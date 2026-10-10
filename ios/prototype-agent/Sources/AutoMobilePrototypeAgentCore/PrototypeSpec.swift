@@ -95,43 +95,47 @@ struct PrototypeSpec: Decodable {
         let raw = try container.decode(JSONValue.self, forKey: .root)
         try PrototypeLimits.guardTree(raw)
         root = try JSONDecoder().decode(PrototypeNode.self, from: JSONEncoder().encode(PrototypeRepeat.expand(raw)))
+        // There is no Swift twin of the host validator, so the forms `prototype_theme_modes_v1`
+        // added are checked here: a malformed one fails the show instead of drawing a fallback.
+        try PrototypeThemeModes.validate(placement: window.placement, root: root)
     }
 }
 
 /// A colour or image-asset slot that can differ by appearance (#11218): one value used in both
 /// modes, or a `{light, dark}` pair. A colour slot holds a hex value or a Material role name, an
-/// asset slot an opaque asset id; the host validator checks the contents.
+/// asset slot an opaque asset id; `PrototypeThemeModes.validate` checks the contents.
 enum PrototypeModeValue: Decodable, Equatable, ExpressibleByStringLiteral {
     case single(String)
     case modes(light: String, dark: String)
-
-    private struct Modes: Decodable {
-        let light: String
-        let dark: String
-    }
 
     init(stringLiteral value: String) {
         self = .single(value)
     }
 
+    /// A string, or an object holding exactly `light` and `dark` strings: a missing mode, an extra
+    /// key or a nested pair does not decode.
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if let value = try? container.decode(String.self) {
             self = .single(value)
-        } else {
-            let modes = try container.decode(Modes.self)
-            self = .modes(light: modes.light, dark: modes.dark)
+            return
         }
+        let fields = try container.decode([String: String].self)
+        guard fields.count == 2, let light = fields["light"], let dark = fields["dark"] else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "A per-mode value needs exactly the keys light and dark"
+            )
+        }
+        self = .modes(light: light, dark: dark)
     }
 
-    /// Seam for #11220: the one place a per-mode value becomes the single value the renderer
-    /// draws. It returns the `light` side of a pair, which keeps every existing spec drawing as
-    /// before: the agent does not advertise `prototype_theme_modes_v1` yet, so the host refuses a
-    /// spec that carries a pair. #11220 replaces this with resolution against the resolved mode.
-    var rendered: String {
+    /// The value drawn in the resolved mode (#11220): a single value in both, else that mode's side
+    /// of the pair. The renderer takes `dark` from `PrototypePalette.dark`.
+    func value(dark: Bool) -> String {
         switch self {
         case let .single(value): value
-        case let .modes(light, _): light
+        case let .modes(light, darkValue): dark ? darkValue : light
         }
     }
 
@@ -247,6 +251,8 @@ struct Style: Decodable {
     let height: Dimension?
     let padding: Padding?
     let background: PrototypeModeValue?
+    /// Painted over `background` and under the content, inside the corner shape.
+    let gradient: PrototypeGradient?
     let cornerRadius: CornerRadius?
     let border: Border?
     let alpha: Double?
@@ -280,6 +286,7 @@ struct Style: Decodable {
             height: prototype.height ?? height,
             padding: prototype.padding ?? padding,
             background: prototype.background ?? background,
+            gradient: prototype.gradient ?? gradient,
             cornerRadius: prototype.cornerRadius ?? cornerRadius,
             border: prototype.border ?? border,
             alpha: prototype.alpha ?? alpha,
@@ -303,6 +310,12 @@ struct Style: Decodable {
             overflow: prototype.overflow ?? overflow,
             textStyle: prototype.textStyle ?? textStyle
         )
+    }
+
+    /// Whether the author painted the node, so a component's default container must not cover it
+    /// (Android's `authoredFill`).
+    var hasAuthoredFill: Bool {
+        background != nil || gradient != nil
     }
 
     /// The scale a tappable node draws at: `pressScale` while pressed, 1 otherwise.

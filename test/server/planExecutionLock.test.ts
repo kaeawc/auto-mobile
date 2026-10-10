@@ -146,7 +146,7 @@ describe("Plan execution lock", () => {
   });
 
   test.each(["session", "global"] as const)(
-    "allows only read-only observation during a plan in %s scope",
+    "allows only reads during a plan in %s scope",
     (scope) => {
       const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator());
       const lock = new ExecutionTrackerPlanExecutionLock(
@@ -159,6 +159,9 @@ describe("Plan execution lock", () => {
           blocked: false,
           scope,
         });
+        expect(
+          lock.evaluate({ toolName: "hitTest", sessionUuid: "session-a:phone", readOnly: true }),
+        ).toEqual({ blocked: false, scope });
         for (const toolName of ["tapOn", "executePlan", "startTestRecording", "recordSteps"]) {
           expect(lock.evaluate({ toolName, sessionUuid: "session-a:phone" })).toEqual({
             blocked: true,
@@ -181,6 +184,7 @@ describe("Plan execution lock", () => {
 
 describe("Plan execution lock through session routing", () => {
   const toolName = "planLockRoutingProbe";
+  const readToolName = "planLockReadProbe";
   const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator());
   const lock = new ExecutionTrackerPlanExecutionLock(
     tracker,
@@ -224,6 +228,13 @@ describe("Plan execution lock through session routing", () => {
       async () => response(),
       { nonDeviceHandler: async () => response() },
     );
+    ToolRegistry.registerDeviceAware(
+      readToolName,
+      "Plan lock read probe",
+      z.object({ device: z.string().optional(), sessionUuid: z.string().optional() }),
+      async () => response(),
+      { nonDeviceHandler: async () => response(), deviceReadOnly: true },
+    );
     explicitFixture = new McpTestFixture({
       planExecutionLock: lock,
       toolSelectionSessionManager: sessions,
@@ -241,8 +252,29 @@ describe("Plan execution lock through session routing", () => {
     await explicitFixture.teardown();
     await routingFixture.teardown();
     ToolRegistry.unregister(toolName);
+    ToolRegistry.unregister(readToolName);
     restorePipeline();
     ToolRegistry.setToolCallRepositoryForTesting(originalRepository);
+  });
+
+  test("a read tool runs during a plan on its own session while a control tool is blocked", async () => {
+    const execution = tracker.startExecution("executePlan", undefined, "provided-session");
+    try {
+      const call = (name: string) =>
+        explicitFixture.getContext().client.request(
+          {
+            method: "tools/call",
+            params: { name, arguments: { sessionUuid: "provided-session" } },
+          },
+          z.any(),
+        );
+      expect(await call(readToolName)).toMatchObject({
+        content: [{ type: "text", text: "probe executed" }],
+      });
+      await expect(call(toolName)).rejects.toThrow("plan execution in progress");
+    } finally {
+      tracker.endExecution(execution.id);
+    }
   });
 
   test.each([

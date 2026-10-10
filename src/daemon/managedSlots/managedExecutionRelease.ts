@@ -17,9 +17,10 @@ import type { SessionReleaseReason } from "../releaseReasons";
  *   generation advances) BEFORE its execution owner is cleared, so there is no instant at which it
  *   looks ready and unowned; `claimExecution` refuses a non-ready slot, so the next acquisition
  *   waits. This daemon is recorded as the slot's settler. Its watcher returns the slot to `ready`
- *   once the work settles; past the watcher's cap, or after this daemon exits, the slot stays
- *   `settling` until {@link SlotRegistry.recoverSettledSlots} finds its settler dead (the work died
- *   with it) — a restarted daemon runs that recovery when it opens the registry. A failed device
+ *   once the work settles, however long that takes (past the cap it re-checks at a slower
+ *   cadence, #11336); after this daemon exits, the slot stays `settling` until
+ *   {@link SlotRegistry.recoverSettledSlots} finds its settler dead (the work died with it) — a
+ *   restarted daemon runs that recovery when it opens the registry. A failed device
  *   deletion is a different state (`cleanup_pending`) that only the journal redrive resolves.
  *
  * The same slot bookkeeping runs for a managed session released any other way (heartbeat loss, idle
@@ -151,11 +152,13 @@ export const MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS = 700;
 /** How often the settlement watcher re-checks unsettled work. */
 export const MANAGED_EXECUTION_SETTLEMENT_POLL_MS = 250;
 /**
- * How long the watcher waits for unsettled work before leaving the slot `settling` for later
- * recovery (once this daemon exits, its slots are recoverable). Generous: a stuck action blocks
- * only its own slot.
+ * How long the watcher polls unsettled work at the fast cadence. Past it the slot stays `settling`
+ * and the watcher keeps going at {@link MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS}, so the slot
+ * returns to `ready` whenever its work finally settles (#11336).
  */
 export const MANAGED_EXECUTION_SETTLEMENT_CAP_MS = 5 * 60 * 1000;
+/** How often the watcher re-checks work that outlived the cap. */
+export const MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS = 30 * 1000;
 /** Released sessions remembered so a repeated release can still name its slots. */
 const RECENT_RELEASE_LIMIT = 256;
 
@@ -170,6 +173,7 @@ export interface ManagedExecutionReleaseOptions {
   releaseBudgetMs?: number;
   settlementPollMs?: number;
   settlementCapMs?: number;
+  settlementSlowPollMs?: number;
   /** This daemon, recorded as the settler of slots it marks `settling`. Default: this process. */
   settler?: SlotProcessIdentity;
   journal?: ManagedExecutionReleaseJournal;
@@ -188,6 +192,7 @@ export class ManagedExecutionRelease {
   private readonly releaseBudgetMs: number;
   private readonly settlementPollMs: number;
   private readonly settlementCapMs: number;
+  private readonly settlementSlowPollMs: number;
   /** Releases this coordinator is driving; the release listener leaves them to it. */
   private readonly driven = new Map<string, Promise<ManagedExecutionReleaseResult>>();
   private readonly recentSlots = new Map<string, SlotKey[]>();
@@ -200,6 +205,8 @@ export class ManagedExecutionRelease {
     this.releaseBudgetMs = options.releaseBudgetMs ?? MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS;
     this.settlementPollMs = options.settlementPollMs ?? MANAGED_EXECUTION_SETTLEMENT_POLL_MS;
     this.settlementCapMs = options.settlementCapMs ?? MANAGED_EXECUTION_SETTLEMENT_CAP_MS;
+    this.settlementSlowPollMs =
+      options.settlementSlowPollMs ?? MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS;
   }
 
   /**
@@ -560,21 +567,22 @@ export class ManagedExecutionRelease {
   ): Promise<void> {
     const { timer } = this.options;
     const deadline = timer.now() + this.settlementCapMs;
+    let pastCap = false;
     while (!this.isSettled(sessionId, deviceId)) {
       if (this.closed) {
         return;
       }
-      if (timer.now() >= deadline) {
+      if (!pastCap && timer.now() >= deadline) {
+        pastCap = true;
         logger.warn(
           `[ManagedExecutionRelease] Work of released session ${sessionId} did not settle within ` +
-            `${this.settlementCapMs}ms; its slots stay settling until this daemon's exit makes ` +
-            "them recoverable",
+            `${this.settlementCapMs}ms; its slots stay settling and are re-checked every ` +
+            `${this.settlementSlowPollMs}ms until the work settles (#11336)`,
         );
-        // Their release journal entries stay in flight here: the work may still be running in this
-        // process, so only a later daemon (once this one is gone) redrives them.
-        return;
       }
-      await timer.sleep(this.settlementPollMs);
+      // The release journal entries stay in flight meanwhile: the work may still be running in
+      // this process, so this watcher alone settles them once it ends.
+      await timer.sleep(pastCap ? this.settlementSlowPollMs : this.settlementPollMs);
     }
     await Promise.all(marked.map((slot) => this.restoreReady(registry, slot)));
   }

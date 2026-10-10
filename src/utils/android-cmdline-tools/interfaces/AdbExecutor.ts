@@ -142,6 +142,8 @@ export interface AdbExecutor {
   getDeviceStates?(options?: {
     timeoutMs?: number;
     signal?: AbortSignal;
+    /** Reject instead of reporting no devices when the adb executable is unavailable. */
+    throwOnMissingAdb?: boolean;
   }): Promise<AdbDeviceState[]>;
 
   /** One fresh ADB observation for readiness, including offline and online rows. */

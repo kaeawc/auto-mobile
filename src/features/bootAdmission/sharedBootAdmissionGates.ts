@@ -40,6 +40,8 @@ export interface SharedBootAdmissionGates {
 export interface SharedBootAdmissionGateDeps {
   env?: NodeJS.ProcessEnv;
   timer?: Timer;
+  /** Host OS; the iOS gate exists only on darwin. Defaults to `process.platform`. */
+  hostPlatform?: NodeJS.Platform;
 }
 
 let shared: SharedBootAdmissionGates | undefined;
@@ -85,15 +87,19 @@ export function createBootAdmissionGates(
           { env },
         )
       : undefined,
-    ios: testOverrides.bootAdmissionGatesDisabled
-      ? undefined
-      : createIosSimCapacityGate({
-          simctl: new SimCtlClient(null),
-          timer,
-          history: iosBootHistory,
-          env,
-          executor,
-        }),
+    // simulators exist only on macOS: elsewhere there is nothing to gate or report, and
+    // the fleet sample would shell out to a missing `xcrun` on every listing.
+    ios:
+      testOverrides.bootAdmissionGatesDisabled ||
+      (deps.hostPlatform ?? process.platform) !== "darwin"
+        ? undefined
+        : createIosSimCapacityGate({
+            simctl: new SimCtlClient(null),
+            timer,
+            history: iosBootHistory,
+            env,
+            executor,
+          }),
     iosBootHistory,
   };
 }

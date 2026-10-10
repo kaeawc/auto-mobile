@@ -5,6 +5,7 @@ import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/sessionLivenes
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
+import { ActionableError } from "../../src/models/ActionableError";
 import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 import {
   SessionManager,
@@ -14,6 +15,10 @@ import {
   SessionActivityPersistenceError,
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
   SessionRecoveryIdentityLossError,
+  SessionNoLongerOwnsDeviceError,
+  SessionRebindingError,
+  SESSION_NO_LONGER_OWNS_DEVICE_CODE,
+  SESSION_REBINDING_CODE,
   type SessionReleaseSnapshot,
   type BiometricEnrollmentRestorer,
   type KeepScreenAwakeRestorer,
@@ -5703,14 +5708,46 @@ describe("SessionManager", () => {
       persistence.deferNextUpsert();
       const rebind = manager.rebindSession("reserved-session", "emulator-5560", "android");
       await persistence.waitForUpsert();
-      expect(() => manager.reserveSessionForTerminalRelease(session, "emulator-5554")).toThrow(
-        "rebinding devices",
-      );
+      let refusal: unknown;
+      try {
+        manager.reserveSessionForTerminalRelease(session, "emulator-5554");
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toBeInstanceOf(SessionRebindingError);
+      expect(refusal).toBeInstanceOf(ActionableError);
+      expect(refusal).toMatchObject({
+        code: SESSION_REBINDING_CODE,
+        sessionUuid: "reserved-session",
+      });
+      expect((refusal as Error).message).toContain("rebinding devices");
       persistence.finishUpsert();
 
       await expect(rebind).resolves.toBe(session);
       expect(session.assignedDevice).toBe("emulator-5560");
       expect(persistence.upsertedDeviceIds).toEqual(["emulator-5554", "emulator-5560"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("terminal release reservation for a device the session left is a typed refusal", async () => {
+    const manager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+    try {
+      const session = await manager.createSession("moved-session", "emulator-5554", "android");
+      let refusal: unknown;
+      try {
+        manager.reserveSessionForTerminalRelease(session, "emulator-5560");
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toBeInstanceOf(SessionNoLongerOwnsDeviceError);
+      expect(refusal).toBeInstanceOf(ActionableError);
+      expect(refusal).toMatchObject({
+        code: SESSION_NO_LONGER_OWNS_DEVICE_CODE,
+        sessionUuid: "moved-session",
+        deviceId: "emulator-5560",
+      });
     } finally {
       manager.stopCleanupTimer();
     }

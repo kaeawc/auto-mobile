@@ -449,6 +449,12 @@ export type DeviceRecoveryEligibility =
 export interface RemoveDeviceOptions {
   /** Keep the tracked emulator child (liveness-miss removal, not retirement). */
   keepTrackedProcess?: boolean;
+  /**
+   * Leave this daemon's allocation claim on the device in place. For a removal whose session
+   * moves to a replacement device: the caller withdraws the claim itself once the session is
+   * bound again or released (#11448).
+   */
+  keepDeviceClaim?: boolean;
 }
 
 export interface PooledDevice {
@@ -2308,6 +2314,12 @@ export class DevicePool {
     this.startedDeviceProcessOutput.delete(deviceId);
   }
 
+  private releaseDeviceClaimOnRemoval(deviceId: string, options?: RemoveDeviceOptions): void {
+    if (!options?.keepDeviceClaim) {
+      this.releaseDeviceClaim(deviceId);
+    }
+  }
+
   /**
    * Remove device from pool
    */
@@ -2332,7 +2344,7 @@ export class DevicePool {
     }
 
     this.devices.delete(deviceId);
-    this.releaseDeviceClaim(deviceId);
+    this.releaseDeviceClaimOnRemoval(deviceId, options);
     if (device.platform === "android" && this.androidTransportAliases.retire(deviceId)) {
       this.androidAliasRetirement++;
     }
@@ -6912,6 +6924,8 @@ export class DevicePool {
           await this.rollbackSystemUiAnrRecoveryReplacement(replacementDevice, preservedSession);
         }
         throw error;
+      } finally {
+        this.settleSystemUiAnrOriginalClaim(expectedDevice.id);
       }
       if (!replacementDevice) {
         throw new ActionableError(
@@ -6928,6 +6942,19 @@ export class DevicePool {
         },
       };
     });
+  }
+
+  /**
+   * The original incarnation was removed with its claim kept, so the claim file is never absent
+   * between the old and the new pool entry (#11448). Withdraw it here unless a session of this
+   * daemon holds a device under that serial: a same-serial replacement keeps the claim, while a
+   * different-serial replacement (whose own claim is published by now) and a failed recovery
+   * give it up.
+   */
+  private settleSystemUiAnrOriginalClaim(originalDeviceId: string): void {
+    if (!this.devices.get(originalDeviceId)?.sessionId) {
+      this.releaseDeviceClaim(originalDeviceId);
+    }
   }
 
   private async validateSystemUiAnrRecoverySession(
@@ -7023,7 +7050,9 @@ export class DevicePool {
       if (this.isPooledEntryCurrent(expectedDevice)) {
         await this.cancelOldDeviceWorkForSystemUiAnr(expectedDevice.id, excludeExecutionId);
         this.releaseCapturedDeviceForShutdown(expectedDevice);
-        await this.removeDevice(expectedDevice.id, false, expectedDevice);
+        await this.removeDevice(expectedDevice.id, false, expectedDevice, {
+          keepDeviceClaim: true,
+        });
       }
       return await this.adoptSystemUiAnrReplacement(
         existingReplacement,
@@ -7035,10 +7064,11 @@ export class DevicePool {
 
     // removeDevice rejects busy entries, so detach pool ownership only after
     // capturing any session that must be rebound below. The replacement remains
-    // unavailable through the caller's readiness reservation while this runs.
+    // unavailable through the caller's readiness reservation while this runs. The session's
+    // claim stays published across the removal; the caller settles it when the handoff ends.
     await this.cancelOldDeviceWorkForSystemUiAnr(expectedDevice.id, excludeExecutionId);
     this.releaseCapturedDeviceForShutdown(expectedDevice);
-    await this.removeDevice(expectedDevice.id, false, expectedDevice);
+    await this.removeDevice(expectedDevice.id, false, expectedDevice, { keepDeviceClaim: true });
     if (this.devices.has(replacement.deviceId)) {
       throw new ActionableError(
         `Replacement device '${replacement.deviceId}' was already added to the device pool.`,

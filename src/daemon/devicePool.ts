@@ -139,10 +139,12 @@ import {
 } from "./sessionPreservingRecovery";
 import { DeviceAutolockManager, type AutolockClient } from "./deviceAutolockManager";
 import {
+  currentManagedSlotReconciler,
   managedSlotRefusal,
   type ManagedDeviceRef,
   type ManagedSlotExclusion,
 } from "./managedSlots/managedSlotExclusion";
+import { DeviceAssignedToManagedSlotError } from "./managedSlots/managedSlotRefusal";
 import {
   AdbServerResetQuarantine,
   type AdbServerResetQuarantinePoolPort,
@@ -8923,11 +8925,16 @@ export class DevicePool {
     if (exclusion.holderOf(this.managedRefFor(device.id, device.platform))) {
       return true;
     }
+    return this.isUnresolvedEmulatorWhileAndroidManaged(device);
+  }
+
+  /** An Android emulator whose AVD name is unread while any Android device is managed. */
+  private isUnresolvedEmulatorWhileAndroidManaged(device: PooledDevice): boolean {
     return (
       device.platform === "android" &&
       this.isPooledAndroidEmulator(device.id) &&
       this.stableDeviceIdFor(device) === undefined &&
-      exclusion.stableIdsFor("android").size > 0
+      (this.managedSlotExclusion?.stableIdsFor("android").size ?? 0) > 0
     );
   }
 
@@ -8944,12 +8951,36 @@ export class DevicePool {
     stableIds?: ReadonlyArray<string | undefined>;
     requesterSessionUuid?: string;
   }): Error | undefined {
-    return managedSlotRefusal(this.managedSlotExclusion, {
+    const refusal = managedSlotRefusal(this.managedSlotExclusion, {
       action: input.action,
       deviceId: input.deviceId,
       device: this.managedRefFor(input.deviceId, input.platform, input.stableIds),
       requesterSessionUuid: input.requesterSessionUuid,
     });
+    if (refusal) {
+      return refusal;
+    }
+    // The same unresolved-identity rule as isManagedSlotDevice: an idle emulator whose AVD name is
+    // unread cannot be proven free, so a generic caller may not drive it (#11457). Only the
+    // session that already holds it in the pool, or a slot reconciler, passes.
+    const device = this.devices.get(input.deviceId);
+    if (
+      device &&
+      this.isUnresolvedEmulatorWhileAndroidManaged(device) &&
+      !(input.requesterSessionUuid && device.sessionId === input.requesterSessionUuid) &&
+      currentManagedSlotReconciler() === undefined
+    ) {
+      return new DeviceAssignedToManagedSlotError(input.action, input.deviceId, {
+        platform: device.platform,
+        stableDeviceId: input.deviceId,
+        holder: "free",
+        scopeKey: "",
+        slotIndex: null,
+        scopeState: null,
+        execSessionUuid: null,
+      });
+    }
+    return undefined;
   }
 
   /**

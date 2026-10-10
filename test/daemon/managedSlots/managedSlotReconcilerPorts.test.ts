@@ -182,6 +182,23 @@ describe("PoolManagedSlotDeviceClaims", () => {
     expect((await claims.describe(avd)).kind).toBe("held");
   });
 
+  test("lists the sessions this daemon's pool holds on the device, and only on it", () => {
+    const claims = new PoolManagedSlotDeviceClaims({
+      getAllDevices: () => [
+        pooled("session-1"),
+        { ...pooled("other-session"), id: "emulator-5556", name: "other", avdName: "other" },
+      ],
+      assertNotClaimedByForeignDaemon: async () => {},
+    });
+    expect(claims.sessionsOn(avd)).toEqual(["session-1"]);
+    expect(
+      new PoolManagedSlotDeviceClaims({
+        getAllDevices: () => [pooled(null)],
+        assertNotClaimedByForeignDaemon: async () => {},
+      }).sessionsOn(avd),
+    ).toEqual([]);
+  });
+
   test("another daemon's claim holds the device", async () => {
     const claims = new PoolManagedSlotDeviceClaims({
       getAllDevices: () => [pooled(null)],

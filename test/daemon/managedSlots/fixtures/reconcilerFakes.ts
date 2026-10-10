@@ -144,10 +144,15 @@ export class FakeDeleter implements ManagedSlotDeviceDeleter {
 
 export class FakeClaims implements ManagedSlotDeviceClaims {
   readonly claims = new Map<string, ManagedSlotDeviceClaim>();
+  /** Sessions the daemon's pool holds per device stable id. */
+  readonly sessions = new Map<string, string[]>();
   beforeDescribe: (() => Promise<void>) | undefined;
   async describe(device: DeviceInfo): Promise<ManagedSlotDeviceClaim> {
     await this.beforeDescribe?.();
     return this.claims.get(deviceStableId(device) ?? "") ?? { kind: "free" };
+  }
+  sessionsOn(device: DeviceInfo): string[] {
+    return [...(this.sessions.get(deviceStableId(device) ?? "") ?? [])];
   }
 }
 

@@ -262,16 +262,7 @@ export class PoolManagedSlotDeviceClaims implements ManagedSlotDeviceClaims {
   constructor(private readonly pool: ManagedSlotClaimPool) {}
 
   async describe(device: DeviceInfo): Promise<ManagedSlotDeviceClaim> {
-    const stableId = deviceStableId(device);
-    const runtimes = this.pool
-      .getAllDevices()
-      .filter(
-        (pooled) =>
-          pooled.platform === device.platform &&
-          (device.platform === "android"
-            ? (pooled.avdName ?? pooled.name) === stableId
-            : pooled.id === stableId),
-      );
+    const runtimes = this.runtimesOf(device);
     const held = runtimes.find((pooled) => pooled.sessionId !== null);
     if (held) {
       return { kind: "held", reason: `session ${held.sessionId} holds ${held.id}` };
@@ -287,5 +278,25 @@ export class PoolManagedSlotDeviceClaims implements ManagedSlotDeviceClaims {
       }
     }
     return { kind: "free" };
+  }
+
+  sessionsOn(device: DeviceInfo): string[] {
+    return this.runtimesOf(device).flatMap((pooled) =>
+      pooled.sessionId ? [pooled.sessionId] : [],
+    );
+  }
+
+  /** The pooled runtimes of a configured device (AVD name or simulator UDID). */
+  private runtimesOf(device: DeviceInfo): PooledDevice[] {
+    const stableId = deviceStableId(device);
+    return this.pool
+      .getAllDevices()
+      .filter(
+        (pooled) =>
+          pooled.platform === device.platform &&
+          (device.platform === "android"
+            ? (pooled.avdName ?? pooled.name) === stableId
+            : pooled.id === stableId),
+      );
   }
 }

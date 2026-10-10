@@ -193,7 +193,9 @@ context follows the same value as one on the service context.
   `appearance: {mode, source, deviceDark}`. `mode` is `light` or `dark`. `source` names the step
   that decided it: `explicit`, `override`, `roleLuminance`, `authoredBackground` or `system`
   (`theme.mode: "system"` reports `system`, or `override` when the show pinned it). `deviceDark` is
-  the device's own setting whatever decided the mode.
+  the device's own setting whatever decided the mode. The prototype's own window entry in a
+  hierarchy capture carries the same object as `prototypeAppearance`, next to `prototypePlacement`
+  and `prototypeOpaque`; an APK without `prototype_appearance_v1` omits it.
 
 ## Windows
 

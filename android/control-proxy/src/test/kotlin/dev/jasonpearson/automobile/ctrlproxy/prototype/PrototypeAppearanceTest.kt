@@ -150,6 +150,17 @@ class PrototypeAppearanceTest {
   }
 
   @Test
+  fun `a dark override does not beat an authored light background`() = runTest {
+    // Owner decision 2026-10-10: the override replaces the system setting only.
+    val root = PrototypeBoxNode(style = filled("#FFFFFF"), children = emptyList())
+    controller.show("show", spec(root), appearance = PrototypeAppearanceOverride.DARK)
+    val expected = appearance(light, PrototypeAppearanceSource.AUTHORED_BACKGROUND)
+    assertEquals(expected, results.last().appearance)
+    assertEquals(expected, shown().appearance)
+    assertEquals(expected, inspected())
+  }
+
+  @Test
   fun `a device flip re-themes the same show and sends one appearance_changed event`() = runTest {
     val pager = PrototypePagerNode("pager", children = List(3) { PrototypeTextNode(text = "p") })
     controller.show("show", spec(pager, state = mapOf("name" to PrototypeScalar.Text("Jason"))))

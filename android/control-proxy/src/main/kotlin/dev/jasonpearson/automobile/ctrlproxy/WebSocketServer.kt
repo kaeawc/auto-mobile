@@ -350,7 +350,8 @@ class WebSocketServer(
     // show_prototype honours appearance (device, light or dark as the system setting); a shown
     // prototype re-themes when the device setting or palette changes and says so with an
     // appearance_changed prototype_event; the show result and each inspect entry carry the resolved
-    // appearance. An older APK ignores the request field and follows the device silently, so a
+    // appearance, as does the prototype's hierarchy window entry (prototypeAppearance). An older
+    // APK ignores the request field and follows the device silently, so a
     // host sends it, and expects the report, only when this flag is present.
     add("prototype_appearance_v1")
     // A device-persistent prototype buffers its events while no host is connected and replays them,

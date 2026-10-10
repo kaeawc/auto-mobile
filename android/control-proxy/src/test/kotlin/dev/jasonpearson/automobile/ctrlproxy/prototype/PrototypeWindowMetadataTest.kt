@@ -190,6 +190,43 @@ class PrototypeWindowMetadataTest {
   }
 
   @Test
+  fun `window entries carry the prototype appearance only when set and round trip it`() {
+    val wire = Json {
+      ignoreUnknownKeys = true
+      encodeDefaults = true
+    }
+    assertFalse(
+      wire
+        .encodeToString(WindowInfo.serializer(), WindowInfo(id = 3, type = 1))
+        .contains("prototypeAppearance"),
+    )
+    val prototype =
+      WindowInfo(
+        id = 4,
+        type = 4,
+        prototypePlacement = "fullscreen",
+        prototypeOpaque = false,
+        prototypeAppearance =
+          PrototypeAppearance(
+            PrototypeAppearanceMode.DARK,
+            PrototypeAppearanceSource.AUTHORED_BACKGROUND,
+            deviceDark = false,
+          ),
+      )
+    val encoded = wire.encodeToString(WindowInfo.serializer(), prototype)
+    assertTrue(
+      encoded,
+      encoded.contains(
+        """"prototypeAppearance":{"mode":"dark","source":"authoredBackground","deviceDark":false}""",
+      ),
+    )
+    assertEquals(prototype, wire.decodeFromString(WindowInfo.serializer(), encoded))
+    // An APK that predates prototype_appearance_v1 sends placement and opacity alone.
+    val older = """{"id":4,"type":4,"prototypePlacement":"fullscreen","prototypeOpaque":false}"""
+    assertNull(wire.decodeFromString(WindowInfo.serializer(), older).prototypeAppearance)
+  }
+
+  @Test
   fun `controller reports the active prototype and nothing once it is dismissed`() = runTest {
     val host = FakePrototypeHost()
     val controller =

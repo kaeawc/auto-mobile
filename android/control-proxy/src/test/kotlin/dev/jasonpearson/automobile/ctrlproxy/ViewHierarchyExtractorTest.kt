@@ -14,6 +14,9 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.models.WindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PROTOTYPE_WINDOW_TITLE
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowMetadata
+import dev.jasonpearson.automobile.protocol.PrototypeAppearance
+import dev.jasonpearson.automobile.protocol.PrototypeAppearanceMode
+import dev.jasonpearson.automobile.protocol.PrototypeAppearanceSource
 import java.util.Random
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -1193,11 +1196,17 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `prototype metadata is stamped on both prototype layers but never on SystemUI windows`() {
     val asked = mutableListOf<Pair<String?, String?>>()
+    val appearance =
+      PrototypeAppearance(
+        PrototypeAppearanceMode.DARK,
+        PrototypeAppearanceSource.OVERRIDE,
+        deviceDark = false,
+      )
     val stamping =
       ViewHierarchyExtractor(
         ownPrototypeMetadata = { pkg, title ->
           asked += pkg to title?.toString()
-          PrototypeWindowMetadata("floating", opaque = false)
+          PrototypeWindowMetadata("floating", opaque = false, appearance = appearance)
         },
       )
     val own = "dev.jasonpearson.automobile.ctrlproxy"
@@ -1212,6 +1221,7 @@ class ViewHierarchyExtractorTest {
         }
       assertEquals("type $type", "floating", window.prototypePlacement)
       assertEquals("type $type", false, window.prototypeOpaque)
+      assertEquals("type $type", appearance, window.prototypeAppearance)
     }
     assertEquals(List(2) { own to PROTOTYPE_WINDOW_TITLE }, asked)
 
@@ -1228,6 +1238,7 @@ class ViewHierarchyExtractorTest {
           .single { it.id == 2 }
       assertNull(window.prototypePlacement)
       assertNull(window.prototypeOpaque)
+      assertNull(window.prototypeAppearance)
     }
     assertTrue(asked.isEmpty())
   }

@@ -2304,9 +2304,10 @@ export class SessionManager {
   }
 
   /**
-   * How an idle-expiry release aborts the executions it overrides once their veto has run out, as
-   * the heartbeat reap and owner-disconnect paths already do (#9839, #10820). The daemon supplies
-   * the execution tracker.
+   * How a release aborts the executions it overrides once their veto has run out (#9839, #10820):
+   * the idle-expiry releases, and the heartbeat reap and owner-disconnect release that share
+   * {@link cancelExecutionsCutByRelease} with them (#11400). The daemon supplies the execution
+   * tracker.
    */
   setExpiryReleaseExecutionCanceller(canceller: ExpiryReleaseExecutionCanceller): void {
     this.expiryReleaseExecutionCanceller = canceller;
@@ -8713,14 +8714,30 @@ export class SessionManager {
     releaseReason: SessionReleaseReason,
     excludeExecutionId?: string,
   ): boolean {
+    return this.cancelExecutionsCutByRelease(session.sessionId, releaseReason, excludeExecutionId);
+  }
+
+  /**
+   * Abort every call still running under a session that is about to be released for a reason of
+   * its own, with the typed release, so each cut caller gets the terminal refusal. The one routine
+   * for every such release: idle sweep, lazy expiry, the lapsed-lease admission, and the daemon's
+   * heartbeat reap and owner-disconnect release (#11400). It covers the scope the release vetoes
+   * count as in flight, implicit (autolock) calls included, so a veto can never count a call the
+   * release then leaves running on a freed device. Returns whether anything was in flight.
+   */
+  cancelExecutionsCutByRelease(
+    sessionId: string,
+    releaseReason: SessionReleaseReason,
+    excludeExecutionId?: string,
+  ): boolean {
     const query: ActiveSessionExecutionQuery =
       excludeExecutionId === undefined ? {} : { excludeExecutionId };
-    if (!this.activeSessionExecutionChecker(session.sessionId, query)) {
+    if (!this.activeSessionExecutionChecker(sessionId, query)) {
       return false;
     }
     this.expiryReleaseExecutionCanceller(
-      session.sessionId,
-      new SessionReleasedDuringCallError(session.sessionId, releaseReason),
+      sessionId,
+      new SessionReleasedDuringCallError(sessionId, releaseReason),
       query,
     );
     return true;

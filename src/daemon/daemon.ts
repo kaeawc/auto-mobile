@@ -12,7 +12,7 @@ import {
   forceStuckSessionRelease,
   releaseSessionAndDevice,
 } from "./releaseSessionAndDevice";
-import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
+import type { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
 import { ambientExecutionIdReader } from "../server/deviceExecutionBinding";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { ObserverReleaseBroadcaster } from "./observerReleaseBroadcast";
@@ -1058,7 +1058,7 @@ export class Daemon {
           // A call the release cuts (one still running past the veto's bound) is told the session
           // is gone, as a call arriving after the release is (#11381).
           await this.cancelAndReleaseSession(session.sessionId, reason, false, session, undefined, {
-            cancellation: new SessionReleasedDuringCallError(session.sessionId, reason),
+            cutCallsLearnRelease: true,
           });
         },
       },
@@ -3096,10 +3096,11 @@ export class Daemon {
       // quiet is answered, but it is not the owner's liveness and must not hold the device.
       this.sessionExecutionProbe({ excludeReads: true }),
       async (sessionId, reason) => {
-        // A call still in flight (a read never keeps the session) learns why it was cancelled:
-        // the typed terminal refusal, not a generic abort (#11322).
+        // A call still in flight (a read never keeps the session; a control call only until its
+        // veto runs out) learns why it was cancelled: the typed terminal refusal, not a generic
+        // abort (#11322). That includes a call that reached the session through autolock (#11400).
         await this.cancelAndReleaseSession(sessionId, reason, false, undefined, undefined, {
-          cancellation: new SessionReleasedDuringCallError(sessionId, reason),
+          cutCallsLearnRelease: true,
         });
       },
       this.timer,
@@ -3222,8 +3223,8 @@ export class Daemon {
   }
 
   /**
-   * Abort what an idle-expiry release overrides (#10820), over the same session scope
-   * {@link hasActiveSessionExecution} counts as in flight. The tracker signals each abort before
+   * Abort what a release overrides — idle expiry (#10820), heartbeat reap and owner disconnect
+   * (#11400) — over the same session scope {@link hasActiveSessionExecution} counts as in flight. The tracker signals each abort before
    * its first await, so the aborts land before the release that follows starts. They are aborted
    * with the typed release, so each cut caller gets the terminal refusal (#11381).
    */
@@ -4275,10 +4276,17 @@ export class Daemon {
     allowExpired: boolean = false,
     expectedSession?: Session,
     shouldCommit?: () => boolean,
-    options?: { deferFailureFallback?: boolean; cancellation?: Error },
+    options?: {
+      deferFailureFallback?: boolean;
+      /**
+       * The release ends the session for a reason of its own (heartbeat reap, owner disconnect),
+       * so every call it cuts is aborted with the typed release, through the routine the
+       * idle-expiry releases use (#11381, #11400).
+       */
+      cutCallsLearnRelease?: boolean;
+    },
   ): Promise<boolean> {
-    const cancelWith = options?.cancellation ?? releaseReason;
-    return cancelExecutionsAndReleaseSession(sessionId, cancelWith, async (cancelled) => {
+    const release = async (cancelled: number): Promise<boolean> => {
       // Early identity fence: discovery can replace a same-serial runtime while
       // execution cancellation is in flight. It is not the final one — the
       // session manager re-evaluates `shouldCommit` immediately before it
@@ -4355,7 +4363,17 @@ export class Daemon {
           `(reason=${releaseReason})`,
       );
       return true;
-    });
+    };
+    if (options?.cutCallsLearnRelease) {
+      // The veto that held this release counted the session's implicit (autolock) calls too, so
+      // the release must cut them as well, never only the calls that name the session UUID: one
+      // left running would keep driving a device that is already free (#11400). The aborts are
+      // signalled before the release starts.
+      const cancelled = executionTracker.getActiveDeviceSessionExecutionCount(sessionId);
+      this.sessionManager.cancelExecutionsCutByRelease(sessionId, releaseReason);
+      return release(cancelled);
+    }
+    return cancelExecutionsAndReleaseSession(sessionId, releaseReason, release);
   }
 
   private isSessionDeviceAssigned(deviceId: string | null, sessionId: string): boolean {

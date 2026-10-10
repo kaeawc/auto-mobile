@@ -142,7 +142,11 @@ struct PrototypeCardView: View {
             value: node.containerLayoutSignature(state: model.state) { model.holds($0) }
         )
         .frame(minWidth: 0, alignment: .leading)
-        .background(shape.fill(colors.authored(style?.background) ?? defaultFill))
+        // An authored gradient is painted behind the card, over the authored background, by the
+        // node's own style; the card's fill would cover it.
+        .background(shape.fill(
+            style?.gradient == nil ? colors.authored(style?.background) ?? defaultFill : .clear
+        ))
         .overlay(shape.stroke(node.variant == "outlined" ? colors.outline : .clear, lineWidth: 1))
         .shadow(color: node.variant == "elevated" ? .black.opacity(0.2) : .clear, radius: 2, y: 1)
     }
@@ -429,7 +433,7 @@ struct PrototypeTopAppBarView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(style?.background == nil ? colors.surface : .clear)
+        .background(style?.hasAuthoredFill ?? false ? .clear : colors.surface)
     }
 
     private func titleText(_ font: Font) -> some View {
@@ -700,7 +704,8 @@ struct PrototypeModalLayer: View {
                         in: node.childEntries(path: "modal\(index)"),
                         state: model.state,
                         pages: model.pages,
-                        retainExiting: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).enabled
+                        retainExiting: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+                            .enabled
                     ),
                     model: model
                 )

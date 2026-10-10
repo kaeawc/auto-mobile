@@ -254,6 +254,7 @@ final class PrototypeAgent {
                 }
                 model.show(spec, reset: message["reset"] as? Bool == true)
                 warnAboutFontAssets(for: spec)
+                warnAboutUnknownThemeColors(for: spec)
                 let missing = missingAssetsExtra()
                 // The host can leave before this queued show runs; nothing would remove it later.
                 if connectedClients == 0 { model.hostDisconnected() }
@@ -350,6 +351,16 @@ final class PrototypeAgent {
         guard !fonts.isEmpty else { return }
         prototypeLog.warning(
             "prototype \(spec.id, privacy: .public): fontFamily asset unsupported on iOS, using system font for \(fonts.joined(separator: ","), privacy: .public)"
+        )
+    }
+
+    /// `theme.colors` keys that are neither a field nor a Material role are not applied; say so
+    /// instead of dropping them silently.
+    private func warnAboutUnknownThemeColors(for spec: PrototypeSpec) {
+        let unknown = spec.theme?.colors?.unknownKeys ?? []
+        guard !unknown.isEmpty else { return }
+        prototypeLog.warning(
+            "prototype \(spec.id, privacy: .public): ignoring unknown theme.colors keys \(unknown.joined(separator: ","), privacy: .public)"
         )
     }
 
@@ -484,7 +495,7 @@ struct PrototypeRootView: View {
                         Color.clear
                             .overlay {
                                 if layer == .page {
-                                    placed(spec, layer: pageAccessibility).opacity(opacity)
+                                    placed(spec, layer: pageAccessibility, palette: palette).opacity(opacity)
                                 }
                             }
                             .overlay {
@@ -500,7 +511,7 @@ struct PrototypeRootView: View {
                             .clipped()
                     }
                 } else if layer == .page {
-                    placed(spec, layer: pageAccessibility).opacity(opacity)
+                    placed(spec, layer: pageAccessibility, palette: palette).opacity(opacity)
                     anchorLayer(spec).opacity(opacity).prototypeLayerAccessibility(pageAccessibility)
                 } else {
                     PrototypeModalLayer(model: model).opacity(opacity)
@@ -554,7 +565,13 @@ struct PrototypeRootView: View {
     }
 
     @ViewBuilder
-    private func placed(_ spec: PrototypeSpec, layer: PrototypeLayerAccessibility) -> some View {
+    private func placed(
+        _ spec: PrototypeSpec,
+        layer: PrototypeLayerAccessibility,
+        palette: PrototypePalette
+    )
+        -> some View
+    {
         let placement = spec.window.placement
         // The boundary sits on the root itself, inside the placement's fill frames, so a lone
         // node keeps its own accessibility frame (#10898).
@@ -587,7 +604,7 @@ struct PrototypeRootView: View {
         default:
             // Fullscreen blocks the app, like the Android full-screen window.
             ZStack(alignment: .topLeading) {
-                Color(hex: placement.scrim?.rendered) ?? .clear
+                palette.scrim(placement.scrim).map { Color($0) } ?? .clear
                 root
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

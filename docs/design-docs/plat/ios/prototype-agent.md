@@ -17,22 +17,23 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 
 ## Feature support
 
-| Feature                                                                  | iOS simulator                                                                                           |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `show`, `dismiss`, `status`, `awaitEvent`; fullscreen, floating, sheet   | Supported                                                                                               |
-| Replace in place, and `reset: true` to start fresh                       | Supported (`prototype_show_in_place_v1`)                                                                |
-| Element and bounds anchors                                               | Supported, in points (`prototype_anchor_v1`); see [Anchors](#anchors)                                   |
-| `pressScale`, motion, `visibleWhen`, state and actions, assets and fonts | Supported                                                                                               |
-| Material component nodes, dialog, snackbar, pickers                      | Supported; see [Material components](#material-components)                                              |
-| Reusable `components` / `use` nodes (#11053)                             | Supported: the host expands them before sending, so the agent only sees plain nodes                     |
-| Prototype hidden from `layer: "app"` observe screenshots (`target`)      | Supported (#10943, #10988); the host restores it after capture                                          |
-| `display` selector                                                       | Refused: a simulator has one screen                                                                     |
-| `window.layer: "app"`                                                    | Accepted and ignored, silently: the window level is fixed at alert + 1 (decision 3)                     |
-| `window.persistence: "device"`                                           | Refused: the agent lives in the app process and dies with it                                            |
-| `inspect`                                                                | Supported (`prototype_inspect_v1`); see [Inspect](#inspect)                                             |
-| Idle TTL and dismissal on host disconnect                                | Supported; see [Expiry](#expiry). Reasons `user`, `agent`, `ttl`, `disconnect`                          |
-| Bottom sheet lifting above the keyboard                                  | Supported, not yet device-verified; see [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard) |
-| Foreground scoping to the shown-over app                                 | Not needed: the agent lives in the app, so backgrounding the app hides its window                       |
+| Feature                                                                  | iOS simulator                                                                                                        |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `show`, `dismiss`, `status`, `awaitEvent`; fullscreen, floating, sheet   | Supported                                                                                                            |
+| Replace in place, and `reset: true` to start fresh                       | Supported (`prototype_show_in_place_v1`)                                                                             |
+| Element and bounds anchors                                               | Supported, in points (`prototype_anchor_v1`); see [Anchors](#anchors)                                                |
+| `pressScale`, motion, `visibleWhen`, state and actions, assets and fonts | Supported                                                                                                            |
+| Material component nodes, dialog, snackbar, pickers                      | Supported; see [Material components](#material-components)                                                           |
+| Reusable `components` / `use` nodes (#11053)                             | Supported: the host expands them before sending, so the agent only sees plain nodes                                  |
+| Prototype hidden from `layer: "app"` observe screenshots (`target`)      | Supported (#10943, #10988); the host restores it after capture                                                       |
+| `display` selector                                                       | Refused: a simulator has one screen                                                                                  |
+| `window.layer: "app"`                                                    | Accepted and ignored, silently: the window level is fixed at alert + 1 (decision 3)                                  |
+| `window.persistence: "device"`                                           | Refused: the agent lives in the app process and dies with it                                                         |
+| `inspect`                                                                | Supported (`prototype_inspect_v1`); see [Inspect](#inspect)                                                          |
+| Idle TTL and dismissal on host disconnect                                | Supported; see [Expiry](#expiry). Reasons `user`, `agent`, `ttl`, `disconnect`                                       |
+| Per-mode colours and images, gradients, role scrims (#11220)             | Supported, not yet device-verified (`prototype_theme_modes_v1`); see [Light and dark values](#light-and-dark-values) |
+| Bottom sheet lifting above the keyboard                                  | Supported, not yet device-verified; see [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard)              |
+| Foreground scoping to the shown-over app                                 | Not needed: the agent lives in the app, so backgrounding the app hides its window                                    |
 
 ## Open decisions
 
@@ -205,6 +206,75 @@ returns to the screen edge when it hides. Fullscreen, floating and top sheets ne
   private keyboard curve is not public API). It is instant under spec `motion: "none"` or Reduce
   Motion (`PrototypeKeyboardLift.animationDuration`).
 - **Not yet verified on a simulator.** No simulator was driven for this change.
+
+## Light and dark values
+
+The agent advertises `prototype_theme_modes_v1` (#11220, part of #11215), so the host sends it the
+per-mode spec forms. The rules below are the Core target's (`PrototypeModeValue`,
+`PrototypePalette`, `PrototypeGradient`, `PrototypeThemeModes`), covered by `swift test`; the
+drawing itself is not yet device-verified.
+
+**Which mode.** One mode is resolved per shown prototype, by `PrototypePalette.make`, and every
+per-mode value follows it: explicit `theme.mode`, else the luminance of the flat
+`theme.colors.background` (else `surface`) override, else the appearance SwiftUI reports for the
+prototype window. A spec without a `theme` follows that appearance too. Inference from an authored
+background, a pinned appearance and live re-theming are #11222.
+
+**Colours.** Every colour slot takes a hex value, a role name, or `{light, dark}` whose sides are
+each a hex value or a role: `style.background`, `style.color`, `style.shadowColor`,
+`style.border.color`, a `styleWhen` entry's style, gradient stop colours, `window.placement.scrim`
+and a bottomSheet `scrim`. A pair gives its side for the resolved mode; that value is then
+resolved like a single one, so a role comes from the resolved mode's scheme.
+
+**Theme role maps.** The scheme is built in this order: the baseline Material scheme for the
+mode, the seed scheme, the flat `theme.colors.<role>` overrides (both modes), then
+`theme.colors.light` or `theme.colors.dark` for the resolved mode. A mode map never takes part in
+choosing the mode. A top-level `theme.colors` key that is neither a field nor a role is not
+applied and is logged once per show.
+
+**Gradients.** `style.gradient` is painted over `style.background` and under the content, inside
+the node's corner shape. The geometry matches Android: a linear gradient's angle is degrees
+clockwise from left to right (0 runs left to right, 90 top to bottom) and its line passes through
+the centre, long enough that the corners take the first and last stop colours; a radial gradient
+starts at the centre and reaches the corners. Positions apply only when every stop has one, and
+are made non-decreasing; otherwise the stops are spread evenly. A `card` and a `topAppBar` drop
+their default container when the node has a gradient, as they do for a background.
+
+**Scrims.** `window.placement.scrim` and a bottomSheet's `scrim` resolve through one function,
+`PrototypePalette.scrim` (owner decision 2026-10-10). Only the `scrim` role gets an alpha: named
+directly or as the resolved side of a pair, it draws the scheme's scrim colour at 40% opacity
+(`PrototypePalette.scrimRoleAlpha`, the same number as Android's `PROTOTYPE_SHEET_SCRIM_ALPHA`),
+because the role itself is opaque black. Any other role used as a scrim draws its colour
+unchanged, and a hex value keeps exactly the authored alpha. Outside a scrim slot the `scrim`
+role is the plain colour. A bottomSheet's authored `scrim` takes the touches it covers, and a tap
+on it closes the sheet by writing `!equals` to its `openWhen` key, as on Android.
+
+**Known differences from Android.**
+
+- A bottomSheet without a `scrim` draws nothing behind the sheet. Android draws its default
+  scrim (the `scrim` role at 40%).
+- A bottomSheet's scrim covers the sheet node's own frame, behind the sheet surface, not the
+  whole prototype window: the iOS renderer draws a sheet in place instead of hoisting it above the
+  tree.
+- A `button` keeps its system fill, which covers a `style.gradient` behind it. Android makes the
+  button's container transparent so the gradient shows.
+
+**Images.** `image.asset` and a `tabBar` / `bottomNav` item `image` take an asset id or
+`{light, dark}` ids; the id for the resolved mode is drawn. A nav item draws its image at 24 pt
+when the asset is uploaded, then its `icon`, then a placeholder square. Both ids of a pair are
+reported in `missingAssets` until they are uploaded.
+
+**Malformed values.** The agent has no copy of the host validator. For the forms this capability
+added it checks them while decoding, and a malformed one fails `show_prototype` with
+`Invalid prototype spec: <path>: ...`, leaving the shown prototype untouched: a pair that is not
+exactly `{light, dark}` strings, a pair side or a gradient stop or a scrim that is neither a hex
+value nor a role, an empty id in an image pair, a gradient with an unknown type, a linear one
+without an angle, fewer than two or more than four stops or a position outside 0 to 1, and a
+`theme.colors.light` / `dark` that is not a non-empty `{role: hex}` map. Every shared invalid
+fixture for these forms fails on iOS (`PrototypeThemeModesTests`). Two things stay with the host
+alone: the image-count limit (the agent has none, and a spec over it draws correctly), and a
+single unknown value in a slot that predates the capability (a style colour, a border or shadow
+colour), which draws that slot's fallback as before.
 
 ## Anchors
 

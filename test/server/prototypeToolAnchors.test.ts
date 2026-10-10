@@ -240,6 +240,149 @@ describe("prototype show with anchors (#9316)", () => {
   });
 });
 
+/** The captured hierarchy, optionally with a shorter screen so a lower element is off screen. */
+class ShortScreenHierarchy extends CapturedHierarchy {
+  constructor(private readonly screenHeight?: number) {
+    super();
+  }
+  override async capture(request: HierarchyCaptureRequest): Promise<HierarchySnapshot> {
+    const snapshot = await super.capture(request);
+    return this.screenHeight === undefined
+      ? snapshot
+      : { ...snapshot, hierarchy: { ...snapshot.hierarchy, screenHeight: this.screenHeight } };
+  }
+}
+
+describe("an anchor-refused app-layer show leaves the device untouched (#11379)", () => {
+  const APPOP = "shell appops set dev.jasonpearson.automobile.ctrlproxy SYSTEM_ALERT_WINDOW allow";
+  const appLayer = (selector: Record<string, unknown>) => {
+    const spec = anchoredSpec(selector);
+    return { ...spec, window: { ...spec.window, layer: "app" } };
+  };
+  let client: FakeCtrlProxy;
+  let adb: FakeAdbExecutor;
+  let hierarchy: ShortScreenHierarchy;
+  let restore: () => void;
+  let unsubscribe: () => void;
+
+  function register(screenHeight?: number) {
+    unsubscribe?.();
+    const timer = new FakeTimer();
+    hierarchy = new ShortScreenHierarchy(screenHeight);
+    unsubscribe = registerPrototypeTools({
+      clientFactory: () => client,
+      clock: timer,
+      timer,
+      cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
+      anchorHierarchyCaptureFactory: () => hierarchy,
+      adbFactory: new FakeAdbClientFactory(adb),
+      lastRenderedObservation: () => undefined,
+    });
+  }
+
+  beforeEach(() => {
+    restore = preserveToolRegistry();
+    client = new FakeCtrlProxy(new FakeTimer());
+    client.setSupportedCommands([PROTOTYPE_ANCHOR_CAPABILITY, "prototype_window_options_v1"]);
+    adb = new FakeAdbExecutor();
+    register();
+  });
+  afterEach(() => {
+    unsubscribe();
+    restore();
+  });
+
+  async function call(input: unknown, device = android) {
+    const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
+    return prototypeOutputSchema.parse(response.structuredContent);
+  }
+
+  function expectUntouched() {
+    expect(adb.getExecutedCommands()).not.toContain(APPOP);
+    expect(client.getPrototypeHistory()).toEqual([]);
+  }
+
+  test("an unsupported anchor capability grants nothing", async () => {
+    client.setSupportedCommands(["prototype_window_options_v1"]);
+    const payload = await call({
+      action: "show",
+      spec: appLayer({ elementId: "button_elevated" }),
+    });
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain(PROTOTYPE_ANCHOR_CAPABILITY);
+    expectUntouched();
+  });
+
+  test("a missing element grants nothing", async () => {
+    const payload = await call({
+      action: "show",
+      spec: appLayer({ elementId: "no_such_element" }),
+    });
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain("Nothing was shown");
+    expectUntouched();
+  });
+
+  test("an ambiguous element grants nothing", async () => {
+    const payload = await call({ action: "show", spec: appLayer({ text: "Text" }) });
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain("Target ambiguous");
+    expectUntouched();
+  });
+
+  test("an off-screen element grants nothing", async () => {
+    register(1500);
+    const payload = await call({
+      action: "show",
+      spec: appLayer({ elementId: "button_elevated" }),
+    });
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain("is off screen");
+    expectUntouched();
+  });
+
+  test("an element anchor on another display grants nothing", async () => {
+    client.setSupportedCommands([
+      PROTOTYPE_ANCHOR_CAPABILITY,
+      PROTOTYPE_DISPLAY_CAPABILITY,
+      "prototype_window_options_v1",
+    ]);
+    adb.setCommandResponse("cmd display get-displays", {
+      stdout:
+        'Display id 0: DisplayInfo{uniqueId "local:cover-key" type INTERNAL, real 100 x 100}\n' +
+        'Display id 2: DisplayInfo{uniqueId "local:inner-key" type INTERNAL, real 200 x 200}',
+      stderr: "",
+    });
+    const fold: BootedDevice = {
+      ...android,
+      displays: {
+        panels: [
+          { key: "inner-key", role: "inner", sizePx: { width: 200, height: 200 } },
+          { key: "cover-key", role: "cover", sizePx: { width: 100, height: 100 } },
+        ],
+        postures: ["opened", "closed"],
+      },
+    };
+    const payload = await call(
+      { action: "show", display: "inner", spec: appLayer({ elementId: "button_elevated" }) },
+      fold,
+    );
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain("default display");
+    expectUntouched();
+  });
+
+  test("a valid anchored app-layer show grants once, before the show request", async () => {
+    const payload = await call({
+      action: "show",
+      spec: appLayer({ elementId: "button_elevated" }),
+    });
+    expect(payload.success).toBe(true);
+    expect(adb.getExecutedCommands().filter((command) => command === APPOP)).toHaveLength(1);
+    expect(client.getPrototypeHistory()).toHaveLength(1);
+  });
+});
+
 /** Serves the captured iPhone 17 Settings hierarchy with the injected agent's window above it. */
 class CapturedIosHierarchy implements HierarchyCapture {
   readonly requests: HierarchyCaptureRequest[] = [];

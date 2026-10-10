@@ -698,15 +698,12 @@ async function showDisplayId(
 }
 
 /**
- * Refuses, before anything is sent, a spec whose window options the device would silently ignore,
- * and grants CtrlProxy SYSTEM_ALERT_WINDOW for an app-layer window (the device re-checks it and
- * fails with the appop command when the grant did not take).
+ * Refuses, before anything is sent, a spec whose window options the device would silently ignore.
+ * It has no device side effect: the app-layer grant is [appLayerGrant], run last.
  */
-async function prepareWindowOptions(
+async function windowOptionsRefusal(
   target: PrototypeTarget,
-  device: BootedDevice,
   args: z.infer<typeof prototypeSchema>,
-  dependencies: Pick<PrototypeToolDependencies, "adbFactory">,
   signal: AbortSignal | undefined,
 ): Promise<PrototypeResult | undefined> {
   if (args.action !== "show" || args.spec === undefined) {
@@ -729,15 +726,35 @@ async function prepareWindowOptions(
       error: new ActionableError(prototypeWindowOptionsUnsupportedMessage(options)).message,
     };
   }
-  if (options.appLayer) {
+  return undefined;
+}
+
+/**
+ * The SYSTEM_ALERT_WINDOW grant for an app-layer window (the device re-checks it and fails with
+ * the appop command when the grant did not take), or undefined when the show needs none. It is a
+ * device mutation, so it runs after every refusal, immediately before the show is sent.
+ */
+function appLayerGrant(
+  target: PrototypeTarget,
+  device: BootedDevice,
+  args: z.infer<typeof prototypeSchema>,
+  dependencies: Pick<PrototypeToolDependencies, "adbFactory">,
+  signal: AbortSignal | undefined,
+): (() => Promise<void>) | undefined {
+  if (args.action !== "show" || args.spec === undefined || !target.android) {
+    return undefined;
+  }
+  if (!requestedPrototypeWindowOptions(args.spec as PrototypeSpec).appLayer) {
+    return undefined;
+  }
+  return async () => {
     await grantPrototypeAppLayer(
       (dependencies.adbFactory ?? defaultAdbClientFactory).create(device),
       signal,
     );
     // An abort that landed after the grant completed must still stop the mutation.
     signal?.throwIfAborted();
-  }
-  return undefined;
+  };
 }
 
 /**
@@ -1009,14 +1026,17 @@ async function sendPrototype(
   stage: AssetStage,
   signal: AbortSignal | undefined,
   displayId: number | undefined,
-  superseded: () => boolean = () => false,
+  hooks: { superseded?: () => boolean; beforeSend?: () => Promise<void> } = {},
 ): Promise<MutationOutcome> {
+  const superseded = hooks.superseded ?? (() => false);
+  const { beforeSend } = hooks;
   if (stage.failure) {
     return { result: stage.failure };
   }
   if (superseded()) {
     return { result: supersededBeforeSend(args) };
   }
+  await beforeSend?.();
   const first = await runMutation(target, args, displayId);
   if (!needsAssetResend(first, superseded)) {
     return { result: first };
@@ -1057,9 +1077,9 @@ async function resolveShowDisplay(
 }
 
 /**
- * Display resolution, then the theme-modes refusal, then window-option support and the app-layer
- * grant (a device side effect, so refusals that need no grant come first), then anchor resolution:
- * any refusal ends the call unsent. An in-place show stays on [show.shownDisplayId], so anchors are checked against that.
+ * Display resolution, then the theme-modes refusal, then window-option support, then anchor
+ * resolution: any refusal ends the call unsent and leaves the device untouched (the app-layer grant
+ * is a device side effect that runs later, in [sendPrototype]). An in-place show stays on [show.shownDisplayId], so anchors are checked against that.
  */
 async function preflightMutation(
   show: { inPlace: boolean; shownDisplayId?: number },
@@ -1078,7 +1098,7 @@ async function preflightMutation(
   }
   const failure =
     (await themeModesRefusal(target, args, signal)) ??
-    (await prepareWindowOptions(target, device, args, dependencies, signal));
+    (await windowOptionsRefusal(target, args, signal));
   if (failure) {
     return { displayId: resolved.displayId, failure };
   }
@@ -1251,7 +1271,10 @@ async function performMutation(
     stage,
     signal,
     displayId,
-    () => isSuperseded(commits, scope, target, generation),
+    {
+      superseded: () => isSuperseded(commits, scope, target, generation),
+      beforeSend: appLayerGrant(prototypeTarget, device, args, dependencies, signal),
+    },
   );
   retireObservation(dependencies.cacheInvalidator, device, result);
   const placed = placedDisplay(args, shown, comparable, result.success);

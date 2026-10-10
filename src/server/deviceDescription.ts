@@ -25,6 +25,7 @@ export type {
 export { projectConfiguredImage } from "../models/deviceDescription";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
 import { z } from "zod/v4";
+import { classifyPoolStatus } from "../daemon/devicePool";
 import type { GenericAvailability, PooledDevice } from "../daemon/devicePool";
 import type { Session } from "../daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../models";
@@ -121,6 +122,7 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
     adbOfflineState: input.kind === "booted" ? input.adbOfflineState : undefined,
     heldBy: input.kind === "booted" ? input.heldBy : undefined,
     reserved: input.kind === "booted" ? input.reserved : undefined,
+    unhealthy: input.unhealthy !== undefined,
   });
   return input.unhealthy ? { ...description, unhealthy: input.unhealthy } : description;
 }
@@ -176,6 +178,8 @@ interface BootedDescriptionOptions {
   adbOfflineState?: string;
   heldBy?: DeviceHeldBy;
   reserved?: boolean;
+  /** A health marker keeps allocation off the device, so it is not `idle` (#11387). */
+  unhealthy?: boolean;
 }
 
 // oxlint-disable-next-line complexity -- one exhaustive canonical booted projection preserves precedence.
@@ -193,6 +197,7 @@ function describeBooted({
   adbOfflineState,
   heldBy,
   reserved,
+  unhealthy,
 }: BootedDescriptionOptions): DeviceDescription {
   const merged = mergeRuntimeFacts(device, admittedImage, admittedImageAuthoritative);
   // A cold-boot adapter can report a temporary non-emulator transport id even
@@ -229,7 +234,7 @@ function describeBooted({
       readiness: {
         state: adbOfflineState ? "not_ready" : readinessFromServiceStatus(serviceStatus),
       },
-      poolStatus: poolStatus(pooled, heldBy ?? reserved),
+      poolStatus: poolStatus(pooled, Boolean(heldBy ?? reserved) || unhealthy === true),
       ...(heldBy ? { heldBy } : {}),
       session: session
         ? {
@@ -302,15 +307,9 @@ function readinessFromServiceStatus(
 
 function poolStatus(
   pooled: PooledDevice | undefined,
-  held: DeviceHeldBy | boolean | undefined,
+  unlendable: boolean,
 ): DevicePoolStatus | null {
-  if (!pooled) {
-    return null;
-  }
-  if (pooled.status === "busy" || (held && pooled.status === "idle")) {
-    return "assigned";
-  }
-  return pooled.status === "idle" || pooled.status === "error" ? pooled.status : null;
+  return pooled ? classifyPoolStatus(pooled.status, unlendable) : null;
 }
 
 /**

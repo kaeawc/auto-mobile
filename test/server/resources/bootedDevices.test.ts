@@ -238,6 +238,10 @@ describe("MCP Booted Device Resources", () => {
       expect(result.devices[0].unhealthy).toEqual({ reason: "biometric-enrollment", since: 1234 });
       expect(result.devices[1]).not.toHaveProperty("unhealthy");
       expect(result.poolStatus?.idle).toBe(1);
+      // #11387: the unlendable device is `assigned` everywhere, and total matches pool stats.
+      expect(result.devices[0].runtime.poolStatus).toBe("assigned");
+      expect(result.poolStatus).toMatchObject({ idle: 1, assigned: 1, error: 0, total: 2 });
+      expect(pool.getStats()).toMatchObject({ idle: 1, assigned: 1, error: 0, total: 2 });
       expect(listDevicesEntrySchema.shape.unhealthy.parse(result.devices[0].unhealthy)).toEqual({
         reason: "biometric-enrollment",
         since: 1234,

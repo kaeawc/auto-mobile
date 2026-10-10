@@ -245,6 +245,25 @@ function resolveConsoleBusyRegistry(
  */
 export type GenericAvailability = "free" | "managed_slot" | "foreign_daemon" | "reserved";
 
+/** The three buckets `getStats()` and every per-device `poolStatus` partition the pool into. */
+export type PoolStatusBucket = "idle" | "assigned" | "error";
+
+/**
+ * The one per-device classification behind `getStats()`, `getStatsForPlatform`, `listDevices`
+ * and the booted resources: every device is in exactly one bucket. An errored device is `error`
+ * whatever else holds it; a busy device, or an idle one allocation cannot lend (held by a slot,
+ * another daemon, a reservation, or carrying a health marker), is `assigned`; the rest are `idle`.
+ */
+export function classifyPoolStatus(
+  status: PooledDevice["status"],
+  unlendable: boolean,
+): PoolStatusBucket {
+  if (status === "error") {
+    return "error";
+  }
+  return status === "busy" || unlendable ? "assigned" : "idle";
+}
+
 /** A lifecycle stop that must not take a device another live daemon holds (#11200). */
 export interface ShutdownForeignClaim {
   toolName: string;
@@ -9040,25 +9059,34 @@ export class DevicePool {
     return Array.from(this.devices.values()).filter((device) => device.platform === platform);
   }
 
-  private getStatsForPlatform(platform?: Platform): {
+  /** A device allocation cannot lend (#11387): held, reserved, or carrying a health marker. */
+  private poolBucketFor(device: PooledDevice): PoolStatusBucket {
+    const unlendable =
+      this.isHeldOutsideGenericAllocation(device) ||
+      this.isReservedForAssignment(device) ||
+      !this.isPotentialAllocationSupply(device);
+    return classifyPoolStatus(device.status, unlendable);
+  }
+
+  /** The bucket {@link getStats} counts `deviceId` in, or null when the pool does not know it. */
+  poolBucket(deviceId: string): PoolStatusBucket | null {
+    const device = this.devices.get(deviceId);
+    return device ? this.poolBucketFor(device) : null;
+  }
+
+  getStatsForPlatform(platform?: Platform): {
     total: number;
     idle: number;
     assigned: number;
     error: number;
   } {
     const devices = this.getDevicesByPlatform(platform);
-    // Same derivation as getStats (#11317): a managed-slot or other-daemon device that is idle is
-    // held, so allocation messages count it assigned. `total` (capacity gating) is unaffected.
-    const idle = devices.filter(
-      (device) => this.isIdleDeviceEligible(device) && !this.isHeldOutsideGenericAllocation(device),
-    ).length;
-    const assigned = devices.filter(
-      (device) =>
-        device.status === "busy" ||
-        this.isReservedForAssignment(device) ||
-        (device.status === "idle" && this.isHeldOutsideGenericAllocation(device)),
-    ).length;
-    const error = devices.filter((device) => device.status === "error").length;
+    // Same derivation as getStats (#11317, #11387): one bucket per device. `total` (capacity
+    // gating) is the device count.
+    const buckets = devices.map((device) => this.poolBucketFor(device));
+    const idle = buckets.filter((bucket) => bucket === "idle").length;
+    const assigned = buckets.filter((bucket) => bucket === "assigned").length;
+    const error = buckets.filter((bucket) => bucket === "error").length;
 
     return {
       total: devices.length,
@@ -9079,14 +9107,7 @@ export class DevicePool {
     avgAssignments: number;
   } {
     const all = this.getAllDevices();
-    const idle = this.getIdleDevices().length;
-    const assigned = all.filter(
-      (device) =>
-        device.status === "busy" ||
-        this.isReservedForAssignment(device) ||
-        (device.status === "idle" && this.isHeldOutsideGenericAllocation(device)),
-    ).length;
-    const error = this.getErrorDevices().length;
+    const { idle, assigned, error } = this.getStatsForPlatform();
     const avgAssignments =
       all.length > 0
         ? Math.round(all.reduce((sum, d) => sum + d.assignmentCount, 0) / all.length)

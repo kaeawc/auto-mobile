@@ -1,0 +1,14 @@
+{
+  "surface": "delete-device",
+  "name": "device_owned_by_other_daemon",
+  "builder": "typedTeardownRefusal",
+  "payload": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Device 'emulator-5554' is claimed by another AutoMobile daemon (PID 4242) (code device_owned_by_other_daemon); two daemons must never drive the same device. Retry after that daemon releases it, or pick another device.\",\"mode\":\"destroy\",\"state\":\"failed\",\"target\":{\"stableId\":\"Pixel_8_API_35\",\"platform\":\"android\",\"isVirtual\":true},\"failure\":{\"deviceId\":\"emulator-5554\",\"retryable\":true,\"retryAfterMs\":2000,\"code\":\"device_owned_by_other_daemon\",\"phase\":\"precondition\",\"message\":\"Device 'emulator-5554' is claimed by another AutoMobile daemon (PID 4242) (code device_owned_by_other_daemon); two daemons must never drive the same device. Retry after that daemon releases it, or pick another device.\"}}"
+      }
+    ]
+  }
+}

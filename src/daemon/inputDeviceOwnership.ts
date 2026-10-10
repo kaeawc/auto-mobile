@@ -1,4 +1,5 @@
 import { ActionableError } from "../models/ActionableError";
+import type { SessionAccess, SessionExecutionMetadata } from "./sessionManager";
 import {
   resolveToolSelectionBaseSessionUuid,
   type ToolSelectionSessionManager,
@@ -112,6 +113,57 @@ export function assertInputRequesterHoldsDevice(input: {
     return;
   }
   throw new InputDeviceOwnedError(input.action, input.deviceId, requesterSessionUuid, input.remedy);
+}
+
+/**
+ * The session manager's control-call admission, the entry point the MCP tool path uses. Read
+ * structurally so daemon-state fakes that model no session lifecycle keep working.
+ */
+interface InputSessionAdmission {
+  admitIssuedSessionForAutomation(
+    sessionId: string,
+    execution?: SessionExecutionMetadata,
+    options?: { access?: SessionAccess },
+  ): Promise<{ assignedDevice: string } | undefined>;
+}
+
+function admitsIssuedSessions<T extends object>(manager: T): manager is T & InputSessionAdmission {
+  return typeof Reflect.get(manager, "admitIssuedSessionForAutomation") === "function";
+}
+
+/**
+ * `input/*` on a held device is a control call on the holder's session (#11417), so it passes the
+ * admission an MCP control call passes before anything reaches the device: a suspect session
+ * refuses it (retryable), and a session whose owner lease and grace ran out, or whose idle window
+ * closed, is released and refuses it terminally (`session_ownership_lost`). `execution` is the
+ * input's own tracked execution, so it is not mistaken for earlier work still in flight.
+ *
+ * The pane is not the session's owner, so admission is `non-owner-control`: it changes nothing on
+ * the session. It does not reclaim a rehydrated session awaiting its owner (that session is still
+ * released at the owner-reconnect timeout, which cuts an input in flight with the typed refusal),
+ * and it stamps neither the owner lease nor the activity clocks. The input's END is tool use, as
+ * it was before admission existed: the tracker reports it and the idle window restarts there.
+ */
+export async function admitInputOnHolderSession(input: {
+  deviceId: string;
+  holderSessionUuid: string;
+  sessionManager: object | undefined;
+  execution: SessionExecutionMetadata;
+}): Promise<void> {
+  const { sessionManager, holderSessionUuid, deviceId } = input;
+  if (!sessionManager || !admitsIssuedSessions(sessionManager)) {
+    return;
+  }
+  const admitted = await sessionManager.admitIssuedSessionForAutomation(
+    holderSessionUuid,
+    input.execution,
+    { access: "non-owner-control" },
+  );
+  if (admitted?.assignedDevice !== deviceId) {
+    throw new ActionableError(
+      `Session ${holderSessionUuid} no longer holds device '${deviceId}'; the input was not sent.`,
+    );
+  }
 }
 
 /**

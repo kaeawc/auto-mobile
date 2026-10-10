@@ -919,6 +919,15 @@ internal object AutoMobilePlanExecutor {
 
     // JSON strings such as "true" are not an affirmative boolean plan result.
     val success = parsed["success"] == JsonPrimitive(true)
+    return parseToolPayload(parsed, isError, success)
+  }
+
+  /** Reads the typed refusal fields from a daemon tool payload, top level or nested in `error`. */
+  private fun parseToolPayload(
+    parsed: JsonObject,
+    isError: Boolean,
+    success: Boolean,
+  ): ParsedToolResult {
     val errorObject = parsed["error"] as? JsonObject
     val retryable =
       errorObject?.get("retryable") == JsonPrimitive(true) ||
@@ -957,6 +966,32 @@ internal object AutoMobilePlanExecutor {
       )
     }
     return ParsedToolResult(true, "")
+  }
+
+  /**
+   * How a refusal rendered into a thrown tool error (`... returned an error: {json}`) is handled,
+   * decided by the same typed fields and wait rule as the `executePlan` loop (the
+   * `test/fixtures/refusal-wire` table). Null when the text carries no JSON object.
+   */
+  internal data class RefusalVerdict(
+    val disposition: RefusalDisposition,
+    val code: String?,
+    val retryAfterMs: Long?,
+  )
+
+  internal fun classifyRefusalText(text: String, json: Json = Json): RefusalVerdict? {
+    val start = text.indexOf('{')
+    val end = text.lastIndexOf('}')
+    if (start < 0 || end <= start) return null
+    val payload =
+      try {
+        json.parseToJsonElement(text.substring(start, end + 1)) as? JsonObject
+      } catch (e: SerializationException) {
+        println("Warning: refusal text is not a JSON payload: ${e.message}")
+        null
+      } ?: return null
+    val parsed = parseToolPayload(payload, isError = true, success = false)
+    return RefusalVerdict(refusalDisposition(parsed), parsed.code, parsed.retryAfterMs)
   }
 
   /** How the runner reacts to a daemon refusal; one row of `test/fixtures/refusal-wire`. */

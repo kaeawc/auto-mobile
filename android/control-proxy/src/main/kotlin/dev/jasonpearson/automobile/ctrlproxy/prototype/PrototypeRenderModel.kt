@@ -363,21 +363,24 @@ fun prototypeColor(value: String): Color {
 }
 
 /**
- * Seam for #11219: the one place a per-mode spec value (#11218) becomes the single value the
- * renderer draws. It returns the `light` side of a `{light, dark}` colour or image-asset pair,
- * which keeps every existing spec drawing as before: no CtrlProxy advertises
- * `prototype_theme_modes_v1` yet, so the host refuses a spec that carries a pair. #11219 replaces
- * this with resolution against the prototype's resolved light or dark mode.
+ * The value a per-mode spec slot (#11218) holds in the prototype's resolved appearance: a single
+ * value serves both modes, and a `{light, dark}` pair gives its [dark] or light side. A colour slot
+ * yields a hex value or a Material role name, an image slot an asset id.
  */
-internal fun prototypeModeValue(value: PrototypeModeValue): String =
+internal fun prototypeModeValue(value: PrototypeModeValue, dark: Boolean): String =
   when (value) {
     is PrototypeModeValue.Single -> value.value
-    is PrototypeModeValue.Modes -> value.light
+    is PrototypeModeValue.Modes -> if (dark) value.dark else value.light
   }
 
-/** The colour of a hex value, or null for a Material ColorScheme role name (resolved in render). */
+/**
+ * The colour of a single hex value. Null for a Material role name and for a `{light, dark}` pair:
+ * both depend on the theme, so they resolve during composition ([prototypeResolveColor]). Because a
+ * pair maps to no literal colour, it never takes part in inferring light or dark from the authored
+ * background, which would be circular.
+ */
 internal fun prototypeHexColor(value: PrototypeModeValue?): Color? =
-  value?.let(::prototypeModeValue)?.takeIf { it.startsWith("#") }?.let(::prototypeColor)
+  (value as? PrototypeModeValue.Single)?.value?.takeIf { it.startsWith("#") }?.let(::prototypeColor)
 
 fun mapPrototypeStyle(style: PrototypeStyle): PrototypeRenderStyle =
   PrototypeRenderStyle(
@@ -478,11 +481,15 @@ fun prototypeLinearGradientLine(angle: Double, width: Float, height: Float): Pai
 /**
  * Stop colors and, only when every stop authors a position, their explicit positions. Positions are
  * made non-decreasing (a stop never starts before the previous one), which is what Skia does to a
- * descending list anyway, so the rendered result is deterministic and documented.
+ * descending list anyway, so the rendered result is deterministic and documented. A stop colour is
+ * a hex value, a role name or a `{light, dark}` pair of either, resolved against [palette].
  */
-fun prototypeGradientStops(stops: List<PrototypeGradientStop>): Pair<List<Color>, List<Float>?> {
-  // A role-named stop (#11218) has no scheme here; it stays transparent until #11219 resolves it.
-  val colors = stops.map { prototypeHexColor(it.color) ?: Color.Transparent }
+internal fun prototypeGradientStops(
+  stops: List<PrototypeGradientStop>,
+  palette: PrototypePalette,
+): Pair<List<Color>, List<Float>?> {
+  // The validator only admits hex values and known role names, so the fallback is unreachable.
+  val colors = stops.map { prototypeResolveColor(palette, null, it.color) ?: Color.Transparent }
   val positions = stops.map { it.position?.toFloat() }
   if (!positions.all { it != null }) return colors to null
   var floor = 0f

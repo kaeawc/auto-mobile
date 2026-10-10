@@ -143,9 +143,14 @@ internal fun PrototypeImageContent(node: PrototypeRenderNode, modifier: Modifier
   val background =
     prototypeThemedColor(node.style.background, node.style.source.background)
       ?: prototypePlaceholderColor(MaterialTheme.colorScheme)
+  // A {light, dark} asset pair draws the asset for the prototype's resolved appearance.
+  val dark = LocalPrototypeDark.current
   BoxWithConstraints(modifier.defaultMinSize(24.dp, 24.dp)) {
     val state =
-      rememberPrototypeImage(prototypeModeValue(source.asset), prototypeImageTarget(constraints))
+      rememberPrototypeImage(
+        prototypeModeValue(source.asset, dark),
+        prototypeImageTarget(constraints),
+      )
     val image = (state as? PrototypeImageState.Ready)?.image as? BitmapPrototypeImage
     if (image != null) {
       Image(
@@ -184,7 +189,8 @@ private fun PrototypeDimension?.isSized() =
 /** A nav item's image, built-in icon or placeholder, per [prototypeNavigationVisual]. */
 @Composable
 internal fun PrototypeNavigationIcon(item: PrototypeItem) {
-  val image = item.image?.let(::prototypeModeValue)
+  val dark = LocalPrototypeDark.current
+  val image = item.image?.let { prototypeModeValue(it, dark) }
   val state = image?.let { rememberPrototypeImage(it, NAVIGATION_ICON_TARGET) }
   when (val visual = prototypeNavigationVisual(item, state)) {
     is PrototypeNavigationVisual.Image ->

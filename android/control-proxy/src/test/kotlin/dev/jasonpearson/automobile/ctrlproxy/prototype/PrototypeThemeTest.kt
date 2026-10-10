@@ -256,10 +256,13 @@ class PrototypeThemeTest {
     assertEquals(Color(0xFF123456), prototypeColorRole(scheme, "primary"))
     assertEquals(Color(0xFF654321), prototypeColorRole(scheme, "surfaceContainer"))
     assertNull(prototypeColorRole(scheme, "onPurple"))
-    assertEquals(Color(0xFF123456), prototypeResolveColor(scheme, null, "primary"))
-    assertEquals(Color.Red, prototypeResolveColor(scheme, Color.Red, "#FFFF0000"))
-    assertEquals(Color.Red, prototypeResolveColor(scheme, Color.Red, null))
-    assertNull(prototypeResolveColor(scheme, null, null))
+    val palette = PrototypePalette(scheme, dark = false)
+    val primary = PrototypeModeValue.Single("primary")
+    val red = PrototypeModeValue.Single("#FFFF0000")
+    assertEquals(Color(0xFF123456), prototypeResolveColor(palette, null, primary))
+    assertEquals(Color.Red, prototypeResolveColor(palette, Color.Red, red))
+    assertEquals(Color.Red, prototypeResolveColor(palette, Color.Red, null))
+    assertNull(prototypeResolveColor(palette, null, null))
   }
 
   @Test
@@ -373,7 +376,10 @@ class PrototypeThemeTest {
   fun `sheet handle scrims and placeholders use scheme roles`() {
     for (scheme in listOf(lightColorScheme(), darkColorScheme())) {
       assertEquals(scheme.onSurfaceVariant, prototypeHandleColor(scheme))
-      assertEquals(scheme.scrim.copy(alpha = 0.4f), prototypeSheetScrimFallback(scheme))
+      assertEquals(
+        scheme.scrim.copy(alpha = 0.4f),
+        prototypeSheetScrimFallback(PrototypePalette(scheme, dark = false)),
+      )
       assertEquals(scheme.scrim.copy(alpha = 0.32f), prototypeDialogScrimFallback(scheme))
       assertEquals(scheme.surfaceVariant, prototypePlaceholderColor(scheme))
       assertEquals(scheme.onSurfaceVariant, prototypePlaceholderContentColor(scheme))

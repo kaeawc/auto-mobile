@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.accessibility.AccessibilityWindowInfo
+import androidx.compose.ui.graphics.Color
 import dev.jasonpearson.automobile.protocol.PrototypeDimension
 
 /**
@@ -30,7 +31,10 @@ const val FULLSCREEN_DISMISS_BAR_OPAQUE = false
  * translucent (`opacityPercent` 100), no translucent host chrome over the window, and a fully
  * opaque surface that fills the window: the root's own background at alpha 1 sized to fill with no
  * node alpha, or, for fullscreen, a fully opaque scrim painted behind it. A modal sheet's scrim is
- * drawn over content and never makes anything more opaque.
+ * drawn over content and never makes anything more opaque. Colours are resolved as they are drawn,
+ * against every mode the prototype can resolve to: a role name counts when its scheme colour is
+ * opaque, a `{light, dark}` pair only when the side for each reachable mode is, and the `scrim`
+ * role in a scrim slot never does, because it is drawn at the default scrim opacity.
  */
 fun prototypeWindowMetadata(
   model: PrototypeRenderModel,
@@ -44,14 +48,22 @@ fun prototypeWindowMetadata(
       is PrototypePlacement.Floating -> "floating"
     }
   val style = model.root.style
+  // What is drawn decides: a colour is solid only if it resolves opaque in every reachable mode.
+  val palettes = prototypeReachablePalettes(model)
+  fun opaque(color: Color?) = (color?.alpha ?: 0f) >= 1f
   // An omitted dimension is wrap-content, so only an explicit fill spans the window.
   val rootFills =
     style.source.width == PrototypeDimension.Fill && style.source.height == PrototypeDimension.Fill
   val rootSolid =
     rootFills &&
-      (style.background?.alpha ?: 0f) >= 1f &&
+      palettes.all {
+        opaque(prototypeResolveColor(it, style.background, style.source.background))
+      } &&
       (style.source.alpha?.let { it >= 1.0 } ?: true)
-  val scrimSolid = (placement as? PrototypePlacement.Fullscreen)?.scrim?.alpha == 1f
+  val fullscreen = placement as? PrototypePlacement.Fullscreen
+  val scrimSolid =
+    fullscreen != null &&
+      palettes.all { opaque(prototypeResolveScrim(it, fullscreen.scrim, fullscreen.scrimSpec)) }
   val chromeOpaque = placement !is PrototypePlacement.Fullscreen || dismissBarOpaque
   return PrototypeWindowMetadata(
     name,

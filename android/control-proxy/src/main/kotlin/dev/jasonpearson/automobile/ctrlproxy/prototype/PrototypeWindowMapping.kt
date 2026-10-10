@@ -22,7 +22,7 @@ fun isDevicePersistent(spec: PrototypeSpec): Boolean =
 fun mapPrototypePlacement(placement: SpecPlacement): PrototypePlacement =
   when (placement) {
     is PrototypeFullscreenPlacement ->
-      PrototypePlacement.Fullscreen(prototypeHexColor(placement.scrim))
+      PrototypePlacement.Fullscreen(prototypeHexColor(placement.scrim), placement.scrim)
     is PrototypeSheetPlacement ->
       PrototypePlacement.Sheet(
         when (placement.edge) {

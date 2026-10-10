@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.Gravity
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -274,20 +275,24 @@ class PrototypeRenderModelTest {
 
   @Test
   fun `gradient stop positions apply only when every stop authors one`() {
+    val palette = PrototypePalette(lightColorScheme(), dark = false)
     val even =
       prototypeGradientStops(
         listOf(PrototypeGradientStop("#000000", 0.2), PrototypeGradientStop("#ffffff")),
+        palette,
       )
     assertEquals(listOf(Color(0xff000000), Color(0xffffffff)), even.first)
     assertNull(even.second)
     val explicit =
       prototypeGradientStops(
         listOf(PrototypeGradientStop("#000000", 0.2), PrototypeGradientStop("#ffffff", 1.0)),
+        palette,
       )
     assertEquals(listOf(0.2f, 1f), explicit.second)
     val descending =
       prototypeGradientStops(
         listOf(PrototypeGradientStop("#000000", 0.8), PrototypeGradientStop("#ffffff", 0.2)),
+        palette,
       )
     assertEquals(listOf(0.8f, 0.8f), descending.second)
   }
@@ -449,7 +454,10 @@ class PrototypeRenderModelTest {
     val window = PrototypeWindow(PrototypeFullscreenPlacement("#80123456"), 37)
     val model = mapPrototypeSpec(spec(PrototypeSpacerNode()).copy(window = window))
     assertEquals(37, model.request().opacityPercent)
-    assertEquals(PrototypePlacement.Fullscreen(Color(0x80123456)), model.placement)
+    assertEquals(
+      PrototypePlacement.Fullscreen(Color(0x80123456), PrototypeModeValue.Single("#80123456")),
+      model.placement,
+    )
     for (edge in listOf("top", "bottom")) {
       val sheet =
         mapPrototypePlacement(PrototypeSheetPlacement(edge, 240.0)) as PrototypePlacement.Sheet

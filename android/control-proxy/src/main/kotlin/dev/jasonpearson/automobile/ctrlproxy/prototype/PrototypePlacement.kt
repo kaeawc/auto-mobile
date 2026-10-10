@@ -6,10 +6,16 @@ import android.view.Gravity
 import android.view.WindowManager
 import androidx.compose.ui.graphics.Color
 import dev.jasonpearson.automobile.ctrlproxy.OverlayManager
+import dev.jasonpearson.automobile.protocol.PrototypeModeValue
 import kotlin.math.roundToInt
 
 sealed interface PrototypePlacement {
-  data class Fullscreen(val scrim: Color? = null) : PrototypePlacement
+  /**
+   * [scrim] is the literal colour of a single hex scrim. [scrimSpec] is the authored slot, which
+   * the host resolves against the theme when it is a role name or a `{light, dark}` pair.
+   */
+  data class Fullscreen(val scrim: Color? = null, val scrimSpec: PrototypeModeValue? = null) :
+    PrototypePlacement
 
   data class Sheet(val edge: Edge, val sizeDp: Float) : PrototypePlacement {
     init {

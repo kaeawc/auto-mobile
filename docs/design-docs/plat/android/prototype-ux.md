@@ -87,15 +87,16 @@ plugin or API-check task; its published artifact includes the contract resource.
 Optional top-level `theme` sets the Material scheme every built-in component draws
 from. At least one of its fields is required:
 
-| Field                   | Meaning                                                                                                                                                                           |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mode`                  | `light`, `dark` or `system` (follow the device). Omitted: inferred from the first opaque background on the root's leading chain, else the device setting.                         |
-| `colors.seed`           | Hex color a full light or dark scheme is generated from.                                                                                                                          |
-| `colors.source`         | `device`: Android 12+ (API 31) dynamic color. On older devices it falls back to `colors.seed` when present, else the default scheme.                                              |
-| `colors.<role>`         | Hex override for one Material 3 role (`primary`, `onPrimary`, `surface`, `surfaceContainer` … the 36 roles style colors accept), applied over the seed, device or default scheme. |
-| `typography.scale`      | Number 0.75–1.5 multiplying the size and line height of every Material type role. Default 1.                                                                                      |
-| `typography.fontFamily` | `sans`, `serif` or `mono`: the family of every Material type role.                                                                                                                |
-| `shapes.corner`         | `none`, `small`, `medium` (the stock Material 3 scale), `large` or `full` (pill). Shifts every corner family built-in components use.                                             |
+| Field                         | Meaning                                                                                                                                                                           |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`                        | `light`, `dark` or `system` (follow the device). Omitted: inferred from the first opaque background on the root's leading chain, else the device setting.                         |
+| `colors.seed`                 | Hex color a full light or dark scheme is generated from.                                                                                                                          |
+| `colors.source`               | `device`: Android 12+ (API 31) dynamic color. On older devices it falls back to `colors.seed` when present, else the default scheme.                                              |
+| `colors.<role>`               | Hex override for one Material 3 role (`primary`, `onPrimary`, `surface`, `surfaceContainer` … the 36 roles style colors accept), applied over the seed, device or default scheme. |
+| `colors.light`, `colors.dark` | Maps of role name to hex, applied after `colors.<role>` in the matching mode only. See [Light and dark values](#light-and-dark-values).                                           |
+| `typography.scale`            | Number 0.75–1.5 multiplying the size and line height of every Material type role. Default 1.                                                                                      |
+| `typography.fontFamily`       | `sans`, `serif` or `mono`: the family of every Material type role.                                                                                                                |
+| `shapes.corner`               | `none`, `small`, `medium` (the stock Material 3 scale), `large` or `full` (pill). Shifts every corner family built-in components use.                                             |
 
 `colors`, `typography` and `shapes` each need at least one field. An explicit theme wins over the scheme
 inferred from backgrounds.
@@ -118,6 +119,56 @@ theme's Shapes (`shapes.corner` shifts them), `none` is square and `full` a pill
 role-valued `background` does not take part in inferring the prototype's light/dark
 theme from authored backgrounds (it would be circular); set `theme.mode` or
 `colors.seed` for that.
+
+### Light and dark values
+
+A prototype resolves to exactly one mode, light or dark, each time it is composed: an explicit
+`theme.mode` (`system` reads the device setting), else the luminance of a flat `colors.background`
+(else `colors.surface`) override, else the first opaque hex background on the root's leading
+chain, else the device setting. Every per-mode form below reads that one resolved mode. A device
+needs `prototype_theme_modes_v1` for them; the host refuses such a spec for an older CtrlProxy.
+
+- **Colour pairs.** Every colour slot (`style.background`, `style.color`, `style.shadowColor`,
+  `style.border.color`, gradient stops, `window.placement.scrim` and the `bottomSheet` `scrim`,
+  including inside `styleWhen`) accepts a hex value, a role name, or `{light, dark}` where each
+  side is a hex value or a role name. Both sides are required. The side for the resolved mode is
+  taken first, and is then a literal colour or a role looked up in the active scheme.
+- **Role maps.** The scheme is built in this order: seed, device or default scheme, then the flat
+  `colors.<role>` overrides (both modes), then `colors.light` or `colors.dark` for the resolved
+  mode. A role named in both the flat overrides and the mode map takes the map's value in that
+  mode and the flat value in the other. A role name inside a pair resolves against this final
+  scheme, so there is no precedence to decide between a node's pair and the theme maps: the pair
+  picks the name or literal, the scheme supplies the role's colour.
+- **Mode inference ignores per-mode values.** `colors.light` / `colors.dark` and a `{light, dark}`
+  background never decide the mode, because they depend on it. A pair background is skipped by
+  the authored-background inference in the same way a role-named background is, and the search
+  continues down the leading chain. A spec whose only backgrounds are pairs or roles follows the
+  device setting.
+- **Gradient stops** accept role names; a role is the scheme's colour unchanged.
+- **Scrims** (`window.placement.scrim` and the `bottomSheet` `scrim`) accept role names with one
+  special case. The `scrim` role, alone or as the side of a pair for the resolved mode, draws the
+  scheme's scrim colour at the default scrim opacity (40%), the same value an omitted `bottomSheet`
+  scrim uses, so `"scrim": "scrim"` dims rather than hides the app. Any other role (`surface`,
+  `primary`, …) draws its scheme colour unchanged, which is opaque unless the theme overrides it
+  with alpha. A hex scrim keeps exactly its authored alpha. A `dialog` authors no scrim; its
+  fixed scrim is the `scrim` role at 32%.
+- **Component colours.** A role name or pair in `style.color` on a `button`, `checkbox`, `switch`,
+  `radioGroup` or `listItem`, and in `style.background` on a `card` or `listItem`, resolves
+  against the theme like any other colour slot. Before `prototype_theme_modes_v1` only a hex value
+  took effect in those slots.
+- **Images.** `image.asset` and a `tabBar`/`bottomNav` item `image` accept
+  `{light: assetId, dark: assetId}`. Only the asset for the resolved mode is decoded and drawn;
+  both ids are checked at `show` and reported in `missingAssets`, and both stay retained with the
+  prototype.
+- **Window metadata.** `prototypeOpaque` follows what is drawn. The root background and the window
+  scrim are resolved for every mode the prototype can reach (one mode when `theme.mode` is
+  `light` or `dark` or the backgrounds fix it, both otherwise) and count as solid only when the
+  result is fully opaque in each. An opaque role counts; the `scrim` role in a scrim slot never
+  does.
+
+The mode is resolved when the prototype composes. Re-theming a prototype that is already showing
+when the device setting changes, a per-show appearance override, and reporting the resolved mode
+to the host are tracked in #11221.
 
 ## Windows
 

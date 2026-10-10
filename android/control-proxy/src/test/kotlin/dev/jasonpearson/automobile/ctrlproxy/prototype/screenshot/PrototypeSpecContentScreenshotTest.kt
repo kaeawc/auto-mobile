@@ -265,4 +265,48 @@ class PrototypeSpecContentScreenshotTest {
       validPrototypeFixture("theme-device"),
       pending = true,
     )
+
+  // Per-mode colours (#11219): `{light, dark}` pairs in a style colour, border, shadow and gradient
+  // stop, role-named stops, and the `theme.colors.light` / `theme.colors.dark` maps. Pending until
+  // recorded on Linux from an LFS-enabled plain-git clone (#11319).
+
+  /** The per-mode colour fixture on a light device: every pair draws its light side. */
+  @Test
+  @Config(qualifiers = "+notnight")
+  fun themeModesColorsLight() =
+    prototypeScreenshotTest(
+      "theme_modes_colors_light",
+      validPrototypeFixture("theme-modes-colors"),
+      pending = true,
+    )
+
+  /** The same fixture on a dark device: every pair draws its dark side. */
+  @Test
+  @Config(qualifiers = "+night")
+  fun themeModesColorsDark() =
+    prototypeScreenshotTest(
+      "theme_modes_colors_dark",
+      validPrototypeFixture("theme-modes-colors"),
+      pending = true,
+    )
+
+  /** Its sheets open on a light device: the `styleWhen` pair and the pair and role scrims. */
+  @Test
+  @Config(qualifiers = "+notnight")
+  fun themeModesColorsOpenLight() =
+    prototypeScreenshotTest(
+      "theme_modes_colors_open_light",
+      validPrototypeFixture("theme-modes-colors", stateOverrides = mapOf("open" to OPEN)),
+      pending = true,
+    )
+
+  /** Its sheets open on a dark device. */
+  @Test
+  @Config(qualifiers = "+night")
+  fun themeModesColorsOpenDark() =
+    prototypeScreenshotTest(
+      "theme_modes_colors_open_dark",
+      validPrototypeFixture("theme-modes-colors", stateOverrides = mapOf("open" to OPEN)),
+      pending = true,
+    )
 }

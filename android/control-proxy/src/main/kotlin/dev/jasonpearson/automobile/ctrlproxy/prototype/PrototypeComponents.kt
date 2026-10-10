@@ -151,10 +151,18 @@ internal fun RenderPrototypeButton(
   }
 }
 
+/**
+ * A component's authored `style.color` (hex, role name or `{light, dark}` pair) resolved against
+ * the theme, or null when the node authors none.
+ */
+@Composable
+internal fun prototypeAuthoredForeground(node: PrototypeRenderNode): Color? =
+  prototypeThemedColor(null, node.style.source.color)
+
 /** The authored `style.color` when set, else the enclosing Material component's content color. */
 @Composable
 internal fun prototypeForeground(node: PrototypeRenderNode): Color =
-  if (node.style.source.color != null) node.style.color else LocalContentColor.current
+  prototypeAuthoredForeground(node) ?: LocalContentColor.current
 
 /** The node-level semantics already carry the label, so the drawn text adds none of its own. */
 @Composable
@@ -271,7 +279,7 @@ internal fun RenderPrototypeCard(
   modifier: Modifier,
   content: @Composable ColumnScope.() -> Unit,
 ) {
-  val container = node.style.background
+  val container = prototypeThemedColor(node.style.background, node.style.source.background)
   when ((node.source as? PrototypeCardNode)?.variant) {
     "elevated" ->
       ElevatedCard(

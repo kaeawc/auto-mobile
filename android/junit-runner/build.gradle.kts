@@ -135,6 +135,13 @@ tasks.withType<Test> {
     .withPropertyName("daemonIsolationPathVectors")
     .withPathSensitivity(PathSensitivity.RELATIVE)
 
+  // RefusalWireContractTest classifies the typed-refusal wire fixtures shared with the TypeScript
+  // daemon and XCTestRunner.
+  inputs
+    .dir(layout.projectDirectory.dir("../../test/fixtures/refusal-wire"))
+    .withPropertyName("refusalWireFixtures")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+
   // Enable parallel test execution across multiple devices
   maxParallelForks = Runtime.getRuntime().availableProcessors().coerceAtLeast(2)
   dependsOn(":control-proxy:assembleDebug")

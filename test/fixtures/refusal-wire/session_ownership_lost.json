@@ -1,0 +1,13 @@
+{
+  "code": "session_ownership_lost",
+  "builder": "sessionOwnershipLostPayload",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"code\":\"session_ownership_lost\",\"message\":\"Session ownership lost for 11111111-2222-4333-8444-555555555555: heartbeat_timeout.\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"reason\":\"heartbeat_timeout\",\"retryable\":false,\"nextAction\":\"acquire_new_session\",\"recovery\":{\"action\":\"acquire_replacement_session\",\"tools\":[\"getAndroid\",\"getApple\"]}}}"
+      }
+    ]
+  }
+}

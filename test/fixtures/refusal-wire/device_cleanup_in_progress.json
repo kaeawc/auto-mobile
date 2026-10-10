@@ -1,0 +1,13 @@
+{
+  "code": "device_cleanup_in_progress",
+  "builder": "DeviceCleanupInProgressError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Device 'emulator-5554' is still completing the previous session's cleanup (code device_cleanup_in_progress); retry in about 1000ms, after the cleanup finishes.\",\"code\":\"device_cleanup_in_progress\",\"deviceId\":\"emulator-5554\",\"retryable\":true,\"retryAfterMs\":1000}"
+      }
+    ],
+    "isError": true
+  }
+}

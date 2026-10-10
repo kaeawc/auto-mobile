@@ -1,0 +1,13 @@
+{
+  "code": "device_owned_by_other_session",
+  "builder": "deviceAssignedToOtherSessionError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Device 'emulator-5554' is already assigned to session holder-session\",\"code\":\"device_owned_by_other_session\",\"deviceId\":\"emulator-5554\",\"retryable\":false}"
+      }
+    ],
+    "isError": true
+  }
+}

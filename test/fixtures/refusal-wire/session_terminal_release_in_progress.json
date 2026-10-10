@@ -1,0 +1,13 @@
+{
+  "code": "session_terminal_release_in_progress",
+  "builder": "SessionTerminalReleaseInProgressError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Session 11111111-2222-4333-8444-555555555555 is being terminally released from its device; use a new session UUID (code session_terminal_release_in_progress, device 'emulator-5554').\",\"code\":\"session_terminal_release_in_progress\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"deviceId\":\"emulator-5554\",\"retryable\":false}"
+      }
+    ],
+    "isError": true
+  }
+}

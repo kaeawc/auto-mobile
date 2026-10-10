@@ -1,0 +1,13 @@
+{
+  "code": "no_active_device_session",
+  "builder": "noActiveDeviceSessionResult",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"code\":\"no_active_device_session\",\"message\":\"This MCP connection has no active device session (the previous session was released: heartbeat_timeout). Call getAndroid or getApple to acquire a new device session.\",\"reason\":\"heartbeat_timeout\",\"retryable\":false,\"nextAction\":\"acquire_new_session\",\"recovery\":{\"action\":\"acquire_replacement_session\",\"tools\":[\"getAndroid\",\"getApple\"]}}}"
+      }
+    ],
+    "isError": true
+  }
+}

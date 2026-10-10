@@ -1,0 +1,13 @@
+{
+  "code": "daemon_shutting_down",
+  "builder": "daemonShuttingDownMcpOutcome",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"code\":\"daemon_shutting_down\",\"message\":\"Daemon is shutting down\",\"retryable\":true}}"
+      }
+    ]
+  }
+}

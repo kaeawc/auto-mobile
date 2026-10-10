@@ -39,6 +39,21 @@ extension AutoMobilePlanExecutor {
             return retryable && DaemonRefusal.retryableWaitCodes.contains(code)
         }
 
+        /// How the runner reacts to this refusal; the shared vocabulary of
+        /// `test/fixtures/refusal-wire/expectations.json`.
+        public enum Disposition: String, Sendable {
+            case wait
+            case acquireNewSession = "acquire-new-session"
+            case retry
+            case fail
+        }
+
+        public var disposition: Disposition {
+            if waitsForDevice { return .wait }
+            if acquiresNewSession { return .acquireNewSession }
+            return retryable ? .retry : .fail
+        }
+
         static let acquireNewSessionNextAction = "acquire_new_session"
 
         /// Android's `DEVICE_WAIT_CODES`.

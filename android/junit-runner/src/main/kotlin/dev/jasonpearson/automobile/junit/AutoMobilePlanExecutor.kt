@@ -484,7 +484,7 @@ internal object AutoMobilePlanExecutor {
       }
 
       val errorMessage = response.error ?: parsed.errorMessage
-      if (waitsForDevice(parsed)) {
+      if (refusalDisposition(parsed) == RefusalDisposition.WAIT) {
         // Another session holds the device (typically a concurrent test attempt in this runner),
         // or its previous session is still finishing cleanup (#10960). Wait for it to free up,
         // within its own bounded budget, without spending maxRetries.
@@ -958,6 +958,26 @@ internal object AutoMobilePlanExecutor {
     }
     return ParsedToolResult(true, "")
   }
+
+  /** How the runner reacts to a daemon refusal; one row of `test/fixtures/refusal-wire`. */
+  internal enum class RefusalDisposition(val wire: String) {
+    WAIT("wait"),
+    ACQUIRE_NEW_SESSION("acquire-new-session"),
+    RETRY("retry"),
+    FAIL("fail"),
+  }
+
+  private fun refusalDisposition(parsed: ParsedToolResult): RefusalDisposition =
+    when {
+      waitsForDevice(parsed) -> RefusalDisposition.WAIT
+      parsed.acquireNewSession -> RefusalDisposition.ACQUIRE_NEW_SESSION
+      parsed.retryable -> RefusalDisposition.RETRY
+      else -> RefusalDisposition.FAIL
+    }
+
+  /** Classifies a failed daemon tool response the way the executePlan loop does. */
+  internal fun classifyRefusal(response: DaemonResponse, json: Json): RefusalDisposition =
+    refusalDisposition(parseDaemonToolResult(response, json))
 
   private fun planFailureMessage(payload: JsonObject, isError: Boolean): String {
     val errorObject = payload["error"] as? JsonObject

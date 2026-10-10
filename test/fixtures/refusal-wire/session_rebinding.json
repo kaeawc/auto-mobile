@@ -1,0 +1,13 @@
+{
+  "code": "session_rebinding",
+  "builder": "SessionRebindingError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Session 11111111-2222-4333-8444-555555555555 is rebinding devices (code session_rebinding); retry shutdown after it settles.\",\"code\":\"session_rebinding\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"retryable\":true,\"retryAfterMs\":1000}"
+      }
+    ],
+    "isError": true
+  }
+}

@@ -56,6 +56,7 @@ import {
 } from "./models/managedSlotConfig";
 import { runShutdownCleanupStages } from "./shutdownCleanup";
 import { startStartupMaintenance } from "./utils/startupMaintenance";
+import { daemonCommandSkipsServerBootstrap } from "./daemon/cli/daemonCommandRouting";
 
 interface FatalLogger {
   error(...args: unknown[]): void;
@@ -63,18 +64,6 @@ interface FatalLogger {
 }
 
 let fatalLogger: FatalLogger | undefined;
-
-// These commands interact only with an existing daemon and never publish tools.
-// Start and restart commands are excluded because they configure the spawned
-// daemon with the caller's tool profile. heartbeat must return as soon as the
-// daemon commits it; it must not kick off detached CtrlProxy prefetch work.
-const PROFILE_TOLERANT_DAEMON_COMMANDS = new Set([
-  "status",
-  "stop",
-  "health",
-  "diagnose",
-  "heartbeat",
-]);
 
 function logFatal(label: string, error: unknown): void {
   const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
@@ -299,7 +288,9 @@ async function main() {
       printUnknownDaemonCommand(undefined);
       return;
     }
-    if (daemonCommand && PROFILE_TOLERANT_DAEMON_COMMANDS.has(daemonCommand)) {
+    // Commands that only talk to an existing daemon (or print usage) skip the server bootstrap:
+    // tool registration, startup maintenance and the CtrlProxy/video prefetches (#11252).
+    if (daemonCommand && daemonCommandSkipsServerBootstrap(daemonCommand)) {
       await runDaemonCommand(daemonCommand, daemonArgs, { namespaceEnv: process.env });
       await exitAfterSuccessfulDaemonCommand(logger, process);
       return;

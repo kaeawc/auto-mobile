@@ -46,6 +46,7 @@ import {
 import {
   installProcessLifecycleHandlers,
   installStdinShutdownHandlers,
+  requestProcessShutdown,
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "./processLifecycle";
@@ -747,6 +748,11 @@ async function main() {
         logger.error("Failed to create MCP server:", error);
         throw error;
       }
+      if (useProxyMode && managedSlotConfig) {
+        // A managed slot execution's proxy must not outlive its owner (#11176): owner exit or
+        // re-parenting shuts it down, and shutdown releases its sessions promptly.
+        await startExecutionOwnerWatch();
+      }
       try {
         logger.info("Connecting MCP server to stdio transport");
         startupBenchmark.startPhase("serverListening");
@@ -771,6 +777,23 @@ async function main() {
     logger.error("Error initializing server:", err);
     throw err;
   }
+}
+
+/** Watch the managed slot execution's owner (by default the launching parent) (#11176). */
+async function startExecutionOwnerWatch(): Promise<void> {
+  const [{ ExecutionOwnerWatch }, { isProcessRunning }, { defaultTimer }] = await Promise.all([
+    import("./daemon/executionOwnerWatch"),
+    import("./utils/processLiveness"),
+    import("./utils/SystemTimer"),
+  ]);
+  new ExecutionOwnerWatch(
+    {
+      launchParentPid: process.ppid,
+      onOwnerLost: () => requestProcessShutdown("execution-owner-lost"),
+    },
+    { isProcessRunning: (pid) => isProcessRunning(pid), currentParentPid: () => process.ppid },
+    defaultTimer,
+  ).start();
 }
 
 // Bun sets import.meta.main on the entrypoint module; under `module: ESNext`

@@ -10,6 +10,7 @@
 import type { SessionLivenessClock } from "./sessionClocks";
 import type { Session, SessionLivenessPolicy } from "./sessionManager";
 import { SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
+import { holdsOwnerHeartbeatLease } from "./managedExecutionLiveness";
 
 /**
  * How long a session whose owner missed its lease is held, device still reserved
@@ -213,7 +214,7 @@ export function ownerLeaseLiveAt(
 export function suspectGraceMsFor(
   session: Pick<LeaseSession, "livenessPolicy" | "hasReceivedHeartbeat" | "ownership">,
 ): number {
-  return session.livenessPolicy === "heartbeat" &&
+  return holdsOwnerHeartbeatLease(session.livenessPolicy) &&
     session.hasReceivedHeartbeat &&
     session.ownership === "owned"
     ? SUSPECT_GRACE_MS

@@ -531,6 +531,9 @@ export const DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD = "daemon/releaseLivenessO
 
 export const DAEMON_HEARTBEAT_METHOD = "daemon/heartbeat";
 
+/** Releases a session and frees its device, cancelling its in-flight executions first. */
+export const DAEMON_RELEASE_SESSION_METHOD = "daemon/releaseSession";
+
 /**
  * Lists the live device sessions whose liveness owner is the given token (#10990). A proxy
  * restarted with its harness-supplied stable `--liveness-owner-token` asks this on connect, then

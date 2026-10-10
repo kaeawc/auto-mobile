@@ -49,6 +49,7 @@ import {
   CLI_SESSION_LIVENESS_POLICY,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   DAEMON_HEARTBEAT_METHOD,
+  DAEMON_RELEASE_SESSION_METHOD,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
   DAEMON_REGISTER_SESSION_METHOD,
@@ -63,6 +64,10 @@ import {
 } from "../models/managedSlotConfig";
 import { executionTracker } from "../server/executionTracker";
 import { sessionHoldDiagnostics, vetoedIdleReleaseAt } from "./sessionHoldDiagnostics";
+import {
+  MANAGED_EXECUTION_LIVENESS_POLICY,
+  holdsOwnerHeartbeatLease,
+} from "./managedExecutionLiveness";
 import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
 import {
   daemonDeviceLeaseActivitySources,
@@ -315,7 +320,7 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
     ["daemon/sessionInfo", (request, state) => handleSessionInfo(request, state)],
     ["daemon/activeSessions", (request, state) => handleActiveSessions(request, state)],
     [
-      "daemon/releaseSession",
+      DAEMON_RELEASE_SESSION_METHOD,
       (request, state, executions) => handleReleaseSession(request, state, executions),
     ],
     [DAEMON_LIST_DEVICE_SESSIONS_METHOD, handleListDeviceSessions],
@@ -563,6 +568,18 @@ async function handleHeartbeat(
   // daemon stops holding its session to the 10 s heartbeat contract no
   // one-shot process can keep. An unmarked Desktop heartbeat restores that
   // strict contract when a prior CLI invocation widened the same session.
+  if (
+    heartbeatParams?.livenessPolicy === CLI_SESSION_LIVENESS_POLICY &&
+    manager.getSession(sessionId)?.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY
+  ) {
+    // A managed execution's session stays on its owner lease (#11176): the CLI declaration is
+    // refused, and the ack says which policy still governs the session.
+    manager.recordHeartbeat?.(sessionId);
+    return heartbeatAck(manager, sessionId, ackReport, {
+      livenessPolicy: MANAGED_EXECUTION_LIVENESS_POLICY,
+      livenessUnchanged: true,
+    });
+  }
   if (heartbeatParams?.livenessPolicy === CLI_SESSION_LIVENESS_POLICY) {
     // The invocation carries its own resolved idle timeout: it reuses a
     // running daemon, whose process env was read at startup and cannot
@@ -657,7 +674,9 @@ function heartbeatAck(
  * proxies claim with `heartbeat`, while one-shot `--cli` owners move the session to `cli-idle`.
  */
 function isProxyOwnedSession(session: Session): boolean {
-  return session.livenessPolicy === "heartbeat" && session.livenessOwnerToken !== undefined;
+  return (
+    holdsOwnerHeartbeatLease(session.livenessPolicy) && session.livenessOwnerToken !== undefined
+  );
 }
 
 /**

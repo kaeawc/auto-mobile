@@ -247,7 +247,15 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   },
   "src/daemon/sessionManager.ts rebaseIdleDeadlineOnLastActivity": {
     writes: 1,
-    reason: "Policy: heartbeat restoration re-derives expiresAt from lastUsedAt (rule 2).",
+    reason:
+      "Policy: heartbeat restoration and managed-execution adoption (#11176) re-derive " +
+      "expiresAt from lastUsedAt (rule 2).",
+  },
+  "src/daemon/sessionManager.ts SessionManager.adoptManagedExecutionLivenessPolicy": {
+    writes: 1,
+    reason:
+      "Policy (#11176): a failed durable write of the managed-execution adoption restores the " +
+      "previous expiresAt; the new deadline itself comes from rebaseIdleDeadlineOnLastActivity.",
   },
   "src/daemon/sessionManager.ts SessionManager.forgiveDaemonStall": {
     writes: 2,
@@ -257,9 +265,11 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   },
 
   // --- Proxy replay lease (DaemonMcpProxy) ---------------------------------
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.constructor": {
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.bindStartupSession": {
     writes: 1,
-    reason: "Binding: a configured --initial-session-uuid starts its replay lease.",
+    reason:
+      "Binding: a configured --initial-session-uuid, or a managed execution's held session " +
+      "(#11176), starts its replay lease.",
   },
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.bindResultMintedDeviceSession": {
     writes: 1,

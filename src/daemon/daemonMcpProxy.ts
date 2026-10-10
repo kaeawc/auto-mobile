@@ -35,6 +35,7 @@ import {
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
   DAEMON_HEARTBEAT_METHOD,
+  DAEMON_RELEASE_SESSION_METHOD,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   CLI_SESSION_LIVENESS_POLICY,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
@@ -99,6 +100,7 @@ import {
   getCurrentBuildIdentity,
 } from "./buildIdentity";
 import { ActionableError, toActionableError } from "../models";
+import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "./managedExecutionLiveness";
 import { DeviceControlTransportError, isReplaySafeToolName } from "./deviceControlTransportFailure";
 import { McpOverloadError, McpTimeoutError } from "./McpTimeoutError";
 import {
@@ -1310,6 +1312,8 @@ export class DaemonMcpProxy {
    * that owner's lease lapses. The other owner keeps it alive or the daemon reaps it.
    */
   private readonly claimableSessions = new Set<string>();
+  /** Sessions held for a managed slot execution; released promptly on close (#11176). */
+  private readonly managedExecutionSessions = new Set<string>();
   // Once the daemon confirms this transport's bound session is gone, preserve
   // that terminal identity instead of clearing it and allowing the same UUID to
   // acquire another device. `fromResultMint` records the binding's provenance at
@@ -1450,12 +1454,7 @@ export class DaemonMcpProxy {
       typeof config.initialSessionUuid === "string" &&
       config.initialSessionUuid.trim().length > 0
     ) {
-      this.boundSessionUuid = config.initialSessionUuid.trim();
-      this.boundSessionUuidAt = this.timer.now();
-      this.initialSessionBindingConfigured = true;
-      this.initialSessionAwaitingFirstCall = true;
-      this.ownedDeviceSessions.add(this.boundSessionUuid);
-      this.claimableSessions.add(this.boundSessionUuid);
+      this.bindStartupSession(config.initialSessionUuid.trim());
     }
     this.staticToolDefinitionsProvider =
       config.staticToolDefinitionsProvider ?? getStaticToolDefinitions;
@@ -1508,6 +1507,88 @@ export class DaemonMcpProxy {
     } catch (error) {
       await this.handleConnectionFailure(error);
     }
+  }
+
+  /** Bind a client-declared startup session that this proxy claims and heartbeats from now on. */
+  private bindStartupSession(sessionUuid: string): void {
+    this.boundSessionUuid = sessionUuid;
+    this.boundSessionUuidAt = this.timer.now();
+    this.initialSessionBindingConfigured = true;
+    this.initialSessionAwaitingFirstCall = true;
+    this.ownedDeviceSessions.add(sessionUuid);
+    this.claimableSessions.add(sessionUuid);
+  }
+
+  /**
+   * Hold a managed slot execution's session for the execution's lifetime (#11176). The managed
+   * slot acquisition (epic #11172 step 5) calls this once the daemon has put the session on the
+   * `managed-execution` policy. The session is bound like `--initial-session-uuid`, claimed and
+   * heartbeated from now on — not from the first tool call — and released promptly by
+   * {@link close} (stdin EOF, owner loss, or any other shutdown) instead of waiting out the
+   * daemon's no-heartbeat release. Throws when the proxy is closing, already holds a different
+   * binding, or cannot reach the daemon.
+   */
+  async holdManagedExecutionSession(sessionUuid: string): Promise<void> {
+    const trimmed = sessionUuid.trim();
+    if (trimmed.length === 0) {
+      throw new ActionableError("A managed execution session UUID is required.");
+    }
+    if (this.closing) {
+      throw new DaemonUnavailableError("MCP proxy is closing");
+    }
+    if (this.boundSessionUuid !== undefined && this.boundSessionUuid !== trimmed) {
+      throw new ActionableError(
+        `Cannot hold managed execution session ${trimmed}: this proxy is already bound to ` +
+          `session ${this.boundSessionUuid}.`,
+      );
+    }
+    this.bindStartupSession(trimmed);
+    this.managedExecutionSessions.add(trimmed);
+    try {
+      await this.ensureConnected();
+      // Already connected (the acquisition used this connection): establishment did not run for
+      // this binding, so claim it and start the keeper now. A fresh connection already did, and
+      // this only coalesces into the keeper's own tick.
+      await this.establishBoundSessionHeartbeat();
+    } catch (error) {
+      throw toActionableError(error, `Failed to hold managed execution session ${trimmed}`);
+    }
+  }
+
+  /** The sessions this proxy holds for a managed execution (#11176). */
+  getManagedExecutionSessions(): string[] {
+    return [...this.managedExecutionSessions];
+  }
+
+  /**
+   * Release every managed execution session this proxy holds, bounded so a wedged daemon cannot
+   * hold up shutdown (#11176). A failed or timed-out release falls back to the daemon's
+   * owner-disconnect / no-heartbeat release (~10 s) once the keeper stops.
+   */
+  private async releaseManagedExecutionSessions(): Promise<void> {
+    const client = this.client;
+    const sessions = [...this.managedExecutionSessions];
+    this.managedExecutionSessions.clear();
+    if (!client || sessions.length === 0) {
+      return;
+    }
+    await Promise.all(
+      sessions.map(async (sessionId) => {
+        try {
+          await client.callDaemonMethod(
+            DAEMON_RELEASE_SESSION_METHOD,
+            { sessionId },
+            { timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS },
+          );
+        } catch (error) {
+          logger.warn(
+            `[DaemonMcpProxy] Releasing managed execution session ${sessionId} failed; the daemon ` +
+              `releases it after the no-heartbeat window: ${errorMessage(error)}`,
+            error,
+          );
+        }
+      }),
+    );
   }
 
   /**
@@ -6682,6 +6763,8 @@ export class DaemonMcpProxy {
     this.cancelBackgroundConnectRetry();
     this.cancelConnectedFallbackReconcile();
     this.connectionCloseReject?.(new DaemonUnavailableError("MCP proxy is closing"));
+    // Before the keeper stops, so the lease stays live until the release lands (#11176).
+    await this.releaseManagedExecutionSessions();
     await this.stopBoundSessionHeartbeat();
     if (this.client) {
       await this.client.close();

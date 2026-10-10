@@ -63,7 +63,11 @@ import {
   ManagedExecutionRelease,
   managedExecutionSessionsFrom,
 } from "./managedSlots/managedExecutionRelease";
-import { currentSlotOwnerProcess } from "./managedSlots/slotOwnerLiveness";
+import {
+  currentSlotOwnerProcess,
+  defaultSlotExecOwnerLiveness,
+  withLiveExecutionSessions,
+} from "./managedSlots/slotOwnerLiveness";
 import { openSqliteSlotRegistry, slotRegistryFileExists } from "./managedSlots/sqliteSlotRegistry";
 import { SlotScopeReset } from "./managedSlots/slotScopeReset";
 import { ManagedExecutionReowner } from "./managedSlots/managedExecutionReowner";
@@ -968,7 +972,12 @@ export class Daemon {
     if (this.managedSlotRegistry) {
       return this.managedSlotRegistry;
     }
-    const opening = openSqliteSlotRegistry({ timer: this.timer });
+    const opening = openSqliteSlotRegistry({
+      timer: this.timer,
+      // A live execution's slot is in use while this daemon holds its session, even when the
+      // recorded owner is a previous daemon that died with a restart (#11275).
+      isExecOwnerLive: withLiveExecutionSessions(defaultSlotExecOwnerLiveness, this.sessionManager),
+    });
     this.managedSlotRegistry = opening;
     // Restart-time recovery (#11242): slots a previous daemon left settling are settled once that
     // daemon is gone. Runs once per open, after the open succeeds.

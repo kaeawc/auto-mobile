@@ -33,6 +33,7 @@ import {
   type ManagedSlotProvisionRequest,
   type ManagedSlotProvisionedDevice,
 } from "./reconciler";
+import type { LiveExecutionSessions } from "./slotOwnerLiveness";
 import type { SlotPlatform } from "./slotRegistry";
 
 /** Invokes a registered tool handler in-process and returns its raw MCP tool response. */
@@ -258,15 +259,10 @@ export interface ManagedSlotClaimPool {
  * A device is held while a pooled runtime of it has a session, or another daemon claims it. A
  * running device whose runtime identity the pool cannot resolve is unknown, never free.
  */
-/** The daemon's view of which sessions are live managed executions (#11275). */
-export interface ManagedExecutionSessionLiveness {
-  isLiveManagedExecutionSession(sessionUuid: string): boolean;
-}
-
 export class PoolManagedSlotDeviceClaims implements ManagedSlotDeviceClaims {
   constructor(
     private readonly pool: ManagedSlotClaimPool,
-    private readonly executions?: ManagedExecutionSessionLiveness,
+    private readonly executions?: LiveExecutionSessions,
   ) {}
 
   isLiveExecution(sessionUuid: string): boolean {

@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ManagedExecutionReowner } from "../../../src/daemon/managedSlots/managedExecutionReowner";
 import {
   MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS,
+  type SlotExecOwnerLiveness,
   type SlotKey,
   type SlotProcessIdentity,
   type SlotRegistry,
 } from "../../../src/daemon/managedSlots/slotRegistry";
+import { withLiveExecutionSessions } from "../../../src/daemon/managedSlots/slotOwnerLiveness";
 import { openSqliteSlotRegistry } from "../../../src/daemon/managedSlots/sqliteSlotRegistry";
 import { SessionManager, type SessionDeviceAssigner } from "../../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
@@ -24,6 +26,8 @@ describe("managed execution across a daemon restart", () => {
   let timer: FakeTimer;
   let persistence: FakeDeviceSessionPersistence;
   let livePids: Set<number>;
+  /** The registry's owner liveness; the restarted daemon swaps in its own. */
+  let ownerLiveness: SlotExecOwnerLiveness;
   let registry: SlotRegistry;
   let managers: SessionManager[];
   let key: SlotKey;
@@ -57,11 +61,12 @@ describe("managed execution across a daemon restart", () => {
     timer.setCurrentTime(1_000_000);
     persistence = new FakeDeviceSessionPersistence();
     livePids = new Set([BEFORE.pid]);
+    ownerLiveness = (owner) => livePids.has(owner.pid);
     managers = [];
     registry = await openSqliteSlotRegistry({
       dbPath: ":memory:",
       timer,
-      isExecOwnerLive: (owner) => livePids.has(owner.pid),
+      isExecOwnerLive: (owner) => ownerLiveness(owner),
     });
     const scope = await registry.ensureScope({
       managedHostScope: "host",
@@ -172,6 +177,29 @@ describe("managed execution across a daemon restart", () => {
       kind: "not_abandoned",
       reason: "live_owner",
     });
+  });
+
+  test("before any re-own, the restarted daemon's liveness keeps the live execution's slot in use", async () => {
+    // The scope's last acquisition is already past the abandonment threshold when the restart
+    // lands, and the session is live (rehydrated, awaiting its proxy's re-bind).
+    timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS + 60_000);
+    const { manager } = await restartWithLiveExecution();
+    // The daemon's registry liveness: the recorded process, or a session it holds live (#11275).
+    ownerLiveness = withLiveExecutionSessions((owner) => livePids.has(owner.pid), manager);
+
+    expect(await duplicateClaim()).toMatchObject({
+      kind: "slot_in_use",
+      owner: { sessionUuid: SESSION, pid: BEFORE.pid },
+    });
+    expect(await registry.findAbandonedScopes()).toEqual([]);
+    expect(await registry.markScopeAbandoned(key.scopeKey)).toMatchObject({
+      kind: "not_abandoned",
+      reason: "live_owner",
+    });
+
+    // Once the session is gone, the dead previous daemon no longer pins the slot.
+    await manager.releaseSession(SESSION);
+    expect(await registry.findAbandonedScopes()).toHaveLength(1);
   });
 });
 

@@ -3,6 +3,7 @@ import {
   createSlotExecOwnerLiveness,
   currentSlotOwnerProcess,
   type SlotOwnerProcessProbe,
+  withLiveExecutionSessions,
 } from "../../../src/daemon/managedSlots/slotOwnerLiveness";
 import type { SlotExecOwner } from "../../../src/daemon/managedSlots/slotRegistry";
 
@@ -61,5 +62,24 @@ describe("slot execution owner liveness", () => {
       pid: 77,
       processGenerationToken: null,
     });
+  });
+});
+
+describe("owner liveness that counts this daemon's live executions (#11275)", () => {
+  const liveSessions = new Set(["live-session"]);
+  const sessions = { isLiveManagedExecutionSession: (id: string) => liveSessions.has(id) };
+  const deadProcess = () => false;
+
+  test("an owner whose process died with a restart is live while its session is", () => {
+    const liveness = withLiveExecutionSessions(deadProcess, sessions);
+    expect(liveness({ daemonId: "before", pid: 10, sessionUuid: "live-session" })).toBe(true);
+    expect(liveness({ daemonId: "before", pid: 10, sessionUuid: "ended-session" })).toBe(false);
+  });
+
+  test("a live process is live whatever its session; a settler is judged by its process alone", () => {
+    expect(withLiveExecutionSessions(() => true, sessions)(owner(10))).toBe(true);
+    expect(withLiveExecutionSessions(deadProcess, sessions)({ daemonId: "d", pid: 10 })).toBe(
+      false,
+    );
   });
 });

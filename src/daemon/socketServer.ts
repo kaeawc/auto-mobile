@@ -142,8 +142,10 @@ import {
 import { ToolRegistry } from "../server/toolRegistry";
 import {
   DeviceAssignedToManagedSlotError,
+  DeviceOutsideManagedSlotsError,
   ManagedSlotDiscoveryIncompleteError,
 } from "./managedSlots/managedSlotRefusal";
+import { managedConnectionControlRefusal } from "./managedSlots/managedConnectionScope";
 import { provisionCancellationOutcomes } from "../server/provisionCancellationOutcomes";
 import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../server/deviceTools";
 
@@ -321,6 +323,15 @@ function logRequestFailureCause(cause: DaemonRequestFailureCause | undefined): v
 
 const JSONRPC_INVALID_PARAMS = -32602;
 
+/** The typed code of a managed-slot refusal (#11174, #11178), for the failure frame. */
+function managedSlotRefusalCode(error: unknown): { code?: string } {
+  return error instanceof DeviceAssignedToManagedSlotError ||
+    error instanceof DeviceOutsideManagedSlotsError ||
+    error instanceof ManagedSlotDiscoveryIncompleteError
+    ? { code: error.code }
+    : {};
+}
+
 export function mcpRequestFailureDetails(
   error: unknown,
   cause: DaemonRequestFailureCause | undefined,
@@ -348,10 +359,7 @@ export function mcpRequestFailureDetails(
       : {}),
     ...(isToolUnavailableWireError(error) ? { code: DAEMON_TOOL_UNAVAILABLE_CODE } : {}),
     ...(error instanceof InputDeviceOwnedError ? { code: error.code } : {}),
-    ...(error instanceof DeviceAssignedToManagedSlotError ||
-    error instanceof ManagedSlotDiscoveryIncompleteError
-      ? { code: error.code }
-      : {}),
+    ...managedSlotRefusalCode(error),
     ...(cause ? { requestFailureCause: cause } : {}),
   };
 }
@@ -1604,6 +1612,7 @@ export class UnixSocketServer {
     this.resourceSubscriptions.delete(sessionId);
     this.clearBoundMcpClientKey(sessionId);
     this.releaseDevicePoolMcpSessionBindings(sessionId);
+    this.daemonState.getManagedConnectionScopes?.().unbind(sessionId);
     this.releaseMcpRecording(sessionId);
     // Lift any streamed gesture this socket left open on the device (issue: streaming gesture
     // input). Tracked so daemon shutdown drains it rather than a fire-and-forget floating promise.
@@ -6919,8 +6928,34 @@ export class UnixSocketServer {
       action,
       bypassAndroidDeviceListCache,
     );
+    this.assertManagedConnectionInputTarget(socketSessionId, action, targetDevice.deviceId);
     this.captureInputTargetOwner(targetDevice);
     return targetDevice;
+  }
+
+  /**
+   * An `input/*` frame is control: a socket bound to managed slots drives only its own slot devices
+   * (#11178). Streams and other reads stay open. Generic sockets are unaffected here; their frames
+   * on a slot device are refused by the managed-slot gate in {@link runTrackedDeviceInput}.
+   */
+  private assertManagedConnectionInputTarget(
+    socketSessionId: string | undefined,
+    action: InputTargetAction,
+    deviceId: string,
+  ): void {
+    if (!this.daemonState.isInitialized()) {
+      return;
+    }
+    const sessionManager = this.daemonState.getSessionManager();
+    const refusal = managedConnectionControlRefusal({
+      binding: this.daemonState.getManagedConnectionScopes?.().get(socketSessionId),
+      action,
+      deviceId,
+      slotDeviceOf: (sessionUuid) => sessionManager.getSession(sessionUuid)?.assignedDevice,
+    });
+    if (refusal) {
+      throw refusal;
+    }
   }
 
   private captureInputTargetOwner(targetDevice: BootedDevice): void {

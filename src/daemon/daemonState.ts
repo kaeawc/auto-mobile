@@ -1,6 +1,8 @@
 import { setDeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import type { ObserverSessionStore } from "./observerSessionRegistry";
 import type { ManagedExecutionRelease } from "./managedSlots/managedExecutionRelease";
+import { ManagedConnectionScopes } from "./managedSlots/managedConnectionScope";
+import type { SlotScopeReset } from "./managedSlots/slotScopeReset";
 import { SessionManager } from "./sessionManager";
 import { DevicePool } from "./devicePool";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
@@ -31,6 +33,8 @@ export class DaemonState implements DaemonStateLike {
   private deviceSessionRegistry: DeviceSessionRegistry | null = null;
   private unregisterSessionReadinessListener: (() => void) | null = null;
   private managedExecutionRelease: ManagedExecutionRelease | null = null;
+  private slotScopeReset: SlotScopeReset | null = null;
+  private readonly managedConnectionScopes = new ManagedConnectionScopes();
 
   private constructor() {}
 
@@ -106,6 +110,20 @@ export class DaemonState implements DaemonStateLike {
     return this.managedExecutionRelease ?? undefined;
   }
 
+  /** Publish the managed slot scope reset behind `daemon/resetSlotScope` (#11174). */
+  setSlotScopeReset(reset: SlotScopeReset | null): void {
+    this.slotScopeReset = reset;
+  }
+
+  getSlotScopeReset(): SlotScopeReset | undefined {
+    return this.slotScopeReset ?? undefined;
+  }
+
+  /** Socket sessions bound to managed slots, confined to their slot devices (#11178). */
+  getManagedConnectionScopes(): ManagedConnectionScopes {
+    return this.managedConnectionScopes;
+  }
+
   getObserverSessionRegistry(): ObserverSessionStore | undefined {
     return this.observerSessionRegistry ?? undefined;
   }
@@ -158,6 +176,8 @@ export class DaemonState implements DaemonStateLike {
     this.observerSessionRegistry?.dispose();
     this.observerSessionRegistry = null;
     this.managedExecutionRelease = null;
+    this.slotScopeReset = null;
+    this.managedConnectionScopes.clear();
     this.sessionManager = null;
     this.devicePool = null;
     setDeviceAdmissionGate(undefined);

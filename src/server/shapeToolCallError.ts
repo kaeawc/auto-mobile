@@ -16,6 +16,7 @@ import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import {
   DeviceAssignedToManagedSlotError,
+  DeviceOutsideManagedSlotsError,
   ManagedSlotDiscoveryIncompleteError,
 } from "../daemon/managedSlots/managedSlotRefusal";
 import {
@@ -97,6 +98,7 @@ function toolCallErrorText(error: unknown, message: string): string {
 function typedRefusalPayload(error: unknown): Record<string, unknown> | undefined {
   if (
     error instanceof DeviceAssignedToManagedSlotError ||
+    error instanceof DeviceOutsideManagedSlotsError ||
     error instanceof ManagedSlotDiscoveryIncompleteError
   ) {
     return error.toPayload();

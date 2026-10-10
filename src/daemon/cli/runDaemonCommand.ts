@@ -39,6 +39,11 @@ import {
   type DaemonCommandFlagSpec,
 } from "./daemonArgs";
 import { describeForeignForwardLeaseHolders } from "../forwardLeaseHolders";
+import { DAEMON_RESET_SLOT_SCOPE_METHOD } from "../constants";
+import {
+  SLOT_SCOPE_RESET_DEFAULT_WAIT_MS,
+  SLOT_SCOPE_RESET_MAX_WAIT_MS,
+} from "../managedSlots/slotScopeReset";
 import {
   ALLOW_SHARED_NAMESPACE_FLAG,
   assertDaemonNamespaceMatchesState,
@@ -125,6 +130,102 @@ export function parseDaemonHeartbeatCommandArgs(args: string[]): DaemonHeartbeat
   }
 
   return { sessionId, livenessOwnerToken, claimLivenessOwnership };
+}
+
+export interface ResetSlotScopeCommandArgs {
+  runnerNamespace: string;
+  runnerIncarnation: string;
+  managedHostScope?: string;
+  waitMs?: number;
+}
+
+/**
+ * Parse `--daemon reset-slot-scope --runner-namespace <ns> --incarnation <id>
+ * [--managed-host-scope <scope>] [--wait-ms <ms>]` (#11174).
+ */
+export function parseResetSlotScopeCommandArgs(args: string[]): ResetSlotScopeCommandArgs {
+  const read = (flag: string, required: boolean): string | undefined => {
+    const index = args.indexOf(flag);
+    if (index === -1) {
+      if (required) {
+        throw new ActionableError(`reset-slot-scope requires ${flag} <value>`);
+      }
+      return undefined;
+    }
+    const value = args[index + 1]?.trim();
+    if (!value || value.startsWith("--")) {
+      throw new ActionableError(`${flag} requires a non-empty value`);
+    }
+    return value;
+  };
+  const runnerNamespace = read("--runner-namespace", true)!;
+  const runnerIncarnation = read("--incarnation", true)!;
+  const managedHostScope = read("--managed-host-scope", false);
+  const waitText = read("--wait-ms", false);
+  let waitMs: number | undefined;
+  if (waitText !== undefined) {
+    waitMs = Number(waitText);
+    if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > SLOT_SCOPE_RESET_MAX_WAIT_MS) {
+      throw new ActionableError(
+        `--wait-ms must be an integer between 0 and ${SLOT_SCOPE_RESET_MAX_WAIT_MS}`,
+      );
+    }
+  }
+  return {
+    runnerNamespace,
+    runnerIncarnation,
+    ...(managedHostScope === undefined ? {} : { managedHostScope }),
+    ...(waitMs === undefined ? {} : { waitMs }),
+  };
+}
+
+/** Socket budget for the reset RPC: its settle wait plus room for the registry work. */
+const RESET_SLOT_SCOPE_CALL_MARGIN_MS = 5_000;
+
+/**
+ * `--daemon reset-slot-scope`: invalidate one runner incarnation's managed slot scope (#11174).
+ * Prints the daemon's JSON result; exits 2 when the scope is still waiting on owners or cleanup
+ * (retry later) and 1 when no scope matched or the call failed.
+ */
+async function resetSlotScope(args: string[], manager: DaemonManager): Promise<void> {
+  let outcome: unknown;
+  try {
+    const request = parseResetSlotScopeCommandArgs(args);
+    const client = manager.createClient();
+    let result: unknown;
+    try {
+      await client.connect();
+      result = await client.callDaemonMethod(DAEMON_RESET_SLOT_SCOPE_METHOD, request, {
+        timeoutMs:
+          (request.waitMs ?? SLOT_SCOPE_RESET_DEFAULT_WAIT_MS) + RESET_SLOT_SCOPE_CALL_MARGIN_MS,
+      });
+      await client.close();
+    } catch (error) {
+      throw new ActionableError(`Failed to reset slot scope: ${errorMessage(error)}`);
+    }
+    console.log(JSON.stringify(result));
+    outcome =
+      result !== null && typeof result === "object" && "outcome" in result
+        ? result.outcome
+        : undefined;
+  } catch (error) {
+    if (error instanceof ActionableError) {
+      console.error(`Error: ${error.message}`);
+    } else {
+      console.error(`Unexpected error: ${errorMessage(error)}`);
+    }
+    process.exit(1);
+  }
+  if (outcome === "pending") {
+    console.error(
+      "Scope is still settling (live owners or pending cleanup); acquisitions stay blocked. Retry the command.",
+    );
+    process.exit(2);
+  }
+  if (outcome === "not_found") {
+    console.error("No managed slot scope matches that runner namespace and incarnation.");
+    process.exit(1);
+  }
 }
 
 export function parseRestartAdmittedMaintenanceToken(args: string[]): string {
@@ -860,6 +961,14 @@ const ACCEPTANCE_SESSION_RESTART_FLAGS = [
   "--expires-at",
 ];
 
+/** The options of `reset-slot-scope` (#11174). */
+const RESET_SLOT_SCOPE_FLAGS = [
+  "--runner-namespace",
+  "--incarnation",
+  "--managed-host-scope",
+  "--wait-ms",
+];
+
 /**
  * Daemon commands that take no positional arguments, with the options each accepts. The
  * lifecycle commands are strict (#11252): a stray word or a misspelled option is refused
@@ -879,6 +988,7 @@ const NO_POSITIONAL_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpe
   diagnose: { launchFlags: true },
   "available-devices": { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
   "active-sessions": { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
+  "reset-slot-scope": { launchFlags: true, valueFlags: RESET_SLOT_SCOPE_FLAGS },
 };
 
 /**
@@ -925,6 +1035,9 @@ function printDaemonUsageError(message: string): void {
     console.log(
       "  heartbeat <id>        Heartbeat a session (one-shot CLI: no-op; proxy-owned: refused)",
     );
+    console.log(
+      "  reset-slot-scope --runner-namespace <ns> --incarnation <id>  Invalidate a managed slot scope; free its devices",
+    );
     console.log("\nOptions:");
     console.log(
       `  ${ALLOW_SHARED_NAMESPACE_FLAG}  Let start/stop/restart/release act on the shared daemon while AUTOMOBILE_DATA_DIR or DB dirs are set without AUTOMOBILE_AUX_SOCKET_DIR`,
@@ -952,6 +1065,7 @@ const NAMESPACE_GUARDED_DAEMON_COMMANDS = new Set([
   "restart-acceptance-session",
   "release-session",
   "release-liveness-ownership",
+  "reset-slot-scope",
 ]);
 
 function refuseSharedNamespaceAction(
@@ -1000,6 +1114,7 @@ export async function runDaemonCommand(
     "release-session": () => releaseDaemonSession(args, manager),
     heartbeat: () => recordDaemonHeartbeat(args, manager),
     "release-liveness-ownership": () => releaseDaemonLivenessOwnership(args, manager),
+    "reset-slot-scope": () => resetSlotScope(args, manager),
   };
   const handler = Object.hasOwn(handlers, command) ? handlers[command] : undefined;
   if (!handler) {

@@ -1193,6 +1193,37 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       });
     });
 
+    test("findScopes selects by namespace and incarnation, optionally by host", async () => {
+      const a1 = await readyScope(SCOPE_A1);
+      const otherHost = await readyScope({ ...SCOPE_A1, managedHostScope: "host-2" });
+      await readyScope(SCOPE_B1);
+      const query = { runnerNamespace: "runner-a", runnerIncarnation: "boot-1" };
+      expect((await registry.findScopes(query)).map((scope) => scope.scopeKey).sort()).toEqual(
+        [a1, otherHost].sort(),
+      );
+      expect(
+        (await registry.findScopes({ ...query, managedHostScope: "host-1" })).map(
+          (scope) => scope.scopeKey,
+        ),
+      ).toEqual([a1]);
+      expect(await registry.findScopes({ ...query, runnerIncarnation: "boot-9" })).toEqual([]);
+    });
+
+    test("listAbandonedScopes lists abandoned scopes until they are revived or reset", async () => {
+      const key = { scopeKey: await readyScope(), slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      expect(await registry.listAbandonedScopes()).toEqual([]);
+      await abandon(key.scopeKey);
+      expect((await registry.listAbandonedScopes()).map((scope) => scope.scopeKey)).toEqual([
+        key.scopeKey,
+      ]);
+      await registry.ensureScope(SCOPE_A1);
+      expect(await registry.listAbandonedScopes()).toEqual([]);
+      await abandon(key.scopeKey);
+      await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
+      expect(await registry.listAbandonedScopes()).toEqual([]);
+    });
+
     test("malformed slot keys and thresholds are rejected before storage", async () => {
       const scopeKey = await readyScope();
       await expect(registry.initSlot({ scopeKey, slotIndex: -1 }, INIT)).rejects.toThrow(

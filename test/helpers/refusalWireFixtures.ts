@@ -15,7 +15,10 @@ import {
   SessionTerminalReleaseInProgressError,
 } from "../../src/daemon/sessionManager";
 import { ProvisionDeviceError } from "../../src/devices/exactDeviceProvisioning";
-import { DeviceAssignedToManagedSlotError } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import {
+  DeviceAssignedToManagedSlotError,
+  DeviceOutsideManagedSlotsError,
+} from "../../src/daemon/managedSlots/managedSlotRefusal";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/devices/deviceBootService";
 import { createToolErrorResponse } from "../../src/server/deviceTools";
 import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
@@ -172,6 +175,14 @@ const BUILDERS: readonly (readonly [string, string, () => RefusalWireResult])[] 
           scopeState: "valid",
           execSessionUuid: null,
         }),
+      ),
+  ],
+  [
+    "device_outside_managed_slots",
+    "DeviceOutsideManagedSlotsError via shapeToolCallError",
+    () =>
+      shaped(
+        new DeviceOutsideManagedSlotsError("tapOn", "device", "0123abcd", { deviceId: DEVICE }),
       ),
   ],
   [

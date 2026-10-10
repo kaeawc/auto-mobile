@@ -63,9 +63,19 @@ import {
   managedExecutionSessionsFrom,
 } from "./managedSlots/managedExecutionRelease";
 import { currentSlotOwnerProcess } from "./managedSlots/slotOwnerLiveness";
-import { openSqliteSlotRegistry } from "./managedSlots/sqliteSlotRegistry";
+import { openSqliteSlotRegistry, slotRegistryFileExists } from "./managedSlots/sqliteSlotRegistry";
 import type { SlotJournalOwner, SlotRegistry } from "./managedSlots/slotRegistry";
 import { SlotJournalInFlight } from "./managedSlots/slotJournal";
+import { SlotScopeReset } from "./managedSlots/slotScopeReset";
+import {
+  createDefaultAbandonedScopeReclaimer,
+  type ManagedSlotReclaimerFactory,
+  type ManagedSlotReclaimerHandle,
+} from "./managedSlots/defaultAbandonedScopeReclaimer";
+import type {
+  AbandonedScopeReclaimJournal,
+  AbandonedScopeReclaimRegistry,
+} from "./managedSlots/abandonedScopeReclaimer";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import {
   DEFAULT_DAEMON_PORT,
@@ -608,6 +618,7 @@ export class Daemon {
   private managedSlotRegistry: Promise<SlotRegistry> | undefined;
   /** Journal entries this daemon is driving; shared by the drain and the slot reconciler. */
   private readonly managedSlotJournalInFlight = new SlotJournalInFlight();
+  private managedSlotReclaimer: ManagedSlotReclaimerHandle | undefined;
   private readonly generationStartedAt: number;
   private readonly processStartedAt: number;
   private readonly processGenerationToken: string | undefined;
@@ -676,6 +687,15 @@ export class Daemon {
     private readonly managedSlotExclusionFactory: (
       timer: Timer,
     ) => ManagedSlotExclusion = createDefaultManagedSlotExclusion,
+    /** Abandoned managed-slot scope reclamation (#11174); not armed under `bun test`. */
+    private readonly managedSlotReclaimerFactory: ManagedSlotReclaimerFactory = createDefaultAbandonedScopeReclaimer,
+    /**
+     * The slot journal the abandoned-scope sweep deletes through (#11179), built over the registry
+     * with this daemon's device inventory and claim ports. Undefined leaves the sweep unarmed.
+     */
+    private readonly managedSlotJournalFactory?: (
+      registry: AbandonedScopeReclaimRegistry,
+    ) => AbandonedScopeReclaimJournal,
   ) {
     installDefaultProvisionedDeviceTransportFence();
     this.startupCompletion = new Promise<void>((resolve, reject) => {
@@ -811,6 +831,30 @@ export class Daemon {
       release.onSessionReleased(snapshot, options),
     );
     DaemonState.getInstance().setManagedExecutionRelease(release);
+    // `daemon/resetSlotScope` (#11174): opens the registry only when an operator asks.
+    DaemonState.getInstance().setSlotScopeReset(
+      new SlotScopeReset({
+        registry: () => this.openManagedSlotRegistry(),
+        registryExists: () => this.managedSlotRegistryExists(),
+        timer: this.timer,
+      }),
+    );
+  }
+
+  /** Start the abandoned-scope sweep (#11174): one hour idle, no live owner → devices deleted. */
+  private startManagedSlotReclaimer(): void {
+    this.managedSlotReclaimer ??= this.managedSlotReclaimerFactory({
+      registry: () => this.openManagedSlotRegistry(),
+      registryExists: () => this.managedSlotRegistryExists(),
+      journal: this.managedSlotJournalFactory,
+      timer: this.timer,
+    });
+    this.managedSlotReclaimer?.start();
+  }
+
+  /** A host that never served a managed slot has no registry; maintenance must not create one. */
+  private managedSlotRegistryExists(): boolean {
+    return this.managedSlotRegistry !== undefined || slotRegistryFileExists();
   }
 
   /**
@@ -851,6 +895,8 @@ export class Daemon {
   /** Stop the drain's settlement watchers and close the slot registry if this daemon opened it. */
   private async closeManagedExecutionRelease(): Promise<void> {
     this.managedExecutionRelease?.close();
+    this.managedSlotReclaimer?.stop();
+    this.managedSlotReclaimer = undefined;
     const registry = this.managedSlotRegistry;
     this.managedSlotRegistry = undefined;
     try {
@@ -1479,6 +1525,7 @@ export class Daemon {
     this.startNavigationRetentionMonitor();
     this.startForwardLeaseIdleReleaser();
     this.startPrivateDaemonOrphanWatchdog();
+    this.startManagedSlotReclaimer();
 
     startupBenchmark.emit("daemon", {
       host: this.host,

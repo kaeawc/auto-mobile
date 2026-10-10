@@ -2251,6 +2251,19 @@ export function isTeardownFailure(response: TeardownToolResponse): boolean {
 
 let deviceTeardownService: DeviceTeardownService | undefined;
 
+/** Runs the verified `deleteDevice` workflow (stop, destroy, verify absence) on the daemon's behalf. */
+export type DaemonDeviceDeletion = (
+  args: TeardownDeviceArgs,
+  signal?: AbortSignal,
+) => Promise<TeardownToolResponse>;
+
+let daemonDeviceDeletion: DaemonDeviceDeletion | undefined;
+
+/** The daemon's delete workflow, once the device tools are registered in this process. */
+export function getDaemonDeviceDeletion(): DaemonDeviceDeletion | undefined {
+  return daemonDeviceDeletion;
+}
+
 export function getDeviceTeardownService(
   dependencies: DeviceToolsDependencies,
 ): DeviceTeardownService {
@@ -4526,6 +4539,12 @@ export function registerDeviceTools() {
   const { getAndroidHandler, getAppleHandler } = acquisitionHandlers;
 
   const { killDeviceHandler, executeDeleteDevice, deleteDeviceHandler } = createLifecycleHandlers();
+  // The daemon's own deletions (abandoned managed slots, #11174) run the same verified workflow with
+  // no caller: the managed-slot and session-holder refusals guard callers, not the daemon itself.
+  daemonDeviceDeletion = (args, signal) => {
+    const deps = getDeviceToolsDependencies();
+    return executeDeleteDevice(args, deps, signal, getDeviceTeardownService(deps));
+  };
 
   provisionHandlers = createProvisionDeviceHandlers({
     bindBootedDeviceSession,

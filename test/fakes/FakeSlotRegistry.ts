@@ -51,6 +51,7 @@ import {
   type SlotRegistry,
   type SlotScopeIdentity,
   type SlotScopeInvalidationReason,
+  type SlotScopeQuery,
   type SlotScopeRecord,
   type UpdateSlotStateOptions,
   type UpdateSlotStateResult,
@@ -639,6 +640,26 @@ export class FakeSlotRegistry implements SlotRegistry {
       )
       .sort((a, b) => a.nextAttemptAtMs - b.nextAttemptAtMs || a.id - b.id)
       .map(copyEntry);
+  }
+
+  async findScopes(query: SlotScopeQuery): Promise<SlotScopeRecord[]> {
+    return [...this.scopes.values()]
+      .filter(
+        (scope) =>
+          scope.runnerNamespace === query.runnerNamespace &&
+          scope.runnerIncarnation === query.runnerIncarnation &&
+          (query.managedHostScope === undefined ||
+            scope.managedHostScope === query.managedHostScope),
+      )
+      .sort((a, b) => a.createdAtMs - b.createdAtMs || (a.scopeKey < b.scopeKey ? -1 : 1))
+      .map((scope) => ({ ...scope }));
+  }
+
+  async listAbandonedScopes(): Promise<SlotScopeRecord[]> {
+    return [...this.scopes.values()]
+      .filter((scope) => scope.state === "invalidating" && scope.invalidationReason === "abandoned")
+      .sort((a, b) => (a.invalidatingAtMs ?? 0) - (b.invalidatingAtMs ?? 0))
+      .map((scope) => ({ ...scope }));
   }
 
   async close(): Promise<void> {

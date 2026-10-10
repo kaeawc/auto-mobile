@@ -273,6 +273,13 @@ export type MarkScopeAbandonedResult =
     }
   | { kind: "not_found" };
 
+/** Selects scopes by namespace and incarnation; omitting the host scope matches every host. */
+export interface SlotScopeQuery {
+  runnerNamespace: string;
+  runnerIncarnation: string;
+  managedHostScope?: string;
+}
+
 export interface AbandonmentQuery {
   /** Defaults to {@link MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS}. */
   thresholdMs?: number;
@@ -527,6 +534,13 @@ export interface SlotRegistry {
   markScopeAbandoned(scopeKey: string, query?: AbandonmentQuery): Promise<MarkScopeAbandonedResult>;
   /** Free-pool devices that have sat unadopted for at least the threshold. */
   findReclaimableFreeDevices(query?: AbandonmentQuery): Promise<FreeSlotDeviceRecord[]>;
+  /** Every scope of `(namespace, incarnation)`, optionally narrowed to one host scope. */
+  findScopes(query: SlotScopeQuery): Promise<SlotScopeRecord[]>;
+  /**
+   * Scopes marked abandoned and not yet revived or reset (`invalidating`, reason `abandoned`):
+   * their slots keep their bindings so a returning incarnation can revive them.
+   */
+  listAbandonedScopes(): Promise<SlotScopeRecord[]>;
 
   /**
    * Open a journal entry for a slot together with its anchoring assignment change. Refused while

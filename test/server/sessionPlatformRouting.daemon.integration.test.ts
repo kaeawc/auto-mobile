@@ -367,24 +367,26 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
       initialSessionUuid: pool.resolveAutolockSessionForMcpSession(socketSessionId, "ios"),
     });
     try {
-      await expect(
-        pinned.callTool("routingProbe", {
-          platform: "android",
-          deviceId: devices[0].deviceId,
-          keepScreenAwake: false,
-        }),
-      ).rejects.toThrow("device_outside_bound_session");
+      // Typed refusals raised while routing reach the client as a typed result, not a thrown
+      // -32603 (#11292).
+      const refusedBound = await pinned.callTool("routingProbe", {
+        platform: "android",
+        deviceId: devices[0].deviceId,
+        keepScreenAwake: false,
+      });
+      expect(refusedBound.isError).toBe(true);
+      expect(JSON.stringify(refusedBound.content)).toContain("device_outside_bound_session");
       // A managed connection gets its own typed refusal for a non-slot device, not the
       // bound-session one above (#11268, #11274).
       DaemonState.getInstance()
         .getManagedConnectionScopes()
         .bind(socketSessionId, { scopeKey: "scope-11268", sessionUuids: [apple] });
-      await expect(
-        pinned.callTool("setActiveDevice", {
-          deviceId: devices[0].deviceId,
-          platform: "android",
-        }),
-      ).rejects.toThrow("not one of its slot");
+      const refusedSlot = await pinned.callTool("setActiveDevice", {
+        deviceId: devices[0].deviceId,
+        platform: "android",
+      });
+      expect(refusedSlot.isError).toBe(true);
+      expect(JSON.stringify(refusedSlot.content)).toContain("device_outside_managed_slots");
       // Reads stay open everywhere (owner decision Q6, #11271): a read naming a device other than
       // the bound session's watches it sessionless instead of failing on the binding, and control
       // there gets the typed refusal rather than the routing error.

@@ -1869,9 +1869,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     // A tunnel-stop failure must not skip runner termination, and it must not leave
-    // the port reservation or the retiring runner's abort signal behind once the
-    // runner is gone. They are retained only when the runner is confirmed still
-    // alive, so its port is not handed to another device while it holds it.
+    // the retiring runner's abort signal behind once the runner is gone. The port
+    // reservation is retained when the runner is confirmed still alive or when the
+    // iproxy tunnel stop failed, so the port is not handed to another device while
+    // either may still hold it.
     let tunnelStopError: unknown;
     try {
       // Stop iproxy tunnel if running
@@ -1898,7 +1899,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         this.runnerAbortController = null;
       }
     } finally {
-      PortManager.release(this.device.deviceId);
+      // iproxy may still hold the port when its stop threw; keep the reservation
+      // so another device is not handed a port the live tunnel occupies (#11186).
+      if (tunnelStopError === undefined) {
+        PortManager.release(this.device.deviceId);
+      }
     }
     if (tunnelStopError !== undefined) {
       throw toActionableError(tunnelStopError, "Failed to stop iOS CtrlProxy iproxy tunnel");

@@ -27,7 +27,14 @@ interface ActiveExecution {
   /** Captured when an untargeted device call starts, until routing finishes. */
   provisionalAutolockSessionUuid?: string;
   deviceIds?: Set<string>;
+  /** When the call started, on the tracker's wall clock. */
   startTime: number;
+  /**
+   * {@link startTime} on the session clock, by the offset in force when the call started (#11290):
+   * session stamps such as the idle deadline are judged against this, so a later wall-clock step
+   * cannot move the call's start across them.
+   */
+  sessionClockStartTime: number;
   abortController: AbortController;
   /**
    * The reason this execution was cancelled, recorded synchronously at cancellation time for
@@ -78,6 +85,23 @@ interface ActiveExecution {
    * new holder's device.
    */
   sessionlessDeviceUse?: Set<string>;
+}
+
+/**
+ * What the session manager needs to know about a tracked call to judge it against a session's
+ * stamps: its id and its start on both clocks (#11290). Every producer of that metadata builds
+ * it here, so none can hand over a wall-clock start alone.
+ */
+export function sessionExecutionMetadataOf(execution: ActiveExecution): {
+  executionId: string;
+  startTime: number;
+  sessionClockStartTime: number;
+} {
+  return {
+    executionId: execution.id,
+    startTime: execution.startTime,
+    sessionClockStartTime: execution.sessionClockStartTime,
+  };
 }
 
 /** How a session-bearing execution ended: whether it was ever admitted under its session. */
@@ -162,7 +186,7 @@ export class ExecutionTracker {
 
   /**
    * Where the session clock stands relative to this tracker's wall clock (session minus wall),
-   * read when an execution's deadline is recorded (#11105).
+   * read when an execution starts (#11290) and when its deadline is recorded (#11105).
    */
   setSessionClockOffsetProvider(provider: () => number): void {
     this.sessionClockOffsetProvider = provider;
@@ -187,6 +211,7 @@ export class ExecutionTracker {
       throw new DaemonRestartPendingError();
     }
     const id = this.idGenerator.next();
+    const startTime = this.timer.now();
     const execution: ActiveExecution = {
       id,
       toolName,
@@ -196,7 +221,8 @@ export class ExecutionTracker {
       provisionalAutolockSessionUuid: unresolvedAutolockMcpSessionId
         ? this.autolockSessionResolver?.autolockSessionForMcpSession(unresolvedAutolockMcpSessionId)
         : undefined,
-      startTime: this.timer.now(),
+      startTime,
+      sessionClockStartTime: startTime + this.sessionClockOffsetProvider(),
       abortController: new AbortController(),
     };
 
@@ -340,6 +366,14 @@ export class ExecutionTracker {
     return () => {
       this.sessionExecutionEndListeners.delete(listener);
     };
+  }
+
+  /**
+   * When a running execution started, on the session clock (#11290); undefined once it has ended
+   * or for an id this tracker never issued.
+   */
+  getSessionClockStartTime(executionId: string): number | undefined {
+    return this.executions.get(executionId)?.sessionClockStartTime;
   }
 
   /**

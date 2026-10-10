@@ -27,6 +27,9 @@ import {
 } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { subscribeToolCallEndActivity } from "../../src/daemon/toolCallActivity";
+import { ExecutionTracker, sessionExecutionMetadataOf } from "../../src/server/executionTracker";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -7157,6 +7160,146 @@ describe("released-session restart recovery window read-only probe", () => {
     await expect(manager.isReleasedSessionInRestartRecoveryWindow("missing")).rejects.toThrow(
       "read failed",
     );
+  });
+});
+
+describe("restart recovery idle window counts control calls only (#11281)", () => {
+  const SESSION = "restarting";
+
+  /**
+   * A session released for a device restart (60 s idle window, last control activity at t=0), with
+   * the real execution tracker wired to the manager the way the daemon wires it. Its recovery is
+   * pending in the pool, kept there by a waiter that is not a control call, so whatever extends
+   * the window in a test is the call the test makes.
+   */
+  async function pendingRecovery(): Promise<{
+    timer: FakeTimer;
+    persistence: FakeDeviceSessionPersistence;
+    manager: SessionManager;
+    tracker: ExecutionTracker;
+    failRecovery: () => void;
+  }> {
+    const timer = new FakeTimer();
+    const persistence = new FakeDeviceSessionPersistence();
+    persistence.seed(
+      persistedRecoverySession({
+        session_uuid: SESSION,
+        stable_device_id: "Pixel",
+        status: "released",
+        release_reason: "device-restart:Pixel",
+        expires_at_ms: 60_000,
+      }),
+    );
+    const manager = new SessionManager(timer, persistence);
+    manager.stopCleanupTimer();
+    const tracker = new ExecutionTracker(timer, new FakeIdGenerator());
+    subscribeToolCallEndActivity(tracker, manager, { sessionExecutionsEnded: () => {} });
+    let failRecovery = (): void => {};
+    const pool = {
+      assignDeviceToSession: () =>
+        new Promise<string>((_resolve, reject) => {
+          failRecovery = () => reject(new Error("device still rebooting"));
+        }),
+    };
+    void manager
+      .getOrCreateSession(SESSION, pool, "android", undefined, true, "read-only")
+      .catch(() => {});
+    await settle();
+    return { timer, persistence, manager, tracker, failRecovery };
+  }
+
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+    }
+  }
+
+  /**
+   * One tool call through the tracker and session admission, as `toolRegistry` runs it: a read is
+   * marked and admitted read-only, a control call is marked admitted only once admission resolves.
+   * The call ends when its admission settles.
+   */
+  function startCall(
+    tracker: ExecutionTracker,
+    manager: SessionManager,
+    kind: "control" | "read",
+  ): Promise<void> {
+    const execution = tracker.startExecution(
+      kind === "read" ? "observe" : "tapOn",
+      undefined,
+      SESSION,
+    );
+    const metadata = sessionExecutionMetadataOf(execution);
+    if (kind === "read") {
+      tracker.markDeviceReadCall(execution.id);
+    }
+    const admission =
+      kind === "read"
+        ? manager.admitIssuedSessionForAutomation(SESSION, metadata, { access: "read-only" })
+        : manager
+            .admitIssuedSessionForAutomation(SESSION, metadata)
+            .then(() => tracker.markSessionAdmitted(execution.id));
+    return admission.then(
+      () => tracker.endExecution(execution.id),
+      () => tracker.endExecution(execution.id),
+    );
+  }
+
+  test.each([
+    { kind: "control" as const, recoverableAt70s: true },
+    { kind: "read" as const, recoverableAt70s: false },
+  ])(
+    "a $kind call that waits on the restart and fails with it at 50 s => recoverable at 70 s: $recoverableAt70s",
+    async ({ kind, recoverableAt70s }) => {
+      const { timer, persistence, manager, tracker, failRecovery } = await pendingRecovery();
+      const call = startCall(tracker, manager, kind);
+      await settle();
+      const expiryWhileWaiting = (await persistence.getSession?.(SESSION))?.expires_at_ms;
+
+      timer.advanceTime(50_000);
+      failRecovery();
+      await call;
+      await settle();
+
+      const persistedExpiry = (await persistence.getSession?.(SESSION))?.expires_at_ms;
+      expect(persistedExpiry === expiryWhileWaiting).toBe(!recoverableAt70s);
+      timer.advanceTime(20_000);
+      expect(await manager.isReleasedSessionInRestartRecoveryWindow(SESSION)).toBe(
+        recoverableAt70s,
+      );
+    },
+  );
+
+  test.each([
+    { kind: "control" as const, recoverableAt70s: true },
+    { kind: "read" as const, recoverableAt70s: false },
+  ])(
+    "a $kind call joining the pending recovery at 50 s => recoverable at 70 s: $recoverableAt70s",
+    async ({ kind, recoverableAt70s }) => {
+      const { timer, manager, tracker } = await pendingRecovery();
+
+      timer.advanceTime(50_000);
+      void startCall(tracker, manager, kind);
+      await settle();
+
+      timer.advanceTime(20_000);
+      expect(await manager.isReleasedSessionInRestartRecoveryWindow(SESSION)).toBe(
+        recoverableAt70s,
+      );
+    },
+  );
+
+  test("a read that ran under the session id and ended at 50 s does not extend the recovery", async () => {
+    const { timer, manager, tracker } = await pendingRecovery();
+
+    timer.advanceTime(50_000);
+    const read = tracker.startExecution("observe", undefined, SESSION);
+    tracker.markDeviceReadCall(read.id);
+    tracker.endExecution(read.id);
+    await settle();
+
+    timer.advanceTime(20_000);
+    expect(await manager.isReleasedSessionInRestartRecoveryWindow(SESSION)).toBe(false);
   });
 });
 

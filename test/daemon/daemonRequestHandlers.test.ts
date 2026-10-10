@@ -1086,7 +1086,7 @@ describe("handleDaemonRequest", () => {
     },
   );
 
-  test("unknown session release stays idempotent without cancelling or waiting", async () => {
+  test("a never-issued session release is refused without cancelling or waiting (#11148)", async () => {
     const timer = new FakeTimer();
     const tracker = new ExecutionTracker(timer, new FakeIdGenerator());
     const cancel = spyOn(tracker, "cancelSessionUuidExecutions");
@@ -1094,16 +1094,14 @@ describe("handleDaemonRequest", () => {
     try {
       expect(
         await handleDaemonRequest(
-          buildRequest("daemon/releaseSession", { sessionId: "missing" }),
+          buildRequest("daemon/releaseSession", { sessionId: "missing", requireKnown: true }),
           new FakeDaemonState(sessionManager, pool),
           tracker,
         ),
-      ).toEqual({
-        success: true,
-        result: {
-          message: "Session missing already released or never existed",
-          alreadyReleased: true,
-        },
+      ).toMatchObject({
+        success: false,
+        code: "daemon_session_not_found",
+        error: expect.stringContaining("Session missing is not a known session"),
       });
       expect(cancel).not.toHaveBeenCalled();
       expect(pool.releasedDevices).toEqual([]);
@@ -1112,6 +1110,34 @@ describe("handleDaemonRequest", () => {
     } finally {
       cancel.mockRestore();
     }
+  });
+
+  test("an unknown session release stays idempotent without requireKnown (desktop wire)", async () => {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator());
+    const pool = new FakeDevicePool({ total: 0, idle: 0, assigned: 0, error: 0 });
+
+    expect(
+      await handleDaemonRequest(
+        buildRequest("daemon/releaseSession", { sessionId: "missing" }),
+        new FakeDaemonState(sessionManager, pool),
+        tracker,
+      ),
+    ).toMatchObject({ success: true, result: { alreadyReleased: true } });
+  });
+
+  test("releasing an already released session stays idempotent (#11148)", async () => {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator());
+    const pool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
+    await sessionManager.createSession("released-once", "emulator-5556", "android");
+    const release = () =>
+      handleDaemonRequest(
+        buildRequest("daemon/releaseSession", { sessionId: "released-once", requireKnown: true }),
+        new FakeDaemonState(sessionManager, pool),
+        tracker,
+      );
+    await release();
+
+    expect(await release()).toMatchObject({ success: true, result: { alreadyReleased: true } });
   });
 
   test("releases session and device without a cancellation await when idle", async () => {

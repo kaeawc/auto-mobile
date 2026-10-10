@@ -562,7 +562,7 @@ async function releaseDaemonSession(args: string[], manager: DaemonManager): Pro
       try {
         await client.connect();
         await client
-          .callDaemonMethod("daemon/releaseSession", { sessionId })
+          .callDaemonMethod("daemon/releaseSession", { sessionId, requireKnown: true })
           .then(async (result: unknown) => {
             await client.close();
             if (!isReleaseResult(result)) {

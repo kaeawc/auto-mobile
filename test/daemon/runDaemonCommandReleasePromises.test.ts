@@ -149,7 +149,10 @@ describe("CLI release-session daemon results", () => {
       expect(log.mock.calls).toEqual(output.map((line) => [line]));
       expect(exit).not.toHaveBeenCalled();
       expect(calls).toEqual([
-        { method: "daemon/releaseSession", params: { sessionId: "fake-session" } },
+        {
+          method: "daemon/releaseSession",
+          params: { sessionId: "fake-session", requireKnown: true },
+        },
       ]);
     } finally {
       exit.mockRestore();

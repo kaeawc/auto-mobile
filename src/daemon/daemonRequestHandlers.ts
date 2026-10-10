@@ -942,7 +942,8 @@ async function handleReleaseSession(
   state: DaemonStateAccess,
   executions?: SessionExecutionCanceller,
 ): Promise<DaemonMethodResult> {
-  const sessionId = (request.params as { sessionId?: string } | undefined)?.sessionId;
+  const params = request.params as { sessionId?: string; requireKnown?: boolean } | undefined;
+  const sessionId = params?.sessionId;
   if (!sessionId) {
     return {
       success: false,
@@ -961,17 +962,38 @@ async function handleReleaseSession(
         },
       };
     }
-    // Session doesn't exist - treat as already released (idempotent)
-    // This happens when daemon auto-releases after executePlan completes
-    return {
-      success: true,
-      result: {
-        message: `Session ${sessionId} already released or never existed`,
-        alreadyReleased: true,
-      },
-    };
+    return await releaseUnknownSession(manager, sessionId, params?.requireKnown === true);
   }
   return releaseBoundSession(state, manager, sessionId, session, executions);
+}
+
+/**
+ * An unknown id stays idempotent for programmatic callers (the desktop releases sessions a
+ * restarted daemon forgot). A caller that sets `requireKnown` (the `--daemon release-session`
+ * CLI) is told when the daemon never issued the UUID, so a typo is not reported as success
+ * (#11148). A session this daemon issued and already released stays idempotent either way.
+ */
+async function releaseUnknownSession(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+  requireKnown: boolean,
+): Promise<DaemonMethodResult> {
+  if (requireKnown && (await lookupReleasedSessionReason(manager, sessionId)) === undefined) {
+    return {
+      success: false,
+      error:
+        `Session ${sessionId} is not a known session (never issued by this daemon, or its release ` +
+        "record has expired). Run --daemon active-sessions to list held sessions.",
+      code: DAEMON_SESSION_NOT_FOUND_CODE,
+    };
+  }
+  return {
+    success: true,
+    result: {
+      message: `Session ${sessionId} already released or never existed`,
+      alreadyReleased: true,
+    },
+  };
 }
 
 async function releaseBoundSession(

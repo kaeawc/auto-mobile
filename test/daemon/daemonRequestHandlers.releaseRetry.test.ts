@@ -78,7 +78,7 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
         id: "release",
         type: "daemon_request",
         method: "daemon/releaseSession",
-        params: { sessionId: id },
+        params: { sessionId: id, requireKnown: true },
       },
       state,
     );
@@ -195,9 +195,10 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
       expect(manager.hasSession(sessionId)).toBe(false);
       expect(pool.getDevice(deviceId)).toMatchObject({ sessionId: null, status: "idle" });
       expect(await release()).toMatchObject({ success: true, result: { alreadyReleased: true } });
+      // #11148: a UUID this daemon never issued is refused rather than reported as released.
       expect(await release("never-existed")).toMatchObject({
-        success: true,
-        result: { alreadyReleased: true },
+        success: false,
+        code: "daemon_session_not_found",
       });
       expect(free).toHaveBeenCalledTimes(1);
     } finally {

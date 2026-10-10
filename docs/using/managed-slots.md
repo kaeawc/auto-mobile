@@ -167,10 +167,10 @@ connection used for tools and resources:
    UUID is new, session-scoped device-state resets (#11145) apply to each
    execution.
 3. **Hold.** The proxy holds the session for the whole execution, renewing the
-   owner heartbeat. Only the owner's heartbeats keep it alive. The proxy also
-   refuses `registerSession` binding to managed sessions it cannot prove it
-   holds (`managed_slot_registration_refused`, a daemon protocol answer rather
-   than a device-tool refusal).
+   owner heartbeat. Only the owner's heartbeats keep it alive. The daemon also
+   refuses `daemon/registerSession` binding to managed sessions it cannot prove it
+   holds (`managed_slot_registration_refused`, a protocol answer rather than a
+   device-tool refusal).
 4. **Drain and release.** When the execution ends (stdin EOF, cancellation or
    owner loss) the proxy releases its sessions with a bounded wait
    (`MANAGED_EXECUTION_RELEASE_TIMEOUT_MS`, 1.5 s). The daemon cancels the

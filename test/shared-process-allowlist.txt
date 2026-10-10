@@ -125,6 +125,7 @@ test/daemon/managedSlots/slotJournal.test.ts
 test/daemon/managedSlots/slotOwnerLiveness.test.ts
 test/daemon/managedSlots/slotRegistryMigrations.test.ts
 test/daemon/managedSlots/slotScopeReset.test.ts
+test/daemon/managedSlots/slotsRegistryAbsentThenUnreadable.test.ts
 test/daemon/managedSlots/sqliteSlotRegistry.test.ts
 test/daemon/managerOutputReductionArgs.test.ts
 test/daemon/observationRequestBatch.test.ts

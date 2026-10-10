@@ -4,6 +4,7 @@ import { type Kysely, sql } from "kysely";
 import type { Database } from "../../src/db/types";
 import {
   deviceRestartReleaseReason,
+  DeviceSessionNotActiveError,
   DeviceSessionRepository,
   isRecoverableDaemonReleaseReason,
   RECOVERABLE_DAEMON_RELEASE_REASONS,
@@ -11,7 +12,10 @@ import {
 } from "../../src/db/deviceSessionRepository";
 import { logger } from "../../src/utils/logger";
 import { createTestDatabase } from "./testDbHelper";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import {
+  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+  SessionManager,
+} from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncident";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -192,6 +196,7 @@ describe("DeviceSessionRepository", () => {
         "expired",
         10_000,
         "expired",
+        { expectedRowGeneration: 0 },
       );
       expect(await repo.getSession("remaining-expired")).toMatchObject({ status: "expired" });
     } finally {
@@ -800,13 +805,16 @@ describe("DeviceSessionRepository", () => {
     });
     await repo.markReleased("session-1", "released", 2000, "explicit-release");
 
-    await repo.recordActivity("session-1", {
-      lastUsedAtMs: 3000,
-      expiresAtMs: 63_000,
-      sessionTimeoutMs: 60_000,
-      heartbeatTimeoutMs: 60_000,
-      hasReceivedHeartbeat: true,
-    });
+    // Zero rows matched: a failure, not a silent success the dedupe would remember (#11129).
+    await expect(
+      repo.recordActivity("session-1", {
+        lastUsedAtMs: 3000,
+        expiresAtMs: 63_000,
+        sessionTimeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+        hasReceivedHeartbeat: true,
+      }),
+    ).rejects.toBeInstanceOf(DeviceSessionNotActiveError);
 
     const row = await repo.getSession("session-1");
     expect(row!.status).toBe("released");
@@ -814,6 +822,210 @@ describe("DeviceSessionRepository", () => {
     expect(row!.release_reason).toBe("explicit-release");
     expect(row!.last_used_at_ms).toBe(1000);
     expect(row!.expires_at_ms).toBe(61_000);
+  });
+
+  test("an older activity write landing after a newer one keeps the newer lease (#11129)", async () => {
+    await repo.upsertActiveSession({
+      sessionUuid: "session-1",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 1000,
+      lastUsedAtMs: 1000,
+      expiresAtMs: 61_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: false,
+    });
+    const activity = {
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: true,
+    };
+    // A tool-call end lands first; the heartbeat write issued before it lands second (BUSY retry).
+    await repo.recordActivity("session-1", {
+      ...activity,
+      lastUsedAtMs: 5000,
+      expiresAtMs: 65_000,
+    });
+    await repo.recordActivity("session-1", {
+      ...activity,
+      lastUsedAtMs: 3000,
+      expiresAtMs: 63_000,
+      hasReceivedHeartbeat: false,
+    });
+
+    let row = await repo.getSession("session-1");
+    expect(row!.last_used_at_ms).toBe(5000);
+    expect(row!.expires_at_ms).toBe(65_000);
+    expect(row!.has_received_heartbeat).toBe(1);
+
+    // A write from the same activity may still shorten the lease (an idle-window rebase).
+    await repo.recordActivity("session-1", {
+      ...activity,
+      lastUsedAtMs: 5000,
+      expiresAtMs: 20_000,
+    });
+    row = await repo.getSession("session-1");
+    expect(row!.expires_at_ms).toBe(20_000);
+  });
+
+  test("a delayed non-terminal release of an earlier incarnation leaves the re-acquired row (#11129)", async () => {
+    const record: DeviceSessionRecord = {
+      sessionUuid: "session-1",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 1000,
+      lastUsedAtMs: 1000,
+      expiresAtMs: 61_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: false,
+    };
+    const released = await repo.upsertActiveSession(record);
+    const reacquired = await repo.upsertActiveSession({ ...record, lastUsedAtMs: 2000 });
+    expect(reacquired).toBe(released + 1);
+
+    await repo.markReleased("session-1", "released", 1500, "daemon-shutdown", {
+      expectedRowGeneration: released,
+    });
+    expect((await repo.getSession("session-1"))!.status).toBe("active");
+
+    await repo.markReleased("session-1", "released", 3000, "daemon-shutdown", {
+      expectedRowGeneration: reacquired,
+    });
+    expect((await repo.getSession("session-1"))!.release_reason).toBe("daemon-shutdown");
+  });
+
+  test("SessionManager's late non-terminal release cannot release the resumed session (#11129)", async () => {
+    const timer = new FakeTimer();
+    let releaseGate: (() => void) | undefined;
+    let lateWrite: Promise<void> | undefined;
+    class DelayedReleaseRepository extends DeviceSessionRepository {
+      override async markReleased(
+        ...args: Parameters<DeviceSessionRepository["markReleased"]>
+      ): Promise<void> {
+        if (args[3] === "daemon-shutdown" && releaseGate === undefined) {
+          lateWrite = new Promise<void>((resolve) => {
+            releaseGate = resolve;
+          }).then(() => super.markReleased(...args));
+          return await lateWrite;
+        }
+        await super.markReleased(...args);
+      }
+    }
+    const delayed = new DelayedReleaseRepository(db, timer);
+    const sessionManager = new SessionManager(timer, delayed);
+    try {
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      const release = sessionManager.releaseSession("session-1", "daemon-shutdown");
+      while (releaseGate === undefined) {
+        await Promise.resolve();
+      }
+      await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+      await release.catch(() => undefined);
+
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      releaseGate!();
+      await lateWrite;
+
+      const row = await repo.getSession("session-1");
+      expect(row!.status).toBe("active");
+      expect(row!.release_reason).toBeNull();
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("SessionManager re-persists a live session whose row a peer expired (#11129)", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, repo);
+    try {
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      // A peer daemon judged this daemon dead and expired the row.
+      await repo.markReleased("session-1", "expired", 500, "daemon-restart");
+      timer.advanceTime(1000);
+      await sessionManager.getOrCreateSession("session-1");
+
+      const row = await repo.getSession("session-1");
+      expect(row!.status).toBe("active");
+      expect(row!.release_reason).toBeNull();
+      expect(row!.last_used_at_ms).toBe(1000);
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("SessionManager never revives a terminally released row on activity (#11129)", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, repo);
+    try {
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      await repo.markReleased("session-1", "released", 500, "explicit-release");
+      timer.advanceTime(1000);
+      await expect(sessionManager.getOrCreateSession("session-1")).rejects.toThrow(
+        "Failed to persist liveness activity",
+      );
+
+      const row = await repo.getSession("session-1");
+      expect(row!.status).toBe("released");
+      expect(row!.release_reason).toBe("explicit-release");
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("recoverable-session listing judges expiry on the session clock it is given (#11129)", async () => {
+    await repo.upsertActiveSession({
+      sessionUuid: "recoverable",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 1000,
+      lastUsedAtMs: 1000,
+      expiresAtMs: 61_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: true,
+    });
+    await repo.markReleased("recoverable", "expired", 1000, "daemon-restart");
+    // The wall timer reads past the expiry; the session-clock instant the caller passes does not.
+    timer.setCurrentTime(121_000);
+
+    const listed = await repo.listRecoverableSessions(2000);
+    expect(listed.map((row) => row.session_uuid)).toEqual(["recoverable"]);
+    expect((await repo.getSession("recoverable"))!.release_reason).toBe("daemon-restart");
+  });
+
+  test("SessionManager hands the repository its session clock, not the wall timer (#11129)", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(10_000);
+    const seen: { upsert?: number; list?: number } = {};
+    class ClockRecordingRepository extends DeviceSessionRepository {
+      override async upsertActiveSession(record: DeviceSessionRecord, nowMs?: number) {
+        seen.upsert = nowMs;
+        return await super.upsertActiveSession(record, nowMs);
+      }
+      override async listRecoverableSessions(nowMs?: number) {
+        seen.list = nowMs;
+        return await super.listRecoverableSessions(nowMs);
+      }
+    }
+    const sessionManager = new SessionManager(timer, new ClockRecordingRepository(db, timer));
+    try {
+      const sessionClock = sessionManager.sessionNow();
+      // A backward wall step: the session clock holds, the wall timer falls an hour behind.
+      timer.stepWallClock(-3_600_000);
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      await sessionManager.rehydratePersistedSessions({
+        assignSessionToDevice: async () => {
+          throw new Error("no rows to assign");
+        },
+      } as unknown as Parameters<SessionManager["rehydratePersistedSessions"]>[0]);
+      expect(seen.upsert).toBe(sessionClock);
+      expect(seen.list).toBe(sessionClock);
+      expect(timer.now()).toBe(sessionClock - 3_600_000);
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
   });
 
   test("SessionManager persists create, activity, and release", async () => {
@@ -1230,6 +1442,55 @@ describe("DeviceSessionRepository", () => {
       expect(stillActive!.status).toBe("active");
       expect(stillActive!.released_at_ms).toBeNull();
     });
+  });
+
+  test("markAutolockSession propagates a write failure (#11129)", async () => {
+    const warnSpy = spyOn(logger, "warn");
+    try {
+      await db.schema.dropTable("device_sessions").execute(); // force the update to throw
+      await expect(
+        repo.markAutolockSession("session-fail", {
+          mcpSessionId: "mcp-1",
+          lastUsedAtMs: 1000,
+          expiresAtMs: 61_000,
+        }),
+      ).rejects.toThrow(/Failed to persist autolock session session-fail/);
+      expect(warnSpy.mock.calls.map((c) => String(c[0])).join("\n")).toContain("session-fail");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  test("markAutolockSession never regresses a newer activity's lease (#11129)", async () => {
+    await repo.upsertActiveSession({
+      sessionUuid: "session-1",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 1000,
+      lastUsedAtMs: 1000,
+      expiresAtMs: 61_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: false,
+    });
+    await repo.recordActivity("session-1", {
+      lastUsedAtMs: 5000,
+      expiresAtMs: 65_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: true,
+    });
+    // The autolock stamps were snapshotted before the activity write landed.
+    await repo.markAutolockSession("session-1", {
+      mcpSessionId: "mcp-1",
+      lastUsedAtMs: 2000,
+      expiresAtMs: 62_000,
+    });
+
+    const row = await repo.getSession("session-1");
+    expect(row!.mcp_session_id).toBe("mcp-1");
+    expect(row!.last_used_at_ms).toBe(5000);
+    expect(row!.expires_at_ms).toBe(65_000);
   });
 
   test("upsertActiveSession logs and propagates a write failure for session rollback", async () => {

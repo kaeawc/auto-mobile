@@ -4202,7 +4202,8 @@ export class Daemon {
       }
       await this.deviceSessionRepository.markStaleActiveSessionsExpired(
         this.daemonSessionId,
-        this.timer.now(),
+        // released_at_ms is judged against the session clock everywhere else (#11129).
+        this.sessionManager.sessionNow(),
         "daemon-restart",
         liveDaemonSessionIds,
       );

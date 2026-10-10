@@ -127,7 +127,7 @@ describe("DevicePool autolock", () => {
       });
       await expect(
         recoveringPool.attachAutolockSessionToMcpSession("recovered-autolock", "reconnected-mcp"),
-      ).resolves.toBeUndefined();
+      ).resolves.toBe("attached");
     } finally {
       recoveringManager.stopCleanupTimer();
     }

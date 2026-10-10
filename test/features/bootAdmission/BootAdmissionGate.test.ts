@@ -146,13 +146,27 @@ describe("shared boot admission gates", () => {
   test("builds both gates by default and none when opted out", () => {
     testOverrides.bootAdmissionGatesDisabled = false;
     const timer = new FakeTimer();
-    const gates = createBootAdmissionGates({ env: {}, timer });
+    const gates = createBootAdmissionGates({ env: {}, timer, hostPlatform: "darwin" });
     expect(gates.android).toBeDefined();
     expect(gates.ios).toBeDefined();
 
-    const optedOut = createBootAdmissionGates({ env: { [BOOT_CAPACITY_GATE_ENV]: "0" }, timer });
+    const optedOut = createBootAdmissionGates({
+      env: { [BOOT_CAPACITY_GATE_ENV]: "0" },
+      timer,
+      hostPlatform: "darwin",
+    });
     expect(optedOut.android).toBeUndefined();
     expect(optedOut.ios).toBeUndefined();
+  });
+
+  test("the iOS gate exists only on darwin (#11209)", () => {
+    testOverrides.bootAdmissionGatesDisabled = false;
+    const timer = new FakeTimer();
+    for (const hostPlatform of ["linux", "win32"] as const) {
+      const gates = createBootAdmissionGates({ env: {}, timer, hostPlatform });
+      expect(gates.android).toBeDefined();
+      expect(gates.ios).toBeUndefined();
+    }
   });
 
   test("the unit-test override keeps every gate off", () => {

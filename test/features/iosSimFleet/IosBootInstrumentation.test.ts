@@ -21,7 +21,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 const UDID = "BCC31307-1A19-4D67-A7F0-44FC98F78921";
 const limits = { maxBooted: 1, source: "derived" } as const;
 const queue: CapacityDecision = {
-  outcome: "queue",
+  outcome: "refuse",
   reason: "at-capacity",
   limits,
   bootedCount: 1,
@@ -29,12 +29,10 @@ const queue: CapacityDecision = {
   message: "1 simulator(s) booted; limit is 1",
 };
 
-function setup(gateDecision?: CapacityDecision, timesOut = false) {
+function setup(gateDecision?: CapacityDecision) {
   const timer = new FakeTimer();
   const history = new InMemoryBootDurationHistory();
-  const gate = gateDecision
-    ? new FakeSimulatorCapacityGate(timer, gateDecision, timesOut)
-    : undefined;
+  const gate = gateDecision ? new FakeSimulatorCapacityGate(timer, gateDecision) : undefined;
   const instrumentation = new FleetBootInstrumentation({ history, timer, gate });
   return { timer, history, gate, instrumentation };
 }
@@ -71,20 +69,19 @@ describe("FleetBootInstrumentation", () => {
     expect(history.latestFor(UDID)).toBeUndefined();
   });
 
-  test("time queued for capacity is deducted from the boot budget", async () => {
+  test("an admitted boot keeps the caller's full budget", async () => {
     const { gate, history, instrumentation } = setup({ outcome: "allow", limits, bootedCount: 0 });
-    gate!.queuedWaitMs = 10_000;
     let budget = 0;
     await instrumentation.run({ udid: UDID, timeoutMs: 60_000 }, async (remainingMs) => {
       budget = remainingMs;
     });
-    expect(budget).toBe(50_000);
+    expect(budget).toBe(60_000);
     expect(history.latestFor(UDID)?.durationMs).toBe(0);
     expect(gate!.requests[0]).toMatchObject({ profileId: bootProfileId(), excludeUdids: [UDID] });
   });
 
-  test("a wait that times out at capacity throws without booting", async () => {
-    const { instrumentation } = setup(queue, true);
+  test("a boot at capacity is refused at once without booting", async () => {
+    const { instrumentation } = setup(queue);
     let booted = false;
     await expect(
       instrumentation.run({ udid: UDID, timeoutMs: 1_000 }, async () => {
@@ -94,9 +91,9 @@ describe("FleetBootInstrumentation", () => {
     expect(booted).toBe(false);
   });
 
-  // #11064: the boot path's signal reaches the capacity wait, and an admitted
+  // #11064: the boot path's signal reaches the capacity check, and an admitted
   // boot holds its slot only until the boot ends, success or failure.
-  test("threads the boot signal into the capacity wait and releases the admission after boot", async () => {
+  test("threads the boot signal into the capacity check and releases the admission after boot", async () => {
     const { gate, instrumentation } = setup({ outcome: "allow", limits, bootedCount: 0 });
     const controller = new AbortController();
     let admittedDuringBoot = 0;
@@ -106,7 +103,7 @@ describe("FleetBootInstrumentation", () => {
         admittedDuringBoot = gate!.admitted;
       },
     );
-    expect(gate!.waitOptions[0]).toMatchObject({ signal: controller.signal, bootUdid: UDID });
+    expect(gate!.admitOptions[0]).toMatchObject({ signal: controller.signal, bootUdid: UDID });
     expect(admittedDuringBoot).toBe(1);
     expect(gate!.admitted).toBe(0);
   });

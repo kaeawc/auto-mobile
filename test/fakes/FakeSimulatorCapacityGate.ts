@@ -1,19 +1,18 @@
 import type {
   CapacityDecision,
-  CapacityWaitOptions,
-  CapacityWaitResult,
+  CapacityAdmitOptions,
+  CapacityAdmission,
   SimulatorCapacityGate,
 } from "../../src/features/iosSimFleet/CapacityGate";
 import type { WarmDeviceRequest } from "../../src/features/iosSimFleet/capacityPolicy";
 import type { Timer } from "../../src/utils/SystemTimer";
 
-/** Scripted gate: returns queued decisions (advancing the timer) before the final decision. */
+/** Scripted gate: returns the scripted decision. */
 export class FakeSimulatorCapacityGate implements SimulatorCapacityGate {
   requests: Array<WarmDeviceRequest | undefined> = [];
-  waitOptions: CapacityWaitOptions[] = [];
-  /** Admissions handed out by `waitForCapacity` and not yet released. */
+  admitOptions: CapacityAdmitOptions[] = [];
+  /** Admissions handed out by `admitBoot` and not yet released. */
   admitted = 0;
-  queuedWaitMs = 0;
   constructor(
     private readonly timer: Pick<Timer, "now"> & { advanceTime(ms: number): void },
     private decision: CapacityDecision,
@@ -25,19 +24,14 @@ export class FakeSimulatorCapacityGate implements SimulatorCapacityGate {
     return this.decision;
   }
 
-  async waitForCapacity(
+  async admitBoot(
     request: WarmDeviceRequest | undefined,
-    options: CapacityWaitOptions,
-  ): Promise<CapacityWaitResult> {
+    options: CapacityAdmitOptions,
+  ): Promise<CapacityAdmission> {
     this.requests.push(request);
-    this.waitOptions.push(options);
-    this.timer.advanceTime(this.queuedWaitMs);
-    const result = {
-      decision: this.decision,
-      waitedMs: this.queuedWaitMs,
-      timedOut: this.timesOut,
-    };
-    if (this.decision.outcome === "queue") {
+    this.admitOptions.push(options);
+    const result = { decision: this.decision };
+    if (this.decision.outcome === "refuse") {
       return result;
     }
     this.admitted += 1;

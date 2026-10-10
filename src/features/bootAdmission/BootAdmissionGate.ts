@@ -7,7 +7,7 @@ import type { CapacityLimits } from "./capacityLimits";
 
 /**
  * Platform-neutral boot admission (#11181): the ledger of admitted boots, the
- * queue/wait loop and the capacity-exhausted failure shared by the Android
+ * immediate admit-or-refuse decision and the capacity-exhausted failure shared by the Android
  * emulator gate and the iOS simulator gate.
  */
 
@@ -16,10 +16,15 @@ export const BOOT_CAPACITY_GATE_ENV = "AUTOMOBILE_BOOT_CAPACITY_GATE";
 /** iOS-only override of {@link BOOT_CAPACITY_GATE_ENV}: exact `0` disables, exact `1` enables. */
 export const IOS_SIM_CAPACITY_GATE_ENV = "AUTOMOBILE_IOS_SIM_CAPACITY_GATE";
 
+/**
+ * Suggested wait before retrying a refused boot. Capacity frees when another
+ * device shuts down, which takes seconds, not a boot's worth of time; a short
+ * fixed hint lets a caller poll without hammering `adb`/`simctl`.
+ */
 export const DEFAULT_ADMISSION_RETRY_AFTER_MS = 5_000;
 
 /**
- * Whether boots of `platform` wait for admission. On by default; the iOS
+ * Whether boots of `platform` go through admission. On by default; the iOS
  * override wins over the shared switch when it is exactly `0` or `1`.
  */
 export function isBootCapacityGateEnabled(platform: Platform, env: NodeJS.ProcessEnv): boolean {
@@ -32,129 +37,122 @@ export function isBootCapacityGateEnabled(platform: Platform, env: NodeJS.Proces
   return env[BOOT_CAPACITY_GATE_ENV]?.trim() !== "0";
 }
 
-/** A wait that must keep waiting: the platform is at its limit or the host is under pressure. */
-export interface QueuedCapacityDecision {
-  outcome: "queue";
-  reason: "at-capacity" | "sustained-pressure";
+/** A boot the gate refuses now: the platform is at its device-count limit. */
+export interface RefusedCapacityDecision {
+  outcome: "refuse";
+  reason: "at-capacity";
   limits: CapacityLimits;
   bootedCount: number;
   retryAfterMs: number;
   message: string;
+  /** Counted devices this process did not start (e.g. launched from Android Studio). */
+  externalDevices?: string[];
 }
 
-export interface BootAdmissionWaitResult<D> {
-  decision: D | QueuedCapacityDecision;
-  waitedMs: number;
-  timedOut: boolean;
+export interface BootAdmissionResult<D> {
+  decision: D | RefusedCapacityDecision;
   /**
-   * Present when the wait admitted a boot: it counts toward the limit until
-   * released, so concurrent waiters cannot all be admitted against one free
+   * Present when the boot was admitted a boot: it counts toward the limit until
+   * released, so concurrent callers cannot all be admitted against one free
    * slot before the first boot shows up in the platform's listing.
    */
   releaseAdmission?: () => void;
 }
 
-/** The at-capacity queue decision, or undefined when one more boot fits. */
+/** The at-capacity refusal, or undefined when one more boot fits. */
 export function atCapacityDecision(
   bootedCount: number,
   limits: CapacityLimits,
   retryAfterMs: number,
-  describe: { noun: string; envName: string },
-): QueuedCapacityDecision | undefined {
+  describe: { noun: string; envName: string; externalDevices?: readonly string[] },
+): RefusedCapacityDecision | undefined {
   if (bootedCount < limits.maxBooted) {
     return undefined;
   }
+  const external = describe.externalDevices ?? [];
+  const externalNote =
+    external.length > 0
+      ? ` ${external.length} of them were not started by AutoMobile but still count toward the limit: ${external.join(", ")}.`
+      : "";
+  const optOut = external.length > 0 ? ` or disable the gate with ${BOOT_CAPACITY_GATE_ENV}=0` : "";
   return {
-    outcome: "queue",
+    outcome: "refuse",
     reason: "at-capacity",
     limits,
     bootedCount,
     retryAfterMs,
-    message: `${bootedCount} ${describe.noun}(s) booted; limit is ${limits.maxBooted} (${limits.source}). Shut one down or raise the limit with ${describe.envName}.`,
+    ...(external.length > 0 ? { externalDevices: [...external] } : {}),
+    message: `${bootedCount} ${describe.noun}(s) booted; limit is ${limits.maxBooted} (${limits.source}).${externalNote} Shut one down, raise the limit with ${describe.envName}${optOut}.`,
   };
 }
 
-export interface BootAdmissionWaitOptions<S, D extends { outcome: string }> {
+export interface BootAdmissionOptions<S, D extends { outcome: string }> {
   timer: Timer;
-  /** Absolute deadline on the timer's clock. */
-  deadlineMs: number;
   signal?: AbortSignal;
   /** e.g. "iOS simulator capacity"; used in timeout and cancellation messages. */
   label: string;
-  /** One fresh capacity sample, bounded by the remaining deadline. */
+  /** Bound on the one capacity sample; defaults to {@link DEFAULT_SAMPLE_TIMEOUT_MS}. */
+  sampleTimeoutMs?: number;
+  /** One fresh capacity sample. */
   sample: () => Promise<S>;
-  /** Synchronous so a waiter decides and records its admission without an interleaving. */
-  decide: (sample: S) => D | QueuedCapacityDecision;
+  /** Synchronous so a caller decides and records its admission without an interleaving. */
+  decide: (sample: S) => D | RefusedCapacityDecision;
   /** Records the admission; returns its release. Called synchronously after `decide`. */
   admit: (decision: D) => () => void;
 }
 
+export const DEFAULT_SAMPLE_TIMEOUT_MS = 15_000;
+
 /**
- * Polls `sample` with the injected timer until `decide` admits the boot, the
- * next poll would pass the deadline, or the signal aborts.
+ * Takes one capacity sample and decides at once (owner decision 2026-10-09:
+ * a platform at its limit fails the boot immediately instead of queueing it
+ * against the boot's budget). A refusal carries no admission; an allowed
+ * decision is recorded in the same synchronous turn, so concurrent callers
+ * cannot all take one free slot.
  */
-export async function waitForBootAdmission<S, D extends { outcome: string }>(
-  options: BootAdmissionWaitOptions<S, D>,
-): Promise<BootAdmissionWaitResult<D>> {
-  const { timer } = options;
-  const startedAt = timer.now();
-  for (;;) {
-    options.signal?.throwIfAborted();
-    const sample = await sampleWithin(options, startedAt);
-    options.signal?.throwIfAborted();
-    const decision = options.decide(sample);
-    const waitedMs = timer.now() - startedAt;
-    if (!isQueued(decision)) {
-      return { decision, waitedMs, timedOut: false, releaseAdmission: options.admit(decision) };
-    }
-    if (timer.now() + decision.retryAfterMs > options.deadlineMs) {
-      return { decision, waitedMs, timedOut: true };
-    }
-    await raceWithDeadline(timer.sleep(decision.retryAfterMs), {
-      timer,
-      signal: options.signal,
-      label: `Waiting for ${options.label}`,
-    });
+export async function admitBootNow<S, D extends { outcome: string }>(
+  options: BootAdmissionOptions<S, D>,
+): Promise<BootAdmissionResult<D>> {
+  options.signal?.throwIfAborted();
+  const sample = await sampleWithin(options);
+  options.signal?.throwIfAborted();
+  const decision = options.decide(sample);
+  if (isRefused(decision)) {
+    return { decision };
   }
+  return { decision, releaseAdmission: options.admit(decision) };
 }
 
-function isQueued<D extends { outcome: string }>(
-  decision: D | QueuedCapacityDecision,
-): decision is QueuedCapacityDecision {
-  return decision.outcome === "queue";
+function isRefused<D extends { outcome: string }>(
+  decision: D | RefusedCapacityDecision,
+): decision is RefusedCapacityDecision {
+  return decision.outcome === "refuse";
 }
 
-/** A capacity sample bounded by the wait's deadline and cancellation. */
+/** A capacity sample bounded by a timeout and cancellation. */
 async function sampleWithin<S, D extends { outcome: string }>(
-  options: BootAdmissionWaitOptions<S, D>,
-  startedAt: number,
+  options: BootAdmissionOptions<S, D>,
 ): Promise<S> {
   const { timer } = options;
-  const remainingMs = Math.floor(options.deadlineMs - timer.now());
-  const timedOut = () =>
-    new ActionableError(
-      `Timed out after ${timer.now() - startedAt}ms collecting ${options.label}.`,
-    );
-  if (remainingMs <= 0) {
-    throw timedOut();
-  }
+  const timeoutMs = options.sampleTimeoutMs ?? DEFAULT_SAMPLE_TIMEOUT_MS;
   return await raceWithDeadline(options.sample, {
     timer,
-    timeoutMs: remainingMs,
+    timeoutMs,
     signal: options.signal,
     label: `Collecting ${options.label}`,
-    timeoutError: timedOut,
+    timeoutError: () =>
+      new ActionableError(`Timed out after ${timeoutMs}ms collecting ${options.label}.`),
   });
 }
 
-/** Throws the typed retryable {@link BootCapacityExhaustedError} when a wait ended without capacity. */
+/** Throws the typed retryable {@link BootCapacityExhaustedError} when the boot was refused. */
 export function assertBootCapacityGranted<D extends { outcome: string }>(
-  result: BootAdmissionWaitResult<D>,
+  result: BootAdmissionResult<D>,
   platform: Platform,
   noun: string,
 ): void {
   const { decision } = result;
-  if (!result.timedOut || !isQueued(decision)) {
+  if (!isRefused(decision)) {
     return;
   }
   throw new BootCapacityExhaustedError(
@@ -163,8 +161,9 @@ export function assertBootCapacityGranted<D extends { outcome: string }>(
       limit: decision.limits.maxBooted,
       booted: decision.bootedCount,
       retryAfterMs: decision.retryAfterMs,
+      ...(decision.externalDevices ? { externalDevices: decision.externalDevices } : {}),
     },
-    `Timed out after ${result.waitedMs}ms waiting for ${noun} capacity (code capacity_exhausted, retryable): ${decision.message}`,
+    `Refused to boot: no ${noun} capacity (code capacity_exhausted, retryable; retry after ${decision.retryAfterMs}ms): ${decision.message}`,
   );
 }
 
@@ -182,7 +181,7 @@ export interface LedgerAdmission {
 
 /**
  * Boots admitted by a gate and not yet visible in the platform listing. Each
- * counts toward the limit, so concurrent waiters cannot all be admitted
+ * counts toward the limit, so concurrent callers cannot all be admitted
  * against one free slot.
  */
 export class BootAdmissionLedger {
@@ -235,6 +234,8 @@ export interface BootCapacitySnapshot {
   booted: number;
   /** Admitted boots not yet visible as booted. */
   inFlight: number;
+  /** Reported only, never a reason to refuse a boot (#11209). iOS only. */
+  hostPressure?: { sustained: boolean; consecutiveSamples: number; memoryPressure: string };
 }
 
 /** Read-only capacity report a gate exposes to listings. */

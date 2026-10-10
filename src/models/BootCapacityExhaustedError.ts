@@ -9,16 +9,18 @@ export interface BootCapacityExhaustedDetails {
   retryable: true;
   /** Suggested wait before retrying the boot. */
   retryAfterMs: number;
-  /** The platform's booted-device limit when the wait ended. */
+  /** The platform's booted-device limit when the boot was refused. */
   limit: number;
   /** Booted devices (including admitted boots in flight) counted against the limit. */
   booted: number;
   platform: Platform;
+  /** Counted devices AutoMobile did not start; present only when there are any. */
+  externalDevices?: string[];
 }
 
 /**
- * A cold boot waited for the boot admission gate until its deadline and the
- * platform never had capacity. Retryable: capacity frees when another device
+ * A cold boot was refused at once because the platform already runs as many
+ * devices as its limit allows. Retryable: capacity frees when another device
  * shuts down, without the caller doing anything.
  */
 export class BootCapacityExhaustedError extends ActionableError {

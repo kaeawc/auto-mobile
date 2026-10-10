@@ -8,11 +8,12 @@ import {
   atCapacityDecision,
   BootAdmissionLedger,
   DEFAULT_ADMISSION_RETRY_AFTER_MS,
-  waitForBootAdmission,
+  admitBootNow,
+  DEFAULT_SAMPLE_TIMEOUT_MS,
   type BootCapacityReporter,
   type BootCapacitySnapshot,
   type LedgerAdmission,
-  type QueuedCapacityDecision,
+  type RefusedCapacityDecision,
 } from "./BootAdmissionGate";
 import {
   ANDROID_EMULATOR_MEMORY_POLICY,
@@ -25,7 +26,7 @@ import {
 export const ANDROID_MAX_BOOTED_ENV = "AUTOMOBILE_ANDROID_MAX_BOOTED";
 
 export interface AndroidBootAdmissionRequest {
-  /** Boot budget: the wait fails with `capacity_exhausted` when no slot frees within it. */
+  /** Boot budget: bounds the capacity sample and the hand-off window. */
   timeoutMs: number;
   signal?: AbortSignal;
   /** The AVD being booted, for logs. */
@@ -40,7 +41,7 @@ export interface AndroidBootAdmissionGateOptions {
 }
 
 /**
- * Queues an Android emulator cold boot while the host already runs as many
+ * Refuses an Android emulator cold boot while the host already runs as many
  * emulators as its derived limit allows (#11181). Every running emulator
  * counts, including ones started outside AutoMobile. Read-only: it never
  * boots, kills or reconfigures an emulator.
@@ -50,6 +51,8 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter {
   private readonly retryAfterMs: number;
   private readonly ledger: BootAdmissionLedger;
   private warnedLimit: string | undefined;
+  /** Serials of emulators this process launched through an admission. */
+  private readonly startedSerials = new Set<string>();
 
   constructor(
     private readonly source: AndroidCapacitySource,
@@ -62,17 +65,17 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter {
   }
 
   /**
-   * Waits until one more emulator fits, then returns the admission that holds
-   * the slot. Rejects with `BootCapacityExhaustedError` when the deadline would
-   * pass first, and with the abort reason when the signal fires.
+   * Returns the admission that holds a slot when one more emulator fits right
+   * now. Rejects at once with `BootCapacityExhaustedError` when the host is at
+   * its limit (no queueing), and with the abort reason when the signal fires.
    */
   async admit(request: AndroidBootAdmissionRequest): Promise<BootAdmission> {
     const deadlineMs = this.timer.now() + request.timeoutMs;
     let admitted: LedgerAdmission | undefined;
-    const result = await waitForBootAdmission<AndroidCapacitySample, AndroidAdmissionDecision>({
+    const result = await admitBootNow<AndroidCapacitySample, AndroidAdmissionDecision>({
       timer: this.timer,
-      deadlineMs,
       signal: request.signal,
+      sampleTimeoutMs: Math.min(request.timeoutMs, DEFAULT_SAMPLE_TIMEOUT_MS),
       label: "Android emulator capacity",
       sample: () => this.source.sample({ signal: request.signal }),
       decide: (sample) => this.decide(sample),
@@ -82,19 +85,19 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter {
       },
     });
     assertBootCapacityGranted(result, "android", "emulator");
-    if (result.waitedMs > 0) {
-      logger.info(
-        `[BootAdmission] admitted cold boot of AVD '${request.avdName}' after waiting ${result.waitedMs}ms for capacity`,
-      );
-    }
     const ledgerAdmission = admitted;
     if (!ledgerAdmission) {
-      // waitForBootAdmission returns without timing out only after calling `admit`.
+      // admitBootNow returns without refusing only after calling `admit`.
       throw new ActionableError(`Boot admission for AVD '${request.avdName}' ended without a slot`);
     }
     return {
       release: ledgerAdmission.release,
-      handOff: (deviceId) => ledgerAdmission.handOff(deviceId, deadlineMs),
+      handOff: (deviceId) => {
+        if (deviceId !== undefined) {
+          this.startedSerials.add(deviceId);
+        }
+        ledgerAdmission.handOff(deviceId, deadlineMs);
+      },
     };
   }
 
@@ -110,13 +113,18 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter {
   }
 
   /** Synchronous so the waiter decides and records its admission without an interleaving. */
-  private decide(sample: AndroidCapacitySample): AndroidAdmissionDecision | QueuedCapacityDecision {
+  private decide(
+    sample: AndroidCapacitySample,
+  ): AndroidAdmissionDecision | RefusedCapacityDecision {
     const limits = this.limitsFor(sample);
     const bootedCount = this.count(sample).effective;
     return (
       atCapacityDecision(bootedCount, limits, this.retryAfterMs, {
         noun: "emulator",
         envName: ANDROID_MAX_BOOTED_ENV,
+        externalDevices: sample.emulatorSerials.filter(
+          (serial) => !this.startedSerials.has(serial),
+        ),
       }) ?? { outcome: "allow", limits, bootedCount }
     );
   }

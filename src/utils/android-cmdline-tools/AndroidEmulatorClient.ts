@@ -247,7 +247,7 @@ interface EmulatorProcessOptions {
   capturePreLaunchDeviceIds?: boolean;
   expectedDeviceId?: string;
   signal?: AbortSignal;
-  /** Waits for capacity before the cold spawn; see {@link AndroidEmulatorLaunchRequest.admitColdBoot}. */
+  /** Takes a capacity slot before the cold spawn (refuses at once at the limit); see {@link AndroidEmulatorLaunchRequest.admitColdBoot}. */
   admitColdBoot?: AdmitColdBoot;
   /** Receives the admission so the launch can free it when it is cancelled. */
   onAdmitted?: (admission: BootAdmission) => void;
@@ -367,7 +367,7 @@ export interface AndroidEmulatorLaunchRequest {
   /**
    * Boot admission (#11181), awaited only on the cold-spawn path: after the
    * in-process join and the already-running/starting adoption checks, so
-   * adopting a running AVD never queues for capacity.
+   * adopting a running AVD is never refused for capacity.
    */
   admitColdBoot?: AdmitColdBoot;
 }

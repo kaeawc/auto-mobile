@@ -707,7 +707,7 @@ does not spend an attempt either way.
 
 ### Boot capacity
 
-Emulator and simulator cold boots wait for host capacity by default (#11181).
+Emulator and simulator cold boots are checked against host capacity by default (#11181).
 Android and iOS each have their own limit: the smaller of half the host RAM
 divided by the per-device memory and half the CPU cores, at least 1. Android
 measures per-emulator memory from the `qemu-system-*` processes (4 GiB when it
@@ -717,24 +717,31 @@ AutoMobile: for Android, the larger of the emulators adb lists and the
 `qemu-system-*` processes on the host, so emulators still booting or on another
 adb server count too.
 
-A boot over the limit waits and checks again every 5 seconds. If no slot frees
-before the boot deadline, it fails with a retryable error:
+Only the device-count limit refuses a boot: iOS host memory/CPU pressure is
+reported (`hostPressure` in the capacity snapshot) but never refuses one.
+
+A boot over the limit is refused at once; it does not queue against the boot
+budget (#11209). It fails with a retryable error whose `retryAfterMs` (a fixed 5
+seconds: capacity frees when another device shuts down, which takes seconds) says
+when to try again. When emulators AutoMobile did not start occupy slots, the
+message lists them and `externalDevices` carries their serials:
 
 ```json
 {
   "success": false,
-  "error": "Timed out after 115000ms waiting for emulator capacity ...",
+  "error": "Refused to boot: no emulator capacity (code capacity_exhausted, retryable; retry after 5000ms): 2 emulator(s) booted; limit is 2 (derived). 1 of them were not started by AutoMobile but still count toward the limit: emulator-5554. Shut one down, raise the limit with AUTOMOBILE_ANDROID_MAX_BOOTED or disable the gate with AUTOMOBILE_BOOT_CAPACITY_GATE=0.",
   "code": "capacity_exhausted",
   "retryable": true,
   "retryAfterMs": 5000,
   "limit": 2,
   "booted": 2,
-  "platform": "android"
+  "platform": "android",
+  "externalDevices": ["emulator-5554"]
 }
 ```
 
-Adopting an emulator or simulator that is already running or starting never
-waits. An admitted boot holds its slot until adb lists the new emulator (or the
+Adopting an emulator or simulator that is already running or starting is never
+refused. An admitted boot holds its slot until adb lists the new emulator (or the
 simulator boot finishes), the launch fails or is cancelled, or the boot deadline
 passes. `listDevices` reports `capacity` per gated platform as
 `{ limit, booted, inFlight }`.

@@ -31,8 +31,9 @@ The limit on concurrently booted simulators is the smaller of a memory budget
 clamped to 1.5-6 GiB, default 3 GiB) and a core budget (cores / 2), at least 1.
 Set `AUTOMOBILE_IOS_SIM_MAX_BOOTED` to override.
 
-Simulator boots wait on this gate by default (#11181); a boot that finds no slot
-before its deadline fails with the retryable `capacity_exhausted` error. See
+Simulator boots go through this gate by default (#11181); a boot that finds the
+platform at its limit fails at once with the retryable `capacity_exhausted` error
+(it is not queued). See
 [Boot capacity](environment-variables.md#boot-capacity) for the opt-out and the
 shared Android gate.
 
@@ -40,13 +41,14 @@ shared Android gate.
 
 - `reuse-warm`: a booted simulator matches the requested device type, runtime and/or profile
   (excluding devices the caller marks busy). Reuse it instead of booting.
-- `queue` with `at-capacity`: the booted count has reached the limit.
-- `queue` with `sustained-pressure`: the host reported memory pressure (warn/critical) or load of
-  at least 1.5 per core for 3 consecutive samples while other simulators are booted.
-- `allow`: a new boot fits. The first boot is never deferred by pressure.
+- `refuse` with `at-capacity`: the booted count has reached the limit.
+- `allow`: a new boot fits. Only the booted-device count limit refuses a boot (#11209); host
+  memory/CPU pressure never does. Memory pressure (warn/critical) or load of at least 1.5 per core
+  for 3 consecutive samples is reported as `hostPressure` in the gate's capacity snapshot
+  (`{ sustained, consecutiveSamples, memoryPressure }`) instead.
 
-`waitForCapacity(request, { deadlineMs, signal })` polls with the injected timer until the
-decision is no longer `queue`, the absolute deadline would be exceeded, or the signal aborts.
+`admitBoot(request, { signal, bootUdid })` takes one sample and decides immediately: an admitted
+boot holds its slot until released, a `refuse` decision becomes `capacity_exhausted`.
 Sampling is single-flight and independent of sessions, device epochs and runner readiness.
 
 ## Surfaces
@@ -54,5 +56,5 @@ Sampling is single-flight and independent of sessions, device epochs and runner 
 - `auto-mobile --cli doctor` (macOS): the "iOS Simulator Fleet Cost" check lists each booted
   simulator's memory, CPU, data size and last boot time, and warns when a new boot would exceed capacity.
 - Daemon-internal: `IosSimCapacityGate` and the optional `IosSimFleetMonitor` in
-  `src/features/iosSimFleet/`. Every simulator boot waits on one process-wide gate and records its
+  `src/features/iosSimFleet/`. Every simulator boot passes through one process-wide gate and records its
   duration via `BootDurationHistory`. The shared admission logic lives in `src/features/bootAdmission/`.

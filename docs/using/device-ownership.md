@@ -205,15 +205,18 @@ kill naming a device the session has left with `session_no_longer_owns_device`
 
 ## Boot capacity
 
-Cold boots wait for host capacity (owner decision 2026-10-09, #11181). Each
+Cold boots are admitted against host capacity (owner decision 2026-10-09,
+#11181, #11209). Each
 platform has its own limit on booted devices: the smaller of half the host RAM
 divided by the measured per-device memory and half the CPU cores, at least 1.
 Every booted emulator or simulator counts, including ones started outside
-AutoMobile. A boot that would go over the limit waits until a device shuts
-down. If no slot frees before the boot deadline, it fails with the retryable
-code `capacity_exhausted`, which carries `retryAfterMs`, `limit`, `booted` and
-`platform`. Adopting an emulator or simulator that is already running never
-waits. `listDevices` reports `capacity` per gated platform as
+AutoMobile. A boot that would go over the limit is not queued: it fails at once
+with the retryable code `capacity_exhausted`, which carries `retryAfterMs`,
+`limit`, `booted`, `platform` and, when emulators AutoMobile did not start occupy
+slots, `externalDevices` (the message names them and the
+`AUTOMOBILE_<PLATFORM>_MAX_BOOTED` / `AUTOMOBILE_BOOT_CAPACITY_GATE=0` escape
+hatches). Adopting an emulator or simulator that is already running never fails
+this way. `listDevices` reports `capacity` per gated platform as
 `{ limit, booted, inFlight }`. See
 [environment variables](environment-variables.md#boot-capacity) for the opt-out
 and the per-platform overrides.

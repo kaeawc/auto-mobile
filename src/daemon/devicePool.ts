@@ -1566,6 +1566,7 @@ export class DevicePool {
 
   private createMissingDevicePort(): MissingDeviceLivenessPoolPort {
     return {
+      noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
       getDevices: () => this.devices,
       getRefreshMissingDeviceMisses: () => this.refreshMissingDeviceMisses,
       getAssignmentMutex: () => this.assignmentMutex,
@@ -1679,6 +1680,7 @@ export class DevicePool {
       {
         getSessionManager: () => this.sessionManager,
         getDaemonSessionId: () => this.daemonSessionId,
+        noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
         getDevice: (id) => this.devices.get(id),
         withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
         withTargetDeviceDiscovery: (options) => this.withTargetDeviceDiscovery(options),
@@ -1779,6 +1781,7 @@ export class DevicePool {
   private createSessionPreservingRecovery(): SessionPreservingRecoveryRunner {
     return new SessionPreservingRecoveryRunner({
       getRecoveringSessionLoss: (id) => this.recoveringSessionLosses.get(id),
+      noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
       startAndroidRecoveryRecord: (id, details, reservations, replace) =>
         this.startAndroidRecoveryRecord(id, details, reservations, replace),
       isAndroidEmulatorActiveRelaunchEligible: (device): device is AndroidEmulatorRecoveryDevice =>
@@ -1965,6 +1968,7 @@ export class DevicePool {
   ): AdbServerResetQuarantine {
     return createAdbServerResetQuarantine(
       {
+        noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
         getAssignmentMutex: () => this.assignmentMutex,
         getDevices: () => this.devices,
         getSessionManager: () => this.sessionManager,
@@ -4199,6 +4203,7 @@ export class DevicePool {
     }
     this.discardReleasedCapture(sessionId, device.id);
     device.sessionId = null;
+    this.notifyDeviceStateChanged(device);
     return true;
   }
 
@@ -4838,6 +4843,7 @@ export class DevicePool {
     // proven. removeDevice requires an unassigned pool entry.
     device.sessionId = null;
     device.status = "idle";
+    this.notifyDeviceStateChanged(device);
     return true;
   }
 
@@ -7765,6 +7771,7 @@ export class DevicePool {
           this.assertDeviceCleanupComplete(deviceId);
           device.sessionId = null;
           device.status = "idle";
+          this.notifyDeviceStateChanged(device);
         }
 
         await this.assignDeviceToBoundSession(device, sessionId, platform, caller, options);

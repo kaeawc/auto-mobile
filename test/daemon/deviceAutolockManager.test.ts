@@ -354,6 +354,54 @@ describe("DeviceAutolockManager", () => {
     sessions.stopCleanupTimer();
   });
 
+  test("an explicit-UUID call from another connection does not take the session (#11164)", async () => {
+    const { manager, sessions, device, devices, setPersistence } = harness();
+    const owned = await manager.autolockDevice(device.id, "android", "mcp-A");
+    const other: PooledDevice = { ...device, id: "emulator-5556", name: "Other", sessionId: null };
+    devices.set(other.id, other);
+    const own = await manager.autolockDevice(other.id, "android", "mcp-B");
+    const persistedOwners: (string | null)[] = [];
+    setPersistence(async (_id, input) => {
+      persistedOwners.push(input.mcpSessionId);
+    });
+
+    await expect(manager.attachExplicitSessionUuidCall(owned!, "mcp-B")).resolves.toBe(
+      "not-attached",
+    );
+
+    expect(manager.captureAutolockSessionForMcpSession("mcp-B")).toBe(own);
+    expect(manager.captureAutolockSessionForMcpSession("mcp-A")).toBe(owned);
+    expect(persistedOwners).toEqual([]);
+    sessions.stopCleanupTimer();
+  });
+
+  test("an explicit-UUID call never flips its own connection's default (#11164)", async () => {
+    const { manager, sessions, device, devices } = harness();
+    const first = await manager.autolockDevice(device.id, "android", "mcp-1");
+    const other: PooledDevice = { ...device, id: "emulator-5556", name: "Other", sessionId: null };
+    devices.set(other.id, other);
+    const second = await manager.autolockDevice(other.id, "android", "mcp-1");
+    const before = manager.captureAutolockSessionForMcpSession("mcp-1");
+
+    await manager.attachExplicitSessionUuidCall(before === first ? second! : first!, "mcp-1");
+
+    expect(manager.captureAutolockSessionForMcpSession("mcp-1")).toBe(before);
+    sessions.stopCleanupTimer();
+  });
+
+  test("an explicit-UUID call adopting an unowned session records pool ownership", async () => {
+    const { manager, sessions, device, events } = harness();
+    const owned = await manager.autolockDevice(device.id, "android", "mcp-A");
+    manager.releaseMcpSessionBindings("mcp-A");
+    events.length = 0;
+
+    await expect(manager.attachExplicitSessionUuidCall(owned!, "mcp-A2")).resolves.toBe("attached");
+
+    expect(events).toContain("ownership");
+    expect(manager.captureAutolockSessionForMcpSession("mcp-A2")).toBe(owned);
+    sessions.stopCleanupTimer();
+  });
+
   test("reconnect restore reattaches an autolock no other connection owns", async () => {
     const { manager, sessions, device } = harness();
     const owned = await manager.autolockDevice(device.id, "android", "mcp-A");

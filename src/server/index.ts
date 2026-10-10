@@ -1626,7 +1626,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         if (tool.requiresDevice && daemonSessionManager && implicitAutolockMcpSessionId) {
           await DaemonState.getInstance()
             .getDevicePool()
-            .attachAutolockSessionToMcpSession(providedSessionUuid, implicitAutolockMcpSessionId);
+            .attachExplicitSessionUuidCall(providedSessionUuid, implicitAutolockMcpSessionId);
         }
       }
       // Wire-boundary output policy: strip the duplicated `structuredContent`

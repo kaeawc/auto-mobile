@@ -1023,6 +1023,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         signal,
         getConnectedPlatforms,
         autolockEnabled,
+        readOnly: isDeviceReadOnlyCall(options, args),
       });
     }
 
@@ -1478,6 +1479,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     signal,
     getConnectedPlatforms,
     autolockEnabled,
+    readOnly,
   }: {
     platform: SomePlatform;
     sessionUuid: string | undefined;
@@ -1486,6 +1488,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     signal: AbortSignal | undefined;
     getConnectedPlatforms: () => Promise<ConnectedPlatformScan>;
     autolockEnabled: boolean;
+    readOnly: boolean;
   }): Promise<void> {
     if (!autolockEnabled) {
       return;
@@ -1510,6 +1513,13 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       return;
     }
 
+    // A read never requires a session (#10970, #11351): it is asked for a deviceId only.
+    if (readOnly) {
+      throw new ActionableError(
+        "Device pool autolock is enabled and multiple devices are available. " +
+          "Provide a deviceId to target a specific device.",
+      );
+    }
     throw new ActionableError(
       "Device pool autolock is enabled and multiple devices are available. " +
         "Call getAndroid or getApple first from this MCP session, or provide the returned sessionUuid (or a deviceId) to target a specific device.",

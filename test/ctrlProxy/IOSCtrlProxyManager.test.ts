@@ -5325,6 +5325,58 @@ describe("IOSCtrlProxyManager", function () {
       }
     });
 
+    test("forceRestart() terminates a stalled runner left on the retired port instead of adopting it as external (#11205)", async function () {
+      // Killing the daemon's xcodebuild leaves the in-simulator runner alive under
+      // launchd_sim. A SIGSTOPped runner keeps its listener on the retired port but
+      // never answers /health; it must be terminated and a fresh runner spawned.
+      const stalledRunner: FakeListeningProcess = {
+        pid: 2223,
+        port: 8765,
+        ppid: 2222,
+        command:
+          "/tmp/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests-Runner",
+        alive: true,
+        ignoreTerm: true,
+      };
+      const launchdSim: FakeListeningProcess = {
+        pid: 2222,
+        port: 0,
+        ppid: 1,
+        command: `launchd_sim ${testDevice.deviceId}`,
+        alive: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [stalledRunner, launchdSim]);
+      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
+      fakeExecutor.setCommandHandler("curl -s", (command) =>
+        createExecResult(
+          fakeExecutor.getSpawnedProcesses().length > 0 && !command.includes(":8765/")
+            ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId })
+            : "",
+          "",
+        ),
+      );
+      fakeTimer.enableAutoAdvance();
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor,
+      );
+      expect(manager.getServicePort()).toBe(8765);
+      spyOn(manager, "stop").mockResolvedValue();
+
+      await manager.forceRestart();
+
+      expect(stalledRunner.alive).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -KILL 2223")).toBe(true);
+      expect(launchdSim.alive).toBe(true);
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
+      expect(manager.getServicePort()).not.toBe(8765);
+      expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({
+        CTRL_PROXY_IOS_PORT: String(manager.getServicePort()),
+      });
+    });
+
     test("start() reclaims a stale daemon-owned xcodebuild even when pgrep finds it", async function () {
       const staleProcess: FakeListeningProcess = {
         pid: 2223,

@@ -466,14 +466,6 @@ data class ShowPrototype(
   val appearance: PrototypeAppearanceOverride? = null,
 ) : WebSocketRequest()
 
-/** What a show takes as the system appearance: the device's own setting, or a fixed mode. */
-@Serializable
-enum class PrototypeAppearanceOverride {
-  @SerialName("device") DEVICE,
-  @SerialName("light") LIGHT,
-  @SerialName("dark") DARK,
-}
-
 @Serializable
 @SerialName("dismiss_prototype")
 data class DismissPrototype(

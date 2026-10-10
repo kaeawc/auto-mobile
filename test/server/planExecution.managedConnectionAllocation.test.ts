@@ -211,4 +211,108 @@ describe("managed connection executePlan device labels (#11397)", () => {
     expect(result).toMatchObject({ success: true, deviceMapping: { A: slotA.deviceId } });
     expect(probed).toEqual([slotA.deviceId]);
   });
+
+  // #11421: the slot session belongs to the connection for its lifetime. Plan auto-release frees
+  // the sessions a plan run owns; a managed connection's slot session is not one of them.
+  describe("the slot session outlives the plan (#11421)", () => {
+    const genericSession = "generic-session";
+    let probed: string[];
+
+    const planOf = (...lines: string[]): string => [...lines, ""].join("\n");
+    const PROBE_PLAN = planOf(
+      "name: slots-probe",
+      "steps:",
+      "  - tool: slotProbe",
+      "    params: {}",
+    );
+    const probe = (sessionUuid: string, mcpSessionId?: string) =>
+      ToolRegistry.getTool("slotProbe")!.handler({
+        platform: "ios",
+        sessionUuid,
+        __mcpSessionId: mcpSessionId,
+      });
+
+    beforeEach(() => {
+      probed = [];
+      ToolRegistry.registerDeviceAware(
+        "slotProbe",
+        "Slot probe",
+        z.object({}).passthrough(),
+        async (device: BootedDevice) => {
+          probed.push(device.deviceId);
+          return { success: true };
+        },
+      );
+    });
+
+    const expectSlotSessionLive = async (): Promise<void> => {
+      expect(sessionManager.getSession(execA)?.assignedDevice).toBe(slotA.deviceId);
+      expect(sessionManager.getSessionForDevice(slotA.deviceId)).toBe(execA);
+      // The next control call on the same connection still runs on the slot device.
+      probed = [];
+      await probe(execA, mcpA);
+      expect(probed).toEqual([slotA.deviceId]);
+    };
+
+    test("a successful plan leaves the slot session and its device with the connection", async () => {
+      const result = await runPlan(PROBE_PLAN);
+
+      expect(result).toMatchObject({ success: true, deviceId: slotA.deviceId });
+      await expectSlotSessionLive();
+    });
+
+    test("a successful single-label plan leaves the slot session with the connection", async () => {
+      const result = await runPlan(
+        planOf(
+          "name: slots-label",
+          "devices:",
+          "  - A",
+          "steps:",
+          "  - tool: slotProbe",
+          "    device: A",
+          "    params: {}",
+        ),
+      );
+
+      expect(result).toMatchObject({ success: true });
+      await expectSlotSessionLive();
+    });
+
+    test("a refused plan leaves the slot session with the connection", async () => {
+      const result = await runPlan(PLAN, { devices: ["A", "B"] });
+
+      expect(result.code).toBe(DEVICE_OUTSIDE_MANAGED_SLOTS_CODE);
+      await expectSlotSessionLive();
+    });
+
+    test("a failed plan leaves the slot session with the connection", async () => {
+      const result = await runPlan(
+        planOf("name: slots-fail", "steps:", "  - tool: noSuchTool", "    params: {}"),
+      );
+
+      expect(result.success).toBe(false);
+      await expectSlotSessionLive();
+    });
+
+    // docs/tools.md (`holdSessionOnFailure` "instead of auto-releasing them") and the
+    // `plan-auto-release` row of docs/using/device-ownership.md: a generic connection's plan
+    // frees its base session and device, whether or not the session existed before the plan.
+    test("a generic connection's session is still auto-released after its plan", async () => {
+      await sessionManager.createSession(genericSession, free.deviceId, "ios");
+      sessionManager.setDeviceReadiness(genericSession, "automationReady");
+      await probe(genericSession);
+
+      const result = await runPlan(PROBE_PLAN, {
+        sessionUuid: genericSession,
+        __mcpSessionId: "mcp-socket-generic",
+      });
+
+      expect(result).toMatchObject({ success: true, deviceId: free.deviceId });
+      expect(probed).toEqual([free.deviceId, free.deviceId]);
+      expect(sessionManager.getSession(genericSession)).toBeFalsy();
+      expect(sessionManager.getSessionForDevice(free.deviceId)).toBeNull();
+      // The managed connection next to it is untouched.
+      expect(sessionManager.getSession(execA)?.assignedDevice).toBe(slotA.deviceId);
+    });
+  });
 });

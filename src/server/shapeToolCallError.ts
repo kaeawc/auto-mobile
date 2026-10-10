@@ -16,6 +16,9 @@ import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import {
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   RetryableDeviceAcquisitionError,
+  SESSION_NO_LONGER_OWNS_DEVICE_CODE,
+  SESSION_REBINDING_CODE,
+  SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
 } from "../daemon/deviceAcquisitionRefusals";
 
 export interface ToolCallErrorContext {
@@ -40,69 +43,77 @@ export function shapeToolCallError(
   const message = safeToolCallErrorMessage(error);
   logger.error(`[${context.source}] Tool call failed: ${context.toolName} - ${message}`);
   return {
-    content: [
-      {
-        type: "text",
-        text:
-          error instanceof TextIndeterminateError
-            ? JSON.stringify({ success: false, error: message, retryable: false })
-            : isMcpQueueTimeoutError(error)
-              ? JSON.stringify({
-                  success: false,
-                  error: message,
-                  code: MCP_QUEUE_TIMEOUT_ERROR_CODE,
-                  retryable: true,
-                })
-              : error instanceof SessionRecoveryAssignmentError
-                ? JSON.stringify({ error: { message, ...error.details } })
-                : isSuspectSessionError(error)
-                  ? JSON.stringify({
-                      error: {
-                        code: DAEMON_SESSION_SUSPECT_CODE,
-                        message,
-                        sessionUuid: error.sessionUuid,
-                        remainingMs: error.remainingMs,
-                        retryable: true,
-                      },
-                    })
-                  : error instanceof InputDeviceOwnedError
-                    ? JSON.stringify({
-                        success: false,
-                        error: message,
-                        code: error.code,
-                        deviceId: error.deviceId,
-                        retryable: false,
-                      })
-                    : error instanceof BootCapacityExhaustedError
-                      ? JSON.stringify({ success: false, error: message, ...error.details })
-                      : error instanceof RetryableDeviceAcquisitionError
-                        ? JSON.stringify({
-                            success: false,
-                            error: message,
-                            code: error.code,
-                            deviceId: error.deviceId,
-                            retryable: true,
-                            retryAfterMs: error.retryAfterMs,
-                          })
-                        : isTerminalForeignOwnedRecoveryError(error)
-                          ? JSON.stringify({
-                              success: false,
-                              error: message,
-                              code: error.code,
-                              deviceId: error.deviceId,
-                              retryable: false,
-                            })
-                          : error instanceof ActionableError && error.containerFailure
-                            ? JSON.stringify({
-                                success: false,
-                                error: message,
-                                containerFailure: error.containerFailure,
-                              })
-                            : `Error: ${message}`,
-      },
-    ],
+    content: [{ type: "text", text: toolCallErrorText(error, message) }],
     isError: true,
   };
+}
+
+function toolCallErrorText(error: unknown, message: string): string {
+  if (error instanceof TextIndeterminateError) {
+    return JSON.stringify({ success: false, error: message, retryable: false });
+  }
+  if (isMcpQueueTimeoutError(error)) {
+    return JSON.stringify({
+      success: false,
+      error: message,
+      code: MCP_QUEUE_TIMEOUT_ERROR_CODE,
+      retryable: true,
+    });
+  }
+  if (error instanceof SessionRecoveryAssignmentError) {
+    return JSON.stringify({ error: { message, ...error.details } });
+  }
+  if (isSuspectSessionError(error)) {
+    return JSON.stringify({
+      error: {
+        code: DAEMON_SESSION_SUSPECT_CODE,
+        message,
+        sessionUuid: error.sessionUuid,
+        remainingMs: error.remainingMs,
+        retryable: true,
+      },
+    });
+  }
+  const refusal = typedRefusalPayload(error);
+  if (refusal) {
+    return JSON.stringify({ success: false, error: message, ...refusal });
+  }
+  if (error instanceof ActionableError && error.containerFailure) {
+    return JSON.stringify({
+      success: false,
+      error: message,
+      containerFailure: error.containerFailure,
+    });
+  }
+  return `Error: ${message}`;
+}
+
+/** The typed fields of a device or session refusal, after `success` and `error`. */
+function typedRefusalPayload(error: unknown): Record<string, unknown> | undefined {
+  if (error instanceof InputDeviceOwnedError || isTerminalForeignOwnedRecoveryError(error)) {
+    return { code: error.code, deviceId: error.deviceId, retryable: false };
+  }
+  if (error instanceof BootCapacityExhaustedError) {
+    return { ...error.details };
+  }
+  if (error instanceof RetryableDeviceAcquisitionError) {
+    return {
+      code: error.code,
+      deviceId: error.deviceId,
+      retryable: true,
+      retryAfterMs: error.retryAfterMs,
+    };
+  }
+  if (isTypedSessionRefusal(error)) {
+    return {
+      code: error.code,
+      sessionUuid: error.sessionUuid,
+      ...(typeof error.deviceId === "string" ? { deviceId: error.deviceId } : {}),
+      retryable: error.retryable,
+      ...(typeof error.retryAfterMs === "number" ? { retryAfterMs: error.retryAfterMs } : {}),
+    };
+  }
+  return undefined;
 }
 
 /**
@@ -136,6 +147,37 @@ function isTerminalForeignOwnedRecoveryError(
     error.name === "SessionRecoveryIdentityLossError" &&
     "code" in error &&
     error.code === DEVICE_OWNED_BY_OTHER_DAEMON_CODE
+  );
+}
+
+/** Session refusals around a kill's terminal release that carry their own wire code. */
+const TYPED_SESSION_REFUSAL_CODES: ReadonlySet<unknown> = new Set([
+  SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
+  SESSION_NO_LONGER_OWNS_DEVICE_CODE,
+  SESSION_REBINDING_CODE,
+]);
+
+/**
+ * A typed session refusal from a kill's terminal release (#11146, #11166, #11189): the session is
+ * being terminally released (not retryable under that UUID), no longer owns the device (not
+ * retryable as-is), or is mid-rebind (retryable after `retryAfterMs`). Matched on its wire `code`
+ * so this module does not import the daemon's session manager.
+ */
+function isTypedSessionRefusal(error: unknown): error is Error & {
+  code: string;
+  sessionUuid: string;
+  deviceId?: unknown;
+  retryable: boolean;
+  retryAfterMs?: unknown;
+} {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    TYPED_SESSION_REFUSAL_CODES.has(error.code) &&
+    "sessionUuid" in error &&
+    typeof error.sessionUuid === "string" &&
+    "retryable" in error &&
+    typeof error.retryable === "boolean"
   );
 }
 

@@ -4,6 +4,9 @@ import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   DEVICE_SHUTTING_DOWN_CODE,
+  SESSION_NO_LONGER_OWNS_DEVICE_CODE,
+  SESSION_REBINDING_CODE,
+  SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
 } from "../daemon/deviceAcquisitionRefusals";
 
 /** Tools that stop a device and therefore accept `force` to override a held-device refusal. */
@@ -45,6 +48,25 @@ export function cliDeviceOwnershipHint(payload: unknown, toolName: string): stri
     return (
       "Hint: the device is being shut down. Re-run the command after the retryAfterMs in the " +
       "error has passed, once the shutdown has finished."
+    );
+  }
+  if (code === SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE) {
+    return (
+      "Hint: this session is being released because its device is being shut down, so its " +
+      "session UUID cannot be used again. Retrying with the same --session-uuid will not " +
+      "succeed; acquire the device again under a new session instead."
+    );
+  }
+  if (code === SESSION_REBINDING_CODE) {
+    return (
+      "Hint: the device's session is moving to another device. Re-run the command after the " +
+      "retryAfterMs in the error has passed, once the rebind has settled."
+    );
+  }
+  if (code === SESSION_NO_LONGER_OWNS_DEVICE_CODE) {
+    return (
+      "Hint: the session no longer holds this device; it was rebound or released. Check who " +
+      "holds the device now with --daemon active-sessions before re-running the command."
     );
   }
   if (code === DEVICE_OWNED_BY_OTHER_DAEMON_CODE) {

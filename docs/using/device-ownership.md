@@ -195,6 +195,14 @@ code (owner decision 2026-10-09, #10982): `device_cleanup_in_progress` while the
 device is still being released (#10960), and `device_owned_by_other_daemon` when
 another daemon holds it. Clients may wait and retry.
 
+A session UUID whose device is being killed is refused with
+`session_terminal_release_in_progress` and `retryable: false` (#11189): the
+UUID ends with that release, so retrying under it cannot succeed. Acquire the
+device again under a new session. A kill that races the session's own rebind is
+refused with `session_rebinding` (`retryable: true`, with `retryAfterMs`), and a
+kill naming a device the session has left with `session_no_longer_owns_device`
+(`retryable: false`; check who holds the device before killing it).
+
 ## Boot capacity
 
 Cold boots wait for host capacity (owner decision 2026-10-09, #11181). Each

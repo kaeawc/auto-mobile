@@ -27,6 +27,28 @@ export const DEVICE_OWNED_BY_OTHER_DAEMON_CODE = "device_owned_by_other_daemon";
  */
 export const DEVICE_SHUTTING_DOWN_CODE = "device_shutting_down";
 
+/**
+ * The session UUID is under a kill's terminal release reservation (#11146), so it cannot be bound,
+ * rebound or reserved again. Unlike `device_shutting_down` it is NOT retryable: the UUID ends with
+ * that release, so only a new session UUID (or nothing, for a second kill) can follow (#11189).
+ */
+export const SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE = "session_terminal_release_in_progress";
+
+/**
+ * A kill's terminal-release reservation named a device the session no longer holds (#11166).
+ * Not retryable as-is: the device's holder changed, so the caller re-checks before killing.
+ */
+export const SESSION_NO_LONGER_OWNS_DEVICE_CODE = "session_no_longer_owns_device";
+
+/**
+ * A kill's terminal-release reservation raced the session's own rebind (#11166). Retryable with a
+ * `retryAfterMs` hint once the rebind settles, but deliberately NOT in
+ * {@link RETRYABLE_DEVICE_ACQUISITION_CODES}: it refuses a destructive shutdown, not an
+ * acquisition, and after the rebind the device may be unowned or held by another session, so the
+ * caller (not a client loop) decides whether to kill again (#11189).
+ */
+export const SESSION_REBINDING_CODE = "session_rebinding";
+
 /** Wire codes of acquisition refusals a client should wait out rather than fail on. */
 export const RETRYABLE_DEVICE_ACQUISITION_CODES: ReadonlySet<string> = new Set([
   DEVICE_CLEANUP_IN_PROGRESS_CODE,

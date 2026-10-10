@@ -1311,20 +1311,13 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // control tool (killDevice, recordSteps) is admitted on the session it names, so it is judged
     // like a device call (#11542); nested internal calls are judged by the same predicate (#11555).
     if (daemonMode && isControlCallOnNamedSession(tool, parsedParams)) {
-      refuseControlOnForeignOwnedSession(
-        name,
-        providedSessionUuid,
-        requestMcpSessionId,
-        parsedParams,
-      );
-      // The session a `device` label resolves to is the one the call runs on (#11542).
-      if (derivedLabelSessionUuid !== providedSessionUuid) {
-        refuseControlOnForeignOwnedSession(
-          name,
-          derivedLabelSessionUuid,
-          requestMcpSessionId,
-          parsedParams,
-        );
+      // The session the call names, and the one a `device` label resolves to, which is the one
+      // the call runs on (#11542). The implicit routing session of a call that names none is not
+      // judged: a connection's bound session reaches here unnamed, and whether a binding another
+      // connection merely declares may drive the session is an open owner question (#11555,
+      // pinned in test/daemon/implicitRoutingForeignOwnedSession.test.ts).
+      for (const sessionUuid of new Set([providedSessionUuid, derivedLabelSessionUuid])) {
+        refuseControlOnForeignOwnedSession(name, sessionUuid, requestMcpSessionId, parsedParams);
       }
     }
 

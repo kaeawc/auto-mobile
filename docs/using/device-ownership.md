@@ -36,7 +36,11 @@ same rule as a direct call from the connection that started it (#11469, #11555).
 [Ownership is cooperative](#ownership-is-cooperative)), but naming a session is
 never use of it: while the owner is connected, no call from another connection
 extends the session's idle window, counts as its liveness, or binds that
-connection to it (#11555). Once the owner has disconnected
+connection to it (#11555). The rule judges the session a call names. A proxy
+started with `--initial-session-uuid` declares that session as its own binding
+and its calls then name none, so they are not judged by this rule; its claim is
+governed by liveness ownership instead (see
+[environment variables](environment-variables.md)). Once the owner has disconnected
 (a finished `--cli` call, for example) another connection may name the session.
 
 Reads stay allowed on any device, whichever session holds it, and need no

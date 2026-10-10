@@ -42,7 +42,9 @@ private func interpolationTokenEnd(_ scalars: [Unicode.Scalar], from start: Int)
         return nil
     }
     var index = start + 2
-    while index < scalars.count, isInterpolationKeyPart(scalars[index]) { index += 1 }
+    while index < scalars.count, isInterpolationKeyPart(scalars[index]) {
+        index += 1
+    }
     return index < scalars.count && scalars[index] == "}" ? index + 1 : nil
 }
 
@@ -59,7 +61,9 @@ private func resolveInterpolation(
     token: String,
     state: [String: JSONValue],
     pager: PagerPosition?
-) -> String {
+)
+    -> String
+{
     if key == "page" || key == "pageCount" {
         guard let pager else { return token }
         return key == "page" ? String(pager.page + 1) : String(pager.count)

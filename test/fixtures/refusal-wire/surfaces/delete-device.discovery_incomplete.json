@@ -1,0 +1,14 @@
+{
+  "surface": "delete-device",
+  "name": "discovery_incomplete",
+  "builder": "typedTeardownRefusal",
+  "payload": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"The managed-slot registry is unreadable (registry locked), so assigned devices cannot be told apart from free ones (code discovery_incomplete); retry shortly.\",\"mode\":\"destroy\",\"state\":\"failed\",\"target\":{\"stableId\":\"Pixel_8_API_35\",\"platform\":\"android\",\"isVirtual\":true},\"failure\":{\"retryable\":true,\"retryAfterMs\":2000,\"code\":\"discovery_incomplete\",\"phase\":\"precondition\",\"message\":\"The managed-slot registry is unreadable (registry locked), so assigned devices cannot be told apart from free ones (code discovery_incomplete); retry shortly.\"}}"
+      }
+    ]
+  }
+}

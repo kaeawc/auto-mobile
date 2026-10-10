@@ -132,6 +132,7 @@ import {
 import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
 import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
 import { refuseControlOnForeignOwnedSession } from "./foreignOwnedSessionRefusal";
+import { nonBlankSessionUuid } from "./planCallerIdentity";
 import { deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
 import { getAbortSignal, isClientCancelled, runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -848,16 +849,24 @@ function isDeviceHeld(deviceId: string): boolean {
 function adoptHolderConnectionSession(args: Record<string, unknown>): void {
   if (
     typeof args.deviceId !== "string" ||
-    args.sessionUuid !== undefined ||
+    nonBlankSessionUuid(args.sessionUuid) !== undefined ||
     args.device !== undefined ||
-    typeof args.__mcpSessionId !== "string" ||
     !DaemonState.getInstance().isInitialized()
   ) {
     return;
   }
+  // #11469: a plan step or nested call carries no socket identity of its own; it runs for the
+  // connection of the call that started it.
+  const mcpSessionId =
+    typeof args.__mcpSessionId === "string"
+      ? args.__mcpSessionId
+      : getToolSelectionContext()?.callerMcpSessionId;
+  if (!mcpSessionId) {
+    return;
+  }
   const holderSessionUuid = DaemonState.getInstance()
     .getDevicePool()
-    .resolveOwnedDeviceSessionForMcpSession(args.__mcpSessionId, args.deviceId);
+    .resolveOwnedDeviceSessionForMcpSession(mcpSessionId, args.deviceId);
   if (!holderSessionUuid) {
     return;
   }
@@ -2340,6 +2349,19 @@ function withItemsEnum(
   };
 }
 
+/**
+ * #11469: a blank `sessionUuid` names no session. Dropped before target resolution so a blank
+ * plan session neither masks the ambient routing session nor reaches the plan's steps as one.
+ */
+function withoutBlankSessionUuid(args: Record<string, unknown>): Record<string, unknown> {
+  if (typeof args.sessionUuid !== "string" || nonBlankSessionUuid(args.sessionUuid)) {
+    return args;
+  }
+  const rest = { ...args };
+  delete rest.sessionUuid;
+  return rest;
+}
+
 function deviceAwareHandlerArgs(
   args: Record<string, unknown>,
   options: DeviceAwareToolOptions,
@@ -2353,7 +2375,11 @@ function deviceAwareHandlerArgs(
     !args.sessionUuid
       ? undefined
       : context?.routingSessionUuid;
-  const handlerArgs = withAmbientDeviceContext(args, routingSession, context?.execution);
+  const handlerArgs = withAmbientDeviceContext(
+    withoutBlankSessionUuid(args),
+    nonBlankSessionUuid(routingSession),
+    context?.execution,
+  );
   if (name === "tapAt") {
     handlerArgs.__tapAtRecordingContext = handlerArgs.__tapAtPlanContext ?? {};
   }
@@ -2486,31 +2512,30 @@ async function assertManagedSlotControlAccess(input: {
 /**
  * #11469: an internal call (plan step, nested tool) runs for the connection of the call that
  * started it, so a session the call itself names is judged by the owner rule a direct call from
- * that connection gets at the MCP ingress (#11344), before any bind, device move or input. The
- * plan's own session and the ambient routing session replace whatever a step names and were
- * judged when the enclosing call was admitted; reads and acquisitions are never refused. A call
- * with no originating connection (daemon housekeeping, a direct-mode server) carries no identity
- * and is left to the device-holder check.
+ * that connection gets at the MCP ingress (#11344), before any bind, device move or input. A
+ * plan's own session or the ambient routing session that actually replaced the named one was
+ * judged when the enclosing call was admitted, so the check is skipped only when the session the
+ * call runs on differs from the one it named; a blank plan session replaces nothing. Reads and
+ * acquisitions are never refused. A call with no originating connection (daemon housekeeping, a
+ * direct-mode server) carries no identity and is left to the device-holder check.
  */
 function refuseInternalControlOnForeignOwnedSession(
   tool: RegisteredTool,
-  args: Record<string, unknown>,
-  options: InternalToolCallOptions,
+  namedSessionUuid: string | undefined,
+  invocation: { args: Record<string, unknown>; routingSessionUuid?: string },
 ): void {
-  const context = getToolSelectionContext();
-  const callerMcpSessionId = context?.callerMcpSessionId;
+  const callerMcpSessionId = getToolSelectionContext()?.callerMcpSessionId;
   if (
     !callerMcpSessionId ||
-    options.sessionUuid !== undefined ||
-    context?.routingSessionUuid !== undefined ||
-    typeof args.sessionUuid !== "string" ||
+    namedSessionUuid === undefined ||
+    invocation.routingSessionUuid !== namedSessionUuid ||
     !tool.requiresDevice ||
     isDeviceSessionAcquisitionTool(tool.name) ||
-    tool.isDeviceReadOnlyCall?.(args) === true
+    tool.isDeviceReadOnlyCall?.(invocation.args) === true
   ) {
     return;
   }
-  refuseControlOnForeignOwnedSession(tool.name, args.sessionUuid, callerMcpSessionId);
+  refuseControlOnForeignOwnedSession(tool.name, namedSessionUuid, callerMcpSessionId);
 }
 
 /**
@@ -3108,7 +3133,11 @@ export class ToolRegistryClass {
     }
     const invocation = this.createInternalToolInvocationContext(args, options);
     assertInternalCallWithinManagedSlots(resolved.name, invocation);
-    refuseInternalControlOnForeignOwnedSession(resolved, invocation.args, options);
+    refuseInternalControlOnForeignOwnedSession(
+      resolved,
+      nonBlankSessionUuid(args.sessionUuid),
+      invocation,
+    );
 
     return runWithToolSelectionContext(invocation, () =>
       runWithPostActionCaptureScope(
@@ -3143,10 +3172,11 @@ export class ToolRegistryClass {
     // An internal call inherits the ambient ROUTING session (issue #4611 Gap C)
     // so a plan step or navigation replay routes to the same derived/label
     // session the outer call resolved to, not the base session.
+    // A blank session names none (#11469), so it never replaces the one below it.
     const sessionUuid =
-      options.sessionUuid ??
-      context?.routingSessionUuid ??
-      (typeof args.sessionUuid === "string" ? args.sessionUuid : undefined);
+      nonBlankSessionUuid(options.sessionUuid) ??
+      nonBlankSessionUuid(context?.routingSessionUuid) ??
+      nonBlankSessionUuid(args.sessionUuid);
     return {
       args: sessionUuid && args.sessionUuid !== sessionUuid ? { ...args, sessionUuid } : args,
       routingSessionUuid: sessionUuid,

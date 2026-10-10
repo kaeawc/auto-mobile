@@ -228,6 +228,144 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
     });
   });
 
+  describe("a blank plan session names no session", () => {
+    const OWN_SESSION = "sess-b";
+    const tapOnHeld: PlanStep = {
+      tool: "tapAt",
+      params: { x: 10, y: 10, sessionUuid: SESSION, deviceId: held.deviceId },
+    };
+    const runWithPlanSession = (
+      step: PlanStep,
+      planSessionUuid: string,
+      ambientSessionUuid?: string,
+    ): Promise<StepExecutionResult> =>
+      runWithToolSelectionContext(
+        {
+          ...planCallerContext({ [INTERNAL_MCP_SESSION_PARAM]: OTHER }),
+          routingSessionUuid: ambientSessionUuid,
+        },
+        () =>
+          executor.executeStep(step, {
+            logPrefix: "[plan]",
+            platform: "android",
+            sessionUuid: planSessionUuid,
+          }),
+      );
+
+    for (const [name, blank] of [
+      ["empty", ""],
+      ["whitespace-only", "  \t"],
+    ] as const) {
+      test(`an ${name} plan session does not exempt a step naming a foreign session`, async () => {
+        const result = await runWithPlanSession(tapOnHeld, blank);
+
+        expect(result.status).toBe("failed");
+        expect(refusalCode(result)).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+        expect(tools.runs).toEqual([]);
+      });
+
+      test(`an ${name} plan session keeps the connection's ambient session override`, async () => {
+        await pool.bindOrReuseDeviceSession(OWN_SESSION, free.deviceId, "android");
+
+        const result = await runWithPlanSession(tap, blank, OWN_SESSION);
+
+        expect(result.status).toBe("completed");
+        expect(tools.runs).toEqual([
+          { name: "tapAt", deviceId: free.deviceId, sessionUuid: OWN_SESSION },
+        ]);
+      });
+
+      test(`a device-aware call with an ${name} sessionUuid runs on the ambient session`, async () => {
+        await pool.bindOrReuseDeviceSession(OWN_SESSION, free.deviceId, "android");
+
+        await runWithToolSelectionContext({ routingSessionUuid: OWN_SESSION }, () =>
+          tools.call("tapAt", { x: 10, y: 10, sessionUuid: blank }),
+        );
+
+        expect(tools.runs).toEqual([
+          { name: "tapAt", deviceId: free.deviceId, sessionUuid: OWN_SESSION },
+        ]);
+      });
+    }
+  });
+
+  describe("a step naming only a device", () => {
+    const tapOnDevice: PlanStep = {
+      tool: "tapAt",
+      params: { x: 10, y: 10, deviceId: held.deviceId },
+    };
+
+    test("in the holder's own plan runs as the holder's session", async () => {
+      const result = await runStep(tapOnDevice, OWNER);
+
+      expect(result.status).toBe("completed");
+      expect(tools.runs).toEqual([
+        { name: "tapAt", deviceId: held.deviceId, sessionUuid: SESSION },
+      ]);
+    });
+
+    test("in another connection's plan is refused, typed", async () => {
+      const result = await runStep(tapOnDevice, OTHER);
+
+      expect(result.status).toBe("failed");
+      expect(refusalCode(result)).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(tools.runs).toEqual([]);
+    });
+  });
+
+  /**
+   * Explore, NavigateTo and DefaultUIStateSetup replay actions through `ToolRegistry.callInternal`
+   * / `callInternalTyped` by tool name, naming the session they were built with. These are those
+   * call shapes at the seam; the feature classes themselves are not driven here.
+   */
+  describe("a nested call made while serving a connection", () => {
+    const nested = (run: () => Promise<unknown>, connection: string): Promise<unknown> =>
+      runWithToolSelectionContext(
+        planCallerContext({ [INTERNAL_MCP_SESSION_PARAM]: connection }),
+        run,
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    const pressBack = () =>
+      ToolRegistry.callInternal("pressButton", {
+        button: "back",
+        platform: "android",
+        deviceId: held.deviceId,
+        sessionUuid: SESSION,
+      });
+    const swipe = () =>
+      ToolRegistry.callInternalTyped("swipeOn", {
+        direction: "up",
+        platform: "android",
+        sessionUuid: SESSION,
+      });
+
+    test("naming a foreign session is refused, by name or typed", async () => {
+      for (const call of [pressBack, swipe]) {
+        const error = (await nested(call, OTHER)) as InputDeviceOwnedError | undefined;
+
+        expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      }
+      expect(tools.runs).toEqual([]);
+    });
+
+    test("naming the connection's own session runs", async () => {
+      expect(await nested(pressBack, OWNER)).toBeUndefined();
+      expect(tools.runs).toEqual([
+        { name: "pressButton", deviceId: held.deviceId, sessionUuid: SESSION },
+      ]);
+    });
+
+    test("with no originating connection keeps today's behaviour", async () => {
+      await pressBack();
+
+      expect(tools.runs).toEqual([
+        { name: "pressButton", deviceId: held.deviceId, sessionUuid: SESSION },
+      ]);
+    });
+  });
+
   test("a step cannot name its own connection: plan content never supplies the identity", async () => {
     const forged: PlanStep = {
       tool: "tapAt",

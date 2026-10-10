@@ -527,7 +527,14 @@ export class DefaultPlanStepExecutor<
     }
   }
 
-  async executeStep(step: PlanStep, context: StepExecutionContext): Promise<StepExecutionResult> {
+  async executeStep(
+    step: PlanStep,
+    planContext: StepExecutionContext,
+  ): Promise<StepExecutionResult> {
+    // A blank plan session is no session (#11469): it must not replace the one a step names.
+    const context = planContext.sessionUuid?.trim()
+      ? planContext
+      : { ...planContext, sessionUuid: undefined };
     const tool = this.tools.getToolForPlan(step.tool);
     if (!tool) {
       const error = `Unknown tool: ${step.tool}`;

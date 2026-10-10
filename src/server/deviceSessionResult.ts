@@ -92,7 +92,7 @@ export function managedExecutionEndedPayload({
 }: {
   sessionUuid?: string;
   reason: string;
-  slot?: Pick<ManagedSlotResultEntry, "slotIndex" | "role" | "assignmentGeneration"> | null;
+  slot?: Pick<ManagedSlotResultEntry, "slotIndex" | "assignmentGeneration"> | null;
 }) {
   return {
     error: {
@@ -108,7 +108,6 @@ export function managedExecutionEndedPayload({
       ...(slot
         ? {
             slotIndex: slot.slotIndex,
-            role: slot.role,
             assignmentGeneration: slot.assignmentGeneration,
           }
         : {}),

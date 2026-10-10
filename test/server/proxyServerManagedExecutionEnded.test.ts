@@ -156,3 +156,27 @@ test("a successful result on a managed connection passes through unchanged", asy
   const { text } = await callThrough(readyManagedSlotsResult(SESSION), { returns: ok });
   expect(text).toBe('{"success":true}');
 });
+
+test("a read still succeeds after the release, and the refusal carries no role", async () => {
+  const { server, proxy, registrations } = createHarness(readyManagedSlotsResult(SESSION));
+  const ok: CallToolResult = { content: [{ type: "text", text: '{"hierarchy":[]}' }] };
+  const call = spyOn(proxy, "callTool")
+    .mockRejectedValueOnce(new DaemonBoundSessionExpiredError(SESSION, "idle-timeout"))
+    .mockResolvedValue(ok);
+  try {
+    const handler = registrations.find(([schema]) => schema === CallToolRequestSchema)?.[1];
+    if (!handler) {
+      throw new Error("Missing handler");
+    }
+    const refused = await handler({ method: "tools/call", params: { name: "tapOn" } }, extra);
+    const read = await handler({ method: "tools/call", params: { name: "observe" } }, extra);
+    expect(refused.isError).toBe(true);
+    expect(JSON.parse(refused.content[0].text).error).not.toHaveProperty("role");
+    expect(read.isError).toBeUndefined();
+    expect(read.content[0].text).toBe('{"hierarchy":[]}');
+  } finally {
+    call.mockRestore();
+    await server.close();
+    await proxy.close();
+  }
+});

@@ -142,7 +142,7 @@ acquisitions as anonymous (#11096):
   acquires devices, so after its execution's session is released it answers
   `managed_execution_ended` instead: `retryable: false`,
   `nextAction: "relaunch_execution"`, the release `reason`, and the slot's
-  `slotIndex`, `role` and `assignmentGeneration`. It names no recovery tools; the
+  `slotIndex` and `assignmentGeneration`. It names no recovery tools; the
   runner decides whether to relaunch the execution (#11341).
 - Booted-device discovery that did not complete (adb or simctl failed, or a
   running emulator's AVD identity has not resolved) is refused with the retryable

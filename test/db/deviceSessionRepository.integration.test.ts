@@ -197,7 +197,7 @@ describe("DeviceSessionRepository", () => {
         "expired",
         10_000,
         "expired",
-        { expectedRowGeneration: 0, onlyIfRecoverable: true },
+        { expectedRowGeneration: 0, onlyIfRecoverable: true, onlyIfExpiredAtMs: 10_000 },
       );
       expect(await repo.getSession("remaining-expired")).toMatchObject({ status: "expired" });
     } finally {

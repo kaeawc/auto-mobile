@@ -1021,11 +1021,19 @@ async function handleReleaseSession(
   return releaseBoundSession(state, manager, sessionId, session, executions);
 }
 
-const releaseExecutionParams = z.object({ sessionId: z.string().trim().min(1) });
+const releaseExecutionParams = z.object({
+  sessionId: z.string().trim().min(1),
+  livenessOwnerToken: z.string().trim().min(1),
+});
 
 /**
  * End a managed slot execution (#11177): drain its work, release its live control, keep its slot's
  * device assignment. Idempotent: a repeated or late call reports the current settlement.
+ *
+ * Only the session's current liveness owner may end it (#11232): a proxy that lost its session to a
+ * successor (same UUID, a different owner token) and is shutting down must not release the
+ * successor's execution. A session with no recorded owner, or one no longer live, is released or
+ * reported as before.
  */
 async function handleReleaseExecution(
   request: DaemonRequest,
@@ -1033,13 +1041,24 @@ async function handleReleaseExecution(
 ): Promise<DaemonMethodResult> {
   const parsed = releaseExecutionParams.safeParse(request.params);
   if (!parsed.success) {
-    return { success: false, error: "sessionId parameter required" };
+    return { success: false, error: "sessionId and livenessOwnerToken parameters required" };
   }
   const drain = state.getManagedExecutionRelease?.();
   if (!drain) {
     return { success: false, error: "Managed execution release is not available in this daemon" };
   }
-  const result = await drain.releaseExecution(parsed.data.sessionId);
+  const { sessionId, livenessOwnerToken } = parsed.data;
+  const owner = state.getSessionManager().getSession(sessionId)?.livenessOwnerToken;
+  if (owner && owner !== livenessOwnerToken) {
+    return {
+      success: false,
+      code: DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE,
+      error:
+        `Session ${sessionId}'s managed execution can only be released by its current liveness ` +
+        "owner; nothing changed.",
+    };
+  }
+  const result = await drain.releaseExecution(sessionId);
   return { success: true, result: { ...result } };
 }
 

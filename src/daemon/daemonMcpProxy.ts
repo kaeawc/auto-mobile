@@ -1607,7 +1607,8 @@ export class DaemonMcpProxy {
         try {
           const result: unknown = await client.callDaemonMethod(
             DAEMON_RELEASE_EXECUTION_METHOD,
-            { sessionId },
+            // The daemon refuses a release by anyone but the session's current owner (#11232).
+            { sessionId, livenessOwnerToken: this.livenessOwnerToken },
             { timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS },
           );
           logManagedExecutionReleaseOutcome(sessionId, result);

@@ -113,7 +113,7 @@ class HeldDeviceWaitingMCPClientTest {
     val delegate = ScriptedClient(mutableListOf({ "ok" }, refusal("device_owned_by_other_session")))
     val client = client(delegate)
 
-    assertEquals("ok", client.callTool("observe", emptyMap()))
+    assertEquals("ok", client.callTool("tapOn", emptyMap()))
     try {
       client.callTool("tapOn", emptyMap())
       fail("a later refusal is not waited for")
@@ -186,6 +186,36 @@ class HeldDeviceWaitingMCPClientTest {
     try {
       client(delegate).callTool("tapOn", emptyMap())
       fail("expected failure")
+    } catch (_: RuntimeException) {}
+    assertTrue(sleeps.isEmpty())
+  }
+
+  @Test
+  fun `a successful read does not confirm the device for the control call that follows`() {
+    val delegate =
+      ScriptedClient(
+        mutableListOf(
+          { "observed" },
+          fixtureRefusal("device_owned_by_other_session"),
+          { "tapped" },
+        ),
+      )
+    val client = client(delegate)
+
+    assertEquals("observed", client.callTool("observe", emptyMap()))
+    assertEquals("tapped", client.callTool("tapOn", emptyMap()))
+    assertEquals(listOf(500L), sleeps)
+  }
+
+  @Test
+  fun `a successful lifecycle call confirms the device`() {
+    val delegate = ScriptedClient(mutableListOf({ "ok" }, fixtureRefusal("capacity_exhausted")))
+    val client = client(delegate)
+
+    assertEquals("ok", client.callTool("launchApp", emptyMap()))
+    try {
+      client.callTool("tapOn", emptyMap())
+      fail("a later refusal is not waited for")
     } catch (_: RuntimeException) {}
     assertTrue(sleeps.isEmpty())
   }

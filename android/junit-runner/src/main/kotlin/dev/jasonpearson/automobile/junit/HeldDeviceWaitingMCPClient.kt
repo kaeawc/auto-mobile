@@ -9,8 +9,9 @@ package dev.jasonpearson.automobile.junit
  * session` (or `device_cleanup_in_progress` while the daemon is still releasing it). This is the
  * same held-device wait [AutoMobilePlanExecutor] applies to `executePlan`: exponential sleeps
  * within [AutoMobilePlanExecutor.deviceOwnedWaitBudgetMs], cancellable (an interrupt ends the
- * wait), never an exception that skips the bound. Once any call succeeds the device is ours and
- * calls pass straight through.
+ * wait), never an exception that skips the bound. Once a control or lifecycle call succeeds the
+ * device is ours and calls pass straight through; a successful read proves nothing about ownership
+ * (reads are never refused and never hold a device), so it confirms nothing.
  *
  * Whether a refusal is waited on is decided by [AutoMobilePlanExecutor.classifyRefusalText], the
  * same typed-field rule the `executePlan` loop uses, and its `retryAfterMs` lengthens the step
@@ -47,7 +48,7 @@ internal class HeldDeviceWaitingMCPClient(
     while (true) {
       try {
         val result = delegate.callTool(toolName, parameters)
-        deviceConfirmed = true
+        if (toolName !in READ_ONLY_TOOLS) deviceConfirmed = true
         return result
       } catch (error: RuntimeException) {
         val message = error.message.orEmpty()
@@ -72,5 +73,14 @@ internal class HeldDeviceWaitingMCPClient(
         waitedMs += delayMs
       }
     }
+  }
+
+  private companion object {
+    /**
+     * Tools that only read. The daemon publishes no read-only metadata (`tool-definitions.json` has
+     * none), so this is the one small set of read tools the recovery surface exposes: `observe`,
+     * and `waitFor`, which only polls it.
+     */
+    val READ_ONLY_TOOLS = setOf("observe", "waitFor")
   }
 }

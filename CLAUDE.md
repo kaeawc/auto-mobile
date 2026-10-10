@@ -148,7 +148,7 @@ oxlint's `--type-aware` rules).
 
 Bun's bundler skips type-checking, so `build`/`test` do NOT catch type errors.
 A scoped gate (issue #3001) runs `tsgo --noEmit` and fails CI only on errors NOT
-already in the committed baseline (`scripts/typecheck-baseline.txt`, ~185
+already in the committed baseline (`scripts/typecheck-baseline.txt`, 6
 tolerated errors):
 
 ```bash

@@ -59,6 +59,7 @@ import {
   DEFAULT_PROVISION_DEVICE_RETRYABILITY,
   type ProvisionDeviceFailureCode,
 } from "../../src/devices/exactDeviceProvisioning";
+import { AppNotRunningError } from "../../src/models/AppNotRunningError";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { logger } from "../../src/utils/logger";
 
@@ -188,6 +189,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     "device_owned_by_other_session",
     "deviceAssignedToOtherSessionError via shapeToolCallError",
     () => shaped(deviceAssignedToOtherSessionError(DEVICE, "holder-session", SESSION)),
+  ],
+  [
+    "app_not_running",
+    "AppNotRunningError via shapeToolCallError",
+    () => shaped(new AppNotRunningError("com.example.app", DEVICE)),
   ],
   [
     "device_owned_by_other_daemon",

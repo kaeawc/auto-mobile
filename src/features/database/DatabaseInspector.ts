@@ -6,6 +6,7 @@ import { shellQuote } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { ProviderUnavailableError } from "../storage/ProviderUnavailableError";
 import { parseJsonKeepingBigIntegers } from "./bigIntegerJson";
+import { AppNotRunningError } from "../../models/AppNotRunningError";
 
 /**
  * Database descriptor returned from listDatabases
@@ -103,6 +104,11 @@ export class DatabaseInspector {
     private device: BootedDevice,
     private adb: AdbExecutor,
     private timer: Pick<Timer, "sleep"> = defaultTimer,
+    /**
+     * True when the reader is not the holder of a device another session holds. Such a read must
+     * not start a dead app's process, so it is refused with `app_not_running` (#11350).
+     */
+    private isNonOwnerReaderOfHeldDevice: () => boolean = () => false,
   ) {}
 
   /**
@@ -191,6 +197,10 @@ export class DatabaseInspector {
 
     // Read before the call: the call itself starts a dead app's process.
     const wasRunning = await this.isAppProcessRunning(appId);
+    if (!wasRunning && this.isNonOwnerReaderOfHeldDevice()) {
+      // Starting the process is a control action on the holder's device (#11350).
+      throw new AppNotRunningError(appId, this.device.deviceId);
+    }
     try {
       return await this.runContentCall<T>(cmd);
     } catch (error) {

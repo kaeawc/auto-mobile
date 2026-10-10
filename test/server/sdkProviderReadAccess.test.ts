@@ -1,0 +1,65 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { BootedDevice } from "../../src/models";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import { isNonOwnerReaderOfHeldDevice } from "../../src/server/sdkProviderReadAccess";
+
+describe("isNonOwnerReaderOfHeldDevice (#11350)", () => {
+  const device: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
+  let sessionManager: SessionManager;
+
+  beforeEach(async () => {
+    const timer = new FakeTimer();
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const deviceUtils = new FakeDeviceUtils();
+    deviceUtils.setBootedDevices("android", [device]);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer,
+        deviceManager: deviceUtils,
+      }),
+    );
+    await pool.initializeWithDevices([device]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+  });
+
+  afterEach(() => {
+    DaemonState.getInstance().reset();
+    sessionManager.stopCleanupTimer();
+  });
+
+  const readAs = (routingSessionUuid: string) =>
+    runWithToolSelectionContext({ routingSessionUuid }, async () =>
+      isNonOwnerReaderOfHeldDevice(device.deviceId),
+    );
+
+  test("a free device has no non-owner reader", () => {
+    expect(isNonOwnerReaderOfHeldDevice(device.deviceId)).toBe(false);
+  });
+
+  test("a sessionless reader of a held device is a non-owner", async () => {
+    await sessionManager.createSession("holder", device.deviceId, "android");
+    expect(isNonOwnerReaderOfHeldDevice(device.deviceId)).toBe(true);
+  });
+
+  test("another session reading a held device is a non-owner", async () => {
+    await sessionManager.createSession("holder", device.deviceId, "android");
+    expect(await readAs("watcher")).toBe(true);
+  });
+
+  test("the holder and its derived label session are owners", async () => {
+    await sessionManager.createSession("holder", device.deviceId, "android");
+    expect(await readAs("holder")).toBe(false);
+  });
+
+  test("an uninitialized daemon keeps today's behaviour", () => {
+    DaemonState.getInstance().reset();
+    expect(isNonOwnerReaderOfHeldDevice(device.deviceId)).toBe(false);
+  });
+});

@@ -15,6 +15,7 @@ import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
 import { recoveryIdentityLoss, recoveryIdentityLossPayload } from "./deviceSessionResult";
 import { DeviceOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
+import { AppNotRunningError } from "../models/AppNotRunningError";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import {
   DeviceAssignedToManagedSlotError,
@@ -123,12 +124,14 @@ function hasSelfDescribedRefusalPayload(
   | DeviceOutsideManagedSlotsError
   | DeviceOutsideBoundSessionError
   | InputDeviceOwnedError
+  | AppNotRunningError
   | ManagedSlotDiscoveryIncompleteError {
   return (
     error instanceof DeviceAssignedToManagedSlotError ||
     error instanceof DeviceOutsideManagedSlotsError ||
     error instanceof DeviceOutsideBoundSessionError ||
     error instanceof InputDeviceOwnedError ||
+    error instanceof AppNotRunningError ||
     error instanceof ManagedSlotDiscoveryIncompleteError
   );
 }

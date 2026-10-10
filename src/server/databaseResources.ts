@@ -9,6 +9,7 @@ import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import type { TableDataResult } from "../features/database/DatabaseInspector";
+import { isNonOwnerReaderOfHeldDevice } from "./sdkProviderReadAccess";
 import { optionalInteger } from "./queryParamValidation";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 import { ActionableError } from "../models/ActionableError";
@@ -132,7 +133,9 @@ async function iosStorageRequest<T>(request: () => Promise<T>): Promise<T> {
 function createDatabaseClient(device: BootedDevice): AppDatabaseClient {
   if (device.platform === "android") {
     const adb = defaultAdbClientFactory.create(device);
-    return new DatabaseInspector(device, adb);
+    return new DatabaseInspector(device, adb, undefined, () =>
+      isNonOwnerReaderOfHeldDevice(device.deviceId),
+    );
   }
 
   if (device.platform === "ios") {

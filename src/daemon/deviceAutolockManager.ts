@@ -91,7 +91,8 @@ export interface DeviceAutolockPoolPort {
     create: () => Promise<Session>,
   ): Promise<Session>;
   stableDeviceIdFor(device: PooledDevice): string | undefined;
-  recordMcpSessionOwnership(client: string, session: string): void;
+  /** Records the owner unless its connection closed mid-acquire; false means not recorded. */
+  recordBindOwnership(client: string, session: string): boolean;
   restoreSessionAssignment(device: PooledDevice, snapshot: SessionAssignmentSnapshot): void;
   isSessionAssignmentCurrent(device: PooledDevice, session: Session): boolean;
   getPooledSessionIdentity(device: PooledDevice): Session | undefined;
@@ -311,12 +312,13 @@ export class DeviceAutolockManager {
     // skip) setup. The setter is monotonic, so recording here is safe even for
     // a restored session that already reached a higher level.
     this.pool.getSessionManager().setDeviceReadiness(sessionId, achievedReadiness);
-    if (mcpSessionId) {
+    // A connection that closed mid-acquire already had its bindings released: publishing its
+    // routes now would leave a dead owner that suppresses the owner-disconnect release (#11166).
+    if (mcpSessionId && this.pool.recordBindOwnership(mcpSessionId, sessionId)) {
       this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
       const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
       acquired.add(sessionId);
       this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
-      this.pool.recordMcpSessionOwnership(mcpSessionId, sessionId);
     }
     await this.persistAcquiredAutolockSession(
       device,

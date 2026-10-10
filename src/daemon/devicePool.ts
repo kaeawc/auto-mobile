@@ -1616,8 +1616,7 @@ export class DevicePool {
         createSessionOrRestore: (device, snapshot, create) =>
           this.createSessionOrRestore(device, snapshot, create),
         stableDeviceIdFor: (device) => this.stableDeviceIdFor(device),
-        recordMcpSessionOwnership: (client, session) =>
-          this.recordMcpSessionOwnership(client, session),
+        recordBindOwnership: (client, session) => this.recordBindOwnership(client, session),
         restoreSessionAssignment: (device, snapshot) =>
           this.restoreSessionAssignment(device, snapshot),
         isSessionAssignmentCurrent: (device, session) =>
@@ -7795,12 +7794,13 @@ export class DevicePool {
    * Record a bind's caller as the session's owner, unless that connection closed while the bind
    * was in flight (#11146): its bindings were already released, so it would stay a dead owner and
    * suppress the owner-disconnect release (#10503). Then the session is ownerless, so arm that
-   * release instead, exactly as the close would have for an owner recorded in time.
+   * release instead, exactly as the close would have for an owner recorded in time. Returns
+   * whether the owner was recorded; autolock acquisition publishes its routes only then (#11166).
    */
-  private recordBindOwnership(mcpSessionId: string | undefined, sessionId: string): void {
+  private recordBindOwnership(mcpSessionId: string | undefined, sessionId: string): boolean {
     if (!mcpSessionId || !this.mcpBindsInFlight.get(mcpSessionId)?.closed) {
       this.recordMcpSessionOwnership(mcpSessionId, sessionId);
-      return;
+      return true;
     }
     logger.info(
       `[DevicePool] MCP connection ${mcpSessionId} closed while binding session ${sessionId}; not recording it as owner`,
@@ -7808,6 +7808,7 @@ export class DevicePool {
     if (!this.hasConnectedMcpSessionOwner(sessionId)) {
       this.ownerDisconnectRelease.ownerDisconnected(sessionId, mcpSessionId);
     }
+    return false;
   }
 
   private recordMcpSessionOwnership(mcpSessionId: string | undefined, sessionId: string): void {
@@ -7985,7 +7986,9 @@ export class DevicePool {
   autolockDevice(
     ...args: Parameters<DeviceAutolockManager["autolockDevice"]>
   ): Promise<string | undefined> {
-    return this.autolockManager.autolockDevice(...args);
+    // Tracked like an explicit bind: a connection closing mid-acquire must not stay an owner (#11166).
+    const endBind = this.beginMcpBind(args[2]);
+    return this.autolockManager.autolockDevice(...args).finally(endBind);
   }
 
   captureAutolockSessionForMcpSession(mcpSessionId: string | undefined): string | undefined {

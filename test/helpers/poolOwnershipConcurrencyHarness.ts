@@ -5,6 +5,7 @@ import {
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { registerDerivedLabelSessionReleaseCascade } from "../../src/daemon/derivedLabelSessionReleaseCascade";
+import { getDevicePoolTimeoutMs } from "../../src/daemon/poolConfig";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
@@ -55,6 +56,8 @@ const DEVICES: readonly BootedDevice[] = Array.from({ length: DEVICE_COUNT }, (_
 }));
 
 export const IDLE_WINDOW_MS = DEFAULT_SESSION_IDLE_TIMEOUT_MS;
+/** The autolock idle window: the device pool timeout (60 s unless AUTOMOBILE_DEVICE_POOL_TIMEOUT). */
+const AUTOLOCK_IDLE_WINDOW_MS = getDevicePoolTimeoutMs();
 const LEASE_MS = DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS;
 
 /** Microtask turns a settle point drains before it moves fake time to unpark operations. */
@@ -65,6 +68,7 @@ const SETTLE_NUDGE_MS = 1_000;
 
 export type StepKind =
   | "acquireMcp"
+  | "acquireAutolock"
   | "acquireCli"
   | "release"
   | "control"
@@ -130,7 +134,7 @@ export function describeStep(step: Step, index: number): string {
       ? `${step.ms}ms`
       : ["kill", "disconnect", "reconnect"].includes(step.kind)
         ? `d${step.device}`
-        : ["acquireMcp", "acquireCli"].includes(step.kind)
+        : ["acquireMcp", "acquireAutolock", "acquireCli"].includes(step.kind)
           ? `c${step.client} d${step.device}`
           : `c${step.client}`;
   return `#${index} ${step.kind} ${target} +${step.turns}t`;
@@ -290,6 +294,8 @@ class OwnershipWorld {
   readonly closedConnections = new Set<string>();
   /** End of the last admitted control call per session (creation counts). */
   readonly lastControlAt = new Map<string, number>();
+  /** Sessions minted by an autolock acquisition, which idle out on the pool timeout. */
+  readonly autolockSessions = new Set<string>();
   /** Last accepted owner heartbeat per session. */
   readonly lastOwnerHeartbeatAt = new Map<string, number>();
   readonly clients: ClientState[] = Array.from({ length: CLIENT_COUNT }, (_, index) => ({
@@ -432,11 +438,15 @@ class OwnershipWorld {
     const lastControl = this.lastControlAt.get(record.sessionId);
     const idleReasons = ["lazy-expiry", "cleanup-expired", "cli-idle-timeout", "expired"];
     if (idleReasons.includes(record.reason) && lastControl !== undefined) {
-      if (now - lastControl < IDLE_WINDOW_MS) {
+      // An autolock session's idle window is the device pool timeout, not the session default.
+      const window = this.autolockSessions.has(record.sessionId)
+        ? AUTOLOCK_IDLE_WINDOW_MS
+        : IDLE_WINDOW_MS;
+      if (now - lastControl < window) {
         this.fail(
           "early-idle-release",
           `${record.sessionId} idle-released (${record.reason}) ${now - lastControl}ms after its ` +
-            `last control call at t=${lastControl}, inside the ${IDLE_WINDOW_MS}ms idle window`,
+            `last control call at t=${lastControl}, inside the ${window}ms idle window`,
         );
       }
     }
@@ -654,32 +664,59 @@ class OwnershipWorld {
   }
 
   /** getAndroid-style explicit bind of a named device for an MCP connection or a one-shot CLI. */
-  acquire(client: ClientState, deviceIndex: number, kind: "mcp" | "cli"): void {
+  acquire(
+    client: ClientState,
+    deviceIndex: number,
+    kind: "mcp" | "cli",
+    via: "bind" | "autolock" = "bind",
+  ): void {
     const device = DEVICES[deviceIndex]!;
     const sessionId = `s${++this.sessionCounter}`;
     const connection = kind === "mcp" ? this.connectionFor(client) : undefined;
-    this.log(`c${client.index} acquire(${kind}) ${device.deviceId} as ${sessionId}`);
+    this.log(`c${client.index} acquire(${kind}/${via}) ${device.deviceId} as ${sessionId}`);
     this.launch(`c${client.index} acquire ${device.deviceId}`, async () => {
-      const bound = await this.pool.bindOrReuseDeviceSession(
-        sessionId,
-        device.deviceId,
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        connection,
-        kind === "cli",
-      );
+      // An autolock acquisition mints its own session id; an absent result is a lost race.
+      const bound =
+        via === "autolock"
+          ? await this.pool.autolockDevice(
+              device.deviceId,
+              "android",
+              connection,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              "automationReady",
+              undefined,
+              { autolockEnabled: true },
+            )
+          : await this.pool.bindOrReuseDeviceSession(
+              sessionId,
+              device.deviceId,
+              "android",
+              undefined,
+              undefined,
+              undefined,
+              false,
+              undefined,
+              undefined,
+              undefined,
+              connection,
+              kind === "cli",
+            );
+      if (bound === undefined) {
+        return;
+      }
+      if (via === "autolock") {
+        this.autolockSessions.add(bound);
+      }
       const boundSession = this.manager.getAllSessions().find((s) => s.sessionId === bound);
       this.log(
         `  c${client.index} bound ${device.deviceId} -> ${bound} (created t=${boundSession?.createdAt}, lastUsedAt t=${boundSession?.lastUsedAt})`,
       );
       const origin = this.origin.get(bound);
-      if (bound !== sessionId) {
+      if (bound !== sessionId && !(via === "autolock" && !origin)) {
         const sameOwner =
           kind === "cli"
             ? origin?.kind === "cli"
@@ -694,7 +731,7 @@ class OwnershipWorld {
       } else {
         this.origin.set(bound, { kind, client: client.index, connection });
       }
-      if (bound === sessionId && boundSession) {
+      if (!origin && boundSession) {
         // The idle window of a minted session starts at its creation inside the bind; the
         // acquisition call's end is not recorded as activity for it (it carried no sessionUuid).
         this.released.delete(bound);
@@ -1050,6 +1087,9 @@ class OwnershipWorld {
     switch (step.kind) {
       case "acquireMcp":
         this.acquire(client, step.device, "mcp");
+        break;
+      case "acquireAutolock":
+        this.acquire(client, step.device, "mcp", "autolock");
         break;
       case "acquireCli":
         this.acquire(client, step.device, "cli");

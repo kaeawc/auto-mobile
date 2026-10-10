@@ -29,6 +29,7 @@ import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpReq
 import { McpOverloadError, McpTimeoutError, MCP_QUEUE_TIMEOUT_ERROR_CODE } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
+import { typedRefusalFields } from "../models/typedRefusalFields";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { isDebugModeEnabled } from "../utils/debug";
 import {
@@ -323,8 +324,21 @@ const JSONRPC_INVALID_PARAMS = -32602;
 export function mcpRequestFailureDetails(
   error: unknown,
   cause: DaemonRequestFailureCause | undefined,
-): Pick<DaemonResponse, "code" | "overloadFailure" | "requestFailureCause"> {
+): Pick<
+  DaemonResponse,
+  | "code"
+  | "retryable"
+  | "retryAfterMs"
+  | "nextAction"
+  | "details"
+  | "overloadFailure"
+  | "requestFailureCause"
+> {
   return {
+    // Any typed refusal (e.g. retryable discovery_incomplete from an ide/* device lookup) keeps
+    // its code and retry intent on the socket wire, not just its message (#11244). The
+    // class-specific codes below still win.
+    ...typedRefusalFields(error),
     ...(error instanceof McpOverloadError ? { overloadFailure: error.failure } : {}),
     ...(error instanceof McpTimeoutError && error.code ? { code: error.code } : {}),
     // Keep the daemon MCP server's invalid-params verdict (e.g. a malformed

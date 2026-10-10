@@ -198,9 +198,12 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `a failed frame is retried only when its typed retryable flag says so`() {
     AutoMobilePlanExecutor.retryBackoffMs = 0L
-    // code, retryable, message, expected executePlan calls with maxRetries = 1
+    // code, retryable (null = the frame omits it), message, executePlan calls with maxRetries = 1
     val cases =
       listOf(
+        // A frame without the flag keeps the message-based retry (older daemons).
+        listOf("daemon_queue_timeout", null, "MCP timeout: tapOn exceeded 30000ms", 1),
+        listOf("code_without_flag", null, "daemon request timeout", 2),
         listOf("daemon_queue_timeout", true, "MCP timeout: tapOn exceeded 30000ms", 2),
         listOf("daemon_shutting_down", true, "Daemon is shutting down", 2),
         listOf("daemon_restart_pending", true, "Daemon restart is pending", 2),
@@ -221,8 +224,8 @@ class AutoMobilePlanExecutorTest {
           type = "mcp_response",
           success = false,
           error = case[2] as String,
-          code = code,
-          retryable = case[1] as Boolean,
+          code = JsonPrimitive(code),
+          retryable = (case[1] as Boolean?)?.let { JsonPrimitive(it) },
         ),
       )
 
@@ -256,8 +259,8 @@ class AutoMobilePlanExecutorTest {
         type = "mcp_response",
         success = false,
         error = "Device is held",
-        code = "device_owned_by_other_session",
-        retryable = false,
+        code = JsonPrimitive("device_owned_by_other_session"),
+        retryable = JsonPrimitive(false),
       ),
     )
     fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(successPayload()))
@@ -277,8 +280,8 @@ class AutoMobilePlanExecutorTest {
         type = "mcp_response",
         success = false,
         error = "Daemon is shutting down",
-        code = "daemon_shutting_down",
-        retryable = true,
+        code = JsonPrimitive("daemon_shutting_down"),
+        retryable = JsonPrimitive(true),
       ),
     )
     fakeDaemonClient.setResponse("executePlan", buildDaemonResponse(successPayload()))
@@ -298,8 +301,8 @@ class AutoMobilePlanExecutorTest {
         type = "mcp_response",
         success = false,
         error = "request timeout",
-        code = "device_outside_bound_session",
-        retryable = false,
+        code = JsonPrimitive("device_outside_bound_session"),
+        retryable = JsonPrimitive(false),
       ),
     )
     fakeDaemonClient.setResponse("executePlan", buildDaemonResponse(successPayload()))

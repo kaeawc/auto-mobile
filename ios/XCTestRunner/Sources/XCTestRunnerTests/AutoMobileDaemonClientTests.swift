@@ -37,6 +37,11 @@ final class AutoMobileDaemonClientTests: XCTestCase {
                 ))
             ),
             (#"{"id":"1","type":"mcp_response","success":false,"error":"boom"}"#, .serverError("boom")),
+            // A code without the flag (`daemon_queue_timeout` today) keeps the blind retry.
+            (
+                #"{"id":"1","type":"mcp_response","success":false,"error":"queue","code":"daemon_queue_timeout"}"#,
+                .serverError("queue")
+            ),
         ]
         for (frame, expected) in frames {
             let connection = AsyncFakeDaemonConnection()

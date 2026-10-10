@@ -133,9 +133,16 @@ extension AutoMobilePlanExecutor {
         /// overflow (#11544). Android's `positiveRetryAfterMs`.
         static func usableHintMs(wire: Any?) -> Int? {
             guard let number = wire as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
-            let value = number.doubleValue
-            guard value.isFinite, value > 0, value == value.rounded() else { return nil }
-            return Int(min(value, Double(finalizeWaitCapMs)))
+            if CFNumberIsFloatType(number) {
+                // Beyond the Int64 range Android's `longOrNull` finds no number, so it is absent here too.
+                let value = number.doubleValue
+                guard value.isFinite, value > 0, value < 9.2e18, value == value.rounded() else { return nil }
+                return Int(min(value, Double(finalizeWaitCapMs)))
+            }
+            guard number.compare(NSNumber(value: Int64.max)) != .orderedDescending else { return nil }
+            let value = number.int64Value
+            guard value > 0 else { return nil }
+            return Int(min(value, Int64(finalizeWaitCapMs)))
         }
 
         static func usableHintMs(_ hint: Int?) -> Int? {

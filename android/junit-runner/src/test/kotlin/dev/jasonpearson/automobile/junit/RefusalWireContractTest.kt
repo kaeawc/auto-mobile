@@ -100,9 +100,9 @@ class RefusalWireContractTest {
   @Test
   fun `a retryAfterMs hint is usable as the shared hints table says`() {
     for (row in hintRows("usableHints")) {
-      val wire = row.getValue("wire").longOrNullOrNull()
+      val wire = row.getValue("wire")
       val usable = row.getValue("usable").longOrNullOrNull()
-      assertEquals(row.name(), usable, AutoMobilePlanExecutor.positiveRetryAfterMs(wire))
+      assertEquals(row.name(), usable, AutoMobilePlanExecutor.retryAfterHintMs(wire))
       val frame = DaemonResponse("hint", "mcp_response", false, retryAfterMs = wire)
       assertEquals(
         row.name(),

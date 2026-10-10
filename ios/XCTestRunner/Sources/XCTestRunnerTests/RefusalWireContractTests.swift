@@ -100,8 +100,9 @@ final class RefusalWireContractTests: XCTestCase {
                 waits: (row["waits"] as? NSNumber)?.intValue ?? 0,
                 waitedMs: (row["waitedMs"] as? NSNumber)?.intValue ?? 0
             )
+            let rawHint = (row["retryAfterMs"] as? NSNumber)?.intValue
             XCTAssertEqual(
-                raw.nextDelayMs(retryAfterMs: (row["retryAfterMs"] as? NSNumber)?.intValue, code: row["code"] as? String),
+                raw.nextDelayMs(retryAfterMs: rawHint, code: row["code"] as? String),
                 (row["delayMs"] as? NSNumber)?.intValue,
                 "\(name) raw"
             )

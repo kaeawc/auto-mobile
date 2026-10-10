@@ -6,6 +6,10 @@
     { "name": "at the cap", "wire": 150000, "usable": 150000 },
     { "name": "above the cap", "wire": 600000, "usable": 150000 },
     { "name": "near the integer maximum", "wire": 9223372036854775807, "usable": 150000 },
+    { "name": "fractional", "wire": 1500.5, "usable": null },
+    { "name": "boolean", "wire": true, "usable": null },
+    { "name": "string", "wire": "5000", "usable": null },
+    { "name": "beyond the integer range", "wire": 99999999999999999999, "usable": null },
     { "name": "zero", "wire": 0, "usable": null },
     { "name": "negative", "wire": -1, "usable": null },
     { "name": "most negative", "wire": -9223372036854775808, "usable": null }

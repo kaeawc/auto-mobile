@@ -1244,12 +1244,15 @@ internal data class DaemonResponse(
   val success: Boolean,
   val result: JsonElement? = null,
   val error: String? = null,
-  /** The typed code of a failed frame (`mcpRequestFailureDetails`); absent on older daemons. */
-  val code: String? = null,
-  /** Whether the daemon says the failed call may be retried; absent on older daemons. */
-  val retryable: Boolean? = null,
-  val nextAction: String? = null,
-  val retryAfterMs: Long? = null,
+  /**
+   * The typed refusal fields of a failed frame (`mcpRequestFailureDetails`), absent on older
+   * daemons. Kept as raw elements so a field of an unexpected type is ignored instead of failing
+   * the decode of the whole frame.
+   */
+  val code: JsonElement? = null,
+  val retryable: JsonElement? = null,
+  val nextAction: JsonElement? = null,
+  val retryAfterMs: JsonElement? = null,
 )
 
 /** Interface for daemon tool calls to enable testing with fakes. */

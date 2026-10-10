@@ -518,9 +518,9 @@ internal object AutoMobilePlanExecutor {
         attempt > maxRetries ||
           !(parsed.retryable ||
             parsed.acquireNewSession ||
-            // A typed code is the daemon's verdict (#11544); only an untyped failure falls back to
-            // matching the message text.
-            (parsed.code == null && isTransientError(errorMessage)))
+            // An explicit `retryable: false` on a typed frame is the daemon's verdict (#11544); any
+            // other failure falls back to matching the message text.
+            (!parsed.terminal && isTransientError(errorMessage)))
       ) {
         break
       }
@@ -902,14 +902,21 @@ internal object AutoMobilePlanExecutor {
   private fun parseDaemonToolResult(response: DaemonResponse, json: Json): ParsedToolResult {
     if (!response.success) {
       // A failed frame carries the typed refusal fields at the top level (#11544).
+      val code = (response.code as? JsonPrimitive)?.takeIf { it.isString }?.content
       return ParsedToolResult(
         false,
         response.error ?: "Daemon returned failure",
-        retryable = response.retryable == true,
-        code = response.code?.takeIf { it.isNotEmpty() },
+        retryable = response.retryable == JsonPrimitive(true),
+        code = code,
         daemonMessage = response.error,
-        acquireNewSession = response.nextAction == ACQUIRE_NEW_SESSION_NEXT_ACTION,
-        retryAfterMs = positiveRetryAfterMs(response.retryAfterMs),
+        acquireNewSession =
+          (response.nextAction as? JsonPrimitive)?.takeIf { it.isString }?.content ==
+            ACQUIRE_NEW_SESSION_NEXT_ACTION,
+        retryAfterMs = retryAfterHintMs(response.retryAfterMs),
+        // Only an explicit `retryable: false` on a typed code is the daemon's final verdict; a
+        // frame that omits the flag (older daemons, `daemon_queue_timeout` today) keeps the
+        // message-based retry it always had.
+        terminal = code != null && response.retryable == JsonPrimitive(false),
       )
     }
 
@@ -977,11 +984,7 @@ internal object AutoMobilePlanExecutor {
             else -> null
           },
         acquireNewSession = acquireNewSession,
-        retryAfterMs =
-          ((errorObject?.get("retryAfterMs") ?: parsed["retryAfterMs"]) as? JsonPrimitive)
-            ?.takeIf { !it.isString }
-            ?.longOrNull
-            .let(::positiveRetryAfterMs),
+        retryAfterMs = retryAfterHintMs(errorObject?.get("retryAfterMs") ?: parsed["retryAfterMs"]),
       )
     }
     return ParsedToolResult(true, "")
@@ -1406,6 +1409,10 @@ internal object AutoMobilePlanExecutor {
   internal fun positiveRetryAfterMs(retryAfterMs: Long?): Long? =
     retryAfterMs?.takeIf { it > 0 }?.coerceAtMost(DEVICE_FINALIZE_WAIT_CAP_MS)
 
+  /** The usable hint of a wire `retryAfterMs` element: only a whole JSON number counts. */
+  internal fun retryAfterHintMs(wire: JsonElement?): Long? =
+    positiveRetryAfterMs((wire as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull)
+
   /**
    * Total wait budget for this refusal. For the finalize codes the daemon's `retryAfterMs` is the
    * finalize time STILL REMAINING, so it bounds the total: [waitedMs] already spent plus that hint,
@@ -1497,5 +1504,7 @@ internal object AutoMobilePlanExecutor {
     val acquireNewSession: Boolean = false,
     /** The daemon's `retryAfterMs` hint for a retryable refusal, when it sent one. */
     val retryAfterMs: Long? = null,
+    /** A typed failed frame said `retryable: false`: the daemon's final verdict (#11544). */
+    val terminal: Boolean = false,
   )
 }

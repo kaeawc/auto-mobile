@@ -1,4 +1,21 @@
 import {
+  isSlotJournalPhaseOpen,
+  journalOwnersEqual,
+  journalTargetEntries,
+  sameBinding,
+  scopeAcceptsSlotChange,
+  SLOT_JOURNAL_TERMINAL_RETENTION_MS,
+  type AdvanceSlotJournalInput,
+  type AdvanceSlotJournalResult,
+  type ClaimSlotJournalResult,
+  type OpenSlotJournalInput,
+  type OpenSlotJournalResult,
+  type SlotJournalAssignmentChange,
+  type SlotJournalChangeFailure,
+  type SlotJournalEntry,
+  type SlotJournalOwner,
+  type SlotJournalTarget,
+  type SlotProcessIdentity,
   assertSettlerForState,
   assertValidSlotKey,
   bindingMatches,
@@ -48,6 +65,8 @@ export class FakeSlotRegistry implements SlotRegistry {
   private readonly scopes = new Map<string, SlotScopeRecord>();
   private readonly assignments = new Map<string, SlotAssignmentRecord>();
   private readonly free = new Map<string, FreeSlotDeviceRecord>();
+  private readonly journal = new Map<number, SlotJournalEntry>();
+  private nextJournalId = 1;
   private closed = false;
 
   constructor(
@@ -153,7 +172,16 @@ export class FakeSlotRegistry implements SlotRegistry {
     expected: SlotBindingExpectation,
     next: SlotBindingCommit,
   ): Promise<CommitBindingResult> {
-    const checked = this.checkBinding(key, expected);
+    return this.commitBindingSync(key, expected, next);
+  }
+
+  private commitBindingSync(
+    key: SlotKey,
+    expected: SlotBindingExpectation,
+    next: SlotBindingCommit,
+    journaled = false,
+  ): CommitBindingResult {
+    const checked = this.checkBinding(key, expected, journaled);
     if ("kind" in checked) {
       return checked;
     }
@@ -202,8 +230,17 @@ export class FakeSlotRegistry implements SlotRegistry {
     state: SlotAssignmentState,
     options?: UpdateSlotStateOptions,
   ): Promise<UpdateSlotStateResult> {
-    const settler = assertSettlerForState(state, options);
-    const checked = this.checkBinding(key, expected);
+    return this.updateSlotStateSync(key, expected, state, assertSettlerForState(state, options));
+  }
+
+  private updateSlotStateSync(
+    key: SlotKey,
+    expected: SlotBindingExpectation,
+    state: SlotAssignmentState,
+    settler: SlotProcessIdentity | null,
+    journaled = false,
+  ): UpdateSlotStateResult {
+    const checked = this.checkBinding(key, expected, journaled);
     if ("kind" in checked) {
       return checked;
     }
@@ -359,7 +396,8 @@ export class FakeSlotRegistry implements SlotRegistry {
       scopeState: null,
       execSessionUuid: null,
     }));
-    return [...bound, ...freed];
+    const entries = [...bound, ...freed];
+    return [...entries, ...journalTargetEntries(await this.listOpenSlotJournal(), entries)];
   }
 
   async listFreeDevices(): Promise<FreeSlotDeviceRecord[]> {
@@ -414,13 +452,23 @@ export class FakeSlotRegistry implements SlotRegistry {
     const cleanupPending = assignments.filter(
       (assignment) => assignment.state === "cleanup_pending",
     );
-    if (liveOwners.length > 0 || settling.length > 0 || cleanupPending.length > 0) {
+    const openJournal = [...this.journal.values()]
+      .filter((entry) => entry.scopeKey === scopeKey && isSlotJournalPhaseOpen(entry.phase))
+      .sort((a, b) => a.id - b.id)
+      .map(copyEntry);
+    if (
+      liveOwners.length > 0 ||
+      settling.length > 0 ||
+      cleanupPending.length > 0 ||
+      openJournal.length > 0
+    ) {
       return {
         kind: "pending",
         scope: { ...scope },
         liveOwners: liveOwners.map(copy),
         settling: settling.map(copy),
         cleanupPending: cleanupPending.map(copy),
+        openJournal,
       };
     }
     const nowMs = this.timer.now();
@@ -472,17 +520,165 @@ export class FakeSlotRegistry implements SlotRegistry {
     return (await this.listFreeDevices()).filter((device) => device.freedAtMs <= cutoffMs);
   }
 
+  async openSlotJournal(key: SlotKey, input: OpenSlotJournalInput): Promise<OpenSlotJournalResult> {
+    assertValidSlotKey(key);
+    if (!isSlotJournalPhaseOpen(input.phase)) {
+      throw new Error(`A managed slot journal entry cannot open at phase '${input.phase}'`);
+    }
+    const nowMs = this.timer.now();
+    for (const [id, entry] of this.journal) {
+      if (
+        !isSlotJournalPhaseOpen(entry.phase) &&
+        entry.updatedAtMs < nowMs - SLOT_JOURNAL_TERMINAL_RETENTION_MS
+      ) {
+        this.journal.delete(id);
+      }
+    }
+    const open = this.findOpenEntry(key);
+    if (open) {
+      return { kind: "journal_open", entry: copyEntry(open) };
+    }
+    const applied = this.applyAssignmentChange(key, input.assignment);
+    if ("kind" in applied) {
+      return applied;
+    }
+    const entry: SlotJournalEntry = {
+      id: this.nextJournalId++,
+      scopeKey: key.scopeKey,
+      slotIndex: key.slotIndex,
+      kind: input.kind,
+      phase: input.phase,
+      platform: applied.platform,
+      fromGeneration: input.assignment.expected.generation,
+      toGeneration:
+        applied.generation === input.assignment.expected.generation ? null : applied.generation,
+      binding: { generation: applied.generation, stableDeviceId: applied.stableDeviceId },
+      target: copyTarget(input.target),
+      owner: { ...input.owner },
+      attempts: 0,
+      lastError: null,
+      nextAttemptAtMs: nowMs,
+      createdAtMs: nowMs,
+      updatedAtMs: nowMs,
+    };
+    this.journal.set(entry.id, entry);
+    return { kind: "opened", entry: copyEntry(entry), assignment: copy(applied) };
+  }
+
+  async advanceSlotJournal(
+    id: number,
+    input: AdvanceSlotJournalInput,
+  ): Promise<AdvanceSlotJournalResult> {
+    const entry = this.journal.get(id);
+    if (
+      !entry ||
+      !isSlotJournalPhaseOpen(entry.phase) ||
+      entry.phase !== input.expectedPhase ||
+      !journalOwnersEqual(entry.owner, input.owner)
+    ) {
+      return { kind: "journal_conflict", entry: entry ? copyEntry(entry) : null };
+    }
+    let assignment: SlotAssignmentRecord | null = null;
+    if (input.assignment) {
+      if (!sameBinding(entry.binding, input.assignment.expected)) {
+        return { kind: "journal_conflict", entry: copyEntry(entry) };
+      }
+      const applied = this.applyAssignmentChange(entry, input.assignment);
+      if ("kind" in applied) {
+        return applied;
+      }
+      assignment = copy(applied);
+    }
+    if (assignment && assignment.generation !== entry.binding.generation) {
+      entry.toGeneration = assignment.generation;
+    }
+    if (assignment) {
+      entry.binding = {
+        generation: assignment.generation,
+        stableDeviceId: assignment.stableDeviceId,
+      };
+    }
+    entry.phase = input.phase;
+    entry.target = copyTarget({ ...entry.target, ...input.target });
+    if (input.attempt) {
+      entry.attempts += 1;
+      entry.lastError = input.attempt.error;
+      entry.nextAttemptAtMs = input.attempt.nextAttemptAtMs;
+    }
+    entry.updatedAtMs = this.timer.now();
+    return { kind: "advanced", entry: copyEntry(entry), assignment };
+  }
+
+  async claimSlotJournal(
+    id: number,
+    expected: SlotJournalOwner,
+    next: SlotJournalOwner,
+  ): Promise<ClaimSlotJournalResult> {
+    const entry = this.journal.get(id);
+    if (
+      !entry ||
+      !isSlotJournalPhaseOpen(entry.phase) ||
+      !journalOwnersEqual(entry.owner, expected)
+    ) {
+      return { kind: "journal_conflict", entry: entry ? copyEntry(entry) : null };
+    }
+    entry.owner = { ...next };
+    entry.updatedAtMs = this.timer.now();
+    return { kind: "claimed", entry: copyEntry(entry) };
+  }
+
+  async getSlotJournal(id: number): Promise<SlotJournalEntry | null> {
+    const entry = this.journal.get(id);
+    return entry ? copyEntry(entry) : null;
+  }
+
+  async listOpenSlotJournal(key?: SlotKey): Promise<SlotJournalEntry[]> {
+    return [...this.journal.values()]
+      .filter(
+        (entry) => isSlotJournalPhaseOpen(entry.phase) && (!key || slotId(entry) === slotId(key)),
+      )
+      .sort((a, b) => a.nextAttemptAtMs - b.nextAttemptAtMs || a.id - b.id)
+      .map(copyEntry);
+  }
+
   async close(): Promise<void> {
     this.closed = true;
+  }
+
+  private findOpenEntry(key: SlotKey): SlotJournalEntry | undefined {
+    return [...this.journal.values()].find(
+      (entry) => slotId(entry) === slotId(key) && isSlotJournalPhaseOpen(entry.phase),
+    );
+  }
+
+  /** The fake is single-threaded, so the CAS check and both writes are already atomic. */
+  private applyAssignmentChange(
+    key: SlotKey,
+    change: SlotJournalAssignmentChange,
+  ): SlotAssignmentRecord | SlotJournalChangeFailure {
+    const result =
+      change.kind === "state"
+        ? this.updateSlotStateSync(
+            key,
+            change.expected,
+            change.state,
+            assertSettlerForState(change.state, change.options),
+            true,
+          )
+        : this.commitBindingSync(key, change.expected, change.next, true);
+    return result.kind === "committed" || result.kind === "updated"
+      ? this.assignments.get(slotId(key))!
+      : result;
   }
 
   private checkBinding(
     key: SlotKey,
     expected: SlotBindingExpectation,
+    journaled = false,
   ): SlotAssignmentRecord | SlotCasFailure {
     assertValidSlotKey(key);
     const scope = this.scopes.get(key.scopeKey);
-    if (scope?.state !== "valid") {
+    if (!scopeAcceptsSlotChange(scope ?? null, journaled)) {
       return { kind: "scope_not_valid", scope: scope ? { ...scope } : null };
     }
     const current = this.assignments.get(slotId(key));
@@ -586,5 +782,22 @@ function copy(assignment: SlotAssignmentRecord): SlotAssignmentRecord {
           processGenerationToken: assignment.settler.processGenerationToken ?? null,
         }
       : null,
+  };
+}
+
+function copyEntry(entry: SlotJournalEntry): SlotJournalEntry {
+  return {
+    ...entry,
+    binding: { ...entry.binding },
+    target: copyTarget(entry.target),
+    owner: { ...entry.owner, processGenerationToken: entry.owner.processGenerationToken ?? null },
+  };
+}
+
+function copyTarget(target: SlotJournalTarget): SlotJournalTarget {
+  return {
+    ...target,
+    requestedSpec: roundTrip(target.requestedSpec),
+    resolvedSpec: roundTrip(target.resolvedSpec),
   };
 }

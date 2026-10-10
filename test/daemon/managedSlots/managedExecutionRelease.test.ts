@@ -5,6 +5,7 @@ import {
   type ManagedExecutionWork,
 } from "../../../src/daemon/managedSlots/managedExecutionRelease";
 import type { SlotKey } from "../../../src/daemon/managedSlots/slotRegistry";
+import { SlotJournalInFlight } from "../../../src/daemon/managedSlots/slotJournal";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../src/daemon/managedExecutionLiveness";
 import { logger } from "../../../src/utils/logger";
 import { SessionManager } from "../../../src/daemon/sessionManager";
@@ -236,6 +237,74 @@ describe("managed execution release (daemon/releaseExecution)", () => {
       outcome: "reusable_for_this_slot",
       settlement: "confirmed",
       alreadyReleased: true,
+    });
+  });
+
+  describe("with the slot journal (#11179)", () => {
+    let inFlight: SlotJournalInFlight;
+
+    beforeEach(() => {
+      inFlight = new SlotJournalInFlight();
+      drain.close();
+      drain = new ManagedExecutionRelease({
+        registry: async () => registry,
+        journal: { inFlight },
+        settler: SETTLER,
+        work,
+        sessions,
+        timer,
+        settlementCapMs: 1_000,
+      });
+    });
+
+    test("an unsettled drain journals its settling mark and closes the entry when it settles", async () => {
+      timer.enableAutoAdvance();
+      work.endOnCancel = false;
+      work.active.set(S1, 1);
+
+      await drain.releaseExecution(S1);
+
+      const [entry] = await registry.listOpenSlotJournal(key);
+      expect(entry).toMatchObject({
+        kind: "release",
+        phase: "intent",
+        owner: { daemonId: SETTLER.daemonId, pid: SETTLER.pid },
+        fromGeneration: BINDING.generation,
+        binding: FENCED,
+        target: { oldStableId: AVD },
+      });
+      expect(inFlight.has(entry.id)).toBe(true);
+      expect(await registry.getAssignment(key)).toMatchObject({
+        ...FENCED,
+        state: "settling",
+        settler: SETTLER,
+      });
+
+      work.active.delete(S1);
+      await drain.whenIdle();
+
+      expect(await registry.getSlotJournal(entry.id)).toMatchObject({ phase: "committed" });
+      expect(inFlight.has(entry.id)).toBe(false);
+      expect(await registry.getAssignment(key)).toMatchObject({ ...FENCED, state: "ready" });
+    });
+
+    test("work that never settles keeps the entry open and guarded for a later daemon's redrive", async () => {
+      timer.enableAutoAdvance();
+      work.endOnCancel = false;
+      work.active.set(S1, 1);
+
+      await drain.releaseExecution(S1);
+      await drain.whenIdle();
+
+      const [entry] = await registry.listOpenSlotJournal(key);
+      expect(entry).toMatchObject({ kind: "release", phase: "intent" });
+      expect(inFlight.has(entry.id)).toBe(true);
+      expect((await registry.getAssignment(key))?.state).toBe("settling");
+    });
+
+    test("a settled drain opens no journal entry", async () => {
+      await drain.releaseExecution(S1);
+      expect(await registry.listOpenSlotJournal()).toEqual([]);
     });
   });
 

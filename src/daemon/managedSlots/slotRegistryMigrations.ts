@@ -5,6 +5,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { selectMigrationLock } from "../../db/migrationLock";
 import * as slotRegistry000 from "./migrations/2026_10_09_000_slot_registry";
 import * as slotRegistry001 from "./migrations/2026_10_09_001_slot_owner_fencing";
+import * as slotJournal002 from "./migrations/2026_10_09_002_slot_journal";
 
 /**
  * The slot registry's own migration set (#11174). Statically imported rather than read from a
@@ -14,6 +15,7 @@ import * as slotRegistry001 from "./migrations/2026_10_09_001_slot_owner_fencing
 export const SLOT_REGISTRY_MIGRATIONS: Readonly<Record<string, Migration>> = {
   "2026_10_09_000_slot_registry": slotRegistry000,
   "2026_10_09_001_slot_owner_fencing": slotRegistry001,
+  "2026_10_09_002_slot_journal": slotJournal002,
 };
 
 export const slotRegistryMigrationProvider: MigrationProvider = {

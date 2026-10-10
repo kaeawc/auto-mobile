@@ -1,10 +1,18 @@
 import {
+  isReissuableByNameReleaseReason,
+  releaseReasonMayReplace,
+} from "../../src/daemon/releaseReasons";
+import {
   DeviceSessionNotActiveError,
+  DeviceSessionRowChangedError,
   isDeviceRestartReleaseReason,
   isRecoverableDaemonReleaseReason,
   type DeviceSessionActivityUpdate,
   type DeviceSessionPersistence,
   type DeviceSessionRecord,
+  type MarkReleasedOptions,
+  type RecoverableRowIncarnation,
+  type UpsertActiveSessionOptions,
 } from "../../src/db/deviceSessionRepository";
 import type { DeviceSession, DeviceSessionStatus } from "../../src/db/types";
 
@@ -15,12 +23,59 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
   private readonly rows = new Map<string, DeviceSession>();
   getSession?: (sessionUuid: string) => Promise<DeviceSession | undefined>;
 
-  async upsertActiveSession(record: DeviceSessionRecord): Promise<number> {
+  /** Mirrors the repository's claimed-row precondition: the incarnation and a re-issuable reason. */
+  private matchesIncarnation(row: DeviceSession | undefined, expected: RecoverableRowIncarnation) {
+    return (
+      row !== undefined &&
+      row.status !== "active" &&
+      (row.stable_identity_generation ?? 0) === expected.rowGeneration &&
+      (row.daemon_session_id ?? null) === expected.daemonSessionId &&
+      row.release_reason !== null &&
+      isReissuableByNameReleaseReason(row.release_reason)
+    );
+  }
+
+  async claimRecoverableSession(
+    sessionUuid: string,
+    expected: RecoverableRowIncarnation,
+    daemonSessionId: string,
+  ): Promise<number | undefined> {
+    const row = this.rows.get(sessionUuid);
+    if (!row || !this.matchesIncarnation(row, expected)) {
+      return undefined;
+    }
+    row.daemon_session_id = daemonSessionId;
+    row.stable_identity_generation = (row.stable_identity_generation ?? 0) + 1;
+    return row.stable_identity_generation;
+  }
+
+  async releaseRecoverableSessionClaim(
+    sessionUuid: string,
+    claimed: RecoverableRowIncarnation,
+    previousOwner: string | null,
+  ): Promise<boolean> {
+    const row = this.rows.get(sessionUuid);
+    if (!row || !this.matchesIncarnation(row, claimed)) {
+      return false;
+    }
+    row.daemon_session_id = previousOwner;
+    row.stable_identity_generation = (row.stable_identity_generation ?? 0) + 1;
+    return true;
+  }
+
+  async upsertActiveSession(
+    record: DeviceSessionRecord,
+    _nowMs?: number,
+    options: UpsertActiveSessionOptions = {},
+  ): Promise<number> {
     this.createAttempts++;
     if (this.failure === "create" || this.createFailureOnAttempt === this.createAttempts) {
       throw new Error("persist create failed");
     }
     const existing = this.rows.get(record.sessionUuid);
+    if (options.claimedRow && !this.matchesIncarnation(existing, options.claimedRow)) {
+      throw new DeviceSessionRowChangedError(record.sessionUuid);
+    }
     this.rows.set(record.sessionUuid, {
       session_uuid: record.sessionUuid,
       device_id: record.deviceId,
@@ -112,12 +167,23 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
     status: DeviceSessionStatus,
     releasedAtMs: number,
     reason: string,
+    options: MarkReleasedOptions = {},
   ): Promise<void> {
     if (this.failure === "release") {
       throw new Error("persist release failed");
     }
     const row = this.rows.get(sessionUuid);
     if (!row) {
+      return;
+    }
+    if (
+      (options.expectedRowGeneration !== undefined &&
+        (row.stable_identity_generation ?? 0) !== options.expectedRowGeneration) ||
+      // A terminal reason is never replaced by a weaker one.
+      !releaseReasonMayReplace(reason, row.release_reason) ||
+      (options.onlyIfRecoverable &&
+        !(row.release_reason && isRecoverableDaemonReleaseReason(row.release_reason)))
+    ) {
       return;
     }
     row.status = status;

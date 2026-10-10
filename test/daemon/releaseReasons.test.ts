@@ -6,6 +6,7 @@ import {
   SESSION_RELEASE_REASON_TRAITS,
   isExpiryReleaseReason,
   isIdleReleaseReason,
+  isReissuableByNameReleaseReason,
   isRecoverableDaemonReleaseReason,
   isTerminalReleaseReason,
   literalReleaseReasonsWhere,
@@ -101,6 +102,7 @@ describe("session release-reason table (#11258)", () => {
       expiry: false,
       terminal: false,
       recoverable: false,
+      reissuableByName: false,
     });
     expect(isIdleReleaseReason("some-future-reason")).toBe(false);
     expect(isExpiryReleaseReason("some-future-reason")).toBe(false);
@@ -133,5 +135,25 @@ describe("session release-reason table (#11258)", () => {
       ...Object.keys(SESSION_RELEASE_REASON_FAMILY_TRAITS),
     ].filter((reason) => !doc.includes(`\`${reason}`));
     expect(missing).toEqual([]);
+  });
+});
+
+describe("re-issuable-by-name category (#11418)", () => {
+  test("is the recoverable reasons plus plan-auto-release, and nothing terminal", () => {
+    const reissuable = [
+      ...literalReleaseReasonsWhere("reissuableByName"),
+      ...releaseReasonFamiliesWhere("reissuableByName"),
+    ].sort();
+    const recoverable = [
+      ...literalReleaseReasonsWhere("recoverable"),
+      ...releaseReasonFamiliesWhere("recoverable"),
+    ];
+    expect(reissuable).toEqual([...recoverable, "plan-auto-release"].sort());
+    expect(isRecoverableDaemonReleaseReason("plan-auto-release")).toBe(false);
+    for (const reason of ["superseded", "allocation-rollback", "explicit-release", "expired"]) {
+      expect(isReissuableByNameReleaseReason(reason)).toBe(false);
+    }
+    expect(isReissuableByNameReleaseReason("device-restart:Pixel")).toBe(true);
+    expect(isTerminalReleaseReason("plan-auto-release")).toBe(false);
   });
 });

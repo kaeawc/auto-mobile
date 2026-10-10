@@ -550,8 +550,10 @@ export interface PrototypeAssetResult extends PrototypeResult {
 }
 
 /**
- * Event kinds this host understands. `appearance_changed` (`prototype_appearance_v1`) has a null
- * `name` and the payload `{mode, source}`.
+ * Event kinds this host understands. `page_changed` has the pager id as `name` and the new
+ * zero-based page index as its payload, on Android and iOS (#11409); the `pages` map of the event
+ * carries every pager. `appearance_changed` (`prototype_appearance_v1`) has a null `name` and the
+ * payload `{mode, source}`.
  */
 export const PROTOTYPE_EVENT_KINDS = [
   "emit",

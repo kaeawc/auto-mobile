@@ -471,3 +471,18 @@ test.each(["portrait", "unavailable", "incompatible"])(
     expect(result.screenshotSettled).toBe(true);
   },
 );
+
+test("degraded hierarchy-less read takes screenSize from the known panel so raster geometry works", async () => {
+  const warn = spyOn(logger, "warn");
+  const { screen, setCaptureSize } = setup("android", 0, 0, undefined, 0, {
+    panels: [{ key: "external", role: "external", sizePx: { width: 1080, height: 2400 } }],
+    postures: [],
+  });
+  setCaptureSize({ width: 1080, height: 2400 });
+  const result = await screen.execute(options);
+  expect(result.screenSize).toMatchObject({ width: 1080, height: 2400 });
+  expect(result.screenshotPixelsPerNativeUnit).toEqual({ x: 1, y: 1 });
+  expect(
+    warn.mock.calls.some((call) => String(call[0]).includes("Could not derive screenshot raster")),
+  ).toBe(false);
+});

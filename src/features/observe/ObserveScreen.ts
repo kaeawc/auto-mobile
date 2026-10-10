@@ -2721,6 +2721,25 @@ export class RealObserveScreen implements ObserveScreen {
     };
   }
 
+  /**
+   * Called when the accessibility service gave no screen info. A degraded read still knows the panel's physical size from the
+   * display inventory, the same source the `display: "all"` fallback uses. Without
+   * it the 0x0 placeholder breaks screenshot raster geometry on every read.
+   */
+  private applyKnownPanelScreenSize(result: ObserveResult): void {
+    logger.warn("[OBSERVE] No screen info from accessibility service - check if APK is updated");
+    if (result.screenSize.width > 0 && result.screenSize.height > 0) {
+      return;
+    }
+    // "active" never throws on a degraded read, unlike a pin or explicit panel request.
+    const panel = resolveTargetDisplay(this.device.displays, "active", {
+      focusedPanelKey: displayTransitions.observedPanel(this.device.deviceId)?.key,
+    });
+    if (panel.sizePx.width > 0 && panel.sizePx.height > 0) {
+      result.screenSize = { ...panel.sizePx };
+    }
+  }
+
   /** Attach the output coordinate unit without changing the captured dimensions. */
   private stampScreenSizeUnits(result: ObserveResult): void {
     result.screenSize = {
@@ -2898,9 +2917,7 @@ export class RealObserveScreen implements ObserveScreen {
           }
           logger.debug("[OBSERVE] Using device metadata from accessibility service");
         } else {
-          logger.warn(
-            "[OBSERVE] No screen info from accessibility service - check if APK is updated",
-          );
+          this.applyKnownPanelScreenSize(result);
           const tasks: Promise<void>[] = [
             perf.track("wakefulness", () =>
               this.deviceStateCollector.collectWakefulness(result, signal),

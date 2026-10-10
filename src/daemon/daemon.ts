@@ -925,6 +925,7 @@ export class Daemon {
         },
       },
       pool: this.devicePool,
+      executions: this.sessionManager,
       owner: () => this.managedSlotJournalOwner(),
       timer: this.timer,
       journal: {

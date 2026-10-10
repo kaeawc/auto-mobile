@@ -20,6 +20,7 @@ import {
   DeviceManagerSlotInventory,
   PoolManagedSlotDeviceClaims,
   ToolManagedSlotProvisioner,
+  type ManagedExecutionSessionLiveness,
   type ManagedSlotClaimPool,
   type ManagedSlotToolInvoker,
 } from "./managedSlotReconcilerPorts";
@@ -39,6 +40,8 @@ export interface DaemonManagedSlotAcquisitionOptions {
   registry: () => Promise<SlotRegistry>;
   sessions: ManagedSlotAcquisitionSessions;
   pool: ManagedSlotClaimPool;
+  /** Which sessions this daemon holds as live managed executions (#11275). */
+  executions?: ManagedExecutionSessionLiveness;
   owner: () => SlotProcessIdentity;
   timer: Timer;
   /**
@@ -110,7 +113,7 @@ export function createDaemonManagedSlotAcquisition(
         // The verified delete workflow run as the daemon (#11178): a journaled delete of an idle or
         // abandoned slot's device has no execution session for the tool-level ownership check.
         deleter: new WorkflowManagedSlotDeviceDeleter(options.timer),
-        claims: new PoolManagedSlotDeviceClaims(options.pool),
+        claims: new PoolManagedSlotDeviceClaims(options.pool, options.executions),
         // Boot capacity is enforced by the provision path itself (BootCapacityExhaustedError).
         timer: options.timer,
         journal: { owner: options.journal.owner, inFlight: options.journal.inFlight },

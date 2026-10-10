@@ -258,8 +258,20 @@ export interface ManagedSlotClaimPool {
  * A device is held while a pooled runtime of it has a session, or another daemon claims it. A
  * running device whose runtime identity the pool cannot resolve is unknown, never free.
  */
+/** The daemon's view of which sessions are live managed executions (#11275). */
+export interface ManagedExecutionSessionLiveness {
+  isLiveManagedExecutionSession(sessionUuid: string): boolean;
+}
+
 export class PoolManagedSlotDeviceClaims implements ManagedSlotDeviceClaims {
-  constructor(private readonly pool: ManagedSlotClaimPool) {}
+  constructor(
+    private readonly pool: ManagedSlotClaimPool,
+    private readonly executions?: ManagedExecutionSessionLiveness,
+  ) {}
+
+  isLiveExecution(sessionUuid: string): boolean {
+    return this.executions?.isLiveManagedExecutionSession(sessionUuid) ?? false;
+  }
 
   async describe(device: DeviceInfo): Promise<ManagedSlotDeviceClaim> {
     const runtimes = this.runtimesOf(device);

@@ -182,6 +182,19 @@ describe("PoolManagedSlotDeviceClaims", () => {
     expect((await claims.describe(avd)).kind).toBe("held");
   });
 
+  test("reports a session as a live execution only when the daemon holds it as one (#11275)", () => {
+    const pool = {
+      getAllDevices: () => [pooled("session-1")],
+      assertNotClaimedByForeignDaemon: async () => {},
+    };
+    const claims = new PoolManagedSlotDeviceClaims(pool, {
+      isLiveManagedExecutionSession: (sessionUuid) => sessionUuid === "session-1",
+    });
+    expect(claims.isLiveExecution("session-1")).toBe(true);
+    expect(claims.isLiveExecution("session-2")).toBe(false);
+    expect(new PoolManagedSlotDeviceClaims(pool).isLiveExecution("session-1")).toBe(false);
+  });
+
   test("lists the sessions this daemon's pool holds on the device, and only on it", () => {
     const claims = new PoolManagedSlotDeviceClaims({
       getAllDevices: () => [

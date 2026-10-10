@@ -154,6 +154,11 @@ export class FakeClaims implements ManagedSlotDeviceClaims {
   sessionsOn(device: DeviceInfo): string[] {
     return [...(this.sessions.get(deviceStableId(device) ?? "") ?? [])];
   }
+  /** Sessions the daemon holds as live managed executions (#11275). */
+  readonly liveExecutions = new Set<string>();
+  isLiveExecution(sessionUuid: string): boolean {
+    return this.liveExecutions.has(sessionUuid);
+  }
 }
 
 export class FakeCapacity implements ManagedSlotBootCapacity {

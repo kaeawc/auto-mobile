@@ -233,6 +233,12 @@ export interface ManagedSlotDeviceClaims {
    * it out again (bind-or-reuse), so it is released first and never reused.
    */
   sessionsOn?(device: DeviceInfo): string[];
+  /**
+   * Whether a session on the device is a live managed execution this daemon still holds (#11275).
+   * Such a session is never an earlier execution's leftover, whatever the registry's recorded
+   * owner says (a restart can leave it naming a dead daemon): the slot is in use.
+   */
+  isLiveExecution?(sessionUuid: string): boolean;
 }
 
 export type ManagedSlotCapacityCheck =
@@ -1210,6 +1216,8 @@ export class ManagedSlotReconciler {
     device: DeviceInfo,
   ): Promise<ReadyResult> {
     await this.assertBootCapacity(context.request, device);
+    // Before reserving: a reservation would take the slot over from the live execution's record.
+    this.assertNoLiveExecutionOn(context, device);
     // Reserve the slot before binding a session to its device, so a concurrent replacement can
     // neither fence nor delete the device while this attempt provisions it.
     const reservation = await this.reserveExecution(context, assignment);
@@ -1229,8 +1237,9 @@ export class ManagedSlotReconciler {
     device: DeviceInfo,
     reservation: string | undefined,
   ): Promise<ReadyResult> {
-    // The slot's own device is excluded from every other caller and the slot has no live
-    // execution, so any session on it is an earlier execution's leftover.
+    // The slot's own device is excluded from every other caller and the registry records no live
+    // execution, so any session on it is an earlier execution's leftover, unless this daemon still
+    // holds it as a live execution (#11275), which refuses with slot_in_use instead.
     const provisioned = await this.provisionExisting(context, device, { releaseStale: true });
     const expected = expectationOf(assignment);
     const fingerprint = encodeManagedSpecFingerprint(context.fingerprint);
@@ -1792,6 +1801,7 @@ export class ManagedSlotReconciler {
         ),
       );
     }
+    this.assertNoLiveExecutionOn(context, device, stale);
     try {
       await Promise.all(
         stale.map((sessionUuid) => this.deps.provisioner.releaseSession(sessionUuid)),
@@ -1810,6 +1820,26 @@ export class ManagedSlotReconciler {
     }
     context.evidence.releasedStaleSessions = stale;
     return new Set(stale);
+  }
+
+  /**
+   * Refuse with a retryable `slot_in_use` when this daemon still holds a session on the device as a
+   * live managed execution (#11275): a duplicate acquisition must never release it.
+   */
+  private assertNoLiveExecutionOn(
+    context: ReconcileContext,
+    device: DeviceInfo,
+    sessions: readonly string[] = this.sessionsOn(device),
+  ): void {
+    const live = sessions.find((sessionUuid) => this.deps.claims.isLiveExecution?.(sessionUuid));
+    if (live !== undefined) {
+      throw new ReconcileAbort(
+        failure(
+          "slot_in_use",
+          `Slot ${context.request.key.slotIndex} is held by live session ${live} on '${device.name}'.`,
+        ),
+      );
+    }
   }
 
   private async provisionExisting(

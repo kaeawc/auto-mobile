@@ -1233,6 +1233,8 @@ export class Daemon {
       executionTracker.cancelSessionlessDeviceUse(deviceId, {
         excludeExecutionId: getToolSelectionContext()?.execution?.executionId,
       });
+      // A sessionless stroke parked on the device with no frame in flight is lifted too (#11541).
+      this.socketServer?.liftSessionlessStrokesOn(deviceId);
       stopOwnerlessRecordings(deviceId);
       clearOwnerlessNetworkState(deviceId);
       resetSettingDefaults(deviceId, sessionId);

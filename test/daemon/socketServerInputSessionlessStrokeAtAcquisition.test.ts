@@ -1,35 +1,34 @@
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { DaemonStateAccess } from "../../../src/daemon/daemonRequestHandlers";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import { UnixSocketServer } from "../../../src/daemon/socketServer";
+import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { UnixSocketServer } from "../../src/daemon/socketServer";
 import {
   hasActiveSessionExecution,
   subscribeToolCallEndActivity,
-} from "../../../src/daemon/toolCallActivity";
-import type { DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
-import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { executionTracker } from "../../../src/server/executionTracker";
-import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeTimer } from "../../fakes/FakeTimer";
+} from "../../src/daemon/toolCallActivity";
+import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { executionTracker } from "../../src/server/executionTracker";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeTimer } from "../fakes/FakeTimer";
 import {
   androidDevice,
   createFakeDaemonState,
   createFakeDeviceManager,
-} from "../helpers/inputSocketHarness";
+} from "./helpers/inputSocketHarness";
 
 /**
- * Holder-change matrix, cell "a session acquires the device × an open sessionless stroke".
+ * Holder-change matrix, cell "a session acquires the device × an open sessionless stroke" (#11541).
  *
  * A sessionless `input/gestureStart` is admitted on a device no session holds, and the runner
  * parks the stroke with no ceiling. When a session then acquires the device, the daemon stops
  * everything else sessionless work left on it (#10829 in-flight calls, #10961 recordings, #11130
- * network state), and #11448 lifts a stroke when its holder is RELEASED, but nothing lifts a
- * sessionless stroke when the device gains a holder: the frames of a gesture are separate control
- * calls, so with no frame in flight `cancelSessionlessDeviceUse` finds nothing to cancel. The new
- * owner gets its device with a finger down until the pane sends another frame or disconnects.
+ * network state). The frames of a gesture are separate control calls, so with no frame in flight
+ * `cancelSessionlessDeviceUse` finds nothing to cancel: the acquisition hook lifts the stroke
+ * itself, and a start still awaiting its ack when the session arrives is lifted on the ack.
  *
  * Same harness as `socketServerInputStrokeAfterSessionRelease.test.ts`. The acquisition hook is
  * wired as `daemon.ts` wires it (`setDeviceAcquisitionExecutionCanceller`), and the release hook
@@ -68,6 +67,7 @@ interface Internals {
   handleConnection(socket: Socket): void;
   activeRequestHandlers: Set<Promise<void>>;
   liftStrokesHeldBy(releasedSessionId: string): Promise<void>;
+  liftSessionlessStrokesOn(deviceId: string): void;
 }
 
 const NEW_OWNER = "new-owner-session";
@@ -81,6 +81,8 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
   /** Device-side gesture frames, in the order the fake device received them. */
   let strokes: string[];
   let acquisitions: string[];
+  /** When set, the fake device holds the start's ack until it resolves. */
+  let startAck: PromiseWithResolvers<{ success: boolean }> | undefined;
   let unsubscribeActivity: () => void;
   const pool = { isSessionRecoveryInFlight: () => false, sessionExecutionsEnded: () => {} };
 
@@ -108,14 +110,17 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
   beforeEach(() => {
     strokes = [];
     acquisitions = [];
+    startAck = undefined;
     sessionManager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence());
     sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
     );
-    // daemon.ts: a session acquiring a device cancels the sessionless calls admitted on it.
+    // daemon.ts: a session acquiring a device cancels the sessionless calls admitted on it and
+    // lifts the sessionless strokes parked on it.
     sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {
       acquisitions.push(`${sessionId}@${deviceId}`);
       executionTracker.cancelSessionlessDeviceUse(deviceId);
+      internals.liftSessionlessStrokesOn(deviceId);
     });
     unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
 
@@ -129,7 +134,10 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
       () =>
         ({
           getScreenScaleMetadata: () => null,
-          requestGestureStart: stroke("start"),
+          requestGestureStart: async () => {
+            strokes.push("start");
+            return startAck ? await startAck.promise : { success: true };
+          },
           requestGestureMove: stroke("move"),
           requestGestureEnd: stroke("end"),
         }) as unknown as AndroidCtrlProxyClient,
@@ -180,7 +188,7 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
     expect(strokes).toEqual(["start", "cancel"]);
   });
 
-  test("control: the pane's next frame is refused and only then lifts the stroke", async () => {
+  test("the lifted stroke is cancelled once: a refused frame and the socket close lift nothing more", async () => {
     expect(await sendSessionlessGesture("Start")).toMatchObject({ success: true });
     await sessionManager.createSession(NEW_OWNER, DEVICE, "android", IDLE_MS);
     await settle();
@@ -189,6 +197,92 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
       success: false,
       code: "device_owned_by_other_session",
     });
+    socket.destroy();
+    await settle();
+    await Promise.all([...internals.activeRequestHandlers]);
     expect(strokes).toEqual(["start", "cancel"]);
+  });
+
+  test("a stroke on another device, and one a session holds, are left alone", async () => {
+    expect(await sendSessionlessGesture("Start")).toMatchObject({ success: true });
+
+    internals.liftSessionlessStrokesOn("some-other-device");
+    await settle();
+    expect(strokes).toEqual(["start"]);
+
+    // The new owner's own stroke is not sessionless work: a later acquisition signal leaves it.
+    await sessionManager.createSession(NEW_OWNER, DEVICE, "android", IDLE_MS);
+    await settle();
+    socket.send({
+      id: "owner-start",
+      type: "mcp_request",
+      method: "input/gestureStart",
+      params: {
+        platform: "android",
+        deviceId: DEVICE,
+        x: 1,
+        y: 2,
+        sessionUuid: NEW_OWNER,
+        gestureId: "owner-drag",
+      },
+    });
+    await settle();
+    await Promise.all([...internals.activeRequestHandlers]);
+    expect(socket.responses.find((frame) => frame.id === "owner-start")).toMatchObject({
+      success: true,
+    });
+    internals.liftSessionlessStrokesOn(DEVICE);
+    await settle();
+    expect(strokes).toEqual(["start", "cancel", "start"]);
+  });
+
+  test("a sessionless start still awaiting its ack when the session arrives is lifted on the ack, once", async () => {
+    startAck = Promise.withResolvers<{ success: boolean }>();
+    socket.send({
+      id: "gesture-Start",
+      type: "mcp_request",
+      method: "input/gestureStart",
+      params: { platform: "android", deviceId: DEVICE, x: 1, y: 2, gestureId: "drag-1" },
+    });
+    await settle();
+    expect(strokes).toEqual(["start"]);
+
+    // The acquisition finds no recorded stroke: the pointer is down, the ack is not in yet.
+    await sessionManager.createSession(NEW_OWNER, DEVICE, "android", IDLE_MS);
+    await settle();
+    expect(strokes).toEqual(["start"]);
+
+    startAck.resolve({ success: true });
+    await settle();
+    await Promise.all([...internals.activeRequestHandlers]);
+
+    expect(strokes).toEqual(["start", "cancel"]);
+    expect(socket.responses.find((frame) => frame.id === "gesture-Start")).toMatchObject({
+      success: false,
+      code: "device_owned_by_other_session",
+    });
+    socket.destroy();
+    await settle();
+    await Promise.all([...internals.activeRequestHandlers]);
+    expect(strokes).toEqual(["start", "cancel"]);
+  });
+
+  test("a sessionless start the runner refused opened nothing, so the acquisition cancels nothing", async () => {
+    startAck = Promise.withResolvers<{ success: boolean }>();
+    socket.send({
+      id: "gesture-Start",
+      type: "mcp_request",
+      method: "input/gestureStart",
+      params: { platform: "android", deviceId: DEVICE, x: 1, y: 2, gestureId: "drag-1" },
+    });
+    await settle();
+    await sessionManager.createSession(NEW_OWNER, DEVICE, "android", IDLE_MS);
+    await settle();
+
+    startAck.resolve({ success: false });
+    await settle();
+    await Promise.all([...internals.activeRequestHandlers]);
+
+    expect(strokes).toEqual(["start"]);
   });
 });

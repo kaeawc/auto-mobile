@@ -4,38 +4,38 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
-} from "../../../src/daemon/daemonRequestHandlers";
-import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
-import { releasePlanSessionAndDevice } from "../../../src/daemon/releaseSessionAndDevice";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import { UnixSocketServer } from "../../../src/daemon/socketServer";
+} from "../../src/daemon/daemonRequestHandlers";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { releasePlanSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { UnixSocketServer } from "../../src/daemon/socketServer";
 import {
   hasActiveSessionExecution,
   subscribeToolCallEndActivity,
-} from "../../../src/daemon/toolCallActivity";
-import type { DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
-import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { executionTracker } from "../../../src/server/executionTracker";
-import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeTimer } from "../../fakes/FakeTimer";
+} from "../../src/daemon/toolCallActivity";
+import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { executionTracker } from "../../src/server/executionTracker";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeTimer } from "../fakes/FakeTimer";
 import {
   androidDevice,
   createFakeDaemonState,
   createFakeDeviceManager,
-} from "../helpers/inputSocketHarness";
+} from "./helpers/inputSocketHarness";
 
 /**
- * Release-cut matrix, cell "release that cuts × `input/gestureStart` in flight on the device".
+ * Release-cut matrix, cell "release that cuts × `input/gestureStart` in flight on the device"
+ * (#11541).
  *
  * #11448 lifts a released holder's strokes at release time (`liftStrokesHeldBy`), but only the
- * strokes already recorded in the ownership registry. A stroke is recorded when its
+ * strokes already recorded in the ownership registry, and a stroke is recorded when its
  * `gestureStart` is ACKED. A release that cuts (explicit release, plan auto-release: neither
  * waits for a control call) can land while the start is on the device and not yet acked: the
- * release's lift finds nothing, the device is freed, and then the ack records the stroke under
- * the holder that has just been released. Streamed gesture frames carry no abort signal to the
- * runner, so the cut does not stop the start either. Nothing lifts the pointer until the pane's
- * socket closes or sends another frame: the device is free for the next owner with a finger down.
+ * release's lift finds nothing and the device is freed. Streamed gesture frames carry no abort
+ * signal to the runner, so the cut does not stop the start either. The ack therefore cancels the
+ * stroke instead of recording it under a holder that has left, and answers the release.
  *
  * Same harness as `socketServerInputStrokeAfterSessionRelease.test.ts`: real SessionManager,
  * socket server, release handler and execution tracker; only the device client is a fake.
@@ -73,6 +73,11 @@ interface Internals {
   handleConnection(socket: Socket): void;
   activeRequestHandlers: Set<Promise<void>>;
   liftStrokesHeldBy(releasedSessionId: string): Promise<void>;
+  strokeAdmissionStillHolds(admission: {
+    deviceId: string;
+    holderSessionId?: string;
+    holderIncarnation?: object;
+  }): boolean;
 }
 
 const SESSION = "stroke-holder-session";
@@ -219,11 +224,97 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
       "explicit-release",
     );
 
-    await ackStart();
+    const answer = await ackStart();
 
     // The pane's socket is still connected and sends nothing more (the mouse is held still). The
-    // pointer the cut start put down must have been lifted; it stays down on the free device.
+    // pointer the cut start put down is lifted, and the frame answers the release that cut it.
     expect(socket.destroyed).toBe(false);
+    expect(strokes).toEqual(["start", "cancel"]);
+    expect(answer).toMatchObject({
+      success: false,
+      code: "session_ownership_lost",
+      details: { reason: "explicit-release", sessionUuid: SESSION },
+    });
+
+    // Nothing was recorded, so the socket close has no stroke to cancel a second time.
+    socket.destroy();
+    await settle();
+    await Promise.all([...internals.activeRequestHandlers]);
+    expect(strokes).toEqual(["start", "cancel"]);
+  });
+
+  test("the same session id holding the device again is a different holder than the one admitted", async () => {
+    const admitted = sessionManager.getSession(SESSION)!;
+    const admission = { deviceId: DEVICE, holderSessionId: SESSION, holderIncarnation: admitted };
+    expect(internals.strokeAdmissionStillHolds(admission)).toBe(true);
+
+    // A plan's auto-release leaves the UUID free for a later plan to be issued again by name.
+    await sessionManager.releaseSession(SESSION, "plan-auto-release");
+    expect(internals.strokeAdmissionStillHolds(admission)).toBe(false);
+
+    // Same id, same device, a new incarnation: the admitted holder is still gone.
+    await sessionManager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+    expect(sessionManager.getSessionForDevice(DEVICE)).toBe(SESSION);
+    expect(sessionManager.getSession(SESSION)).not.toBe(admitted);
+    expect(internals.strokeAdmissionStillHolds(admission)).toBe(false);
+    expect(
+      internals.strokeAdmissionStillHolds({
+        ...admission,
+        holderIncarnation: sessionManager.getSession(SESSION)!,
+      }),
+    ).toBe(true);
+    // A start admitted with no holder does not survive a session holding the device.
+    expect(internals.strokeAdmissionStillHolds({ deviceId: DEVICE })).toBe(false);
+  });
+
+  test("a plan re-issuing the released session id before the ack does not keep the old holder's stroke", async () => {
+    await putPointerDownWithAckPending();
+    await releasePlanSessionAndDevice(
+      sessionManager,
+      { releaseDevice: async () => {} },
+      { sessionId: SESSION, deviceId: DEVICE },
+    );
+    await settle();
+    await sessionManager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+    expect(sessionManager.getSessionForDevice(DEVICE)).toBe(SESSION);
+
+    await ackStart();
+
+    expect(strokes).toEqual(["start", "cancel"]);
+    // The new incarnation's release finds no stroke of the old one to lift again.
+    await sessionManager.releaseSession(SESSION, "plan-auto-release");
+    await settle();
+    expect(strokes).toEqual(["start", "cancel"]);
+  });
+
+  test("a start the runner refused opened nothing: the release cancels no stroke", async () => {
+    await putPointerDownWithAckPending();
+    await releasePlanSessionAndDevice(
+      sessionManager,
+      { releaseDevice: async () => {} },
+      { sessionId: SESSION, deviceId: DEVICE },
+    );
+    await settle();
+
+    startAck.resolve({ success: false });
+    await settle();
+    await Promise.all([...internals.activeRequestHandlers]);
+
+    expect(strokes).toEqual(["start"]);
+  });
+
+  test("a start acked while its holder still holds the device is recorded and lifted by the release", async () => {
+    await putPointerDownWithAckPending();
+    expect(await ackStart()).toMatchObject({ success: true });
+    expect(strokes).toEqual(["start"]);
+
+    await releasePlanSessionAndDevice(
+      sessionManager,
+      { releaseDevice: async () => {} },
+      { sessionId: SESSION, deviceId: DEVICE },
+    );
+    await settle();
+
     expect(strokes).toEqual(["start", "cancel"]);
   });
 

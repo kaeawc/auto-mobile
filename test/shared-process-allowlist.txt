@@ -41,6 +41,7 @@ test/daemon/canonicalPixels.property.test.ts
 test/daemon/canonicalPixels.test.ts
 test/daemon/childProcessCleanup.test.ts
 test/daemon/cliIdleDaemonStallForgiveness.test.ts
+test/daemon/cliIdleReadInFlightReportedDeadline.test.ts
 test/daemon/clientNonFiniteEncoding.test.ts
 test/daemon/clientOptionsSchema.test.ts
 test/daemon/clientRequestIdGenerator.test.ts
@@ -97,6 +98,7 @@ test/daemon/disconnectMonitor-physicalImmediate.test.ts
 test/daemon/emulatorLossIncident.test.ts
 test/daemon/emulatorLossIncidentLedger.test.ts
 test/daemon/executionOwnerWatch.test.ts
+test/daemon/explicitReleaseCutCall.test.ts
 test/daemon/failuresPushSocketServer.test.ts
 test/daemon/findAvailableDaemonPort.test.ts
 test/daemon/forwardLeaseHolders.test.ts
@@ -758,6 +760,7 @@ test/scripts/benchmarkListDevicesFixture.test.ts
 test/scripts/benchmarkSettledScreenshot.test.ts
 test/scripts/benchmarkSettledScreenshotIsolation.test.ts
 test/scripts/benchmarkSettledScreenshotReliability.test.ts
+test/scripts/benchmarkThresholds.test.ts
 test/scripts/buildReleaseNotes.test.ts
 test/scripts/checkUtilsImportDirection.test.ts
 test/scripts/ciLfsSkipSmudgePolicy.test.ts
@@ -898,6 +901,7 @@ test/server/prompts/list.test.ts
 test/server/prototypeDisplay.test.ts
 test/server/prototypeDisplayAssets.test.ts
 test/server/prototypeInspect.test.ts
+test/server/prototypeIosResetRefusal.test.ts
 test/server/prototypeResources.test.ts
 test/server/prototypeToolAnchors.test.ts
 test/server/prototypeToolAppearance.test.ts

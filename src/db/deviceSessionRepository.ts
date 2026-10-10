@@ -8,8 +8,11 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import {
   isRecoverableDaemonReleaseReason,
+  literalReleaseReasonsStrongerThan,
   literalReleaseReasonsWhere,
+  releaseReasonFamiliesStrongerThan,
   releaseReasonFamiliesWhere,
+  releaseReasonStrength,
   sessionReleaseReasonFamily,
   type SessionReleaseReasonFamily,
 } from "../daemon/releaseReasons";
@@ -51,6 +54,24 @@ function hasRecoverableReleaseReason(eb: ExpressionBuilder<Database, "device_ses
   return eb.or([
     eb("release_reason", "in", Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS)),
     ...releaseReasonFamiliesWhere("recoverable").map((family) =>
+      eb("release_reason", "like", `${family}_%`),
+    ),
+  ]);
+}
+
+/**
+ * SQL form of "the stored reason is stronger than `candidate`" (see `releaseReasonMayReplace`): a
+ * release with `candidate` must not be applied to such a row.
+ */
+function holdsStrongerReleaseReason(
+  eb: ExpressionBuilder<Database, "device_sessions">,
+  candidate: string,
+) {
+  const strength = releaseReasonStrength(candidate);
+  const literals = literalReleaseReasonsStrongerThan(strength);
+  return eb.or([
+    ...(literals.length > 0 ? [eb("release_reason", "in", literals)] : []),
+    ...releaseReasonFamiliesStrongerThan(strength).map((family) =>
       eb("release_reason", "like", `${family}_%`),
     ),
   ]);
@@ -143,6 +164,12 @@ export interface DeviceSessionActivityUpdate {
  */
 export interface MarkReleasedOptions {
   expectedRowGeneration?: number;
+  /**
+   * Apply the release only while the row still holds a recoverable reason (single statement): a
+   * sweep that terminalizes an expired recoverable row must not overwrite a release that landed
+   * after it selected the row.
+   */
+  onlyIfRecoverable?: boolean;
 }
 
 /** The row incarnation a recovery read, which its ownership claim must still match (#11200). */
@@ -634,7 +661,7 @@ export class DeviceSessionRepository {
     reason: string,
     options: MarkReleasedOptions = {},
   ): Promise<void> {
-    const { expectedRowGeneration } = options;
+    const { expectedRowGeneration, onlyIfRecoverable } = options;
     try {
       const db = await this.getDb();
       let update = db
@@ -646,9 +673,22 @@ export class DeviceSessionRepository {
           ...(shouldRetainLivenessOwner(reason) ? {} : { liveness_owner_token: null }),
           updated_at: this.nowIso(),
         })
-        .where("session_uuid", "=", sessionUuid);
+        .where("session_uuid", "=", sessionUuid)
+        // A terminal reason is never replaced by a weaker one (a stronger or equal one may).
+        .where((eb) =>
+          // Nothing is stronger than the strongest reason, so it replaces any row.
+          releaseReasonStrength(reason) === 2
+            ? eb.val(true)
+            : eb.or([
+                eb("release_reason", "is", null),
+                eb.not(holdsStrongerReleaseReason(eb, reason)),
+              ]),
+        );
       if (expectedRowGeneration !== undefined) {
         update = update.where("stable_identity_generation", "=", expectedRowGeneration);
+      }
+      if (onlyIfRecoverable) {
+        update = update.where((eb) => hasRecoverableReleaseReason(eb));
       }
       const result = await update.executeTakeFirst();
       if (expectedRowGeneration !== undefined && Number(result.numUpdatedRows) === 0) {
@@ -744,6 +784,7 @@ export class DeviceSessionRepository {
       try {
         await this.markReleased(row.session_uuid, "expired", nowMs, "expired", {
           expectedRowGeneration: row.stable_identity_generation ?? 0,
+          onlyIfRecoverable: true,
         });
       } catch (error) {
         logger.warn(

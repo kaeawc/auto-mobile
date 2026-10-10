@@ -23,7 +23,7 @@ class SessionLossGuardMCPClientTest {
     val client =
       HeldDeviceWaitingMCPClient(
         SessionLossGuardMCPClient(delegate, "held") { loss },
-        backoffDelayMs = { _, _ -> 10L },
+        backoffDelayMs = { _, _, _ -> 10L },
         sleeper = { sleeps.add(it) },
       )
 

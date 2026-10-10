@@ -721,14 +721,21 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     spec: AndroidDeviceSpecification,
     displayCutout: DisplayCutoutClassification,
   ): Promise<ExactProvisionedDevice> {
-    const created = await this.dependencies.avdManager.createAvd(
-      {
-        name: request.name,
-        package: spec.runtime,
-        device: spec.deviceType,
-      },
-      { signal: request.signal },
-    );
+    let created: Awaited<ReturnType<ExactAndroidAvdClient["createAvd"]>>;
+    try {
+      created = await this.dependencies.avdManager.createAvd(
+        {
+          name: request.name,
+          package: spec.runtime,
+          device: spec.deviceType,
+        },
+        { signal: request.signal },
+      );
+    } catch (error) {
+      // A killed or cancelled create may have left the AVD for rollback to find (#11155).
+      invalidateAndroidInventoryProvenanceAndCatalog();
+      throw error;
+    }
     if (!created.success) {
       throw new ProvisionDeviceCreateRejectedError(
         `Failed to create Android AVD '${request.name}': ${created.message}`,

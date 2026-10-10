@@ -8,7 +8,11 @@ import {
   getBestAndroidToolsLocation,
   validateRequiredTools,
 } from "./detection";
-import { AvdManagerClient, type AvdManagerExecutionOptions } from "./AvdManagerClient";
+import {
+  AvdCreateInterruptedError,
+  AvdManagerClient,
+  type AvdManagerExecutionOptions,
+} from "./AvdManagerClient";
 import {
   SdkManagerClient,
   type SdkManagerCommandResult,
@@ -145,7 +149,16 @@ export async function createAvd(
   dependencies = createDefaultDependencies(),
   signal?: AbortSignal,
 ): Promise<{ success: boolean; message: string; avdName?: string }> {
-  const result = await createAvdManagerClient(dependencies).createAvd(params, { signal });
+  let result: Awaited<ReturnType<AvdManagerClient["createAvd"]>>;
+  try {
+    result = await createAvdManagerClient(dependencies).createAvd(params, { signal });
+  } catch (error) {
+    if (error instanceof AvdCreateInterruptedError) {
+      // The killed create may have left the AVD on disk; list it for rollback.
+      invalidateAndroidInventoryProvenanceAndCatalog();
+    }
+    throw error;
+  }
   if (result.success) {
     invalidateAndroidInventoryProvenanceAndCatalog();
   }

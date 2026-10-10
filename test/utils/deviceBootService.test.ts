@@ -14,6 +14,7 @@ import {
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
 import { pickAndroidSystemImage } from "../../src/devices/deviceProvisioning";
+import { ProvisionDeviceCreateRejectedError } from "../../src/devices/exactDeviceProvisioning";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import {
   ActionableError,
@@ -810,6 +811,81 @@ describe("DeviceBootService", () => {
     expect(rolledBack).toEqual([
       { name: created.name, failure: expect.stringContaining("has no lifecycle identity") },
     ]);
+  });
+
+  it("rolls back the identity a cancelled create claimed, after the create settles (#11155)", async () => {
+    const timer = new FakeTimer();
+    const createSettled = Promise.withResolvers<void>();
+    const rollbacks: { device: DeviceInfo; pendingCreation?: Promise<unknown> }[] = [];
+    const claimed = {
+      platform: "ios" as const,
+      name: "AutoMobile-iPhone-17-claimed",
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+      runtimeId: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+      runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+    };
+    const boot = new DeviceBootService({
+      deviceManager: new FakeDeviceUtils(),
+      deviceMatcher: new FakeDeviceMatcher(),
+      deviceCreationGate: { isCreationAllowed: () => true, describeSource: () => "test" },
+      deviceProvisioner: {
+        provision: async (_criteria, _signal, identityHooks) => {
+          await identityHooks?.reserveBeforeCreate(claimed);
+          await createSettled.promise;
+          throw new Error("simctl create cancelled");
+        },
+      },
+      matchingStrategy: "LATEST",
+      timer,
+      lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
+      rollbackCreatedDevice: async (device, _failure, options) => {
+        rollbacks.push({ device, pendingCreation: options?.pendingCreation });
+      },
+    });
+
+    const outcome = boot.boot({ platform: "ios", createIfMissing: true });
+    createSettled.resolve();
+    await expect(outcome).rejects.toThrow(/simctl create cancelled/);
+
+    expect(rollbacks).toHaveLength(1);
+    expect(rollbacks[0].device).toMatchObject({
+      name: claimed.name,
+      platform: "ios",
+      deviceType: claimed.deviceType,
+      runtime: claimed.runtime,
+    });
+    expect(rollbacks[0].device.deviceId).toBeUndefined();
+    await expect(rollbacks[0].pendingCreation).rejects.toThrow(/simctl create cancelled/);
+  });
+
+  it("does not roll back a create the platform tool cleanly rejected (#11155)", async () => {
+    const timer = new FakeTimer();
+    let rollbacks = 0;
+    const boot = new DeviceBootService({
+      deviceManager: new FakeDeviceUtils(),
+      deviceMatcher: new FakeDeviceMatcher(),
+      deviceCreationGate: { isCreationAllowed: () => true, describeSource: () => "test" },
+      deviceProvisioner: {
+        provision: async (_criteria, _signal, identityHooks) => {
+          await identityHooks?.reserveBeforeCreate({
+            platform: "android",
+            name: "AutoMobile-android-34-claimed",
+          });
+          throw new ProvisionDeviceCreateRejectedError("AVD creation failed: name in use");
+        },
+      },
+      matchingStrategy: "LATEST",
+      timer,
+      lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
+      rollbackCreatedDevice: async () => {
+        rollbacks++;
+      },
+    });
+
+    await expect(boot.boot({ platform: "android", createIfMissing: true })).rejects.toThrow(
+      /name in use/,
+    );
+    expect(rollbacks).toBe(0);
   });
 
   it("does not roll back when provisioning failed before creating a device (#11100)", async () => {

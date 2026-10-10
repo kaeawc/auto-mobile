@@ -217,6 +217,33 @@ describe("pool ownership races found by the seeded concurrency harness", () => {
     },
   );
 
+  // Root cause (fixed, #11192): the attach wrote the owner row (markAutolockSession) before the
+  // ownership decision, and an acquisition persisted its caller even when recordBindOwnership
+  // refused it, so a daemon restart could restore a mapping to a connection that had closed.
+  test.each(ATTACH_PATHS)(
+    "a refused attach (%s) never persists the closed connection as owner",
+    async (_path, attach) => {
+      const world = await createPoolWorld();
+      const sessionId = await ownerlessAutolock(world);
+
+      const attaching = attach(world.pool, sessionId, "closing-connection");
+      world.pool.releaseMcpSessionBindings("closing-connection");
+      await attaching;
+
+      expect(world.autolockRows.map((row) => row.mcpSessionId)).not.toContain("closing-connection");
+    },
+  );
+
+  test("an acquisition refused as owner persists no owner row for the closed connection", async () => {
+    const world = await createPoolWorld();
+
+    const acquire = autolockForConnection(world.pool, "closing-connection");
+    world.pool.releaseMcpSessionBindings("closing-connection");
+    const sessionId = await acquire;
+
+    expect(world.autolockRows).toEqual([{ sessionId: sessionId!, mcpSessionId: null }]);
+  });
+
   test("a connection that closed while its attach wrote the owner row owns nothing", async () => {
     const world = await createPoolWorld();
     const sessionId = await ownerlessAutolock(world);

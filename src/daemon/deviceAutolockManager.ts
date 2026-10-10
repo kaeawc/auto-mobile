@@ -315,17 +315,22 @@ export class DeviceAutolockManager {
     this.pool.getSessionManager().setDeviceReadiness(sessionId, achievedReadiness);
     // A connection that closed mid-acquire already had its bindings released: publishing its
     // routes now would leave a dead owner that suppresses the owner-disconnect release (#11166).
-    if (mcpSessionId && this.pool.recordBindOwnership(mcpSessionId, sessionId)) {
-      this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
-      const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
+    const owner =
+      mcpSessionId && this.pool.recordBindOwnership(mcpSessionId, sessionId)
+        ? mcpSessionId
+        : undefined;
+    if (owner) {
+      this.mcpSessionAutolockMap.set(owner, sessionId);
+      const acquired = this.mcpSessionAcquiredAutolocks.get(owner) ?? new Set<string>();
       acquired.add(sessionId);
-      this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
+      this.mcpSessionAcquiredAutolocks.set(owner, acquired);
     }
+    // A refused owner is not persisted either, so a restart cannot restore it (#11192).
     await this.persistAcquiredAutolockSession(
       device,
       session,
       assignmentSnapshot,
-      mcpSessionId,
+      owner,
       collectCancellationSettlement,
     );
 
@@ -730,15 +735,15 @@ export class DeviceAutolockManager {
         return "not-attached";
       }
       this.assertMcpSessionCanAutolockDevice(mcpSessionId, device);
-      const outcome = await this.persistAttachment(session, mcpSessionId);
-      // Ownership is decided before anything is published (#11192): a connection that closed
-      // while this attach was in flight already had its bindings released, so routing it here
-      // would leave a dead owner that suppresses the owner-disconnect release (#10503).
+      // Ownership is decided before anything is published or persisted (#11192): a connection
+      // that closed while this attach was in flight already had its bindings released, so routing
+      // it here would leave a dead owner that suppresses the owner-disconnect release (#10503),
+      // and persisting it would let a daemon restart restore that dead mapping.
       if (refuseForeignOwned && !this.pool.recordBindOwnership(mcpSessionId, sessionId)) {
         return "not-attached";
       }
       this.recordAttachment(sessionId, mcpSessionId, makeDefault);
-      return outcome;
+      return await this.persistAttachment(session, mcpSessionId);
     });
   }
 

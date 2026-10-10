@@ -14,6 +14,11 @@ import {
   type ResolvedExactDeviceSpecification,
 } from "../../devices/exactDeviceProvisioning";
 import type { DeviceInfo } from "../../models";
+import { evaluateRuntimeCompatibility } from "../../utils/ios-cmdline-tools/runtimeCompatibility";
+import type {
+  AppleDeviceRuntime,
+  AppleDeviceType,
+} from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
 import type { AvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "../../utils/android-cmdline-tools/AndroidSystemImageRuntime";
@@ -74,6 +79,26 @@ export interface ManagedSlotSpecFingerprint {
 
 export type ManagedSlotDisposition = "reused" | "adopted" | "created" | "replaced";
 
+type WithOptionalDeviceType<T extends { deviceType: string }> = Omit<T, "deviceType"> & {
+  deviceType?: string;
+};
+
+/**
+ * A managed slot's requested spec: an exact spec whose `deviceType` (the model or hardware
+ * profile) may be omitted. Omitted means "any model" (owner decision Q4): any listed device of the
+ * requested runtime matches, and a device that must be created gets a model the resolver picks
+ * and records in the resolved spec.
+ */
+export type ManagedSlotRequestedSpec =
+  | WithOptionalDeviceType<AndroidDeviceSpecification>
+  | WithOptionalDeviceType<IosDeviceSpecification>;
+
+/**
+ * The Android hardware profile created for a spec that omits `deviceType` (a current Pixel with a
+ * known cutout class). Override per resolver.
+ */
+export const MANAGED_SLOT_DEFAULT_ANDROID_DEVICE_TYPE = "pixel_8";
+
 // ---------------------------------------------------------------------------------------------
 // Ports
 // ---------------------------------------------------------------------------------------------
@@ -96,7 +121,7 @@ export interface ManagedSlotInventory {
 export type ManagedSpecMatch = "match" | "mismatch" | "unknown";
 
 export interface ManagedSpecMatcher {
-  matches(device: DeviceInfo, spec: ExactDeviceSpecification): Promise<ManagedSpecMatch>;
+  matches(device: DeviceInfo, spec: ManagedSlotRequestedSpec): Promise<ManagedSpecMatch>;
 }
 
 export type ManagedSpecResolution =
@@ -105,13 +130,15 @@ export type ManagedSpecResolution =
       resolvedSpec: ResolvedExactDeviceSpecification;
       fingerprint: ManagedSlotSpecFingerprint;
     }
-  | { kind: "unsupported"; code: "spec_unsupported" | "runtime_incompatible"; message: string };
+  | { kind: "unsupported"; code: "spec_unsupported" | "runtime_incompatible"; message: string }
+  /** The spec could not be resolved yet (an unreadable catalog); retryable, nothing changed. */
+  | { kind: "unresolved"; message: string };
 
 /** Validates and resolves a spec before any destructive work. */
 export interface ManagedSpecResolver {
   resolve(
     platform: SlotPlatform,
-    spec: ExactDeviceSpecification,
+    spec: ManagedSlotRequestedSpec,
     options: { signal?: AbortSignal },
   ): Promise<ManagedSpecResolution>;
 }
@@ -122,7 +149,11 @@ export interface ManagedSlotProvisionRequest {
   name: string;
   /** iOS UDID of an existing simulator to adopt. */
   deviceId?: string;
-  spec: ExactDeviceSpecification;
+  /**
+   * `create` always carries a concrete `deviceType` (the resolved model). `adopt` carries the
+   * requested spec, whose omitted `deviceType` accepts the existing device's model.
+   */
+  spec: ManagedSlotRequestedSpec;
   /** `adopt` must never create; `create` provisions a new device under `name`. */
   mode: "adopt" | "create";
   deadlineMs: number;
@@ -220,7 +251,7 @@ export interface ManagedSlotReconcileRequest {
   key: SlotKey;
   role: string;
   platform: SlotPlatform;
-  requestedSpec: ExactDeviceSpecification;
+  requestedSpec: ManagedSlotRequestedSpec;
   /** Non-authoritative: preferred among adoption candidates, never trusted for deletion. */
   priorDeviceHint?: { stableId: string };
   /** Absolute deadline on the timer's clock for the whole preparation. */
@@ -323,7 +354,7 @@ export type ManagedSlotReconcileResult =
       assignment: SlotAssignmentRecord;
       device: ManagedSlotDeviceIdentity;
       sessionUuid: string;
-      requestedSpec: ExactDeviceSpecification;
+      requestedSpec: ManagedSlotRequestedSpec;
       resolvedSpec: ResolvedExactDeviceSpecification;
       specFingerprint: ManagedSlotSpecFingerprint;
       readiness: { mode: string; status: string };
@@ -386,7 +417,7 @@ export function deviceStableId(device: DeviceInfo): string | undefined {
 export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
   constructor(private readonly androidConfigReader: Pick<AvdConfigReader, "readConfig">) {}
 
-  async matches(device: DeviceInfo, spec: ExactDeviceSpecification): Promise<ManagedSpecMatch> {
+  async matches(device: DeviceInfo, spec: ManagedSlotRequestedSpec): Promise<ManagedSpecMatch> {
     if (device.platform === "android") {
       let config: Awaited<ReturnType<AvdConfigReader["readConfig"]>>;
       try {
@@ -401,36 +432,58 @@ export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
       if (!config) {
         return "unknown";
       }
-      return matchesAndroidDeviceSpecification(spec as AndroidDeviceSpecification, config)
-        ? "match"
-        : "mismatch";
+      // An omitted hardware profile is unconstrained: the AVD's own profile (even an unset one)
+      // satisfies it.
+      const constraints = {
+        ...(spec as WithOptionalDeviceType<AndroidDeviceSpecification>),
+        deviceType: (spec.deviceType ?? config.deviceName) as string,
+      };
+      return matchesAndroidDeviceSpecification(constraints, config) ? "match" : "mismatch";
     }
     // An unavailable simulator (runtime unmounted, or listed under a different Xcode or
     // DEVELOPER_DIR) proves nothing about its configuration, so it is never a mismatch to replace.
     if (
       device.isAvailable === false ||
       device.runtime === undefined ||
-      device.deviceType === undefined
+      (spec.deviceType !== undefined && device.deviceType === undefined)
     ) {
       return "unknown";
     }
-    return iosDeviceSpecificationMismatch(spec as IosDeviceSpecification, device) === undefined
-      ? "match"
-      : "mismatch";
+    // An omitted model is unconstrained: the simulator's own model satisfies it.
+    const constraints = { runtime: spec.runtime, deviceType: spec.deviceType ?? device.deviceType! };
+    return iosDeviceSpecificationMismatch(constraints, device) === undefined ? "match" : "mismatch";
   }
+}
+
+export interface DefaultManagedSpecResolverOptions {
+  /** Profile created for an Android spec that omits `deviceType`. */
+  androidDefaultDeviceType?: string;
 }
 
 /**
  * Resolves a spec with the shared exact-provisioning checks: Android image identifier shape,
  * display cutout, and (with a catalog) a proven-incompatible iOS model/runtime pair. Unreadable
  * catalogs are unknown, not unsupported, matching the provisioner.
+ *
+ * An omitted `deviceType` ("any model") resolves to the model a creation would use: on iOS the
+ * newest iPhone the catalog lists as supporting the runtime (so a catalog is required), on Android
+ * {@link MANAGED_SLOT_DEFAULT_ANDROID_DEVICE_TYPE} unless overridden. Matching still accepts any
+ * model; only creation uses the resolved one. A cutout preference needs an explicit model.
  */
 export class DefaultManagedSpecResolver implements ManagedSpecResolver {
-  constructor(private readonly iosRuntimeCatalog?: ExactIosRuntimeCatalog) {}
+  private readonly androidDefaultDeviceType: string;
+
+  constructor(
+    private readonly iosRuntimeCatalog?: ExactIosRuntimeCatalog,
+    options: DefaultManagedSpecResolverOptions = {},
+  ) {
+    this.androidDefaultDeviceType =
+      options.androidDefaultDeviceType ?? MANAGED_SLOT_DEFAULT_ANDROID_DEVICE_TYPE;
+  }
 
   async resolve(
     platform: SlotPlatform,
-    spec: ExactDeviceSpecification,
+    spec: ManagedSlotRequestedSpec,
     options: { signal?: AbortSignal },
   ): Promise<ManagedSpecResolution> {
     if (platform === "android" && !parseAndroidSystemImageRuntime(spec.runtime)) {
@@ -440,18 +493,23 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
         message: `Android runtime '${spec.runtime}' is not a system-image identifier.`,
       };
     }
-    const cutout = resolveDisplayCutoutPreference(platform, spec);
+    const model = await this.resolveDeviceType(platform, spec, options.signal);
+    if (model.kind !== "resolved") {
+      return model.resolution;
+    }
+    const exact = { ...spec, deviceType: model.deviceType } as ExactDeviceSpecification;
+    const cutout = resolveDisplayCutoutPreference(platform, exact);
     if (cutout.kind !== "resolved") {
       return { kind: "unsupported", code: "spec_unsupported", message: cutout.message };
     }
-    if (platform === "ios" && this.iosRuntimeCatalog) {
-      const incompatible = await this.findIosIncompatibility(spec, options.signal);
+    if (platform === "ios" && this.iosRuntimeCatalog && spec.deviceType !== undefined) {
+      const incompatible = await this.findIosIncompatibility(exact, options.signal);
       if (incompatible) {
         return { kind: "unsupported", code: "runtime_incompatible", message: incompatible };
       }
     }
     const resolvedSpec = {
-      ...spec,
+      ...exact,
       displayCutout: cutout.displayCutout,
     } as ResolvedExactDeviceSpecification;
     return {
@@ -459,6 +517,60 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
       resolvedSpec,
       fingerprint: computeManagedSpecFingerprint(platform, resolvedSpec),
     };
+  }
+
+  private async resolveDeviceType(
+    platform: SlotPlatform,
+    spec: ManagedSlotRequestedSpec,
+    signal: AbortSignal | undefined,
+  ): Promise<
+    { kind: "resolved"; deviceType: string } | { kind: "refused"; resolution: ManagedSpecResolution }
+  > {
+    if (spec.deviceType !== undefined) {
+      return { kind: "resolved", deviceType: spec.deviceType };
+    }
+    if (spec.displayCutout !== undefined && spec.displayCutout !== "any") {
+      return refused(
+        "spec_unsupported",
+        `A display cutout preference ('${spec.displayCutout}') needs an explicit deviceType.`,
+      );
+    }
+    if (platform === "android") {
+      return { kind: "resolved", deviceType: this.androidDefaultDeviceType };
+    }
+    if (!this.iosRuntimeCatalog) {
+      return refused(
+        "spec_unsupported",
+        "An iOS spec without deviceType needs the simulator catalog to choose a model.",
+      );
+    }
+    let runtimes: AppleDeviceRuntime[];
+    let deviceTypes: AppleDeviceType[];
+    try {
+      [runtimes, deviceTypes] = await Promise.all([
+        this.iosRuntimeCatalog.getRuntimesChecked(undefined, signal),
+        this.iosRuntimeCatalog.getDeviceTypesChecked(signal),
+      ]);
+    } catch (error) {
+      logger.warn(
+        `[ManagedSlots] iOS catalog unreadable; cannot choose a model: ${errorMessage(error)}`,
+        error,
+      );
+      return {
+        kind: "refused",
+        resolution: {
+          kind: "unresolved",
+          message: `The simulator catalog could not be read to choose a model: ${errorMessage(error)}`,
+        },
+      };
+    }
+    const deviceType = chooseIosDeviceType(spec.runtime, runtimes, deviceTypes);
+    return deviceType
+      ? { kind: "resolved", deviceType }
+      : refused(
+          "runtime_incompatible",
+          `No installed iPhone model supports runtime '${spec.runtime}', or the runtime is not available.`,
+        );
   }
 
   private async findIosIncompatibility(
@@ -488,6 +600,35 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
       ? `Runtime '${spec.runtime}' is not available. Compatible installed runtimes: ${alternatives}.`
       : `Device type '${spec.deviceType}' does not support runtime '${spec.runtime}'. Compatible installed runtimes: ${alternatives}.`;
   }
+}
+
+function refused(
+  code: "spec_unsupported" | "runtime_incompatible",
+  message: string,
+): { kind: "refused"; resolution: ManagedSpecResolution } {
+  return { kind: "refused", resolution: { kind: "unsupported", code, message } };
+}
+
+/**
+ * The model "any model" creates for an iOS runtime: the last (newest, in simctl's catalog order)
+ * iPhone whose runtime range supports it, else the last iPhone with no range metadata (simctl
+ * stays the authority). Undefined when the runtime is missing or unavailable, or no iPhone fits.
+ */
+export function chooseIosDeviceType(
+  runtimeId: string,
+  runtimes: readonly AppleDeviceRuntime[],
+  deviceTypes: readonly AppleDeviceType[],
+): string | undefined {
+  const runtime = runtimes.find((entry) => entry.identifier === runtimeId);
+  if (!runtime?.isAvailable) {
+    return undefined;
+  }
+  const iphones = deviceTypes.filter((entry) => entry.productFamily === "iPhone");
+  const statusOf = (entry: AppleDeviceType) =>
+    evaluateRuntimeCompatibility(entry, runtime.version).status;
+  const supported = iphones.filter((entry) => statusOf(entry) === "supported");
+  const unknown = iphones.filter((entry) => statusOf(entry) === "unknown");
+  return (supported.at(-1) ?? unknown.at(-1))?.identifier;
 }
 
 class ReconcileAbort extends Error {
@@ -661,6 +802,9 @@ export class ManagedSlotReconciler {
     });
     if (resolution.kind === "unsupported") {
       throw new ReconcileAbort(failure(resolution.code, resolution.message));
+    }
+    if (resolution.kind === "unresolved") {
+      throw new ReconcileAbort(failure("discovery_incomplete", resolution.message));
     }
     const context: ReconcileContext = {
       request,
@@ -1006,7 +1150,8 @@ export class ManagedSlotReconciler {
       provisioned = await this.deps.provisioner.provision({
         platform: request.platform,
         name,
-        spec: request.requestedSpec,
+        // "Any model" creates the model the resolver chose (and recorded).
+        spec: { ...request.requestedSpec, deviceType: context.resolvedSpec.deviceType },
         mode: "create",
         deadlineMs: request.deadlineMs,
         signal: request.signal,

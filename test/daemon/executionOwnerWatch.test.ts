@@ -113,6 +113,19 @@ describe("ExecutionOwnerWatch", () => {
     expect(losses.map((loss) => loss.reason)).toEqual(["owner-exited"]);
   });
 
+  test("an explicit live owner outlives a re-parent: the wrapper exiting does not end the execution (#11342)", async () => {
+    const { timer, watch, losses, reparent, kill } = harness({ ownerPid: SUPERVISOR });
+    watch.start();
+    reparent(1);
+    timer.advanceTime(3 * EXECUTION_OWNER_CHECK_INTERVAL_MS);
+    await settle();
+    expect(losses).toEqual([]);
+    kill(SUPERVISOR);
+    timer.advanceTime(EXECUTION_OWNER_CHECK_INTERVAL_MS);
+    await settle();
+    expect(losses.map((loss) => loss.reason)).toEqual(["owner-exited"]);
+  });
+
   test("an owner already gone at launch is caught by the first check", async () => {
     const { watch, losses, kill } = harness();
     kill(PARENT);

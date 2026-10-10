@@ -6,7 +6,8 @@
  * the execution it served is gone, so the proxy checks, on its own short cadence, that:
  *
  * - its declared execution owner (by default the parent it was launched by) is still running, and
- * - it has not been re-parented (the launching parent died and init or a subreaper adopted it).
+ * - with the default owner only, it has not been re-parented (the launching parent died and init
+ *   or a subreaper adopted it); an explicit owner pid is judged by its liveness alone.
  *
  * Either loss fires `onOwnerLost` exactly once; the caller then releases the execution's sessions
  * and shuts the proxy down. Stdin EOF is the third end-of-execution signal and is already handled
@@ -118,7 +119,12 @@ export class ExecutionOwnerWatch {
     if (this.options.ownerPid === undefined && this.options.launchParentPid === INIT_PID) {
       return "parent-changed";
     }
-    if (this.probe.currentParentPid() !== this.options.launchParentPid) {
+    // An explicit owner pid replaces the parent heuristic (#11342): only its liveness matters, so
+    // an intermediate wrapper that launched the proxy and exited does not end the execution.
+    if (
+      this.options.ownerPid === undefined &&
+      this.probe.currentParentPid() !== this.options.launchParentPid
+    ) {
       return "parent-changed";
     }
     return this.probe.isProcessRunning(this.ownerPid) ? undefined : "owner-exited";

@@ -221,7 +221,7 @@
 14	test/server/toolRegistry.lastHierarchyCache.test.ts
 23	test/server/toolRegistry.pipeline.test.ts
 4	test/server/toolRegistry.scrollPositionUpdate.test.ts
-4	test/server/tools/daemonModeTools.test.ts
+3	test/server/tools/daemonModeTools.test.ts
 5	test/server/tools/schema.integration.test.ts
 2	test/server/unissuedSessionBoundConnection.integration.test.ts
 1	test/server/videoRecordingReadiness.test.ts

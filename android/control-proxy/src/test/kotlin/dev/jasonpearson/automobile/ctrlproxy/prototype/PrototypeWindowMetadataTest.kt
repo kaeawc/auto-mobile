@@ -104,6 +104,32 @@ class PrototypeWindowMetadataTest {
   }
 
   @Test
+  fun `an anchored root is laid out at its anchor so it never counts as covering`() {
+    val placements =
+      listOf(
+        PrototypeFullscreenPlacement(),
+        PrototypeSheetPlacement(edge = "bottom", height = 200.0),
+        PrototypeFloatingPlacement(gravity = "topStart", offset = PrototypeOffset(0.0, 0.0)),
+      )
+    val anchors =
+      listOf(
+        PrototypeBoundsAnchor(PrototypeBounds(40.0, 40.0, 80.0, 80.0)),
+        PrototypeBoundsAnchor(PrototypeBounds(40.0, 40.0, 80.0, 80.0), "cover"),
+        PrototypeBoundsAnchor(PrototypeBounds(40.0, 40.0, 80.0, 80.0), "below"),
+      )
+    for (placement in placements) {
+      val base = spec(placement)
+      val root = base.root as PrototypeBoxNode
+      // Control: the same root without an anchor covers its window.
+      assertTrue(placement.toString(), metadata(base).opaque)
+      for (anchor in anchors) {
+        val anchored = metadata(base.copy(root = root.copy(anchor = anchor)))
+        assertFalse("$placement $anchor", anchored.opaque)
+      }
+    }
+  }
+
+  @Test
   fun `square corners and a zero offset still cover the window`() {
     val covering =
       listOf<(PrototypeStyle) -> PrototypeStyle>(

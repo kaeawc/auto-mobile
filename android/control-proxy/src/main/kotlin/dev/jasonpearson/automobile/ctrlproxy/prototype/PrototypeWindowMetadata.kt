@@ -38,13 +38,13 @@ const val FULLSCREEN_DISMISS_BAR_OPAQUE = false
  * Derived from the render model the window actually draws. Opaque requires the window not to be
  * translucent (`opacityPercent` 100), no translucent host chrome over the window, and a fully
  * opaque surface that fills the window: the root's own background at alpha 1 sized to fill with no
- * node alpha and nothing that draws it short of the window ([coversItsParent]), or, for fullscreen,
- * a fully opaque scrim painted behind it. A modal sheet's scrim is drawn over content and never
- * makes anything more opaque. Colours are resolved as they are drawn, against [palettes]: a role
- * name counts when its scheme colour is opaque, a `{light, dark}` pair only when the side for each
- * palette's mode is, and the `scrim` role in a scrim slot never does, because it is drawn at the
- * default scrim opacity. The controller passes the one palette of the mode the show resolved to,
- * with that [appearance]; without it every mode the spec can resolve to is checked.
+ * node alpha, no `anchor` and nothing that draws it short of the window ([coversItsParent]), or,
+ * for fullscreen, a fully opaque scrim painted behind it. A modal sheet's scrim is drawn over
+ * content and never makes anything more opaque. Colours are resolved as they are drawn, against
+ * [palettes]: a role name counts when its scheme colour is opaque, a `{light, dark}` pair only when
+ * the side for each palette's mode is, and the `scrim` role in a scrim slot never does, because it
+ * is drawn at the default scrim opacity. The controller passes the one palette of the mode the show
+ * resolved to, with that [appearance]; without it every mode the spec can resolve to is checked.
  */
 internal fun prototypeWindowMetadata(
   model: PrototypeRenderModel,
@@ -63,7 +63,10 @@ internal fun prototypeWindowMetadata(
   // What is drawn decides: a colour is solid only if it resolves opaque in every reachable mode.
   val drawn = palettes ?: prototypeReachablePalettes(model)
   fun opaque(color: Color?) = (color?.alpha ?: 0f) >= 1f
-  val rootFills = style.source.coversItsParent()
+  // An anchored root is measured and placed at its anchor's rectangle (`prototypeAnchor`), not over
+  // the window. Only a floating window follows the rectangle, and its size is not known here, so an
+  // anchor never counts as covering: a false `true` would hide a visible app from the host.
+  val rootFills = model.root.source?.anchor == null && style.source.coversItsParent()
   val rootSolid =
     rootFills &&
       drawn.all {

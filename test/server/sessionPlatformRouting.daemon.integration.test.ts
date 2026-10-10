@@ -360,9 +360,11 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     await manager.releaseSession(apple, "heartbeat-timeout");
     await pool.releaseDevice(devices[1].deviceId, apple);
     client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, apple, "heartbeat-timeout");
-    await expect(
-      proxy.callTool("routingProbe", { platform: "ios", keepScreenAwake: false }),
-    ).rejects.toThrow();
+    // The connection now holds no iOS session: the selector falls through to ordinary
+    // discovery instead of reporting a false ambiguity (#11167), and never reaches the Android one.
+    const receivedBeforeIos = received.length;
+    await proxy.callTool("routingProbe", { platform: "ios", keepScreenAwake: false });
+    expect(received.slice(receivedBeforeIos)).not.toContain(devices[0].deviceId);
     // The released iOS binding must not prevent an unqualified call from using
     // the still-owned Android binding.
     await proxy.callTool("routingProbe", {});
@@ -430,7 +432,7 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
   }
 }, 30000);
 
-test("setActiveDevice rebinds the current session to an unacquired free device", async () => {
+test("setActiveDevice rebinds the session of the device's platform, never the other platform's default (#11167)", async () => {
   await acquireBoth();
   registerUtilityTools();
   const result = await ToolRegistry.getTool("setActiveDevice")!.handler({
@@ -438,9 +440,10 @@ test("setActiveDevice rebinds the current session to an unacquired free device",
     platform: "android",
     __mcpSessionId: "client",
   });
-  expect(JSON.parse(result.content[0].text).sessionUuid).toBe(iosSession);
-  expect(manager.getSession(iosSession!)?.assignedDevice).toBe(devices[2].deviceId);
-  expect(pool.resolveAutolockSessionForMcpSession("client")).toBe(iosSession);
+  expect(JSON.parse(result.content[0].text).sessionUuid).toBe(androidSession);
+  expect(manager.getSession(androidSession!)?.assignedDevice).toBe(devices[2].deviceId);
+  expect(manager.getSession(iosSession!)?.platform).toBe("ios");
+  expect(manager.getSession(iosSession!)?.assignedDevice).toBe(devices[1].deviceId);
 }, 30000);
 
 test("restoring retained sessions preserves an already changed default", async () => {

@@ -8142,6 +8142,16 @@ export class DevicePool {
    * Whether a still-connected MCP client (other than `exceptMcpSessionId`) owns the session or
    * routes to it by autolock.
    */
+  /** Whether `sessionId` is a live autolock session another connected client owns or routes to. */
+  isAutolockSessionOwnedByOtherConnection(sessionId: string, mcpSessionId?: string): boolean {
+    if (!this.autolockManager.hasMcpSessionOwner(sessionId, mcpSessionId)) {
+      return false;
+    }
+    const session = this.sessionManager.getSession(sessionId);
+    const device = session ? this.devices.get(session.assignedDevice) : undefined;
+    return device?.autolockSessionId === sessionId;
+  }
+
   private hasConnectedMcpSessionOwner(sessionId: string, exceptMcpSessionId?: string): boolean {
     for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredDeviceSessions) {
       if (mcpSessionId !== exceptMcpSessionId && acquired.has(sessionId)) {

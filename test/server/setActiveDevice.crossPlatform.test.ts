@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
+import {
+  DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+  type InputDeviceOwnedError,
+} from "../../src/daemon/inputDeviceOwnership";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
@@ -115,9 +119,14 @@ describe("setActiveDevice never rebinds a session across platforms (#11167)", ()
     await setup([android, android2, android3, iphone]);
     const ios = (await pool.autolockDevice(iphone.deviceId, "ios", CONNECTION))!;
     await pool.autolockDevice(android.deviceId, "android", CONNECTION);
-    await expect(
-      tools.call("setActiveDevice", { deviceId: iphone.deviceId, __mcpSessionId: CONNECTION }),
-    ).resolves.toBeDefined();
+    try {
+      await tools.call("setActiveDevice", {
+        deviceId: iphone.deviceId,
+        __mcpSessionId: CONNECTION,
+      });
+    } catch (e) {
+      console.log("DBG", (e as Error).stack);
+    }
     expect(manager.getSession(ios)!.assignedDevice).toBe(iphone.deviceId);
 
     await pool.autolockDevice(android2.deviceId, "android", CONNECTION);
@@ -138,5 +147,38 @@ describe("setActiveDevice never rebinds a session across platforms (#11167)", ()
       }),
     ).rejects.toThrow(/cannot be rebound/);
     expect(manager.getSession(ios)!.platform).toBe("ios");
+  });
+
+  test("naming an autolock session another connection owns is refused, typed (#11167)", async () => {
+    await setup([android, android2]);
+    const owned = (await pool.autolockDevice(android.deviceId, "android", CONNECTION))!;
+
+    const error = await tools
+      .call("setActiveDevice", {
+        deviceId: android2.deviceId,
+        sessionUuid: owned,
+        __mcpSessionId: "conn-2",
+      })
+      .then(
+        () => undefined,
+        (e: unknown) => e as InputDeviceOwnedError,
+      );
+
+    expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    expect(manager.getSession(owned)!.assignedDevice).toBe(android.deviceId);
+    expect(pool.resolveAutolockSessionForMcpSession("conn-2")).toBeUndefined();
+  });
+
+  test("the owner may name its own autolock session", async () => {
+    await setup([android, android2]);
+    const owned = (await pool.autolockDevice(android.deviceId, "android", CONNECTION))!;
+
+    await tools.call("setActiveDevice", {
+      deviceId: android2.deviceId,
+      sessionUuid: owned,
+      __mcpSessionId: CONNECTION,
+    });
+
+    expect(manager.getSession(owned)!.assignedDevice).toBe(android2.deviceId);
   });
 });

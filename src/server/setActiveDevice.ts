@@ -73,6 +73,20 @@ function resolveAutolockSelection(args: HandlerArgs): string | undefined {
   return targetSession === args.sessionUuid ? targetSession : undefined;
 }
 
+/**
+ * #11167: sharing an autolock session needs its owner to release it first. Naming a session
+ * another connected client owns is refused, typed, before anything is selected or rebound.
+ */
+function refuseForeignOwnedAutolock(args: HandlerArgs): void {
+  if (!args.sessionUuid || !DaemonState.getInstance().isInitialized()) {
+    return;
+  }
+  const pool = DaemonState.getInstance().getDevicePool();
+  if (pool.isAutolockSessionOwnedByOtherConnection(args.sessionUuid, args.__mcpSessionId)) {
+    throw deviceAssignedToOtherSessionError(args.deviceId, args.sessionUuid, undefined);
+  }
+}
+
 async function requestedPoolDevice(pool: DevicePool, deviceId: string): Promise<PooledDevice> {
   let device = pool.getDevice(deviceId);
   if (!device) {
@@ -257,6 +271,7 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
     const mcpSessionId = args.__mcpSessionId;
     try {
       const selectedAutolockSession = resolveAutolockSelection(args);
+      refuseForeignOwnedAutolock(args);
       admitSessionlessSelection(args);
       const sessionUuid = args.sessionUuid;
       const sessionScoped = Boolean(sessionUuid) && DaemonState.getInstance().isInitialized();
@@ -280,7 +295,7 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
       if (selectedAutolockSession) {
         await DaemonState.getInstance()
           .getDevicePool()
-          .attachAutolockSessionToMcpSession(selectedAutolockSession, mcpSessionId);
+          .attachAutolockSessionToMcpSession(selectedAutolockSession, mcpSessionId, true, true);
       }
       const payload = {
         message: `Active device set to '${args.deviceId}'`,

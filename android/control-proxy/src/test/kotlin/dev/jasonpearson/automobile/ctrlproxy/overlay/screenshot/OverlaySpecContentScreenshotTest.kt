@@ -21,18 +21,23 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34], qualifiers = "w360dp-h640dp-mdpi", application = Application::class)
 class OverlaySpecContentScreenshotTest {
 
+  // Pending: #11298 changed the image placeholder colours (surfaceVariant instead of LightGray), so
+  // this baseline must be re-recorded on Linux from an LFS-enabled plain-git clone.
   /** Every node type and style token in one fullscreen tree. */
   @Test
   fun fullscreenAllNodes() =
     overlayScreenshotTest(
       "fullscreen_all_nodes",
       validOverlayFixture("fullscreen-all-nodes"),
+      pending = true,
     )
 
+  // Pending: #11298 changed the image placeholder colours (surfaceVariant instead of LightGray), so
+  // this baseline must be re-recorded on Linux from an LFS-enabled plain-git clone.
   /** Tab bar, pager with a scrolled text page, text field and a closed bottom sheet. */
   @Test
   fun tabbedPagerWithTextField() =
-    overlayScreenshotTest("doc_example_1", validOverlayFixture("doc-example-1"))
+    overlayScreenshotTest("doc_example_1", validOverlayFixture("doc-example-1"), pending = true)
 
   /** Horizontal scroll row with an icon action above a bottom navigation bar. */
   @Test

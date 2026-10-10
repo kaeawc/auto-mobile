@@ -28,7 +28,7 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { executionTracker } from "./executionTracker";
+import { executionTracker, sessionExecutionMetadataOf } from "./executionTracker";
 import { withAdmittedSessionEcho } from "./routedSessionEcho";
 import { withForeignOwnedSessionMeta } from "./routedSessionMeta";
 import { combineRequestAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
@@ -1513,11 +1513,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           .getSessionManager()
           .admitIssuedSessionForAutomation(
             providedSessionUuid,
-            {
-              executionId: execution.id,
-              startTime: execution.startTime,
-              sessionClockStartTime: execution.sessionClockStartTime,
-            },
+            sessionExecutionMetadataOf(execution),
             plainReadCall ? { access: "read-only" } : undefined,
           );
         // Only an admitted call's end is session use (#10824).
@@ -1542,8 +1538,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
                 bindDeviceExecution: (deviceId) =>
                   executionTracker.bindDeviceExecution(execution.id, deviceId),
               },
-              executionId: execution.id,
-              startTime: execution.startTime,
+              ...sessionExecutionMetadataOf(execution),
             },
             // A routing session already carries its own base/label union in
             // ToolRegistry. Carry only a distinct connection profile so it
@@ -1656,11 +1651,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         providedSessionUuid &&
         !isRecordingIdCleanup &&
         !isDeviceInventoryTool(name)
-          ? daemonSessionManager.getSessionForNewExecution(providedSessionUuid, {
-              executionId: execution.id,
-              startTime: execution.startTime,
-              sessionClockStartTime: execution.sessionClockStartTime,
-            })
+          ? daemonSessionManager.getSessionForNewExecution(
+              providedSessionUuid,
+              sessionExecutionMetadataOf(execution),
+            )
           : undefined;
       if (
         !isDeviceSessionAcquisitionTool(name) &&

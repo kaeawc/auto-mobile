@@ -87,6 +87,23 @@ interface ActiveExecution {
   sessionlessDeviceUse?: Set<string>;
 }
 
+/**
+ * What the session manager needs to know about a tracked call to judge it against a session's
+ * stamps: its id and its start on both clocks (#11290). Every producer of that metadata builds
+ * it here, so none can hand over a wall-clock start alone.
+ */
+export function sessionExecutionMetadataOf(execution: ActiveExecution): {
+  executionId: string;
+  startTime: number;
+  sessionClockStartTime: number;
+} {
+  return {
+    executionId: execution.id,
+    startTime: execution.startTime,
+    sessionClockStartTime: execution.sessionClockStartTime,
+  };
+}
+
 /** How a session-bearing execution ended: whether it was ever admitted under its session. */
 export interface SessionExecutionEnd {
   admitted: boolean;

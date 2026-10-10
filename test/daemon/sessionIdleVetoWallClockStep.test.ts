@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { SessionManager, type SessionExecutionMetadata } from "../../src/daemon/sessionManager";
 import { SESSION_IDLE_TIMEOUT_ENV } from "../../src/daemon/sessionLivenessWindows";
-import { ExecutionTracker, type ActiveExecution } from "../../src/server/executionTracker";
+import {
+  ExecutionTracker,
+  sessionExecutionMetadataOf,
+  type ActiveExecution,
+} from "../../src/server/executionTracker";
+import {
+  getToolSelectionContext,
+  runWithToolSelectionContext,
+} from "../../src/features/toolSelection/toolSelectionContext";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -137,13 +145,7 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
   });
 
   /** The metadata the server hands the session manager for a tracked execution. */
-  function metadataOf(execution: ActiveExecution): SessionExecutionMetadata {
-    return {
-      executionId: execution.id,
-      startTime: execution.startTime,
-      sessionClockStartTime: tracker.getSessionClockStartTime(execution.id),
-    };
-  }
+  const metadataOf = sessionExecutionMetadataOf;
 
   function admission(execution: SessionExecutionMetadata): "admitted" | "expired" | "refused" {
     try {
@@ -213,6 +215,32 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
 
     expect(tracker.getSessionClockStartTime(timely.id)).toBe(IDLE_MS - 20_000);
     expect(admission(metadataOf(timely))).toBe("admitted");
+  });
+
+  it("a start carried by the tool-selection context keeps its session-clock stamp", async () => {
+    // A plan's label registration reads the call's metadata back from the ambient context
+    // (planExecutionOrchestrator -> registerDeviceLabelMap -> createToolExecutionContext).
+    timer.advanceTime(IDLE_MS - 20_000);
+    const timely = tracker.startExecution("executePlan", undefined, SESSION);
+    timer.stepWallClock(-HOUR_MS);
+    timer.advanceTime(30_000);
+
+    const outcome = await runWithToolSelectionContext(
+      { execution: sessionExecutionMetadataOf(timely) },
+      async () => admission(getToolSelectionContext()!.execution!),
+    );
+
+    expect(outcome).toBe("admitted");
+  });
+
+  it("a start whose stamp was dropped is judged late after a backward wall step", () => {
+    // Why every producer must carry the stamp: the wall-clock start alone lands an hour late.
+    timer.advanceTime(IDLE_MS - 20_000);
+    const timely = tracker.startExecution("executePlan", undefined, SESSION);
+    timer.stepWallClock(-HOUR_MS);
+    timer.advanceTime(30_000);
+
+    expect(admission({ executionId: timely.id, startTime: timely.startTime })).toBe("expired");
   });
 
   it("reports no session-clock start for an execution it does not track", () => {

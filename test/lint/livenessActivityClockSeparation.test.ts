@@ -1088,6 +1088,7 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       ...Object.entries(DEADLINE_REDERIVATION_HELPERS),
       ...Object.entries(EXPIRY_JUDGEMENTS),
       ...Object.entries(LEASE_JUDGEMENTS),
+      ...Object.entries(SESSION_CLOCK_JUDGEMENTS),
     ].flatMap(([path, keys]) =>
       keys.filter((key) => !models.get(path)?.functions.has(key)).map((key) => `${path} ${key}`),
     );

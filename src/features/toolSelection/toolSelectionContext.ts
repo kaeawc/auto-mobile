@@ -27,7 +27,10 @@ export type ToolSelectionContext = {
   execution?: {
     deviceBinding?: DeviceExecutionBinding;
     executionId: string;
+    /** When the call started, on the tracker's wall clock. */
     startTime: number;
+    /** The same instant on the session clock, which session expiry is judged on (#11290). */
+    sessionClockStartTime?: number;
   };
   /** Connection-scoped selection profile, independent of device routing. */
   toolSelectionProfileUuid?: string;

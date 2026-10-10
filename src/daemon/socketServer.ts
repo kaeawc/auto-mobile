@@ -200,7 +200,7 @@ import type {
   ScreenScaleMetadata,
 } from "../models";
 import type { DeviceService } from "../features/observe/DeviceService";
-import { executionTracker } from "../server/executionTracker";
+import { executionTracker, sessionExecutionMetadataOf } from "../server/executionTracker";
 import {
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
   DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
@@ -7208,8 +7208,7 @@ export class UnixSocketServer {
       return await runWithToolSelectionContext(
         {
           execution: {
-            executionId: execution.id,
-            startTime: execution.startTime,
+            ...sessionExecutionMetadataOf(execution),
             deviceBinding: {
               bindDeviceExecution: (deviceId) =>
                 executionTracker.bindDeviceExecution(execution.id, deviceId),

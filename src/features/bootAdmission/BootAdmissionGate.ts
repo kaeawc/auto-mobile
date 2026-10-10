@@ -1,4 +1,7 @@
-import { ActionableError } from "../../models/ActionableError";
+import {
+  AndroidBootedDeviceDiscoveryIncompleteError,
+  BootedDeviceDiscoveryIncompleteError,
+} from "../../models/BootedDeviceDiscoveryIncompleteError";
 import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
 import type { Platform } from "../../models/Platform";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -88,6 +91,8 @@ export function atCapacityDecision(
 
 export interface BootAdmissionOptions<S, D extends { outcome: string }> {
   timer: Timer;
+  /** Platform being sampled: a sample timeout means its booted count is unknown. */
+  platform: Platform;
   signal?: AbortSignal;
   /** e.g. "iOS simulator capacity"; used in timeout and cancellation messages. */
   label: string;
@@ -140,9 +145,27 @@ async function sampleWithin<S, D extends { outcome: string }>(
     timeoutMs,
     signal: options.signal,
     label: `Collecting ${options.label}`,
-    timeoutError: () =>
-      new ActionableError(`Timed out after ${timeoutMs}ms collecting ${options.label}.`),
+    timeoutError: () => sampleTimeoutError(options.platform, timeoutMs, options.label),
   });
+}
+
+/**
+ * An unfinished sample leaves the booted count unknown, which never fails open: retryable
+ * `discovery_incomplete`, as for a failed listing.
+ */
+function sampleTimeoutError(
+  platform: Platform,
+  timeoutMs: number,
+  label: string,
+): BootedDeviceDiscoveryIncompleteError {
+  const discoveryError = {
+    code: "timeout",
+    message: `timed out after ${timeoutMs}ms collecting ${label}`,
+    retryable: true,
+  } as const;
+  return platform === "android"
+    ? new AndroidBootedDeviceDiscoveryIncompleteError(discoveryError)
+    : new BootedDeviceDiscoveryIncompleteError(platform, discoveryError);
 }
 
 /** Throws the typed retryable {@link BootCapacityExhaustedError} when the boot was refused. */

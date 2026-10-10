@@ -159,6 +159,7 @@ export class IosSimCapacityGate
   ): Promise<CapacityAdmission> {
     return await admitBootNow<FleetCostReport, CapacityDecision>({
       timer: this.timer,
+      platform: "ios",
       signal: options.signal,
       label: "iOS simulator capacity",
       sample: () => this.refresh(),

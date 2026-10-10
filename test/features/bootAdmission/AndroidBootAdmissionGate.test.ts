@@ -183,6 +183,19 @@ describe("AndroidBootAdmissionGate (#11181)", () => {
     expect(source.samples).toBe(3);
   });
 
+  test("a sample timeout is reported as retryable discovery_incomplete", async () => {
+    const { timer, source, gate } = setup();
+    source.sample = () => new Promise(() => {});
+
+    const admission = rejection(gate.admit({ timeoutMs: 60_000, avdName: AVD }));
+    await Promise.resolve();
+    timer.advanceTime(15_000);
+
+    const error = await admission;
+    expect(error).toBeInstanceOf(AndroidBootedDeviceDiscoveryIncompleteError);
+    expect(error).toMatchObject({ code: "discovery_incomplete", retryable: true });
+  });
+
   test("releasing on failure frees the slot for the next boot", async () => {
     const { gate } = setup({ [ANDROID_MAX_BOOTED_ENV]: "1" });
     const first = await gate.admit({ timeoutMs: 60_000, avdName: AVD });

@@ -72,4 +72,17 @@ describe("iOS boot capacity gate", () => {
     const again = await gate.admitBoot(undefined, { bootUdid: A });
     expect(again.decision.outcome).toBe("allow");
   });
+
+  // Unknown count => retryable discovery_incomplete (owner contract). A listing that outlives the
+  // 15 s sample bound (simctl's own bound is 60 s) surfaces as an untyped ActionableError, while
+  // the Android gate's listing timeout is typed discovery_incomplete.
+  test("a sample timeout is reported as discovery_incomplete", async () => {
+    const source = new ScriptedSource();
+    const { gate, timer } = build(source);
+    const admission = gate.admitBoot(undefined, { bootUdid: A });
+    admission.catch(() => {});
+    await tick();
+    timer.advanceTime(15_000);
+    await expect(admission).rejects.toBeInstanceOf(BootedDeviceDiscoveryIncompleteError);
+  });
 });

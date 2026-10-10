@@ -78,6 +78,7 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     let admitted: LedgerAdmission | undefined;
     const result = await admitBootNow<AndroidCapacitySample, AndroidAdmissionDecision>({
       timer: this.timer,
+      platform: "android",
       signal: request.signal,
       sampleTimeoutMs: Math.min(request.timeoutMs, DEFAULT_SAMPLE_TIMEOUT_MS),
       label: "Android emulator capacity",

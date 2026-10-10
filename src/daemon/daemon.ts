@@ -3158,6 +3158,8 @@ export class Daemon {
       {
         parentPid: () => process.ppid,
         launcherPid: () => launcherPid,
+        launcherIsExplicit: () => launcherPid !== PROCESS_ENTRY_PARENT_PID,
+        isProcessRunning: (pid) => isProcessRunning(pid),
         clientCount: () =>
           (this.socketServer?.getClientConnectionCount() ?? 0) +
           getLiveAuxSocketConnectionCount() +

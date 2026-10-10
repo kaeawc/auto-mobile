@@ -104,6 +104,7 @@ test/daemon/explicitReleaseCutCall.test.ts
 test/daemon/failuresPushSocketServer.test.ts
 test/daemon/findAvailableDaemonPort.test.ts
 test/daemon/forwardLeaseHolders.test.ts
+test/daemon/freshStartAlreadyBoundRefusal.test.ts
 test/daemon/gatedToolThroughDaemon.test.ts
 test/daemon/gestureOwnership.test.ts
 test/daemon/getApplePreparationTimeout.property.test.ts

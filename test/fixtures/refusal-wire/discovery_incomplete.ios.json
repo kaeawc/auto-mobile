@@ -1,0 +1,13 @@
+{
+  "code": "discovery_incomplete.ios",
+  "builder": "ProvisionDeviceError via createToolErrorResponse",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"message\":\"discovery_incomplete: iOS booted-device discovery was incomplete and is retryable: simctl list timed out\",\"error\":{\"code\":\"discovery_incomplete\",\"message\":\"discovery_incomplete: iOS booted-device discovery was incomplete and is retryable: simctl list timed out\",\"retryable\":true}}"
+      }
+    ]
+  }
+}

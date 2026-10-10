@@ -1846,8 +1846,18 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return;
     }
 
-    // Stop iproxy tunnel if running
-    await this.stopIproxyTunnel({ clearDevicePort: true });
+    // A tunnel-stop failure must not skip runner termination, and it must not leave
+    // the port reservation or the retiring runner's abort signal behind once the
+    // runner is gone. They are retained only when the runner is confirmed still
+    // alive, so its port is not handed to another device while it holds it.
+    let tunnelStopError: unknown;
+    try {
+      // Stop iproxy tunnel if running
+      await this.stopIproxyTunnel({ clearDevicePort: true });
+    } catch (error) {
+      tunnelStopError = error;
+      logger.warn(`[IOSCtrlProxy] iproxy tunnel stop failed: ${errorMessage(error)}`, error);
+    }
 
     const runnerTerminationError = await this.terminateTrackedRunner(retiringController, deadline);
 
@@ -1859,12 +1869,18 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           `${errorMessage(runnerTerminationError)}`,
       );
     }
-    // Terminate descendants before abort can synchronously clear process tracking.
-    retiringController?.abort(new Error("iOS CtrlProxy runner stopped"));
-    if (this.runnerAbortController === retiringController) {
-      this.runnerAbortController = null;
+    try {
+      // Terminate descendants before abort can synchronously clear process tracking.
+      retiringController?.abort(new Error("iOS CtrlProxy runner stopped"));
+      if (this.runnerAbortController === retiringController) {
+        this.runnerAbortController = null;
+      }
+    } finally {
+      PortManager.release(this.device.deviceId);
     }
-    PortManager.release(this.device.deviceId);
+    if (tunnelStopError !== undefined) {
+      throw toActionableError(tunnelStopError, "Failed to stop iOS CtrlProxy iproxy tunnel");
+    }
     logger.info("[IOSCtrlProxy] Service stopped");
   }
 

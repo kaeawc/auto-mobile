@@ -8,6 +8,7 @@ import { runWithToolDispatchReporter } from "../utils/ToolDispatchContext";
 import type { NavigationToolCallHandle } from "../utils/interfaces/NavigationGraph";
 import { runSessionDisplayPin } from "./sessionDisplayPin";
 import { toActionableError } from "../models/ActionableError";
+import { DeviceOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
 import {
   clearToolTransportRecovery,
   setToolTransportRecovery,
@@ -1036,6 +1037,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         signal,
         getConnectedPlatforms,
         autolockEnabled,
+        readOnly: isDeviceReadOnlyCall(options, args),
       });
     }
 
@@ -1143,6 +1145,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         providedDeviceId,
         sessionUuid,
         admittedSession?.assignedDevice,
+        admittedSession?.platform,
       );
       const context = await createToolExecutionContext(
         sessionUuid,
@@ -1178,7 +1181,13 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         true,
         signal,
       );
-      assertSessionDeviceRouting(name, providedDeviceId, sessionUuid, context.deviceId);
+      assertSessionDeviceRouting(
+        name,
+        providedDeviceId,
+        sessionUuid,
+        context.deviceId,
+        context.devicePlatform,
+      );
       if (context.deviceId && !providedDeviceId) {
         providedDeviceId = context.deviceId;
         logger.info(`[ToolRegistry] Resolved device from session: ${providedDeviceId}`);
@@ -1496,6 +1505,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     signal,
     getConnectedPlatforms,
     autolockEnabled,
+    readOnly,
   }: {
     platform: SomePlatform;
     sessionUuid: string | undefined;
@@ -1504,6 +1514,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     signal: AbortSignal | undefined;
     getConnectedPlatforms: () => Promise<ConnectedPlatformScan>;
     autolockEnabled: boolean;
+    readOnly: boolean;
   }): Promise<void> {
     if (!autolockEnabled) {
       return;
@@ -1528,6 +1539,13 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       return;
     }
 
+    // A read never requires a session (#10970, #11351): it is asked for a deviceId only.
+    if (readOnly) {
+      throw new ActionableError(
+        "Device pool autolock is enabled and multiple devices are available. " +
+          "Provide a deviceId to target a specific device.",
+      );
+    }
     throw new ActionableError(
       "Device pool autolock is enabled and multiple devices are available. " +
         "Call getAndroid or getApple first from this MCP session, or provide the returned sessionUuid (or a deviceId) to target a specific device.",
@@ -2381,9 +2399,15 @@ function assertSessionDeviceRouting(
   providedDeviceId: string | undefined,
   sessionUuid: string,
   sessionDeviceId: string | undefined,
+  sessionPlatform: string | undefined,
 ): void {
   if (providedDeviceId && sessionDeviceId && providedDeviceId !== sessionDeviceId) {
-    throw new ActionableError(
+    // The same refusal a pinned connection gets for a foreign device (#11351), typed so clients
+    // branch on `device_outside_bound_session`; the long-standing wording is kept.
+    throw new DeviceOutsideBoundSessionError(
+      sessionUuid,
+      { deviceId: sessionDeviceId, platform: sessionPlatform ?? "unknown" },
+      { deviceId: providedDeviceId },
       `${toolName} deviceId '${providedDeviceId}' does not match session '${sessionUuid}' device '${sessionDeviceId}'.`,
     );
   }
@@ -2996,6 +3020,14 @@ export class ToolRegistryClass {
   getAllTools(options: ToolListingOptions = {}): RegisteredTool[] {
     const tools = Array.from(this.tools.values());
     return tools.filter((tool) => this.toolReachable(tool, "list", options));
+  }
+
+  /**
+   * Every registered tool, hidden and availability-gated ones included. For audits that must not
+   * miss a tool that discovery hides (e.g. the read/control classification lint, #11353).
+   */
+  getEveryRegisteredTool(): RegisteredTool[] {
+    return Array.from(this.tools.values());
   }
 
   getConfigurableToolNames(): string[] {

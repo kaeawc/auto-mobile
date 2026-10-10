@@ -1,0 +1,20 @@
+{
+  "surface": "socket-frame",
+  "name": "session_ownership_lost.recovery_owned_by_other_daemon",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "Cannot safely recover session 11111111-2222-4333-8444-555555555555: android device 'Pixel_8_API_35' is claimed by another AutoMobile daemon (PID 4242) (code device_owned_by_other_daemon) (recovery reason: owned-by-other-daemon). The persisted session is terminal; acquire a new device with getAndroid or getApple.",
+    "code": "session_ownership_lost",
+    "retryable": false,
+    "nextAction": "acquire_new_session",
+    "details": {
+      "sessionUuid": "11111111-2222-4333-8444-555555555555",
+      "reason": "identity-recovery-owned-by-other-daemon",
+      "recoveryReason": "owned-by-other-daemon",
+      "deviceId": "emulator-5554",
+      "ownerPid": 4242
+    }
+  }
+}

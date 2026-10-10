@@ -34,7 +34,18 @@ describe("clock-semantics drift", () => {
   });
 
   test("the running Bun is the release line the clock table was verified for", () => {
-    expect(monotonicClockSemanticsDrift(process.versions.bun)).toBeUndefined();
+    const drift = monotonicClockSemanticsDrift(process.versions.bun);
+    // Same pass/fail as a bare toBeUndefined(); the message says how to resolve it (#11473).
+    expect(
+      drift === undefined
+        ? undefined
+        : `${drift}\n\nTo resolve: download the "bun-14-canary" artifact from the Nightly run and ` +
+            "open clock-semantics.json (produced by scripts/ci/measure-clock-semantics.ts). Compare " +
+            "its per-platform elapsedMs/deltaFromPerformanceMs with the table on " +
+            "monotonicClockIncludesHostSleep in src/utils/SystemTimer.ts, confirm the clock source " +
+            "in the Bun release notes, then bump MONOTONIC_CLOCK_SEMANTICS_VERIFIED_BUN (and the " +
+            "pinned packageManager Bun if upgrading) in that file. Do not bump it without comparing.",
+    ).toBeUndefined();
   });
 
   test("reports drift for another release line and nothing outside Bun", () => {

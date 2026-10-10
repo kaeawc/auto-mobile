@@ -1,0 +1,36 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "h": 7,
+      "m": 30
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "timePicker",
+          "hourKey": "h",
+          "minuteKey": "m"
+        },
+        {
+          "type": "button",
+          "label": "Go",
+          "onTap": [
+            {
+              "type": "setState",
+              "key": "h",
+              "value": 24
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onTap[0].value"
+}

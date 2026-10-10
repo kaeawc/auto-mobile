@@ -526,22 +526,27 @@ function isPrototypeDate(value: unknown): boolean {
   return year >= 1900 && year <= 2100 && days !== undefined && day >= 1 && day <= days;
 }
 /** A list item's trailing switch or checkbox binds a boolean, like the standalone controls. */
+function trailingErrors(
+  value: Record<string, unknown>,
+  path: string,
+  state: Record<string, unknown>,
+): PrototypeValidationError | undefined {
+  const trailing = value.type === "listItem" ? object(value.trailing) : undefined;
+  return trailing &&
+    typeof trailing.stateKey === "string" &&
+    typeof state[trailing.stateKey] !== "boolean"
+    ? fail(`${path}.trailing.stateKey`, "Toggle control requires a boolean state key")
+    : undefined;
+}
 function listItemBindingErrors(
   checked: Checked,
   data: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   const state = object(data.state) ?? {};
   for (const { value, path, item } of checked.nodes) {
-    const trailing = value.type === "listItem" ? object(value.trailing) : undefined;
-    if (
-      trailing &&
-      typeof trailing.stateKey === "string" &&
-      typeof state[trailing.stateKey] !== "boolean"
-    ) {
-      return forItem(
-        fail(`${path}.trailing.stateKey`, "Toggle control requires a boolean state key"),
-        item,
-      );
+    const error = trailingErrors(value, path, state);
+    if (error) {
+      return forItem(error, item);
     }
   }
   return undefined;
@@ -629,28 +634,31 @@ function componentFormErrors(
       return undefined;
   }
 }
+/** A tab bar or bottom navigation bound to a state key selects a nonnegative integer index. */
+function selectionErrors(
+  value: Record<string, unknown>,
+  path: string,
+  state: Record<string, unknown>,
+): PrototypeValidationError | undefined {
+  if (
+    typeof value.stateKey !== "string" ||
+    (value.type !== "tabBar" && value.type !== "bottomNav")
+  ) {
+    return undefined;
+  }
+  return numberValid(state[value.stateKey], { kind: "number", integer: true, min: 0 })
+    ? undefined
+    : fail(`${path}.stateKey`, "Selection requires a nonnegative integer state key");
+}
 function bindingErrors(
   checked: Checked,
   data: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   const state = object(data.state) ?? {};
   for (const { value, path, item } of checked.nodes) {
-    const component = componentBindingErrors(value, path, state);
-    if (component) {
-      return forItem(component, item);
-    }
-    if (typeof value.stateKey !== "string") {
-      continue;
-    }
-    const stored = state[value.stateKey];
-    if (value.type !== "tabBar" && value.type !== "bottomNav") {
-      continue;
-    }
-    if (!numberValid(stored, { kind: "number", integer: true, min: 0 })) {
-      return forItem(
-        fail(`${path}.stateKey`, "Selection requires a nonnegative integer state key"),
-        item,
-      );
+    const error = componentBindingErrors(value, path, state) ?? selectionErrors(value, path, state);
+    if (error) {
+      return forItem(error, item);
     }
   }
   return undefined;
@@ -661,21 +669,27 @@ const MODAL_NAMES: Record<string, string | undefined> = {
   dialog: "Dialog",
   snackbar: "Snackbar",
 };
+function openWhenErrors(
+  value: Record<string, unknown>,
+  path: string,
+  state: Record<string, unknown>,
+): PrototypeValidationError | undefined {
+  const type = String(value.type);
+  const name = Object.hasOwn(MODAL_NAMES, type) ? MODAL_NAMES[type] : undefined;
+  const key = name === undefined ? undefined : object(value.openWhen)?.key;
+  return typeof key === "string" && Object.hasOwn(state, key) && typeof state[key] !== "boolean"
+    ? fail(`${path}.openWhen.key`, `${name} requires a boolean state key`)
+    : undefined;
+}
 function sheetBindingErrors(
   checked: Checked,
   data: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   const state = object(data.state) ?? {};
   for (const { value, path, item } of checked.nodes) {
-    const type = String(value.type);
-    const name = Object.hasOwn(MODAL_NAMES, type) ? MODAL_NAMES[type] : undefined;
-    if (name === undefined) {
-      continue;
-    }
-    const condition = object(value.openWhen);
-    const key = condition?.key;
-    if (typeof key === "string" && Object.hasOwn(state, key) && typeof state[key] !== "boolean") {
-      return forItem(fail(`${path}.openWhen.key`, `${name} requires a boolean state key`), item);
+    const error = openWhenErrors(value, path, state);
+    if (error) {
+      return forItem(error, item);
     }
   }
   return undefined;
@@ -694,18 +708,75 @@ const stateActionTypes: Record<string, { check: (stored: unknown) => boolean; me
     message: "Decrement requires a numeric state key",
   },
 };
+/** Every state key a node binds: `stateKey`, time picker keys, a trailing control, `openWhen`. */
+function boundKeys(value: Record<string, unknown>): string[] {
+  const keys = [value.stateKey, value.hourKey, value.minuteKey, object(value.trailing)?.stateKey];
+  const openWhen = Object.hasOwn(MODAL_NAMES, String(value.type))
+    ? object(value.openWhen)
+    : undefined;
+  return [...keys, openWhen?.key].filter((key): key is string => typeof key === "string");
+}
+/** First binding rule the node breaks; the same rules that check the declared state. */
+function controlErrors(
+  value: Record<string, unknown>,
+  path: string,
+  state: Record<string, unknown>,
+): PrototypeValidationError | undefined {
+  return (
+    componentBindingErrors(value, path, state) ??
+    selectionErrors(value, path, state) ??
+    trailingErrors(value, path, state) ??
+    openWhenErrors(value, path, state)
+  );
+}
+/**
+ * A `setState` must leave every control bound to its key valid, so the key is checked as if the
+ * value were the declared state (#11452). A key no control binds, a key bound by controls of
+ * different types, and a repeat-templated value are not checked.
+ */
+function setStateBindingErrors(
+  action: Bound,
+  checked: Checked,
+  state: Record<string, unknown>,
+): PrototypeValidationError | undefined {
+  const { key, value } = action.value;
+  if (typeof key !== "string" || action.operandTemplated || value === undefined) {
+    return undefined;
+  }
+  const controls = checked.nodes.filter((node) => boundKeys(node.value).includes(key));
+  if (new Set(controls.map((node) => String(node.value.type))).size !== 1) {
+    return undefined;
+  }
+  const written = { ...state, [key]: value };
+  for (const control of controls) {
+    const error = controlErrors(control.value, control.path, written);
+    if (error) {
+      return fail(
+        `${action.path}.value`,
+        `setState value does not fit the control bound to "${key}": ${error.message}`,
+      );
+    }
+  }
+  return undefined;
+}
 function stateActionErrors(
   checked: Checked,
   data: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   const state = object(data.state) ?? {};
-  for (const { value, path, item } of checked.actions) {
+  for (const action of checked.actions) {
+    const { value, path, item } = action;
     const rule =
       typeof value.type === "string" && Object.hasOwn(stateActionTypes, value.type)
         ? stateActionTypes[value.type]
         : undefined;
     if (rule && typeof value.key === "string" && !rule.check(state[value.key])) {
       return forItem(fail(`${path}.key`, rule.message), item);
+    }
+    const written =
+      value.type === "setState" ? setStateBindingErrors(action, checked, state) : undefined;
+    if (written) {
+      return forItem(written, item);
     }
   }
   return undefined;
@@ -715,6 +786,8 @@ interface Bound {
   value: Record<string, unknown>;
   path: string;
   item?: number;
+  /** An action whose `value` holds a repeat placeholder: its type is not known statically. */
+  operandTemplated?: boolean;
 }
 interface Checked {
   nodes: Bound[];
@@ -728,10 +801,11 @@ function forItem(
     ? error
     : { ...error, message: `${error.message} (repeat item ${item})` };
 }
-const bound = ({ located, value, item }: KeyInstance<Located>): Bound => ({
+const bound = ({ located, value, item, operandTemplated }: KeyInstance<Located>): Bound => ({
   value,
   path: located.path,
   item,
+  operandTemplated,
 });
 /** State-type checks over every repeat instance: a templated key is checked once per item. */
 function stateTypeErrors(

@@ -2901,7 +2901,13 @@ export class UnixSocketServer {
     if (this.releaseBindingsIfSocketDisconnected(socketSessionId, ownerSocket, pool)) {
       return;
     }
-    await pool.restoreAutolockSessionsForMcpSession?.(ids, socketSessionId);
+    // A session another connection owns must not be restored as this connection's autolock
+    // route either: that would rewrite its persisted owner and make it this client's default.
+    const refusedIds = new Set(refused.map((refusal) => refusal.sessionId));
+    await pool.restoreAutolockSessionsForMcpSession?.(
+      ids.filter((id) => !refusedIds.has(id)),
+      socketSessionId,
+    );
     this.releaseBindingsIfSocketDisconnected(socketSessionId, ownerSocket, pool);
     this.failIfCallTargetsRefusedRestore(args, refused);
   }

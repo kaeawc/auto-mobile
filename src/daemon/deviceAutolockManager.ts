@@ -656,17 +656,19 @@ export class DeviceAutolockManager {
       // second attachment runs, letting restoration clobber a `setActiveDevice`
       // that landed in between (#6807).
       // A persistence failure is logged and reported by the attach; keep restoring the rest.
-      await this.attachAutolockSessionToMcpSession(id, mcpSessionId, "if-absent");
+      await this.attachAutolockSessionToMcpSession(id, mcpSessionId, "if-absent", true);
     }
   }
 
   /**
-   * Associate a live autolock session with a reconnected MCP client session.
+   * Associate a live autolock session with a reconnected MCP client session. `restoreOnly`
+   * (reconnect restoration) refuses a session another connected client owns.
    */
   async attachAutolockSessionToMcpSession(
     sessionId: string,
     mcpSessionId: string | undefined,
     makeDefault: boolean | "if-absent" = true,
+    restoreOnly = false,
   ): Promise<AutolockAttachOutcome> {
     if (!mcpSessionId) {
       return "not-attached";
@@ -680,6 +682,16 @@ export class DeviceAutolockManager {
         device.sessionId !== sessionId ||
         device.autolockSessionId !== sessionId
       ) {
+        return "not-attached";
+      }
+      if (restoreOnly && this.hasMcpSessionOwner(sessionId, mcpSessionId)) {
+        // A reconnect restore names ids from the client: naming another connected client's
+        // autolock is not proof of ownership, so never move its persisted owner or default
+        // route here (#11164). Explicit attaches (setActiveDevice, a sessionUuid call) share.
+        logger.warn(
+          `Not restoring autolock session ${sessionId} to MCP session ${mcpSessionId}: ` +
+            `another connection owns it`,
+        );
         return "not-attached";
       }
       this.assertMcpSessionCanAutolockDevice(mcpSessionId, device);

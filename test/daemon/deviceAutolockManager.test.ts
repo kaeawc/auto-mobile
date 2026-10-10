@@ -341,6 +341,30 @@ describe("DeviceAutolockManager", () => {
     sessions.stopCleanupTimer();
   });
 
+  test("reconnect restore refuses an autolock another connection owns (#11164)", async () => {
+    const { manager, sessions, device, events } = harness();
+    const owned = await manager.autolockDevice(device.id, "android", "mcp-A");
+    events.length = 0;
+
+    await manager.restoreAutolockSessionsForMcpSession([owned!], "mcp-B");
+
+    expect(manager.captureAutolockSessionForMcpSession("mcp-B")).toBeUndefined();
+    expect(manager.captureAutolockSessionForMcpSession("mcp-A")).toBe(owned);
+    expect(events).not.toContain("persist");
+    sessions.stopCleanupTimer();
+  });
+
+  test("reconnect restore reattaches an autolock no other connection owns", async () => {
+    const { manager, sessions, device } = harness();
+    const owned = await manager.autolockDevice(device.id, "android", "mcp-A");
+    manager.releaseMcpSessionBindings("mcp-A");
+
+    await manager.restoreAutolockSessionsForMcpSession([owned!], "mcp-A");
+
+    expect(manager.captureAutolockSessionForMcpSession("mcp-A")).toBe(owned);
+    sessions.stopCleanupTimer();
+  });
+
   test("if-absent attachment preserves an existing default", async () => {
     const { manager, sessions, device, devices } = harness();
     const first = await manager.autolockDevice(device.id, "android", "mcp-1");

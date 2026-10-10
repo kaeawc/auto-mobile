@@ -131,4 +131,30 @@ describe("hunt: revive after a blocked abandoned-scope reclaim", () => {
     expect(again.disposition).toBe("reused");
     expect(provisioner.created()).toHaveLength(0);
   });
+
+  test("the background redrive pass never deletes a revived (valid) scope's intact device", async () => {
+    const first = expectReady(await reconciler.reconcile(request()));
+    const deviceId = first.device.stableId;
+    timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS);
+    claims.claims.set(deviceId, { kind: "unknown", reason: "running state unknown" });
+    expect((await sweeper.sweep()).blocked).toMatchObject([
+      { ...key, reason: "discovery_incomplete" },
+    ]);
+    expect(deleter.calls).toEqual([]);
+
+    expect(await registry.ensureScope(SCOPE)).toMatchObject({ kind: "ready", revived: true });
+    claims.claims.clear();
+    timer.advanceTime(60_000);
+
+    // The daemon's 5 s journal redrive loop (#11480), with no acquisition involved.
+    await reconciler.journal.runPass();
+
+    // Actual: the valid scope's device is deleted and its slot left empty.
+    expect((await registry.getScope(key.scopeKey))?.state).toBe("valid");
+    expect(deleter.stableIds()).toEqual([]);
+    expect(await registry.getAssignment(key)).toMatchObject({
+      stableDeviceId: deviceId,
+      state: "ready",
+    });
+  });
 });

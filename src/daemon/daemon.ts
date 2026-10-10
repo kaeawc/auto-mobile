@@ -154,6 +154,11 @@ import {
 import { currentDaemonProcessGenerationToken } from "./processGeneration";
 import { processGenerationRecordFields } from "./processGenerationFields";
 import { executionTracker } from "../server/executionTracker";
+import { createDeviceStateChangeNotifier } from "../server/deviceStateChangeNotifier";
+import {
+  notifyBootedDeviceResourcesUpdated,
+  resetBootedDevicesResourceCache,
+} from "../server/bootedDeviceResources";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import {
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
@@ -1087,6 +1092,12 @@ export class Daemon {
           });
         }
       },
+      // Subscribers to the booted-device resources learn of status and holder changes (#11413).
+      onDeviceStateChanged: createDeviceStateChangeNotifier({
+        timer: this.timer,
+        invalidate: resetBootedDevicesResourceCache,
+        notify: notifyBootedDeviceResourcesUpdated,
+      }),
       emulatorLossIncidentStore: new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
       ambientExecutionIdReader,
       cancelDeviceSessionExecutions: Object.assign(

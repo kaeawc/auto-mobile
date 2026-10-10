@@ -53,6 +53,25 @@ const PROFILES: Record<string, HarnessProfile> = {
       settle: 4,
     },
   },
+  /** Autolock acquisitions racing explicit binds, connection closes, releases and device loss. */
+  autolock: {
+    steps: STEPS,
+    weights: {
+      acquireAutolock: 7,
+      acquireMcp: 3,
+      acquireCli: 1,
+      release: 3,
+      control: 3,
+      advance: 4,
+      monitorTick: 2,
+      kill: 1,
+      disconnect: 1,
+      reconnect: 2,
+      closeConnection: 5,
+      reopenConnection: 3,
+      settle: 3,
+    },
+  },
   /** Many clients fighting over three devices while devices die and come back. */
   contention: {
     steps: STEPS,

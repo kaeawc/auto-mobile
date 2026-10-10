@@ -591,6 +591,48 @@ export class SessionTerminalReleaseInProgressError extends ActionableError {
   }
 }
 
+/**
+ * A terminal-release reservation (killDevice) named a device the session no longer holds: the
+ * session was rebound or released since the caller resolved it (#11166). Re-resolve the device's
+ * current session and retry, rather than release a session that moved on.
+ */
+export const SESSION_NO_LONGER_OWNS_DEVICE_CODE = "session_no_longer_owns_device";
+
+export class SessionNoLongerOwnsDeviceError extends ActionableError {
+  readonly code = SESSION_NO_LONGER_OWNS_DEVICE_CODE;
+
+  constructor(
+    readonly sessionUuid: string,
+    readonly deviceId: string,
+  ) {
+    super(
+      `Session ${sessionUuid} no longer owns device ${deviceId} ` +
+        `(code ${SESSION_NO_LONGER_OWNS_DEVICE_CODE}); it was rebound or released. ` +
+        "Re-resolve the device's current session and retry.",
+    );
+    this.name = "SessionNoLongerOwnsDeviceError";
+  }
+}
+
+/**
+ * A terminal-release reservation (killDevice) raced the session's own rebind to another device
+ * (#11166). The rebind settles on its own, so retrying the shutdown afterwards is safe.
+ */
+export const SESSION_REBINDING_CODE = "session_rebinding";
+
+export class SessionRebindingError extends ActionableError {
+  readonly code = SESSION_REBINDING_CODE;
+  readonly retryable = true;
+
+  constructor(readonly sessionUuid: string) {
+    super(
+      `Session ${sessionUuid} is rebinding devices (code ${SESSION_REBINDING_CODE}); ` +
+        "retry shutdown after it settles.",
+    );
+    this.name = "SessionRebindingError";
+  }
+}
+
 const TERMINAL_RELEASE_IN_PROGRESS_DETAIL =
   "is being terminally released from its device; use a new session UUID";
 
@@ -3714,12 +3756,10 @@ export class SessionManager {
   /** Prevent this exact session UUID from being rebound while its device shutdown is in flight. */
   reserveSessionForTerminalRelease(session: Session, expectedDeviceId: string): () => void {
     if (session.assignedDevice !== expectedDeviceId) {
-      throw new Error(`Session ${session.sessionId} no longer owns device ${expectedDeviceId}.`);
+      throw new SessionNoLongerOwnsDeviceError(session.sessionId, expectedDeviceId);
     }
     if (this.pendingSessionRebinds.has(session.sessionId)) {
-      throw new Error(
-        `Session ${session.sessionId} is rebinding devices; retry shutdown after it settles.`,
-      );
+      throw new SessionRebindingError(session.sessionId);
     }
     const existing = this.terminalReleaseReservations.get(session.sessionId);
     if (existing) {

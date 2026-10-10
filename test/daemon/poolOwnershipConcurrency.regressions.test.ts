@@ -114,6 +114,53 @@ describe("pool ownership races found by the seeded concurrency harness", () => {
     expect(releases.map((r) => r.reason)).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
   });
 
+  // Root cause (fixed, #11166): the autolock acquisition path published its routes and acquired
+  // set for the calling connection after awaits without checking it was still open (the same race
+  // as the explicit bind above). It now goes through the pool's in-flight bind tracking.
+  function autolockForConnection(pool: DevicePool, connection: string) {
+    return pool.autolockDevice(
+      DEVICE.deviceId,
+      "android",
+      connection,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "automationReady",
+      undefined,
+      { autolockEnabled: true },
+    );
+  }
+
+  test("a connection that closed while its autolock acquisition was in flight owns nothing", async () => {
+    const { pool } = await createPoolWorld();
+
+    const acquire = autolockForConnection(pool, "closing-connection");
+    pool.releaseMcpSessionBindings("closing-connection");
+    const sessionId = await acquire;
+
+    expect(sessionId).toBeDefined();
+    expect(pool.resolveAutolockSessionForMcpSession("closing-connection")).toBeUndefined();
+    expect(pool.hasConnectedMcpSessionOwner(sessionId!)).toBe(false);
+  });
+
+  test("an autolock acquired by a connection that closed mid-acquire is released on owner disconnect", async () => {
+    const { pool, timer, manager, releases } = await createPoolWorld();
+
+    const acquire = autolockForConnection(pool, "first-connection");
+    pool.releaseMcpSessionBindings("first-connection");
+    const sessionId = (await acquire)!;
+    await pool.restoreOwnedDeviceSessionsForMcpSession([sessionId], "second-connection");
+    pool.releaseMcpSessionBindings("second-connection");
+
+    timer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
+    await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+
+    expect(manager.getSession(sessionId)).toBeNull();
+    expect(releases.map((r) => r.reason)).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
+  });
+
   // Harness: contention profile, AUTOMOBILE_POOL_OWNERSHIP_SEED_BASE=1375 (before the disconnect
   // reason was made terminal) shrank to `acquireMcp c0 d0`, `kill d0`, `disconnect d0`; with the
   // real terminal device-loss reason the same class still shows as `plan-auto-release` or

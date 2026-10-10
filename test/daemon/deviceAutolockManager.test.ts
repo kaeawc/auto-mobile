@@ -80,7 +80,10 @@ function harness(env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" }) {
     nextLastUsedAt: () => timer.now() + 1,
     createSessionOrRestore: async (_pooled, _snapshot, create) => await create(),
     stableDeviceIdFor: (pooled) => pooled.name,
-    recordMcpSessionOwnership: () => events.push("ownership"),
+    recordBindOwnership: () => {
+      events.push("ownership");
+      return true;
+    },
     restoreSessionAssignment: (pooled, snapshot) => {
       events.push("restore");
       Object.assign(pooled, snapshot);

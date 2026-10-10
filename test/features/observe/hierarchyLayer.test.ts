@@ -3,7 +3,7 @@ import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import {
   assertAppGestureNotUnderPrototype,
   hasOwnPrototype,
-  ownWindowCoversPoint,
+  ownPrototypeCoversPoint,
   scopeHierarchyForSelector,
   scopeHierarchyToLayer,
   scopeObserveResultToLayer,
@@ -182,8 +182,8 @@ describe("assertAppGestureNotUnderPrototype (#9305)", () => {
 
   test("a full-screen prototype covers every app point", () => {
     const hierarchy = capturedPrototypeHierarchy({ fullScreen: true });
-    expect(ownWindowCoversPoint(hierarchy, { x: 130, y: 578 })).toBe(true);
-    expect(ownWindowCoversPoint(capturedTwoWindowHierarchy(), { x: 130, y: 578 })).toBe(false);
+    expect(ownPrototypeCoversPoint(hierarchy, { x: 130, y: 578 })).toBe(true);
+    expect(ownPrototypeCoversPoint(capturedTwoWindowHierarchy(), { x: 130, y: 578 })).toBe(false);
   });
 
   test("default and prototype layers never refuse", () => {

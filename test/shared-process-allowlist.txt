@@ -527,6 +527,7 @@ test/features/observe/output/diffObserveRealDevice.test.ts
 test/features/observe/output/diffObserveResult.test.ts
 test/features/observe/output/stableIdentityScrollDiff.test.ts
 test/features/observe/ownWindowFocus.test.ts
+test/features/observe/prototypeLayerHighlightGesture.test.ts
 test/features/observe/rasterGeometry.test.ts
 test/features/observe/screenshot/ScreenshotFileWriter.test.ts
 test/features/observe/screenshot/observationScreenshotEvidence.test.ts

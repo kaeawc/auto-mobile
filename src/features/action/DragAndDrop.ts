@@ -22,7 +22,7 @@ import {
   scopeHierarchyForSelector,
 } from "../observe/hierarchyLayer";
 import type { HierarchyCapture } from "../observe/HierarchyCapture";
-import { ownWindowSafeGesturePoint } from "../observe/ApplicationWindowCover";
+import { ownPrototypeSafeGesturePoint } from "../observe/ApplicationWindowCover";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
@@ -551,7 +551,7 @@ export class DragAndDrop extends BaseVisualChange {
     if (layer !== undefined || this.device.platform === "ios") {
       return center;
     }
-    const safe = ownWindowSafeGesturePoint(hierarchy, element, element.bounds, center);
+    const safe = ownPrototypeSafeGesturePoint(hierarchy, element, element.bounds, center);
     if (!safe) {
       throw new ActionableError(
         `dragAndDrop ${label} is covered by an AutoMobile prototype window; hide or move the prototype, then retry.`,

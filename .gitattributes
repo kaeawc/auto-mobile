@@ -140,3 +140,4 @@ test/fixtures/ios-sim-fleet/*.txt text eol=lf
 test/fixtures/ios-sim-fleet/*.json text eol=lf
 test/fixtures/android-apk-signing/*.b64 text eol=lf
 test/fixtures/android-apk-signing/*.txt text eol=lf
+test/fixtures/refusal-wire/*.json text eol=lf

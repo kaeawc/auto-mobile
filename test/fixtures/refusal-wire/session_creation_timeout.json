@@ -1,0 +1,13 @@
+{
+  "code": "session_creation_timeout",
+  "builder": "SessionCreationTimeoutError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Creating session 11111111-2222-4333-8444-555555555555 on device 'emulator-5554' did not finish within 30000ms (code session_creation_timeout); the device was not bound. Retry the request.\",\"code\":\"session_creation_timeout\",\"deviceId\":\"emulator-5554\",\"retryable\":true,\"retryAfterMs\":1000}"
+      }
+    ],
+    "isError": true
+  }
+}

@@ -123,7 +123,9 @@ function noActiveDeviceSessionMessage(error: DaemonConnectionSessionReleasedErro
   return JSON.stringify(noActiveDeviceSessionPayload(error));
 }
 
-function noActiveDeviceSessionResult(error: DaemonConnectionSessionReleasedError): CallToolResult {
+export function noActiveDeviceSessionResult(
+  error: DaemonConnectionSessionReleasedError,
+): CallToolResult {
   return {
     content: [{ type: "text", text: noActiveDeviceSessionMessage(error) }],
     isError: true,

@@ -1,0 +1,13 @@
+{
+  "code": "session_no_longer_owns_device",
+  "builder": "SessionNoLongerOwnsDeviceError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Session 11111111-2222-4333-8444-555555555555 no longer owns device emulator-5554 (code session_no_longer_owns_device); it was rebound or released. Re-resolve the device's current session and retry.\",\"code\":\"session_no_longer_owns_device\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"deviceId\":\"emulator-5554\",\"retryable\":false}"
+      }
+    ],
+    "isError": true
+  }
+}

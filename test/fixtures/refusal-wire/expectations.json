@@ -1,0 +1,19 @@
+{
+  "description": "How a runner must classify each typed daemon refusal in this directory (<code>.json, generated from the real TypeScript builders by scripts/generate-refusal-wire-fixtures.ts). wait = wait for the device within the bounded device wait; acquire-new-session = retry under a fresh session UUID; retry = ordinary bounded retry; fail = fail the attempt. Precedence when a runner derives it: wait, then acquire-new-session (nextAction), then retry (retryable: true), else fail. knownGaps maps a runner (kotlin, swift) to the disposition it currently produces instead of the expected one, so the suite stays green while the gap is tracked; a gap that starts matching the expectation fails the suite until the entry is removed.",
+  "codes": {
+    "capacity_exhausted": { "expected": "wait" },
+    "daemon_session_suspect": { "expected": "retry" },
+    "daemon_shutting_down": { "expected": "retry" },
+    "device_cleanup_in_progress": { "expected": "wait" },
+    "device_owned_by_other_daemon": { "expected": "wait" },
+    "device_owned_by_other_session": { "expected": "wait" },
+    "device_shutting_down": { "expected": "wait" },
+    "discovery_incomplete": { "expected": "wait" },
+    "no_active_device_session": { "expected": "acquire-new-session" },
+    "session_creation_timeout": { "expected": "retry" },
+    "session_no_longer_owns_device": { "expected": "fail" },
+    "session_ownership_lost": { "expected": "acquire-new-session" },
+    "session_rebinding": { "expected": "retry" },
+    "session_terminal_release_in_progress": { "expected": "fail" }
+  }
+}

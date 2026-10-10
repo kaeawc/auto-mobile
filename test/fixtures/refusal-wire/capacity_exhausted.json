@@ -1,0 +1,13 @@
+{
+  "code": "capacity_exhausted",
+  "builder": "BootCapacityExhaustedError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Timed out waiting for emulator capacity\",\"platform\":\"android\",\"limit\":2,\"booted\":2,\"retryAfterMs\":5000,\"code\":\"capacity_exhausted\",\"retryable\":true}"
+      }
+    ],
+    "isError": true
+  }
+}

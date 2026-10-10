@@ -1,0 +1,105 @@
+import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
+import * as inputOwnership from "../../src/daemon/inputDeviceOwnership";
+import * as bootCapacity from "../../src/models/BootCapacityExhaustedError";
+import {
+  REFUSAL_FIXTURES_DIR,
+  UNFIXTURED_REFUSAL_CODES,
+  buildRefusalWireFixtures,
+  serializeRefusalFixture,
+  type RefusalDisposition,
+} from "../helpers/refusalWireFixtures";
+
+/**
+ * Cross-language contract for typed daemon refusals: the JUnit runner and XCTestRunner decode the
+ * same fixtures and classify them per expectations.json. This suite keeps the TypeScript side of
+ * that contract honest.
+ */
+interface Expectations {
+  codes: Record<
+    string,
+    { expected: RefusalDisposition; knownGaps?: Record<string, RefusalDisposition> }
+  >;
+}
+
+const expectations = JSON.parse(
+  readFileSync(join(REFUSAL_FIXTURES_DIR, "expectations.json"), "utf8"),
+) as Expectations;
+const fixtures = buildRefusalWireFixtures();
+const fixtureCodes = fixtures.map((fixture) => fixture.code);
+
+/**
+ * Every exported `*_CODE` string constant of the modules that define device-refusal codes. The
+ * session-envelope codes (`session_ownership_lost`, `no_active_device_session`) and the daemon
+ * lifecycle codes are literals or live beside unrelated protocol codes; they are fixtured by name.
+ */
+function exportedCodeConstants(): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const module of [acquisitionRefusals, inputOwnership, bootCapacity]) {
+    for (const [name, value] of Object.entries(module)) {
+      if (name.endsWith("_CODE") && typeof value === "string") {
+        found.set(value, name);
+      }
+    }
+  }
+  return found;
+}
+
+describe("refusal wire contract", () => {
+  test("committed fixtures equal what the real TypeScript builders emit", () => {
+    for (const fixture of fixtures) {
+      const path = join(REFUSAL_FIXTURES_DIR, `${fixture.code}.json`);
+      expect(readFileSync(path, "utf8")).toBe(serializeRefusalFixture(fixture));
+    }
+  });
+
+  test("no stray fixture file exists without a builder", () => {
+    const files = readdirSync(REFUSAL_FIXTURES_DIR)
+      .filter((name) => name.endsWith(".json") && name !== "expectations.json")
+      .map((name) => name.replace(/\.json$/, ""));
+    expect(files.sort()).toEqual([...fixtureCodes].sort());
+  });
+
+  test("every fixture carries the code it is named for on the wire", () => {
+    for (const fixture of fixtures) {
+      const payload = JSON.parse(fixture.result.content[0].text) as {
+        code?: string;
+        error?: { code?: string } | string;
+      };
+      const wireCode = typeof payload.error === "object" ? payload.error.code : payload.code;
+      expect(wireCode).toBe(fixture.code);
+    }
+  });
+
+  test("every refusal code constant has a fixture or a recorded reason it has none", () => {
+    const missing: string[] = [];
+    for (const [code, constant] of exportedCodeConstants()) {
+      if (!fixtureCodes.includes(code) && !(code in UNFIXTURED_REFUSAL_CODES)) {
+        missing.push(`${constant} = "${code}"`);
+      }
+    }
+    // Add a builder to test/helpers/refusalWireFixtures.ts, run
+    // `bun scripts/generate-refusal-wire-fixtures.ts`, and add a row to expectations.json.
+    expect(missing).toEqual([]);
+  });
+
+  test("every retryable acquisition code has a fixture", () => {
+    for (const code of acquisitionRefusals.RETRYABLE_DEVICE_ACQUISITION_CODES) {
+      expect(fixtureCodes).toContain(code);
+    }
+  });
+
+  test("the expectations table covers exactly the fixtures", () => {
+    expect(Object.keys(expectations.codes).sort()).toEqual([...fixtureCodes].sort());
+  });
+
+  test("a known gap never repeats the expectation", () => {
+    for (const [code, row] of Object.entries(expectations.codes)) {
+      for (const actual of Object.values(row.knownGaps ?? {})) {
+        expect(actual, code).not.toBe(row.expected);
+      }
+    }
+  });
+});

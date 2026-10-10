@@ -1,0 +1,13 @@
+{
+  "code": "device_owned_by_other_daemon",
+  "builder": "DeviceOwnedByOtherDaemonError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Device 'emulator-5554' is claimed by another AutoMobile daemon (PID 4242) (code device_owned_by_other_daemon); two daemons must never drive the same device. Retry after that daemon releases it, or pick another device.\",\"code\":\"device_owned_by_other_daemon\",\"deviceId\":\"emulator-5554\",\"retryable\":true,\"retryAfterMs\":2000}"
+      }
+    ],
+    "isError": true
+  }
+}

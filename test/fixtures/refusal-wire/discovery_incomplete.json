@@ -1,0 +1,13 @@
+{
+  "code": "discovery_incomplete",
+  "builder": "ProvisionDeviceError via createToolErrorResponse",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"message\":\"discovery_incomplete: Android booted-device discovery was incomplete and is retryable.\",\"error\":{\"code\":\"discovery_incomplete\",\"message\":\"discovery_incomplete: Android booted-device discovery was incomplete and is retryable.\",\"retryable\":true}}"
+      }
+    ]
+  }
+}

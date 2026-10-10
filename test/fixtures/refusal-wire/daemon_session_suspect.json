@@ -1,0 +1,13 @@
+{
+  "code": "daemon_session_suspect",
+  "builder": "SessionSuspectError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"code\":\"daemon_session_suspect\",\"message\":\"Session 11111111-2222-4333-8444-555555555555 missed a liveness heartbeat and is being restored; its device stays reserved for 8s. Retry this call now, without waiting. If the retry says the session was released, acquire a device again with getAndroid or getApple.\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"remainingMs\":8000,\"retryable\":true}}"
+      }
+    ],
+    "isError": true
+  }
+}

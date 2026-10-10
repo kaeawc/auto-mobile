@@ -1,0 +1,13 @@
+{
+  "code": "device_shutting_down",
+  "builder": "DeviceShuttingDownError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Device 'emulator-5554' is shutting down and cannot be assigned (code device_shutting_down); retry once the shutdown has finished.\",\"code\":\"device_shutting_down\",\"deviceId\":\"emulator-5554\",\"retryable\":true,\"retryAfterMs\":2000}"
+      }
+    ],
+    "isError": true
+  }
+}

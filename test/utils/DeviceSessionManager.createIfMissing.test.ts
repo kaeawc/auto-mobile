@@ -13,6 +13,11 @@ import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClien
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
+import type {
+  IosBootInstrumentation,
+  IosBootRequest,
+} from "../../src/features/iosSimFleet/IosBootInstrumentation";
 
 interface SimctlRecorder {
   createCalls: { name: string; deviceType: string; runtime: string }[];
@@ -271,5 +276,75 @@ describe("findOrStartIosDevice creation gate", () => {
     );
     expect(recorder.createCalls).toEqual([]);
     expect(recorder.bootCalls).toEqual([]);
+  });
+});
+
+/** Refuses every boot at the limit, the way the shared iOS admission gate does. */
+class RefusingIosBootInstrumentation implements IosBootInstrumentation {
+  readonly requests: IosBootRequest[] = [];
+
+  async run<T>(request: IosBootRequest): Promise<T> {
+    this.requests.push(request);
+    throw new BootCapacityExhaustedError(
+      { platform: "ios", limit: 1, booted: 1, retryAfterMs: 3_000 },
+      "Refused to boot: no iOS simulator capacity",
+    );
+  }
+}
+
+// #11236: findOrStartIosDevice called simctl.bootSimulator directly, bypassing the
+// iOS capacity gate every other simulator boot goes through.
+describe("findOrStartIosDevice boot admission", () => {
+  let recorder: SimctlRecorder;
+  let instrumentation: RefusingIosBootInstrumentation;
+
+  beforeEach(() => {
+    recorder = {
+      createCalls: [],
+      bootCalls: [],
+      presentationCalls: [],
+      presentationSignals: [],
+      deleteCalls: [],
+      deleteSignalAborted: [],
+    };
+    instrumentation = new RefusingIosBootInstrumentation();
+  });
+
+  afterEach(() => {
+    resetDeviceCreationGate();
+  });
+
+  const managerWith = (images: DeviceInfo[]) =>
+    DeviceSessionManager.createInstance(
+      new FakeDeviceClientProvider(
+        new FakeAdbExecutor(),
+        new FakeDeviceUtils(),
+        makeSimctl(recorder, images),
+      ),
+      undefined,
+      { iosBootInstrumentation: instrumentation },
+    );
+
+  test("refuses to boot an existing simulator at the limit", async () => {
+    const error = await managerWith([simulatorImage("AAAA", true)])
+      .findOrStartIosDevice()
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BootCapacityExhaustedError);
+    expect(instrumentation.requests.map((request) => request.udid)).toEqual(["AAAA"]);
+    expect(recorder.bootCalls).toEqual([]);
+  });
+
+  test("refuses to boot a created simulator at the limit and rolls it back", async () => {
+    setDeviceCreationGate(new FakeDeviceCreationGate(true));
+
+    const error = await managerWith([])
+      .findOrStartIosDevice()
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BootCapacityExhaustedError);
+    expect(instrumentation.requests.map((request) => request.udid)).toEqual(["CREATED-UDID"]);
+    expect(recorder.bootCalls).toEqual([]);
+    expect(recorder.deleteCalls).toEqual(["CREATED-UDID"]);
   });
 });

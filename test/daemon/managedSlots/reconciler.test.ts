@@ -952,7 +952,10 @@ describe("ManagedSlotReconciler", () => {
 
       const result = expectReady(await reconciler.reconcile(request(SPEC_18, { owner })));
 
-      expect(result.assignment.execOwner).toMatchObject({ ...owner, sessionUuid: result.sessionUuid });
+      expect(result.assignment.execOwner).toMatchObject({
+        ...owner,
+        sessionUuid: result.sessionUuid,
+      });
       const again = expectFailed(await reconciler.reconcile(request(SPEC_18, { owner })));
       expect(again.failure.code).toBe("slot_in_use");
     });
@@ -1134,9 +1137,9 @@ describe("DefaultManagedSpecMatcher", () => {
 
   test("an omitted Android profile or iOS model is unconstrained", async () => {
     expect(await matcherFor(baseConfig).matches(avd, { runtime })).toBe("match");
-    expect(await matcherFor({ ...baseConfig, deviceName: undefined }).matches(avd, { runtime })).toBe(
-      "match",
-    );
+    expect(
+      await matcherFor({ ...baseConfig, deviceName: undefined }).matches(avd, { runtime }),
+    ).toBe("match");
     expect(
       await matcherFor(baseConfig).matches(avd, {
         runtime: "system-images;android-34;google_apis;arm64-v8a",
@@ -1151,9 +1154,9 @@ describe("DefaultManagedSpecMatcher", () => {
       deviceType: IPHONE_15,
     };
     expect(await matcherFor(null).matches(sim, { runtime: IOS_18 })).toBe("match");
-    expect(await matcherFor(null).matches({ ...sim, deviceType: undefined }, { runtime: IOS_18 })).toBe(
-      "match",
-    );
+    expect(
+      await matcherFor(null).matches({ ...sim, deviceType: undefined }, { runtime: IOS_18 }),
+    ).toBe("match");
     expect(await matcherFor(null).matches(sim, { runtime: IOS_17 })).toBe("mismatch");
   });
 
@@ -1219,9 +1222,9 @@ describe("DefaultManagedSpecResolver any model", () => {
   });
 
   test("iOS without a catalog, with an unreadable one, or with no fitting model refuses", async () => {
-    expect(await new DefaultManagedSpecResolver().resolve("ios", { runtime: IOS_18 }, {})).toMatchObject(
-      { kind: "unsupported", code: "spec_unsupported" },
-    );
+    expect(
+      await new DefaultManagedSpecResolver().resolve("ios", { runtime: IOS_18 }, {}),
+    ).toMatchObject({ kind: "unsupported", code: "spec_unsupported" });
     const unreadable: ExactIosRuntimeCatalog = {
       getRuntimesChecked: async () => {
         throw new Error("simctl timed out");

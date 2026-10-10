@@ -275,7 +275,10 @@ describe("managed execution release (daemon/releaseExecution)", () => {
     await drain.releaseExecution(S1);
     await drain.whenIdle();
 
-    expect(await registry.getAssignment(key)).toMatchObject({ state: "settling", settler: SETTLER });
+    expect(await registry.getAssignment(key)).toMatchObject({
+      state: "settling",
+      settler: SETTLER,
+    });
     // A live settler keeps it; a restarted daemon recovers it once that settler is gone.
     expect(await drain.recoverSettledSlots()).toEqual([]);
     registry.setExecOwnerLiveness((owner) => owner.pid !== SETTLER.pid);

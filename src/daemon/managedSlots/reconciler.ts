@@ -380,7 +380,10 @@ export type ManagedSlotReconcileResult =
  * name is its stable id, so one attempt's cleanup can never delete the other's device.
  */
 export function managedSlotDeviceName(key: SlotKey, generation: number, nonce: string): string {
-  const safeNonce = nonce.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8);
+  const safeNonce = nonce
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, 8);
   if (safeNonce.length === 0) {
     throw new Error(`Managed slot device name nonce '${nonce}' has no usable characters`);
   }
@@ -450,7 +453,10 @@ export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
       return "unknown";
     }
     // An omitted model is unconstrained: the simulator's own model satisfies it.
-    const constraints = { runtime: spec.runtime, deviceType: spec.deviceType ?? device.deviceType! };
+    const constraints = {
+      runtime: spec.runtime,
+      deviceType: spec.deviceType ?? device.deviceType!,
+    };
     return iosDeviceSpecificationMismatch(constraints, device) === undefined ? "match" : "mismatch";
   }
 }
@@ -524,7 +530,8 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     spec: ManagedSlotRequestedSpec,
     signal: AbortSignal | undefined,
   ): Promise<
-    { kind: "resolved"; deviceType: string } | { kind: "refused"; resolution: ManagedSpecResolution }
+    | { kind: "resolved"; deviceType: string }
+    | { kind: "refused"; resolution: ManagedSpecResolution }
   > {
     if (spec.deviceType !== undefined) {
       return { kind: "resolved", deviceType: spec.deviceType };
@@ -674,7 +681,10 @@ function casFailure(result: SlotCasFailure, step: string): ManagedSlotReconcileF
 
 /** A refused execution claim or fence, as a reconcile failure. */
 function claimFailure(
-  result: SlotCasFailure | { kind: "slot_in_use"; owner: SlotExecOwner } | { kind: "slot_not_ready" },
+  result:
+    | SlotCasFailure
+    | { kind: "slot_in_use"; owner: SlotExecOwner }
+    | { kind: "slot_not_ready" },
   step: string,
 ): ManagedSlotReconcileFailure {
   switch (result.kind) {

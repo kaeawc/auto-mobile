@@ -379,6 +379,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private warnedIdeviceIdUnavailable = false;
   private isProcessSupervisorRestarting = false;
   private static readonly MAX_RESTART_ATTEMPTS = 5;
+  private static readonly USB_RECHECK_DELAY_MS = 500;
   private static readonly RESTART_BASE_DELAY_MS = 2000;
   private static readonly RESTART_MAX_DELAY_MS = 30000;
   private static readonly PORT_RELEASE_GRACE_MS = 250;
@@ -4311,6 +4312,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return;
     }
     if (await this.isUsbListed(["-l", "-n"])) {
+      // A cabled phone with Wi-Fi sync can be listed by `-n` while transiently
+      // missing from `-l`; re-probe USB once before calling it Wi-Fi only (#11186).
+      await this.timer.sleep(IOSCtrlProxyManager.USB_RECHECK_DELAY_MS);
+      if (await this.isUsbListed(["-l"])) {
+        return;
+      }
       throw new ActionableError(
         `iOS device ${this.device.deviceId} is reachable over Wi-Fi only. The CtrlProxy tunnel ` +
           "requires a USB connection; connect the device with a cable and retry.",

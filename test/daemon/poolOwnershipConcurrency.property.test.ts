@@ -72,6 +72,24 @@ const PROFILES: Record<string, HarnessProfile> = {
       settle: 3,
     },
   },
+  /**
+   * Autolock attach (explicit sessionUuid calls, setActiveDevice) and reconnect restores racing
+   * connection closes (#11192): a closed connection must never be routed to or own a session.
+   */
+  autolockAttach: {
+    steps: STEPS,
+    weights: {
+      acquireAutolock: 6,
+      attachAutolock: 8,
+      restoreAutolock: 5,
+      closeConnection: 8,
+      reopenConnection: 2,
+      release: 1,
+      control: 1,
+      advance: 1,
+      settle: 2,
+    },
+  },
   /** Many clients fighting over three devices while devices die and come back. */
   contention: {
     steps: STEPS,

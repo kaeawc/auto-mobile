@@ -34,8 +34,8 @@ import { drainMicrotasks } from "./fakeTimerStepping";
 
 // Seeded concurrency harness for device-session ownership. One seed generates a list of steps
 // (acquire, release, heartbeat, control and read tool calls, heartbeat loss, time advance,
-// killDevice, device disconnect/reconnect, owner connection close/reconnect, executePlan label
-// sessions, daemon restart). The runner starts each operation WITHOUT awaiting it and drains a
+// killDevice, device disconnect/reconnect, owner connection close/reconnect, autolock attach and
+// restore, executePlan label sessions, daemon restart). The runner starts each operation WITHOUT awaiting it and drains a
 // seeded number of microtask turns before the next step, so operations overlap at their await
 // points in an order the seed alone decides. After every step it checks the invariants that must
 // hold at every instant; at settle points (all in-flight operations finished) it checks the
@@ -83,6 +83,8 @@ export type StepKind =
   | "reconnect"
   | "closeConnection"
   | "reopenConnection"
+  | "attachAutolock"
+  | "restoreAutolock"
   | "planLabels"
   | "planEnd"
   | "restart"
@@ -134,7 +136,13 @@ export function describeStep(step: Step, index: number): string {
       ? `${step.ms}ms`
       : ["kill", "disconnect", "reconnect"].includes(step.kind)
         ? `d${step.device}`
-        : ["acquireMcp", "acquireAutolock", "acquireCli"].includes(step.kind)
+        : [
+              "acquireMcp",
+              "acquireAutolock",
+              "acquireCli",
+              "attachAutolock",
+              "restoreAutolock",
+            ].includes(step.kind)
           ? `c${step.client} d${step.device}`
           : `c${step.client}`;
   return `#${index} ${step.kind} ${target} +${step.turns}t`;
@@ -241,6 +249,24 @@ export interface RunOptions {
 export interface RunResult {
   violation: Violation | undefined;
   trace: string[];
+}
+
+/**
+ * Every connection the autolock manager routes or counts as an acquirer (its default-route map and
+ * its acquired sets), read without side effects. Private state, read only here.
+ */
+function autolockConnections(pool: DevicePool): Set<string> {
+  const manager: unknown = Reflect.get(pool, "autolockManager");
+  const routes: unknown = manager ? Reflect.get(manager, "mcpSessionAutolockMap") : undefined;
+  const acquired: unknown = manager
+    ? Reflect.get(manager, "mcpSessionAcquiredAutolocks")
+    : undefined;
+  if (!(routes instanceof Map) || !(acquired instanceof Map)) {
+    throw new Error("DeviceAutolockManager no longer keeps its MCP route maps; update the harness");
+  }
+  return new Set(
+    [...routes.keys(), ...acquired.keys()].filter((c): c is string => typeof c === "string"),
+  );
 }
 
 /**
@@ -482,6 +508,16 @@ class OwnershipWorld {
 
   /** Invariants that hold at every instant, even with operations in flight. */
   checkAlways(): void {
+    // A close drops the connection's autolock routes synchronously, and nothing may publish them
+    // again afterwards (#11192), so a closed connection is never routed or counted as an acquirer.
+    for (const connection of autolockConnections(this.pool)) {
+      if (this.closedConnections.has(connection)) {
+        this.fail(
+          "closed-connection-owns",
+          `closed connection ${connection} is still in the autolock route or acquired-set maps`,
+        );
+      }
+    }
     const devices = this.pool.getAllDevices();
     const owners = new Map<string, string>();
     for (const device of devices) {
@@ -717,10 +753,16 @@ class OwnershipWorld {
       );
       const origin = this.origin.get(bound);
       if (bound !== sessionId && !(via === "autolock" && !origin)) {
+        // The same client whose acquisition outlived its connection, after its reconnect restored
+        // the session onto a newer one, is not handed a foreign session: the reply goes nowhere.
         const sameOwner =
           kind === "cli"
             ? origin?.kind === "cli"
-            : origin?.kind === "mcp" && origin.connection === connection;
+            : origin?.kind === "mcp" &&
+              (origin.connection === connection ||
+                (origin.client === client.index &&
+                  connection !== undefined &&
+                  this.closedConnections.has(connection)));
         if (!sameOwner) {
           this.fail(
             "foreign-session-reuse",
@@ -970,7 +1012,11 @@ class OwnershipWorld {
           client.connection === connection &&
           this.pool.resolveOwnedDeviceSessionForMcpSession(connection, device) === sessionId
         ) {
-          client.ownedVia = connection;
+          // An acquisition that finished while this restore waited may have moved the client on
+          // to another session; it no longer holds this one, but the connection still owns it.
+          if (client.sessionId === sessionId) {
+            client.ownedVia = connection;
+          }
           // Restoration hands the session to the reconnected connection.
           const origin = this.origin.get(sessionId);
           if (origin?.kind === "mcp") {
@@ -980,6 +1026,54 @@ class OwnershipWorld {
         await this.heartbeat(client);
       }
     });
+  }
+
+  /**
+   * A tool call naming a live autolock session (`via` "explicit") or a setActiveDevice selecting it
+   * (`via` "select"): the pool attaches it to the client's connection unless another connected
+   * client owns it. The model's holder bookkeeping is left alone: only the pool's maps are judged.
+   */
+  attachAutolock(client: ClientState, deviceIndex: number, via: "explicit" | "select"): void {
+    const sessionId = this.pool.getDevice(DEVICES[deviceIndex]!.deviceId)?.autolockSessionId;
+    if (!sessionId) {
+      return;
+    }
+    const connection = this.connectionFor(client);
+    this.log(`c${client.index} attach(${via}) ${sessionId} on ${connection}`);
+    this.launch(`c${client.index} attach ${sessionId}`, async () => {
+      const outcome =
+        via === "explicit"
+          ? await this.pool.attachExplicitSessionUuidCall(sessionId, connection)
+          : await this.pool.attachAutolockSessionToMcpSession(sessionId, connection, true, true);
+      this.log(`  c${client.index} attach ${sessionId} -> ${outcome}`);
+      this.adoptAttachedOrigin(client, sessionId, connection);
+    });
+  }
+
+  /** The client's proxy reconnects and restores the autolock session it retained (or names). */
+  restoreAutolock(client: ClientState, deviceIndex: number): void {
+    const named = this.pool.getDevice(DEVICES[deviceIndex]!.deviceId)?.autolockSessionId;
+    const retained =
+      client.sessionId && this.autolockSessions.has(client.sessionId) ? client.sessionId : named;
+    if (!retained) {
+      return;
+    }
+    const connection = this.connectionFor(client);
+    this.log(`c${client.index} restore autolock ${retained} on ${connection}`);
+    this.launch(`c${client.index} restore autolock ${retained}`, async () => {
+      await this.pool.restoreAutolockSessionsForMcpSession([retained], connection);
+      this.adoptAttachedOrigin(client, retained, connection);
+    });
+  }
+
+  /** An attach that took ownership hands the session to that connection, like a restore. */
+  private adoptAttachedOrigin(client: ClientState, sessionId: string, connection: string): void {
+    if (
+      client.connection === connection &&
+      connectionOwnership(this.pool).get(connection)?.has(sessionId)
+    ) {
+      this.origin.set(sessionId, { kind: "mcp", client: client.index, connection });
+    }
   }
 
   /** executePlan with `device:` labels: a derived `${base}:B` session on another idle device. */
@@ -1137,6 +1231,18 @@ class OwnershipWorld {
         break;
       case "reopenConnection":
         this.reopenConnection(client);
+        break;
+      case "attachAutolock":
+        // The otherwise unused advance choice picks the entry point, so the step list (and every
+        // existing seed's) is unchanged.
+        this.attachAutolock(
+          client,
+          step.device,
+          ADVANCE_CHOICES_MS.indexOf(step.ms) % 2 === 0 ? "explicit" : "select",
+        );
+        break;
+      case "restoreAutolock":
+        this.restoreAutolock(client, step.device);
         break;
       case "planLabels":
         this.planLabels(client);

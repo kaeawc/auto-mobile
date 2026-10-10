@@ -8041,22 +8041,27 @@ export class DevicePool {
     return session.sessionId;
   }
 
+  // The attach paths are tracked like a bind (#11192): a connection closing while one waits for
+  // the assignment lock or its persistence must not be adopted as the owner afterwards.
   restoreAutolockSessionsForMcpSession(
     ...args: Parameters<DeviceAutolockManager["restoreAutolockSessionsForMcpSession"]>
   ): Promise<void> {
-    return this.autolockManager.restoreAutolockSessionsForMcpSession(...args);
+    const endBind = this.beginMcpBind(args[1]);
+    return this.autolockManager.restoreAutolockSessionsForMcpSession(...args).finally(endBind);
   }
 
   attachExplicitSessionUuidCall(
     ...args: Parameters<DeviceAutolockManager["attachExplicitSessionUuidCall"]>
   ): ReturnType<DeviceAutolockManager["attachExplicitSessionUuidCall"]> {
-    return this.autolockManager.attachExplicitSessionUuidCall(...args);
+    const endBind = this.beginMcpBind(args[1]);
+    return this.autolockManager.attachExplicitSessionUuidCall(...args).finally(endBind);
   }
 
   attachAutolockSessionToMcpSession(
     ...args: Parameters<DeviceAutolockManager["attachAutolockSessionToMcpSession"]>
   ): ReturnType<DeviceAutolockManager["attachAutolockSessionToMcpSession"]> {
-    return this.autolockManager.attachAutolockSessionToMcpSession(...args);
+    const endBind = this.beginMcpBind(args[1]);
+    return this.autolockManager.attachAutolockSessionToMcpSession(...args).finally(endBind);
   }
 
   assertAutolockAccess(...args: Parameters<DeviceAutolockManager["assertAutolockAccess"]>): void {
@@ -8075,6 +8080,24 @@ export class DevicePool {
     mcpSessionId: string,
     livenessOwnerToken?: string,
   ): Promise<readonly RefusedOwnedSessionRestore[]> {
+    // Tracked like a bind (#11192): the connection may close while this waits for the mutex.
+    const endBind = this.beginMcpBind(mcpSessionId);
+    try {
+      return await this.restoreOwnedDeviceSessionsUnderBindClaim(
+        sessionIds,
+        mcpSessionId,
+        livenessOwnerToken,
+      );
+    } finally {
+      endBind();
+    }
+  }
+
+  private async restoreOwnedDeviceSessionsUnderBindClaim(
+    sessionIds: readonly string[],
+    mcpSessionId: string,
+    livenessOwnerToken: string | undefined,
+  ): Promise<readonly RefusedOwnedSessionRestore[]> {
     return await this.assignmentMutex.runExclusive(() => {
       const refused: RefusedOwnedSessionRestore[] = [];
       for (const sessionId of sessionIds) {
@@ -8092,7 +8115,8 @@ export class DevicePool {
             refused.push({ sessionId, deviceId: device.id, reason: "owned-by-other-connection" });
             continue;
           }
-          this.recordMcpSessionOwnership(mcpSessionId, sessionId);
+          // A connection that closed while this restore waited is not recorded (#11192).
+          this.recordBindOwnership(mcpSessionId, sessionId);
         }
       }
       return refused;

@@ -28,10 +28,11 @@ interface Internals {
 function makeManager(
   executor: FakeProcessExecutor,
   lister?: IosPhysicalDeviceLister,
+  timer: FakeTimer = new FakeTimer(),
 ): { manager: IOSCtrlProxyManager; internal: Internals } {
   const manager = IOSCtrlProxyManager.createForTestingWithDeps(
     device,
-    new FakeTimer(),
+    timer,
     undefined,
     executor,
     undefined,
@@ -123,9 +124,29 @@ describe("IOSCtrlProxyManager physical runner detection and stop (#11154)", () =
       executor.setCommandHandler("idevice_id", (command) =>
         createExecResult(command.endsWith("-n") ? `${UDID}\n` : "", ""),
       );
-      const { internal } = makeManager(executor);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const { internal } = makeManager(executor, undefined, timer);
       await expect(internal.startIproxyTunnel()).rejects.toThrow(/Wi-Fi only.*USB/);
       expect(executor.getSpawnedProcesses()).toEqual([]);
+    });
+
+    test("a transient `idevice_id -l` miss is retried once before rejecting as Wi-Fi only (#11186)", async () => {
+      const executor = new FakeProcessExecutor();
+      let usbProbes = 0;
+      executor.setCommandHandler("idevice_id", (command) => {
+        if (command.endsWith("-n")) {
+          return createExecResult(`${UDID}\n`, "");
+        }
+        usbProbes += 1;
+        return createExecResult(usbProbes === 1 ? "" : `${UDID}\n`, "");
+      });
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const { internal } = makeManager(executor, undefined, timer);
+      const err = await internal.startIproxyTunnel().catch((e: Error) => e);
+      expect(String((err as Error | undefined)?.message ?? "")).not.toMatch(/Wi-Fi only/);
+      expect(usbProbes).toBe(2);
     });
   });
 });

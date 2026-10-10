@@ -206,7 +206,7 @@ async function rollbackCreatedDeviceAfterBoot(
   options: BootPreparationOptions,
   failure: unknown,
 ): Promise<void> {
-  const { state, releaseReadinessReservations } = options;
+  const { state } = options;
   const boot = state.boot;
   const createdImage = boot?.provisioned ? boot.sourceImage : undefined;
   const rollback = createdDeviceRollbackFor(options);
@@ -221,17 +221,10 @@ async function rollbackCreatedDeviceAfterBoot(
     state.coldBootSettlements.push(termination);
   }
   state.boot = undefined;
-  // Teardown must not wait on the readiness reservations this request holds.
-  for (const release of releaseReadinessReservations.splice(0).reverse()) {
-    try {
-      await release();
-    } catch (error) {
-      logger.warn(
-        `[DeviceTools] Readiness reservation release before created-device rollback failed: ${errorMessage(error)}`,
-        error,
-      );
-    }
-  }
+  // Readiness reservations stay held through the rollback: releasing them first
+  // would expose the still-listed, shutting-down emulator to a concurrent
+  // acquisition that could adopt it before its AVD is deleted (#11186). The
+  // acquisition `finally` releases them once the rollback settles.
   await rollback(createdImage, failure);
 }
 

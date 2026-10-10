@@ -8,11 +8,7 @@ import {
   getBestAndroidToolsLocation,
   validateRequiredTools,
 } from "./detection";
-import {
-  AvdCreateInterruptedError,
-  AvdManagerClient,
-  type AvdManagerExecutionOptions,
-} from "./AvdManagerClient";
+import { AvdManagerClient, type AvdManagerExecutionOptions } from "./AvdManagerClient";
 import {
   SdkManagerClient,
   type SdkManagerCommandResult,
@@ -153,10 +149,9 @@ export async function createAvd(
   try {
     result = await createAvdManagerClient(dependencies).createAvd(params, { signal });
   } catch (error) {
-    if (error instanceof AvdCreateInterruptedError) {
-      // The killed create may have left the AVD on disk; list it for rollback.
-      invalidateAndroidInventoryProvenanceAndCatalog();
-    }
+    // Any thrown create (interrupted, timed out, or cancelled by the abort signal)
+    // may have left the AVD on disk; list it fresh for rollback (#11186).
+    invalidateAndroidInventoryProvenanceAndCatalog();
     throw error;
   }
   if (result.success) {

@@ -379,6 +379,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private warnedIdeviceIdUnavailable = false;
   private isProcessSupervisorRestarting = false;
   private static readonly MAX_RESTART_ATTEMPTS = 5;
+  private static readonly USB_RECHECK_DELAY_MS = 500;
   private static readonly RESTART_BASE_DELAY_MS = 2000;
   private static readonly RESTART_MAX_DELAY_MS = 30000;
   private static readonly PORT_RELEASE_GRACE_MS = 250;
@@ -1869,9 +1870,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     // A tunnel-stop failure must not skip runner termination, and it must not leave
-    // the port reservation or the retiring runner's abort signal behind once the
-    // runner is gone. They are retained only when the runner is confirmed still
-    // alive, so its port is not handed to another device while it holds it.
+    // the retiring runner's abort signal behind once the runner is gone. The port
+    // reservation is retained when the runner is confirmed still alive or when the
+    // iproxy tunnel stop failed, so the port is not handed to another device while
+    // either may still hold it.
     let tunnelStopError: unknown;
     try {
       // Stop iproxy tunnel if running
@@ -1898,7 +1900,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         this.runnerAbortController = null;
       }
     } finally {
-      PortManager.release(this.device.deviceId);
+      // iproxy may still hold the port when its stop threw; keep the reservation
+      // so another device is not handed a port the live tunnel occupies (#11186).
+      if (tunnelStopError === undefined) {
+        PortManager.release(this.device.deviceId);
+      }
     }
     if (tunnelStopError !== undefined) {
       throw toActionableError(tunnelStopError, "Failed to stop iOS CtrlProxy iproxy tunnel");
@@ -4306,6 +4312,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return;
     }
     if (await this.isUsbListed(["-l", "-n"])) {
+      // A cabled phone with Wi-Fi sync can be listed by `-n` while transiently
+      // missing from `-l`; re-probe USB once before calling it Wi-Fi only (#11186).
+      await this.timer.sleep(IOSCtrlProxyManager.USB_RECHECK_DELAY_MS);
+      if (await this.isUsbListed(["-l"])) {
+        return;
+      }
       throw new ActionableError(
         `iOS device ${this.device.deviceId} is reachable over Wi-Fi only. The CtrlProxy tunnel ` +
           "requires a USB connection; connect the device with a cable and retry.",

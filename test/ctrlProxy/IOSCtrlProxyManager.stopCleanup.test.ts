@@ -43,9 +43,10 @@ describe("IOSCtrlProxyManager stopTrackedService cleanup (#11154)", () => {
   });
 
   describe("stop", () => {
-    test("a throwing tunnel stop still terminates the runner, releases the port and aborts the retiring controller", async () => {
+    test("a throwing tunnel stop still terminates the runner and aborts the retiring controller but retains the port reservation (#11186)", async () => {
       const executor = new FakeProcessExecutor();
       const { manager, internal } = makeManager(executor);
+      PortManager.reserve(UDID, 8101);
       const controller = new AbortController();
       internal.runnerAbortController = controller;
       let terminateCalls = 0;
@@ -64,7 +65,7 @@ describe("IOSCtrlProxyManager stopTrackedService cleanup (#11154)", () => {
       }
       expect(terminateCalls).toBe(1);
       expect(controller.signal.aborted).toBe(true);
-      expect(PortManager.getPort(UDID)).toBeUndefined();
+      expect(PortManager.getPort(UDID)).toBe(8101);
     });
   });
 });

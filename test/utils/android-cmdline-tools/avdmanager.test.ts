@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, mock } from "bun:test";
+import { expect, describe, test, beforeEach, mock, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AvdManagerDependencies } from "../../../src/utils/android-cmdline-tools/avdmanager";
@@ -7,6 +7,7 @@ import { AvdManagerService } from "../../../src/utils/android-cmdline-tools/AvdM
 import { createDeviceImageResourcesHandler } from "../../../src/server/deviceImageResources";
 import { FakeAvdManager } from "../../fakes/FakeAvdManager";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
+import { AndroidAvdProvenanceCache } from "../../../src/utils/AndroidAvdProvenanceCache";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 async function pendingCatalog() {
@@ -548,6 +549,24 @@ Available Packages:
   });
 
   describe("createAvd", () => {
+    test("invalidates the inventory when a cancelled create throws (#11186)", async () => {
+      const invalidate = spyOn(AndroidAvdProvenanceCache.getInstance(), "invalidate");
+      const mockDeps = createDependencies();
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        avdmanager.createAvd(
+          { name: "test_avd", package: "system-images;android-33;google_apis;arm64-v8a" },
+          mockDeps,
+          controller.signal,
+        ),
+      ).rejects.toThrow();
+
+      expect(invalidate).toHaveBeenCalledTimes(1);
+      invalidate.mockRestore();
+    });
+
     test("should create AVD successfully", async () => {
       const mockDeps = createDependencies();
       const originalSpawn = mockDeps.spawn;

@@ -5,6 +5,7 @@ import { PlanExecutionOrchestrator } from "../../src/server/planExecutionOrchest
 import { PLAN_HEALTH_DIR_ENV } from "../../src/server/planHealthSummary";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakePlanHealthWriter } from "../fakes/FakePlanHealthWriter";
+import { FakePlanVideoRecorder } from "../fakes/FakePlanVideoRecorder";
 
 const base: PlanExecutionResult = {
   success: true,
@@ -36,6 +37,7 @@ function run(healthWriter: FakePlanHealthWriter | undefined, validYaml = true) {
     {
       timer: new FakeTimer(),
       healthWriter,
+      videoRecorder: new FakePlanVideoRecorder(),
       createSchemaValidator: () => ({
         loadSchema: async () => undefined,
         validateYaml: () =>

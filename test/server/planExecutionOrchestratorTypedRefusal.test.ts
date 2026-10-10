@@ -7,6 +7,7 @@ import {
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { ActionableError } from "../../src/models/ActionableError";
 import { DeviceOutsideManagedSlotsError } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { FakePlanVideoRecorder } from "../fakes/FakePlanVideoRecorder";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // #11236: a typed retryable refusal that failed the plan was flattened into the `error` string,
@@ -32,6 +33,7 @@ function run() {
     },
     {
       timer: new FakeTimer(),
+      videoRecorder: new FakePlanVideoRecorder(),
       createSchemaValidator: () => ({
         loadSchema: async () => undefined,
         validateYaml: () => ({ valid: true }),

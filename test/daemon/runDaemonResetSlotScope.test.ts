@@ -74,6 +74,23 @@ describe("reset-slot-scope daemon command", () => {
     expect(
       parseResetSlotScopeCommandArgs(["--incarnation", "b", "--runner-namespace", "n"]),
     ).toEqual({ runnerNamespace: "n", runnerIncarnation: "b" });
+    expect(
+      parseResetSlotScopeCommandArgs(["--incarnation", "b", "--runner-namespace", "n", "--force"]),
+    ).toEqual({ runnerNamespace: "n", runnerIncarnation: "b", force: true });
+  });
+
+  test("--force reaches the daemon request (#11336)", async () => {
+    const result = { outcome: "invalidated", retryable: false, scopes: [], waitedMs: 0 };
+    const { client } = await run(
+      ["--runner-namespace", "ns", "--incarnation", "boot-1", "--force"],
+      result,
+    );
+    expect(client.callDaemonMethodCalls).toEqual([
+      {
+        method: DAEMON_RESET_SLOT_SCOPE_METHOD,
+        params: { runnerNamespace: "ns", runnerIncarnation: "boot-1", force: true },
+      },
+    ]);
   });
 
   test.each([

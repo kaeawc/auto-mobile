@@ -39,6 +39,7 @@ import {
   type VirtualDeviceLifecycleLease,
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { DeviceBootService } from "../../src/devices/deviceBootService";
+import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { getStructuredField, type StructuredToolResponse } from "../../src/utils/toolUtils";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
 import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
@@ -2957,6 +2958,24 @@ describe("startDevice handler", () => {
       }),
     ).rejects.toThrow("Cannot uniquely resolve Android device");
 
+    expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  it("reports incomplete iOS simulator discovery as typed retryable discovery_incomplete", async () => {
+    fakeDeviceUtils.getDeviceImagesDetailed = async () => ({
+      devices: [],
+      succeededPlatforms: new Set(),
+      discoveryErrors: { ios: { code: "failed", message: "simctl list timed out" } },
+    });
+
+    const error = await callStartDevice({ platform: "ios", name: iosDevice.name }).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(BootedDeviceDiscoveryIncompleteError);
+    expect(error).toMatchObject({ code: "discovery_incomplete", retryable: true, platform: "ios" });
+    expect((error as Error).message).toContain("Cannot uniquely resolve iOS device");
     expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(false);
   });
 

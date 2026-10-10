@@ -4,10 +4,11 @@ import { isSessionReleasing } from "./sessionReleaseState";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
-  cancelAndReleaseSession,
+  cancelExecutionsCutBySessionRelease,
   releaseSessionAndDevice,
-  type SessionExecutionCanceller,
+  type ReleaseCutExecutions,
 } from "./releaseSessionAndDevice";
+import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import type { DeviceHealthMarker } from "./deviceHealthMarkers";
 import { z } from "zod";
 import {
@@ -80,7 +81,12 @@ import {
 } from "./managedExecutionLiveness";
 import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
 import type { ManagedExecutionRelease } from "./managedSlots/managedExecutionRelease";
-import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
+import {
+  SESSION_OWNERSHIP_LOST_CODE,
+  SessionReleasedDuringCallError,
+} from "./sessionReleasedDuringCall";
+import { isExpiryReleaseReason } from "./releaseReasons";
+import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import type { ManagedConnectionScopes } from "./managedSlots/managedConnectionScope";
 import {
   DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
@@ -237,8 +243,16 @@ export type DaemonMethodResult = {
   releaseReason?: string;
   /** With `releaseReason`: an idle-window release (#10832). */
   idle?: true;
+  /** With a typed refusal `code`: whether retrying the same request can succeed. */
+  retryable?: boolean;
+  /** With a typed refusal `code`: what to do instead of retrying. */
+  nextAction?: typeof ACQUIRE_NEW_SESSION_NEXT_ACTION;
+  /** With a typed refusal `code`: its structured evidence. */
+  details?: Record<string, unknown>;
   code?:
     | typeof DAEMON_SESSION_NOT_FOUND_CODE
+    /** `daemon/registerSession` naming a UUID an idle or heartbeat release ended (#11367). */
+    | typeof SESSION_OWNERSHIP_LOST_CODE
     | typeof DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
     | typeof DAEMON_LIVENESS_OWNER_UNOWNED_CODE
     | typeof DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE
@@ -304,11 +318,19 @@ function managedConnectionRegistrationRefusal(
   if (!managedSlots) {
     return undefined;
   }
-  const refuse = (reason: string): DaemonMethodResult => ({
-    success: false,
-    code: DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE,
-    error: `Managed slot registration refused: ${reason}`,
-  });
+  const refuse = (reason: string): DaemonMethodResult => {
+    // The connection declared itself managed, so a refusal must not leave it generic: the slot
+    // set is fixed for its lifetime. Bind an unbound socket fail-closed with zero sessions, so
+    // device acquisition and lifecycle stay refused while reads remain open (#11399).
+    if (scopes && socketSessionId !== undefined && !binding) {
+      scopes.bind(socketSessionId, { scopeKey: managedSlots.scopeKey, sessionUuids: [] });
+    }
+    return {
+      success: false,
+      code: DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE,
+      error: `Managed slot registration refused: ${reason}`,
+    };
+  };
   if (!scopes || socketSessionId === undefined) {
     return refuse("this daemon cannot bind managed connections.");
   }
@@ -365,6 +387,40 @@ async function releaseDrainRefusal(
     : undefined;
 }
 
+/**
+ * The terminal refusal for registering a UUID that an idle or heartbeat release ended (#11367), or
+ * undefined when the UUID may register. Such a UUID never comes back, so admitting it as an
+ * observer would let a client heartbeat and re-authenticate streams under a dead session. The
+ * answer is the standard `session_ownership_lost` (not retryable, `acquire_new_session`) with the
+ * release reason and, for an idle-window release, `idle: true`. A never-issued UUID has no
+ * snapshot and still registers as an observer.
+ */
+function terminalSessionRegistrationRefusal(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+): DaemonMethodResult | undefined {
+  const release = manager.getTerminalReleaseSnapshot?.(sessionId);
+  if (!release?.terminal || !isExpiryReleaseReason(release.releaseReason)) {
+    return undefined;
+  }
+  const { releaseReason, ownerPid } = release;
+  return {
+    success: false,
+    code: SESSION_OWNERSHIP_LOST_CODE,
+    retryable: false,
+    nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
+    error:
+      `Session ${sessionId} is terminal after ${releaseReason} and cannot be registered again. ` +
+      "Acquire a new device with getAndroid or getApple, or register a new session UUID to observe.",
+    details: {
+      sessionUuid: sessionId,
+      reason: releaseReason,
+      ...(ownerPid === undefined ? {} : { ownerPid }),
+    },
+    ...releasedSessionNotFoundFields(releaseReason),
+  };
+}
+
 /** A session-clock instant as wall-clock epoch ms, for a report another process reads (#11105). */
 function reportedWallClock(
   manager: { sessionClockToWall?(sessionClockMs: number): number },
@@ -376,7 +432,7 @@ function reportedWallClock(
 async function handleRegisterSession(
   request: DaemonRequest,
   state: DaemonStateAccess,
-  _executions?: SessionExecutionCanceller,
+  _executions?: ReleaseCutExecutions,
   _signal?: AbortSignal,
   context: DaemonRequestContext = {},
 ): Promise<DaemonMethodResult> {
@@ -416,6 +472,10 @@ async function handleRegisterSession(
       },
     };
   }
+  const terminal = terminalSessionRegistrationRefusal(manager, sessionId);
+  if (terminal) {
+    return terminal;
+  }
   const registry = state.getObserverSessionRegistry?.();
   if (!registry) {
     return { success: false, error: "Observer session registration is unavailable" };
@@ -435,7 +495,7 @@ export interface DaemonRequestContext {
 export async function handleDaemonRequest(
   request: DaemonRequest,
   state: DaemonStateAccess,
-  executions?: SessionExecutionCanceller,
+  executions?: ReleaseCutExecutions,
   /** Aborts when the requesting socket closes or cancels this request. */
   signal?: AbortSignal,
   context: DaemonRequestContext = {},
@@ -476,7 +536,7 @@ export async function handleDaemonRequest(
 type InitializedDaemonMethodHandler = (
   request: DaemonRequest,
   state: DaemonStateAccess,
-  executions: SessionExecutionCanceller | undefined,
+  executions: ReleaseCutExecutions | undefined,
   signal: AbortSignal | undefined,
   context: DaemonRequestContext,
 ) => DaemonMethodResult | Promise<DaemonMethodResult>;
@@ -511,7 +571,7 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
 async function handleInitializedDaemonRequest(
   request: DaemonRequest,
   state: DaemonStateAccess,
-  executions: SessionExecutionCanceller | undefined,
+  executions: ReleaseCutExecutions | undefined,
   signal: AbortSignal | undefined,
   context: DaemonRequestContext,
 ): Promise<DaemonMethodResult> {
@@ -1186,7 +1246,7 @@ export async function handleActiveSessions(
 async function handleReleaseSession(
   request: DaemonRequest,
   state: DaemonStateAccess,
-  executions?: SessionExecutionCanceller,
+  executions?: ReleaseCutExecutions,
 ): Promise<DaemonMethodResult> {
   const params = request.params as { sessionId?: string; requireKnown?: boolean } | undefined;
   const sessionId = params?.sessionId;
@@ -1393,30 +1453,38 @@ async function releaseBoundSession(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
   session: Session | null | undefined,
-  executions: SessionExecutionCanceller = executionTracker,
+  executions: ReleaseCutExecutions = executionTracker,
 ): Promise<DaemonMethodResult> {
   const pool = state.getDevicePool();
   // A failed terminal write hides routing identity while retaining ownership.
   let deviceId =
     session?.assignedDevice ?? manager.getTerminalReleaseSnapshot?.(sessionId)?.deviceId ?? null;
-  const release = () =>
-    releaseSessionAndDevice(manager, pool, deviceId, sessionId, undefined, {
-      release: async () => {
-        deviceId = await manager.releaseSession(sessionId);
-        return deviceId;
-      },
-    });
-  // Preserve the idle path's timing: no cancellation await when there is no work.
-  await (executions.hasActiveSessionUuidExecutions(sessionId)
-    ? // An explicit release is terminal (docs/using/device-ownership.md): a call it cuts is told
-      // the session is gone, as a call arriving after the release is (#11393).
-      cancelAndReleaseSession(
-        sessionId,
-        new SessionReleasedDuringCallError(sessionId, "explicit-release"),
-        release,
-        executions,
-      )
-    : release());
+  // An explicit release is terminal and immediate (docs/using/device-ownership.md): it waits for
+  // no call, so every call it cuts is told the session is gone, as a call arriving after the
+  // release is (#11393). It cuts through the routine every other release uses, so an implicit
+  // (autolock) call is aborted too rather than left driving the freed device. The requester is a
+  // daemon request, never a tracked execution, so it is not cut. The aborts are signalled
+  // synchronously: with or without work in flight, the release starts in this turn.
+  cancelExecutionsCutBySessionRelease(
+    executions,
+    {
+      sessionId,
+      baseSessionId: resolveToolSelectionBaseSessionUuid(sessionId, manager),
+      deviceId,
+    },
+    new SessionReleasedDuringCallError(sessionId, "explicit-release"),
+  ).catch((error: unknown) => {
+    logger.warn(
+      `Failed to cancel executions of explicitly released session ${sessionId}: ${errorMessage(error)}`,
+      error,
+    );
+  });
+  await releaseSessionAndDevice(manager, pool, deviceId, sessionId, undefined, {
+    release: async () => {
+      deviceId = await manager.releaseSession(sessionId);
+      return deviceId;
+    },
+  });
   return {
     success: true,
     result: {

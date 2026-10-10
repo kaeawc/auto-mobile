@@ -505,9 +505,19 @@ export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
   }
 }
 
+/** The Android system-image packages installed in the SDK, as `system-images;...` identifiers. */
+export interface ManagedAndroidImageCatalog {
+  listInstalledPackages(signal?: AbortSignal): Promise<string[]>;
+}
+
 export interface DefaultManagedSpecResolverOptions {
   /** Profile created for an Android spec that omits `deviceType`. */
   androidDefaultDeviceType?: string;
+  /**
+   * With a catalog, an Android spec whose system image is not installed is refused as
+   * `spec_unsupported` before anything is created, instead of surfacing avdmanager's raw text.
+   */
+  androidImageCatalog?: ManagedAndroidImageCatalog;
 }
 
 /**
@@ -522,6 +532,7 @@ export interface DefaultManagedSpecResolverOptions {
  */
 export class DefaultManagedSpecResolver implements ManagedSpecResolver {
   private readonly androidDefaultDeviceType: string;
+  private readonly androidImageCatalog?: ManagedAndroidImageCatalog;
 
   constructor(
     private readonly iosRuntimeCatalog?: ExactIosRuntimeCatalog,
@@ -529,6 +540,7 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
   ) {
     this.androidDefaultDeviceType =
       options.androidDefaultDeviceType ?? MANAGED_SLOT_DEFAULT_ANDROID_DEVICE_TYPE;
+    this.androidImageCatalog = options.androidImageCatalog;
   }
 
   async resolve(
@@ -542,6 +554,12 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
         code: "spec_unsupported",
         message: `Android runtime '${spec.runtime}' is not a system-image identifier.`,
       };
+    }
+    if (platform === "android") {
+      const missing = await this.findMissingAndroidImage(spec.runtime, options.signal);
+      if (missing) {
+        return { kind: "unsupported", code: "spec_unsupported", message: missing };
+      }
     }
     const model = await this.resolveDeviceType(platform, spec, options.signal);
     if (model.kind !== "resolved") {
@@ -622,6 +640,27 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
           "runtime_incompatible",
           `No installed iPhone model supports runtime '${spec.runtime}', or the runtime is not available.`,
         );
+  }
+
+  private async findMissingAndroidImage(
+    runtime: string,
+    signal: AbortSignal | undefined,
+  ): Promise<string | undefined> {
+    if (!this.androidImageCatalog) {
+      return undefined;
+    }
+    let installed: string[];
+    try {
+      installed = await this.androidImageCatalog.listInstalledPackages(signal);
+    } catch (error) {
+      // An unreadable SDK listing is not proof the image is missing; avdmanager stays the authority.
+      logger.warn(`[ManagedSlots] Android image check skipped: ${errorMessage(error)}`, error);
+      return undefined;
+    }
+    if (installed.includes(runtime)) {
+      return undefined;
+    }
+    return `Android system image '${runtime}' is not installed. Install it with sdkmanager, or request an installed image (${installed.join(", ") || "none installed"}).`;
   }
 
   private async findIosIncompatibility(

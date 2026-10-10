@@ -26,6 +26,7 @@ enum PrototypeAgentProtocol {
         screenshotHideCapability,
         inspectCapability,
         themeModesCapability,
+        appearanceCapability,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
@@ -54,6 +55,13 @@ enum PrototypeAgentProtocol {
     /// spec that uses one on an agent that does not advertise it. Same name as the CtrlProxy
     /// capability.
     static let themeModesCapability = "prototype_theme_modes_v1"
+    /// Appearance (#11222): `show_prototype` takes `appearance` (`device`, `light` or `dark`), the
+    /// show result and `get_prototype_status` report `appearance: {mode, source, deviceDark}`, and
+    /// any change of the shown prototype's mode (the device flipping, or state moving the inferred
+    /// background) re-themes it and pushes one `appearance_changed` event. The host sends `appearance` only to an agent
+    /// that advertises
+    /// this. Same name as the CtrlProxy capability.
+    static let appearanceCapability = "prototype_appearance_v1"
     static let portEnvironmentKey = "AUTOMOBILE_PROTOTYPE_PORT"
     static let tokenEnvironmentKey = "AUTOMOBILE_PROTOTYPE_TOKEN"
     /// Shortest token the agent accepts, so a stray or empty value cannot open the server.

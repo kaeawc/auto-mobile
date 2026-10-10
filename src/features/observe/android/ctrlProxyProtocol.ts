@@ -446,6 +446,30 @@ export interface ShowPrototypeMessage {
    * always starts fresh, which is what `reset` asks for.
    */
   reset?: true;
+  /**
+   * What "the system setting" means for this show: `light` or `dark` pins it, without changing the
+   * device. Omitted for the device's own setting. Requires prototype_appearance_v1: an older device
+   * ignores the field and follows the device silently, so it is never sent to one.
+   */
+  appearance?: PrototypeAppearanceOverride;
+}
+/** A fixed mode a show takes as the system setting; following the device is the absent field. */
+export type PrototypeAppearanceOverride = "light" | "dark";
+/** Which step of the resolution order decided a prototype's mode, highest precedence first. */
+export type PrototypeAppearanceSource =
+  | "explicit"
+  | "roleLuminance"
+  | "authoredBackground"
+  | "override"
+  | "system";
+/**
+ * The light or dark mode a shown prototype resolved to (`prototype_appearance_v1`). `deviceDark` is
+ * the device's own setting whatever decided `mode`. Absent wherever a device lacks the capability.
+ */
+export interface PrototypeAppearance {
+  mode: "light" | "dark";
+  source: PrototypeAppearanceSource;
+  deviceDark: boolean;
 }
 export type PrototypeDismiss = { id: string; all?: never } | { all: true; id?: never };
 export type DismissPrototypeMessage = {
@@ -496,6 +520,8 @@ export interface PrototypeResult {
   prototypes?: PrototypeStatusEntry[];
   /** Only with `prototypes`: events the device dropped from its offline buffer since it started. */
   droppedEvents?: number;
+  /** Only a successful `show_prototype` reply from a device advertising prototype_appearance_v1. */
+  appearance?: PrototypeAppearance;
 }
 
 /** One prototype the device reported to `inspect_prototypes`. `id` is the prototype id (its spec id). */
@@ -509,6 +535,8 @@ export interface PrototypeStatusEntry {
   lastSequence: number;
   /** True while the prototype's app is not in front: hidden, state kept, back with the app. */
   suspended?: boolean;
+  /** The mode it is drawn in right now; only from a device advertising prototype_appearance_v1. */
+  appearance?: PrototypeAppearance;
 }
 
 /**
@@ -521,6 +549,24 @@ export interface PrototypeAssetResult extends PrototypeResult {
   acknowledged: boolean;
 }
 
+/**
+ * Event kinds this host understands. `appearance_changed` (`prototype_appearance_v1`) has a null
+ * `name` and the payload `{mode, source}`.
+ */
+export const PROTOTYPE_EVENT_KINDS = [
+  "emit",
+  "page_changed",
+  "dismissed",
+  "appearance_changed",
+] as const;
+export type PrototypeEventKind = (typeof PROTOTYPE_EVENT_KINDS)[number];
+/**
+ * Host-side stand-in for a kind a newer device sent that this host does not know. Such an event
+ * carries only `id`, `sequence` and `timestamp` from the wire: it advances the sequence ledger and
+ * is never buffered, recorded or returned by awaitEvent.
+ */
+export const UNKNOWN_PROTOTYPE_EVENT_KIND = "unknown";
+
 /** Id-less push; pager selection has its own namespace, separate from authored state. */
 export interface PrototypeEvent {
   type: "prototype_event";
@@ -531,7 +577,7 @@ export interface PrototypeEvent {
    * Hosts should treat lower-or-equal sequences for the same id as duplicates.
    */
   sequence: number;
-  kind: "emit" | "page_changed" | "dismissed";
+  kind: PrototypeEventKind | typeof UNKNOWN_PROTOTYPE_EVENT_KIND;
   name: string | null;
   payload: PrototypeJson;
   state: PrototypeState;
@@ -933,6 +979,15 @@ export const PROTOTYPE_ANCHOR_CAPABILITY = "prototype_anchor_v1";
  * rejects or misdraws those forms, so the host refuses the show before sending.
  */
 export const PROTOTYPE_THEME_MODES_CAPABILITY = "prototype_theme_modes_v1";
+
+/**
+ * Advertised by a CtrlProxy or iOS prototype agent that honours `show_prototype`'s `appearance`,
+ * reports the resolved `appearance` in the show result and in inspect or status, re-themes a shown
+ * prototype when its resolved mode changes and says so with an `appearance_changed` event (#11215).
+ * An older device ignores the request field and follows the device silently, so the host refuses a
+ * `light` or `dark` override for one and never sends the field.
+ */
+export const PROTOTYPE_APPEARANCE_CAPABILITY = "prototype_appearance_v1";
 
 /**
  * Advertised by a CtrlProxy that answers `set_network_mock_rules` (when it carries a requestId)
@@ -1404,6 +1459,7 @@ export const ctrlProxyRequests = {
     spec: PrototypeSpec;
     displayId?: number;
     reset?: boolean;
+    appearance?: PrototypeAppearanceOverride;
   }): ShowPrototypeMessage {
     return {
       type: "show_prototype",
@@ -1411,6 +1467,7 @@ export const ctrlProxyRequests = {
       spec: args.spec,
       ...(args.displayId === undefined ? {} : { displayId: args.displayId }),
       ...(args.reset === true ? { reset: true as const } : {}),
+      ...(args.appearance === undefined ? {} : { appearance: args.appearance }),
     };
   },
 

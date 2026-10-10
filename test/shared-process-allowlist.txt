@@ -102,6 +102,7 @@ test/daemon/emulatorLossIncident.test.ts
 test/daemon/emulatorLossIncidentLedger.test.ts
 test/daemon/executionOwnerWatch.test.ts
 test/daemon/explicitReleaseCutCall.test.ts
+test/daemon/explicitReleaseOfUnrecoveredRestartRow.test.ts
 test/daemon/failuresPushSocketServer.test.ts
 test/daemon/findAvailableDaemonPort.test.ts
 test/daemon/forwardLeaseHolders.test.ts
@@ -115,6 +116,7 @@ test/daemon/hierarchyStreamDiff.test.ts
 test/daemon/idleDeviceReaper.test.ts
 test/daemon/incumbentOwnerGuard.test.ts
 test/daemon/inputDeviceOwnership.test.ts
+test/daemon/lateRehydrationOwnerToldNotFound.test.ts
 test/daemon/liveDeadlineRegistry.test.ts
 test/daemon/livenessKeeperSuspectInteractions.test.ts
 test/daemon/livenessOwnerLease.test.ts
@@ -163,6 +165,7 @@ test/daemon/refusalWireContract.test.ts
 test/daemon/registerSessionManagedConnection.test.ts
 test/daemon/rehydratedLegacyLivenessDefaults.test.ts
 test/daemon/rehydrationIdleOrigin.test.ts
+test/daemon/rehydrationReservationAutolock.test.ts
 test/daemon/releaseReasons.test.ts
 test/daemon/releasingSessionRequests.test.ts
 test/daemon/sessionCacheNoEscapeHatch.test.ts

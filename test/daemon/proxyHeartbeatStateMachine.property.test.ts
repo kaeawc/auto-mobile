@@ -16,8 +16,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // | what the daemon holds / told the proxy              | keeper       | heartbeats   | a call naming it  |
 // | --------------------------------------------------- | ------------ | ------------ | ----------------- |
 // | live, acquired or reached by a call since           | runs         | every tick   | forwarded         |
-// | gone with no reason or a recoverable one, told by a | for others   | none needed  | forwarded, and    |
-// |   not-found heartbeat                               |              |              | success re-arms   |
+// | gone with a recoverable reason, told by a not-found | may run      | allowed: the | forwarded         |
+// |   heartbeat (#11461)                                |              | owner waits  |                   |
+// | gone with no reason, told by a not-found heartbeat  | for others   | none needed  | forwarded, and    |
+// |                                                     |              |              | success re-arms   |
 // | gone with any reason that is not recoverable        | for others   | never again  | refused locally   |
 // |   (terminal, `plan-auto-release`, unknown to this   |              |              | while it is the   |
 // |   build), proxy told (release notification or       |              |              | fenced binding    |
@@ -221,7 +223,9 @@ class World {
       }
       this.learnDead(sessionUuid);
     }
-    session.told = true;
+    // A recoverable handoff is not "told gone": its owner keeps heartbeating so a daemon that is
+    // still recovering the session finds it reclaimed when it lands (#11461).
+    session.told = session.daemon !== "recoverable";
     throw Object.assign(new Error(`Session not found: ${sessionUuid}`), {
       code: DAEMON_SESSION_NOT_FOUND_CODE,
       ...(session.daemon === "terminal" ? { releaseReason: session.endedAs } : {}),

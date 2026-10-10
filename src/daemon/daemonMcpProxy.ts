@@ -4699,11 +4699,14 @@ export class DaemonMcpProxy {
    * | ---------------------------------------------------- | ---------- | ----------- | ------------------------- |
    * | latest, claimable (minted here or startup-declared)  | runs       | every tick  | forwarded                 |
    * | latest, only named in a call's args (#10664)         | for others | never       | forwarded                 |
+   * | latest or held, heartbeat answered not-found with a   | runs       | every tick, | forwarded: the daemon     |
+   * |   recoverable reason (a daemon restart or shutdown,  |            | claiming    | restores it or refuses    |
+   * |   `device-restart:<id>`) (#11461)                    |            | again       |                           |
    * | latest, heartbeat answered not-found with no release | for others | not until a | forwarded: the daemon     |
-   * |   reason or a recoverable one (a restarted daemon,   |            | call reaches| restores it or refuses,   |
-   * |   `device-restart:<id>`)                             |            | it again    | and success re-arms it    |
+   * |   reason (a restarted daemon that has not            |            | call reaches| restores it or refuses,   |
+   * |   materialised it)                                   |            | it again    | and success re-arms it    |
    * | held                                                 | runs       | every tick  | forwarded                 |
-   * | held, heartbeat answered not-found                   | for others | never       | forwarded, daemon decides |
+   * | held, heartbeat answered not-found otherwise         | for others | never       | forwarded, daemon decides |
    * | fenced (any release reason that is not recoverable,  | for others | never       | refused locally           |
    * |   expired replay lease, exhausted liveness recovery) |            |             |                           |
    *
@@ -6110,19 +6113,33 @@ export class DaemonMcpProxy {
    * here with the same decision: the keeper tick (retried on a fresh connection), a held
    * session's tick, the first heartbeat of a binding and liveness recovery (#11411).
    *
-   * A held session is dropped: no longer heartbeated, never fenced. For the latest binding the
-   * daemon released the session and this proxy missed the notification (#10702): stop
-   * heartbeating it rather than every tick resetting the socket to ask again. A release reason
-   * is the one a missed notification would have carried (#10972) and is classified as that
-   * notification is ({@link releaseKeepsBinding}): the binding is fenced unless the reason is a
-   * recoverable handoff. With a recoverable reason (`device-restart:<id>`, a daemon restart), or
-   * with no reason at all (a replacement daemon that has not materialised a persisted session),
-   * the daemon may hand the session back (#11400): a tool call that reaches it restores it and
-   * re-arms the heartbeat; otherwise that call reports the loss.
+   * A release reason is the one a missed notification would have carried (#10972) and is
+   * classified as that notification is ({@link releaseKeepsBinding}).
+   *
+   * A recoverable handoff (`device-restart:<id>`, a daemon shutdown or restart) of a session this
+   * proxy owns keeps being heartbeated, latest or held, each heartbeat claiming again (#11461):
+   * a restarted daemon may still be recovering the row and publishes the session waiting for its
+   * owner, so an owner that went quiet here lost it to `rehydration-owner-timeout`. A not-found
+   * heartbeat resets no socket, and the idle bounds still apply (the replay lease for the latest
+   * binding, {@link evictAbandonedHeldSessions} for a held one).
+   *
+   * Otherwise a held session is dropped: no longer heartbeated, never fenced. The latest binding
+   * is fenced for any other reason. With no reason at all (a replacement daemon that has not
+   * materialised a persisted session, or a release whose notification this proxy missed, #10702)
+   * the proxy stops heartbeating it, and the daemon may still hand the session back (#11400): a
+   * tool call that reaches it restores it and re-arms the heartbeat; otherwise that call reports
+   * the loss.
    */
   private heartbeatSessionNotFound(sessionUuid: string, releaseReason?: string): void {
+    // A not-found answer is no idle report: the daemon's instant no longer describes the session.
+    this.daemonIdleReports.delete(sessionUuid);
+    const recoverableHandoff =
+      releaseReason !== undefined && this.releaseKeepsBinding(sessionUuid, releaseReason);
     if (this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
-      if (this.otherHeldSessions.has(sessionUuid)) {
+      const held = this.otherHeldSessions.get(sessionUuid);
+      if (held && recoverableHandoff) {
+        held.claimSent = false;
+      } else if (held) {
         logger.warn(
           `[DaemonMcpProxy] Held session ${sessionUuid} is gone, no longer heartbeating it`,
         );
@@ -6130,16 +6147,18 @@ export class DaemonMcpProxy {
       }
       return;
     }
-    // A not-found answer is no idle report: the daemon's instant no longer describes the session.
-    this.daemonIdleReports.delete(sessionUuid);
-    if (releaseReason !== undefined && !this.releaseKeepsBinding(sessionUuid, releaseReason)) {
+    if (recoverableHandoff) {
+      this.livenessOwnershipClaimSent = false;
+      this.syncHeartbeatKeeper();
+      return;
+    }
+    if (releaseReason !== undefined) {
       this.fenceBoundSessionUuid(sessionUuid, releaseReason);
       return;
     }
     if (this.latestBindingNotFound !== sessionUuid) {
       logger.info(
-        `[DaemonMcpProxy] The daemon no longer knows session ${sessionUuid}` +
-          `${releaseReason ? ` (released: ${releaseReason})` : ""}; no longer heartbeating it`,
+        `[DaemonMcpProxy] The daemon no longer knows session ${sessionUuid}; no longer heartbeating it`,
       );
     }
     this.latestBindingNotFound = sessionUuid;

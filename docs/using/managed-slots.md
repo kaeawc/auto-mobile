@@ -253,6 +253,11 @@ Matching is declarative, per slot, and the result reports a `disposition` of
   emulator may be replaced with an iOS simulator). If deletion fails, the old
   assignment is kept and marked cleanup pending (`cleanup_pending`); replacement
   never starts from a partial inventory (`discovery_incomplete`).
+  Boot capacity is checked before the old device is deleted, so a replacement
+  refused at the limit (`capacity_exhausted`), or with an unknown booted count
+  (`discovery_incomplete`), leaves the old device in place (#11433). Reuse and
+  adopt are not pre-checked: nothing is deleted first, and provisioning's own
+  exemption for the slot's own device applies.
 - Generic `provisionDevice` keeps its existing `identity_conflict` behavior;
   destructive mismatch replacement exists only for managed slots.
 

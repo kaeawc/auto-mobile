@@ -16,6 +16,7 @@ import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
 import {
   getVideoRecordingMetadata,
+  getVideoRecordingOwnerRef,
   IOS_MAX_DURATION_SECONDS,
   listActiveVideoRecordings,
   rollbackVideoRecordingStart,
@@ -24,7 +25,7 @@ import {
 } from "./videoRecordingManager";
 import type { VideoRecordingConfigInput } from "../models";
 import { DeviceSessionManager } from "../devices/DeviceSessionManager";
-import type { VideoRecordingRecord } from "../db/videoRecordingRepository";
+import { ownerVisibleInScope, type VideoRecordingRecord } from "../db/videoRecordingRepository";
 import { highlightShapeSchema } from "../features/debug/VisualHighlight";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../features/video/androidScreenrecord";
 import {
@@ -127,20 +128,16 @@ const segmentedSessions = (() => {
   // release-time stop (#10958). Bounded: the oldest entry is dropped first.
   const finished = new Map<
     string,
-    { owner: string | undefined; stopped: StoppedSegmentedSession }
+    { owner: string | undefined; deviceId: string; stopped: StoppedSegmentedSession }
   >();
   return {
-    /** A finalized session's stop result, when `ownerSessionUuid` may see it (unset = unscoped). */
-    getFinished(handle: string, ownerSessionUuid?: string): StoppedSegmentedSession | undefined {
+    /** A finalized session's stop result, when `canSee` admits its owner (#11533). */
+    getFinished(
+      handle: string,
+      canSee: (owner: string | undefined, deviceId: string) => boolean,
+    ): StoppedSegmentedSession | undefined {
       const entry = finished.get(handle);
-      if (!entry) {
-        return undefined;
-      }
-      const visible =
-        ownerSessionUuid === undefined ||
-        entry.owner === undefined ||
-        entry.owner === ownerSessionUuid;
-      return visible ? entry.stopped : undefined;
+      return entry && canSee(entry.owner, entry.deviceId) ? entry.stopped : undefined;
     },
     get timer(): Timer | undefined {
       return injectedTimer;
@@ -194,7 +191,7 @@ const segmentedSessions = (() => {
       byHandle.delete(handle);
       const { segments, manifestPath } = await persistSegmentedResult(handle, result);
       const stopped = { sessionId: handle, segments, manifestPath, highlights: result.highlights };
-      finished.set(handle, { owner: session.ownerSession, stopped });
+      finished.set(handle, { owner: session.ownerSession, deviceId: session.deviceId, stopped });
       if (finished.size > MAX_FINISHED_SEGMENTED_SESSIONS) {
         const oldest = finished.keys().next();
         if (!oldest.done) {
@@ -650,12 +647,82 @@ function stopResultEntry(
  * is returned to its owner instead of failing: the owner-scoped lookup needs no device, so a
  * stop by id never allocates one (#10958).
  */
-async function finalizedStopResponse(recordingId: string, ownerSessionUuid?: string) {
-  const finishedSegmented = segmentedSessions.getFinished(recordingId, ownerSessionUuid);
+/**
+ * Whether a requester may reach a finalized recording of `owner` on `deviceId`: the same owners
+ * `assertActiveRecordingOwner` accepts (#11533), so a recording stays reachable after the stop that
+ * finalized it. A sessionless requester or an ownerless recording is unscoped, as before.
+ */
+function finalizedOwnerVisible(
+  owner: string | undefined,
+  deviceId: string,
+  requesterSessionUuid: string | undefined,
+  requesterMcpSessionId: string | undefined,
+): boolean {
+  if (owner === undefined || requesterSessionUuid === undefined) {
+    return true;
+  }
+  const requesterBase = recordingRequesterResolver.baseSessionUuid(requesterSessionUuid);
+  const ownerBase = recordingRequesterResolver.baseSessionUuid(owner);
+  return (
+    ownerVisibleInScope(owner, {
+      ownerSessionUuid: requesterSessionUuid,
+      ownerBaseSessionUuid: requesterBase,
+    }) ||
+    ownerBase === requesterBase ||
+    (requesterMcpSessionId !== undefined &&
+      recordingRequesterResolver.connectionOwnsDeviceSession(
+        requesterMcpSessionId,
+        deviceId,
+        ownerBase,
+      ))
+  );
+}
+
+/** The finalized row's metadata, owner-scoped in the query itself (#11533). */
+async function getFinalizedMetadata(
+  recordingId: string,
+  requesterSessionUuid: string | undefined,
+  requesterMcpSessionId: string | undefined,
+) {
+  if (requesterSessionUuid === undefined) {
+    return getVideoRecordingMetadata(recordingId);
+  }
+  const metadata = await getVideoRecordingMetadata(recordingId, {
+    ownerSessionUuid: requesterSessionUuid,
+    ownerBaseSessionUuid: recordingRequesterResolver.baseSessionUuid(requesterSessionUuid),
+  });
+  if (metadata || requesterMcpSessionId === undefined) {
+    return metadata;
+  }
+  // The requester's connection may hold the device session of the owner's base: learn the owner
+  // from the row's header, then re-query scoped to exactly that owner.
+  const ref = await getVideoRecordingOwnerRef(recordingId);
+  if (
+    ref?.ownerSessionUuid === undefined ||
+    !finalizedOwnerVisible(
+      ref.ownerSessionUuid,
+      ref.deviceId,
+      requesterSessionUuid,
+      requesterMcpSessionId,
+    )
+  ) {
+    return null;
+  }
+  return getVideoRecordingMetadata(recordingId, { ownerSessionUuid: ref.ownerSessionUuid });
+}
+
+async function finalizedStopResponse(
+  recordingId: string,
+  ownerSessionUuid?: string,
+  requesterMcpSessionId?: string,
+) {
+  const finishedSegmented = segmentedSessions.getFinished(recordingId, (owner, deviceId) =>
+    finalizedOwnerVisible(owner, deviceId, ownerSessionUuid, requesterMcpSessionId),
+  );
   if (finishedSegmented) {
     return segmentedStopResponse(finishedSegmented);
   }
-  const metadata = await getVideoRecordingMetadata(recordingId, { ownerSessionUuid });
+  const metadata = await getFinalizedMetadata(recordingId, ownerSessionUuid, requesterMcpSessionId);
   if (!metadata) {
     return null;
   }
@@ -686,7 +753,11 @@ async function stopRecordingById(
   const activeRecords = await listActiveVideoRecordings();
   const matching = activeRecords.find((record) => record.recordingId === recordingId);
   if (!matching) {
-    const finalized = await finalizedStopResponse(recordingId, ownerSessionUuid);
+    const finalized = await finalizedStopResponse(
+      recordingId,
+      ownerSessionUuid,
+      requesterMcpSessionId,
+    );
     if (finalized) {
       return finalized;
     }

@@ -1,4 +1,4 @@
-import type { Kysely, SelectQueryBuilder } from "kysely";
+import { sql, type Kysely, type SelectQueryBuilder } from "kysely";
 import { getDatabase } from "./database";
 import type {
   VideoContainerFormat,
@@ -49,6 +49,33 @@ export interface VideoRecordingRecord extends VideoRecordingMetadata {
  */
 export interface VideoRecordingOwnerScope {
   ownerSessionUuid?: string;
+  /**
+   * Base session of the requester (#11533). With `ownerSessionUuid` set, the scope also admits
+   * rows owned by this base session or by a derived `${base}:${label}` session of it, the same
+   * owners the active-recording stop accepts (#11140). Another base's rows stay hidden.
+   */
+  ownerBaseSessionUuid?: string;
+}
+
+/** Whether `owner` is `base` itself or a derived `${base}:${label}` session of it. */
+export function isOwnerWithinBase(owner: string, base: string): boolean {
+  return owner === base || owner.startsWith(`${base}:`);
+}
+
+/** Whether a row owned by `owner` (undefined = legacy) is visible under `scope`. */
+export function ownerVisibleInScope(
+  owner: string | undefined,
+  scope: VideoRecordingOwnerScope,
+): boolean {
+  if (!scope.ownerSessionUuid) {
+    return true;
+  }
+  return (
+    owner === undefined ||
+    owner === scope.ownerSessionUuid ||
+    (scope.ownerBaseSessionUuid !== undefined &&
+      isOwnerWithinBase(owner, scope.ownerBaseSessionUuid))
+  );
 }
 
 export interface VideoRecordingQuery extends VideoRecordingOwnerScope {
@@ -136,14 +163,28 @@ function toRecord(row: DbVideoRecording): VideoRecordingRecord {
  */
 function applyOwnerScope<O>(
   builder: SelectQueryBuilder<Database, "video_recordings", O>,
-  ownerSessionUuid?: string,
+  scope: VideoRecordingOwnerScope,
 ): SelectQueryBuilder<Database, "video_recordings", O> {
+  const { ownerSessionUuid, ownerBaseSessionUuid } = scope;
   if (!ownerSessionUuid) {
     return builder;
   }
-  return builder.where((eb) =>
-    eb.or([eb("owner_session_uuid", "is", null), eb("owner_session_uuid", "=", ownerSessionUuid)]),
-  );
+  return builder.where((eb) => {
+    const owners = [
+      eb("owner_session_uuid", "is", null),
+      eb("owner_session_uuid", "=", ownerSessionUuid),
+    ];
+    if (ownerBaseSessionUuid !== undefined) {
+      // The base session's own rows and its derived `${base}:${label}` sessions' (#11533). A
+      // substr prefix compare, not LIKE, so a base containing % or _ cannot widen the match.
+      const prefix = `${ownerBaseSessionUuid}:`;
+      owners.push(
+        eb("owner_session_uuid", "=", ownerBaseSessionUuid),
+        eb(sql<string>`substr(owner_session_uuid, 1, ${prefix.length})`, "=", prefix),
+      );
+    }
+    return eb.or(owners);
+  });
 }
 
 function buildUpdatePayload(update: Partial<VideoRecordingRecord>): VideoRecordingUpdate {
@@ -331,7 +372,7 @@ export class VideoRecordingRepository {
       .selectFrom("video_recordings")
       .selectAll()
       .where("recording_id", "=", recordingId);
-    builder = applyOwnerScope(builder, scope.ownerSessionUuid);
+    builder = applyOwnerScope(builder, scope);
     const row = await builder.executeTakeFirst();
 
     return row ? toRecord(row) : null;
@@ -341,7 +382,7 @@ export class VideoRecordingRepository {
     const db = await this.getDb();
     let builder = db.selectFrom("video_recordings").selectAll();
 
-    builder = applyOwnerScope(builder, query.ownerSessionUuid);
+    builder = applyOwnerScope(builder, query);
     const liveDaemonSessionIds = Array.from(query.excludeLiveDaemonSessionIds ?? []);
     if (liveDaemonSessionIds.length > 0) {
       builder = builder.where((eb) =>

@@ -10,6 +10,9 @@ import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { TouchTrackFailure } from "../features/record/android/types";
 import { DualTrackRecorder } from "../features/record/android";
+import { DaemonState } from "../daemon/daemonState";
+import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
+import { isOwnerWithinBase } from "../db/videoRecordingRepository";
 
 interface TestRecordingStartResult {
   recordingId: string;
@@ -90,15 +93,37 @@ function retainStoppedPlan(session: RecordingSession, result: TestRecordingStopR
   }
 }
 
-/** The retained plan of a stopped recording, only for the session that owned it. */
+/** Base session of a derived `${base}:${label}` session; itself when the daemon is not up. */
+function daemonBaseSessionUuid(sessionUuid: string): string {
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return sessionUuid;
+  }
+  return (
+    resolveToolSelectionBaseSessionUuid(sessionUuid, daemonState.getSessionManager()) ?? sessionUuid
+  );
+}
+
+/**
+ * The retained plan of a stopped recording, for the session that owned it and, as for an active
+ * recording (#11140), its base session or a sibling derived session of the same base (#11533).
+ * `baseSessionUuid` resolves a session to its base; another base's plans stay hidden.
+ */
 export function getStoppedTestRecording(
   recordingId: string,
   ownerSessionUuid: string | undefined,
+  baseSessionUuid: (sessionUuid: string) => string = daemonBaseSessionUuid,
 ): TestRecordingStopResult | undefined {
   const entry = stoppedPlans.get(recordingId);
-  return entry && ownerSessionUuid !== undefined && entry.owner === ownerSessionUuid
-    ? entry.result
-    : undefined;
+  if (!entry || ownerSessionUuid === undefined) {
+    return undefined;
+  }
+  const requesterBase = baseSessionUuid(ownerSessionUuid);
+  const visible =
+    entry.owner === ownerSessionUuid ||
+    isOwnerWithinBase(entry.owner, requesterBase) ||
+    baseSessionUuid(entry.owner) === requesterBase;
+  return visible ? entry.result : undefined;
 }
 
 /** Test seam: forget retained plans. */

@@ -263,6 +263,43 @@ class PrototypeSpecTest {
     )
   }
 
+  private fun setStateSpec(state: String, controls: String, value: String) =
+    """{"id":"a","window":{"placement":{"type":"fullscreen"}},"state":$state,"root":{"type":"column","children":[$controls,{"type":"button","label":"Go","onTap":[{"type":"setState","key":"k","value":$value}]}]}}"""
+
+  private val radioControl =
+    """{"type":"radioGroup","stateKey":"k","options":[{"value":"a","label":"A"},{"value":"b","label":"B"}]}"""
+
+  @Test
+  fun `setState names the key and the broken rule at the value path`() {
+    val slider = """{"type":"slider","stateKey":"k","min":0,"max":10}"""
+    val result =
+      PrototypeSpecValidator.validate(setStateSpec("""{"k":1}""", slider, "99"))
+        as PrototypeSpecValidation.Failure
+    assertEquals("root.children[1].onTap[0].value", result.error.path)
+    assertEquals(
+      "setState value does not fit the control bound to \"k\": " +
+        "Slider requires a numeric state key within min and max",
+      result.error.message,
+    )
+  }
+
+  @Test
+  fun `setState to a key bound by controls of different types is accepted`() {
+    val mixed = """$radioControl,{"type":"textField","stateKey":"k"}"""
+    assertTrue(
+      PrototypeSpecValidator.validate(setStateSpec("""{"k":"a"}""", mixed, "5"))
+        is PrototypeSpecValidation.Success,
+    )
+  }
+
+  @Test
+  fun `setState to a radio value outside the options is accepted`() {
+    assertTrue(
+      PrototypeSpecValidator.validate(setStateSpec("""{"k":"a"}""", radioControl, "\"zzz\""))
+        is PrototypeSpecValidation.Success,
+    )
+  }
+
   @Test
   fun `raw byte limit includes whitespace and accepts its exact boundary`() {
     val input = validJson.getValue(valid.first())

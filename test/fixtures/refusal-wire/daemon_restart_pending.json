@@ -1,0 +1,13 @@
+{
+  "code": "daemon_restart_pending",
+  "builder": "daemonRestartPendingToolResult",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"code\":\"daemon_restart_pending\",\"message\":\"Daemon restart is pending; retry provisionDevice after the replacement becomes ready.\",\"retryable\":true}}"
+      }
+    ]
+  }
+}

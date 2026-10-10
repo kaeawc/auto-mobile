@@ -94,17 +94,105 @@ class PrototypeSpecTest {
     // Every override is exactly one of the colour roles a style colour can name.
     val roles =
       definitions
-        .getValue("colorValue")
+        .getValue("colorRole")
         .jsonObject
-        .getValue("options")
-        .jsonArray
-        .map { it.jsonObject }
-        .single { it.getValue("kind").jsonPrimitive.content == "enum" }
         .getValue("values")
         .jsonArray
         .map { it.jsonPrimitive.content }
         .toSet()
-    assertEquals(roles, fields - setOf("seed", "source"))
+    assertEquals(roles, fields - setOf("seed", "source", "light", "dark"))
+    // A per-mode map overrides exactly the roles the flat overrides do.
+    assertEquals(
+      roles,
+      definitions.getValue("themeModeColors").jsonObject.getValue("fields").jsonObject.keys,
+    )
+  }
+
+  private fun decoded(name: String): PrototypeSpec {
+    val json = validJson.entries.single { it.key.name == name }.value
+    return (PrototypeSpecValidator.validate(json) as PrototypeSpecValidation.Success).spec
+  }
+
+  @Test
+  fun `per-mode colours decode as pairs and single values in every colour slot`() {
+    val spec = decoded("theme-modes-colors.json")
+    val placement = spec.window.placement as PrototypeFullscreenPlacement
+    assertEquals(PrototypeModeValue.Modes("#66000000", "scrim"), placement.scrim)
+    val root = spec.root as PrototypeColumnNode
+    val style = checkNotNull(root.style)
+    assertEquals(PrototypeModeValue.Modes("#FFFFFF", "#101014"), style.background)
+    assertEquals(PrototypeModeValue.Modes("outline", "#44FFFFFF"), style.border?.color)
+    assertEquals(PrototypeModeValue.Modes("#40000000", "scrim"), style.shadowColor)
+    assertEquals(
+      listOf(
+        PrototypeModeValue.Single("primary"),
+        PrototypeModeValue.Modes("#FF6200EE", "primaryContainer"),
+        PrototypeModeValue.Single("#00000000"),
+      ),
+      (style.gradient as PrototypeLinearGradient).stops.map { it.color },
+    )
+    val sheets = root.children.filterIsInstance<PrototypeBottomSheetNode>()
+    assertEquals(
+      listOf(
+        PrototypeModeValue.Modes("#52000000", "#99000000"),
+        PrototypeModeValue.Single("scrim"),
+      ),
+      sheets.map { it.scrim },
+    )
+    val colors = checkNotNull(spec.theme?.colors)
+    assertEquals("#B3261E", colors.primary)
+    assertEquals(mapOf("surface" to "#FFFBFE", "onSurface" to "#1C1B1F"), colors.light)
+    assertEquals("#F2B8B5", colors.dark?.get("primary"))
+  }
+
+  @Test
+  fun `per-mode image assets decode on image nodes and navigation items`() {
+    val root = decoded("theme-modes-images.json").root as PrototypeColumnNode
+    assertEquals(
+      listOf(
+        PrototypeModeValue.Modes("logo-light", "logo-dark"),
+        PrototypeModeValue.Modes("photo", "photo"),
+        PrototypeModeValue.Single("plain"),
+      ),
+      root.children.filterIsInstance<PrototypeImageNode>().map { it.asset },
+    )
+    val tabs = root.children.filterIsInstance<PrototypeTabBarNode>().single()
+    assertEquals(
+      listOf(
+        PrototypeModeValue.Modes("home-light", "home-dark"),
+        PrototypeModeValue.Single("search"),
+      ),
+      tabs.items.map { it.image },
+    )
+    assertEquals(
+      listOf("logo-light", "logo-dark"),
+      PrototypeModeValue.Modes("logo-light", "logo-dark").values,
+    )
+    assertEquals(listOf("photo"), PrototypeModeValue.Modes("photo", "photo").values)
+  }
+
+  @Test
+  fun `a mode pair serializer rejects every shape the contract rejects`() {
+    for (json in
+      listOf(
+        """{"light":"a"}""",
+        """{"light":"a","dark":"b","x":"c"}""",
+        """{"light":1,"dark":"b"}""",
+        "3",
+        "[]",
+      )) {
+      assertThrows(kotlinx.serialization.SerializationException::class.java) {
+        Json.decodeFromString(PrototypeModeValue.serializer(), json)
+      }
+    }
+    val pair = PrototypeModeValue.Modes("a", "b")
+    val encoded = Json.encodeToString(PrototypeModeValue.serializer(), pair)
+    assertEquals("""{"light":"a","dark":"b"}""", encoded)
+    assertEquals(pair, Json.decodeFromString(PrototypeModeValue.serializer(), encoded))
+    assertEquals(
+      "\"x\"",
+      Json.encodeToString(PrototypeModeValue.serializer(), PrototypeModeValue.Single("x")),
+    )
   }
 
   @Test

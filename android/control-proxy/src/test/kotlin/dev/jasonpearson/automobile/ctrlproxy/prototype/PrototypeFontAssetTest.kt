@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
 import dev.jasonpearson.automobile.protocol.PrototypeCondition
 import dev.jasonpearson.automobile.protocol.PrototypeFontFamily
 import dev.jasonpearson.automobile.protocol.PrototypeImageNode
+import dev.jasonpearson.automobile.protocol.PrototypeModeValue
 import dev.jasonpearson.automobile.protocol.PrototypeStyle
 import dev.jasonpearson.automobile.protocol.PrototypeStyleWhen
 import dev.jasonpearson.automobile.protocol.PrototypeTextNode
@@ -136,7 +137,7 @@ class PrototypeFontAssetTest {
                   ),
                 ),
             ),
-            PrototypeImageNode(asset = "pic"),
+            PrototypeImageNode(asset = PrototypeModeValue.Single("pic")),
             PrototypeTextNode(
               text = "b",
               style = PrototypeStyle(fontFamily = PrototypeFontFamily.Named("serif")),

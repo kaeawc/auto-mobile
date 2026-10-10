@@ -48,7 +48,10 @@ class PrototypeMissingAssetsTest {
     PrototypeSpec(
       "panel",
       PrototypeWindow(PrototypeFullscreenPlacement()),
-      root = PrototypeColumnNode(children = assets.map { PrototypeImageNode(asset = it) }),
+      root =
+        PrototypeColumnNode(
+          children = assets.map { PrototypeImageNode(asset = PrototypeModeValue.Single(it)) },
+        ),
     )
 
   private fun upload(id: String) = store.put(id, "image/png", PrototypeAssetBytes.png())

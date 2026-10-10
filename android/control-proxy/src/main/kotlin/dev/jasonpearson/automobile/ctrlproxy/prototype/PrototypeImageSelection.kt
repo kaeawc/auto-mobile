@@ -62,9 +62,10 @@ fun prototypeAssetReferences(root: PrototypeNode): List<String> {
   fun visit(node: PrototypeNode) {
     prototypeFontAssetReferences(node).forEach { ids += it }
     when (node) {
-      is PrototypeImageNode -> ids += node.asset
-      is PrototypeTabBarNode -> node.items.mapNotNullTo(ids) { it.image }
-      is PrototypeBottomNavNode -> node.items.mapNotNullTo(ids) { it.image }
+      // A {light, dark} asset pair (#11218) references both ids, whichever mode is drawn.
+      is PrototypeImageNode -> ids += node.asset.values
+      is PrototypeTabBarNode -> node.items.flatMapTo(ids) { it.image?.values.orEmpty() }
+      is PrototypeBottomNavNode -> node.items.flatMapTo(ids) { it.image?.values.orEmpty() }
       else -> Unit
     }
     prototypeDescendants(node).forEach(::visit)

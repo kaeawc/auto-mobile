@@ -18598,7 +18598,7 @@
           "enum": ["show", "dismiss", "status", "inspect", "awaitEvent"]
         },
         "spec": {
-          "description": "Full prototype spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. show always renders the whole spec; spec.state is authoritative. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising prototype_window_options_v1.",
+          "description": "Full prototype spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. show always renders the whole spec; spec.state is authoritative. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising prototype_window_options_v1. Per-mode forms need a device advertising prototype_theme_modes_v1 and are refused otherwise: a colour field, gradient stop or scrim as {light, dark} (each hex or a role), a role name in a gradient stop or scrim, theme.colors.light / theme.colors.dark {role: hex} maps applied after the flat overrides for the resolved mode, and image.asset or a tabBar/bottomNav item image as {light, dark} asset ids.",
           "type": "object",
           "properties": {
             "id": {
@@ -18618,8 +18618,111 @@
                           "enum": ["fullscreen"]
                         },
                         "scrim": {
-                          "type": "string",
-                          "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "primary",
+                                "onPrimary",
+                                "primaryContainer",
+                                "onPrimaryContainer",
+                                "inversePrimary",
+                                "secondary",
+                                "onSecondary",
+                                "secondaryContainer",
+                                "onSecondaryContainer",
+                                "tertiary",
+                                "onTertiary",
+                                "tertiaryContainer",
+                                "onTertiaryContainer",
+                                "background",
+                                "onBackground",
+                                "surface",
+                                "onSurface",
+                                "surfaceVariant",
+                                "onSurfaceVariant",
+                                "surfaceTint",
+                                "inverseSurface",
+                                "inverseOnSurface",
+                                "error",
+                                "onError",
+                                "errorContainer",
+                                "onErrorContainer",
+                                "outline",
+                                "outlineVariant",
+                                "scrim",
+                                "surfaceBright",
+                                "surfaceDim",
+                                "surfaceContainer",
+                                "surfaceContainerHigh",
+                                "surfaceContainerHighest",
+                                "surfaceContainerLow",
+                                "surfaceContainerLowest"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "light": {
+                                  "anyOf": [
+                                    {
+                                      "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "primary",
+                                        "onPrimary",
+                                        "primaryContainer",
+                                        "onPrimaryContainer",
+                                        "inversePrimary",
+                                        "secondary",
+                                        "onSecondary",
+                                        "secondaryContainer",
+                                        "onSecondaryContainer",
+                                        "tertiary",
+                                        "onTertiary",
+                                        "tertiaryContainer",
+                                        "onTertiaryContainer",
+                                        "background",
+                                        "onBackground",
+                                        "surface",
+                                        "onSurface",
+                                        "surfaceVariant",
+                                        "onSurfaceVariant",
+                                        "surfaceTint",
+                                        "inverseSurface",
+                                        "inverseOnSurface",
+                                        "error",
+                                        "onError",
+                                        "errorContainer",
+                                        "onErrorContainer",
+                                        "outline",
+                                        "outlineVariant",
+                                        "scrim",
+                                        "surfaceBright",
+                                        "surfaceDim",
+                                        "surfaceContainer",
+                                        "surfaceContainerHigh",
+                                        "surfaceContainerHighest",
+                                        "surfaceContainerLow",
+                                        "surfaceContainerLowest"
+                                      ]
+                                    }
+                                  ]
+                                },
+                                "dark": {
+                                  "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/2/properties/light"
+                                }
+                              },
+                              "required": ["light", "dark"],
+                              "additionalProperties": false
+                            }
+                          ]
                         }
                       },
                       "required": ["type"],
@@ -18715,121 +18818,236 @@
                   "type": "object",
                   "properties": {
                     "seed": {
-                      "type": "string",
-                      "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                      "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
                     },
                     "source": {
                       "type": "string",
                       "enum": ["device"]
                     },
+                    "light": {
+                      "type": "object",
+                      "properties": {
+                        "primary": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "onPrimary": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "primaryContainer": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "onPrimaryContainer": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "inversePrimary": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "secondary": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "onSecondary": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "secondaryContainer": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "onSecondaryContainer": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "tertiary": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "onTertiary": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "tertiaryContainer": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "onTertiaryContainer": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "background": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "onBackground": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "surface": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "onSurface": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "surfaceVariant": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "onSurfaceVariant": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "surfaceTint": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "inverseSurface": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "inverseOnSurface": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "error": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "onError": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "errorContainer": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "onErrorContainer": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "outline": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "outlineVariant": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "scrim": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "surfaceBright": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "surfaceDim": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "surfaceContainer": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "surfaceContainerHigh": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "surfaceContainerHighest": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "surfaceContainerLow": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        },
+                        "surfaceContainerLowest": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/0"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "dark": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light"
+                    },
                     "primary": {
-                      "type": "string",
-                      "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/primary"
                     },
                     "onPrimary": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/onPrimary"
                     },
                     "primaryContainer": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/primaryContainer"
                     },
                     "onPrimaryContainer": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/onPrimaryContainer"
                     },
                     "inversePrimary": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/inversePrimary"
                     },
                     "secondary": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/secondary"
                     },
                     "onSecondary": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/onSecondary"
                     },
                     "secondaryContainer": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/secondaryContainer"
                     },
                     "onSecondaryContainer": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/onSecondaryContainer"
                     },
                     "tertiary": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/tertiary"
                     },
                     "onTertiary": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/onTertiary"
                     },
                     "tertiaryContainer": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/tertiaryContainer"
                     },
                     "onTertiaryContainer": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/onTertiaryContainer"
                     },
                     "background": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/background"
                     },
                     "onBackground": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/onBackground"
                     },
                     "surface": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/surface"
                     },
                     "onSurface": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/onSurface"
                     },
                     "surfaceVariant": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/surfaceVariant"
                     },
                     "onSurfaceVariant": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/onSurfaceVariant"
                     },
                     "surfaceTint": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/surfaceTint"
                     },
                     "inverseSurface": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/inverseSurface"
                     },
                     "inverseOnSurface": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/inverseOnSurface"
                     },
                     "error": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/error"
                     },
                     "onError": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/onError"
                     },
                     "errorContainer": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/errorContainer"
                     },
                     "onErrorContainer": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/onErrorContainer"
                     },
                     "outline": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/outline"
                     },
                     "outlineVariant": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/outlineVariant"
                     },
                     "scrim": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/scrim"
                     },
                     "surfaceBright": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/surfaceBright"
                     },
                     "surfaceDim": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/surfaceDim"
                     },
                     "surfaceContainer": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/surfaceContainer"
                     },
                     "surfaceContainerHigh": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/surfaceContainerHigh"
                     },
                     "surfaceContainerHighest": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/surfaceContainerHighest"
                     },
                     "surfaceContainerLow": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/surfaceContainerLow"
                     },
                     "surfaceContainerLowest": {
-                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/light/properties/surfaceContainerLowest"
                     }
                   },
                   "additionalProperties": false,
@@ -19094,53 +19312,7 @@
                           "additionalProperties": false
                         },
                         "background": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
-                            },
-                            {
-                              "type": "string",
-                              "enum": [
-                                "primary",
-                                "onPrimary",
-                                "primaryContainer",
-                                "onPrimaryContainer",
-                                "inversePrimary",
-                                "secondary",
-                                "onSecondary",
-                                "secondaryContainer",
-                                "onSecondaryContainer",
-                                "tertiary",
-                                "onTertiary",
-                                "tertiaryContainer",
-                                "onTertiaryContainer",
-                                "background",
-                                "onBackground",
-                                "surface",
-                                "onSurface",
-                                "surfaceVariant",
-                                "onSurfaceVariant",
-                                "surfaceTint",
-                                "inverseSurface",
-                                "inverseOnSurface",
-                                "error",
-                                "onError",
-                                "errorContainer",
-                                "onErrorContainer",
-                                "outline",
-                                "outlineVariant",
-                                "scrim",
-                                "surfaceBright",
-                                "surfaceDim",
-                                "surfaceContainer",
-                                "surfaceContainerHigh",
-                                "surfaceContainerHighest",
-                                "surfaceContainerLow",
-                                "surfaceContainerLowest"
-                              ]
-                            }
-                          ]
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
                         },
                         "cornerRadius": {
                           "anyOf": [
@@ -19192,7 +19364,7 @@
                               "minimum": 0
                             },
                             "color": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/background"
+                              "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
                             }
                           },
                           "required": ["width", "color"],
@@ -19203,7 +19375,7 @@
                           "minimum": 0
                         },
                         "shadowColor": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/background"
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
                         },
                         "gradient": {
                           "anyOf": [
@@ -19223,7 +19395,7 @@
                                     "type": "object",
                                     "properties": {
                                       "color": {
-                                        "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                                        "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
                                       },
                                       "position": {
                                         "type": "number",
@@ -19318,7 +19490,7 @@
                           "maximum": 900
                         },
                         "color": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/background"
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
                         },
                         "textAlign": {
                           "type": "string",
@@ -19880,8 +20052,27 @@
                       "enum": ["image"]
                     },
                     "asset": {
-                      "type": "string",
-                      "minLength": 1
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "light": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "dark": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["light", "dark"],
+                          "additionalProperties": false
+                        }
+                      ]
                     },
                     "contentScale": {
                       "type": "string",
@@ -21265,8 +21456,7 @@
                             "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
                           },
                           "image": {
-                            "type": "string",
-                            "minLength": 1
+                            "$ref": "#/properties/spec/properties/root/anyOf/4/properties/asset"
                           }
                         },
                         "required": ["label"],
@@ -21410,8 +21600,7 @@
                       "maxItems": 8
                     },
                     "scrim": {
-                      "type": "string",
-                      "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                      "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
                     },
                     "dragHandle": {
                       "type": "boolean"

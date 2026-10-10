@@ -41,7 +41,7 @@ class PrototypeAssetLifecycleTest {
     PrototypeSpec(
       id,
       PrototypeWindow(PrototypeFullscreenPlacement()),
-      root = PrototypeImageNode(asset = "hero"),
+      root = PrototypeImageNode(asset = PrototypeModeValue.Single("hero")),
     )
 
   private fun upload() {

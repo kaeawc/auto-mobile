@@ -183,12 +183,29 @@ interface Budget {
   images: number;
 }
 
-function imageUses(node: Raw): number {
-  if (node.type === "image") {
+/**
+ * What one image slot costs against `MAX_PROTOTYPE_IMAGES`: an asset id costs 1, and a
+ * `{light, dark}` pair costs 2 when the two modes name different assets (#11218). Absent is 0.
+ */
+export function imageSlotUses(value: unknown): number {
+  if (typeof value === "string") {
     return 1;
   }
+  const pair = record(value);
+  if (!pair) {
+    return 0;
+  }
+  return typeof pair.light === "string" && typeof pair.dark === "string" && pair.light !== pair.dark
+    ? 2
+    : 1;
+}
+
+function imageUses(node: Raw): number {
+  if (node.type === "image") {
+    return Math.max(1, imageSlotUses(node.asset));
+  }
   const items = Array.isArray(node.items) ? (node.items as unknown[]) : [];
-  return items.filter((item) => typeof record(item)?.image === "string").length;
+  return items.reduce<number>((sum, item) => sum + imageSlotUses(record(item)?.image), 0);
 }
 
 /** Walks the expanded tree; an overflow inside a template is reported at its `repeat`. */

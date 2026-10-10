@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
 import dev.jasonpearson.automobile.protocol.PrototypeFullscreenPlacement
 import dev.jasonpearson.automobile.protocol.PrototypeImageNode
+import dev.jasonpearson.automobile.protocol.PrototypeModeValue
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeWindow
 import kotlin.coroutines.CoroutineContext
@@ -297,7 +298,11 @@ class PrototypeImageCacheTest {
           PrototypeWindow(PrototypeFullscreenPlacement()),
           root =
             PrototypeColumnNode(
-              children = listOf(PrototypeImageNode(asset = "a"), PrototypeImageNode(asset = "b")),
+              children =
+                listOf(
+                  PrototypeImageNode(asset = PrototypeModeValue.Single("a")),
+                  PrototypeImageNode(asset = PrototypeModeValue.Single("b")),
+                ),
             ),
         )
       sessionStore.put("a", "image/png", PrototypeAssetBytes.png())

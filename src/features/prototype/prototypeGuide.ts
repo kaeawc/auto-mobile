@@ -1,4 +1,5 @@
 import contract from "../../../schemas/prototype-spec-contract.json";
+import { PROTOTYPE_THEME_MODES_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { GUIDE_COMPONENTS, GUIDE_ERRORS, GUIDE_INTRO, GUIDE_REPEAT } from "./prototypeGuideProse";
 import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
 
@@ -127,13 +128,15 @@ function renderActions(): string {
 }
 
 function renderTheme(): string {
-  const roles = (definitions.colorValue.options ?? []).find((o) => o.kind === "enum")?.values ?? [];
+  const roles = definitions.colorRole.values ?? [];
   return [
     "## Theme and style",
     "",
     `Theme: \`{${Object.keys(definitions.theme.fields ?? {}).join(", ")}}\`; mode is ${code(fieldRuleValues("theme", "mode"))}.`,
     "",
     `Material colour roles (a colour field takes a hex value or one of these): ${code(roles)}.`,
+    "",
+    `Per-mode values, refused unless the device advertises \`${PROTOTYPE_THEME_MODES_CAPABILITY}\`: every colour field (style colours, \`border.color\`, gradient stops, \`window.placement.scrim\`, a bottomSheet \`scrim\`) also takes \`{light, dark}\`, each a hex value or a role, both required; gradient stops and scrims take a role name too. \`theme.colors.light\` and \`theme.colors.dark\` are \`{<role>: hex}\` maps applied after the flat role overrides for the resolved mode. \`image.asset\` and a tabBar or bottomNav item \`image\` take \`{light: assetId, dark: assetId}\`: upload both, and a pair naming two different assets counts as two images. Prefer a role name, which already follows the mode; use a pair for a brand literal that needs a hand-picked dark value.`,
     "",
     `Text style roles (\`style.textStyle\`): ${code(fieldRuleValues("style", "textStyle"))}.`,
     "",

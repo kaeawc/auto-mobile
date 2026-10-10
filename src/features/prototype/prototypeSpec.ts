@@ -181,19 +181,33 @@ const cornerRadiiSchema = z
     bottomStart: z.number().finite().min(0).optional(),
   })
   .strict();
+const hexColorSchema = z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/);
+/** One colour: a hex value or a Material role name. */
+const colorTokenSchema = z.union([hexColorSchema, z.enum(PROTOTYPE_COLOR_ROLES)]);
+/**
+ * A colour slot (#11218): one token used in both modes, or a `{light, dark}` pair of tokens. A pair
+ * needs a device advertising `prototype_theme_modes_v1`.
+ */
 const colorValueSchema = z.union([
-  z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/),
+  hexColorSchema,
   z.enum(PROTOTYPE_COLOR_ROLES),
+  z.object({ light: colorTokenSchema, dark: colorTokenSchema }).strict(),
 ]);
+export type PrototypeColorValue = z.infer<typeof colorValueSchema>;
+/** An uploaded image asset id, or a `{light, dark}` pair of ids (#11218). */
+const imageAssetSchema = z.union([
+  z.string().min(1),
+  z.object({ light: z.string().min(1), dark: z.string().min(1) }).strict(),
+]);
+export type PrototypeImageAsset = z.infer<typeof imageAssetSchema>;
 const borderSchema = z
   .object({
     width: z.number().finite().min(0),
     color: colorValueSchema,
   })
   .strict();
-const hexColorSchema = z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/);
 const gradientStopSchema = z
-  .object({ color: hexColorSchema, position: z.number().finite().min(0).max(1).optional() })
+  .object({ color: colorValueSchema, position: z.number().finite().min(0).max(1).optional() })
   .strict();
 const gradientSchema = z.discriminatedUnion("type", [
   z
@@ -292,7 +306,7 @@ const itemSchema = z
   .object({
     label: z.string().min(1),
     icon: iconNameSchema.optional(),
-    image: z.string().min(1).optional(),
+    image: imageAssetSchema.optional(),
   })
   .strict();
 const anchorAlignmentSchema = z.enum(["cover", "top", "bottom", "start", "end"]);
@@ -321,10 +335,7 @@ export const placementSchema = z.discriminatedUnion("type", [
   z
     .object({
       type: z.enum(["fullscreen"]),
-      scrim: z
-        .string()
-        .regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/)
-        .optional(),
+      scrim: colorValueSchema.optional(),
     })
     .strict(),
   z
@@ -434,7 +445,7 @@ const imageBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["image"]),
-    asset: z.string().min(1),
+    asset: imageAssetSchema,
     contentScale: z.enum(["fit", "crop", "fill"]).optional(),
   })
   .strict();
@@ -679,10 +690,7 @@ const bottomSheetBaseSchema = z
     type: z.enum(["bottomSheet"]),
     openWhen: sheetConditionSchema,
     detents: z.array(detentSchema).min(1).max(8),
-    scrim: z
-      .string()
-      .regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/)
-      .optional(),
+    scrim: colorValueSchema.optional(),
     dragHandle: z.boolean().optional(),
     dismissOnSwipe: z.boolean().optional(),
   })
@@ -783,13 +791,17 @@ const windowSchema = z
 const themeColorRoleSchemas = Object.fromEntries(
   PROTOTYPE_COLOR_ROLES.map((role) => [role, hexColorSchema.optional()]),
 ) as Record<(typeof PROTOTYPE_COLOR_ROLES)[number], z.ZodOptional<typeof hexColorSchema>>;
+/** Role overrides for one resolved mode, applied after the flat overrides (#11218). */
+const themeModeColorsSchema = z
+  .object(themeColorRoleSchemas)
+  .strict()
+  .refine((value) => Object.keys(value).length > 0);
 const themeColorsSchema = z
   .object({
-    seed: z
-      .string()
-      .regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/)
-      .optional(),
+    seed: hexColorSchema.optional(),
     source: z.enum(["device"]).optional(),
+    light: themeModeColorsSchema.optional(),
+    dark: themeModeColorsSchema.optional(),
     ...themeColorRoleSchemas,
   })
   .strict()

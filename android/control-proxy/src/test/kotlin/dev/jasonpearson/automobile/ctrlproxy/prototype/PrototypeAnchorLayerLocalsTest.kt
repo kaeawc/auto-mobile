@@ -76,7 +76,7 @@ class PrototypeAnchorLayerLocalsTest {
           listOf(
             PrototypeTextNode(text = "outside", testTag = "outside"),
             PrototypeCardNode(
-              style = PrototypeStyle(background = "#6750A4"),
+              style = PrototypeStyle(background = PrototypeModeValue.Single("#6750A4")),
               children =
                 listOf(
                   PrototypeTextNode(text = "plain", testTag = "plain"),

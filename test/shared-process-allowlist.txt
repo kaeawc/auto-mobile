@@ -566,6 +566,7 @@ test/features/prototype/prototypeMissingAssets.test.ts
 test/features/prototype/prototypeNodeContractParity.test.ts
 test/features/prototype/prototypeRepeat.test.ts
 test/features/prototype/prototypeSelectionControls.test.ts
+test/features/prototype/prototypeThemeModes.test.ts
 test/features/record/McpCallRecorder.test.ts
 test/features/record/McpCallRecorderCoverage.test.ts
 test/features/record/android/GestureClassifier.characterization.test.ts
@@ -892,6 +893,7 @@ test/server/prototypeResources.test.ts
 test/server/prototypeToolAnchors.test.ts
 test/server/prototypeToolAssets.test.ts
 test/server/prototypeToolSpecPath.test.ts
+test/server/prototypeToolThemeModes.test.ts
 test/server/prototypeToolsIos.test.ts
 test/server/prototypeWindowOptions.test.ts
 test/server/provisionCancellationOutcomes.test.ts

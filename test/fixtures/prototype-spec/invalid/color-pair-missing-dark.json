@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "style": {
+        "background": {
+          "light": "#FFFFFF"
+        }
+      }
+    }
+  },
+  "expectedPath": "root.style.background.dark"
+}

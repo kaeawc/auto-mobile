@@ -28,6 +28,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.DefaultShadowColor
 import androidx.compose.ui.graphics.LinearGradientShader
 import androidx.compose.ui.graphics.RadialGradientShader
@@ -612,8 +613,7 @@ private fun RenderPrototypeSheet(
     Box(
       Modifier.fillMaxSize()
         .background(
-          source.scrim?.let(::prototypeColor)
-            ?: prototypeSheetScrimFallback(MaterialTheme.colorScheme),
+          prototypeHexColor(source.scrim) ?: prototypeSheetScrimFallback(MaterialTheme.colorScheme),
         )
         .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) },
     )
@@ -1000,3 +1000,8 @@ private fun prototypeGradientBrush(gradient: PrototypeGradient): Brush =
         }
       }
   }
+
+/** [prototypeThemedColor] for a spec colour slot, through the [prototypeModeValue] seam. */
+@Composable
+internal fun prototypeThemedColor(literal: Color?, spec: PrototypeModeValue?): Color? =
+  prototypeThemedColor(literal, spec?.let(::prototypeModeValue))

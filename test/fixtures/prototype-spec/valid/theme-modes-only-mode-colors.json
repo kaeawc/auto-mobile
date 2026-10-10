@@ -1,0 +1,20 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "theme": {
+    "mode": "system",
+    "colors": {
+      "dark": {
+        "background": "#000000"
+      }
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "x"
+  }
+}

@@ -78,6 +78,11 @@ export interface ExactDeviceProvisionRequest {
   spec: ExactDeviceSpecification;
   /** Note ownership immediately before creating a previously absent device. */
   onBeforeCreate?: () => void;
+  /**
+   * Read-only check run before creating a previously absent device that is about to be booted:
+   * throws (e.g. `BootCapacityExhaustedError`) to refuse before any creation side effect.
+   */
+  assertCapacityBeforeCreate?: (signal?: AbortSignal) => Promise<void>;
   /** Shared lifecycle lease held by a higher-level operation through boot/readiness. */
   lifecycleLease?: VirtualDeviceLifecycleLease;
   /** Absolute deadline for acquiring lifecycle coordination. */
@@ -103,6 +108,7 @@ export type ProvisionDeviceFailureCode =
   | "device_assigned_to_managed_slot"
   | "device_offline"
   | "discovery_incomplete"
+  | "capacity_exhausted"
   | "identity_conflict"
   | "timeout"
   | "unsupported"
@@ -130,6 +136,8 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   device_assigned_to_managed_slot: false,
   device_offline: true,
   discovery_incomplete: true,
+  // Transient: capacity frees when another device shuts down (#11236).
+  capacity_exhausted: true,
   identity_conflict: false,
   timeout: true,
   unsupported: false,
@@ -157,6 +165,16 @@ interface ProvisionDeviceErrorDiagnostics {
   recovery?: ProvisionDeviceRecoveryEvidence;
   /** The managed slot holding the device (`device_assigned_to_managed_slot`); no credentials. */
   managedSlot?: { scopeKey: string; declaredSlot: number | null; stableId: string };
+  /** Boot-capacity refusal details (`capacity_exhausted`, #11236). */
+  capacity?: ProvisionDeviceCapacityDetails;
+}
+
+/** The booted-device limit a `capacity_exhausted` refusal hit (#11236). */
+export interface ProvisionDeviceCapacityDetails {
+  limit: number;
+  booted: number;
+  /** Counted devices AutoMobile did not start; present only when there are any. */
+  externalDevices?: string[];
 }
 
 export interface IosRuntimeIncompatibility {
@@ -547,6 +565,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
       await this.assertIosPairCompatible(request, request.spec as IosDeviceSpecification);
     }
 
+    await request.assertCapacityBeforeCreate?.(request.signal);
     request.onBeforeCreate?.();
     if (request.platform === "android") {
       return await trackAmbient("provision:createAndroid", () =>

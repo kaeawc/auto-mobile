@@ -2,6 +2,7 @@ import { ActionableError } from "../../models/ActionableError";
 import type { BootAdmission } from "../../models/BootAdmission";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
+import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
 import type { AndroidCapacitySample, AndroidCapacitySource } from "./AndroidCapacitySource";
 import {
   assertBootCapacityGranted,
@@ -10,6 +11,7 @@ import {
   DEFAULT_ADMISSION_RETRY_AFTER_MS,
   admitBootNow,
   DEFAULT_SAMPLE_TIMEOUT_MS,
+  type BootCapacityChecker,
   type BootCapacityReporter,
   type BootCapacitySnapshot,
   type LedgerAdmission,
@@ -46,7 +48,7 @@ export interface AndroidBootAdmissionGateOptions {
  * counts, including ones started outside AutoMobile. Read-only: it never
  * boots, kills or reconfigures an emulator.
  */
-export class AndroidBootAdmissionGate implements BootCapacityReporter {
+export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapacityChecker {
   private readonly env: NodeJS.ProcessEnv;
   private readonly retryAfterMs: number;
   private readonly ledger: BootAdmissionLedger;
@@ -77,7 +79,7 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter {
       signal: request.signal,
       sampleTimeoutMs: Math.min(request.timeoutMs, DEFAULT_SAMPLE_TIMEOUT_MS),
       label: "Android emulator capacity",
-      sample: () => this.source.sample({ signal: request.signal }),
+      sample: () => this.sampleKnownCount({ signal: request.signal }),
       decide: (sample) => this.decide(sample),
       admit: () => {
         admitted = this.ledger.admit();
@@ -101,15 +103,47 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter {
     };
   }
 
+  /** Refuses with `capacity_exhausted` when a cold boot would be refused now; admits nothing. */
+  async assertCapacityAvailable(options: { signal?: AbortSignal } = {}): Promise<void> {
+    const sample = await this.sampleKnownCount(options);
+    assertBootCapacityGranted({ decision: this.decide(sample) }, "android", "emulator");
+  }
+
   /** Current limit, booted emulators (every running one, owned or not) and admitted boots in flight. */
   async describeCapacity(options: { signal?: AbortSignal } = {}): Promise<BootCapacitySnapshot> {
-    const sample = await this.source.sample(options);
+    const sample = await this.sampleKnownCount(options);
     const counts = this.count(sample);
     return {
       limit: this.limitsFor(sample).maxBooted,
       booted: counts.booted,
       inFlight: counts.inFlight,
     };
+  }
+
+  /**
+   * One sample whose booted count is known. With the adb listing failed and no process count
+   * (e.g. Windows has no `ps`), zero emulators is a guess: refuse with retryable
+   * `discovery_incomplete` rather than fail open past the limit (#11236).
+   */
+  private async sampleKnownCount(options: {
+    signal?: AbortSignal;
+  }): Promise<AndroidCapacitySample> {
+    const sample = await this.source.sample(options);
+    if (sample.errors.length === 0) {
+      return sample;
+    }
+    const detail = sample.errors.join("; ");
+    if (sample.serialListingFailed && sample.emulatorProcessRssBytes === undefined) {
+      logger.warn(`[BootAdmission] Android emulator count unknown; refusing to boot: ${detail}`);
+      throw new AndroidBootedDeviceDiscoveryIncompleteError({
+        code: "failed",
+        message: `emulator count unknown (${detail})`,
+        retryable: true,
+      });
+    }
+    // The other source still counts emulators; the failing one was logged where it failed.
+    logger.debug(`[BootAdmission] Android capacity sample partially failed: ${detail}`);
+    return sample;
   }
 
   /** Synchronous so the waiter decides and records its admission without an interleaving. */

@@ -1930,6 +1930,30 @@
         "sessionHeld": {
           "description": "Present only on a failed run with holdSessionOnFailure: true when the session and device were kept for recovery, false when they were released (plans with derived label sessions are always released).",
           "type": "boolean"
+        },
+        "code": {
+          "description": "Present only when a typed refusal failed the plan before it produced a result (e.g. capacity_exhausted from device allocation): its wire code.",
+          "type": "string"
+        },
+        "retryable": {
+          "description": "With code: whether retrying the same plan can succeed.",
+          "type": "boolean"
+        },
+        "retryAfterMs": {
+          "description": "With code: suggested wait before retrying.",
+          "type": "number"
+        },
+        "nextAction": {
+          "description": "With code: what to do instead of retrying.",
+          "type": "string"
+        },
+        "details": {
+          "description": "With code: the refusal's structured details (e.g. limit, booted).",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
         }
       },
       "required": ["success", "executedSteps", "totalSteps"],

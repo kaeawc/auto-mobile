@@ -21,8 +21,10 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { ProgressCallback } from "./toolRegistry";
 import type { DeviceResourceConfigurationResult } from "../models/DeviceResourceConfiguration";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
-import { BootedDevice, DeviceInfo } from "../models";
+import { BootedDevice, DeviceInfo, Platform } from "../models";
 import { DeviceLostError } from "../models/DeviceLostError";
+import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
+import { assertBootCapacityAvailable } from "../features/bootAdmission/sharedBootAdmissionGates";
 import { describeDevice, projectProvisionedDevice } from "./deviceDescription";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
@@ -204,13 +206,17 @@ function retryableAcquisitionProvisionCode(code: string): ProvisionDeviceFailure
 }
 
 /**
- * Typed retryable refusals from the shared bind path keep their wire code and wait hint so a
- * controller retries them the way startDevice/getAndroid clients do.
+ * Typed retryable refusals from the shared bind path, and boot capacity refusals (#11236), keep
+ * their wire code and wait hint so a controller retries them the way startDevice/getAndroid
+ * clients do.
  */
 function retryableAcquisitionProvisionError(
   args: ProvisionDeviceArgs,
   error: unknown,
 ): ProvisionDeviceError | undefined {
+  if (error instanceof BootCapacityExhaustedError) {
+    return capacityExhaustedProvisionError(args, error);
+  }
   if (!(error instanceof RetryableDeviceAcquisitionError)) {
     return undefined;
   }
@@ -228,6 +234,26 @@ function retryableAcquisitionProvisionError(
       ...(error instanceof DeviceOwnedByOtherDaemonError && error.ownerPid !== undefined
         ? { ownerPid: error.ownerPid }
         : {}),
+    },
+  );
+}
+
+/**
+ * A boot refused at the booted-device limit stays the typed retryable `capacity_exhausted`
+ * refusal with its wait hint and limit details, not a terminal `platform_command_failed` (#11236).
+ */
+function capacityExhaustedProvisionError(
+  args: ProvisionDeviceArgs,
+  error: BootCapacityExhaustedError,
+): ProvisionDeviceError {
+  const { limit, booted, externalDevices } = error.details;
+  return new ProvisionDeviceError(
+    "capacity_exhausted",
+    `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
+    true,
+    {
+      retryAfterMs: error.retryAfterMs,
+      capacity: { limit, booted, ...(externalDevices ? { externalDevices } : {}) },
     },
   );
 }
@@ -1432,6 +1458,10 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
           markDeviceCreationStarted: () => {
             creationStarted = true;
           },
+          checkBootCapacity:
+            deps.checkBootCapacity ??
+            ((platform, capacitySignal) =>
+              assertBootCapacityAvailable(platform, { signal: capacitySignal })),
           lifecycleLease: lifecycleLease,
           collectPendingSettlement: (settlement) => {
             settlementState.exactProvisioning = settlement;
@@ -1545,8 +1575,10 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       lifecycleLease,
       collectPendingSettlement,
       signal,
+      checkBootCapacity,
     }: {
       totalDeadlineMs: number;
+      checkBootCapacity: (platform: Platform, signal?: AbortSignal) => Promise<void>;
       markDeviceCreationStarted: () => void;
       lifecycleLease: VirtualDeviceLifecycleLease;
       collectPendingSettlement: (settlement: Promise<unknown>) => void;
@@ -1572,6 +1604,13 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
               ...(args.device.deviceId === undefined ? {} : { deviceId: args.device.deviceId }),
               spec: args.device.spec,
               onBeforeCreate: markDeviceCreationStarted,
+              // A device created only to be refused at boot would then be deleted (#11236).
+              ...(args.boot
+                ? {
+                    assertCapacityBeforeCreate: async (capacitySignal?: AbortSignal) =>
+                      await checkBootCapacity(args.device.platform, capacitySignal),
+                  }
+                : {}),
               lifecycleLease,
               deadlineMs: totalDeadlineMs,
               signal: deadlineSignal,
@@ -1601,6 +1640,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       lifecycleLease,
       allowExternalLeaseAdoptionRecheck: true,
       lifecycleCoordinator: deps.lifecycleCoordinator,
+      checkBootCapacity: deps.checkBootCapacity,
       onAndroidColdBootTrackingChanged: () => {
         void deps.notifyDeviceInventoryResourcesChanged(false).catch((error) => {
           logger.warn(
@@ -2147,6 +2187,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
         ? { runtimeCompatibility: diagnostics.runtimeCompatibility }
         : {}),
       ...(diagnostics.managedSlot ? { managedSlot: diagnostics.managedSlot } : {}),
+      ...(diagnostics.capacity ? diagnostics.capacity : {}),
       daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
     };
   }

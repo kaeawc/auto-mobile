@@ -104,6 +104,18 @@ export function createBootAdmissionGates(
   };
 }
 
+/**
+ * Read-only check that one more cold boot of `platform` fits right now; throws the typed retryable
+ * `BootCapacityExhaustedError` at the limit. A platform whose boots are not gated always passes.
+ */
+export async function assertBootCapacityAvailable(
+  platform: Platform,
+  options: { signal?: AbortSignal } = {},
+  gates: Pick<SharedBootAdmissionGates, "android" | "ios"> = getSharedBootAdmissionGates(),
+): Promise<void> {
+  await gates[platform]?.assertCapacityAvailable(options);
+}
+
 const CAPACITY_REPORT_TIMEOUT_MS = 3_000;
 
 export type BootCapacityReport = Partial<Record<Platform, BootCapacitySnapshot>>;

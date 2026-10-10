@@ -64,6 +64,7 @@ import type {
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import { resetProvisionedDeviceTransportFenceForTests } from "../../src/utils/provisionedDeviceTransportFence";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
+import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import {
   resetVideoRecordingManagerDependencies,
@@ -1898,6 +1899,73 @@ describe("provisionDevice handler", () => {
     });
     expect(await deviceManager.listDeviceImages("android")).toEqual([]);
   });
+
+  // At the boot limit each provision created the AVD, was refused at boot, then deleted it
+  // (#11236): a read-only capacity check now refuses before creating.
+  for (const boot of [true, false]) {
+    test(`checks boot capacity before creating only when booting (boot=${boot})`, async () => {
+      const timer = new FakeTimer();
+      const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+      configureProvisionBootAndTeardown(deviceManager, "android");
+      const createdAvds: string[] = [];
+      const capacityChecks: string[] = [];
+      setDeviceToolsDependencies({
+        timer,
+        lifecycleCoordinator,
+        checkBootCapacity: async (platform) => {
+          capacityChecks.push(platform);
+          throw new BootCapacityExhaustedError(
+            { platform, limit: 1, booted: 1, retryAfterMs: 5_000 },
+            "Refused to boot: no Android capacity",
+          );
+        },
+        exactDeviceProvisionerFactory: (manager, creationGate) =>
+          new DefaultExactDeviceProvisioner({
+            listDeviceImages: async (platform) => await manager.listDeviceImages(platform),
+            isCreationAllowed: (createIfMissing) => creationGate.isCreationAllowed(createIfMissing),
+            avdManager: {
+              createAvd: async ({ name }) => {
+                createdAvds.push(name);
+                deviceManager.setDeviceImages("android", [
+                  { name, platform: "android", isRunning: false },
+                ]);
+                return { success: true, message: "created", avdName: name };
+              },
+            },
+            androidConfigReader: { readConfig: async () => undefined },
+            androidConfigWriter: { setMemoryMb: async () => {} },
+            iosSimulator: {
+              createSimulator: async () => {
+                throw new Error("unexpected iOS simulator creation");
+              },
+            },
+            lifecycleCoordinator,
+            timer,
+          }),
+      });
+      registerDeviceTools();
+
+      const response = JSON.parse(
+        await provisionResponseText({
+          ...provisionTestArgs("android"),
+          boot,
+          readiness: "none" as const,
+        }),
+      );
+
+      if (boot) {
+        expect(response).toMatchObject({
+          success: false,
+          error: { code: "capacity_exhausted", retryable: true, retryAfterMs: 5_000 },
+        });
+        expect(capacityChecks).toEqual(["android"]);
+        expect(createdAvds).toEqual([]);
+      } else {
+        expect(capacityChecks).toEqual([]);
+        expect(createdAvds).toEqual(["phone-api-36-a"]);
+      }
+    });
+  }
 
   test("does not delete an AVD whose creation avdmanager rejected (#11100)", async () => {
     const timer = new FakeTimer();
@@ -4240,6 +4308,40 @@ describe("provisionDevice handler", () => {
 
     expect(JSON.parse((response as any).content[0].text)).toMatchObject({
       error: { code: "timeout", retryable: true },
+    });
+  });
+
+  // A boot refused at the booted-device limit lost its code, wait hint and limit details and
+  // surfaced as terminal `platform_command_failed` (#11236).
+  test("keeps a boot capacity refusal typed and retryable", async () => {
+    deviceManager.setDeviceImages("android", [
+      { name: "phone-api-36-a", platform: "android", isRunning: false },
+    ]);
+    deviceManager.startDevice = async () => {
+      throw new BootCapacityExhaustedError(
+        {
+          platform: "android",
+          limit: 2,
+          booted: 2,
+          retryAfterMs: 5_000,
+          externalDevices: ["emulator-5556"],
+        },
+        "Refused to boot: no Android capacity",
+      );
+    };
+
+    const response = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+
+    expect(response).toMatchObject({
+      success: false,
+      error: {
+        code: "capacity_exhausted",
+        retryable: true,
+        retryAfterMs: 5_000,
+        limit: 2,
+        booted: 2,
+        externalDevices: ["emulator-5556"],
+      },
     });
   });
 

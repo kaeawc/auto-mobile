@@ -281,6 +281,28 @@ describe("capacity gate", () => {
     expect(result.releaseAdmission).toBeUndefined();
   });
 
+  // #11236: a read-only check lets a caller refuse before creating a simulator it would delete.
+  test("assertCapacityAvailable refuses at capacity, even with a warm device, and admits nothing", async () => {
+    const { collector, timer, history } = setup([IOS27, IOS18]);
+    history.record({ udid: IOS18, profileId: "lean-v1", durationMs: 30_000, recordedAtMs: 0 });
+    const gate = new IosSimCapacityGate(collector, timer, { env });
+
+    const error = await gate.assertCapacityAvailable().catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BootCapacityExhaustedError);
+    expect(error).toMatchObject({ details: { limit: 2, booted: 2, platform: "ios" } });
+    expect((await gate.describeCapacity()).inFlight).toBe(0);
+  });
+
+  test("assertCapacityAvailable passes below the limit without taking a slot", async () => {
+    const { collector, timer } = setup([IOS27]);
+    const gate = new IosSimCapacityGate(collector, timer, { env });
+
+    await gate.assertCapacityAvailable();
+
+    expect((await gate.describeCapacity()).inFlight).toBe(0);
+  });
+
   test("admitBoot reports a warm device as a hint when a boot fits", async () => {
     const { collector, timer, history } = setup([IOS27]);
     history.record({ udid: IOS27, profileId: "lean-v1", durationMs: 30_000, recordedAtMs: 0 });

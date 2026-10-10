@@ -238,6 +238,15 @@ export interface BootCapacitySnapshot {
   hostPressure?: { sustained: boolean; consecutiveSamples: number; memoryPressure: string };
 }
 
+/**
+ * Read-only "would a cold boot be refused now" check: throws the typed retryable
+ * `BootCapacityExhaustedError` at the limit and takes no admission. Lets a caller refuse before a
+ * side effect (creating a device it would then have to delete) rather than after it (#11236).
+ */
+export interface BootCapacityChecker {
+  assertCapacityAvailable(options?: { signal?: AbortSignal }): Promise<void>;
+}
+
 /** Read-only capacity report a gate exposes to listings. */
 export interface BootCapacityReporter {
   describeCapacity(options?: { signal?: AbortSignal }): Promise<BootCapacitySnapshot>;

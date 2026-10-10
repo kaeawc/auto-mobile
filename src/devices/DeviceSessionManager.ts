@@ -67,6 +67,10 @@ import { disableStylusHandwriting } from "../utils/disableStylusHandwriting";
 import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
 import { RunnerReadinessError, RunnerReadinessService } from "../ctrlProxy/RunnerReadinessService";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
+import { getSharedBootAdmissionGates } from "../features/bootAdmission/sharedBootAdmissionGates";
+import { createDefaultIosBootInstrumentation } from "../features/iosSimFleet/defaultIosBootInstrumentation";
+import type { IosBootInstrumentation } from "../features/iosSimFleet/IosBootInstrumentation";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { serverConfig } from "../utils/ServerConfig";
 import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../utils/runnerReadinessConfig";
@@ -437,6 +441,11 @@ export interface DeviceSessionManagerOptions {
   runnerProvisionTimeoutMs?: number;
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
   idGenerator?: IdGenerator;
+  /**
+   * Capacity gating and boot-duration recording for simulator boots this manager starts itself
+   * (`findOrStartIosDevice`). Defaults to the process-wide iOS gate (#11236).
+   */
+  iosBootInstrumentation?: IosBootInstrumentation;
 }
 
 /** What a lifecycle-start operation may do to keep its AVD lease past its own return. */
@@ -464,6 +473,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
   private _adb: AdbExecutor | undefined;
   private readonly idGenerator: IdGenerator;
+  private iosBootInstrumentationInstance: IosBootInstrumentation | undefined;
   private readonly appearanceOnConnectDependencies:
     | Partial<AppearanceOnConnectDependencies>
     | undefined;
@@ -483,6 +493,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     this.runnerReadinessTimer = options.runnerReadinessTimer ?? defaultTimer;
     this.physicalIosScanBudgetMs = options.physicalIosScanBudgetMs ?? PHYSICAL_IOS_SCAN_BUDGET_MS;
     this.idGenerator = options.idGenerator ?? defaultIdGenerator;
+    this.iosBootInstrumentationInstance = options.iosBootInstrumentation;
     this.appearanceOnConnectDependencies = options.appearanceOnConnectDependencies;
     this.runnerReadinessTimeoutMs = options.runnerReadinessTimeoutMs;
     this.runnerProvisionTimeoutMs = options.runnerProvisionTimeoutMs;
@@ -508,6 +519,40 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
   private get simctl(): SimCtlClient | undefined {
     return this.provider.getSimctl();
+  }
+
+  /** The process-wide iOS capacity gate unless overridden, built on first boot. */
+  private get iosBootInstrumentation(): IosBootInstrumentation {
+    if (!this.iosBootInstrumentationInstance) {
+      const gates = getSharedBootAdmissionGates();
+      this.iosBootInstrumentationInstance = createDefaultIosBootInstrumentation({
+        timer: defaultTimer,
+        history: gates.iosBootHistory,
+        gate: gates.ios,
+      });
+    }
+    return this.iosBootInstrumentationInstance;
+  }
+
+  /**
+   * Boots a simulator through the shared iOS admission gate, so at the derived limit the boot
+   * fails at once with the typed retryable `capacity_exhausted` refusal (#11236).
+   */
+  private async bootIosSimulatorAdmitted(
+    simctl: SimCtlClient,
+    device: { runtimeId?: string },
+    udid: string,
+    signal: AbortSignal,
+  ): Promise<BootedDevice> {
+    return await this.iosBootInstrumentation.run(
+      {
+        udid,
+        runtime: device.runtimeId,
+        timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS,
+        signal,
+      },
+      async () => await runWithAbortSignal(signal, async () => await simctl.bootSimulator(udid)),
+    );
   }
 
   private get androidEmulator(): AndroidEmulatorClient | undefined {
@@ -1926,9 +1971,11 @@ export class DeviceSessionManager implements DeviceSessionManager {
           );
           return await this.runWithLifecycleLease(lease, options, async (signal) => {
             perf.startOperation("bootSimulator");
-            const createdDevice = await runWithAbortSignal(
+            const createdDevice = await this.bootIosSimulatorAdmitted(
+              this.simctl!,
+              provisioned,
+              provisioned.deviceId!,
               signal,
-              async () => await this.simctl!.bootSimulator(provisioned.deviceId!),
             );
             perf.endOperation("bootSimulator");
             if (createdDevice.deviceId === provisioned.deviceId) {
@@ -2009,9 +2056,11 @@ export class DeviceSessionManager implements DeviceSessionManager {
       options,
       async (signal) => {
         perf.startOperation("bootSimulator");
-        const bootedDevice = await runWithAbortSignal(
+        const bootedDevice = await this.bootIosSimulatorAdmitted(
+          this.simctl!,
+          device,
+          deviceId,
           signal,
-          async () => await this.simctl!.bootSimulator(deviceId),
         );
         perf.endOperation("bootSimulator");
         if (bootedDevice.deviceId === deviceId) {

@@ -53,6 +53,7 @@ import { getToolSelectionContext } from "../features/toolSelection/toolSelection
 import type { Plan } from "../models/Plan";
 import { isDeviceLostError } from "./deviceLossOutcome";
 import { errorMessage } from "../utils/describeUnknownError";
+import { typedRefusalFields } from "../models/typedRefusalFields";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
@@ -228,6 +229,16 @@ function planToolResultsTruncatedField(truncated: PlanToolResultsTruncation | un
   toolResultsTruncated?: PlanToolResultsTruncation;
 } {
   return truncated ? { toolResultsTruncated: truncated } : {};
+}
+
+/**
+ * The typed refusal fields of an error that failed the plan, so a typed retryable refusal (e.g.
+ * `capacity_exhausted` from device allocation) is not flattened into the `error` string (#11236).
+ */
+export function planRefusalFields(
+  error: unknown,
+): Pick<ExecutePlanResult, "code" | "retryable" | "retryAfterMs" | "nextAction" | "details"> {
+  return typedRefusalFields(error) ?? {};
 }
 
 /** The deviceFailures response field, omitted when no device failures were reported. */
@@ -495,6 +506,7 @@ export class PlanExecutionOrchestrator {
         executedSteps: 0,
         totalSteps: 0,
         error: `${error}`,
+        ...planRefusalFields(error),
         platform: this.device.platform,
         deviceId: this.device.deviceId,
         ...healthSummaryField(failureHealth),

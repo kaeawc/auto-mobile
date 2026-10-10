@@ -55,6 +55,7 @@ describe("ProvisionDeviceError retryability", () => {
       device_assigned_to_managed_slot: false,
       device_offline: true,
       discovery_incomplete: true,
+      capacity_exhausted: true,
       identity_conflict: false,
       timeout: true,
       unsupported: false,

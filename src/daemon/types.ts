@@ -58,6 +58,14 @@ export interface DaemonResponse {
   error?: string;
   /** Structured daemon error code, or JSON-RPC parse/invalid-request code. */
   code?: string | number;
+  /** With a typed refusal `code`: whether retrying can succeed (#11244). Additive. */
+  retryable?: boolean;
+  /** With a typed refusal `code`: suggested wait before retrying. Additive. */
+  retryAfterMs?: number;
+  /** With a typed refusal `code`: what to do instead of retrying. Additive. */
+  nextAction?: string;
+  /** With a typed refusal `code`: its structured details (e.g. limit, booted). Additive. */
+  details?: Record<string, unknown>;
   /**
    * Why a session-not-found answer names a session the daemon knows it released (#10730), e.g.
    * `heartbeat-timeout`, `cleanup-expired` or `owner-disconnected`. Absent for a UUID the daemon

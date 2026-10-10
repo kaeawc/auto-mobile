@@ -1243,6 +1243,11 @@ export interface DeviceToolsDependencies {
     deviceManager: PlatformDeviceManager,
     deviceCreationGate: DeviceCreationGate,
   ) => ExactDeviceProvisioner;
+  /**
+   * Read-only boot capacity check run before creating a device that will be booted (#11236);
+   * defaults to the process-wide admission gates.
+   */
+  checkBootCapacity?: (platform: Platform, signal?: AbortSignal) => Promise<void>;
   clearInstalledAppsForDevice: (deviceId: string) => Promise<void>;
   stopPerformanceMonitoring: (deviceId: string) => void;
   stopAndroidObservers: (device: BootedDevice) => Promise<void>;
@@ -3414,10 +3419,11 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
 function provisionDeviceDependencyOverrides(
   deps: Partial<DeviceToolsDependencies>,
   currentDeps: DeviceToolsDependencies,
-): Pick<DeviceToolsDependencies, "exactDeviceProvisionerFactory"> {
+): Pick<DeviceToolsDependencies, "exactDeviceProvisionerFactory" | "checkBootCapacity"> {
   return {
     exactDeviceProvisionerFactory:
       deps.exactDeviceProvisionerFactory ?? currentDeps.exactDeviceProvisionerFactory,
+    checkBootCapacity: deps.checkBootCapacity ?? currentDeps.checkBootCapacity,
   };
 }
 

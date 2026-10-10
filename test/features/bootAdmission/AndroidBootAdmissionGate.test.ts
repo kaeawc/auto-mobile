@@ -4,6 +4,7 @@ import {
   AndroidBootAdmissionGate,
 } from "../../../src/features/bootAdmission/AndroidBootAdmissionGate";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
+import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { FakeAndroidCapacitySource } from "../../fakes/FakeAndroidCapacitySource";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -49,6 +50,53 @@ describe("AndroidBootAdmissionGate (#11181)", () => {
     expect(source.samples).toBe(1);
     expect(timer.now()).toBe(0);
     expect(timer.getPendingSleepCount()).toBe(0);
+  });
+
+  // #11236: a read-only check lets a caller refuse before creating an AVD it would delete.
+  test("assertCapacityAvailable refuses at capacity and admits nothing below it", async () => {
+    const { source, gate } = setup();
+    source.emulatorSerials = ["emulator-5554", "emulator-5556"];
+
+    const error = await rejection(gate.assertCapacityAvailable());
+
+    expect(error).toBeInstanceOf(BootCapacityExhaustedError);
+    expect(error).toMatchObject({ details: { limit: 2, booted: 2, platform: "android" } });
+    source.emulatorSerials = ["emulator-5554"];
+    await gate.assertCapacityAvailable();
+    expect(await gate.describeCapacity()).toEqual({ limit: 2, booted: 1, inFlight: 0 });
+  });
+
+  // #11236: with adb failed and no process table (Windows has no `ps`), zero emulators is a
+  // guess; the gate used to read it as zero load and admit past the limit.
+  test("refuses with retryable discovery_incomplete when the emulator count is unknown", async () => {
+    const { source, gate } = setup();
+    source.serialListingError = "adb server not running";
+    source.emulatorProcessRssBytes = undefined;
+
+    for (const check of [
+      () => gate.admit({ timeoutMs: 60_000, avdName: AVD }),
+      () => gate.assertCapacityAvailable(),
+    ]) {
+      const error = await rejection(check());
+      expect(error).toBeInstanceOf(AndroidBootedDeviceDiscoveryIncompleteError);
+      expect(error).toMatchObject({ code: "discovery_incomplete", retryable: true });
+      expect(String(error)).toContain("adb server not running");
+    }
+    expect(await rejection(gate.describeCapacity())).toBeInstanceOf(
+      AndroidBootedDeviceDiscoveryIncompleteError,
+    );
+  });
+
+  test("still counts by process table when only the adb listing failed", async () => {
+    const { source, gate } = setup();
+    source.serialListingError = "adb timed out";
+    source.emulatorProcessRssBytes = [2 * GIB, 2 * GIB];
+
+    expect(await rejection(gate.admit({ timeoutMs: 60_000, avdName: AVD }))).toBeInstanceOf(
+      BootCapacityExhaustedError,
+    );
+    source.emulatorProcessRssBytes = [2 * GIB];
+    (await gate.admit({ timeoutMs: 60_000, avdName: AVD })).release();
   });
 
   test("admits right away once an emulator has shut down", async () => {

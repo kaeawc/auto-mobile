@@ -288,6 +288,20 @@ function releaseReasonField(response: DaemonResponse): { releaseReason?: string;
     : { releaseReason: response.releaseReason };
 }
 
+/** A typed refusal's retry intent from a failed response (#11244), as error fields. */
+function typedRefusalResponseFields(
+  response: DaemonResponse,
+): Pick<DaemonResponse, "retryable" | "retryAfterMs" | "nextAction" | "details"> {
+  return {
+    ...(typeof response.retryable === "boolean" ? { retryable: response.retryable } : {}),
+    ...(typeof response.retryAfterMs === "number" ? { retryAfterMs: response.retryAfterMs } : {}),
+    ...(typeof response.nextAction === "string" ? { nextAction: response.nextAction } : {}),
+    ...(response.details && typeof response.details === "object"
+      ? { details: response.details }
+      : {}),
+  };
+}
+
 /** The error a failed daemon response rejects with, carrying its structured code and details. */
 export function daemonResponseError(response: DaemonResponse): Error {
   const error =
@@ -312,6 +326,7 @@ export function daemonResponseError(response: DaemonResponse): Error {
       : undefined;
   return Object.assign(error, {
     code,
+    ...typedRefusalResponseFields(response),
     ...(livenessOwnerHold ? { livenessOwnerHold } : {}),
     ...releaseReasonField(response),
   });

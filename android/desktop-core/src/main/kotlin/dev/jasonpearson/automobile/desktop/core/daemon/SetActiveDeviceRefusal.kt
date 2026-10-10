@@ -29,8 +29,6 @@ enum class SetActiveDeviceRefusal {
   SESSION_RELEASED,
 }
 
-private const val SESSION_OWNERSHIP_LOST_CODE = "session_ownership_lost"
-
 // The daemon's typed ownership refusal (#10832): `setActiveDevice` and the pool bind carry
 // [DEVICE_OWNED_BY_OTHER_SESSION_CODE] as a top-level `code` in the tool error payload, like
 // `input/*` and device-aware `tools/call`. Older daemons sent ownership refusals as plain

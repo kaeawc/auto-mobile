@@ -380,7 +380,34 @@ data class InputActionResult(
    * (#10698). Read from the socket response, not the result body.
    */
   val code: String? = null,
+  /** The failure frame's `retryable` flag; null when the daemon did not say. */
+  val retryable: Boolean? = null,
+  /**
+   * How long to wait before retrying, from the failure frame's `details.remainingMs` (a suspect
+   * session's remaining reservation); null when the frame carried none.
+   */
+  val retryAfterMs: Long? = null,
 )
+
+/**
+ * Input-frame code for a session that missed a liveness heartbeat and is being restored: retryable
+ * after [InputActionResult.retryAfterMs], the device stays reserved meanwhile.
+ */
+const val DAEMON_SESSION_SUSPECT_CODE = "daemon_session_suspect"
+
+/**
+ * The daemon's code for a session it no longer recognises as the device's owner. Terminal for that
+ * session: only a freshly acquired session can send input again.
+ */
+const val SESSION_OWNERSHIP_LOST_CODE = "session_ownership_lost"
+
+/** True when this input was refused because the session is suspect and will be restored. */
+val InputActionResult.isSessionSuspect: Boolean
+  get() = !success && code == DAEMON_SESSION_SUSPECT_CODE
+
+/** True when this input was refused because the session lost ownership (terminal). */
+val InputActionResult.isSessionOwnershipLost: Boolean
+  get() = !success && code == SESSION_OWNERSHIP_LOST_CODE
 
 internal fun unsupportedInputAction(transportName: String, action: String): InputActionResult =
   InputActionResult(

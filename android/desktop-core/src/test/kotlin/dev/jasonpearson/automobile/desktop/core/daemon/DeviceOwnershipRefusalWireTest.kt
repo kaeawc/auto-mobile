@@ -110,4 +110,60 @@ class DeviceOwnershipRefusalWireTest {
       assertEquals(expected, decoded(case).message, "${case.name}: message")
     }
   }
+
+  /** Answers every request with an input failure frame carrying [frame]'s fields. */
+  private fun tapAnswering(frame: String): InputActionResult =
+    McpDaemonClient(
+        DaemonRequestTransport { request ->
+          DaemonJson.decodeFromString<DaemonResponse>(
+            """{"id":"${request.id}","type":"mcp_response","success":false,$frame}""",
+          )
+        },
+        sessionUuid = desktopSession,
+      )
+      .inputTap(x = 1.0, y = 2.0, platform = "android", deviceId = "emulator-5554")
+
+  @Test
+  fun `a suspect-session input frame is retryable and keeps its remaining reservation`() {
+    val result =
+      tapAnswering(
+        """"error":"Session is being restored; retry now","code":"daemon_session_suspect",""" +
+          """"retryable":true,"details":{"deviceId":"emulator-5554","sessionUuid":"s1",""" +
+          """"remainingMs":8000}""",
+      )
+
+    assertFalse(result.success)
+    assertTrue(result.isSessionSuspect)
+    assertFalse(result.isSessionOwnershipLost)
+    assertEquals(true, result.retryable)
+    assertEquals(8000L, result.retryAfterMs)
+    assertEquals("Session is being restored; retry now", result.error)
+  }
+
+  @Test
+  fun `an ownership-lost input frame is terminal for the session`() {
+    val result =
+      tapAnswering(
+        """"error":"Session s1 no longer owns emulator-5554","code":"session_ownership_lost",""" +
+          """"retryable":false,"details":{"deviceId":"emulator-5554","boundSessionUuid":"s2",""" +
+          """"sessionUuid":"s1","reason":"heartbeat_timeout"}""",
+      )
+
+    assertFalse(result.success)
+    assertTrue(result.isSessionOwnershipLost)
+    assertFalse(result.isSessionSuspect)
+    assertEquals(false, result.retryable)
+    assertEquals(null, result.retryAfterMs)
+  }
+
+  @Test
+  fun `a device-held input frame keeps retryable false and is neither suspect nor lost`() {
+    val result =
+      clientAnswering("tap-refused")
+        .inputTap(x = 540.0, y = 1200.0, platform = "android", deviceId = "emulator-5554")
+
+    assertEquals(false, result.retryable)
+    assertFalse(result.isSessionSuspect)
+    assertFalse(result.isSessionOwnershipLost)
+  }
 }

@@ -14,10 +14,9 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { drainMicrotasks, drainUntil, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 
 // Minimized regressions for the ownership races the seeded concurrency harness
-// (test/helpers/poolOwnershipConcurrencyHarness.ts) found. Each is a `test.todo`: it fails on
-// current main and documents the bug; `bun test --todo` runs them. The fix PR turns its todo into
-// a plain test and stops tolerating the matching violation kind in
-// poolOwnershipConcurrency.property.test.ts.
+// (test/helpers/poolOwnershipConcurrencyHarness.ts) found (#11146). Each failed before its fix; a
+// newly found race lands here as a `test.todo` with its violation kind tolerated in
+// poolOwnershipConcurrency.property.test.ts until it is fixed.
 
 const DEVICE: BootedDevice = { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" };
 
@@ -120,23 +119,14 @@ describe("pool ownership races found by the seeded concurrency harness", () => {
   // real terminal device-loss reason the same class still shows as `plan-auto-release` or
   // `lazy-expiry` followed by `device-killed` (contention/releaseRace profiles).
   //
-  // Root cause: SessionManager.releaseSessionInternal (src/daemon/sessionManager.ts) notifies
-  // onSessionRelease once when it commits the removal, then awaits completeReleasePersistence. A
-  // terminal release (explicit-release, device-killed, ...) arriving in that await upgrades the
-  // shared reason, so completeReleasePersistence returns a different snapshot and
-  // releaseSessionInternal notifies AGAIN with the caller's original options:
-  //     if (persistedSnapshot !== releaseSnapshot) {
-  //       this.notifySessionRelease(persistedSnapshot, options);
-  //     }
-  // The second notification lacks `upgradeOnly`, so every listener re-runs its full release
-  // cleanup. releaseFinalizedSession already announces the same kind of terminal upgrade with
-  // `{ upgradeOnly: true }` because "the device may now belong to the next owner" (#10825).
-  // Listeners that run twice today: daemon.ts's central release cleanup (explicit device pin,
-  // observe cache, display inventory, CtrlProxy binding), recording and performance-monitor
-  // session cleanup, the pool's own release handler. Reassigning the device between the two
-  // notifications was NOT reproduced: the pool refuses the device with
-  // DeviceCleanupInProgressError while the first release's persistence is pending.
-  test.todo("a terminal release racing a non-terminal one's persistence notifies a full release once", async () => {
+  // Root cause (fixed, #11146): SessionManager.releaseSessionInternal notifies onSessionRelease
+  // when it commits the removal, then awaits completeReleasePersistence. A terminal release
+  // (explicit-release, device-killed, ...) arriving in that await upgrades the shared reason, and
+  // the second notification re-sent the caller's options without `upgradeOnly`, so every listener
+  // (daemon.ts's central release cleanup, recording and performance-monitor cleanup, the pool's own
+  // release handler) re-ran its full release cleanup. It now announces `{ upgradeOnly: true }`,
+  // like releaseFinalizedSession's upgrade path (#10825).
+  test("a terminal release racing a non-terminal one's persistence notifies a full release once", async () => {
     for (const first of [PLAN_AUTO_RELEASE_REASON, "lazy-expiry"]) {
       const timer = new FakeTimer();
       const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());

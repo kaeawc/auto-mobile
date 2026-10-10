@@ -19,12 +19,9 @@ import {
 //
 // A violation kind listed here is tolerated: a known, open bug with a minimized `test.todo`
 // regression in poolOwnershipConcurrency.regressions.test.ts. Its fix removes the kind so the
-// property is enforced again. closed-connection-owns was fixed in #11146.
-const KNOWN_VIOLATIONS: ReadonlySet<ViolationKind> = new Set<ViolationKind>([
-  // A terminal release racing a non-terminal release's persistence re-notifies a full release
-  // without `upgradeOnly` (SessionManager.releaseSessionInternal).
-  "double-release",
-]);
+// property is enforced again. The closed-connection-owns and double-release kinds were fixed in
+// #11146.
+const KNOWN_VIOLATIONS: ReadonlySet<ViolationKind> = new Set<ViolationKind>();
 
 const STEPS = 40;
 const SEEDS_PER_TEST = 3;

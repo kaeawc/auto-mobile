@@ -4354,7 +4354,9 @@ export class SessionManager {
       }
       this.recordFinalizedSessionRelease(session, reason);
       if (persistedSnapshot !== releaseSnapshot) {
-        this.notifySessionRelease(persistedSnapshot, options);
+        // A terminal reason upgraded this release while it persisted. Its cleanup already ran on
+        // the first notification, so announce only the reason change (#10825, #11146).
+        this.notifySessionRelease(persistedSnapshot, { ...options, upgradeOnly: true });
       }
       logger.info(
         pendingCleanup.length > 0

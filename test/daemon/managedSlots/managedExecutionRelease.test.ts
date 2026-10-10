@@ -288,18 +288,23 @@ describe("managed execution release (daemon/releaseExecution)", () => {
       expect(await registry.getAssignment(key)).toMatchObject({ ...FENCED, state: "ready" });
     });
 
-    test("work that never settles keeps the entry open and guarded for a later daemon's redrive", async () => {
+    test("work that outlives the cap keeps its entry guarded, then settles it when the work ends (#11336)", async () => {
       timer.enableAutoAdvance();
       work.endOnCancel = false;
       work.active.set(S1, 1);
-
       await drain.releaseExecution(S1);
+      const [entry] = await registry.listOpenSlotJournal(key);
+      // The work finishes a minute after the 1 s cap; the watcher is still polling.
+      timer.setTimeout(() => work.active.delete(S1), 1_000 + 60_000);
+      let guardedPastCap: boolean | undefined;
+      timer.setTimeout(() => (guardedPastCap = inFlight.has(entry.id)), 1_000 + 1_000);
+
       await drain.whenIdle();
 
-      const [entry] = await registry.listOpenSlotJournal(key);
-      expect(entry).toMatchObject({ kind: "release", phase: "intent" });
-      expect(inFlight.has(entry.id)).toBe(true);
-      expect((await registry.getAssignment(key))?.state).toBe("settling");
+      expect(guardedPastCap).toBe(true);
+      expect(await registry.getSlotJournal(entry.id)).toMatchObject({ phase: "committed" });
+      expect(inFlight.has(entry.id)).toBe(false);
+      expect(await registry.getAssignment(key)).toMatchObject({ ...FENCED, state: "ready" });
     });
 
     test("a settled drain opens no journal entry", async () => {
@@ -328,7 +333,81 @@ describe("managed execution release (daemon/releaseExecution)", () => {
     expect(await registry.getAssignment(key)).toMatchObject({ ...FENCED, state: "ready" });
   });
 
-  test("work that never settles stays settling past the watcher cap, until its settler is gone", async () => {
+  describe("work that outlives the settlement cap (#11336)", () => {
+    const CAP_MS = 1_000;
+    const SLOW_POLL_MS = 30_000;
+
+    beforeEach(() => {
+      drain.close();
+      drain = new ManagedExecutionRelease({
+        registry: async () => registry,
+        work,
+        sessions,
+        timer,
+        settlementCapMs: CAP_MS,
+        settlementSlowPollMs: SLOW_POLL_MS,
+        settler: SETTLER,
+      });
+      timer.enableAutoAdvance();
+      work.endOnCancel = false;
+      work.active.set(S1, 1);
+    });
+
+    test("the slot returns to ready once the work settles, and can be claimed again", async () => {
+      await drain.releaseExecution(S1);
+      timer.setTimeout(() => work.active.delete(S1), CAP_MS + 60_000);
+      let settlingPastCap: string | undefined;
+      timer.setTimeout(() => {
+        void registry.getAssignment(key).then((slot) => (settlingPastCap = slot?.state));
+      }, CAP_MS + 1_000);
+
+      await drain.whenIdle();
+
+      expect(settlingPastCap).toBe("settling");
+      expect(await registry.getAssignment(key)).toMatchObject({ ...FENCED, state: "ready" });
+      const claimed = await registry.claimExecution(key, FENCED, {
+        daemonId: SETTLER.daemonId,
+        pid: SETTLER.pid,
+        sessionUuid: S2,
+      });
+      expect(claimed.kind).toBe("claimed");
+    });
+
+    test("it warns once and re-checks at the slow cadence after the cap", async () => {
+      await drain.releaseExecution(S1);
+      const start = timer.now();
+      const polls: number[] = [];
+      const originalSleep = timer.sleep.bind(timer);
+      spyOn(timer, "sleep").mockImplementation((ms: number) => {
+        polls.push(ms);
+        return originalSleep(ms);
+      });
+      timer.setTimeout(() => work.active.delete(S1), CAP_MS + 5 * SLOW_POLL_MS);
+
+      await drain.whenIdle();
+
+      expect(timer.now() - start).toBeGreaterThanOrEqual(CAP_MS + 5 * SLOW_POLL_MS);
+      expect(polls.filter((ms) => ms === SLOW_POLL_MS).length).toBeGreaterThanOrEqual(4);
+      expect(
+        warn.mock.calls.filter(([message]) => String(message).includes("did not settle")),
+      ).toHaveLength(1);
+    });
+
+    test("work that never settles stays settling, its settler live, until close stops the watcher", async () => {
+      await drain.releaseExecution(S1);
+      timer.setTimeout(() => drain.close(), CAP_MS + 10 * SLOW_POLL_MS);
+
+      await drain.whenIdle();
+
+      expect(await registry.getAssignment(key)).toMatchObject({
+        state: "settling",
+        settler: SETTLER,
+      });
+      expect(await drain.recoverSettledSlots()).toEqual([]);
+    });
+  });
+
+  test("a settling slot is recovered once its settler is gone", async () => {
     drain = new ManagedExecutionRelease({
       registry: async () => registry,
       work,
@@ -342,6 +421,7 @@ describe("managed execution release (daemon/releaseExecution)", () => {
     work.active.set(S1, 1);
 
     await drain.releaseExecution(S1);
+    timer.setTimeout(() => drain.close(), 2_000);
     await drain.whenIdle();
 
     expect(await registry.getAssignment(key)).toMatchObject({

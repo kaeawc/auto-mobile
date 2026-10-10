@@ -1166,6 +1166,11 @@ export class DaemonMcpProxy {
    */
   private heartbeatKeeperStarted = false;
   /**
+   * The release reason the daemon gave with its latest not-found answer to a liveness recovery
+   * heartbeat, per session, until recovery acts on that answer.
+   */
+  private readonly recoveryNotFoundReasons = new Map<string, string>();
+  /**
    * Whether this connection already declared its bound session CLI-owned
    * (issue #6870 review). Once declared, this proxy's remaining heartbeats must
    * keep carrying the CLI marker: an ordinary heartbeat now restores the strict
@@ -4930,19 +4935,7 @@ export class DaemonMcpProxy {
       }
     } catch (error) {
       if (this.isDaemonSessionNotFoundError(error) && this.boundSessionUuid === sessionUuid) {
-        // The bound session was already reaped before our first heartbeat reached
-        // the daemon (the #5637 race lost). Surface it as terminal now instead of
-        // proceeding to a keeper that can only re-confirm the loss — this keeps
-        // terminal fencing intact and gives the caller an ownership-lost error on
-        // its next operation. Synchronous fence: no reconnect, no reentrancy.
-        const releaseReason = releaseReasonFromError(error);
-        if (releaseReason !== undefined && !isTerminalReleaseReason(releaseReason)) {
-          // A recoverable release (the device is restarting) is handed back to the next call
-          // that names the session, exactly as on a keeper tick (#11400).
-          this.stopHeartbeatingUnknownLatestBinding(sessionUuid, releaseReason);
-          return;
-        }
-        this.fenceBoundSessionUuid(sessionUuid, releaseReason ?? "session-not-found");
+        this.firstHeartbeatSessionNotFound(sessionUuid, releaseReasonFromError(error));
         return;
       }
       // Safe to swallow the rest: the establishment heartbeat is best-effort. The
@@ -4952,6 +4945,22 @@ export class DaemonMcpProxy {
         `[DaemonMcpProxy] Initial bound-session heartbeat failed: ${errorMessage(error)}`,
       );
     }
+  }
+
+  /**
+   * The bound session was already reaped before our first heartbeat reached the daemon (the #5637
+   * race lost). Surface it as terminal now instead of proceeding to a keeper that can only
+   * re-confirm the loss: this keeps terminal fencing intact and gives the caller an ownership-lost
+   * error on its next operation. Synchronous fence: no reconnect, no reentrancy. Only a
+   * recoverable release (the device is restarting) is handed back to the next call that names the
+   * session, exactly as on a keeper tick (#11400).
+   */
+  private firstHeartbeatSessionNotFound(sessionUuid: string, releaseReason?: string): void {
+    if (releaseReason !== undefined && !isTerminalReleaseReason(releaseReason)) {
+      this.heartbeatSessionNotFound(sessionUuid, releaseReason);
+      return;
+    }
+    this.fenceBoundSessionUuid(sessionUuid, releaseReason ?? "session-not-found");
   }
 
   /**
@@ -5139,7 +5148,14 @@ export class DaemonMcpProxy {
             (restoredAfterLapse ? "; the daemon held it as suspect and kept the same UUID" : ""),
         );
       },
-      onSessionGone: (sessionUuid) => this.dropGoneSession(sessionUuid),
+      onSessionGone: (sessionUuid) => {
+        // The same decision as a keeper tick answered not-found: a replacement daemon that has
+        // not materialised a persisted session yet says so with no release reason, and the next
+        // tool call restores it (#11411).
+        const releaseReason = this.recoveryNotFoundReasons.get(sessionUuid);
+        this.recoveryNotFoundReasons.delete(sessionUuid);
+        this.heartbeatSessionNotFound(sessionUuid, releaseReason);
+      },
       onHandover: (handover) => this.deliverLivenessHandover(handover),
     });
   }
@@ -5255,6 +5271,12 @@ export class DaemonMcpProxy {
     error: unknown,
   ): RecoveryAttemptOutcome {
     if (this.isDaemonSessionNotFoundError(error)) {
+      const releaseReason = releaseReasonFromError(error);
+      if (releaseReason === undefined) {
+        this.recoveryNotFoundReasons.delete(sessionUuid);
+      } else {
+        this.recoveryNotFoundReasons.set(sessionUuid, releaseReason);
+      }
       return "session-gone";
     }
     if (isLivenessOwnershipLostError(error)) {
@@ -5288,16 +5310,6 @@ export class DaemonMcpProxy {
     } else if (this.otherHeldSessions.has(sessionUuid)) {
       this.recordHeldSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership);
     }
-  }
-
-  /** The daemon answered that a session it was heartbeated for no longer exists. */
-  private dropGoneSession(sessionUuid: string, releaseReason?: string): void {
-    if (sessionUuid === this.boundSessionUuid && !this.terminalBoundSession) {
-      this.fenceBoundSessionUuid(sessionUuid, releaseReason ?? "session-not-found");
-      return;
-    }
-    logger.warn(`[DaemonMcpProxy] Held session ${sessionUuid} is gone, no longer heartbeating it`);
-    this.dropHeldSession(sessionUuid);
   }
 
   /**
@@ -5892,7 +5904,7 @@ export class DaemonMcpProxy {
     if (error instanceof HeldSessionNotFoundError) {
       // The daemon does not know this session. Drop it once; retrying every tick would only
       // keep asking, and resetting the socket to ask again would hurt its siblings.
-      this.dropGoneSession(sessionUuid, error.releaseReason);
+      this.heartbeatSessionNotFound(sessionUuid, error.releaseReason);
       return;
     }
     if (isLivenessOwnerConflictError(error)) {
@@ -5967,6 +5979,7 @@ export class DaemonMcpProxy {
     this.livenessAcks.delete(sessionUuid);
     this.daemonIdleReports.delete(sessionUuid);
     this.livenessConflictLogged.delete(sessionUuid);
+    this.recoveryNotFoundReasons.delete(sessionUuid);
     if (!keepHandover) {
       this.sessionDeviceIds.delete(sessionUuid);
       this.stallHandovers.delete(sessionUuid);
@@ -6070,7 +6083,7 @@ export class DaemonMcpProxy {
         return;
       }
       if (this.isDaemonSessionNotFoundError(error) && isCurrent()) {
-        this.stopHeartbeatingUnknownLatestBinding(sessionUuid, releaseReasonFromError(error));
+        this.heartbeatSessionNotFound(sessionUuid, releaseReasonFromError(error));
         return;
       }
       if (error instanceof DaemonBoundSessionExpiredError) {
@@ -6083,8 +6096,12 @@ export class DaemonMcpProxy {
   }
 
   /**
-   * The daemon answered a heartbeat for the latest binding, retried on a fresh connection, with
-   * not-found: it released the session and this proxy missed the notification (#10702). Stop
+   * The daemon answered a heartbeat for `sessionUuid` with not-found. Every heartbeat path ends
+   * here with the same decision: the keeper tick (retried on a fresh connection), a held
+   * session's tick, the first heartbeat of a binding and liveness recovery (#11411).
+   *
+   * A held session is dropped: no longer heartbeated, never fenced. For the latest binding the
+   * daemon released the session and this proxy missed the notification (#10702): stop
    * heartbeating it rather than every tick resetting the socket to ask again. The binding is
    * fenced only when the daemon names a terminal release reason, the one a missed release
    * notification would have carried (#10972). With no reason (a replacement daemon that has not
@@ -6092,8 +6109,14 @@ export class DaemonMcpProxy {
    * restart) the daemon may hand the session back (#11400): a tool call that reaches it restores
    * it and re-arms the heartbeat; otherwise that call reports the loss.
    */
-  private stopHeartbeatingUnknownLatestBinding(sessionUuid: string, releaseReason?: string): void {
+  private heartbeatSessionNotFound(sessionUuid: string, releaseReason?: string): void {
     if (this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
+      if (this.otherHeldSessions.has(sessionUuid)) {
+        logger.warn(
+          `[DaemonMcpProxy] Held session ${sessionUuid} is gone, no longer heartbeating it`,
+        );
+        this.dropHeldSession(sessionUuid);
+      }
       return;
     }
     // A not-found answer is no idle report: the daemon's instant no longer describes the session.

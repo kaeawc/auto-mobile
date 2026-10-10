@@ -179,18 +179,21 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
   });
 
   // A call is told the session is gone only when the session IT runs under was released. A derived
-  // `${base}:${label}` session expiring cuts the base session's call too (#10820), but the base
-  // session is still live, so that call gets no refusal.
+  // `${base}:${label}` session expiring cuts the base session's call that drives the derived
+  // session's device (#10820), but the base session is still live, so that call gets no refusal.
+  // A base call on the base's own device is not the release's to cut at all.
   describe("a derived label session's idle expiry", () => {
     const BASE = "typed-cancellation-base";
     const DERIVED = `${BASE}:A`;
+    const BASE_DEVICE = "emulator-5554";
+    const DERIVED_DEVICE = "emulator-5556";
     const LONG_TIMEOUT_MS = 60 * 60 * 1000;
     const DERIVED_TIMEOUT_MS = 1_000;
 
     async function baseWithDerivedLabel(): Promise<void> {
       const sessionManager = daemon.getSessionManager();
-      await sessionManager.createSession(BASE, "emulator-5554", "android", LONG_TIMEOUT_MS);
-      await sessionManager.createSession(DERIVED, "emulator-5556", "android", DERIVED_TIMEOUT_MS);
+      await sessionManager.createSession(BASE, BASE_DEVICE, "android", LONG_TIMEOUT_MS);
+      await sessionManager.createSession(DERIVED, DERIVED_DEVICE, "android", DERIVED_TIMEOUT_MS);
       sessionManager.setDeviceLabels(BASE, { A: DERIVED });
     }
 
@@ -202,15 +205,41 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
       expect(daemon.getSessionManager().getSession(DERIVED)).toBeNull();
     }
 
-    test("cuts the base session's call without telling it the base session is gone", async () => {
+    test("cuts the base session's call driving the derived device without telling it the base session is gone", async () => {
       await baseWithDerivedLabel();
       const baseCall = track(executionTracker.startExecution("tapOn", undefined, BASE));
+      executionTracker.bindDeviceExecution(baseCall.id, DERIVED_DEVICE);
 
       await expireDerivedPastHungCall(baseCall);
 
       expect(baseCall.abortController.signal.aborted).toBe(true);
       expect(sessionReleasedDuringCallPayload(baseCall.cancelReason)).toBeUndefined();
       expect(daemon.getSessionManager().hasSession(BASE)).toBe(true);
+    });
+
+    test("leaves the base session's call on the base's own device running", async () => {
+      await baseWithDerivedLabel();
+      const baseCall = track(executionTracker.startExecution("tapOn", undefined, BASE));
+      executionTracker.bindDeviceExecution(baseCall.id, BASE_DEVICE);
+
+      await expireDerivedPastHungCall(baseCall);
+
+      expect(baseCall.abortController.signal.aborted).toBe(false);
+      expect(daemon.getSessionManager().hasSession(BASE)).toBe(true);
+    });
+
+    test("a base call not yet bound keeps running but may no longer bind to the derived device", async () => {
+      await baseWithDerivedLabel();
+      const baseCall = track(executionTracker.startExecution("tapOn", undefined, BASE));
+
+      await expireDerivedPastHungCall(baseCall);
+
+      expect(baseCall.abortController.signal.aborted).toBe(false);
+      expect(() => executionTracker.bindDeviceExecution(baseCall.id, DERIVED_DEVICE)).toThrow(
+        `Session ${DERIVED} was released (lazy-expiry)`,
+      );
+      executionTracker.bindDeviceExecution(baseCall.id, BASE_DEVICE);
+      expect(baseCall.deviceIds).toEqual(new Set([BASE_DEVICE]));
     });
 
     test("answers the derived session's own call with the refusal naming the derived session", async () => {
@@ -222,6 +251,80 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
       expect(derivedCall.abortController.signal.aborted).toBe(true);
       expect(sessionReleasedDuringCallPayload(derivedCall.cancelReason)).toMatchObject({
         error: { code: "session_ownership_lost", sessionUuid: DERIVED, reason: "lazy-expiry" },
+      });
+    });
+  });
+
+  // The heartbeat monitor reaps a derived label session on its own lease while the base session's
+  // owner keeps heartbeating. That release may cut only what it frees: the derived session's own
+  // calls and whatever the base session is driving on the derived session's device.
+  describe("a derived label session's heartbeat reap under a live, heartbeating base", () => {
+    const BASE = "typed-cancellation-live-base";
+    const DERIVED = `${BASE}:B`;
+    const DERIVED_DEVICE: BootedDevice = {
+      name: "Pixel_9_API_35",
+      deviceId: "emulator-5556",
+      platform: "android",
+    };
+
+    const startRead = (sessionUuid: string, connection?: string): ActiveExecution => {
+      const read = track(executionTracker.startExecution("observe", connection, sessionUuid));
+      executionTracker.markSessionAdmitted(read.id);
+      executionTracker.markDeviceReadCall(read.id, read.toolName);
+      return read;
+    };
+
+    test("cuts the derived session's calls and the base call on its device, never the base's own-device read", async () => {
+      const sessionManager = daemon.getSessionManager();
+      const devicePool = daemon.getDevicePool();
+      const deviceManager = new FakeDeviceManager();
+      deviceManager.bootedDevices = [DEVICE, DERIVED_DEVICE];
+      Object.assign(devicePool, { deviceManager });
+      await devicePool.initializeWithDevices([DEVICE, DERIVED_DEVICE]);
+      await devicePool.bindOrReuseDeviceSession(
+        BASE,
+        DEVICE.deviceId,
+        "android",
+        undefined,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        OWNER_CONNECTION,
+      );
+      await devicePool.bindOrReuseDeviceSession(DERIVED, DERIVED_DEVICE.deviceId, "android");
+      sessionManager.setDeviceLabels(BASE, { A: BASE, B: DERIVED });
+      sessionManager.recordHeartbeat(BASE);
+      (daemon as unknown as DaemonMonitorInternals).startHeartbeatMonitor();
+
+      const baseReadOnBaseDevice = startRead(BASE, OWNER_CONNECTION);
+      executionTracker.bindDeviceExecution(baseReadOnBaseDevice.id, DEVICE.deviceId);
+      const baseReadOnDerivedDevice = startRead(BASE, OWNER_CONNECTION);
+      executionTracker.bindDeviceExecution(baseReadOnDerivedDevice.id, DERIVED_DEVICE.deviceId);
+      const derivedRead = startRead(DERIVED);
+      executionTracker.bindDeviceExecution(derivedRead.id, DERIVED_DEVICE.deviceId);
+
+      // The base owner keeps heartbeating; only the derived session's lease runs out.
+      const stepMs = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
+      const reapWithinMs = DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS + 2 * stepMs;
+      for (let waited = 0; waited < reapWithinMs && sessionManager.hasSession(DERIVED);) {
+        sessionManager.recordHeartbeat(BASE);
+        await settle(stepMs);
+        waited += stepMs;
+      }
+
+      expect(sessionManager.hasSession(DERIVED)).toBe(false);
+      expect(sessionManager.hasSession(BASE)).toBe(true);
+      expect(baseReadOnBaseDevice.abortController.signal.aborted).toBe(false);
+      expect(baseReadOnDerivedDevice.abortController.signal.aborted).toBe(true);
+      expect(
+        sessionReleasedDuringCallPayload(baseReadOnDerivedDevice.cancelReason),
+      ).toBeUndefined();
+      expect(derivedRead.abortController.signal.aborted).toBe(true);
+      expect(sessionReleasedDuringCallPayload(derivedRead.cancelReason)).toMatchObject({
+        error: { code: "session_ownership_lost", sessionUuid: DERIVED },
       });
     });
   });

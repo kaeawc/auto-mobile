@@ -1,10 +1,23 @@
-import type { DaemonClientLike } from "../../src/daemon/client";
+import type { DaemonClientLike, DaemonMethodCallOptions } from "../../src/daemon/client";
 import { DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
 import type { DaemonNotification } from "../../src/daemon/types";
 import { FakeIdGenerator } from "./FakeIdGenerator";
 
 export interface FakeDaemonClientOptions {
+  /**
+   * A connection to a real daemon (#11441), e.g. `LivenessScenario.daemonConnection()`. With
+   * it this client stops answering for the daemon: every tool call, resource read, daemon method
+   * and notification subscription is forwarded to that connection and answered (or refused) by
+   * it, and its pushed frames and connection close reach this client's handlers unchanged. The
+   * client still records calls and runs its hooks first, so a test keeps its fault injection
+   * (`shouldFailConnect`, a throwing `onCallTool`, `emitNotification`), and an answer the test
+   * scripts explicitly (`toolResult`, `toolResultFor`, `resourceResult`,
+   * `daemonMethodResults`, a hook's return value) still wins. Without it every answer is
+   * hand-written: `{}` for any daemon method and a bare "success" tool result, which is not what
+   * a daemon answers (no heartbeat ack fields, no refusals, no activity echo).
+   */
+  daemon?: DaemonClientLike;
   toolResult?: any;
   // Per-tool result override. When it returns a value for a given call, that
   // value is the tool result instead of `toolResult`; returning undefined falls
@@ -32,6 +45,10 @@ export class FakeDaemonClient implements DaemonClientLike {
   readonly readResourceSignals: Array<AbortSignal | undefined> = [];
   readonly callDaemonMethodCalls: Array<{ method: string; params: Record<string, any> }> = [];
   private connected = false;
+  private readonly daemon?: DaemonClientLike;
+  private readonly scriptedToolResult: boolean;
+  private readonly scriptedResourceResult: boolean;
+  private daemonUnsubscribes: Array<() => void> = [];
   private toolResult: any;
   private readonly toolResultFor?: (toolName: string, params: Record<string, any>) => any;
   private resourceResult: any;
@@ -48,6 +65,9 @@ export class FakeDaemonClient implements DaemonClientLike {
   shouldFailSubscribe = false;
 
   constructor(options: FakeDaemonClientOptions = {}) {
+    this.daemon = options.daemon;
+    this.scriptedToolResult = options.toolResult !== undefined;
+    this.scriptedResourceResult = options.resourceResult !== undefined;
     this.toolResult = options.toolResult ?? { content: [{ type: "text", text: "success" }] };
     this.toolResultFor = options.toolResultFor;
     this.resourceResult = options.resourceResult ?? { contents: [{ uri: "test", text: "test" }] };
@@ -60,11 +80,28 @@ export class FakeDaemonClient implements DaemonClientLike {
     if (this.shouldFailConnect) {
       throw new DaemonUnavailableError("Connection failed");
     }
+    if (this.daemon && !this.connected) {
+      this.daemonUnsubscribes = [
+        this.daemon.onNotification?.((notification) => this.deliver(notification)),
+        this.daemon.onConnectionClosed?.(() => this.emitConnectionClosed()),
+      ].filter((unsubscribe) => unsubscribe !== undefined);
+      await this.daemon.connect();
+    }
     this.connected = true;
   }
 
   async close(): Promise<void> {
     this.connected = false;
+    for (const unsubscribe of this.daemonUnsubscribes.splice(0)) {
+      unsubscribe();
+    }
+    await this.daemon?.close();
+  }
+
+  private deliver(notification: DaemonNotification): void {
+    for (const handler of this.notificationHandlers) {
+      handler(notification);
+    }
   }
 
   readonly callToolProgressTokens: Array<string | number | undefined> = [];
@@ -92,7 +129,10 @@ export class FakeDaemonClient implements DaemonClientLike {
       await this.onCallTool(toolName, params);
     }
     const perToolResult = this.toolResultFor?.(toolName, params);
-    return perToolResult ?? this.toolResult;
+    if (perToolResult !== undefined || this.scriptedToolResult || !this.daemon) {
+      return perToolResult ?? this.toolResult;
+    }
+    return await this.daemon.callTool(toolName, params, progressToken, undefined, signal);
   }
 
   async readResource(
@@ -106,10 +146,17 @@ export class FakeDaemonClient implements DaemonClientLike {
     const recordedParams = { ...params };
     delete recordedParams[DAEMON_BOUND_SESSION_PARAM];
     this.readResourceParams.push(recordedParams);
-    return this.resourceResult;
+    if (this.scriptedResourceResult || !this.daemon) {
+      return this.resourceResult;
+    }
+    return await this.daemon.readResource(uri, params, { signal });
   }
 
-  async callDaemonMethod(method: string, params: Record<string, any>): Promise<any> {
+  async callDaemonMethod(
+    method: string,
+    params: Record<string, any>,
+    options?: DaemonMethodCallOptions,
+  ): Promise<any> {
     const recordedParams = { ...params };
     delete recordedParams[DAEMON_BOUND_SESSION_PARAM];
     this.callDaemonMethodCalls.push({ method, params: recordedParams });
@@ -119,7 +166,10 @@ export class FakeDaemonClient implements DaemonClientLike {
         return result;
       }
     }
-    return this.daemonMethodResults.get(method) ?? {};
+    if (this.daemonMethodResults.has(method) || !this.daemon) {
+      return this.daemonMethodResults.get(method) ?? {};
+    }
+    return await this.daemon.callDaemonMethod(method, params, options);
   }
 
   isConnected(): boolean {
@@ -152,6 +202,7 @@ export class FakeDaemonClient implements DaemonClientLike {
     if (this.shouldFailSubscribe) {
       throw new Error("Unsupported daemon method: daemon/subscribe-notifications");
     }
+    await this.daemon?.subscribeToNotifications?.();
   }
 
   /**

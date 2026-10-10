@@ -4663,6 +4663,9 @@ export class SessionManager {
         this.createReboundSession(existing, assignedDevice, platform, stableDeviceId),
         existing,
       );
+      // The rebind's row is live: a rewrite still owed from before it is settled (#11557), so a
+      // terminal row found under the session later is the UUID's end, not that rewrite's.
+      this.settleOwedSupersededRowReassert(existing);
     });
     const pendingKeepScreenAwakeRestoration = (
       await this.restoreKeepScreenAwakeBestEffort(existing)

@@ -320,6 +320,39 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     expect(releases).toEqual([]);
   });
 
+  test("a rebind that outlasts every retry settles the owed rewrite, so a later terminal row with the same reason ends the session", async () => {
+    const REBOUND_DEVICE = "emulator-5556";
+    await supersededReleaseWithFailingRewrite(1);
+    const supersededRow = (await store.getSession?.(SESSION))!;
+    // The rebind's write stays in flight while every retry comes due and yields to it.
+    store.duringPlainUpsert = async () => {
+      for (let attempt = 0; attempt < SUPERSEDED_ROW_REASSERT_RETRY_ATTEMPTS + 2; attempt++) {
+        await timer.advanceTimeAsync(RETRY_DELAY_MS);
+        await settleMicrotasks(50);
+      }
+    };
+
+    await manager.rebindSession(SESSION, REBOUND_DEVICE, "android");
+
+    // The scenario was driven: only the rebind wrote, the retries are spent, and the row is live.
+    expect(store.plainUpserts).toBe(2);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(await store.getSession?.(SESSION)).toMatchObject({
+      status: "active",
+      device_id: REBOUND_DEVICE,
+    });
+    // A terminal row with the superseded release's reason lands afterwards (a peer's write).
+    store.seed({ ...supersededRow, device_id: REBOUND_DEVICE });
+    timer.advanceTime(1);
+
+    expect(await refresh()).toBe("TerminalSessionError");
+
+    expect(store.plainUpserts).toBe(2);
+    expect(manager.getSession(SESSION)).toBeNull();
+    expect(releases).toEqual([DEVICE_LOSS]);
+    expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: DEVICE_LOSS });
+  });
+
   /** A device-loss release is superseded while its terminal write is parked past the deadline. */
   async function supersededReleaseWithParkedWrite(): Promise<() => void> {
     await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);

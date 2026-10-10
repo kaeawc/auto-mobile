@@ -1434,7 +1434,7 @@ export class RealObserveScreen implements ObserveScreen {
       callerSignal?.throwIfAborted();
       logger.warn(`[ObserveScreen] Display ${display} unavailable: ${describeError(error)}`, error);
       if (display === "active" && !timedOut) {
-        return this.createCriticalFallback(error, { includeFreshness: true });
+        return this.createCriticalFallback(error);
       }
       const result = this.createBaseResult();
       const panel = resolveTargetDisplay(this.device.displays, display, {
@@ -2130,7 +2130,7 @@ export class RealObserveScreen implements ObserveScreen {
         signal?.throwIfAborted();
         if (!observerMode && (displayRequest === undefined || displayRequest === "active")) {
           logger.error("Critical error in aggregate active observation:", err);
-          return this.createCriticalFallback(err, { includeFreshness: true });
+          return this.createCriticalFallback(err);
         }
       }
       if (observerMode || preserveDisplayState) {
@@ -2386,9 +2386,9 @@ export class RealObserveScreen implements ObserveScreen {
   /** Build the ordinary critical fallback without mutating screenshot or display state. */
   private createCriticalFallback(
     error: unknown,
-    options: { includeFreshness?: boolean; fallback?: ObserveResult } = {},
+    options: { fallback?: ObserveResult } = {},
   ): ObserveResult {
-    const { includeFreshness = false, fallback = this.createBaseResult() } = options;
+    const { fallback = this.createBaseResult() } = options;
     const errorMessage = error instanceof Error ? error.stack || error.message : String(error);
     this.stampScreenSizeUnits(fallback);
     appendObserveError(fallback, {
@@ -2396,14 +2396,13 @@ export class RealObserveScreen implements ObserveScreen {
       message: "Observation failed due to device access error",
       cause: errorMessage,
     });
-    if (includeFreshness) {
-      fallback.freshness = computeFreshness({
-        now: this.timer.now(),
-        unavailable: true,
-        unavailableReason: "unknown",
-        unavailableDetail: errorMessage,
-      });
-    }
+    // Consumers treat a missing freshness as fresh, so a critical fallback always marks it unavailable.
+    fallback.freshness = computeFreshness({
+      now: this.timer.now(),
+      unavailable: true,
+      unavailableReason: "unknown",
+      unavailableDetail: errorMessage,
+    });
     return fallback;
   }
 
@@ -2721,6 +2720,25 @@ export class RealObserveScreen implements ObserveScreen {
     };
   }
 
+  /**
+   * Called when the accessibility service gave no screen info. A degraded read still knows the panel's physical size from the
+   * display inventory, the same source the `display: "all"` fallback uses. Without
+   * it the 0x0 placeholder breaks screenshot raster geometry on every read.
+   */
+  private applyKnownPanelScreenSize(result: ObserveResult): void {
+    logger.warn("[OBSERVE] No screen info from accessibility service - check if APK is updated");
+    if (result.screenSize.width > 0 && result.screenSize.height > 0) {
+      return;
+    }
+    // "active" never throws on a degraded read, unlike a pin or explicit panel request.
+    const panel = resolveTargetDisplay(this.device.displays, "active", {
+      focusedPanelKey: displayTransitions.observedPanel(this.device.deviceId)?.key,
+    });
+    if (panel.sizePx.width > 0 && panel.sizePx.height > 0) {
+      result.screenSize = { ...panel.sizePx };
+    }
+  }
+
   /** Attach the output coordinate unit without changing the captured dimensions. */
   private stampScreenSizeUnits(result: ObserveResult): void {
     result.screenSize = {
@@ -2898,9 +2916,7 @@ export class RealObserveScreen implements ObserveScreen {
           }
           logger.debug("[OBSERVE] Using device metadata from accessibility service");
         } else {
-          logger.warn(
-            "[OBSERVE] No screen info from accessibility service - check if APK is updated",
-          );
+          this.applyKnownPanelScreenSize(result);
           const tasks: Promise<void>[] = [
             perf.track("wakefulness", () =>
               this.deviceStateCollector.collectWakefulness(result, signal),

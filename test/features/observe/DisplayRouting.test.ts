@@ -1097,7 +1097,7 @@ describe("all-display captures", () => {
     expect(h.capture.requests).toEqual([]);
   });
 
-  test("default critical failure preserves the HEAD fallback without freshness", async () => {
+  test("default critical failure fallback marks freshness unavailable", async () => {
     const h = harness();
     const error = new Error("Device access denied");
     const base = h.screen.createBaseResult();
@@ -1107,9 +1107,10 @@ describe("all-display captures", () => {
 
     const result = await h.screen.execute({ ...options, display: "active" });
 
-    expect(Object.hasOwn(result, "freshness")).toBe(false);
+    expect(result.freshness?.category).toBe("unavailable");
     expect(result).toEqual({
       ...base,
+      freshness: result.freshness,
       observationId: result.observationId,
       screenSize: { ...base.screenSize, units: "physical-pixels" },
       errors: [
@@ -1153,9 +1154,10 @@ describe("all-display captures", () => {
           },
         ],
         error: "Observation failed due to device access error",
+        freshness: result.freshness,
       }),
     );
-    expect(Object.hasOwn(result, "freshness")).toBe(false);
+    expect(result.freshness?.category).toBe("unavailable");
   });
 
   test("active critical failure preserves the default fallback and reads other panels", async () => {

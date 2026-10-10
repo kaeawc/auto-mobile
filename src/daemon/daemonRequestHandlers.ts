@@ -188,6 +188,8 @@ export interface DaemonStateAccess {
     refreshDevices(): Promise<number>;
     refreshDevicesWithOutcome?(): Promise<import("./devicePoolRefresh").DevicePoolRefreshResult>;
     getStats(): DevicePoolStats;
+    /** {@link getStats} after refreshing slot and foreign-daemon ownership (#11305). */
+    getRefreshedStats?(): Promise<DevicePoolStats>;
     releaseDevice(deviceId: string, expectedSessionId: string): Promise<void>;
     getAllDevices?(): PooledDevice[];
     /** The pooled device, whose `sessionId` is set as soon as a session is assigned it. */
@@ -990,6 +992,28 @@ function livenessOwnershipFailure(
   return undefined;
 }
 
+/**
+ * Pool stats with a fresh managed-slot snapshot and foreign-daemon ownership, so `availableDevices`
+ * means "allocation can lend it". An unreadable slot registry fails the call (as listDevices does)
+ * rather than reporting held devices as idle.
+ */
+async function refreshedPoolStats(
+  pool: ReturnType<DaemonStateAccess["getDevicePool"]>,
+): Promise<{ ok: true; stats: DevicePoolStats } | { ok: false; error: string }> {
+  try {
+    return {
+      ok: true,
+      stats: pool.getRefreshedStats ? await pool.getRefreshedStats() : pool.getStats(),
+    };
+  } catch (error) {
+    logger.warn(`[Daemon] Could not refresh device ownership: ${errorMessage(error)}`, error);
+    return {
+      ok: false,
+      error: `Could not determine which devices are available: ${errorMessage(error)}. Resolve the cause and retry.`,
+    };
+  }
+}
+
 async function handleRefreshDevices(
   request: DaemonRequest,
   state: DaemonStateAccess,
@@ -1004,7 +1028,11 @@ async function handleRefreshDevices(
       error: `Could not refresh device list: ${outcome.failure}. Resolve the cause and retry.`,
     };
   }
-  const stats = pool.getStats();
+  const refreshed = await refreshedPoolStats(pool);
+  if (!refreshed.ok) {
+    return { success: false, error: refreshed.error };
+  }
+  const stats = refreshed.stats;
   return {
     success: true,
     result: {
@@ -1021,7 +1049,11 @@ async function handleAvailableDevices(
   state: DaemonStateAccess,
 ): Promise<DaemonMethodResult> {
   const pool = state.getDevicePool();
-  const stats = pool.getStats();
+  const refreshed = await refreshedPoolStats(pool);
+  if (!refreshed.ok) {
+    return { success: false, error: refreshed.error };
+  }
+  const stats = refreshed.stats;
   const recoveryPolicy = pool.getRecoveryPolicy?.();
   const devices = pool.getAllDevices?.().map((device) => ({
     deviceId: device.id,

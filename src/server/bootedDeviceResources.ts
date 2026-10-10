@@ -923,7 +923,7 @@ async function discoverBootedDevicesForPlatform(
     // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
     await devicePool?.reconcileDiscoveryObservation(discovery.devices, "booted-devices-resource");
     // Refresh the managed-slot snapshot so held devices are not reported as free, as listDevices does.
-    await devicePool?.managedSlotStableIds(platform);
+    await devicePool?.refreshInventoryOwnership();
     options.onDiscovery(
       discovery.devices.map((device) =>
         withIdentityQuarantineMarker(

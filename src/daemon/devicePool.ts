@@ -5729,6 +5729,23 @@ export class DevicePool {
     }
   }
 
+  /**
+   * Re-read the ownership facts {@link genericAvailability} and {@link getStats} depend on: the
+   * managed-slot snapshot and which idle devices other daemons drive. Every inventory surface calls
+   * this before reading availability so none answers from a stale or never-loaded snapshot. Throws
+   * {@link ManagedSlotDiscoveryIncompleteError} when the slot registry is unreadable and no snapshot
+   * was ever loaded: callers must not report such devices as free.
+   */
+  async refreshInventoryOwnership(): Promise<void> {
+    await this.refreshForeignOwnership();
+  }
+
+  /** {@link getStats} after {@link refreshInventoryOwnership}: what `availableDevices` surfaces report. */
+  async getRefreshedStats(): Promise<ReturnType<DevicePool["getStats"]>> {
+    await this.refreshInventoryOwnership();
+    return this.getStats();
+  }
+
   /** Re-read which idle Android devices other daemons drive, for this allocation pass. */
   private async refreshForeignOwnership(): Promise<void> {
     const idle = (platform: Platform) =>

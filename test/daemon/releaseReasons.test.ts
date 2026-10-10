@@ -15,8 +15,13 @@ import {
   sessionReleaseReasonFamily,
   sessionReleaseReasonTraits,
 } from "../../src/daemon/releaseReasons";
+import { DEVICE_LOSS_REASON_PREFIX } from "../../src/utils/deviceLossCancellationReason";
 
 describe("session release-reason table (#11258)", () => {
+  test("the utils-side device-loss prefix is a family in the table", () => {
+    expect(Object.keys(SESSION_RELEASE_REASON_FAMILY_TRAITS)).toContain(DEVICE_LOSS_REASON_PREFIX);
+  });
+
   test("idle releases are exactly the idle-window reasons", () => {
     expect(literalReleaseReasonsWhere("idle").sort()).toEqual(
       ["cleanup-expired", "cli-idle-timeout", "lazy-expiry"].sort(),

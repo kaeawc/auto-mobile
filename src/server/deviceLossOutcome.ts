@@ -1,3 +1,7 @@
+import {
+  DEVICE_LOSS_REASON_PREFIX,
+  isDeviceLossCancellationReason,
+} from "../utils/deviceLossCancellationReason";
 import { isDeviceLostError, deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
 export {
   isDeviceLostError,
@@ -40,10 +44,10 @@ export interface DeviceLossOutcome {
 }
 
 export function deviceLostErrorFromCancellationReason(reason: string): DeviceLostError | undefined {
-  if (!reason.startsWith("device-disconnected:")) {
+  if (!isDeviceLossCancellationReason(reason)) {
     return undefined;
   }
-  const details = reason.slice("device-disconnected:".length);
+  const details = reason.slice(DEVICE_LOSS_REASON_PREFIX.length);
   const incidentDelimiter = ";incident=";
   const incidentIndex = details.indexOf(incidentDelimiter);
   const deviceId = incidentIndex === -1 ? details : details.slice(0, incidentIndex);

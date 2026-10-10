@@ -9,6 +9,7 @@ import { ActionableError, toActionableError } from "../models/ActionableError";
 import {
   isRecoverableDaemonReleaseReason,
   literalReleaseReasonsWhere,
+  releaseReasonFamiliesWhere,
   sessionReleaseReasonFamily,
   type SessionReleaseReasonFamily,
 } from "../daemon/releaseReasons";
@@ -49,7 +50,9 @@ export function isRecoverableDeviceSession(session: DeviceSession, nowMs: number
 function hasRecoverableReleaseReason(eb: ExpressionBuilder<Database, "device_sessions">) {
   return eb.or([
     eb("release_reason", "in", Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS)),
-    eb("release_reason", "like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`),
+    ...releaseReasonFamiliesWhere("recoverable").map((family) =>
+      eb("release_reason", "like", `${family}_%`),
+    ),
   ]);
 }
 

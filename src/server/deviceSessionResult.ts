@@ -6,6 +6,7 @@ import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
 import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
+import { SUSPECT_GRACE_MS } from "../daemon/sessionLivenessWindows";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_SHUTTING_DOWN_CODE,
@@ -47,7 +48,11 @@ export function appendHeartbeatExpiryMessage(
     return message;
   }
   const { ageMs, timeoutMs } = release.heartbeat;
-  return `${message} No heartbeat for ${ageMs} ms (limit ${timeoutMs} ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).`;
+  // A lapsed owner lease is held for the suspect grace before the release (#10051), so the limit
+  // the owner actually exceeded is lease plus grace; a never-heartbeated session has no grace.
+  const limitMs =
+    release.releaseReason === "heartbeat-timeout" ? timeoutMs + SUSPECT_GRACE_MS : timeoutMs;
+  return `${message} No heartbeat for ${ageMs} ms (limit ${limitMs} ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).`;
 }
 
 /**

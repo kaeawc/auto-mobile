@@ -425,7 +425,7 @@ describe("device loss MCP outcome", () => {
         message:
           "Session device-session-a is terminal after heartbeat-timeout and cannot be reused. " +
           "Acquire a new device with getAndroid or getApple. " +
-          "No heartbeat for 11000 ms (limit 10000 ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).",
+          "No heartbeat for 11000 ms (limit 14000 ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).",
         sessionUuid: "device-session-a",
         reason: "heartbeat-timeout",
         retryable: false,

@@ -64,9 +64,10 @@ import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../uti
 import { Mutex } from "async-mutex";
 import { errorMessage } from "../utils/describeUnknownError";
 import { effectiveLastToolActivity } from "./sessionClocks";
+import { onSessionClock } from "./sessionClockPersistence";
 import {
-  effectiveLastHeartbeat,
   isLivenessOwnerLeaseLive,
+  judgedLeaseHeartbeat,
   ownerLeaseLiveAt,
   livenessLeaseState,
   livenessOwnerHold,
@@ -1476,7 +1477,11 @@ export class SessionManager {
   attachTerminalReleaseJournal(journal: TerminalReleaseJournal): void {
     this.terminalReleaseJournal = journal;
     for (const intent of journal.loadUnconfirmed()) {
-      this.recoveredTerminalReleaseIntents.set(intent.sessionId, intent);
+      // The journal holds wall ms, like the rows it backs (#11162).
+      this.recoveredTerminalReleaseIntents.set(intent.sessionId, {
+        ...intent,
+        at: this.wallToSessionClock(intent.at),
+      });
     }
   }
 
@@ -1786,7 +1791,11 @@ export class SessionManager {
   ) {
     this.timer = timer;
     this.sessionClock = new SteadyWallClock(timer);
-    this.deviceSessionRepository = deviceSessionRepository;
+    // Rows are read by other processes on their own session clocks: stamps cross as wall ms (#11162).
+    this.deviceSessionRepository = onSessionClock(deviceSessionRepository, {
+      toWall: (sessionClockMs) => this.sessionClockToWall(sessionClockMs),
+      toSessionClock: (wallMs) => this.wallToSessionClock(wallMs),
+    });
     this.getBarrier = getBarrier;
     this.keepScreenAwakeRestorerFactory = keepScreenAwakeRestorerFactory;
     this.biometricEnrollmentRestorerFactory = biometricEnrollmentRestorerFactory;
@@ -1884,6 +1893,14 @@ export class SessionManager {
    */
   sessionClockToWall(sessionClockMs: number): number {
     return this.timer.now() + (sessionClockMs - this.sessionNow());
+  }
+
+  /**
+   * A wall-clock epoch ms instant (a persisted stamp, another process's report) on the session
+   * clock: the inverse of {@link sessionClockToWall} (#11162).
+   */
+  wallToSessionClock(wallMs: number): number {
+    return this.sessionNow() + (wallMs - this.timer.now());
   }
 
   /**
@@ -4935,7 +4952,8 @@ export class SessionManager {
         this.terminalReleaseJournal.record({
           sessionId: snapshot.sessionId,
           reason: snapshot.releaseReason,
-          at: snapshot.releasedAtMs,
+          // Read back by the next daemon on its own session clock: stored as wall ms (#11162).
+          at: this.sessionClockToWall(snapshot.releasedAtMs),
         });
       }
       const write = this.deviceSessionRepository.markReleased(
@@ -7560,7 +7578,9 @@ export class SessionManager {
         continue;
       }
       if (ownerLeaseLiveAt(session, gapBeganAt)) {
-        const leaseStart = effectiveLastHeartbeat(session);
+        // The lease that is judged (#11162): for a session judged on its owner's heartbeats, a
+        // non-owner's tool call must not move the forgiven lease start.
+        const leaseStart = judgedLeaseHeartbeat(session);
         session.stallForgivenAt = Math.max(
           leaseStart,
           Math.min(resumedAt, leaseStart + leaseLostMs),
@@ -8080,7 +8100,7 @@ export class SessionManager {
         preCliHeartbeatTimeoutSource: session.preCliLiveness?.heartbeatTimeoutSource,
         preCliSessionTimeoutMs: session.preCliLiveness?.sessionTimeoutMs,
       },
-      // The retention prune compares session-clock release stamps (#11129).
+      // The retention prune compares release stamps (#11129); converted to wall ms with them.
       this.sessionNow(),
     );
     // Recorded before the ownership write, which can fail after the row already advanced.

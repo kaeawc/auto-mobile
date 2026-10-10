@@ -345,7 +345,8 @@ function assertNoRecoveryReservationsRemain(pool: DevicePool, sessionId: string)
 }
 
 async function flush(): Promise<void> {
-  for (let i = 0; i < 40; i++) {
+  // Persisted rows are read back through the session-clock conversion (#11162), one turn each.
+  for (let i = 0; i < 80; i++) {
     await Promise.resolve();
   }
 }
@@ -1956,6 +1957,32 @@ test("device-restart resume waits for the same serial and preserves its session 
     expect(await persistence.getSession?.("session")).toMatchObject({
       status: "active",
       device_id: original.deviceId,
+    });
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("device-restart resume keeps retrying across a forward wall-clock step inside its window (#11162)", async () => {
+  const { timer, sessions, manager, pool } = await setupPassiveRestart();
+  try {
+    const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
+    await flush();
+    expect(timer.getPendingTimeouts()).toEqual([1_000]);
+    // An NTP step an hour forward on a clock whose monotonic reading runs through host sleep
+    // (Linux, Windows), so the session clock ignores the step: the recovery window derives from
+    // session stamps, and the retry gate must not read the stepped wall clock as past it.
+    timer.simulateSleepCountingMonotonicClock();
+    timer.stepWallClock(3_600_000);
+    timer.advanceTime(1_000);
+    await flush();
+
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    timer.advanceTime(1_000);
+    await expect(resume).resolves.toMatchObject({
+      sessionId: "session",
+      assignedDevice: original.deviceId,
     });
   } finally {
     sessions.stopCleanupTimer();

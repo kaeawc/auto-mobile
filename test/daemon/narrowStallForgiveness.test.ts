@@ -265,3 +265,42 @@ describe("wall-clock steps do not move leases (#11080)", () => {
     expect(await r.heartbeat()).toBe(true);
   });
 });
+
+describe("stall forgiveness anchors on the owner's heartbeats, not tool activity (#11162)", () => {
+  test("a non-owner's activity does not restart a dead owner's lease across a stall", async () => {
+    const r = await setUp();
+    // On-time scans with no owner heartbeat until the owner's lease (4 s) has run out.
+    for (let scan = 0; scan < 3; scan++) {
+      r.timer.setCurrentTime(r.timer.getCurrentTime() + SCAN_MS);
+      await r.monitor.tick();
+    }
+    expect(r.manager.getSessionLeaseState(SESSION)?.phase).toBe("suspect");
+    // Another client's tool call refreshes the activity clock, not the owner's lease.
+    r.manager.recordToolCallEnded(SESSION);
+
+    r.timer.setCurrentTime(r.timer.getCurrentTime() + SCAN_MS + 8_000);
+    await r.monitor.tick();
+
+    expect(r.reaped).toEqual(["heartbeat-timeout"]);
+    expect(r.manager.getSession(SESSION)).toBeNull();
+  });
+
+  test("a live owner's lease is forgiven from its own last heartbeat, not a later tool call", async () => {
+    const r = await setUp();
+    r.timer.setCurrentTime(r.timer.getCurrentTime() + SCAN_MS);
+    await r.monitor.tick();
+    r.timer.setCurrentTime(r.timer.getCurrentTime() + 1_500);
+    r.manager.recordToolCallEnded(SESSION);
+    r.timer.setCurrentTime(r.timer.getCurrentTime() + 500);
+    await r.monitor.tick();
+    const ownerHeartbeatAt = r.manager.getSession(SESSION)!.lastOwnerHeartbeat!;
+
+    // The stall begins as the owner's lease runs out, so the owner was live when it began.
+    r.timer.setCurrentTime(r.timer.getCurrentTime() + SCAN_MS + 8_000);
+    r.manager.getSession(SESSION);
+
+    const session = r.manager.getSession(SESSION)!;
+    expect(session.stallForgivenAt).toBe(ownerHeartbeatAt + 8_000);
+    expect(r.manager.getSessionLeaseState(SESSION)?.phase).toBe("suspect");
+  });
+});

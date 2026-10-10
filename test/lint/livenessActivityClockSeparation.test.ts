@@ -142,8 +142,19 @@ const EXPIRY_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
  */
 const SESSION_CLOCK_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
   "src/daemon/sessionManager.ts": ["SessionManager.isSessionExpired"],
-  "src/daemon/ownerDisconnectRelease.ts": ["ownerDisconnectReleaseBlocker"],
-  "src/daemon/devicePool.ts": ["DevicePool.recoveryAssignmentError", "DevicePool.recoveryNow"],
+  // #11162: the release's deferral is a session-clock instant from the execution veto.
+  "src/daemon/ownerDisconnectRelease.ts": [
+    "ownerDisconnectReleaseBlocker",
+    "OwnerDisconnectRelease.afterAttempt",
+  ],
+  // #11162: the veto's start and bound are judged against session-clock request deadlines.
+  "src/daemon/unsettledExecutionVeto.ts": ["UnsettledExecutionVeto.judge"],
+  "src/daemon/devicePool.ts": [
+    "DevicePool.recoveryAssignmentError",
+    "DevicePool.recoveryNow",
+    // #11162: the restart-recovery wait and retry gate compare with the recovery deadline.
+    "DevicePool.assignmentRetryPolicy",
+  ],
 };
 
 /** Rule 5: lease judgements read only liveness clocks. */
@@ -155,6 +166,8 @@ const LEASE_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
     "ownerLeaseHeartbeat",
     // #11080: whether an owner was live when a daemon stall began, for narrow forgiveness.
     "ownerLeaseLiveAt",
+    // #11162: the judged lease start, which stall forgiveness also anchors on.
+    "judgedLeaseHeartbeat",
   ],
   "src/daemon/SessionHeartbeatMonitor.ts": [
     "SessionHeartbeatMonitor.heartbeatLeaseStaleReason",

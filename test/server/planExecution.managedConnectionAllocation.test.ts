@@ -190,6 +190,67 @@ describe("managed connection executePlan device labels (#11397)", () => {
     expect(result).toMatchObject({ code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE, deviceLabel: "A" });
   });
 
+  // #11421: the slot serves a label with its own device or not at all.
+  describe("a label's declared simulator criteria", () => {
+    const labelPlan = (...criteria: string[]): string =>
+      [
+        "name: slots-criteria",
+        "devices:",
+        "  - label: A",
+        "    platform: ios",
+        ...criteria.map((line) => `    ${line}`),
+        "steps:",
+        "  - tool: slotProbe",
+        "    device: A",
+        "    params: {}",
+        "",
+      ].join("\n");
+
+    beforeEach(() => {
+      ToolRegistry.registerDeviceAware(
+        "slotProbe",
+        "Slot probe",
+        z.object({}).passthrough(),
+        async () => ({ success: true }),
+      );
+    });
+
+    const slotDeviceIs = (facts: { simulatorType?: string; iosVersion?: string }): void => {
+      Object.assign(pool.getDevice(slotA.deviceId)!, facts);
+    };
+
+    test.each([
+      ["simulatorType", 'simulatorType: "iPad Pro"'],
+      ["iosVersion", 'iosVersion: "17.5"'],
+    ])("a %s the slot device does not have is refused", async (_criterion, line) => {
+      slotDeviceIs({ simulatorType: "iPhone 16", iosVersion: "18.0" });
+
+      const result = await runPlan(labelPlan(line));
+
+      expect(allocatorCalls).toEqual([]);
+      expect(result).toMatchObject({
+        success: false,
+        code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
+        deviceLabel: "A",
+      });
+    });
+
+    test("criteria the slot device meets are served by it", async () => {
+      slotDeviceIs({ simulatorType: "iPhone 16", iosVersion: "18.0" });
+
+      const result = await runPlan(labelPlan('simulatorType: "iPhone 16"', 'iosVersion: "18.0"'));
+
+      expect(result).toMatchObject({ success: true, deviceMapping: { A: slotA.deviceId } });
+    });
+
+    test("criteria the pool cannot evaluate for the slot device are not a refusal", async () => {
+      // The harness device carries neither a simulator type nor an iOS version.
+      const result = await runPlan(labelPlan('simulatorType: "iPad Pro"', 'iosVersion: "17.5"'));
+
+      expect(result).toMatchObject({ success: true, deviceMapping: { A: slotA.deviceId } });
+    });
+  });
+
   test("a single label is served by the slot device without the generic allocator", async () => {
     const probed: string[] = [];
     ToolRegistry.registerDeviceAware(

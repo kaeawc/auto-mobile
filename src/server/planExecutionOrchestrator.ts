@@ -34,7 +34,10 @@ import {
 import { importPlanFromYaml, executePlan } from "../utils/planUtils";
 import { DaemonState } from "../daemon/daemonState";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
-import { managedConnectionPlanLabelRefusal } from "../daemon/managedSlots/managedConnectionScope";
+import {
+  managedConnectionPlanLabelRefusal,
+  slotDeviceFailsLabelCriteria,
+} from "../daemon/managedSlots/managedConnectionScope";
 import { DeviceOutsideManagedSlotsError } from "../daemon/managedSlots/managedSlotRefusal";
 import type { DevicePool } from "../daemon/devicePool";
 import type { SessionManager } from "../daemon/sessionManager";
@@ -768,13 +771,20 @@ export class PlanExecutionOrchestrator {
     if (refusal) {
       throw refusal;
     }
+    const devicePool = DaemonState.getInstance().getDevicePool();
     const slotDevices = new Map<string, string>();
     for (const [label, slotSessionUuid] of Object.entries(labelToSessionMap)) {
       const slotSession = sessionManager.getSession(slotSessionUuid);
-      const platform = normalized.definitions.find(
-        (definition) => definition.label === label,
-      )?.platform;
-      if (!slotSession?.assignedDevice || (platform && slotSession.platform !== platform)) {
+      // The slot serves the label with its own device or not at all: a declared criterion that
+      // device demonstrably fails is refused instead of silently ignored (#11421).
+      if (
+        !slotSession?.assignedDevice ||
+        slotDeviceFailsLabelCriteria({
+          declared: normalized.definitions.find((definition) => definition.label === label),
+          slotPlatform: slotSession.platform,
+          device: devicePool.getDevice(slotSession.assignedDevice),
+        })
+      ) {
         throw new DeviceOutsideManagedSlotsError("executePlan", "tool", binding.scopeKey, {
           deviceLabel: label,
         });

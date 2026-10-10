@@ -22,7 +22,10 @@ import { spyOn } from "bun:test";
 import { createExecResult } from "../../../src/utils/execResult";
 import { wrapCommandError } from "../../../src/utils/CommandError";
 import { errorMessage } from "../../../src/utils/describeUnknownError";
-import { IosRunnerBusyError } from "../../../src/features/observe/ios/runnerErrorCodes";
+import {
+  IosRunnerBusyError,
+  IosRunnerStalledError,
+} from "../../../src/features/observe/ios/runnerErrorCodes";
 
 // Synthetic focused-value variants of the representative iOS forms fixture, not captures.
 function focusedIOSForm(value?: string): ViewHierarchyResult {
@@ -1085,19 +1088,25 @@ describe("Clipboard iOS dispatch outcomes", () => {
     },
   );
 
-  test("paste: a busy runner is a plain retry-safe failure, not indeterminate", async () => {
-    const clipboard = new Clipboard(device, new FakeAdbClientFactory(), () => ({
-      requestClipboard: async (action, _text, _timeout, _perf, _signal, onDispatch) => {
-        if (action === "get") {
-          return { success: true, text: "", totalTimeMs: 0 };
-        }
-        onDispatch?.();
-        throw new IosRunnerBusyError("runner busy");
-      },
-    }));
-    const result = await clipboard.execute("paste");
-    expect(result).toEqual({ success: false, action: "paste", error: "runner busy" });
-  });
+  test.each([IosRunnerBusyError, IosRunnerStalledError])(
+    "paste: %p is a plain refusal without replay",
+    async (BusyError) => {
+      let pasteRequests = 0;
+      const clipboard = new Clipboard(device, new FakeAdbClientFactory(), () => ({
+        requestClipboard: async (action, _text, _timeout, _perf, _signal, onDispatch) => {
+          if (action === "get") {
+            return { success: true, text: "", totalTimeMs: 0 };
+          }
+          pasteRequests++;
+          onDispatch?.();
+          throw new BusyError("runner busy");
+        },
+      }));
+      const result = await clipboard.execute("paste");
+      expect(result).toEqual({ success: false, action: "paste", error: "runner busy" });
+      expect(pasteRequests).toBe(1);
+    },
+  );
 
   test("already aborted paste does not invoke the client", async () => {
     let requests = 0;

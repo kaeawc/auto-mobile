@@ -17,6 +17,7 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { ViewHierarchyQueryOptions } from "../../models";
 import { AndroidCtrlProxyClient } from "./android";
 import { IOSCtrlProxyClient } from "./ios";
+import { IosRunnerStalledError } from "./ios/runnerErrorCodes";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../utility/viewHierarchySearch";
@@ -210,6 +211,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     this.classifyDisconnectedIosHierarchy(result, client);
     if (
       (result.hierarchy.unavailableReason !== "runner_not_running" &&
+        result.hierarchy.unavailableReason !== "runner_stalled" &&
         result.hierarchy.unavailableReason !== "connection_lost" &&
         result.hierarchy.unavailableReason !== "service_recovering" &&
         !(result.ctrlProxyReconnect && result.hierarchy.error)) ||
@@ -360,14 +362,28 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
     const viewHierarchy = await perf.track("ctrlProxyGetHierarchy", async () => {
       // Use getLatestHierarchy which properly handles skipWaitForFresh and minTimestamp
-      const result = await xcTestClient.getLatestHierarchy(
-        !skipWaitForFresh, // waitForFresh = opposite of skipWaitForFresh
-        timeoutMs ?? 15000, // timeout: caller budget when supplied
-        perf,
-        skipWaitForFresh,
-        minTimestamp,
-        signal,
-      );
+      let result: CtrlProxyHierarchyResponse | null;
+      try {
+        result = await xcTestClient.getLatestHierarchy(
+          !skipWaitForFresh, // waitForFresh = opposite of skipWaitForFresh
+          timeoutMs ?? 15000, // timeout: caller budget when supplied
+          perf,
+          skipWaitForFresh,
+          minTimestamp,
+          signal,
+        );
+      } catch (error) {
+        if (!(error instanceof IosRunnerStalledError)) {
+          throw error;
+        }
+        logger.warn(`[VIEW_HIERARCHY] ${error.message}`);
+        result = {
+          hierarchy: null,
+          fresh: false,
+          unavailableReason: "runner_stalled",
+          unavailableDetail: error.message,
+        };
+      }
 
       if (!result || !result.hierarchy) {
         if (result?.reconnectStatus) {

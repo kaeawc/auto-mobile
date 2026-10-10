@@ -1,0 +1,13 @@
+{
+  "code": "session_ownership_lost.released_explicit_release",
+  "builder": "SessionReleasedDuringCallError via sessionReleasedDuringCallPayload",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"code\":\"session_ownership_lost\",\"message\":\"Session 11111111-2222-4333-8444-555555555555 is terminal after explicit-release and cannot be reused; it was released while this call was in flight, so the call was cancelled. Acquire a new device with getAndroid or getApple.\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"reason\":\"explicit-release\",\"retryable\":false,\"nextAction\":\"acquire_new_session\",\"recovery\":{\"action\":\"acquire_replacement_session\",\"tools\":[\"getAndroid\",\"getApple\"]}}}"
+      }
+    ]
+  }
+}

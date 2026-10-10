@@ -1,0 +1,42 @@
+{
+  "surface": "managed-slots-result",
+  "name": "capacity_exhausted.capacity",
+  "builder": "reconciler failure in ManagedSlotsResult",
+  "payload": {
+    "contractVersion": 1,
+    "scope": {
+      "managedHostScope": "host",
+      "runnerNamespace": "ns",
+      "runnerIncarnation": "inc",
+      "scopeKey": null
+    },
+    "outcome": "failed",
+    "slots": [
+      {
+        "slotIndex": 0,
+        "role": "primary",
+        "platform": "android",
+        "assignmentGeneration": null,
+        "device": null,
+        "sessionUuid": null,
+        "requestedSpec": null,
+        "resolvedSpec": null,
+        "specFingerprint": null,
+        "disposition": null,
+        "readiness": null,
+        "lifecycle": null,
+        "failure": {
+          "code": "capacity_exhausted",
+          "retryable": true,
+          "message": "capacity_exhausted fixture",
+          "nextAction": "Shut down a device or raise the boot limit, then retry.",
+          "capacity": {
+            "limit": 2,
+            "booted": 2,
+            "retryAfterMs": 5000
+          }
+        }
+      }
+    ]
+  }
+}

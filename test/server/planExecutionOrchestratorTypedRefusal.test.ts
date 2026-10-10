@@ -6,6 +6,7 @@ import {
 } from "../../src/server/planExecutionOrchestrator";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { ActionableError } from "../../src/models/ActionableError";
+import { DeviceOutsideManagedSlotsError } from "../../src/daemon/managedSlots/managedSlotRefusal";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // #11236: a typed retryable refusal that failed the plan was flattened into the `error` string,
@@ -82,4 +83,30 @@ test("planRefusalFields reads nextAction and ignores a code without a retryable 
   });
   expect(planRefusalFields(Object.assign(new Error("enoent"), { code: "ENOENT" }))).toEqual({});
   expect(planRefusalFields("boom")).toEqual({});
+});
+
+// #11421: a refusal that builds its own wire payload keeps that evidence on the plan result.
+test("planRefusalFields carries a self-described refusal's payload evidence", () => {
+  expect(
+    planRefusalFields(
+      new DeviceOutsideManagedSlotsError("executePlan", "tool", "scope-1", { deviceLabel: "B" }),
+    ),
+  ).toEqual({
+    code: "device_outside_managed_slots",
+    retryable: false,
+    action: "executePlan",
+    reason: "tool",
+    scopeKey: "scope-1",
+    deviceLabel: "B",
+  });
+});
+
+test("planRefusalFields does not repeat a refusal's details beside them", () => {
+  const details = { platform: "android" as const, limit: 2, booted: 2, retryAfterMs: 5_000 };
+  expect(planRefusalFields(new BootCapacityExhaustedError(details, "no capacity"))).toEqual({
+    code: "capacity_exhausted",
+    retryable: true,
+    retryAfterMs: 5_000,
+    details: { ...details, code: "capacity_exhausted", retryable: true },
+  });
 });

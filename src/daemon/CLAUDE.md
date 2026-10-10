@@ -206,8 +206,8 @@ selection, multi-device allocation and auto-start; explicit binds, autolock,
 `killDevice`/`deleteDevice` (stopped targets included) and `input/*`/`ide/*` mutations
 refuse them with non-retryable `device_assigned_to_managed_slot` unless the caller is
 the slot's recorded execution session; `force` never overrides. Reads stay open. A
-registry never read refuses with retryable `discovery_incomplete`; an unreadable one
-keeps the last good snapshot.
+registry never read refuses with retryable `discovery_incomplete` (an absent one means
+no managed slots); an unreadable one keeps the last good snapshot.
 
 Owner decisions 2026-10-08 (#10730) settle the viewing question: watching is
 allowed on any device, whichever session owns it, and watching is not use.

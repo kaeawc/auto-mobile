@@ -1,3 +1,5 @@
+import { DeviceCriteriaMatcher, type DeviceAllocationCriteria } from "../DeviceCriteriaMatcher";
+import type { PooledDevice } from "../devicePool";
 import { DeviceOutsideManagedSlotsError } from "./managedSlotRefusal";
 
 /**
@@ -135,6 +137,36 @@ export function managedConnectionPlanLabelRefusal(input: {
         deviceLabel: outside[0],
       })
     : undefined;
+}
+
+/**
+ * Whether a slot device demonstrably fails the criteria a plan label declares (#11421). A slot
+ * serves a label only with its own device, so a declared criterion it does not meet is a refusal,
+ * never a silent substitution. The pool's own matcher decides, as for generic allocation.
+ * A criterion is evaluated only when the device's fact is known: `platform` always, `simulatorType`
+ * and `iosVersion` when the pool recorded them (iOS simulators). An undeclared criterion, or one
+ * whose device fact is unknown, is not a reason to refuse.
+ */
+export function slotDeviceFailsLabelCriteria(input: {
+  declared: DeviceAllocationCriteria | undefined;
+  slotPlatform: PooledDevice["platform"];
+  device: PooledDevice | null;
+}): boolean {
+  const { declared, device } = input;
+  if (!declared) {
+    return false;
+  }
+  if (declared.platform && declared.platform !== input.slotPlatform) {
+    return true;
+  }
+  if (!device) {
+    return false;
+  }
+  const evaluable: DeviceAllocationCriteria = {
+    simulatorType: device.simulatorType ? declared.simulatorType : undefined,
+    iosVersion: device.iosVersion ? declared.iosVersion : undefined,
+  };
+  return new DeviceCriteriaMatcher().filterDevices([device], evaluable).length === 0;
 }
 
 /**

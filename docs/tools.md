@@ -1955,8 +1955,9 @@ evidence stays `unknown`; the snapshot is stamped with `freshness.observedAtMs` 
 a response that is lost in transit leaves the caller without it. Gathering it reads only in-memory
 state and does not extend the request deadline.
 
-`deleteDevice.operationId` is a caller-generated idempotency and diagnostic
-correlation ID. `verifyAbsence` requires a complete inventory observation proving
+`deleteDevice` has no caller-supplied operation ID and stores no replayable
+result: each call runs its own teardown under the device lifecycle lease, and
+a repeated call on an already-removed device reports `already_absent`. `verifyAbsence` requires a complete inventory observation proving
 durable absence. `cancellationPolicy: "cancel-on-request-abort"` cancels accepted teardown when
 the MCP request is aborted; use it for deadline-critical, caller-owned cleanup
 that must stop when its caller stops waiting.

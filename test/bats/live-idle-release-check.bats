@@ -104,7 +104,7 @@ scan_device() {
       printf '%s\n' "${t}" > "${dir}/last_tool"
     fi
   fi
-  if [[ "${FAKE_NEVER_IDLE_RELEASE:-0}" != 1 ]] && ((t > $(cat "${dir}/last_tool") + idle_ms + 4000)); then
+  if [[ "${FAKE_NEVER_IDLE_RELEASE:-0}" != 1 ]] && ((t > $(cat "${dir}/last_tool") + idle_ms + ${FAKE_IDLE_RELEASE_LAG_MS:-2000})); then
     release "${dev}" cleanup-expired
   elif [[ -n "${FAKE_RELEASE_AFTER_MS:-}" ]] && ((t - $(cat "${dir}/acquired") >= FAKE_RELEASE_AFTER_MS)); then
     release "${dev}" bug
@@ -358,6 +358,12 @@ run_check() {
 
 @test "fails the idle scenario when a heartbeating session is never idle-released" {
   FAKE_NEVER_IDLE_RELEASE=1 run_check --scenario idle
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL idle"*"still held after the 16000 ms idle window"* ]]
+}
+
+@test "fails the idle scenario when release lags the idle window by the old suspect grace" {
+  FAKE_IDLE_RELEASE_LAG_MS=8000 run_check --scenario idle
   [ "${status}" -eq 1 ]
   [[ "${output}" == *"FAIL idle"*"still held after the 16000 ms idle window"* ]]
 }

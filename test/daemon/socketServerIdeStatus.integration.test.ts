@@ -899,7 +899,10 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     const device: BootedDevice = { deviceId: "sim-shutdown", platform: "ios", name: "iPhone 16" };
     shutdownReserved = true;
     const discovery = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue({
-      getBootedDevices: async () => [device],
+      getBootedDevicesDetailed: async () => ({
+        devices: [device],
+        succeededPlatforms: new Set(["ios"]),
+      }),
     } as never);
     const restart = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
       forceRestart: async () => {},
@@ -923,6 +926,27 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     } finally {
       resume.mockRestore();
       restart.mockRestore();
+      discovery.mockRestore();
+    }
+  });
+
+  test("iOS updateService reports incomplete simulator discovery instead of 'Device not found' (#11122)", async () => {
+    const discovery = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue({
+      getBootedDevicesDetailed: async () => ({
+        devices: [],
+        succeededPlatforms: new Set(),
+        discoveryErrors: { ios: { code: "failed", message: "simctl exploded" } },
+      }),
+    } as never);
+    try {
+      const response = await sendRequest(socketPath, "ide/updateService", {
+        deviceId: "sim-1",
+        platform: "ios",
+      });
+      expect(response.success).toBe(false);
+      expect(response.error).toContain("discovery_incomplete");
+      expect(response.error).not.toContain("Device not found");
+    } finally {
       discovery.mockRestore();
     }
   });

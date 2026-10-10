@@ -93,7 +93,7 @@ test("runDoctor and the CLI doctor tool pass injected iOS dependencies to the ch
       "Run AutoMobile setup diagnostics",
       doctorTools.doctorSchema,
       expect.any(Function),
-      { defaultEnabled: true },
+      { defaultEnabled: true, readOnly: true },
     );
     expect(handler).toBeDefined();
     await handler!({ ios: true });

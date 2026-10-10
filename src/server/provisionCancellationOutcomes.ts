@@ -27,25 +27,40 @@ export class ProvisionCancellationOutcomes {
     this.waiters.delete(requestKey);
     if (!waiting || waiting.length === 0) {
       // The reply may not be waiting yet (a fast rollback): keep the outcome briefly.
-      const now = this.clock.now();
-      this.early.forEach((held, key) => {
-        if (held.expiresAtMs <= now) {
-          this.early.delete(key);
-        }
+      this.pruneExpired();
+      this.early.set(requestKey, {
+        outcome,
+        expiresAtMs: this.clock.now() + EARLY_OUTCOME_RETENTION_MS,
       });
-      this.early.set(requestKey, { outcome, expiresAtMs: now + EARLY_OUTCOME_RETENTION_MS });
       return;
     }
     waiting.forEach((resolve) => resolve(outcome));
   }
 
+  /** Drops unclaimed early outcomes past their retention, so a quiet daemon does not keep them. */
+  private pruneExpired(): void {
+    const now = this.clock.now();
+    this.early.forEach((held, key) => {
+      if (held.expiresAtMs <= now) {
+        this.early.delete(key);
+      }
+    });
+  }
+
+  /** Unclaimed early outcomes currently retained, expired or not; for tests. */
+  get retainedEarlyCount(): number {
+    return this.early.size;
+  }
+
   /** Whether a reply is currently waiting for this call's outcome. */
   isAwaiting(requestKey: string): boolean {
+    this.pruneExpired();
     return this.waiters.has(requestKey);
   }
 
   /** Resolves with the published outcome, or undefined when none arrives within `timeoutMs`. */
   async await(requestKey: string, timeoutMs: number, timer: Timer): Promise<unknown> {
+    this.pruneExpired();
     const held = this.early.get(requestKey);
     if (held) {
       this.early.delete(requestKey);

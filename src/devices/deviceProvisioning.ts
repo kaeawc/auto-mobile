@@ -487,6 +487,17 @@ export interface DefaultDeviceProvisionerDependencies {
   identityHooks?: DeviceProvisioningIdentityHooks;
 }
 
+/**
+ * A requested name that is not itself a device type names the simulator (as it does for an
+ * Android AVD); an exact device-type name selects the model and stays the base (#11148).
+ */
+function createdIosBaseName(requested: string | undefined, deviceTypeName: string): string {
+  const trimmed = requested?.trim();
+  return trimmed && trimmed.toLowerCase() !== deviceTypeName.toLowerCase()
+    ? trimmed
+    : deviceTypeName;
+}
+
 export class DefaultDeviceProvisioner implements DeviceProvisioner {
   private readonly idGenerator: IdGenerator;
   private readonly architecture: string;
@@ -525,9 +536,10 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     }
 
     const { deviceType, runtime } = await resolveIosProvisioningSelection(simctl, criteria, signal);
+    const baseName = createdIosBaseName(criteria.name, deviceType.name);
     const name =
-      this.dependencies.createdDeviceName?.(deviceType.name) ??
-      buildCreatedDeviceName(deviceType.name, this.idGenerator);
+      this.dependencies.createdDeviceName?.(baseName) ??
+      buildCreatedDeviceName(baseName, this.idGenerator);
     const identitySignal = await identityHooks?.reserveBeforeCreate({
       platform: "ios",
       name,

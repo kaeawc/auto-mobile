@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { errorMessage } from "../utils/describeUnknownError";
+import { sortedReaddirSync } from "../utils/io";
 import { logger } from "../utils/logger";
 import { resolveAutoMobileBaseDir } from "../utils/tempDir";
 
@@ -14,8 +15,10 @@ import { resolveAutoMobileBaseDir } from "../utils/tempDir";
  * intent at startup and terminalizes the row before rehydrating sessions, so the released UUID is
  * never revived.
  *
- * The file is per data directory; the daemon's startup lock already keeps one daemon per data
- * directory, so there is no cross-process writer to coordinate with.
+ * Several daemons can share a data directory (#11158), so each daemon writes its own file, keyed
+ * by its daemon session id, and only ever compacts that file. At startup a daemon adopts the files
+ * of daemons that are no longer live (see {@link createDaemonTerminalReleaseJournal}); a live
+ * peer's file, and its in-flight intents, are left alone.
  */
 export interface TerminalReleaseIntent {
   sessionId: string;
@@ -52,7 +55,31 @@ export interface TerminalReleaseJournalFileSystem {
   remove(filePath: string): void;
 }
 
+/**
+ * Directory listing for startup adoption of other daemons' journals (#11158); injected so tests
+ * never touch the disk.
+ */
+export interface TerminalReleaseJournalDirectory extends TerminalReleaseJournalFileSystem {
+  /** File names in `dirPath`, or an empty list when it does not exist. */
+  listNames(dirPath: string): string[];
+}
+
+/** The single shared journal file written before per-daemon journals (#11158). */
 export const TERMINAL_RELEASE_JOURNAL_FILE_NAME = "terminal-release-intents.jsonl";
+
+/** Directory of per-daemon journal files, one `<daemon session id>.jsonl` each (#11158). */
+export const TERMINAL_RELEASE_JOURNAL_DIR_NAME = "terminal-release-intents";
+
+const JOURNAL_FILE_SUFFIX = ".jsonl";
+
+/** The journal file of the daemon with `daemonSessionId` in `dataDir`. */
+export function terminalReleaseJournalPath(dataDir: string, daemonSessionId: string): string {
+  return path.join(
+    dataDir,
+    TERMINAL_RELEASE_JOURNAL_DIR_NAME,
+    `${encodeURIComponent(daemonSessionId)}${JOURNAL_FILE_SUFFIX}`,
+  );
+}
 
 /** Journal used when none is attached (unit tests of unrelated behaviour). */
 export class NoopTerminalReleaseJournal implements TerminalReleaseJournal {
@@ -133,7 +160,9 @@ function serialize(intent: TerminalReleaseIntent): string {
  * line that does not parse as an intent.
  */
 export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
-  private intents: Map<string, TerminalReleaseIntent> | undefined;
+  /** Intents known so far; until the file has been read, only this daemon's own (#11114). */
+  private readonly intents = new Map<string, TerminalReleaseIntent>();
+  private loaded = false;
 
   constructor(
     private readonly filePath: string,
@@ -141,11 +170,12 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
   ) {}
 
   loadUnconfirmed(): TerminalReleaseIntent[] {
-    return Array.from(this.ensureLoaded().values());
+    this.ensureLoaded();
+    return Array.from(this.intents.values());
   }
 
   record(intent: TerminalReleaseIntent): void {
-    const intents = this.ensureLoaded();
+    this.ensureLoaded();
     try {
       this.fileSystem.appendDurable(this.filePath, serialize(intent));
     } catch (error) {
@@ -156,21 +186,23 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
         error,
       );
     }
-    intents.set(intent.sessionId, intent);
+    this.intents.set(intent.sessionId, intent);
   }
 
   resolve(sessionId: string, reason?: string): void {
-    const intents = this.ensureLoaded();
-    const intent = intents.get(sessionId);
+    // An unread file may hold a predecessor's intents this cache does not: never rewrite it from
+    // the partial cache, only append the lift (#11114).
+    const loaded = this.ensureLoaded();
+    const intent = this.intents.get(sessionId);
     if (!intent || (reason !== undefined && intent.reason !== reason)) {
       return;
     }
-    intents.delete(sessionId);
-    if (this.compact(intents)) {
+    this.intents.delete(sessionId);
+    if (loaded && this.compact(this.intents)) {
       return;
     }
-    // Compaction failed (e.g. Windows EPERM): the stale intent would terminalize a live session
-    // on restart, so make the lift itself durable with an appended marker.
+    // Compaction failed (e.g. Windows EPERM) or is unsafe: the stale intent would terminalize a
+    // live session on restart, so make the lift itself durable with an appended marker.
     try {
       this.fileSystem.appendDurable(this.filePath, serializeLifted(sessionId));
     } catch (error) {
@@ -182,40 +214,52 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
     }
   }
 
-  private ensureLoaded(): Map<string, TerminalReleaseIntent> {
-    if (this.intents) {
-      return this.intents;
+  /**
+   * Reads the file once it is readable; returns whether the cache reflects it. A failed read is
+   * retried on the next call rather than cached as an empty journal (#11114).
+   */
+  private ensureLoaded(): boolean {
+    if (this.loaded) {
+      return true;
     }
-    const intents = new Map<string, TerminalReleaseIntent>();
-    this.intents = intents;
     let text: string | undefined;
     try {
       text = this.fileSystem.readText(this.filePath);
     } catch (error) {
       logger.warn(
         `[TerminalReleaseJournal] Failed to read ${this.filePath}; unconfirmed terminal releases ` +
-          `from a previous daemon cannot be applied: ${errorMessage(error)}`,
+          `from a previous daemon cannot be applied yet: ${errorMessage(error)}`,
         error,
       );
-      return intents;
+      return false;
     }
-    if (text === undefined) {
-      return intents;
+    this.loaded = true;
+    const unread = new Map(this.intents);
+    this.intents.clear();
+    if (text !== undefined) {
+      this.replay(text);
     }
+    // This daemon's own intents are the newest; one whose append failed exists only in memory.
+    for (const [sessionId, intent] of unread) {
+      this.intents.set(sessionId, intent);
+    }
+    return true;
+  }
+
+  private replay(text: string): void {
     const lines = text.split("\n");
     // Everything after the last newline is a torn append (or empty when the file ends cleanly).
     const tornTail = lines.pop() ?? "";
-    const discarded = replayLines(lines, intents) || tornTail.length > 0;
+    const discarded = replayLines(lines, this.intents) || tornTail.length > 0;
     if (discarded) {
       logger.warn(
         `[TerminalReleaseJournal] Discarded a torn or corrupt tail of ${this.filePath}; ` +
-          `${intents.size} intent(s) kept`,
+          `${this.intents.size} intent(s) kept`,
       );
     }
-    if (discarded || lines.length !== intents.size) {
-      this.compact(intents);
+    if (discarded || lines.length !== this.intents.size) {
+      this.compact(this.intents);
     }
-    return intents;
   }
 
   /** Returns whether the file now reflects `intents`. */
@@ -241,34 +285,6 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
   }
 }
 
-const RENAME_ATTEMPTS = 4;
-const RENAME_RETRY_DELAY_MS = 25;
-
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-/** Rename, retrying transient EPERM/EACCES a few times (Windows AV/indexer holds). */
-export function renameWithRetry(
-  rename: (from: string, to: string) => void,
-  sleep: (ms: number) => void,
-  from: string,
-  to: string,
-): void {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      rename(from, to);
-      return;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if ((code !== "EPERM" && code !== "EACCES") || attempt >= RENAME_ATTEMPTS) {
-        throw error;
-      }
-      sleep(RENAME_RETRY_DELAY_MS * attempt);
-    }
-  }
-}
-
 function fsyncPath(filePath: string, flags: string): void {
   const fd = fs.openSync(filePath, flags);
   try {
@@ -279,7 +295,17 @@ function fsyncPath(filePath: string, flags: string): void {
 }
 
 /** Real file primitives: synchronous so the intent is on disk before the DB write is issued. */
-export const nodeTerminalReleaseJournalFileSystem: TerminalReleaseJournalFileSystem = {
+export const nodeTerminalReleaseJournalFileSystem: TerminalReleaseJournalDirectory = {
+  listNames(dirPath) {
+    try {
+      return sortedReaddirSync(dirPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+  },
   readText(filePath) {
     try {
       return fs.readFileSync(filePath, "utf-8");
@@ -312,7 +338,9 @@ export const nodeTerminalReleaseJournalFileSystem: TerminalReleaseJournalFileSys
     try {
       // libuv renames with MOVEFILE_REPLACE_EXISTING on Windows, so this replaces in place there
       // too; it fails only while another process (AV, indexer) briefly holds the target open.
-      renameWithRetry(fs.renameSync, sleepSync, temporaryPath, filePath);
+      // No retry or sleep here: this runs on the daemon's event loop, so a failure surfaces at once
+      // and `resolve` falls back to the durable appended `lifted` marker (#11102).
+      fs.renameSync(temporaryPath, filePath);
     } catch (error) {
       fs.rmSync(temporaryPath, { force: true });
       throw error;
@@ -327,12 +355,139 @@ export const nodeTerminalReleaseJournalFileSystem: TerminalReleaseJournalFileSys
   },
 };
 
-/** The daemon's journal: one file in its data directory. */
+export interface DaemonTerminalReleaseJournalOptions {
+  /** This daemon's session id; its journal file is keyed by it. */
+  daemonSessionId: string;
+  /** Peer daemons live at startup; their journals are never read or touched. */
+  liveDaemonSessionIds: ReadonlySet<string>;
+  dataDir?: string;
+  fileSystem?: TerminalReleaseJournalDirectory;
+}
+
+/**
+ * The daemon's journal: its own file in the data directory (#11158). Before returning it, the
+ * unconfirmed intents of daemons that are no longer live are adopted into it, so this daemon
+ * applies them at startup: each dead daemon's file is read, its intents appended (durably) to
+ * this daemon's file, and only then removed. The legacy shared file is adopted the same way, but
+ * only while no peer daemon is live — an older live peer may still be writing it.
+ */
 export function createDaemonTerminalReleaseJournal(
-  dataDir: string = resolveAutoMobileBaseDir(),
+  options: DaemonTerminalReleaseJournalOptions,
 ): FileTerminalReleaseJournal {
-  return new FileTerminalReleaseJournal(
-    path.join(dataDir, TERMINAL_RELEASE_JOURNAL_FILE_NAME),
-    nodeTerminalReleaseJournalFileSystem,
+  const dataDir = options.dataDir ?? resolveAutoMobileBaseDir();
+  const fileSystem = options.fileSystem ?? nodeTerminalReleaseJournalFileSystem;
+  const ownPath = terminalReleaseJournalPath(dataDir, options.daemonSessionId);
+  adoptDeadDaemonJournals(
+    ownPath,
+    deadDaemonJournalPaths(dataDir, options, fileSystem),
+    fileSystem,
   );
+  return new FileTerminalReleaseJournal(ownPath, fileSystem);
+}
+
+function deadDaemonJournalPaths(
+  dataDir: string,
+  options: DaemonTerminalReleaseJournalOptions,
+  fileSystem: TerminalReleaseJournalDirectory,
+): string[] {
+  const livePeers = new Set(options.liveDaemonSessionIds);
+  livePeers.delete(options.daemonSessionId);
+  const paths =
+    livePeers.size === 0 ? [path.join(dataDir, TERMINAL_RELEASE_JOURNAL_FILE_NAME)] : [];
+  const directory = path.join(dataDir, TERMINAL_RELEASE_JOURNAL_DIR_NAME);
+  let names: string[];
+  try {
+    names = fileSystem.listNames(directory);
+  } catch (error) {
+    logger.warn(
+      `[TerminalReleaseJournal] Failed to list ${directory}; terminal releases of earlier daemons ` +
+        `are applied by a later startup: ${errorMessage(error)}`,
+      error,
+    );
+    return paths;
+  }
+  for (const name of names) {
+    if (!name.endsWith(JOURNAL_FILE_SUFFIX)) {
+      continue;
+    }
+    const ownerId = decodeJournalOwner(name.slice(0, -JOURNAL_FILE_SUFFIX.length));
+    if (ownerId !== undefined && ownerId !== options.daemonSessionId && !livePeers.has(ownerId)) {
+      paths.push(path.join(directory, name));
+    }
+  }
+  return paths;
+}
+
+function decodeJournalOwner(encoded: string): string | undefined {
+  try {
+    return decodeURIComponent(encoded);
+  } catch (error) {
+    // Not a name this module wrote; leave the file alone.
+    logger.debug(
+      `[TerminalReleaseJournal] Ignoring journal file ${encoded}: ${errorMessage(error)}`,
+    );
+    return undefined;
+  }
+}
+
+/** Read a dead daemon's journal without compacting it; undefined when it cannot be read. */
+function readDeadJournal(
+  filePath: string,
+  fileSystem: TerminalReleaseJournalFileSystem,
+): TerminalReleaseIntent[] | undefined {
+  let text: string | undefined;
+  try {
+    text = fileSystem.readText(filePath);
+  } catch (error) {
+    logger.warn(
+      `[TerminalReleaseJournal] Failed to read ${filePath}; its terminal releases are applied by ` +
+        `a later startup: ${errorMessage(error)}`,
+      error,
+    );
+    return undefined;
+  }
+  const intents = new Map<string, TerminalReleaseIntent>();
+  if (text !== undefined) {
+    const lines = text.split("\n");
+    // The last element is a torn append or empty; a corrupt line carries no intent.
+    lines.pop();
+    replayLines(lines, intents);
+  }
+  return Array.from(intents.values());
+}
+
+function adoptDeadDaemonJournals(
+  ownPath: string,
+  deadPaths: readonly string[],
+  fileSystem: TerminalReleaseJournalFileSystem,
+): void {
+  for (const deadPath of deadPaths) {
+    const intents = readDeadJournal(deadPath, fileSystem);
+    if (intents === undefined) {
+      continue;
+    }
+    if (intents.length > 0) {
+      try {
+        // Durable in this daemon's file before the dead daemon's copy goes away.
+        fileSystem.appendDurable(ownPath, intents.map(serialize).join(""));
+      } catch (error) {
+        logger.warn(
+          `[TerminalReleaseJournal] Failed to adopt ${deadPath}; its terminal releases are applied ` +
+            `by a later startup: ${errorMessage(error)}`,
+          error,
+        );
+        continue;
+      }
+    }
+    try {
+      fileSystem.remove(deadPath);
+    } catch (error) {
+      // Its intents are already in this daemon's file; a later startup re-adopts them, and one
+      // whose row is terminal by then is dropped.
+      logger.warn(
+        `[TerminalReleaseJournal] Adopted but could not remove ${deadPath}: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
 }

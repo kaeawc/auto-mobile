@@ -6,7 +6,7 @@ import { resetBootedDevicesResourceCache } from "../server/bootedDeviceResources
 import { resetAndroidDeviceImageResourceCache } from "../server/deviceImageResources";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
-import type { PooledDevice, SessionRecoveryPreparation } from "./devicePool";
+import type { PooledDevice, RemoveDeviceOptions, SessionRecoveryPreparation } from "./devicePool";
 import type { IdentityComparison } from "../devices/deviceIdentityEvidence";
 
 /** Consecutive successful discovery sweeps required to confirm absence. */
@@ -33,6 +33,9 @@ export function observeMissingDevice(
   missesByDevice.set(deviceId, misses);
   return { misses, confirmedGone: misses >= MISSING_DEVICE_MISS_THRESHOLD };
 }
+/** adb lost the serial but the emulator child may be alive: keep watching it (#11123). */
+const LIVENESS_MISS_REMOVAL: RemoveDeviceOptions = { keepTrackedProcess: true };
+
 type IdentityObservation = Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">;
 
 export interface MissingDeviceEvictionOptions {
@@ -96,6 +99,7 @@ export interface MissingDeviceLivenessPoolPort {
     deviceId: string,
     awaitCacheCleanup: boolean,
     expectedDevice: PooledDevice,
+    options?: RemoveDeviceOptions,
   ): Promise<void>;
   isReservedForShutdown(device: PooledDevice): boolean;
   recordEmulatorLossIncident(
@@ -544,14 +548,14 @@ export class MissingDeviceLiveness {
     lockPoolRemoval?: boolean,
   ): Promise<void> {
     if (!lockPoolRemoval) {
-      await this.pool.removeDevice(device.id, true, device);
+      await this.pool.removeDevice(device.id, true, device, LIVENESS_MISS_REMOVAL);
       return;
     }
     // Incident and recovery I/O completed before assignmentMutex. Only the
     // compare-and-delete runs under the lock, after any lifecycle lease settles.
     await this.pool
       .getAssignmentMutex()
-      .runExclusive(() => this.pool.removeDevice(device.id, false, device));
+      .runExclusive(() => this.pool.removeDevice(device.id, false, device, LIVENESS_MISS_REMOVAL));
   }
 
   private prepareEvictedDeviceForRemoval(device: PooledDevice, lockPoolRemoval?: boolean): void {

@@ -3,14 +3,11 @@ import {
   DeviceTeardownService,
   type DeviceTeardownPhase,
 } from "../../src/devices/deviceTeardownService";
-import type { DeviceTeardownOperationStore } from "../../src/db/deviceTeardownOperationRepository";
 import {
   InMemoryVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleLease,
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
-import { FakeDeviceTeardownOperationStore } from "../fakes/FakeDeviceTeardownOperationStore";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { ActionableError } from "../../src/models";
 
 interface TestResponse {
@@ -21,20 +18,13 @@ interface TestResponse {
 
 const identity = { platform: "ios", stableId: "IOS-DEVICE-1" } as const;
 
-function createService(
-  timer: FakeTimer,
-  operationStore?: DeviceTeardownOperationStore,
-  idGenerator?: CountingIdGenerator,
-) {
+function createService(timer: FakeTimer) {
   const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
   return {
     coordinator,
     service: new DeviceTeardownService({
       lifecycleCoordinator: coordinator,
-      operationStore,
       timer,
-      resultTtlMs: 1_000,
-      idGenerator,
     }),
   };
 }
@@ -52,24 +42,17 @@ describe("DeviceTeardownService", () => {
         _target: string,
         signal: AbortSignal,
         retainLeaseUntil: (settlement: Promise<unknown>) => void,
-        markDestructionStarted: () => void,
       ) => {
-        markDestructionStarted();
         retainLeaseUntil(stalledDestroy.promise);
         enteredDestroy.resolve(signal);
         await stalledDestroy.promise;
       },
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
       failure: (phase: DeviceTeardownPhase, error: unknown) =>
         ({ status: "failed", phase, error }) as TestResponse,
-      isFailure: (response: TestResponse) => response.status === "failed",
     };
 
-    const pending = service.teardown(
-      { operationId: "hung-destroy", fingerprint: "fingerprint", identity, deadlineMs: 100 },
-      workflow,
-    );
+    const pending = service.teardown({ identity, deadlineMs: 100 }, workflow);
     const signal = await enteredDestroy.promise;
     timer.advanceTime(100);
     const result = await pending;
@@ -96,15 +79,11 @@ describe("DeviceTeardownService", () => {
       },
       destroy: async () => {},
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
       failure: (phase: DeviceTeardownPhase, error: unknown) =>
         ({ status: "failed", phase, error }) as TestResponse,
-      isFailure: (response: TestResponse) => response.status === "failed",
     };
     const pending = service.teardown(
       {
-        operationId: "reserve-consumes-time",
-        fingerprint: "fingerprint",
         identity,
         deadlineMs: 100,
       },
@@ -129,91 +108,13 @@ describe("DeviceTeardownService", () => {
       stop: async () => "stopped" as const,
       destroy: async () => {},
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
       failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
-      isFailure: (response: TestResponse) => response.status === "failed",
     };
 
-    await expect(
-      service.teardown(
-        { operationId: "quick-success", fingerprint: "fingerprint", identity, deadlineMs: 100 },
-        workflow,
-      ),
-    ).resolves.toEqual({ status: "destroyed" });
-    expect(timer.getPendingTimeouts()).toEqual([1_000]);
-  });
-
-  test("replays a terminal result after the service restarts", async () => {
-    const timer = new FakeTimer();
-    const operationStore = new FakeDeviceTeardownOperationStore();
-    let destroyCalls = 0;
-    const workflow = {
-      resolve: async () => ({ target: "target" }) as const,
-      stop: async () => "accepted" as const,
-      destroy: async (
-        _target: string,
-        _signal: AbortSignal,
-        _retainLeaseUntil: (settlement: Promise<unknown>) => void,
-        markDestructionStarted: () => void,
-      ) => {
-        destroyCalls++;
-        markDestructionStarted();
-      },
-      verify: async () => ({ status: "destroyed" }) as TestResponse,
-      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
-      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
-      isFailure: (response: TestResponse) => response.status === "failed",
-    };
-    const request = {
-      operationId: "operation-restart",
-      fingerprint: "fingerprint",
-      identity,
-      deadlineMs: 1_000,
-    };
-    const first = createService(timer, operationStore).service;
-
-    await expect(first.teardown(request, workflow)).resolves.toEqual({ status: "destroyed" });
-    first.dispose();
-    const restarted = createService(timer, operationStore).service;
-    await expect(restarted.teardown(request, workflow)).resolves.toEqual({
+    await expect(service.teardown({ identity, deadlineMs: 100 }, workflow)).resolves.toEqual({
       status: "destroyed",
     });
-
-    expect(destroyCalls).toBe(1);
-  });
-
-  test("reports a persistence failure when ownership is lost before completion", async () => {
-    class LostCompletionStore extends FakeDeviceTeardownOperationStore {
-      override async complete(
-        ..._args: Parameters<DeviceTeardownOperationStore["complete"]>
-      ): Promise<boolean> {
-        return false;
-      }
-    }
-
-    const timer = new FakeTimer();
-    const service = createService(timer, new LostCompletionStore()).service;
-    const workflow = {
-      resolve: async () => ({ target: "target" }) as const,
-      stop: async () => "accepted" as const,
-      destroy: async () => {},
-      verify: async () => ({ status: "destroyed" }) as TestResponse,
-      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
-      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
-      isFailure: (response: TestResponse) => response.status === "failed",
-    };
-
-    await expect(
-      service.teardown(
-        {
-          operationId: "lost-completion",
-          fingerprint: "fingerprint",
-          identity,
-          deadlineMs: 1_000,
-        },
-        workflow,
-      ),
-    ).resolves.toEqual({ status: "failed", phase: "verification" });
+    expect(timer.getPendingTimeouts()).toEqual([]);
   });
 
   test("uses a transferred provision lease without preempting a queued provision", async () => {
@@ -232,16 +133,12 @@ describe("DeviceTeardownService", () => {
       stop: async () => "accepted" as const,
       destroy: async () => {},
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
       failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
-      isFailure: (response: TestResponse) => response.status === "failed",
     };
 
     await expect(
       service.teardown(
         {
-          operationId: "failed-provision-cleanup",
-          fingerprint: "fingerprint",
           identity,
           deadlineMs: 1_000,
           lifecycleLease: provisionLease,
@@ -253,46 +150,6 @@ describe("DeviceTeardownService", () => {
     const nextProvision = await queuedProvision;
     expect(nextProvision.signal.aborted).toBe(false);
     nextProvision.release();
-  });
-
-  test("releases a transferred lease when the operation id is already accepted", async () => {
-    const timer = new FakeTimer();
-    const { coordinator, service } = createService(timer);
-    const workflow = {
-      resolve: async () => ({ target: "target" }) as const,
-      stop: async () => "accepted" as const,
-      destroy: async () => {},
-      verify: async () => ({ status: "destroyed" }) as TestResponse,
-      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
-      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
-      isFailure: (response: TestResponse) => response.status === "failed",
-    };
-    const request = {
-      operationId: "already-accepted-cleanup",
-      fingerprint: "fingerprint",
-      identity,
-      deadlineMs: 1_000,
-    };
-
-    await expect(service.teardown(request, workflow)).resolves.toEqual({ status: "destroyed" });
-    const transferred = await coordinator.reserve(
-      { kind: "stable", ...identity },
-      { operation: "provision", deadlineMs: 1_000 },
-    );
-
-    // The replayed operation never reaches `execute`, so nothing else holds a
-    // handle on the transferred reservation.
-    await expect(
-      service.teardown({ ...request, lifecycleLease: transferred }, workflow),
-    ).resolves.toEqual({ status: "destroyed" });
-
-    const nextProvision = coordinator.reserve(
-      { kind: "stable", ...identity },
-      { operation: "provision", deadlineMs: 2_000 },
-    );
-    timer.advanceTime(2_001);
-    await expect(nextProvision).resolves.toBeDefined();
-    (await nextProvision).release();
   });
 
   test("uses a live teardown signal after another teardown preempts provisioning", async () => {
@@ -316,16 +173,12 @@ describe("DeviceTeardownService", () => {
       stop: async () => "accepted" as const,
       destroy: async () => {},
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
       failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
-      isFailure: (response: TestResponse) => response.status === "failed",
     };
 
     await expect(
       service.teardown(
         {
-          operationId: "preempted-provision-cleanup",
-          fingerprint: "fingerprint",
           identity,
           deadlineMs: 1_000,
           lifecycleLease: provisionLease,
@@ -340,7 +193,7 @@ describe("DeviceTeardownService", () => {
 
   test("caller cancellation stops waiting without cancelling accepted teardown", async () => {
     const timer = new FakeTimer();
-    const { service } = createService(timer);
+    const { coordinator, service } = createService(timer);
     let finishDestroy!: () => void;
     const destroyGate = new Promise<void>((resolve) => {
       finishDestroy = resolve;
@@ -355,13 +208,9 @@ describe("DeviceTeardownService", () => {
         await destroyGate;
       },
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
       failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
-      isFailure: (response: TestResponse) => response.status === "failed",
     };
     const request = {
-      operationId: "operation-1",
-      fingerprint: "fingerprint",
       identity,
       deadlineMs: 1_000,
       callerSignal: controller.signal,
@@ -375,8 +224,12 @@ describe("DeviceTeardownService", () => {
     finishDestroy();
     await Promise.resolve();
     await Promise.resolve();
-    const replay = await service.teardown({ ...request, callerSignal: undefined }, workflow);
-    expect(replay).toEqual({ status: "destroyed" });
+    // The accepted workflow finished on its own and released the lifecycle lease.
+    const lease = await coordinator.reserve(
+      { kind: "stable", ...identity },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+    lease.release();
     expect(destroyCalls).toBe(1);
   });
 
@@ -393,9 +246,7 @@ describe("DeviceTeardownService", () => {
         _target: string,
         signal: AbortSignal,
         _retainLeaseUntil: (settlement: Promise<unknown>) => void,
-        markDestructionStarted: () => void,
       ) => {
-        markDestructionStarted();
         await new Promise<void>((resolve, reject) => {
           const timeout = timer.setTimeout(() => {
             mutations++;
@@ -414,13 +265,9 @@ describe("DeviceTeardownService", () => {
         });
       },
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
       failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
-      isFailure: (response: TestResponse) => response.status === "failed",
     };
     const request = {
-      operationId: "deadline-critical-delete",
-      fingerprint: "fingerprint",
       identity,
       deadlineMs: 1_000,
       callerSignal: controller.signal,
@@ -431,9 +278,6 @@ describe("DeviceTeardownService", () => {
     await destroyWaitingForAbort.promise;
     controller.abort(new Error("acceptance deadline elapsed"));
     await expect(caller).rejects.toThrow("acceptance deadline elapsed");
-    await expect(
-      service.teardown({ ...request, callerSignal: undefined }, workflow),
-    ).resolves.toEqual({ status: "failed", phase: "destroy" });
 
     const replacement = await coordinator.reserve(
       { kind: "stable", ...identity },
@@ -459,10 +303,8 @@ describe("DeviceTeardownService", () => {
         _target: string,
         signal: AbortSignal,
         retainLeaseUntil: (settlement: Promise<unknown>) => void,
-        markDestructionStarted: () => void,
       ) => {
         destroyCalls++;
-        markDestructionStarted();
         const platformMutation = new Promise<void>((resolve) => {
           timer.setTimeout(() => {
             mutations++;
@@ -474,13 +316,9 @@ describe("DeviceTeardownService", () => {
         await platformMutation;
       },
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
       failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
-      isFailure: (response: TestResponse) => response.status === "failed",
     };
     const request = {
-      operationId: "deadline-critical-non-cooperative-delete",
-      fingerprint: "fingerprint",
       identity,
       deadlineMs: 1_000,
       callerSignal: controller.signal,
@@ -491,12 +329,6 @@ describe("DeviceTeardownService", () => {
     await destroyWaitingForAbort.promise;
     controller.abort(new Error("acceptance deadline elapsed"));
     await expect(caller).rejects.toThrow("acceptance deadline elapsed");
-    const replay = service.teardown({ ...request, callerSignal: undefined }, workflow);
-    let replaySettled = false;
-    void replay.then(() => {
-      replaySettled = true;
-    });
-
     const replacement = coordinator.reserve(
       { kind: "stable", ...identity },
       { operation: "provision", deadlineMs: 1_000 },
@@ -507,188 +339,13 @@ describe("DeviceTeardownService", () => {
     });
     await Promise.resolve();
     expect(replacementAcquired).toBe(false);
-    expect(replaySettled).toBe(false);
 
     await timer.advanceTimeAsync(100);
-    await expect(replay).resolves.toEqual({ status: "failed", phase: "destroy" });
     const replacementLease = await replacement;
     replacementLease.release();
 
     expect(mutations).toBe(1);
     expect(destroyCalls).toBe(1);
-  });
-
-  test("renews a running durable operation until its long teardown settles", async () => {
-    const timer = new FakeTimer();
-    const operationStore = new FakeDeviceTeardownOperationStore();
-    const idGenerator = new CountingIdGenerator("owner");
-    const first = createService(timer, operationStore, idGenerator).service;
-    let finishDestroy!: () => void;
-    const destroyGate = new Promise<void>((resolve) => {
-      finishDestroy = resolve;
-    });
-    const workflow = {
-      resolve: async () => ({ target: "target" }) as const,
-      stop: async () => "accepted" as const,
-      destroy: async () => {
-        await destroyGate;
-      },
-      verify: async () => ({ status: "destroyed" }) as TestResponse,
-      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
-      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
-      isFailure: (response: TestResponse) => response.status === "failed",
-    };
-    const request = {
-      operationId: "long-operation",
-      fingerprint: "fingerprint",
-      identity,
-      deadlineMs: 10_000,
-    };
-    const pending = first.teardown(request, workflow);
-    await Promise.resolve();
-    await Promise.resolve();
-    await timer.advanceTimeAsync(2_500);
-
-    const restarted = createService(
-      timer,
-      operationStore,
-      new CountingIdGenerator("replacement"),
-    ).service;
-    await expect(restarted.teardown(request, workflow)).resolves.toEqual({
-      status: "failed",
-      phase: "precondition",
-    });
-
-    finishDestroy();
-    await expect(pending).resolves.toEqual({ status: "destroyed" });
-  });
-
-  test("retries a rejected renewal before the running record expires", async () => {
-    class RejectFirstRenewalStore extends FakeDeviceTeardownOperationStore {
-      renewCalls = 0;
-
-      override async renew(
-        ...args: Parameters<DeviceTeardownOperationStore["renew"]>
-      ): Promise<boolean> {
-        this.renewCalls++;
-        if (this.renewCalls === 1) {
-          throw new Error("temporary database error");
-        }
-        return await super.renew(...args);
-      }
-    }
-
-    const timer = new FakeTimer();
-    const operationStore = new RejectFirstRenewalStore();
-    const first = createService(timer, operationStore, new CountingIdGenerator("owner")).service;
-    const destroyGate = Promise.withResolvers<void>();
-    let destroyCalls = 0;
-    const workflow = {
-      resolve: async () => ({ target: "target" }) as const,
-      stop: async () => "accepted" as const,
-      destroy: async () => {
-        destroyCalls++;
-        await destroyGate.promise;
-      },
-      verify: async () => ({ status: "destroyed" }) as TestResponse,
-      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
-      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
-      isFailure: (response: TestResponse) => response.status === "failed",
-    };
-    const request = {
-      operationId: "renewal-retry",
-      fingerprint: "fingerprint",
-      identity,
-      deadlineMs: 10_000,
-    };
-    const pending = first.teardown(request, workflow);
-    await Promise.resolve();
-    await Promise.resolve();
-
-    await timer.advanceTimeAsync(500);
-    await timer.advanceTimeAsync(124);
-    expect(operationStore.renewCalls).toBe(2);
-    await timer.advanceTimeAsync(400);
-
-    const restarted = createService(
-      timer,
-      operationStore,
-      new CountingIdGenerator("replacement"),
-    ).service;
-    await expect(restarted.teardown(request, workflow)).resolves.toEqual({
-      status: "failed",
-      phase: "precondition",
-    });
-    expect(destroyCalls).toBe(1);
-
-    destroyGate.resolve();
-    await expect(pending).resolves.toEqual({ status: "destroyed" });
-  });
-
-  test("retries a stalled renewal without accepting a duplicate teardown", async () => {
-    const firstRenewal = Promise.withResolvers<boolean>();
-    class StalledRenewalStore extends FakeDeviceTeardownOperationStore {
-      renewCalls = 0;
-
-      override async renew(
-        ...args: Parameters<DeviceTeardownOperationStore["renew"]>
-      ): Promise<boolean> {
-        this.renewCalls++;
-        if (this.renewCalls === 1) {
-          return await firstRenewal.promise;
-        }
-        return await super.renew(...args);
-      }
-    }
-
-    const timer = new FakeTimer();
-    const operationStore = new StalledRenewalStore();
-    const first = createService(timer, operationStore, new CountingIdGenerator("owner")).service;
-    const destroyGate = Promise.withResolvers<void>();
-    let destroyCalls = 0;
-    const workflow = {
-      resolve: async () => ({ target: "target" }) as const,
-      stop: async () => "accepted" as const,
-      destroy: async () => {
-        destroyCalls++;
-        await destroyGate.promise;
-      },
-      verify: async () => ({ status: "destroyed" }) as TestResponse,
-      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
-      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
-      isFailure: (response: TestResponse) => response.status === "failed",
-    };
-    const request = {
-      operationId: "stalled-renewal",
-      fingerprint: "fingerprint",
-      identity,
-      deadlineMs: 10_000,
-    };
-    const pending = first.teardown(request, workflow);
-    await Promise.resolve();
-    await Promise.resolve();
-
-    await timer.advanceTimeAsync(500);
-    await timer.advanceTimeAsync(62);
-    await timer.advanceTimeAsync(124);
-    expect(operationStore.renewCalls).toBe(2);
-    await timer.advanceTimeAsync(400);
-
-    const restarted = createService(
-      timer,
-      operationStore,
-      new CountingIdGenerator("replacement"),
-    ).service;
-    await expect(restarted.teardown(request, workflow)).resolves.toEqual({
-      status: "failed",
-      phase: "precondition",
-    });
-    expect(destroyCalls).toBe(1);
-
-    firstRenewal.resolve(true);
-    await Promise.resolve();
-    destroyGate.resolve();
-    await expect(pending).resolves.toEqual({ status: "destroyed" });
   });
 
   test("teardown preempts recovery and waits for its platform command to settle", async () => {
@@ -701,8 +358,6 @@ describe("DeviceTeardownService", () => {
     let resolveStarted = false;
     const teardown = service.teardown(
       {
-        operationId: "operation-1",
-        fingerprint: "fingerprint",
         identity,
         deadlineMs: 1_000,
       },
@@ -714,9 +369,7 @@ describe("DeviceTeardownService", () => {
         stop: async () => "not_required" as const,
         destroy: async () => {},
         verify: async () => ({ status: "destroyed" }) as TestResponse,
-        conflict: () => ({ status: "failed" }) as TestResponse,
         failure: (phase) => ({ status: "failed", phase }) as TestResponse,
-        isFailure: (response) => response.status === "failed",
       },
     );
 
@@ -735,8 +388,6 @@ describe("DeviceTeardownService", () => {
       finishLateDelete = resolve;
     });
     const request = {
-      operationId: "operation-1",
-      fingerprint: "fingerprint",
       identity,
       deadlineMs: 1_000,
     };
@@ -748,24 +399,16 @@ describe("DeviceTeardownService", () => {
         _target: string,
         _signal: AbortSignal,
         retainLeaseUntil: (settlement: Promise<unknown>) => void,
-        markDestructionStarted: () => void,
       ) => {
         destroyCalls++;
-        markDestructionStarted();
         retainLeaseUntil(lateDelete);
         throw new Error("delete deadline elapsed");
       },
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      conflict: () => ({ status: "failed" }) as TestResponse,
       failure: (phase) => ({ status: "failed", phase }) as TestResponse,
-      isFailure: (response) => response.status === "failed",
     };
     const teardown = service.teardown(request, workflow);
     await expect(teardown).resolves.toEqual({ status: "failed", phase: "destroy" });
-    await expect(service.teardown(request, workflow)).resolves.toEqual({
-      status: "failed",
-      phase: "destroy",
-    });
     expect(destroyCalls).toBe(1);
 
     const start = coordinator.reserve(
@@ -794,8 +437,6 @@ describe("DeviceTeardownService", () => {
     });
     const teardown = service.teardown(
       {
-        operationId: "operation-late-shutdown",
-        fingerprint: "fingerprint",
         identity,
         deadlineMs: 1_000,
       },
@@ -807,9 +448,7 @@ describe("DeviceTeardownService", () => {
         },
         destroy: async () => {},
         verify: async () => ({ status: "destroyed" }) as TestResponse,
-        conflict: () => ({ status: "failed" }) as TestResponse,
         failure: (phase) => ({ status: "failed", phase }) as TestResponse,
-        isFailure: (response) => response.status === "failed",
       },
     );
     await expect(teardown).resolves.toEqual({ status: "failed", phase: "stop" });

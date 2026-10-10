@@ -294,6 +294,8 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     // A replacement socket must recover both acquisitions before selector routing.
     socketSessionId = "replacement-client";
     client.emitConnectionClosed();
+    // The daemon drops the closed socket's bindings, so the replacement may restore them (#11107).
+    pool.releaseMcpSessionBindings("client");
 
     await proxy.callTool("routingProbe", { platform: "android", keepScreenAwake: false });
     await proxy.callTool("routingProbe", { platform: "ios", keepScreenAwake: false });
@@ -333,7 +335,7 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
       daemonManager: daemon,
       autoStartDaemon: false,
       timer,
-      initialSessionUuid: pool.resolveAutolockSessionForMcpSession("client", "ios"),
+      initialSessionUuid: pool.resolveAutolockSessionForMcpSession(socketSessionId, "ios"),
     });
     try {
       await expect(

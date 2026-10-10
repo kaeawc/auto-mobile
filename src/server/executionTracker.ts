@@ -64,6 +64,15 @@ interface ActiveExecution {
    */
   readDeadlineMs?: () => number | undefined;
   /**
+   * Session clock minus wall clock when the deadline was last stamped (#11105): a wall-clock
+   * step after that moves the wall deadline's meaning but not the offset recorded here, so the
+   * deadline can be read on the session clock without the step. Re-captured on every progress
+   * extension, which restamps the deadline with the then-current wall clock (#11123).
+   */
+  sessionClockOffsetMs?: number;
+  /** Stops following the deadline's progress extensions; run when the execution ends. */
+  unsubscribeDeadlineExtensions?: () => void;
+  /**
    * Devices this call was admitted to drive without a session, because no session held them
    * (#10829). A session that acquires one of them cancels the call: it may not keep driving the
    * new holder's device.
@@ -144,10 +153,19 @@ export class ExecutionTracker {
   private daemonMaintenancePrepared = false;
   private activeProvisionDeviceQuery?: ActiveProvisionDeviceQuery;
   private autolockSessionResolver?: AutolockSessionResolver;
+  private sessionClockOffsetProvider: () => number = () => 0;
 
   constructor(timer: Timer = defaultTimer, idGenerator: IdGenerator = defaultIdGenerator) {
     this.timer = timer;
     this.idGenerator = idGenerator;
+  }
+
+  /**
+   * Where the session clock stands relative to this tracker's wall clock (session minus wall),
+   * read when an execution's deadline is recorded (#11105).
+   */
+  setSessionClockOffsetProvider(provider: () => number): void {
+    this.sessionClockOffsetProvider = provider;
   }
 
   setActiveProvisionDeviceQuery(query: ActiveProvisionDeviceQuery): void {
@@ -281,6 +299,7 @@ export class ExecutionTracker {
     }
 
     this.executions.delete(executionId);
+    execution.unsubscribeDeadlineExtensions?.();
     this.unregisterDeviceExecutions(executionId, execution.deviceIds);
 
     if (execution.sessionId) {
@@ -326,11 +345,22 @@ export class ExecutionTracker {
   /**
    * Record where to read this execution's request deadline, so a release vetoed by the call is
    * bounded by the call's own deadline rather than a flat ceiling (#10712).
+   * `subscribeExtensions` reports each progress extension, which restamps the deadline with the
+   * wall clock of that moment, so the session-clock offset is captured again then (#11123).
    */
-  setExecutionDeadline(executionId: string, readDeadlineMs: () => number | undefined): void {
+  setExecutionDeadline(
+    executionId: string,
+    readDeadlineMs: () => number | undefined,
+    subscribeExtensions?: (onExtended: () => void) => (() => void) | undefined,
+  ): void {
     const execution = this.executions.get(executionId);
     if (execution) {
       execution.readDeadlineMs = readDeadlineMs;
+      execution.sessionClockOffsetMs = this.sessionClockOffsetProvider();
+      execution.unsubscribeDeadlineExtensions?.();
+      execution.unsubscribeDeadlineExtensions = subscribeExtensions?.(() => {
+        execution.sessionClockOffsetMs = this.sessionClockOffsetProvider();
+      });
     }
   }
 
@@ -339,7 +369,10 @@ export class ExecutionTracker {
    * (explicit, resolved-autolock and provisional-autolock membership). `Number.POSITIVE_INFINITY`
    * when any of them has no deadline, undefined when none is running.
    */
-  getLatestSessionExecutionDeadlineMs(sessionUuid: string): number | undefined {
+  getLatestSessionExecutionDeadlineMs(
+    sessionUuid: string,
+    options: { onSessionClock?: boolean } = {},
+  ): number | undefined {
     const executionIds = new Set([
       ...(this.sessionUuidExecutions.get(sessionUuid) ?? []),
       ...(this.autolockSessionExecutions.get(sessionUuid) ?? []),
@@ -347,7 +380,12 @@ export class ExecutionTracker {
     ]);
     const deadlines = [...executionIds].flatMap((executionId) => {
       const execution = this.executions.get(executionId);
-      return execution ? [execution.readDeadlineMs?.() ?? Number.POSITIVE_INFINITY] : [];
+      if (!execution) {
+        return [];
+      }
+      const deadline = execution.readDeadlineMs?.() ?? Number.POSITIVE_INFINITY;
+      // Infinity stays infinite; a finite wall deadline moves by the offset it was stamped under.
+      return [options.onSessionClock ? deadline + (execution.sessionClockOffsetMs ?? 0) : deadline];
     });
     return deadlines.length === 0 ? undefined : Math.max(...deadlines);
   }

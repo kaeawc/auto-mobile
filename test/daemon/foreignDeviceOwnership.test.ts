@@ -4,6 +4,7 @@ import { tmpdir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   adbServerScope,
+  DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS,
   deviceAllocationClaimPath,
   ForwardLeaseForeignDeviceOwnership,
   type DeviceOwnershipFileSource,
@@ -95,18 +96,21 @@ const status = (
 function harness() {
   const files = new FakeOwnershipFiles();
   const probe = new FakeOwnerProbe();
+  const timer = new FakeTimer();
+  // Claims recorded at `acquiredAt: 1` are past their owner's startup grace (#11158).
+  timer.setCurrentTime(1 + DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS);
   const ownership = new ForwardLeaseForeignDeviceOwnership(
     SELF_PID,
     files,
     probe,
     () => SELF_SOCKET,
-    new FakeTimer(),
+    timer,
   );
   const ownerOf = async (deviceId: string) => {
     await ownership.refresh([deviceId]);
     return ownership.foreignOwnerPid(deviceId);
   };
-  return { files, probe, ownership, ownerOf };
+  return { files, probe, ownership, ownerOf, timer };
 }
 
 describe("ForwardLeaseForeignDeviceOwnership", () => {
@@ -169,6 +173,28 @@ describe("ForwardLeaseForeignDeviceOwnership", () => {
     expect(await ownerOf("d")).toBe(FOREIGN_PID);
 
     probe.reports.set("/s", status(FOREIGN_PID, null));
+    expect(await ownerOf("d")).toBeUndefined();
+  });
+
+  test("a live owner's fresh claim survives its socket not being bound yet (#11158)", async () => {
+    // A restarting daemon republishes rehydrated sessions' claims before its socket binds.
+    const { files, ownership, ownerOf, timer } = harness();
+    const fresh = JSON.stringify({ socketPath: "/s", acquiredAt: timer.now() - 1_000 });
+    files.files.set("/claims/d.lock", { pid: FOREIGN_PID, token: "t", metadata: fresh });
+
+    expect(await ownerOf("d")).toBe(FOREIGN_PID);
+    expect(await ownership.claim("d")).toBe(false);
+    expect(files.files.get("/claims/d.lock")?.pid).toBe(FOREIGN_PID);
+
+    // Once the grace has passed, an owner still unreachable is gone.
+    timer.advanceTime(DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS);
+    expect(await ownerOf("d")).toBeUndefined();
+  });
+
+  test("a dead owner's fresh claim lapses without waiting out the grace", async () => {
+    const { files, ownerOf, timer } = harness();
+    const fresh = JSON.stringify({ socketPath: "/s", acquiredAt: timer.now() });
+    files.files.set("/claims/d.lock", { pid: 5151, token: "t", metadata: fresh });
     expect(await ownerOf("d")).toBeUndefined();
   });
 
@@ -415,8 +441,9 @@ describe("daemons in different coordination directories on one adb server (#1070
     // Once the first daemon stops using the device, the second takes the claim over.
     probe.reports.set("/sockets/first.sock", status(FOREIGN_PID, null));
     expect(await second.claim("emulator-5554")).toBe(true);
+    probe.reports.set(SELF_SOCKET, status(SELF_PID, "second-session"));
     await first.refresh(["emulator-5554"]);
-    expect(first.foreignOwnerPid("emulator-5554")).toBeUndefined();
+    expect(first.foreignOwnerPid("emulator-5554")).toBe(SELF_PID);
   });
 
   test("a session claim is written and withdrawn at the ADB-server location, never the legacy one (#10708, #10709)", async () => {

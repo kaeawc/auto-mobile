@@ -431,6 +431,15 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
     return this.routes.get(deviceId) ?? deviceId;
   }
 
+  /** The pooled canonical id a known alias serial belongs to, else the serial itself. */
+  canonicalFor(serial: string): string {
+    return (
+      [...this.groups.values()].find(
+        (group) => group.canonical === serial || group.serials.has(serial),
+      )?.canonical ?? serial
+    );
+  }
+
   aliases(deviceId: string): string[] {
     return [...this.groups.values()]
       .filter((entry) => entry.canonical === deviceId)

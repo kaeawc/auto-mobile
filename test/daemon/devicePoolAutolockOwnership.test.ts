@@ -195,6 +195,27 @@ test("does not return a reused UUID released during activity persistence", async
   });
 });
 
+test("attaching an autolock whose row write fails still routes and reports it unpersisted (#11129)", async () => {
+  await withAutolock(async () => {
+    const h = await harness();
+    const mark = spyOn(h.repository, "markAutolockSession");
+    try {
+      const first = (await h.pool.autolockDevice("emulator-5554", "android", "agent-A"))!;
+      mark.mockRejectedValueOnce(new Error("disk I/O error"));
+      await expect(h.pool.attachAutolockSessionToMcpSession(first, "agent-A")).resolves.toBe(
+        "attached-not-persisted",
+      );
+      expect(h.pool.resolveAutolockSessionForMcpSession("agent-A")).toBe(first);
+      await expect(h.pool.attachAutolockSessionToMcpSession(first, "agent-A")).resolves.toBe(
+        "attached",
+      );
+    } finally {
+      mark.mockRestore();
+      await h.close();
+    }
+  });
+});
+
 test("same MCP client reuses its live autolock after a fresh start", async () => {
   await withAutolock(async () => {
     const h = await harness();

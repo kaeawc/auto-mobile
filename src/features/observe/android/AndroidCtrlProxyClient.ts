@@ -5421,6 +5421,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * outlives the forward it described. A forward another process is connected
    * to is therefore left alone and its stale record dropped. When the host
    * connections cannot be read, the pruned record is the best evidence left.
+   * Re-probes like the unrecorded path and reports a retryable conflict (#11106).
    */
   private async reclaimRecordedOrphanForwards(
     ports: number[],
@@ -5429,7 +5430,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (ports.length === 0) {
       return;
     }
-    const evidence = await this.findForeignForwardClients(ports, 1, signal);
+    const evidence = await this.findForeignForwardClients(
+      ports,
+      AndroidCtrlProxyClient.FORWARD_CLIENT_PROBES,
+      signal,
+    );
     const clients = "clientPidsByPort" in evidence ? evidence.clientPidsByPort : new Map();
     const contested = ports.filter((port) => clients.has(port));
     for (const port of contested) {
@@ -5450,7 +5455,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
     }
     if (contested.length > 0) {
-      this.throwForeignCtrlProxyForwards(contested, { clientPidsByPort: clients });
+      // Transient (#11106): the record proves this coordination domain made the
+      // forward, so a client still connected after the bounded re-probes is
+      // usually a stray dialing the fixed host port. The record is dropped
+      // above, so the retry re-judges the port as unrecorded and fails closed
+      // (non-transient) if a live daemon really owns it.
+      this.throwForeignCtrlProxyForwards(contested, { clientPidsByPort: clients }, true);
     }
   }
 
@@ -5491,7 +5501,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private throwForeignCtrlProxyForwards(ports: number[], evidence: ForwardClientEvidence): never {
+  private throwForeignCtrlProxyForwards(
+    ports: number[],
+    evidence: ForwardClientEvidence,
+    transient = false,
+  ): never {
     const clientPids =
       "clientPidsByPort" in evidence
         ? [...new Set([...evidence.clientPidsByPort.values()].flat())]
@@ -5504,6 +5518,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         "probeFailure" in evidence ? evidence : { clientPids },
       ),
       clientPids[0],
+      undefined,
+      transient,
     );
   }
 

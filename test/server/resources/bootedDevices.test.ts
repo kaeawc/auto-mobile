@@ -64,6 +64,12 @@ import { AndroidAvdProvenanceCache } from "../../../src/utils/AndroidAvdProvenan
 import { notifyDeviceImageResourcesUpdated } from "../../../src/server/deviceImageResources";
 import type { IosLockStateProbe } from "../../../src/features/observe/ios/IosLockStateProbe";
 import { logger } from "../../../src/utils/logger";
+import {
+  AdbClient,
+  resetAdbClientCaches,
+} from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import type { PlatformDeviceManager } from "../../../src/devices/deviceUtils";
 
 describe("MCP Booted Device Resources", () => {
   let fixture: McpTestFixture;
@@ -1383,6 +1389,117 @@ describe("MCP Booted Device Resources", () => {
       );
 
       // Clean up SessionManager timer to prevent process hang
+      sessionManager.stopCleanupTimer();
+    });
+
+    // #11118: during the disconnect monitor's offline budget the daemon still holds the
+    // session, so the listing must keep the session and pool status plus an explicit state.
+    test("lists a held device adb reports offline with its session, pool status and connection", async function () {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      resetAdbClientCaches();
+      // `adb devices -l` rows in the shape adb prints them; the held emulator is offline.
+      const adb = new AdbClient(null, async (command: string) =>
+        command.includes("adb devices")
+          ? createExecResult(
+              [
+                "List of devices attached",
+                "emulator-5554          offline transport_id:1",
+                "emulator-5556          device product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 device:emu64a transport_id:2",
+                "",
+              ].join("\n"),
+              "",
+            )
+          : createExecResult("", ""),
+      );
+      const emulator = new AndroidEmulatorClient(
+        undefined,
+        null,
+        fakeTimer,
+        new FakeAdbClientFactory(adb),
+      );
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1, mockAndroidDevice2]);
+      (fakeDeviceUtils as PlatformDeviceManager).getAndroidListedDeviceStates = (ids) =>
+        emulator.getListedNonDeviceStatesAmong(ids);
+
+      const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+      const devicePool = new DevicePool(
+        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+          timer: fakeTimer,
+          deviceManager: fakeDeviceUtils,
+        }),
+      );
+      await devicePool.initializeWithDevices([mockAndroidDevice1]);
+      await devicePool.assignDeviceToSession("session-held");
+      expect(devicePool.getDevice(mockAndroidDevice1.deviceId)?.sessionId).toBe("session-held");
+      // From here adb lists the held emulator offline, so discovery no longer returns it.
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice2]);
+      DaemonState.getInstance().initialize(sessionManager, devicePool);
+
+      const result = await getBootedDevicesForPlatforms(["android"], fakeTimer);
+
+      const held = result.devices.find((d) => d.runtime.deviceId === "emulator-5554");
+      expect(held?.runtime.session?.sessionUuid).toBe("session-held");
+      expect(held?.runtime.poolStatus).toBe("assigned");
+      expect(held?.runtime.connection).toEqual({ state: "offline", adbState: "offline" });
+      expect(held?.runtime.readiness.state).toBe("not_ready");
+      expect(listDevicesEntrySchema.shape.runtime.safeParse(held?.runtime).success).toBe(true);
+      const online = result.devices.find((d) => d.runtime.deviceId === "emulator-5556");
+      expect(online?.runtime.connection).toBeUndefined();
+      expect(result.devices).toHaveLength(2);
+      sessionManager.stopCleanupTimer();
+    });
+
+    // #11132: the held AVD re-cold-boots while adb still lists the old serial offline; the
+    // listing must show it once, keeping the held row's session and pool status.
+    test("does not list a held offline AVD twice while it is re-cold-booting", async function () {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      resetAdbClientCaches();
+      const adb = new AdbClient(null, async (command: string) =>
+        command.includes("adb devices")
+          ? createExecResult(
+              [
+                "List of devices attached",
+                "emulator-5554          offline transport_id:1",
+                "",
+              ].join("\n"),
+              "",
+            )
+          : createExecResult("", ""),
+      );
+      const emulator = new AndroidEmulatorClient(
+        undefined,
+        null,
+        fakeTimer,
+        new FakeAdbClientFactory(adb),
+      );
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+      (fakeDeviceUtils as PlatformDeviceManager).getAndroidListedDeviceStates = (ids) =>
+        emulator.getListedNonDeviceStatesAmong(ids);
+      const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+      const devicePool = new DevicePool(
+        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+          timer: fakeTimer,
+          deviceManager: fakeDeviceUtils,
+        }),
+      );
+      await devicePool.initializeWithDevices([mockAndroidDevice1]);
+      await devicePool.assignDeviceToSession("session-held");
+      fakeDeviceUtils.setBootedDevices("android", []);
+      DaemonState.getInstance().initialize(sessionManager, devicePool);
+      setInFlightAndroidColdBootReader({
+        listInFlightAndroidColdBootAvdNames: () => [mockAndroidDevice1.name],
+      });
+
+      const result = await getBootedDevicesForPlatforms(["android"], fakeTimer);
+
+      expect(result.devices).toHaveLength(1);
+      expect(result.devices[0]?.runtime.session?.sessionUuid).toBe("session-held");
+      expect(result.devices[0]?.runtime.connection).toEqual({
+        state: "offline",
+        adbState: "offline",
+      });
       sessionManager.stopCleanupTimer();
     });
 

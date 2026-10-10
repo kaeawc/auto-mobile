@@ -21,6 +21,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -66,6 +67,7 @@ class PlanRecoveryInteractionTest {
     DaemonHeartbeat.testController = null
     AutoMobilePlanExecutor.testAgent = null
     System.clearProperty("automobile.ci.mode")
+    AutoMobilePlanExecutor.retryBackoffMs = 2000L
   }
 
   // ── #10090 x #10093 x recovery ──────────────────────────────────────────
@@ -198,6 +200,53 @@ class PlanRecoveryInteractionTest {
     assertEquals(
       listOf("daemon/releaseSession" to daemon.sessionUuidArgs[0]),
       daemon.daemonMethodCalls,
+    )
+  }
+
+  // ── #11139: a resumed run that never reaches executePlan frees the session it took over ──
+
+  @Test
+  fun `a resumed run that fails before executePlan releases the held session`() {
+    daemon.cannedFailure = failedPayload { it }
+    daemon.setToolEnabledFailures[1] = "Unable to enable executePlan"
+
+    val result = executeSimplePlan()
+
+    assertFalse(result.success)
+    val heldSession = daemon.sessionUuidArgs.single()
+    assertEquals(
+      listOf(
+        "setToolEnabled:$heldSession",
+        "executePlan:$heldSession",
+        "setToolEnabled:$heldSession",
+        "daemon/releaseSession:$heldSession",
+      ),
+      daemon.events,
+    )
+  }
+
+  @Test
+  fun `a resumed run retried under a fresh session releases the held one first`() {
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    daemon.cannedFailure = failedPayload { it }
+    daemon.setToolEnabledFailures[1] = "Request timed out"
+
+    val result = executeSimplePlan(maxRetries = 1)
+
+    assertTrue(result.success)
+    val heldSession = daemon.sessionUuidArgs[0]
+    val retrySession = daemon.sessionUuidArgs[1]
+    assertNotEquals(heldSession, retrySession)
+    assertEquals(
+      listOf(
+        "setToolEnabled:$heldSession",
+        "executePlan:$heldSession",
+        "setToolEnabled:$heldSession",
+        "daemon/releaseSession:$heldSession",
+        "setToolEnabled:$retrySession",
+        "executePlan:$retrySession",
+      ),
+      daemon.events,
     )
   }
 
@@ -375,11 +424,11 @@ class PlanRecoveryInteractionTest {
       AutoMobilePlanExecutionOptions(aiAssistance = true),
     )
 
-  private fun executeSimplePlan(): AutoMobilePlanExecutionResult =
+  private fun executeSimplePlan(maxRetries: Int = 0): AutoMobilePlanExecutionResult =
     AutoMobilePlanExecutor.execute(
       "test-plans/launch-clock-app.yaml",
       emptyMap(),
-      AutoMobilePlanExecutionOptions(aiAssistance = true),
+      AutoMobilePlanExecutionOptions(aiAssistance = true, maxRetries = maxRetries),
     )
 
   private fun resultMessage(result: AutoMobilePlanExecutionResult, stepIndex: Int): String? {
@@ -490,7 +539,12 @@ private class PlanInteractionDaemon : DaemonToolClient {
   val sessionUuidArgs = mutableListOf<String?>()
   val holdSessionOnFailureArgs = mutableListOf<Boolean?>()
   val daemonMethodCalls = mutableListOf<Pair<String, String?>>()
+  /** Error to answer the Nth (0-based) `setToolEnabled` call with, instead of success. */
+  val setToolEnabledFailures = mutableMapOf<Int, String>()
+  /** Ordered `<tool or method>:<session>` log of every daemon call. */
+  val events = mutableListOf<String>()
   private var calls = 0
+  private var setToolEnabledCalls = 0
   override var sessionUuid: String = "plan-interaction-session"
 
   fun reset() {
@@ -505,8 +559,16 @@ private class PlanInteractionDaemon : DaemonToolClient {
     arguments: JsonObject,
     timeoutMs: Long,
   ): DaemonResponse {
+    val session = (arguments["sessionUuid"] as? JsonPrimitive)?.contentOrNull
+    events.add("$toolName:$session")
     if (toolName == "setToolEnabled") {
-      return DaemonResponse(id = "enable", type = "mcp_response", success = true)
+      val failure = setToolEnabledFailures[setToolEnabledCalls++]
+      return DaemonResponse(
+        id = "enable",
+        type = "mcp_response",
+        success = failure == null,
+        error = failure,
+      )
     }
     val call = calls++
     val startStep = arguments["startStep"]?.jsonPrimitive?.content?.toInt() ?: 0
@@ -536,7 +598,9 @@ private class PlanInteractionDaemon : DaemonToolClient {
     params: JsonObject,
     timeoutMs: Long,
   ): DaemonResponse {
-    daemonMethodCalls.add(method to (params["sessionId"] as? JsonPrimitive)?.contentOrNull)
+    val session = (params["sessionId"] as? JsonPrimitive)?.contentOrNull
+    daemonMethodCalls.add(method to session)
+    events.add("$method:$session")
     return DaemonResponse(id = "method", type = "daemon_response", success = true)
   }
 

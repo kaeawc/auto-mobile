@@ -66,6 +66,18 @@ describe("default provisioned device transport fence", () => {
     expect(installDefaultProvisionedDeviceTransportFence(options)).toBe(fence);
   });
 
+  test("clear deletes the durable tombstone row (#11134)", async () => {
+    const fence = createDefaultProvisionedDeviceTransportFence({ isTest: false, database });
+    await fence.retire({ deviceId: "emulator-5556", stableId: "phone", reason: "timeout" });
+    await fence.clear("emulator-5556");
+    const row = await database
+      .selectFrom("provisioned_device_transport_tombstones")
+      .selectAll()
+      .where("device_id", "=", "emulator-5556")
+      .executeTakeFirst();
+    expect(row).toBeUndefined();
+  });
+
   test("an unwired production holder fails loudly for both reads and session checks", async () => {
     resetProvisionedDeviceTransportFenceForTests({ isTest: false });
     expect(getProvisionedDeviceTransportFence).toThrow("fence is not installed");

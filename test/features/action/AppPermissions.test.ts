@@ -99,7 +99,7 @@ describe("AppPermissions", () => {
 
     expect(result.success).toBe(true);
     expect(result.changedCount).toBe(4);
-    expect(result.operations.map((operation) => operation.operationId)).toEqual([
+    expect(result.operations.map((operation) => operation.stepId)).toEqual([
       "android_runtime_permissions:grant",
       "android_notifications_enabled",
       "android_notification_policy_access",
@@ -142,7 +142,7 @@ describe("AppPermissions", () => {
     expect(result.success).toBe(false);
     expect(result.changedCount).toBe(0);
     expect(result.failedCount).toBe(1);
-    expect(result.operations.map((operation) => operation.operationId)).toEqual([
+    expect(result.operations.map((operation) => operation.stepId)).toEqual([
       "android_runtime_permissions:reset",
     ]);
     expect(adbFactory.getFakeClient().getAllCommands()).toEqual([]);
@@ -194,14 +194,14 @@ describe("AppPermissions", () => {
       });
       expect(result.operations).toMatchObject([
         {
-          operationId: "android_notification_policy_access",
+          stepId: "android_notification_policy_access",
           success: false,
           changedCount: 0,
           failedCount: 1,
           error: "policy denied",
         },
         {
-          operationId: "android_schedule_exact_alarm_appop",
+          stepId: "android_schedule_exact_alarm_appop",
           success: true,
           changedCount: 0,
           failedCount: 0,
@@ -357,20 +357,20 @@ describe("AppPermissions", () => {
     expect(result.failedCount).toBe(1);
     expect(
       result.operations.map((operation) => ({
-        operationId: operation.operationId,
+        stepId: operation.stepId,
         success: operation.success,
         changedCount: operation.changedCount,
         failedCount: operation.failedCount,
       })),
     ).toEqual([
       {
-        operationId: "android_runtime_permissions:revoke",
+        stepId: "android_runtime_permissions:revoke",
         success: true,
         changedCount: 1,
         failedCount: 0,
       },
       {
-        operationId: "android_notifications_enabled",
+        stepId: "android_notifications_enabled",
         success: false,
         changedCount: 0,
         failedCount: 1,
@@ -392,7 +392,7 @@ describe("AppPermissions", () => {
     expect(result.success).toBe(true);
     expect(result.changedCount).toBe(1);
     expect(result.failedCount).toBe(0);
-    expect(result.operations.map((operation) => operation.operationId)).toEqual([
+    expect(result.operations.map((operation) => operation.stepId)).toEqual([
       "android_notifications_enabled",
     ]);
     expect(
@@ -429,7 +429,7 @@ describe("AppPermissions", () => {
     expect(result.success).toBe(false);
     expect(result.changedCount).toBe(0);
     expect(result.failedCount).toBe(1);
-    expect(result.operations.map((operation) => operation.operationId)).toEqual([
+    expect(result.operations.map((operation) => operation.stepId)).toEqual([
       "android_runtime_permissions:reset",
     ]);
     expect(result.operations[0].result).toMatchObject({
@@ -460,7 +460,7 @@ describe("AppPermissions", () => {
     expect(result.success).toBe(true);
     expect(result.changedCount).toBe(1);
     expect(result.failedCount).toBe(0);
-    expect(result.operations.map((operation) => operation.operationId)).toEqual([
+    expect(result.operations.map((operation) => operation.stepId)).toEqual([
       "android_runtime_permissions:reset",
     ]);
     expect(client.wasCommandExecuted("shell pm reset-permissions")).toBe(true);
@@ -614,7 +614,7 @@ describe("AppPermissions", () => {
     expect(result.success).toBe(true);
     expect(result.platform).toBe("ios");
     expect(result.changedCount).toBe(2);
-    expect(result.operations.map((operation) => operation.operationId)).toEqual([
+    expect(result.operations.map((operation) => operation.stepId)).toEqual([
       "ios_xcuitest_reset:reset:camera",
       "ios_xcuitest_reset:reset:photos",
     ]);
@@ -652,7 +652,7 @@ describe("AppPermissions", () => {
     expect(result.success).toBe(true);
     expect(result.changedCount).toBe(expandedResources.length);
     expect(result.failedCount).toBe(0);
-    expect(result.operations.map((operation) => operation.operationId)).toEqual(
+    expect(result.operations.map((operation) => operation.stepId)).toEqual(
       expandedResources.map((resource) => `ios_xcuitest_reset:reset:${resource}`),
     );
     expect(iosPhysicalClient.calls).toEqual([
@@ -788,7 +788,7 @@ describe("AppPermissions", () => {
       const result = await permissions.setPermissions("com.example.app", {});
 
       expect(result.success).toBe(false);
-      expect(result.operations.map((operation) => operation.operationId)).toEqual([
+      expect(result.operations.map((operation) => operation.stepId)).toEqual([
         "app_permissions:no_operation",
       ]);
       expect(result.error).toBe(

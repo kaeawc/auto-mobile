@@ -143,6 +143,29 @@ class DesktopDaemonSessionCompositionTest {
   }
 
   @Test
+  fun `a bind slower than the lapse window does not make one heartbeat miss a lapse (#11102)`() =
+    runComposeUiTest {
+      // The lapse window is measured from the daemon last being reached. A bind that itself takes
+      // longer than the window (allocation timeout 10 s) must not count against the first
+      // heartbeat.
+      val transport = RecordingDaemonTransport()
+      val host = start(transport, listOf(pixel))
+      transport.onSend = { key ->
+        if (key == "tools/call:setActiveDevice") clockSkewMs += HEARTBEAT_LAPSE_MS + 1_000L
+      }
+      assertTrue(input(host, pixel.deviceId))
+
+      transport.failNext("daemon/heartbeat")
+      tick()
+      settle()
+      repeat(3) { tick() }
+
+      assertEquals("emulator-5554", host.state().boundDeviceId)
+      assertEquals(null, host.state().idleReleasedDeviceId)
+      assertEquals("session-1", host.state().sessionUuidProvider())
+    }
+
+  @Test
   fun `heartbeat failures past the lease and grace drop the held device (#11072)`() =
     runComposeUiTest {
       val transport = RecordingDaemonTransport()
@@ -834,6 +857,9 @@ class DesktopDaemonSessionCompositionTest {
 
   private var sessionCounter = 0
 
+  /** Extra virtual milliseconds a slow fake call adds to the session's monotonic clock. */
+  @Volatile private var clockSkewMs = 0L
+
   private fun ComposeUiTest.tick() {
     mainClock.advanceTimeBy(HEARTBEAT_MS)
     mainClock.advanceTimeByFrame()
@@ -863,7 +889,7 @@ class DesktopDaemonSessionCompositionTest {
   ): Host {
     val host =
       Host(transport, panes, visible, inputAllocationTimeoutMs, bindRetryBackoff) {
-        mainClock.currentTime
+        mainClock.currentTime + clockSkewMs
       }
     setContent { host.compose() }
     mainClock.autoAdvance = false

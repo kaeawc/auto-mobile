@@ -503,6 +503,10 @@ fun rememberDesktopDaemonSession(
                 when {
                   result.success -> {
                     bindingAcknowledged = true
+                    // The daemon was just reached: the lapse window starts here, not at effect
+                    // start. A bind slower than [HEARTBEAT_LAPSE_MS] (allocation timeout 10 s)
+                    // must not let one transient first-heartbeat miss drop the device (#11102).
+                    lastHeartbeatOkAtMs = monotonicClockMs()
                     failedBinds = 0
                     bindErrorRetries = 0
                     // A later bind succeeding (the device came back) clears a surfaced bind error

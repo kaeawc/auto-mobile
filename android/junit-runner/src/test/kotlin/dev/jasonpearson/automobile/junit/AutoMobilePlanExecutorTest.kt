@@ -230,6 +230,39 @@ class AutoMobilePlanExecutorTest {
   }
 
   @Test
+  fun `terminal session refusal is retried under a new session not the same uuid`() {
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(otherDaemonTerminalSessionPayload(), isError = true),
+    )
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1, aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(2, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
+  fun `terminal session refusal without nextAction is not retried`() {
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(
+        payload(
+          """{"error":{"code":"session_ownership_lost","message":"gone","retryable":false}}""",
+        ),
+        isError = true,
+      ),
+    )
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 2, aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(1, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
   fun `current retryable session ownership loss is retried`() {
     fakeDaemonClient.setResponse(
       "executePlan",
@@ -628,8 +661,23 @@ class AutoMobilePlanExecutorTest {
   private fun sessionOwnershipLostPayload(): JsonObject =
     payload(
       """{"error":{"code":"session_ownership_lost","message":"Session released",
-      "sessionUuid":"test-session","reason":"explicit","retryable":true,
+      "sessionUuid":"test-session","reason":"explicit","retryable":false,
+      "nextAction":"acquire_new_session",
       "recovery":{"action":"acquire_replacement_session","tools":["getAndroid","getApple"]}}}""",
+    )
+
+  // Captured from sessionOwnershipLostPayload for a session terminalized by
+  // identity-recovery-owned-by-other-daemon (#11098).
+  private fun otherDaemonTerminalSessionPayload(): JsonObject =
+    payload(
+      """{"error":{"code":"session_ownership_lost","message":"Session terminal",
+      "sessionUuid":"test-session","reason":"identity-recovery-owned-by-other-daemon",
+      "retryable":false,"nextAction":"acquire_new_session","ownerPid":4242,
+      "recovery":{"action":"acquire_replacement_session","tools":["getAndroid","getApple"]},
+      "release":{"sessionId":"test-session","deviceId":"emulator-5554",
+      "releaseReason":"identity-recovery-owned-by-other-daemon","releasedAtMs":2,"terminal":true,
+      "ownerPid":4242,"heartbeat":{"lastHeartbeatMs":1,"hasReceivedHeartbeat":true,
+      "timeoutMs":20000,"ageMs":1}}}}""",
     )
 
   // Shape of shapeToolCallError for an InputDeviceOwnedError

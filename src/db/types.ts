@@ -570,17 +570,6 @@ export interface ProvisionedDeviceTransportTombstonesTable {
   retired_at_ms: number;
 }
 
-export interface DeviceTeardownOperationsTable {
-  operation_id: string;
-  request_fingerprint: string;
-  owner_token: string;
-  status: string;
-  result_json: string | null;
-  expires_at_ms: number;
-  created_at: Generated<string>;
-  updated_at: Generated<string>;
-}
-
 /**
  * Durable membership set backing `ToolSelectionProfileRegistry` (issue #6225):
  * one row per crypto-random tool-selection-profile uuid this daemon process
@@ -838,7 +827,6 @@ export interface Database {
   device_resource_applications: DeviceResourceApplicationsTable;
   emulator_loss_incidents: EmulatorLossIncidentsTable;
   provisioned_device_transport_tombstones: ProvisionedDeviceTransportTombstonesTable;
-  device_teardown_operations: DeviceTeardownOperationsTable;
   tool_selection_profile_provenance: ToolSelectionProfileProvenanceTable;
 }
 

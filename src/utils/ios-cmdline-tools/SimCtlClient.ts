@@ -728,7 +728,13 @@ export class SimCtlClient implements SimCtl {
   private static readonly HEADLESS_SESSION_CACHE_TTL = 30_000; // 30 seconds
 
   // Static cache for device list
-  private static deviceListCache: { devices: DeviceInfo[]; timestamp: number } | null = null;
+  // `observedAt` is the discovery stamp taken when the listing was recorded, so a
+  // cache hit replays it instead of looking newer than later evidence (#11103).
+  private static deviceListCache: {
+    devices: DeviceInfo[];
+    timestamp: number;
+    observedAt: number;
+  } | null = null;
   private static readonly DEVICE_LIST_CACHE_TTL = 5000; // 5 seconds
   // Last-known-good device list, retained past a failed listing so a transient
   // `simctl` error degrades to a stale-but-usable snapshot instead of throwing
@@ -1337,7 +1343,7 @@ export class SimCtlClient implements SimCtl {
     udid: string,
     deadlineMs: number | undefined,
     signal: AbortSignal | undefined,
-    operation: "start" | "shut down" = "start",
+    operation: "start" | "shut down" | "erase" = "start",
   ): Promise<SimulatorBootLease> {
     if (signal?.aborted) {
       throw signal.reason ?? new ActionableError(`iOS simulator ${operation} aborted for ${udid}`);
@@ -1523,7 +1529,30 @@ export class SimCtlClient implements SimCtl {
 
   async eraseSimulator(udid: string): Promise<void> {
     logger.debug(`Erasing iOS simulator ${udid}`);
-    await this.executeCommandArgs(["erase", udid]);
+    const signal = getAbortSignal();
+    // Erase mutates the same device a boot or shutdown is working on, so it queues
+    // behind them under the same lease (bounded, even with no abort signal) and
+    // leaves a cold simulator whose cached "booted" listing is stale (#11122).
+    const lease = await this.acquireSimulatorBoot(
+      udid,
+      this.timer.now() + SIMULATOR_SHUTDOWN_LEASE_WAIT_TIMEOUT_MS,
+      signal,
+      "erase",
+    );
+    try {
+      await this.executeCommandArgv(
+        ["erase", udid],
+        SIMCTL_COMMAND_TIMEOUT_MS,
+        `erase ${udid}`,
+        signal,
+        true,
+      );
+      lease.state.lastBootSucceeded = false;
+      lease.state.ownerToken = undefined;
+    } finally {
+      SimCtlClient.invalidateDeviceListCache();
+      lease.release();
+    }
   }
 
   async waitForSimulatorReady(
@@ -2251,7 +2280,9 @@ export class SimCtlClient implements SimCtl {
       return false;
     }
     const timestamp = this.timer.now();
-    SimCtlClient.deviceListCache = devices.length ? { devices, timestamp } : null;
+    SimCtlClient.deviceListCache = devices.length
+      ? { devices, timestamp, observedAt: this.observationSequence.next() }
+      : null;
     SimCtlClient.lastGoodDeviceList = { devices, timestamp };
     SimCtlClient.recordedDeviceListRequestSequence = requestSequence;
     return true;
@@ -2349,7 +2380,11 @@ export class SimCtlClient implements SimCtl {
         : options.bypassCache
           ? await this.listDevicesForBootedCheck(timeoutMs, signal)
           : await this.raceOwnDeadline(this.sharedDeviceList(), timeoutMs, signal);
-    const observedAt = this.observationSequence.next();
+    // A listing served from (or just recorded into) the cache keeps its recorded
+    // stamp; only an unrecorded read is a new observation.
+    const recorded = SimCtlClient.deviceListCache;
+    const observedAt =
+      recorded?.devices === devices ? recorded.observedAt : this.observationSequence.next();
 
     return devices
       .filter((device) => isDeviceAvailable(device) && device.state === "Booted" && device.deviceId)
@@ -2588,21 +2623,26 @@ export class SimCtlClient implements SimCtl {
     signal?: AbortSignal,
   ): Promise<string> {
     logger.debug(`Creating iOS simulator: ${name} (${deviceType}, ${runtime})`);
-    const result = await this.executeCommandArgs(
-      ["create", name, deviceType, runtime],
-      undefined,
-      signal,
-    );
+    let result: ExecResult;
+    try {
+      result = await this.executeCommandArgs(
+        ["create", name, deviceType, runtime],
+        undefined,
+        signal,
+      );
+    } finally {
+      // A freshly created simulator must be visible to the very next
+      // listSimulatorImages() call, otherwise the provisioning path boots off a
+      // snapshot that predates the device it just created. A cancelled or
+      // failed `simctl create` may still have created it, so invalidate on
+      // every outcome (#11100).
+      SimCtlClient.invalidateDeviceListCache();
+    }
     const simulatorUdid = result.stdout.trim();
 
     if (!simulatorUdid) {
       throw new ActionableError(`Failed to create iOS simulator ${name}`);
     }
-
-    // A freshly created simulator must be visible to the very next
-    // listSimulatorImages() call, otherwise the provisioning path boots off a
-    // snapshot that predates the device it just created.
-    SimCtlClient.invalidateDeviceListCache();
 
     logger.debug(`Created iOS simulator ${name} with UDID: ${simulatorUdid}`);
     return simulatorUdid;

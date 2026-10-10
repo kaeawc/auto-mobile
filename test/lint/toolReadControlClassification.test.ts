@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { registerMcpTools } from "../../src/server";
+import { registerDoctorTools } from "../../src/server/doctorTools";
 import { ToolRegistry, type RegisteredTool } from "../../src/server/toolRegistry";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -136,6 +137,33 @@ const CLASSIFICATION: Classification = {
   ],
 };
 
+/**
+ * Every plain (non-device) tool is a read or control too (#11107). A plain read naming a session is
+ * admitted read-only and never counts as activity; it registers `readOnly` (a per-args classifier
+ * for a mixed tool). Control is the default: acquisition, release, routing and configuration.
+ */
+const PLAIN_CLASSIFICATION: Classification = {
+  read: ["doctor", "getIosSimulatorCapabilities", "listDeviceImages", "listDevices"],
+  perArgs: {
+    recordSteps: {
+      reads: [{ action: "status" }],
+      controls: [{ action: "begin" }, { action: "end", planName: "p" }],
+    },
+  },
+  control: [
+    "deleteDevice",
+    // Stops the active recording.
+    "exportPlan",
+    "getAndroid",
+    "getApple",
+    "killDevice",
+    "provisionDevice",
+    "setActiveDevice",
+    "setToolEnabled",
+    "startDevice",
+  ],
+};
+
 type ClassifiedTool = Pick<RegisteredTool, "name" | "deviceReadOnly">;
 
 /** Every way the registered device-aware tools disagree with the classification table. */
@@ -184,13 +212,23 @@ function perArgsViolations(
   ];
 }
 
-/** The device-aware tools the server registers, including hidden aliases and gated tools. */
-function registeredDeviceAwareTools(): ClassifiedTool[] {
+/** Every tool the server registers, including hidden aliases and gated tools. */
+function registeredTools(): RegisteredTool[] {
   const listed = ToolRegistry.getAllTools({ includeUnavailable: true });
-  const hidden = ["overlay"]
+  const hidden = ["overlay", "startDevice"]
     .map((name) => ToolRegistry.getTool(name))
     .filter((tool): tool is RegisteredTool => tool !== undefined);
-  return [...listed, ...hidden].filter((tool) => tool.requiresDevice);
+  return [...listed, ...hidden];
+}
+
+/** The device-aware tools the server registers, including hidden aliases and gated tools. */
+function registeredDeviceAwareTools(): ClassifiedTool[] {
+  return registeredTools().filter((tool) => tool.requiresDevice);
+}
+
+/** The plain (non-device) tools the server and the CLI register (#11107). */
+function registeredPlainTools(): ClassifiedTool[] {
+  return registeredTools().filter((tool) => !tool.requiresDevice);
 }
 
 describe("device-aware tool read/control classification (#10965)", () => {
@@ -203,6 +241,8 @@ describe("device-aware tool read/control classification (#10965)", () => {
     serverConfig.setEmbeddedSdkEnabled(true);
     ToolRegistry.clearTools();
     registerMcpTools(true);
+    // The CLI also registers `doctor`, a plain host diagnostic (#11107).
+    registerDoctorTools();
   });
 
   afterAll(() => {
@@ -217,12 +257,18 @@ describe("device-aware tool read/control classification (#10965)", () => {
     expect(classificationViolations(tools, CLASSIFICATION)).toEqual([]);
   });
 
+  test("every registered plain tool matches its declared read/control classification (#11107)", () => {
+    const tools = registeredPlainTools();
+    expect(tools.length).toBeGreaterThan(10);
+    expect(classificationViolations(tools, PLAIN_CLASSIFICATION)).toEqual([]);
+  });
+
   test("a read is in exactly one list", () => {
-    const names = [
-      ...CLASSIFICATION.read,
-      ...Object.keys(CLASSIFICATION.perArgs),
-      ...CLASSIFICATION.control,
-    ];
+    const names = [CLASSIFICATION, PLAIN_CLASSIFICATION].flatMap((table) => [
+      ...table.read,
+      ...Object.keys(table.perArgs),
+      ...table.control,
+    ]);
     expect(names.length).toBe(new Set(names).size);
   });
 

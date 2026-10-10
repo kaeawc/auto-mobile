@@ -1,10 +1,24 @@
 import { pruneSessionAppearanceConfigs } from "../server/appearanceManager";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
+import type { DeviceSession } from "../db/types";
 import type { RehydrationSummary } from "./sessionManager";
 
 export interface AppearanceSweepSessions {
   getSession(sessionId: string): unknown;
+}
+
+/**
+ * What the sweep needs to tell a live peer daemon's session from a stale one when several daemons
+ * share a data dir (#11158). `liveDaemonSessionIds` is the startup live-peer set; by the time the
+ * sweep runs, startup already expired every active `device_sessions` row owned by a dead daemon.
+ */
+export interface AppearanceSweepPeers {
+  liveDaemonSessionIds: ReadonlySet<string>;
+  ownDaemonSessionId: string;
+  getPersistedSession(
+    sessionUuid: string,
+  ): Promise<Pick<DeviceSession, "status" | "daemon_session_id"> | undefined>;
 }
 
 /**
@@ -13,10 +27,17 @@ export interface AppearanceSweepSessions {
  * sessions never ran the live release that clears their row. A row is kept for a session that is
  * live now or that rehydration left for a later recovery; a timed-out rehydration proves nothing
  * about the rows it never listed, so the sweep is skipped then.
+ *
+ * Rows are shared by every daemon on the data dir (#11158), so a row this daemon does not own is
+ * dropped only when its session is terminal. A still-active persisted session belongs to a live
+ * peer (dead owners were expired at startup) and is kept. A row naming no persisted session (an
+ * observer, or a pruned session) is dropped only when no peer daemon is live, since a live peer's
+ * observer rows are indistinguishable from stale ones.
  */
 export async function sweepStaleAppearanceConfigs(
   summary: RehydrationSummary,
   sessions: AppearanceSweepSessions,
+  peers: AppearanceSweepPeers,
   prune: typeof pruneSessionAppearanceConfigs = pruneSessionAppearanceConfigs,
 ): Promise<string[]> {
   if (summary.timedOut) {
@@ -29,8 +50,14 @@ export async function sweepStaleAppearanceConfigs(
       .map(({ sessionUuid }) => sessionUuid),
   );
   try {
+    const hasLivePeer = [...peers.liveDaemonSessionIds].some(
+      (id) => id !== peers.ownDaemonSessionId,
+    );
     const dropped = await prune(
-      (sessionId) => awaitingRecovery.has(sessionId) || isPresent(sessions.getSession(sessionId)),
+      async (sessionId) =>
+        awaitingRecovery.has(sessionId) ||
+        isPresent(sessions.getSession(sessionId)) ||
+        (await mayBelongToLivePeer(sessionId, peers, hasLivePeer)),
     );
     if (dropped.length > 0) {
       logger.info(`[Appearance] Dropped ${dropped.length} stale per-session appearance rows`);
@@ -39,6 +66,27 @@ export async function sweepStaleAppearanceConfigs(
   } catch (error) {
     logger.warn(`[Appearance] Startup appearance-row sweep failed: ${errorMessage(error)}`, error);
     return [];
+  }
+}
+
+async function mayBelongToLivePeer(
+  sessionId: string,
+  peers: AppearanceSweepPeers,
+  hasLivePeer: boolean,
+): Promise<boolean> {
+  try {
+    const persisted = await peers.getPersistedSession(sessionId);
+    if (persisted === undefined) {
+      return hasLivePeer;
+    }
+    return persisted.status === "active";
+  } catch (error) {
+    // Keeping a row we cannot classify is safe; dropping a live peer's row is not.
+    logger.warn(
+      `[Appearance] Could not read session ${sessionId} during startup sweep; keeping its row: ${errorMessage(error)}`,
+      error,
+    );
+    return true;
   }
 }
 

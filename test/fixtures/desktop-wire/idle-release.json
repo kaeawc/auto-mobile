@@ -118,11 +118,11 @@
           "sessionId": "d0000000-0000-4000-8000-000000000001"
         }
       },
-      "repeat": 62,
+      "repeat": 60,
       "everyMs": 2000
     },
     {
-      "atMs": 128000,
+      "atMs": 124000,
       "actor": "desktop",
       "label": "heartbeat-lapse",
       "request": {
@@ -140,7 +140,7 @@
       }
     },
     {
-      "atMs": 128000,
+      "atMs": 124000,
       "actor": "probe",
       "label": "idle-released",
       "request": {
@@ -159,7 +159,7 @@
       }
     },
     {
-      "atMs": 128000,
+      "atMs": 124000,
       "actor": "desktop",
       "label": "release-lapsed",
       "request": {
@@ -177,7 +177,7 @@
       }
     },
     {
-      "atMs": 128000,
+      "atMs": 124000,
       "actor": "desktop",
       "label": "register-fresh",
       "request": {
@@ -192,12 +192,12 @@
         "result": {
           "accepted": true,
           "heartbeatTimeoutMs": 8000,
-          "expiresAtMs": 136000
+          "expiresAtMs": 132000
         }
       }
     },
     {
-      "atMs": 130000,
+      "atMs": 126000,
       "actor": "desktop",
       "label": "heartbeat-watching-after-release",
       "request": {
@@ -216,7 +216,7 @@
       "everyMs": 2000
     },
     {
-      "atMs": 368000,
+      "atMs": 364000,
       "actor": "probe",
       "label": "still-released",
       "request": {
@@ -235,7 +235,7 @@
       }
     },
     {
-      "atMs": 368000,
+      "atMs": 364000,
       "actor": "desktop",
       "label": "bind-on-tap",
       "request": {
@@ -265,7 +265,7 @@
       }
     },
     {
-      "atMs": 368000,
+      "atMs": 364000,
       "actor": "desktop",
       "label": "tap-after-release",
       "request": {
@@ -293,7 +293,7 @@
       }
     },
     {
-      "atMs": 370000,
+      "atMs": 366000,
       "actor": "desktop",
       "label": "heartbeat-after-tap",
       "request": {

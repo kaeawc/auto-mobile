@@ -422,7 +422,9 @@ export class FakeAdbExecutor implements AdbExecutor {
     return this.defaultResponse;
   }
 
-  async getBootedAndroidDevices(): Promise<BootedDevice[]> {
+  async getBootedAndroidDevices(
+    _options?: Parameters<AdbExecutor["getBootedAndroidDevices"]>[0],
+  ): Promise<BootedDevice[]> {
     return this.devices;
   }
 

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   SimCtlClient,
   type SimCtlBootOptions,
@@ -296,6 +296,10 @@ function createConcurrentStartHarness(
       const result = await (options.shutdown?.(shutdownCount, signal) ?? createExecResult("", ""));
       shutdownSucceeded = true;
       return result;
+    }
+    if (command === `xcrun simctl erase ${UDID}`) {
+      lifecycleCalls.push("erase");
+      return createExecResult("", "");
     }
     if (command === "xcrun simctl list devices --json") {
       listDevicesCount++;
@@ -1221,6 +1225,35 @@ describe("SimCtlClient boot self-verification", () => {
     await expect(readiness).resolves.toMatchObject({ deviceId: UDID });
     await expect(kill).resolves.toBeUndefined();
     expect(harness.lifecycleCalls).toEqual(["bootstatus-1", "shutdown"]);
+  });
+
+  test("eraseSimulator queues behind in-flight readiness and invalidates the list cache (#11122)", async () => {
+    let completeReadiness: (() => void) | undefined;
+    const harness = createConcurrentStartHarness(
+      () =>
+        new Promise((resolve) => {
+          completeReadiness = () => resolve(createExecResult("", ""));
+        }),
+    );
+    const invalidate = spyOn(SimCtlClient, "invalidateDeviceListCache");
+    try {
+      const readiness = harness.createClient().waitForSimulatorReady(UDID, 120_000);
+      await waitForCondition(() => completeReadiness !== undefined, "readiness verification");
+      const erase = harness.createClient().eraseSimulator(UDID);
+      await drainMicrotasks();
+      expect(harness.lifecycleCalls).toEqual(["bootstatus-1"]);
+      invalidate.mockClear();
+
+      completeReadiness!();
+      harness.timer.enableAutoAdvance();
+      await readiness;
+      await erase;
+
+      expect(harness.lifecycleCalls).toEqual(["bootstatus-1", "erase"]);
+      expect(invalidate).toHaveBeenCalled();
+    } finally {
+      invalidate.mockRestore();
+    }
   });
 
   test("bounds killSimulator's boot-lease wait when no signal ever aborts it", async () => {

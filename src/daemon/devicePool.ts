@@ -8969,6 +8969,8 @@ export class DevicePool {
     if (
       device &&
       this.isUnresolvedEmulatorWhileAndroidManaged(device) &&
+      // A caller-supplied identity (the verified AVD name on acquire) was already judged above.
+      !input.stableIds?.some((id) => id !== undefined && id !== "") &&
       !(input.requesterSessionUuid && device.sessionId === input.requesterSessionUuid) &&
       currentManagedSlotReconciler() === undefined
     ) {
@@ -8983,6 +8985,29 @@ export class DevicePool {
       });
     }
     return undefined;
+  }
+
+  /** Last forced re-read per device and session, so a hammering caller costs one read per window. */
+  private readonly managedRereadAtMs = new Map<string, number>();
+
+  private mayForceManagedReread(input: {
+    deviceId: string;
+    requesterSessionUuid?: string;
+    maxAgeMs?: number;
+  }): boolean {
+    const windowMs = input.maxAgeMs ?? 0;
+    const now = this.timer.now();
+    for (const [key, at] of this.managedRereadAtMs) {
+      if (now - at >= windowMs) {
+        this.managedRereadAtMs.delete(key);
+      }
+    }
+    const key = JSON.stringify([input.deviceId, input.requesterSessionUuid]);
+    if (this.managedRereadAtMs.has(key)) {
+      return false;
+    }
+    this.managedRereadAtMs.set(key, now);
+    return true;
   }
 
   /**
@@ -9004,11 +9029,16 @@ export class DevicePool {
     }
     await this.managedSlotExclusion.refresh({ maxAgeMs: input.maxAgeMs });
     let refusal = this.managedSlotRefusalFor(input);
-    if (refusal && input.maxAgeMs && input.requesterSessionUuid) {
+    if (
+      refusal &&
+      input.maxAgeMs &&
+      input.requesterSessionUuid &&
+      this.mayForceManagedReread(input)
+    ) {
       // A cached snapshot can predate the requester's own claim of this slot (#11457). Re-read
-      // before refusing a session so a fresh execution is never refused its own device; callers
-      // with no session, and every call the cache lets through, keep the shared read.
-      await this.managedSlotExclusion.refresh();
+      // with a load that starts after this call before refusing a session, so a fresh execution
+      // is never refused its own device.
+      await this.managedSlotExclusion.refresh({ fresh: true });
       refusal = this.managedSlotRefusalFor(input);
     }
     if (refusal) {

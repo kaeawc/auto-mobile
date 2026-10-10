@@ -21,6 +21,11 @@ export interface ManagedDeviceRef {
 export interface ManagedSlotRefreshOptions {
   /** Reuse a snapshot younger than this. 0 (the default) always re-reads the registry. */
   maxAgeMs?: number;
+  /**
+   * Run a load that starts after this call, never joining one already in flight (which may have
+   * read the registry before the caller's own change). Concurrent fresh calls share one load.
+   */
+  fresh?: boolean;
 }
 
 /**
@@ -146,6 +151,10 @@ export class RegistryManagedSlotExclusion implements ManagedSlotExclusion {
   ) {}
 
   async refresh(options: ManagedSlotRefreshOptions = {}): Promise<void> {
+    if (options.fresh) {
+      await this.refreshFresh();
+      return;
+    }
     const maxAgeMs = options.maxAgeMs ?? 0;
     if (
       maxAgeMs > 0 &&
@@ -159,6 +168,29 @@ export class RegistryManagedSlotExclusion implements ManagedSlotExclusion {
       this.inFlight = undefined;
     });
     await this.inFlight;
+  }
+
+  private freshWaiter: Promise<void> | undefined;
+
+  private refreshFresh(): Promise<void> {
+    // While a waiter is still queued behind an older load, its own load has not started, so a
+    // later caller can share it; once it starts, a newcomer must queue a new one.
+    if (this.freshWaiter) {
+      return this.freshWaiter;
+    }
+    const older = this.inFlight;
+    if (!older) {
+      return this.refresh();
+    }
+    const waiter = older
+      // The older load's failure is its callers' concern; this one reads again.
+      .catch(() => undefined)
+      .then(() => {
+        this.freshWaiter = undefined;
+        return this.refresh();
+      });
+    this.freshWaiter = waiter;
+    return waiter;
   }
 
   holderOf(device: ManagedDeviceRef): ManagedDeviceEntry | undefined {

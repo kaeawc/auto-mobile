@@ -119,3 +119,86 @@ describe("a slot's own execution right after its acquisition", () => {
     expect(await control(PREVIOUS)).toBe("device_assigned_to_managed_slot");
   });
 });
+
+describe("a forced exclusion re-read after a refusal", () => {
+  const DEVICE = { name: "iPhone", deviceId: "IOS-SLOT", platform: "ios" as const };
+
+  test("never joins a load already in flight, and concurrent calls share one new load", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1_000_000);
+    const registry = new FakeSlotRegistry(timer);
+    await assignManagedSlotDevice(registry, "ios", DEVICE.deviceId);
+    const real = registry.snapshotManagedDevices.bind(registry);
+    const gates: Array<() => void> = [];
+    let loads = 0;
+    registry.snapshotManagedDevices = async () => {
+      loads += 1;
+      const entries = await real();
+      await new Promise<void>((resolve) => gates.push(resolve));
+      return entries;
+    };
+    const exclusion = new RegistryManagedSlotExclusion(async () => registry, timer);
+
+    const flush = async () => {
+      for (let i = 0; i < 20; i += 1) {
+        await Promise.resolve();
+      }
+    };
+    const older = exclusion.refresh();
+    await flush();
+    expect(loads).toBe(1);
+
+    const first = exclusion.refresh({ fresh: true });
+    const second = exclusion.refresh({ fresh: true });
+    gates.shift()!();
+    await older;
+    await flush();
+    expect(loads).toBe(2);
+    gates.shift()!();
+    await Promise.all([first, second]);
+    expect(loads).toBe(2);
+  });
+
+  test("the pool re-reads at most once per window for a hammering session", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1_000_000);
+    const registry = new FakeSlotRegistry(timer);
+    await assignManagedSlotDevice(registry, "ios", DEVICE.deviceId);
+    const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    sessions.stopCleanupTimer();
+    const deviceManager = new FakeDeviceUtils();
+    deviceManager.setBootedDevices("ios", [DEVICE]);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessions, "slots-reread-window", {
+        timer,
+        deviceManager,
+        managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, timer),
+      }),
+    );
+    await pool.initializeWithDevices([DEVICE]);
+    const real = registry.snapshotManagedDevices.bind(registry);
+    let loads = 0;
+    registry.snapshotManagedDevices = () => {
+      loads += 1;
+      return real();
+    };
+    const call = () =>
+      pool
+        .assertNotAssignedToManagedSlot({
+          action: "tapOn",
+          deviceId: DEVICE.deviceId,
+          platform: "ios",
+          requesterSessionUuid: "generic",
+          maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
+        })
+        .catch(() => undefined);
+    await call();
+    const afterFirst = loads;
+    await call();
+    await call();
+    expect(loads).toBe(afterFirst);
+    timer.advanceTime(MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS);
+    await call();
+    expect(loads).toBeGreaterThan(afterFirst);
+  });
+});

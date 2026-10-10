@@ -83,4 +83,34 @@ describe("a slot's emulator whose AVD name the pool could not read", () => {
 
     expect(input).not.toBe("allowed");
   });
+
+  const gate = (extra: Record<string, unknown>) =>
+    refusal(
+      pool.assertNotAssignedToManagedSlot({
+        action: "input",
+        deviceId: SLOT_EMULATOR.deviceId,
+        platform: "android",
+        requesterSessionUuid: "generic-session",
+        maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
+        ...extra,
+      }),
+    );
+
+  test("acquire with a verified non-managed AVD name passes", async () => {
+    expect(await gate({ action: "acquire", stableIds: ["generic-avd"] })).toBe("allowed");
+  });
+
+  test("acquire with a managed AVD name is refused", async () => {
+    expect(await gate({ action: "acquire", stableIds: ["amslot-avd"] })).toBe(
+      "device_assigned_to_managed_slot",
+    );
+  });
+
+  test("a testRecording gate with no identity at all is refused", async () => {
+    expect(await gate({ action: "testRecording" })).toBe("device_assigned_to_managed_slot");
+  });
+
+  test("an input gate with only undefined identities is refused", async () => {
+    expect(await gate({ stableIds: [undefined] })).toBe("device_assigned_to_managed_slot");
+  });
 });

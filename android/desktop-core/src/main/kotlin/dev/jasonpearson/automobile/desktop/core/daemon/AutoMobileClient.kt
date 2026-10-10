@@ -573,32 +573,45 @@ internal fun <T> decodeToolResponse(
 }
 
 /**
- * The failure a tool error result reports, keeping the payload's structured `code` and `deviceId`
- * (a refusal is `{success:false, error, code, deviceId, retryable}`, `shapeToolCallError.ts`) so
- * callers can act on the code instead of the message.
+ * The failure a tool error result reports, keeping the payload's structured `code`, `deviceId`,
+ * `retryable`, `retryAfterMs` and `nextAction` so callers can act on them instead of the message.
+ * The daemon puts these fields at the payload's top level (`{success:false, error, code,
+ * retryable}`, `shapeToolCallError.ts`) or nested under `error` (`{error:{code, message, retryable,
+ * nextAction}}`); both shapes exist on the wire, so each field is read from either.
  */
 private fun toolError(json: Json, text: String, cause: Throwable? = null): McpToolErrorException {
   val payload = runCatching { json.decodeFromString<JsonElement>(text) }.getOrNull()
   val payloadObject = payload as? JsonObject
   val code = payloadObject?.let {
-    (it["code"] as? JsonPrimitive)?.contentOrNull
+    refusalString(it, "code")
       ?: ((it["failure"] as? JsonObject)?.get("code") as? JsonPrimitive)?.contentOrNull
   }
   val structuredMessage = payloadObject?.let {
     (it["error"] as? JsonPrimitive)?.contentOrNull
+      ?: ((it["error"] as? JsonObject)?.get("message") as? JsonPrimitive)?.contentOrNull
       ?: (it["message"] as? JsonPrimitive)?.contentOrNull
       ?: (it["reason"] as? JsonPrimitive)?.contentOrNull
-      ?: (it["code"] as? JsonPrimitive)?.contentOrNull
+      ?: code
   }
   return McpToolErrorException(
     message =
       structuredMessage ?: text.removePrefix("Error:").trim().ifBlank { "Tool operation failed" },
     code = code,
-    deviceId = (payloadObject?.get("deviceId") as? JsonPrimitive)?.contentOrNull,
+    deviceId = payloadObject?.let { refusalString(it, "deviceId") },
     cause = cause,
-    retryAfterMs = (payloadObject?.get("retryAfterMs") as? JsonPrimitive)?.longOrNull,
+    retryAfterMs = payloadObject?.let { refusalPrimitive(it, "retryAfterMs")?.longOrNull },
+    retryable = payloadObject?.let { refusalPrimitive(it, "retryable")?.booleanOrNull },
+    nextAction = payloadObject?.let { refusalString(it, "nextAction") },
   )
 }
+
+/** A refusal field read from the payload's top level, else from its nested `error` object. */
+internal fun refusalPrimitive(payload: JsonObject, name: String): JsonPrimitive? =
+  (payload[name] as? JsonPrimitive)
+    ?: ((payload["error"] as? JsonObject)?.get(name) as? JsonPrimitive)
+
+internal fun refusalString(payload: JsonObject, name: String): String? =
+  refusalPrimitive(payload, name)?.contentOrNull
 
 internal fun <T> decodeResourceResponse(
   json: Json,

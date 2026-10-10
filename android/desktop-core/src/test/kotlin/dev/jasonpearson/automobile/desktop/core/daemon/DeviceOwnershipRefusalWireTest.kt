@@ -7,6 +7,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.serializer
 
 /**
  * The client keeps the daemon's typed refusal code (#10743, #10783) from the captured
@@ -70,5 +71,43 @@ class DeviceOwnershipRefusalWireTest {
 
     assertFalse(result.success)
     assertEquals(DEVICE_OWNED_BY_OTHER_SESSION_CODE, result.code)
+  }
+
+  /** Every captured typed refusal, decoded through the tools/call error path. */
+  private fun decoded(case: RefusalWireFixtures.Case): McpToolErrorException =
+    assertFailsWith<McpToolErrorException>(case.name) {
+      decodeToolResponse(DaemonJson, case.result, serializer<SetActiveDeviceResult>())
+    }
+
+  @Test
+  fun `every captured refusal keeps its code, retryable, retryAfterMs and nextAction`() {
+    val cases = RefusalWireFixtures.all()
+    assertTrue(cases.size >= 50, "expected the full refusal-wire corpus, found ${cases.size}")
+    cases.forEach { case ->
+      val error = decoded(case)
+      assertEquals(case.code, error.code, "${case.name}: code")
+      // Rows without a wire `retryable` (managed-slot failures carry it only in a nested
+      // acquisitionFailure) expect false.
+      assertEquals(case.retryable ?: false, error.retryable ?: false, "${case.name}: retryable")
+      assertEquals(case.retryAfterMs, error.retryAfterMs, "${case.name}: retryAfterMs")
+      assertEquals(
+        case.acquireNewSession,
+        error.nextAction == NEXT_ACTION_ACQUIRE_NEW_SESSION,
+        "${case.name}: nextAction",
+      )
+      assertEquals(
+        case.acquireNewSession,
+        error.isSessionTerminalRefusal(),
+        "${case.name}: terminal",
+      )
+    }
+  }
+
+  @Test
+  fun `a refusal surfaces its message field, not the raw JSON payload`() {
+    RefusalWireFixtures.all().forEach { case ->
+      val expected = case.message ?: return@forEach
+      assertEquals(expected, decoded(case).message, "${case.name}: message")
+    }
   }
 }

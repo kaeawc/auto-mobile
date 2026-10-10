@@ -8946,9 +8946,16 @@ export class DevicePool {
     error: number;
   } {
     const devices = this.getDevicesByPlatform(platform);
-    const idle = devices.filter((device) => this.isIdleDeviceEligible(device)).length;
+    // Same derivation as getStats (#11317): a managed-slot or other-daemon device that is idle is
+    // held, so allocation messages count it assigned. `total` (capacity gating) is unaffected.
+    const idle = devices.filter(
+      (device) => this.isIdleDeviceEligible(device) && !this.isHeldOutsideGenericAllocation(device),
+    ).length;
     const assigned = devices.filter(
-      (device) => device.status === "busy" || this.isReservedForAssignment(device),
+      (device) =>
+        device.status === "busy" ||
+        this.isReservedForAssignment(device) ||
+        (device.status === "idle" && this.isHeldOutsideGenericAllocation(device)),
     ).length;
     const error = devices.filter((device) => device.status === "error").length;
 

@@ -101,6 +101,21 @@ describe("DevicePool managed-slot exclusion", () => {
     expect(pool.getIdleDevices().map((device) => device.id)).toEqual(["SIM-FREE"]);
   });
 
+  test("allocation timeout message does not count the managed-slot device as idle (#11320)", async () => {
+    await assignManagedSlotDevice(registry, "ios", "SIM-SLOT");
+    await setUp([ios("SIM-SLOT"), ios("SIM-FREE")]);
+    await pool.managedSlotStableIds("ios");
+
+    expect(await assignOne("generic-1", "ios")).toBe("SIM-FREE");
+    const refused = await assignOne("generic-2", "ios");
+
+    expect(refused).toBeInstanceOf(Error);
+    const message = (refused as Error).message;
+    expect(message).toContain("Total devices: 2");
+    expect(message).toContain("Idle: 0\n");
+    expect(message).toContain("Assigned: 2\n");
+  });
+
   test("multi-device criteria allocation never lends the assigned device", async () => {
     await assignManagedSlotDevice(registry, "ios", "SIM-SLOT");
     await setUp([ios("SIM-SLOT"), ios("SIM-FREE")]);

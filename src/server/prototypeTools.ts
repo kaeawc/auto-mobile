@@ -43,7 +43,9 @@ import {
 } from "../features/observe/android/CtrlProxyPrototypes";
 import {
   PROTOTYPE_ANCHOR_CAPABILITY,
+  PROTOTYPE_APPEARANCE_CAPABILITY,
   PROTOTYPE_DISPLAY_CAPABILITY,
+  PROTOTYPE_EVENT_KINDS,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   PROTOTYPE_THEME_MODES_CAPABILITY,
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
@@ -86,6 +88,15 @@ import {
   prototypeThemeModeFields,
   prototypeThemeModesUnsupportedMessage,
 } from "../features/prototype/prototypeThemeModes";
+import {
+  parsePrototypeAppearance,
+  PROTOTYPE_APPEARANCE_INPUTS,
+  PROTOTYPE_APPEARANCE_MODES,
+  PROTOTYPE_APPEARANCE_SOURCES,
+  prototypeAppearanceOverride,
+  prototypeAppearanceUnsupportedMessage,
+  shownAppearance,
+} from "../features/prototype/prototypeAppearance";
 import {
   resolvePrototypeDisplayId,
   type PrototypeDisplayDependencies,
@@ -334,6 +345,12 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .describe(
           "show only: when the prototype with spec.id is already shown, start it fresh (pager pages from the spec, display re-resolved) instead of replacing it in place",
         ),
+      appearance: z
+        .enum(PROTOTYPE_APPEARANCE_INPUTS)
+        .optional()
+        .describe(
+          'show only: what the system light/dark setting means for this prototype. device (default) follows the device; light or dark pins it without changing the device or the app behind, so a spec with theme.mode "system" or no mode can be checked in both modes. It replaces the system setting only: an explicit theme.mode, a flat theme.colors.background/surface override and an opaque authored background still decide first. Each show states it afresh (a same-id show without it follows the device again). light and dark need a device advertising prototype_appearance_v1 and are refused otherwise.',
+        ),
       id: z
         .string()
         .min(1)
@@ -347,9 +364,11 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       all: z.literal(true).optional().describe("Dismiss all prototypes on the targeted device"),
       eventName: z.string().min(1).optional().describe("awaitEvent only: filter event name"),
       kind: z
-        .enum(["emit", "page_changed", "dismissed"])
+        .enum(PROTOTYPE_EVENT_KINDS)
         .optional()
-        .describe("awaitEvent only: filter event kind"),
+        .describe(
+          "awaitEvent only: filter event kind. appearance_changed (name null, payload {mode, source}) is sent once whenever the shown prototype's resolved light/dark mode changes, by a device advertising prototype_appearance_v1",
+        ),
       afterSequence: z
         .number()
         .int()
@@ -375,13 +394,14 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "all",
     "display",
     "reset",
+    "appearance",
     "eventName",
     "kind",
     "afterSequence",
     "assets",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
-    show: ["spec", "specPath", "display", "reset", "assets"],
+    show: ["spec", "specPath", "display", "reset", "appearance", "assets"],
     dismiss: ["id", "all"],
     status: [],
     inspect: [],
@@ -451,6 +471,19 @@ function prototypeScope(
   };
 }
 
+const appearanceSchema = z.object({
+  mode: z.enum(PROTOTYPE_APPEARANCE_MODES),
+  source: z
+    .enum(PROTOTYPE_APPEARANCE_SOURCES)
+    .describe(
+      "What decided the mode: explicit (theme.mode light or dark), roleLuminance (the flat theme.colors.background, else surface, override), authoredBackground (the first opaque authored background), override (the show's appearance), or system (the device's own setting)",
+    ),
+  deviceDark: z
+    .boolean()
+    .describe(
+      "The device's own setting whatever decided mode, as of the last show, inspect or system-sourced appearance_changed event",
+    ),
+});
 const lastResultSchema = z.object({
   id: z.string().optional(),
   all: z.literal(true).optional(),
@@ -477,6 +510,11 @@ const lastResultSchema = z.object({
     .nonnegative()
     .optional()
     .describe("Android logical display the prototype was shown on; absent for the default display"),
+  appearance: appearanceSchema
+    .optional()
+    .describe(
+      "The light or dark mode the prototype is drawn in, as the device last reported it: in lastResult what a successful show resolved to, and per prototype in status and inspect that value refreshed by inspect and by appearance_changed events. Absent when the device does not advertise prototype_appearance_v1, on dismiss and on a failed show",
+    ),
   success: z.boolean(),
   error: z.string().optional(),
   totalTimeMs: z.number().optional(),
@@ -505,7 +543,7 @@ const eventCountsSchema = z.object({
 const prototypeEventOutputSchema = z.object({
   id: z.string(),
   sequence: z.number().int().nonnegative(),
-  kind: z.enum(["emit", "page_changed", "dismissed"]),
+  kind: z.enum(PROTOTYPE_EVENT_KINDS),
   name: z.string().nullable(),
   payload: z.json(),
   state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
@@ -662,6 +700,8 @@ async function mutate(
       timeoutMs: args.timeoutMs,
       displayId,
       reset: args.reset,
+      // [appearanceRefusal] already ended the call when the device would ignore it.
+      appearance: prototypeAppearanceOverride(args.appearance),
     });
   }
   const dismissal: PrototypeDismiss = args.all ? { all: true } : { id: args.id! };
@@ -782,6 +822,37 @@ async function themeModesRefusal(
     return undefined;
   }
   const message = prototypeThemeModesUnsupportedMessage(fields, target.android ? "android" : "ios");
+  return { success: false, error: new ActionableError(message).message };
+}
+
+/**
+ * Refuses, before anything is sent, a `light` or `dark` appearance override (#11223) on a device
+ * that does not advertise `prototype_appearance_v1`: an older device ignores the request field and
+ * draws the prototype in the device's own mode, which the caller would take for the pinned one.
+ * `device` and an omitted `appearance` send nothing, so they need no capability.
+ */
+async function appearanceRefusal(
+  target: PrototypeTarget,
+  args: z.infer<typeof prototypeSchema>,
+  signal: AbortSignal | undefined,
+): Promise<PrototypeResult | undefined> {
+  const override =
+    args.action === "show" ? prototypeAppearanceOverride(args.appearance) : undefined;
+  if (override === undefined) {
+    return undefined;
+  }
+  const supported = target.android
+    ? await target.android.supportsCommand(PROTOTYPE_APPEARANCE_CAPABILITY)
+    : target.ios?.supportsCapability(PROTOTYPE_APPEARANCE_CAPABILITY) === true;
+  // The lookup waits for connection and handshake; an abort during it must stop the show.
+  signal?.throwIfAborted();
+  if (supported) {
+    return undefined;
+  }
+  const message = prototypeAppearanceUnsupportedMessage(
+    override,
+    target.android ? "android" : "ios",
+  );
   return { success: false, error: new ActionableError(message).message };
 }
 
@@ -1077,7 +1148,8 @@ async function resolveShowDisplay(
 }
 
 /**
- * Display resolution, then the theme-modes refusal, then window-option support, then anchor
+ * Display resolution, then the theme-modes refusal, then the appearance-override refusal, then
+ * window-option support, then anchor
  * resolution: any refusal ends the call unsent and leaves the device untouched (the app-layer grant
  * is a device side effect that runs later, in [sendPrototype]). An in-place show stays on [show.shownDisplayId], so anchors are checked against that.
  */
@@ -1098,6 +1170,7 @@ async function preflightMutation(
   }
   const failure =
     (await themeModesRefusal(target, args, signal)) ??
+    (await appearanceRefusal(target, args, signal)) ??
     (await windowOptionsRefusal(target, args, signal));
   if (failure) {
     return { displayId: resolved.displayId, failure };
@@ -1407,6 +1480,7 @@ function supersededResult(
     ...target,
     lastAction: args.action,
     ...(placed.displayId === undefined ? {} : { displayId: placed.displayId }),
+    ...shownAppearance(args.action, result),
     success: result.success,
     ...(result.error ? { error: result.error } : {}),
     ...(result.totalTimeMs === undefined ? {} : { totalTimeMs: result.totalTimeMs }),
@@ -1528,6 +1602,8 @@ const devicePrototypeEntrySchema = z.object({
   pages: z.record(z.string(), z.number().int().nonnegative()).default({}),
   lastSequence: z.number().int().nonnegative(),
   suspended: z.boolean().optional(),
+  // Absent from a device without prototype_appearance_v1; a malformed one is dropped, not guessed.
+  appearance: z.unknown().optional().transform(parsePrototypeAppearance),
 });
 
 function parseReportedPrototypes(
@@ -1669,6 +1745,9 @@ const iosAgentStatusSchema = z.object({
   pages: z.record(z.string(), z.number().int().nonnegative()).default({}),
   state: stateInput,
   lastSequence: z.number().int().nonnegative(),
+  // Flat on the status (the agent holds one prototype); absent when nothing is shown and from an
+  // agent without prototype_appearance_v1.
+  appearance: z.unknown().optional().transform(parsePrototypeAppearance),
 });
 
 /**
@@ -1711,9 +1790,9 @@ async function inspectIosAgent(
       error: "Prototype inspect failed: the agent returned a malformed status.",
     };
   }
-  const { shown, id, pages, state, lastSequence } = status.data;
+  const { shown, id, pages, state, lastSequence, appearance } = status.data;
   const reported =
-    shown && id !== null ? [{ id, persistent: false, state, pages, lastSequence }] : [];
+    shown && id !== null ? [{ id, persistent: false, state, pages, lastSequence, appearance }] : [];
   adoptReportedPrototypes(
     store,
     events,
@@ -2166,7 +2245,7 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
   };
   ToolRegistry.registerDeviceAware(
     PROTOTYPE_TOOL_NAME,
-    'Show (always a full spec, inline as spec or from a local JSON file as specPath), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which prototypes it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for a prototype id on Android, or on an iOS simulator through the prototype agent that launchApp with prototype:true injects (show, dismiss, status, inspect, awaitEvent; sizes are points). A show with the id of the prototype already on screen replaces it in place: it keeps the display and each pager\'s page (clamped), while the new spec\'s state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/toggle/increment/decrement/dismiss. Reuse: a top-level components:{name:{root}} map placed with {type:"use",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node\'s anchor {type:"element",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the prototype excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:"bounds",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the prototype is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the prototype re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. On Android a session prototype is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer "prototype" calls fail saying so) and it returns with the app; a device-persistent prototype is not tied to an app. Status makes no device request, marks a prototype suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the prototype stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising prototype_window_options_v1. A device-persistent prototype keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising prototype_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (prototype_inspect_v1) for the one prototype it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>.',
+    'Show (always a full spec, inline as spec or from a local JSON file as specPath), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which prototypes it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for a prototype id on Android, or on an iOS simulator through the prototype agent that launchApp with prototype:true injects (show, dismiss, status, inspect, awaitEvent; sizes are points). A show with the id of the prototype already on screen replaces it in place: it keeps the display and each pager\'s page (clamped), while the new spec\'s state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/toggle/increment/decrement/dismiss. Reuse: a top-level components:{name:{root}} map placed with {type:"use",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node\'s anchor {type:"element",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the prototype excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:"bounds",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the prototype is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the prototype re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. On Android a session prototype is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer "prototype" calls fail saying so) and it returns with the app; a device-persistent prototype is not tied to an app. Status makes no device request, marks a prototype suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the prototype stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising prototype_window_options_v1. A device-persistent prototype keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising prototype_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (prototype_inspect_v1) for the one prototype it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Light and dark: show takes appearance device (default), light or dark, which pins what the system setting means for that show without changing the device; it replaces the system setting only (mode order: explicit theme.mode, then the flat theme.colors.background/surface luminance, then an opaque authored background, then appearance, else the device), and light or dark is refused unless the device advertises prototype_appearance_v1. Such a device reports appearance {mode, source, deviceDark} in lastResult after a show and per prototype in status and inspect, and sends one appearance_changed event (awaitEvent kind; payload {mode, source}) on any change of the resolved mode while shown (the device flipping, or prototype state changing an inferred mode), never for the show itself. In a scrim slot only the scrim role gets alpha (0.4); other roles are drawn unchanged. Per-mode {light, dark} forms need prototype_theme_modes_v1. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>.',
     prototypeSchema,
     handler,
     {

@@ -1,6 +1,11 @@
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
-import type { PrototypeEvent, PrototypeResult } from "../observe/android/ctrlProxyProtocol";
+import type {
+  PrototypeAppearance,
+  PrototypeEvent,
+  PrototypeResult,
+} from "../observe/android/ctrlProxyProtocol";
+import { prototypeAppearanceAfterChange, shownAppearance } from "./prototypeAppearance";
 
 export type PrototypeMutation = "show" | "dismiss";
 export interface PrototypeLastResult {
@@ -21,6 +26,12 @@ export interface PrototypeLastResult {
    */
   suspended?: true;
   displayId?: number;
+  /**
+   * The light or dark mode the prototype is drawn in, as last reported by the device: a show
+   * result, an `inspect`, or an `appearance_changed` event since. Absent on a dismiss, a failed
+   * show, and whenever the device lacks `prototype_appearance_v1`.
+   */
+  appearance?: PrototypeAppearance;
   success: boolean;
   error?: string;
   totalTimeMs?: number;
@@ -35,6 +46,7 @@ export interface AdoptedPrototype {
   id: string;
   persistent?: boolean;
   suspended?: boolean;
+  appearance?: PrototypeAppearance;
   pages: PrototypeEvent["pages"];
   state: PrototypeEvent["state"];
 }
@@ -147,6 +159,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       adopted: true,
       ...(prototype.persistent === undefined ? {} : { persistent: prototype.persistent }),
       ...(prototype.suspended === true ? { suspended: true as const } : {}),
+      ...(prototype.appearance ? { appearance: { ...prototype.appearance } } : {}),
       success: true,
       timestamp: this.clock.now(),
     };
@@ -175,10 +188,29 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       state: { ...event.state },
       lastKnown: true,
     };
-    if (stored.shown.has(event.id)) {
+    const shown = stored.shown.get(event.id);
+    if (shown) {
       stored.snapshot = stored.pendingSnapshot;
+      if (event.kind === "appearance_changed") {
+        this.recordAppearanceChange(stored, shown, event);
+      }
     }
     this.remember(key, stored);
+  }
+
+  /**
+   * The shown prototype's resolved mode changed. Only its presence entry is refreshed: `lastResult`
+   * stays the record of what the last request reported.
+   */
+  private recordAppearanceChange(
+    stored: StoredPrototypeStatus,
+    shown: PrototypeLastResult,
+    event: PrototypeEvent,
+  ): void {
+    const appearance = prototypeAppearanceAfterChange(shown.appearance, event.payload);
+    if (appearance) {
+      stored.shown.set(event.id, { ...shown, appearance });
+    }
   }
 
   record(
@@ -235,8 +267,16 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       } else if (entry.id) {
         this.clearShown(stored.deviceId, entry.id);
       }
-    } else if (entry.id && stored.shown.has(entry.id)) {
-      stored.shown.set(entry.id, entry);
+    } else if (entry.id) {
+      this.keepShown(stored, entry.id, entry);
+    }
+  }
+
+  /** A refused show or dismiss leaves the prototype on screen, in the mode it was already in. */
+  private keepShown(stored: StoredPrototypeStatus, id: string, entry: PrototypeLastResult): void {
+    const shown = stored.shown.get(id);
+    if (shown) {
+      stored.shown.set(id, shown.appearance ? { ...entry, appearance: shown.appearance } : entry);
     }
   }
 
@@ -291,6 +331,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...target,
       lastAction: action,
       ...(displayId === undefined ? {} : { displayId }),
+      ...shownAppearance(action, result),
       success: result.success,
       ...(result.error ? { error: result.error } : {}),
       ...(result.totalTimeMs === undefined ? {} : { totalTimeMs: result.totalTimeMs }),

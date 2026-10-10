@@ -162,7 +162,12 @@ the system setting. Every per-mode form below reads that one resolved mode. A de
   prototype.
 - **Window metadata.** `prototypeOpaque` follows what is drawn. The root background and the window
   scrim are resolved in the mode the show resolved to and count as solid only when the result is
-  fully opaque. An opaque role counts; the `scrim` role in a scrim slot never does.
+  fully opaque. An opaque role counts; the `scrim` role in a scrim slot never does. The root
+  counts only when it is drawn over the whole window (#11408): `width` and `height` both `fill`,
+  no `maxWidth`/`maxHeight` cap and no `aspectRatio`, no non-zero `offset`, no rounded corner
+  (`cornerRadius` absent, `0`, `none` or all corners `0`) and no `pressScale` below one. A root
+  that fails any of these lets the app show at an edge or corner, so only an opaque fullscreen
+  scrim behind it can still make the window opaque.
 
 ### Live appearance (#11221, `prototype_appearance_v1`)
 

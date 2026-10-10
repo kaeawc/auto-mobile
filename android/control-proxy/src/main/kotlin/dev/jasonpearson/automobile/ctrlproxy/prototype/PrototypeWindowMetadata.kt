@@ -3,7 +3,9 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import android.view.accessibility.AccessibilityWindowInfo
 import androidx.compose.ui.graphics.Color
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
+import dev.jasonpearson.automobile.protocol.PrototypeCornerRadius
 import dev.jasonpearson.automobile.protocol.PrototypeDimension
+import dev.jasonpearson.automobile.protocol.PrototypeStyle
 
 /**
  * Window title of the prototype (`prototypeLayoutParams`). It is what tells the prototype window
@@ -36,13 +38,13 @@ const val FULLSCREEN_DISMISS_BAR_OPAQUE = false
  * Derived from the render model the window actually draws. Opaque requires the window not to be
  * translucent (`opacityPercent` 100), no translucent host chrome over the window, and a fully
  * opaque surface that fills the window: the root's own background at alpha 1 sized to fill with no
- * node alpha, or, for fullscreen, a fully opaque scrim painted behind it. A modal sheet's scrim is
- * drawn over content and never makes anything more opaque. Colours are resolved as they are drawn,
- * against [palettes]: a role name counts when its scheme colour is opaque, a `{light, dark}` pair
- * only when the side for each palette's mode is, and the `scrim` role in a scrim slot never does,
- * because it is drawn at the default scrim opacity. The controller passes the one palette of the
- * mode the show resolved to, with that [appearance]; without it every mode the spec can resolve to
- * is checked.
+ * node alpha and nothing that draws it short of the window ([coversItsParent]), or, for fullscreen,
+ * a fully opaque scrim painted behind it. A modal sheet's scrim is drawn over content and never
+ * makes anything more opaque. Colours are resolved as they are drawn, against [palettes]: a role
+ * name counts when its scheme colour is opaque, a `{light, dark}` pair only when the side for each
+ * palette's mode is, and the `scrim` role in a scrim slot never does, because it is drawn at the
+ * default scrim opacity. The controller passes the one palette of the mode the show resolved to,
+ * with that [appearance]; without it every mode the spec can resolve to is checked.
  */
 internal fun prototypeWindowMetadata(
   model: PrototypeRenderModel,
@@ -61,9 +63,7 @@ internal fun prototypeWindowMetadata(
   // What is drawn decides: a colour is solid only if it resolves opaque in every reachable mode.
   val drawn = palettes ?: prototypeReachablePalettes(model)
   fun opaque(color: Color?) = (color?.alpha ?: 0f) >= 1f
-  // An omitted dimension is wrap-content, so only an explicit fill spans the window.
-  val rootFills =
-    style.source.width == PrototypeDimension.Fill && style.source.height == PrototypeDimension.Fill
+  val rootFills = style.source.coversItsParent()
   val rootSolid =
     rootFills &&
       drawn.all {
@@ -81,6 +81,34 @@ internal fun prototypeWindowMetadata(
     appearance,
   )
 }
+
+/**
+ * Whether a node with this style paints its background over all of its parent, as the renderer
+ * (`prototypeNodeModifier`) applies it. An omitted dimension is wrap-content, so only an explicit
+ * `fill` on both axes spans the parent. Everything else that can pull the drawn surface off an edge
+ * rules it out: a `maxWidth`/`maxHeight` cap or an `aspectRatio` (they resize a filled node; the
+ * window size is not known here, so any cap counts), an `offset` (it shifts the whole node), a
+ * `cornerRadius` that rounds any corner (the background is clipped to it) and a `pressScale` below
+ * one (the node shrinks while pressed).
+ */
+private fun PrototypeStyle.coversItsParent(): Boolean =
+  width == PrototypeDimension.Fill &&
+    height == PrototypeDimension.Fill &&
+    maxWidth == null &&
+    maxHeight == null &&
+    aspectRatio == null &&
+    (offset?.let { it.x == 0.0 && it.y == 0.0 } ?: true) &&
+    (cornerRadius?.isSquare() ?: true) &&
+    (pressScale?.let { it >= 1.0 } ?: true)
+
+/** Whether no corner is rounded. A shape token other than `none` always rounds. */
+private fun PrototypeCornerRadius.isSquare(): Boolean =
+  when (this) {
+    is PrototypeCornerRadius.Dp -> dp == 0.0
+    is PrototypeCornerRadius.Token -> name == "none"
+    is PrototypeCornerRadius.Corners ->
+      listOf(topStart, topEnd, bottomEnd, bottomStart).all { (it ?: 0.0) == 0.0 }
+  }
 
 /**
  * Whether an accessibility window type can be one of CtrlProxy's prototype windows: the system

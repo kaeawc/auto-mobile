@@ -1,0 +1,13 @@
+Seq	Host	Starttime	JobRuntime	Send	Receive	Exitval	Signal	Command
+3	:	1791665895.660	     0.419	0	254	0	0	bash -o pipefail -c 'bats "$1"  2>&1 | tee "$2"' _ test/bats/ctrl-proxy-xcodegen-drift.bats "/tmp/tmp.81TwxkbMwl"/3.out
+1	:	1791665895.654	     2.792	0	1233	0	0	bash -o pipefail -c 'bats "$1"  2>&1 | tee "$2"' _ test/bats/validate-ktfmt.bats "/tmp/tmp.81TwxkbMwl"/1.out
+5	:	1791665896.083	     2.992	0	678	0	0	bash -o pipefail -c 'bats "$1"  2>&1 | tee "$2"' _ test/bats/ensure-daemon-ready.bats "/tmp/tmp.81TwxkbMwl"/5.out
+7	:	1791665899.079	    15.992	0	1490	0	0	bash -o pipefail -c 'bats "$1"  2>&1 | tee "$2"' _ test/bats/verify-release-integrity.bats "/tmp/tmp.81TwxkbMwl"/7.out
+6	:	1791665898.450	    28.526	0	4000	0	0	bash -o pipefail -c 'bats "$1"  2>&1 | tee "$2"' _ test/bats/classify-failure.bats "/tmp/tmp.81TwxkbMwl"/6.out
+2	:	1791665895.656	    36.011	0	2645	0	0	bash -o pipefail -c 'bats "$1"  2>&1 | tee "$2"' _ test/bats/maven-publication-manifest.bats "/tmp/tmp.81TwxkbMwl"/2.out
+8	:	1791665915.076	    17.477	0	1906	0	0	bash -o pipefail -c 'bats "$1"  2>&1 | tee "$2"' _ test/bats/install-bounded-package-install.bats "/tmp/tmp.81TwxkbMwl"/8.out
+9	:	1791665926.980	     6.298	0	1857	0	0	bash -o pipefail -c 'bats "$1"  2>&1 | tee "$2"' _ test/bats/generate-release-constants.bats "/tmp/tmp.81TwxkbMwl"/9.out
+11	:	1791665932.557	     0.848	0	328	0	0	bash -o pipefail -c 'bats "$1"  2>&1 | tee "$2"' _ test/bats/check-no-new-direct-security.bats "/tmp/tmp.81TwxkbMwl"/11.out
+10	:	1791665931.670	     1.977	0	983	0	0	bash -o pipefail -c 'bats "$1"  2>&1 | tee "$2"' _ test/bats/validate-sdk-debug-inspector-consumer.bats "/tmp/tmp.81TwxkbMwl"/10.out
+12	:	1791665933.281	     4.776	0	832	0	0	bash -o pipefail -c 'bats "$1"  2>&1 | tee "$2"' _ test/bats/bump-versions.bats "/tmp/tmp.81TwxkbMwl"/12.out
+4	:	1791665895.662	    76.850	0	1087	0	0	bash -o pipefail -c 'bats "$1"  2>&1 | tee "$2"' _ test/bats/prepush-ios.bats "/tmp/tmp.81TwxkbMwl"/4.out

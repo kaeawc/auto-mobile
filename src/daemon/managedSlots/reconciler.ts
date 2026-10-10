@@ -45,6 +45,7 @@ import { stableStringify } from "../../utils/stableStringify";
 import type { Timer } from "../../utils/SystemTimer";
 import {
   bindingMatches,
+  isStaleFreeDeviceStopClaim,
   type SlotAssignmentRecord,
   type SlotBindingExpectation,
   type SlotCasFailure,
@@ -861,6 +862,11 @@ function casFailure(result: SlotCasFailure, step: string): ManagedSlotReconcileF
         "concurrent_modification",
         `Device is already assigned to slot ${result.holder.slotIndex} of another scope (${step}).`,
       );
+    case "free_device_stopping":
+      return failure(
+        "concurrent_modification",
+        `Free-pool device is being shut down for reclaim (${step}); retry once it is stopped.`,
+      );
   }
 }
 
@@ -1461,6 +1467,11 @@ export class ManagedSlotReconciler {
     const free = new Set(
       (await this.deps.registry.listFreeDevices())
         .filter((entry) => entry.platform === request.platform)
+        // A `stopping` device is mid-shutdown (#11337); a `stopped` one is adopted and booted.
+        .filter(
+          (entry) =>
+            entry.state !== "stopping" || isStaleFreeDeviceStopClaim(entry, this.deps.timer.now()),
+        )
         .map((entry) => entry.stableDeviceId),
     );
     const prefix = managedSlotDeviceNamePrefix(request.key);

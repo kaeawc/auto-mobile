@@ -31,6 +31,7 @@ import {
 import type { ListDeviceImagesArgs, ListDevicesArgs } from "./deviceTools";
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { adbOfflineHeldDevices } from "./adbOfflineHeldDevices";
+import type { AdbOfflineHold } from "./inventoryDeviceDescription";
 import { describeBootCapacity } from "../features/bootAdmission/sharedBootAdmissionGates";
 
 function selectBootedDevices(
@@ -133,7 +134,7 @@ export function createListingHandlers() {
     // Sampled alongside discovery; best-effort and absent when no platform is gated (#11181).
     const capacity = describeBootCapacity(requestedPlatforms, deps.bootCapacityReporters);
     let booted: BootedDevice[] = [];
-    const adbOfflineStates = new Map<string, string>();
+    const adbOfflineHolds = new Map<string, AdbOfflineHold>();
     // #5893 item 4: `getBootedDevices` collapses a failed per-platform probe to
     // `[]`, so a transient tooling failure is indistinguishable from a genuinely
     // empty inventory. Use the detailed contract, which reports which platforms
@@ -174,7 +175,10 @@ export function createListingHandlers() {
         devicePool: pool,
         deviceManager,
       })) {
-        adbOfflineStates.set(offlineHeld.device.deviceId, offlineHeld.adbState);
+        adbOfflineHolds.set(offlineHeld.device.deviceId, {
+          adbState: offlineHeld.adbState,
+          avdName: offlineHeld.avdName,
+        });
         booted = [...booted, offlineHeld.device];
       }
       succeededPlatforms = discovery.succeededPlatforms;
@@ -218,7 +222,7 @@ export function createListingHandlers() {
       configured.images,
       (deviceId) => pool?.getAndroidTransportAliases(deviceId) ?? directAliases.aliases(deviceId),
       (deviceId) => pool?.getAndroidTransportAvdName(deviceId) ?? directAliases.avdName(deviceId),
-      adbOfflineStates,
+      adbOfflineHolds,
     );
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 

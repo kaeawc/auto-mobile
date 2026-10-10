@@ -4,8 +4,13 @@ import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { DeviceOutsideManagedSlotsError } from "../../src/daemon/managedSlots/managedSlotRefusal";
-import { SessionRecoveryIdentityLossError } from "../../src/daemon/sessionManager";
+import {
+  SessionRecoveryIdentityLossError,
+  SessionSuspectError,
+  TerminalSessionError,
+} from "../../src/daemon/sessionManager";
 import { DeviceOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
+import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
@@ -146,5 +151,54 @@ test("a session lost to recovery identity loss is the terminal refusal on the fr
       deviceId: "emulator-5554",
       ownerPid: 4242,
     },
+  });
+});
+
+// #11417: a control call refused at session admission on the socket (direct `input/*`) answers the
+// refusal the MCP result carries for the same error.
+
+test("a suspect-session refusal is the retryable suspect refusal on the frame", () => {
+  const error = new SessionSuspectError("quiet-session", 2_500);
+  const result = shapeToolCallError(error, { toolName: "tapOn", source: "MCP" });
+  const mcp: { error: Record<string, unknown> } = JSON.parse(result.content[0].text);
+
+  expect(mcpRequestFailureDetails(error, undefined)).toEqual({
+    code: "daemon_session_suspect",
+    retryable: true,
+    details: { sessionUuid: "quiet-session", remainingMs: 2_500 },
+  });
+  // The MCP error is the same fields plus the message, which the frame carries as `error`.
+  expect({ ...frameFields(error), message: error.message }).toEqual(mcp.error);
+});
+
+test("a terminal-session refusal is session_ownership_lost on the frame", () => {
+  const error = new TerminalSessionError("gone-session", {
+    sessionId: "gone-session",
+    deviceId: "emulator-5554",
+    releaseReason: "heartbeat-timeout",
+    releasedAtMs: 8_001,
+    terminal: true,
+    heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: true, timeoutMs: 4_000, ageMs: 8_001 },
+  });
+  // The envelope the MCP server answers a TerminalSessionError with.
+  const mcp = sessionOwnershipLostPayload({
+    message: error.message,
+    sessionUuid: error.sessionUuid,
+    reason: error.release.releaseReason,
+    release: error.release,
+  }).error;
+
+  expect(mcpRequestFailureDetails(error, undefined)).toEqual({
+    code: "session_ownership_lost",
+    retryable: false,
+    nextAction: "acquire_new_session",
+    details: { sessionUuid: "gone-session", reason: "heartbeat-timeout" },
+  });
+  expect(frameFields(error)).toMatchObject({
+    code: mcp.code,
+    retryable: mcp.retryable,
+    nextAction: mcp.nextAction,
+    sessionUuid: mcp.sessionUuid,
+    reason: mcp.reason,
   });
 });

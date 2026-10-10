@@ -400,6 +400,8 @@ jobs:
       AUTOMOBILE_DATA_DIR: ${{ github.workspace }}/scratch/foldable-lane/data
       AUTOMOBILE_DB_DIR: ${{ github.workspace }}/scratch/foldable-lane/db
       AUTOMOBILE_LOG_DIR: ${{ github.workspace }}/scratch/foldable-lane/logs
+      # The runner's only daemon uses these dirs; release-session may act on it (#11252).
+      AUTOMOBILE_ALLOW_SHARED_DAEMON_NAMESPACE: "1"
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6

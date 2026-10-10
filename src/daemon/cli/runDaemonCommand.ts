@@ -33,8 +33,19 @@ import {
   releaseReasonFromError,
 } from "../types";
 import type { AcceptanceSessionRestartScope } from "../daemonRestartAdmission";
-import { parseDaemonArgs } from "./daemonArgs";
+import {
+  invalidDaemonCommandArgument,
+  parseDaemonArgs,
+  type DaemonCommandFlagSpec,
+} from "./daemonArgs";
 import { describeForeignForwardLeaseHolders } from "../forwardLeaseHolders";
+import {
+  ALLOW_SHARED_NAMESPACE_FLAG,
+  assertDaemonNamespaceMatchesState,
+} from "../sharedNamespaceGuard";
+
+/** `--json`: print a daemon query's result or refusal as one JSON object (#11252). */
+export const DAEMON_JSON_FLAG = "--json";
 
 /**
  * Run daemon management command
@@ -43,6 +54,11 @@ export interface RunDaemonCommandOptions {
   clientFactory?: DaemonClientFactory;
   stateProvider?: () => DaemonStateLike;
   startupToolDefaults?: Pick<DaemonOptions, "enabledTools" | "disabledTools">;
+  /**
+   * Environment the shared-namespace guard reads (#11252). The CLI entry point passes
+   * `process.env`; unset skips the guard, so injected-manager tests are unaffected.
+   */
+  namespaceEnv?: NodeJS.ProcessEnv;
 }
 
 export function daemonCommandOptions(
@@ -219,6 +235,14 @@ function printAvailableDevicesContent(content: string | undefined): void {
   }
 }
 
+/**
+ * Whether `--daemon status` must exit non-zero: the namespace's socket is held by a process
+ * that could not be authenticated as its daemon, so "not running" would mislead (#11252).
+ */
+export function daemonStatusIsUnhealthy(status: DaemonStatus): boolean {
+  return !status.running && status.recovery !== undefined;
+}
+
 function printDaemonStatus(status: DaemonStatus, manager: DaemonManager): void {
   if (status.recovery) {
     console.log(
@@ -252,6 +276,8 @@ function printDaemonStatus(status: DaemonStatus, manager: DaemonManager): void {
         `\nThese can cause device pool conflicts. Run 'bunx ${resolveDaemonInstallSpecifier()} --daemon restart' to stop them.`,
       );
     }
+  } else if (status.recovery) {
+    console.log("Daemon socket is held by a process that is not an authenticated daemon");
   } else {
     console.log("Daemon is not running");
   }
@@ -346,17 +372,32 @@ async function runDaemonLifecycleCommand(
   }
 }
 
-async function runDaemonDiagnosticsCommand(command: string, manager: DaemonManager): Promise<void> {
+/** Print `--daemon status` (or its `--json` object); true when it must exit non-zero. */
+async function runDaemonStatusCommand(args: string[], manager: DaemonManager): Promise<boolean> {
+  const status = await manager.status();
+  if (args.includes(DAEMON_JSON_FLAG)) {
+    console.log(JSON.stringify(status));
+    return daemonStatusIsUnhealthy(status);
+  }
+  printDaemonStatus(status, manager);
+  for (const line of await describeForeignForwardLeaseHolders(
+    status.running ? status.pid : undefined,
+  )) {
+    console.log(line);
+  }
+  return daemonStatusIsUnhealthy(status);
+}
+
+async function runDaemonDiagnosticsCommand(
+  command: string,
+  args: string[],
+  manager: DaemonManager,
+): Promise<void> {
+  let statusUnhealthy = false;
   try {
     switch (command) {
       case "status": {
-        const status = await manager.status();
-        printDaemonStatus(status, manager);
-        for (const line of await describeForeignForwardLeaseHolders(
-          status.running ? status.pid : undefined,
-        )) {
-          console.log(line);
-        }
+        statusUnhealthy = await runDaemonStatusCommand(args, manager);
         break;
       }
 
@@ -397,9 +438,92 @@ async function runDaemonDiagnosticsCommand(command: string, manager: DaemonManag
     }
     process.exit(1);
   }
+  if (statusUnhealthy) {
+    process.exit(1);
+  }
 }
 
-async function queryAvailableDevices(manager: DaemonManager): Promise<void> {
+/**
+ * A daemon query or release that failed, keeping the daemon's typed refusal fields (#11252)
+ * instead of flattening them into a bare "Failed to ...: message".
+ */
+export class DaemonCommandRefusal extends ActionableError {
+  readonly code?: string;
+  readonly nextAction?: string;
+  readonly retryable?: boolean;
+  readonly retryAfterMs?: number;
+  readonly releaseReason?: string;
+  readonly detail: string;
+
+  constructor(context: string, error: unknown) {
+    const field = (name: string): unknown =>
+      error !== null && typeof error === "object" && name in error
+        ? (error as Record<string, unknown>)[name]
+        : undefined;
+    const code = field("code");
+    const nextAction = field("nextAction");
+    const retryable = field("retryable");
+    const retryAfterMs = field("retryAfterMs");
+    const releaseReason = releaseReasonFromError(error);
+    const detail = errorMessage(error);
+    const typedCode =
+      typeof code === "string" || typeof code === "number" ? String(code) : undefined;
+    const typedNextAction = typeof nextAction === "string" ? nextAction : undefined;
+    super(
+      `${context}: ${detail}${releaseReason ? ` (released: ${releaseReason})` : ""}` +
+        `${typedCode ? ` [${typedCode}]` : ""}${typedNextAction ? ` Next: ${typedNextAction}` : ""}`,
+      { cause: error },
+    );
+    this.detail = detail;
+    this.code = typedCode;
+    this.nextAction = typedNextAction;
+    this.retryable = typeof retryable === "boolean" ? retryable : undefined;
+    this.retryAfterMs = typeof retryAfterMs === "number" ? retryAfterMs : undefined;
+    this.releaseReason = releaseReason;
+  }
+}
+
+/** The `--json` object for a failed daemon query; absent refusal fields are omitted. */
+function daemonQueryFailureJson(error: unknown): Record<string, unknown> {
+  if (!(error instanceof DaemonCommandRefusal)) {
+    return { ok: false, error: errorMessage(error) };
+  }
+  const fields: Record<string, unknown> = {
+    code: error.code,
+    nextAction: error.nextAction,
+    retryable: error.retryable,
+    retryAfterMs: error.retryAfterMs,
+    releaseReason: error.releaseReason,
+  };
+  return {
+    ok: false,
+    error: error.detail,
+    ...Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)),
+  };
+}
+
+/** Print a daemon query failure (text on stderr, or one JSON object on stdout) and exit 1. */
+function exitWithDaemonQueryFailure(error: unknown, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(daemonQueryFailureJson(error)));
+  } else if (error instanceof ActionableError) {
+    console.error(`Error: ${error.message}`);
+  } else {
+    console.error(`Unexpected error: ${errorMessage(error)}`);
+  }
+  process.exit(1);
+}
+
+/** Split `--json` out of a command's arguments. */
+function takeJsonFlag(args: string[]): { json: boolean; rest: string[] } {
+  return {
+    json: args.includes(DAEMON_JSON_FLAG),
+    rest: args.filter((arg) => arg !== DAEMON_JSON_FLAG),
+  };
+}
+
+async function queryAvailableDevices(args: string[], manager: DaemonManager): Promise<void> {
+  const { json } = takeJsonFlag(args);
   try {
     // Check if running in daemon process
     const daemonState = manager.getDaemonState();
@@ -429,21 +553,17 @@ async function queryAvailableDevices(manager: DaemonManager): Promise<void> {
         printAvailableDevicesContent(content);
         await client.close();
       } catch (error) {
-        throw new ActionableError(`Failed to query available devices: ${errorMessage(error)}`);
+        throw new DaemonCommandRefusal("Failed to query available devices", error);
       }
     }
     return;
   } catch (error) {
-    if (error instanceof ActionableError) {
-      console.error(`Error: ${error.message}`);
-    } else {
-      console.error(`Unexpected error: ${errorMessage(error)}`);
-    }
-    process.exit(1);
+    exitWithDaemonQueryFailure(error, json);
   }
 }
 
-async function querySessionInfo(args: string[], manager: DaemonManager): Promise<void> {
+async function querySessionInfo(rawArgs: string[], manager: DaemonManager): Promise<void> {
+  const { json, rest: args } = takeJsonFlag(rawArgs);
   try {
     if (args.length === 0) {
       throw new ActionableError("session-info requires a session ID argument");
@@ -477,19 +597,12 @@ async function querySessionInfo(args: string[], manager: DaemonManager): Promise
         console.log(JSON.stringify(result));
         await client.close();
       } catch (error) {
-        throw new ActionableError(
-          `Failed to get session info: ${errorMessage(error)}${releasedSuffix(error)}`,
-        );
+        throw new DaemonCommandRefusal("Failed to get session info", error);
       }
     }
     return;
   } catch (error) {
-    if (error instanceof ActionableError) {
-      console.error(`Error: ${error.message}`);
-    } else {
-      console.error(`Unexpected error: ${errorMessage(error)}`);
-    }
-    process.exit(1);
+    exitWithDaemonQueryFailure(error, json);
   }
 }
 
@@ -498,7 +611,8 @@ async function querySessionInfo(args: string[], manager: DaemonManager): Promise
  * heartbeat, idle-release deadline, holder kind and in-flight executions (#10671). Always asks
  * the daemon over its socket, so the answer is the daemon's own view.
  */
-async function queryActiveSessions(manager: DaemonManager): Promise<void> {
+async function queryActiveSessions(args: string[], manager: DaemonManager): Promise<void> {
+  const { json } = takeJsonFlag(args);
   try {
     const client = manager.createClient();
     try {
@@ -509,19 +623,33 @@ async function queryActiveSessions(manager: DaemonManager): Promise<void> {
       console.log(JSON.stringify(result));
       await client.close();
     } catch (error) {
-      throw new ActionableError(`Failed to query active sessions: ${errorMessage(error)}`);
+      throw new DaemonCommandRefusal("Failed to query active sessions", error);
     }
   } catch (error) {
-    if (error instanceof ActionableError) {
-      console.error(`Error: ${error.message}`);
-    } else {
-      console.error(`Unexpected error: ${errorMessage(error)}`);
-    }
-    process.exit(1);
+    exitWithDaemonQueryFailure(error, json);
   }
 }
 
-async function releaseDaemonSession(args: string[], manager: DaemonManager): Promise<void> {
+async function releaseDaemonSession(rawArgs: string[], manager: DaemonManager): Promise<void> {
+  const { json, rest: args } = takeJsonFlag(rawArgs);
+  const printReleased = (alreadyReleased: boolean, message: string, device?: string) => {
+    if (json) {
+      console.log(
+        JSON.stringify({
+          ok: true,
+          sessionId: args[0],
+          alreadyReleased,
+          message,
+          ...(device !== undefined ? { device } : {}),
+        }),
+      );
+      return;
+    }
+    console.log(message);
+    if (!alreadyReleased && device !== undefined) {
+      console.log(`Device ${device} is now available`);
+    }
+  };
   try {
     if (args.length === 0) {
       throw new ActionableError("release-session requires a session ID argument");
@@ -538,8 +666,7 @@ async function releaseDaemonSession(args: string[], manager: DaemonManager): Pro
       const deviceId = session.assignedDevice;
       await sessionManager.releaseSession(sessionId);
       await pool.releaseDevice(deviceId, sessionId);
-      console.log(`Session ${sessionId} released`);
-      console.log(`Device ${deviceId} is now available`);
+      printReleased(false, `Session ${sessionId} released`, deviceId);
       return;
     }
     {
@@ -568,23 +695,19 @@ async function releaseDaemonSession(args: string[], manager: DaemonManager): Pro
             if (!isReleaseResult(result)) {
               throw new ActionableError("Invalid daemon release-session result");
             }
-            console.log(result.alreadyReleased ? result.message : `Session ${sessionId} released`);
-            if (!result.alreadyReleased && result.device !== undefined) {
-              console.log(`Device ${result.device} is now available`);
-            }
+            printReleased(
+              result.alreadyReleased,
+              result.alreadyReleased ? result.message : `Session ${sessionId} released`,
+              result.device,
+            );
           });
       } catch (error) {
-        throw new ActionableError(`Failed to release session: ${errorMessage(error)}`);
+        throw new DaemonCommandRefusal("Failed to release session", error);
       }
     }
     return;
   } catch (error) {
-    if (error instanceof ActionableError) {
-      console.error(`Error: ${error.message}`);
-    } else {
-      console.error(`Unexpected error: ${errorMessage(error)}`);
-    }
-    process.exit(1);
+    exitWithDaemonQueryFailure(error, json);
   }
 }
 
@@ -727,28 +850,56 @@ export function printUnknownDaemonCommand(command: string | undefined): void {
   );
 }
 
-/** Daemon commands that take no positional arguments. */
-const NO_POSITIONAL_DAEMON_COMMANDS = new Set([
-  "status",
-  "health",
-  "diagnose",
-  "available-devices",
-  "active-sessions",
-]);
+const ACCEPTANCE_SESSION_RESTART_FLAGS = [
+  "--session-uuid",
+  "--platform",
+  "--stable-device-id",
+  "--android-sibling-avd-name",
+  "--android-duplicate-serial",
+  "--ios-same-name-sibling-uuid",
+  "--expires-at",
+];
 
 /**
- * The first stray positional word given to a no-argument daemon command. A word
- * right after a `--flag` is treated as that flag's value, so launch options such
- * as `--port 3001` keep working after the command.
+ * Daemon commands that take no positional arguments, with the options each accepts. The
+ * lifecycle commands are strict (#11252): a stray word or a misspelled option is refused
+ * rather than silently stopping or restarting the daemon without it.
  */
-export function strayDaemonCommandArgument(command: string, args: string[]): string | undefined {
-  if (!NO_POSITIONAL_DAEMON_COMMANDS.has(command)) {
+const NO_POSITIONAL_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpec>> = {
+  start: { launchFlags: true },
+  stop: { launchFlags: true },
+  restart: { launchFlags: true },
+  "restart-admitted": { launchFlags: true, valueFlags: ["--maintenance-token"] },
+  "restart-acceptance-session": {
+    launchFlags: false,
+    valueFlags: ACCEPTANCE_SESSION_RESTART_FLAGS,
+  },
+  status: { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
+  health: { launchFlags: true },
+  diagnose: { launchFlags: true },
+  "available-devices": { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
+  "active-sessions": { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
+};
+
+/**
+ * The usage error for a no-argument daemon command given a stray positional word or an unknown
+ * option, or undefined when its arguments are valid. A word right after a value-taking flag is
+ * that flag's value, so launch options such as `--port 3001` keep working after the command.
+ */
+export function daemonCommandArgumentError(command: string, args: string[]): string | undefined {
+  const spec = Object.hasOwn(NO_POSITIONAL_DAEMON_COMMANDS, command)
+    ? NO_POSITIONAL_DAEMON_COMMANDS[command]
+    : undefined;
+  if (!spec) {
     return undefined;
   }
-  return args.find(
-    (arg, index) =>
-      arg !== "" && !arg.startsWith("-") && (index === 0 || !args[index - 1].startsWith("--")),
-  );
+  const invalid = invalidDaemonCommandArgument(args, spec);
+  if (!invalid) {
+    return undefined;
+  }
+  return invalid.kind === "positional"
+    ? `Unexpected argument for daemon ${command}: ${invalid.argument}`
+    : `Unknown option for daemon ${command}: ${invalid.argument}`;
 }
 
 function printDaemonUsageError(message: string): void {
@@ -766,10 +917,17 @@ function printDaemonUsageError(message: string): void {
     console.log("  session-info <id>     Get information about a session");
     console.log("  release-session <id>  Release a session and free its device");
     console.log(
+      "  (status, available-devices, active-sessions, session-info and release-session accept --json)",
+    );
+    console.log(
       "  release-liveness-ownership <id> --liveness-owner-token <token>  Hand off liveness; keep the device",
     );
     console.log(
       "  heartbeat <id>        Heartbeat a session (one-shot CLI: no-op; proxy-owned: refused)",
+    );
+    console.log("\nOptions:");
+    console.log(
+      `  ${ALLOW_SHARED_NAMESPACE_FLAG}  Let start/stop/restart/release act on the shared daemon while AUTOMOBILE_DATA_DIR or DB dirs are set without AUTOMOBILE_AUX_SOCKET_DIR`,
     );
     process.exit(1);
   } catch (error) {
@@ -782,15 +940,49 @@ function printDaemonUsageError(message: string): void {
   }
 }
 
+/**
+ * Commands that stop, replace or release on a daemon. With a private state env but the shared
+ * namespace they would act on the resident daemon (#11252), so they pass the namespace guard.
+ */
+const NAMESPACE_GUARDED_DAEMON_COMMANDS = new Set([
+  "start",
+  "stop",
+  "restart",
+  "restart-admitted",
+  "restart-acceptance-session",
+  "release-session",
+  "release-liveness-ownership",
+]);
+
+function refuseSharedNamespaceAction(
+  command: string,
+  env: NodeJS.ProcessEnv,
+  allowShared: boolean,
+): boolean {
+  if (!NAMESPACE_GUARDED_DAEMON_COMMANDS.has(command)) {
+    return false;
+  }
+  try {
+    assertDaemonNamespaceMatchesState(`run daemon ${command}`, env, allowShared);
+    return false;
+  } catch (error) {
+    console.error(`Error: ${errorMessage(error)}`);
+    process.exit(1);
+    return true;
+  }
+}
+
 export async function runDaemonCommand(
   command: string,
-  args: string[],
+  rawArgs: string[],
   options: RunDaemonCommandOptions,
   DaemonManager: new (
     clientFactory?: DaemonClientFactory,
     stateProvider?: () => DaemonStateLike,
   ) => DaemonManager,
 ): Promise<void> {
+  const allowSharedNamespace = rawArgs.includes(ALLOW_SHARED_NAMESPACE_FLAG);
+  const args = rawArgs.filter((arg) => arg !== ALLOW_SHARED_NAMESPACE_FLAG);
   const manager = new DaemonManager(options.clientFactory, options.stateProvider);
 
   const handlers: Partial<Record<string, () => Promise<void> | void>> = {
@@ -799,11 +991,11 @@ export async function runDaemonCommand(
     restart: () => runDaemonLifecycleCommand(command, args, options, manager),
     "restart-admitted": () => runDaemonLifecycleCommand(command, args, options, manager),
     "restart-acceptance-session": () => runDaemonLifecycleCommand(command, args, options, manager),
-    status: () => runDaemonDiagnosticsCommand(command, manager),
-    health: () => runDaemonDiagnosticsCommand(command, manager),
-    diagnose: () => runDaemonDiagnosticsCommand(command, manager),
-    "available-devices": () => queryAvailableDevices(manager),
-    "active-sessions": () => queryActiveSessions(manager),
+    status: () => runDaemonDiagnosticsCommand(command, args, manager),
+    health: () => runDaemonDiagnosticsCommand(command, args, manager),
+    diagnose: () => runDaemonDiagnosticsCommand(command, args, manager),
+    "available-devices": () => queryAvailableDevices(args, manager),
+    "active-sessions": () => queryActiveSessions(args, manager),
     "session-info": () => querySessionInfo(args, manager),
     "release-session": () => releaseDaemonSession(args, manager),
     heartbeat: () => recordDaemonHeartbeat(args, manager),
@@ -813,9 +1005,15 @@ export async function runDaemonCommand(
   if (!handler) {
     return printUnknownDaemonCommand(command);
   }
-  const stray = strayDaemonCommandArgument(command, args);
-  if (stray !== undefined) {
-    return printDaemonUsageError(`Unexpected argument for daemon ${command}: ${stray}`);
+  const argumentError = daemonCommandArgumentError(command, args);
+  if (argumentError !== undefined) {
+    return printDaemonUsageError(argumentError);
+  }
+  if (
+    options.namespaceEnv &&
+    refuseSharedNamespaceAction(command, options.namespaceEnv, allowSharedNamespace)
+  ) {
+    return;
   }
   return handler();
 }

@@ -1,7 +1,12 @@
 import { parsePort, parsePositiveNumber, type ParseLogger } from "../../cli/numericValidators";
 import { logger } from "../../utils/logger";
-import { shouldSkipCtrlProxyDownload } from "../../utils/ctrlProxyDownloadControl";
 import {
+  LEGACY_SKIP_ACCESSIBILITY_DOWNLOAD_FLAG,
+  SKIP_CTRL_PROXY_DOWNLOAD_FLAG,
+  shouldSkipCtrlProxyDownload,
+} from "../../utils/ctrlProxyDownloadControl";
+import {
+  EVENT_ALL_MARKERS_FLAG,
   hasEventAllMarkersCliOverride,
   parseEventAllMarkersConfig,
 } from "../../utils/eventAllMarkers";
@@ -16,7 +21,11 @@ import {
   TOOL_OUTPUT_DIR_FLAG_ALIAS,
 } from "../../utils/toolOutputArtifacts";
 import { resolveDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
-import { parseOutputReductionFlags } from "../../utils/outputReductionFlags";
+import {
+  OUTPUT_REDUCTION_FLAG_SPECS,
+  parseOutputReductionFlags,
+} from "../../utils/outputReductionFlags";
+import { MANAGED_SLOT_CONFIG_FLAG } from "../../models/managedSlotConfig";
 import type { DaemonOptions } from "../types";
 
 const numericFlags: Partial<
@@ -244,4 +253,89 @@ export function parseDaemonArgs(
     }
   }
   return options;
+}
+
+/**
+ * Value-taking flags a daemon command tail may carry besides parseDaemonArgs' own: the shared
+ * launcher flags `parseArgs` resolves from the same argv. `--daemon-socket-path` is a discovery
+ * marker only.
+ */
+const SHARED_LAUNCH_VALUE_FLAGS = [
+  EVENT_ALL_MARKERS_FLAG,
+  MANAGED_SLOT_CONFIG_FLAG,
+  "--daemon-socket-path",
+];
+
+/** Boolean shared launcher flags a daemon command tail may carry besides parseDaemonArgs' own. */
+const SHARED_LAUNCH_BOOLEAN_FLAGS = [
+  SKIP_CTRL_PROXY_DOWNLOAD_FLAG,
+  LEGACY_SKIP_ACCESSIBILITY_DOWNLOAD_FLAG,
+  ...OUTPUT_REDUCTION_FLAG_SPECS.flatMap((spec) =>
+    spec.disableCli ? [spec.cli, spec.disableCli] : [spec.cli],
+  ),
+];
+
+const DAEMON_LAUNCH_VALUE_FLAGS: ReadonlySet<string> = new Set([
+  "--port",
+  ...Object.keys(numericFlags),
+  ...Object.keys(stringFlags),
+  ...Object.keys(valueFlags),
+  ...SHARED_LAUNCH_VALUE_FLAGS,
+]);
+
+const DAEMON_LAUNCH_BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
+  ...Object.keys(booleanFlags),
+  ...SHARED_LAUNCH_BOOLEAN_FLAGS,
+]);
+
+/** Extra flags one daemon command accepts on top of (or instead of) the launch flags. */
+export interface DaemonCommandFlagSpec {
+  /** Whether the shared daemon launch flags (`--port`, `--debug`, ...) are accepted. */
+  launchFlags: boolean;
+  valueFlags?: readonly string[];
+  booleanFlags?: readonly string[];
+}
+
+/** Why a daemon command's argument tail is invalid: a stray word or an unknown option. */
+export type InvalidDaemonArgument =
+  | { kind: "positional"; argument: string }
+  | { kind: "option"; argument: string };
+
+/**
+ * The first argument a daemon command that takes no positional arguments cannot accept (#11252):
+ * a stray word (`--daemon stop <sessionId>` would otherwise stop the whole daemon) or an unknown
+ * option (`restart --stict-port` would otherwise drop the flag silently). A word right after a
+ * value-taking flag is that flag's value; `--flag=value` names `--flag`.
+ */
+export function invalidDaemonCommandArgument(
+  args: string[],
+  spec: DaemonCommandFlagSpec,
+): InvalidDaemonArgument | undefined {
+  const isValueFlag = (flag: string) =>
+    (spec.launchFlags && DAEMON_LAUNCH_VALUE_FLAGS.has(flag)) ||
+    (spec.valueFlags?.includes(flag) ?? false);
+  const isBooleanFlag = (flag: string) =>
+    (spec.launchFlags && DAEMON_LAUNCH_BOOLEAN_FLAGS.has(flag)) ||
+    (spec.booleanFlags?.includes(flag) ?? false);
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "") {
+      continue;
+    }
+    if (!arg.startsWith("-")) {
+      return { kind: "positional", argument: arg };
+    }
+    const equals = arg.indexOf("=");
+    const flag = equals === -1 ? arg : arg.slice(0, equals);
+    if (isValueFlag(flag)) {
+      if (equals === -1 && hasDaemonFlagValue(args[i + 1])) {
+        i++;
+      }
+      continue;
+    }
+    if (!isBooleanFlag(flag)) {
+      return { kind: "option", argument: arg };
+    }
+  }
+  return undefined;
 }

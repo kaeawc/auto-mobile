@@ -2077,6 +2077,17 @@ export class DaemonManager implements DaemonManagerLike {
       status = await this.authenticateSocketOwner();
     }
 
+    if (!status.running && status.recovery) {
+      // A process holds this namespace's socket but is not provably its daemon (#11252):
+      // nothing was stopped, so this must not read as a clean "not running".
+      throw new ActionableError(
+        `Daemon socket ${this.socketPath} is held by a process that could not be authenticated ` +
+          `as this namespace's daemon (${status.recovery.state}` +
+          `${status.recovery.reason ? `: ${status.recovery.reason}` : ""}); nothing was stopped. ` +
+          "Run --daemon diagnose to identify the socket owner.",
+      );
+    }
+
     if (!status.running) {
       // Status never deletes files (issue #6140) and does not
       // reclaim a well-formed PID file naming an already-exited daemon.

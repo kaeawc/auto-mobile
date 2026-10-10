@@ -692,6 +692,24 @@ describe("provider-owned identity recovery", () => {
     expect(h.client.callDaemonMethodCalls).toHaveLength(0);
   });
 
+  // #11252: stop reported "Daemon is not running" and exited 0 while a foreign process held the socket.
+  test("explicit stop refuses an unauthenticated socket owner instead of reporting not running", async () => {
+    const h = harness();
+    h.failProbe(new ActionableError("no version identity"));
+    // The harness signaler throws "must not signal", so reaching the kill path fails differently.
+    await expect(h.manager.stop()).rejects.toThrow(
+      `Daemon socket ${socketPath} is held by a process that could not be authenticated as this namespace's daemon (unauthenticated: no version identity); nothing was stopped.`,
+    );
+    expect(h.client.callDaemonMethodCalls).toHaveLength(0);
+  });
+
+  test("explicit stop of a refused stale socket still reports not running", async () => {
+    const h = harness();
+    h.failProbe(new Error("connect ECONNREFUSED"));
+    await h.manager.stop();
+    expect(h.client.callDaemonMethodCalls).toHaveLength(0);
+  });
+
   test("fix 5: refused stale socket is ordinary not-running without recovery presentation", async () => {
     const h = harness();
     h.failProbe(new Error("connect ECONNREFUSED"));

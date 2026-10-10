@@ -1140,6 +1140,7 @@ describe("DaemonMcpProxy", () => {
           daemonEntryScript?: string;
           clientBuild?: { buildId: string; entryScript: string };
           activeProvisioning?: boolean;
+          lifecycleNamespaceEnv?: NodeJS.ProcessEnv;
         } = {},
       ) {
         const timer = new FakeTimer();
@@ -1186,9 +1187,46 @@ describe("DaemonMcpProxy", () => {
           timer,
           clientVersion: opts.clientVersion ?? CLIENT_VERSION,
           buildIdentity: opts.clientBuild,
+          ...(opts.lifecycleNamespaceEnv
+            ? { lifecycleNamespaceEnv: opts.lifecycleNamespaceEnv }
+            : {}),
         });
         return { fakeClient, fakeManager, isAvailableSpy, proxy, timer };
       }
+
+      // #11252: a private data dir without a private namespace must not restart the resident daemon.
+      test("refuses a version restart when private state env targets the shared namespace", async () => {
+        const { fakeManager, isAvailableSpy, proxy } = makeProxy({
+          runningVersion: OLDER_VERSION,
+          startedAt: ANCIENT_TIMESTAMP,
+          lifecycleNamespaceEnv: { AUTOMOBILE_DATA_DIR: "/tmp/private-lane-data" },
+        });
+        try {
+          await expect(proxy.listTools()).rejects.toThrow(/shared_daemon_namespace/);
+          expect(fakeManager.restartCalled).toBe(false);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("restarts a private-namespace daemon when the state env is private too", async () => {
+        const { fakeManager, isAvailableSpy, proxy } = makeProxy({
+          runningVersion: OLDER_VERSION,
+          startedAt: ANCIENT_TIMESTAMP,
+          lifecycleNamespaceEnv: {
+            AUTOMOBILE_DATA_DIR: "/tmp/private-lane-data",
+            AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/private-lane-aux",
+          },
+        });
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
 
       async function expectVersionMismatch(
         promise: Promise<unknown>,

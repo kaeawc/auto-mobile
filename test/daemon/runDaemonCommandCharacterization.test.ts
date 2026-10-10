@@ -56,11 +56,20 @@ describe("daemon command characterization with fake I/O", () => {
           ["stdout", "  release-session <id>  Release a session and free its device"],
           [
             "stdout",
+            "  (status, available-devices, active-sessions, session-info and release-session accept --json)",
+          ],
+          [
+            "stdout",
             "  release-liveness-ownership <id> --liveness-owner-token <token>  Hand off liveness; keep the device",
           ],
           [
             "stdout",
             "  heartbeat <id>        Heartbeat a session (one-shot CLI: no-op; proxy-owned: refused)",
+          ],
+          ["stdout", "\nOptions:"],
+          [
+            "stdout",
+            "  --allow-shared-namespace  Let start/stop/restart/release act on the shared daemon while AUTOMOBILE_DATA_DIR or DB dirs are set without AUTOMOBILE_AUX_SOCKET_DIR",
           ],
           ["exit", 1],
           ["stderr", "Unexpected error: fake exit"],
@@ -169,53 +178,50 @@ describe("daemon command characterization with fake I/O", () => {
     }
   });
 
-  test.each(["start", "stop", "restart", "restart-admitted", "restart-acceptance-session"])(
-    "%s dispatches only to the injected fake manager",
-    async (command) => {
-      const events: string[] = [];
-      class Manager extends SafeDaemonManager {
-        override async start() {
-          events.push("start");
-        }
-        override async stop() {
-          events.push("stop");
-        }
-        override async restart() {
-          events.push("restart");
-        }
-        override async restartAdmitted() {
-          events.push("restart-admitted");
-        }
-        override async restartAcceptanceSession() {
-          events.push("restart-acceptance-session");
-        }
+  const acceptanceScopeArgs = [
+    "--session-uuid",
+    "session",
+    "--platform",
+    "ios",
+    "--stable-device-id",
+    "device",
+    "--android-sibling-avd-name",
+    "sibling",
+    "--android-duplicate-serial",
+    "serial",
+    "--ios-same-name-sibling-uuid",
+    "udid",
+    "--expires-at",
+    "1",
+  ];
+  test.each([
+    ["start", []],
+    ["stop", []],
+    ["restart", []],
+    ["restart-admitted", ["--maintenance-token", "fake"]],
+    ["restart-acceptance-session", acceptanceScopeArgs],
+  ])("%s dispatches only to the injected fake manager", async (command, args) => {
+    const events: string[] = [];
+    class Manager extends SafeDaemonManager {
+      override async start() {
+        events.push("start");
       }
-      await runDaemonCommand(
-        command,
-        [
-          "--maintenance-token",
-          "fake",
-          "--session-uuid",
-          "session",
-          "--platform",
-          "ios",
-          "--stable-device-id",
-          "device",
-          "--android-sibling-avd-name",
-          "sibling",
-          "--android-duplicate-serial",
-          "serial",
-          "--ios-same-name-sibling-uuid",
-          "udid",
-          "--expires-at",
-          "1",
-        ],
-        {},
-        Manager,
-      );
-      expect(events).toEqual([command]);
-    },
-  );
+      override async stop() {
+        events.push("stop");
+      }
+      override async restart() {
+        events.push("restart");
+      }
+      override async restartAdmitted() {
+        events.push("restart-admitted");
+      }
+      override async restartAcceptanceSession() {
+        events.push("restart-acceptance-session");
+      }
+    }
+    await runDaemonCommand(command, args, {}, Manager);
+    expect(events).toEqual([command]);
+  });
 
   test("diagnose awaits the fake health report before fake socket diagnostics", async () => {
     const events: unknown[] = [];
@@ -409,16 +415,24 @@ describe("daemon command characterization with fake I/O", () => {
       const coordinationDir = mkdtempSync(join(tmpdir(), "daemon-status-coord-"));
       const previousCoordinationDir = process.env.AUTOMOBILE_COORDINATION_DIR;
       process.env.AUTOMOBILE_COORDINATION_DIR = coordinationDir;
+      const exited = new Error("fake exit");
+      const exit = spyOn(process, "exit").mockImplementation((code) => {
+        events.push(["exit", code]);
+        throw exited;
+      });
       try {
-        await runDaemonCommand("status", [], {}, Manager);
         if (!running) {
-          expect(events).toEqual([
+          // #11252: an unauthenticated socket owner is not a clean "not running".
+          await expect(runDaemonCommand("status", [], {}, Manager)).rejects.toBe(exited);
+          expect(events.slice(0, 3)).toEqual([
             "status",
             ["  Identity recovery: deferred (busy)"],
-            ["Daemon is not running"],
+            ["Daemon socket is held by a process that is not an authenticated daemon"],
           ]);
+          expect(events.at(-1)).toEqual(["exit", 1]);
           return;
         }
+        await runDaemonCommand("status", [], {}, Manager);
         expect(events.slice(0, 10)).toEqual([
           "status",
           ["  Identity recovery: deferred (busy)"],
@@ -440,6 +454,7 @@ describe("daemon command characterization with fake I/O", () => {
         ]);
         expect(String(events[15])).toContain("--daemon restart' to stop them.");
       } finally {
+        exit.mockRestore();
         log.mockRestore();
         if (previousCoordinationDir === undefined) {
           delete process.env.AUTOMOBILE_COORDINATION_DIR;

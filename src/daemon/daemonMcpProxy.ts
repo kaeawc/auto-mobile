@@ -1,4 +1,5 @@
 import { isMcpQueueTimeoutError } from "./McpTimeoutError";
+import { assertDaemonNamespaceMatchesState } from "./sharedNamespaceGuard";
 import { errorMessage } from "../utils/describeUnknownError";
 import { getRemovedToolHint } from "../models/removedTools";
 import { shellQuote } from "../utils/shellQuote";
@@ -762,6 +763,11 @@ export type DaemonProxyProgressCallback = (
 export interface DaemonMcpProxyConfig {
   /** Whether to automatically start the daemon if not running */
   autoStartDaemon?: boolean;
+  /**
+   * Environment the shared-namespace guard reads before an automatic restart (#11252). Production
+   * entry points pass `process.env`; unset skips the guard, so injected-manager tests are unaffected.
+   */
+  lifecycleNamespaceEnv?: NodeJS.ProcessEnv;
   /** Socket path for daemon communication */
   socketPath?: string;
   /** Connection timeout in milliseconds */
@@ -2608,6 +2614,13 @@ export class DaemonMcpProxy {
 
   private assertAutomaticRestartAllowed(status: DaemonStatus, reason: string): void {
     this.assertDaemonLifecycleUnfenced();
+    if (this.config.lifecycleNamespaceEnv) {
+      // A private state env with the shared namespace would restart the resident daemon (#11252).
+      assertDaemonNamespaceMatchesState(
+        `restart the daemon (${reason})`,
+        this.config.lifecycleNamespaceEnv,
+      );
+    }
     if (status.activeProvisioning) {
       throw new DaemonRestartDeferredError(reason);
     }

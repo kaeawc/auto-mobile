@@ -39,6 +39,8 @@ For container log collection:
 export AUTOMOBILE_DATA_DIR=/var/lib/automobile
 export AUTOMOBILE_LOG_FORMAT=json
 export AUTOMOBILE_LOG_SINK=stderr
+# The container's only daemon uses this data dir; see "Shared-namespace guard" below.
+export AUTOMOBILE_ALLOW_SHARED_DAEMON_NAMESPACE=1
 ```
 
 Some persistent stores still use fixed paths under `~/.auto-mobile`, including
@@ -73,6 +75,7 @@ unset.
 | `AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS`, `AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS`                         | Steady-state CtrlProxy readiness budget; integer milliseconds in `1000..120000`; CLI flag wins.                                                                                                                                                                                                                                                                                                                                         | `30000` ms                                      |
 | `AUTOMOBILE_CTRL_PROXY_LEASE_IDLE_MS`                                                                       | Idle period after which a daemon closes a device's CtrlProxy connection and gives up its forwarding lease (no session, stream, tool call or CtrlProxy request); also how recent its own use must be for it to refuse another process's request to give the lease up; positive number of milliseconds, otherwise the default.                                                                                                            | `60000` ms                                      |
 | `AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS`                                                                  | Idle timeout after which a harness private daemon (`AUTOMOBILE_HARNESS_PRIVATE_DAEMON=1`, or an explicit non-default `AUTOMOBILE_DAEMON_SOCKET_PATH` with `AUTOMOBILE_AUX_SOCKET_DIR` set) whose launching parent exited, with no clients or sessions, shuts itself down; non-negative milliseconds, `0` disables.                                                                                                                      | `900000` ms                                     |
+| `AUTOMOBILE_ALLOW_SHARED_DAEMON_NAMESPACE`                                                                  | Lets daemon lifecycle and release commands, and automatic client restarts, act on the shared daemon while a state directory is relocated without a private namespace (see "Shared-namespace guard"); exact `1` enables.                                                                                                                                                                                                                 | unset                                           |
 | `AUTOMOBILE_HARNESS_PRIVATE_DAEMON`                                                                         | Marks a test/lane private daemon for the orphan watchdog; `1` arms it, `0` exempts a daemon that would otherwise qualify.                                                                                                                                                                                                                                                                                                               | unset                                           |
 | `AUTOMOBILE_DAEMON_LAUNCHER_PID`                                                                            | Pid of the process that launched a private daemon, for the orphan watchdog; defaults to the parent pid read at process entry. Values that are not a pid above 1 are ignored.                                                                                                                                                                                                                                                            | unset                                           |
 
@@ -82,6 +85,25 @@ Set `AUTOMOBILE_DAEMON_SOCKET_PATH`, `AUTOMOBILE_DAEMON_PID_FILE_PATH`, and
 `AUTOMOBILE_DAEMON_LOCK_FILE_PATH` to distinct absolute paths for each concurrent
 instance. Relative paths resolve from the daemon launch directory. The legacy
 `AUTO_MOBILE_` aliases are also accepted.
+
+### Shared-namespace guard
+
+`AUTOMOBILE_DATA_DIR`, `AUTOMOBILE_DB_DIR` and `AUTOMOBILE_DB_PATH` (and their
+`AUTO_MOBILE_` aliases) relocate a daemon's state, but not its namespace.
+With any of them set and neither `AUTOMOBILE_AUX_SOCKET_DIR` nor an
+`AUTOMOBILE_DAEMON_SOCKET_PATH` that differs from the default, `--daemon start`,
+`stop`, `restart`, `restart-admitted`, `restart-acceptance-session`,
+`release-session` and `release-liveness-ownership` refuse with
+`[shared_daemon_namespace]`: they would act on the shared daemon, which runs on
+different state. MCP and `--cli` clients refuse an automatic version, build or
+startup-option restart for the same reason; they still auto-start a daemon when
+none is running. `AUTOMOBILE_LOG_DIR` does not count (it only moves log files),
+nor do the coordination directories, which cooperating daemons share.
+
+Set `AUTOMOBILE_AUX_SOCKET_DIR` to reach a private daemon instead. To act on the
+shared daemon deliberately, pass `--allow-shared-namespace` after the daemon
+command, or set `AUTOMOBILE_ALLOW_SHARED_DAEMON_NAMESPACE=1` on hosts whose only
+daemon uses the relocated state, such as a container.
 
 Start, stop, and restart operate only on that namespace. A live process in
 another namespace is ignored, even when it uses the default TCP port. Lost PID

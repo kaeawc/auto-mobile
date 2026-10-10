@@ -2996,6 +2996,14 @@ export class ToolRegistryClass {
     return tools.filter((tool) => this.toolReachable(tool, "list", options));
   }
 
+  /**
+   * Every registered tool, hidden and availability-gated ones included. For audits that must not
+   * miss a tool that discovery hides (e.g. the read/control classification lint, #11353).
+   */
+  getEveryRegisteredTool(): RegisteredTool[] {
+    return Array.from(this.tools.values());
+  }
+
   getConfigurableToolNames(): string[] {
     return Array.from(this.tools.values())
       .filter((tool) => this.isUserConfigurableTool(tool.name))

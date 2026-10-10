@@ -42,8 +42,7 @@ enum JSONValue: Codable, Equatable {
         switch self {
         case let .string(value): return value
         case let .bool(value): return String(value)
-        case let .number(value):
-            return value.rounded() == value && abs(value) < 1e15 ? String(Int64(value)) : String(value)
+        case let .number(value): return PrototypeScalarText.render(value)
         default: return ""
         }
     }

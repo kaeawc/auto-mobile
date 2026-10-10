@@ -154,6 +154,9 @@ is simulator-only and device launches will fail to load it.
 
 ## Differences from Android
 
+- Numbers in `{key}` text and `repeat` bindings render exactly as the host's `renderScalar` does
+  (`PrototypeScalarText`): integral values as exact plain digits at any magnitude (`-0` is `0`), all
+  others as JavaScript `String(number)` (`1e-7`, `1.5e-7`, `0.30000000000000004`).
 - `prototype` on iOS has no `showVariants` and no `update` action (removed by owner decision).
   Showing a spec with an id that is already shown updates it in place, keeping each pager's page;
   `reset: true` starts it fresh (the agent advertises `prototype_show_in_place_v1`, and the host refuses

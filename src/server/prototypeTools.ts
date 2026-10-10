@@ -718,6 +718,7 @@ async function showDisplayId(
   device: BootedDevice,
   args: z.infer<typeof prototypeSchema>,
   dependencies: Pick<PrototypeToolDependencies, "adbFactory" | "lastRenderedObservation">,
+  signal: AbortSignal | undefined,
 ): Promise<number | undefined> {
   // prototypePlatformError refuses display off Android, so only Android reaches the resolver.
   if (args.action !== "show" || args.display === undefined || !target.android) {
@@ -727,12 +728,16 @@ async function showDisplayId(
     adb: (dependencies.adbFactory ?? defaultAdbClientFactory).create(device),
     lastRenderedObservation: dependencies.lastRenderedObservation,
   });
+  signal?.throwIfAborted();
   // Id 0 is the default display: it needs neither the wire field nor the capability, and the
   // result schema leaves displayId absent for it, so it is never carried forward as 0.
   if (!displayId) {
     return undefined;
   }
-  if (!(await target.android.supportsCommand(PROTOTYPE_DISPLAY_CAPABILITY))) {
+  const supported = await target.android.supportsCommand(PROTOTYPE_DISPLAY_CAPABILITY);
+  // The lookup waits for connection and handshake; a cancelled show must not carry on to the device.
+  signal?.throwIfAborted();
+  if (!supported) {
     throw new ActionableError(prototypeDisplayUnsupportedMessage(displayId));
   }
   return displayId;
@@ -1157,10 +1162,13 @@ async function resolveShowDisplay(
   device: BootedDevice,
   args: z.infer<typeof prototypeSchema>,
   dependencies: Pick<PrototypeToolDependencies, "adbFactory" | "lastRenderedObservation">,
+  signal: AbortSignal | undefined,
 ): Promise<{ displayId?: number; failure?: PrototypeResult }> {
   try {
-    return { displayId: await showDisplayId(target, device, args, dependencies) };
+    return { displayId: await showDisplayId(target, device, args, dependencies, signal) };
   } catch (error) {
+    // A cancelled request is not a display refusal: let the abort end the call.
+    signal?.throwIfAborted();
     logger.warn("[prototype] Request failed", error);
     return {
       failure: {
@@ -1188,7 +1196,14 @@ async function preflightMutation(
   >,
   signal: AbortSignal | undefined,
 ): Promise<AnchorStage & { displayId?: number }> {
-  const resolved = await resolveMutationDisplay(show.inPlace, target, device, args, dependencies);
+  const resolved = await resolveMutationDisplay(
+    show.inPlace,
+    target,
+    device,
+    args,
+    dependencies,
+    signal,
+  );
   if (resolved.failure) {
     return resolved;
   }
@@ -1335,54 +1350,59 @@ async function performMutation(
   // An older CtrlProxy re-shows a same-id prototype fresh on the display it is sent, so its pages
   // restart. It still validates before replacing, so a refused show leaves the old prototype and its
   // events exactly as an in-place one does; only the caller needs telling.
-  const legacy = await legacyInPlaceWarning(prototypeTarget, target, inPlace);
+  const legacy = await legacyInPlaceWarning(prototypeTarget, target, inPlace, signal);
   const takenGeneration = beginShowGeneration(commits, scope, args.action, target);
   // Every display lookup and window-option check happens before staging; nothing is re-resolved
   // after dispatch. A refused show must not reset the event epoch of a prototype still on screen.
-  const { resolved, generation } = await preflightWithGeneration(
-    { commits, scope, target, generation: takenGeneration },
-    () =>
-      preflightMutation(
-        { inPlace, shownDisplayId: shown?.displayId },
-        prototypeTarget,
-        device,
-        args,
-        dependencies,
-        signal,
-      ),
+  const ordering = { commits, scope, target, generation: takenGeneration };
+  const { resolved, generation } = await preflightWithGeneration(ordering, () =>
+    preflightMutation(
+      { inPlace, shownDisplayId: shown?.displayId },
+      prototypeTarget,
+      device,
+      args,
+      dependencies,
+      signal,
+    ),
   );
   // The device is sent resolved bounds anchors; host status keeps the authored spec's identity.
   const sendArgs = resolved.spec ? { ...args, spec: resolved.spec } : args;
-  const comparable = await comparableForMutation(resolved, inPlace, device, args, dependencies);
+  const comparable = await withdrawOnAbort(
+    ordering,
+    signal,
+    comparableForMutation(resolved, inPlace, device, args, dependencies),
+  );
   // An in-place show names the display it replaces on: if the prototype is dismissed while assets
   // stage, the runner then shows it fresh there instead of on the default display.
   const displayId = inPlace ? shown?.displayId : resolved.displayId;
-  const stage = await stageUnlessRefused(
-    resolved.failure,
-    prototypeTarget,
-    sendArgs,
-    assetReaders,
+  const stage = await withdrawOnAbort(
+    ordering,
     signal,
+    stageUnlessRefused(resolved.failure, prototypeTarget, sendArgs, assetReaders, signal),
   );
-  const { result, warning } = await sendPrototype(
-    prototypeTarget,
-    sendArgs,
-    stage,
-    signal,
-    displayId,
-    {
-      superseded: () => isSuperseded(commits, scope, target, generation),
+  // A failed upload ends the call unsent, like a refusal: it must not supersede a valid show.
+  const sentGeneration = stage.failure ? undefined : generation;
+  if (stage.failure) {
+    withdrawGeneration(ordering);
+  }
+  const { result, warning } = await withdrawOnAbort(
+    ordering,
+    undefined,
+    sendPrototype(prototypeTarget, sendArgs, stage, signal, displayId, {
+      superseded: () => isSuperseded(commits, scope, target, sentGeneration),
       beforeSend: async () => {
+        // Last abort check before the grant, the event epoch and the device send.
+        signal?.throwIfAborted();
         await appLayerGrant(prototypeTarget, device, args, dependencies, signal)?.();
         // Last step before dispatch: a refusal, a failed upload, a lost race or a failed grant
         // must leave the event epoch of a prototype still on screen alone (#11394).
         startFreshShowEvents(events, scope, source, { target, args, inPlace });
       },
-    },
+    }),
   );
   retireObservation(dependencies.cacheInvalidator, device, result);
   const placed = placedDisplay(args, shown, comparable, result.success);
-  const lastResult = isSuperseded(commits, scope, target, generation)
+  const lastResult = isSuperseded(commits, scope, target, sentGeneration)
     ? supersededResult(dependencies, { args, target, result, placed })
     : commitMutation(dependencies, scope, source, {
         args,
@@ -1411,12 +1431,15 @@ async function legacyInPlaceWarning(
   target: PrototypeTarget,
   prototype: { id?: string },
   inPlace: boolean,
+  signal: AbortSignal | undefined,
 ): Promise<string | undefined> {
-  if (
-    !inPlace ||
-    !target.android ||
-    (await target.android.supportsCommand(PROTOTYPE_SHOW_IN_PLACE_CAPABILITY))
-  ) {
+  if (!inPlace || !target.android) {
+    return undefined;
+  }
+  const supported = await target.android.supportsCommand(PROTOTYPE_SHOW_IN_PLACE_CAPABILITY);
+  // The lookup waits for connection and handshake; a cancelled show must not carry on to the device.
+  signal?.throwIfAborted();
+  if (supported) {
     return undefined;
   }
   return `the connected CtrlProxy does not advertise ${PROTOTYPE_SHOW_IN_PLACE_CAPABILITY}, so prototype ${prototype.id} was re-shown fresh on its display: pager pages restarted. Update the connected CtrlProxy to keep pages.`;
@@ -1437,37 +1460,54 @@ function retireObservation(
   }
 }
 
+interface ShowOrdering {
+  commits: PrototypeCommitGenerations;
+  scope: PrototypeScope;
+  target: { id?: string };
+  generation: number | undefined;
+}
+
+function withdrawGeneration(ordering: ShowOrdering): void {
+  const { commits, scope, target, generation } = ordering;
+  if (generation !== undefined && target.id !== undefined) {
+    commits.withdraw(scope.deviceId, target.id, generation);
+  }
+}
+
+/**
+ * Awaits one step of a show past preflight. A step that throws, or a request cancelled while it
+ * waited, withdraws the show's generation so an aborted show leaves no ordering state behind.
+ */
+async function withdrawOnAbort<T>(
+  ordering: ShowOrdering,
+  signal: AbortSignal | undefined,
+  step: Promise<T>,
+): Promise<T> {
+  try {
+    const value = await step;
+    signal?.throwIfAborted();
+    return value;
+  } catch (error) {
+    withdrawGeneration(ordering);
+    throw error;
+  }
+}
+
 /**
  * A show takes its generation on arrival so concurrent valid shows order by arrival, but a show the
  * host refuses (or abandons) never reaches the device and so withdraws it: it must not supersede a
  * valid in-flight show of the same id (#11477).
  */
 async function preflightWithGeneration(
-  ordering: {
-    commits: PrototypeCommitGenerations;
-    scope: PrototypeScope;
-    target: { id?: string };
-    generation: number | undefined;
-  },
+  ordering: ShowOrdering,
   preflight: () => Promise<AnchorStage & { displayId?: number }>,
 ): Promise<{ resolved: AnchorStage & { displayId?: number }; generation: number | undefined }> {
-  const { commits, scope, target, generation } = ordering;
-  const withdraw = () => {
-    if (generation !== undefined && target.id !== undefined) {
-      commits.withdraw(scope.deviceId, target.id, generation);
-    }
-  };
-  try {
-    const resolved = await preflight();
-    if (resolved.failure) {
-      withdraw();
-      return { resolved, generation: undefined };
-    }
-    return { resolved, generation };
-  } catch (error) {
-    withdraw();
-    throw error;
+  const resolved = await withdrawOnAbort(ordering, undefined, preflight());
+  if (resolved.failure) {
+    withdrawGeneration(ordering);
+    return { resolved, generation: undefined };
   }
+  return { resolved, generation: ordering.generation };
 }
 
 function beginShowGeneration(
@@ -1562,8 +1602,9 @@ async function resolveMutationDisplay(
   device: BootedDevice,
   args: z.infer<typeof prototypeSchema>,
   dependencies: Pick<PrototypeToolDependencies, "adbFactory" | "lastRenderedObservation">,
+  signal: AbortSignal | undefined,
 ): Promise<{ displayId?: number; failure?: PrototypeResult }> {
-  return inPlace ? {} : resolveShowDisplay(target, device, args, dependencies);
+  return inPlace ? {} : resolveShowDisplay(target, device, args, dependencies, signal);
 }
 
 /**
@@ -1757,6 +1798,7 @@ async function inspectDevice(
   target: PrototypeTarget,
   scope: PrototypeScope,
   timeoutMs: number | undefined,
+  signal: AbortSignal | undefined,
 ): Promise<PrototypeOutput> {
   const { store, events } = dependencies;
   const client = target.android;
@@ -1772,7 +1814,10 @@ async function inspectDevice(
   const stopCapture = client.onEvent((event) => replayed.push(event));
   let result: PrototypeResult;
   try {
-    if (!(await client.supportsCommand(PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY))) {
+    const supported = await client.supportsCommand(PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY);
+    // A cancelled inspect must not send its request after the capability lookup.
+    signal?.throwIfAborted();
+    if (!supported) {
       return {
         success: false,
         error: new ActionableError(prototypeInspectUnsupportedMessage()).message,
@@ -1780,6 +1825,7 @@ async function inspectDevice(
     }
     result = await client.inspect(timeoutMs);
   } catch (error) {
+    signal?.throwIfAborted();
     logger.warn("[prototype] Inspect request failed", error);
     return { success: false, error: toActionableError(error, "Prototype inspect failed").message };
   } finally {
@@ -2191,12 +2237,14 @@ function parsePrototypeInput(input: unknown) {
 async function withSpecFromPath(
   args: z.infer<typeof prototypeSchema>,
   reader: PrototypeAssetFileReader,
+  signal: AbortSignal | undefined,
 ): Promise<{ args: z.infer<typeof prototypeSchema> } | { error: string }> {
   if (args.action !== "show" || args.specPath === undefined) {
     return { args };
   }
   const { specPath, ...rest } = args;
   const read = await readPrototypeSpecFile(specPath, reader);
+  signal?.throwIfAborted();
   if ("error" in read) {
     return read;
   }
@@ -2250,7 +2298,7 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
     // Only a specPath show awaits here: other calls keep their timing against FakeTimer.
     const loaded =
       parsed.data.action === "show" && parsed.data.specPath !== undefined
-        ? await withSpecFromPath(parsed.data, assetReaders.assetFileReader)
+        ? await withSpecFromPath(parsed.data, assetReaders.assetFileReader, signal)
         : { args: parsed.data };
     if ("error" in loaded) {
       return responseFor({ success: false, error: loaded.error });
@@ -2274,7 +2322,9 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
       return responseFor({ success: false, error: error.message });
     }
     if (args.action === "inspect") {
-      return responseFor(await inspectDevice({ store, events }, target, scope, args.timeoutMs));
+      return responseFor(
+        await inspectDevice({ store, events }, target, scope, args.timeoutMs, signal),
+      );
     }
     if (args.action === "awaitEvent") {
       const source = prototypeEventSource(target.transport);

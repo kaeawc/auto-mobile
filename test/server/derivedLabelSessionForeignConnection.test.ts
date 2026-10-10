@@ -1,22 +1,22 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { INTERNAL_MCP_SESSION_PARAM } from "../../../src/daemon/constants";
-import { DaemonState } from "../../../src/daemon/daemonState";
-import { DevicePool } from "../../../src/daemon/devicePool";
-import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
-import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../../src/daemon/inputDeviceOwnership";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import type { BootedDevice } from "../../../src/models";
-import { buildDeviceLabelMap } from "../../../src/server/deviceLabelMapping";
-import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
-import { logger } from "../../../src/utils/logger";
-import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { McpTestFixture } from "../../fixtures/mcpTestFixture";
-import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
-import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
-import { RealToolCallPath } from "../../helpers/realToolCallPath";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import type { BootedDevice } from "../../src/models";
+import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { logger } from "../../src/utils/logger";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { McpTestFixture } from "../fixtures/mcpTestFixture";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { RealToolCallPath } from "../helpers/realToolCallPath";
 
 const primary: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
 const labelled: BootedDevice = { name: "Pixel B", deviceId: "emulator-5556", platform: "android" };
@@ -29,7 +29,7 @@ function wire(result: { content?: unknown }): Record<string, unknown> {
   return JSON.parse(content[0].text) as Record<string, unknown>;
 }
 
-describe("hunt: a derived label session of a base another connection owns", () => {
+describe("a derived label session of a base another connection owns", () => {
   let manager: SessionManager;
   let pool: DevicePool;
   let tools: RealToolCallPath;
@@ -65,7 +65,7 @@ describe("hunt: a derived label session of a base another connection owns", () =
     discovery.setBootedDevices("ios", []);
     PlatformDeviceManagerFactory.setInstance(discovery);
     pool = new DevicePool(
-      createDevicePoolDependencies(manager, "hunt-label-session-daemon", {
+      createDevicePoolDependencies(manager, "label-session-daemon", {
         timer,
         deviceManager: discovery,
       }),
@@ -163,5 +163,50 @@ describe("hunt: a derived label session of a base another connection owns", () =
   test("the pool predicate counts a derived session as its base", () => {
     expect(pool.isSessionOwnedByOtherConnection(labelSession, OTHER)).toBe(true);
     expect(pool.isSessionOwnedByOtherConnection(labelSession, OWNER)).toBe(false);
+  });
+
+  test("a derived session whose base has no connected owner is foreign to no one", () => {
+    pool.releaseMcpSessionBindings(OWNER);
+
+    expect(pool.isSessionOwnedByOtherConnection(labelSession, OTHER)).toBe(false);
+  });
+
+  test("a caller with no connection identity is not told apart from the owner", () => {
+    expect(pool.isSessionOwnedByOtherConnection(labelSession)).toBe(false);
+  });
+
+  test("a read naming the derived session from another connection is not refused", async () => {
+    const before = manager.getSession(labelSession)!.lastUsedAt;
+
+    const result = await fixture!.client.callTool({
+      name: "observe",
+      arguments: { sessionUuid: labelSession, [INTERNAL_MCP_SESSION_PARAM]: OTHER },
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(tools.runs.map((run) => run.deviceId)).toEqual([labelled.deviceId]);
+    expect(manager.getSession(labelSession)!.lastUsedAt).toBe(before);
+  });
+
+  test("the owner's own calls on its labelled devices run", async () => {
+    for (const device of ["B", "A"]) {
+      const result = await fixture!.client.callTool({
+        name: "tapAt",
+        arguments: { x: 10, y: 10, sessionUuid: BASE, device, [INTERNAL_MCP_SESSION_PARAM]: OWNER },
+      });
+      expect(result.isError).not.toBe(true);
+    }
+
+    expect(tools.runs.map((run) => run.deviceId)).toEqual([labelled.deviceId, primary.deviceId]);
+  });
+
+  test("the owner naming its derived session runs on the labelled device", async () => {
+    const result = await fixture!.client.callTool({
+      name: "tapAt",
+      arguments: { x: 10, y: 10, sessionUuid: labelSession, [INTERNAL_MCP_SESSION_PARAM]: OWNER },
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(tools.runs.map((run) => run.deviceId)).toEqual([labelled.deviceId]);
   });
 });

@@ -6697,7 +6697,8 @@ describe("Daemon manager available-devices", () => {
       isInitialized: () => true,
       getDevicePool: () =>
         ({
-          getStats: () => ({
+          // The in-daemon path refreshes slot and foreign ownership before reading stats (#11317).
+          getRefreshedStats: async () => ({
             idle: 1,
             assigned: 2,
             error: 1,

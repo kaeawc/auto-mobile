@@ -5,6 +5,7 @@ import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionRe
 import { DAEMON_BOUND_SESSION_REPLAY_TTL_MS, DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
@@ -101,7 +102,13 @@ describe("proxy stops heartbeating held sessions the conversation abandoned (iss
     failHeartbeatFor = new Set();
     mintedBy = {};
     client = new FakeDaemonClient({
-      toolResultFor: (name) => (mintedBy[name] ? deviceStartResult(mintedBy[name]) : undefined),
+      // The daemon echoes the session an admitted control call used (#10974); a read carries none.
+      toolResultFor: (name, params) =>
+        mintedBy[name]
+          ? deviceStartResult(mintedBy[name])
+          : name === "tapOn" && typeof params.sessionUuid === "string"
+            ? withRoutedSessionMeta({ content: [{ type: "text", text: "ok" }] }, params.sessionUuid)
+            : undefined,
       onCallDaemonMethod: (method, params) => {
         if (method === "daemon/heartbeat" && failHeartbeatFor.has(params.sessionId)) {
           throw new Error(`heartbeat rejected for ${params.sessionId}`);
@@ -128,7 +135,7 @@ describe("proxy stops heartbeating held sessions the conversation abandoned (iss
 
     // The conversation keeps using only the new device.
     await advance(IDLE_WINDOW_MS / 2);
-    await proxy.callTool("observe", {});
+    await proxy.callTool("tapOn", { action: "tap", text: "OK" });
     await advance(IDLE_WINDOW_MS / 2);
 
     expect(await tickSessions()).toEqual(["ios-session"]);

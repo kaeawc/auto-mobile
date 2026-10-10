@@ -4,6 +4,8 @@ import {
   type EmulatorLossIncidentPoolPort,
 } from "../../src/daemon/emulatorLossIncidentLedger";
 import type { PooledDevice } from "../../src/daemon/devicePool";
+import { SessionManager, type Session } from "../../src/daemon/sessionManager";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type {
   EmulatorLossIncident,
   EmulatorLossIncidentStore,
@@ -86,11 +88,19 @@ class FakePoolPort implements EmulatorLossIncidentPoolPort {
   }
 
   getSessionForDevice(_deviceId: string): string | null {
-    return null;
+    return this.sessionId;
   }
 
-  getSession(_sessionId: string): null {
-    return null;
+  session: Session | null = null;
+  sessionId: string | null = null;
+  sessionClockOffsetMs = 0;
+
+  getSession(_sessionId: string): Session | null {
+    return this.session;
+  }
+
+  sessionClockToWall(sessionClockMs: number): number {
+    return sessionClockMs - this.sessionClockOffsetMs;
   }
 
   getProcessOutputTail(_deviceId: string): undefined {
@@ -128,6 +138,22 @@ describe("EmulatorLossIncidentLedger", () => {
     expect(store.openCount).toBe(1);
     expect(ledger.emulatorLossRecoverySettlements.has(id!)).toBe(true);
     expect(ledger.emulatorLossRecoveryResolvers.has(id!)).toBe(true);
+  });
+
+  test("records the session's last heartbeat as wall time, not session-clock time (#11358)", async () => {
+    const { ledger, port, store, timer } = createLedger();
+    // A backward wall step left the session clock an hour ahead of the wall clock.
+    port.sessionClockOffsetMs = 3_600_000;
+    const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    sessions.stopCleanupTimer();
+    port.session = await sessions.createSession("s", "emulator-5554", "android");
+    port.sessionId = "s";
+
+    const id = (await ledger.recordEmulatorLossIncident("emulator-5554", "device-discovery-miss"))!;
+
+    expect((await store.get(id))?.session?.lastHeartbeatMs).toBe(
+      port.session.lastHeartbeat - 3_600_000,
+    );
   });
 
   test("wait resolves when the incident settles", async () => {

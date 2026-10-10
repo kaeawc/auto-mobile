@@ -1,7 +1,10 @@
 import {
   ACQUIRE_NEW_SESSION_NEXT_ACTION,
   DEVICE_SESSION_RECOVERY_TOOLS,
+  MANAGED_EXECUTION_ENDED_CODE,
+  RELAUNCH_EXECUTION_NEXT_ACTION,
 } from "../models/deviceSessionRecovery";
+import type { ManagedSlotResultEntry } from "../models/managedSlotsResult";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
 import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
@@ -73,6 +76,66 @@ export function terminalSessionRefusalFields(ownerPid?: number) {
       action: "acquire_replacement_session" as const,
       tools: [...DEVICE_SESSION_RECOVERY_TOOLS],
     },
+  };
+}
+
+/**
+ * The envelope a managed connection answers with once its execution's session is terminally released
+ * (#11341). Every idle or heartbeat release is terminal and a managed proxy never acquires devices
+ * itself, so the answer is not retryable, names `relaunch_execution` (the runner's decision) and
+ * carries no recovery tools. The slot is named when the session is one of the connection's slots.
+ */
+export function managedExecutionEndedPayload({
+  sessionUuid,
+  reason,
+  slot,
+}: {
+  sessionUuid?: string;
+  reason: string;
+  slot?: Pick<ManagedSlotResultEntry, "slotIndex" | "assignmentGeneration"> | null;
+}) {
+  return {
+    error: {
+      code: MANAGED_EXECUTION_ENDED_CODE,
+      message:
+        `This managed execution has ended: its device session${sessionUuid ? ` ${sessionUuid}` : ""} ` +
+        `was released (${reason}) and cannot be reused. This connection never acquires devices, so ` +
+        "device calls are refused until the runner relaunches the execution; reads still work.",
+      ...(sessionUuid === undefined ? {} : { sessionUuid }),
+      reason,
+      retryable: false as const,
+      nextAction: RELAUNCH_EXECUTION_NEXT_ACTION,
+      ...(slot
+        ? {
+            slotIndex: slot.slotIndex,
+            assignmentGeneration: slot.assignmentGeneration,
+          }
+        : {}),
+    },
+  };
+}
+
+/**
+ * The session a relayed daemon terminal-session refusal names and why it ended, or undefined when
+ * `result` is not one. A managed proxy rewrites such a result into `managed_execution_ended`
+ * (#11341) instead of passing on advice to acquire a new session.
+ */
+export function readTerminalSessionRefusal(
+  result: unknown,
+): { sessionUuid?: string; reason?: string } | undefined {
+  if (!declaresDeviceSessionInvalid(result)) {
+    return undefined;
+  }
+  const payload = readToolEnvelopePayload(result)?.payload;
+  const nested = payload?.error;
+  const fields: Record<string, unknown> | undefined =
+    nested !== null && typeof nested === "object" && !Array.isArray(nested)
+      ? (nested as Record<string, unknown>)
+      : payload;
+  const { sessionUuid, reason } = fields ?? {};
+  return {
+    ...(typeof sessionUuid === "string" && sessionUuid.length > 0 ? { sessionUuid } : {}),
+    ...(typeof reason === "string" && reason.length > 0 ? { reason } : {}),
   };
 }
 

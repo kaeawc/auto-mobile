@@ -92,6 +92,19 @@ export function deviceAlreadyAssignedToAnotherSessionError(
   );
 }
 
+/** True when the requester is the holder, a derived `${base}:${label}` session counting as its base. */
+export function isSameHolderSession(
+  ownerSessionUuid: string,
+  requesterSessionUuid: string | undefined,
+  sessionManager: ToolSelectionSessionManager | undefined,
+): boolean {
+  if (!requesterSessionUuid) {
+    return false;
+  }
+  const base = (uuid: string) => resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
+  return base(requesterSessionUuid) === base(ownerSessionUuid);
+}
+
 /** Throws {@link InputDeviceOwnedError} unless the requester may drive the device. */
 export function assertInputRequesterHoldsDevice(input: {
   action: string;
@@ -108,8 +121,7 @@ export function assertInputRequesterHoldsDevice(input: {
   if (!ownerSessionUuid) {
     return;
   }
-  const base = (uuid: string) => resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
-  if (requesterSessionUuid && base(requesterSessionUuid) === base(ownerSessionUuid)) {
+  if (isSameHolderSession(ownerSessionUuid, requesterSessionUuid, sessionManager)) {
     return;
   }
   throw new InputDeviceOwnedError(input.action, input.deviceId, requesterSessionUuid, input.remedy);

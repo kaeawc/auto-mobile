@@ -237,6 +237,30 @@ test("same MCP client reuses its live autolock after a fresh start", async () =>
   });
 });
 
+test("fresh-start autolock names a restored session awaiting its owner (#11189)", async () => {
+  await withAutolock(async () => {
+    const h = await harness();
+    try {
+      const first = (await h.pool.autolockDevice("emulator-5554", "android", "agent-A"))!;
+      // What startup rehydration leaves behind after a daemon restart.
+      h.manager.getSession(first)!.ownership = "awaiting-owner";
+      await expect(
+        h.pool.autolockDevice("emulator-5554", "android", "agent-B", {
+          name: "Agent A AVD",
+          platform: "android",
+          isRunning: false,
+          source: "local",
+        }),
+      ).rejects.toThrow(
+        `Device 'emulator-5554' is reserved for session ${first}, which the daemon restored after a restart`,
+      );
+      expect(h.pool.getDevice("emulator-5554")?.sessionId).toBe(first);
+    } finally {
+      await h.close();
+    }
+  });
+});
+
 test("fresh-start autolock still rejects a different MCP session with the reservation race", async () => {
   await withAutolock(async () => {
     const h = await harness();

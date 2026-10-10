@@ -3,6 +3,7 @@ import {
   DeviceCleanupInProgressError,
   DeviceOwnedByOtherDaemonError,
   DeviceShuttingDownError,
+  freshStartAlreadyBoundError,
 } from "./deviceAcquisitionRefusals";
 import {
   currentAllocationCancellationScope,
@@ -7729,9 +7730,10 @@ export class DevicePool {
   ): Promise<string> {
     const existingSessionId = existingSession.sessionId;
     if (sourceImage && !confirmedSameOwner) {
-      throw new ActionableError(
-        `Freshly started device '${deviceId}' was assigned to session ` +
-          `${existingSessionId} before its owning session could reserve it.`,
+      throw freshStartAlreadyBoundError(
+        deviceId,
+        existingSessionId,
+        existingSession.ownership === "awaiting-owner",
       );
     }
     // A caller that proved it owns the holder (its MCP connection acquired it) may reuse another

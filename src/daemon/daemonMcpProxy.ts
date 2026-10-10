@@ -1265,6 +1265,12 @@ export class DaemonMcpProxy {
    * instead of reconnecting to the still-reachable but quiesced incarnation.
    */
   private daemonShutdownDisconnect: Promise<void> | null = null;
+  /**
+   * When the daemon last announced a clean `daemon-shutdown` release (proxy clock). A
+   * `daemon_stalled` handover with no acknowledgement since is the expected outcome of that
+   * shutdown, not a daemon fault, so it is logged below error level (#11189).
+   */
+  private daemonShutdownAnnouncedAt: number | undefined;
   private resolveDaemonShutdownDisconnect: (() => void) | null = null;
   private connected: boolean = false;
   private closing: boolean = false;
@@ -2225,6 +2231,7 @@ export class DaemonMcpProxy {
     const isRecoverableHandoff =
       notification.reason !== undefined && isRecoverableDaemonReleaseReason(notification.reason);
     if (notification.reason === "daemon-shutdown") {
+      this.daemonShutdownAnnouncedAt = this.timer.now();
       // Daemon shutdown is connection-wide. Arm the successor barrier even when
       // this UUID belongs to an unresolved acquisition result that has not become
       // the current binding yet.
@@ -5045,7 +5052,14 @@ export class DaemonMcpProxy {
    * structured error for the next tool call that reaches each of them, and tell the harness now.
    */
   private deliverLivenessHandover(handover: LivenessHandover): void {
-    logger.error(`[DaemonMcpProxy] ${handover.code}: ${livenessHandoverMessage(handover)}`);
+    if (this.isHandoverAfterCleanDaemonShutdown(handover)) {
+      logger.warn(
+        `[DaemonMcpProxy] ${handover.code} after a clean daemon shutdown (no daemon has ` +
+          `acknowledged a heartbeat since): ${livenessHandoverMessage(handover)}`,
+      );
+    } else {
+      logger.error(`[DaemonMcpProxy] ${handover.code}: ${livenessHandoverMessage(handover)}`);
+    }
     for (const { sessionUuid } of handover.sessions) {
       this.stallHandovers.set(sessionUuid, this.stallHandoverRecord(handover, sessionUuid));
     }
@@ -5066,6 +5080,18 @@ export class DaemonMcpProxy {
     if (this.hasProbeableStall() && !this.closing) {
       this.stallResumeProbe.start();
     }
+  }
+
+  /**
+   * A `daemon_stalled` handover whose sessions were last acknowledged before the daemon announced
+   * its own shutdown: nothing has answered since the old daemon said it was going away.
+   */
+  private isHandoverAfterCleanDaemonShutdown(handover: LivenessHandover): boolean {
+    return (
+      handover.code === DAEMON_STALLED_CODE &&
+      this.daemonShutdownAnnouncedAt !== undefined &&
+      handover.lastAcknowledgedHeartbeatAt <= this.daemonShutdownAnnouncedAt
+    );
   }
 
   private notifyLivenessHandoverListeners(handover: LivenessHandover): void {

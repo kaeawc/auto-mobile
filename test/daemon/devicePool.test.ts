@@ -994,6 +994,51 @@ describe("DevicePool", () => {
     expect(devicePool.getDevice(device.deviceId)?.sessionId).toBe("owner-session");
   });
 
+  test("names a restored session awaiting its owner instead of a fresh-start race (#11189)", async () => {
+    const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+    const sourceImage: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      isRunning: false,
+      source: "local",
+    };
+    await initializeLiveDevices([device]);
+    await devicePool.bindOrReuseDeviceSession(
+      "restored-session",
+      device.deviceId,
+      "android",
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      "owner-mcp-session",
+    );
+    // What startup rehydration leaves behind after a daemon restart.
+    sessionManager.getSession("restored-session")!.ownership = "awaiting-owner";
+
+    const refusal = devicePool.bindOrReuseDeviceSession(
+      "newly-generated-session",
+      device.deviceId,
+      "android",
+      sourceImage,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+    );
+    await expect(refusal).rejects.toThrow(
+      "Device 'emulator-5554' is reserved for session restored-session, which the daemon " +
+        "restored after a restart and is holding for its previous owner to reconnect.",
+    );
+    await expect(refusal).rejects.not.toThrow("Freshly started");
+    expect(devicePool.getDevice(device.deviceId)?.sessionId).toBe("restored-session");
+  });
+
   describe("assertSessionReadyForAutomation shutdown admission (#5494)", () => {
     const sourceImage: DeviceInfo = {
       name: "Pixel 8",

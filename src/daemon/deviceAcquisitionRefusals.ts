@@ -57,6 +57,30 @@ export const RETRYABLE_DEVICE_ACQUISITION_CODES: ReadonlySet<string> = new Set([
   DEVICE_SHUTTING_DOWN_CODE,
 ]);
 
+/**
+ * A freshly started device turned out to be held by another session before the caller could
+ * reserve it. When that holder is a session the daemon restored after a restart and is holding for
+ * its previous owner, say so: "freshly started" reads as a race and hides the remedy (#11189).
+ */
+export function freshStartAlreadyBoundError(
+  deviceId: string,
+  holderSessionId: string,
+  holderAwaitingOwner: boolean,
+): ActionableError {
+  if (holderAwaitingOwner) {
+    return new ActionableError(
+      `Device '${deviceId}' is reserved for session ${holderSessionId}, which the daemon restored ` +
+        "after a restart and is holding for its previous owner to reconnect. If that session is " +
+        `yours, pass sessionUuid ${holderSessionId} to reclaim it; otherwise wait for the ` +
+        "reservation to lapse or use another device.",
+    );
+  }
+  return new ActionableError(
+    `Freshly started device '${deviceId}' was assigned to session ` +
+      `${holderSessionId} before its owning session could reserve it.`,
+  );
+}
+
 /** Retry hint when nothing bounds the remaining wait more precisely. */
 export const DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS = 1_000;
 

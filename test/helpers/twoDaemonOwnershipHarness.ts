@@ -19,7 +19,9 @@ import { PROXY_HEARTBEAT_INTERVAL_MS } from "../../src/daemon/sessionLivenessWin
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   createDaemonTerminalReleaseJournal,
+  FileTerminalReleaseJournal,
   TERMINAL_RELEASE_JOURNAL_DIR_NAME,
+  terminalReleaseJournalPath,
   type TerminalReleaseJournalDirectory,
 } from "../../src/daemon/terminalReleaseJournal";
 import type { Database } from "../../src/db/types";
@@ -73,6 +75,8 @@ import { isExpectedRefusal, processTimer } from "./poolOwnershipConcurrencyHarne
 //   - foreign-session-revived: a daemon never creates or rehydrates a session live in its peer.
 //   - peer-row-expired: a daemon's startup never moves a live peer's live session row off active.
 //   - peer-journal-touched: a daemon never writes or removes a live peer's journal file.
+//   - released-session-revived: a session a daemon had journaled as terminally released when it
+//     died (and its peer did not hold) is never created or rehydrated again (#11355).
 //   - live-row-not-owned: at a settle point a daemon's live session has an active row stamped
 //     with that daemon's id.
 //   - stranded-claim: at a settle point a recoverable row a live daemon claimed (#11243) is live
@@ -192,6 +196,7 @@ export type TwoDaemonViolationKind =
   | "foreign-session-revived"
   | "peer-row-expired"
   | "peer-journal-touched"
+  | "released-session-revived"
   | "live-row-not-owned"
   | "stranded-claim"
   | "unsettled-operation"
@@ -329,6 +334,8 @@ class TwoDaemonWorld {
   readonly timer = new FakeTimer();
   readonly discovery = new FakeDeviceUtils();
   readonly journalFiles = new FakeTerminalReleaseJournalFileSystem();
+  /** Session id -> the dead daemon whose journal held its terminal release when it died. */
+  private readonly deadTerminalReleases = new Map<string, string>();
   readonly claims = new SharedClaimFiles((pid) => this.isPidRunning(pid));
   readonly trace: string[] = [];
   private readonly repository: DeviceSessionRepository;
@@ -607,6 +614,14 @@ class TwoDaemonWorld {
     manager.onSessionCreated((session) => {
       if (self.dead) {
         return;
+      }
+      const releasedBy = this.deadTerminalReleases.get(session.sessionId);
+      if (releasedBy !== undefined) {
+        this.fail(
+          "released-session-revived",
+          `${self.name} created/rehydrated ${session.sessionId} on ${session.assignedDevice}, ` +
+            `which ${releasedBy} had journaled as terminally released when it died`,
+        );
       }
       const peer = this.peerOf(self);
       if (peer?.manager.getAllSessions().some((s) => s.sessionId === session.sessionId)) {
@@ -1283,11 +1298,33 @@ class TwoDaemonWorld {
 
   /** The process exits: its unfinished operations never finish, and nothing waits for them. */
   private markDead(process: DaemonProcess): void {
+    this.recordDeadTerminalReleases(process);
     process.dead = true;
     process.parked.length = 0;
     for (const [run, owner] of this.inflight) {
       if (owner === process) {
         this.inflight.delete(run);
+      }
+    }
+  }
+
+  /**
+   * The terminal releases `process` leaves in its journal as it dies. One for a session its live
+   * peer holds is a stale release of a session the peer took over, not a fence on the peer.
+   */
+  private recordDeadTerminalReleases(process: DaemonProcess): void {
+    const journalPath = terminalReleaseJournalPath(DATA_DIR, process.daemonSessionId);
+    const text = this.journalFiles.files.get(journalPath);
+    if (text === undefined) {
+      return;
+    }
+    // Replayed on a copy: reading a journal compacts it, and a dead daemon's file must stay as is.
+    const copy = new FakeTerminalReleaseJournalFileSystem();
+    copy.files.set(journalPath, text);
+    const peer = this.peerOf(process);
+    for (const intent of new FileTerminalReleaseJournal(journalPath, copy).loadUnconfirmed()) {
+      if (!peer?.manager.hasSession(intent.sessionId)) {
+        this.deadTerminalReleases.set(intent.sessionId, process.name);
       }
     }
   }

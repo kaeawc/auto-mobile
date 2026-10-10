@@ -18,7 +18,9 @@ import { resolveAutoMobileBaseDir } from "../utils/tempDir";
  * Several daemons can share a data directory (#11158), so each daemon writes its own file, keyed
  * by its daemon session id, and only ever compacts that file. At startup a daemon adopts the files
  * of daemons that are no longer live (see {@link createDaemonTerminalReleaseJournal}); a live
- * peer's file, and its in-flight intents, are left alone.
+ * peer's file, and its in-flight intents, are left alone. A peer that was live at startup and died
+ * later is adopted when one of its rows is next read
+ * ({@link TerminalReleaseJournal.adoptDeadDaemon}, #11355).
  */
 export interface TerminalReleaseIntent {
   sessionId: string;
@@ -41,6 +43,15 @@ export interface TerminalReleaseJournal {
    * a later upgraded intent whose own write is still pending.
    */
   resolve(sessionId: string, reason?: string): void;
+  /**
+   * Adopt the unconfirmed intents of a peer daemon the caller knows is dead (#11355): a peer that
+   * was live when this daemon started is skipped by startup adoption, so its journal is read when
+   * it is found dead. The intents are appended durably to this daemon's journal before the dead
+   * daemon's file is removed. Returns the adopted intents, or `undefined` when the file could not
+   * be read (the caller retries later). Never call it for a daemon that may be live: its file
+   * holds in-flight intents whose fence may still be lifted.
+   */
+  adoptDeadDaemon?(daemonSessionId: string): TerminalReleaseIntent[] | undefined;
 }
 
 /** Durable file primitives the journal needs; injected so tests never touch the disk. */
@@ -167,11 +178,35 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
   constructor(
     private readonly filePath: string,
     private readonly fileSystem: TerminalReleaseJournalFileSystem,
+    /** Where a peer daemon keeps its journal; without it no peer is adopted after startup. */
+    private readonly peerJournalPath?: (daemonSessionId: string) => string,
   ) {}
 
   loadUnconfirmed(): TerminalReleaseIntent[] {
     this.ensureLoaded();
     return Array.from(this.intents.values());
+  }
+
+  adoptDeadDaemon(daemonSessionId: string): TerminalReleaseIntent[] | undefined {
+    const deadPath = this.peerJournalPath?.(daemonSessionId);
+    if (deadPath === undefined || deadPath === this.filePath) {
+      return [];
+    }
+    const loaded = this.ensureLoaded();
+    const read = adoptDeadDaemonJournals(this.filePath, [deadPath], this.fileSystem);
+    if (read.unread.length > 0) {
+      return undefined;
+    }
+    // This daemon's own intent for a session is the newer one; the dead daemon's never replaces it.
+    const adopted = read.intents.filter((intent) => !this.intents.has(intent.sessionId));
+    for (const intent of adopted) {
+      this.intents.set(intent.sessionId, intent);
+    }
+    if (loaded && adopted.length !== read.intents.length) {
+      // The appended copy of a superseded intent would win a later replay; rewrite without it.
+      this.compact(this.intents);
+    }
+    return adopted;
   }
 
   record(intent: TerminalReleaseIntent): void {
@@ -382,7 +417,9 @@ export function createDaemonTerminalReleaseJournal(
     deadDaemonJournalPaths(dataDir, options, fileSystem),
     fileSystem,
   );
-  return new FileTerminalReleaseJournal(ownPath, fileSystem);
+  return new FileTerminalReleaseJournal(ownPath, fileSystem, (daemonSessionId) =>
+    terminalReleaseJournalPath(dataDir, daemonSessionId),
+  );
 }
 
 function deadDaemonJournalPaths(
@@ -456,16 +493,26 @@ function readDeadJournal(
   return Array.from(intents.values());
 }
 
+/** What an adoption pass read: the intents found, and the files it could not read. */
+interface DeadDaemonJournalAdoption {
+  /** Intents read from the dead daemons' files, including any whose durable append failed. */
+  intents: TerminalReleaseIntent[];
+  unread: string[];
+}
+
 function adoptDeadDaemonJournals(
   ownPath: string,
   deadPaths: readonly string[],
   fileSystem: TerminalReleaseJournalFileSystem,
-): void {
+): DeadDaemonJournalAdoption {
+  const adoption: DeadDaemonJournalAdoption = { intents: [], unread: [] };
   for (const deadPath of deadPaths) {
     const intents = readDeadJournal(deadPath, fileSystem);
     if (intents === undefined) {
+      adoption.unread.push(deadPath);
       continue;
     }
+    adoption.intents.push(...intents);
     if (intents.length > 0) {
       try {
         // Durable in this daemon's file before the dead daemon's copy goes away.
@@ -490,4 +537,5 @@ function adoptDeadDaemonJournals(
       );
     }
   }
+  return adoption;
 }

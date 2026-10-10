@@ -1422,6 +1422,13 @@ export class SessionManager {
    * listed UUID reads as terminally released, so nothing can revive it.
    */
   private readonly recoveredTerminalReleaseIntents: Map<string, TerminalReleaseIntent> = new Map();
+  /** Dead peer daemons whose journals were adopted after startup (#11355); never read again. */
+  private readonly adoptedDeadDaemonJournals: Set<string> = new Set();
+  /**
+   * The dead daemon each post-startup adopted intent came from (#11355). Such an intent applies
+   * only while its row is still that daemon's: a row another daemon took since is left alone.
+   */
+  private readonly adoptedTerminalReleaseOwners: Map<string, string> = new Map();
   /** Finalized release state retained only while its exact Session identity is referenced. */
   private readonly finalizedSessionReleases: WeakMap<Session, ReleaseReasonState> = new WeakMap();
   /** Serializes durable liveness claims within one exact session incarnation. */
@@ -1633,7 +1640,8 @@ export class SessionManager {
         const persisted = await this.deviceSessionRepository.getSession?.(intent.sessionId);
         if (
           persisted &&
-          !(persisted.release_reason && isTerminalReleaseReason(persisted.release_reason))
+          !(persisted.release_reason && isTerminalReleaseReason(persisted.release_reason)) &&
+          this.adoptedTerminalReleaseApplies(persisted)
         ) {
           await raceWithDeadline(
             this.deviceSessionRepository.markReleased(
@@ -1666,6 +1674,7 @@ export class SessionManager {
         continue;
       }
       this.recoveredTerminalReleaseIntents.delete(intent.sessionId);
+      this.adoptedTerminalReleaseOwners.delete(intent.sessionId);
       this.terminalReleaseJournal.resolve(intent.sessionId, intent.reason);
     }
     if (applied.length > 0) {
@@ -1682,7 +1691,8 @@ export class SessionManager {
     const intent = this.recoveredTerminalReleaseIntents.get(persisted.session_uuid);
     if (
       !intent ||
-      (persisted.release_reason !== null && isTerminalReleaseReason(persisted.release_reason))
+      (persisted.release_reason !== null && isTerminalReleaseReason(persisted.release_reason)) ||
+      !this.adoptedTerminalReleaseApplies(persisted)
     ) {
       return persisted;
     }
@@ -1692,6 +1702,86 @@ export class SessionManager {
       released_at_ms: intent.at,
       release_reason: intent.reason,
     };
+  }
+
+  /**
+   * Whether the recovered intent for this row may terminalize it. An intent adopted from a peer
+   * that died after this daemon started (#11355) applies only while the row is still that peer's.
+   */
+  private adoptedTerminalReleaseApplies(persisted: DeviceSession): boolean {
+    const adoptedFrom = this.adoptedTerminalReleaseOwners.get(persisted.session_uuid);
+    return adoptedFrom === undefined || (persisted.daemon_session_id ?? null) === adoptedFrom;
+  }
+
+  /**
+   * Adopt the terminal-release journal of this row's owner daemon once that daemon is known to be
+   * dead (#11355). Startup adoption skips a peer that is live at the time, so a peer that parked a
+   * terminal release and then died left a still-active row a survivor would recover. Reading one
+   * of its rows adopts its whole journal first: the intents fence their UUIDs in memory at once,
+   * and their rows are written before the read returns. A daemon whose liveness cannot be
+   * confirmed is left alone, because a live daemon's intents can still be lifted. Resolves true
+   * when intents were adopted, so the caller re-reads the row.
+   */
+  private async adoptDeadOwnerTerminalReleases(stored: DeviceSession): Promise<boolean> {
+    const owner = this.unadoptedDeadOwner(stored);
+    const intents =
+      owner === undefined ? undefined : this.terminalReleaseJournal.adoptDeadDaemon?.(owner);
+    if (owner === undefined || intents === undefined) {
+      // No dead owner, or its journal is unreadable for now: the next read of its rows retries.
+      return false;
+    }
+    this.adoptedDeadDaemonJournals.add(owner);
+    if (intents.length === 0) {
+      return false;
+    }
+    for (const intent of intents) {
+      // The journal holds wall ms, like the rows it backs (#11162).
+      this.recoveredTerminalReleaseIntents.set(intent.sessionId, {
+        ...intent,
+        at: this.wallToSessionClock(intent.at),
+      });
+      this.adoptedTerminalReleaseOwners.set(intent.sessionId, owner);
+    }
+    logger.warn(
+      `[SessionManager] Adopted ${intents.length} unconfirmed terminal release(s) of dead daemon ` +
+        `${owner}: ${intents.map((intent) => intent.sessionId).join(", ")}`,
+    );
+    await this.applyRecoveredTerminalReleaseIntents();
+    return true;
+  }
+
+  /** The row's owner daemon, when it is a confirmed-dead peer whose journal is not adopted yet. */
+  private unadoptedDeadOwner(stored: DeviceSession): string | undefined {
+    const owner = stored.daemon_session_id ?? null;
+    if (owner === null || this.daemonSessionId === undefined || owner === this.daemonSessionId) {
+      return undefined;
+    }
+    if (
+      !this.terminalReleaseJournal.adoptDeadDaemon ||
+      (stored.release_reason !== null && isTerminalReleaseReason(stored.release_reason))
+    ) {
+      return undefined;
+    }
+    return !this.adoptedDeadDaemonJournals.has(owner) && this.isConfirmedDeadDaemonSession(owner)
+      ? owner
+      : undefined;
+  }
+
+  /** True only when the live-daemon listing succeeded and does not name `daemonSessionId`. */
+  private isConfirmedDeadDaemonSession(daemonSessionId: string): boolean {
+    if (!this.liveDaemonSessionIds) {
+      return false;
+    }
+    try {
+      return !this.liveDaemonSessionIds().has(daemonSessionId);
+    } catch (error) {
+      logger.warn(
+        `[SessionManager] Cannot list live daemons to check journal owner ${daemonSessionId}; ` +
+          `its journal is not adopted yet: ${errorMessage(error)}`,
+        error,
+      );
+      return false;
+    }
   }
 
   /** Optional daemon wiring; existing constructors and device-session lookups stay unchanged. */
@@ -2709,7 +2799,11 @@ export class SessionManager {
 
   /** The persisted row, with tool activity during a device-restart recovery applied to its expiry. */
   private async readPersistedSession(sessionId: string): Promise<DeviceSession | undefined> {
-    const stored = await this.deviceSessionRepository.getSession?.(sessionId);
+    let stored = await this.deviceSessionRepository.getSession?.(sessionId);
+    if (stored && (await this.adoptDeadOwnerTerminalReleases(stored))) {
+      // The adopted releases were just written; this read predates them.
+      stored = await this.deviceSessionRepository.getSession?.(sessionId);
+    }
     const persisted = stored && this.withRecoveredTerminalRelease(stored);
     const activityAt = this.restartRecoveryActivityAt.get(sessionId);
     if (!persisted || activityAt === undefined || !isDeviceRestartReleasedRow(persisted)) {

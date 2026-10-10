@@ -298,4 +298,114 @@ describe("per-daemon terminal release journals (#11158)", () => {
       warn.mockRestore();
     }
   });
+
+  // #11355: a peer that was live at startup is skipped there, so it is adopted once it is dead.
+  test("a peer that died after startup is adopted on demand, durably, exactly once", () => {
+    const fs = new FakeTerminalReleaseJournalFileSystem();
+    fs.files.set(peer, line("peer-session", "heartbeat-timeout", 1) + '{"torn');
+    const journal = open(fs);
+    journal.record({ sessionId: "mine", reason: "explicit-release", at: 5 });
+    expect(journal.loadUnconfirmed().map((intent) => intent.sessionId)).toEqual(["mine"]);
+
+    expect(journal.adoptDeadDaemon("live-peer")).toEqual([
+      { sessionId: "peer-session", reason: "heartbeat-timeout", at: 1 },
+    ]);
+
+    expect(fs.files.has(peer)).toBe(false);
+    expect(fs.files.get(own)).toBe(
+      line("mine", "explicit-release", 5) + line("peer-session", "heartbeat-timeout", 1),
+    );
+    expect(journal.loadUnconfirmed().map((intent) => intent.sessionId)).toEqual([
+      "mine",
+      "peer-session",
+    ]);
+    // A restart of this daemon still finds the adopted intent, and a second adoption finds none.
+    expect(
+      open(fs, ["self"])
+        .loadUnconfirmed()
+        .map((intent) => intent.sessionId),
+    ).toEqual(["mine", "peer-session"]);
+    expect(journal.adoptDeadDaemon("live-peer")).toEqual([]);
+    // Resolving the adopted intent compacts it out of this daemon's file.
+    journal.resolve("peer-session", "heartbeat-timeout");
+    expect(fs.files.get(own)).toBe(line("mine", "explicit-release", 5));
+  });
+
+  test("on-demand adoption honours the dead peer's lifted fences and never its own file", () => {
+    const fs = new FakeTerminalReleaseJournalFileSystem();
+    fs.files.set(
+      peer,
+      line("lifted", "device-killed", 1) +
+        `${JSON.stringify({ sessionId: "lifted", lifted: true })}\n` +
+        line("kept", "explicit-release", 2),
+    );
+    const journal = open(fs);
+
+    expect(journal.adoptDeadDaemon("self")).toEqual([]);
+    expect(journal.adoptDeadDaemon("live-peer")).toEqual([
+      { sessionId: "kept", reason: "explicit-release", at: 2 },
+    ]);
+    expect(journal.adoptDeadDaemon("never-wrote-a-journal")).toEqual([]);
+  });
+
+  test("this daemon's own intent for a session outlives the dead peer's copy", () => {
+    const fs = new FakeTerminalReleaseJournalFileSystem();
+    fs.files.set(peer, line("shared", "heartbeat-timeout", 1) + line("theirs", "device-killed", 2));
+    const journal = open(fs);
+    journal.record({ sessionId: "shared", reason: "explicit-release", at: 9 });
+
+    expect(journal.adoptDeadDaemon("live-peer")).toEqual([
+      { sessionId: "theirs", reason: "device-killed", at: 2 },
+    ]);
+    expect(open(fs, ["self"]).loadUnconfirmed()).toEqual([
+      { sessionId: "shared", reason: "explicit-release", at: 9 },
+      { sessionId: "theirs", reason: "device-killed", at: 2 },
+    ]);
+  });
+
+  test("an unreadable dead peer journal reports undefined so the caller retries", () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const fs = new FakeTerminalReleaseJournalFileSystem();
+      fs.files.set(peer, line("peer-session", "heartbeat-timeout", 1));
+      const journal = open(fs);
+      journal.loadUnconfirmed();
+
+      fs.failReads = new Error("EIO");
+      expect(journal.adoptDeadDaemon("live-peer")).toBeUndefined();
+      expect(fs.files.has(peer)).toBe(true);
+
+      fs.failReads = undefined;
+      expect(journal.adoptDeadDaemon("live-peer")).toEqual([
+        { sessionId: "peer-session", reason: "heartbeat-timeout", at: 1 },
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a failed durable append still fences the adopted intents and keeps the dead file", () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const fs = new FakeTerminalReleaseJournalFileSystem();
+      fs.files.set(peer, line("peer-session", "heartbeat-timeout", 1));
+      const journal = open(fs);
+      fs.failNextAppend = new Error("ENOSPC");
+
+      expect(journal.adoptDeadDaemon("live-peer")).toEqual([
+        { sessionId: "peer-session", reason: "heartbeat-timeout", at: 1 },
+      ]);
+      expect(fs.files.get(peer)).toBe(line("peer-session", "heartbeat-timeout", 1));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a journal opened without a data directory adopts no peer", () => {
+    const fs = new FakeTerminalReleaseJournalFileSystem();
+    fs.files.set(peer, line("peer-session", "heartbeat-timeout", 1));
+
+    expect(new FileTerminalReleaseJournal(own, fs).adoptDeadDaemon("live-peer")).toEqual([]);
+    expect(fs.files.has(peer)).toBe(true);
+  });
 });

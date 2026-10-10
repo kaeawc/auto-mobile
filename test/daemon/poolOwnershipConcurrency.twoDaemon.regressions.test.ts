@@ -68,4 +68,25 @@ describe("cross-daemon ownership regressions", () => {
     ]);
     expect(result.violation).toBeUndefined();
   });
+
+  // A terminal release whose row write is parked lives only in the releasing daemon's journal.
+  // Startup adoption skips a live peer's journal, so a daemon that started while the releasing
+  // daemon was live never read it. Once that daemon died the survivor saw only a row owned by a
+  // dead daemon: a still-active one (this scenario) it refused forever as owned by another daemon,
+  // and a recoverably released one it revived (terminalReleaseJournalPeerAdoption.test.ts, and
+  // the released-session-revived invariant). The survivor now adopts a dead owner's journal
+  // before it reads that owner's row, and writes the terminal row itself. #11355
+  test("a survivor never revives a session its dead peer had journaled as released", async () => {
+    const result = await runTwoDaemonSteps([
+      step("acquireAny", { daemon: 0 }),
+      step("settle"),
+      step("wedge", { daemon: 0 }),
+      step("release", { turns: 13 }),
+      step("crash", { daemon: 0 }),
+      step("cancelRecovery", { daemon: 1, turns: 40 }),
+      step("settle"),
+    ]);
+    expect(result.violation).toBeUndefined();
+    expect(result.trace.join("\n")).toContain("B1 journal appended to");
+  });
 });

@@ -277,6 +277,7 @@ import { serverConfig } from "../utils/ServerConfig";
 import { setDebugPerfEnabled } from "../utils/PerformanceTracker";
 import {
   installProcessLifecycleHandlers,
+  PROCESS_SHUTDOWN_TIMEOUT_MS,
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "../processLifecycle";
@@ -1092,6 +1093,45 @@ export class Daemon {
   }
 
   private async startUntilReady(): Promise<void> {
+    await this.startThroughSocketBind();
+    try {
+      await this.startAfterSocketBind();
+    } catch (error) {
+      // Past the bind this process owns rehydrated sessions, forward leases and
+      // children; exiting straight from main().catch would skip their release and
+      // the daemon-shutdown broadcast (#11156). Tear down (bounded) first.
+      logger.error(`Daemon startup failed after the socket bind; stopping: ${errorMessage(error)}`);
+      await this.stopAfterFailedStartup();
+      throw error;
+    }
+  }
+
+  private async stopAfterFailedStartup(): Promise<void> {
+    if (this.shutdownInProgress) {
+      // A signal-driven stop already owns teardown.
+      return;
+    }
+    const timedOut = Symbol("post-bind startup failure stop timeout");
+    try {
+      await raceWithDeadline(() => this.stop(), {
+        timer: this.timer,
+        timeoutMs: PROCESS_SHUTDOWN_TIMEOUT_MS,
+        label: "Post-bind startup failure stop",
+        timeoutError: () => timedOut,
+      });
+    } catch (stopError) {
+      // The startup failure is the actionable error the caller rethrows; a stop
+      // failure or overrun here is diagnostic only.
+      logger.warn(
+        stopError === timedOut
+          ? `Stopping after a failed startup exceeded ${PROCESS_SHUTDOWN_TIMEOUT_MS}ms`
+          : `Stopping after a failed startup failed: ${errorMessage(stopError)}`,
+        stopError,
+      );
+    }
+  }
+
+  private async startThroughSocketBind(): Promise<void> {
     // Mirror structured daemon logs to stdout/stderr capture as well. The
     // primary stable log is `<configured log dir>/daemon.log` (defaulting to
     // `<auto-mobile data dir>/logs/daemon.log`); the daemon manager also
@@ -1250,7 +1290,9 @@ export class Daemon {
       throw error;
     }
     logger.info("Unix socket server started");
+  }
 
+  private async startAfterSocketBind(): Promise<void> {
     startupBenchmark.startPhase("auxiliarySocketServerStart");
     await this.startAuxiliarySocket("video-recording", startVideoRecordingSocketServer);
     await this.startAuxiliarySocket("test-recording", startTestRecordingSocketServer);

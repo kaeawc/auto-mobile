@@ -57,6 +57,12 @@ export interface SlotExecOwner {
   daemonId: string;
   pid: number;
   sessionUuid: string;
+  /**
+   * The owner process's generation token (its start identity), so a reused PID is not mistaken
+   * for the owner. Absent or null when the platform cannot report one: liveness then falls back
+   * to the PID probe alone.
+   */
+  processGenerationToken?: string | null;
 }
 
 export interface SlotAssignmentRecord extends SlotKey {
@@ -245,7 +251,10 @@ export interface AbandonmentQuery {
  */
 export const MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS = 60 * 60 * 1000;
 
-/** Decides whether a recorded execution owner is still alive (default: its PID is running). */
+/**
+ * Decides whether a recorded execution owner is still alive. The default
+ * (`defaultSlotExecOwnerLiveness`) requires its PID to run as the same process generation.
+ */
 export type SlotExecOwnerLiveness = (owner: SlotExecOwner) => boolean;
 
 export interface SlotRegistry {

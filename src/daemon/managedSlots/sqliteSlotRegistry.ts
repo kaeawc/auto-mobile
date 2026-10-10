@@ -5,8 +5,8 @@ import { SQLITE_BUSY_TIMEOUT_MS } from "../../db/database";
 import { isInMemoryDatabasePath } from "../../db/migrationLock";
 import { ActionableError } from "../../models/ActionableError";
 import { ensureSecureDirectorySync, getAdbServerScopedAutoMobileDir } from "../../utils/tempDir";
-import { isProcessRunning } from "../../utils/processLiveness";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
 import { migrateSlotRegistry } from "./slotRegistryMigrations";
 import {
   assertValidSlotKey,
@@ -98,6 +98,7 @@ interface SlotAssignmentsTable {
   state: SlotAssignmentState;
   exec_owner_daemon_id: string | null;
   exec_owner_pid: number | null;
+  exec_owner_process_token: string | null;
   exec_session_uuid: string | null;
   updated_at_ms: number;
 }
@@ -156,6 +157,7 @@ function toExecOwner(row: AssignmentRow): SlotExecOwner | null {
     daemonId: row.exec_owner_daemon_id,
     pid: row.exec_owner_pid,
     sessionUuid: row.exec_session_uuid,
+    processGenerationToken: row.exec_owner_process_token,
   };
 }
 
@@ -197,7 +199,7 @@ function serializeSpec(spec: unknown): string {
 
 export interface SqliteSlotRegistryOptions {
   timer?: Timer;
-  /** Decides whether a recorded execution owner is alive. Defaults to a PID liveness probe. */
+  /** Decides whether a recorded execution owner is alive. Defaults to PID + process generation. */
   isExecOwnerLive?: SlotExecOwnerLiveness;
 }
 
@@ -205,8 +207,6 @@ export interface OpenSqliteSlotRegistryOptions extends SqliteSlotRegistryOptions
   /** Defaults to {@link defaultSlotRegistryPath}. `:memory:` gives a private in-memory registry. */
   dbPath?: string;
 }
-
-const defaultExecOwnerLiveness: SlotExecOwnerLiveness = (owner) => isProcessRunning(owner.pid);
 
 /** The slice of a bun:sqlite handle this module touches before handing it to the dialect. */
 interface RegistrySqliteHandle {
@@ -260,7 +260,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
     options: SqliteSlotRegistryOptions = {},
   ) {
     this.timer = options.timer ?? defaultTimer;
-    this.isExecOwnerLive = options.isExecOwnerLive ?? defaultExecOwnerLiveness;
+    this.isExecOwnerLive = options.isExecOwnerLive ?? defaultSlotExecOwnerLiveness;
   }
 
   async ensureScope(identity: SlotScopeIdentity): Promise<EnsureScopeResult> {
@@ -365,6 +365,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
         state: "provisioning",
         exec_owner_daemon_id: null,
         exec_owner_pid: null,
+        exec_owner_process_token: null,
         exec_session_uuid: null,
         updated_at_ms: this.timer.now(),
       };
@@ -425,7 +426,12 @@ export class SqliteSlotRegistry implements SlotRegistry {
           ...(requestedSpecJson === undefined ? {} : { requested_spec_json: requestedSpecJson }),
           // A different device cannot inherit the previous device's execution owner.
           ...(deviceChanged
-            ? { exec_owner_daemon_id: null, exec_owner_pid: null, exec_session_uuid: null }
+            ? {
+                exec_owner_daemon_id: null,
+                exec_owner_pid: null,
+                exec_owner_process_token: null,
+                exec_session_uuid: null,
+              }
             : {}),
           updated_at_ms: this.timer.now(),
         })
@@ -495,6 +501,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
         .set({
           exec_owner_daemon_id: owner.daemonId,
           exec_owner_pid: owner.pid,
+          exec_owner_process_token: owner.processGenerationToken ?? null,
           exec_session_uuid: owner.sessionUuid,
           updated_at_ms: this.timer.now(),
         })
@@ -514,6 +521,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
         .set({
           exec_owner_daemon_id: null,
           exec_owner_pid: null,
+          exec_owner_process_token: null,
           exec_session_uuid: null,
           updated_at_ms: this.timer.now(),
         })

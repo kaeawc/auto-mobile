@@ -341,6 +341,26 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect(await registry.isDeviceAssignedToValidSlot("android", "avd-1")).toBe(true);
     });
 
+    test("the owner's process-generation token round-trips and is cleared on release", async () => {
+      const key = { scopeKey: await readyScope(), slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      const binding = { generation: 1, stableDeviceId: "avd-1" };
+      const claimed = await registry.claimExecution(key, binding, {
+        ...ownerFor(100, "s1"),
+        processGenerationToken: "linux:boot:42",
+      });
+      expect(claimed).toMatchObject({
+        kind: "claimed",
+        assignment: { execOwner: { pid: 100, processGenerationToken: "linux:boot:42" } },
+      });
+      expect((await registry.getAssignment(key))?.execOwner?.processGenerationToken).toBe(
+        "linux:boot:42",
+      );
+      await registry.releaseExecution(key, "s1");
+      await registry.claimExecution(key, binding, ownerFor(100, "s2"));
+      expect((await registry.getAssignment(key))?.execOwner?.processGenerationToken).toBeNull();
+    });
+
     test("findExecutionAssignments resolves the slots a session holds, and none once released", async () => {
       const scopeKey = await readyScope();
       const first = { scopeKey, slotIndex: 0 };

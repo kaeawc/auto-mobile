@@ -19,6 +19,7 @@ import type { AvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfi
 import { parseAndroidSystemImageRuntime } from "../../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
+import { defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
 import { logger } from "../../utils/logger";
 import { stableStringify } from "../../utils/stableStringify";
 import type { Timer } from "../../utils/SystemTimer";
@@ -204,7 +205,7 @@ export interface ManagedSlotReconcilerDependencies {
   deleter: ManagedSlotDeviceDeleter;
   claims: ManagedSlotDeviceClaims;
   capacity?: ManagedSlotBootCapacity;
-  /** Whether a recorded execution owner is alive; default treats every owner as live. */
+  /** Whether a recorded execution owner is alive; default: PID plus process generation. */
   isExecOwnerLive?: SlotExecOwnerLiveness;
   timer: Pick<Timer, "now">;
   /** Execution-reservation ids (default: random UUIDs). */
@@ -605,7 +606,7 @@ export class ManagedSlotReconciler {
   private readonly idGenerator: IdGenerator;
 
   constructor(private readonly deps: ManagedSlotReconcilerDependencies) {
-    this.isExecOwnerLive = deps.isExecOwnerLive ?? (() => true);
+    this.isExecOwnerLive = deps.isExecOwnerLive ?? defaultSlotExecOwnerLiveness;
     this.idGenerator = deps.idGenerator ?? defaultIdGenerator;
   }
 

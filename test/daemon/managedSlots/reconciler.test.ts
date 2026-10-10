@@ -203,6 +203,7 @@ describe("ManagedSlotReconciler", () => {
       capacity,
       timer,
       idGenerator: new FakeIdGenerator(),
+      isExecOwnerLive: () => true,
     });
     const scope = await registry.ensureScope(SCOPE);
     if (scope.kind !== "ready") {
@@ -477,6 +478,31 @@ describe("ManagedSlotReconciler", () => {
       expect(result.failure.code).toBe("discovery_incomplete");
       expect(provisioner.calls).toHaveLength(0);
       expect(result.assignment).toMatchObject({ generation: 1, stableDeviceId: stableId });
+    });
+
+    test("by default an owner whose PID is not running does not hold the slot", async () => {
+      const stableId = await seedAssigned();
+      await registry.claimExecution(
+        key,
+        { generation: 1, stableDeviceId: stableId },
+        // A non-positive PID is never a running process.
+        { daemonId: "d", pid: -1, sessionUuid: "crashed" },
+      );
+      reconciler = new ManagedSlotReconciler({
+        registry,
+        inventory,
+        matcher,
+        resolver: new DefaultManagedSpecResolver(),
+        provisioner,
+        deleter,
+        claims,
+        capacity,
+        timer,
+      });
+
+      const result = expectReady(await reconciler.reconcile(request()));
+
+      expect(result.disposition).toBe("reused");
     });
 
     test("a live execution owner refuses with slot_in_use", async () => {
@@ -868,7 +894,7 @@ describe("ManagedSlotReconciler", () => {
 
       const result = expectReady(await reconciler.reconcile(request(SPEC_18, { owner })));
 
-      expect(result.assignment.execOwner).toEqual({ ...owner, sessionUuid: result.sessionUuid });
+      expect(result.assignment.execOwner).toMatchObject({ ...owner, sessionUuid: result.sessionUuid });
       const again = expectFailed(await reconciler.reconcile(request(SPEC_18, { owner })));
       expect(again.failure.code).toBe("slot_in_use");
     });

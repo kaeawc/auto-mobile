@@ -510,6 +510,11 @@ function copy(assignment: SlotAssignmentRecord): SlotAssignmentRecord {
     ...assignment,
     requestedSpec: roundTrip(assignment.requestedSpec),
     resolvedSpec: roundTrip(assignment.resolvedSpec),
-    execOwner: assignment.execOwner ? { ...assignment.execOwner } : null,
+    execOwner: assignment.execOwner
+      ? {
+          ...assignment.execOwner,
+          processGenerationToken: assignment.execOwner.processGenerationToken ?? null,
+        }
+      : null,
   };
 }

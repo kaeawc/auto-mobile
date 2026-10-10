@@ -640,9 +640,11 @@ export class DeviceAutolockManager {
       // surface the recovery error for the device the client actually owns.
       return matches[0].sessionId;
     }
-    if (candidates.length > 0 && !deviceId) {
+    // Zero matches is not ambiguous: the connection simply holds nothing for the
+    // requested platform, so the caller falls through to ordinary discovery (#11167).
+    if (matches.length > 1 && !deviceId) {
       throw new ActionableError(
-        `Cannot resolve requested platform/deviceId unambiguously. Candidate sessions: ${candidates
+        `Cannot resolve requested platform/deviceId unambiguously. Candidate sessions: ${matches
           .map(
             (candidate) =>
               `${candidate.sessionId} (${candidate.deviceId}, ${candidate.platform}` +

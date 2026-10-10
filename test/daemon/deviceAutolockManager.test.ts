@@ -330,6 +330,13 @@ describe("DeviceAutolockManager", () => {
     sessions.stopCleanupTimer();
   });
 
+  test("a platform the connection holds no autolock for falls through instead of throwing (#11167)", async () => {
+    const { manager, sessions, device } = harness();
+    await manager.autolockDevice(device.id, "android", "mcp-1");
+    expect(manager.resolveAutolockSessionForMcpSession("mcp-1", "ios")).toBeUndefined();
+    sessions.stopCleanupTimer();
+  });
+
   test("routes a quarantined ADB-reset session to its original device", async () => {
     const { manager, sessions, device, devices, quarantined } = harness();
     const id = await manager.autolockDevice(device.id, "android", "mcp-1");

@@ -6815,17 +6815,33 @@ export class DaemonMcpProxy {
     return typeof properties === "object" && properties !== null && "sessionUuid" in properties;
   }
 
+  /**
+   * Whether `sessionUuid` was minted by an acquisition RESULT on this proxy, as opposed to
+   * declared at startup (`--initial-session-uuid`, a managed slot) or only named by a caller.
+   * Provenance belongs to the session, not to how the binding last reached it (#11483): a
+   * connection that minted the session recovers in-band however the agent addressed it since.
+   */
+  private wasMintedThroughThisProxy(sessionUuid: string): boolean {
+    return (
+      this.claimableSessions.has(sessionUuid) &&
+      sessionUuid !== this.config.initialSessionUuid?.trim() &&
+      !this.managedExecutionSessions.has(sessionUuid)
+    );
+  }
+
   // Bind `sessionUuid`, refreshing the replay lease. A change to a different UUID
-  // marks the binding client-declared: the new UUID came from a call's args, not
-  // a device-acquisition result. A sessionless refresh re-binds the same
-  // result-minted UUID and preserves its provenance (issue #5689).
+  // takes that session's provenance: client-declared when the UUID is known only
+  // from a call's args, result-minted when this proxy minted it earlier and the
+  // binding is returning to it (setActiveDevice, or naming it once the latest
+  // binding is gone). A sessionless refresh re-binds the same UUID and preserves
+  // its provenance (issue #5689).
   private updateBoundSessionUuid(sessionUuid: string): void {
     // A held session that becomes the binding again keeps its idle clock: the call that named it
     // may be a read, and the daemon's echo already credited it when it was use (#11348).
     const heldLastUsedAt = this.otherHeldSessions.get(sessionUuid)?.lastUsedAt;
     if (sessionUuid !== this.boundSessionUuid) {
       this.holdPreviousBinding(sessionUuid);
-      this.boundSessionFromResultMint = false;
+      this.boundSessionFromResultMint = this.wasMintedThroughThisProxy(sessionUuid);
       this.livenessOwnershipClaimSent = false;
     }
     // Re-binding the session that is already bound is not use: a read naming it must not restart

@@ -803,8 +803,9 @@ function foreignDeviceRead(
 /**
  * Admit a read under its session without refreshing or claiming it (#10964): the live session, or
  * null when the id names no live device session this daemon can route the read to (never issued,
- * such as an IDE observer session (#10968), or not live) so the read runs sessionless. A terminal
- * or suspect session keeps its typed error. Undefined when there is no daemon session manager.
+ * such as an IDE observer session (#10968), not live, or a row that expired while no daemon ran
+ * (#11361)) so the read runs sessionless. A terminally released or suspect session keeps its
+ * typed error. Undefined when there is no daemon session manager.
  */
 async function admitReadSession(
   sessionUuid: string,
@@ -824,6 +825,19 @@ async function admitReadSession(
     }
     throw error;
   }
+}
+
+/**
+ * The device of the session a read named but was too late to be admitted under (#11361): the
+ * session is past its idle deadline and only earlier work still holds it. Undefined otherwise.
+ */
+function lateReadSessionDevice(
+  sessionUuid: string | undefined,
+  execution: { executionId: string; startTime: number } | undefined,
+): string | undefined {
+  return sessionUuid
+    ? DaemonState.getInstance().getSessionManager().deviceHeldForLateRead(sessionUuid, execution)
+    : undefined;
 }
 
 /** A device another session holds: a live owner, or an autolock holder. */
@@ -1041,11 +1055,23 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       logger.info(
         `[ToolRegistry] ${name}: ${sessionUuid} is not a live device session; reading sessionlessly`,
       );
+      const lateReadDeviceId = providedDeviceId
+        ? undefined
+        : lateReadSessionDevice(sessionUuid, execution);
       sessionUuid = undefined;
       delete args.sessionUuid;
       if (options.sessionlessDeviceRead && providedDeviceId) {
         // The same contract as a sessionless `observe {deviceId}`: no session, no readiness.
         return resolveSessionlessDeviceRead(input, options.sessionlessDeviceRead, providedDeviceId);
+      }
+      if (lateReadDeviceId) {
+        // A read that named a session still held by earlier work past its idle deadline (#11361)
+        // reads that session's device, not whichever device a sessionless call would select.
+        return resolveSessionlessDeviceRead(
+          input,
+          options.sessionlessDeviceRead ?? this.defaultDeviceRead,
+          lateReadDeviceId,
+        );
       }
     }
     // A sessionless read-only call that would land on a held device watches it through the

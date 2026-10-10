@@ -93,10 +93,8 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       // Row hygiene is unchanged: the answer writes no terminal reason to the row.
       expect((await repo.getSession(SESSION))?.release_reason ?? undefined).toBe(reason);
 
-      // A read naming the session gets the same answer.
-      const read = await refusal(manager, "read-only");
-      expect(read).toBeInstanceOf(TerminalSessionError);
-      expect((read as TerminalSessionError).release.releaseReason).toBe("expired");
+      // A read is never refused: it gets the answer its caller turns into a sessionless read.
+      expect(await refusal(manager, "read-only")).toBeInstanceOf(UnissuedSessionError);
     });
   }
 

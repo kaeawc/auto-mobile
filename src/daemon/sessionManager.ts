@@ -2895,10 +2895,11 @@ export class SessionManager {
   /**
    * The release a call naming a row past its deadline is refused with (#11361), or undefined when
    * the row is not one: a session that ran out its idle or recovery window while no daemon was
-   * there to release it is gone for good, so the caller gets the typed terminal refusal (with the
-   * `expired` reason) rather than the untyped "not found" of a never-issued id. Only the answer is
-   * terminal: the row keeps its non-terminal `expired` reason and no in-memory fence is raised,
-   * so a name that may be issued again (a plan's) still can be.
+   * there to release it is gone, so a control call naming it gets the typed terminal refusal (with
+   * the `expired` reason) rather than the untyped "not found" of a never-issued id. Only that
+   * answer is terminal: the row keeps its non-terminal `expired` reason and no in-memory fence is
+   * raised, so `daemon/registerSession` still accepts the UUID as an observer and createSession
+   * or a plan re-issue can issue the name again.
    */
   private expiredReleaseFromPersisted(
     sessionId: string,
@@ -2916,12 +2917,21 @@ export class SessionManager {
     };
   }
 
-  /** What a call naming a UUID that cannot be admitted is refused with: expired, or never issued. */
+  /**
+   * What a call naming a UUID that cannot be admitted is answered with. A control call naming a
+   * row past its deadline gets the typed terminal refusal; a never-issued id gets `neverIssued`.
+   * A read is never refused for an expired row: it gets `neverIssued` too, which its caller turns
+   * into a sessionless read, exactly as before the expired answer existed (#11361).
+   */
   private unadmittedSessionError(
     sessionId: string,
     persisted: DeviceSession | undefined,
     neverIssued: UnissuedSessionError,
+    access?: SessionAccess,
   ): Error {
+    if (access === "read-only") {
+      return neverIssued;
+    }
     const expired = persisted && this.expiredReleaseFromPersisted(sessionId, persisted);
     return expired ? new TerminalSessionError(sessionId, expired) : neverIssued;
   }
@@ -3024,27 +3034,47 @@ export class SessionManager {
   }
 
   /**
-   * A call's start on the clock `expiresAt` is stamped with (#11290): its wall-clock `startTime`
-   * is not comparable with a session stamp once the wall clock has stepped.
-   */
-  /**
-   * The live session a read may be answered from, releasing nothing. A read is never refused
-   * (#11322, #11361): one that arrives after the idle deadline while earlier work still holds the
-   * session is told there is no session to route to, like any read of an expired session, and
-   * runs sessionless rather than getting the refusal a late control call gets.
+   * The live session a read is admitted under, releasing nothing. A read that arrives after the
+   * idle deadline while earlier work still holds the session (#11361) is not admitted under it and
+   * does not get the untyped refusal a late control call gets: this returns null, read-only
+   * admission resolves undefined, and the caller runs the read without a session on the device
+   * {@link deviceHeldForLateRead} names. Any other read past the deadline also gets null here.
    */
   private observeSessionForRead(
     sessionId: string,
     execution: SessionExecutionMetadata | undefined,
   ): Session | null {
-    const session = this.sessions.get(sessionId);
-    const started = execution && this.executionOnSessionClock(execution);
-    if (session && this.isLateExecutionWhileEarlierWorkIsActive(session, started)) {
+    if (this.deviceHeldForLateRead(sessionId, execution) !== undefined) {
       return null;
     }
     return this.getSessionInternal(sessionId, true, execution, false);
   }
 
+  /**
+   * The device of the live session a read named but arrived too late to be admitted under: past
+   * the idle deadline, with earlier work still holding the session (#11361). The read runs
+   * sessionless against this device, the one it asked about, rather than whatever device a
+   * sessionless call would otherwise select. Undefined in every other case. Reads no device and
+   * changes nothing: no release, no refresh, no idle credit.
+   */
+  deviceHeldForLateRead(
+    sessionId: string,
+    execution: SessionExecutionMetadata | undefined,
+  ): string | undefined {
+    const session = this.sessions.get(sessionId);
+    if (!session || this.terminalReleaseSnapshots.has(sessionId)) {
+      return undefined;
+    }
+    const started = execution && this.executionOnSessionClock(execution);
+    return this.isLateExecutionWhileEarlierWorkIsActive(session, started)
+      ? session.assignedDevice
+      : undefined;
+  }
+
+  /**
+   * A call's start on the clock `expiresAt` is stamped with (#11290): its wall-clock `startTime`
+   * is not comparable with a session stamp once the wall clock has stepped.
+   */
   private executionOnSessionClock(execution: SessionExecutionMetadata): SessionClockExecution {
     return {
       ...execution,
@@ -3482,7 +3512,7 @@ export class SessionManager {
     if (persisted && this.isReissuablePersistedSession(persisted)) {
       return undefined;
     }
-    throw this.unadmittedSessionError(sessionId, persisted, unissuedSessionError);
+    throw this.unadmittedSessionError(sessionId, persisted, unissuedSessionError, options.access);
   }
 
   private async createUnseenSession(

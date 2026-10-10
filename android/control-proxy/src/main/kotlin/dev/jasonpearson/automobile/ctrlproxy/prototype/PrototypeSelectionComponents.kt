@@ -121,7 +121,7 @@ internal fun RenderPrototypeListItem(
         Modifier.clickable(role = Role.Button) { interact(PrototypeInteraction.Tap(actions)) }
       else -> Modifier
     }
-  val foreground = if (node.style.source.color != null) node.style.color else Color.Unspecified
+  val foreground = prototypeThemedColor(null, node.style.source.color) ?: Color.Unspecified
   ListItem(
     headlineContent = { Text(source.headline, Modifier.clearAndSetSemantics {}) },
     modifier = target.then(modifier),
@@ -134,7 +134,8 @@ internal fun RenderPrototypeListItem(
     colors =
       ListItemDefaults.colors(
         containerColor =
-          if (node.style.background != null) Color.Transparent else ListItemDefaults.containerColor,
+          if (node.style.source.background != null) Color.Transparent
+          else ListItemDefaults.containerColor,
         headlineColor = foreground,
         supportingColor = foreground,
         leadingIconColor = foreground,

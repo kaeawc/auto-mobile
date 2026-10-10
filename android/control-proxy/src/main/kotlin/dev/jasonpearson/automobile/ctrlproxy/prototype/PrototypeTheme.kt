@@ -16,8 +16,10 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -25,6 +27,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.isSpecified
 import dev.jasonpearson.automobile.protocol.PrototypeCornerRadius
+import dev.jasonpearson.automobile.protocol.PrototypeModeValue
 import dev.jasonpearson.automobile.protocol.PrototypeSpecTheme
 import dev.jasonpearson.automobile.protocol.PrototypeSpecThemeColors
 import dev.jasonpearson.automobile.protocol.PrototypeSpecThemeShapes
@@ -41,9 +44,21 @@ internal data class PrototypeThemeSpec(
   val seed: Color? = null,
   /** The spec asked for device dynamic colour; honoured only when the OS supports it. */
   val dynamicColor: Boolean = false,
-  /** Explicit per-role hex overrides, painted over whichever scheme the rest selects. */
+  /**
+   * Explicit per-role hex overrides, painted over whichever scheme the rest selects: the flat roles
+   * in both modes, then the `light` or `dark` map for the resolved mode.
+   */
   val roles: PrototypeSpecThemeColors? = null,
 )
+
+/**
+ * What a colour slot resolves against: the prototype's Material scheme and the resolved light or
+ * dark appearance that picks a side of a `{light, dark}` pair.
+ */
+internal data class PrototypePalette(val scheme: ColorScheme, val dark: Boolean)
+
+/** The prototype's resolved appearance, provided by [PrototypeTheme]; light outside one. */
+internal val LocalPrototypeDark = staticCompositionLocalOf { false }
 
 /**
  * The first opaque background on the tree's leading chain (root, then its first visible child, and
@@ -51,6 +66,9 @@ internal data class PrototypeThemeSpec(
  * whichever of light or dark content reads better on it decides light or dark. A spec with no such
  * background follows the device setting. An explicit spec `theme` wins over this inference: its
  * `mode` decides light or dark, and its colours replace the background-derived surfaces (#10438).
+ *
+ * Only single hex values take part: a `{light, dark}` background pair and the `colors.light` /
+ * `colors.dark` role maps depend on the mode, so neither can decide it (#11215 D2).
  */
 internal fun prototypeThemeSpec(
   root: PrototypeRenderNode,
@@ -121,12 +139,16 @@ internal fun prototypeHostDark(model: PrototypeRenderModel): Boolean? =
  * [dynamicScheme] is the device's Material You scheme, supplied only on API 31+. It is used when
  * the spec asked for device colour; otherwise a seed generates the scheme, else the baseline
  * palette is used with the authored surface painted over it. Explicit role overrides are applied
- * last, over any of those.
+ * last, over any of those: the flat `colors.<role>` values, then the `colors.light` or
+ * `colors.dark` map for the resolved mode, which therefore wins for a role both name (#11215 D2).
  */
 internal fun prototypeColorScheme(
   theme: PrototypeThemeSpec,
   dynamicScheme: ColorScheme? = null,
-): ColorScheme = prototypeBaseColorScheme(theme, dynamicScheme).withRoleOverrides(theme.roles)
+): ColorScheme =
+  prototypeBaseColorScheme(theme, dynamicScheme)
+    .withRoleOverrides(theme.roles)
+    .withRoleMap(if (theme.dark) theme.roles?.dark else theme.roles?.light)
 
 private fun prototypeBaseColorScheme(
   theme: PrototypeThemeSpec,
@@ -151,7 +173,8 @@ private fun prototypeBaseColorScheme(
 /** This scheme with every role [roles] names replaced by that hex colour; null keeps it as is. */
 internal fun ColorScheme.withRoleOverrides(roles: PrototypeSpecThemeColors?): ColorScheme {
   // Seed and source alone name no role: keep this scheme instance.
-  if (roles == null || roles == PrototypeSpecThemeColors(roles.seed, roles.source)) return this
+  val named = roles?.copy(seed = null, source = null, light = null, dark = null)
+  if (named == null || named == PrototypeSpecThemeColors()) return this
   fun String?.hex(): Color? = this?.let(::prototypeColor)
   return copy(
     primary = roles.primary.hex() ?: primary,
@@ -190,6 +213,52 @@ internal fun ColorScheme.withRoleOverrides(roles: PrototypeSpecThemeColors?): Co
     surfaceContainerHighest = roles.surfaceContainerHighest.hex() ?: surfaceContainerHighest,
     surfaceContainerLow = roles.surfaceContainerLow.hex() ?: surfaceContainerLow,
     surfaceContainerLowest = roles.surfaceContainerLowest.hex() ?: surfaceContainerLowest,
+  )
+}
+
+/**
+ * This scheme with every role [roles] names (role name to hex) replaced; null or empty keeps it.
+ */
+internal fun ColorScheme.withRoleMap(roles: Map<String, String>?): ColorScheme {
+  if (roles.isNullOrEmpty()) return this
+  fun hex(role: String): Color? = roles[role]?.let(::prototypeColor)
+  return copy(
+    primary = hex("primary") ?: primary,
+    onPrimary = hex("onPrimary") ?: onPrimary,
+    primaryContainer = hex("primaryContainer") ?: primaryContainer,
+    onPrimaryContainer = hex("onPrimaryContainer") ?: onPrimaryContainer,
+    inversePrimary = hex("inversePrimary") ?: inversePrimary,
+    secondary = hex("secondary") ?: secondary,
+    onSecondary = hex("onSecondary") ?: onSecondary,
+    secondaryContainer = hex("secondaryContainer") ?: secondaryContainer,
+    onSecondaryContainer = hex("onSecondaryContainer") ?: onSecondaryContainer,
+    tertiary = hex("tertiary") ?: tertiary,
+    onTertiary = hex("onTertiary") ?: onTertiary,
+    tertiaryContainer = hex("tertiaryContainer") ?: tertiaryContainer,
+    onTertiaryContainer = hex("onTertiaryContainer") ?: onTertiaryContainer,
+    background = hex("background") ?: background,
+    onBackground = hex("onBackground") ?: onBackground,
+    surface = hex("surface") ?: surface,
+    onSurface = hex("onSurface") ?: onSurface,
+    surfaceVariant = hex("surfaceVariant") ?: surfaceVariant,
+    onSurfaceVariant = hex("onSurfaceVariant") ?: onSurfaceVariant,
+    surfaceTint = hex("surfaceTint") ?: surfaceTint,
+    inverseSurface = hex("inverseSurface") ?: inverseSurface,
+    inverseOnSurface = hex("inverseOnSurface") ?: inverseOnSurface,
+    error = hex("error") ?: error,
+    onError = hex("onError") ?: onError,
+    errorContainer = hex("errorContainer") ?: errorContainer,
+    onErrorContainer = hex("onErrorContainer") ?: onErrorContainer,
+    outline = hex("outline") ?: outline,
+    outlineVariant = hex("outlineVariant") ?: outlineVariant,
+    scrim = hex("scrim") ?: scrim,
+    surfaceBright = hex("surfaceBright") ?: surfaceBright,
+    surfaceDim = hex("surfaceDim") ?: surfaceDim,
+    surfaceContainer = hex("surfaceContainer") ?: surfaceContainer,
+    surfaceContainerHigh = hex("surfaceContainerHigh") ?: surfaceContainerHigh,
+    surfaceContainerHighest = hex("surfaceContainerHighest") ?: surfaceContainerHighest,
+    surfaceContainerLow = hex("surfaceContainerLow") ?: surfaceContainerLow,
+    surfaceContainerLowest = hex("surfaceContainerLowest") ?: surfaceContainerLowest,
   )
 }
 
@@ -348,6 +417,7 @@ internal fun PrototypeHostTheme(
     MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
       CompositionLocalProvider(
         LocalContentColor provides MaterialTheme.colorScheme.onSurface,
+        LocalPrototypeDark provides dark,
         content = content,
       )
     }
@@ -361,16 +431,24 @@ internal fun PrototypeTheme(
 ) {
   val systemDark = isSystemInDarkTheme()
   val context = LocalContext.current
-  val scheme =
+  val palette =
     remember(root, explicit, systemDark) {
       val theme = prototypeThemeSpec(root, systemDark, explicit)
-      prototypeColorScheme(theme, prototypeDynamicScheme(context, theme))
+      PrototypePalette(
+        prototypeColorScheme(theme, prototypeDynamicScheme(context, theme)),
+        theme.dark,
+      )
     }
   val typography = remember(explicit) { prototypeTypography(explicit?.typography) }
   val shapes = remember(explicit) { prototypeShapes(explicit?.shapes) }
-  MaterialTheme(colorScheme = scheme, typography = typography, shapes = shapes) {
-    // Unstyled text and icons take this, so they follow the scheme instead of a fixed black.
-    CompositionLocalProvider(LocalContentColor provides scheme.onSurface, content = content)
+  MaterialTheme(colorScheme = palette.scheme, typography = typography, shapes = shapes) {
+    CompositionLocalProvider(
+      // Unstyled text and icons take this, so they follow the scheme instead of a fixed black.
+      LocalContentColor provides palette.scheme.onSurface,
+      // The same resolved mode picks the side of every {light, dark} colour and image pair.
+      LocalPrototypeDark provides palette.dark,
+      content = content,
+    )
   }
 }
 
@@ -501,14 +579,33 @@ internal fun prototypeColorRole(scheme: ColorScheme, role: String): Color? =
     else -> null
   }
 
-/** [literal] is the parsed hex colour; a role name in [spec] takes the active scheme's colour. */
-internal fun prototypeResolveColor(scheme: ColorScheme, literal: Color?, spec: String?): Color? =
-  spec?.takeIf { !it.startsWith("#") }?.let { prototypeColorRole(scheme, it) } ?: literal
+/**
+ * The colour of a spec colour slot. A `{light, dark}` pair first gives the side for the palette's
+ * mode; that value (or the single one) is then a hex colour or a role name looked up in the
+ * palette's scheme, which already carries the theme's flat and per-mode role overrides. [literal]
+ * is the colour the render model parsed for a single hex value, reused instead of parsing again; it
+ * is also the result when [spec] is absent.
+ */
+internal fun prototypeResolveColor(
+  palette: PrototypePalette,
+  literal: Color?,
+  spec: PrototypeModeValue?,
+): Color? {
+  val value = spec?.let { prototypeModeValue(it, palette.dark) } ?: return literal
+  if (!value.startsWith("#")) return prototypeColorRole(palette.scheme, value) ?: literal
+  val parsed = literal?.takeIf { spec is PrototypeModeValue.Single && it.isSpecified }
+  return parsed ?: prototypeColor(value)
+}
 
-/** [prototypeResolveColor] against the active prototype MaterialTheme. */
+/** The scheme and resolved mode of the enclosing [PrototypeTheme]. */
 @Composable
-internal fun prototypeThemedColor(literal: Color?, spec: String?): Color? =
-  prototypeResolveColor(MaterialTheme.colorScheme, literal, spec)
+internal fun prototypePalette(): PrototypePalette =
+  PrototypePalette(MaterialTheme.colorScheme, LocalPrototypeDark.current)
+
+/** [prototypeResolveColor] against the active prototype theme. */
+@Composable
+internal fun prototypeThemedColor(literal: Color?, spec: PrototypeModeValue?): Color? =
+  prototypeResolveColor(prototypePalette(), literal, spec)
 
 /**
  * A `cornerRadius` as a shape: dp as a rounded corner, a token as the theme's Shapes step, and

@@ -342,6 +342,11 @@ class WebSocketServer(
     // unknown
     // spec fields, so an older device would silently show a session-scoped system-layer prototype.
     add("prototype_window_options_v1")
+    // Prototype specs honour {light, dark} colour and image pairs, role names in gradient stops and
+    // scrims, and theme.colors.light / theme.colors.dark. An older APK cannot decode a pair where
+    // it expects a string and fails the whole show, and draws a role-named stop transparent, so
+    // hosts refuse such a spec for a device lacking this flag.
+    add("prototype_theme_modes_v1")
     // A device-persistent prototype buffers its events while no host is connected and replays them,
     // and inspect_prototypes reports what it is showing. Older hosts never send inspect_prototypes.
     add("prototype_persistence_replay_v1")

@@ -256,10 +256,13 @@ class PrototypeThemeTest {
     assertEquals(Color(0xFF123456), prototypeColorRole(scheme, "primary"))
     assertEquals(Color(0xFF654321), prototypeColorRole(scheme, "surfaceContainer"))
     assertNull(prototypeColorRole(scheme, "onPurple"))
-    assertEquals(Color(0xFF123456), prototypeResolveColor(scheme, null, "primary"))
-    assertEquals(Color.Red, prototypeResolveColor(scheme, Color.Red, "#FFFF0000"))
-    assertEquals(Color.Red, prototypeResolveColor(scheme, Color.Red, null))
-    assertNull(prototypeResolveColor(scheme, null, null))
+    val palette = PrototypePalette(scheme, dark = false)
+    val primary = PrototypeModeValue.Single("primary")
+    val red = PrototypeModeValue.Single("#FFFF0000")
+    assertEquals(Color(0xFF123456), prototypeResolveColor(palette, null, primary))
+    assertEquals(Color.Red, prototypeResolveColor(palette, Color.Red, red))
+    assertEquals(Color.Red, prototypeResolveColor(palette, Color.Red, null))
+    assertNull(prototypeResolveColor(palette, null, null))
   }
 
   @Test

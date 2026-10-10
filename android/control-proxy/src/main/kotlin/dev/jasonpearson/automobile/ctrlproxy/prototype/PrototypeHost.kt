@@ -814,7 +814,9 @@ private fun PrototypeChrome(
           .fillMaxWidth()
           .clipToBounds()
           .alpha(chrome.contentAlpha)
-          .background(fullscreen?.scrim ?: Color.Transparent),
+          .background(
+            prototypeThemedColor(fullscreen?.scrim, fullscreen?.scrimSpec) ?: Color.Transparent,
+          ),
       ) {
         CompositionLocalProvider(
           LocalPrototypeInsetFloor provides floor,

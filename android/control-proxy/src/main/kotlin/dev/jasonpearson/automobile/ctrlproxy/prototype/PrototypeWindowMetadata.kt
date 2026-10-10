@@ -30,7 +30,8 @@ const val FULLSCREEN_DISMISS_BAR_OPAQUE = false
  * translucent (`opacityPercent` 100), no translucent host chrome over the window, and a fully
  * opaque surface that fills the window: the root's own background at alpha 1 sized to fill with no
  * node alpha, or, for fullscreen, a fully opaque scrim painted behind it. A modal sheet's scrim is
- * drawn over content and never makes anything more opaque.
+ * drawn over content and never makes anything more opaque. A `{light, dark}` pair is opaque only
+ * when both sides are opaque hex colours; a role name is never counted, as before.
  */
 fun prototypeWindowMetadata(
   model: PrototypeRenderModel,
@@ -49,9 +50,12 @@ fun prototypeWindowMetadata(
     style.source.width == PrototypeDimension.Fill && style.source.height == PrototypeDimension.Fill
   val rootSolid =
     rootFills &&
-      (style.background?.alpha ?: 0f) >= 1f &&
+      ((style.background?.alpha ?: 0f) >= 1f ||
+        prototypeOpaqueInEveryMode(style.source.background)) &&
       (style.source.alpha?.let { it >= 1.0 } ?: true)
-  val scrimSolid = (placement as? PrototypePlacement.Fullscreen)?.scrim?.alpha == 1f
+  val fullscreen = placement as? PrototypePlacement.Fullscreen
+  val scrimSolid =
+    fullscreen?.scrim?.alpha == 1f || prototypeOpaqueInEveryMode(fullscreen?.scrimSpec)
   val chromeOpaque = placement !is PrototypePlacement.Fullscreen || dismissBarOpaque
   return PrototypeWindowMetadata(
     name,

@@ -31,6 +31,7 @@ class CommandAdvertisementTest {
       "gesture_display_id_v1",
       "prototype_display_id_v1",
       "prototype_window_options_v1",
+      "prototype_theme_modes_v1",
       "prototype_persistence_replay_v1",
       "prototype_show_in_place_v1",
       "prototype_anchor_v1",
@@ -58,6 +59,7 @@ class CommandAdvertisementTest {
       assertTrue(commands.contains("ime_password_commit_v1"))
       assertTrue(commands.contains("tap_double_v1"))
       assertTrue(commands.contains("prototype_window_options_v1"))
+      assertTrue(commands.contains("prototype_theme_modes_v1"))
       assertTrue(commands.contains("prototype_persistence_replay_v1"))
       assertTrue(commands.contains("prototype_show_in_place_v1"))
       assertTrue(commands.contains("prototype_anchor_v1"))

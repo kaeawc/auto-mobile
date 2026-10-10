@@ -28,7 +28,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.DefaultShadowColor
 import androidx.compose.ui.graphics.LinearGradientShader
 import androidx.compose.ui.graphics.RadialGradientShader
@@ -613,7 +612,8 @@ private fun RenderPrototypeSheet(
     Box(
       Modifier.fillMaxSize()
         .background(
-          prototypeHexColor(source.scrim) ?: prototypeSheetScrimFallback(MaterialTheme.colorScheme),
+          prototypeThemedColor(null, source.scrim)
+            ?: prototypeSheetScrimFallback(MaterialTheme.colorScheme),
         )
         .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) },
     )
@@ -722,7 +722,9 @@ private fun prototypeNodeModifier(
   prototypeThemedColor(node.style.background, style.background)?.let {
     modifier = modifier.background(it, shape)
   }
-  style.gradient?.let { modifier = modifier.background(prototypeGradientBrush(it), shape) }
+  style.gradient?.let {
+    modifier = modifier.background(prototypeGradientBrush(it, prototypePalette()), shape)
+  }
   style.border?.let {
     val borderColor = prototypeThemedColor(node.style.borderColor, it.color)
     modifier = modifier.border(it.width.toFloat().dp, checkNotNull(borderColor), shape)
@@ -980,17 +982,17 @@ private fun sizeConstraintModifier(modifier: Modifier, style: PrototypeStyle): M
     )
 
 /** A shader brush so the gradient line is computed from the node's measured size. */
-private fun prototypeGradientBrush(gradient: PrototypeGradient): Brush =
+private fun prototypeGradientBrush(gradient: PrototypeGradient, palette: PrototypePalette): Brush =
   object : ShaderBrush() {
     override fun createShader(size: Size): Shader =
       when (gradient) {
         is PrototypeLinearGradient -> {
-          val (colors, positions) = prototypeGradientStops(gradient.stops)
+          val (colors, positions) = prototypeGradientStops(gradient.stops, palette)
           val (from, to) = prototypeLinearGradientLine(gradient.angle, size.width, size.height)
           LinearGradientShader(from, to, colors, positions)
         }
         is PrototypeRadialGradient -> {
-          val (colors, positions) = prototypeGradientStops(gradient.stops)
+          val (colors, positions) = prototypeGradientStops(gradient.stops, palette)
           RadialGradientShader(
             size.center,
             hypot(size.width, size.height) / 2f,
@@ -1000,8 +1002,3 @@ private fun prototypeGradientBrush(gradient: PrototypeGradient): Brush =
         }
       }
   }
-
-/** [prototypeThemedColor] for a spec colour slot, through the [prototypeModeValue] seam. */
-@Composable
-internal fun prototypeThemedColor(literal: Color?, spec: PrototypeModeValue?): Color? =
-  prototypeThemedColor(literal, spec?.let(::prototypeModeValue))

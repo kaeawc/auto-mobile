@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "style": {
+        "border": {
+          "width": 1,
+          "color": {}
+        }
+      }
+    }
+  },
+  "expectedPath": "root.style.border.color.dark"
+}

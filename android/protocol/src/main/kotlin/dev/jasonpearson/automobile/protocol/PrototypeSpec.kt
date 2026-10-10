@@ -70,14 +70,21 @@ data class PrototypePadding(
 @Serializable
 data class PrototypeBorder(
   val width: Double,
-  val color: String,
-)
+  val color: PrototypeModeValue,
+) {
+  constructor(width: Double, color: String) : this(width, PrototypeModeValue.Single(color))
+}
 
 @Serializable
 data class PrototypeGradientStop(
-  val color: String,
+  val color: PrototypeModeValue,
   val position: Double? = null,
-)
+) {
+  constructor(
+    color: String,
+    position: Double? = null,
+  ) : this(PrototypeModeValue.Single(color), position)
+}
 
 @Serializable sealed class PrototypeGradient
 
@@ -102,13 +109,14 @@ data class PrototypeStyle(
   val minHeight: Double? = null,
   val maxHeight: Double? = null,
   val padding: PrototypePadding? = null,
-  val background: String? = null,
+  /** Hex, colour role, or a `{light, dark}` pair of either, as every colour slot (#11218). */
+  val background: PrototypeModeValue? = null,
   /** A dp number, a Material Shapes token, or per-corner dp radii. */
   val cornerRadius: PrototypeCornerRadius? = null,
   val border: PrototypeBorder? = null,
   val elevation: Double? = null,
   /** Hex or colour role tinting the `elevation` shadow; absent keeps the platform shadow colour. */
-  val shadowColor: String? = null,
+  val shadowColor: PrototypeModeValue? = null,
   val gradient: PrototypeGradient? = null,
   val aspectRatio: Double? = null,
   /** A dp draw offset; it moves the drawn and touchable node without changing its layout slot. */
@@ -121,7 +129,7 @@ data class PrototypeStyle(
   val spacing: Double? = null,
   val textSize: Double? = null,
   val fontWeight: Int? = null,
-  val color: String? = null,
+  val color: PrototypeModeValue? = null,
   val textAlign: String? = null,
   val maxLines: Int? = null,
   /** Positive sp between baselines. */
@@ -153,8 +161,15 @@ data class PrototypeStyleWhen(val `when`: PrototypeCondition, val style: Prototy
 data class PrototypeItem(
   val label: String,
   val icon: String? = null,
-  val image: String? = null,
-)
+  /** An uploaded image asset id, or a `{light, dark}` pair of ids (#11218). */
+  val image: PrototypeModeValue? = null,
+) {
+  constructor(
+    label: String,
+    icon: String? = null,
+    image: String,
+  ) : this(label, icon, PrototypeModeValue.Single(image))
+}
 
 @Serializable sealed class PrototypeAnchor
 
@@ -183,7 +198,10 @@ data class PrototypeElementAnchor(
 
 @SerialName("fullscreen")
 @Serializable
-data class PrototypeFullscreenPlacement(val scrim: String? = null) : PrototypePlacement()
+data class PrototypeFullscreenPlacement(val scrim: PrototypeModeValue? = null) :
+  PrototypePlacement() {
+  constructor(scrim: String) : this(PrototypeModeValue.Single(scrim))
+}
 
 @SerialName("sheet")
 @Serializable
@@ -332,7 +350,8 @@ data class PrototypeImageNode(
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
-  val asset: String,
+  /** An uploaded image asset id, or a `{light, dark}` pair of ids (#11218). */
+  val asset: PrototypeModeValue,
   val contentScale: String = "fit",
 ) : PrototypeNode()
 
@@ -861,7 +880,7 @@ data class PrototypeBottomSheetNode(
   val child: PrototypeNode,
   val openWhen: PrototypeSheetCondition,
   val detents: List<PrototypeDetent>,
-  val scrim: String? = null,
+  val scrim: PrototypeModeValue? = null,
   val dragHandle: Boolean = true,
   val dismissOnSwipe: Boolean = true,
 ) : PrototypeNode()
@@ -886,7 +905,8 @@ data class PrototypeWindow(
 /**
  * `source = "device"` asks for Android 12+ dynamic colour; `seed` generates a scheme from one
  * colour. Each Material 3 role field is an explicit hex override applied over that scheme (or the
- * baseline one) in both light and dark.
+ * baseline one) in both light and dark. `light` and `dark` are `{role: hex}` maps applied after
+ * those flat overrides for the resolved mode only (#11218); they never drive mode inference.
  */
 @Serializable
 data class PrototypeSpecThemeColors(
@@ -928,6 +948,8 @@ data class PrototypeSpecThemeColors(
   val surfaceContainerHighest: String? = null,
   val surfaceContainerLow: String? = null,
   val surfaceContainerLowest: String? = null,
+  val light: Map<String, String>? = null,
+  val dark: Map<String, String>? = null,
 )
 
 /** `scale` multiplies every Material type role; `fontFamily` is sans, serif or mono. */

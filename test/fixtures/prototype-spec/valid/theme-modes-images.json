@@ -1,0 +1,52 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "tab": 0
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "image",
+        "asset": {
+          "light": "logo-light",
+          "dark": "logo-dark"
+        },
+        "contentScale": "fit"
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "photo",
+          "dark": "photo"
+        }
+      },
+      {
+        "type": "image",
+        "asset": "plain"
+      },
+      {
+        "type": "tabBar",
+        "stateKey": "tab",
+        "items": [
+          {
+            "label": "Home",
+            "image": {
+              "light": "home-light",
+              "dark": "home-dark"
+            }
+          },
+          {
+            "label": "Search",
+            "image": "search"
+          }
+        ]
+      }
+    ]
+  }
+}

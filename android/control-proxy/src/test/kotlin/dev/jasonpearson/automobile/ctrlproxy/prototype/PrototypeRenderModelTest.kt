@@ -46,7 +46,7 @@ class PrototypeRenderModelTest {
         PrototypeTextNode(testTag = "text", text = "Hello"),
         PrototypeIconNode(testTag = "icon", name = "home"),
         PrototypeSpacerNode(testTag = "spacer"),
-        PrototypeImageNode(testTag = "image", asset = "future"),
+        PrototypeImageNode(testTag = "image", asset = PrototypeModeValue.Single("future")),
       )
     for (node in nodes) {
       val model = mapPrototypeSpec(spec(node)).root
@@ -108,12 +108,16 @@ class PrototypeRenderModelTest {
     val node =
       PrototypeTextNode(
         text = "text",
-        style = PrototypeStyle(background = "#111111", color = "#222222"),
+        style =
+          PrototypeStyle(
+            background = PrototypeModeValue.Single("#111111"),
+            color = PrototypeModeValue.Single("#222222"),
+          ),
         styleWhen =
           listOf(
             PrototypeStyleWhen(
               PrototypeCondition("selected", equals = PrototypeScalar.BooleanValue(true)),
-              PrototypeStyle(background = "#2255CC"),
+              PrototypeStyle(background = PrototypeModeValue.Single("#2255CC")),
             ),
           ),
       )
@@ -209,7 +213,7 @@ class PrototypeRenderModelTest {
   fun `text polish and shadow colour map to their Compose values`() {
     val style =
       PrototypeStyle(
-        shadowColor = "#80FF0000",
+        shadowColor = PrototypeModeValue.Single("#80FF0000"),
         fontStyle = "italic",
         textDecoration = "underlineLineThrough",
         overflow = "ellipsis",
@@ -247,7 +251,8 @@ class PrototypeRenderModelTest {
 
   @Test
   fun `unset text polish keeps Compose defaults and a role shadow colour resolves later`() {
-    val mapped = mapPrototypeStyle(PrototypeStyle(shadowColor = "primary"))
+    val mapped =
+      mapPrototypeStyle(PrototypeStyle(shadowColor = PrototypeModeValue.Single("primary")))
     assertNull(mapped.shadowColor)
     assertEquals(FontStyle.Normal, mapped.fontStyle)
     assertEquals(TextDecoration.None, mapped.textDecoration)
@@ -314,7 +319,7 @@ class PrototypeRenderModelTest {
         minHeight = 20.0,
         maxHeight = 90.0,
         padding = PrototypePadding(1.0, 2.0, 3.0, 4.0),
-        background = "#112233",
+        background = PrototypeModeValue.Single("#112233"),
         cornerRadius = PrototypeCornerRadius.Dp(6.0),
         border = PrototypeBorder(2.0, "#80112233"),
         alpha = 0.4,
@@ -323,7 +328,7 @@ class PrototypeRenderModelTest {
         spacing = 8.0,
         textSize = 18.0,
         fontWeight = 700,
-        color = "#ff556677",
+        color = PrototypeModeValue.Single("#ff556677"),
         textAlign = "justify",
         maxLines = 3,
         fontFamily = PrototypeFontFamily.Named("monospace"),

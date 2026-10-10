@@ -81,7 +81,7 @@ class PrototypeStateLogicTest {
   fun `styleWhen merges matching entries over the base in authored order`() {
     val base =
       PrototypeStyle(
-        background = "#111111",
+        background = PrototypeModeValue.Single("#111111"),
         alpha = 1.0,
         cornerRadius = PrototypeCornerRadius.Dp(4.0),
       )
@@ -97,12 +97,12 @@ class PrototypeStateLogicTest {
         ),
         PrototypeStyleWhen(
           PrototypeCondition("count", gt = 2.0),
-          PrototypeStyle(alpha = 0.7, background = "#222222"),
+          PrototypeStyle(alpha = 0.7, background = PrototypeModeValue.Single("#222222")),
         ),
       )
     val resolved = resolvePrototypeStyle(base, entries, state)
     assertEquals(0.7, resolved.alpha!!, 0.0)
-    assertEquals("#222222", resolved.background)
+    assertEquals(PrototypeModeValue.Single("#222222"), resolved.background)
     assertEquals(PrototypeCornerRadius.Dp(4.0), resolved.cornerRadius)
     val gradient =
       PrototypeRadialGradient(
@@ -151,11 +151,11 @@ class PrototypeStateLogicTest {
         minHeight = 2.0,
         maxHeight = 200.0,
         padding = PrototypePadding(1.0, 2.0, 3.0, 4.0),
-        background = "#112233",
+        background = PrototypeModeValue.Single("#112233"),
         cornerRadius = PrototypeCornerRadius.Corners(topStart = 8.0),
         border = PrototypeBorder(1.0, "primary"),
         elevation = 6.0,
-        shadowColor = "#80FF0000",
+        shadowColor = PrototypeModeValue.Single("#80FF0000"),
         gradient =
           PrototypeRadialGradient(
             listOf(PrototypeGradientStop("#000000"), PrototypeGradientStop("#ffffff")),
@@ -169,7 +169,7 @@ class PrototypeStateLogicTest {
         spacing = 4.0,
         textSize = 18.0,
         fontWeight = 700,
-        color = "onSurface",
+        color = PrototypeModeValue.Single("onSurface"),
         textAlign = "center",
         maxLines = 2,
         lineHeight = 24.0,

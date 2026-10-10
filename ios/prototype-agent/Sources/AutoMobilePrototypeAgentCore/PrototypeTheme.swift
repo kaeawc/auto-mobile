@@ -91,12 +91,30 @@ struct PrototypeThemeColors: Decodable, Equatable {
     let source: String?
     /// Only the Material 3 role names (`PrototypePalette.roleNames`), hex values as authored.
     let roles: [String: String]
+    /// `light` and `dark`: role overrides for one resolved mode, applied after `roles` (#11218).
+    /// Decoded only; the palette applies them in #11220.
+    let light: [String: String]
+    let dark: [String: String]
 
     init(from decoder: Decoder) throws {
-        let all = try decoder.singleValueContainer().decode([String: String].self)
-        seed = all["seed"]
-        source = all["source"]
-        roles = all.filter { PrototypePalette.roleNames.contains($0.key) }
+        let all = try decoder.singleValueContainer().decode([String: JSONValue].self)
+        seed = Self.text(all["seed"])
+        source = Self.text(all["source"])
+        roles = Self.roleOverrides(all)
+        light = Self.modeOverrides(all["light"])
+        dark = Self.modeOverrides(all["dark"])
+    }
+
+    private static func text(_ value: JSONValue?) -> String? {
+        if case let .string(text)? = value { text } else { nil }
+    }
+
+    private static func roleOverrides(_ fields: [String: JSONValue]) -> [String: String] {
+        fields.compactMapValues { text($0) }.filter { PrototypePalette.roleNames.contains($0.key) }
+    }
+
+    private static func modeOverrides(_ value: JSONValue?) -> [String: String] {
+        if case let .object(fields)? = value { roleOverrides(fields) } else { [:] }
     }
 }
 
@@ -278,6 +296,11 @@ struct PrototypePalette: Equatable {
     func resolve(_ spec: String?) -> PrototypeRGBA? {
         guard let spec else { return nil }
         return spec.hasPrefix("#") ? PrototypeRGBA(hex: spec) : colors[spec]
+    }
+
+    /// A spec colour slot, through the `PrototypeModeValue.rendered` seam.
+    func resolve(_ spec: PrototypeModeValue?) -> PrototypeRGBA? {
+        resolve(spec?.rendered)
     }
 
     /// `systemDark` decides when the theme has no `mode` (or `system`) and no surface override.

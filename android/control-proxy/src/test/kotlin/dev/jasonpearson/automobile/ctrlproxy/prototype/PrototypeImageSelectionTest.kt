@@ -70,7 +70,9 @@ class PrototypeImageSelectionTest {
     assertEquals(ContentScale.FillBounds, prototypeContentScale("fill"))
     assertEquals(
       ContentScale.Fit,
-      prototypeContentScale(PrototypeImageNode(asset = "a").contentScale),
+      prototypeContentScale(
+        PrototypeImageNode(asset = PrototypeModeValue.Single("a")).contentScale,
+      ),
     )
   }
 
@@ -80,20 +82,28 @@ class PrototypeImageSelectionTest {
       PrototypeColumnNode(
         children =
           listOf(
-            PrototypeImageNode(asset = "hero"),
+            PrototypeImageNode(asset = PrototypeModeValue.Single("hero")),
             PrototypeRowNode(
-              children = listOf(PrototypeImageNode(asset = "hero", contentScale = "crop")),
+              children =
+                listOf(
+                  PrototypeImageNode(
+                    asset = PrototypeModeValue.Single("hero"),
+                    contentScale = "crop",
+                  ),
+                ),
             ),
             PrototypePagerNode(
               id = "pages",
               children =
                 listOf(
                   PrototypeTextNode(text = "one"),
-                  PrototypeScrollNode(child = PrototypeImageNode(asset = "second-page")),
+                  PrototypeScrollNode(
+                    child = PrototypeImageNode(asset = PrototypeModeValue.Single("second-page")),
+                  ),
                 ),
             ),
             PrototypeBottomSheetNode(
-              child = PrototypeImageNode(asset = "sheet"),
+              child = PrototypeImageNode(asset = PrototypeModeValue.Single("sheet")),
               openWhen = PrototypeSheetCondition("open", true),
               detents = listOf(PrototypeDetent.Half),
             ),

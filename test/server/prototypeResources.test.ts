@@ -46,7 +46,7 @@ describe("automobile:prototype resource", () => {
     const guide = renderPrototypeGuide();
     const defs = contract.definitions as unknown as Record<
       string,
-      { variants?: Record<string, unknown>; options?: Array<{ values?: string[] }> }
+      { variants?: Record<string, unknown>; values?: string[] }
     >;
     for (const type of [
       ...Object.keys(defs.node.variants ?? {}),
@@ -54,7 +54,8 @@ describe("automobile:prototype resource", () => {
     ]) {
       expect(guide).toContain(`\`${type}\``);
     }
-    for (const role of defs.colorValue.options?.[1].values ?? []) {
+    expect(defs.colorRole.values?.length).toBeGreaterThan(0);
+    for (const role of defs.colorRole.values ?? []) {
       expect(guide).toContain(`\`${role}\``);
     }
   });

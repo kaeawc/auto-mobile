@@ -1,0 +1,18 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "image",
+      "asset": {
+        "light": "",
+        "dark": "b"
+      }
+    }
+  },
+  "expectedPath": "root.asset.light"
+}

@@ -1,0 +1,26 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "tab": 0
+    },
+    "root": {
+      "type": "tabBar",
+      "stateKey": "tab",
+      "items": [
+        {
+          "label": "Home",
+          "image": {
+            "dark": "home"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.items[0].image.light"
+}

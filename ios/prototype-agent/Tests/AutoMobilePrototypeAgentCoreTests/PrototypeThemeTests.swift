@@ -45,7 +45,7 @@ final class PrototypeThemeTests: XCTestCase {
         try XCTAssertEqual(palette.resolve(title.color), hex("#FFFFFF"))
         try XCTAssertEqual(palette.resolve(title.background), hex("#FF6200EE"))
         XCTAssertNil(palette.resolve("notARole"))
-        XCTAssertNil(palette.resolve(nil))
+        XCTAssertNil(palette.resolve(nil as String?))
     }
 
     func testModeDecidesLightOrDarkAndSystemFollowsTheDevice() throws {

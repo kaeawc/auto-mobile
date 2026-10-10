@@ -98,6 +98,52 @@ struct PrototypeSpec: Decodable {
     }
 }
 
+/// A colour or image-asset slot that can differ by appearance (#11218): one value used in both
+/// modes, or a `{light, dark}` pair. A colour slot holds a hex value or a Material role name, an
+/// asset slot an opaque asset id; the host validator checks the contents.
+enum PrototypeModeValue: Decodable, Equatable, ExpressibleByStringLiteral {
+    case single(String)
+    case modes(light: String, dark: String)
+
+    private struct Modes: Decodable {
+        let light: String
+        let dark: String
+    }
+
+    init(stringLiteral value: String) {
+        self = .single(value)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(String.self) {
+            self = .single(value)
+        } else {
+            let modes = try container.decode(Modes.self)
+            self = .modes(light: modes.light, dark: modes.dark)
+        }
+    }
+
+    /// Seam for #11220: the one place a per-mode value becomes the single value the renderer
+    /// draws. It returns the `light` side of a pair, which keeps every existing spec drawing as
+    /// before: the agent does not advertise `prototype_theme_modes_v1` yet, so the host refuses a
+    /// spec that carries a pair. #11220 replaces this with resolution against the resolved mode.
+    var rendered: String {
+        switch self {
+        case let .single(value): value
+        case let .modes(light, _): light
+        }
+    }
+
+    /// Every distinct value the slot names, light first.
+    var values: [String] {
+        switch self {
+        case let .single(value): [value]
+        case let .modes(light, dark): light == dark ? [light] : [light, dark]
+        }
+    }
+}
+
 struct WindowSpec: Decodable {
     let placement: Placement
     let opacity: Int?
@@ -105,7 +151,7 @@ struct WindowSpec: Decodable {
 
 struct Placement: Decodable {
     let type: String
-    let scrim: String?
+    let scrim: PrototypeModeValue?
     let edge: String?
     let height: Double?
     let gravity: String?
@@ -143,7 +189,7 @@ struct Padding: Decodable {
 
 struct Border: Decodable {
     let width: Double
-    let color: String
+    let color: PrototypeModeValue
 }
 
 /// `cornerRadius`: dp number, Material 3 shape token, or per-corner dp radii.
@@ -200,7 +246,7 @@ struct Style: Decodable {
     let width: Dimension?
     let height: Dimension?
     let padding: Padding?
-    let background: String?
+    let background: PrototypeModeValue?
     let cornerRadius: CornerRadius?
     let border: Border?
     let alpha: Double?
@@ -211,12 +257,12 @@ struct Style: Decodable {
     let spacing: Double?
     let textSize: Double?
     let fontWeight: Int?
-    let color: String?
+    let color: PrototypeModeValue?
     let textAlign: String?
     let maxLines: Int?
     let fontFamily: FontFamily?
     let elevation: Double?
-    let shadowColor: String?
+    let shadowColor: PrototypeModeValue?
     let offset: Offset?
     let lineHeight: Double?
     let letterSpacing: Double?
@@ -376,7 +422,8 @@ struct SafeAreaPadding: Decodable {
 struct NavItem: Decodable {
     let label: String
     let icon: String?
-    let image: String?
+    /// An uploaded image asset id, or a `{light, dark}` pair of ids (#11218).
+    let image: PrototypeModeValue?
 }
 
 /// One `radioGroup` or `segmentedButton` choice.
@@ -424,7 +471,8 @@ final class PrototypeNode: Decodable {
     let text: String?
     /// Authored accessible label (#10446); wins over the label derived from text or icon.
     let contentDescription: String?
-    let asset: String?
+    /// An uploaded image asset id, or a `{light, dark}` pair of ids (#11218).
+    let asset: PrototypeModeValue?
     let contentScale: String?
     let name: String?
     /// `button`/`chip`/extended `fab` text, and the optional `switch`/`checkbox`/`slider` label.
@@ -442,7 +490,7 @@ final class PrototypeNode: Decodable {
     let scrollable: Bool?
     let openWhen: Condition?
     let detents: [Detent]?
-    let scrim: String?
+    let scrim: PrototypeModeValue?
     let dragHandle: Bool?
     /// `radioGroup` and `segmentedButton` choices.
     let options: [PrototypeOption]?
@@ -512,9 +560,10 @@ final class PrototypeNode: Decodable {
 
     /// Asset ids the spec references, for the `missingAssets` warning.
     func collectAssets(into ids: inout Set<String>) {
-        if let asset { ids.insert(asset) }
+        // A {light, dark} pair references both ids, whichever mode is drawn.
+        ids.formUnion(asset?.values ?? [])
         ids.formUnion(fontAssetIds())
-        items?.compactMap(\.image).forEach { ids.insert($0) }
+        items?.compactMap(\.image).forEach { ids.formUnion($0.values) }
         children?.forEach { $0.collectAssets(into: &ids) }
         child?.collectAssets(into: &ids)
     }

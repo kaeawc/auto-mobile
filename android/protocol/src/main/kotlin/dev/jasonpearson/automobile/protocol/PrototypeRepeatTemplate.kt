@@ -389,9 +389,11 @@ internal object PrototypeRepeatValidator {
   }
 
   private fun imageUses(node: JsonObject): Int =
-    if (node.text("type") == "image") 1
+    if (node.text("type") == "image") maxOf(1, prototypeImageSlotUses(node["asset"]))
     else
-      (node["items"] as? JsonArray).orEmpty().count { (it as? JsonObject)?.text("image") != null }
+      (node["items"] as? JsonArray).orEmpty().sumOf {
+        prototypeImageSlotUses((it as? JsonObject)?.get("image"))
+      }
 
   /** Walks the expanded tree; an overflow inside a template is reported at its `repeat`. */
   private fun expandedErrors(

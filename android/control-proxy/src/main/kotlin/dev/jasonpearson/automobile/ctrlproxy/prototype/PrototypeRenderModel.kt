@@ -362,9 +362,22 @@ fun prototypeColor(value: String): Color {
   return Color(if (value.length == 7) argb or 0xff000000L else argb)
 }
 
+/**
+ * Seam for #11219: the one place a per-mode spec value (#11218) becomes the single value the
+ * renderer draws. It returns the `light` side of a `{light, dark}` colour or image-asset pair,
+ * which keeps every existing spec drawing as before: no CtrlProxy advertises
+ * `prototype_theme_modes_v1` yet, so the host refuses a spec that carries a pair. #11219 replaces
+ * this with resolution against the prototype's resolved light or dark mode.
+ */
+internal fun prototypeModeValue(value: PrototypeModeValue): String =
+  when (value) {
+    is PrototypeModeValue.Single -> value.value
+    is PrototypeModeValue.Modes -> value.light
+  }
+
 /** The colour of a hex value, or null for a Material ColorScheme role name (resolved in render). */
-private fun prototypeHexColor(value: String?): Color? =
-  value?.takeIf { it.startsWith("#") }?.let(::prototypeColor)
+internal fun prototypeHexColor(value: PrototypeModeValue?): Color? =
+  value?.let(::prototypeModeValue)?.takeIf { it.startsWith("#") }?.let(::prototypeColor)
 
 fun mapPrototypeStyle(style: PrototypeStyle): PrototypeRenderStyle =
   PrototypeRenderStyle(
@@ -468,7 +481,8 @@ fun prototypeLinearGradientLine(angle: Double, width: Float, height: Float): Pai
  * descending list anyway, so the rendered result is deterministic and documented.
  */
 fun prototypeGradientStops(stops: List<PrototypeGradientStop>): Pair<List<Color>, List<Float>?> {
-  val colors = stops.map { prototypeColor(it.color) }
+  // A role-named stop (#11218) has no scheme here; it stays transparent until #11219 resolves it.
+  val colors = stops.map { prototypeHexColor(it.color) ?: Color.Transparent }
   val positions = stops.map { it.position?.toFloat() }
   if (!positions.all { it != null }) return colors to null
   var floor = 0f

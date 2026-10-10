@@ -30,7 +30,7 @@ class PrototypeAnchorFadeTest {
         listOf(
           PrototypeBoxNode(
             testTag = "child",
-            style = PrototypeStyle(background = "#FF0000"),
+            style = PrototypeStyle(background = PrototypeModeValue.Single("#FF0000")),
             anchor = PrototypeBoundsAnchor(PrototypeBounds(100.0, 200.0, 200.0, 200.0), "cover"),
             children = emptyList(),
           ),

@@ -1,0 +1,17 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen",
+        "scrim": {
+          "dark": "#000000"
+        }
+      }
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "expectedPath": "window.placement.scrim.light"
+}

@@ -89,7 +89,7 @@ class PrototypeRepeatTest {
                     ),
                   ),
               ),
-              PrototypeStyle(background = "#2255CC"),
+              PrototypeStyle(background = PrototypeModeValue.Single("#2255CC")),
             ),
           ),
         onTap =

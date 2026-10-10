@@ -96,4 +96,6 @@ export interface FleetCostReport {
   totals: FleetCostTotals;
   /** Collection-level errors (inventory or host snapshot); never silently empty. */
   errors: string[];
+  /** True when `simctl list` failed: `simulators` is then unknown, not empty (#11280). */
+  inventoryFailed?: boolean;
 }

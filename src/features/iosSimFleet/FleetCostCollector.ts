@@ -125,7 +125,7 @@ export class IosSimFleetCostCollector implements FleetCostSource {
 }
 
 function emptyReport(collectedAtMs: number, errors: string[]): FleetCostReport {
-  return { collectedAtMs, simulators: [], totals: totalsOf([]), errors };
+  return { collectedAtMs, simulators: [], totals: totalsOf([]), errors, inventoryFailed: true };
 }
 
 function totalsOf(simulators: readonly SimulatorCost[]): FleetCostTotals {

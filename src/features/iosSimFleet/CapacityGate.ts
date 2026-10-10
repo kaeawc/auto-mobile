@@ -1,3 +1,5 @@
+import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
+import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import {
   assertBootCapacityGranted,
@@ -120,6 +122,7 @@ export class IosSimCapacityGate
     request: WarmDeviceRequest | undefined,
     warmMatch: "substitute" | "hint",
   ): CapacityDecision {
+    this.assertCountKnown(report);
     const warm = findWarmCompatibleDevices(report, request ?? {})[0];
     if (warm && warmMatch === "substitute") {
       return { outcome: "reuse-warm", udid: warm.udid };
@@ -170,6 +173,7 @@ export class IosSimCapacityGate
   async describeCapacity(): Promise<BootCapacitySnapshot> {
     // A listing is not a boot decision: reading must not advance the sustained-pressure streak.
     const report = await this.fleet.collect();
+    this.assertCountKnown(report);
     return {
       limit: this.limitsFor(report).maxBooted,
       booted: this.occupiedCount(report),
@@ -180,6 +184,23 @@ export class IosSimCapacityGate
         memoryPressure: report.host?.memoryPressure ?? "unknown",
       },
     };
+  }
+
+  /**
+   * With `simctl list` failed the booted count is unknown; zero would admit past the limit.
+   * Refuse with retryable `discovery_incomplete`, as the Android gate does (#11280).
+   */
+  private assertCountKnown(report: FleetCostReport): void {
+    if (!report.inventoryFailed) {
+      return;
+    }
+    const detail = report.errors.join("; ") || "simctl list failed";
+    logger.warn(`[BootAdmission] iOS simulator count unknown; refusing to boot: ${detail}`);
+    throw new BootedDeviceDiscoveryIncompleteError("ios", {
+      code: "failed",
+      message: `simulator count unknown (${detail})`,
+      retryable: true,
+    });
   }
 
   /** Simulators holding a slot: Booted, Booting or Shutting Down, whoever started them. */

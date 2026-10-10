@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { BootedDeviceDiscoveryIncompleteError } from "../../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -456,6 +457,43 @@ describe("capacity gate occupying states (#11291)", () => {
     await gate.admitBoot(undefined, { bootUdid: IOS27 });
     source.inventory = inState(IOS27, "Booting");
     expect(await gate.evaluateBoot()).toMatchObject({ outcome: "allow", bootedCount: 1 });
+  });
+});
+
+describe("capacity gate with an unknown count (#11280)", () => {
+  const failedInventory = () => {
+    const { collector, timer, source } = setup([]);
+    source.inventoryError = new Error("simctl list timed out");
+    return new IosSimCapacityGate(collector, timer, { env: { [IOS_SIM_MAX_BOOTED_ENV]: "2" } });
+  };
+
+  test("admitBoot refuses with retryable discovery_incomplete instead of admitting", async () => {
+    const error = await failedInventory()
+      .admitBoot(undefined, { bootUdid: "NEW" })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(BootedDeviceDiscoveryIncompleteError);
+    expect(error).toMatchObject({ code: "discovery_incomplete", retryable: true, platform: "ios" });
+  });
+
+  test("assertCapacityAvailable refuses with discovery_incomplete", async () => {
+    await expect(failedInventory().assertCapacityAvailable()).rejects.toBeInstanceOf(
+      BootedDeviceDiscoveryIncompleteError,
+    );
+  });
+
+  test("describeCapacity throws so listDevices omits capacity.ios instead of booted:0", async () => {
+    await expect(failedInventory().describeCapacity()).rejects.toBeInstanceOf(
+      BootedDeviceDiscoveryIncompleteError,
+    );
+  });
+
+  test("a host snapshot failure alone still counts from the inventory", async () => {
+    const { collector, timer, source } = setup([IOS27]);
+    source.snapshot = new Error("ps failed");
+    const gate = new IosSimCapacityGate(collector, timer, {
+      env: { [IOS_SIM_MAX_BOOTED_ENV]: "2" },
+    });
+    expect((await gate.describeCapacity()).booted).toBe(1);
   });
 });
 

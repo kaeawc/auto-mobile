@@ -6,7 +6,7 @@ import {
   PROTOTYPE_ICONS_URI,
   renderPrototypeGuide,
   searchIcons,
-} from "../features/overlay/prototypeGuide";
+} from "../features/prototype/prototypeGuide";
 import { encodeUriSegment } from "../utils/encodeUriSegment";
 
 /** Registers the `prototype` authoring guide and its icon lookup (#11052). */

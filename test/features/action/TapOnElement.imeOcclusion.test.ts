@@ -215,7 +215,7 @@ async function executeAt(
     index?: number;
     /** The text tapOn is given, when it differs from the `label` that locates the fixture node. */
     selectorText?: string;
-    layer?: "app" | "overlay";
+    layer?: "app" | "prototype";
   } = {},
 ) {
   const hierarchy = fixture ?? imeOcclusionHierarchy(withIme);
@@ -701,11 +701,11 @@ describe("captured iOS keyboard selected through a registered observe capture", 
   // `q` in ios-keyboard-visible.raw.json: UIKeyboard > UIKeyboardLayoutStar Preview > q.
   const keyQ = { elementId: "s2-f4f27f88982be7ea", point: { x: 23, y: 624 } };
   const appQ = "synthetic-app-q";
-  const overlayDismiss = "automobile-overlay-dismiss";
+  const prototypeDismiss = "automobile-prototype-dismiss";
   const layerCases = [
-    { name: "default layer", layer: undefined, overlay: false },
-    { name: "default layer, overlay showing", layer: undefined, overlay: true },
-    { name: 'layer "app", overlay showing', layer: "app", overlay: true },
+    { name: "default layer", layer: undefined, prototype: false },
+    { name: "default layer, prototype showing", layer: undefined, prototype: true },
+    { name: 'layer "app", prototype showing', layer: "app", prototype: true },
   ] as const;
 
   test("default layer taps the keyboard key", async () => {
@@ -720,10 +720,10 @@ describe("captured iOS keyboard selected through a registered observe capture", 
   });
 
   test.each([undefined, "app"] as const)(
-    "with an AutoMobile overlay showing, layer %p taps the keyboard key",
+    "with an AutoMobile prototype showing, layer %p taps the keyboard key",
     async (layer) => {
       const { result, points } = await executeAt("q", {
-        ...registeredIos(registeredKeyboardCapture({ overlay: true })),
+        ...registeredIos(registeredKeyboardCapture({ prototype: true })),
         elementId: keyQ.elementId,
         layer,
       });
@@ -734,11 +734,11 @@ describe("captured iOS keyboard selected through a registered observe capture", 
     },
   );
 
-  test('with an AutoMobile overlay showing, layer "overlay" does not reach the keyboard key', async () => {
+  test('with an AutoMobile prototype showing, layer "prototype" does not reach the keyboard key', async () => {
     const { result, points } = await executeAt("q", {
-      ...registeredIos(registeredKeyboardCapture({ overlay: true })),
+      ...registeredIos(registeredKeyboardCapture({ prototype: true })),
       elementId: keyQ.elementId,
-      layer: "overlay",
+      layer: "prototype",
     });
     expect(result.success).toBe(false);
     expect(result.error).not.toContain("covered by the soft keyboard");
@@ -746,9 +746,9 @@ describe("captured iOS keyboard selected through a registered observe capture", 
   });
 
   // iOS keys carry no input-method package, so a text selector still resolves the key.
-  test.each(layerCases)('text "q" taps the keyboard key ($name)', async ({ layer, overlay }) => {
+  test.each(layerCases)('text "q" taps the keyboard key ($name)', async ({ layer, prototype }) => {
     const { result, points } = await executeAt("q", {
-      ...registeredIos(registeredKeyboardCapture({ overlay })),
+      ...registeredIos(registeredKeyboardCapture({ prototype })),
       layer,
     });
     expect(result.error).toBeUndefined();
@@ -759,9 +759,9 @@ describe("captured iOS keyboard selected through a registered observe capture", 
 
   test.each(layerCases)(
     "an app q sharing the key's bounds stays refused ($name)",
-    async ({ layer, overlay }) => {
+    async ({ layer, prototype }) => {
       const { result, points, actionError } = await executeAt("q", {
-        ...registeredIos(registeredKeyboardCapture({ overlay, appQ: true })),
+        ...registeredIos(registeredKeyboardCapture({ prototype, appQ: true })),
         elementId: appQ,
         layer,
       });
@@ -783,17 +783,17 @@ describe("captured iOS keyboard selected through a registered observe capture", 
 
   /**
    * The captured visible-keyboard hierarchy, registered as ObserveScreen registers it.
-   * `appQ` and `overlay` add SYNTHETIC scaffolding (no captured fixture has either):
+   * `appQ` and `prototype` add SYNTHETIC scaffolding (no captured fixture has either):
    * - `appQ`: an app button after the keyboard sharing the `q` key's label and bounds,
    *   outside the keyboard subtree, so a bounds-only match would wrongly exempt it.
-   * - `overlay`: wraps the app's top-level nodes in a UIWindow and adds a second small
-   *   UIWindow holding the overlay agent's dismiss control, the unconverted XCUITest
-   *   shape `scopeHierarchyToLayer` recognizes as AutoMobile's own overlay.
+   * - `prototype`: wraps the app's top-level nodes in a UIWindow and adds a second small
+   *   UIWindow holding the prototype agent's dismiss control, the unconverted XCUITest
+   *   shape `scopeHierarchyToLayer` recognizes as AutoMobile's own prototype.
    */
   function registeredKeyboardCapture({
-    overlay = false,
+    prototype = false,
     appQ: withAppQ = false,
-  }: { overlay?: boolean; appQ?: boolean } = {}): ViewHierarchyResult {
+  }: { prototype?: boolean; appQ?: boolean } = {}): ViewHierarchyResult {
     const hierarchy = structuredClone(iosKeyboardVisibleHierarchy);
     const root = hierarchy.hierarchy as ViewHierarchyNode;
     const children = Array.isArray(root.node) ? root.node : root.node ? [root.node] : [];
@@ -809,7 +809,7 @@ describe("captured iOS keyboard selected through a registered observe capture", 
           },
         ]
       : children;
-    root.node = overlay
+    root.node = prototype
       ? [
           {
             className: "UIWindow",
@@ -823,8 +823,8 @@ describe("captured iOS keyboard selected through a registered observe capture", 
               className: "UIButton",
               clickable: "true",
               text: "Dismiss",
-              "resource-id": overlayDismiss,
-              "view-id": overlayDismiss,
+              "resource-id": prototypeDismiss,
+              "view-id": prototypeDismiss,
               bounds: { left: 300, top: 20, right: 390, bottom: 56 },
             },
           },

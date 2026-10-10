@@ -67,14 +67,14 @@ import { readImageHeaderDimensions } from "../../utils/screenshot/imageHeaderDim
 import { displayTransitions } from "./DisplayTransition";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import {
-  defaultIosCaptureOverlayHider,
-  type IosCaptureOverlayHiderResolver,
-} from "../overlay/ios/iosCaptureOverlayHider";
-import { captureHideDeadlineMs } from "../overlay/ios/iosOverlayTransport";
+  defaultIosCapturePrototypeHider,
+  type IosCapturePrototypeHiderResolver,
+} from "../prototype/ios/iosCapturePrototypeHider";
+import { captureHideDeadlineMs } from "../prototype/ios/iosPrototypeTransport";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
 const SCREENSHOT_CLEANUP_TIMEOUT_MS = 1500;
-/** How long the host waits for the CtrlProxy iOS screenshot; the overlay hide deadline derives from it. */
+/** How long the host waits for the CtrlProxy iOS screenshot; the prototype hide deadline derives from it. */
 const IOS_SCREENSHOT_TIMEOUT_MS = 10000;
 
 export function replaceScreenshotExtension(filePath: string, extension: string): string {
@@ -89,12 +89,12 @@ export interface ScreenshotOptions {
   /** Android logical display selected by observe. */
   displayId?: number;
   /**
-   * Capture with the device's overlay hidden (#9305). Set only for a device whose agent advertises
-   * `screenshot_hide_overlay_v1`: Android CtrlProxy, or the connected iOS overlay agent. There is
-   * no fallback: a capture that cannot confirm the overlay was hidden fails rather than return an
+   * Capture with the device's prototype hidden (#9305). Set only for a device whose agent advertises
+   * `screenshot_hide_prototype_v1`: Android CtrlProxy, or the connected iOS prototype agent. There is
+   * no fallback: a capture that cannot confirm the prototype was hidden fails rather than return an
    * image that shows it.
    */
-  hideOverlays?: boolean;
+  hidePrototypes?: boolean;
 }
 
 async function encodeScreenshot(
@@ -156,10 +156,10 @@ function ctrlProxyScreenshotFormat(
   return mime.slice(6) as "png" | "jpeg" | "webp";
 }
 
-function resolveIosOverlayHider(
-  hider: IosCaptureOverlayHiderResolver | undefined,
-): IosCaptureOverlayHiderResolver {
-  return hider ?? defaultIosCaptureOverlayHider;
+function resolveIosPrototypeHider(
+  hider: IosCapturePrototypeHiderResolver | undefined,
+): IosCapturePrototypeHiderResolver {
+  return hider ?? defaultIosCapturePrototypeHider;
 }
 
 export class TakeScreenshot implements ScreenshotService {
@@ -282,7 +282,7 @@ export class TakeScreenshot implements ScreenshotService {
   private fileSystem: FileSystem;
   private cacheDirResolver: () => string;
   private readonly pathProtection: ScreenshotPathProtection;
-  private readonly iosOverlayHider: IosCaptureOverlayHiderResolver;
+  private readonly iosPrototypeHider: IosCapturePrototypeHiderResolver;
   private readonly physicalDisplayIdResolver: PhysicalDisplayIdResolver;
   /**
    * Get the cache directory, creating it with secure permissions if needed.
@@ -313,11 +313,11 @@ export class TakeScreenshot implements ScreenshotService {
     cleanupOnCreate = true,
     options: {
       pathProtection?: ScreenshotPathProtection;
-      iosOverlayHider?: IosCaptureOverlayHiderResolver;
+      iosPrototypeHider?: IosCapturePrototypeHiderResolver;
     } = {},
   ) {
     this.pathProtection = options.pathProtection ?? screenshotPathProtection;
-    this.iosOverlayHider = resolveIosOverlayHider(options.iosOverlayHider);
+    this.iosPrototypeHider = resolveIosPrototypeHider(options.iosPrototypeHider);
     this.device = device;
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
@@ -472,8 +472,8 @@ export class TakeScreenshot implements ScreenshotService {
   ): Promise<ScreenshotResult> {
     logger.info(`[SCREENSHOT] Starting screenshot capture with format: ${options.format}`);
 
-    if (options.hideOverlays === true) {
-      return this.captureScreenshotWithOverlayHidden(finalPath, options, signal);
+    if (options.hidePrototypes === true) {
+      return this.captureScreenshotWithPrototypeHidden(finalPath, options, signal);
     }
 
     if (
@@ -572,7 +572,7 @@ export class TakeScreenshot implements ScreenshotService {
   private async requestCtrlProxyCapture(
     signal?: AbortSignal,
     displayId?: number,
-    hideOverlays = false,
+    hidePrototypes = false,
   ): Promise<CtrlProxyScreenshotResult | null> {
     const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     try {
@@ -584,7 +584,7 @@ export class TakeScreenshot implements ScreenshotService {
       // (re)connection completes, burning the shared screenshot rate limit and
       // pushing a late observation-stream frame (#6605).
       const result = await awaitWhileRequestIsLive(
-        client.requestScreenshot(10000, undefined, false, signal, displayId, hideOverlays),
+        client.requestScreenshot(10000, undefined, false, signal, displayId, hidePrototypes),
         signal,
       );
       return signal?.aborted ? null : result;
@@ -639,7 +639,7 @@ export class TakeScreenshot implements ScreenshotService {
    * Hide-capture-restore happens on the device in the one CtrlProxy request (#9305). The image is
    * encoded to the requested format; without a requested format the device's own bytes are kept.
    */
-  private async captureScreenshotWithOverlayHidden(
+  private async captureScreenshotWithPrototypeHidden(
     finalPath: string,
     options: ScreenshotOptions,
     signal?: AbortSignal,
@@ -651,14 +651,14 @@ export class TakeScreenshot implements ScreenshotService {
     if (!result.success || !result.data) {
       return {
         success: false,
-        error: `Screenshot with the overlay hidden failed: ${result.error ?? "no image data returned from Android CtrlProxy"}`,
+        error: `Screenshot with the prototype hidden failed: ${result.error ?? "no image data returned from Android CtrlProxy"}`,
       };
     }
-    if (result.overlaysHidden !== true) {
+    if (result.prototypesHidden !== true) {
       return {
         success: false,
         error:
-          "Android CtrlProxy could not confirm its overlay was hidden for the capture; retry the observe",
+          "Android CtrlProxy could not confirm its prototype was hidden for the capture; retry the observe",
       };
     }
     const deviceBytes = Buffer.from(result.data, "base64");
@@ -680,7 +680,7 @@ export class TakeScreenshot implements ScreenshotService {
       success: true,
       path: screenshotPath,
       screenshotImageSize: readImageHeaderDimensions(imageBuffer) ?? undefined,
-      overlaysHidden: true,
+      prototypesHidden: true,
       ...metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, format),
     };
   }
@@ -717,8 +717,8 @@ export class TakeScreenshot implements ScreenshotService {
         );
       const result = await this.requestiOSScreenshot(request, options);
       const written = await this.writeiOSScreenshot(finalPath, result, startTime, options, signal);
-      return options.hideOverlays === true && written.success
-        ? { ...written, overlaysHidden: true }
+      return options.hidePrototypes === true && written.success
+        ? { ...written, prototypesHidden: true }
         : written;
     } catch (error) {
       const errorMsg = errorMessage(error);
@@ -734,28 +734,28 @@ export class TakeScreenshot implements ScreenshotService {
     request: () => Promise<CtrlProxyScreenshotResult>,
     options: ScreenshotOptions,
   ): Promise<CtrlProxyScreenshotResult> {
-    return options.hideOverlays === true
-      ? this.requestiOSScreenshotWithOverlayHidden(request)
+    return options.hidePrototypes === true
+      ? this.requestiOSScreenshotWithPrototypeHidden(request)
       : request();
   }
 
   /**
    * Hide-capture-restore around the simulator screenshot (#9305). The agent answers the hide before the
    * capture runs; a hide it never confirmed fails the capture rather than return an image that
-   * shows the overlay.
+   * shows the prototype.
    */
-  private async requestiOSScreenshotWithOverlayHidden(
+  private async requestiOSScreenshotWithPrototypeHidden(
     request: () => Promise<CtrlProxyScreenshotResult>,
   ): Promise<CtrlProxyScreenshotResult> {
-    const hider = this.iosOverlayHider(this.device.deviceId);
+    const hider = this.iosPrototypeHider(this.device.deviceId);
     if (hider === undefined) {
       return {
         success: false,
         error:
-          "The iOS overlay agent is no longer connected, so the overlay cannot be hidden for the capture; retry the observe",
+          "The iOS prototype agent is no longer connected, so the prototype cannot be hidden for the capture; retry the observe",
       };
     }
-    const { value, hideUnconfirmed } = await hider.captureWithOverlayHidden(
+    const { value, hideUnconfirmed } = await hider.captureWithPrototypeHidden(
       request,
       captureHideDeadlineMs(IOS_SCREENSHOT_TIMEOUT_MS),
     );
@@ -763,7 +763,7 @@ export class TakeScreenshot implements ScreenshotService {
       return {
         success: false,
         error:
-          "The iOS overlay agent could not confirm its overlay was hidden for the capture; retry the observe",
+          "The iOS prototype agent could not confirm its prototype was hidden for the capture; retry the observe",
       };
     }
     return value;

@@ -1,5 +1,5 @@
 import { applicationWindowSafeTapPoint } from "../observe/HierarchyHitTest";
-import type { OwnOverlayCoverRule } from "../observe/ApplicationWindowCover";
+import type { OwnPrototypeCoverRule } from "../observe/ApplicationWindowCover";
 import { isStrictlyScoped, propagateUniqueStrategy } from "../utility/ScopedSelection";
 import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
@@ -121,12 +121,12 @@ import {
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
 import {
-  isOwnOverlayNode,
-  resolveOverlayTapUnderSystemBar,
-  type OverlayBarTapDecision,
-} from "./overlayTapUnderSystemBars";
+  isOwnPrototypeNode,
+  resolvePrototypeTapUnderSystemBar,
+  type PrototypeBarTapDecision,
+} from "./prototypeTapUnderSystemBars";
 import {
-  assertAppGestureNotUnderOverlay,
+  assertAppGestureNotUnderPrototype,
   scopeHierarchyForSelector,
 } from "../observe/hierarchyLayer";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
@@ -402,8 +402,8 @@ export const tapFocusFailure: unique symbol = Symbol("tapFocusFailure");
 export type TapFocusFailure = "not-found" | "no-visible-tap-area" | "navigation-bar";
 export type TapOnFocusResult = TapOnElementResult & { [tapFocusFailure]?: TapFocusFailure };
 
-/** With no `layer`, a tap must avoid AutoMobile's own overlay windows as well (#10691). */
-function tapOwnOverlayCoverRule(layer: TapOnElementOptions["layer"]): OwnOverlayCoverRule {
+/** With no `layer`, a tap must avoid AutoMobile's own prototype windows as well (#10691). */
+function tapOwnPrototypeCoverRule(layer: TapOnElementOptions["layer"]): OwnPrototypeCoverRule {
   return layer === undefined ? "touch" : "none";
 }
 
@@ -690,7 +690,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private validateSemanticLinkOptions(options: TapOnElementOptions): string | null {
     if (options.layer !== undefined && this.hasSemanticLinkTarget(options)) {
       // Semantic links are activated on the device across every window, so the
-      // host cannot keep the activation inside the app or the overlay (#9305).
+      // host cannot keep the activation inside the app or the prototype (#9305).
       return "tapOn layer cannot be used with accessibilityLink or subtext";
     }
     if (options.selectionStrategy === "unique" && (options.sibling || options.accessibilityLink)) {
@@ -783,19 +783,19 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return ime && platform === "ios" ? getIosImeOccluder(ime, screenSize) : ime;
   }
 
-  /** Judge an Android tap on one of CtrlProxy's own overlay controls against the system bars (#10086). */
-  private overlayBarTapDecision(
+  /** Judge an Android tap on one of CtrlProxy's own prototype controls against the system bars (#10086). */
+  private prototypeBarTapDecision(
     hierarchy: ViewHierarchyResult,
     element: Element,
     point: { x: number; y: number },
-  ): OverlayBarTapDecision {
+  ): PrototypeBarTapDecision {
     if (this.device.platform !== "android") {
       return { kind: "proceed", point };
     }
     const owner = findTapTargetNode(new SearchableHierarchy().project(hierarchy), element)?.source;
-    return resolveOverlayTapUnderSystemBar({
+    return resolvePrototypeTapUnderSystemBar({
       hierarchy,
-      ownedByOverlay: isOwnOverlayNode(hierarchy, owner),
+      ownedByPrototype: isOwnPrototypeNode(hierarchy, owner),
       bounds: element.bounds,
       point,
     });
@@ -1478,9 +1478,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           right: ime.bounds[2],
           bottom: ime.bounds[3],
         },
-        // Default-layer selectors also resolve app rows kept under AutoMobile's own overlay
-        // (#10691); layer "app" refuses those later with its own overlay-specific error.
-        tapOwnOverlayCoverRule(context.options.layer),
+        // Default-layer selectors also resolve app rows kept under AutoMobile's own prototype
+        // (#10691); layer "app" refuses those later with its own prototype-specific error.
+        tapOwnPrototypeCoverRule(context.options.layer),
       );
       if (!safe.point) {
         throw new TapTargetUnavailableError(
@@ -4678,20 +4678,20 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                 "Dismiss the keyboard or scroll it into view, then retry tapOn.",
             );
           }
-          const barDecision = this.overlayBarTapDecision(
+          const barDecision = this.prototypeBarTapDecision(
             viewHierarchy,
             tapElement,
             visibleTapPoint,
           );
           if (barDecision.kind === "refuse") {
             throw new ActionableError(
-              `Cannot tap (${visibleTapPoint.x}, ${visibleTapPoint.y}): the AutoMobile overlay control is under the ${barDecision.bar} and the touch would not reach it. ` +
+              `Cannot tap (${visibleTapPoint.x}, ${visibleTapPoint.y}): the AutoMobile prototype control is under the ${barDecision.bar} and the touch would not reach it. ` +
                 "Move the control inside the safe area (safeAreaPadding on the node, or an offset in the floating placement), then retry.",
             );
           }
           const tapPoint = barDecision.point;
           // The selector resolved in the scoped tree; the touch lands on whatever is on top (#9305).
-          assertAppGestureNotUnderOverlay(viewHierarchy, options.layer, tapPoint, "tap");
+          assertAppGestureNotUnderPrototype(viewHierarchy, options.layer, tapPoint, "tap");
           if (barDecision.warning) {
             activationWarnings.push(barDecision.warning);
           }

@@ -7,7 +7,7 @@ export interface ActiveWindowInfo {
   layoutSeqSum: number;
   /**
    * Optional classification for system dialogs or non-app surfaces. Includes
-   * `"interactive_overlay"` while the AutoMobile interactive overlay holds window
+   * `"prototype"` while the AutoMobile prototype holds window
    * focus; `appId` then names the app behind it (issue #10000).
    */
   type?: string;

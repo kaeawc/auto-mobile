@@ -28,7 +28,7 @@ function markOccluded(target: Record<string, unknown>): void {
   delete target.actions;
 }
 
-/** Source nodes of actionable rows that application windows or AutoMobile overlays fully cover. */
+/** Source nodes of actionable rows that application windows or AutoMobile prototypes fully cover. */
 function coveredSources(
   elements: NonNullable<ObserveResult["elements"]>,
   source: ObserveResult,

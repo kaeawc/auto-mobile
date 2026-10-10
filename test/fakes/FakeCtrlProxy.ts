@@ -14,14 +14,14 @@ import {
   AccessibilityHierarchy,
   AccessibilityNodeSelector,
 } from "../../src/features/observe/android";
-import type { OverlaySpec } from "../../src/features/overlay/overlaySpec";
-import type { OverlayAssetUpload } from "../../src/features/overlay/overlayAssets";
-import type { OverlayAssetRequestOptions } from "../../src/features/observe/android/CtrlProxyOverlays";
+import type { PrototypeSpec } from "../../src/features/prototype/prototypeSpec";
+import type { PrototypeAssetUpload } from "../../src/features/prototype/prototypeAssets";
+import type { PrototypeAssetRequestOptions } from "../../src/features/observe/android/CtrlProxyPrototypes";
 import type {
-  OverlayAssetResult,
-  OverlayDismiss,
-  OverlayEvent,
-  OverlayResult,
+  PrototypeAssetResult,
+  PrototypeDismiss,
+  PrototypeEvent,
+  PrototypeResult,
 } from "../../src/features/observe/android/ctrlProxyProtocol";
 import type { SetTextOptions } from "../../src/features/observe/DeviceService";
 import { HighlightOperationResult, HighlightShape, ViewHierarchyResult } from "../../src/models";
@@ -61,16 +61,16 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       this.supportedCommands.add(command);
     }
   }
-  private probeEvents: OverlayEvent[] = [];
+  private probeEvents: PrototypeEvent[] = [];
   /** Events a capability probe delivers, as a device draining its offline ring on connect. */
-  setProbeEvents(events: OverlayEvent[]): void {
+  setProbeEvents(events: PrototypeEvent[]): void {
     this.probeEvents = events;
   }
   async supportsCommand(name: string): Promise<boolean> {
     const events = this.probeEvents;
     this.probeEvents = [];
     for (const event of events) {
-      this.emitOverlayEvent(event);
+      this.emitPrototypeEvent(event);
     }
     return this.supportedCommands.has(name);
   }
@@ -109,48 +109,48 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return { success: true, totalTimeMs: duration };
   }
 
-  private overlayResult: OverlayResult = { success: true };
-  private readonly overlayHistory: Array<
+  private prototypeResult: PrototypeResult = { success: true };
+  private readonly prototypeHistory: Array<
     | {
         method: "show";
-        spec: OverlaySpec;
+        spec: PrototypeSpec;
         timeoutMs: number;
         perf?: PerformanceTracker;
         displayId?: number;
         reset?: boolean;
       }
-    | { method: "dismiss"; target: OverlayDismiss; timeoutMs: number; perf?: PerformanceTracker }
+    | { method: "dismiss"; target: PrototypeDismiss; timeoutMs: number; perf?: PerformanceTracker }
   > = [];
-  private readonly overlayListeners = new Set<(event: OverlayEvent) => void>();
+  private readonly prototypeListeners = new Set<(event: PrototypeEvent) => void>();
 
-  private readonly queuedOverlayResults: OverlayResult[] = [];
+  private readonly queuedPrototypeResults: PrototypeResult[] = [];
 
-  setOverlayResult(result: OverlayResult): void {
-    this.overlayResult = result;
+  setPrototypeResult(result: PrototypeResult): void {
+    this.prototypeResult = result;
   }
 
   /** Results returned, in order, by the next show requests before the default. */
-  queueOverlayResults(...results: OverlayResult[]): void {
-    this.queuedOverlayResults.push(...results);
+  queuePrototypeResults(...results: PrototypeResult[]): void {
+    this.queuedPrototypeResults.push(...results);
   }
 
-  private nextOverlayResult(): OverlayResult {
-    return this.queuedOverlayResults.shift() ?? this.overlayResult;
+  private nextPrototypeResult(): PrototypeResult {
+    return this.queuedPrototypeResults.shift() ?? this.prototypeResult;
   }
 
-  getOverlayHistory() {
-    return [...this.overlayHistory];
+  getPrototypeHistory() {
+    return [...this.prototypeHistory];
   }
 
-  async requestShowOverlay(
-    spec: OverlaySpec,
+  async requestShowPrototype(
+    spec: PrototypeSpec,
     timeoutMs = 5000,
     perf?: PerformanceTracker,
     displayId?: number,
     reset?: boolean,
-  ): Promise<OverlayResult> {
-    this.checkFailure("requestShowOverlay");
-    this.overlayHistory.push({
+  ): Promise<PrototypeResult> {
+    this.checkFailure("requestShowPrototype");
+    this.prototypeHistory.push({
       method: "show",
       spec,
       timeoutMs,
@@ -158,27 +158,27 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       ...(displayId === undefined ? {} : { displayId }),
       ...(reset === undefined ? {} : { reset }),
     });
-    return this.nextOverlayResult();
+    return this.nextPrototypeResult();
   }
 
-  async requestDismissOverlay(
-    target: OverlayDismiss,
+  async requestDismissPrototype(
+    target: PrototypeDismiss,
     timeoutMs = 5000,
     perf?: PerformanceTracker,
-  ): Promise<OverlayResult> {
-    this.checkFailure("requestDismissOverlay");
-    this.overlayHistory.push({ method: "dismiss", target, timeoutMs, perf });
-    return this.overlayResult;
+  ): Promise<PrototypeResult> {
+    this.checkFailure("requestDismissPrototype");
+    this.prototypeHistory.push({ method: "dismiss", target, timeoutMs, perf });
+    return this.prototypeResult;
   }
 
-  private inspectReply: { events: OverlayEvent[]; result: OverlayResult } = {
+  private inspectReply: { events: PrototypeEvent[]; result: PrototypeResult } = {
     events: [],
-    result: { success: true, overlays: [], droppedEvents: 0 },
+    result: { success: true, prototypes: [], droppedEvents: 0 },
   };
   private inspectCount = 0;
 
   /** What the next inspect delivers: `events` first (as the device replays), then `result`. */
-  setInspectReply(result: OverlayResult, events: OverlayEvent[] = []): void {
+  setInspectReply(result: PrototypeResult, events: PrototypeEvent[] = []): void {
     this.inspectReply = { events, result };
   }
 
@@ -186,67 +186,67 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return this.inspectCount;
   }
 
-  async requestInspectOverlays(
+  async requestInspectPrototypes(
     _timeoutMs = 5000,
     _perf?: PerformanceTracker,
-  ): Promise<OverlayResult> {
-    this.checkFailure("requestInspectOverlays");
+  ): Promise<PrototypeResult> {
+    this.checkFailure("requestInspectPrototypes");
     this.inspectCount++;
     for (const event of this.inspectReply.events) {
-      this.emitOverlayEvent(event);
+      this.emitPrototypeEvent(event);
     }
     return this.inspectReply.result;
   }
 
-  private overlayAssetResult: OverlayAssetResult = {
+  private prototypeAssetResult: PrototypeAssetResult = {
     success: true,
     dispatched: true,
     acknowledged: true,
   };
-  private readonly overlayAssetHistory: Array<
-    | { method: "put"; asset: OverlayAssetUpload; options?: OverlayAssetRequestOptions }
-    | { method: "remove"; id: string; options?: OverlayAssetRequestOptions }
+  private readonly prototypeAssetHistory: Array<
+    | { method: "put"; asset: PrototypeAssetUpload; options?: PrototypeAssetRequestOptions }
+    | { method: "remove"; id: string; options?: PrototypeAssetRequestOptions }
   > = [];
 
-  setOverlayAssetResult(result: OverlayAssetResult): void {
-    this.overlayAssetResult = result;
+  setPrototypeAssetResult(result: PrototypeAssetResult): void {
+    this.prototypeAssetResult = result;
   }
 
-  getOverlayAssetHistory() {
-    return [...this.overlayAssetHistory];
+  getPrototypeAssetHistory() {
+    return [...this.prototypeAssetHistory];
   }
 
-  async requestPutOverlayAsset(
-    asset: OverlayAssetUpload,
-    options?: OverlayAssetRequestOptions,
-  ): Promise<OverlayAssetResult> {
-    this.checkFailure("requestPutOverlayAsset");
-    this.overlayAssetHistory.push({ method: "put", asset, options });
-    return this.overlayAssetResult;
+  async requestPutPrototypeAsset(
+    asset: PrototypeAssetUpload,
+    options?: PrototypeAssetRequestOptions,
+  ): Promise<PrototypeAssetResult> {
+    this.checkFailure("requestPutPrototypeAsset");
+    this.prototypeAssetHistory.push({ method: "put", asset, options });
+    return this.prototypeAssetResult;
   }
 
-  async requestRemoveOverlayAsset(
+  async requestRemovePrototypeAsset(
     id: string,
-    options?: OverlayAssetRequestOptions,
-  ): Promise<OverlayAssetResult> {
-    this.checkFailure("requestRemoveOverlayAsset");
-    this.overlayAssetHistory.push({ method: "remove", id, options });
-    return this.overlayAssetResult;
+    options?: PrototypeAssetRequestOptions,
+  ): Promise<PrototypeAssetResult> {
+    this.checkFailure("requestRemovePrototypeAsset");
+    this.prototypeAssetHistory.push({ method: "remove", id, options });
+    return this.prototypeAssetResult;
   }
 
-  onOverlayEvent(listener: (event: OverlayEvent) => void): () => void {
-    this.overlayListeners.add(listener);
+  onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void {
+    this.prototypeListeners.add(listener);
     return () => {
-      this.overlayListeners.delete(listener);
+      this.prototypeListeners.delete(listener);
     };
   }
 
-  getOverlayListenerCount(): number {
-    return this.overlayListeners.size;
+  getPrototypeListenerCount(): number {
+    return this.prototypeListeners.size;
   }
 
-  emitOverlayEvent(event: OverlayEvent): void {
-    for (const listener of this.overlayListeners) {
+  emitPrototypeEvent(event: PrototypeEvent): void {
+    for (const listener of this.prototypeListeners) {
       listener(event);
     }
   }

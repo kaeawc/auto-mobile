@@ -145,10 +145,10 @@ import {
   ANDROID_FULL_COMMAND_SET_CAPABILITY,
   ANDROID_REQUEST_ID_ECHO_CAPABILITY,
   ANDROID_REQUEST_ID_RESPONSE_TYPES,
-  OVERLAY_DISPLAY_CAPABILITY,
-  SCREENSHOT_HIDE_OVERLAY_CAPABILITY,
-  OVERLAY_WINDOW_OPTIONS_CAPABILITY,
-  OVERLAY_PERSISTENCE_REPLAY_CAPABILITY,
+  PROTOTYPE_DISPLAY_CAPABILITY,
+  SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY,
+  PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
+  PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   ctrlProxyMissingRequestIdError,
   ctrlProxyRequests,
   serializeCtrlProxyRequest,
@@ -194,14 +194,14 @@ import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyCertificates, type CertificateFileSystem } from "./CtrlProxyCertificates";
 import { CtrlProxyFocus, type FocusActionOutcome } from "./CtrlProxyFocus";
-import { CtrlProxyOverlays, type OverlayAssetRequestOptions } from "./CtrlProxyOverlays";
-import type { OverlaySpec } from "../../overlay/overlaySpec";
-import type { OverlayAssetUpload } from "../../overlay/overlayAssets";
+import { CtrlProxyPrototypes, type PrototypeAssetRequestOptions } from "./CtrlProxyPrototypes";
+import type { PrototypeSpec } from "../../prototype/prototypeSpec";
+import type { PrototypeAssetUpload } from "../../prototype/prototypeAssets";
 import type {
-  OverlayAssetResult,
-  OverlayDismiss,
-  OverlayEvent,
-  OverlayResult,
+  PrototypeAssetResult,
+  PrototypeDismiss,
+  PrototypeEvent,
+  PrototypeResult,
 } from "./ctrlProxyProtocol";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import {
@@ -351,7 +351,7 @@ interface WsScreenshotMessage extends WsMessageBase, ScreenshotPerformanceMetada
   rotation?: number;
   displayId?: number | null;
   panelUniqueId?: string | null;
-  overlaysHidden?: boolean | null;
+  prototypesHidden?: boolean | null;
 }
 
 export interface AndroidDisplayTransition {
@@ -596,11 +596,11 @@ interface WsTraversalOrderResultMessage extends WsMessageBase {
   };
 }
 
-interface WsOverlayResultMessage extends OverlayResult {
-  type: "overlay_result";
+interface WsPrototypeResultMessage extends PrototypeResult {
+  type: "prototype_result";
   requestId: string;
 }
-type WsOverlayEventMessage = OverlayEvent;
+type WsPrototypeEventMessage = PrototypeEvent;
 
 interface WsHighlightResponseMessage extends WsMessageBase {
   type: "highlight_response";
@@ -1030,8 +1030,8 @@ type WebSocketMessage =
   | WsPermissionResultMessage
   | WsCurrentFocusResultMessage
   | WsTraversalOrderResultMessage
-  | WsOverlayResultMessage
-  | WsOverlayEventMessage
+  | WsPrototypeResultMessage
+  | WsPrototypeEventMessage
   | WsHighlightResponseMessage
   | WsGlobalActionResultMessage
   | WsDeviceInfoResultMessage
@@ -1324,28 +1324,28 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
   ): Promise<A11yPermissionResult>;
 
-  requestShowOverlay(
-    spec: OverlaySpec,
+  requestShowPrototype(
+    spec: PrototypeSpec,
     timeoutMs?: number,
     perf?: PerformanceTracker,
     displayId?: number,
     reset?: boolean,
-  ): Promise<OverlayResult>;
-  requestDismissOverlay(
-    target: OverlayDismiss,
+  ): Promise<PrototypeResult>;
+  requestDismissPrototype(
+    target: PrototypeDismiss,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<OverlayResult>;
-  requestInspectOverlays(timeoutMs?: number, perf?: PerformanceTracker): Promise<OverlayResult>;
-  requestPutOverlayAsset(
-    asset: OverlayAssetUpload,
-    options?: OverlayAssetRequestOptions,
-  ): Promise<OverlayAssetResult>;
-  requestRemoveOverlayAsset(
+  ): Promise<PrototypeResult>;
+  requestInspectPrototypes(timeoutMs?: number, perf?: PerformanceTracker): Promise<PrototypeResult>;
+  requestPutPrototypeAsset(
+    asset: PrototypeAssetUpload,
+    options?: PrototypeAssetRequestOptions,
+  ): Promise<PrototypeAssetResult>;
+  requestRemovePrototypeAsset(
     id: string,
-    options?: OverlayAssetRequestOptions,
-  ): Promise<OverlayAssetResult>;
-  onOverlayEvent(listener: (event: OverlayEvent) => void): () => void;
+    options?: PrototypeAssetRequestOptions,
+  ): Promise<PrototypeAssetResult>;
+  onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void;
 
   requestAddHighlight(
     id: string,
@@ -1630,7 +1630,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private _storage: CtrlProxyStorage | null = null;
   private _certificates: CtrlProxyCertificates | null = null;
   private _focus: CtrlProxyFocus | null = null;
-  private _overlays: CtrlProxyOverlays | null = null;
+  private _prototypes: CtrlProxyPrototypes | null = null;
   private _highlights: CtrlProxyHighlights | null = null;
   private _packages: CtrlProxyPackages | null = null;
 
@@ -2532,13 +2532,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     );
   }
 
-  private get overlays(): CtrlProxyOverlays {
+  private get prototypes(): CtrlProxyPrototypes {
     return this.lazyDelegate(
-      () => this._overlays,
+      () => this._prototypes,
       (value) => {
-        this._overlays = value;
+        this._prototypes = value;
       },
-      () => new CtrlProxyOverlays(this.createDelegateContext()),
+      () => new CtrlProxyPrototypes(this.createDelegateContext()),
     );
   }
 
@@ -3861,39 +3861,42 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Delegated Public Methods - Highlights
   // ===========================================================================
 
-  requestShowOverlay(
-    spec: OverlaySpec,
+  requestShowPrototype(
+    spec: PrototypeSpec,
     timeoutMs?: number,
     perf?: PerformanceTracker,
     displayId?: number,
     reset?: boolean,
-  ): Promise<OverlayResult> {
-    return this.overlays.requestShowOverlay(spec, timeoutMs, perf, displayId, reset);
+  ): Promise<PrototypeResult> {
+    return this.prototypes.requestShowPrototype(spec, timeoutMs, perf, displayId, reset);
   }
-  requestDismissOverlay(
-    target: OverlayDismiss,
+  requestDismissPrototype(
+    target: PrototypeDismiss,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<OverlayResult> {
-    return this.overlays.requestDismissOverlay(target, timeoutMs, perf);
+  ): Promise<PrototypeResult> {
+    return this.prototypes.requestDismissPrototype(target, timeoutMs, perf);
   }
-  requestInspectOverlays(timeoutMs?: number, perf?: PerformanceTracker): Promise<OverlayResult> {
-    return this.overlays.requestInspectOverlays(timeoutMs, perf);
+  requestInspectPrototypes(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    return this.prototypes.requestInspectPrototypes(timeoutMs, perf);
   }
-  requestPutOverlayAsset(
-    asset: OverlayAssetUpload,
-    options?: OverlayAssetRequestOptions,
-  ): Promise<OverlayAssetResult> {
-    return this.overlays.requestPutOverlayAsset(asset, options);
+  requestPutPrototypeAsset(
+    asset: PrototypeAssetUpload,
+    options?: PrototypeAssetRequestOptions,
+  ): Promise<PrototypeAssetResult> {
+    return this.prototypes.requestPutPrototypeAsset(asset, options);
   }
-  requestRemoveOverlayAsset(
+  requestRemovePrototypeAsset(
     id: string,
-    options?: OverlayAssetRequestOptions,
-  ): Promise<OverlayAssetResult> {
-    return this.overlays.requestRemoveOverlayAsset(id, options);
+    options?: PrototypeAssetRequestOptions,
+  ): Promise<PrototypeAssetResult> {
+    return this.prototypes.requestRemovePrototypeAsset(id, options);
   }
-  onOverlayEvent(listener: (event: OverlayEvent) => void): () => void {
-    return this.overlays.onOverlayEvent(listener);
+  onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void {
+    return this.prototypes.onPrototypeEvent(listener);
   }
 
   async requestAddHighlight(
@@ -4811,7 +4814,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     sentRequestId: string,
     signal?: AbortSignal,
     displayId?: number,
-    hideOverlays = false,
+    hidePrototypes = false,
   ): Promise<void> {
     if (signal?.aborted) {
       // Settle the registration we just made so it neither waits out its
@@ -4827,9 +4830,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         requestId: sentRequestId,
         displayId,
         // A capability flag, never a request type: the legacy "assume supported" path must not
-        // apply, or an older APK would silently capture with the overlay showing.
-        hideOverlays:
-          hideOverlays && this.supportedCommands?.has(SCREENSHOT_HIDE_OVERLAY_CAPABILITY) === true,
+        // apply, or an older APK would silently capture with the prototype showing.
+        hidePrototypes:
+          hidePrototypes &&
+          this.supportedCommands?.has(SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY) === true,
       }),
     );
     // Shared rate-limit floor accounting (issue #4927): a one-shot screenshot (observe /
@@ -4876,8 +4880,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
-   * `hideOverlays` asks the device to hide its overlay for this capture (#9305); it is sent only
-   * to a CtrlProxy advertising `screenshot_hide_overlay_v1`, and the result's `overlaysHidden`
+   * `hidePrototypes` asks the device to hide its prototype for this capture (#9305); it is sent only
+   * to a CtrlProxy advertising `screenshot_hide_prototype_v1`, and the result's `prototypesHidden`
    * reports the outcome.
    */
   async requestScreenshot(
@@ -4886,7 +4890,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     suppressObservationStreamPush: boolean = false,
     signal?: AbortSignal,
     displayId?: number,
-    hideOverlays: boolean = false,
+    hidePrototypes: boolean = false,
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
     let suppressedRequestId: string | undefined;
@@ -4923,7 +4927,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       );
 
       await perf.track("sendRequest", () =>
-        this.dispatchScreenshotRequest(sentRequestId, signal, displayId, hideOverlays),
+        this.dispatchScreenshotRequest(sentRequestId, signal, displayId, hidePrototypes),
       );
 
       removeAbortListener = this.registerPostDispatchAbort(sentRequestId, signal);
@@ -5868,10 +5872,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         rejectedCommand &&
         [
           "request_click_focused_input",
-          "show_overlay",
-          "dismiss_overlay",
-          "put_overlay_asset",
-          "remove_overlay_asset",
+          "show_prototype",
+          "dismiss_prototype",
+          "put_prototype_asset",
+          "remove_prototype_asset",
         ].includes(rejectedCommand)
           ? deviceError
           : rewriteUnknownCommandError(deviceError, "android");
@@ -5946,8 +5950,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           displayId: message.displayId,
           panelUniqueId: message.panelUniqueId,
           ...screenshotPerformanceMetadataFrom(message),
-          ...(typeof message.overlaysHidden === "boolean"
-            ? { overlaysHidden: message.overlaysHidden }
+          ...(typeof message.prototypesHidden === "boolean"
+            ? { prototypesHidden: message.prototypesHidden }
             : {}),
         });
       }
@@ -6292,8 +6296,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         };
       }),
 
-    overlay_result: (message) =>
-      this.resolvePendingResponse(message, (message): OverlayResult => ({
+    prototype_result: (message) =>
+      this.resolvePendingResponse(message, (message): PrototypeResult => ({
         success: message.success,
         error: message.error,
         requestId: message.requestId,
@@ -6301,7 +6305,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         ...(Array.isArray(message.missingAssets) && message.missingAssets.length > 0
           ? { missingAssets: message.missingAssets.filter((id) => typeof id === "string") }
           : {}),
-        ...(Array.isArray(message.overlays) ? { overlays: message.overlays } : {}),
+        ...(Array.isArray(message.prototypes) ? { prototypes: message.prototypes } : {}),
         ...(typeof message.droppedEvents === "number"
           ? { droppedEvents: message.droppedEvents }
           : {}),
@@ -6511,8 +6515,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
     },
 
-    overlay_event: (message) => {
-      this.overlays.handleOverlayEvent(message);
+    prototype_event: (message) => {
+      this.prototypes.handlePrototypeEvent(message);
     },
 
     interaction_event: (message) => {
@@ -6837,7 +6841,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
 
     // Notify hierarchy navigation detector. Screen identity follows the app windows only
-    // (#9305): AutoMobile's own overlay is removed and the capture attributed to the app behind it,
+    // (#9305): AutoMobile's own prototype is removed and the capture attributed to the app behind it,
     // so showing, paging or dismissing a prototype records no navigation.
     const appCapture = appWindowsOnly(data);
     const navigationPackage = this.resolveHierarchyPackage(appCapture);
@@ -7401,9 +7405,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (
       messageType === "gesture_display_id_v1" ||
       messageType === "tap_double_v1" ||
-      messageType === OVERLAY_DISPLAY_CAPABILITY ||
-      messageType === OVERLAY_WINDOW_OPTIONS_CAPABILITY ||
-      messageType === OVERLAY_PERSISTENCE_REPLAY_CAPABILITY
+      messageType === PROTOTYPE_DISPLAY_CAPABILITY ||
+      messageType === PROTOTYPE_WINDOW_OPTIONS_CAPABILITY ||
+      messageType === PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY
     ) {
       return this.supportedCommands?.has(messageType) === true;
     }

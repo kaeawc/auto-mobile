@@ -118,11 +118,11 @@ export interface SkeletonElement {
   /** Present only for a `toggle` affordance: the current checked state. */
   checked?: boolean;
   /**
-   * AutoMobile overlay rows only (rows from CtrlProxy's own overlay windows): the selected tab or
+   * AutoMobile prototype rows only (rows from CtrlProxy's own prototype windows): the selected tab or
    * option (#10446). App rows never carry it, as observe output for apps is unchanged.
    */
   selected?: true;
-  /** AutoMobile overlay rows only: the node's state description, e.g. a pager's `Page 1 of 3`. */
+  /** AutoMobile prototype rows only: the node's state description, e.g. a pager's `Page 1 of 3`. */
   state?: string;
   /** Explicit disabled state on either platform; omitted means enabled. */
   enabled?: false;
@@ -214,13 +214,13 @@ export type ObserveResult = {
   screenshotCaptureAttempted?: boolean;
 
   /**
-   * Set by `observe` with `layer: "app"` while an AutoMobile overlay is on screen and the
+   * Set by `observe` with `layer: "app"` while an AutoMobile prototype is on screen and the
    * observation carries a screenshot (issue #9305). False when the capture was taken with the
-   * overlay hidden device-side (`screenshot_hide_overlay_v1`); true when the device could not hide
-   * it, so the screenshot and any crop still show the overlay over the app. The capture stamps
-   * false when it asks for hiding; observe reports the field only in the overlay-showing case.
+   * prototype hidden device-side (`screenshot_hide_prototype_v1`); true when the device could not hide
+   * it, so the screenshot and any crop still show the prototype over the app. The capture stamps
+   * false when it asks for hiding; observe reports the field only in the prototype-showing case.
    */
-  screenshotIncludesOverlay?: boolean;
+  screenshotIncludesPrototype?: boolean;
 
   /** Whether this observation's requested settled screenshot was validated on disk. */
   screenshotSettled?: boolean;

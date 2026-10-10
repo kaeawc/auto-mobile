@@ -31,7 +31,7 @@ async function tapElement(hierarchy: ViewHierarchyResult, elementId: string) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const tap = new TapOnElement(
-    { name: "overlay", platform: "ios", deviceId: "overlay" },
+    { name: "prototype", platform: "ios", deviceId: "prototype" },
     new FakeAdbExecutor(),
     {
       timer,
@@ -67,14 +67,14 @@ async function tapElement(hierarchy: ViewHierarchyResult, elementId: string) {
   return { result, points };
 }
 
-describe("tapOn controls in a captured in-app iOS overlay window", () => {
-  test("taps the overlay dismiss control drawn over the app's navigation bar", async () => {
-    const { result, points } = await tapElement(captured(), "automobile-overlay-dismiss");
+describe("tapOn controls in a captured in-app iOS prototype window", () => {
+  test("taps the prototype dismiss control drawn over the app's navigation bar", async () => {
+    const { result, points } = await tapElement(captured(), "automobile-prototype-dismiss");
     expect(result.success).toBe(true);
     expect(points).toEqual([{ x: 372, y: 84 }]);
   });
 
-  test("taps the centre of overlay buttons drawn over the app's toolbar", async () => {
+  test("taps the centre of prototype buttons drawn over the app's toolbar", async () => {
     const close = await tapElement(captured(), "close-button");
     expect(close.result.success).toBe(true);
     expect(close.points).toEqual([{ x: 171, y: 802 }]);

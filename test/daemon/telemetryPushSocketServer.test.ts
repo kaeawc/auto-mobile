@@ -222,20 +222,20 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
     expect(infoSpy).not.toHaveBeenCalled();
   });
 
-  test("queues distinct overlay sequences during backfill and deduplicates repeated sequence", async () => {
-    const filter = server.filter("overlay");
+  test("queues distinct prototype sequences during backfill and deduplicates repeated sequence", async () => {
+    const filter = server.filter("prototype");
     server.subscribe(socket, filter);
-    const overlayEvent = (sequence: number): TelemetryEvent => ({
-      category: "overlay",
+    const prototypeEvent = (sequence: number): TelemetryEvent => ({
+      category: "prototype",
       timestamp: sequence,
       deviceId: "device",
       sessionId: "session",
       data: { id: "panel", sequence, kind: "page_changed" },
     });
-    server.pushTelemetryEvent(overlayEvent(1));
-    server.pushTelemetryEvent(overlayEvent(2));
-    server.pushTelemetryEvent(overlayEvent(3));
-    server.pushTelemetryEvent(overlayEvent(3));
+    server.pushTelemetryEvent(prototypeEvent(1));
+    server.pushTelemetryEvent(prototypeEvent(2));
+    server.pushTelemetryEvent(prototypeEvent(3));
+    server.pushTelemetryEvent(prototypeEvent(3));
     await server.backfill(socket, filter);
     // Explicitly finish because the harness's manual backfill bypasses onSubscribed.
     await server["finishBackfill"]("backfill");
@@ -244,7 +244,7 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
     ]);
   });
 
-  test("preserves non-overlay event key serialization", () => {
+  test("preserves non-prototype event key serialization", () => {
     const keys = new EventKeyTelemetryServer("/fake/key.sock", timer);
     const base = { timestamp: 1, deviceId: "device", sessionId: "session" } as const;
     expect(keys.key({ ...base, category: "navigation", data: { id: "event" } })).toBe(
@@ -260,24 +260,24 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
     [{ id: null, occurrenceId: "panel", sequenceNumber: 9, requestId: "ignored" }, "panel"],
     [{ id: null, occurrenceId: null, sequenceNumber: 0, requestId: "ignored" }, 0],
     [{ requestId: "panel" }, "panel"],
-  ] as const)("overlay identity retains id fallback precedence (%j)", (data, id) => {
+  ] as const)("prototype identity retains id fallback precedence (%j)", (data, id) => {
     const keys = new EventKeyTelemetryServer("/fake/key.sock", timer);
     const base = { timestamp: 1, deviceId: "device", sessionId: "session" } as const;
-    expect(keys.key({ ...base, category: "overlay", data: { ...data, sequence: 2 } })).toBe(
-      JSON.stringify(["overlay", "device", "session", id, 2]),
+    expect(keys.key({ ...base, category: "prototype", data: { ...data, sequence: 2 } })).toBe(
+      JSON.stringify(["prototype", "device", "session", id, 2]),
     );
-    expect(keys.key({ ...base, category: "overlay", data })).toBe(
-      JSON.stringify(["overlay", "device", "session", id]),
+    expect(keys.key({ ...base, category: "prototype", data })).toBe(
+      JSON.stringify(["prototype", "device", "session", id]),
     );
     expect(keys.key({ ...base, category: "toolcall", data })).toBe(
       JSON.stringify(["toolcall", "device", "session", id]),
     );
   });
 
-  test("overlay identity requires a valid id and a numeric sequence", () => {
+  test("prototype identity requires a valid id and a numeric sequence", () => {
     const keys = new EventKeyTelemetryServer("/fake/key.sock", timer);
     const base = {
-      category: "overlay",
+      category: "prototype",
       timestamp: 1,
       deviceId: "device",
       sessionId: "session",
@@ -285,7 +285,7 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
     expect(keys.key({ ...base, data: { sequence: 2 } })).toBeNull();
     expect(keys.key({ ...base, data: { id: {}, occurrenceId: "panel", sequence: 2 } })).toBeNull();
     expect(keys.key({ ...base, data: { id: "panel", sequence: "2" } })).toBe(
-      '["overlay","device","session","panel"]',
+      '["prototype","device","session","panel"]',
     );
   });
 

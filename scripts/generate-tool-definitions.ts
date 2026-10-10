@@ -28,7 +28,7 @@ import { registerSnapshotTools } from "../src/server/snapshotTools";
 import { registerSnapshotOfTools } from "../src/server/snapshotOfTools";
 import { registerBiometricTools } from "../src/server/biometricTools";
 import { registerTelephonyTools } from "../src/server/telephonyTools";
-import { registerOverlayTools } from "../src/server/overlayTools";
+import { registerPrototypeTools } from "../src/server/prototypeTools";
 import { registerHighlightTools } from "../src/server/highlightTools";
 import { registerDatabaseTools } from "../src/server/databaseTools";
 import { registerStorageTools } from "../src/server/storageTools";
@@ -62,7 +62,7 @@ function registerAllTools(): void {
   registerBiometricTools();
   registerTelephonyTools();
   registerHighlightTools();
-  registerOverlayTools();
+  registerPrototypeTools();
   registerDatabaseTools();
   registerStorageTools();
   registerPreferenceTools();

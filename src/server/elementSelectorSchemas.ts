@@ -39,7 +39,7 @@ export const resolverSelectionStrategySchema = z.enum(ELEMENT_SELECTION_STRATEGI
 export const hierarchyLayerSchema = z
   .enum(HIERARCHY_LAYERS)
   .describe(
-    "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+    "app: exclude the AutoMobile prototype; prototype: prototype nodes only (error if none shown). Omit for both, topmost first",
   );
 
 export const nestedElementContainerSchema: z.ZodType<ElementContainerSelector> = z.lazy(() =>

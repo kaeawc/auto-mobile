@@ -6,7 +6,7 @@ import {
   type ViewHierarchyWindowInfo,
 } from "../../../models/ViewHierarchyResult";
 import { linkWindowRoots } from "../linkWindowRoots";
-import { ownOverlayWindows } from "../ownOverlayFocus";
+import { ownPrototypeWindows } from "../ownPrototypeFocus";
 
 /** AccessibilityWindowInfo.TYPE_APPLICATION. */
 const WINDOW_TYPE_APPLICATION = 1;
@@ -21,7 +21,7 @@ function trimmed(value: unknown): string | undefined {
 
 /**
  * The capture app's window the user is looking at: the focused one, else the active one, else the
- * topmost. System windows (status bar, navigation bar), the IME and AutoMobile's own overlay never
+ * topmost. System windows (status bar, navigation bar), the IME and AutoMobile's own prototype never
  * name the app's screen, so they are never chosen; the status bar's "Status bar" pane title is on
  * every capture.
  */
@@ -29,13 +29,13 @@ function foregroundAppWindow(
   viewHierarchy: ViewHierarchyResult,
   packageName: string,
 ): ViewHierarchyNode | undefined {
-  const overlays = new Set(ownOverlayWindows(viewHierarchy).map((window) => window.id));
+  const prototypes = new Set(ownPrototypeWindows(viewHierarchy).map((window) => window.id));
   const appWindows = (linkWindowRoots(viewHierarchy.hierarchy, viewHierarchy.windows) ?? []).filter(
     (window): window is ViewHierarchyWindowInfo & { hierarchy: ViewHierarchyNode } =>
       window.type === WINDOW_TYPE_APPLICATION &&
       window.hierarchy !== undefined &&
       (window.packageName === undefined || window.packageName === packageName) &&
-      !overlays.has(window.id),
+      !prototypes.has(window.id),
   );
   const topmost = appWindows.toSorted(
     (left, right) => (right.windowLayer ?? 0) - (left.windowLayer ?? 0),

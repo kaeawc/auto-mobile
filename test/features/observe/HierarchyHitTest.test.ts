@@ -12,7 +12,7 @@ import {
 import type { ElementBounds, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
 import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
-import { ownOverlaySafeGesturePoint } from "../../../src/features/observe/ApplicationWindowCover";
+import { ownPrototypeSafeGesturePoint } from "../../../src/features/observe/ApplicationWindowCover";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import capturedIme from "../../fixtures/android-ime-window/playground-gboard-api36.json";
@@ -226,19 +226,19 @@ describe("skeleton occlusion by application windows", () => {
   });
 });
 
-// Inline model trees: no capture has an AutoMobile overlay and an application dialog splitting
+// Inline model trees: no capture has an AutoMobile prototype and an application dialog splitting
 // one app row between them (#10715).
-describe("AutoMobile overlay covers (#10715)", () => {
+describe("AutoMobile prototype covers (#10715)", () => {
   const row = { "resource-id": "list_row", clickable: "true", bounds: rect(0, 400) };
   const dialog = { "resource-id": "dialog_btn", clickable: "true", bounds: rect(0, 200) };
   function rect(left: number, right: number): ElementBounds {
     return { left, top: 0, right, bottom: 100 };
   }
-  function overlayWindow(
+  function prototypeWindow(
     bounds: ElementBounds,
     metadata: Pick<
       NonNullable<ViewHierarchyResult["windows"]>[number],
-      "overlayPlacement" | "overlayOpaque"
+      "prototypePlacement" | "prototypeOpaque"
     > = {},
   ): NonNullable<ViewHierarchyResult["windows"]>[number] {
     return {
@@ -246,7 +246,7 @@ describe("AutoMobile overlay covers (#10715)", () => {
       windowLayer: 2,
       packageName: CTRL_PROXY_PACKAGE,
       bounds,
-      hierarchy: { node: [{ "resource-id": "overlay_btn", clickable: "true", bounds }] },
+      hierarchy: { node: [{ "resource-id": "prototype_btn", clickable: "true", bounds }] },
       ...metadata,
     };
   }
@@ -270,24 +270,24 @@ describe("AutoMobile overlay covers (#10715)", () => {
     return [...skeleton, ...context].find((entry) => entry.elementId === "list_row");
   };
 
-  test("gesture point moves off a partial overlay and is refused under a full one", () => {
-    const partial = hierarchyWith([overlayWindow(rect(100, 300))]);
+  test("gesture point moves off a partial prototype and is refused under a full one", () => {
+    const partial = hierarchyWith([prototypeWindow(rect(100, 300))]);
     expect(
-      ownOverlaySafeGesturePoint(partial, target(partial), row.bounds, { x: 200, y: 50 }),
+      ownPrototypeSafeGesturePoint(partial, target(partial), row.bounds, { x: 200, y: 50 }),
     ).toEqual({
       x: 50,
       y: 50,
     });
-    const full = hierarchyWith([overlayWindow(rect(0, 400))]);
+    const full = hierarchyWith([prototypeWindow(rect(0, 400))]);
     expect(
-      ownOverlaySafeGesturePoint(full, target(full), row.bounds, { x: 200, y: 50 }),
+      ownPrototypeSafeGesturePoint(full, target(full), row.bounds, { x: 200, y: 50 }),
     ).toBeNull();
   });
 
-  test("observe marks a row an overlay and a dialog cover between them, as tapOn refuses it", () => {
+  test("observe marks a row a prototype and a dialog cover between them, as tapOn refuses it", () => {
     const hierarchy = hierarchyWith([
       { type: 1, windowLayer: 1, hierarchy: dialog },
-      overlayWindow(rect(200, 400)),
+      prototypeWindow(rect(200, 400)),
     ]);
     expect(
       applicationWindowSafeTapPoint(
@@ -302,27 +302,27 @@ describe("AutoMobile overlay covers (#10715)", () => {
     expect(rowState(hierarchy)).toMatchObject({ occluded: true, affordances: [] });
   });
 
-  test("observe marks a row a translucent overlay and a dialog cover between them (#10715)", () => {
+  test("observe marks a row a translucent prototype and a dialog cover between them (#10715)", () => {
     // Owner decision 2026-10-08 reverses #10615: opacity does not change where a tap lands.
     const hierarchy = hierarchyWith([
       { type: 1, windowLayer: 1, hierarchy: dialog },
-      overlayWindow(rect(200, 400), { overlayPlacement: "fullscreen", overlayOpaque: false }),
+      prototypeWindow(rect(200, 400), { prototypePlacement: "fullscreen", prototypeOpaque: false }),
     ]);
     expect(rowState(hierarchy)).toMatchObject({ occluded: true, affordances: [] });
   });
 
-  test("observe keeps a row actionable while an overlay leaves part of it exposed", () => {
-    const hierarchy = hierarchyWith([overlayWindow(rect(100, 400))]);
+  test("observe keeps a row actionable while a prototype leaves part of it exposed", () => {
+    const hierarchy = hierarchyWith([prototypeWindow(rect(100, 400))]);
     expect(rowState(hierarchy)?.affordances).toContain("tap");
     expect(rowState(hierarchy)?.occluded).toBeUndefined();
   });
 
   test("observe tests the screen-clipped row, as tapOn does: an off-screen remainder is not exposed", () => {
-    // The row runs past the 400px-wide screen; the overlay covers its whole on-screen part.
+    // The row runs past the 400px-wide screen; the prototype covers its whole on-screen part.
     const wide = { ...row, bounds: { left: 0, top: 0, right: 600, bottom: 100 } };
     const hierarchy: ViewHierarchyResult = {
       hierarchy: { node: [] },
-      windows: [{ type: 1, windowLayer: 0, hierarchy: wide }, overlayWindow(rect(0, 400))],
+      windows: [{ type: 1, windowLayer: 0, hierarchy: wide }, prototypeWindow(rect(0, 400))],
     };
     expect(rowState(hierarchy)).toMatchObject({ occluded: true, affordances: [] });
   });

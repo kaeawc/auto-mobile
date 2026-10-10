@@ -45,7 +45,7 @@ function clip(hierarchy: ViewHierarchyResult, nativeId: string) {
   });
 }
 
-describe("iOS window layers on a captured in-app overlay window", () => {
+describe("iOS window layers on a captured in-app prototype window", () => {
   test("stamps each window's top-level nodes front to back and leaves descendants unstamped", () => {
     const roots = convert().hierarchy.node as unknown as { extras?: Record<string, string> };
     const children = (roots as { node?: { extras?: Record<string, string> }[] }).node ?? [];
@@ -54,9 +54,9 @@ describe("iOS window layers on a captured in-app overlay window", () => {
     expect(layers.lastIndexOf("1")).toBeLessThan(layers.indexOf("0"));
   });
 
-  test("ranks overlay nodes, including descendants, above the app's own chrome", () => {
+  test("ranks prototype nodes, including descendants, above the app's own chrome", () => {
     const hierarchy = convert();
-    const dismiss = entry(hierarchy, "automobile-overlay-dismiss");
+    const dismiss = entry(hierarchy, "automobile-prototype-dismiss");
     const like = entry(hierarchy, "like-button");
     const toolbar = entry(hierarchy, "Toolbar");
     const navigation = entry(hierarchy, "Settings");
@@ -66,9 +66,9 @@ describe("iOS window layers on a captured in-app overlay window", () => {
     expect(like.windowRank).toBeLessThan(toolbar.windowRank);
   });
 
-  test("app chrome does not clip overlay controls drawn over it", () => {
+  test("app chrome does not clip prototype controls drawn over it", () => {
     const hierarchy = convert();
-    for (const id of ["automobile-overlay-dismiss", "like-button", "close-button"]) {
+    for (const id of ["automobile-prototype-dismiss", "like-button", "close-button"]) {
       expect(clip(hierarchy, id)).toEqual({ bounds: entry(hierarchy, id).bounds! });
     }
   });
@@ -85,15 +85,15 @@ describe("iOS window layers on a captured in-app overlay window", () => {
     });
   });
 
-  test("without the window layer the toolbar-band overlay controls read as covered", () => {
+  test("without the window layer the toolbar-band prototype controls read as covered", () => {
     const hierarchy = convert();
     const stripped = JSON.parse(
       JSON.stringify(hierarchy).replaceAll(`"${IOS_WINDOW_LAYER_EXTRA}"`, '"unrelated"'),
     ) as ViewHierarchyResult;
     // A non-scrolling control wholly inside the navigation bar is bar-level content even
     // without its layer (#10635); the toolbar band has no such exemption.
-    expect(clip(stripped, "automobile-overlay-dismiss")).toEqual({
-      bounds: entry(stripped, "automobile-overlay-dismiss").bounds!,
+    expect(clip(stripped, "automobile-prototype-dismiss")).toEqual({
+      bounds: entry(stripped, "automobile-prototype-dismiss").bounds!,
     });
     expect(clip(stripped, "close-button").bounds).toEqual(
       expect.objectContaining({ top: 780, bottom: 788 }),

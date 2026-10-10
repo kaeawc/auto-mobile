@@ -316,7 +316,7 @@ export interface SendKeysSelector {
 export interface SendKeysFocusOptions {
   container?: ElementContainerSelector;
   selectionStrategy?: ElementSelectionStrategy;
-  /** Resolve the field in the app or the AutoMobile overlay only (issue #9305). */
+  /** Resolve the field in the app or the AutoMobile prototype only (issue #9305). */
   layer?: HierarchyLayer;
 }
 

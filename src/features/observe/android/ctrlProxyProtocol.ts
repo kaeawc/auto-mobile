@@ -29,7 +29,7 @@
  *   same treatment separately.
  */
 
-import type { OverlaySpec, OverlayJson } from "../../overlay/overlaySpec";
+import type { PrototypeSpec, PrototypeJson } from "../../prototype/prototypeSpec";
 import type { HighlightShape } from "../../../models/VisualHighlight";
 import type { ImeAction } from "../../../models/ImeAction";
 import type { NetworkMockRuleSync } from "../../../server/networkMockRules";
@@ -75,8 +75,8 @@ export interface RequestScreenshotMessage {
   type: "request_screenshot";
   requestId: string;
   displayId?: number;
-  /** Hide CtrlProxy's overlay for this capture only; sent only under {@link SCREENSHOT_HIDE_OVERLAY_CAPABILITY}. */
-  hideOverlays?: boolean;
+  /** Hide CtrlProxy's prototype for this capture only; sent only under {@link SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY}. */
+  hidePrototypes?: boolean;
 }
 
 // =============================================================================
@@ -433,105 +433,108 @@ export interface GetTraversalOrderMessage {
   requestId: string;
 }
 
-export type OverlayState = NonNullable<OverlaySpec["state"]>;
-export interface ShowOverlayMessage {
-  type: "show_overlay";
+export type PrototypeState = NonNullable<PrototypeSpec["state"]>;
+export interface ShowPrototypeMessage {
+  type: "show_prototype";
   requestId: string;
-  spec: OverlaySpec;
-  /** Android logical display; omitted for the default display. Requires overlay_display_id_v1. */
+  spec: PrototypeSpec;
+  /** Android logical display; omitted for the default display. Requires prototype_display_id_v1. */
   displayId?: number;
   /**
-   * Only `true` is sent. A show whose spec.id is the overlay on screen replaces it in place (pages
+   * Only `true` is sent. A show whose spec.id is the prototype on screen replaces it in place (pages
    * and display kept); `reset` starts it fresh. A device that predates it ignores the field and
    * always starts fresh, which is what `reset` asks for.
    */
   reset?: true;
 }
-export type OverlayDismiss = { id: string; all?: never } | { all: true; id?: never };
-export type DismissOverlayMessage = { type: "dismiss_overlay"; requestId: string } & OverlayDismiss;
+export type PrototypeDismiss = { id: string; all?: never } | { all: true; id?: never };
+export type DismissPrototypeMessage = {
+  type: "dismiss_prototype";
+  requestId: string;
+} & PrototypeDismiss;
 /**
- * `@SerialName("inspect_overlays")` → `InspectOverlays`. Answered by one `overlay_result` carrying
- * `overlays`; events the device buffered while no host was connected arrive first, as ordinary
- * `overlay_event` frames. Only sent to a device advertising `overlay_persistence_replay_v1`.
+ * `@SerialName("inspect_prototypes")` → `InspectPrototypes`. Answered by one `prototype_result` carrying
+ * `prototypes`; events the device buffered while no host was connected arrive first, as ordinary
+ * `prototype_event` frames. Only sent to a device advertising `prototype_persistence_replay_v1`.
  */
-export interface InspectOverlaysMessage {
-  type: "inspect_overlays";
+export interface InspectPrototypesMessage {
+  type: "inspect_prototypes";
   requestId: string;
 }
 /**
- * `@SerialName("put_overlay_asset")` → `PutOverlayAsset`. `dataBase64` is the encoded image file
+ * `@SerialName("put_prototype_asset")` → `PutPrototypeAsset`. `dataBase64` is the encoded image file
  * (PNG, JPEG or WebP) in standard base64 without line breaks, sent in the one JSON text frame like
- * screenshots. Replaces any asset with the same id. Answered by one `overlay_result`.
+ * screenshots. Replaces any asset with the same id. Answered by one `prototype_result`.
  */
-export interface PutOverlayAssetMessage {
-  type: "put_overlay_asset";
+export interface PutPrototypeAssetMessage {
+  type: "put_prototype_asset";
   requestId: string;
   id: string;
   mimeType: string;
   dataBase64: string;
 }
-/** `@SerialName("remove_overlay_asset")` → `RemoveOverlayAsset`. Idempotent on the device. */
-export interface RemoveOverlayAssetMessage {
-  type: "remove_overlay_asset";
+/** `@SerialName("remove_prototype_asset")` → `RemovePrototypeAsset`. Idempotent on the device. */
+export interface RemovePrototypeAssetMessage {
+  type: "remove_prototype_asset";
   requestId: string;
   id: string;
 }
 
-export interface OverlayResult {
+export interface PrototypeResult {
   success: boolean;
   totalTimeMs?: number;
   error?: string | null;
   requestId?: string;
   timestamp?: number;
   /**
-   * Warning, not a failure: after a successful show_overlay, the asset ids the
+   * Warning, not a failure: after a successful show_prototype, the asset ids the
    * spec references that the device has no copy of (never uploaded, or cleared since), so the
    * host can re-upload them. Absent when nothing is missing and on devices that predate it.
    */
   missingAssets?: string[];
-  /** Only the reply to `inspect_overlays`: the overlays the device is showing right now. */
-  overlays?: OverlayStatusEntry[];
-  /** Only with `overlays`: events the device dropped from its offline buffer since it started. */
+  /** Only the reply to `inspect_prototypes`: the prototypes the device is showing right now. */
+  prototypes?: PrototypeStatusEntry[];
+  /** Only with `prototypes`: events the device dropped from its offline buffer since it started. */
   droppedEvents?: number;
 }
 
-/** One overlay the device reported to `inspect_overlays`. `id` is the overlay id (its spec id). */
-export interface OverlayStatusEntry {
+/** One prototype the device reported to `inspect_prototypes`. `id` is the prototype id (its spec id). */
+export interface PrototypeStatusEntry {
   id: string;
   /** True for `window.persistence: "device"`. */
   persistent: boolean;
-  state: OverlayState;
+  state: PrototypeState;
   pages: Record<string, number>;
-  /** Highest `overlay_event` sequence the device allocated for this overlay; no rewind. */
+  /** Highest `prototype_event` sequence the device allocated for this prototype; no rewind. */
   lastSequence: number;
-  /** True while the overlay's app is not in front: hidden, state kept, back with the app. */
+  /** True while the prototype's app is not in front: hidden, state kept, back with the app. */
   suspended?: boolean;
 }
 
 /**
- * Outcome of an overlay asset upload or removal. `dispatched` is true once the frame was written
+ * Outcome of a prototype asset upload or removal. `dispatched` is true once the frame was written
  * to the socket; `acknowledged` is true only when the device answered (success or refusal). A
  * dispatched, unacknowledged request is indeterminate: the device may or may not have applied it.
  */
-export interface OverlayAssetResult extends OverlayResult {
+export interface PrototypeAssetResult extends PrototypeResult {
   dispatched: boolean;
   acknowledged: boolean;
 }
 
 /** Id-less push; pager selection has its own namespace, separate from authored state. */
-export interface OverlayEvent {
-  type: "overlay_event";
+export interface PrototypeEvent {
+  type: "prototype_event";
   timestamp: number;
   id: string;
   /**
-   * Emitter contract: per overlay id, monotonic starting at 1; reconnects must not reset it.
+   * Emitter contract: per prototype id, monotonic starting at 1; reconnects must not reset it.
    * Hosts should treat lower-or-equal sequences for the same id as duplicates.
    */
   sequence: number;
   kind: "emit" | "page_changed" | "dismissed";
   name: string | null;
-  payload: OverlayJson;
-  state: OverlayState;
+  payload: PrototypeJson;
+  state: PrototypeState;
   pages: Record<string, number>;
 }
 
@@ -830,11 +833,11 @@ export type CtrlProxyRequest =
   | RequestDeviceInfoMessage
   | GetCurrentFocusMessage
   | GetTraversalOrderMessage
-  | ShowOverlayMessage
-  | DismissOverlayMessage
-  | InspectOverlaysMessage
-  | PutOverlayAssetMessage
-  | RemoveOverlayAssetMessage
+  | ShowPrototypeMessage
+  | DismissPrototypeMessage
+  | InspectPrototypesMessage
+  | PutPrototypeAssetMessage
+  | RemovePrototypeAssetMessage
   | AddHighlightMessage
   | ListPreferenceFilesMessage
   | GetPreferencesMessage
@@ -875,10 +878,10 @@ export type CtrlProxyRequestType = CtrlProxyRequest["type"];
  * the raw advertised list for the remaining optional text/keyboard capabilities.
  */
 export const ANDROID_CAPABILITY_REQUEST_TYPES = [
-  "show_overlay",
-  "dismiss_overlay",
-  "put_overlay_asset",
-  "remove_overlay_asset",
+  "show_prototype",
+  "dismiss_prototype",
+  "put_prototype_asset",
+  "remove_prototype_asset",
   "discover_keystore",
   "get_sdk_capabilities",
   "set_hierarchy_interval",
@@ -892,36 +895,36 @@ export const ANDROID_CAPABILITY_REQUEST_TYPES = [
 ] as const satisfies readonly CtrlProxyRequestType[];
 
 /**
- * Advertised only by a CtrlProxy that attaches `show_overlay` to the requested `displayId`. An
- * older device would ignore the unknown field and show the overlay on the default display.
+ * Advertised only by a CtrlProxy that attaches `show_prototype` to the requested `displayId`. An
+ * older device would ignore the unknown field and show the prototype on the default display.
  */
-export const OVERLAY_DISPLAY_CAPABILITY = "overlay_display_id_v1";
+export const PROTOTYPE_DISPLAY_CAPABILITY = "prototype_display_id_v1";
 
 /**
  * Advertised only by a CtrlProxy that honours spec `window.layer` and `window.persistence`. An older
- * device decodes the spec leniently and would silently show a session-scoped system-layer overlay.
+ * device decodes the spec leniently and would silently show a session-scoped system-layer prototype.
  */
-export const OVERLAY_WINDOW_OPTIONS_CAPABILITY = "overlay_window_options_v1";
+export const PROTOTYPE_WINDOW_OPTIONS_CAPABILITY = "prototype_window_options_v1";
 
 /**
- * Advertised by a CtrlProxy that buffers a device-persistent overlay's events while no host is
- * connected, replays them on the next connection, and answers `inspect_overlays`.
+ * Advertised by a CtrlProxy that buffers a device-persistent prototype's events while no host is
+ * connected, replays them on the next connection, and answers `inspect_prototypes`.
  */
-export const OVERLAY_PERSISTENCE_REPLAY_CAPABILITY = "overlay_persistence_replay_v1";
+export const PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY = "prototype_persistence_replay_v1";
 
 /**
- * Advertised by a CtrlProxy whose `show_overlay` replaces an overlay of the same id in place,
+ * Advertised by a CtrlProxy whose `show_prototype` replaces a prototype of the same id in place,
  * keeping its display and each pager's page unless `reset` is set (#10550). An older device ignores
- * `reset` and re-shows the overlay fresh, so pages restart (#10642).
+ * `reset` and re-shows the prototype fresh, so pages restart (#10642).
  */
-export const OVERLAY_SHOW_IN_PLACE_CAPABILITY = "overlay_show_in_place_v1";
+export const PROTOTYPE_SHOW_IN_PLACE_CAPABILITY = "prototype_show_in_place_v1";
 
 /**
- * Advertised by a CtrlProxy whose overlay renderer lays an anchored node out at its screen-space dp
+ * Advertised by a CtrlProxy whose prototype renderer lays an anchored node out at its screen-space dp
  * bounds, relative to its own window's origin (#9316). An older device decodes anchors and ignores
  * them, so the node would silently render at its normal position.
  */
-export const OVERLAY_ANCHOR_CAPABILITY = "overlay_anchor_v1";
+export const PROTOTYPE_ANCHOR_CAPABILITY = "prototype_anchor_v1";
 
 /**
  * Advertised by a CtrlProxy that answers `set_network_mock_rules` (when it carries a requestId)
@@ -931,11 +934,11 @@ export const OVERLAY_ANCHOR_CAPABILITY = "overlay_anchor_v1";
 export const NETWORK_MOCK_RULES_REPORT_CAPABILITY = "network_mock_rules_report_v1";
 
 /**
- * Advertised by a CtrlProxy whose window entries for its own interactive overlay carry
- * `overlayPlacement` and `overlayOpaque`. Older APKs never send them, so consumers fall back to
+ * Advertised by a CtrlProxy whose window entries for its own prototype carry
+ * `prototypePlacement` and `prototypeOpaque`. Older APKs never send them, so consumers fall back to
  * window bounds when the fields are absent.
  */
-export const OVERLAY_WINDOW_METADATA_CAPABILITY = "overlay_window_metadata_v1";
+export const PROTOTYPE_WINDOW_METADATA_CAPABILITY = "prototype_window_metadata_v1";
 
 /**
  * Advertised by a CtrlProxy whose `get_sdk_capabilities` honours `userId` (work or secondary
@@ -945,13 +948,13 @@ export const OVERLAY_WINDOW_METADATA_CAPABILITY = "overlay_window_metadata_v1";
 export const SDK_CAPABILITIES_USER_ID_CAPABILITY = "sdk_capabilities_user_id_v1";
 
 /**
- * Advertised by a device agent whose `request_screenshot` honours `hideOverlays` (#9305): it hides
- * its own overlay window, waits for a rendered frame, captures and restores, all in that one
- * request, and answers with `overlaysHidden`. The iOS overlay agent advertises the same string for
- * its `hide_for_capture` handshake. An older agent ignores the field and captures with the overlay
+ * Advertised by a device agent whose `request_screenshot` honours `hidePrototypes` (#9305): it hides
+ * its own prototype window, waits for a rendered frame, captures and restores, all in that one
+ * request, and answers with `prototypesHidden`. The iOS prototype agent advertises the same string for
+ * its `hide_for_capture` handshake. An older agent ignores the field and captures with the prototype
  * showing.
  */
-export const SCREENSHOT_HIDE_OVERLAY_CAPABILITY = "screenshot_hide_overlay_v1";
+export const SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY = "screenshot_hide_prototype_v1";
 
 /** Capability flags in the handshake that are never sent as wire requests. */
 export const ANDROID_CAPABILITY_FLAGS = [
@@ -961,15 +964,15 @@ export const ANDROID_CAPABILITY_FLAGS = [
   "ime_password_commit_v1",
   "gesture_display_id_v1",
   "tap_double_v1",
-  OVERLAY_DISPLAY_CAPABILITY,
-  OVERLAY_WINDOW_OPTIONS_CAPABILITY,
-  OVERLAY_PERSISTENCE_REPLAY_CAPABILITY,
-  OVERLAY_SHOW_IN_PLACE_CAPABILITY,
-  OVERLAY_ANCHOR_CAPABILITY,
+  PROTOTYPE_DISPLAY_CAPABILITY,
+  PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
+  PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
+  PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
+  PROTOTYPE_ANCHOR_CAPABILITY,
   NETWORK_MOCK_RULES_REPORT_CAPABILITY,
-  OVERLAY_WINDOW_METADATA_CAPABILITY,
+  PROTOTYPE_WINDOW_METADATA_CAPABILITY,
   SDK_CAPABILITIES_USER_ID_CAPABILITY,
-  SCREENSHOT_HIDE_OVERLAY_CAPABILITY,
+  SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY,
 ] as const;
 
 /** The supportedCommands list is authoritative for every request when this marker is present. */
@@ -1010,7 +1013,7 @@ export const ANDROID_REQUEST_ID_RESPONSE_TYPES: ReadonlySet<string> = new Set([
   "current_focus_result",
   "traversal_order_result",
   "highlight_response",
-  "overlay_result",
+  "prototype_result",
   "global_action_result",
   "frame_context_validation_result",
   "device_info_result",
@@ -1035,7 +1038,7 @@ export const ANDROID_ID_LESS_MESSAGE_TYPES: ReadonlySet<string> = new Set([
   "navigation_event",
   "package_event",
   "interaction_event",
-  "overlay_event",
+  "prototype_event",
   "handled_exception_event",
   "crash_event",
   "anr_event",
@@ -1113,11 +1116,11 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   get_current_focus: true,
   get_traversal_order: true,
   add_highlight: true,
-  show_overlay: true,
-  dismiss_overlay: true,
-  inspect_overlays: true,
-  put_overlay_asset: true,
-  remove_overlay_asset: true,
+  show_prototype: true,
+  dismiss_prototype: true,
+  inspect_prototypes: true,
+  put_prototype_asset: true,
+  remove_prototype_asset: true,
   list_preference_files: true,
   get_preferences: true,
   discover_keystore: true,
@@ -1246,13 +1249,13 @@ export const ctrlProxyRequests = {
   requestScreenshot(args: {
     requestId: string;
     displayId?: number;
-    hideOverlays?: boolean;
+    hidePrototypes?: boolean;
   }): RequestScreenshotMessage {
     return {
       type: "request_screenshot",
       requestId: args.requestId,
       ...(args.displayId === undefined ? {} : { displayId: args.displayId }),
-      ...(args.hideOverlays === true ? { hideOverlays: true } : {}),
+      ...(args.hidePrototypes === true ? { hidePrototypes: true } : {}),
     };
   },
 
@@ -1388,14 +1391,14 @@ export const ctrlProxyRequests = {
     return { type: "get_traversal_order", requestId: args.requestId };
   },
 
-  showOverlay(args: {
+  showPrototype(args: {
     requestId: string;
-    spec: OverlaySpec;
+    spec: PrototypeSpec;
     displayId?: number;
     reset?: boolean;
-  }): ShowOverlayMessage {
+  }): ShowPrototypeMessage {
     return {
-      type: "show_overlay",
+      type: "show_prototype",
       requestId: args.requestId,
       spec: args.spec,
       ...(args.displayId === undefined ? {} : { displayId: args.displayId }),
@@ -1403,24 +1406,24 @@ export const ctrlProxyRequests = {
     };
   },
 
-  inspectOverlays(args: { requestId: string }): InspectOverlaysMessage {
-    return { type: "inspect_overlays", requestId: args.requestId };
+  inspectPrototypes(args: { requestId: string }): InspectPrototypesMessage {
+    return { type: "inspect_prototypes", requestId: args.requestId };
   },
 
-  dismissOverlay(args: { requestId: string } & OverlayDismiss): DismissOverlayMessage {
+  dismissPrototype(args: { requestId: string } & PrototypeDismiss): DismissPrototypeMessage {
     return args.id !== undefined
-      ? { type: "dismiss_overlay", requestId: args.requestId, id: args.id }
-      : { type: "dismiss_overlay", requestId: args.requestId, all: args.all };
+      ? { type: "dismiss_prototype", requestId: args.requestId, id: args.id }
+      : { type: "dismiss_prototype", requestId: args.requestId, all: args.all };
   },
 
-  putOverlayAsset(args: {
+  putPrototypeAsset(args: {
     requestId: string;
     id: string;
     mimeType: string;
     dataBase64: string;
-  }): PutOverlayAssetMessage {
+  }): PutPrototypeAssetMessage {
     return {
-      type: "put_overlay_asset",
+      type: "put_prototype_asset",
       requestId: args.requestId,
       id: args.id,
       mimeType: args.mimeType,
@@ -1428,8 +1431,8 @@ export const ctrlProxyRequests = {
     };
   },
 
-  removeOverlayAsset(args: { requestId: string; id: string }): RemoveOverlayAssetMessage {
-    return { type: "remove_overlay_asset", requestId: args.requestId, id: args.id };
+  removePrototypeAsset(args: { requestId: string; id: string }): RemovePrototypeAssetMessage {
+    return { type: "remove_prototype_asset", requestId: args.requestId, id: args.id };
   },
 
   addHighlight(args: {

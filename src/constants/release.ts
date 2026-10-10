@@ -58,11 +58,11 @@ export interface ReleaseChecksumEntry {
    */
   screenCaptureHelperSha256?: string;
   /**
-   * SHA-256 of the universal ad-hoc-signed iOS-simulator overlay-agent dylib
-   * (`AutoMobileOverlayAgent.dylib`, #10564/#10565). Optional: releases that
-   * predate it degrade to "overlay agent unavailable for this build".
+   * SHA-256 of the universal ad-hoc-signed iOS-simulator prototype-agent dylib
+   * (`AutoMobilePrototypeAgent.dylib`, #10564/#10565). Optional: releases that
+   * predate it degrade to "prototype agent unavailable for this build".
    */
-  overlayAgentSha256?: string;
+  prototypeAgentSha256?: string;
   /**
    * SHA-256 of the signed, notarized universal macOS Network Filter app archive
    * (`automobile-network-filter-macos-universal.zip`, packed with
@@ -86,7 +86,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     runnerSha256Target: "xctest",
     videoJarSha256: "ff288b15e0720a02a831a8c166f5c63e580e1242c641a62ed8b03973fd6ebe11",
     screenCaptureHelperSha256: "c6987679e04d612c1c1c14d706291979e64ef48039f0a47be91eef911774e8d4",
-    overlayAgentSha256: "d9602fb3a39ecd4c4873afe4592850c310fae831be39103e66267dd606d8f381",
+    prototypeAgentSha256: "d9602fb3a39ecd4c4873afe4592850c310fae831be39103e66267dd606d8f381",
     networkFilterSha256: "1c31070cd3ce59a50964357058b839e80f2987426726a9ea8e10b03123d9033c",
   },
   {
@@ -953,28 +953,28 @@ export function resolveVideoJarChecksum(
   return entryForPinnedVersion(env, registry)?.videoJarSha256 ?? "";
 }
 
-/** Fixed GitHub Release asset for the universal ad-hoc-signed iOS-simulator overlay agent (#10564). */
-export const OVERLAY_AGENT_DYLIB_FILENAME = "AutoMobileOverlayAgent.dylib";
+/** Fixed GitHub Release asset for the universal ad-hoc-signed iOS-simulator prototype agent (#10564). */
+export const PROTOTYPE_AGENT_DYLIB_FILENAME = "AutoMobilePrototypeAgent.dylib";
 
-/** Download URL for the iOS-simulator overlay-agent dylib. */
-export function resolveOverlayAgentUrl(
+/** Download URL for the iOS-simulator prototype-agent dylib. */
+export function resolvePrototypeAgentUrl(
   env: EnvLike = process.env,
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   return buildReleaseAssetUrl(
-    OVERLAY_AGENT_DYLIB_FILENAME,
+    PROTOTYPE_AGENT_DYLIB_FILENAME,
     resolvePinnedVersion(env),
     resolveAssetBaseUrl(env),
     registry,
   );
 }
 
-/** Expected overlay-agent dylib SHA-256 for the pinned version; "" when unknown. */
-export function resolveOverlayAgentChecksum(
+/** Expected prototype-agent dylib SHA-256 for the pinned version; "" when unknown. */
+export function resolvePrototypeAgentChecksum(
   env: EnvLike = process.env,
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
-  return entryForPinnedVersion(env, registry)?.overlayAgentSha256 ?? "";
+  return entryForPinnedVersion(env, registry)?.prototypeAgentSha256 ?? "";
 }
 
 /** Download URL for the signed macOS ScreenCaptureKit helper archive. */

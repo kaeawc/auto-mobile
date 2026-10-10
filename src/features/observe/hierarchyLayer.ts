@@ -1,5 +1,5 @@
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
-import { OVERLAY_SUSPENDED_REASON } from "../overlay/overlaySuspended";
+import { PROTOTYPE_SUSPENDED_REASON } from "../prototype/prototypeSuspended";
 import { ActionableError } from "../../models/ActionableError";
 import type { Element } from "../../models/Element";
 import type { HierarchyLayer } from "../../models/HierarchyLayer";
@@ -17,7 +17,7 @@ import { iosWindowLayer } from "./ios/iosWindowLayer";
 import { linkWindowRoots } from "./linkWindowRoots";
 import type { XCTestHierarchy } from "./ios/types";
 import { ObserveElementsBuilder } from "./ObserveElementsBuilder";
-import { INTERACTIVE_OVERLAY_WINDOW_TYPE, ownOverlayWindows } from "./ownOverlayFocus";
+import { PROTOTYPE_WINDOW_TYPE, ownPrototypeWindows } from "./ownPrototypeFocus";
 
 /** AccessibilityWindowInfo.TYPE_APPLICATION. */
 const ACCESSIBILITY_WINDOW_TYPE_APPLICATION = 1;
@@ -28,44 +28,44 @@ const scopedCache = new WeakMap<
 >();
 
 /**
- * Accessibility identifier of the host-owned dismiss control the iOS overlay agent always draws in
- * its own window beside the spec content (`OverlayAgent.swift`). The spec cannot remove it, so it
+ * Accessibility identifier of the host-owned dismiss control the iOS prototype agent always draws in
+ * its own window beside the spec content (`PrototypeAgent.swift`). The spec cannot remove it, so it
  * marks the agent's window in the app's XCUITest hierarchy.
  */
-const IOS_OVERLAY_DISMISS_IDENTIFIER = "automobile-overlay-dismiss";
+const IOS_PROTOTYPE_DISMISS_IDENTIFIER = "automobile-prototype-dismiss";
 
 /**
- * The window roots of a capture, each marked `true` when it belongs to AutoMobile's own overlay.
+ * The window roots of a capture, each marked `true` when it belongs to AutoMobile's own prototype.
  * Window roots are never nested.
  */
 type WindowRoots = Map<ViewHierarchyNode, boolean>;
 
-/** Whether the capture contains one of AutoMobile's own overlay windows. */
-export function hasOwnOverlay(hierarchy: ViewHierarchyResult | undefined): boolean {
-  if (ownOverlayWindows(hierarchy).length > 0) {
+/** Whether the capture contains one of AutoMobile's own prototype windows. */
+export function hasOwnPrototype(hierarchy: ViewHierarchyResult | undefined): boolean {
+  if (ownPrototypeWindows(hierarchy).length > 0) {
     return true;
   }
   const roots = hierarchy ? iosWindowRoots(hierarchy) : undefined;
   return roots !== undefined && [...roots.values()].some(Boolean);
 }
 
-function overlayWindowIds(hierarchy: ViewHierarchyResult): Set<number> {
+function prototypeWindowIds(hierarchy: ViewHierarchyResult): Set<number> {
   return new Set(
-    ownOverlayWindows(hierarchy)
+    ownPrototypeWindows(hierarchy)
       .map((window) => window.id)
       .filter((id): id is number => Number.isInteger(id)),
   );
 }
 
-/** Android: each root stamped with a `windowId`, an overlay root when the window is CtrlProxy's. */
+/** Android: each root stamped with a `windowId`, a prototype root when the window is CtrlProxy's. */
 function androidWindowRoots(hierarchy: ViewHierarchyResult): WindowRoots {
-  const overlayIds = overlayWindowIds(hierarchy);
+  const prototypeIds = prototypeWindowIds(hierarchy);
   const tree = hierarchy.hierarchy as ViewHierarchyNode | undefined;
   const roots =
     tree && !hierarchy.hierarchy.error
       ? collectRoots(tree, (node) => windowIdOf(node) !== undefined)
       : [];
-  return new Map(roots.map((root) => [root, overlayIds.has(windowIdOf(root)!)]));
+  return new Map(roots.map((root) => [root, prototypeIds.has(windowIdOf(root)!)]));
 }
 
 function classOf(node: ViewHierarchyNode): unknown {
@@ -83,7 +83,7 @@ function pathToIosDismiss(root: ViewHierarchyNode): ViewHierarchyNode[] | undefi
   const visit = (node: ViewHierarchyNode): boolean => {
     path.push(node);
     if (
-      nodeAttributes(node)["resource-id"] === IOS_OVERLAY_DISMISS_IDENTIFIER ||
+      nodeAttributes(node)["resource-id"] === IOS_PROTOTYPE_DISMISS_IDENTIFIER ||
       childrenOf(node).some(visit)
     ) {
       return true;
@@ -103,16 +103,16 @@ function collectRoots(
 }
 
 /**
- * iOS: the in-app overlay agent's UIWindow (iphone D2). Captures carry no window ids, so the agent's
+ * iOS: the in-app prototype agent's UIWindow (iphone D2). Captures carry no window ids, so the agent's
  * window is the one holding its host dismiss control:
  * - converted captures stamp each window's top-level nodes with its front-to-back layer once two
- *   windows contribute nodes (`iosWindowLayer.ts`); the overlay is every root sharing the dismiss
+ *   windows contribute nodes (`iosWindowLayer.ts`); the prototype is every root sharing the dismiss
  *   control's layer;
- * - unconverted XCUITest trees keep the `UIWindow` wrappers; the overlay is the one around it;
+ * - unconverted XCUITest trees keep the `UIWindow` wrappers; the prototype is the one around it;
  * - when no window root is stamped the agent's window is the only one contributing nodes (a
- *   fullscreen overlay hides the app's windows from accessibility), so every top-level node of the
- *   application is the overlay's.
- * Undefined when the dismiss control is absent: no overlay is showing, or this is not an iOS capture.
+ *   fullscreen prototype hides the app's windows from accessibility), so every top-level node of the
+ *   application is the prototype's.
+ * Undefined when the dismiss control is absent: no prototype is showing, or this is not an iOS capture.
  */
 function iosWindowRoots(hierarchy: ViewHierarchyResult): WindowRoots | undefined {
   const tree = hierarchy.hierarchy as ViewHierarchyNode | undefined;
@@ -138,7 +138,7 @@ function iosWindowRoots(hierarchy: ViewHierarchyResult): WindowRoots | undefined
   return new Map(childrenOf(application).map((root) => [root, true]));
 }
 
-/** Window roots for scoping: Android `windowId` roots, else the iOS overlay agent's window. */
+/** Window roots for scoping: Android `windowId` roots, else the iOS prototype agent's window. */
 function windowRootsOf(hierarchy: ViewHierarchyResult): WindowRoots {
   const android = androidWindowRoots(hierarchy);
   if ([...android.values()].some(Boolean)) {
@@ -160,17 +160,17 @@ function windowIdOf(node: ViewHierarchyNode): number | undefined {
 }
 
 /**
- * Remove every overlay window root. Untouched subtrees keep their identity so
- * node-identity checks (e.g. `isOwnOverlayNode`) still hold; only the ancestors
+ * Remove every prototype window root. Untouched subtrees keep their identity so
+ * node-identity checks (e.g. `isOwnPrototypeNode`) still hold; only the ancestors
  * of a removed root are shallow-copied.
  */
 function pruneWindowRoots(
   node: ViewHierarchyNode,
   roots: WindowRoots,
 ): ViewHierarchyNode | undefined {
-  const isOverlay = roots.get(node);
-  if (isOverlay !== undefined) {
-    return isOverlay ? undefined : node;
+  const isPrototype = roots.get(node);
+  if (isPrototype !== undefined) {
+    return isPrototype ? undefined : node;
   }
   const children = childrenOf(node);
   if (children.length === 0) {
@@ -186,13 +186,13 @@ function pruneWindowRoots(
   return { ...node, node: kept };
 }
 
-/** The overlay window roots, in document order; window roots are never nested. */
-function collectOverlayRoots(node: ViewHierarchyNode, roots: WindowRoots): ViewHierarchyNode[] {
-  const isOverlay = roots.get(node);
-  if (isOverlay !== undefined) {
-    return isOverlay ? [node] : [];
+/** The prototype window roots, in document order; window roots are never nested. */
+function collectPrototypeRoots(node: ViewHierarchyNode, roots: WindowRoots): ViewHierarchyNode[] {
+  const isPrototype = roots.get(node);
+  if (isPrototype !== undefined) {
+    return isPrototype ? [node] : [];
   }
-  return childrenOf(node).flatMap((child) => collectOverlayRoots(child, roots));
+  return childrenOf(node).flatMap((child) => collectPrototypeRoots(child, roots));
 }
 
 function containsFlag(node: ViewHierarchyNode | undefined, flag: string): boolean {
@@ -215,14 +215,14 @@ function scopeTree(
   if (layer === "app") {
     return pruneWindowRoots(root, windowRoots) ?? {};
   }
-  const roots = collectOverlayRoots(root, windowRoots);
+  const roots = collectPrototypeRoots(root, windowRoots);
   if (windowRoots.has(root)) {
     return roots[0] ?? {};
   }
   return { ...root, node: roots };
 }
 
-/** The app's own package once the overlay is excluded, when the capture names the overlay host. */
+/** The app's own package once the prototype is excluded, when the capture names the prototype host. */
 function appPackageName(
   hierarchy: ViewHierarchyResult,
   windows: ViewHierarchyWindowInfo[] | undefined,
@@ -243,12 +243,12 @@ function scopeSingleHierarchy(
   hierarchy: ViewHierarchyResult,
   layer: HierarchyLayer,
 ): ViewHierarchyResult {
-  const overlayWindowSet = new Set(ownOverlayWindows(hierarchy));
+  const prototypeWindowSet = new Set(ownPrototypeWindows(hierarchy));
   const keepWindow = (window: ViewHierarchyWindowInfo) =>
-    layer === "overlay" ? overlayWindowSet.has(window) : !overlayWindowSet.has(window);
+    layer === "prototype" ? prototypeWindowSet.has(window) : !prototypeWindowSet.has(window);
   // iOS window entries describe the app, not the agent's UIWindow, so they stay as captured.
   const windows =
-    overlayWindowSet.size > 0 || layer === "overlay"
+    prototypeWindowSet.size > 0 || layer === "prototype"
       ? hierarchy.windows?.filter(keepWindow)
       : hierarchy.windows;
   const tree = hierarchy.hierarchy as ViewHierarchyNode | undefined;
@@ -275,14 +275,14 @@ function scopeSingleHierarchy(
 }
 
 /**
- * Scope a capture to the app or to AutoMobile's own overlay (issue #9305).
- * Android overlay windows are recognized by window entry (`ownOverlayWindows`);
+ * Scope a capture to the app or to AutoMobile's own prototype (issue #9305).
+ * Android prototype windows are recognized by window entry (`ownPrototypeWindows`);
  * their nodes by the `windowId` CtrlProxy stamps on every window root. On iOS
- * the overlay agent's UIWindow is recognized by its host dismiss control
+ * the prototype agent's UIWindow is recognized by its host dismiss control
  * (`iosWindowRoots`).
  *
- * `undefined` returns the capture unchanged. A capture with no overlay window
- * is returned unchanged for `app` and scoped to nothing for `overlay`. The
+ * `undefined` returns the capture unchanged. A capture with no prototype window
+ * is returned unchanged for `app` and scoped to nothing for `prototype`. The
  * input is never mutated, and the attached raw capture is scoped the same way.
  */
 export function scopeHierarchyToLayer(
@@ -292,7 +292,7 @@ export function scopeHierarchyToLayer(
   if (layer === undefined) {
     return hierarchy;
   }
-  if (layer === "app" && !hasOwnOverlay(hierarchy)) {
+  if (layer === "app" && !hasOwnPrototype(hierarchy)) {
     return hierarchy;
   }
   const cached = scopedCache.get(hierarchy)?.[layer];
@@ -311,22 +311,22 @@ export function scopeHierarchyToLayer(
 }
 
 /**
- * A device capture as app screen identity sees it (issue #9305 (e)): AutoMobile's own overlay
- * windows are removed and a capture labelled with the overlay host's package is attributed to the
+ * A device capture as app screen identity sees it (issue #9305 (e)): AutoMobile's own prototype
+ * windows are removed and a capture labelled with the prototype host's package is attributed to the
  * app behind it. Navigation fingerprints are computed from this, so showing, paging or dismissing
- * a prototype overlay neither changes the app screen's identity nor records a navigation.
+ * a prototype neither changes the app screen's identity nor records a navigation.
  *
  * Takes the captures the hierarchy pushes carry (the Android CtrlProxy wire capture and the iOS
- * runner's XCTestHierarchy) and returns the same shape. A capture with no overlay is returned
- * unchanged, as the same object, so screens without an overlay keep their fingerprints.
+ * runner's XCTestHierarchy) and returns the same shape. A capture with no prototype is returned
+ * unchanged, as the same object, so screens without a prototype keep their fingerprints.
  */
 export function appWindowsOnly(capture: AndroidWireHierarchy): AndroidWireHierarchy;
 export function appWindowsOnly(capture: XCTestHierarchy): XCTestHierarchy;
 export function appWindowsOnly(
   capture: AndroidWireHierarchy | XCTestHierarchy,
 ): AndroidWireHierarchy | XCTestHierarchy {
-  // Wire window entries do not carry their roots, and an app-layer overlay (TYPE_SYSTEM) is only
-  // recognized by the nodes it hosts, so link the roots when the overlay host owns a window.
+  // Wire window entries do not carry their roots, and an app-layer prototype (TYPE_SYSTEM) is only
+  // recognized by the nodes it hosts, so link the roots when the prototype host owns a window.
   const linked = capture.windows?.some(
     (window) => window.packageName === CTRL_PROXY_PACKAGE && window.hierarchy === undefined,
   )
@@ -347,29 +347,29 @@ export function appWindowsOnly(
   return { ...(scoped as typeof capture), windows };
 }
 
-const NO_OVERLAY_SHOWING =
-  'layer "overlay" was requested, but no AutoMobile overlay is showing. ' +
-  "Show the overlay first, or omit layer to search the whole screen.";
+const NO_PROTOTYPE_SHOWING =
+  'layer "prototype" was requested, but no AutoMobile prototype is showing. ' +
+  "Show the prototype first, or omit layer to search the whole screen.";
 
-const OVERLAY_SUSPENDED =
-  `layer "overlay" was requested, but ${OVERLAY_SUSPENDED_REASON}. ` +
-  "Bring that app back to the foreground (the overlay returns with its state), or omit layer.";
+const PROTOTYPE_SUSPENDED =
+  `layer "prototype" was requested, but ${PROTOTYPE_SUSPENDED_REASON}. ` +
+  "Bring that app back to the foreground (the prototype returns with its state), or omit layer.";
 
-/** The refusal for `layer: "overlay"` with no overlay window in the capture. */
-function noOverlayMessage(hierarchy: ViewHierarchyResult | undefined): string {
-  return hierarchy?.overlaySuspended === true ? OVERLAY_SUSPENDED : NO_OVERLAY_SHOWING;
+/** The refusal for `layer: "prototype"` with no prototype window in the capture. */
+function noPrototypeMessage(hierarchy: ViewHierarchyResult | undefined): string {
+  return hierarchy?.prototypeSuspended === true ? PROTOTYPE_SUSPENDED : NO_PROTOTYPE_SHOWING;
 }
 
 /**
- * Scope a capture for selector resolution. `overlay` with no overlay window on
+ * Scope a capture for selector resolution. `prototype` with no prototype window on
  * screen is an actionable error rather than an ordinary "not found".
  */
 export function scopeHierarchyForSelector(
   hierarchy: ViewHierarchyResult,
   layer: HierarchyLayer | undefined,
 ): ViewHierarchyResult {
-  if (layer === "overlay" && !hasOwnOverlay(hierarchy)) {
-    throw new ActionableError(noOverlayMessage(hierarchy));
+  if (layer === "prototype" && !hasOwnPrototype(hierarchy)) {
+    throw new ActionableError(noPrototypeMessage(hierarchy));
   }
   return scopeHierarchyToLayer(hierarchy, layer);
 }
@@ -388,15 +388,15 @@ function pointInBounds(
 }
 
 /**
- * Whether one of AutoMobile's own overlay windows covers a screen point. The iOS agent's window
- * passes touches through outside its content and dismiss control, so there the overlay's own
+ * Whether one of AutoMobile's own prototype windows covers a screen point. The iOS agent's window
+ * passes touches through outside its content and dismiss control, so there the prototype's own
  * top-level nodes are what covers a point.
  */
-export function ownOverlayCoversPoint(
+export function ownPrototypeCoversPoint(
   hierarchy: ViewHierarchyResult | undefined,
   point: { x: number; y: number },
 ): boolean {
-  if (ownOverlayWindows(hierarchy).some((window) => pointInBounds(point, window.bounds))) {
+  if (ownPrototypeWindows(hierarchy).some((window) => pointInBounds(point, window.bounds))) {
     return true;
   }
   const roots = hierarchy ? iosWindowRoots(hierarchy) : undefined;
@@ -405,18 +405,18 @@ export function ownOverlayCoversPoint(
   }
   const parser = new DefaultElementParser();
   return [...roots].some(
-    ([root, isOverlay]) =>
-      isOverlay && pointInBounds(point, parser.parseNodeBounds(root)?.bounds ?? undefined),
+    ([root, isPrototype]) =>
+      isPrototype && pointInBounds(point, parser.parseNodeBounds(root)?.bounds ?? undefined),
   );
 }
 
 /**
  * With `layer: "app"`, refuse a coordinate gesture whose point lies inside one
- * of AutoMobile's own overlay windows: the touch would reach the overlay, not
+ * of AutoMobile's own prototype windows: the touch would reach the prototype, not
  * the app element behind it (issue #9305 proposal (c)). The check runs against
  * the unscoped capture, before any dispatch.
  */
-export function assertAppGestureNotUnderOverlay(
+export function assertAppGestureNotUnderPrototype(
   hierarchy: ViewHierarchyResult | undefined,
   layer: HierarchyLayer | undefined,
   point: { x: number; y: number },
@@ -425,15 +425,15 @@ export function assertAppGestureNotUnderOverlay(
   if (layer !== "app" || !hierarchy) {
     return;
   }
-  if (ownOverlayCoversPoint(hierarchy, point)) {
-    throw new ActionableError(appPointUnderOverlay(point, action));
+  if (ownPrototypeCoversPoint(hierarchy, point)) {
+    throw new ActionableError(appPointUnderPrototype(point, action));
   }
 }
 
-function appPointUnderOverlay(point: { x: number; y: number }, action: string): string {
+function appPointUnderPrototype(point: { x: number; y: number }, action: string): string {
   return (
-    `Cannot ${action} at (${point.x}, ${point.y}) with layer "app": an AutoMobile overlay window covers that point, ` +
-    "so the touch would reach the overlay instead of the app. Hide or move the overlay, then retry."
+    `Cannot ${action} at (${point.x}, ${point.y}) with layer "app": an AutoMobile prototype window covers that point, ` +
+    "so the touch would reach the prototype instead of the app. Hide or move the prototype, then retry."
   );
 }
 
@@ -443,10 +443,10 @@ function appPointUnderOverlay(point: { x: number; y: number }, action: string): 
  * callers pass the points where fingers go down (a swipe's start, both pinch fingers' starts, a
  * tap point); the rest of the path follows the window that received the down event.
  *
- * - `app`: refused while one of AutoMobile's own overlay windows covers a point, since the touch
- *   would reach the overlay. No touch-through toggle in v1: the device findings measured it as a
+ * - `app`: refused while one of AutoMobile's own prototype windows covers a point, since the touch
+ *   would reach the prototype. No touch-through toggle in v1: the device findings measured it as a
  *   race (0/20 delivered without a 100 ms settle wait).
- * - `overlay`: refused when no overlay is showing, or when a point lies outside every overlay
+ * - `prototype`: refused when no prototype is showing, or when a point lies outside every prototype
  *   window, since that touch would reach the app.
  *
  * Checked against the unscoped capture, before any dispatch.
@@ -461,16 +461,16 @@ export function layerGestureRefusal(
     return undefined;
   }
   if (layer === "app") {
-    const covered = points.find((point) => ownOverlayCoversPoint(hierarchy, point));
-    return covered ? appPointUnderOverlay(covered, action) : undefined;
+    const covered = points.find((point) => ownPrototypeCoversPoint(hierarchy, point));
+    return covered ? appPointUnderPrototype(covered, action) : undefined;
   }
-  if (!hasOwnOverlay(hierarchy)) {
-    return noOverlayMessage(hierarchy);
+  if (!hasOwnPrototype(hierarchy)) {
+    return noPrototypeMessage(hierarchy);
   }
-  const outside = points.find((point) => !ownOverlayCoversPoint(hierarchy, point));
+  const outside = points.find((point) => !ownPrototypeCoversPoint(hierarchy, point));
   return outside
-    ? `Cannot ${action} at (${outside.x}, ${outside.y}) with layer "overlay": no AutoMobile overlay window covers that point, ` +
-        "so the touch would reach the app instead of the overlay. Target a point inside the overlay, or omit layer."
+    ? `Cannot ${action} at (${outside.x}, ${outside.y}) with layer "prototype": no AutoMobile prototype window covers that point, ` +
+        "so the touch would reach the app instead of the prototype. Target a point inside the prototype, or omit layer."
     : undefined;
 }
 
@@ -491,7 +491,7 @@ export function assertGestureOnLayer(
  * Why an action on the input-focused field (selectAllText) must not run for `layer`, or
  * `undefined` when it may. The device acts on whichever field holds input focus, so the call is
  * refused when that field belongs to the other layer. With no focused field in the capture the
- * device reports its own failure. `overlay` with no overlay showing is refused.
+ * device reports its own failure. `prototype` with no prototype showing is refused.
  */
 export function focusedFieldLayerRefusal(
   hierarchy: ViewHierarchyResult | undefined,
@@ -501,23 +501,23 @@ export function focusedFieldLayerRefusal(
   if (layer === undefined || !hierarchy) {
     return undefined;
   }
-  const overlayShowing = hasOwnOverlay(hierarchy);
-  if (layer === "overlay" && !overlayShowing) {
-    return noOverlayMessage(hierarchy);
+  const prototypeShowing = hasOwnPrototype(hierarchy);
+  if (layer === "prototype" && !prototypeShowing) {
+    return noPrototypeMessage(hierarchy);
   }
-  if (!overlayShowing || !findFlaggedElement(hierarchy, "focused")) {
+  if (!prototypeShowing || !findFlaggedElement(hierarchy, "focused")) {
     return undefined;
   }
-  const focusedInOverlay =
-    findFlaggedElement(scopeHierarchyToLayer(hierarchy, "overlay"), "focused") !== undefined;
-  if (focusedInOverlay === (layer === "overlay")) {
+  const focusedInPrototype =
+    findFlaggedElement(scopeHierarchyToLayer(hierarchy, "prototype"), "focused") !== undefined;
+  if (focusedInPrototype === (layer === "prototype")) {
     return undefined;
   }
-  return focusedInOverlay
-    ? `Cannot ${action} with layer "app": the focused text field is in the AutoMobile overlay. ` +
+  return focusedInPrototype
+    ? `Cannot ${action} with layer "app": the focused text field is in the AutoMobile prototype. ` +
         'Focus the app\'s field first (tapOn with layer "app"), or omit layer.'
-    : `Cannot ${action} with layer "overlay": the focused text field is in the app, not the AutoMobile overlay. ` +
-        'Focus the overlay\'s field first (tapOn with layer "overlay"), or omit layer.';
+    : `Cannot ${action} with layer "prototype": the focused text field is in the app, not the AutoMobile prototype. ` +
+        'Focus the prototype\'s field first (tapOn with layer "prototype"), or omit layer.';
 }
 
 function findFlaggedElement(
@@ -548,17 +548,17 @@ function scopedActiveWindow(
   activeWindow: ObserveResult["activeWindow"],
   layer: HierarchyLayer,
 ): ObserveResult["activeWindow"] {
-  if (layer !== "app" || activeWindow?.type !== INTERACTIVE_OVERLAY_WINDOW_TYPE) {
+  if (layer !== "app" || activeWindow?.type !== PROTOTYPE_WINDOW_TYPE) {
     return activeWindow;
   }
-  // `appId` already names the app behind the overlay (#10000); only the overlay marker goes.
+  // `appId` already names the app behind the prototype (#10000); only the prototype marker goes.
   const appWindow = { ...activeWindow };
   delete appWindow.type;
   return appWindow;
 }
 
 /**
- * Project an observation onto the app or the overlay for the `observe` response
+ * Project an observation onto the app or the prototype for the `observe` response
  * (issue #9305). Returns a copy; the cached observation keeps every window so a
  * later call without `layer` still sees the whole screen.
  */

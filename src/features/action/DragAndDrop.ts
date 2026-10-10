@@ -18,11 +18,11 @@ import {
 } from "../../models";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import {
-  assertAppGestureNotUnderOverlay,
+  assertAppGestureNotUnderPrototype,
   scopeHierarchyForSelector,
 } from "../observe/hierarchyLayer";
 import type { HierarchyCapture } from "../observe/HierarchyCapture";
-import { ownOverlaySafeGesturePoint } from "../observe/ApplicationWindowCover";
+import { ownPrototypeSafeGesturePoint } from "../observe/ApplicationWindowCover";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
@@ -525,23 +525,23 @@ export class DragAndDrop extends BaseVisualChange {
       observationScreenSize: options.observation.screenSize,
       display: options.observation.viewHierarchy,
     };
-    // `layer` scopes both endpoints; the overlay check runs on the unscoped capture (#9305).
+    // `layer` scopes both endpoints; the prototype check runs on the unscoped capture (#9305).
     const scoped = scopeHierarchyForSelector(hierarchy, options.layer);
     const source = this.resolveTarget(scoped, { ...options.source, screenSizeOptions }, "source");
     const target = this.resolveTarget(scoped, { ...options.target, screenSizeOptions }, "target");
-    const sourcePoint = this.overlaySafePoint(hierarchy, options.layer, source, "source");
-    const targetPoint = this.overlaySafePoint(hierarchy, options.layer, target, "target");
-    assertAppGestureNotUnderOverlay(hierarchy, options.layer, sourcePoint, "drag from");
-    assertAppGestureNotUnderOverlay(hierarchy, options.layer, targetPoint, "drop");
+    const sourcePoint = this.prototypeSafePoint(hierarchy, options.layer, source, "source");
+    const targetPoint = this.prototypeSafePoint(hierarchy, options.layer, target, "target");
+    assertAppGestureNotUnderPrototype(hierarchy, options.layer, sourcePoint, "drag from");
+    assertAppGestureNotUnderPrototype(hierarchy, options.layer, targetPoint, "drop");
     return { sourcePoint, targetPoint };
   }
 
   /**
-   * The endpoint's center, moved off AutoMobile's own overlay windows for a default-layer drag:
-   * selectors also resolve app rows kept under the overlay (#10691), as tapOn does. Layer "app"
-   * refuses an overlay-covered point later with its own error.
+   * The endpoint's center, moved off AutoMobile's own prototype windows for a default-layer drag:
+   * selectors also resolve app rows kept under the prototype (#10691), as tapOn does. Layer "app"
+   * refuses a prototype-covered point later with its own error.
    */
-  private overlaySafePoint(
+  private prototypeSafePoint(
     hierarchy: ViewHierarchyResult,
     layer: DragAndDropOptions["layer"],
     element: Element,
@@ -551,10 +551,10 @@ export class DragAndDrop extends BaseVisualChange {
     if (layer !== undefined || this.device.platform === "ios") {
       return center;
     }
-    const safe = ownOverlaySafeGesturePoint(hierarchy, element, element.bounds, center);
+    const safe = ownPrototypeSafeGesturePoint(hierarchy, element, element.bounds, center);
     if (!safe) {
       throw new ActionableError(
-        `dragAndDrop ${label} is covered by an AutoMobile overlay window; hide or move the overlay, then retry.`,
+        `dragAndDrop ${label} is covered by an AutoMobile prototype window; hide or move the prototype, then retry.`,
       );
     }
     return safe;

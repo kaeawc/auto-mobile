@@ -35,7 +35,7 @@ describe("RequestManager", () => {
     const failure = new Error("factory failed");
     const promise = manager.register(
       "throwing",
-      "overlay_result",
+      "prototype_result",
       50,
       () => null,
       () => {

@@ -38,9 +38,9 @@ describe("coordinate and focus tool layer argument (#9305)", () => {
     ["swipeOn", swipeOnSchema, { direction: "up" }],
     ["pinchOn", pinchOnSchema, { direction: "in" }],
     ["selectAllText", selectAllTextSchema, {}],
-  ] as const)("%s accepts app and overlay and rejects anything else", (_name, schema, base) => {
+  ] as const)("%s accepts app and prototype and rejects anything else", (_name, schema, base) => {
     expect(schema.safeParse({ ...base, layer: "app" }).success).toBe(true);
-    expect(schema.safeParse({ ...base, layer: "overlay" }).success).toBe(true);
+    expect(schema.safeParse({ ...base, layer: "prototype" }).success).toBe(true);
     expect(schema.safeParse({ ...base, layer: "target" }).success).toBe(false);
   });
 
@@ -84,15 +84,15 @@ describe("coordinate and focus tool layer argument (#9305)", () => {
     );
 
     await tapAtHandler(device, { x: 1, y: 2, layer: "app" });
-    await swipeOnHandler(device, { direction: "up", layer: "overlay" });
+    await swipeOnHandler(device, { direction: "up", layer: "prototype" });
     await pinchOnHandler(device, { direction: "in", layer: "app" });
-    await selectAllTextHandler(device, { layer: "overlay" });
+    await selectAllTextHandler(device, { layer: "prototype" });
 
     expect(seen).toEqual([
       ["tapAt", "app"],
-      ["swipeOn", "overlay"],
+      ["swipeOn", "prototype"],
       ["pinchOn", "app"],
-      ["selectAllText", "overlay"],
+      ["selectAllText", "prototype"],
     ]);
   });
 });

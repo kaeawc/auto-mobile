@@ -1,5 +1,5 @@
 import type { Element, ElementBounds, ViewHierarchyResult } from "../../models";
-import { hostsNodes, ownOverlayWindows } from "./ownOverlayFocus";
+import { hostsNodes, ownPrototypeWindows } from "./ownPrototypeFocus";
 import { boundsArea } from "../../utils/bounds";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -53,14 +53,14 @@ export function hitEntries(entries: readonly SearchableEntry[], point: { x: numb
 }
 
 /**
- * Which of AutoMobile's own overlay windows count as covers besides application windows:
- * - `"none"`: none (layer-scoped taps, which resolve the overlay layer separately);
- * - `"touch"`: every node-hosting overlay window, opaque, translucent, sheet or floating, because
- *   the overlay is touchable within its bounds (FLAG_NOT_TOUCH_MODAL), so a coordinate gesture
- *   inside one reaches the overlay whatever it paints. The default-layer tap path and observe both
+ * Which of AutoMobile's own prototype windows count as covers besides application windows:
+ * - `"none"`: none (layer-scoped taps, which resolve the prototype layer separately);
+ * - `"touch"`: every node-hosting prototype window, opaque, translucent, sheet or floating, because
+ *   the prototype is touchable within its bounds (FLAG_NOT_TOUCH_MODAL), so a coordinate gesture
+ *   inside one reaches the prototype whatever it paints. The default-layer tap path and observe both
  *   use it (owner decision 2026-10-08, #10715), so observe never offers a row tapOn refuses.
  */
-export type OwnOverlayCoverRule = "none" | "touch";
+export type OwnPrototypeCoverRule = "none" | "touch";
 
 /**
  * The per-hierarchy work of the cover test: the deduplicated projection and each node's owning
@@ -84,9 +84,9 @@ export function applicationWindowCoverIndex(
 /**
  * Reuse preview ordering and source identity; system-window dispatch remains unchanged.
  *
- * With `ownOverlays` other than `"none"`, AutoMobile's own node-hosting overlay windows ranked
+ * With `ownPrototypes` other than `"none"`, AutoMobile's own node-hosting prototype windows ranked
  * above the target's window cover their bounds too: a default-layer tap there would reach the
- * overlay, not the app row the selector matched behind it.
+ * prototype, not the app row the selector matched behind it.
  */
 export function applicationWindowSafeTapPoint(
   hierarchy: ViewHierarchyResult,
@@ -94,7 +94,7 @@ export function applicationWindowSafeTapPoint(
   bounds: ElementBounds,
   point: { x: number; y: number },
   imeBounds?: ElementBounds,
-  ownOverlays: OwnOverlayCoverRule = "none",
+  ownPrototypes: OwnPrototypeCoverRule = "none",
 ): { point: { x: number; y: number } | null; coveredBy?: string } {
   return safeTapPoint({
     hierarchy,
@@ -102,7 +102,7 @@ export function applicationWindowSafeTapPoint(
     bounds,
     point,
     imeBounds,
-    ownOverlays,
+    ownPrototypes,
     index: applicationWindowCoverIndex(hierarchy),
   });
 }
@@ -113,7 +113,7 @@ interface SafeTapPointQuery {
   bounds: ElementBounds;
   point: { x: number; y: number };
   imeBounds?: ElementBounds;
-  ownOverlays: OwnOverlayCoverRule;
+  ownPrototypes: OwnPrototypeCoverRule;
   index: ApplicationWindowCoverIndex;
 }
 
@@ -123,7 +123,7 @@ function safeTapPoint({
   bounds,
   point,
   imeBounds,
-  ownOverlays,
+  ownPrototypes,
   index,
 }: SafeTapPointQuery): { point: { x: number; y: number } | null; coveredBy?: string } {
   const { entries, types } = index;
@@ -137,37 +137,37 @@ function safeTapPoint({
   if (!types.has(owner.source)) {
     return { point };
   }
-  const overlayCovers = ownOverlayCoversAbove(hierarchy, entries, owner, ownOverlays);
+  const prototypeCovers = ownPrototypeCoversAbove(hierarchy, entries, owner, ownPrototypes);
   const first = hitEntries(entries, point)[0];
   const appCovered =
     first !== undefined && first.windowRank < owner.windowRank && types.get(first.source) === 1;
-  const overlayCovered = overlayCovers.some((cover) => contains(cover, point.x, point.y));
-  if (!appCovered && !overlayCovered) {
+  const prototypeCovered = prototypeCovers.some((cover) => contains(cover, point.x, point.y));
+  if (!appCovered && !prototypeCovered) {
     return { point };
   }
-  const coveredBy = appCovered ? coveringLabel(first, target) : OWN_OVERLAY_COVER_LABEL;
+  const coveredBy = appCovered ? coveringLabel(first, target) : OWN_PROTOTYPE_COVER_LABEL;
   const covers = entries
     .filter(
       (entry) =>
         entry.bounds && entry.windowRank < owner.windowRank && types.get(entry.source) === 1,
     )
     .map((entry) => entry.bounds!);
-  covers.push(...overlayCovers);
+  covers.push(...prototypeCovers);
   if (imeBounds) {
     covers.push(imeBounds);
   }
   return { point: exposedPoint(bounds, covers), coveredBy };
 }
 
-const OWN_OVERLAY_COVER_LABEL = "an AutoMobile overlay window";
+const OWN_PROTOTYPE_COVER_LABEL = "an AutoMobile prototype window";
 
 /**
- * tapOn's default-layer own-overlay cover check for gestures that only need to avoid AutoMobile's
- * overlay windows (tapAny, dragAndDrop endpoints): keeps `point` when no node-hosting overlay
+ * tapOn's default-layer own-prototype cover check for gestures that only need to avoid AutoMobile's
+ * prototype windows (tapAny, dragAndDrop endpoints): keeps `point` when no node-hosting prototype
  * window ranked above the target's window contains it, moves it to an exposed part of `bounds`
- * otherwise, and returns `null` when the overlay windows cover all of `bounds`.
+ * otherwise, and returns `null` when the prototype windows cover all of `bounds`.
  */
-export function ownOverlaySafeGesturePoint(
+export function ownPrototypeSafeGesturePoint(
   hierarchy: ViewHierarchyResult,
   target: Element,
   bounds: ElementBounds,
@@ -180,7 +180,7 @@ export function ownOverlaySafeGesturePoint(
   if (!owner || !windowTypesBySource(hierarchy).has(owner.source)) {
     return point;
   }
-  const covers = ownOverlayCoversAbove(hierarchy, entries, owner, "touch");
+  const covers = ownPrototypeCoversAbove(hierarchy, entries, owner, "touch");
   if (!covers.some((cover) => contains(cover, point.x, point.y))) {
     return point;
   }
@@ -225,21 +225,21 @@ function coveringLabel(first: SearchableEntry, target: Element): string {
 }
 
 /**
- * Bounds of AutoMobile's own overlay windows that host nodes and rank above `owner`'s window
+ * Bounds of AutoMobile's own prototype windows that host nodes and rank above `owner`'s window
  * (none for the `"none"` rule). The node-free highlight window is FLAG_NOT_TOUCHABLE and passes
- * touches through, so it never covers; nor does an overlay window that owns the target.
+ * touches through, so it never covers; nor does a prototype window that owns the target.
  */
-function ownOverlayCoversAbove(
+function ownPrototypeCoversAbove(
   hierarchy: ViewHierarchyResult,
   entries: readonly SearchableEntry[],
   owner: SearchableEntry,
-  rule: OwnOverlayCoverRule,
+  rule: OwnPrototypeCoverRule,
 ): ElementBounds[] {
   if (rule === "none") {
     return [];
   }
   const parser = new DefaultElementParser();
-  return ownOverlayWindows(hierarchy)
+  return ownPrototypeWindows(hierarchy)
     .filter((window) => window.bounds !== undefined && window.hierarchy && hostsNodes(window))
     .filter((window) => {
       const sources = new Set<SearchableEntry["source"]>();
@@ -256,7 +256,7 @@ function ownOverlayCoversAbove(
 
 /**
  * Whether tapOn would find no exposed tap point on `target` because application windows ranked
- * above its window, plus the own overlay windows `ownOverlays` selects, cover all of `bounds`.
+ * above its window, plus the own prototype windows `ownPrototypes` selects, cover all of `bounds`.
  * Observe uses this to mark skeleton rows `occluded` under exactly the condition
  * `applicationWindowSafeTapPoint` fails the tap path with; pass the same screen-clipped bounds the
  * tap path tests (`visibleTapBounds`).
@@ -265,7 +265,7 @@ export function isFullyCoveredByApplicationWindow(
   hierarchy: ViewHierarchyResult,
   target: Element,
   bounds: ElementBounds,
-  ownOverlays: OwnOverlayCoverRule = "none",
+  ownPrototypes: OwnPrototypeCoverRule = "none",
   index: ApplicationWindowCoverIndex = applicationWindowCoverIndex(hierarchy),
 ): boolean {
   const center = {
@@ -273,7 +273,7 @@ export function isFullyCoveredByApplicationWindow(
     y: Math.floor((bounds.top + bounds.bottom) / 2),
   };
   return (
-    safeTapPoint({ hierarchy, target, bounds, point: center, ownOverlays, index }).point === null
+    safeTapPoint({ hierarchy, target, bounds, point: center, ownPrototypes, index }).point === null
   );
 }
 
@@ -305,15 +305,15 @@ function windowTypesBySource(hierarchy: ViewHierarchyResult) {
 }
 
 /**
- * Every captured node that belongs to one of AutoMobile's own overlay windows. Observe uses it to
- * tell the prototype overlay's rows from the app's, which share one flattened `elements` block.
+ * Every captured node that belongs to one of AutoMobile's own prototype windows. Observe uses it to
+ * tell the prototype's rows from the app's, which share one flattened `elements` block.
  */
-export function ownOverlayNodeSources(
+export function ownPrototypeNodeSources(
   hierarchy: ViewHierarchyResult | undefined,
 ): Set<SearchableEntry["source"]> {
   const sources = new Set<SearchableEntry["source"]>();
   const parser = new DefaultElementParser();
-  for (const window of ownOverlayWindows(hierarchy)) {
+  for (const window of ownPrototypeWindows(hierarchy)) {
     if (window.hierarchy) {
       parser.traverseNode(window.hierarchy, (node) => sources.add(node));
     }

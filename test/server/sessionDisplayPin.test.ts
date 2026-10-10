@@ -1356,7 +1356,7 @@ test.each([
   ["dismiss", undefined],
   ["awaitEvent", undefined],
   ["status", undefined],
-])("overlay %s takes the session display pin only when it shows", async (action, expected) => {
+])("prototype %s takes the session display pin only when it shows", async (action, expected) => {
   sessions.updateSessionCache("one", { displayPin: "inner" });
   const seen: unknown[] = [];
   await runSessionDisplayPin({

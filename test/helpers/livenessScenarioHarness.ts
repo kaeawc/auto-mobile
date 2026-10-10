@@ -517,10 +517,13 @@ export class LivenessScenario {
     // lease files, and takes no injection; swap the fakes in before anything discovers a device.
     const poolInternals = pool as unknown as {
       deviceManager: unknown;
+      idleDeviceReaper: { deviceManager: unknown };
       foreignDeviceOwnership: unknown;
       iosForeignDeviceOwnership: unknown;
     };
     poolInternals.deviceManager = this.discovery;
+    // The idle-device reaper captured the pool's device manager when the pool was built.
+    poolInternals.idleDeviceReaper.deviceManager = this.discovery;
     poolInternals.foreignDeviceOwnership = this.peerAwareOwnership();
     poolInternals.iosForeignDeviceOwnership = undefined;
     manager.onSessionRelease((sessionId, deviceId, reason) => {

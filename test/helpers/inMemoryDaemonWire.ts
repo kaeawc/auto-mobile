@@ -27,9 +27,12 @@ import type { Timer } from "../../src/utils/SystemTimer";
 // `daemonResponseError`). Nothing listens: each connection is a pair of in-process socket ends.
 // Faked: the kernel socket, and the loopback MCP HTTP hop behind the server (`mcpClientFactory`).
 //
-// The server's `start()` cannot run without binding a socket file, so `attach()` does the two
-// things `start()` does besides binding: accept requests, and fan session releases out to
-// subscribed clients (the subscription body is `start()`'s own, call for call).
+// The server's `start()` cannot run without binding a socket file, so `attach()` does what
+// liveness needs of it besides binding: accept requests, and fan session releases out to
+// subscribed clients (the subscription body is `start()`'s own, call for call). Not replicated:
+// `start()`'s list-changed and resource-updated fan-out, so a client here is never pushed
+// `tools/list_changed` or a resource update; and the server is built with no feature-flag
+// service and no startup identity options.
 
 /** A socket path no process can bind: the in-memory server is never started on it. */
 export const IN_MEMORY_SOCKET_PATH = "in-memory://liveness-scenario/control.sock";

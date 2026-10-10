@@ -68,6 +68,9 @@ struct PrototypeSession {
     private(set) var appearanceOverride = PrototypeAppearanceOverride.device
     /// The device's own appearance, as last reported through `setDeviceDark`; it outlives a show.
     private(set) var deviceDark = false
+    /// The mode the host was last told for the shown prototype, by its show result or by an
+    /// `appearance_changed` event; nil while nothing is shown.
+    private var reportedDark: Bool?
 
     var isShown: Bool {
         spec != nil
@@ -97,6 +100,8 @@ struct PrototypeSession {
         }
         state = spec.state ?? [:]
         self.spec = spec
+        // The show result reports this mode, so the show itself is not a change.
+        reportedDark = self.appearance?.dark
     }
 
     func holds(_ condition: Condition) -> Bool {
@@ -121,14 +126,32 @@ struct PrototypeSession {
     }
 
     /// The device's appearance changed (or was read for the first time). The shown prototype is
-    /// re-resolved, keeping its state and pages; exactly one `appearance_changed` follows when its
-    /// mode changed, and none when it did not (an explicit or pinned mode, an inferred one, a
-    /// repeated report, nothing shown).
+    /// re-resolved, keeping its state and pages; see `appearanceChange` for the event.
     mutating func setDeviceDark(_ dark: Bool) -> [PrototypeEvent] {
-        let before = appearance
         deviceDark = dark
-        guard let before, let after = appearance, after.dark != before.dark else { return [] }
-        return emit(kind: "appearance_changed", name: nil, payload: after.eventPayload)
+        return appearanceChange()
+    }
+
+    /// Runs one transition and appends the `appearance_changed` it caused, if any: a state or page
+    /// change can move the leading authored background (a `styleWhen`, a `visibleWhen`, a pager
+    /// page) and with it the inferred mode. The event follows the `change` or `page_changed` that
+    /// caused it. Every transition of a shown prototype goes through here.
+    mutating func transition(_ body: (inout PrototypeSession) -> [PrototypeEvent]) -> [PrototypeEvent] {
+        let events = body(&self)
+        return events + appearanceChange()
+    }
+
+    /// Exactly one `appearance_changed` when the shown prototype's mode differs from the one last
+    /// reported, whatever changed it, and none otherwise: a repeated report, an explicit or pinned
+    /// mode, a change that leaves the mode as it was, nothing shown.
+    private mutating func appearanceChange() -> [PrototypeEvent] {
+        guard let appearance else {
+            reportedDark = nil
+            return []
+        }
+        guard appearance.dark != reportedDark else { return [] }
+        reportedDark = appearance.dark
+        return emit(kind: "appearance_changed", name: nil, payload: appearance.eventPayload)
     }
 
     // MARK: Interactions

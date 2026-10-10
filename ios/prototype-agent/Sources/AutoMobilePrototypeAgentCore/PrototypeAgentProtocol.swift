@@ -57,8 +57,9 @@ enum PrototypeAgentProtocol {
     static let themeModesCapability = "prototype_theme_modes_v1"
     /// Appearance (#11222): `show_prototype` takes `appearance` (`device`, `light` or `dark`), the
     /// show result and `get_prototype_status` report `appearance: {mode, source, deviceDark}`, and
-    /// a device appearance change that changes the mode re-themes the prototype and pushes one
-    /// `appearance_changed` event. The host sends `appearance` only to an agent that advertises
+    /// any change of the shown prototype's mode (the device flipping, or state moving the inferred
+    /// background) re-themes it and pushes one `appearance_changed` event. The host sends `appearance` only to an agent
+    /// that advertises
     /// this. Same name as the CtrlProxy capability.
     static let appearanceCapability = "prototype_appearance_v1"
     static let portEnvironmentKey = "AUTOMOBILE_PROTOTYPE_PORT"

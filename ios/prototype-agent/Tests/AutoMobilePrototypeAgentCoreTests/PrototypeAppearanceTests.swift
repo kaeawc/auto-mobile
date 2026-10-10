@@ -159,15 +159,24 @@ final class PrototypeAppearanceTests: XCTestCase {
         assertAppearance(resolve(dark, override: .light, deviceDark: false), dark: true, .explicit)
     }
 
-    func testTheOverrideStandsInForTheDeviceAndBeatsInference() throws {
+    func testTheOverrideStandsInForTheDeviceOnly() throws {
         let unthemed = try spec(root: plain)
         assertAppearance(resolve(unthemed, override: .dark, deviceDark: false), dark: true, .override)
         assertAppearance(resolve(unthemed, override: .light, deviceDark: true), dark: false, .override)
         assertAppearance(resolve(unthemed, override: .device, deviceDark: true), dark: true, .system)
-        // D4: the override is step 2, ahead of the role override (3) and the authored background (4).
+    }
+
+    func testTheOverrideNeverBeatsTheSpecsOwnSignals() throws {
+        // No `theme.mode`, a white authored root, `appearance: "dark"`: the spec decides.
+        let white = try spec(root: box(lightHex))
+        assertAppearance(resolve(white, override: .dark), dark: false, .authoredBackground)
+        let black = try spec(root: box(darkHex))
+        assertAppearance(resolve(black, override: .light, deviceDark: true), dark: true, .authoredBackground)
         let roles = try spec(root: plain, theme: ##"{"colors":{"background":"#000000"}}"##)
-        assertAppearance(resolve(roles, override: .light), dark: false, .override)
-        try assertAppearance(resolve(spec(root: box(darkHex)), override: .light), dark: false, .override)
+        assertAppearance(resolve(roles, override: .light), dark: true, .roleLuminance)
+        // A background that cannot infer leaves the decision to the override.
+        let role = try spec(root: box("\"surface\""))
+        assertAppearance(resolve(role, override: .dark), dark: true, .override)
     }
 
     func testSystemModeIsTheOverrideElseTheDeviceAndNeverInfers() throws {
@@ -235,19 +244,93 @@ final class PrototypeAppearanceTests: XCTestCase {
         )
     }
 
-    func testAStateChangeThatFlipsInferenceFlipsTheOneModeForEverything() throws {
+    private func action(_ json: String) throws -> PrototypeAction {
+        try JSONDecoder().decode(PrototypeAction.self, from: Data(json.utf8))
+    }
+
+    private let darkPayload = JSONValue.object(["mode": .string("dark"), "source": .string("authoredBackground")])
+    private let lightPayload = JSONValue.object(["mode": .string("light"), "source": .string("authoredBackground")])
+
+    func testAStyleWhenChangeThatFlipsTheModeEmitsOneEventAfterItsChange() throws {
         var session = PrototypeSession()
         let night = ##""styleWhen":[{"when":{"key":"night","equals":true},"style":{"background":"#000000"}}],"##
-        try session.show(spec(root: box(lightHex, extra: night), state: #"{"night":false}"#))
+        try session.show(spec(root: box(lightHex, extra: night), state: #"{"night":false,"count":0}"#))
         XCTAssertEqual(session.appearance?.dark, false)
-        let toggle = try JSONDecoder().decode(
-            PrototypeAction.self,
-            from: Data(#"{"type":"toggle","key":"night"}"#.utf8)
-        )
-        let events = session.run([toggle])
-        // The device did not change, so the only event is the state change.
-        XCTAssertEqual(events.map(\.kind), ["emit"])
+        // The show itself is not a change.
+        XCTAssertEqual(session.transition { _ in [] }.count, 0)
+        XCTAssertEqual(session.lastSequence, 0)
+
+        let toggle = try action(#"{"type":"toggle","key":"night"}"#)
+        let events = session.transition { $0.run([toggle]) }
+        XCTAssertEqual(events.map(\.kind), ["emit", "appearance_changed"])
+        XCTAssertEqual(events.map(\.name), ["change", nil])
+        XCTAssertEqual(events.map(\.sequence), [1, 2])
+        XCTAssertEqual(events.last?.payload, darkPayload)
+        XCTAssertEqual(events.last?.state["night"], .bool(true))
         assertAppearance(session.appearance, dark: true, .authoredBackground)
+
+        // A change that leaves the mode alone, and a repeat, emit no appearance event.
+        let increment = try action(#"{"type":"increment","key":"count"}"#)
+        XCTAssertEqual(session.transition { $0.run([increment]) }.map(\.kind), ["emit"])
+        XCTAssertEqual(session.transition { _ in [] }.count, 0)
+        XCTAssertEqual(session.transition { $0.run([toggle]) }.last?.payload, lightPayload)
+        XCTAssertEqual(session.lastSequence, 5)
+    }
+
+    func testAPagerPageThatFlipsTheModeEmitsOneEventAfterPageChanged() throws {
+        var session = PrototypeSession()
+        let pager = #"{"type":"pager","id":"pg","children":[\#(box(lightHex)),\#(box(darkHex)),\#(box(darkHex))]}"#
+        try session.show(spec(root: pager))
+        let events = session.transition { $0.setPage("pg", 1) }
+        XCTAssertEqual(events.map(\.kind), ["page_changed", "appearance_changed"])
+        XCTAssertEqual(events.last?.payload, darkPayload)
+        XCTAssertEqual(events.last?.pages, ["pg": 1])
+        // Dark page to dark page: the page changes, the mode does not.
+        XCTAssertEqual(session.transition { $0.setPage("pg", 2) }.map(\.kind), ["page_changed"])
+        XCTAssertEqual(session.transition { $0.setPage("pg", 0) }.last?.payload, lightPayload)
+    }
+
+    func testAVisibleWhenChangeThatFlipsTheModeEmitsOneEvent() throws {
+        var session = PrototypeSession()
+        let hidden = #""visibleWhen":{"key":"shown","equals":true},"#
+        let tree = box(children: [box(darkHex, extra: hidden), box(lightHex)])
+        try session.show(spec(root: tree, state: #"{"shown":false}"#))
+        let events = session.transition { $0.change(key: "shown", value: .bool(true)) }
+        XCTAssertEqual(events.map(\.kind), ["emit", "appearance_changed"])
+        XCTAssertEqual(events.last?.payload, darkPayload)
+    }
+
+    func testAStateChangeToOrFromNoInferenceReportsTheNewSource() throws {
+        var session = PrototypeSession()
+        let hidden = #""visibleWhen":{"key":"shown","equals":true},"#
+        try session.show(spec(root: box(children: [box(darkHex, extra: hidden)]), state: #"{"shown":true}"#))
+        assertAppearance(session.appearance, dark: true, .authoredBackground)
+        let events = session.transition { $0.change(key: "shown", value: .bool(false)) }
+        XCTAssertEqual(
+            events.last?.payload,
+            .object(["mode": .string("light"), "source": .string("system")])
+        )
+    }
+
+    func testAnExplicitOrPinnedModeNeverEmitsForAStateChange() throws {
+        let night = ##""styleWhen":[{"when":{"key":"night","equals":true},"style":{"background":"#000000"}}],"##
+        let toggle = try action(#"{"type":"toggle","key":"night"}"#)
+        for theme in [#"{"mode":"light"}"#, #"{"mode":"system"}"#, ##"{"colors":{"surface":"#FFFFFF"}}"##] {
+            var session = PrototypeSession()
+            try session.show(spec(root: box(lightHex, extra: night), theme: theme, state: #"{"night":false}"#))
+            XCTAssertEqual(session.transition { $0.run([toggle]) }.map(\.kind), ["emit"], theme)
+        }
+    }
+
+    func testADismissalEmitsNoAppearanceEventAndTheNextShowStartsClean() throws {
+        var session = PrototypeSession()
+        try session.show(spec(root: box(darkHex)))
+        XCTAssertEqual(session.transition { $0.dismiss(reason: .user) }.map(\.kind), ["dismissed"])
+        try session.show(spec(root: box(lightHex)))
+        XCTAssertEqual(session.transition { _ in [] }.count, 0)
+        // A same-id re-show into the other mode is reported by its result, not by an event.
+        try session.show(spec(root: box(darkHex)))
+        XCTAssertEqual(session.transition { _ in [] }.count, 0)
     }
 
     // MARK: Session: override, device change, event

@@ -5,7 +5,8 @@ import Foundation
 // drives the palette, the host chrome and the UIKit trait, so no part can disagree with another.
 
 /// The show request's `appearance`: what "system" means for that prototype. `device` (the default)
-/// follows the simulator; `light` and `dark` stand in for it without changing the simulator.
+/// follows the simulator; `light` and `dark` stand in for it without changing the simulator. It
+/// replaces the device setting only: an explicit mode and an inferred one still win.
 enum PrototypeAppearanceOverride: String, Equatable {
     case device, light, dark
 
@@ -30,7 +31,7 @@ enum PrototypeAppearanceOverride: String, Equatable {
 enum PrototypeAppearanceSource: String, Equatable {
     /// `theme.mode` is `light` or `dark`.
     case explicit
-    /// The show's `appearance` is `light` or `dark`.
+    /// The show's `appearance` is `light` or `dark`, and nothing in the spec decided first.
     case override
     /// The luminance of the flat `theme.colors.background` (else `surface`) override.
     case roleLuminance
@@ -67,14 +68,15 @@ struct PrototypeAppearance: Equatable {
     /// (Android's `OPAQUE_BACKGROUND_ALPHA`).
     static let opaqueBackgroundAlpha = 0.99
 
-    /// The one resolution order, the same on Android (#11215 D4):
+    /// The one resolution order, the same on Android (#11215 D4, owner decision 2026-10-10):
     /// 1. `theme.mode` `light` or `dark`;
-    /// 2. the show's `appearance` override;
-    /// 3. the luminance of the flat `background` (else `surface`) role override;
-    /// 4. the first opaque authored background on the root's leading chain;
-    /// 5. the device.
-    /// `theme.mode: "system"` asks for the system setting outright, so it skips 3 and 4: it is the
-    /// override when one is set, else the device. `root` is nil when only the theme is known.
+    /// 2. the luminance of the flat `background` (else `surface`) role override;
+    /// 3. the first opaque authored background on the root's leading chain;
+    /// 4. the system setting: the show's `appearance` override when it is `light` or `dark`, else
+    ///    the device.
+    /// The override only stands in for the device, so it never beats what the spec itself says.
+    /// `theme.mode: "system"` asks for the system setting outright, so it skips 2 and 3. `root` is
+    /// nil when only the theme is known.
     static func resolve(
         theme: PrototypeTheme?,
         root: PrototypeNode?,
@@ -95,7 +97,6 @@ struct PrototypeAppearance: Equatable {
         case "system": return system
         default: break
         }
-        if override.dark != nil { return system }
         // Only the flat overrides count: a `light` / `dark` role map is chosen by the mode, so it
         // cannot also decide it.
         let roles = theme?.colors?.roles ?? [:]

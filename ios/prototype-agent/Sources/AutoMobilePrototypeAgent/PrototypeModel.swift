@@ -102,7 +102,8 @@ final class PrototypeModel: ObservableObject {
     }
 
     /// Reports the device's appearance. A changed value re-themes a prototype that follows the
-    /// device, keeping its state and pages, and pushes `appearance_changed`; it is not activity.
+    /// device, keeping its state and pages, and pushes `appearance_changed` when its mode changed;
+    /// it is not activity.
     func setDeviceDark(_ dark: Bool) {
         guard session.deviceDark != dark else { return }
         apply(activity: false) { $0.setDeviceDark(dark) }
@@ -219,7 +220,8 @@ final class PrototypeModel: ObservableObject {
     /// TTL while the prototype stays up.
     private func apply(activity: Bool = true, _ transition: (inout PrototypeSession) -> [PrototypeEvent]) {
         let wasShown = session.isShown
-        let events = transition(&session)
+        // `transition` adds the `appearance_changed` a state or page change caused.
+        let events = session.transition(transition)
         if session.isShown {
             if activity { idleTimer.arm() }
         } else {

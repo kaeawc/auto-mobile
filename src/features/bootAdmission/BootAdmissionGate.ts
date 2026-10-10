@@ -37,10 +37,10 @@ export function isBootCapacityGateEnabled(platform: Platform, env: NodeJS.Proces
   return env[BOOT_CAPACITY_GATE_ENV]?.trim() !== "0";
 }
 
-/** A boot the gate refuses now: the platform is at its limit or the host is under pressure. */
+/** A boot the gate refuses now: the platform is at its device-count limit. */
 export interface RefusedCapacityDecision {
   outcome: "refuse";
-  reason: "at-capacity" | "sustained-pressure";
+  reason: "at-capacity";
   limits: CapacityLimits;
   bootedCount: number;
   retryAfterMs: number;
@@ -234,6 +234,8 @@ export interface BootCapacitySnapshot {
   booted: number;
   /** Admitted boots not yet visible as booted. */
   inFlight: number;
+  /** Reported only, never a reason to refuse a boot (#11209). iOS only. */
+  hostPressure?: { sustained: boolean; consecutiveSamples: number; memoryPressure: string };
 }
 
 /** Read-only capacity report a gate exposes to listings. */

@@ -296,22 +296,23 @@ describe("capacity gate", () => {
     result.releaseAdmission?.();
   });
 
-  test("refuses only after sustained pressure, not on one sample", async () => {
-    const { collector, timer, source } = setup([IOS27], { ...calm, memoryPressure: "warn" });
+  test("a pressured host under the count limit still admits, and reports the pressure (#11209)", async () => {
+    const { collector, timer } = setup([IOS27], { ...calm, memoryPressure: "warn" });
     const gate = new IosSimCapacityGate(collector, timer, {
       env: { [IOS_SIM_MAX_BOOTED_ENV]: "4" },
     });
+    for (let boots = 0; boots < 5; boots++) {
+      const result = await gate.admitBoot(undefined, { bootUdid: `NEW-${boots}` });
+      expect(result.decision.outcome).toBe("allow");
+      result.releaseAdmission?.();
+    }
     expect((await gate.evaluateBoot()).outcome).toBe("allow");
-    expect((await gate.evaluateBoot()).outcome).toBe("allow");
-    expect(await gate.evaluateBoot()).toMatchObject({
-      outcome: "refuse",
-      reason: "sustained-pressure",
+    expect(await gate.describeCapacity()).toMatchObject({
+      hostPressure: { sustained: true, memoryPressure: "warn" },
     });
-    source.snapshot = snapshot(calm);
-    expect((await gate.evaluateBoot()).outcome).toBe("allow");
   });
 
-  test("describeCapacity reads without advancing the sustained-pressure streak (#11209)", async () => {
+  test("describeCapacity reads without advancing the pressure streak (#11209)", async () => {
     const { collector, timer } = setup([IOS27], { ...calm, memoryPressure: "warn" });
     const gate = new IosSimCapacityGate(collector, timer, {
       env: { [IOS_SIM_MAX_BOOTED_ENV]: "4" },
@@ -319,7 +320,9 @@ describe("capacity gate", () => {
     for (let reads = 0; reads < 5; reads++) {
       await gate.describeCapacity();
     }
-    expect((await gate.evaluateBoot()).outcome).toBe("allow");
+    expect(await gate.describeCapacity()).toMatchObject({
+      hostPressure: { sustained: false, consecutiveSamples: 0 },
+    });
   });
 
   test("the first boot is never deferred by pressure", async () => {

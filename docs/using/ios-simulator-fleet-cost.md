@@ -42,9 +42,10 @@ shared Android gate.
 - `reuse-warm`: a booted simulator matches the requested device type, runtime and/or profile
   (excluding devices the caller marks busy). Reuse it instead of booting.
 - `refuse` with `at-capacity`: the booted count has reached the limit.
-- `refuse` with `sustained-pressure`: the host reported memory pressure (warn/critical) or load of
-  at least 1.5 per core for 3 consecutive samples while other simulators are booted.
-- `allow`: a new boot fits. The first boot is never deferred by pressure.
+- `allow`: a new boot fits. Only the booted-device count limit refuses a boot (#11209); host
+  memory/CPU pressure never does. Memory pressure (warn/critical) or load of at least 1.5 per core
+  for 3 consecutive samples is reported as `hostPressure` in the gate's capacity snapshot
+  (`{ sustained, consecutiveSamples, memoryPressure }`) instead.
 
 `admitBoot(request, { signal, bootUdid })` takes one sample and decides immediately: an admitted
 boot holds its slot until released, a `refuse` decision becomes `capacity_exhausted`.

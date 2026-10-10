@@ -717,6 +717,9 @@ AutoMobile: for Android, the larger of the emulators adb lists and the
 `qemu-system-*` processes on the host, so emulators still booting or on another
 adb server count too.
 
+Only the device-count limit refuses a boot: iOS host memory/CPU pressure is
+reported (`hostPressure` in the capacity snapshot) but never refuses one.
+
 A boot over the limit is refused at once; it does not queue against the boot
 budget (#11209). It fails with a retryable error whose `retryAfterMs` (a fixed 5
 seconds: capacity frees when another device shuts down, which takes seconds) says

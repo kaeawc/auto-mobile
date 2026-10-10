@@ -20,7 +20,7 @@ import {
   type CapacityLimits,
   type WarmDeviceRequest,
 } from "./capacityPolicy";
-import type { FleetCostReport, HostResources } from "./types";
+import type { FleetCostReport } from "./types";
 
 const DEFAULT_SUSTAINED_SAMPLES = 3;
 
@@ -32,7 +32,7 @@ export type CapacityDecision =
   | { outcome: "reuse-warm"; udid: string }
   /** A new boot fits within capacity. */
   | { outcome: "allow"; limits: CapacityLimits; bootedCount: number }
-  /** A new boot would exceed capacity or add to sustained host pressure; refuse it. */
+  /** A new boot would exceed the booted-device limit; refuse it. */
   | RefusedCapacityDecision;
 
 /** `releaseAdmission` is present when the boot was admitted; call it once the boot ends. */
@@ -60,7 +60,7 @@ export interface SimulatorCapacityGate {
 export interface CapacityGateOptions {
   env?: NodeJS.ProcessEnv;
   retryAfterMs?: number;
-  /** Consecutive pressured samples before new boots are refused. */
+  /** Consecutive pressured samples before `describeCapacity` reports sustained host pressure. */
   sustainedSamples?: number;
 }
 
@@ -123,7 +123,7 @@ export class IosSimCapacityGate implements SimulatorCapacityGate, BootCapacityRe
     }
     const limits = this.limitsFor(report);
     const bootedCount = report.totals.bootedCount + this.inFlightBootCount(report);
-    const queued = this.queueReason(report.host, bootedCount, limits);
+    const queued = this.queueReason(bootedCount, limits);
     if (queued) {
       return {
         outcome: "refuse",
@@ -161,6 +161,11 @@ export class IosSimCapacityGate implements SimulatorCapacityGate, BootCapacityRe
       limit: this.limitsFor(report).maxBooted,
       booted: report.totals.bootedCount,
       inFlight: this.inFlightBootCount(report),
+      hostPressure: {
+        sustained: this.pressuredStreak >= this.sustainedSamples,
+        consecutiveSamples: this.pressuredStreak,
+        memoryPressure: report.host?.memoryPressure ?? "unknown",
+      },
     };
   }
 
@@ -180,10 +185,9 @@ export class IosSimCapacityGate implements SimulatorCapacityGate, BootCapacityRe
   }
 
   private queueReason(
-    host: HostResources | undefined,
     bootedCount: number,
     limits: CapacityLimits,
-  ): { reason: "at-capacity" | "sustained-pressure"; message: string } | undefined {
+  ): { reason: "at-capacity"; message: string } | undefined {
     const atCapacity = atCapacityDecision(bootedCount, limits, this.retryAfterMs, {
       noun: "simulator",
       envName: IOS_SIM_MAX_BOOTED_ENV,
@@ -191,12 +195,7 @@ export class IosSimCapacityGate implements SimulatorCapacityGate, BootCapacityRe
     if (atCapacity) {
       return { reason: atCapacity.reason, message: atCapacity.message };
     }
-    if (bootedCount > 0 && this.pressuredStreak >= this.sustainedSamples) {
-      return {
-        reason: "sustained-pressure",
-        message: `Host has been under memory/CPU pressure for ${this.pressuredStreak} consecutive samples (memory pressure: ${host?.memoryPressure ?? "unknown"}); refusing another boot.`,
-      };
-    }
+    // Owner decision (#11209): host pressure is reported, never a reason to refuse a boot.
     return undefined;
   }
 }

@@ -17,6 +17,14 @@ interface PendingRequest<T> {
   responseErrorFactory?: ResponseErrorFactory<T>;
 }
 
+/** What a timeout observer learns about the request that expired. */
+export interface TimedOutRequest {
+  type: string;
+  timeoutMs: number;
+  /** When the request was registered, on the manager's timer. */
+  createdAt: number;
+}
+
 /**
  * Default error result factory for timed-out requests.
  */
@@ -52,7 +60,7 @@ export class RequestManager {
     // consecutive timeouts as a signal that the underlying socket, though
     // still `readyState === OPEN`, may be wedged and worth a liveness probe.
     // Optional so every other caller of this shared primitive is unaffected.
-    private readonly onTimeout?: () => void,
+    private readonly onTimeout?: (request: TimedOutRequest) => void,
   ) {
     this.timer = timer;
   }
@@ -95,7 +103,7 @@ export class RequestManager {
           logger.warn(
             `[RequestManager] Request timed out: ${type} (id: ${id}, timeout: ${timeoutMs}ms)`,
           );
-          this.onTimeout?.();
+          this.onTimeout?.({ type, timeoutMs, createdAt: request.createdAt });
           resolve(timeoutErrorFactory(id, type, timeoutMs));
         }
       }, timeoutMs);

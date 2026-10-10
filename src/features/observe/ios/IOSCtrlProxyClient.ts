@@ -23,6 +23,7 @@ import { ActionableError } from "../../../models/ActionableError";
 import { IosRunnerBusyError, IosRunnerStalledError } from "./runnerErrorCodes";
 import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
 import { logger } from "../../../utils/logger";
+import type { TimedOutRequest } from "../../../utils/RequestManager";
 import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
 import { captureIosPanelScreenshot } from "./CtrlProxyScreenshot";
 import { displayTransitions } from "../DisplayTransition";
@@ -855,6 +856,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private connectionIncarnation = 0;
   private lastDeniedRestartState: string | undefined;
   private static readonly MAX_FAILURES_BEFORE_RESTART = 3;
+  /**
+   * Shorter command budgets (e.g. a 1 s settle-gate read) can expire on a
+   * healthy runner, so only a timeout at least this long is stall evidence.
+   */
+  private static readonly STALL_EVIDENCE_MIN_TIMEOUT_MS = 5000;
+  /** How long an unanswered ping must stay unanswered after a silent command timeout. */
+  private static readonly STALL_CONFIRMATION_MS = 2000;
   private static readonly CONNECTION_RESET_MS = 2000;
   /** A briefly open socket is not evidence that the runner recovered. */
   private static readonly RESTART_REARM_STABILITY_MS = 2000;
@@ -3043,6 +3051,26 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     const resolve = this.resolvePendingRestart;
     this.resolvePendingRestart = undefined;
     resolve?.(stable);
+  }
+
+  protected override silentTimeoutConfirmationMs(request: TimedOutRequest): number | undefined {
+    if (
+      this.transientObserver ||
+      request.timeoutMs < IOSCtrlProxyClient.STALL_EVIDENCE_MIN_TIMEOUT_MS
+    ) {
+      return undefined;
+    }
+    return IOSCtrlProxyClient.STALL_CONFIRMATION_MS;
+  }
+
+  /**
+   * A command (tap, observe hierarchy, ...) that timed out on a runner that
+   * then ignored a ping joins the same budgeted force-restart path as failed
+   * readiness checks, instead of waiting for the 60 s liveness probe or the
+   * process supervisor (#11247). The timed-out command is never replayed.
+   */
+  protected override onConfirmedRequestStall(_request: TimedOutRequest): void {
+    this.triggerServiceRestart("observed-failure");
   }
 
   /** Start runner recovery for this observed failure, subject to the manager budget. */

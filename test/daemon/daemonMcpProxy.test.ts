@@ -1,4 +1,5 @@
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { SessionTerminalReleaseInProgressError } from "../../src/daemon/sessionManager";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import {
@@ -4380,6 +4381,55 @@ describe("DaemonMcpProxy", () => {
           { toolName: "tapOn", params: { sessionUuid: "session-a" } },
           { toolName: "observe", params: { sessionUuid: "session-a" } },
         ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("an unbound connection does not bind or heartbeat a session refused as terminally releasing (#11296)", async () => {
+      const timer = new FakeTimer();
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const refusal = shapeToolCallError(
+        new SessionTerminalReleaseInProgressError(
+          "session-x",
+          "emulator-5554",
+          "is being released",
+        ),
+        { toolName: "tapOn", source: "MCP" },
+      );
+      const callTool = client.callTool.bind(client);
+      client.callTool = async (toolName, params) => {
+        await callTool(toolName, params);
+        return toolName === "tapOn" ? refusal : { content: [{ type: "text", text: "ok" }] };
+      };
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+        heartbeatIntervalMs: 1_000,
+      });
+
+      try {
+        await expect(proxy.callTool("tapOn", { sessionUuid: "session-x" })).resolves.toMatchObject({
+          isError: true,
+          content: refusal.content,
+        });
+        timer.advanceTime(5_000);
+        await drainMicrotasks();
+        await proxy.callTool("observe", {});
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "tapOn", params: { sessionUuid: "session-x" } },
+          { toolName: "observe", params: {} },
+        ]);
+        expect(
+          client.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat"),
+        ).toEqual([]);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();

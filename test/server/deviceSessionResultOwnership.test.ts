@@ -2,7 +2,12 @@ import { SUSPECT_GRACE_MS } from "../../src/daemon/sessionLivenessWindows";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { describe, expect, test } from "bun:test";
-import { TerminalSessionError, type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
+import {
+  SessionNoLongerOwnsDeviceError,
+  SessionTerminalReleaseInProgressError,
+  TerminalSessionError,
+  type SessionReleaseSnapshot,
+} from "../../src/daemon/sessionManager";
 import {
   sessionOwnershipLostPayload,
   declaresDeviceSessionInvalid,
@@ -179,5 +184,65 @@ describe("terminal-session refusals name the next action, not a retry (#11098)",
       reason: "explicit-release",
     });
     expect("ownerPid" in error).toBe(false);
+  });
+});
+
+describe("declaresDeviceSessionInvalid reads the real serializer output (#11296)", () => {
+  test("recognises the top-level shape shapeToolCallError emits for a terminal release", () => {
+    const result = shapeToolCallError(
+      new SessionTerminalReleaseInProgressError("session-x", "emulator-5554", "is being released"),
+      { toolName: "tapOn", source: "MCP" },
+    );
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.code).toBe("session_terminal_release_in_progress");
+    expect(typeof payload.error).toBe("string");
+    expect(declaresDeviceSessionInvalid(result)).toBe(true);
+  });
+
+  test("recognises the nested shape of sessionOwnershipLostPayload via structuredContent", () => {
+    const payload = sessionOwnershipLostPayload({
+      message: "Ownership lost.",
+      sessionUuid: "session-x",
+      reason: "device-killed",
+    });
+    expect(
+      declaresDeviceSessionInvalid({ isError: true, structuredContent: payload, content: [] }),
+    ).toBe(true);
+  });
+
+  test("recognises nextAction acquire_new_session without a known code, top-level or nested", () => {
+    const text = (value: unknown) => ({
+      isError: true,
+      content: [{ type: "text", text: JSON.stringify(value) }],
+    });
+    expect(
+      declaresDeviceSessionInvalid(
+        text({ code: "future_code", nextAction: "acquire_new_session" }),
+      ),
+    ).toBe(true);
+    expect(
+      declaresDeviceSessionInvalid(
+        text({ error: { code: "future_code", nextAction: "acquire_new_session" } }),
+      ),
+    ).toBe(true);
+  });
+
+  test("stays false for refusals that leave the session live or recoverable", () => {
+    const rebound = shapeToolCallError(
+      new SessionNoLongerOwnsDeviceError("session-x", "emulator-5554"),
+      { toolName: "killDevice", source: "MCP" },
+    );
+    expect(declaresDeviceSessionInvalid(rebound)).toBe(false);
+    expect(
+      declaresDeviceSessionInvalid({
+        isError: true,
+        content: [{ type: "text", text: "tap failed: session_ownership_lost mentioned in prose" }],
+      }),
+    ).toBe(false);
+    expect(
+      declaresDeviceSessionInvalid({
+        content: [{ type: "text", text: JSON.stringify({ code: "session_ownership_lost" }) }],
+      }),
+    ).toBe(false);
   });
 });

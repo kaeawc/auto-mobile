@@ -86,6 +86,7 @@ test/daemon/devicePool.recoveryStopOfflineConfirmation.test.ts
 test/daemon/devicePool.removeDeviceLeaks.test.ts
 test/daemon/devicePool.selectionPresenceSweep.test.ts
 test/daemon/devicePool.staleIdentityRefresh.test.ts
+test/daemon/devicePool.stateChangeListener.test.ts
 test/daemon/devicePool.statsBuckets.test.ts
 test/daemon/devicePoolCreate.test.ts
 test/daemon/devicePoolPhysicalIosRename.test.ts
@@ -118,6 +119,7 @@ test/daemon/liveDeadlineRegistry.test.ts
 test/daemon/livenessKeeperSuspectInteractions.test.ts
 test/daemon/livenessOwnerLease.test.ts
 test/daemon/managedExecutionLiveness.test.ts
+test/daemon/managedRebindRefusedFailsClosed.test.ts
 test/daemon/managedSlots/abandonedScopeReclaimer.test.ts
 test/daemon/managedSlots/capacityExternalDevices.test.ts
 test/daemon/managedSlots/daemonManagedSlotAcquisition.ownDevice.test.ts
@@ -153,7 +155,9 @@ test/daemon/privateDaemonOrphanExitRecord.test.ts
 test/daemon/privateDaemonOrphanWatchdog.test.ts
 test/daemon/processGeneration.test.ts
 test/daemon/processGenerationFields.test.ts
+test/daemon/proxyHeartbeatStateMachine.property.test.ts
 test/daemon/proxyLivenessRecovery.test.ts
+test/daemon/proxyReleaseReasonClassification.test.ts
 test/daemon/recycledProcessGeneration.test.ts
 test/daemon/refusalWireContract.test.ts
 test/daemon/registerSessionManagedConnection.test.ts
@@ -354,6 +358,7 @@ test/features/action/textTransportTimeout.test.ts
 test/features/action/touchscreenInput.test.ts
 test/features/appearance/AppearanceConfig.property.test.ts
 test/features/bootAdmission/AndroidBootAdmissionGate.test.ts
+test/features/bootAdmission/AndroidCapacitySource.test.ts
 test/features/database/bigIntegerJson.test.ts
 test/features/database/sqlLexer.test.ts
 test/features/debug/VisualHighlight.test.ts
@@ -849,6 +854,7 @@ test/server/deviceMatcher.test.ts
 test/server/deviceResourceSchemas.test.ts
 test/server/deviceSessionRecoveryTools.test.ts
 test/server/deviceSessionResultOwnership.test.ts
+test/server/deviceStateChangeNotifier.test.ts
 test/server/deviceTools.listDevicesCapacitySchema.test.ts
 test/server/deviceTools.listDevicesOwnership.test.ts
 test/server/deviceTools.screenSize.test.ts

@@ -367,7 +367,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .enum(PROTOTYPE_EVENT_KINDS)
         .optional()
         .describe(
-          "awaitEvent only: filter event kind. appearance_changed (name null, payload {mode, source}) is sent once whenever the shown prototype's resolved light/dark mode changes, by a device advertising prototype_appearance_v1",
+          "awaitEvent only: filter event kind. page_changed (name = pager id, payload = the new zero-based page index) is sent when a pager settles on another page. appearance_changed (name null, payload {mode, source}) is sent once whenever the shown prototype's resolved light/dark mode changes, by a device advertising prototype_appearance_v1",
         ),
       afterSequence: z
         .number()

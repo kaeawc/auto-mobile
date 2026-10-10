@@ -391,9 +391,8 @@ describe("DevicePool autolock", () => {
       const sessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
 
       expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBe(sessionId);
-      expect(() => pool.resolveAutolockSessionForMcpSession("mcp-session-1", "ios")).toThrow(
-        "Candidate sessions:",
-      );
+      // A platform the connection holds nothing for falls through, it is not ambiguous (#11167).
+      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "ios")).toBeUndefined();
       expect(
         pool.resolveAutolockSessionForMcpSession("other-mcp-session", "android"),
       ).toBeUndefined();

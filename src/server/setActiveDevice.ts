@@ -64,9 +64,27 @@ function resolveAutolockSelection(args: HandlerArgs): string | undefined {
     undefined,
     args.deviceId,
   );
-  const targetSession = ownedSession ?? pool.resolveAutolockSessionForMcpSession(mcpSessionId);
+  // #11167: without an explicit platform the pooled device names it. The default-session
+  // fallback must stay on that platform; a session is never rebound across platforms.
+  const fallbackPlatform = args.platform ?? pool.getDevice(args.deviceId)?.platform;
+  const targetSession =
+    ownedSession ?? pool.resolveAutolockSessionForMcpSession(mcpSessionId, fallbackPlatform);
   args.sessionUuid ??= targetSession;
   return targetSession === args.sessionUuid ? targetSession : undefined;
+}
+
+/**
+ * #11167: sharing an autolock session needs its owner to release it first. Naming a session
+ * another connected client owns is refused, typed, before anything is selected or rebound.
+ */
+function refuseForeignOwnedAutolock(args: HandlerArgs): void {
+  if (!args.sessionUuid || !DaemonState.getInstance().isInitialized()) {
+    return;
+  }
+  const pool = DaemonState.getInstance().getDevicePool();
+  if (pool.isAutolockSessionOwnedByOtherConnection(args.sessionUuid, args.__mcpSessionId)) {
+    throw deviceAssignedToOtherSessionError(args.deviceId, args.sessionUuid, undefined);
+  }
 }
 
 async function requestedPoolDevice(pool: DevicePool, deviceId: string): Promise<PooledDevice> {
@@ -109,6 +127,13 @@ async function bindRequestedDevice(input: {
   const existing = sessions.getSession(args.sessionUuid);
   if (existing?.assignedDevice === args.deviceId) {
     return;
+  }
+  if (existing && existing.platform !== device.platform) {
+    throw new ActionableError(
+      `Session ${args.sessionUuid} is a ${existing.platform} session and cannot be rebound to ` +
+        `${device.platform} device '${args.deviceId}'. Start or select a ${device.platform} ` +
+        `session for that device instead.`,
+    );
   }
   // The pool persists the replacement before releasing the previous binding.
   // #5870: infer platform from the resolved device when the caller omitted it.
@@ -246,6 +271,7 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
     const mcpSessionId = args.__mcpSessionId;
     try {
       const selectedAutolockSession = resolveAutolockSelection(args);
+      refuseForeignOwnedAutolock(args);
       admitSessionlessSelection(args);
       const sessionUuid = args.sessionUuid;
       const sessionScoped = Boolean(sessionUuid) && DaemonState.getInstance().isInitialized();
@@ -269,7 +295,7 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
       if (selectedAutolockSession) {
         await DaemonState.getInstance()
           .getDevicePool()
-          .attachAutolockSessionToMcpSession(selectedAutolockSession, mcpSessionId);
+          .attachAutolockSessionToMcpSession(selectedAutolockSession, mcpSessionId, true, true);
       }
       const payload = {
         message: `Active device set to '${args.deviceId}'`,

@@ -107,6 +107,24 @@ describe("a terminal upgrade of an already-finalized release (#10825)", () => {
       terminal: true,
     });
   });
+
+  test("a terminal release of a device-restart-released session leaves B's sampling running (#11206)", async () => {
+    // A is released for a device restart; within its recovery window B takes the device.
+    await manager.createSession("A", DEVICE, "android", undefined, undefined, "Pixel");
+    await manager.releaseSession("A", "device-restart:Pixel");
+    await manager.createSession("B", DEVICE, "android");
+    startRoute();
+    perfStops = [];
+
+    // A's client now ends A: only its persisted row names the device, which is B's by now.
+    await manager.releaseSession("A", "explicit-release");
+
+    expect(manager.getSessionForDevice(DEVICE)).toBe("B");
+    expect(routes.isActive(DEVICE)).toBe(true);
+    expect(perfStops).toEqual([]);
+    expect(notifications).toEqual(["A:device-restart:Pixel", "A:explicit-release:upgrade"]);
+    expect(manager.getTerminalReleaseSnapshot("A")?.releaseReason).toBe("explicit-release");
+  });
 });
 
 interface DaemonNavigationInternals {

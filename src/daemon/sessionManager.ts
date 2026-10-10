@@ -4121,7 +4121,9 @@ export class SessionManager {
           released_at_ms: this.sessionNow(),
         })!;
         await this.persistTerminalReleaseIfNeeded(snapshot);
-        this.notifySessionRelease(snapshot);
+        // The device-restart release already ran this session's device cleanup; the row's device
+        // may belong to another session by now, so announce only the terminal reason (#11206).
+        this.notifySessionRelease(snapshot, { upgradeOnly: true });
         return snapshot.deviceId;
       }
     }

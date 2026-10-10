@@ -16,9 +16,15 @@ function refusalCode(payload: unknown): unknown {
   const record = payload as Record<string, unknown>;
   // Tool-call refusals carry `code`; a deleteDevice precondition failure nests it in `failure`.
   const failure = record.failure;
-  return failure && typeof failure === "object"
-    ? (failure as Record<string, unknown>).code
-    : record.code;
+  if (failure && typeof failure === "object") {
+    return (failure as Record<string, unknown>).code;
+  }
+  // Ownership-loss payloads (session_ownership_lost, ...) nest the code under `error`.
+  const error = record.error;
+  return (
+    record.code ??
+    (error && typeof error === "object" ? (error as Record<string, unknown>).code : undefined)
+  );
 }
 
 /**

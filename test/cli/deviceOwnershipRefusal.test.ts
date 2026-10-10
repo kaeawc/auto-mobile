@@ -201,3 +201,55 @@ describe("--cli surfaces a held-device refusal", () => {
     expect(stderr[1]).toContain("--force true");
   });
 });
+
+describe("--cli prints structured session errors (#11148)", () => {
+  const originalProcessExit = process.exit;
+  const originalConsoleError = console.error;
+  let isolatedCliDataDir: IsolatedCliDataDir;
+  let stderr: unknown[];
+
+  beforeEach(() => {
+    isolatedCliDataDir = isolateCliDataDir();
+    stderr = [];
+    process.exit = (() => {}) as typeof process.exit;
+    console.error = ((...args: unknown[]) => {
+      stderr.push(...args);
+    }) as typeof console.error;
+    setCliOutputSinksForTesting({ stdout: { write: () => {} }, stderr: { write: () => {} } });
+  });
+
+  afterEach(() => {
+    process.exit = originalProcessExit;
+    console.error = originalConsoleError;
+    resetCliOutputSinksForTesting();
+    resetDaemonProxyFactoryForTesting();
+    isolatedCliDataDir.restore();
+  });
+
+  test("an object error prints its message and nextAction as text, not an object", async () => {
+    setDaemonProxyFactoryForTesting((): any => ({
+      callTool: async () => ({
+        success: false,
+        error: {
+          code: "session_ownership_lost",
+          message: "Session lost",
+          nextAction: "Call getAndroid to acquire a new session.",
+        },
+      }),
+      adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
+      close: async (): Promise<void> => {},
+    }));
+
+    await runCliCommand(["rotate"]);
+
+    expect(typeof stderr[0]).toBe("string");
+    expect(stderr[0]).toContain("Session lost");
+    expect(stderr[0]).toContain("Call getAndroid to acquire a new session.");
+  });
+
+  test("refusalCode reads error.code", () => {
+    expect(
+      cliDeviceOwnershipHint({ error: { code: "device_shutting_down", message: "x" } }, "tapOn"),
+    ).toContain("shut down");
+  });
+});

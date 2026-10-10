@@ -4,6 +4,7 @@ import {
   type SessionReleaseAnnouncer,
 } from "../../src/daemon/announceSessionRelease";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
+import type { SessionReleaseExtras } from "../../src/server/sessionReleaseBroadcast";
 
 const snapshot = (sessionId: string): SessionReleaseSnapshot => ({
   sessionId,
@@ -16,7 +17,12 @@ const snapshot = (sessionId: string): SessionReleaseSnapshot => ({
 
 class FakeAnnouncer implements SessionReleaseAnnouncer {
   readonly captured = new Map<string, string[]>();
-  readonly emitted: Array<{ sessionId: string; reason: string; recordingIds?: string[] }> = [];
+  readonly emitted: Array<{
+    sessionId: string;
+    reason: string;
+    recordingIds?: string[];
+    upgradeOnly?: boolean;
+  }> = [];
   takeRecordingIds(sessionId: string): string[] {
     const ids = this.captured.get(sessionId) ?? [];
     this.captured.delete(sessionId);
@@ -26,9 +32,14 @@ class FakeAnnouncer implements SessionReleaseAnnouncer {
     sessionId: string,
     reason: string,
     _snapshot: SessionReleaseSnapshot,
-    extras?: { recordingIds?: string[] },
+    extras?: SessionReleaseExtras,
   ): void {
-    this.emitted.push({ sessionId, reason, recordingIds: extras?.recordingIds });
+    this.emitted.push({
+      sessionId,
+      reason,
+      recordingIds: extras?.recordingIds,
+      ...(extras?.upgradeOnly ? { upgradeOnly: true } : {}),
+    });
   }
 }
 
@@ -72,6 +83,21 @@ describe("announceSessionRelease", () => {
     );
     expect(announcer.emitted).toEqual([
       { sessionId: "a", reason: "heartbeat-timeout", recordingIds: undefined },
+    ]);
+  });
+
+  test("an upgrade-only release is announced with its marker (#11206)", () => {
+    const announcer = new FakeAnnouncer();
+    announceSessionRelease(
+      announcer,
+      { fallbacks: null, announced: null },
+      "a",
+      "explicit-release",
+      snapshot("a"),
+      { upgradeOnly: true },
+    );
+    expect(announcer.emitted).toEqual([
+      { sessionId: "a", reason: "explicit-release", recordingIds: undefined, upgradeOnly: true },
     ]);
   });
 });

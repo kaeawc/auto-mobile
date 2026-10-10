@@ -260,4 +260,19 @@ describe("launchApp overlay:true (#10567)", () => {
     expect(h.registry.size()).toBe(0);
     expect(h.clients[0]!.closeCount).toBe(1);
   });
+
+  test("an upgrade-only re-announcement leaves the device's next owner's agents alone (#11206)", async () => {
+    const h = setup();
+    await launch(SIMULATOR, { overlay: true });
+
+    SessionReleaseBroadcaster.emit(
+      "earlier-owner",
+      "explicit-release",
+      { deviceId: SIMULATOR.deviceId } as SessionReleaseSnapshot,
+      { upgradeOnly: true },
+    );
+
+    expect(h.registry.size()).toBe(1);
+    expect(h.clients[0]!.closeCount).toBe(0);
+  });
 });

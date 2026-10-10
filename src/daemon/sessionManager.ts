@@ -4121,7 +4121,9 @@ export class SessionManager {
           released_at_ms: this.sessionNow(),
         })!;
         await this.persistTerminalReleaseIfNeeded(snapshot);
-        this.notifySessionRelease(snapshot);
+        // The device-restart release already ran this session's device cleanup; the row's device
+        // may belong to another session by now, so announce only the terminal reason (#11206).
+        this.notifySessionRelease(snapshot, { upgradeOnly: true });
         return snapshot.deviceId;
       }
     }
@@ -4380,12 +4382,12 @@ export class SessionManager {
       // Final fence: evaluated synchronously right before the commit, with no
       // await in between, so the persistence awaits above cannot hide a newer
       // confirmation either. A terminal fence this release raised is lifted so
-      // the live session keeps routing; the persisted row is rewritten by
-      // whichever release eventually commits.
+      // the live session keeps routing, and the terminal row it wrote is
+      // rewritten live so a restart rehydrates it (#11206).
       if (releaseSuperseded(shouldCommit)) {
-        return this.abandonSupersededRelease(
-          sessionId,
-          deviceId,
+        return await this.abandonReleaseSupersededAfterPersist(
+          session,
+          releaseSnapshot,
           pendingCleanup,
           !terminalFenceHeldBefore,
         );
@@ -4746,6 +4748,51 @@ export class SessionManager {
     return null;
   }
 
+  /**
+   * The final supersede fence declined after the terminal write: lift the fence this release raised
+   * and rewrite the live row it terminalized (#11206).
+   */
+  private async abandonReleaseSupersededAfterPersist(
+    session: Session,
+    releaseSnapshot: SessionReleaseSnapshot,
+    pendingCleanup: readonly Promise<void>[],
+    liftTerminalFence: boolean,
+  ): Promise<null> {
+    this.abandonSupersededRelease(
+      session.sessionId,
+      releaseSnapshot.deviceId,
+      pendingCleanup,
+      liftTerminalFence,
+    );
+    if (liftTerminalFence && releaseSnapshot.terminal) {
+      await this.reassertSupersededLiveRow(session);
+    }
+    return null;
+  }
+
+  /**
+   * A superseded release lifted its terminal fence, but its terminal row may have landed (#11206).
+   * Nothing else rewrites a terminal row, so re-upsert the live row, as a rebind does, while this
+   * incarnation still holds the UUID unfenced.
+   */
+  private async reassertSupersededLiveRow(session: Session): Promise<void> {
+    if (
+      this.sessions.get(session.sessionId) !== session ||
+      this.terminalReleaseSnapshots.has(session.sessionId)
+    ) {
+      return;
+    }
+    try {
+      await this.persistSession(session, session);
+    } catch (error) {
+      logger.warn(
+        `[SessionManager] Failed to re-persist live session ${session.sessionId} after its ` +
+          `superseded release: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
   private upgradeReleaseReason(reason: ReleaseReasonState, candidate: string): void {
     if (candidate === "device-killed" && reason.value !== candidate) {
       reason.value = candidate;
@@ -5008,7 +5055,14 @@ export class SessionManager {
 
   private trackLateReleaseWrite(write: Promise<void>, snapshot: SessionReleaseSnapshot): void {
     const settled = write.then(
-      () => this.confirmTerminalReleaseWrite(snapshot),
+      async () => {
+        this.confirmTerminalReleaseWrite(snapshot);
+        // A superseded release lifted its fence while this write was parked (#11206).
+        const live = this.sessions.get(snapshot.sessionId);
+        if (snapshot.terminal && live) {
+          await this.reassertSupersededLiveRow(live);
+        }
+      },
       (error: unknown) => {
         logger.warn(`[SessionManager] Late session release write failed: ${errorMessage(error)}`);
         // The row is still active: without a retry a restart would revive the released UUID.

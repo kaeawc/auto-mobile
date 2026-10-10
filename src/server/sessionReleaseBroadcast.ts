@@ -14,6 +14,12 @@ export const SESSION_RELEASED_NOTIFICATION_METHOD = "notifications/session/relea
 export interface SessionReleaseExtras {
   /** Recordings the release is finalizing; the previous owner can still fetch them by id (#10958). */
   recordingIds?: string[];
+  /**
+   * A terminal reason upgrading a release that was already announced (#10825). Its device may
+   * belong to another session by now, so device-keyed listeners must ignore it (#11206); listeners
+   * keyed on the session id still act on it.
+   */
+  upgradeOnly?: boolean;
 }
 
 export interface SessionReleaseListener {

@@ -1499,8 +1499,9 @@ function subscribeOverlayAgentLifecycle(): () => void {
   const releaseDevice = (deviceId: string) =>
     getLaunchAppToolDependencies().overlayAgentRegistry.releaseDevice(deviceId);
   const cleanups = [
-    SessionReleaseBroadcaster.subscribe((_sessionUuid, _reason, snapshot) => {
-      if (snapshot?.deviceId) {
+    SessionReleaseBroadcaster.subscribe((_sessionUuid, _reason, snapshot, extras) => {
+      // An upgrade-only re-announcement's device may belong to its next owner by now (#11206).
+      if (snapshot?.deviceId && !extras?.upgradeOnly) {
         releaseDevice(snapshot.deviceId);
       }
     }),

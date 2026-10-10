@@ -107,6 +107,24 @@ describe("a terminal upgrade of an already-finalized release (#10825)", () => {
       terminal: true,
     });
   });
+
+  test("a terminal release of a device-restart-released session leaves B's sampling running (#11206)", async () => {
+    // A is released for a device restart; within its recovery window B takes the device.
+    await manager.createSession("A", DEVICE, "android", undefined, undefined, "Pixel");
+    await manager.releaseSession("A", "device-restart:Pixel");
+    await manager.createSession("B", DEVICE, "android");
+    startRoute();
+    perfStops = [];
+
+    // A's client now ends A: only its persisted row names the device, which is B's by now.
+    await manager.releaseSession("A", "explicit-release");
+
+    expect(manager.getSessionForDevice(DEVICE)).toBe("B");
+    expect(routes.isActive(DEVICE)).toBe(true);
+    expect(perfStops).toEqual([]);
+    expect(notifications).toEqual(["A:device-restart:Pixel", "A:explicit-release:upgrade"]);
+    expect(manager.getTerminalReleaseSnapshot("A")?.releaseReason).toBe("explicit-release");
+  });
 });
 
 interface DaemonNavigationInternals {
@@ -144,8 +162,8 @@ describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
     const globalNavigation = NavigationGraphManager.getInstance();
     internals.setupNavigationGraphUpdateListener(globalNavigation);
     const broadcasts: string[] = [];
-    SessionReleaseBroadcaster.subscribe((sessionId, reason) =>
-      broadcasts.push(`${sessionId}:${reason}`),
+    SessionReleaseBroadcaster.subscribe((sessionId, reason, _snapshot, extras) =>
+      broadcasts.push(`${sessionId}:${reason}${extras?.upgradeOnly ? ":upgrade" : ""}`),
     );
 
     const sessionA = await sessions.createSession("A", DEVICE, "android");
@@ -161,7 +179,8 @@ describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
 
     expect(DeviceSessionManager.getInstance().getExplicitDevicePin()?.deviceId).toBe(DEVICE);
     expect(internals.navigationGraphListenerManagers.has(globalNavigation)).toBe(true);
-    expect(broadcasts).toEqual(["A:cleanup-expired", "A:device-killed"]);
+    // Device-keyed broadcast listeners (overlay agents and events) skip the marked upgrade (#11206).
+    expect(broadcasts).toEqual(["A:cleanup-expired", "A:device-killed:upgrade"]);
 
     // B's own release is a real one: it clears B's pin.
     await sessions.releaseSession("B", "explicit-release");

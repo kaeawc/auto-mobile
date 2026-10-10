@@ -964,7 +964,7 @@ export class Daemon {
     // (heartbeat / idle / plan), rather than guessing with the replay TTL. Fires
     // for every released key — base and derived `${base}:${label}` alike; the
     // proxy matches its bound (base) UUID by exact equality (issue #4610).
-    this.sessionManager.onSessionRelease((sessionId, _deviceId, releaseReason, snapshot) => {
+    this.sessionManager.onSessionRelease((sessionId, _deviceId, releaseReason, snapshot, opts) => {
       // Name the recordings this release is finalizing so the previous owner can fetch them
       // (#10958); the recording cleanup captured them when the release began.
       announceSessionRelease(
@@ -979,6 +979,7 @@ export class Daemon {
         sessionId,
         releaseReason,
         snapshot,
+        { upgradeOnly: opts?.upgradeOnly },
       );
       if (this.shutdownFallbackReleaseNotifications?.has(sessionId)) {
         return;

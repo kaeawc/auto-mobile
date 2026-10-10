@@ -731,7 +731,13 @@ export class DeviceAutolockManager {
       }
       this.assertMcpSessionCanAutolockDevice(mcpSessionId, device);
       const outcome = await this.persistAttachment(session, mcpSessionId);
-      this.recordAttachment(sessionId, mcpSessionId, makeDefault, refuseForeignOwned);
+      // Ownership is decided before anything is published (#11192): a connection that closed
+      // while this attach was in flight already had its bindings released, so routing it here
+      // would leave a dead owner that suppresses the owner-disconnect release (#10503).
+      if (refuseForeignOwned && !this.pool.recordBindOwnership(mcpSessionId, sessionId)) {
+        return "not-attached";
+      }
+      this.recordAttachment(sessionId, mcpSessionId, makeDefault);
       return outcome;
     });
   }
@@ -766,7 +772,6 @@ export class DeviceAutolockManager {
     sessionId: string,
     mcpSessionId: string,
     makeDefault: boolean | "if-absent",
-    takesOwnership: boolean,
   ): void {
     if (
       makeDefault === true ||
@@ -778,12 +783,6 @@ export class DeviceAutolockManager {
     const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
     acquired.add(sessionId);
     this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
-    if (takesOwnership) {
-      // No other connection owns it, so this client becomes the owner: keep the pool's
-      // ownership map in step, so its disconnect schedules the owner-disconnect release
-      // like an acquisition does. (A setActiveDevice share must not move ownership.)
-      this.pool.recordBindOwnership(mcpSessionId, sessionId);
-    }
   }
 
   clearExpiredAutolockStateWhenIdle(

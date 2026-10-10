@@ -25,6 +25,10 @@ interface PoolWorld {
   manager: SessionManager;
   pool: DevicePool;
   releases: Array<{ sessionId: string; reason: string; upgradeOnly: boolean }>;
+  /** Every autolock owner row write, in order. */
+  autolockRows: Array<{ sessionId: string; mcpSessionId: string | null | undefined }>;
+  /** Awaited inside every autolock owner row write, so a test can close a connection mid-write. */
+  autolockRowGate: { wait?: () => Promise<void> };
 }
 
 const worlds: PoolWorld[] = [];
@@ -38,15 +42,23 @@ async function createPoolWorld(): Promise<PoolWorld> {
   });
   const deviceManager = new FakeDeviceManager();
   deviceManager.bootedDevices = [DEVICE];
+  const autolockRows: PoolWorld["autolockRows"] = [];
+  const autolockRowGate: PoolWorld["autolockRowGate"] = {};
   const pool = new DevicePool(
     createDevicePoolDependencies(manager, "ownership-regression-daemon", {
       timer,
       deviceManager,
       installedAppsRepository: new FakeInstalledAppsRepository(),
+      deviceSessionRepository: {
+        markAutolockSession: async (sessionId, input) => {
+          await autolockRowGate.wait?.();
+          autolockRows.push({ sessionId, mcpSessionId: input.mcpSessionId });
+        },
+      },
     }),
   );
   await pool.initializeWithDevices([DEVICE]);
-  const world = { timer, manager, pool, releases };
+  const world = { timer, manager, pool, releases, autolockRows, autolockRowGate };
   worlds.push(world);
   return world;
 }
@@ -159,6 +171,70 @@ describe("pool ownership races found by the seeded concurrency harness", () => {
 
     expect(manager.getSession(sessionId)).toBeNull();
     expect(releases.map((r) => r.reason)).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
+  });
+
+  // Root cause (fixed, #11192): the autolock attach paths (an explicit-UUID tool call, a
+  // setActiveDevice selection, a reconnect restore) were not tracked as binds in flight and
+  // published the caller's route, acquired set and pool ownership after awaiting the assignment
+  // lock and the owner-row write, ignoring recordBindOwnership's refusal. A connection that closed
+  // in that window became a dead owner, cancelling the owner-disconnect release (#10503).
+  const ATTACH_PATHS: Array<
+    [string, (pool: DevicePool, id: string, c: string) => Promise<unknown>]
+  > = [
+    ["explicit sessionUuid call", (pool, id, c) => pool.attachExplicitSessionUuidCall(id, c)],
+    [
+      "setActiveDevice selection",
+      (pool, id, c) => pool.attachAutolockSessionToMcpSession(id, c, true, true),
+    ],
+    ["reconnect restore", (pool, id, c) => pool.restoreAutolockSessionsForMcpSession([id], c)],
+  ];
+
+  async function ownerlessAutolock(world: PoolWorld): Promise<string> {
+    const sessionId = (await autolockForConnection(world.pool, "first-connection"))!;
+    world.pool.releaseMcpSessionBindings("first-connection");
+    return sessionId;
+  }
+
+  test.each(ATTACH_PATHS)(
+    "a connection that closed while its autolock attach (%s) was in flight owns nothing",
+    async (_path, attach) => {
+      const world = await createPoolWorld();
+      const sessionId = await ownerlessAutolock(world);
+
+      const attaching = attach(world.pool, sessionId, "closing-connection");
+      world.pool.releaseMcpSessionBindings("closing-connection");
+      const outcome = await attaching;
+
+      if (outcome !== undefined) {
+        expect(outcome).toBe("not-attached");
+      }
+      expect(world.pool.resolveAutolockSessionForMcpSession("closing-connection")).toBeUndefined();
+      expect(world.pool.hasConnectedMcpSessionOwner(sessionId)).toBe(false);
+      world.timer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
+      await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+      expect(world.manager.getSession(sessionId)).toBeNull();
+      expect(world.releases.map((r) => r.reason)).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
+    },
+  );
+
+  test("a connection that closed while its attach wrote the owner row owns nothing", async () => {
+    const world = await createPoolWorld();
+    const sessionId = await ownerlessAutolock(world);
+    const writing = Promise.withResolvers<void>();
+    const proceed = Promise.withResolvers<void>();
+    world.autolockRowGate.wait = async () => {
+      writing.resolve();
+      await proceed.promise;
+    };
+
+    const attaching = world.pool.attachExplicitSessionUuidCall(sessionId, "closing-connection");
+    await writing.promise;
+    world.pool.releaseMcpSessionBindings("closing-connection");
+    proceed.resolve();
+    await attaching;
+
+    expect(world.pool.resolveAutolockSessionForMcpSession("closing-connection")).toBeUndefined();
+    expect(world.pool.hasConnectedMcpSessionOwner(sessionId)).toBe(false);
   });
 
   // Harness: contention profile, AUTOMOBILE_POOL_OWNERSHIP_SEED_BASE=1375 (before the disconnect

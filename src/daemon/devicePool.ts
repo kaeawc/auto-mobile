@@ -8041,22 +8041,27 @@ export class DevicePool {
     return session.sessionId;
   }
 
+  // The attach paths are tracked like a bind (#11192): a connection closing while one waits for
+  // the assignment lock or its persistence must not be adopted as the owner afterwards.
   restoreAutolockSessionsForMcpSession(
     ...args: Parameters<DeviceAutolockManager["restoreAutolockSessionsForMcpSession"]>
   ): Promise<void> {
-    return this.autolockManager.restoreAutolockSessionsForMcpSession(...args);
+    const endBind = this.beginMcpBind(args[1]);
+    return this.autolockManager.restoreAutolockSessionsForMcpSession(...args).finally(endBind);
   }
 
   attachExplicitSessionUuidCall(
     ...args: Parameters<DeviceAutolockManager["attachExplicitSessionUuidCall"]>
   ): ReturnType<DeviceAutolockManager["attachExplicitSessionUuidCall"]> {
-    return this.autolockManager.attachExplicitSessionUuidCall(...args);
+    const endBind = this.beginMcpBind(args[1]);
+    return this.autolockManager.attachExplicitSessionUuidCall(...args).finally(endBind);
   }
 
   attachAutolockSessionToMcpSession(
     ...args: Parameters<DeviceAutolockManager["attachAutolockSessionToMcpSession"]>
   ): ReturnType<DeviceAutolockManager["attachAutolockSessionToMcpSession"]> {
-    return this.autolockManager.attachAutolockSessionToMcpSession(...args);
+    const endBind = this.beginMcpBind(args[1]);
+    return this.autolockManager.attachAutolockSessionToMcpSession(...args).finally(endBind);
   }
 
   assertAutolockAccess(...args: Parameters<DeviceAutolockManager["assertAutolockAccess"]>): void {

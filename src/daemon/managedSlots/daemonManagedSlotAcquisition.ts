@@ -113,7 +113,8 @@ export interface DaemonManagedSlotAcquisitionHandle {
   acquisition: ManagedSlotAcquisition;
   /**
    * Start the background journal redrive pass over `registry` (#11179). Call only once the
-   * registry exists; the caller stops the returned loop on shutdown.
+   * registry exists; the caller stops the returned loop on shutdown. Idempotent per registry: a
+   * second call returns the running loop.
    */
   startJournalRedrive(registry: SlotRegistry): SlotJournalRedriveLoop;
   /** The slot journal over `registry` (abandoned-scope sweep, #11174), shared with acquisitions. */
@@ -125,6 +126,7 @@ export function createDaemonManagedSlotAcquisition(
 ): DaemonManagedSlotAcquisitionHandle {
   const invokeTool = options.invokeTool ?? defaultManagedSlotToolInvoker;
   const reconcilers = new WeakMap<SlotRegistry, ManagedSlotReconciler>();
+  const redriveLoops = new WeakMap<SlotRegistry, SlotJournalRedriveLoop>();
   const reconcilerFor = (registry: SlotRegistry): ManagedSlotReconciler => {
     let reconciler = reconcilers.get(registry);
     if (!reconciler) {
@@ -182,8 +184,13 @@ export function createDaemonManagedSlotAcquisition(
   return {
     acquisition,
     startJournalRedrive: (registry) => {
-      const loop = new SlotJournalRedriveLoop(reconcilerFor(registry).journal, options.timer);
-      loop.start();
+      // Single-flight per registry: every open site may ask, only the first starts a loop (#11338).
+      let loop = redriveLoops.get(registry);
+      if (!loop) {
+        loop = new SlotJournalRedriveLoop(reconcilerFor(registry).journal, options.timer);
+        redriveLoops.set(registry, loop);
+        loop.start();
+      }
       return loop;
     },
     journalFor: (registry) => reconcilerFor(registry).journal,

@@ -961,22 +961,16 @@ export class Daemon {
       owner: () => this.managedSlotJournalOwner(),
     });
     DaemonState.getInstance().setManagedExecutionReowner(this.managedExecutionReowner);
-    // Interrupted journaled work (#11179) is redriven in the background, but only on a host that
-    // has a slot registry: a daemon that never served a managed slot never creates one.
+    // Interrupted journaled work (#11179) is redriven in the background. The loop starts when this
+    // daemon first opens the registry (#11338), so a fresh host that creates it on its first
+    // acquisition is covered; an existing registry is opened now so leftovers redrive at startup.
     if (process.env.NODE_ENV !== "test" && slotRegistryFileExists()) {
-      void this.openManagedSlotRegistry().then(
-        (registry) => {
-          if (this.managedSlotAcquisition === acquisition && !this.managedSlotRedrive) {
-            this.managedSlotRedrive = acquisition.startJournalRedrive(registry);
-          }
-        },
-        (error: unknown) => {
-          logger.warn(
-            `[Daemon] Managed slot journal redrive not started: ${errorMessage(error)}`,
-            error,
-          );
-        },
-      );
+      void this.openManagedSlotRegistry().catch((error: unknown) => {
+        logger.warn(
+          `[Daemon] Managed slot journal redrive not started: ${errorMessage(error)}`,
+          error,
+        );
+      });
     }
   }
 
@@ -994,7 +988,13 @@ export class Daemon {
     // Restart-time recovery (#11242): slots a previous daemon left settling are settled once that
     // daemon is gone. Runs once per open, after the open succeeds.
     opening.then(
-      () => void this.managedExecutionRelease?.recoverSettledSlots(),
+      (registry) => {
+        void this.managedExecutionRelease?.recoverSettledSlots();
+        const acquisition = this.managedSlotAcquisition;
+        if (acquisition && !this.managedSlotRedrive && process.env.NODE_ENV !== "test") {
+          this.managedSlotRedrive = acquisition.startJournalRedrive(registry);
+        }
+      },
       // The open failure is logged (and the open forgotten) by the handler below.
       () => undefined,
     );

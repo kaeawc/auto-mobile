@@ -690,8 +690,8 @@ pager's page untouched too. An accepted control still reports its own `change` f
 and then its list, as the iOS agent does. A rejected interaction is logged on the device
 only; no event or status field reports it, so the host sees nothing change. The iOS
 agent does not re-validate at runtime, so the same list applies there in full with
-one `change`; the list the validators should refuse at `show` (a `setState` whose
-value type does not fit a control bound to the key) is the gap between the two.
+one `change`; the TypeScript host and Kotlin validators refuse at `show` a `setState` whose
+value type does not fit a control bound to the key (#11452), which closes that gap on the host.
 
 ### Conditional style: styleWhen
 

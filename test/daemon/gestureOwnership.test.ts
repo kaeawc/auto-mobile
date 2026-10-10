@@ -106,4 +106,66 @@ describe("GestureOwnershipRegistry", () => {
     expect(await registry.onStartAcked("s1", device, "g2")).toBe("cancelled");
     expect(registry.ownerCount).toBe(0);
   });
+
+  test("releasing a holder session cancels the strokes admitted under it, on every socket", async () => {
+    const { liveSockets, cancels, registry } = createHarness();
+    liveSockets.add("s1");
+    liveSockets.add("s2");
+    await registry.onStartAcked("s1", device, "g1", "session-a");
+    await registry.onStartAcked("s2", device, "g2", "session-a");
+    await registry.onStartAcked("s2", device, "g3", "session-b");
+    await registry.onStartAcked("s2", device, "g4");
+
+    await registry.cancelAllHeldBy("session-a");
+
+    expect(cancels.map((c) => c.gestureId)).toEqual(["g1", "g2"]);
+    expect(registry.ownerCount).toBe(1);
+    // The lifted strokes are no longer owned: socket close cancels only what is still open.
+    await registry.cancelAllFor("s1");
+    await registry.cancelAllFor("s2");
+    expect(cancels.map((c) => c.gestureId)).toEqual(["g1", "g2", "g3", "g4"]);
+  });
+
+  test("a refused frame cancels its socket's stroke only once the device has changed hands", async () => {
+    const { liveSockets, cancels, registry } = createHarness();
+    liveSockets.add("s1");
+    await registry.onStartAcked("s1", device, "g1", "session-a");
+    const refused = (socketSessionId: string, holder: string | undefined) =>
+      registry.cancelIfDeviceChangedHands(socketSessionId, device.deviceId, "g1", holder);
+
+    // Still held by the session the start was admitted under: the refusal is not a handover.
+    expect(await refused("s1", "session-a")).toBe(false);
+    // Another socket naming the same gesture id owns nothing and lifts nothing.
+    expect(await refused("s2", "session-b")).toBe(false);
+    expect(cancels).toEqual([]);
+
+    expect(await refused("s1", "session-b")).toBe(true);
+    expect(cancels).toEqual([{ deviceId: "emulator-5554", gestureId: "g1" }]);
+    expect(registry.ownerCount).toBe(0);
+  });
+
+  test("a stroke started on an unheld device is cancelled when a session has since acquired it", async () => {
+    const { liveSockets, cancels, registry } = createHarness();
+    liveSockets.add("s1");
+    await registry.onStartAcked("s1", device, "g1");
+    const refused = (holder: string | undefined) =>
+      registry.cancelIfDeviceChangedHands("s1", device.deviceId, "g1", holder);
+
+    expect(await refused(undefined)).toBe(false);
+    expect(await refused("session-a")).toBe(true);
+    expect(cancels).toHaveLength(1);
+  });
+
+  test("a failed release-time or handover cancel is logged, not thrown", async () => {
+    const { liveSockets, registry } = createHarness({ failCancel: true });
+    liveSockets.add("s1");
+    await registry.onStartAcked("s1", device, "g1", "session-a");
+    await registry.onStartAcked("s1", device, "g2", "session-b");
+
+    await registry.cancelAllHeldBy("session-a");
+    expect(
+      await registry.cancelIfDeviceChangedHands("s1", device.deviceId, "g2", "session-c"),
+    ).toBe(true);
+    expect(registry.ownerCount).toBe(0);
+  });
 });

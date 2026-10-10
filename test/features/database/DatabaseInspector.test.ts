@@ -4,6 +4,7 @@ import type { BootedDevice } from "../../../src/models";
 import { shellQuote } from "../../../src/utils/shellQuote";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { ActionableError } from "../../../src/models";
+import { AppNotRunningError } from "../../../src/models/AppNotRunningError";
 import { ProviderUnavailableError } from "../../../src/features/storage/ProviderUnavailableError";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -52,6 +53,87 @@ describe("DatabaseInspector", () => {
       const commands = fakeAdb.getAllCommands();
       expect(commands.some((c) => c.includes("--extra readOnly:s:'true'"))).toBe(true);
       expect(commands.filter((c) => c.includes("readOnly"))).toHaveLength(1);
+    });
+  });
+
+  describe("non-owner read of a held device with a dead app (#11350)", () => {
+    const sqlCmd = `shell content call --uri 'content://${appId}.automobile.database' --method executeSQL --extra databasePath:s:'${databasePath}' --extra query:s:'select 1'`;
+    const ok = `Bundle[{success=true, result={"type":"query","columns":["1"],"rows":[[1]]}}]`;
+    const providerCalls = () => fakeAdb.getAllCommands().filter((c) => c.includes("content call"));
+
+    test("refuses with app_not_running and never calls the provider", async () => {
+      fakeAdb.setCommandResult(`shell pidof ${shellQuote(appId)}`, "");
+      fakeAdb.setCommandResult(sqlCmd, ok);
+      const watcher = new DatabaseInspector(device, fakeAdb, fakeTimer, () => true);
+
+      const error = await watcher.executeSQL(appId, databasePath, "select 1").catch((e) => e);
+
+      expect(error).toBeInstanceOf(AppNotRunningError);
+      expect(error.code).toBe("app_not_running");
+      expect(error.retryable).toBe(false);
+      expect(providerCalls()).toEqual([]);
+    });
+
+    const pidofFailure = (props: Record<string, unknown>) =>
+      Object.assign(new Error("Command failed: adb shell pidof"), props);
+
+    test("a clean pidof miss (exit 1, no output) is app_not_running", async () => {
+      fakeAdb.setCommandError(
+        `shell pidof ${shellQuote(appId)}`,
+        pidofFailure({ code: 1, stdout: "", stderr: "" }),
+      );
+      const watcher = new DatabaseInspector(device, fakeAdb, fakeTimer, () => true);
+
+      const error = await watcher.executeSQL(appId, databasePath, "select 1").catch((e) => e);
+
+      expect(error).toBeInstanceOf(AppNotRunningError);
+      expect(providerCalls()).toEqual([]);
+    });
+
+    test("a probe failure surfaces as the real error, not app_not_running, and skips the provider", async () => {
+      fakeAdb.setCommandError(
+        `shell pidof ${shellQuote(appId)}`,
+        pidofFailure({ code: 1, stdout: "", stderr: "error: device offline" }),
+      );
+      fakeAdb.setCommandResult(sqlCmd, ok);
+      const watcher = new DatabaseInspector(device, fakeAdb, fakeTimer, () => true);
+
+      const error = await watcher.executeSQL(appId, databasePath, "select 1").catch((e) => e);
+
+      expect(error).not.toBeInstanceOf(AppNotRunningError);
+      expect(error.message).toContain("Command failed");
+      expect(providerCalls()).toEqual([]);
+    });
+
+    test("a probe timeout surfaces as the real error", async () => {
+      fakeAdb.setCommandError(`shell pidof ${shellQuote(appId)}`, new Error("adb timed out"));
+      const watcher = new DatabaseInspector(device, fakeAdb, fakeTimer, () => true);
+
+      const error = await watcher.executeSQL(appId, databasePath, "select 1").catch((e) => e);
+
+      expect(error.message).toBe("adb timed out");
+      expect(providerCalls()).toEqual([]);
+    });
+
+    test("reads normally when the app is alive", async () => {
+      fakeAdb.setCommandResult(sqlCmd, ok);
+      const watcher = new DatabaseInspector(device, fakeAdb, fakeTimer, () => true);
+
+      const result = await watcher.executeSQL(appId, databasePath, "select 1");
+
+      expect(result.rows).toEqual([[1]]);
+      expect(providerCalls()).toHaveLength(1);
+    });
+
+    test("the owner's read of a dead app still cold-starts it", async () => {
+      fakeAdb.setCommandResult(`shell pidof ${shellQuote(appId)}`, "");
+      fakeAdb.setCommandResult(sqlCmd, ok);
+      const owner = new DatabaseInspector(device, fakeAdb, fakeTimer, () => false);
+
+      const result = await owner.executeSQL(appId, databasePath, "select 1");
+
+      expect(result.rows).toEqual([[1]]);
+      expect(providerCalls()).toHaveLength(1);
     });
   });
 

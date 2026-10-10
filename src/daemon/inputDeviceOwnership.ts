@@ -92,6 +92,19 @@ export function deviceAlreadyAssignedToAnotherSessionError(
   );
 }
 
+/** True when the requester is the holder, a derived `${base}:${label}` session counting as its base. */
+export function isSameHolderSession(
+  ownerSessionUuid: string,
+  requesterSessionUuid: string | undefined,
+  sessionManager: ToolSelectionSessionManager | undefined,
+): boolean {
+  if (!requesterSessionUuid) {
+    return false;
+  }
+  const base = (uuid: string) => resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
+  return base(requesterSessionUuid) === base(ownerSessionUuid);
+}
+
 /** Throws {@link InputDeviceOwnedError} unless the requester may drive the device. */
 export function assertInputRequesterHoldsDevice(input: {
   action: string;
@@ -108,8 +121,7 @@ export function assertInputRequesterHoldsDevice(input: {
   if (!ownerSessionUuid) {
     return;
   }
-  const base = (uuid: string) => resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
-  if (requesterSessionUuid && base(requesterSessionUuid) === base(ownerSessionUuid)) {
+  if (isSameHolderSession(ownerSessionUuid, requesterSessionUuid, sessionManager)) {
     return;
   }
   throw new InputDeviceOwnedError(input.action, input.deviceId, requesterSessionUuid, input.remedy);
@@ -228,4 +240,40 @@ export async function assertInputNotOnForeignManagedSlotDevice(input: {
       : undefined,
     maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
   });
+}
+
+/** The pool's cross-daemon claim check, optional so older daemon-state fakes keep compiling. */
+export interface ForeignDaemonClaimGate {
+  assertNotClaimedByForeignDaemon?(
+    deviceId: string,
+    platform: "android" | "ios",
+    remedy?: string,
+    maxAgeMs?: number,
+  ): Promise<void>;
+}
+
+/**
+ * How stale the foreign-claim read may be for a sessionless control call. Like
+ * {@link MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS}: such calls are frequent and each fresh read may
+ * cost a status query and a relinquish round trip to a peer daemon, so calls share one per second.
+ */
+export const FOREIGN_DAEMON_CLAIM_SNAPSHOT_MAX_AGE_MS = 1_000;
+
+/**
+ * Control on a device no session of this daemon holds is refused with the typed
+ * `device_owned_by_other_daemon` while another live daemon claims it (#11349): two daemons must
+ * never drive the same device. The pool skips the check for a device a local session holds, whose
+ * access the holder check governs. Reads are never passed here; watching stays open.
+ */
+export async function assertControlNotOnForeignDaemonDevice(input: {
+  deviceId: string;
+  platform: "android" | "ios";
+  gate: ForeignDaemonClaimGate;
+}): Promise<void> {
+  await input.gate.assertNotClaimedByForeignDaemon?.(
+    input.deviceId,
+    input.platform,
+    undefined,
+    FOREIGN_DAEMON_CLAIM_SNAPSHOT_MAX_AGE_MS,
+  );
 }

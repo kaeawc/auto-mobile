@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 import type { SessionManager } from "../../src/daemon/sessionManager";
@@ -17,7 +17,7 @@ type UnboundCallback = Parameters<SessionManager["onSessionDeviceUnbound"]>[0];
 class FakeSessionManager implements CleanupManager {
   releaseCallbacks: ReleaseCallback[] = [];
   unboundCallbacks: UnboundCallback[] = [];
-  pendingCleanups: Array<{ deviceId: string; cleanup: Promise<unknown> }> = [];
+  pendingCleanups: Array<{ deviceId: string; cleanup: Promise<unknown>; capMs?: number }> = [];
   acquisitionCleanups: Array<{ deviceId: string; cleanup: Promise<unknown> }> = [];
 
   onSessionRelease(callback: ReleaseCallback): void {
@@ -26,8 +26,8 @@ class FakeSessionManager implements CleanupManager {
   onSessionDeviceUnbound(callback: UnboundCallback): void {
     this.unboundCallbacks.push(callback);
   }
-  registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
-    this.pendingCleanups.push({ deviceId, cleanup });
+  registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>, capMs?: number): void {
+    this.pendingCleanups.push({ deviceId, cleanup, capMs });
   }
 
   registerAcquisitionDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
@@ -155,6 +155,14 @@ function setup() {
 }
 
 describe("registerRecordingSessionCleanup", () => {
+  // The finalized-id capture is module-level state keyed by session id; tests that never take
+  // their captured ids would leak them into a later test that reuses the id under random order.
+  beforeEach(() => {
+    for (const sessionId of ["session-a", "session-b", "session-c"]) {
+      takeRecordingIdsFinalizedByRelease(sessionId);
+    }
+  });
+
   test("idle release stops the owner's recording and the next owner can start one", async () => {
     const { manager, recordings } = setup();
     recordings.start("SIM-1", "session-a");
@@ -167,6 +175,16 @@ describe("registerRecordingSessionCleanup", () => {
     expect(manager.pendingCleanups.map((entry) => entry.deviceId)).toEqual(["SIM-1"]);
     recordings.start("SIM-1", "session-b");
     expect(recordings.active.get("SIM-1")?.ownerSessionUuid).toBe("session-b");
+  });
+
+  test("the pending cleanup advertises the real finalize cap plus the incomplete-mark grace, so a refused bind's retryAfterMs is not the 1 s default", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+
+    manager.release("session-a", "SIM-1");
+    await manager.settle();
+
+    expect(manager.pendingCleanups.map((entry) => entry.capMs)).toEqual([125_000]);
   });
 
   test("release captures the recording ids it finalizes before stopping them, once", async () => {

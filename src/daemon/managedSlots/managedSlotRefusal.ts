@@ -89,7 +89,8 @@ export const DEVICE_OUTSIDE_MANAGED_SLOTS_CODE = "device_outside_managed_slots";
 /**
  * `device`: the target device is not one of the connection's slot devices. `session`: the call
  * named a session that is not one of the connection's slot sessions. `tool`: the tool acquires,
- * starts, provisions or deletes devices, which a managed connection leaves to slot acquisition.
+ * starts, stops, provisions or deletes devices, which a managed connection leaves to slot
+ * acquisition and release.
  */
 export type ManagedConnectionRefusalReason = "device" | "session" | "tool";
 
@@ -136,6 +137,9 @@ function managedConnectionRefusalDetail(
     case "session":
       return `Session ${target.sessionUuid} is not one of its slot sessions.`;
     case "tool":
-      return "Slot devices are acquired, started and deleted only by managed slot acquisition.";
+      return (
+        "Slot devices are acquired, started, stopped and deleted only by managed slot " +
+        "acquisition and release."
+      );
   }
 }

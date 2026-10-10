@@ -4,8 +4,8 @@ import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/s
 
 /**
  * The managed-connection gate for plain (not device-aware) tools (#11178): a socket session bound
- * to managed slots may not acquire, start, provision or delete devices, and may point
- * `setActiveDevice`/`killDevice` only at its own slot devices. Device-aware tools are gated in
+ * to managed slots may not acquire, start, stop, provision or delete devices, and may point
+ * `setActiveDevice` only at its own slot devices. Device-aware tools are gated in
  * ToolRegistry, where the target device is resolved. No-op outside the daemon and for generic
  * connections. Throws `DeviceOutsideManagedSlotsError` (`device_outside_managed_slots`).
  */

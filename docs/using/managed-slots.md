@@ -336,7 +336,11 @@ slot. Only control and lifecycle calls on another slot's device are refused.
   control, start, provision or delete anything outside its own slot devices or
   sessions gets the non-retryable `device_outside_managed_slots`, with a reason
   of `device`, `session` or `tool` (device-acquiring tools are left to slot
-  acquisition).
+  acquisition). Lifecycle tools (`getAndroid`, `getApple`, `startDevice`,
+  `provisionDevice`, `killDevice`, `deleteDevice`) are refused with reason `tool`
+  even on the connection's own slot device: it could not boot the device again,
+  so a stop would strand the execution. End the execution instead; the next
+  acquisition on the slot boots and reuses the device.
 - The generic device pool skips assigned and free-pool devices as capacity, idle
   or not. If the registry has never been readable, allocation refuses with
   retryable `discovery_incomplete` rather than treat unknown as free.

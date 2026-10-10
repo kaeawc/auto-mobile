@@ -241,6 +241,21 @@ describe("ToolRegistry managed-slot enforcement (#11178)", () => {
         gate("killDevice", { device: { deviceId: free.deviceId, name: "Free", platform: "ios" } }),
       ).toThrow(DeviceOutsideManagedSlotsError);
       expect(gate("listDevices", {})).not.toThrow();
+      // Stopping is lifecycle too: even its own slot device stops only through slot release (#11271).
+      const ownKill = gate(
+        "killDevice",
+        { device: { deviceId: slotA.deviceId, name: "Slot A", platform: "ios" } },
+        execA,
+      );
+      expect(ownKill).toThrow(DeviceOutsideManagedSlotsError);
+      try {
+        ownKill();
+      } catch (error) {
+        expect((error as DeviceOutsideManagedSlotsError).toPayload()).toMatchObject({
+          reason: "tool",
+          action: "killDevice",
+        });
+      }
       // A generic connection is not confined.
       expect(() =>
         assertManagedConnectionPlainToolCall({

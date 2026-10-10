@@ -1,6 +1,6 @@
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
 import type { ObserveResult } from "../../models";
-import { isOwnPrototypeFocused } from "../observe/ownPrototypeFocus";
+import { isOwnWindowFocused } from "../observe/ownWindowFocus";
 
 /**
  * The package that owns the foreground task, from the adb back stack. Used to
@@ -29,7 +29,7 @@ export function getLaunchObservationPackageNames(observation: ObserveResult | un
     return [];
   }
 
-  const prototypeFocused = isOwnPrototypeFocused(observation.viewHierarchy);
+  const prototypeFocused = isOwnWindowFocused(observation.viewHierarchy);
   const reported = [observation.activeWindow?.appId, observation.viewHierarchy?.packageName].filter(
     (packageName): packageName is string => !!packageName,
   );

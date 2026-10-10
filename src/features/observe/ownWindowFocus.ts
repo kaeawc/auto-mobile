@@ -44,16 +44,17 @@ export const PROTOTYPE_WINDOW_TYPE = "prototype";
  * window; a lone CtrlProxy-labelled capture with no prototype window stays subject
  * to the ordinary identity check.
  */
-export function isOwnPrototypeFocused(
+export function isOwnWindowFocused(
   hierarchy: Pick<ViewHierarchyResult, "packageName" | "windows"> | undefined,
 ): boolean {
-  return ownPrototypeWindows(hierarchy).some(
+  return ownWindows(hierarchy).some(
     (window) => window.isFocused === true || window.isActive === true,
   );
 }
 
 /**
- * CtrlProxy's own prototype windows in a capture, focused or not.
+ * CtrlProxy's own windows in a capture, focused or not: the prototype and, via the type-4 branch, the
+ * highlight tool's accessibility-overlay window (nothing tells them apart there without metadata).
  *
  * Explicit evidence decides first: a window the APK stamped with prototype metadata
  * (`prototypePlacement` / `prototypeOpaque`, `prototype_window_metadata_v1`) and that reports CtrlProxy's
@@ -66,7 +67,7 @@ export function isOwnPrototypeFocused(
  *   granted.
  * CtrlProxy's activity (an application window) and its keyboard (an input-method window) never count.
  */
-export function ownPrototypeWindows(
+export function ownWindows(
   hierarchy: Pick<ViewHierarchyResult, "packageName" | "windows"> | undefined,
 ): ViewHierarchyWindowInfo[] {
   return (hierarchy?.windows ?? []).filter((window) => {

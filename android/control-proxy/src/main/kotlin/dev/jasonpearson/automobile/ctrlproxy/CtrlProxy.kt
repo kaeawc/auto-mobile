@@ -402,7 +402,7 @@ internal data class AccessibilityEventWork(
 }
 
 /**
- * True only for an event from CtrlProxy's own overlay window: an accessibility-overlay window (the
+ * True only for an event from CtrlProxy's own window: an accessibility-overlay window (the
  * highlight overlay or the prototype) or, while an application-layer prototype is up
  * ([appLayerShowing]), a `TYPE_SYSTEM` window, which is how the system reports that layer.
  * CtrlProxy's package also owns the CtrlProxy keyboard (`TYPE_INPUT_METHOD`) and `MainActivity`
@@ -411,7 +411,7 @@ internal data class AccessibilityEventWork(
  * because handling one extra event is safe while dropping a keyboard event leaves stale key
  * coordinates passing the staleness check.
  */
-internal fun shouldSkipOwnOverlayEvent(
+internal fun shouldSkipOwnWindowEvent(
   eventPackage: String?,
   ownPackage: String,
   windowType: Int?,
@@ -3572,7 +3572,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val ownWindowType = if (eventPackage == packageName) ownEventWindowType(event) else null
     val appLayerShowing =
       ::prototypeController.isInitialized && prototypeController.isAppLayerShowing
-    if (shouldSkipOwnOverlayEvent(eventPackage, packageName, ownWindowType, appLayerShowing)) return
+    if (shouldSkipOwnWindowEvent(eventPackage, packageName, ownWindowType, appLayerShowing)) return
     // A window appearing in an app is the cheapest sign its process (re)started; an open storage
     // subscription uses it to re-arm the app-side listener a restart wiped (#10069). A map miss
     // for every package without a subscription, so this is free on the hot path.

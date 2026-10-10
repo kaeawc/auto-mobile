@@ -6,8 +6,8 @@ import type {
 } from "../../../../src/features/observe/ios/types";
 import {
   assertAppGestureNotUnderPrototype,
-  hasOwnPrototype,
-  ownPrototypeCoversPoint,
+  hasOwnWindow,
+  ownWindowCoversPoint,
   scopeHierarchyForSelector,
   scopeHierarchyToLayer,
   scopeObserveResultToLayer,
@@ -57,7 +57,7 @@ function ids(hierarchy: ViewHierarchyResult): Set<string> {
 describe("iOS prototype agent window with layer (iphone D2)", () => {
   test("the converted capture has the prototype and both layers split it from Settings", () => {
     const hierarchy = convert();
-    expect(hasOwnPrototype(hierarchy)).toBe(true);
+    expect(hasOwnWindow(hierarchy)).toBe(true);
 
     const prototype = ids(scopeHierarchyForSelector(hierarchy, "prototype"));
     const app = ids(scopeHierarchyForSelector(hierarchy, "app"));
@@ -73,7 +73,7 @@ describe("iOS prototype agent window with layer (iphone D2)", () => {
 
   test("the unconverted runner tree is split at the agent's UIWindow", () => {
     const hierarchy = unconverted();
-    expect(hasOwnPrototype(hierarchy)).toBe(true);
+    expect(hasOwnWindow(hierarchy)).toBe(true);
     expect(ids(scopeHierarchyToLayer(hierarchy, "prototype")).has("like-button")).toBe(true);
     expect(ids(scopeHierarchyToLayer(hierarchy, "prototype")).has("Toolbar")).toBe(false);
     expect(ids(scopeHierarchyToLayer(hierarchy, "app")).has("like-button")).toBe(false);
@@ -82,14 +82,14 @@ describe("iOS prototype agent window with layer (iphone D2)", () => {
 
   test("when only the agent's window contributes nodes, all of them are the prototype's", () => {
     const hierarchy = onlyWindow(1);
-    expect(hasOwnPrototype(hierarchy)).toBe(true);
+    expect(hasOwnWindow(hierarchy)).toBe(true);
     expect(ids(scopeHierarchyToLayer(hierarchy, "prototype")).has("like-button")).toBe(true);
     expect(ids(scopeHierarchyToLayer(hierarchy, "app")).has("like-button")).toBe(false);
   });
 
   test("Settings alone has no prototype, so layer prototype is the actionable error", () => {
     const hierarchy = onlyWindow(0);
-    expect(hasOwnPrototype(hierarchy)).toBe(false);
+    expect(hasOwnWindow(hierarchy)).toBe(false);
     expect(scopeHierarchyToLayer(hierarchy, "app")).toBe(hierarchy);
     expect(() => scopeHierarchyForSelector(hierarchy, "prototype")).toThrow(
       /no AutoMobile prototype is showing/,
@@ -101,9 +101,9 @@ describe("iOS prototype agent window with layer (iphone D2)", () => {
     const like = { x: 96, y: 802 };
     const dismiss = { x: 372, y: 84 };
     const settingsRow = { x: 200, y: 213 };
-    expect(ownPrototypeCoversPoint(hierarchy, like)).toBe(true);
-    expect(ownPrototypeCoversPoint(hierarchy, dismiss)).toBe(true);
-    expect(ownPrototypeCoversPoint(hierarchy, settingsRow)).toBe(false);
+    expect(ownWindowCoversPoint(hierarchy, like)).toBe(true);
+    expect(ownWindowCoversPoint(hierarchy, dismiss)).toBe(true);
+    expect(ownWindowCoversPoint(hierarchy, settingsRow)).toBe(false);
     expect(() => assertAppGestureNotUnderPrototype(hierarchy, "app", like, "tap")).toThrow(
       /prototype window covers that point/,
     );

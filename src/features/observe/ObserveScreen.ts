@@ -121,7 +121,7 @@ import {
 } from "./observationFreshness";
 import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
-import { PROTOTYPE_WINDOW_TYPE, isOwnPrototypeFocused } from "./ownPrototypeFocus";
+import { PROTOTYPE_WINDOW_TYPE, isOwnWindowFocused } from "./ownWindowFocus";
 import { DefaultElementParser } from "../utility/ElementParser";
 import {
   ALERT_TITLE_RESOURCE_ID,
@@ -341,19 +341,19 @@ function isStatusBarOnlyCandidate(
  * focusable prototype, which owns focus while the app stays resumed behind it
  * (issue #10000). Neither is a stale wrong-window capture. The prototype case is
  * judged from the capture's own windows, so it only counts when the capture is
- * current (`ownPrototypeEvidenceCurrent`): a stale capture taken while the prototype
+ * current (`ownWindowEvidenceCurrent`): a stale capture taken while the prototype
  * had focus says nothing about the device now.
  */
 function isExpectedFocusDivergence(
   hierarchy: ObserveResult["viewHierarchy"],
   observed: string,
   foreground: string,
-  ownPrototypeEvidenceCurrent: boolean,
+  ownWindowEvidenceCurrent: boolean,
 ): boolean {
   return (
     SYSTEM_UI_WINDOW_PACKAGES.has(observed) ||
     SYSTEM_UI_WINDOW_PACKAGES.has(foreground) ||
-    (ownPrototypeEvidenceCurrent && isOwnPrototypeFocused(hierarchy))
+    (ownWindowEvidenceCurrent && isOwnWindowFocused(hierarchy))
   );
 }
 
@@ -1971,7 +1971,7 @@ export class RealObserveScreen implements ObserveScreen {
         postCaptureForeground,
         signal,
       );
-      await this.attributeFocusedOwnPrototypeToForeground(result, foregroundIdentity, minTimestamp);
+      await this.attributeFocusedOwnWindowToForeground(result, foregroundIdentity, minTimestamp);
       const windowIdentityMismatch = await this.resolveWindowIdentityMismatch(
         result,
         foregroundIdentity,
@@ -3822,7 +3822,7 @@ export class RealObserveScreen implements ObserveScreen {
         result.viewHierarchy,
         observed,
         foreground,
-        this.isOwnPrototypeEvidenceCurrent(result, minTimestamp),
+        this.isOwnWindowEvidenceCurrent(result, minTimestamp),
       )
     ) {
       return undefined;
@@ -3852,7 +3852,7 @@ export class RealObserveScreen implements ObserveScreen {
    * freshness age budget; with no stamp the claim cannot be dated and is not
    * trusted.
    */
-  private isOwnPrototypeEvidenceCurrent(result: ObserveResult, minTimestamp: number): boolean {
+  private isOwnWindowEvidenceCurrent(result: ObserveResult, minTimestamp: number): boolean {
     const stamp = this.resolveObservationTimestampMs(result);
     if (stamp === undefined || (minTimestamp > 0 && stamp < minTimestamp)) {
       return false;
@@ -3868,7 +3868,7 @@ export class RealObserveScreen implements ObserveScreen {
    * attribution source; with no ground truth, or a SystemUI surface on top, the
    * window is left as captured.
    */
-  private async attributeFocusedOwnPrototypeToForeground(
+  private async attributeFocusedOwnWindowToForeground(
     result: ObserveResult,
     foregroundIdentity: Promise<string | undefined>,
     minTimestamp: number,
@@ -3876,8 +3876,8 @@ export class RealObserveScreen implements ObserveScreen {
     const activeWindow = result.activeWindow;
     if (
       activeWindow?.appId !== CTRL_PROXY_PACKAGE ||
-      !isOwnPrototypeFocused(result.viewHierarchy) ||
-      !this.isOwnPrototypeEvidenceCurrent(result, minTimestamp)
+      !isOwnWindowFocused(result.viewHierarchy) ||
+      !this.isOwnWindowEvidenceCurrent(result, minTimestamp)
     ) {
       return;
     }

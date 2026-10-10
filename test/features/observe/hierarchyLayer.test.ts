@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import {
   assertAppGestureNotUnderPrototype,
-  hasOwnPrototype,
-  ownPrototypeCoversPoint,
+  hasOwnWindow,
+  ownWindowCoversPoint,
   scopeHierarchyForSelector,
   scopeHierarchyToLayer,
   scopeObserveResultToLayer,
 } from "../../../src/features/observe/hierarchyLayer";
-import { PROTOTYPE_WINDOW_TYPE } from "../../../src/features/observe/ownPrototypeFocus";
+import { PROTOTYPE_WINDOW_TYPE } from "../../../src/features/observe/ownWindowFocus";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
@@ -62,8 +62,8 @@ function selectSettings(hierarchy: ViewHierarchyResult): number | undefined {
 
 describe("scopeHierarchyToLayer (#9305)", () => {
   test("the relabelled capture is recognized as having the prototype", () => {
-    expect(hasOwnPrototype(captureWithPrototype())).toBe(true);
-    expect(hasOwnPrototype(convertedCapture())).toBe(false);
+    expect(hasOwnWindow(captureWithPrototype())).toBe(true);
+    expect(hasOwnWindow(convertedCapture())).toBe(false);
   });
 
   test("omitted layer returns the capture unchanged, prototype included", () => {
@@ -182,8 +182,8 @@ describe("assertAppGestureNotUnderPrototype (#9305)", () => {
 
   test("a full-screen prototype covers every app point", () => {
     const hierarchy = capturedPrototypeHierarchy({ fullScreen: true });
-    expect(ownPrototypeCoversPoint(hierarchy, { x: 130, y: 578 })).toBe(true);
-    expect(ownPrototypeCoversPoint(capturedTwoWindowHierarchy(), { x: 130, y: 578 })).toBe(false);
+    expect(ownWindowCoversPoint(hierarchy, { x: 130, y: 578 })).toBe(true);
+    expect(ownWindowCoversPoint(capturedTwoWindowHierarchy(), { x: 130, y: 578 })).toBe(false);
   });
 
   test("default and prototype layers never refuse", () => {
@@ -243,7 +243,7 @@ describe('app-layer prototype windows (window.layer "app", aovl D4)', () => {
 
   test("the captured app-layer window is AutoMobile's prototype and the status bar is not", () => {
     const hierarchy = capturedAppLayerPrototypeHierarchy();
-    expect(hasOwnPrototype(hierarchy)).toBe(true);
+    expect(hasOwnWindow(hierarchy)).toBe(true);
     const prototype = scopeHierarchyForSelector(hierarchy, "prototype");
     expect(rootWindowIds(prototype)).toEqual([PROTOTYPE_CAPTURE.appLayerPrototypeWindowId]);
     expect(selectByText(prototype, "Bump")).toBeDefined();
@@ -274,7 +274,7 @@ describe('app-layer prototype windows (window.layer "app", aovl D4)', () => {
       ),
       highlight,
     ];
-    expect(hasOwnPrototype(hierarchy)).toBe(false);
+    expect(hasOwnWindow(hierarchy)).toBe(false);
     expect(() => scopeHierarchyForSelector(hierarchy, "prototype")).toThrow(
       /no AutoMobile prototype is showing/,
     );

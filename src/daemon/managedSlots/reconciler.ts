@@ -243,7 +243,14 @@ export interface ManagedSlotDeviceClaims {
 
 export type ManagedSlotCapacityCheck =
   | { kind: "available" }
-  | { kind: "exhausted"; limit: number; booted: number; retryAfterMs: number };
+  | {
+      kind: "exhausted";
+      limit: number;
+      booted: number;
+      retryAfterMs: number;
+      /** Counted devices AutoMobile did not start; present only when there are any (#11390). */
+      externalDevices?: string[];
+    };
 
 /** Immediate boot capacity probe (no waiting). Absent means boots are not gated. */
 export interface ManagedSlotBootCapacity {
@@ -381,7 +388,15 @@ export interface ManagedSlotReconcileFailure {
   nextAction: string;
   /** Underlying provision failure, when the provision path refused. */
   provision?: { code: string; retryable: boolean };
-  capacity?: { limit: number; booted: number; retryAfterMs: number };
+  capacity?: ManagedSlotFailureCapacity;
+}
+
+/** Same `externalDevices` name and shape as the non-slot `capacity_exhausted` refusal (#11390). */
+export interface ManagedSlotFailureCapacity {
+  limit: number;
+  booted: number;
+  retryAfterMs: number;
+  externalDevices?: string[];
 }
 
 export interface ManagedSlotReconcileEvidence {
@@ -859,11 +874,22 @@ function claimFailure(
   }
 }
 
+function externalDevicesField(devices: readonly string[] | undefined): {
+  externalDevices?: string[];
+} {
+  return devices && devices.length > 0 ? { externalDevices: [...devices] } : {};
+}
+
 /** Map a provision-path error into a typed reconcile failure. */
 function provisionFailure(error: unknown): ManagedSlotReconcileFailure {
   if (error instanceof BootCapacityExhaustedError) {
     return failure("capacity_exhausted", error.message, {
-      capacity: { limit: error.limit, booted: error.booted, retryAfterMs: error.retryAfterMs },
+      capacity: {
+        limit: error.limit,
+        booted: error.booted,
+        retryAfterMs: error.retryAfterMs,
+        ...externalDevicesField(error.details.externalDevices),
+      },
     });
   }
   if (error instanceof ProvisionDeviceError) {
@@ -880,6 +906,7 @@ function provisionFailure(error: unknown): ManagedSlotReconcileFailure {
           limit: capacity.limit,
           booted: capacity.booted,
           retryAfterMs: error.diagnostics.retryAfterMs ?? 0,
+          ...externalDevicesField(capacity.externalDevices),
         },
       });
     }
@@ -1917,6 +1944,7 @@ export class ManagedSlotReconciler {
               limit: check.limit,
               booted: check.booted,
               retryAfterMs: check.retryAfterMs,
+              ...externalDevicesField(check.externalDevices),
             },
           },
         ),

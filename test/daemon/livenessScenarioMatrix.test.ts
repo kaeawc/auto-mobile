@@ -1373,3 +1373,218 @@ describe("a client cancels and dies in the same tick (#11058, #11066)", () => {
     }
   });
 });
+
+describe("behaviours only narrow tests protected (#11444, #10655)", () => {
+  test("a read through the proxy after an idle release succeeds without a session, and binds nothing (#10971)", async () => {
+    scenario = await LivenessScenario.start();
+    const session = await scenario.acquire();
+    expect(
+      await scenario.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS),
+    ).toBeDefined();
+    expectFreed();
+
+    // The agent's control call learns of the release and is told to reacquire: terminal, every time.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect((await rejection(scenario.selectorCall(DEVICE_A)))?.message).toContain("getAndroid");
+    }
+    const drivenBefore = scenario.driven.length;
+
+    // From then on its reads go through with no session, and none of them binds the device.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await scenario.idle(10_000);
+      expect(await rejection(scenario.selectorCall(DEVICE_A, "observe", {}))).toBeUndefined();
+      expectFreed();
+    }
+    expect(scenario.driven.slice(drivenBefore).map((run) => run.sessionUuid)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(scenario.isHeld(session)).toBe(false);
+    expectFreed();
+  });
+
+  test("a daemon stall followed by a late ack inside the recovery budget recovers the session instead of handing it over (#10973)", async () => {
+    scenario = await LivenessScenario.start();
+    const session = await scenario.acquire();
+    await scenario.idle(2_000);
+
+    // Held side: the first heartbeat in the blackout is accepted 6 s late and every recovery
+    // attempt meanwhile goes unanswered; the late ack cancels the handover.
+    scenario.daemonStall = { lateAckDelayMs: 6_000 };
+    await scenario.idle(SUSPECT_GRACE_MS + 2 * SCAN_MS);
+    scenario.daemonStall = undefined;
+    await scenario.idle(KEEPER_INTERVAL_MS * 2);
+    expectHeld(session);
+    expect(await rejection(scenario.toolCall(session))).toBeUndefined();
+    expect(scenario.releases).toEqual([]);
+
+    // Released side: the recovered session is an ordinary one again and idles out on schedule.
+    expect(
+      await scenario.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS),
+    ).toBeDefined();
+    expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
+    expectFreed();
+  });
+
+  test("a daemon stall with no ack inside the budget hands the session over: the call is told the daemon stalled (#10973)", async () => {
+    scenario = await LivenessScenario.start();
+    const session = await scenario.acquire();
+    await scenario.idle(2_000);
+
+    scenario.daemonStall = {};
+    await scenario.idle(SUSPECT_GRACE_MS + 2 * SCAN_MS + KEEPER_INTERVAL_MS);
+    scenario.daemonStall = undefined;
+
+    const refused = await rejection(scenario.toolCall(session));
+    expect(refused).toBeInstanceOf(Error);
+    expect(refused?.message ?? "").toContain("daemon stalled and stopped acknowledging heartbeats");
+    expect(scenario.isHeld(session)).toBe(false);
+    expectFreed();
+  });
+
+  test("a refused call naming no deviceId touches no readiness and never drives the device (#10828)", async () => {
+    scenario = await LivenessScenario.start({ devices: [DEVICE_A] });
+    const holder = await scenario.acquire(DEVICE_A);
+    const readinessBefore = scenario.readinessTouches;
+    const drivenBefore = scenario.driven.length;
+
+    // Refused side: the only device is held, so a caller with no session and no deviceId is refused.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await scenario.idle(10_000);
+      const refused = await rejection(
+        scenario.daemonToolCallWith({ orientation: "landscape" }, "rotate"),
+      );
+      expect(refused?.message ?? "").toContain("held by another session");
+    }
+    expect(scenario.readinessTouches).toBe(readinessBefore);
+    expect(scenario.driven.length).toBe(drivenBefore);
+
+    // Allowed side: the holder names its session and drives the device.
+    expect(
+      await rejection(
+        scenario.daemonToolCallWith({ sessionUuid: holder, orientation: "landscape" }, "rotate"),
+      ),
+    ).toBeUndefined();
+    expect(scenario.driven.length).toBe(drivenBefore + 1);
+    expectHeld(holder, DEVICE_A);
+  });
+
+  test("a non-owner's ide/setKeyValue is refused and never reaches the device; the owner's is applied (#11178)", async () => {
+    scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B] });
+    const holder = await scenario.acquire(DEVICE_A);
+    const intruder = await scenario.acquireTokenless(DEVICE_B);
+    const setKeyValue = (sessionUuid?: string) =>
+      scenario.socketFrame("ide/setKeyValue", {
+        platform: "android",
+        deviceId: DEVICE_A,
+        appId: "com.example",
+        fileName: "prefs",
+        key: "k",
+        value: "v",
+        type: "STRING",
+        ...(sessionUuid ? { sessionUuid } : {}),
+      });
+    await scenario.toolCall(holder);
+    const lastCallAt = scenario.timer.now();
+
+    // Refused side: a sessionless client and another session, again and again.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await scenario.idle(10_000);
+      for (const caller of [undefined, intruder]) {
+        expect(await setKeyValue(caller)).toMatchObject({
+          success: false,
+          code: "device_owned_by_other_session",
+        });
+      }
+    }
+    expect(scenario.ctrlProxyWrites).toEqual([]);
+    expectHeld(holder, DEVICE_A);
+
+    // Allowed side: the holder's own frame reaches the device.
+    expect(await setKeyValue(holder)).toMatchObject({ success: true });
+    expect(scenario.ctrlProxyWrites).toEqual(["setPreference"]);
+
+    // Refusals were not use: the holder's window still ended one window after its last tool call.
+    const releasedAt = await scenario.idleUntilReleased(holder, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+    expect(releasedAt).toBeLessThanOrEqual(lastCallAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+    expectFreed(DEVICE_A);
+  });
+
+  test("a non-owner's write SQL on a held device is refused before readiness; the owner's write runs (#10966, #10830)", async () => {
+    scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B] });
+    const holder = await scenario.acquire(DEVICE_A);
+    const intruder = await scenario.acquireTokenless(DEVICE_B);
+    const sql = (query: string, sessionUuid?: string) =>
+      scenario.daemonToolCallWith(
+        {
+          deviceId: DEVICE_A,
+          appId: "com.example",
+          databasePath: "app.db",
+          query,
+          ...(sessionUuid ? { sessionUuid } : {}),
+        },
+        "sqlQuery",
+      );
+    const readinessBefore = scenario.readinessTouches;
+    const drivenBefore = scenario.driven.length;
+
+    for (const query of [
+      "INSERT INTO t VALUES (1)",
+      "SELECT 1; DELETE FROM t",
+      "WITH x AS (SELECT 1) DELETE FROM t",
+      "PRAGMA writable_schema = 1",
+    ]) {
+      for (const caller of [undefined, intruder]) {
+        const refused = await rejection(sql(query, caller));
+        expect(refused?.message ?? "").toContain("held by another session");
+      }
+    }
+    expect(scenario.readinessTouches).toBe(readinessBefore);
+    expect(scenario.driven.length).toBe(drivenBefore);
+
+    // Allowed side: the holder's write is its own control and reaches the device boundary.
+    expect(await rejection(sql("INSERT INTO t VALUES (1)", holder))).toBeUndefined();
+    expect(scenario.driven.slice(drivenBefore).map((run) => run.sessionUuid)).toEqual([holder]);
+    expectHeld(holder, DEVICE_A);
+  });
+
+  test("a non-holder's appearance set does not touch the device; the holder's applies to its own device only (#10976)", async () => {
+    scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B] });
+    const holder = await scenario.acquire(DEVICE_A);
+    const intruder = await scenario.acquireTokenless(DEVICE_B);
+
+    // Refused side: another session's set is applied to the devices IT owns, never to the holder's.
+    const foreign = await scenario.appearanceSet(intruder, "dark");
+    expect(foreign.response.success).toBe(true);
+    expect(foreign.applied).toEqual([`${DEVICE_B}:dark`]);
+    const sessionless = await scenario.appearanceSet(undefined, "dark");
+    expect(sessionless.response).toMatchObject({ success: false });
+    expect(sessionless.applied).toEqual([]);
+
+    // Allowed side: the holder's own set reaches its device and no other.
+    const own = await scenario.appearanceSet(holder, "dark");
+    expect(own.response.success).toBe(true);
+    expect(own.applied).toEqual([`${DEVICE_A}:dark`]);
+  });
+
+  test("an idle release while a recording finalize hangs frees the device at the cap, and the recording is marked incomplete (#10957)", async () => {
+    scenario = await LivenessScenario.start();
+    scenario.recordingStopHangs = true;
+    const session = await scenario.acquire();
+    expect(
+      await scenario.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS),
+    ).toBeDefined();
+    expect(scenario.incompleteRecordings).toEqual([]);
+
+    // Held side: inside the cap the wedged stop is not cut and nothing is marked.
+    await scenario.idle(60_000);
+    expect(scenario.incompleteRecordings).toEqual([]);
+
+    // Released side: past the cap plus the mark grace the recording is incomplete and the device free.
+    await scenario.idle(60_000 + 6_000);
+    expect(scenario.incompleteRecordings).toEqual([`recording-of-${session}`]);
+    expectFreed();
+    expect(await rejection(scenario.acquire())).toBeUndefined();
+  });
+});

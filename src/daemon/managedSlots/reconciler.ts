@@ -505,6 +505,8 @@ export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
   }
 }
 
+const IOS_RUNTIME_IDENTIFIER_PREFIX = "com.apple.CoreSimulator.SimRuntime.";
+
 /** The Android system-image packages installed in the SDK, as `system-images;...` identifiers. */
 export interface ManagedAndroidImageCatalog {
   listInstalledPackages(signal?: AbortSignal): Promise<string[]>;
@@ -521,9 +523,12 @@ export interface DefaultManagedSpecResolverOptions {
 }
 
 /**
- * Resolves a spec with the shared exact-provisioning checks: Android image identifier shape,
- * display cutout, and (with a catalog) a proven-incompatible iOS model/runtime pair. Unreadable
- * catalogs are unknown, not unsupported, matching the provisioner.
+ * Resolves a spec with the shared exact-provisioning checks. Codes are aligned across platforms:
+ * `spec_unsupported` for a malformed spec (an Android runtime that is not a system-image id, an iOS
+ * runtime that is not a CoreSimulator id) or one naming what this host has not installed (an
+ * Android image, an iOS runtime or device type, with a catalog); `runtime_incompatible` only for an
+ * installed iOS model/runtime pair the catalog proves incompatible. Unreadable catalogs are
+ * unknown, not unsupported, matching the provisioner.
  *
  * An omitted `deviceType` ("any model") resolves to the model a creation would use: on iOS the
  * newest iPhone the catalog lists as supporting the runtime (so a catalog is required), on Android
@@ -548,24 +553,9 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     spec: ManagedSlotRequestedSpec,
     options: { signal?: AbortSignal },
   ): Promise<ManagedSpecResolution> {
-    if (platform === "android" && !parseAndroidSystemImageRuntime(spec.runtime)) {
-      return {
-        kind: "unsupported",
-        code: "spec_unsupported",
-        message: `Android runtime '${spec.runtime}' is not a system-image identifier.`,
-      };
-    }
-    if (platform === "android") {
-      const missing = await this.findMissingAndroidImage(spec.runtime, options.signal);
-      if (missing) {
-        return { kind: "unsupported", code: "spec_unsupported", message: missing };
-      }
-    }
-    if (platform === "ios" && spec.deviceType !== undefined) {
-      const missing = await this.findMissingIosDeviceType(spec.deviceType, options.signal);
-      if (missing) {
-        return { kind: "unsupported", code: "spec_unsupported", message: missing };
-      }
+    const unsupported = await this.findUnsupportedSpec(platform, spec, options.signal);
+    if (unsupported) {
+      return { kind: "unsupported", code: "spec_unsupported", message: unsupported };
     }
     const model = await this.resolveDeviceType(platform, spec, options.signal);
     if (model.kind !== "resolved") {
@@ -591,6 +581,26 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
       resolvedSpec,
       fingerprint: computeManagedSpecFingerprint(platform, resolvedSpec),
     };
+  }
+
+  /**
+   * Why the spec is `spec_unsupported` before any model is chosen: malformed (an Android runtime
+   * that is not a system-image id, an iOS runtime that is not a CoreSimulator id), or naming what
+   * the host has not installed. Undefined when it may proceed.
+   */
+  private async findUnsupportedSpec(
+    platform: SlotPlatform,
+    spec: ManagedSlotRequestedSpec,
+    signal: AbortSignal | undefined,
+  ): Promise<string | undefined> {
+    if (platform === "android") {
+      return parseAndroidSystemImageRuntime(spec.runtime)
+        ? await this.findMissingAndroidImage(spec.runtime, signal)
+        : `Android runtime '${spec.runtime}' is not a system-image identifier.`;
+    }
+    return spec.runtime.startsWith(IOS_RUNTIME_IDENTIFIER_PREFIX)
+      ? await this.findMissingIosCatalogEntry(spec, signal)
+      : `iOS runtime '${spec.runtime}' is not a CoreSimulator runtime identifier (${IOS_RUNTIME_IDENTIFIER_PREFIX}...).`;
   }
 
   private async resolveDeviceType(
@@ -670,32 +680,49 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
   }
 
   /**
-   * The refusal for an iOS device type the simulator catalog does not list (#11271), checked before
-   * anything is created instead of surfacing simctl's raw "Invalid device type" text. No catalog,
-   * or an unreadable one, is not proof; simctl stays the authority.
+   * The refusal for an iOS runtime or device type the simulator catalog does not list (#11271),
+   * checked before anything is created instead of surfacing simctl's raw "Invalid device type" text
+   * or reporting a missing runtime as a model/runtime mismatch. Not installed is spec_unsupported,
+   * as for Android's uninstalled image (#11269); `runtime_incompatible` stays for an installed
+   * runtime that is unavailable or outside the model's range. No catalog, or an unreadable one, is
+   * not proof; simctl stays the authority.
    */
-  private async findMissingIosDeviceType(
-    deviceType: string,
+  private async findMissingIosCatalogEntry(
+    spec: ManagedSlotRequestedSpec,
     signal: AbortSignal | undefined,
   ): Promise<string | undefined> {
     if (!this.iosRuntimeCatalog) {
       return undefined;
     }
+    let runtimes: AppleDeviceRuntime[];
     let deviceTypes: AppleDeviceType[];
     try {
-      deviceTypes = await this.iosRuntimeCatalog.getDeviceTypesChecked(signal);
+      [runtimes, deviceTypes] = await Promise.all([
+        this.iosRuntimeCatalog.getRuntimesChecked(undefined, signal),
+        this.iosRuntimeCatalog.getDeviceTypesChecked(signal),
+      ]);
     } catch (error) {
-      logger.warn(`[ManagedSlots] iOS device-type check skipped: ${errorMessage(error)}`, error);
+      logger.warn(`[ManagedSlots] iOS catalog check skipped: ${errorMessage(error)}`, error);
       return undefined;
     }
-    if (deviceTypes.some((entry) => entry.identifier === deviceType)) {
+    if (!runtimes.some((entry) => entry.identifier === spec.runtime)) {
+      const installed = runtimes.map((entry) => entry.identifier);
+      return (
+        `iOS runtime '${spec.runtime}' is not installed on this host. Install it with Xcode, or ` +
+        `request an installed runtime (${installed.join(", ") || "none installed"}).`
+      );
+    }
+    if (
+      spec.deviceType === undefined ||
+      deviceTypes.some((entry) => entry.identifier === spec.deviceType)
+    ) {
       return undefined;
     }
     const iphones = deviceTypes
       .filter((entry) => entry.productFamily === "iPhone")
       .map((entry) => entry.identifier);
     return (
-      `iOS device type '${deviceType}' is not installed on this host. Request an installed ` +
+      `iOS device type '${spec.deviceType}' is not installed on this host. Request an installed ` +
       `device type (iPhone types: ${iphones.join(", ") || "none installed"}; all types: ` +
       "xcrun simctl list devicetypes)."
     );

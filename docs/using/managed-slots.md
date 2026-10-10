@@ -31,6 +31,13 @@ Known gaps at the time of writing:
   (fixed on `main` by #11269; the acceptance run saw a generic `provision_failed`).
 - `setActiveDevice` on a device outside the connection is refused with a
   typed refusal on `main` (#11269); the acceptance run saw an untyped message.
+- From the iOS run, fixed on `main` by #11271 and not re-verified live: a refused
+  `deleteDevice` on a slot device no longer aborts the slot's in-flight
+  acquisition; `killDevice` is refused on a managed connection, own slot device
+  included; `observe` of a non-slot device from a managed connection reads it
+  instead of failing on the session binding; a malformed or uninstalled iOS
+  runtime, or an unknown iOS device type, is `spec_unsupported` before anything
+  is created.
 
 ## Concepts
 
@@ -363,7 +370,8 @@ boot its device.
 | `contract_unsupported`              | no        | `contractVersion` is not supported by this build or daemon.                                                                                                                                             |
 | `managed_slot_group_unsupported`    | no        | `localSlotCapacity` or `requests` exceeds one slot and device.                                                                                                                                          |
 | `managed_slots_unsupported`         | no        | A config was supplied but this build does not serve managed slots.                                                                                                                                      |
-| `spec_unsupported`                  | no        | The requested spec is malformed or unsupported on this host; nothing was changed. (`runtime_incompatible` is the model/runtime variant.)                                                                |
+| `spec_unsupported`                  | no        | The requested spec is malformed, or names an Android image, iOS runtime or iOS device type this host has not installed; nothing was changed.                                                            |
+| `runtime_incompatible`              | no        | An installed iOS runtime that is unavailable, or outside the requested (or every listed) iPhone model's supported range; nothing was changed.                                                           |
 | `slot_in_use`                       | yes       | A live execution already holds the slot.                                                                                                                                                                |
 | `slot_settling`                     | yes       | The previous execution's released work is still settling.                                                                                                                                               |
 | `stale_session`                     | yes       | An earlier execution's session on the slot device could not be released.                                                                                                                                |

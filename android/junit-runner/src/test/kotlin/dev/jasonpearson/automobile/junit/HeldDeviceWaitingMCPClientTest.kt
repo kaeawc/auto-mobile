@@ -68,7 +68,7 @@ class HeldDeviceWaitingMCPClientTest {
   private fun client(delegate: AutoMobileAgent.MCPClient, budgetMs: Long = 30_000L) =
     HeldDeviceWaitingMCPClient(
       delegate,
-      backoffDelayMs = { waits, waited, retryAfterMs ->
+      backoffDelayMs = { waits, waited, retryAfterMs, _ ->
         val remaining = budgetMs - waited
         if (remaining <= 0) {
           null
@@ -93,6 +93,28 @@ class HeldDeviceWaitingMCPClientTest {
     assertEquals("ok", client(delegate).callTool("observe", emptyMap()))
     assertEquals(3, delegate.calls)
     assertEquals(listOf(500L, 1_000L), sleeps)
+  }
+
+  @Test
+  fun `a cleanup refusal advertising the finalize cap is waited out past 30 s`() {
+    // #11360: the real backoff stretches the budget for device_cleanup_in_progress.
+    val client =
+      HeldDeviceWaitingMCPClient(
+        ScriptedClient(
+          mutableListOf(
+            {
+              throw RuntimeException(
+                """MCP tool tapOn returned an error: {"success":false,"error":"finalizing","code":"device_cleanup_in_progress","retryable":true,"retryAfterMs":125000}""",
+              )
+            },
+            { "ok" },
+          ),
+        ),
+        sleeper = { sleeps += it },
+      )
+
+    assertEquals("ok", client.callTool("tapOn", emptyMap()))
+    assertEquals(listOf(125_000L), sleeps)
   }
 
   @Test

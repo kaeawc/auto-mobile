@@ -1,0 +1,13 @@
+{
+  "code": "session_ownership_lost.recovery_owned_by_other_daemon",
+  "builder": "SessionRecoveryIdentityLossError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"code\":\"session_ownership_lost\",\"message\":\"Cannot safely recover session 11111111-2222-4333-8444-555555555555: android device 'Pixel_8_API_35' is claimed by another AutoMobile daemon (PID 4242) (code device_owned_by_other_daemon) (recovery reason: owned-by-other-daemon). The persisted session is terminal; acquire a new device with getAndroid or getApple.\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"reason\":\"identity-recovery-owned-by-other-daemon\",\"retryable\":false,\"nextAction\":\"acquire_new_session\",\"recovery\":{\"action\":\"acquire_replacement_session\",\"tools\":[\"getAndroid\",\"getApple\"]},\"ownerPid\":4242,\"recoveryReason\":\"owned-by-other-daemon\",\"deviceId\":\"emulator-5554\"}}"
+      }
+    ],
+    "isError": true
+  }
+}

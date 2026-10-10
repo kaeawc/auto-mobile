@@ -1,0 +1,12 @@
+{
+  "surface": "socket-frame",
+  "name": "discovery_incomplete.ios",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "discovery_incomplete: iOS booted-device discovery was incomplete and is retryable: simctl list timed out",
+    "code": "discovery_incomplete",
+    "retryable": true
+  }
+}

@@ -201,12 +201,13 @@ These need a login or a credential, so they were not done in the change.
 Registering runners needs a registration token, so it was not done here. Run on
 the Mac as the user that owns `~/actions-runner`:
 
-1. Install Xcode 26.5 next to the current Xcode 26.6 (`/Applications/Xcode.app`)
-   and Xcode 27.1 beta, for example `xcodes install 26.5`, then
-   `DEVELOPER_DIR=/Applications/Xcode-26.5.0.app/Contents/Developer xcodebuild -downloadPlatform iOS`.
-   `bash scripts/ci/select-self-hosted-xcode.sh 26.5` must succeed afterwards.
-   Swift Packages, Build Root SPM Package, Build Xcode Projects, the Playground
-   fallback and Prototype Simulator all pin 26.5.
+1. Keep an Xcode 26.x installed (currently 26.6 at `/Applications/Xcode.app`,
+   next to Xcode 27.1 beta) with its iOS platform
+   (`xcodebuild -downloadPlatform iOS`). Swift Packages, Build Root SPM Package,
+   Build Xcode Projects, the Playground fallback and Prototype Simulator request
+   26.5; `bash scripts/ci/select-self-hosted-xcode.sh 26.5` uses 26.5 when
+   installed and otherwise the newest installed 26.x at or above it (26.6 today),
+   printing which it chose (#11422). It never selects Xcode 27.
 2. Get a registration token (valid for one hour):
 
    ```bash

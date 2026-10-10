@@ -939,7 +939,16 @@ export interface RehydrationDeviceReservation {
   >;
 }
 
-type SessionAccess = "acquire" | "read-only";
+/**
+ * How a call uses the session it names. `acquire` is the client's own control call: admitted
+ * only on a usable session, and it is use (it restarts the idle window and reclaims an
+ * awaiting-owner session). `read-only` is never refused and never use. `non-owner-control` is a
+ * control call made on the holder's behalf by something that is not the session's client (a
+ * desktop pane's direct `input/*`, #11417): it passes the same refusals as `acquire` (suspect,
+ * lapsed owner lease, idle expiry) but changes nothing on admission — no reclaim of an
+ * awaiting-owner session, no activity or liveness stamp, no restart-recovery credit.
+ */
+export type SessionAccess = "acquire" | "read-only" | "non-owner-control";
 
 interface SessionAcquisitionOptions {
   access?: SessionAccess;
@@ -2981,7 +2990,9 @@ export class SessionManager {
     existing: Session,
     access: SessionAccess,
   ): Promise<void> {
-    if (access === "read-only") {
+    // Only the client's own control call reclaims and refreshes: a read is not use, and a
+    // non-owner control call must not stand in for the owner or its activity (#11417).
+    if (access !== "acquire") {
       return;
     }
     await this.reclaimAndRefreshExistingSession(existing);

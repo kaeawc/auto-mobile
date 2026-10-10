@@ -40,10 +40,39 @@ fake_xcode() {
 
 @test "fails and lists installed versions when the version is missing" {
   fake_xcode Xcode.app 26.6
+  run bash "${script}" 26.7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Xcode 26.7 is not installed"* ]]
+  [[ "$output" == *"26.6 (${XCODE_APPLICATIONS_DIR}/Xcode.app)"* ]]
+  [ ! -s "${GITHUB_ENV}" ]
+}
+
+@test "falls back to the newest installed same-major Xcode and says so" {
+  fake_xcode Xcode.app 26.6
+  fake_xcode Xcode-26.5.1.app 26.5.1
+  fake_xcode Xcode_27.app 27.1
+  run bash "${script}" 26.5
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"using the newest installed 26.x (26.6)"* ]]
+  [[ "$output" == *"Selected Xcode 26.6:"* ]]
+  [ "$(cat "${GITHUB_ENV}")" = "DEVELOPER_DIR=${XCODE_APPLICATIONS_DIR}/Xcode.app/Contents/Developer" ]
+}
+
+@test "prefers the exact version over a newer same-major Xcode" {
+  fake_xcode Xcode.app 26.6
+  fake_xcode Xcode-26.5.0.app 26.5
+  run bash "${script}" 26.5
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"newest installed"* ]]
+  [[ "$(cat "${GITHUB_ENV}")" == *"/Xcode-26.5.0.app/Contents/Developer" ]]
+}
+
+@test "never falls back to an older minor or another major" {
+  fake_xcode Xcode.app 26.4
+  fake_xcode Xcode_27.app 27.1
   run bash "${script}" 26.5
   [ "$status" -eq 1 ]
   [[ "$output" == *"Xcode 26.5 is not installed"* ]]
-  [[ "$output" == *"26.6 (${XCODE_APPLICATIONS_DIR}/Xcode.app)"* ]]
   [ ! -s "${GITHUB_ENV}" ]
 }
 

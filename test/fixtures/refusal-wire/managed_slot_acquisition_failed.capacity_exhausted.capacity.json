@@ -1,0 +1,13 @@
+{
+  "code": "managed_slot_acquisition_failed.capacity_exhausted.capacity",
+  "builder": "reconciler failure with capacity via managedSlotsFailedToolResult",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":{\"code\":\"managed_slot_acquisition_failed\",\"message\":\"Tool tapOn is unavailable: this execution's managed slot acquisition failed (capacity_exhausted: capacity_exhausted fixture). Read automobile:managed-slots for the evidence.\",\"acquisitionFailure\":{\"code\":\"capacity_exhausted\",\"retryable\":true,\"message\":\"capacity_exhausted fixture\",\"nextAction\":\"Shut down a device or raise the boot limit, then retry.\",\"capacity\":{\"limit\":2,\"booted\":2,\"retryAfterMs\":5000}}}}"
+      }
+    ]
+  }
+}

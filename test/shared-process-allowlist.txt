@@ -46,6 +46,8 @@ test/daemon/clientNonFiniteEncoding.test.ts
 test/daemon/clientOptionsSchema.test.ts
 test/daemon/clientRequestIdGenerator.test.ts
 test/daemon/clientRequestTimeout.test.ts
+test/daemon/crossDaemonCorruptClaim.test.ts
+test/daemon/crossDaemonSystemUiRecoveryClaim.test.ts
 test/daemon/daemonCapturedDisconnectArguments.test.ts
 test/daemon/daemonCommandRouting.test.ts
 test/daemon/daemonCompactMetadataReuse.test.ts
@@ -117,6 +119,7 @@ test/daemon/livenessOwnerLease.test.ts
 test/daemon/managedExecutionLiveness.test.ts
 test/daemon/managedSlots/abandonedScopeReclaimer.test.ts
 test/daemon/managedSlots/capacityExternalDevices.test.ts
+test/daemon/managedSlots/daemonManagedSlotAcquisition.ownDevice.test.ts
 test/daemon/managedSlots/managedExecutionDaemonRestart.test.ts
 test/daemon/managedSlots/managedSlotAcquisition.test.ts
 test/daemon/managedSlots/managedSlotExclusion.test.ts
@@ -900,6 +903,7 @@ test/server/prompts/list.test.ts
 test/server/prototypeDisplay.test.ts
 test/server/prototypeDisplayAssets.test.ts
 test/server/prototypeInspect.test.ts
+test/server/prototypeIosResetRefusal.test.ts
 test/server/prototypeResources.test.ts
 test/server/prototypeToolAnchors.test.ts
 test/server/prototypeToolAppearance.test.ts
@@ -1177,6 +1181,7 @@ test/utils/plan/summarizeFailureObservation.test.ts
 test/utils/plan/waitForTimeout.test.ts
 test/utils/predictionUtils.property.test.ts
 test/utils/predictionUtils.test.ts
+test/utils/processLivenessGuard.test.ts
 test/utils/qr/QrEncoder.test.ts
 test/utils/qr/QrPngRenderer.test.ts
 test/utils/qr/QrPosterWriter.test.ts

@@ -17,7 +17,7 @@ import { iosWindowLayer } from "./ios/iosWindowLayer";
 import { linkWindowRoots } from "./linkWindowRoots";
 import type { XCTestHierarchy } from "./ios/types";
 import { ObserveElementsBuilder } from "./ObserveElementsBuilder";
-import { PROTOTYPE_WINDOW_TYPE, ownPrototypeWindows, ownWindows } from "./ownWindowFocus";
+import { PROTOTYPE_WINDOW_TYPE, ownPrototypeWindows } from "./ownWindowFocus";
 
 /** AccessibilityWindowInfo.TYPE_APPLICATION. */
 const ACCESSIBILITY_WINDOW_TYPE_APPLICATION = 1;
@@ -161,7 +161,7 @@ function windowIdOf(node: ViewHierarchyNode): number | undefined {
 
 /**
  * Remove every prototype window root. Untouched subtrees keep their identity so
- * node-identity checks (e.g. `isOwnWindowNode`) still hold; only the ancestors
+ * node-identity checks (e.g. `isOwnPrototypeNode`) still hold; only the ancestors
  * of a removed root are shallow-copied.
  */
 function pruneWindowRoots(
@@ -388,15 +388,16 @@ function pointInBounds(
 }
 
 /**
- * Whether one of AutoMobile's own prototype windows covers a screen point. The iOS agent's window
+ * Whether one of AutoMobile's own prototype windows covers a screen point (not the highlight
+ * tool's window: FLAG_NOT_TOUCHABLE, it passes touches through). The iOS agent's window
  * passes touches through outside its content and dismiss control, so there the prototype's own
  * top-level nodes are what covers a point.
  */
-export function ownWindowCoversPoint(
+export function ownPrototypeCoversPoint(
   hierarchy: ViewHierarchyResult | undefined,
   point: { x: number; y: number },
 ): boolean {
-  if (ownWindows(hierarchy).some((window) => pointInBounds(point, window.bounds))) {
+  if (ownPrototypeWindows(hierarchy).some((window) => pointInBounds(point, window.bounds))) {
     return true;
   }
   const roots = hierarchy ? iosWindowRoots(hierarchy) : undefined;
@@ -425,7 +426,7 @@ export function assertAppGestureNotUnderPrototype(
   if (layer !== "app" || !hierarchy) {
     return;
   }
-  if (ownWindowCoversPoint(hierarchy, point)) {
+  if (ownPrototypeCoversPoint(hierarchy, point)) {
     throw new ActionableError(appPointUnderPrototype(point, action));
   }
 }
@@ -461,13 +462,13 @@ export function layerGestureRefusal(
     return undefined;
   }
   if (layer === "app") {
-    const covered = points.find((point) => ownWindowCoversPoint(hierarchy, point));
+    const covered = points.find((point) => ownPrototypeCoversPoint(hierarchy, point));
     return covered ? appPointUnderPrototype(covered, action) : undefined;
   }
   if (!hasOwnPrototype(hierarchy)) {
     return noPrototypeMessage(hierarchy);
   }
-  const outside = points.find((point) => !ownWindowCoversPoint(hierarchy, point));
+  const outside = points.find((point) => !ownPrototypeCoversPoint(hierarchy, point));
   return outside
     ? `Cannot ${action} at (${outside.x}, ${outside.y}) with layer "prototype": no AutoMobile prototype window covers that point, ` +
         "so the touch would reach the app instead of the prototype. Target a point inside the prototype, or omit layer."

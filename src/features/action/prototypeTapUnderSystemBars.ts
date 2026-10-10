@@ -1,4 +1,4 @@
-import { ownWindows } from "../observe/ownWindowFocus";
+import { ownPrototypeWindows } from "../observe/ownWindowFocus";
 import { ViewHierarchyParser } from "../../utils/ViewHierarchyParser";
 import type { ElementBounds } from "../../models/ElementBounds";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../models/ViewHierarchyResult";
@@ -27,7 +27,7 @@ interface BarBands {
  * identity is used (not geometry or ids) so an app control or system UI element
  * drawn at the same place is never mistaken for the prototype's.
  */
-export function isOwnWindowNode(
+export function isOwnPrototypeNode(
   hierarchy: ViewHierarchyResult | undefined,
   node: ViewHierarchyNode | undefined,
 ): boolean {
@@ -35,7 +35,7 @@ export function isOwnWindowNode(
     return false;
   }
   const parser = new ViewHierarchyParser();
-  const prototypeRoots = ownWindows(hierarchy)
+  const prototypeRoots = ownPrototypeWindows(hierarchy)
     .filter((window) => window.hierarchy)
     .flatMap((window) => parser.extractWindowRootGroups({ hierarchy: {}, windows: [window] })[0]);
   let found = false;

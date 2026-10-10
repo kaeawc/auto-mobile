@@ -74,6 +74,8 @@ export class IosSimCapacityGate
   private readonly retryAfterMs: number;
   private readonly sustainedSamples: number;
   private pressuredStreak = 0;
+  private warnedLimit: string | undefined;
+  private warnedHostUnreadable = false;
   private latestReport: FleetCostReport | undefined;
   /** UDIDs this process admitted a boot for; any other occupying simulator is external. */
   private readonly startedUdids = new Set<string>();
@@ -237,9 +239,27 @@ export class IosSimCapacityGate
   private limitsFor(report: FleetCostReport): CapacityLimits {
     if (!report.host) {
       // Without host numbers we cannot derive a limit; fall back to a single concurrent boot.
-      return resolveCapacityLimits(this.env, { totalMemoryBytes: 0, cpuCount: 0 });
+      // A failed `ps` no longer lands here: its snapshot still carries the os totals (#11389).
+      if (!this.warnedHostUnreadable) {
+        this.warnedHostUnreadable = true;
+        logger.warn("[BootAdmission] host resources unreadable; limiting simulator boots to 1");
+      }
+      return this.warnOnUnusableLimit(
+        resolveCapacityLimits(this.env, { totalMemoryBytes: 0, cpuCount: 0 }),
+      );
     }
-    return resolveCapacityLimits(this.env, report.host, estimatePerSimulatorBytes(report));
+    return this.warnOnUnusableLimit(
+      resolveCapacityLimits(this.env, report.host, estimatePerSimulatorBytes(report)),
+    );
+  }
+
+  /** Log an unusable `AUTOMOBILE_IOS_SIM_MAX_BOOTED` once per distinct warning, as Android does. */
+  private warnOnUnusableLimit(limits: CapacityLimits): CapacityLimits {
+    if (limits.warning && limits.warning !== this.warnedLimit) {
+      this.warnedLimit = limits.warning;
+      logger.warn(`[BootAdmission] ${limits.warning}`);
+    }
+    return limits;
   }
 }
 

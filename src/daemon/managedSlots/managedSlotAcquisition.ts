@@ -364,6 +364,7 @@ export class ManagedSlotAcquisition {
           retryable: result.failure.retryable,
           message: result.failure.message,
           nextAction: result.failure.nextAction,
+          ...(result.failure.capacity ? { capacity: result.failure.capacity } : {}),
         },
       };
     }

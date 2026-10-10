@@ -1,5 +1,5 @@
 import type { Element, ElementBounds, ViewHierarchyResult } from "../../models";
-import { hostsNodes, ownWindows } from "./ownWindowFocus";
+import { hostsNodes, ownPrototypeWindows } from "./ownWindowFocus";
 import { boundsArea } from "../../utils/bounds";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -60,7 +60,7 @@ export function hitEntries(entries: readonly SearchableEntry[], point: { x: numb
  *   inside one reaches the prototype whatever it paints. The default-layer tap path and observe both
  *   use it (owner decision 2026-10-08, #10715), so observe never offers a row tapOn refuses.
  */
-export type OwnWindowCoverRule = "none" | "touch";
+export type OwnPrototypeCoverRule = "none" | "touch";
 
 /**
  * The per-hierarchy work of the cover test: the deduplicated projection and each node's owning
@@ -84,7 +84,7 @@ export function applicationWindowCoverIndex(
 /**
  * Reuse preview ordering and source identity; system-window dispatch remains unchanged.
  *
- * With `ownWindows` other than `"none"`, AutoMobile's own windows (the prototype) ranked
+ * With `ownWindows` other than `"none"`, AutoMobile's own prototype windows ranked
  * above the target's window cover their bounds too: a default-layer tap there would reach the
  * prototype, not the app row the selector matched behind it.
  */
@@ -94,7 +94,7 @@ export function applicationWindowSafeTapPoint(
   bounds: ElementBounds,
   point: { x: number; y: number },
   imeBounds?: ElementBounds,
-  ownWindows: OwnWindowCoverRule = "none",
+  ownWindows: OwnPrototypeCoverRule = "none",
 ): { point: { x: number; y: number } | null; coveredBy?: string } {
   return safeTapPoint({
     hierarchy,
@@ -113,7 +113,7 @@ interface SafeTapPointQuery {
   bounds: ElementBounds;
   point: { x: number; y: number };
   imeBounds?: ElementBounds;
-  ownWindows: OwnWindowCoverRule;
+  ownWindows: OwnPrototypeCoverRule;
   index: ApplicationWindowCoverIndex;
 }
 
@@ -137,7 +137,7 @@ function safeTapPoint({
   if (!types.has(owner.source)) {
     return { point };
   }
-  const prototypeCovers = ownWindowCoversAbove(hierarchy, entries, owner, ownWindows);
+  const prototypeCovers = ownPrototypeCoversAbove(hierarchy, entries, owner, ownWindows);
   const first = hitEntries(entries, point)[0];
   const appCovered =
     first !== undefined && first.windowRank < owner.windowRank && types.get(first.source) === 1;
@@ -167,7 +167,7 @@ const OWN_PROTOTYPE_COVER_LABEL = "an AutoMobile prototype window";
  * window ranked above the target's window contains it, moves it to an exposed part of `bounds`
  * otherwise, and returns `null` when the prototype windows cover all of `bounds`.
  */
-export function ownWindowSafeGesturePoint(
+export function ownPrototypeSafeGesturePoint(
   hierarchy: ViewHierarchyResult,
   target: Element,
   bounds: ElementBounds,
@@ -180,7 +180,7 @@ export function ownWindowSafeGesturePoint(
   if (!owner || !windowTypesBySource(hierarchy).has(owner.source)) {
     return point;
   }
-  const covers = ownWindowCoversAbove(hierarchy, entries, owner, "touch");
+  const covers = ownPrototypeCoversAbove(hierarchy, entries, owner, "touch");
   if (!covers.some((cover) => contains(cover, point.x, point.y))) {
     return point;
   }
@@ -229,17 +229,17 @@ function coveringLabel(first: SearchableEntry, target: Element): string {
  * (none for the `"none"` rule). The node-free highlight window is FLAG_NOT_TOUCHABLE and passes
  * touches through, so it never covers; nor does a prototype window that owns the target.
  */
-function ownWindowCoversAbove(
+function ownPrototypeCoversAbove(
   hierarchy: ViewHierarchyResult,
   entries: readonly SearchableEntry[],
   owner: SearchableEntry,
-  rule: OwnWindowCoverRule,
+  rule: OwnPrototypeCoverRule,
 ): ElementBounds[] {
   if (rule === "none") {
     return [];
   }
   const parser = new DefaultElementParser();
-  return ownWindows(hierarchy)
+  return ownPrototypeWindows(hierarchy)
     .filter((window) => window.bounds !== undefined && window.hierarchy && hostsNodes(window))
     .filter((window) => {
       const sources = new Set<SearchableEntry["source"]>();
@@ -265,7 +265,7 @@ export function isFullyCoveredByApplicationWindow(
   hierarchy: ViewHierarchyResult,
   target: Element,
   bounds: ElementBounds,
-  ownWindows: OwnWindowCoverRule = "none",
+  ownWindows: OwnPrototypeCoverRule = "none",
   index: ApplicationWindowCoverIndex = applicationWindowCoverIndex(hierarchy),
 ): boolean {
   const center = {
@@ -308,12 +308,12 @@ function windowTypesBySource(hierarchy: ViewHierarchyResult) {
  * Every captured node that belongs to one of AutoMobile's own prototype windows. Observe uses it to
  * tell the prototype's rows from the app's, which share one flattened `elements` block.
  */
-export function ownWindowNodeSources(
+export function ownPrototypeNodeSources(
   hierarchy: ViewHierarchyResult | undefined,
 ): Set<SearchableEntry["source"]> {
   const sources = new Set<SearchableEntry["source"]>();
   const parser = new DefaultElementParser();
-  for (const window of ownWindows(hierarchy)) {
+  for (const window of ownPrototypeWindows(hierarchy)) {
     if (window.hierarchy) {
       parser.traverseNode(window.hierarchy, (node) => sources.add(node));
     }

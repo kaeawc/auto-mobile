@@ -539,11 +539,84 @@ class PrototypeRuntimeTest {
     assertEquals(PrototypeScalar.Text(""), runtime.current.state["query"])
   }
 
+  private fun controlSpec() =
+    fieldSpec()
+      .copy(
+        state =
+          mapOf(
+            "flag" to PrototypeScalar.BooleanValue(false),
+            "query" to PrototypeScalar.Text(""),
+            "choice" to PrototypeScalar.Text("a"),
+            "level" to PrototypeScalar.Numeric(1.0),
+            "hour" to PrototypeScalar.Numeric(7.0),
+            "minute" to PrototypeScalar.Numeric(30.0),
+            "tab" to PrototypeScalar.Numeric(0.0),
+            "open" to PrototypeScalar.BooleanValue(true),
+          ),
+      )
+
+  /** Every control that writes state of its own, with the action list it then runs. */
+  private fun controls(actions: List<PrototypeAction>) =
+    mapOf(
+      "toggle" to PrototypeInteraction.Toggle("flag", actions),
+      "choose" to PrototypeInteraction.Choose("choice", "b", actions),
+      "slide" to PrototypeInteraction.Slide("level", 2.0, actions),
+      "setTime" to PrototypeInteraction.SetTime("hour", "minute", 8, 45, actions),
+      "select key" to PrototypeInteraction.Select(null, "tab", 1, actions),
+      "select pager" to PrototypeInteraction.Select("pager", null, 1, actions),
+      "closeModal" to
+        PrototypeInteraction.CloseModal(PrototypeSheetCondition("open", true), actions),
+    )
+
   @Test
-  fun `a control keeps its own reported change when its action list is rejected`() = runTest {
-    val runtime = runtime(fieldSpec())
-    assertRejected(runtime, PrototypeInteraction.Toggle("flag", listOf(breaksBinding)))
-    assertEquals(PrototypeScalar.BooleanValue(true), runtime.current.state["flag"])
-    assertEquals(runtime.current.state, events.single().state)
-  }
+  fun `a control whose action list is rejected applies neither its own write nor the list`() =
+    runTest {
+      val rejected = listOf(PrototypeEmitAction("before"), breaksBinding)
+      for ((name, interaction) in controls(rejected)) {
+        val runtime = runtime(controlSpec())
+        val before = runtime.current
+        assertRejected(runtime, interaction)
+        assertSame(name, before, runtime.current)
+        assertTrue(name, events.isEmpty())
+        assertEquals(name, 0L, sequence)
+      }
+    }
+
+  @Test
+  fun `an accepted control reports its own change and then its action list as iOS does`() =
+    runTest {
+      val accepted =
+        listOf(
+          PrototypeSetStateAction("query", PrototypeScalar.Text("x")),
+          PrototypeEmitAction("done"),
+        )
+      val own =
+        mapOf(
+          "toggle" to listOf("flag"),
+          "choose" to listOf("choice"),
+          "slide" to listOf("level"),
+          "setTime" to listOf("hour", "minute"),
+          "select key" to listOf("tab"),
+          "closeModal" to listOf("open"),
+        )
+      for ((name, interaction) in controls(accepted)) {
+        events.clear()
+        val runtime = runtime(controlSpec())
+        val before = runtime.current.state
+        runtime.handle(interaction)
+        val ownKeys = own[name]
+        if (ownKeys == null) {
+          assertEquals(name, PrototypeEventKind.PAGE_CHANGED, events.first().kind)
+        } else {
+          // The control's own change comes first and already carries its write, not the list's.
+          val first = events.first()
+          assertEquals(name, "change", first.name)
+          assertEquals(name, before["query"], first.state["query"])
+          assertTrue(name, ownKeys.all { first.state[it] != before[it] })
+        }
+        assertEquals(name, listOf("done", "change"), events.drop(1).map { it.name })
+        assertEquals(name, PrototypeScalar.Text("x"), events.last().state["query"])
+        assertEquals(name, runtime.current.state, events.last().state)
+      }
+    }
 }

@@ -164,6 +164,7 @@ the system setting. Every per-mode form below reads that one resolved mode. A de
   scrim are resolved in the mode the show resolved to and count as solid only when the result is
   fully opaque. An opaque role counts; the `scrim` role in a scrim slot never does. The root
   counts only when it is drawn over the whole window (#11408): `width` and `height` both `fill`,
+  no `anchor` (an anchored root is laid out at its anchor's rectangle, in every placement),
   no `maxWidth`/`maxHeight` cap and no `aspectRatio`, no non-zero `offset`, no rounded corner
   (`cornerRadius` absent, `0`, `none` or all corners `0`) and no `pressScale` below one. A root
   that fails any of these lets the app show at an edge or corner, so only an opaque fullscreen
@@ -682,8 +683,12 @@ An action list is atomic on Android (#11408). The runtime re-validates the state
 write would leave (binding types, numeric ranges, the size cap) before the first action
 runs; if any write is rejected, nothing in the list is applied and nothing is emitted,
 so device state and the host's event-fed copy never drift apart. Actions after a
-`dismiss` never run and are not checked. A control's own change (a switch flip, a
-dialog close) is applied and reported before its `onTap` list is checked. The iOS
+`dismiss` never run and are not checked. A control's own write (a switch flip, a chosen
+option, a slider value, a picked time, a tab selection, a dialog close) is part of the
+same unit as its `onTap` list: a rejected list leaves the control's value and a bound
+pager's page untouched too. An accepted control still reports its own `change` first
+and then its list, as the iOS agent does. A rejected interaction is logged on the device
+only; no event or status field reports it, so the host sees nothing change. The iOS
 agent does not re-validate at runtime, so the same list applies there in full with
 one `change`; the list the validators should refuse at `show` (a `setState` whose
 value type does not fit a control bound to the key) is the gap between the two.

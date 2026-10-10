@@ -200,7 +200,11 @@ import type {
   ScreenScaleMetadata,
 } from "../models";
 import type { DeviceService } from "../features/observe/DeviceService";
-import { executionTracker, sessionExecutionMetadataOf } from "../server/executionTracker";
+import {
+  executionTracker,
+  sessionExecutionMetadataOf,
+  type ActiveExecution,
+} from "../server/executionTracker";
 import {
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
   DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
@@ -228,6 +232,7 @@ import {
   recordedProcessGenerationToken,
 } from "./processGenerationFields";
 import { CONTROL_SOCKET_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
+import { sessionReleaseThatCancelledCall } from "./sessionReleasedDuringCall";
 import {
   createDeviceSessionErrorResolver,
   DeviceSessionSupersededByRestoreError,
@@ -7205,20 +7210,38 @@ export class UnixSocketServer {
         // or in flight cancels it (#10829).
         executionTracker.markSessionlessDeviceUse(execution.id, targetDevice.deviceId);
       }
-      return await runWithToolSelectionContext(
-        {
-          execution: {
-            ...sessionExecutionMetadataOf(execution),
-            deviceBinding: {
-              bindDeviceExecution: (deviceId) =>
-                executionTracker.bindDeviceExecution(execution.id, deviceId),
+      return await this.answeringSessionRelease(execution, () =>
+        runWithToolSelectionContext(
+          {
+            execution: {
+              ...sessionExecutionMetadataOf(execution),
+              deviceBinding: {
+                bindDeviceExecution: (deviceId) =>
+                  executionTracker.bindDeviceExecution(execution.id, deviceId),
+              },
             },
           },
-        },
-        () => this.runFencedInputOperation(signal, ownerSignal, operation),
+          () => this.runFencedInputOperation(signal, ownerSignal, operation),
+        ),
       );
     } finally {
       executionTracker.endExecution(execution.id);
+    }
+  }
+
+  /**
+   * Run a tracked input and, when the daemon released its session mid-call and that release
+   * cancelled it, answer the typed terminal refusal the MCP path gives, whatever the interrupted
+   * operation threw (#11381). The thrown release carries its wire fields to the failure frame.
+   */
+  private async answeringSessionRelease<T>(
+    execution: Pick<ActiveExecution, "cancelReason">,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      throw sessionReleaseThatCancelledCall(execution.cancelReason) ?? error;
     }
   }
 

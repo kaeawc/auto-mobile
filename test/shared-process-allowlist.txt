@@ -915,6 +915,7 @@ test/server/sessionLogContract.test.ts
 test/server/sessionNetworkCondition.test.ts
 test/server/sessionPlatformRouting.test.ts
 test/server/sessionReleaseBroadcast.test.ts
+test/server/sessionReleasedDuringCallWire.test.ts
 test/server/sessionToolDiscovery.test.ts
 test/server/setToolEnabledBatch.test.ts
 test/server/sharedStorageContract.test.ts

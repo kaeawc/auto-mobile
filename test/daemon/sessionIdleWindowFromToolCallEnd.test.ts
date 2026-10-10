@@ -350,18 +350,25 @@ describe("ExecutionTracker session execution-end notification", () => {
     ]);
   });
 
-  it("does not report a read-only inventory call as session use", () => {
+  it("reports a read-only inventory call's end, but not as session use", () => {
     const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator());
-    const ended: (readonly string[])[] = [];
-    tracker.onSessionExecutionEnded((uuids) => ended.push(uuids));
+    const ended: { uuids: readonly string[]; admitted: boolean }[] = [];
+    tracker.onSessionExecutionEnded((uuids, { admitted }) => ended.push({ uuids, admitted }));
 
+    // The MCP server admits an inventory read read-only and marks it admitted; its end must still
+    // be reported so a release it deferred is retried (#11381), and must never count as use.
     const inventory = tracker.startExecution("listDevices", undefined, SESSION);
     tracker.markReadOnlySessionAccess(inventory.id);
+    tracker.markSessionAdmitted(inventory.id);
     tracker.endExecution(inventory.id);
-    expect(ended).toEqual([]);
+    expect(ended).toEqual([{ uuids: [SESSION], admitted: false }]);
 
     const use = tracker.startExecution("tapOn", undefined, SESSION);
+    tracker.markSessionAdmitted(use.id);
     tracker.endExecution(use.id);
-    expect(ended).toEqual([[SESSION]]);
+    expect(ended).toEqual([
+      { uuids: [SESSION], admitted: false },
+      { uuids: [SESSION], admitted: true },
+    ]);
   });
 });

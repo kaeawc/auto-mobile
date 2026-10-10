@@ -4,6 +4,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { UNSETTLED_EXECUTION_VETO_CEILING_MS } from "../../src/daemon/unsettledExecutionVeto";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
+import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
 import { executionTracker } from "../../src/server/executionTracker";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -42,6 +43,17 @@ describe("Daemon expiry-release cancel wiring", () => {
       sessionManager.cleanupExpiredSessions();
       expect(hung.abortController.signal.aborted).toBe(true);
       expect(bystander.abortController.signal.aborted).toBe(false);
+      // #11381: the real wiring aborts it with the typed release, so the MCP server answers the
+      // terminal refusal rather than a generic abort.
+      expect(sessionReleasedDuringCallPayload(hung.cancelReason)).toMatchObject({
+        error: {
+          code: "session_ownership_lost",
+          sessionUuid: sessionId,
+          reason: "cleanup-expired",
+          retryable: false,
+          nextAction: "acquire_new_session",
+        },
+      });
     } finally {
       executionTracker.endExecution(hung.id);
       executionTracker.endExecution(bystander.id);

@@ -338,9 +338,18 @@ export type ManagedSlotReconcileResult =
 // Helpers
 // ---------------------------------------------------------------------------------------------
 
-/** `amslot-<8 hex of scope key>-<slot>-g<generation>`, valid as an AVD and simulator name. */
-export function managedSlotDeviceName(key: SlotKey, generation: number): string {
-  return `${managedSlotDeviceNamePrefix(key)}${generation}`;
+/**
+ * `amslot-<8 hex of scope key>-<slot>-g<generation>-<attempt nonce>`, valid as an AVD and
+ * simulator name. The per-attempt nonce keeps two concurrent attempts on the same slot (another
+ * daemon, or a retry while the first attempt still runs) from creating the same AVD name, whose
+ * name is its stable id, so one attempt's cleanup can never delete the other's device.
+ */
+export function managedSlotDeviceName(key: SlotKey, generation: number, nonce: string): string {
+  const safeNonce = nonce.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8);
+  if (safeNonce.length === 0) {
+    throw new Error(`Managed slot device name nonce '${nonce}' has no usable characters`);
+  }
+  return `${managedSlotDeviceNamePrefix(key)}${generation}-${safeNonce}`;
 }
 
 function managedSlotDeviceNamePrefix(key: SlotKey): string {
@@ -957,7 +966,11 @@ export class ManagedSlotReconciler {
     const { request } = context;
     this.checkBudget(request);
     await this.assertBootCapacity(request, undefined);
-    const name = managedSlotDeviceName(request.key, assignment.generation + 1);
+    const name = managedSlotDeviceName(
+      request.key,
+      assignment.generation + 1,
+      this.idGenerator.next(),
+    );
     context.evidence.createdName = name;
     let provisioned: ManagedSlotProvisionedDevice;
     try {
@@ -1004,7 +1017,11 @@ export class ManagedSlotReconciler {
     );
   }
 
-  /** A device this attempt created but could not publish: release its session and delete it. */
+  /**
+   * A device this attempt created but could not publish: release its session and delete it, unless
+   * the registry says a slot (any scope) or the free pool now holds that stable id. Losing a
+   * compare-and-set never licenses deleting the device the winner committed.
+   */
   private async discardUncommitted(
     context: ReconcileContext,
     provisioned: ManagedSlotProvisionedDevice,
@@ -1014,6 +1031,25 @@ export class ManagedSlotReconciler {
       return;
     }
     const { request } = context;
+    const holder = await this.deps.registry.findDeviceHolder(
+      request.platform,
+      provisioned.device.stableId,
+    );
+    if (holder) {
+      const heldBy =
+        holder.kind === "slot"
+          ? `slot ${holder.assignment.slotIndex} of scope ${holder.assignment.scopeKey}`
+          : "the managed free pool";
+      context.evidence.uncommittedCleanup = {
+        stableId: provisioned.device.stableId,
+        removed: false,
+        message: `kept: held by ${heldBy}`,
+      };
+      logger.warn(
+        `[ManagedSlots] not discarding '${provisioned.device.stableId}': it is held by ${heldBy}`,
+      );
+      return;
+    }
     const result = await this.deleteDevice({
       platform: request.platform,
       stableId: provisioned.device.stableId,

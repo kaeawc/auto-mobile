@@ -33,6 +33,7 @@ import type { DeviceInfo } from "../../../src/models";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import type { AvdConfig } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "../../../src/utils/android-cmdline-tools/AndroidSystemImageRuntime";
+import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -201,6 +202,7 @@ describe("ManagedSlotReconciler", () => {
       claims,
       capacity,
       timer,
+      idGenerator: new FakeIdGenerator(),
     });
     const scope = await registry.ensureScope(SCOPE);
     if (scope.kind !== "ready") {
@@ -248,7 +250,7 @@ describe("ManagedSlotReconciler", () => {
       const result = expectReady(await reconciler.reconcile(request()));
 
       expect(result.disposition).toBe("created");
-      expect(result.device.name).toBe(managedSlotDeviceName(key, 1));
+      expect(result.device.name).toBe(managedSlotDeviceName(key, 1, "fake-1"));
       expect(result.assignment).toMatchObject({
         generation: 1,
         stableDeviceId: result.device.stableId,
@@ -308,7 +310,7 @@ describe("ManagedSlotReconciler", () => {
           deviceType: IPHONE_16,
         },
         {
-          name: managedSlotDeviceName(key, 1),
+          name: managedSlotDeviceName(key, 1, "earlier"),
           platform: "ios",
           deviceId: "UDID-LEFTOVER",
           isRunning: true,
@@ -331,7 +333,7 @@ describe("ManagedSlotReconciler", () => {
       }
       const otherKey = { scopeKey: other.scope.scopeKey, slotIndex: 0 };
       inventory.devices.push({
-        name: managedSlotDeviceName(key, 1),
+        name: managedSlotDeviceName(key, 1, "earlier"),
         platform: "ios",
         deviceId: "UDID-HELD",
         isRunning: false,
@@ -416,7 +418,9 @@ describe("ManagedSlotReconciler", () => {
 
       expect(result.failure.code).toBe("readiness_incomplete");
       expect(provisioner.released).toEqual(["session-1"]);
-      expect(deleter.calls.map((call) => call.name)).toEqual([managedSlotDeviceName(key, 1)]);
+      expect(deleter.calls.map((call) => call.name)).toEqual([
+        managedSlotDeviceName(key, 1, "fake-1"),
+      ]);
       expect(result.assignment).toMatchObject({ generation: 0, stableDeviceId: null });
     });
   });
@@ -458,7 +462,7 @@ describe("ManagedSlotReconciler", () => {
 
       expect(result.disposition).toBe("created");
       expect(result.evidence.assignedMissing).toBe(true);
-      expect(result.device.name).toBe(managedSlotDeviceName(key, 2));
+      expect(result.device.name).toStartWith(managedSlotDeviceName(key, 2, "x").slice(0, -1));
       expect(result.assignment.generation).toBe(2);
       expect(deleter.calls).toHaveLength(0);
     });
@@ -502,7 +506,7 @@ describe("ManagedSlotReconciler", () => {
       expect(result.evidence.deletedStableId).toBe(oldId);
       expect(result.device.stableId).not.toBe(oldId);
       // generation 2 fenced the old device (`replacing`), 3 recorded its verified absence.
-      expect(result.device.name).toBe(managedSlotDeviceName(key, 4));
+      expect(result.device.name).toStartWith(managedSlotDeviceName(key, 4, "x").slice(0, -1));
       expect(result.assignment).toMatchObject({
         generation: 4,
         stableDeviceId: result.device.stableId,
@@ -727,6 +731,44 @@ describe("ManagedSlotReconciler", () => {
       expect(result.evidence.uncommittedCleanup).toEqual({ stableId: "UDID-1", removed: true });
       expect(inventory.has("UDID-1")).toBe(false);
       expect(result.assignment).toMatchObject({ generation: 1, stableDeviceId: "UDID-WINNER" });
+    });
+
+    test("a losing Android create never deletes the AVD the winner committed under the same id", async () => {
+      const androidSpec = {
+        runtime: "system-images;android-35;google_apis;arm64-v8a",
+        deviceType: "pixel_8",
+      };
+      provisioner.beforeReturn = async (call) => {
+        // The winner committed a device whose stable id (the AVD name) equals ours.
+        await registry.commitBinding(
+          key,
+          { generation: 0, stableDeviceId: null },
+          {
+            stableDeviceId: call.name,
+            deviceName: call.name,
+            resolvedSpec: null,
+            specFingerprint: null,
+            state: "ready",
+          },
+        );
+      };
+
+      const result = expectFailed(
+        await reconciler.reconcile(request(androidSpec, { platform: "android" })),
+      );
+
+      expect(result.failure.code).toBe("concurrent_modification");
+      expect(deleter.calls).toHaveLength(0);
+      expect(result.evidence.uncommittedCleanup).toMatchObject({ removed: false });
+      expect(inventory.has(result.assignment!.stableDeviceId!)).toBe(true);
+    });
+
+    test("two attempts on the same slot and generation never generate the same device name", async () => {
+      const first = managedSlotDeviceName(key, 1, "attempt-a");
+      const second = managedSlotDeviceName(key, 1, "attempt-b");
+      expect(first).not.toBe(second);
+      expect(first).toStartWith("amslot-");
+      expect(first).toMatch(/^[a-z0-9-]+$/);
     });
 
     test("a binding change before the replace mark refuses deletion", async () => {

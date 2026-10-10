@@ -147,6 +147,14 @@ type ProvisionCleanupOptions = {
   collectDeferredCleanup?: (cleanup: Promise<void>) => void;
 };
 
+/** The exact identity an iOS simulator is matched by: UDID, else name + runtime + device type. */
+type ExactIosDeviceIdentity = {
+  name: string;
+  deviceId?: string;
+  runtime?: string;
+  deviceType?: string;
+};
+
 /** Where a failed provision's rollback should aim; `unresolved` never means absent. */
 type ProvisionRollbackTarget =
   | { kind: "device"; device: DeviceInfo }
@@ -898,24 +906,32 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
    * the request, preferring an available one over an unavailable duplicate.
    */
   function findExactIosProvisionDeviceCandidate(
-    args: ProvisionDeviceArgs,
+    identity: ExactIosDeviceIdentity,
     devices: DeviceInfo[],
   ): DeviceInfo | undefined {
-    const spec = args.device.spec;
-    if (args.device.deviceId) {
+    if (identity.deviceId) {
       return devices.find(
-        (device) => device.platform === "ios" && device.deviceId === args.device.deviceId,
+        (device) => device.platform === "ios" && device.deviceId === identity.deviceId,
       );
     }
     const candidates = devices.filter(
       (device) =>
         device.platform === "ios" &&
-        device.name === args.device.name &&
+        device.name === identity.name &&
         device.deviceId &&
-        device.runtime === spec.runtime &&
-        device.deviceType === spec.deviceType,
+        device.runtime === identity.runtime &&
+        device.deviceType === identity.deviceType,
     );
     return candidates.find((device) => device.isAvailable !== false) ?? candidates[0];
+  }
+
+  function exactIosProvisionDeviceIdentity(args: ProvisionDeviceArgs): ExactIosDeviceIdentity {
+    return {
+      name: args.device.name,
+      deviceId: args.device.deviceId,
+      runtime: args.device.spec.runtime,
+      deviceType: args.device.spec.deviceType,
+    };
   }
 
   /**
@@ -931,7 +947,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
    * `absent`; anything else is `unresolved` (#11064).
    */
   async function resolveCreatedIosProvisionDeviceRollbackTarget(
-    args: ProvisionDeviceArgs,
+    identity: ExactIosDeviceIdentity,
     deps: DeviceToolsDependencies,
     deviceManager: PlatformDeviceManager,
     pendingMutationSettlement: Promise<unknown> | undefined,
@@ -946,7 +962,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       ))
     ) {
       logger.warn(
-        `[DeviceTools] Cannot roll back iOS simulator '${args.device.name}': its creation did not settle within the rollback budget.`,
+        `[DeviceTools] Cannot roll back iOS simulator '${identity.name}': its creation did not settle within the rollback budget.`,
       );
       return { kind: "unresolved" };
     }
@@ -964,15 +980,15 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       );
       if (!discovery.succeededPlatforms.has("ios")) {
         logger.warn(
-          `[DeviceTools] Cannot roll back iOS simulator '${args.device.name}': identity discovery did not complete.`,
+          `[DeviceTools] Cannot roll back iOS simulator '${identity.name}': identity discovery did not complete.`,
         );
         return { kind: "unresolved" };
       }
-      const device = findExactIosProvisionDeviceCandidate(args, discovery.devices);
+      const device = findExactIosProvisionDeviceCandidate(identity, discovery.devices);
       return device ? { kind: "device", device } : { kind: "absent" };
     } catch (error) {
       logger.warn(
-        `[DeviceTools] Failed to resolve the iOS rollback target for '${args.device.name}': ${errorMessage(error)}`,
+        `[DeviceTools] Failed to resolve the iOS rollback target for '${identity.name}': ${errorMessage(error)}`,
         error,
       );
       return { kind: "unresolved" };
@@ -1008,7 +1024,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
             device: { name: args.device.name, platform: "android" as const, isRunning: false },
           }
         : await resolveCreatedIosProvisionDeviceRollbackTarget(
-            args,
+            exactIosProvisionDeviceIdentity(args),
             deps,
             deviceManager,
             pendingMutationSettlement,
@@ -1202,7 +1218,10 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
         `Cannot provision iOS device '${args.device.name}' because simulator identity discovery did not complete.`,
       );
     }
-    const existing = findExactIosProvisionDeviceCandidate(args, discovery.devices);
+    const existing = findExactIosProvisionDeviceCandidate(
+      exactIosProvisionDeviceIdentity(args),
+      discovery.devices,
+    );
     if (!existing?.deviceId) {
       if (args.device.deviceId) {
         return await reserveIosProvisionDeviceLifecycle(
@@ -2140,18 +2159,133 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
     failure,
     { lifecycleLease, pendingMutationSettlement, collectDeferredCleanup },
   ) => {
+    const deps = getDeviceToolsDependencies();
     const provisionFailure =
       failure instanceof ProvisionDeviceError
         ? failure
         : new ProvisionDeviceError("platform_command_failed", errorMessage(failure));
-    const rollback = await cleanupFailedProvisionDevice(
-      getDeviceToolsDependencies(),
-      createdDevice,
-      provisionFailure,
-      { lifecycleLease, pendingMutationSettlement, collectDeferredCleanup },
-    );
+    const rollbackDeadlineMs = deps.timer.now() + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
+    let target = createdDevice;
+    if (createdDevice.platform === "ios" && !createdDevice.deviceId) {
+      // The create was cancelled or timed out before simctl reported a UDID:
+      // find what it created by exact identity once it has settled (#11155).
+      const resolved = await resolveCreatedIosRollbackTargetForAcquisition(createdDevice, {
+        deps,
+        pendingMutationSettlement,
+        rollbackDeadlineMs,
+      });
+      if (resolved.kind === "absent") {
+        return createdDeviceRollbackSkipped(createdDevice, "absent");
+      }
+      if (resolved.kind === "unresolved") {
+        retryUnresolvedCreatedDeviceRollback(createdDevice, failure, {
+          lifecycleLease,
+          pendingMutationSettlement,
+          collectDeferredCleanup,
+        });
+        return createdDeviceRollbackSkipped(createdDevice, "unresolved");
+      }
+      target = resolved.device;
+    }
+    const rollback = await cleanupFailedProvisionDevice(deps, target, provisionFailure, {
+      lifecycleLease,
+      pendingMutationSettlement,
+      rollbackDeadlineMs,
+      collectDeferredCleanup,
+    });
     return rollback.cleanup;
   };
+
+  async function resolveCreatedIosRollbackTargetForAcquisition(
+    createdDevice: DeviceInfo,
+    {
+      deps,
+      pendingMutationSettlement,
+      rollbackDeadlineMs,
+    }: {
+      deps: DeviceToolsDependencies;
+      pendingMutationSettlement: Promise<unknown> | undefined;
+      rollbackDeadlineMs: number;
+    },
+  ): Promise<ProvisionRollbackTarget> {
+    if (!createdDevice.runtime || !createdDevice.deviceType) {
+      logger.warn(
+        `[DeviceTools] Cannot roll back iOS simulator '${createdDevice.name}': its runtime and device type are unknown.`,
+      );
+      return { kind: "unresolved" };
+    }
+    return await resolveCreatedIosProvisionDeviceRollbackTarget(
+      {
+        name: createdDevice.name,
+        runtime: createdDevice.runtime,
+        deviceType: createdDevice.deviceType,
+      },
+      deps,
+      deps.deviceManagerFactory(),
+      pendingMutationSettlement,
+      rollbackDeadlineMs,
+    );
+  }
+
+  /**
+   * The create had not settled within the rollback budget: once it does, retry
+   * the rollback with a fresh budget. The retry is handed to the caller's
+   * deferred cleanups, which keep the lifecycle lease held until it finishes.
+   */
+  function retryUnresolvedCreatedDeviceRollback(
+    createdDevice: DeviceInfo,
+    failure: unknown,
+    options: Parameters<CreatedDeviceRollback>[2],
+  ): void {
+    const { pendingMutationSettlement, collectDeferredCleanup } = options;
+    if (!pendingMutationSettlement || !collectDeferredCleanup) {
+      return;
+    }
+    const retry = async (): Promise<void> => {
+      const cleanup = await rollbackCreatedDevice(createdDevice, failure, {
+        ...options,
+        pendingMutationSettlement: undefined,
+      });
+      if (cleanup.status === "failed") {
+        logger.warn(
+          `[DeviceTools] Deferred rollback of created iOS simulator '${createdDevice.name}' failed: ` +
+            `${cleanup.failure?.message ?? "unknown cleanup failure"}`,
+        );
+      }
+    };
+    collectDeferredCleanup(
+      pendingMutationSettlement.then(retry, retry).catch((error: unknown) => {
+        logger.warn(
+          `[DeviceTools] Deferred rollback of created iOS simulator '${createdDevice.name}' rejected: ${errorMessage(error)}`,
+          error,
+        );
+      }),
+    );
+  }
+
+  function createdDeviceRollbackSkipped(
+    createdDevice: DeviceInfo,
+    outcome: "absent" | "unresolved",
+  ): ProvisionDeviceCleanup {
+    const target: ProvisionDeviceCleanup["target"] = {
+      platform: createdDevice.platform,
+      isVirtual: true,
+      stableId: createdDevice.deviceId ?? createdDevice.name,
+      stableName: createdDevice.name,
+    };
+    return outcome === "absent"
+      ? { status: "succeeded", target, state: "absent" }
+      : {
+          status: "failed",
+          target,
+          failure: {
+            code: "target_identity_unresolved",
+            phase: "precondition",
+            message:
+              "A simulator may have been created, but its exact identity could not be resolved; it was not removed.",
+          },
+        };
+  }
 
   return {
     provisionDeviceHandler: (

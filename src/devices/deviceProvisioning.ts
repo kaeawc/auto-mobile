@@ -20,6 +20,7 @@ import { versionToApiLevelRange } from "../utils/android-cmdline-tools/AvdConfig
 import { CTRL_PROXY_APK_MIN_SDK, parseAndroidApiLevelBound } from "../utils/androidVersionBounds";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { CREATED_DEVICE_NAME_PREFIX } from "./deviceCreationGate";
+import { ProvisionDeviceCreateRejectedError } from "./exactDeviceProvisioning";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
 import {
@@ -77,10 +78,16 @@ export interface DeviceProvisioner {
   ): Promise<ProvisionedDevice>;
 }
 
+/**
+ * The identity a create is about to claim. iOS selection also carries the
+ * device type and runtime, so a create that never reported its UDID can still be
+ * found by exact identity and rolled back (#11155).
+ */
+export type ProvisioningCreateIdentity = Pick<ProvisionedDevice, "platform" | "name"> &
+  Partial<Pick<ProvisionedDevice, "deviceType" | "runtimeId" | "runtime">>;
+
 export interface DeviceProvisioningIdentityHooks {
-  reserveBeforeCreate(
-    identity: Pick<ProvisionedDevice, "platform" | "name">,
-  ): Promise<AbortSignal | undefined>;
+  reserveBeforeCreate(identity: ProvisioningCreateIdentity): Promise<AbortSignal | undefined>;
   bindAfterCreate(device: ProvisionedDevice): Promise<void>;
 }
 
@@ -543,6 +550,9 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     const identitySignal = await identityHooks?.reserveBeforeCreate({
       platform: "ios",
       name,
+      deviceType: deviceType.identifier,
+      runtimeId: runtime,
+      runtime,
     });
     const creationSignal =
       signal && identitySignal
@@ -604,6 +614,9 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     const identitySignal = await identityHooks?.reserveBeforeCreate({
       platform: "android",
       name,
+      deviceType: image.packageName,
+      runtimeId: image.packageName,
+      runtime: `android-${image.apiIdentifier}`,
     });
     const creationSignal =
       signal && identitySignal
@@ -612,7 +625,8 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
 
     const result = await avdManager.createAvd({ name, package: image.packageName }, creationSignal);
     if (!result.success) {
-      throw new ActionableError(
+      // avdmanager exited cleanly without creating the AVD: nothing to roll back.
+      throw new ProvisionDeviceCreateRejectedError(
         `Failed to create Android AVD '${name}' from ${image.packageName}: ${result.message}`,
       );
     }

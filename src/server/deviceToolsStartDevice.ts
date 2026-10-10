@@ -151,16 +151,27 @@ type BootPreparationOptions = {
 
 function createdDeviceRollbackFor(
   options: BootPreparationOptions,
-): ((device: DeviceInfo, failure: unknown) => Promise<void>) | undefined {
+):
+  | ((
+      device: DeviceInfo,
+      failure: unknown,
+      rollbackOptions?: { pendingCreation?: Promise<unknown> },
+    ) => Promise<void>)
+  | undefined {
   const { rollbackCreatedDevice, lifecycleLease, state } = options;
   if (!rollbackCreatedDevice) {
     return undefined;
   }
-  return async (device, failure) => {
+  return async (device, failure, rollbackOptions) => {
     // A failed cold boot's emulator may still be terminating, and a cancelled
     // binding may still be draining; the device must not be deleted underneath
     // either, so the rollback waits (bounded) for them first.
-    const pendingTerminations = [...state.coldBootSettlements, ...state.bindingSettlements];
+    // A cancelled create may also still be running (#11155).
+    const pendingTerminations = [
+      ...state.coldBootSettlements,
+      ...state.bindingSettlements,
+      ...(rollbackOptions?.pendingCreation ? [rollbackOptions.pendingCreation] : []),
+    ];
     try {
       const cleanup = await rollbackCreatedDevice(device, failure, {
         lifecycleLease,

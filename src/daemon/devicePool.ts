@@ -5178,21 +5178,7 @@ export class DevicePool {
           );
         }
       },
-      {
-        maxAttempts,
-        signal: assignmentSignal,
-        delays: () =>
-          Math.min(
-            this.DEVICE_WAIT_INTERVAL_MS,
-            recoveryDeadline === undefined
-              ? this.DEVICE_WAIT_INTERVAL_MS
-              : Math.max(0, recoveryDeadline - this.recoveryNow()),
-          ),
-        shouldRetry: (error) =>
-          error instanceof DevicePoolError &&
-          error.isRetryable &&
-          (recoveryDeadline === undefined || this.timer.now() < recoveryDeadline),
-      },
+      this.assignmentRetryPolicy(maxAttempts, assignmentSignal, recoveryDeadline),
     );
 
     if (!result.success) {
@@ -5208,6 +5194,34 @@ export class DevicePool {
     }
 
     return result.value!;
+  }
+
+  /**
+   * How `assignDeviceToSession` waits for a busy pool: retry retryable pool errors every wait
+   * interval, and for a restart recovery only until its deadline. The deadline derives from session
+   * stamps, so both the wait and the retry gate read the session clock a wall-clock step does not
+   * move (#11105, #11162).
+   */
+  private assignmentRetryPolicy(
+    maxAttempts: number,
+    signal: AbortSignal | undefined,
+    recoveryDeadline: number | undefined,
+  ): NonNullable<Parameters<RetryExecutor["execute"]>[1]> {
+    return {
+      maxAttempts,
+      signal,
+      delays: () =>
+        Math.min(
+          this.DEVICE_WAIT_INTERVAL_MS,
+          recoveryDeadline === undefined
+            ? this.DEVICE_WAIT_INTERVAL_MS
+            : Math.max(0, recoveryDeadline - this.recoveryNow()),
+        ),
+      shouldRetry: (error) =>
+        error instanceof DevicePoolError &&
+        error.isRetryable &&
+        (recoveryDeadline === undefined || this.recoveryNow() < recoveryDeadline),
+    };
   }
 
   private throwSessionAssignmentFailure({

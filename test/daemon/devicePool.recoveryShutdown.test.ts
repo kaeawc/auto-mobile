@@ -1962,6 +1962,32 @@ test("device-restart resume waits for the same serial and preserves its session 
   }
 });
 
+test("device-restart resume keeps retrying across a forward wall-clock step inside its window (#11162)", async () => {
+  const { timer, sessions, manager, pool } = await setupPassiveRestart();
+  try {
+    const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
+    await flush();
+    expect(timer.getPendingTimeouts()).toEqual([1_000]);
+    // An NTP step an hour forward on a clock whose monotonic reading runs through host sleep
+    // (Linux, Windows), so the session clock ignores the step: the recovery window derives from
+    // session stamps, and the retry gate must not read the stepped wall clock as past it.
+    timer.simulateSleepCountingMonotonicClock();
+    timer.stepWallClock(3_600_000);
+    timer.advanceTime(1_000);
+    await flush();
+
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    timer.advanceTime(1_000);
+    await expect(resume).resolves.toMatchObject({
+      sessionId: "session",
+      assignedDevice: original.deviceId,
+    });
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
 test("device-restart resume waits through an unknown new serial and binds by AVD name", async () => {
   const { timer, persistence, sessions, manager, pool } = await setupPassiveRestart();
   try {

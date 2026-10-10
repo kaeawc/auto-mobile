@@ -143,7 +143,12 @@ const EXPIRY_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
 const SESSION_CLOCK_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
   "src/daemon/sessionManager.ts": ["SessionManager.isSessionExpired"],
   "src/daemon/ownerDisconnectRelease.ts": ["ownerDisconnectReleaseBlocker"],
-  "src/daemon/devicePool.ts": ["DevicePool.recoveryAssignmentError", "DevicePool.recoveryNow"],
+  "src/daemon/devicePool.ts": [
+    "DevicePool.recoveryAssignmentError",
+    "DevicePool.recoveryNow",
+    // #11162: the restart-recovery wait and retry gate compare with the recovery deadline.
+    "DevicePool.assignmentRetryPolicy",
+  ],
 };
 
 /** Rule 5: lease judgements read only liveness clocks. */

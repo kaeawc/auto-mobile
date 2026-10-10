@@ -19,13 +19,18 @@ describe("packaged WebRTC runtime metadata", () => {
     const executableBody = entrypoint.replace(/^#!.*\r?\n/, "");
     const importLines = executableBody.split(/\r?\n/).filter((line) => line.startsWith("import "));
 
-    expect(importLines.slice(0, 2)).toEqual([
+    expect(importLines.slice(0, 3)).toEqual([
+      'import "./runtime/bunRuntimeGuard";',
       'import "./daemon/processEntry";',
       'import "./runtime/reflectMetadata";',
     ]);
   });
 
-  test("the process entry module imports nothing", async () => {
+  test("the runtime guard and process entry modules import nothing", async () => {
+    const runtimeGuard = await Bun.file("src/runtime/bunRuntimeGuard.ts").text();
+    expect(runtimeGuard).not.toMatch(
+      /^\s*(import|export\s+\*\s+from|export\s+\{[^}]*\}\s+from)\b/m,
+    );
     const processEntry = await Bun.file("src/daemon/processEntry.ts").text();
     expect(processEntry).not.toMatch(
       /^\s*(import|export\s+\*\s+from|export\s+\{[^}]*\}\s+from)\b/m,

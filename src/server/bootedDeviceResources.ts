@@ -1,3 +1,4 @@
+import { adbOfflineHeldDevices } from "./adbOfflineHeldDevices";
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { androidTransportIdentityAdbFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
@@ -607,50 +608,25 @@ interface AdbOfflineHeldInput {
 async function adbOfflineHeldDeviceDescriptions(
   input: AdbOfflineHeldInput,
 ): Promise<BootedDeviceInfo[]> {
-  const { platform, devicePool, deviceManager } = input;
-  if (platform !== "android" || !devicePool || !deviceManager.getAndroidListedDeviceStates) {
-    return [];
-  }
-  const discoveredIds = new Set(input.discovered.map((device) => device.deviceId));
-  const held = devicePool
-    .getAssignedDevices()
-    .filter((pooled) => pooled.platform === "android" && !discoveredIds.has(pooled.id));
-  if (held.length === 0) {
-    return [];
-  }
-  let states: Map<string, string>;
-  try {
-    states = await deviceManager.getAndroidListedDeviceStates(
-      held.map((pooled) => pooled.id),
-      { signal: getAbortSignal() },
-    );
-  } catch (error) {
-    logger.warn(
-      `[BootedDeviceResources] Offline held-device probe failed: ${errorMessage(error)}`,
-      error,
-    );
-    return [];
-  }
-  return held.flatMap((pooled) => {
-    const adbState = states.get(pooled.id);
-    if (!adbState) {
-      return [];
-    }
-    const device: BootedDevice = { deviceId: pooled.id, name: pooled.name, platform: "android" };
-    return [
-      toBootedDeviceInfo(
-        device,
-        resolvePoolDeviceContext(
-          devicePool,
-          device,
-          input.sessionInfoByDeviceId,
-          input.resolveDeviceSessionUuid,
-        ),
-        input.configuredImages.get(`android:${pooled.avdName ?? pooled.name}`),
-        adbState,
-      ),
-    ];
+  const held = await adbOfflineHeldDevices({
+    platform: input.platform,
+    discovered: input.discovered,
+    devicePool: input.devicePool,
+    deviceManager: input.deviceManager,
   });
+  return held.map(({ device, avdName, adbState }) =>
+    toBootedDeviceInfo(
+      device,
+      resolvePoolDeviceContext(
+        input.devicePool,
+        device,
+        input.sessionInfoByDeviceId,
+        input.resolveDeviceSessionUuid,
+      ),
+      input.configuredImages.get(`android:${avdName}`),
+      adbState,
+    ),
+  );
 }
 
 export async function configuredImagesForBootedPlatform(

@@ -1003,6 +1003,8 @@ export function listDevicePayloads(
     devicePool?.getAndroidTransportAliases(deviceId) ?? [],
   transportAvdNameForDevice: (deviceId: string) => string | undefined = (deviceId) =>
     devicePool?.getAndroidTransportAvdName(deviceId),
+  /** Held devices `adb devices` lists in a non-`device` state, by serial (#11455). */
+  adbOfflineStates: ReadonlyMap<string, string> = new Map(),
 ) {
   const sessionManager = DaemonState.getInstance().isInitialized()
     ? DaemonState.getInstance().getSessionManager()
@@ -1019,6 +1021,7 @@ export function listDevicePayloads(
       : undefined;
     const description = describeDevice({
       kind: "booted",
+      adbOfflineState: adbOfflineStates.get(device.deviceId),
       device,
       pooled,
       unhealthy: pooled ? devicePool?.getDeviceHealthMarker(device.deviceId) : undefined,

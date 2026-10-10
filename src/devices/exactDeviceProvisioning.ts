@@ -103,6 +103,7 @@ export type ProvisionDeviceFailureCode =
   | "device_assigned_to_managed_slot"
   | "device_offline"
   | "discovery_incomplete"
+  | "capacity_exhausted"
   | "identity_conflict"
   | "timeout"
   | "unsupported"
@@ -130,6 +131,8 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   device_assigned_to_managed_slot: false,
   device_offline: true,
   discovery_incomplete: true,
+  // Transient: capacity frees when another device shuts down (#11236).
+  capacity_exhausted: true,
   identity_conflict: false,
   timeout: true,
   unsupported: false,
@@ -157,6 +160,16 @@ interface ProvisionDeviceErrorDiagnostics {
   recovery?: ProvisionDeviceRecoveryEvidence;
   /** The managed slot holding the device (`device_assigned_to_managed_slot`); no credentials. */
   managedSlot?: { scopeKey: string; declaredSlot: number | null; stableId: string };
+  /** Boot-capacity refusal details (`capacity_exhausted`, #11236). */
+  capacity?: ProvisionDeviceCapacityDetails;
+}
+
+/** The booted-device limit a `capacity_exhausted` refusal hit (#11236). */
+export interface ProvisionDeviceCapacityDetails {
+  limit: number;
+  booted: number;
+  /** Counted devices AutoMobile did not start; present only when there are any. */
+  externalDevices?: string[];
 }
 
 export interface IosRuntimeIncompatibility {

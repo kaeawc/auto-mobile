@@ -518,6 +518,16 @@ function provisionFailure(error: unknown): ManagedSlotReconcileFailure {
     if (error.code === "runtime_incompatible") {
       return failure("runtime_incompatible", error.message);
     }
+    const capacity = error.diagnostics.capacity;
+    if (error.code === "capacity_exhausted" && capacity) {
+      return failure("capacity_exhausted", error.message, {
+        capacity: {
+          limit: capacity.limit,
+          booted: capacity.booted,
+          retryAfterMs: error.diagnostics.retryAfterMs ?? 0,
+        },
+      });
+    }
     return failure("provision_failed", error.message, {
       retryable: error.retryable,
       provision: { code: error.code, retryable: error.retryable },

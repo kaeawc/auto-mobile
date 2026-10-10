@@ -23,6 +23,7 @@ import type { DeviceResourceConfigurationResult } from "../models/DeviceResource
 import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { BootedDevice, DeviceInfo } from "../models";
 import { DeviceLostError } from "../models/DeviceLostError";
+import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
 import { describeDevice, projectProvisionedDevice } from "./deviceDescription";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
@@ -204,13 +205,17 @@ function retryableAcquisitionProvisionCode(code: string): ProvisionDeviceFailure
 }
 
 /**
- * Typed retryable refusals from the shared bind path keep their wire code and wait hint so a
- * controller retries them the way startDevice/getAndroid clients do.
+ * Typed retryable refusals from the shared bind path, and boot capacity refusals (#11236), keep
+ * their wire code and wait hint so a controller retries them the way startDevice/getAndroid
+ * clients do.
  */
 function retryableAcquisitionProvisionError(
   args: ProvisionDeviceArgs,
   error: unknown,
 ): ProvisionDeviceError | undefined {
+  if (error instanceof BootCapacityExhaustedError) {
+    return capacityExhaustedProvisionError(args, error);
+  }
   if (!(error instanceof RetryableDeviceAcquisitionError)) {
     return undefined;
   }
@@ -228,6 +233,26 @@ function retryableAcquisitionProvisionError(
       ...(error instanceof DeviceOwnedByOtherDaemonError && error.ownerPid !== undefined
         ? { ownerPid: error.ownerPid }
         : {}),
+    },
+  );
+}
+
+/**
+ * A boot refused at the booted-device limit stays the typed retryable `capacity_exhausted`
+ * refusal with its wait hint and limit details, not a terminal `platform_command_failed` (#11236).
+ */
+function capacityExhaustedProvisionError(
+  args: ProvisionDeviceArgs,
+  error: BootCapacityExhaustedError,
+): ProvisionDeviceError {
+  const { limit, booted, externalDevices } = error.details;
+  return new ProvisionDeviceError(
+    "capacity_exhausted",
+    `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
+    true,
+    {
+      retryAfterMs: error.retryAfterMs,
+      capacity: { limit, booted, ...(externalDevices ? { externalDevices } : {}) },
     },
   );
 }
@@ -2147,6 +2172,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
         ? { runtimeCompatibility: diagnostics.runtimeCompatibility }
         : {}),
       ...(diagnostics.managedSlot ? { managedSlot: diagnostics.managedSlot } : {}),
+      ...(diagnostics.capacity ? diagnostics.capacity : {}),
       daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
     };
   }

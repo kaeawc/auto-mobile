@@ -393,6 +393,22 @@ describe("ManagedSlotReconciler", () => {
       expect(result.assignment).toMatchObject({ generation: 0, stableDeviceId: null });
     });
 
+    test("keeps a typed provision capacity_exhausted refusal typed (#11236)", async () => {
+      provisioner.failWith = () =>
+        new ProvisionDeviceError("capacity_exhausted", "full", true, {
+          retryAfterMs: 2_000,
+          capacity: { limit: 1, booted: 1 },
+        });
+
+      const result = expectFailed(await reconciler.reconcile(request()));
+
+      expect(result.failure).toMatchObject({
+        code: "capacity_exhausted",
+        retryable: true,
+        capacity: { limit: 1, booted: 1, retryAfterMs: 2_000 },
+      });
+    });
+
     test("discards a created device that never reached automation readiness", async () => {
       provisioner.readinessStatus = "device_ready";
 

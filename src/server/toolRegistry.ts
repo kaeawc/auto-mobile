@@ -130,6 +130,8 @@ import {
   runWithToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
 import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
+import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
+import { refuseControlOnForeignOwnedSession } from "./foreignOwnedSessionRefusal";
 import { deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
 import { getAbortSignal, isClientCancelled, runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -2482,6 +2484,36 @@ async function assertManagedSlotControlAccess(input: {
 }
 
 /**
+ * #11469: an internal call (plan step, nested tool) runs for the connection of the call that
+ * started it, so a session the call itself names is judged by the owner rule a direct call from
+ * that connection gets at the MCP ingress (#11344), before any bind, device move or input. The
+ * plan's own session and the ambient routing session replace whatever a step names and were
+ * judged when the enclosing call was admitted; reads and acquisitions are never refused. A call
+ * with no originating connection (daemon housekeeping, a direct-mode server) carries no identity
+ * and is left to the device-holder check.
+ */
+function refuseInternalControlOnForeignOwnedSession(
+  tool: RegisteredTool,
+  args: Record<string, unknown>,
+  options: InternalToolCallOptions,
+): void {
+  const context = getToolSelectionContext();
+  const callerMcpSessionId = context?.callerMcpSessionId;
+  if (
+    !callerMcpSessionId ||
+    options.sessionUuid !== undefined ||
+    context?.routingSessionUuid !== undefined ||
+    typeof args.sessionUuid !== "string" ||
+    !tool.requiresDevice ||
+    isDeviceSessionAcquisitionTool(tool.name) ||
+    tool.isDeviceReadOnlyCall?.(args) === true
+  ) {
+    return;
+  }
+  refuseControlOnForeignOwnedSession(tool.name, args.sessionUuid, callerMcpSessionId);
+}
+
+/**
  * The managed-connection gate for internal calls (#11397). The MCP ingress refuses a managed
  * connection's lifecycle tools and off-slot `setActiveDevice`, but a plan step or nested tool call
  * never passes the ingress and carries no socket session id. It is recognized by the slot session
@@ -3076,6 +3108,7 @@ export class ToolRegistryClass {
     }
     const invocation = this.createInternalToolInvocationContext(args, options);
     assertInternalCallWithinManagedSlots(resolved.name, invocation);
+    refuseInternalControlOnForeignOwnedSession(resolved, invocation.args, options);
 
     return runWithToolSelectionContext(invocation, () =>
       runWithPostActionCaptureScope(

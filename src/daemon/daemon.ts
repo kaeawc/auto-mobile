@@ -526,6 +526,12 @@ export class Daemon {
   private readonly startupCompletion: Promise<void>;
   private resolveStartupCompletion!: () => void;
   private rejectStartupCompletion!: (reason: unknown) => void;
+  /**
+   * Aborted when shutdown closes ingress, so an HTTP MCP request still waiting
+   * on {@link startupCompletion} answers 503 instead of holding the HTTP server
+   * close (and every later shutdown stage) open (#11189).
+   */
+  private readonly shutdownIngressAbort = new AbortController();
   private transports: Map<string, StreamableHTTPServerTransport> = new Map();
   private readonly httpSessionIdleTimers = new Map<string, NodeJS.Timeout>();
   private readonly activeHttpRequests = new Map<string, number>();
@@ -1107,6 +1113,9 @@ export class Daemon {
       // children; exiting straight from main().catch would skip their release and
       // the daemon-shutdown broadcast (#11156). Tear down (bounded) first.
       logger.error(`Daemon startup failed after the socket bind; stopping: ${errorMessage(error)}`);
+      // Release HTTP MCP requests held on startup before the stop awaits the HTTP
+      // server close, which waits for those in-flight requests (#11189).
+      this.rejectStartupCompletion(error);
       await this.stopAfterFailedStartup();
       throw error;
     }
@@ -1645,15 +1654,25 @@ export class Daemon {
       return true;
     }
     const timedOut = Symbol("HTTP startup admission timeout");
+    const signal = this.shutdownIngressAbort.signal;
     try {
       await raceWithDeadline(this.startupCompletion, {
         timer: this.timer,
         timeoutMs: HTTP_STARTUP_ADMISSION_TIMEOUT_MS,
+        signal,
         label: "HTTP MCP startup admission",
         timeoutError: () => timedOut,
       });
       return true;
     } catch (error) {
+      if (signal.aborted) {
+        // Shutdown began while this request waited on startup; the HTTP server
+        // close waits for it, so answer now rather than after startup (#11189).
+        logger.info("HTTP MCP request refused: daemon shut down during startup admission");
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Daemon is shutting down" }));
+        return false;
+      }
       if (error === timedOut) {
         logger.warn(
           `HTTP MCP request refused: daemon still starting after ${HTTP_STARTUP_ADMISSION_TIMEOUT_MS}ms`,
@@ -4653,6 +4672,7 @@ export class Daemon {
    */
   private async quiesceProvisioningIngress(): Promise<void> {
     this.acceptingHttpSessions = false;
+    this.shutdownIngressAbort.abort();
     // Start closing the listener now so it cannot admit a connection after the
     // transport snapshot. The later HTTP server stage awaits this close.
     void this.closeHttpListener().catch((error) => {

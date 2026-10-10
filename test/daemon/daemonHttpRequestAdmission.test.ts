@@ -20,6 +20,12 @@ const port = 41321;
 
 interface DaemonHttpInternals {
   startHttpServer(): Promise<void>;
+  startUntilReady(): Promise<void>;
+  startThroughSocketBind(): Promise<void>;
+  startAfterSocketBind(): Promise<void>;
+  stopAfterFailedStartup(): Promise<void>;
+  quiesceProvisioningIngress(): Promise<void>;
+  closeHttpListener(): Promise<void>;
   resolveStartupCompletion(): void;
   rejectStartupCompletion(reason: unknown): void;
   sessionManager: SessionManager;
@@ -80,6 +86,15 @@ class FakeHttpServer extends EventEmitter {
   requestTimeout = 0;
   headersTimeout = 0;
   timeout = 0;
+  closed = false;
+  private readonly inFlight = new Set<Promise<FakeResponse>>();
+
+  /** Like node:http/Bun: close completes only after in-flight requests finish. */
+  close(callback: (error?: Error) => void): this {
+    this.closed = true;
+    void Promise.all(this.inFlight).then(() => callback());
+    return this;
+  }
 
   listen(_port: number, _host: string, callback: () => void): this {
     queueMicrotask(callback);
@@ -107,7 +122,10 @@ class FakeHttpServer extends EventEmitter {
         request.emit("end");
       });
     }
-    return response.finished.then(() => response);
+    const finished = response.finished.then(() => response);
+    this.inFlight.add(finished);
+    void finished.then(() => this.inFlight.delete(finished));
+    return finished;
   }
 }
 
@@ -292,6 +310,79 @@ describe("Daemon HTTP MCP admission during startup (#11156)", () => {
       expect(transport.handled).toBe(0);
     } finally {
       warnings.mockRestore();
+    }
+  });
+});
+
+describe("Daemon HTTP MCP admission during shutdown (#11189)", () => {
+  const headers = { host: `127.0.0.1:${port}`, "mcp-session-id": "known-session" };
+
+  test("shutdown answers a request held on startup with 503 so the HTTP server can close", async () => {
+    const infos = spyOn(logger, "info").mockImplementation(() => {});
+    try {
+      const { server, transport, internals } = await harness(undefined, undefined, {
+        startupComplete: false,
+      });
+      let answered = false;
+      const response = server.dispatch(headers).then((result) => {
+        answered = true;
+        return result;
+      });
+      await Bun.sleep(0);
+      expect(answered).toBeFalse();
+
+      await internals.quiesceProvisioningIngress();
+      let closed = false;
+      void internals.closeHttpListener().then(() => {
+        closed = true;
+      });
+      for (let turn = 0; turn < 20 && !closed; turn++) {
+        await Promise.resolve();
+      }
+      // Startup never completed: before #11189 the held request kept the close pending.
+      expect(closed).toBeTrue();
+      const result = await response;
+      expect(result.statusCode).toBe(503);
+      expect(JSON.parse(result.body)).toEqual({ error: "Daemon is shutting down" });
+      expect(transport.handled).toBe(0);
+    } finally {
+      infos.mockRestore();
+    }
+  });
+
+  test("a post-bind startup failure answers held requests before awaiting the stop", async () => {
+    const warnings = spyOn(logger, "warn").mockImplementation(() => {});
+    const errors = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      const { server, transport, internals } = await harness(undefined, undefined, {
+        startupComplete: false,
+      });
+      const response = server.dispatch(headers);
+      await Bun.sleep(0);
+      const failure = new Error("rehydration exploded");
+      let stopEntered = false;
+      internals.startThroughSocketBind = async () => {};
+      internals.startAfterSocketBind = async () => {
+        throw failure;
+      };
+      // The real stop awaits the HTTP server close, which waits for the held request.
+      internals.stopAfterFailedStartup = async () => {
+        stopEntered = true;
+        await internals.closeHttpListener();
+      };
+      let startError: unknown;
+      await internals.startUntilReady().catch((error: unknown) => {
+        startError = error;
+      });
+      expect(stopEntered).toBeTrue();
+      expect(startError).toBe(failure);
+      const result = await response;
+      expect(result.statusCode).toBe(503);
+      expect(JSON.parse(result.body)).toEqual({ error: "Daemon startup failed" });
+      expect(transport.handled).toBe(0);
+    } finally {
+      warnings.mockRestore();
+      errors.mockRestore();
     }
   });
 });

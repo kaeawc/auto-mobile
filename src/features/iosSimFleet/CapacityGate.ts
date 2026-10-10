@@ -138,7 +138,7 @@ export class IosSimCapacityGate
     // The boot's own target (already Booting or Booted) needs no new slot.
     const occupied = occupyingUdids(report, bootUdid);
     this.forgetExitedStarted(report);
-    const bootedCount = occupied.length + this.inFlightBootCount(report);
+    const bootedCount = occupied.length + this.inFlightBootCount(report, bootUdid);
     const refused = atCapacityDecision(bootedCount, limits, this.retryAfterMs, {
       noun: "simulator",
       envName: IOS_SIM_MAX_BOOTED_ENV,
@@ -231,9 +231,12 @@ export class IosSimCapacityGate
     }
   }
 
-  /** Admitted boots that the latest sample does not already show as occupying a slot. */
-  private inFlightBootCount(report: FleetCostReport): number {
-    return this.admittedBoots.inFlightCount(new Set(occupyingUdids(report)));
+  /**
+   * Admitted boots that the latest sample does not already show as occupying a slot, except
+   * `bootUdid`'s own: that target is excluded from the listing count and needs no second slot.
+   */
+  private inFlightBootCount(report: FleetCostReport, bootUdid?: string): number {
+    return this.admittedBoots.inFlightCount(new Set(occupyingUdids(report)), bootUdid);
   }
 
   private limitsFor(report: FleetCostReport): CapacityLimits {

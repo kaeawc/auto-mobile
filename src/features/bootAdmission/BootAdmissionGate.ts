@@ -211,15 +211,19 @@ export class BootAdmissionLedger {
   /**
    * Admitted boots the listing does not already show. A handed-off boot that
    * is now visible, or past its hand-off window, leaves the ledger here.
+   * An entry for `excludeDeviceId` is not counted: a boot's own target needs no second slot.
    */
-  inFlightCount(visibleDeviceIds: ReadonlySet<string>): number {
+  inFlightCount(visibleDeviceIds: ReadonlySet<string>, excludeDeviceId?: string): number {
     const now = this.timer.now();
     let count = 0;
     for (const [token, entry] of this.entries) {
       const visible = entry.deviceId !== undefined && visibleDeviceIds.has(entry.deviceId);
       if (entry.handedOffUntilMs !== undefined && (visible || now >= entry.handedOffUntilMs)) {
         this.entries.delete(token);
-      } else if (!visible) {
+      } else if (
+        !visible &&
+        (excludeDeviceId === undefined || entry.deviceId !== excludeDeviceId)
+      ) {
         count += 1;
       }
     }

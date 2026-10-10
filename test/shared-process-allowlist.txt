@@ -381,6 +381,7 @@ test/features/featureFlags/FeatureFlagService.toolListChanged.test.ts
 test/features/featureFlags/persistedOutputReductionOverrides.test.ts
 test/features/featureFlags/toolDefinitionAffectingFlags.drift.test.ts
 test/features/iosSimFleet/IosBootInstrumentation.test.ts
+test/features/iosSimFleet/iosBootCapacityGate.test.ts
 test/features/iosSimFleet/iosSimFleet.test.ts
 test/features/memory/MemoryAudit.characterization.test.ts
 test/features/memory/MemoryMetricsCollector.test.ts

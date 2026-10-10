@@ -1,6 +1,12 @@
+import { readFileSync } from "node:fs";
 import { parseArgs as parseNodeArgs } from "node:util";
 import { parsePort, parsePositiveNumber, type ParseLogger } from "./numericValidators";
 import type { VideoRecordingConfigInput } from "../models";
+import {
+  MANAGED_SLOT_CONFIG_ENV,
+  MANAGED_SLOT_CONFIG_FLAG,
+  resolveManagedSlotConfig,
+} from "../models/managedSlotConfig";
 import type { PlanExecutionLockScope } from "../utils/ServerConfig";
 import { shouldSkipCtrlProxyDownload } from "../utils/ctrlProxyDownloadControl";
 import {
@@ -96,6 +102,7 @@ export function parseArgs(
   args: string[],
   log: ParseLogger,
   environment: NodeJS.ProcessEnv = process.env,
+  readFile: (path: string) => string = (path) => readFileSync(path, "utf8"),
 ) {
   const { values } = parseNodeArgs({
     args,
@@ -163,6 +170,14 @@ export function parseArgs(
   const cliIndex = args.indexOf("--cli");
   const cliArgs = cliMode ? args.slice(cliIndex + 1) : [];
   const scalarOptions = parseValueOptions(args, log, video, runnerReadinessTimeoutMs);
+  // Throws a typed ManagedSlotConfigError before any daemon or device work (#11173).
+  const managedSlotConfig = resolveManagedSlotConfig({
+    flagValue: scalarOptions.managedSlotConfigValue,
+    envValue: environment[MANAGED_SLOT_CONFIG_ENV],
+    readFile,
+    hasInitialSessionUuid: scalarOptions.initialSessionUuid !== undefined,
+    noProxy,
+  });
 
   return {
     cliMode,
@@ -172,6 +187,7 @@ export function parseArgs(
     daemonHost: scalarOptions.daemonHost,
     initialSessionUuid: scalarOptions.initialSessionUuid,
     livenessOwnerToken: scalarOptions.livenessOwnerToken,
+    managedSlotConfig,
     debugPerf,
     debug,
     strictPort,
@@ -347,6 +363,7 @@ interface ScalarOptions {
   daemonHost?: string;
   initialSessionUuid?: string;
   livenessOwnerToken?: string;
+  managedSlotConfigValue?: string;
   a11yLevel?: string;
   a11yFailureMode?: string;
   a11yMinSeverity?: string;
@@ -501,6 +518,10 @@ function parseSessionBindingOption(
     options.initialSessionUuid = args[i + 1];
     return i + 1;
   }
+  const managed = parseManagedSlotConfigOption(args, i, log, options);
+  if (managed !== undefined) {
+    return managed;
+  }
   if (arg === "--liveness-owner-token") {
     if (!hasValue) {
       log.warn("--liveness-owner-token requires a non-empty value");
@@ -508,6 +529,30 @@ function parseSessionBindingOption(
     }
     options.livenessOwnerToken = value;
     return i + 1;
+  }
+  return undefined;
+}
+
+/** `--managed-slot-config <json|path>` or `--managed-slot-config=<json|path>`. */
+function parseManagedSlotConfigOption(
+  args: string[],
+  i: number,
+  log: ParseLogger,
+  options: ScalarOptions,
+): number | undefined {
+  const arg = args[i];
+  if (arg === MANAGED_SLOT_CONFIG_FLAG) {
+    const value = args[i + 1]?.trim();
+    if (!value || (value.startsWith("--") && !value.startsWith("{"))) {
+      log.warn(`${MANAGED_SLOT_CONFIG_FLAG} requires inline JSON or a file path`);
+      return i;
+    }
+    options.managedSlotConfigValue = value;
+    return i + 1;
+  }
+  if (arg.startsWith(`${MANAGED_SLOT_CONFIG_FLAG}=`)) {
+    options.managedSlotConfigValue = arg.slice(MANAGED_SLOT_CONFIG_FLAG.length + 1);
+    return i;
   }
   return undefined;
 }

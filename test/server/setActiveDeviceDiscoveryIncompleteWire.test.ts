@@ -1,16 +1,16 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
-import { DaemonState } from "../../../src/daemon/daemonState";
-import { DevicePool } from "../../../src/daemon/devicePool";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import type { BootedDevice } from "../../../src/models";
-import { createSetActiveDeviceHandler } from "../../../src/server/setActiveDevice";
-import { shapeToolCallError } from "../../../src/server/shapeToolCallError";
-import { logger } from "../../../src/utils/logger";
-import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
-import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
-import { FakeTimer } from "../../fakes/FakeTimer";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import type { BootedDevice } from "../../src/models";
+import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
+import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { logger } from "../../src/utils/logger";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
  * #11511 typed incomplete Android discovery as retryable `discovery_incomplete` for startDevice

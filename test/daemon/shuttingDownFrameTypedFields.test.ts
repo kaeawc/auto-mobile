@@ -1,11 +1,11 @@
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { expect, test } from "bun:test";
-import type { DaemonStateAccess } from "../../../src/daemon/daemonRequestHandlers";
-import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../../src/daemon/constants";
-import { UnixSocketServer } from "../../../src/daemon/socketServer";
-import type { DaemonResponse } from "../../../src/daemon/types";
-import { FakeTimer } from "../../fakes/FakeTimer";
+import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
+import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
+import { UnixSocketServer } from "../../src/daemon/socketServer";
+import type { DaemonResponse } from "../../src/daemon/types";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
  * A request the daemon refuses at shutdown is answered with a failure FRAME that carries the

@@ -1,11 +1,7 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import {
-  createProxyMcpServer,
-  livenessHandoverNotificationPayloads,
-  managedEndedPayload,
-} from "../../src/server/proxyServer";
+import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import {
@@ -16,10 +12,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DAEMON_HEARTBEAT_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
-import {
-  livenessHandoverPayload,
-  type LivenessHandover,
-} from "../../src/daemon/proxyLivenessRecovery";
+import type { LivenessHandover } from "../../src/daemon/proxyLivenessRecovery";
 import { logger } from "../../src/utils/logger";
 import type { Timer } from "../../src/utils/SystemTimer";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -29,6 +22,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { readyManagedSlotsResult } from "../helpers/refusalWireFixtures";
+import type { ManagedSlotsResult } from "../../src/models/managedSlotsResult";
 
 // #11483 item 1 (stdio proxy contract): a MANAGED connection whose execution session the daemon released
 // for a lost heartbeat while the proxy itself was stalled (host sleep, SIGSTOP, a long GC pause).
@@ -41,6 +35,9 @@ import { readyManagedSlotsResult } from "../helpers/refusalWireFixtures";
 // acquire a device. The harness mirrors test/daemon/proxyLivenessStalls.test.ts (real session
 // manager and heartbeat handler behind the fake daemon client, a stallable clock) and
 // test/daemon/proxyManagedExecutionHold.test.ts (the managed hold).
+//
+// Every assertion is on what the proxy server answers and pushes, so the file imports nothing the
+// fix added and fails on the pre-fix tree for the behaviour, not for a missing export.
 
 const SESSION = "11111111-2222-4333-8444-555555555555";
 const LEASE_MS = 10_000;
@@ -93,6 +90,7 @@ let timer: StallableTimer;
 let sessionManager: SessionManager;
 let proxy: DaemonMcpProxy;
 let handovers: LivenessHandover[];
+let clients: FakeDaemonClient[];
 let spies: Array<ReturnType<typeof spyOn>>;
 
 beforeEach(async () => {
@@ -119,9 +117,10 @@ beforeEach(async () => {
     spyOn(logger, "error").mockImplementation(() => {}),
   ];
   handovers = [];
+  clients = [];
   proxy = new DaemonMcpProxy({
-    clientFactory: () =>
-      new FakeDaemonClient({
+    clientFactory: () => {
+      const client = new FakeDaemonClient({
         onCallDaemonMethod: async (method, params) => {
           if (method !== DAEMON_HEARTBEAT_METHOD) {
             return undefined;
@@ -135,7 +134,10 @@ beforeEach(async () => {
           }
           return response.result;
         },
-      }),
+      });
+      clients.push(client);
+      return client;
+    },
     daemonManager,
     autoStartDaemon: false,
     timer,
@@ -154,10 +156,24 @@ afterEach(async () => {
   }
 });
 
-test("a managed connection answers a session lost during a proxy stall with managed_execution_ended, not proxy_stalled reacquire advice", async () => {
-  const managedSlots = readyManagedSlotsResult(SESSION);
+interface ToolAnswer {
+  isError?: boolean;
+  content: Array<{ text: string }>;
+}
+
+/**
+ * Lose the held session during a proxy stall on a connection served by the proxy MCP server, then
+ * hand the test its tools/call handler and every logging notification the server pushed.
+ */
+async function withStallLoss(
+  managedSlots: ManagedSlotsResult | undefined,
+  body: (
+    callTool: (name: string, args: Record<string, unknown>) => Promise<ToolAnswer>,
+    pushed: () => unknown[],
+  ) => Promise<void>,
+): Promise<void> {
   const registration = spyOn(Server.prototype, "setRequestHandler");
-  const { server } = createProxyMcpServer({ proxy, managedSlots });
+  const { server } = createProxyMcpServer({ proxy, ...(managedSlots ? { managedSlots } : {}) });
   const handler = registration.mock.calls.find(([schema]) => schema === CallToolRequestSchema)?.[1];
   registration.mockRestore();
   const logged = spyOn(Server.prototype, "sendLoggingMessage").mockResolvedValue(undefined);
@@ -167,7 +183,7 @@ test("a managed connection answers a session lost during a proxy stall with mana
   }
 
   try {
-    // The managed slot acquisition holds the execution's session: claimed and heartbeated.
+    // The session is held: claimed and heartbeated from now on.
     await proxy.holdManagedExecutionSession(SESSION);
     expect(sessionManager.getSession(SESSION)?.livenessOwnerToken).toBeDefined();
 
@@ -181,11 +197,34 @@ test("a managed connection answers a session lost during a proxy stall with mana
     // Precondition: the proxy's own recovery classified this as a definitive loss.
     expect(handovers.map((handover) => handover.code)).toEqual(["proxy_stalled"]);
 
-    const result = await handler(
-      { method: "tools/call", params: { name: "tapOn", arguments: { text: "OK" } } },
-      extra,
+    await body(
+      async (name, args) =>
+        (await handler(
+          { method: "tools/call", params: { name, arguments: args } },
+          extra,
+        )) as ToolAnswer,
+      () => logged.mock.calls.map(([params]) => params.data),
     );
-    const text = (result.content[0] as { text: string }).text;
+  } finally {
+    await server.close();
+  }
+}
+
+/** The read after the stall answer reached the daemon, and carried no session. */
+async function expectNextReadForwardedSessionless(
+  callTool: (name: string, args: Record<string, unknown>) => Promise<ToolAnswer>,
+): Promise<void> {
+  const forwarded = () => clients.flatMap((client) => client.callToolCalls);
+  expect(forwarded()).toEqual([]);
+  const read = await callTool("observe", { deviceId: "emulator-5554" });
+  expect(read.isError).not.toBe(true);
+  expect(forwarded()).toEqual([{ toolName: "observe", params: { deviceId: "emulator-5554" } }]);
+}
+
+test("a managed connection answers a session lost during a proxy stall with managed_execution_ended, not proxy_stalled reacquire advice", async () => {
+  await withStallLoss(readyManagedSlotsResult(SESSION), async (callTool, pushed) => {
+    const result = await callTool("tapOn", { text: "OK" });
+    const text = result.content[0].text;
     const error = JSON.parse(text).error;
 
     expect(result.isError).toBe(true);
@@ -200,35 +239,29 @@ test("a managed connection answers a session lost during a proxy stall with mana
     expect(error).not.toHaveProperty("recovery");
 
     // The pushed logging notification carries the same answer, not the reacquire advice.
-    expect(logged.mock.calls.map(([params]) => params.data)).toEqual([{ error }]);
-  } finally {
-    await server.close();
-  }
+    expect(pushed()).toEqual([{ error }]);
+
+    // That answer told the caller once: it is not refused a second time before reads go through.
+    await expectNextReadForwardedSessionless(callTool);
+  });
 });
 
-test("a generic connection keeps the proxy_stalled handover for the same loss", () => {
-  const handover: LivenessHandover = {
-    code: "proxy_stalled",
-    sessions: [{ sessionUuid: SESSION, deviceId: "emulator-5554", lastAcknowledgedHeartbeatAt: 0 }],
-    attempts: 1,
-    lastAcknowledgedHeartbeatAt: 0,
-    action: "reacquire_lost_sessions",
-  };
-  const stalled = { ...handover, code: "daemon_stalled" as const };
-  const managedSlots = readyManagedSlotsResult(SESSION);
+test("a generic connection keeps the proxy_stalled answer for the same loss, and is told once", async () => {
+  await withStallLoss(undefined, async (callTool, pushed) => {
+    const result = await callTool("tapOn", { text: "OK" });
+    const error = JSON.parse(result.content[0].text).error;
 
-  expect(livenessHandoverNotificationPayloads(handover)).toEqual([
-    livenessHandoverPayload(handover),
-  ]);
-  // A daemon stall is not a loss: a managed connection keeps its handover too.
-  expect(livenessHandoverNotificationPayloads(stalled, managedSlots)).toEqual([
-    livenessHandoverPayload(stalled),
-  ]);
-  // A session that is not one of the connection's slots keeps the handover.
-  const other = { ...handover.sessions[0], sessionUuid: "99999999-2222-4333-8444-555555555555" };
-  const mixed = { ...handover, sessions: [handover.sessions[0], other] };
-  expect(livenessHandoverNotificationPayloads(mixed, managedSlots)).toEqual([
-    managedEndedPayload(managedSlots, SESSION, "proxy_stalled"),
-    livenessHandoverPayload({ ...handover, sessions: [other] }),
-  ]);
+    expect(result.isError).toBe(true);
+    expect(error).toMatchObject({
+      code: "proxy_stalled",
+      retryable: true,
+      recovery: { action: "reacquire_lost_sessions" },
+    });
+    expect(error.sessions.map((session: { sessionUuid: string }) => session.sessionUuid)).toEqual([
+      SESSION,
+    ]);
+    expect(pushed()).toEqual([{ error }]);
+
+    await expectNextReadForwardedSessionless(callTool);
+  });
 });

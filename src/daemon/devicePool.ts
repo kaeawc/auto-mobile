@@ -8164,8 +8164,12 @@ export class DevicePool {
     return true;
   }
 
-  /** Track a bind for `mcpSessionId` until the returned callback runs (#11146). */
-  private beginMcpBind(mcpSessionId: string | undefined): () => void {
+  /**
+   * Track a bind for `mcpSessionId` until the returned callback runs (#11146). The tool-call entry
+   * holds one across a whole explicit-sessionUuid device call (#11348): its attach runs after the
+   * handler, so a close during the handler must still be seen by {@link recordBindOwnership}.
+   */
+  beginMcpBind(mcpSessionId: string | undefined): () => void {
     if (!mcpSessionId) {
       return () => {};
     }

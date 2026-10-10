@@ -68,7 +68,7 @@ describe("daemon command characterization with fake I/O", () => {
           ],
           [
             "stdout",
-            "  reset-slot-scope --runner-namespace <ns> --incarnation <id>  Invalidate a managed slot scope; free its devices",
+            "  reset-slot-scope --runner-namespace <ns> --incarnation <id> [--force]  Invalidate a managed slot scope; free its devices",
           ],
           ["stdout", "\nOptions:"],
           [

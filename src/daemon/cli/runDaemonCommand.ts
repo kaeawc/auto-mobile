@@ -137,11 +137,12 @@ export interface ResetSlotScopeCommandArgs {
   runnerIncarnation: string;
   managedHostScope?: string;
   waitMs?: number;
+  force?: boolean;
 }
 
 /**
  * Parse `--daemon reset-slot-scope --runner-namespace <ns> --incarnation <id>
- * [--managed-host-scope <scope>] [--wait-ms <ms>]` (#11174).
+ * [--managed-host-scope <scope>] [--wait-ms <ms>] [--force]` (#11174, #11336).
  */
 export function parseResetSlotScopeCommandArgs(args: string[]): ResetSlotScopeCommandArgs {
   const read = (flag: string, required: boolean): string | undefined => {
@@ -176,6 +177,7 @@ export function parseResetSlotScopeCommandArgs(args: string[]): ResetSlotScopeCo
     runnerIncarnation,
     ...(managedHostScope === undefined ? {} : { managedHostScope }),
     ...(waitMs === undefined ? {} : { waitMs }),
+    ...(args.includes("--force") ? { force: true } : {}),
   };
 }
 
@@ -988,7 +990,11 @@ const NO_POSITIONAL_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpe
   diagnose: { launchFlags: true },
   "available-devices": { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
   "active-sessions": { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
-  "reset-slot-scope": { launchFlags: true, valueFlags: RESET_SLOT_SCOPE_FLAGS },
+  "reset-slot-scope": {
+    launchFlags: true,
+    valueFlags: RESET_SLOT_SCOPE_FLAGS,
+    booleanFlags: ["--force"],
+  },
 };
 
 /**
@@ -1036,7 +1042,7 @@ function printDaemonUsageError(message: string): void {
       "  heartbeat <id>        Heartbeat a session (one-shot CLI: no-op; proxy-owned: refused)",
     );
     console.log(
-      "  reset-slot-scope --runner-namespace <ns> --incarnation <id>  Invalidate a managed slot scope; free its devices",
+      "  reset-slot-scope --runner-namespace <ns> --incarnation <id> [--force]  Invalidate a managed slot scope; free its devices",
     );
     console.log("\nOptions:");
     console.log(

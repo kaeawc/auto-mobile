@@ -9,6 +9,7 @@ import {
   type SlotRegistry,
   type SlotScopeIdentity,
 } from "../../../src/daemon/managedSlots/slotRegistry";
+import { SlotScopeReset } from "../../../src/daemon/managedSlots/slotScopeReset";
 import { ManagedExecutionReowner } from "../../../src/daemon/managedSlots/managedExecutionReowner";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -390,6 +391,80 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect(await registry.completeScopeInvalidation(scopeKey)).toMatchObject({
         kind: "invalidated",
         freedDevices: [{ stableDeviceId: "avd-1" }],
+      });
+    });
+
+    // #11336: `reset-slot-scope --force` abandons a slot stuck settling under a live settler.
+    describe("forced scope reset of a stuck settling slot", () => {
+      const settler = { daemonId: "d", pid: 300 };
+      const releaseTarget = {
+        oldStableId: "avd-1",
+        oldName: "avd-1",
+        newName: null,
+        newStableId: null,
+        requestedSpec: SPEC,
+        resolvedSpec: SPEC,
+        specFingerprint: "fp-avd-1",
+      };
+
+      async function stuckSettling(): Promise<{ scopeKey: string }> {
+        const scopeKey = await readyScope();
+        const key = { scopeKey, slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        livePids.add(300);
+        const expected = { generation: 1, stableDeviceId: "avd-1" };
+        const opened = await registry.openSlotJournal(key, {
+          kind: "release",
+          phase: "intent",
+          owner: settler,
+          target: releaseTarget,
+          assignment: { kind: "state", expected, state: "settling", options: { settler } },
+        });
+        expect(opened.kind).toBe("opened");
+        return { scopeKey };
+      }
+
+      function resetter(): SlotScopeReset {
+        timer.enableAutoAdvance();
+        return new SlotScopeReset({ registry: async () => registry, timer });
+      }
+
+      test("commits the release entry, invalidates and frees the device; without --force it stays pending", async () => {
+        const { scopeKey } = await stuckSettling();
+        const request = { ...SCOPE_A1, waitMs: 0 };
+        const reset = resetter();
+
+        expect((await reset.reset(request)).outcome).toBe("pending");
+        expect((await registry.getAssignment({ scopeKey, slotIndex: 0 }))?.state).toBe("settling");
+
+        const forced = await reset.reset({ ...request, force: true });
+
+        expect(forced).toMatchObject({
+          outcome: "invalidated",
+          scopes: [{ freedDevices: [{ stableDeviceId: "avd-1" }] }],
+        });
+        expect(await registry.listOpenSlotJournal()).toEqual([]);
+        expect((await registry.listFreeDevices()).map((d) => d.stableDeviceId)).toEqual(["avd-1"]);
+      });
+
+      test("a slot with a live execution owner is still pending under --force", async () => {
+        const scopeKey = await readyScope();
+        const key = { scopeKey, slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        livePids.add(100);
+        await registry.claimExecution(
+          key,
+          { generation: 1, stableDeviceId: "avd-1" },
+          ownerFor(100, "s1"),
+        );
+
+        const result = await resetter().reset({ ...SCOPE_A1, waitMs: 0, force: true });
+
+        expect(result.outcome).toBe("pending");
+        expect(result.scopes[0]?.pending?.liveOwners).toEqual([
+          { slotIndex: 0, sessionUuid: "s1", pid: 100 },
+        ]);
+        expect((await registry.getAssignment(key))?.execOwner?.sessionUuid).toBe("s1");
       });
     });
 

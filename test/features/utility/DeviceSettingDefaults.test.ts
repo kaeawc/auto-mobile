@@ -11,6 +11,23 @@ import {
   FakeDeviceSettings,
 } from "../../fakes/FakeDeviceSettingDefaults";
 
+import { FakeTimer } from "../../fakes/FakeTimer";
+
+/** Device settings whose reads block until released, standing in for a slow adb reset. */
+class GatedSettings extends FakeDeviceSettings {
+  private release!: () => void;
+  private readonly gate = new Promise<void>((resolve) => {
+    this.release = resolve;
+  });
+  open(): void {
+    this.release();
+  }
+  override async read(...args: Parameters<FakeDeviceSettings["read"]>) {
+    await this.gate;
+    return super.read(...args);
+  }
+}
+
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 
 function harness(initial: DeviceSettingValues) {
@@ -134,5 +151,52 @@ describe("DeviceSettingDefaults (#11145)", () => {
     expect(tracked.map(([deviceId]) => deviceId)).toEqual([device.deviceId]);
     await tracked[0][1];
     expect(h.settings.current.fontScale).toBe("default");
+  });
+
+  describe("pending acquisition reset (#11145)", () => {
+    function gated() {
+      const persistence = new FakePersistence();
+      const settings = new GatedSettings({ nightMode: "light" });
+      const timer = new FakeTimer();
+      let holder: string | null = "session-b";
+      const defaults = new DeviceSettingDefaults(persistence, settings, () => holder, timer, 100);
+      persistence.records.set(device.deviceId, {
+        platform: "android",
+        name: "Pixel",
+        sessionId: "session-a",
+        values: { nightMode: "light" },
+      });
+      return { persistence, settings, timer, defaults, hold: (id: string | null) => (holder = id) };
+    }
+
+    test("a settings change that records no default still waits for the pending reset", async () => {
+      const h = gated();
+      h.hold(null);
+      const reset = h.defaults.resetOnAcquisition(device.deviceId, "session-b");
+      let proceeded = false;
+      const record = h.defaults.recordBeforeChange(device, ["nightMode"]).then(() => {
+        proceeded = true;
+      });
+      await Promise.resolve();
+      expect(proceeded).toBe(false);
+      h.settings.open();
+      await Promise.all([reset, record]);
+      expect(proceeded).toBe(true);
+    });
+
+    test("the wait is bounded: on timeout the change proceeds and its default is not recorded afterwards", async () => {
+      const h = gated();
+      const reset = h.defaults.resetOnAcquisition(device.deviceId, "session-b");
+      const record = h.defaults.recordBeforeChange(device, ["nightMode"]);
+      h.timer.advanceTime(100);
+      await record;
+      // The caller changes the setting; the late record must not take that value for the default.
+      h.settings.current.nightMode = "dark";
+      h.settings.open();
+      await reset;
+      await h.defaults.settled(device.deviceId);
+      const recorded = h.persistence.records.get(device.deviceId);
+      expect(recorded?.values.nightMode).not.toBe("dark");
+    });
   });
 });

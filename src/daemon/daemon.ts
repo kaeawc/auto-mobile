@@ -964,6 +964,7 @@ export class Daemon {
       new DeviceSettingDefaultsRepository(),
       new DefaultDeviceSettingsAccess(),
       (deviceId) => this.sessionManager.getSessionForDevice(deviceId),
+      this.timer,
     );
     installDeviceSettingDefaults(settingDefaults);
     const resetSettingDefaults = createDeviceSettingDefaultsAcquisitionReset(

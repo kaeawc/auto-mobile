@@ -61,6 +61,7 @@ import type {
 import {
   type BootedDeviceDiscovery,
   type BootedDeviceDiscoveryOptions,
+  type DeviceDiscoveryError,
   type DeviceImageDiscovery,
   PlatformDeviceManager,
 } from "../devices/deviceUtils";
@@ -86,13 +87,13 @@ import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerServ
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import type { AvdInfo } from "../utils/android-cmdline-tools/avdmanager";
 import {
-  describeDevice,
   projectListDevicesEntry,
   listDevicesEntrySchema,
   provisionedDeviceSchema,
   configuredImageSchema,
 } from "./deviceDescription";
 import { poolHoldFor } from "./deviceDescription";
+import { describeInventoryDevice, type AdbOfflineHold } from "./inventoryDeviceDescription";
 import {
   notifyInstalledAppResourceListChanged,
   syncInstalledAppResourceRegistry,
@@ -136,6 +137,7 @@ import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
 import {
   AndroidAvdIdentityConflictError,
+  AndroidBootedDeviceDiscoveryIncompleteError,
   BootedDeviceDiscoveryIncompleteError,
   DeviceBootService,
   findUniqueBootedAndroidDeviceByName,
@@ -1004,7 +1006,7 @@ export function listDevicePayloads(
   transportAvdNameForDevice: (deviceId: string) => string | undefined = (deviceId) =>
     devicePool?.getAndroidTransportAvdName(deviceId),
   /** Held devices `adb devices` lists in a non-`device` state, by serial (#11455). */
-  adbOfflineStates: ReadonlyMap<string, string> = new Map(),
+  adbOfflineHolds: ReadonlyMap<string, AdbOfflineHold> = new Map(),
 ) {
   const sessionManager = DaemonState.getInstance().isInitialized()
     ? DaemonState.getInstance().getSessionManager()
@@ -1019,36 +1021,29 @@ export function listDevicePayloads(
     const session = pooled?.sessionId
       ? (sessions.get(pooled.sessionId) ?? { sessionId: pooled.sessionId })
       : undefined;
-    const description = describeDevice({
-      kind: "booted",
-      adbOfflineState: adbOfflineStates.get(device.deviceId),
+    const description = describeInventoryDevice({
       device,
       pooled,
       unhealthy: pooled ? devicePool?.getDeviceHealthMarker(device.deviceId) : undefined,
-      configured: configuredImageForBootedDevice(device, configuredImages),
+      configuredImages,
       session,
       deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
-      ...(pooled ? poolHoldFor(devicePool, device.deviceId) : {}),
+      hold: pooled ? poolHoldFor(devicePool, device.deviceId) : undefined,
+      adbOffline: adbOfflineHolds.get(device.deviceId),
+      transportAvdName: transportAvdNameForDevice(device.deviceId),
     });
     if (device.platform === "android") {
-      return projectAndroidTransportDescription(
-        description,
-        aliasesForDevice(device.deviceId),
-        transportAvdNameForDevice(device.deviceId),
-      );
+      return projectAndroidTransportDescription(description, aliasesForDevice(device.deviceId));
     }
     return projectListDevicesEntry(description);
   });
 }
 
 function projectAndroidTransportDescription(
-  description: ReturnType<typeof describeDevice>,
+  description: ReturnType<typeof describeInventoryDevice>,
   aliases: string[],
-  avdName: string | undefined,
 ) {
-  const projected = projectListDevicesEntry(
-    avdName ? { ...description, isVirtual: true, identity: { stableId: avdName } } : description,
-  );
+  const projected = projectListDevicesEntry(description);
   return { ...projected, ...(aliases.length ? { transportAliases: aliases } : {}) };
 }
 
@@ -4371,9 +4366,27 @@ function assertAndroidLifecycleDiscovery(
   if (matchCount === 0) {
     const outcome = discoveryRefreshOutcome(discovery, 0);
     if (outcome.failure !== undefined) {
-      throw new ActionableError(deviceListRefreshFailureMessage(outcome.failure));
+      throw new AndroidBootedDeviceDiscoveryIncompleteError(
+        discovery.discoveryErrors?.android,
+        deviceListRefreshFailureMessage(outcome.failure),
+      );
     }
   }
+}
+
+/**
+ * Lifecycle coordination could not prove which device the serial names because a discovery sweep
+ * did not complete. Typed retryable `discovery_incomplete`, never a generic error; a genuinely
+ * ambiguous identity under COMPLETE discovery keeps its plain ActionableError.
+ */
+function androidLifecycleDiscoveryIncomplete(
+  deviceId: string,
+  discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> | undefined,
+): AndroidBootedDeviceDiscoveryIncompleteError {
+  return new AndroidBootedDeviceDiscoveryIncompleteError(
+    discoveryErrors?.android,
+    `Cannot uniquely resolve Android device '${deviceId}' for lifecycle coordination.`,
+  );
 }
 
 export async function resolveAndroidStartStableDeviceLifecycleTarget(
@@ -4427,9 +4440,7 @@ export async function resolveAndroidStartStableDeviceLifecycleTarget(
     },
   );
   if (!imageDiscovery.succeededPlatforms.has("android")) {
-    throw new ActionableError(
-      `Cannot uniquely resolve Android device '${deviceId}' for lifecycle coordination.`,
-    );
+    throw androidLifecycleDiscoveryIncomplete(deviceId, imageDiscovery.discoveryErrors);
   }
   const imageMatches = imageDiscovery.devices.filter(
     (device) =>
@@ -4451,9 +4462,7 @@ export async function resolveAndroidStartStableDeviceLifecycleTarget(
   );
   if (stableIds.size === 0) {
     if (!bootedDiscovery.succeededPlatforms.has("android")) {
-      throw new ActionableError(
-        `Cannot uniquely resolve Android device '${deviceId}' for lifecycle coordination.`,
-      );
+      throw androidLifecycleDiscoveryIncomplete(deviceId, bootedDiscovery.discoveryErrors);
     }
     return undefined;
   }

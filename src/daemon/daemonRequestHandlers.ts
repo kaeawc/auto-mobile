@@ -1371,6 +1371,7 @@ const resetSlotScopeParams = z
     runnerIncarnation: z.string().trim().min(1),
     managedHostScope: z.string().trim().min(1).optional(),
     waitMs: z.number().int().min(0).max(SLOT_SCOPE_RESET_MAX_WAIT_MS).optional(),
+    force: z.boolean().optional(),
   })
   .strict();
 

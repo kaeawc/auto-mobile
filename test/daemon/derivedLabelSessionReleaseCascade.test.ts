@@ -4,7 +4,10 @@ import {
   type DerivedLabelSessionReleaseCascade,
 } from "../../src/daemon/derivedLabelSessionReleaseCascade";
 import { PLAN_AUTO_RELEASE_REASON, SessionManager } from "../../src/daemon/sessionManager";
+import { sessionReleaseThatCancelledCall } from "../../src/daemon/sessionReleasedDuringCall";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
+import { ExecutionTracker } from "../../src/server/executionTracker";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -17,6 +20,9 @@ describe("derived label sessions are released with their base (#11091)", () => {
   let freed: Array<[string, string]>;
   let releases: Array<[string, string]>;
   let cascade: DerivedLabelSessionReleaseCascade;
+  let tracker: ExecutionTracker;
+  /** Runs when the pool frees a device, before the free is recorded. */
+  let onFree: (deviceId: string) => void;
 
   beforeEach(async () => {
     timer = new FakeTimer();
@@ -26,11 +32,18 @@ describe("derived label sessions are released with their base (#11091)", () => {
     manager.onSessionRelease((sessionId, _deviceId, reason) => {
       releases.push([sessionId, reason]);
     });
-    cascade = registerDerivedLabelSessionReleaseCascade(manager, {
-      releaseDevice: async (deviceId, sessionId) => {
-        freed.push([deviceId, sessionId]);
+    tracker = new ExecutionTracker(timer, new FakeIdGenerator());
+    onFree = () => {};
+    cascade = registerDerivedLabelSessionReleaseCascade(
+      manager,
+      {
+        releaseDevice: async (deviceId, sessionId) => {
+          onFree(deviceId);
+          freed.push([deviceId, sessionId]);
+        },
       },
-    });
+      tracker,
+    );
     const map = buildDeviceLabelMap(["A", "B", "C"], "base");
     await manager.createSession("base", "device-A", "android");
     await manager.createSession("base:B", "device-B", "android");
@@ -62,6 +75,29 @@ describe("derived label sessions are released with their base (#11091)", () => {
       ]);
     },
   );
+
+  // #11490: the cascade frees a derived session's device, so it cuts that session's calls first.
+  // The derived UUID is released as `plan-auto-release` (re-issuable), so the cut is plain.
+  test("a call still running under a derived session is cut before its device is freed", async () => {
+    const onDerived = tracker.startExecution("input/tap", undefined, "base:B");
+    tracker.bindDeviceExecution(onDerived.id, "device-B");
+    const onSibling = tracker.startExecution("input/tap", undefined, "base:C");
+    tracker.bindDeviceExecution(onSibling.id, "device-C");
+    const elsewhere = tracker.startExecution("input/tap", undefined, "unrelated");
+    const abortedWhenFreed: Record<string, boolean> = {};
+    onFree = (deviceId) => {
+      abortedWhenFreed[deviceId] = (
+        deviceId === "device-B" ? onDerived : onSibling
+      ).abortController.signal.aborted;
+    };
+
+    await manager.releaseSession("base", "explicit-release");
+    await cascade.settled();
+
+    expect(abortedWhenFreed).toEqual({ "device-B": true, "device-C": true });
+    expect(sessionReleaseThatCancelledCall(onDerived.cancelReason)).toBeUndefined();
+    expect(elsewhere.abortController.signal.aborted).toBe(false);
+  });
 
   test("the index survives the base's cache losing its label map", async () => {
     manager.clearSessionCache("base");

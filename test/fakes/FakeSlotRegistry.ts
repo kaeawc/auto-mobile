@@ -33,6 +33,9 @@ import {
   type CompleteScopeInvalidationResult,
   type DeviceHolder,
   type EnsureScopeResult,
+  type BeginFreeDeviceStopResult,
+  type FreeDeviceStopClaim,
+  isStaleFreeDeviceStopClaim,
   type FreeSlotDeviceRecord,
   type InitSlotResult,
   type ManagedDeviceEntry,
@@ -201,6 +204,13 @@ export class FakeSlotRegistry implements SlotRegistry {
       }
       const freeId = deviceId(platform, next.stableDeviceId);
       const freed = this.free.get(freeId);
+      if (
+        freed &&
+        freed.state === "stopping" &&
+        !isStaleFreeDeviceStopClaim(freed, this.timer.now())
+      ) {
+        return { kind: "free_device_stopping" };
+      }
       if (freed) {
         this.free.delete(freeId);
         adoptedFreeDevice = { ...freed };
@@ -522,7 +532,65 @@ export class FakeSlotRegistry implements SlotRegistry {
 
   async findReclaimableFreeDevices(query?: AbandonmentQuery): Promise<FreeSlotDeviceRecord[]> {
     const cutoffMs = this.timer.now() - resolveAbandonmentThresholdMs(query);
-    return (await this.listFreeDevices()).filter((device) => device.freedAtMs <= cutoffMs);
+    return (await this.listFreeDevices()).filter(
+      (device) => device.freedAtMs <= cutoffMs && device.state !== "stopped",
+    );
+  }
+
+  async beginFreeDeviceStop(
+    claim: FreeDeviceStopClaim,
+    query?: AbandonmentQuery,
+  ): Promise<BeginFreeDeviceStopResult> {
+    const nowMs = this.timer.now();
+    const cutoffMs = nowMs - resolveAbandonmentThresholdMs(query);
+    const row = this.free.get(deviceId(claim.platform, claim.stableDeviceId));
+    if (!row || row.freedAtMs !== claim.freedAtMs || row.freedAtMs > cutoffMs) {
+      return { kind: "not_reclaimable" };
+    }
+    const claimable =
+      row.state === "free" ||
+      (row.state === "stopping" &&
+        (row.stopClaimedBy === claim.claimedBy || isStaleFreeDeviceStopClaim(row, nowMs)));
+    if (!claimable) {
+      return { kind: "not_reclaimable" };
+    }
+    row.state = "stopping";
+    row.stopClaimedBy = claim.claimedBy;
+    row.stopClaimedAtMs = nowMs;
+    return { kind: "begun" };
+  }
+
+  private heldRow(claim: FreeDeviceStopClaim): FreeSlotDeviceRecord | undefined {
+    const row = this.free.get(deviceId(claim.platform, claim.stableDeviceId));
+    return row &&
+      row.freedAtMs === claim.freedAtMs &&
+      row.state === "stopping" &&
+      row.stopClaimedBy === claim.claimedBy
+      ? row
+      : undefined;
+  }
+
+  async holdsFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean> {
+    return this.heldRow(claim) !== undefined;
+  }
+
+  async completeFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean> {
+    return this.releaseStop(claim, "stopped");
+  }
+
+  async revertFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean> {
+    return this.releaseStop(claim, "free");
+  }
+
+  private releaseStop(claim: FreeDeviceStopClaim, next: "free" | "stopped"): boolean {
+    const row = this.heldRow(claim);
+    if (!row) {
+      return false;
+    }
+    row.state = next;
+    row.stopClaimedBy = null;
+    row.stopClaimedAtMs = null;
+    return true;
   }
 
   async openSlotJournal(key: SlotKey, input: OpenSlotJournalInput): Promise<OpenSlotJournalResult> {
@@ -732,6 +800,9 @@ export class FakeSlotRegistry implements SlotRegistry {
               specFingerprint: assignment.specFingerprint,
               fromScopeKey: scopeKey,
               freedAtMs: nowMs,
+              state: "free",
+              stopClaimedBy: null,
+              stopClaimedAtMs: null,
             },
           ],
     );

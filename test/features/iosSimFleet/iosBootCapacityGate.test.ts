@@ -47,10 +47,10 @@ class ScriptedSource implements FleetHostSource {
   }
 }
 
-function build(source: ScriptedSource) {
+function build(source: ScriptedSource, env: NodeJS.ProcessEnv = ENV) {
   const timer = new FakeTimer();
   const collector = new IosSimFleetCostCollector(source, new InMemoryBootDurationHistory(), timer);
-  return { gate: new IosSimCapacityGate(collector, timer, { env: ENV }), timer };
+  return { gate: new IosSimCapacityGate(collector, timer, { env }), timer };
 }
 
 /** Let queued promise continuations run; no timer involved. */
@@ -93,6 +93,43 @@ describe("iOS boot capacity gate", () => {
     expect(first.decision.outcome).toBe("allow");
     const again = await gate.admitBoot(undefined, { bootUdid: A });
     expect(again.decision.outcome).toBe("allow");
+  });
+
+  // A `simctl list` that started before the caller's own sample window opened can predate a boot
+  // that was released in between: the gate's sample must start no earlier than its window.
+  test("the admission sample does not join a listing that started before its window", async () => {
+    const source = new ScriptedSource();
+    const { gate } = build(source);
+    source.immediate = [sim(A, "Shutdown"), sim(B, "Shutdown")];
+    const first = await gate.admitBoot(undefined, { bootUdid: A });
+    source.immediate = undefined;
+    const reading = gate.describeCapacity(); // a listing that starts while A is still Shutdown
+    await tick();
+    expect(source.pending.length).toBe(1);
+    first.releaseAdmission?.(); // A finished booting: it now holds its slot only in simctl
+
+    const second = gate.admitBoot(undefined, { bootUdid: B });
+    await tick();
+    expect(source.pending.length).toBe(2);
+    source.pending[1]([sim(A, "Booted"), sim(B, "Shutdown")]);
+    source.pending[0]([sim(A, "Shutdown"), sim(B, "Shutdown")]);
+
+    expect((await second).decision.outcome).toBe("refuse");
+    await reading;
+  });
+
+  test("admissions whose windows opened together share one listing", async () => {
+    const source = new ScriptedSource();
+    const { gate } = build(source, { AUTOMOBILE_IOS_SIM_MAX_BOOTED: "2" });
+    source.immediate = undefined;
+    const one = gate.admitBoot(undefined, { bootUdid: A });
+    const two = gate.admitBoot(undefined, { bootUdid: B });
+    await tick();
+    expect(source.pending.length).toBe(1);
+    source.pending[0]([sim(A, "Shutdown"), sim(B, "Shutdown")]);
+
+    expect((await one).decision.outcome).toBe("allow");
+    expect((await two).decision.outcome).toBe("allow");
   });
 
   // Unknown count => retryable discovery_incomplete (owner contract). A listing that outlives the

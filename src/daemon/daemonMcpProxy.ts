@@ -7173,6 +7173,29 @@ export class DaemonMcpProxy {
   }
 
   /**
+   * Whether a resource read is forwarded with no session. A tool-output artifact always is. The
+   * rest is the resource form of {@link isSessionlessReadAfterRelease} (#11483): once the binding is
+   * released and one call has been told so, a read of a resource that names no session (the
+   * booted-device inventory, anything `resources/list` still lists while unbound) is forwarded
+   * without one, as `listDevices` and `observe {deviceId}` are. A URI that names a session keeps
+   * its own routing: the released session's data is gone with it, apart from the fresh
+   * screenshot, and a liveness handover is reported until the harness acts on it.
+   */
+  private isSessionlessResourceRead(uri: string): boolean {
+    if (isToolOutputResourceUri(uri)) {
+      // Session-independent at any time, fenced or not (#5917).
+      return true;
+    }
+    const terminal = this.terminalBoundSession;
+    return (
+      terminal !== undefined &&
+      this.releaseSurfacedFor === terminal.sessionUuid &&
+      !this.stallHandovers.has(terminal.sessionUuid) &&
+      sessionScopedObservationUriSessionUuid(uri) === undefined
+    );
+  }
+
+  /**
    * Read a resource from the daemon
    */
   async readResource(uri: string, { signal }: { signal?: AbortSignal } = {}): Promise<any> {
@@ -7191,9 +7214,10 @@ export class DaemonMcpProxy {
     const ownerForwardedParams = isToolOutput
       ? undefined
       : this.freshScreenshotOwnerForwardParams(uri);
+    const isSessionless = this.isSessionlessResourceRead(uri);
     const allowReleasedSession =
-      isToolOutput || isReleasedSessionScreenshot || ownerForwardedParams !== undefined;
-    const forwardedParams = isToolOutput
+      isSessionless || isReleasedSessionScreenshot || ownerForwardedParams !== undefined;
+    const forwardedParams = isSessionless
       ? {}
       : isReleasedSessionScreenshot
         ? {

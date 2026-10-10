@@ -1,5 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerPlanTools } from "../../src/server/planTools";
@@ -51,7 +51,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
   let keyA: SlotKey;
   let allocatorCalls: string[][];
 
-  beforeEach(async () => {
+  const setUp = async (): Promise<void> => {
     ToolRegistry.clearTools();
     restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
@@ -108,9 +108,9 @@ describe("managed connection executePlan device labels (#11397)", () => {
     };
 
     registerPlanTools();
-  });
+  };
 
-  afterEach(() => {
+  const tearDown = (): void => {
     restorePipeline();
     Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
     Reflect.set(ToolRegistry, "toolCallRepository", originalToolCallRepository);
@@ -118,7 +118,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();
-  });
+  };
 
   const runPlan = async (
     planContent: string,
@@ -136,6 +136,20 @@ describe("managed connection executePlan device labels (#11397)", () => {
     });
     return response.structuredContent ?? JSON.parse(response.content[0].text);
   };
+
+  // The first executePlan call pays the plan pipeline's one-time module and schema cost, which put
+  // the first test over the 100 ms budget on a loaded runner. Pay it once outside the timed tests.
+  beforeAll(async () => {
+    await setUp();
+    try {
+      await runPlan(PLAN, { devices: ["A", "B"] });
+    } finally {
+      tearDown();
+    }
+  });
+
+  beforeEach(setUp);
+  afterEach(tearDown);
 
   test("a label beyond the slot sessions is refused before the generic allocator is asked", async () => {
     const result = await runPlan(PLAN, { devices: ["A", "B"] });

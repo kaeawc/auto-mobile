@@ -21,6 +21,11 @@ export interface AndroidCapacitySample {
   emulatorProcessRssBytes?: number[];
   host: CapacityHostResources;
   errors: string[];
+  /**
+   * The adb listing failed, so `emulatorSerials` is empty for want of data, not because no
+   * emulator runs. With no process count either, the booted count is unknown (#11236).
+   */
+  serialListingFailed?: true;
 }
 
 export interface AndroidCapacitySource {
@@ -58,6 +63,7 @@ export class CommandAndroidCapacitySource implements AndroidCapacitySource {
       errors: [serials.error, processes.error].filter(
         (error): error is string => error !== undefined,
       ),
+      ...(serials.error !== undefined ? { serialListingFailed: true as const } : {}),
     };
   }
 

@@ -21,7 +21,6 @@ import {
   assertAndroidImageRunningStateKnown,
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
   type BootedDeviceDiscoveryOptions,
-  type DeviceDiscoveryError,
   type PlatformDeviceManager,
   waitForDeviceReadyOrCancel,
 } from "./deviceUtils";
@@ -45,6 +44,7 @@ import { runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { runPhaseWithSettlement } from "../utils/runPhaseWithSettlement";
 import { assertBootCapacityAvailable } from "../features/bootAdmission/sharedBootAdmissionGates";
+import { AndroidBootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import type { StableVirtualDeviceIdentity } from "./virtualDeviceLifecycleCoordinator";
 import {
   getVirtualDeviceLifecycleCoordinator,
@@ -79,37 +79,11 @@ export class DeviceBootTimeoutError extends ActionableError {
   }
 }
 
-/**
- * Booted-device discovery did not complete this sweep (adb/simctl
- * unavailable/failed). A transient failure must never be treated as an
- * authoritative empty result — that would let boot or adoption proceed
- * without having proven identity uniqueness (issue #7179). The failure is
- * retryable: callers should re-attempt discovery rather than fall back to
- * an unqualified boot/adopt decision.
- */
-export class BootedDeviceDiscoveryIncompleteError extends ActionableError {
-  readonly code = "discovery_incomplete";
-  readonly retryable = true;
-
-  constructor(
-    readonly platform: Platform,
-    readonly discoveryError: DeviceDiscoveryError | undefined,
-  ) {
-    super(
-      `discovery_incomplete: ${platform === "android" ? "Android" : "iOS"} booted-device ` +
-        "discovery was incomplete and is retryable" +
-        (discoveryError ? `: ${discoveryError.message}` : "."),
-    );
-  }
-}
-
-/** Android flavour of {@link BootedDeviceDiscoveryIncompleteError}. */
-export class AndroidBootedDeviceDiscoveryIncompleteError extends BootedDeviceDiscoveryIncompleteError {
-  constructor(discoveryError: DeviceDiscoveryError | undefined) {
-    super("android", discoveryError);
-  }
-}
-
+// Defined beside the other typed models so the boot admission gates can throw it too (#11236).
+export {
+  AndroidBootedDeviceDiscoveryIncompleteError,
+  BootedDeviceDiscoveryIncompleteError,
+} from "../models/BootedDeviceDiscoveryIncompleteError";
 /** More than one live emulator claims the requested stable AVD identity. */
 export class AndroidAvdIdentityConflictError extends ActionableError {
   readonly code = "identity_conflict";

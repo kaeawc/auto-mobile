@@ -135,6 +135,8 @@ describe("CommandAndroidCapacitySource", () => {
     expect(sample.emulatorSerials).toEqual([]);
     expect(sample.emulatorProcessRssBytes).toBeUndefined();
     expect(sample.errors).toEqual(["adb: adb unavailable", "ps: ps: command not found"]);
+    // #11236: the gate must be able to tell "adb failed" from "no emulators".
+    expect(sample.serialListingFailed).toBe(true);
   });
 });
 

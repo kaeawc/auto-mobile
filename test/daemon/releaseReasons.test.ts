@@ -7,6 +7,7 @@ import {
   isRecoverableDaemonReleaseReason,
   isTerminalReleaseReason,
   literalReleaseReasonsWhere,
+  outranksReleaseReason,
   releaseReasonFamiliesWhere,
   releasedRowStatus,
   sessionReleaseReasonFamily,
@@ -19,6 +20,12 @@ describe("session release-reason table (#11258)", () => {
       ["cleanup-expired", "cli-idle-timeout", "lazy-expiry"].sort(),
     );
     expect(releaseReasonFamiliesWhere("idle")).toEqual([]);
+  });
+
+  test("every idle release is terminal (owner decision 2026-10-09)", () => {
+    for (const reason of literalReleaseReasonsWhere("idle")) {
+      expect(isTerminalReleaseReason(reason)).toBe(true);
+    }
   });
 
   test("expiry releases persist as expired; everything else as released", () => {
@@ -40,10 +47,12 @@ describe("session release-reason table (#11258)", () => {
   test("terminal literal reasons", () => {
     expect(literalReleaseReasonsWhere("terminal").sort()).toEqual(
       [
+        "cleanup-expired",
         "cli-idle-timeout",
         "device-killed",
         "explicit-release",
         "heartbeat-timeout",
+        "lazy-expiry",
         "missing-first-heartbeat",
         "owner-disconnected",
         "rehydration-owner-timeout",
@@ -93,5 +102,20 @@ describe("session release-reason table (#11258)", () => {
   test("inherited object keys are not reasons", () => {
     expect(sessionReleaseReasonTraits("toString").terminal).toBe(false);
     expect(sessionReleaseReasonTraits("constructor").expiry).toBe(false);
+  });
+
+  test("an idle reason is the weakest terminal reason", () => {
+    // A terminal reason replaces a non-terminal one, idle included.
+    expect(outranksReleaseReason("lazy-expiry", "plan-auto-release")).toBe(true);
+    // A non-idle terminal reason replaces an idle one (#10051 keeps the heartbeat diagnostic).
+    expect(outranksReleaseReason("heartbeat-timeout", "cleanup-expired")).toBe(true);
+    expect(outranksReleaseReason("device-disconnected:emulator-5554", "lazy-expiry")).toBe(true);
+    // Never the other way round, and terminal reasons of equal rank do not replace each other.
+    expect(outranksReleaseReason("cleanup-expired", "device-disconnected:emulator-5554")).toBe(
+      false,
+    );
+    expect(outranksReleaseReason("cleanup-expired", "lazy-expiry")).toBe(false);
+    expect(outranksReleaseReason("explicit-release", "heartbeat-timeout")).toBe(false);
+    expect(outranksReleaseReason("daemon-shutdown", "plan-auto-release")).toBe(false);
   });
 });

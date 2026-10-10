@@ -73,6 +73,11 @@ const NOT_TERMINAL: SessionReleaseReasonTraits = {
 };
 const TERMINAL: SessionReleaseReasonTraits = { ...NOT_TERMINAL, terminal: true };
 const TERMINAL_EXPIRY: SessionReleaseReasonTraits = { ...TERMINAL, expiry: true };
+/**
+ * Every idle release ends the session, whatever the liveness policy: heartbeat, one-shot CLI or
+ * managed execution (owner decision 2026-10-09, #11258).
+ */
+const IDLE_EXPIRY: SessionReleaseReasonTraits = { ...TERMINAL_EXPIRY, idle: true };
 const RECOVERABLE_HANDOFF: SessionReleaseReasonTraits = { ...NOT_TERMINAL, recoverable: true };
 
 /** The tags of every literal release reason. */
@@ -82,11 +87,11 @@ export const SESSION_RELEASE_REASON_TRAITS: Readonly<
   /** A client or the daemon released the session on purpose. */
   "explicit-release": TERMINAL,
   /** The idle window ran out, found by a lookup of the session. */
-  "lazy-expiry": { idle: true, expiry: true, terminal: false, recoverable: false },
+  "lazy-expiry": IDLE_EXPIRY,
   /** The idle window ran out, found by the periodic expiry sweep. */
-  "cleanup-expired": { idle: true, expiry: true, terminal: false, recoverable: false },
+  "cleanup-expired": IDLE_EXPIRY,
   /** A one-shot CLI session's idle window ran out. */
-  "cli-idle-timeout": { idle: true, expiry: true, terminal: true, recoverable: false },
+  "cli-idle-timeout": IDLE_EXPIRY,
   /** The owner never sent its first heartbeat inside the pre-first-heartbeat grace. */
   "missing-first-heartbeat": TERMINAL_EXPIRY,
   /** The owner's heartbeat lease lapsed. */
@@ -178,6 +183,22 @@ export function isIdleReleaseReason(reason: string): boolean {
 /** Whether a restarted daemon may rehydrate the session (see {@link SessionReleaseReasonTraits.recoverable}). */
 export function isRecoverableDaemonReleaseReason(reason: string): boolean {
   return sessionReleaseReasonTraits(reason).recoverable;
+}
+
+/**
+ * Whether `candidate` replaces `current` as the reason of one release. A terminal reason replaces a
+ * non-terminal one. An idle reason is the weakest terminal reason: any other terminal reason
+ * replaces it, so an idle sweep that races a heartbeat lapse, a device loss or an earlier terminal
+ * release keeps that more specific diagnostic (#10051), as it did when idle releases were not
+ * terminal. `device-killed` and `daemon-shutdown` have their own precedence at the call site.
+ */
+export function outranksReleaseReason(candidate: string, current: string): boolean {
+  const next = sessionReleaseReasonTraits(candidate);
+  if (!next.terminal) {
+    return false;
+  }
+  const held = sessionReleaseReasonTraits(current);
+  return !held.terminal || (held.idle && !next.idle);
 }
 
 /** The persisted status of a released row. */

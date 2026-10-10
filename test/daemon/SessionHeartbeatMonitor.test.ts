@@ -735,6 +735,8 @@ describe("SessionHeartbeatMonitor", () => {
 
       timer.advanceTime(60_001); // Past the autolock idle timeout.
       await monitor.tick();
+      // An idle release is terminal (#11258) and writes its row before it frees the device.
+      await sessionManager.waitForSessionRelease(replacementSessionId!);
 
       expect(pool.getDevice("emulator-5554")!.autolockSessionId).toBe(firstSessionId);
       expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
@@ -744,6 +746,7 @@ describe("SessionHeartbeatMonitor", () => {
 
       executionTracker.endExecution(execution.id);
       await monitor.tick();
+      await sessionManager.waitForSessionRelease(firstSessionId!);
 
       expect(pool.getDevice("emulator-5554")!.status).toBe("idle");
       expect(pool.getDevice("emulator-5554")!.autolockSessionId).toBeUndefined();
@@ -814,6 +817,8 @@ describe("SessionHeartbeatMonitor", () => {
 
       timer.advanceTime(60_001);
       await monitor.tick();
+      // An idle release is terminal (#11258) and writes its row before it frees the device.
+      await sessionManager.waitForSessionRelease(mappedSessionId!);
 
       expect(pool.getDevice("emulator-5554")!.status).toBe("idle");
       expect(sessionManager.getSession(mappedSessionId!)).toBeNull();
@@ -822,6 +827,7 @@ describe("SessionHeartbeatMonitor", () => {
 
       executionTracker.endExecution(execution.id);
       await monitor.tick();
+      await sessionManager.waitForSessionRelease(explicitSessionId!);
 
       expect(pool.getDevice("emulator-5556")!.status).toBe("idle");
     });

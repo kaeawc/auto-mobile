@@ -275,3 +275,12 @@ User-facing statement of the release model (lease and grace, exact idle release,
 offline budget, restart recovery): `docs/using/device-ownership.md`. Change it in
 the same PR as any constant in `src/daemon/sessionLivenessWindows.ts` or
 `OFFLINE_DEVICE_DISCONNECT_BUDGET_MS`.
+
+Release reasons are classified in one place, `src/daemon/releaseReasons.ts`
+(#11258): a typed `Record` tags each reason `idle`, `expiry`, `terminal` and
+`recoverable`, and a new reason does not compile until it is tagged there. Never
+keep a separate reason list. Every idle release (`lazy-expiry`, `cleanup-expired`,
+`cli-idle-timeout`, whatever the liveness policy) is terminal (owner decision
+2026-10-09); an idle reason is the weakest terminal reason, so a concurrent
+non-idle terminal reason replaces it. The reason table in
+`docs/using/device-ownership.md` must match the code table.

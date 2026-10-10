@@ -265,13 +265,14 @@ describe("session hold diagnostics through the daemon surfaces", () => {
 
       sweepTimer.setCurrentTime(reported - 1);
       sweepManager.cleanupExpiredSessions();
-      await Promise.resolve();
+      await sweepManager.waitForSessionRelease(SESSION);
       expect(released).toEqual([]);
+      expect(sweepManager.hasSession(SESSION)).toBe(true);
 
       sweepTimer.setCurrentTime(reported);
       sweepManager.cleanupExpiredSessions();
-      await Promise.resolve();
-      await Promise.resolve();
+      // An idle release is terminal (#11258) and writes its row before it notifies.
+      await sweepManager.waitForSessionRelease(SESSION);
       expect(released).toEqual([SESSION]);
     } finally {
       sweepManager.stopCleanupTimer();

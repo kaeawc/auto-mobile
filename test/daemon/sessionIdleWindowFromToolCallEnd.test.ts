@@ -99,10 +99,11 @@ describe("the idle window counts from the end of the last tool call", () => {
     }
   });
 
+  // An idle release is terminal (#11258) and writes its row before it notifies, so wait for the
+  // release the sweep started rather than for a fixed number of microtasks.
   const sweep = async (): Promise<void> => {
     manager.cleanupExpiredSessions();
-    await Promise.resolve();
-    await Promise.resolve();
+    await manager.waitForSessionRelease(SESSION);
   };
 
   it("a new session gets the 2-minute idle window", () => {

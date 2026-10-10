@@ -62,10 +62,10 @@ describe("idle-expiry release cancels the executions it overrides (#10820)", () 
     }
   });
 
+  // An idle release is terminal (#11258) and writes its row before it notifies, so wait for the
+  // release itself rather than for a fixed number of microtasks.
   const settle = async (): Promise<void> => {
-    for (let i = 0; i < 4; i++) {
-      await Promise.resolve();
-    }
+    await manager.waitForSessionRelease(SESSION);
   };
 
   const startHungCall = (): number => {

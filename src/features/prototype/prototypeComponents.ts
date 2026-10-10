@@ -73,6 +73,7 @@ interface Context {
   components: Record<string, Raw>;
   locations: Locations;
   nodes: number;
+  references: Map<Raw, ReadonlySet<string>>;
 }
 
 /** A node after expansion, or the first error met while expanding it. */
@@ -118,6 +119,19 @@ function bindableStrings(node: Raw): string[] {
 /** Prop names a component root references. */
 function propReferences(root: Raw): Set<string> {
   return new Set(bindableStrings(root).flatMap((text) => templateFieldReferences(text, PROPS)));
+}
+
+/**
+ * `propReferences`, scanned once per root within one expansion: the scan is pure, and re-scanning
+ * a large root for every `use` that places it dominated expansion time.
+ */
+function referencedProps(root: Raw, context: Context): ReadonlySet<string> {
+  let references = context.references.get(root);
+  if (!references) {
+    references = propReferences(root);
+    context.references.set(root, references);
+  }
+  return references;
 }
 
 /** Binds `{props.*}` through a whole component root, including nested `use` props. */
@@ -175,7 +189,7 @@ function propsError(
   path: string,
   context: Context,
 ): ComponentError | undefined {
-  const referenced = propReferences(root);
+  const referenced = referencedProps(root, context);
   const missing = [...referenced].find((name) => !Object.hasOwn(props, name));
   if (missing !== undefined) {
     return fail(context, `${path}.props`, `Missing component prop ${JSON.stringify(missing)}`);
@@ -324,7 +338,12 @@ export function expandPrototypeComponents(spec: unknown): ComponentExpansion {
     return { success: false, error: components };
   }
   const locations = new Locations();
-  const expanded = expandNode(root, "root", [], { components, locations, nodes: 0 });
+  const expanded = expandNode(root, "root", [], {
+    components,
+    locations,
+    nodes: 0,
+    references: new Map(),
+  });
   if (expanded.error) {
     return { success: false, error: expanded.error };
   }

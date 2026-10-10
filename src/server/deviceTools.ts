@@ -61,6 +61,7 @@ import type {
 import {
   type BootedDeviceDiscovery,
   type BootedDeviceDiscoveryOptions,
+  type DeviceDiscoveryError,
   type DeviceImageDiscovery,
   PlatformDeviceManager,
 } from "../devices/deviceUtils";
@@ -136,6 +137,7 @@ import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
 import {
   AndroidAvdIdentityConflictError,
+  AndroidBootedDeviceDiscoveryIncompleteError,
   BootedDeviceDiscoveryIncompleteError,
   DeviceBootService,
   findUniqueBootedAndroidDeviceByName,
@@ -4364,9 +4366,27 @@ function assertAndroidLifecycleDiscovery(
   if (matchCount === 0) {
     const outcome = discoveryRefreshOutcome(discovery, 0);
     if (outcome.failure !== undefined) {
-      throw new ActionableError(deviceListRefreshFailureMessage(outcome.failure));
+      throw new AndroidBootedDeviceDiscoveryIncompleteError(
+        discovery.discoveryErrors?.android,
+        deviceListRefreshFailureMessage(outcome.failure),
+      );
     }
   }
+}
+
+/**
+ * Lifecycle coordination could not prove which device the serial names because a discovery sweep
+ * did not complete. Typed retryable `discovery_incomplete`, never a generic error; a genuinely
+ * ambiguous identity under COMPLETE discovery keeps its plain ActionableError.
+ */
+function androidLifecycleDiscoveryIncomplete(
+  deviceId: string,
+  discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> | undefined,
+): AndroidBootedDeviceDiscoveryIncompleteError {
+  return new AndroidBootedDeviceDiscoveryIncompleteError(
+    discoveryErrors?.android,
+    `Cannot uniquely resolve Android device '${deviceId}' for lifecycle coordination.`,
+  );
 }
 
 export async function resolveAndroidStartStableDeviceLifecycleTarget(
@@ -4420,9 +4440,7 @@ export async function resolveAndroidStartStableDeviceLifecycleTarget(
     },
   );
   if (!imageDiscovery.succeededPlatforms.has("android")) {
-    throw new ActionableError(
-      `Cannot uniquely resolve Android device '${deviceId}' for lifecycle coordination.`,
-    );
+    throw androidLifecycleDiscoveryIncomplete(deviceId, imageDiscovery.discoveryErrors);
   }
   const imageMatches = imageDiscovery.devices.filter(
     (device) =>
@@ -4444,9 +4462,7 @@ export async function resolveAndroidStartStableDeviceLifecycleTarget(
   );
   if (stableIds.size === 0) {
     if (!bootedDiscovery.succeededPlatforms.has("android")) {
-      throw new ActionableError(
-        `Cannot uniquely resolve Android device '${deviceId}' for lifecycle coordination.`,
-      );
+      throw androidLifecycleDiscoveryIncomplete(deviceId, bootedDiscovery.discoveryErrors);
     }
     return undefined;
   }

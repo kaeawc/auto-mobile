@@ -1076,6 +1076,8 @@ describe("deleteDevice handler", () => {
       expect(body.state).toBe("failed");
       expect(body.failure).toEqual({
         code: "device_owned_by_other_session",
+        deviceId: device.deviceId,
+        retryable: false,
         phase: "precondition",
         message:
           `deleteDevice refused: device '${device.deviceId}' is held by another session. ` +

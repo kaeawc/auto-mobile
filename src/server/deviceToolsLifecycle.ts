@@ -13,6 +13,7 @@ import {
   type VirtualDeviceLifecycleLease,
 } from "../devices/virtualDeviceLifecycleCoordinator";
 import { logger } from "../utils/logger";
+import { isTypedToolRefusal, shapeToolCallError } from "./shapeToolCallError";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import type { ProgressCallback } from "./toolRegistry";
@@ -125,39 +126,44 @@ async function teardownOwnershipRefusal(
     });
     return undefined;
   } catch (error) {
-    if (error instanceof DeviceAssignedToManagedSlotError) {
-      return managedSlotTeardownRefusal(args, error, target.device);
-    }
+    const refusal = typedTeardownRefusal(args, error, target.device);
     if (
-      !(error instanceof InputDeviceOwnedError || error instanceof DeviceOwnedByOtherDaemonError)
+      !refusal ||
+      !(
+        error instanceof DeviceAssignedToManagedSlotError ||
+        error instanceof InputDeviceOwnedError ||
+        error instanceof DeviceOwnedByOtherDaemonError
+      )
     ) {
       throw error;
     }
-    return createTeardownFailureResponse(
-      args,
-      "precondition",
-      error.code,
-      error.message,
-      target.device,
-    );
+    return refusal;
   }
 }
 
-/** deleteDevice's typed precondition failure for a device a managed slot holds (#11174). */
-function managedSlotTeardownRefusal(
+/**
+ * Maps a typed refusal to deleteDevice's failure with the same `code`, `retryable`, `retryAfterMs`
+ * and evidence killDevice's thrown path gives it. The fields come from `shapeToolCallError`'s
+ * payload so the two tools cannot drift; an untyped error returns undefined.
+ */
+export function typedTeardownRefusal(
   args: TeardownDeviceArgs,
-  error: DeviceAssignedToManagedSlotError,
+  error: unknown,
   resolved?: TeardownResolvedTarget["device"],
-): TeardownToolResponse {
-  const { code, retryable, ...evidence } = error.toPayload();
-  return createTeardownFailureResponse(
-    args,
-    "precondition",
-    String(code),
-    error.message,
-    resolved,
-    { ...evidence, retryable },
-  );
+  phase: "precondition" | "stop" | "destroy" | "verification" = "precondition",
+): TeardownToolResponse | undefined {
+  if (!isTypedToolRefusal(error)) {
+    return undefined;
+  }
+  const wire = JSON.parse(
+    shapeToolCallError(error, { toolName: "deleteDevice", source: "MCP" }).content[0].text,
+  ) as Record<string, unknown>;
+  const { code, error: message, ...fields } = wire;
+  if (typeof code !== "string" || typeof message !== "string") {
+    return undefined;
+  }
+  delete fields.success;
+  return createTeardownFailureResponse(args, phase, code, message, resolved, fields);
 }
 
 /**
@@ -181,7 +187,10 @@ async function managedSlotDeleteRefusal(
     return undefined;
   } catch (error) {
     if (error instanceof DeviceAssignedToManagedSlotError) {
-      return { response: managedSlotTeardownRefusal(args, error) };
+      const response = typedTeardownRefusal(args, error);
+      if (response) {
+        return { response };
+      }
     }
     throw error;
   }
@@ -398,9 +407,11 @@ function createDeleteDeviceWorkflow(
           `for ${args.target.platform}:${args.target.stableId}: ${effectiveError}`,
         effectiveError,
       );
-      if (effectiveError instanceof DeviceAssignedToManagedSlotError) {
-        // A managed slot took the device between the entry check and the shutdown reservation.
-        return managedSlotTeardownRefusal(args, effectiveError, state?.target.device);
+      // A typed refusal (a managed slot or a session took the device between the entry check and
+      // the shutdown reservation, a shutdown or capacity refusal) keeps its code and retry hints.
+      const typed = typedTeardownRefusal(args, effectiveError, state?.target.device, phase);
+      if (typed) {
+        return typed;
       }
       return createTeardownFailureResponse(
         args,
@@ -410,10 +421,7 @@ function createDeleteDeviceWorkflow(
         // generic operation failure (#6863 review).
         effectiveError instanceof PooledAvdIdentityError
           ? "target_identity_unresolved"
-          : effectiveError instanceof InputDeviceOwnedError
-            ? // Ownership was lost between the entry check and the shutdown reservation.
-              effectiveError.code
-            : "operation_failed",
+          : "operation_failed",
         String(effectiveError instanceof Error ? effectiveError.message : effectiveError),
         state?.target.device,
       );
@@ -439,7 +447,10 @@ function deleteDeviceCatchResponse(
     `[DeviceTools] teardown failed for ${args.target.platform}:${args.target.stableId}: ${message}`,
     error,
   );
-  return createTeardownFailureResponse(args, "precondition", "operation_failed", message);
+  return (
+    typedTeardownRefusal(args, error) ??
+    createTeardownFailureResponse(args, "precondition", "operation_failed", message)
+  );
 }
 
 export function createLifecycleHandlers() {

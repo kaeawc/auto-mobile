@@ -137,6 +137,24 @@ describe("IncumbentOwnerGuard (issue #6232)", () => {
     expect(guard.capturedLiveIncumbentDaemonSessionId()).toBeUndefined();
   });
 
+  // #11355: the pid-file listing omits an incumbent whose record this daemon replaced; a consumer
+  // that reads "not listed" as "dead" must still see it while it runs.
+  test("adds the captured incumbent to a live set only while it is still running", () => {
+    const { guard, file, running } = makeGuard();
+    file.data = { ...record(INCUMBENT_PID), daemonSessionId: "incumbent-daemon-session" };
+    const listed: ReadonlySet<string> = new Set(["self"]);
+    expect(guard.withLiveIncumbent(listed)).toBe(listed);
+
+    guard.captureIncumbentBeforeOverwrite();
+
+    expect([...guard.withLiveIncumbent(listed)]).toEqual(["self", "incumbent-daemon-session"]);
+    expect([...listed]).toEqual(["self"]);
+    const alreadyListed: ReadonlySet<string> = new Set(["incumbent-daemon-session"]);
+    expect(guard.withLiveIncumbent(alreadyListed)).toBe(alreadyListed);
+    running.delete(INCUMBENT_PID);
+    expect(guard.withLiveIncumbent(listed)).toBe(listed);
+  });
+
   test("P2: restores the captured incumbent record after a refused bind", () => {
     const { guard, file, writes } = makeGuard();
 

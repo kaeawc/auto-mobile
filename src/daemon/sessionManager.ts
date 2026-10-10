@@ -1429,6 +1429,13 @@ export class SessionManager {
    * listed UUID reads as terminally released, so nothing can revive it.
    */
   private readonly recoveredTerminalReleaseIntents: Map<string, TerminalReleaseIntent> = new Map();
+  /** Dead peer daemons whose journals were read after startup (#11355); never read again. */
+  private readonly adoptedDeadDaemonJournals: Set<string> = new Set();
+  /**
+   * The dead daemon each post-startup adopted intent came from (#11355). Such an intent applies
+   * only while its row is still that daemon's: a row another daemon took since is left alone.
+   */
+  private readonly adoptedTerminalReleaseOwners: Map<string, string> = new Map();
   /** Finalized release state retained only while its exact Session identity is referenced. */
   private readonly finalizedSessionReleases: WeakMap<Session, ReleaseReasonState> = new WeakMap();
   /** Serializes durable liveness claims within one exact session incarnation. */
@@ -1640,7 +1647,8 @@ export class SessionManager {
         const persisted = await this.deviceSessionRepository.getSession?.(intent.sessionId);
         if (
           persisted &&
-          !(persisted.release_reason && isTerminalReleaseReason(persisted.release_reason))
+          !(persisted.release_reason && isTerminalReleaseReason(persisted.release_reason)) &&
+          this.adoptedTerminalReleaseApplies(persisted)
         ) {
           await raceWithDeadline(
             this.deviceSessionRepository.markReleased(
@@ -1648,6 +1656,7 @@ export class SessionManager {
               releasedRowStatus(intent.reason),
               intent.at,
               intent.reason,
+              ...this.adoptedTerminalReleaseFence(intent.sessionId),
             ),
             {
               timer: this.timer,
@@ -1673,6 +1682,7 @@ export class SessionManager {
         continue;
       }
       this.recoveredTerminalReleaseIntents.delete(intent.sessionId);
+      this.adoptedTerminalReleaseOwners.delete(intent.sessionId);
       this.terminalReleaseJournal.resolve(intent.sessionId, intent.reason);
     }
     if (applied.length > 0) {
@@ -1689,7 +1699,8 @@ export class SessionManager {
     const intent = this.recoveredTerminalReleaseIntents.get(persisted.session_uuid);
     if (
       !intent ||
-      (persisted.release_reason !== null && isTerminalReleaseReason(persisted.release_reason))
+      (persisted.release_reason !== null && isTerminalReleaseReason(persisted.release_reason)) ||
+      !this.adoptedTerminalReleaseApplies(persisted)
     ) {
       return persisted;
     }
@@ -1699,6 +1710,125 @@ export class SessionManager {
       released_at_ms: intent.at,
       release_reason: intent.reason,
     };
+  }
+
+  /**
+   * Whether the recovered intent for this row may terminalize it. An intent adopted from a peer
+   * that died after this daemon started (#11355) applies only while the row is still that peer's.
+   */
+  private adoptedTerminalReleaseApplies(persisted: DeviceSession): boolean {
+    const adoptedFrom = this.adoptedTerminalReleaseOwners.get(persisted.session_uuid);
+    return adoptedFrom === undefined || (persisted.daemon_session_id ?? null) === adoptedFrom;
+  }
+
+  /**
+   * The write fence of an intent adopted after startup (#11355): the check above is a prior read,
+   * so the release itself is conditioned on the row still being the dead daemon's. A row another
+   * survivor recovered meanwhile, or one this write reaches only after parking, is left alone.
+   */
+  private adoptedTerminalReleaseFence(sessionId: string): [] | [MarkReleasedOptions] {
+    const adoptedFrom = this.adoptedTerminalReleaseOwners.get(sessionId);
+    return adoptedFrom === undefined ? [] : [{ onlyIfOwnedByDaemon: adoptedFrom }];
+  }
+
+  /**
+   * Adopt the terminal-release journal of this row's owner daemon once that daemon is known to be
+   * dead (#11355). Startup adoption skips a peer that is live at the time, so a peer that parked a
+   * terminal release and then died left a row a survivor would recover. Reading one of its rows
+   * reads its whole journal first: the intents fence their UUIDs in memory at once, and their rows
+   * are written before the read returns. The dead daemon's file stays in place until every one of
+   * its intents is settled, so another survivor (or this daemon's successor) still finds it when
+   * a write here parks or fails; a failed write is retried when a row of that daemon is next read. A
+   * daemon whose liveness cannot be confirmed is left alone, because a live daemon's intents can
+   * still be lifted. Resolves true when rows may have been written, so the caller re-reads.
+   */
+  private async adoptDeadOwnerTerminalReleases(stored: DeviceSession): Promise<boolean> {
+    const owner = this.confirmedDeadOwner(stored);
+    if (owner === undefined) {
+      return false;
+    }
+    const firstRead = !this.adoptedDeadDaemonJournals.has(owner);
+    if (firstRead && !this.fenceDeadDaemonIntents(owner)) {
+      // Unreadable for now; the next read of one of this daemon's rows retries.
+      return false;
+    }
+    const unsettled = this.hasUnsettledAdoptedIntent(owner);
+    if (!firstRead && !unsettled) {
+      return false;
+    }
+    if (unsettled) {
+      await this.applyRecoveredTerminalReleaseIntents();
+    }
+    if (!this.hasUnsettledAdoptedIntent(owner)) {
+      // Every row is terminal (or no longer the dead daemon's): nobody needs the file again.
+      this.terminalReleaseJournal.discardDeadDaemon?.(owner);
+    }
+    return true;
+  }
+
+  /** Read `owner`'s journal and fence its intents; false when it cannot be read yet. */
+  private fenceDeadDaemonIntents(owner: string): boolean {
+    const intents = this.terminalReleaseJournal.readDeadDaemon?.(owner);
+    if (intents === undefined) {
+      return false;
+    }
+    this.adoptedDeadDaemonJournals.add(owner);
+    for (const intent of intents) {
+      // The journal holds wall ms, like the rows it backs (#11162).
+      this.recoveredTerminalReleaseIntents.set(intent.sessionId, {
+        ...intent,
+        at: this.wallToSessionClock(intent.at),
+      });
+      this.adoptedTerminalReleaseOwners.set(intent.sessionId, owner);
+    }
+    if (intents.length > 0) {
+      logger.warn(
+        `[SessionManager] Adopted ${intents.length} unconfirmed terminal release(s) of dead ` +
+          `daemon ${owner}: ${intents.map((intent) => intent.sessionId).join(", ")}`,
+      );
+    }
+    return true;
+  }
+
+  private hasUnsettledAdoptedIntent(owner: string): boolean {
+    for (const adoptedFrom of this.adoptedTerminalReleaseOwners.values()) {
+      if (adoptedFrom === owner) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** The row's owner daemon, when it is a confirmed-dead peer whose journal can be adopted. */
+  private confirmedDeadOwner(stored: DeviceSession): string | undefined {
+    const owner = stored.daemon_session_id ?? null;
+    if (owner === null || this.daemonSessionId === undefined || owner === this.daemonSessionId) {
+      return undefined;
+    }
+    if (
+      !this.terminalReleaseJournal.readDeadDaemon ||
+      (stored.release_reason !== null && isTerminalReleaseReason(stored.release_reason))
+    ) {
+      return undefined;
+    }
+    return this.isConfirmedDeadDaemonSession(owner) ? owner : undefined;
+  }
+
+  /** True only when the live-daemon listing succeeded and does not name `daemonSessionId`. */
+  private isConfirmedDeadDaemonSession(daemonSessionId: string): boolean {
+    if (!this.liveDaemonSessionIds) {
+      return false;
+    }
+    try {
+      return !this.liveDaemonSessionIds().has(daemonSessionId);
+    } catch (error) {
+      logger.warn(
+        `[SessionManager] Cannot list live daemons to check journal owner ${daemonSessionId}; ` +
+          `its journal is not adopted yet: ${errorMessage(error)}`,
+        error,
+      );
+      return false;
+    }
   }
 
   /** Optional daemon wiring; existing constructors and device-session lookups stay unchanged. */
@@ -2753,7 +2883,11 @@ export class SessionManager {
 
   /** The persisted row, with tool activity during a device-restart recovery applied to its expiry. */
   private async readPersistedSession(sessionId: string): Promise<DeviceSession | undefined> {
-    const stored = await this.deviceSessionRepository.getSession?.(sessionId);
+    let stored = await this.deviceSessionRepository.getSession?.(sessionId);
+    if (stored && (await this.adoptDeadOwnerTerminalReleases(stored))) {
+      // The adopted releases were just written; this read predates them.
+      stored = await this.deviceSessionRepository.getSession?.(sessionId);
+    }
     const persisted = stored && this.withRecoveredTerminalRelease(stored);
     const activityAt = this.restartRecoveryActivityAt.get(sessionId);
     if (!persisted || activityAt === undefined || !isDeviceRestartReleasedRow(persisted)) {
@@ -4886,8 +5020,103 @@ export class SessionManager {
         return snapshot.deviceId;
       }
     }
+    if (releaseReason === "explicit-release") {
+      const released = await this.releaseUnrecoveredReissuableRow(sessionId);
+      if (released !== undefined) {
+        return released;
+      }
+    }
     logger.warn(`Cannot release session ${sessionId}: not found`);
     return null;
+  }
+
+  /**
+   * An explicit release of a session this daemon does not hold, whose row a call naming the UUID
+   * could still issue again (#11461): a restart handoff the startup deadline left to the follow-up
+   * sweep, one whose recovery failed without terminalizing it, or a `plan-auto-release`. An
+   * explicit release is terminal and never rehydrated, so the row is terminalized rather than
+   * answered "already released" and brought back. One statement, conditioned on the incarnation
+   * read: a recovery's claim (this daemon's or a peer's) advances the generation, so a row someone
+   * took in between is left alone, as is a row another live daemon owns. An active row is never
+   * touched: it is not in this daemon's map, so it is not this daemon's session.
+   *
+   * Resolves the row's device once terminalized, or undefined when there was nothing to release.
+   */
+  private async releaseUnrecoveredReissuableRow(sessionId: string): Promise<string | undefined> {
+    // A recovery's claim can land between the read and the conditional write. The release is
+    // not dropped for that: the row is released at its new generation, or, once the recovery
+    // has started publishing the session, through the path that releases a session being created.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (this.sessions.has(sessionId)) {
+        break;
+      }
+      if (this.isSessionBeingRecreated(sessionId)) {
+        return (await this.releaseSession(sessionId, "explicit-release")) ?? undefined;
+      }
+      const released = await this.tryReleaseUnrecoveredReissuableRow(sessionId);
+      if (released !== "row-changed") {
+        return released;
+      }
+    }
+    // Published by the recovery that won: the caller releases the live session (the daemon
+    // request handler does, cutting its calls like any explicit release).
+    return undefined;
+  }
+
+  /** One conditional release of the row as read; `row-changed` when another writer got there first. */
+  private async tryReleaseUnrecoveredReissuableRow(
+    sessionId: string,
+  ): Promise<string | undefined | "row-changed"> {
+    const persisted = await this.readPersistedSession(sessionId);
+    if (!persisted?.release_reason || !this.isReissuablePersistedSession(persisted)) {
+      return undefined;
+    }
+    if (this.isRowOwnedByLivePeer(persisted)) {
+      logger.info(
+        `[SessionManager] Not releasing session ${sessionId}: another AutoMobile daemon ` +
+          `(${persisted.daemon_session_id}) owns its row`,
+      );
+      return undefined;
+    }
+    await this.deviceSessionRepository.markReleased(
+      sessionId,
+      releasedRowStatus("explicit-release"),
+      this.sessionNow(),
+      "explicit-release",
+      persisted.stable_identity_generation === undefined
+        ? {}
+        : { expectedRowGeneration: persisted.stable_identity_generation },
+    );
+    return (await this.fenceExplicitlyReleasedRow(sessionId)) ?? "row-changed";
+  }
+
+  /** Whether another live daemon owns `row`: such a row is that daemon's to recover or end. */
+  private isRowOwnedByLivePeer(row: DeviceSession): boolean {
+    const owner = row.daemon_session_id ?? null;
+    return owner !== null && owner !== this.daemonSessionId && this.isLiveDaemonSession(owner);
+  }
+
+  /**
+   * Fence a UUID whose row now reads `explicit-release`, and announce it. Resolves the row's
+   * device, or undefined when the conditional release did not apply (the row changed first).
+   */
+  private async fenceExplicitlyReleasedRow(sessionId: string): Promise<string | undefined> {
+    const current = await this.readPersistedSession(sessionId);
+    const snapshot = current && this.terminalReleaseFromPersisted(sessionId, current);
+    if (snapshot?.releaseReason !== "explicit-release") {
+      logger.info(
+        `[SessionManager] Session ${sessionId} was not released: its row changed first ` +
+          `(now ${current?.status ?? "missing"}, ${current?.release_reason ?? "no release reason"})`,
+      );
+      return undefined;
+    }
+    this.terminalReleaseSnapshots.set(sessionId, snapshot);
+    this.restartRecoveryActivityAt.delete(sessionId);
+    // The handoff release already ran this session's device cleanup, and the row's device may
+    // belong to another session by now: announce only the terminal reason (#11206).
+    this.notifySessionRelease(snapshot, { upgradeOnly: true });
+    logger.info(`[SessionManager] Released unrecovered session ${sessionId} (explicit-release)`);
+    return snapshot.deviceId;
   }
 
   private async releasePendingSessionWork(

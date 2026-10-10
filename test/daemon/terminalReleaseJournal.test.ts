@@ -298,4 +298,91 @@ describe("per-daemon terminal release journals (#11158)", () => {
       warn.mockRestore();
     }
   });
+
+  // #11355: a peer that was live at startup is skipped there, so it is read once it is dead. Its
+  // file is the one copy every survivor can read, so reading never changes it.
+  test("a peer that died after startup is read on demand without touching any file", () => {
+    const fs = new FakeTerminalReleaseJournalFileSystem();
+    const peerText =
+      line("lifted", "device-killed", 1) +
+      `${JSON.stringify({ sessionId: "lifted", lifted: true })}\n` +
+      line("peer-session", "heartbeat-timeout", 2) +
+      '{"torn';
+    fs.files.set(peer, peerText);
+    const journal = open(fs);
+    journal.record({ sessionId: "mine", reason: "explicit-release", at: 5 });
+
+    const expected = [{ sessionId: "peer-session", reason: "heartbeat-timeout", at: 2 }];
+    expect(journal.readDeadDaemon("live-peer")).toEqual(expected);
+    // A second survivor (or a second read) finds the same intents.
+    expect(open(fs).readDeadDaemon("live-peer")).toEqual(expected);
+
+    expect(fs.files.get(peer)).toBe(peerText);
+    expect(fs.files.get(own)).toBe(line("mine", "explicit-release", 5));
+    expect(journal.loadUnconfirmed().map((intent) => intent.sessionId)).toEqual(["mine"]);
+    expect(fs.replaces).toBe(0);
+  });
+
+  test("a settled dead peer's journal is discarded; this daemon's own never is", () => {
+    const fs = new FakeTerminalReleaseJournalFileSystem();
+    fs.files.set(peer, line("peer-session", "heartbeat-timeout", 1));
+    const journal = open(fs);
+    journal.record({ sessionId: "mine", reason: "explicit-release", at: 5 });
+
+    expect(journal.readDeadDaemon("self")).toEqual([]);
+    journal.discardDeadDaemon("self");
+    expect(fs.files.get(own)).toBe(line("mine", "explicit-release", 5));
+
+    journal.discardDeadDaemon("live-peer");
+    expect(fs.files.has(peer)).toBe(false);
+    expect(journal.readDeadDaemon("live-peer")).toEqual([]);
+    expect(journal.readDeadDaemon("never-wrote-a-journal")).toEqual([]);
+  });
+
+  test("an unreadable dead peer journal reports undefined so the caller retries", () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const fs = new FakeTerminalReleaseJournalFileSystem();
+      fs.files.set(peer, line("peer-session", "heartbeat-timeout", 1));
+      const journal = open(fs);
+      journal.loadUnconfirmed();
+
+      fs.failReads = new Error("EIO");
+      expect(journal.readDeadDaemon("live-peer")).toBeUndefined();
+
+      fs.failReads = undefined;
+      expect(journal.readDeadDaemon("live-peer")).toEqual([
+        { sessionId: "peer-session", reason: "heartbeat-timeout", at: 1 },
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a failed discard is logged and leaves the file for a later startup", () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const fs = new FakeTerminalReleaseJournalFileSystem();
+      fs.files.set(peer, line("peer-session", "heartbeat-timeout", 1));
+      const journal = open(fs);
+      fs.failCompaction = new Error("EPERM");
+
+      journal.discardDeadDaemon("live-peer");
+
+      expect(fs.files.has(peer)).toBe(true);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a journal opened without a data directory reads and discards no peer", () => {
+    const fs = new FakeTerminalReleaseJournalFileSystem();
+    fs.files.set(peer, line("peer-session", "heartbeat-timeout", 1));
+    const journal = new FileTerminalReleaseJournal(own, fs);
+
+    expect(journal.readDeadDaemon("live-peer")).toEqual([]);
+    journal.discardDeadDaemon("live-peer");
+    expect(fs.files.has(peer)).toBe(true);
+  });
 });

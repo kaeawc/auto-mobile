@@ -361,11 +361,13 @@ export class DeviceAutolockManager {
     };
     try {
       signal?.throwIfAborted();
+      const sessions = this.pool.getSessionManager();
+      // Persisted stamps are wall epoch ms, shared by every process (#11162).
       const persistence = this.deviceSessionRepository.markAutolockSession(session.sessionId, {
         mcpSessionId: mcpSessionId ?? null,
         daemonSessionId: this.pool.getDaemonSessionId(),
-        lastUsedAtMs: session.lastUsedAt,
-        expiresAtMs: session.expiresAt,
+        lastUsedAtMs: sessions.sessionClockToWall(session.lastUsedAt),
+        expiresAtMs: sessions.sessionClockToWall(session.expiresAt),
       });
       try {
         await raceWithDeadline(persistence, {
@@ -735,11 +737,13 @@ export class DeviceAutolockManager {
     mcpSessionId: string,
   ): Promise<AutolockAttachOutcome> {
     try {
+      const sessions = this.pool.getSessionManager();
+      // Persisted stamps are wall epoch ms, shared by every process (#11162).
       await this.deviceSessionRepository.markAutolockSession(session.sessionId, {
         mcpSessionId,
         daemonSessionId: this.pool.getDaemonSessionId(),
-        lastUsedAtMs: session.lastUsedAt,
-        expiresAtMs: session.expiresAt,
+        lastUsedAtMs: sessions.sessionClockToWall(session.lastUsedAt),
+        expiresAtMs: sessions.sessionClockToWall(session.expiresAt),
       });
       return "attached";
     } catch (error) {

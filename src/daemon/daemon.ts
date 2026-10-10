@@ -4315,8 +4315,8 @@ export class Daemon {
       );
       await this.deviceSessionRepository.markStaleActiveSessionsExpired(
         this.daemonSessionId,
-        // released_at_ms is judged against the session clock everywhere else (#11129).
-        this.sessionManager.sessionNow(),
+        // Persisted stamps are wall epoch ms, shared by every process (#11162).
+        this.timer.now(),
         "daemon-restart",
         liveDaemonSessionIds,
       );

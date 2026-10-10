@@ -995,13 +995,14 @@ describe("DeviceSessionRepository", () => {
     expect((await repo.getSession("recoverable"))!.release_reason).toBe("daemon-restart");
   });
 
-  test("SessionManager hands the repository its session clock, not the wall timer (#11129)", async () => {
+  test("SessionManager hands the repository the same clock frame as the stamps it writes (#11129, #11162)", async () => {
     const timer = new FakeTimer();
     timer.setCurrentTime(10_000);
-    const seen: { upsert?: number; list?: number } = {};
+    const seen: { upsert?: number; createdAt?: number; list?: number } = {};
     class ClockRecordingRepository extends DeviceSessionRepository {
       override async upsertActiveSession(record: DeviceSessionRecord, nowMs?: number) {
         seen.upsert = nowMs;
+        seen.createdAt = record.createdAtMs;
         return await super.upsertActiveSession(record, nowMs);
       }
       override async listRecoverableSessions(nowMs?: number) {
@@ -1014,15 +1015,19 @@ describe("DeviceSessionRepository", () => {
       const sessionClock = sessionManager.sessionNow();
       // A backward wall step: the session clock holds, the wall timer falls an hour behind.
       timer.stepWallClock(-3_600_000);
+      const wallClock = timer.now();
+      expect(wallClock).toBe(sessionClock - 3_600_000);
       await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
       await sessionManager.rehydratePersistedSessions({
         assignSessionToDevice: async () => {
           throw new Error("no rows to assign");
         },
       } as unknown as Parameters<SessionManager["rehydratePersistedSessions"]>[0]);
-      expect(seen.upsert).toBe(sessionClock);
-      expect(seen.list).toBe(sessionClock);
-      expect(timer.now()).toBe(sessionClock - 3_600_000);
+      // Stamps cross the process boundary as wall ms (#11162), and the prune and expiry judgements
+      // are handed "now" in that same frame (#11129).
+      expect(seen.createdAt).toBe(wallClock);
+      expect(seen.upsert).toBe(wallClock);
+      expect(seen.list).toBe(wallClock);
     } finally {
       sessionManager.stopCleanupTimer();
     }

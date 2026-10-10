@@ -345,7 +345,8 @@ function assertNoRecoveryReservationsRemain(pool: DevicePool, sessionId: string)
 }
 
 async function flush(): Promise<void> {
-  for (let i = 0; i < 40; i++) {
+  // Persisted rows are read back through the session-clock conversion (#11162), one turn each.
+  for (let i = 0; i < 80; i++) {
     await Promise.resolve();
   }
 }

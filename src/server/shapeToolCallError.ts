@@ -55,6 +55,19 @@ export function shapeToolCallError(
   };
 }
 
+/**
+ * True for a refusal that has a typed client-visible shape (a wire `code` and its fields). The
+ * `tools/call` handler uses it to shape such a refusal thrown before its main `try` block; an
+ * untyped failure there keeps the thrown MCP error contract (#11292).
+ */
+export function isTypedToolRefusal(error: unknown): boolean {
+  return (
+    typedRefusalPayload(error) !== undefined ||
+    isSuspectSessionError(error) ||
+    error instanceof SessionRecoveryAssignmentError
+  );
+}
+
 function toolCallErrorText(error: unknown, message: string): string {
   if (error instanceof TextIndeterminateError) {
     return JSON.stringify({ success: false, error: message, retryable: false });

@@ -80,6 +80,7 @@ import {
 } from "./managedExecutionLiveness";
 import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
 import type { ManagedExecutionRelease } from "./managedSlots/managedExecutionRelease";
+import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
 import type { ManagedConnectionScopes } from "./managedSlots/managedConnectionScope";
 import {
   DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
@@ -1407,7 +1408,14 @@ async function releaseBoundSession(
     });
   // Preserve the idle path's timing: no cancellation await when there is no work.
   await (executions.hasActiveSessionUuidExecutions(sessionId)
-    ? cancelAndReleaseSession(sessionId, "explicit-release", release, executions)
+    ? // An explicit release is terminal (docs/using/device-ownership.md): a call it cuts is told
+      // the session is gone, as a call arriving after the release is (#11393).
+      cancelAndReleaseSession(
+        sessionId,
+        new SessionReleasedDuringCallError(sessionId, "explicit-release"),
+        release,
+        executions,
+      )
     : release());
   return {
     success: true,

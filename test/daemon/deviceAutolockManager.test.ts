@@ -59,6 +59,7 @@ function harness(env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" }) {
     },
     assertRuntimeIdentity: () => events.push("identity"),
     assertNotReservedForShutdown: () => events.push("shutdown-check"),
+    assertNotReservedForOtherRehydration: () => undefined,
     recordSourceAndroidAvd: () => events.push("source"),
     notifyTargetDeviceReady: () => events.push("ready"),
     trackStartedDeviceProcess: async () => {

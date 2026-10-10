@@ -1681,6 +1681,8 @@ export class DevicePool {
           this.runtimeIdentity.assertRuntimeIdentity(device, identity),
         assertNotReservedForShutdown: (device, message) =>
           this.assertNotReservedForShutdown(device, message),
+        assertNotReservedForOtherRehydration: (device) =>
+          this.assertNotReservedForOtherRehydration(device, undefined),
         recordSourceAndroidAvd: (id, image) => this.recordSourceAndroidAvd(id, image),
         notifyTargetDeviceReady: (options) => this.notifyTargetDeviceReady(options),
         trackStartedDeviceProcess: (device, process) =>
@@ -7546,7 +7548,10 @@ export class DevicePool {
   }
 
   /** Restart recovery is about to put another session back on `device` (#11294). */
-  private assertNotReservedForOtherRehydration(device: PooledDevice, sessionId: string): void {
+  private assertNotReservedForOtherRehydration(
+    device: PooledDevice,
+    sessionId: string | undefined,
+  ): void {
     const holder = this.rehydrationReservationHolder(device);
     if (holder !== undefined && holder !== sessionId) {
       throw deviceAssignedToOtherSessionError(device.id, holder, sessionId);

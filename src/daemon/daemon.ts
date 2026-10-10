@@ -9,6 +9,7 @@ import { isSessionReleasing } from "./sessionReleaseState";
 import { isTokenOwnedOrClaimPending, lookupReleasedSessionReason } from "./daemonRequestHandlers";
 import {
   cancelAndReleaseSession as cancelExecutionsAndReleaseSession,
+  cancelExecutionsCutBySessionRelease,
   forceStuckSessionRelease,
   releaseSessionAndDevice,
 } from "./releaseSessionAndDevice";
@@ -1165,8 +1166,9 @@ export class Daemon {
     executionTracker.setSessionClockOffsetProvider(
       () => this.sessionManager.sessionNow() - this.timer.now(),
     );
-    this.sessionManager.setExpiryReleaseExecutionCanceller((sessionId, cancellation, query) =>
-      this.cancelExecutionsForExpiryRelease(sessionId, cancellation, query),
+    this.sessionManager.setExpiryReleaseExecutionCanceller(
+      (sessionId, cancellation, query, releasedDeviceId) =>
+        this.cancelExecutionsForExpiryRelease(sessionId, cancellation, query, releasedDeviceId),
     );
     // A sessionless call admitted while the device was free must not keep driving it for the new
     // holder (#10829). The call performing the acquisition is spared.
@@ -3235,33 +3237,31 @@ export class Daemon {
 
   /**
    * Abort what a release overrides — idle expiry (#10820), heartbeat reap and owner disconnect
-   * (#11400) — over the same session scope {@link hasActiveSessionExecution} counts as in flight. The tracker signals each abort before
-   * its first await, so the aborts land before the release that follows starts. They are aborted
-   * with the typed release, so each cut caller gets the terminal refusal (#11381).
+   * (#11400) — through {@link cancelExecutionsCutBySessionRelease}: the released session's own
+   * calls with the typed release (#11381), and a base session's calls only where they drive the
+   * released derived session's device. The aborts land before the release that follows starts.
    */
   private cancelExecutionsForExpiryRelease(
     sessionId: string,
     cancellation: SessionReleasedDuringCallError,
     query: ActiveSessionExecutionQuery,
+    releasedDeviceId: string | undefined,
   ): void {
-    const executionSessionId =
-      resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager) ?? sessionId;
-    for (const id of new Set([sessionId, executionSessionId])) {
-      // Only a call running under the released session is told it is gone. The base session's call
-      // is cut because it drives the derived session's device (#5364), but the base is still live:
-      // it gets the plain cancellation, never a refusal naming a session that is not its own.
-      const reason = id === sessionId ? cancellation : cancellation.releaseReason;
-      executionTracker
-        .cancelDeviceSessionExecutions(id, reason, {
-          excludeExecutionId: query.excludeExecutionId,
-        })
-        .catch((error: unknown) => {
-          logger.warn(
-            `[Daemon] Failed to cancel executions of expired session ${id}: ${errorMessage(error)}`,
-            error,
-          );
-        });
-    }
+    cancelExecutionsCutBySessionRelease(
+      executionTracker,
+      {
+        sessionId,
+        baseSessionId: resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager),
+        deviceId: releasedDeviceId,
+        excludeExecutionId: query.excludeExecutionId,
+      },
+      cancellation,
+    ).catch((error: unknown) => {
+      logger.warn(
+        `[Daemon] Failed to cancel executions of released session ${sessionId}: ${errorMessage(error)}`,
+        error,
+      );
+    });
   }
 
   private async tryRecoverCapturedDisconnectTarget(

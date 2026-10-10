@@ -59,6 +59,8 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
   let manager: FakeDeviceManager;
   /** Simulator UDIDs a managed slot holds, as the pool's exclusion reports them. */
   let managedSlotDevices: Set<string>;
+  /** The live execution session of the slot holding those devices, if it has one. */
+  let managedSlotExecSession: string | null;
   let pool: DevicePool;
 
   const managedSlotExclusion: ManagedSlotExclusion = {
@@ -74,7 +76,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
             scopeKey: "scope",
             slotIndex: 0,
             scopeState: null,
-            execSessionUuid: null,
+            execSessionUuid: managedSlotExecSession,
           };
     },
     stableIdsFor: () => managedSlotDevices,
@@ -105,6 +107,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     sessions = new SessionManager(timer, persistence);
     manager = new FakeDeviceManager();
     managedSlotDevices = new Set();
+    managedSlotExecSession = null;
   });
 
   afterEach(() => {
@@ -196,6 +199,39 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     // Once the slot lets go, nothing else holds the device: it was never reserved for the row.
     managedSlotDevices.clear();
     expect(pool.genericAvailability(SIM_A)).toBe("free");
+  });
+
+  // Managed slots win even when the slot takes the device after the row reserved it: the
+  // reservation never blocks the slot, and the row then ends through the normal target-busy path.
+  test("a managed slot that acquires a reserved device afterwards takes it from the row", async () => {
+    await seedRestartReleasedRow(persistence, "row-a", SIM_A, 10);
+    await setUp([ios(SIM_A)], true);
+    await pool.reserveDevicesForRehydration([reservation("row-a", SIM_A)]);
+    expect(pool.genericAvailability(SIM_A)).toBe("reserved");
+
+    managedSlotDevices.add(SIM_A);
+    managedSlotExecSession = "slot-exec";
+
+    await expect(
+      pool.bindOrReuseDeviceSession("slot-exec", SIM_A, "ios", undefined, undefined, ios(SIM_A)),
+    ).resolves.toBe("slot-exec");
+    expect(pool.getDevice(SIM_A)?.sessionId).toBe("slot-exec");
+
+    await expect(
+      sessions.getOrCreateSession("row-a", pool, "ios", undefined, true),
+    ).rejects.toThrow("target-busy");
+    expect(sessions.getTerminalReleaseSnapshot("row-a")).toMatchObject({
+      releaseReason: "identity-recovery-target-busy",
+    });
+  });
+
+  test("a reservation still refuses a session that is not the managed slot's execution", async () => {
+    await setUp([ios(SIM_A)], true);
+    await pool.reserveDevicesForRehydration([reservation("row-a", SIM_A)]);
+
+    await expect(
+      pool.bindOrReuseDeviceSession("someone-else", SIM_A, "ios", undefined, undefined, ios(SIM_A)),
+    ).rejects.toMatchObject({ code: DEVICE_OWNED_BY_OTHER_SESSION_CODE });
   });
 
   test("startup rehydration recovers every reserved row and leaves nothing reserved", async () => {

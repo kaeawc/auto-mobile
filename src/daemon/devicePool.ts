@@ -7447,9 +7447,13 @@ export class DevicePool {
     }
   }
 
-  /** The session whose restart recovery `device` is reserved for, if any (#11294). */
+  /**
+   * The session whose restart recovery `device` is reserved for, if any (#11294). A device a
+   * managed slot holds is never reserved, whenever the slot took it: the slot wins, and the row
+   * recovers or fails (target-busy once the slot's execution is bound) through the normal path.
+   */
   private rehydrationReservationHolder(device: PooledDevice): string | undefined {
-    if (this.rehydrationReservations.size === 0) {
+    if (this.rehydrationReservations.size === 0 || this.isManagedSlotDevice(device)) {
       return undefined;
     }
     const stableId = this.stableDeviceIdFor(device);

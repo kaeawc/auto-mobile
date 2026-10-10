@@ -88,6 +88,67 @@ class McpDaemonClientSetActiveDeviceTest {
   }
 
   @Test
+  fun `every captured terminal refusal is a released session in either payload shape`() {
+    val terminal = RefusalWireFixtures.all().filter { it.acquireNewSession }
+    // Top-level (session_terminal_release_in_progress) and nested-under-error shapes both exist.
+    assertEquals(
+      setOf(
+        "session_ownership_lost",
+        "no_active_device_session",
+        "session_terminal_release_in_progress",
+      ),
+      terminal.map { it.name }.toSet(),
+    )
+    terminal.forEach { case ->
+      assertEquals(
+        SetActiveDeviceRefusal.SESSION_RELEASED,
+        classifySetActiveDeviceRefusal(DaemonJson, case.result),
+        case.name,
+      )
+    }
+  }
+
+  @Test
+  fun `a terminal refusal is classified by nextAction whatever its code or message`() {
+    val payload = buildJsonObject {
+      put("success", false)
+      put("error", "Something the daemon words differently tomorrow.")
+      put("code", "a_future_terminal_code")
+      put("retryable", false)
+      put("nextAction", "acquire_new_session")
+    }
+      .toString()
+    assertEquals(SetActiveDeviceRefusal.SESSION_RELEASED, bind(errorText(payload)).refusal)
+  }
+
+  @Test
+  fun `no captured retryable refusal is a released session`() {
+    RefusalWireFixtures.all()
+      .filter { it.retryable == true }
+      .forEach { case ->
+        val refusal = classifySetActiveDeviceRefusal(DaemonJson, case.result)
+        assertTrue(refusal != SetActiveDeviceRefusal.SESSION_RELEASED, case.name)
+      }
+  }
+
+  @Test
+  fun `a retryable refusal is never released even if it carries a terminal code or nextAction`() {
+    val nested = buildJsonObject {
+      put(
+        "error",
+        buildJsonObject {
+          put("code", "session_ownership_lost")
+          put("message", "Session s1 is restoring.")
+          put("retryable", true)
+          put("nextAction", "acquire_new_session")
+        },
+      )
+    }
+      .toString()
+    assertEquals(null, bind(errorText(nested)).refusal)
+  }
+
+  @Test
   fun `a wrapped terminal session message is a released session`() {
     val text =
       "Error: Failed to set active device: Session s1 was released and cannot be reused. " +

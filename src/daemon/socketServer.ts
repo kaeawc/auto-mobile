@@ -1318,6 +1318,7 @@ export class UnixSocketServer {
       this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
         (sessionId, reason, snapshot, extras) => {
           this.clearBoundMcpClientsForReleasedSession(sessionId);
+          void this.liftStrokesHeldBy(sessionId);
           this.broadcastSessionReleased(sessionId, reason, snapshot, extras?.recordingIds);
         },
       );
@@ -6041,7 +6042,12 @@ export class UnixSocketServer {
     if (socketSessionId) {
       if (kind === "start") {
         // A start acked after its socket closed is cancelled here instead of recorded (#10005).
-        await this.ownedGestures.onStartAcked(socketSessionId, targetDevice, args.gestureId);
+        await this.ownedGestures.onStartAcked(
+          socketSessionId,
+          targetDevice,
+          args.gestureId,
+          this.inputTargetOwners.get(targetDevice),
+        );
       } else if (kind === "end") {
         this.ownedGestures.onEndAcked(socketSessionId, targetDevice.deviceId, args.gestureId);
       }
@@ -6064,6 +6070,11 @@ export class UnixSocketServer {
    * runner parks a continued stroke with no ceiling, so the refused frame would leave the pointer
    * down: the daemon lifts the stroke with a cancelling end (no drop is committed) and then
    * answers the typed refusal. A refused `gestureStart` opened nothing.
+   *
+   * A frame refused for any other reason (the holder gate's `device_owned_by_other_session`, a
+   * target resolved for a holder that has left) lifts the stroke this socket owns when the device
+   * is no longer held by the session the start was admitted under (#11448): the holder was
+   * released between frames, and the stroke must not stay down on the next owner's device.
    */
   private async liftingStrokeOnSessionRefusal<T>(
     kind: "start" | "move" | "end",
@@ -6087,9 +6098,26 @@ export class UnixSocketServer {
         if (socketSessionId) {
           this.ownedGestures.onEndAcked(socketSessionId, targetDevice.deviceId, gestureId);
         }
+      } else if (kind !== "start" && socketSessionId) {
+        await this.ownedGestures.cancelIfDeviceChangedHands(
+          socketSessionId,
+          targetDevice.deviceId,
+          gestureId,
+          this.getSessionForDevice(targetDevice.deviceId),
+        );
       }
       throw error;
     }
+  }
+
+  /**
+   * A session was released: lift every stroke admitted under it, at release time, so the cancel is
+   * on the device's keyed queue ahead of any input the next owner sends (#11448). The frames of a
+   * gesture are separate control calls, so a release between two of them cuts no call and nothing
+   * else would lift the pointer until the pane's socket closed. Best-effort; never throws.
+   */
+  private liftStrokesHeldBy(releasedSessionId: string): Promise<void> {
+    return this.ownedGestures.cancelAllHeldBy(releasedSessionId);
   }
 
   /**

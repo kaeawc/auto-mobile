@@ -9,6 +9,7 @@ import {
   type ManagedSlotReconcileResult,
   chooseIosDeviceType,
 } from "../../../src/daemon/managedSlots/reconciler";
+import { InFlightSlotReservations } from "../../../src/daemon/managedSlots/slotOwnerLiveness";
 import type { SlotKey } from "../../../src/daemon/managedSlots/slotRegistry";
 import {
   ProvisionDeviceError,
@@ -1065,6 +1066,37 @@ describe("ManagedSlotReconciler", () => {
         state: "ready",
         execOwner: { ...owner, sessionUuid: "session-2" },
       });
+    });
+
+    test("a reservation is in flight only while its attempt runs (#11339)", async () => {
+      await seedAssigned();
+      const owner = { daemonId: "daemon-a", pid: 4242 };
+      const inFlight = new InFlightSlotReservations();
+      reconciler = new ManagedSlotReconciler({
+        registry,
+        inventory,
+        matcher,
+        resolver: new DefaultManagedSpecResolver(),
+        provisioner,
+        deleter,
+        claims,
+        capacity,
+        timer,
+        idGenerator: new FakeIdGenerator(["r1"]),
+        isExecOwnerLive: () => true,
+        reservations: inFlight,
+      });
+      let duringProvision: boolean | undefined;
+      provisioner.beforeReturn = async () => {
+        const reserved = (await registry.getAssignment(key))?.execOwner?.sessionUuid;
+        duringProvision = reserved !== undefined && inFlight.has(reserved);
+      };
+
+      const result = expectReady(await reconciler.reconcile(request(SPEC_18, { owner })));
+
+      expect(duringProvision).toBe(true);
+      expect(result.disposition).toBe("reused");
+      expect(inFlight.has("reserve-r1")).toBe(false);
     });
 
     test("an owned create claims the slot for the provisioned session", async () => {

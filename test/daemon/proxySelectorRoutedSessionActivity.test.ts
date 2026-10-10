@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import fc from "fast-check";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import {
@@ -85,8 +86,8 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
   let acquired: Array<typeof ANDROID>;
   /** The fake daemon refuses control calls (e.g. a non-holder on a held device). */
   let refuseControl: boolean;
-  /** The fake daemon is an older build that never echoes the routed session. */
-  let legacyDaemon: boolean;
+  /** The fake daemon answers without the routed-session echo, as it does for a call that used none. */
+  let withoutEcho: boolean;
 
   /** The session the daemon would route a call to and admit, as it resolves its selector. */
   function daemonRoutes(params: Record<string, unknown>): string | undefined {
@@ -128,11 +129,12 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
     }
   }
 
-  beforeEach(() => {
+  /** A fresh fake daemon, clock and proxy. */
+  function startProxy(): void {
     timer = new FakeTimer();
     acquired = [];
     refuseControl = false;
-    legacyDaemon = false;
+    withoutEcho = false;
     client = new FakeDaemonClient({
       toolResultFor: (name, params) => {
         const device =
@@ -157,13 +159,10 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
         }
         return withRoutedSessionMeta(
           { content: [{ type: "text", text: "ok" }] },
-          name === "observe" || legacyDaemon ? undefined : daemonRoutes(params),
+          name === "observe" || withoutEcho ? undefined : daemonRoutes(params),
         );
       },
     });
-    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-    warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
-    infoSpy = spyOn(logger, "info").mockImplementation(() => {});
     const daemonManager = new FakeDaemonManager();
     daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
     proxy = new DaemonMcpProxy({
@@ -175,6 +174,13 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
       heartbeatTimeoutMs: 4_000,
       heartbeatIntervalMs: INTERVAL_MS,
     });
+  }
+
+  beforeEach(() => {
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    infoSpy = spyOn(logger, "info").mockImplementation(() => {});
+    startProxy();
   });
 
   afterEach(async () => {
@@ -312,16 +318,91 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
       expect(await nextTicksHeartbeat()).toEqual([ANDROID.sessionUuid]);
     });
 
-    test("an older daemon that never echoes keeps crediting the session a call names", async () => {
-      legacyDaemon = true;
+    // #11348 item 2: the echo is the only credit from the first call on. Before any control call
+    // had echoed, the proxy credited whatever session a call named, so a read moved the idle clock.
+    for (const [form, args] of [
+      ["sessionless", {}],
+      ["explicit sessionUuid", { sessionUuid: ANDROID.sessionUuid }],
+      ["deviceId", { deviceId: ANDROID.deviceId }],
+    ] as const) {
+      test(`a ${form} observe before the first echo does not extend the idle clock`, async () => {
+        await proxy.callTool("getAndroid", {});
+        const acquiredAt = timer.now();
+        await callEvery("observe", args, IDLE_WINDOW_MS / 4, IDLE_WINDOW_MS - INTERVAL_MS);
+        await timer.advanceTimeAsync(acquiredAt + IDLE_WINDOW_MS + INTERVAL_MS - timer.now());
+        expect(await nextTicksHeartbeat()).toEqual([]);
+      });
+    }
+
+    test("a held session's observe before the first echo does not extend its idle clock", async () => {
       await proxy.callTool("getAndroid", {});
+      const acquiredAt = timer.now();
+      await proxy.callTool("getApple", {});
       await callEvery(
         "observe",
         { sessionUuid: ANDROID.sessionUuid },
-        IDLE_WINDOW_MS / 2,
-        IDLE_WINDOW_MS * 3,
+        IDLE_WINDOW_MS / 4,
+        IDLE_WINDOW_MS - INTERVAL_MS,
       );
-      expect(await nextTicksHeartbeat()).toEqual([ANDROID.sessionUuid]);
+      await timer.advanceTimeAsync(acquiredAt + IDLE_WINDOW_MS + INTERVAL_MS - timer.now());
+      expect(await nextTicksHeartbeat()).toEqual([]);
+    });
+
+    // The idle clock as a property: over any history of reads and control calls, in every form a
+    // call can name a session, the binding is kept until one window after the last control call
+    // (the acquisition when there was none) and not a keeper tick longer.
+    test("only control calls move the idle clock, in any order and form", async () => {
+      const selector = fc.constantFrom<Record<string, unknown>>(
+        {},
+        { sessionUuid: ANDROID.sessionUuid },
+        { deviceId: ANDROID.deviceId },
+        { platform: "android" },
+      );
+      const step = fc.record({
+        control: fc.boolean(),
+        args: selector,
+        gapMs: fc.integer({ min: 1, max: 20 }).map((ticks) => ticks * INTERVAL_MS),
+      });
+      await fc.assert(
+        fc.asyncProperty(fc.array(step, { maxLength: 8 }), async (steps) => {
+          await proxy.close();
+          startProxy();
+          await proxy.callTool("getAndroid", {});
+          let lastUsedAt = timer.now();
+          for (const { control, args, gapMs } of steps) {
+            if (timer.now() + gapMs - lastUsedAt > IDLE_WINDOW_MS - INTERVAL_MS * 4) {
+              break;
+            }
+            await timer.advanceTimeAsync(gapMs);
+            if (control) {
+              await proxy.callTool(CONTROL, { ...CONTROL_ARGS, ...args });
+              lastUsedAt = timer.now();
+            } else {
+              await proxy.callTool("observe", args);
+            }
+          }
+          await timer.advanceTimeAsync(lastUsedAt + IDLE_WINDOW_MS - INTERVAL_MS * 4 - timer.now());
+          expect(await nextTicksHeartbeat()).toEqual([ANDROID.sessionUuid]);
+          await timer.advanceTimeAsync(INTERVAL_MS * 2);
+          expect(await nextTicksHeartbeat()).toEqual([]);
+        }),
+        // See test/utils/Backoff.property.test.ts for the pinned-seed rationale.
+        { seed: 11_348, numRuns: 25 },
+      );
+    });
+
+    test("a result without an echo credits nothing, whatever session the call named", async () => {
+      withoutEcho = true;
+      await proxy.callTool("getAndroid", {});
+      const acquiredAt = timer.now();
+      await callEvery(
+        CONTROL,
+        { ...CONTROL_ARGS, sessionUuid: ANDROID.sessionUuid },
+        IDLE_WINDOW_MS / 4,
+        IDLE_WINDOW_MS - INTERVAL_MS,
+      );
+      await timer.advanceTimeAsync(acquiredAt + IDLE_WINDOW_MS + INTERVAL_MS - timer.now());
+      expect(await nextTicksHeartbeat()).toEqual([]);
     });
   });
 

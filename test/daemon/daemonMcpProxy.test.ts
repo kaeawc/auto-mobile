@@ -48,6 +48,7 @@ import {
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
@@ -144,6 +145,18 @@ const matchingDaemonManager = (): FakeDaemonManager => {
   manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
   return manager;
 };
+
+/**
+ * Answer as the daemon does (#10974): the result of an admitted control call echoes the session it
+ * used, and a read (observe) carries no echo. The echo is the proxy's only idle-clock credit.
+ */
+function echoAdmittedControlUse(client: Pick<DaemonClientLike, "callTool">): void {
+  const callTool = client.callTool.bind(client);
+  client.callTool = async (toolName, params, ...rest) => {
+    const result = await callTool(toolName, params, ...rest);
+    return toolName === "observe" ? result : withRoutedSessionMeta(result, params.sessionUuid);
+  };
+}
 
 class ScriptedDaemonClient implements DaemonClientLike {
   readonly callToolCalls: Array<{ toolName: string; params: Record<string, any> }> = [];
@@ -4218,9 +4231,9 @@ describe("DaemonMcpProxy", () => {
     });
 
     test("keeps replaying a bound session across continuous implicit activity beyond one TTL", async () => {
-      // Continuous implicit (sessionless) calls forward the bound UUID and extend
-      // the live daemon session, so the replay lease must refresh off the forwarded
-      // args. Otherwise total elapsed time crossing one TTL retires a still-live
+      // Continuous implicit (sessionless) control calls forward the bound UUID and extend
+      // the live daemon session, so the replay lease must refresh off the session the
+      // daemon echoes. Otherwise total elapsed time crossing one TTL retires a still-live
       // session, and a later reconnect would seed an unbound transport that treats
       // session-disabled capabilities as enabled
       // (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
@@ -4228,6 +4241,7 @@ describe("DaemonMcpProxy", () => {
       const client = new ScriptedDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },
       });
+      echoAdmittedControlUse(client);
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
       const proxy = new DaemonMcpProxy({
         clientFactory: () => client,
@@ -4239,16 +4253,16 @@ describe("DaemonMcpProxy", () => {
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a" });
         // Two implicit calls, each within the TTL, but cumulatively past it. Each
-        // forwarded implicit call must renew the lease so the binding survives.
+        // forwarded implicit control call must renew the lease so the binding survives.
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
-        await proxy.callTool("observe", {});
+        await proxy.callTool("tapOn", {});
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
-        await proxy.callTool("observe", {});
+        await proxy.callTool("tapOn", {});
 
         expect(client.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "tapOn", params: { sessionUuid: "session-a" } },
+          { toolName: "tapOn", params: { sessionUuid: "session-a" } },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4256,13 +4270,10 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("refreshes the replay lease when an admitted bound call is rejected by the handler", async () => {
-      // An implicit sessionless call has the bound UUID injected and reaches the
-      // daemon, which refreshes the LIVE session in getOrCreateSession(). The
-      // handler then rejects (e.g. a tool failure), so the success-only
-      // rememberSessionUuid never runs. Without refreshing the lease in the catch
-      // path, crossing one TTL retires the still-live session and a later reconnect
-      // would seed an unbound transport (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
+    test("a rejection without the daemon's echo does not restart the idle window (#11348)", async () => {
+      // The daemon answers an admitted call that then failed with an error RESULT carrying
+      // its echo (the next test). A bare rejection carries none, so the proxy cannot tell a
+      // control call from a read and credits nothing: a read must never move the idle clock.
       const timer = new FakeTimer();
       const client = new ScriptedDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },
@@ -4279,19 +4290,17 @@ describe("DaemonMcpProxy", () => {
 
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a" });
-        // An admitted-then-rejected implicit call within the TTL. It must renew the
-        // lease off the injected UUID even though it throws.
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         await expect(proxy.callTool("tapOn", {})).rejects.toThrow("tap failed after admission");
-        // Cumulatively past one TTL from the initial bind; only the refreshed lease
-        // keeps the binding alive for this final implicit call.
+        // Cumulatively past one window from the bind: the binding is retired, not replayed.
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
-        await proxy.callTool("observe", {});
+        await expect(proxy.callTool("tapOn", {})).rejects.toMatchObject({
+          reason: "replay-lease-expired",
+        });
 
         expect(client.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a" } },
           { toolName: "tapOn", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4307,8 +4316,12 @@ describe("DaemonMcpProxy", () => {
       const callTool = client.callTool.bind(client);
       client.callTool = async (toolName, params) => {
         await callTool(toolName, params);
+        // An admitted call that then failed still used its session, and the daemon says so (#10824).
         return toolName === "tapOn"
-          ? { content: [{ type: "text", text: "tap failed after admission" }], isError: true }
+          ? withRoutedSessionMeta(
+              { content: [{ type: "text", text: "tap failed after admission" }], isError: true },
+              params.sessionUuid,
+            )
           : { content: [{ type: "text", text: "ok" }] };
       };
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
@@ -4358,7 +4371,11 @@ describe("DaemonMcpProxy", () => {
       const callTool = client.callTool.bind(client);
       client.callTool = async (toolName, params) => {
         await callTool(toolName, params);
-        return toolName === "tapOn" ? pending : { content: [{ type: "text", text: "ok" }] };
+        // The session is admitted before its device assignment answers recovery-pending, so the
+        // daemon echoes it as used (#10824).
+        return toolName === "tapOn"
+          ? withRoutedSessionMeta(pending, params.sessionUuid)
+          : { content: [{ type: "text", text: "ok" }] };
       };
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
       const proxy = new DaemonMcpProxy({
@@ -4522,6 +4539,7 @@ describe("DaemonMcpProxy", () => {
       const client = new ScriptedDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },
       });
+      echoAdmittedControlUse(client);
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
       const proxy = new DaemonMcpProxy({
         clientFactory: () => client,
@@ -4534,9 +4552,9 @@ describe("DaemonMcpProxy", () => {
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a" });
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
-        // An unscoped device call has the bound UUID injected, and that forwarded
-        // call is what renews the replay lease. (Inventory tools such as
-        // listDevices never renew it, and neither do heartbeat acks: #10656.)
+        // An unscoped control call has the bound UUID injected, and the daemon's echo of
+        // that admitted use is what renews the replay lease. (Reads and inventory tools
+        // such as listDevices never renew it, and neither do heartbeat acks: #10656.)
         await proxy.callTool("tapOn", {});
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         await proxy.callTool("observe", {});
@@ -5575,7 +5593,7 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("a response-phase transport failure still refreshes an admitted replay lease", async () => {
+    test("a read whose response was lost does not restart the idle window (#11348)", async () => {
       const timer = new FakeTimer();
       let callCount = 0;
       const responseError = new DeviceControlTransportError(
@@ -5622,11 +5640,13 @@ describe("DaemonMcpProxy", () => {
         await Promise.resolve();
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         await expect(proxy.callTool("observe", {})).rejects.toBe(responseError);
+        // One window after the bind the binding is retired: the lost read credited nothing.
         timer.advanceTime(2);
-        await proxy.callTool("observe", {});
+        await expect(proxy.callTool("tapOn", {})).rejects.toMatchObject({
+          reason: "replay-lease-expired",
+        });
 
         expect(fakeClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
           { toolName: "observe", params: { sessionUuid: "session-a" } },
           { toolName: "observe", params: { sessionUuid: "session-a" } },
         ]);

@@ -17,6 +17,13 @@ const val DEVICE_OWNED_BY_OTHER_SESSION_CODE = "device_owned_by_other_session"
 const val DEVICE_CLEANUP_IN_PROGRESS_CODE = "device_cleanup_in_progress"
 
 /**
+ * The `nextAction` on every terminal session loss (`session_ownership_lost`,
+ * `no_active_device_session`, `session_terminal_release_in_progress`): the session UUID is dead and
+ * only a freshly acquired one can work. Always paired with `retryable: false`.
+ */
+const val NEXT_ACTION_ACQUIRE_NEW_SESSION = "acquire_new_session"
+
+/**
  * A tool call the daemon answered with an error result. [code] and [deviceId] are the structured
  * fields of the error payload, when it had them; [code] also reads a nested `failure.code`, where a
  * `deleteDevice` precondition failure puts it.
@@ -28,7 +35,17 @@ class McpToolErrorException(
   cause: Throwable? = null,
   /** The refusal's `retryAfterMs` hint, when it carried one. */
   val retryAfterMs: Long? = null,
+  /** The refusal's `retryable` flag; null when the payload did not carry one. */
+  val retryable: Boolean? = null,
+  /** The refusal's `nextAction`, e.g. [NEXT_ACTION_ACQUIRE_NEW_SESSION]; null when absent. */
+  val nextAction: String? = null,
 ) : McpConnectionException(message, cause)
+
+/** True when the daemon said this session is terminal and only a new session UUID can proceed. */
+fun Throwable.isSessionTerminalRefusal(): Boolean =
+  (this as? McpToolErrorException)?.let {
+    it.nextAction == NEXT_ACTION_ACQUIRE_NEW_SESSION && it.retryable != true
+  } == true
 
 /** True when this failure is the daemon refusing a device another session holds. */
 fun Throwable.isDeviceOwnedRefusal(): Boolean =

@@ -185,6 +185,12 @@ export interface MarkReleasedOptions {
    */
   onlyIfRecoverable?: boolean;
   /**
+   * Apply the release only while the row's `expires_at_ms` is at or before this instant (single
+   * statement): the expiry sweep must not terminalize a row whose deadline was extended (restart-
+   * recovery activity, #11281) after it selected the row (#11448).
+   */
+  onlyIfExpiredAtMs?: number;
+  /**
    * Apply the release only while the row is still owned by this daemon (single statement): a
    * release adopted from a dead daemon's journal (#11355) must not land on a row another daemon
    * took over after the adopter read it.
@@ -670,7 +676,8 @@ export class DeviceSessionRepository {
     reason: string,
     options: MarkReleasedOptions = {},
   ): Promise<void> {
-    const { expectedRowGeneration, onlyIfRecoverable, onlyIfOwnedByDaemon } = options;
+    const { expectedRowGeneration, onlyIfRecoverable, onlyIfExpiredAtMs, onlyIfOwnedByDaemon } =
+      options;
     try {
       const db = await this.getDb();
       let update = db
@@ -698,6 +705,9 @@ export class DeviceSessionRepository {
       }
       if (onlyIfRecoverable) {
         update = update.where((eb) => hasRecoverableReleaseReason(eb));
+      }
+      if (onlyIfExpiredAtMs !== undefined) {
+        update = update.where("expires_at_ms", "<=", onlyIfExpiredAtMs);
       }
       if (onlyIfOwnedByDaemon !== undefined) {
         update = update.where("daemon_session_id", "=", onlyIfOwnedByDaemon);
@@ -797,6 +807,7 @@ export class DeviceSessionRepository {
         await this.markReleased(row.session_uuid, "expired", nowMs, "expired", {
           expectedRowGeneration: row.stable_identity_generation ?? 0,
           onlyIfRecoverable: true,
+          onlyIfExpiredAtMs: nowMs,
         });
       } catch (error) {
         logger.warn(

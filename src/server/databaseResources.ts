@@ -1,4 +1,9 @@
-import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
+import {
+  ResourceRegistry,
+  ResourceContent,
+  ResourceReadContext,
+  getRequestedResourceUri,
+} from "./resourceRegistry";
 import {
   DatabaseInspector,
   DatabaseInfo,
@@ -9,6 +14,7 @@ import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import type { TableDataResult } from "../features/database/DatabaseInspector";
+import { isNonOwnerReaderOfHeldDevice } from "./sdkProviderReadAccess";
 import { optionalInteger } from "./queryParamValidation";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 import { ActionableError } from "../models/ActionableError";
@@ -129,10 +135,15 @@ async function iosStorageRequest<T>(request: () => Promise<T>): Promise<T> {
   }
 }
 
-function createDatabaseClient(device: BootedDevice): AppDatabaseClient {
+function createDatabaseClient(
+  device: BootedDevice,
+  context?: ResourceReadContext,
+): AppDatabaseClient {
   if (device.platform === "android") {
     const adb = defaultAdbClientFactory.create(device);
-    return new DatabaseInspector(device, adb);
+    return new DatabaseInspector(device, adb, undefined, () =>
+      isNonOwnerReaderOfHeldDevice(device.deviceId, context),
+    );
   }
 
   if (device.platform === "ios") {
@@ -213,7 +224,10 @@ function buildTableStructureUri(
 /**
  * Get databases resource content
  */
-async function getDatabasesResource(params: Record<string, string>): Promise<ResourceContent> {
+async function getDatabasesResource(
+  params: Record<string, string>,
+  context?: ResourceReadContext,
+): Promise<ResourceContent> {
   const { deviceId, appId } = params;
   const uri = buildDatabasesUri(deviceId, appId);
 
@@ -227,7 +241,7 @@ async function getDatabasesResource(params: Record<string, string>): Promise<Res
       };
     }
 
-    const inspector = createDatabaseClient(device);
+    const inspector = createDatabaseClient(device, context);
     const databases = await inspector.listDatabases(appId);
     const lastUpdated = new Date().toISOString();
     const hash = generateHash(databases);
@@ -286,7 +300,10 @@ function malformedUriContent(params: Record<string, string>): ResourceContent {
 /**
  * Get tables resource content
  */
-async function getTablesResource(params: Record<string, string>): Promise<ResourceContent> {
+async function getTablesResource(
+  params: Record<string, string>,
+  context?: ResourceReadContext,
+): Promise<ResourceContent> {
   const { deviceId, databasePath, appId } = params;
   const decodedPath = safeDecodeSegment(databasePath);
   if (decodedPath === null) {
@@ -304,7 +321,7 @@ async function getTablesResource(params: Record<string, string>): Promise<Resour
       };
     }
 
-    const inspector = createDatabaseClient(device);
+    const inspector = createDatabaseClient(device, context);
     const tables = await inspector.listTables(appId, decodedPath);
     const lastUpdated = new Date().toISOString();
 
@@ -341,7 +358,10 @@ async function getTablesResource(params: Record<string, string>): Promise<Resour
 /**
  * Get table data resource content
  */
-async function getTableDataResource(params: Record<string, string>): Promise<ResourceContent> {
+async function getTableDataResource(
+  params: Record<string, string>,
+  context?: ResourceReadContext,
+): Promise<ResourceContent> {
   const { deviceId, databasePath, table, appId } = params;
   const decodedPath = safeDecodeSegment(databasePath);
   const decodedTable = safeDecodeSegment(table);
@@ -397,7 +417,7 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
       };
     }
 
-    const inspector = createDatabaseClient(device);
+    const inspector = createDatabaseClient(device, context);
     const data = await inspector.getTableData(appId, decodedPath, decodedTable, limit, offset);
     const lastUpdated = new Date().toISOString();
 
@@ -439,7 +459,10 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
 /**
  * Get table structure resource content
  */
-async function getTableStructureResource(params: Record<string, string>): Promise<ResourceContent> {
+async function getTableStructureResource(
+  params: Record<string, string>,
+  context?: ResourceReadContext,
+): Promise<ResourceContent> {
   const { deviceId, databasePath, table, appId } = params;
   const decodedPath = safeDecodeSegment(databasePath);
   const decodedTable = safeDecodeSegment(table);
@@ -458,7 +481,7 @@ async function getTableStructureResource(params: Record<string, string>): Promis
       };
     }
 
-    const inspector = createDatabaseClient(device);
+    const inspector = createDatabaseClient(device, context);
     const structure = await inspector.getTableStructure(appId, decodedPath, decodedTable);
     const lastUpdated = new Date().toISOString();
     const hash = generateHash(structure);
@@ -552,7 +575,7 @@ export async function notifyDatabaseChanged(
  */
 export function registerDatabaseResources(): void {
   // Register template for listing databases
-  ResourceRegistry.registerTemplate(
+  ResourceRegistry.registerTemplateWithReadContext(
     DATABASE_RESOURCE_TEMPLATES.DATABASES,
     "App Databases",
     "List all SQLite databases in an Android or iOS app. Requires app to have AutoMobile SDK with database inspection enabled; iOS support requires a DEBUG SDK server.",
@@ -561,7 +584,7 @@ export function registerDatabaseResources(): void {
   );
 
   // Register template for listing tables
-  ResourceRegistry.registerTemplate(
+  ResourceRegistry.registerTemplateWithReadContext(
     DATABASE_RESOURCE_TEMPLATES.TABLES,
     "Database Tables",
     "List all tables in a database.",
@@ -576,7 +599,7 @@ export function registerDatabaseResources(): void {
   // canonical-URI change (notifyDatabaseChanged / schema invalidation, which
   // both fire against the no-limit/offset form) fans out to every per-page
   // subscriber (issue #6198).
-  ResourceRegistry.registerTemplate(
+  ResourceRegistry.registerTemplateWithReadContext(
     DATABASE_RESOURCE_TEMPLATES.TABLE_DATA,
     "Table Data",
     "Get rows from a database table with pagination (default: 50 rows). Add &limit=N&offset=M for pagination.",
@@ -586,7 +609,7 @@ export function registerDatabaseResources(): void {
   );
 
   // Register template for table structure
-  ResourceRegistry.registerTemplate(
+  ResourceRegistry.registerTemplateWithReadContext(
     DATABASE_RESOURCE_TEMPLATES.TABLE_STRUCTURE,
     "Table Structure",
     "Get column definitions for a database table.",

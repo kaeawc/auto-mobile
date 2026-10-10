@@ -294,6 +294,59 @@ describe("startDevice --create-if-missing wiring", () => {
     expect(await fakeDeviceUtils.listDeviceImages("android")).toEqual([]);
   });
 
+  it("keeps readiness reservations until the created-device rollback settles (#11186)", async () => {
+    fakeGate.setAllowed(true);
+    const created = {
+      platform: "android" as const,
+      name: "AutoMobile-android-34-abcd1234",
+      deviceType: "system-images;android-34;google_apis;arm64-v8a",
+      runtime: "android-34",
+    };
+    setDeviceToolsDependencies({
+      deviceProvisionerFactory: () => ({
+        provision: async (criteria, _signal, identityHooks) => {
+          fakeProvisioner.requests.push(criteria);
+          await identityHooks?.reserveBeforeCreate(created);
+          fakeDeviceUtils.setDeviceImages("android", [
+            { name: created.name, platform: "android", isRunning: false },
+          ]);
+          await identityHooks?.bindAfterCreate(created);
+          return created;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        throw new Error("CtrlProxy install failed");
+      },
+    });
+    await useFakeTeardown("android");
+    // Observe the pool's readiness reservation at the moment the AVD is deleted.
+    const pool = DaemonState.getInstance().getDevicePool() as unknown as {
+      isReservedForReadiness(deviceId: string): boolean;
+    };
+    const reservedDuringRollback: boolean[] = [];
+    const reservedIds: string[] = [];
+    const reserve = DaemonState.getInstance().getDevicePool().reserveDeviceForReadiness;
+    DaemonState.getInstance().getDevicePool().reserveDeviceForReadiness = function (
+      this: unknown,
+      deviceId,
+      ...rest
+    ) {
+      reservedIds.push(deviceId);
+      return reserve.call(this, deviceId, ...rest);
+    };
+    const originalDestroy = fakeDeviceUtils.destroyDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.destroyDevice = async (device, options) => {
+      reservedDuringRollback.push(reservedIds.some((id) => pool.isReservedForReadiness(id)));
+      await originalDestroy(device, options);
+    };
+
+    await expect(callStartDevice({ platform: "android", createIfMissing: true })).rejects.toThrow(
+      /CtrlProxy install failed/,
+    );
+
+    expect(reservedDuringRollback).toEqual([true]);
+  });
+
   it("deletes the simulator it created when runner readiness fails after boot (#11155)", async () => {
     fakeGate.setAllowed(true);
     const created = {

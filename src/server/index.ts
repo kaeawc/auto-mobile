@@ -70,6 +70,8 @@ import {
 
 import {
   isControlCallOnNamedSession,
+  isSessionOwnedByAnotherConnection,
+  namedSessionAccess,
   refuseControlOnForeignOwnedSession,
 } from "./foreignOwnedSessionRefusal";
 
@@ -1539,15 +1541,27 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       ) {
         // Plain tools can strip or ignore sessionUuid themselves. Device-aware
         // tools carry their admitted identity into execution in ToolRegistry.
+        // #11555: naming a session another connected client owns is not use of it, for any
+        // plain tool the owner rule lets through (`setToolEnabled`). Such a call passes the
+        // same refusals as the owner's, but neither its admission nor its end stamps the
+        // session, and while in flight it holds the session no more than a read does.
+        const namesForeignOwnedSession = isSessionOwnedByAnotherConnection(
+          providedSessionUuid,
+          requestMcpSessionId,
+        );
         await DaemonState.getInstance()
           .getSessionManager()
           .admitIssuedSessionForAutomation(
             providedSessionUuid,
             sessionExecutionMetadataOf(execution),
-            plainReadCall ? { access: "read-only" } : undefined,
+            namedSessionAccess(plainReadCall, namesForeignOwnedSession),
           );
-        // Only an admitted call's end is session use (#10824).
-        executionTracker.markSessionAdmitted(execution.id);
+        if (namesForeignOwnedSession) {
+          executionTracker.markReadOnlySessionAccess(execution.id);
+        } else {
+          // Only an admitted call's end is session use (#10824).
+          executionTracker.markSessionAdmitted(execution.id);
+        }
       }
       const runToolHandler = () =>
         runWithToolSelectionContext(

@@ -30,8 +30,13 @@ other connection that names the session is refused, with autolock on or off, and
 that connection is never bound to the session. The rule covers control tools
 that take no device routing too (`killDevice`, `deleteDevice`, `exportPlan`,
 `recordSteps` start and stop): the refused call does not run and does not extend the session's
-idle window (#11542). `setToolEnabled` is not refused (see
-[Ownership is cooperative](#ownership-is-cooperative)). Once the owner has disconnected
+idle window (#11542). A plan step, or a tool another tool calls, is judged by the
+same rule as a direct call from the connection that started it (#11469, #11555).
+`setToolEnabled` is not refused (see
+[Ownership is cooperative](#ownership-is-cooperative)), but naming a session is
+never use of it: while the owner is connected, no call from another connection
+extends the session's idle window, counts as its liveness, or binds that
+connection to it (#11555). Once the owner has disconnected
 (a finished `--cli` call, for example) another connection may name the session.
 
 Reads stay allowed on any device, whichever session holds it, and need no

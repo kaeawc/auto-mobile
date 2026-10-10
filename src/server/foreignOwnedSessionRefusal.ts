@@ -1,5 +1,6 @@
 import { DaemonState } from "../daemon/daemonState";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
+import type { SessionAccess } from "../daemon/sessionManager";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
 
@@ -35,6 +36,42 @@ export function isControlCallOnNamedSession(tool: OwnerRuleTool, args: unknown):
 }
 
 /**
+ * Whether a still-connected client other than `mcpSessionId` owns the live session `sessionUuid`.
+ * The one ownership question behind the refusal below and behind what counts as use of a named
+ * session. False for a caller with no connection identity, which cannot be told apart from the
+ * owner, for a session no connected client owns, and outside a daemon.
+ */
+export function isSessionOwnedByAnotherConnection(
+  sessionUuid: string | undefined,
+  mcpSessionId: string | undefined,
+): boolean {
+  const daemonState = DaemonState.getInstance();
+  return (
+    !!sessionUuid &&
+    !!mcpSessionId &&
+    daemonState.isInitialized() &&
+    daemonState.getDevicePool().isSessionOwnedByOtherConnection(sessionUuid, mcpSessionId)
+  );
+}
+
+/**
+ * How a plain tool call uses the session it names (#11555). A read only watches it. A call from a
+ * connection that does not own it while its owner is connected is not the owner's use of it:
+ * admitted as `non-owner-control`, it passes the refusals an owner's call passes and stamps
+ * nothing. Only the owner's own control call, or one on a session no connected client owns, is
+ * use (`acquire`, the default).
+ */
+export function namedSessionAccess(
+  readOnly: boolean,
+  ownedByAnotherConnection: boolean,
+): { access: SessionAccess } | undefined {
+  if (readOnly) {
+    return { access: "read-only" };
+  }
+  return ownedByAnotherConnection ? { access: "non-owner-control" } : undefined;
+}
+
+/**
  * #11344: a control call naming a session that another connected client owns is refused with the
  * typed `device_owned_by_other_session`, with autolock on or off. Ownership is cooperative: no
  * token is needed, but a session is never driven or taken over by merely naming its UUID. A
@@ -47,14 +84,12 @@ export function refuseControlOnForeignOwnedSession(
   mcpSessionId: string | undefined,
   args?: unknown,
 ): void {
-  const daemonState = DaemonState.getInstance();
-  if (!sessionUuid || !mcpSessionId || !daemonState.isInitialized()) {
+  if (!sessionUuid || !isSessionOwnedByAnotherConnection(sessionUuid, mcpSessionId)) {
     return;
   }
-  if (!daemonState.getDevicePool().isSessionOwnedByOtherConnection(sessionUuid, mcpSessionId)) {
-    return;
-  }
-  const deviceId = daemonState.getSessionManager().getSession(sessionUuid)?.assignedDevice;
+  const deviceId = DaemonState.getInstance()
+    .getSessionManager()
+    .getSession(sessionUuid)?.assignedDevice;
   const forced = typeof args === "object" && args !== null && Reflect.get(args, "force") === true;
   const remedy = forced
     ? `${FOREIGN_SESSION_REMEDY} ${FORCED_CALL_REMEDY}`

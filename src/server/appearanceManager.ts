@@ -77,14 +77,14 @@ export async function clearSessionAppearanceConfig(sessionKey: string): Promise<
  * session row leaves them behind. Returns the session keys whose rows were dropped.
  */
 export async function pruneSessionAppearanceConfigs(
-  isLiveSession: (sessionKey: string) => boolean,
+  isLiveSession: (sessionKey: string) => boolean | Promise<boolean>,
   repository: KeyedConfigRepository<AppearanceConfig> = configRepository,
 ): Promise<string[]> {
   const dropped: string[] = [];
   for (const key of await repository.listKeys(SESSION_ROW_PREFIX)) {
     const sessionKey = key.slice(SESSION_ROW_PREFIX.length);
     // Decide per row, just before its delete, so a session admitted meanwhile keeps its row.
-    if (!isLiveSession(sessionKey)) {
+    if (!(await isLiveSession(sessionKey))) {
       await repository.clearConfig(key);
       dropped.push(sessionKey);
     }

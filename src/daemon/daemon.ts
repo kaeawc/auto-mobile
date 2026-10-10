@@ -593,6 +593,8 @@ export class Daemon {
   private readonly acceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
+  /** Live peer daemon ids captured at startup, consulted by the appearance sweep (#11158). */
+  private startupLiveDaemonSessionIds: ReadonlySet<string> = new Set();
   private shutdownSessionReleasesDrained = true;
   /** Session IDs whose normal callback emitted the daemon-shutdown reason. */
   private shutdownReleaseNotifications: Set<string> | null = null;
@@ -1158,7 +1160,12 @@ export class Daemon {
         const rehydration = await startupBenchmark.runPhase("sessionRehydration", () =>
           this.sessionManager.rehydratePersistedSessions(this.devicePool),
         );
-        await sweepStaleAppearanceConfigs(rehydration, this.sessionManager);
+        await sweepStaleAppearanceConfigs(rehydration, this.sessionManager, {
+          liveDaemonSessionIds: this.startupLiveDaemonSessionIds,
+          ownDaemonSessionId: this.daemonSessionId,
+          getPersistedSession: (sessionUuid) =>
+            this.deviceSessionRepository.getSession(sessionUuid),
+        });
       } catch (error) {
         logger.warn(`[Daemon] Session rehydration failed; continuing startup: ${error}`);
       }
@@ -4198,6 +4205,7 @@ export class Daemon {
       if (incumbentDaemonSessionId !== undefined) {
         liveDaemonSessionIds.add(incumbentDaemonSessionId);
       }
+      this.startupLiveDaemonSessionIds = liveDaemonSessionIds;
       // Clear installed apps cache from previous daemon sessions, keeping a live
       // peer's rows (issue #11158) — hence after the live set is computed.
       await this.installedAppsRepository.clearOldDaemonSessions(

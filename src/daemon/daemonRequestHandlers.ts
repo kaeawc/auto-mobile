@@ -175,6 +175,8 @@ export interface DaemonStateAccess {
     getIdleReleaseExecutionVeto?(sessionId: string): { latestDeadlineMs?: number } | undefined;
     /** Converts a session-clock instant to wall-clock epoch ms for reporting (#11105). */
     sessionClockToWall?(sessionClockMs: number): number;
+    /** The same conversion, stable across queries, for values shown to a client (#11368). */
+    sessionClockToReportedWall?(sessionClockMs: number): number;
     getDeviceLabels(sessionId: string): DeviceLabelMap | undefined;
     releaseSession(sessionId: string): Promise<string | null>;
   };
@@ -441,10 +443,17 @@ async function persistedTerminalRelease(
 
 /** A session-clock instant as wall-clock epoch ms, for a report another process reads (#11105). */
 function reportedWallClock(
-  manager: { sessionClockToWall?(sessionClockMs: number): number },
+  manager: {
+    sessionClockToWall?(sessionClockMs: number): number;
+    sessionClockToReportedWall?(sessionClockMs: number): number;
+  },
   sessionClockMs: number,
 ): number {
-  return manager.sessionClockToWall?.(sessionClockMs) ?? sessionClockMs;
+  return (
+    manager.sessionClockToReportedWall?.(sessionClockMs) ??
+    manager.sessionClockToWall?.(sessionClockMs) ??
+    sessionClockMs
+  );
 }
 
 /** The accepted registration of a UUID that is a live device session, or undefined. */
@@ -692,7 +701,7 @@ export function handleTokenOwnedSessions(
         // The daemon's own idle clock, so the resuming proxy judges idleness from the last tool
         // call rather than from the resume (#10656). Reported as wall-clock epoch ms: the proxy
         // compares it with its own wall clock, not the daemon's session clock (#11117).
-        lastUsedAt: manager.sessionClockToWall?.(session.lastUsedAt) ?? session.lastUsedAt,
+        lastUsedAt: reportedWallClock(manager, session.lastUsedAt),
       })),
     },
   };
@@ -945,10 +954,10 @@ function heartbeatAck(
   const idle =
     report.idleRelease && session
       ? {
-          idleReleaseAt:
-            manager.sessionClockToWall?.(
-              vetoedIdleReleaseAt(session, manager.getIdleReleaseExecutionVeto?.(sessionId)),
-            ) ?? vetoedIdleReleaseAt(session, manager.getIdleReleaseExecutionVeto?.(sessionId)),
+          idleReleaseAt: reportedWallClock(
+            manager,
+            vetoedIdleReleaseAt(session, manager.getIdleReleaseExecutionVeto?.(sessionId)),
+          ),
         }
       : {};
   return { success: true, result: { sessionId, ...extra, ...idle, ...instance } };
@@ -1218,7 +1227,7 @@ export async function handleSessionInfo(
         session,
         executions.getActiveDeviceSessionExecutionCount(sessionId),
         manager.getIdleReleaseExecutionVeto?.(sessionId),
-        (ms) => manager.sessionClockToWall?.(ms) ?? ms,
+        (ms) => reportedWallClock(manager, ms),
       ),
       ...livenessInfo(manager.getSessionLeaseState?.(sessionId)),
       ...(isSessionReleasing(manager, sessionId, session) ? { releasing: true } : {}),
@@ -1267,7 +1276,7 @@ export async function handleActiveSessions(
                 session,
                 executions.getActiveDeviceSessionExecutionCount(session.sessionId),
                 manager.getIdleReleaseExecutionVeto?.(session.sessionId),
-                (ms) => manager.sessionClockToWall?.(ms) ?? ms,
+                (ms) => reportedWallClock(manager, ms),
               ),
               ...(isSessionReleasing(manager, session.sessionId, session)
                 ? { releasing: true }

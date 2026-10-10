@@ -2179,10 +2179,20 @@ export class SessionManager {
 
   /**
    * An instant on the session clock as wall-clock epoch ms, for reporting to other processes
-   * (#11105): the instant plus a wall-minus-session offset anchored by the session clock, so a
-   * fixed instant reports one stable value (#11368). Differs from the stamp only after a wall step.
+   * (#11105): wall now + (instant - session now). Differs from the stamp only after a wall step.
+   * This is the exact frame conversion that persisted stamps cross with (paired with
+   * {@link wallToSessionClock}); values shown to a client use {@link sessionClockToReportedWall}.
    */
   sessionClockToWall(sessionClockMs: number): number {
+    return this.timer.now() + (sessionClockMs - this.sessionNow());
+  }
+
+  /**
+   * An instant on the session clock as wall-clock epoch ms for a REPORT only (#11368): a fixed
+   * instant reads back the same value on every query, where {@link sessionClockToWall} re-derives
+   * it against the wall clock each time and jitters by a few ms. Never stored or judged.
+   */
+  sessionClockToReportedWall(sessionClockMs: number): number {
     return this.sessionClock.toWall(sessionClockMs);
   }
 

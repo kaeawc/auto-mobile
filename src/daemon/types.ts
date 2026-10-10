@@ -147,6 +147,12 @@ export const DAEMON_SESSION_SUSPECT_CODE = "daemon_session_suspect";
  */
 export const DAEMON_INSTANCE_CHANGED_CODE = "daemon_instance_changed";
 
+/**
+ * `daemon/registerSession` refused to bind a connection to managed slot sessions it cannot prove it
+ * holds (#11178). A daemon protocol answer to a managed proxy, never a device-tool refusal.
+ */
+export const DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE = "managed_slot_registration_refused";
+
 /** A claim from a different token was rejected because the owner's lease is live (#10050). */
 export const DAEMON_LIVENESS_OWNER_CONFLICT_CODE = "liveness_owner_conflict";
 

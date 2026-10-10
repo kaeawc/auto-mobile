@@ -38,6 +38,7 @@ import {
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_RELEASE_EXECUTION_METHOD,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
+  DAEMON_REGISTER_SESSION_METHOD,
   CLI_SESSION_LIVENESS_POLICY,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
@@ -165,6 +166,8 @@ export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMis
 
 const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = PROXY_HEARTBEAT_INTERVAL_MS;
 const CLI_SESSION_FINALIZATION_TIMEOUT_MS = 2_000;
+/** The client name a managed slot proxy registers its re-bound connection under (#11178). */
+const MANAGED_SLOT_PROXY_CLIENT_NAME = "auto-mobile-managed-slot-proxy";
 const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
 // These inventory tools never operate a device or mint a device session. They
 // normally retain a live binding's policy, but after that binding is terminally
@@ -1623,6 +1626,41 @@ export class DaemonMcpProxy {
     }
   }
 
+  /** The scope and slot sessions this proxy holds after a ready acquisition, if any. */
+  private heldManagedSlotBinding(): { scopeKey: string; sessionUuids: string[] } | undefined {
+    const scopeKey = this.managedSlotsResult?.scope.scopeKey;
+    if (this.managedSlotsResult?.outcome !== "ready" || !scopeKey) {
+      return undefined;
+    }
+    const sessionUuids = [...this.managedExecutionSessions];
+    return sessionUuids.length > 0 ? { scopeKey, sessionUuids } : undefined;
+  }
+
+  /**
+   * Re-bind a reconnected socket to this proxy's managed slot sessions through
+   * `daemon/registerSession` (#11178), proven by the owner token the sessions were claimed for.
+   * Best effort like the token resume: a refusal is logged, and the slot devices stay protected
+   * from every other caller by the generic managed-slot exclusion.
+   */
+  private async rebindManagedConnection(client: DaemonClientLike): Promise<void> {
+    const binding = this.heldManagedSlotBinding();
+    if (!binding || this.closing || this.client !== client) {
+      return;
+    }
+    try {
+      await client.callDaemonMethod(DAEMON_REGISTER_SESSION_METHOD, {
+        sessionId: binding.sessionUuids[0],
+        clientName: MANAGED_SLOT_PROXY_CLIENT_NAME,
+        managedSlots: { ...binding, livenessOwnerToken: this.livenessOwnerToken },
+      });
+    } catch (error) {
+      logger.warn(
+        `[DaemonMcpProxy] Re-binding the managed slot connection failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
   /** The managed slot acquisition result, once {@link acquireManagedSlots} ran. */
   getManagedSlotsResult(): ManagedSlotsResult | undefined {
     return this.managedSlotsResult;
@@ -2054,12 +2092,21 @@ export class DaemonMcpProxy {
     // flips `connected` itself before dispatching the keeper heartbeat (see there).
     // A stable owner token also resumes the sessions it holds (#10990); without one the
     // establishment step is unchanged.
-    const establishOwnership = stableLivenessOwnerToken(this.config)
+    const establishBaseOwnership = stableLivenessOwnerToken(this.config)
       ? async () => {
           await this.establishBoundSessionHeartbeat();
           await this.resumeTokenOwnedSessions(client);
         }
       : () => this.establishBoundSessionHeartbeat();
+    // A managed slot connection that reconnects re-binds the new socket to its slot sessions
+    // (#11178); the daemon dropped the old socket's binding when it closed. Other proxies keep
+    // their establishment exactly as before.
+    const establishOwnership = this.heldManagedSlotBinding()
+      ? async () => {
+          await establishBaseOwnership();
+          await this.rebindManagedConnection(client);
+        }
+      : establishBaseOwnership;
 
     return isFirstPresentationProfileApplication
       ? [applyPresentationProfile, establishOwnership]

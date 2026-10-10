@@ -18,6 +18,7 @@ import {
 import {
   DAEMON_INSTANCE_CHANGED_CODE,
   DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
+  DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE,
   DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
   DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
@@ -80,6 +81,10 @@ import {
 import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
 import type { ManagedExecutionRelease } from "./managedSlots/managedExecutionRelease";
 import type { ManagedConnectionScopes } from "./managedSlots/managedConnectionScope";
+import {
+  DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
+  DeviceOutsideManagedSlotsError,
+} from "./managedSlots/managedSlotRefusal";
 import { SLOT_SCOPE_RESET_MAX_WAIT_MS, type SlotScopeReset } from "./managedSlots/slotScopeReset";
 import type { ManagedSlotAcquisition } from "./managedSlots/managedSlotAcquisition";
 import {
@@ -235,7 +240,10 @@ export type DaemonMethodResult = {
     | typeof DAEMON_LIVENESS_OWNER_IS_PROXY_CODE
     | typeof DAEMON_INSTANCE_CHANGED_CODE
     /** `daemon/acquireManagedSlots` refusals before any mutation (#11173). */
-    | ManagedSlotConfigErrorCode;
+    | ManagedSlotConfigErrorCode
+    /** `daemon/registerSession` managed-connection refusals (#11178). */
+    | typeof DEVICE_OUTSIDE_MANAGED_SLOTS_CODE
+    | typeof DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE;
 };
 
 /** Device-session listing entry; a quarantined UUID cannot be subscribed to until identity resolves. */
@@ -247,7 +255,80 @@ export interface ListedDeviceSessionRecord extends DeviceSessionRecord {
 const registerSessionParams = z.object({
   sessionId: z.string().max(MAX_OBSERVER_SESSION_ID_LENGTH).uuid(),
   clientName: z.string().max(MAX_OBSERVER_CLIENT_NAME_LENGTH).trim().min(1),
+  /**
+   * A managed slot proxy re-binding its connection after a socket reconnect (#11178): the slot
+   * sessions it holds, proven by the liveness owner token they were claimed for.
+   */
+  managedSlots: z
+    .object({
+      scopeKey: z.string().trim().min(1),
+      sessionUuids: z.array(z.string().max(MAX_OBSERVER_SESSION_ID_LENGTH).uuid()).min(1).max(16),
+      livenessOwnerToken: z.string().trim().min(1),
+    })
+    .strict()
+    .optional(),
 });
+
+type ManagedSlotsRegistration = NonNullable<z.infer<typeof registerSessionParams>["managedSlots"]>;
+
+/**
+ * Managed-connection enforcement for `daemon/registerSession` (#11178). A connection bound to
+ * managed slots registers only its own slot sessions. A registration carrying `managedSlots` binds
+ * the socket to those sessions, but only when each is a live managed-execution session claimed for
+ * the presented owner token, so a connection can never bind itself to another execution's slots.
+ * Returns the refusal, or undefined when the registration may proceed.
+ */
+function managedConnectionRegistrationRefusal(
+  state: DaemonStateAccess,
+  socketSessionId: string | undefined,
+  sessionId: string,
+  managedSlots: ManagedSlotsRegistration | undefined,
+): DaemonMethodResult | undefined {
+  const scopes = state.getManagedConnectionScopes?.();
+  const binding = scopes?.get(socketSessionId);
+  if (binding && !binding.sessionUuids.has(sessionId)) {
+    const refusal = new DeviceOutsideManagedSlotsError(
+      DAEMON_REGISTER_SESSION_METHOD,
+      "session",
+      binding.scopeKey,
+      { sessionUuid: sessionId },
+    );
+    return { success: false, code: refusal.code, error: refusal.message };
+  }
+  if (!managedSlots) {
+    return undefined;
+  }
+  const refuse = (reason: string): DaemonMethodResult => ({
+    success: false,
+    code: DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE,
+    error: `Managed slot registration refused: ${reason}`,
+  });
+  if (!scopes || socketSessionId === undefined) {
+    return refuse("this daemon cannot bind managed connections.");
+  }
+  if (binding && binding.scopeKey !== managedSlots.scopeKey) {
+    return refuse(`this connection is already bound to scope ${binding.scopeKey}.`);
+  }
+  if (!managedSlots.sessionUuids.includes(sessionId)) {
+    return refuse(`session ${sessionId} is not one of the registered slot sessions.`);
+  }
+  const manager = state.getSessionManager();
+  const foreign = managedSlots.sessionUuids.find((uuid) => {
+    const session = manager.getSession(uuid);
+    return (
+      session?.livenessPolicy !== MANAGED_EXECUTION_LIVENESS_POLICY ||
+      session.livenessOwnerToken !== managedSlots.livenessOwnerToken
+    );
+  });
+  if (foreign !== undefined) {
+    return refuse(`session ${foreign} is not a managed execution held by this owner token.`);
+  }
+  scopes.bind(socketSessionId, {
+    scopeKey: managedSlots.scopeKey,
+    sessionUuids: managedSlots.sessionUuids,
+  });
+  return undefined;
+}
 
 /** A session-clock instant as wall-clock epoch ms, for a report another process reads (#11105). */
 function reportedWallClock(
@@ -260,13 +341,25 @@ function reportedWallClock(
 async function handleRegisterSession(
   request: DaemonRequest,
   state: DaemonStateAccess,
+  _executions?: SessionExecutionCanceller,
+  _signal?: AbortSignal,
+  context: DaemonRequestContext = {},
 ): Promise<DaemonMethodResult> {
   const params: unknown = request.params;
   const parsed = registerSessionParams.safeParse(params);
   if (!parsed.success) {
     return { success: false, error: `Invalid registerSession parameters: ${parsed.error.message}` };
   }
-  const { sessionId, clientName } = parsed.data;
+  const { sessionId, clientName, managedSlots } = parsed.data;
+  const refusal = managedConnectionRegistrationRefusal(
+    state,
+    context.socketSessionId,
+    sessionId,
+    managedSlots,
+  );
+  if (refusal) {
+    return refusal;
+  }
   const manager = state.getSessionManager();
   if (
     (await manager.waitForSessionReleaseWithin?.(sessionId, SESSION_RELEASE_DRAIN_TIMEOUT_MS)) ===

@@ -85,6 +85,9 @@ function configFor(runtime = IOS_18): ManagedSlotConfig {
 
 /** The fake provisioner, also creating the daemon session it hands out (as the bind path does). */
 class SessionMintingProvisioner extends FakeProvisioner {
+  /** Mint UUID session ids, as production does (registerSession validates UUIDs). */
+  uuidSessions = false;
+
   constructor(
     inventory: FakeInventory,
     private readonly sessions: SessionManager,
@@ -95,7 +98,13 @@ class SessionMintingProvisioner extends FakeProvisioner {
   override async provision(
     request: ManagedSlotProvisionRequest,
   ): Promise<ManagedSlotProvisionedDevice> {
-    const provisioned = await super.provision(request);
+    const minted = await super.provision(request);
+    const provisioned = this.uuidSessions
+      ? {
+          ...minted,
+          sessionUuid: `00000000-0000-4000-8000-${minted.sessionUuid.replace(/\D/g, "").padStart(12, "0")}`,
+        }
+      : minted;
     await this.sessions.createSession(
       provisioned.sessionUuid,
       provisioned.device.transportId ?? provisioned.device.stableId,
@@ -321,6 +330,24 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
     const binding = connectionScopes.get("socket-1");
     expect(binding?.scopeKey).toBe(computeSlotScopeKey(configFor()));
     expect(binding?.sessionUuids.size).toBe(0);
+  });
+
+  test("a reconnected managed proxy re-binds its new socket to its slot sessions", async () => {
+    provisioner.uuidSessions = true;
+    const clients: FakeDaemonClient[] = [];
+    const proxy = newProxy(clients);
+    const result = await proxy.acquireManagedSlots(configFor());
+    const sessionUuid = result.slots[0]!.sessionUuid!;
+    expect([...connectionScopes.get("socket-1")!.sessionUuids]).toEqual([sessionUuid]);
+
+    // The daemon socket drops; the daemon unbinds the closed socket session.
+    clients[0]!.emitConnectionClosed();
+    connectionScopes.unbind("socket-1");
+    await proxy.ensureConnected();
+
+    const binding = connectionScopes.get("socket-2");
+    expect(binding?.scopeKey).toBe(computeSlotScopeKey(configFor()));
+    expect([...(binding?.sessionUuids ?? [])]).toEqual([sessionUuid]);
   });
 
   test("a later execution reuses the slot after the first one's release, then a spec change replaces it", async () => {

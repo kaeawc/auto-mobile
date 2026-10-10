@@ -115,7 +115,8 @@ const SIGNATURE_MISMATCH_FAILURE_CODES = new Set([
 
 /** Extracts the `INSTALL_*` failure token from `adb install` output, if present. */
 function extractInstallFailureCode(message: string): string | undefined {
-  return /INSTALL_[A-Z_]+/.exec(message)?.[0];
+  const anchored = /Failure \[(INSTALL_[A-Z_]+)/.exec(message)?.[1];
+  return anchored ?? /INSTALL_[A-Z_]+/.exec(message)?.[0];
 }
 
 /**

@@ -1964,6 +1964,11 @@ describe("CtrlProxyManager", function () {
 
     describe.each([
       ["INSTALL_FAILED_VERSION_DOWNGRADE", "INSTALL_FAILED_VERSION_DOWNGRADE", true],
+      [
+        "the Failure [...] code, not an earlier INSTALL_ token (#11153)",
+        "Performing Streamed Install INSTALL_STREAM\nFailure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]",
+        true,
+      ],
       ["INSTALL_FAILED_INVALID_APK stays installed", "Failure [INSTALL_FAILED_INVALID_APK]", false],
     ])("in-place upgrade failure: %s", (_name, upgradeMessage, expectsReinstall) => {
       test("falls back to uninstall + reinstall only when expected", async function () {

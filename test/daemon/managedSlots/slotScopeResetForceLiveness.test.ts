@@ -357,4 +357,25 @@ describe.each(REGISTRIES)("reset-slot-scope --force liveness (#11545): %s", (_na
       expect(await registry.listOpenSlotJournal(key)).toHaveLength(1);
     });
   });
+
+  test("a settling slot with no release entry names the path that works: restart its settler", async () => {
+    await openAs(B);
+    await markSettlingByA(false);
+    timer.setCurrentTime(timer.now() + MANAGED_EXECUTION_SETTLEMENT_CAP_MS);
+
+    const forced = await reset.reset(RESET);
+
+    expect(forced.outcome).toBe("pending");
+    expect(forced.scopes[0]?.forceRefusals).toEqual([
+      {
+        slotIndex: 0,
+        reason: "no_release_entry",
+        message: expect.stringMatching(/[Rr]estart/),
+      },
+    ]);
+    const message = forced.scopes[0]?.forceRefusals?.[0]?.message ?? "";
+    expect(message).toContain(`${A.daemonId} (pid ${A.pid})`);
+    expect(message).not.toContain("inspect it");
+    expect((await registry.getAssignment(key))?.state).toBe("settling");
+  });
 });

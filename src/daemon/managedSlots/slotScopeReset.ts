@@ -384,8 +384,10 @@ export class SlotScopeReset {
         slotIndex: key.slotIndex,
         reason: "no_release_entry",
         message:
-          `Slot ${label} is settling but has no open release journal entry, so --force cannot ` +
-          "tell whether it is stuck. Wait for its settler to return it to ready, or inspect it.",
+          `Slot ${label} is settling under ${describeSettler(slot.settler)} but has no open ` +
+          "release journal entry, so --force cannot tell whether it is stuck and does not " +
+          "abandon it. Wait for that daemon to return it to ready; if it does not, restart that " +
+          "daemon (startup recovery returns a slot whose settler is gone to ready), then retry.",
       };
     }
     const remainingMs = release.createdAtMs + this.settlementCapMs - this.options.timer.now();

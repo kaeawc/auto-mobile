@@ -2,7 +2,6 @@ package dev.jasonpearson.automobile.junit
 
 import java.io.File
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -22,7 +21,8 @@ class RefusalWireContractTest {
   fun `every refusal fixture is classified as the shared expectations table says`() {
     val codes = json.parseToJsonElement(File(dir, "expectations.json").readText()).jsonObject
     val rows = codes.getValue("codes").jsonObject
-    val fixtureFiles = dir.listFiles { f -> f.name.endsWith(".json") && f.name != "expectations.json" }!!
+    val fixtureFiles =
+      dir.listFiles { f -> f.name.endsWith(".json") && f.name != "expectations.json" }!!
     assertEquals(rows.keys, fixtureFiles.map { it.name.removeSuffix(".json") }.toSet())
     for (file in fixtureFiles) {
       val code = file.name.removeSuffix(".json")

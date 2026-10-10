@@ -1294,7 +1294,9 @@ internal object AutoMobilePlanExecutor {
       DEVICE_SHUTTING_DOWN_CODE,
     )
 
-  /** Typed codes that wait only when the daemon marks the refusal retryable (iOS parity, #11202). */
+  /**
+   * Typed codes that wait only when the daemon marks the refusal retryable (iOS parity, #11202).
+   */
   internal const val CAPACITY_EXHAUSTED_CODE = "capacity_exhausted"
   internal const val DISCOVERY_INCOMPLETE_CODE = "discovery_incomplete"
 
@@ -1321,8 +1323,8 @@ internal object AutoMobilePlanExecutor {
 
   /**
    * Exponential delay (500ms doubling, capped at 4s) for the next wait on a held device, clamped to
-   * the remaining [deviceOwnedWaitBudgetMs]; null once the budget is spent. A daemon
-   * `retryAfterMs` hint lengthens a step but never extends the budget.
+   * the remaining [deviceOwnedWaitBudgetMs]; null once the budget is spent. A daemon `retryAfterMs`
+   * hint lengthens a step but never extends the budget.
    */
   internal fun deviceOwnedBackoffDelayMs(
     waitsSoFar: Int,
@@ -1347,8 +1349,7 @@ internal object AutoMobilePlanExecutor {
         "Device is claimed by another AutoMobile daemon ($DEVICE_OWNED_BY_OTHER_DAEMON_CODE)"
       DEVICE_SHUTTING_DOWN_CODE -> "Device is shutting down ($DEVICE_SHUTTING_DOWN_CODE)"
       CAPACITY_EXHAUSTED_CODE -> "No device capacity is available ($CAPACITY_EXHAUSTED_CODE)"
-      DISCOVERY_INCOMPLETE_CODE ->
-        "Device discovery has not finished ($DISCOVERY_INCOMPLETE_CODE)"
+      DISCOVERY_INCOMPLETE_CODE -> "Device discovery has not finished ($DISCOVERY_INCOMPLETE_CODE)"
       else -> "Device is held by another session ($DEVICE_OWNED_BY_OTHER_SESSION_CODE)"
     }) +
       (parsed.daemonMessage?.let { ": $it" } ?: "") +

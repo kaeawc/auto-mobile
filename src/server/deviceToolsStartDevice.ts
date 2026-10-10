@@ -44,6 +44,7 @@ import {
   acquisitionLifecycleTimeoutError,
   androidSourceImageWithBootedMetadata,
   assertAndroidBootDidNotEnterRecovery,
+  cancelUnownedColdBoot,
   clearColdBootShutdownMarker,
   configuredImageForAcquiredDevice,
   deviceIdentityPayload,
@@ -156,9 +157,10 @@ function createdDeviceRollbackFor(
     return undefined;
   }
   return async (device, failure) => {
-    // A failed cold boot's emulator may still be terminating; the AVD must not
-    // be deleted underneath it, so the rollback waits (bounded) for it first.
-    const pendingTerminations = [...state.coldBootSettlements];
+    // A failed cold boot's emulator may still be terminating, and a cancelled
+    // binding may still be draining; the device must not be deleted underneath
+    // either, so the rollback waits (bounded) for them first.
+    const pendingTerminations = [...state.coldBootSettlements, ...state.bindingSettlements];
     try {
       const cleanup = await rollbackCreatedDevice(device, failure, {
         lifecycleLease,
@@ -181,6 +183,45 @@ function createdDeviceRollbackFor(
       );
     }
   };
+}
+
+/**
+ * Rolls back a device this request created (createIfMissing) once a post-boot
+ * step (readiness reservation, runner setup, session bind) fails before session
+ * ownership was transferred (#11155). Boot-time failures are rolled back inside
+ * DeviceBootService and leave `state.boot` unset, so they never reach here.
+ */
+async function rollbackCreatedDeviceAfterBoot(
+  options: BootPreparationOptions,
+  failure: unknown,
+): Promise<void> {
+  const { state, releaseReadinessReservations } = options;
+  const boot = state.boot;
+  const createdImage = boot?.provisioned ? boot.sourceImage : undefined;
+  const rollback = createdDeviceRollbackFor(options);
+  if (!boot || !createdImage || state.ownershipTransferred || !rollback) {
+    return;
+  }
+  // Stop the emulator before deleting its AVD. prepareDevice would otherwise
+  // cancel it only after this rollback; clearing `state.boot` keeps that
+  // cancellation from signalling the same process twice.
+  const termination = cancelUnownedColdBoot(boot);
+  if (termination) {
+    state.coldBootSettlements.push(termination);
+  }
+  state.boot = undefined;
+  // Teardown must not wait on the readiness reservations this request holds.
+  for (const release of releaseReadinessReservations.splice(0).reverse()) {
+    try {
+      await release();
+    } catch (error) {
+      logger.warn(
+        `[DeviceTools] Readiness reservation release before created-device rollback failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+  await rollback(createdImage, failure);
 }
 
 const bootAndPrepareDevice = async (
@@ -911,14 +952,21 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
   };
 
   return {
-    bootAndPrepareDevice: (
+    bootAndPrepareDevice: async (
       args: StartDeviceArgs,
       budgets: DevicePreparationBudgets,
       deps: DeviceToolsDependencies,
       deviceUtils: PlatformDeviceManager,
       options: BootPreparationOptions,
-    ) =>
-      bootAndPrepareDevice(args, budgets, deps, deviceUtils, { ...options, rollbackCreatedDevice }),
+    ) => {
+      const bootOptions = { ...options, rollbackCreatedDevice };
+      try {
+        return await bootAndPrepareDevice(args, budgets, deps, deviceUtils, bootOptions);
+      } catch (error) {
+        await rollbackCreatedDeviceAfterBoot(bootOptions, error);
+        throw error;
+      }
+    },
     startDeviceHandler,
     bindBootedDeviceSession,
     ensureCtrlProxyReady,

@@ -257,6 +257,75 @@ describe("startDevice --create-if-missing wiring", () => {
     expect(await fakeDeviceUtils.listDeviceImages("android")).toEqual([]);
   });
 
+  it("deletes the AVD it created when runner readiness fails after boot (#11155)", async () => {
+    fakeGate.setAllowed(true);
+    const created = {
+      platform: "android" as const,
+      name: "AutoMobile-android-34-abcd1234",
+      deviceType: "system-images;android-34;google_apis;arm64-v8a",
+      runtime: "android-34",
+    };
+    setDeviceToolsDependencies({
+      deviceProvisionerFactory: () => ({
+        provision: async (criteria, _signal, identityHooks) => {
+          fakeProvisioner.requests.push(criteria);
+          await identityHooks?.reserveBeforeCreate(created);
+          fakeDeviceUtils.setDeviceImages("android", [
+            { name: created.name, platform: "android", isRunning: false },
+          ]);
+          await identityHooks?.bindAfterCreate(created);
+          return created;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        throw new Error("CtrlProxy install failed");
+      },
+    });
+    await useFakeTeardown("android");
+
+    await expect(callStartDevice({ platform: "android", createIfMissing: true })).rejects.toThrow(
+      /CtrlProxy install failed/,
+    );
+
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain(
+      `destroyDevice:android:${created.name}`,
+    );
+    expect(await fakeDeviceUtils.listDeviceImages("android")).toEqual([]);
+  });
+
+  it("deletes the simulator it created when runner readiness fails after boot (#11155)", async () => {
+    fakeGate.setAllowed(true);
+    const created = {
+      platform: "ios" as const,
+      name: "AutoMobile-iPhone-17-abcd1234",
+      deviceId: "CREATED-UDID",
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+      runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+    };
+    setDeviceToolsDependencies({
+      deviceProvisionerFactory: () => ({
+        provision: async (criteria, _signal, identityHooks) => {
+          fakeProvisioner.requests.push(criteria);
+          await identityHooks?.reserveBeforeCreate(created);
+          fakeDeviceUtils.setDeviceImages("ios", [{ ...created, isRunning: false }]);
+          await identityHooks?.bindAfterCreate(created);
+          return created;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        throw new Error("XCTestRunner never became ready");
+      },
+    });
+    await useFakeTeardown("ios");
+
+    await expect(callStartDevice({ platform: "ios", createIfMissing: true })).rejects.toThrow(
+      /XCTestRunner never became ready/,
+    );
+
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain("destroyDevice:ios:CREATED-UDID");
+    expect(await fakeDeviceUtils.listDeviceImages("ios")).toEqual([]);
+  });
+
   it("deletes the simulator it created when its boot fails (#11100)", async () => {
     fakeGate.setAllowed(true);
     const created = {

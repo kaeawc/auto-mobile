@@ -786,9 +786,13 @@ export class Daemon {
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
     this.sessionManager.attachDaemonSessionId(this.daemonSessionId);
-    // Read when a recovery claims its row, so a peer that started after this daemon is seen.
+    // Read when a recovery claims its row, so a peer that started after this daemon is seen. A
+    // restart incumbent whose pid file this daemon replaced is not listed, so it is added while
+    // it is still live: its rows and its terminal-release journal are not a dead daemon's (#11355).
     this.sessionManager.attachLiveDaemonSessionIds(() =>
-      this.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
+      this.incumbentOwnerGuard.withLiveIncumbent(
+        this.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
+      ),
     );
     this.observerSessionRegistry = new ObserverSessionRegistry(
       this.timer,
@@ -4661,13 +4665,10 @@ export class Daemon {
       // catch: treating it as an empty live set would let this daemon steal a
       // live peer's sessions, which is less safe than refusing startup.
       const liveDaemonSessionIds = new Set(
-        this.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
+        this.incumbentOwnerGuard.withLiveIncumbent(
+          this.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
+        ),
       );
-      const incumbentDaemonSessionId =
-        this.incumbentOwnerGuard.capturedLiveIncumbentDaemonSessionId();
-      if (incumbentDaemonSessionId !== undefined) {
-        liveDaemonSessionIds.add(incumbentDaemonSessionId);
-      }
       this.startupLiveDaemonSessionIds = liveDaemonSessionIds;
       // Clear installed apps cache from previous daemon sessions, keeping a live
       // peer's rows (issue #11158) — hence after the live set is computed.

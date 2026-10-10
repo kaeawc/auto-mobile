@@ -184,6 +184,12 @@ export interface MarkReleasedOptions {
    * after it selected the row.
    */
   onlyIfRecoverable?: boolean;
+  /**
+   * Apply the release only while the row is still owned by this daemon (single statement): a
+   * release adopted from a dead daemon's journal (#11355) must not land on a row another daemon
+   * took over after the adopter read it.
+   */
+  onlyIfOwnedByDaemon?: string;
 }
 
 /** The row incarnation a recovery read, which its ownership claim must still match (#11200). */
@@ -664,7 +670,7 @@ export class DeviceSessionRepository {
     reason: string,
     options: MarkReleasedOptions = {},
   ): Promise<void> {
-    const { expectedRowGeneration, onlyIfRecoverable } = options;
+    const { expectedRowGeneration, onlyIfRecoverable, onlyIfOwnedByDaemon } = options;
     try {
       const db = await this.getDb();
       let update = db
@@ -692,6 +698,9 @@ export class DeviceSessionRepository {
       }
       if (onlyIfRecoverable) {
         update = update.where((eb) => hasRecoverableReleaseReason(eb));
+      }
+      if (onlyIfOwnedByDaemon !== undefined) {
+        update = update.where("daemon_session_id", "=", onlyIfOwnedByDaemon);
       }
       const result = await update.executeTakeFirst();
       if (expectedRowGeneration !== undefined && Number(result.numUpdatedRows) === 0) {

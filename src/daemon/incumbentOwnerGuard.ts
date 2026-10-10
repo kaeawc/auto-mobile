@@ -190,6 +190,20 @@ export class IncumbentOwnerGuard {
   }
 
   /**
+   * `liveDaemonSessionIds` plus the captured incumbent while it is still live. The pid-file
+   * listing omits an incumbent whose record this daemon's early-owner write replaced, so every
+   * consumer that treats "not listed" as "dead" (stale-row sweeps, recovery claims, journal
+   * adoption, #11355) must read the live set through here.
+   */
+  withLiveIncumbent(liveDaemonSessionIds: ReadonlySet<string>): ReadonlySet<string> {
+    const incumbent = this.capturedLiveIncumbentDaemonSessionId();
+    if (incumbent === undefined || liveDaemonSessionIds.has(incumbent)) {
+      return liveDaemonSessionIds;
+    }
+    return new Set([...liveDaemonSessionIds, incumbent]);
+  }
+
+  /**
    * The former dead committed owner this contender's early-owner record must
    * carry (issue #10107), to be spread into that record. Without it, a start
    * that dies before binding leaves only an uncommitted record, and the socket

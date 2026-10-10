@@ -1429,7 +1429,7 @@ export class SessionManager {
    * listed UUID reads as terminally released, so nothing can revive it.
    */
   private readonly recoveredTerminalReleaseIntents: Map<string, TerminalReleaseIntent> = new Map();
-  /** Dead peer daemons whose journals were adopted after startup (#11355); never read again. */
+  /** Dead peer daemons whose journals were read after startup (#11355); never read again. */
   private readonly adoptedDeadDaemonJournals: Set<string> = new Set();
   /**
    * The dead daemon each post-startup adopted intent came from (#11355). Such an intent applies
@@ -1656,6 +1656,7 @@ export class SessionManager {
               releasedRowStatus(intent.reason),
               intent.at,
               intent.reason,
+              ...this.adoptedTerminalReleaseFence(intent.sessionId),
             ),
             {
               timer: this.timer,
@@ -1721,26 +1722,57 @@ export class SessionManager {
   }
 
   /**
+   * The write fence of an intent adopted after startup (#11355): the check above is a prior read,
+   * so the release itself is conditioned on the row still being the dead daemon's. A row another
+   * survivor recovered meanwhile, or one this write reaches only after parking, is left alone.
+   */
+  private adoptedTerminalReleaseFence(sessionId: string): [] | [MarkReleasedOptions] {
+    const adoptedFrom = this.adoptedTerminalReleaseOwners.get(sessionId);
+    return adoptedFrom === undefined ? [] : [{ onlyIfOwnedByDaemon: adoptedFrom }];
+  }
+
+  /**
    * Adopt the terminal-release journal of this row's owner daemon once that daemon is known to be
    * dead (#11355). Startup adoption skips a peer that is live at the time, so a peer that parked a
-   * terminal release and then died left a still-active row a survivor would recover. Reading one
-   * of its rows adopts its whole journal first: the intents fence their UUIDs in memory at once,
-   * and their rows are written before the read returns. A daemon whose liveness cannot be
-   * confirmed is left alone, because a live daemon's intents can still be lifted. Resolves true
-   * when intents were adopted, so the caller re-reads the row.
+   * terminal release and then died left a row a survivor would recover. Reading one of its rows
+   * reads its whole journal first: the intents fence their UUIDs in memory at once, and their rows
+   * are written before the read returns. The dead daemon's file stays in place until every one of
+   * its intents is settled, so another survivor (or this daemon's successor) still finds it when
+   * a write here parks or fails; a failed write is retried when a row of that daemon is next read. A
+   * daemon whose liveness cannot be confirmed is left alone, because a live daemon's intents can
+   * still be lifted. Resolves true when rows may have been written, so the caller re-reads.
    */
   private async adoptDeadOwnerTerminalReleases(stored: DeviceSession): Promise<boolean> {
-    const owner = this.unadoptedDeadOwner(stored);
-    const intents =
-      owner === undefined ? undefined : this.terminalReleaseJournal.adoptDeadDaemon?.(owner);
-    if (owner === undefined || intents === undefined) {
-      // No dead owner, or its journal is unreadable for now: the next read of its rows retries.
+    const owner = this.confirmedDeadOwner(stored);
+    if (owner === undefined) {
+      return false;
+    }
+    const firstRead = !this.adoptedDeadDaemonJournals.has(owner);
+    if (firstRead && !this.fenceDeadDaemonIntents(owner)) {
+      // Unreadable for now; the next read of one of this daemon's rows retries.
+      return false;
+    }
+    const unsettled = this.hasUnsettledAdoptedIntent(owner);
+    if (!firstRead && !unsettled) {
+      return false;
+    }
+    if (unsettled) {
+      await this.applyRecoveredTerminalReleaseIntents();
+    }
+    if (!this.hasUnsettledAdoptedIntent(owner)) {
+      // Every row is terminal (or no longer the dead daemon's): nobody needs the file again.
+      this.terminalReleaseJournal.discardDeadDaemon?.(owner);
+    }
+    return true;
+  }
+
+  /** Read `owner`'s journal and fence its intents; false when it cannot be read yet. */
+  private fenceDeadDaemonIntents(owner: string): boolean {
+    const intents = this.terminalReleaseJournal.readDeadDaemon?.(owner);
+    if (intents === undefined) {
       return false;
     }
     this.adoptedDeadDaemonJournals.add(owner);
-    if (intents.length === 0) {
-      return false;
-    }
     for (const intent of intents) {
       // The journal holds wall ms, like the rows it backs (#11162).
       this.recoveredTerminalReleaseIntents.set(intent.sessionId, {
@@ -1749,29 +1781,37 @@ export class SessionManager {
       });
       this.adoptedTerminalReleaseOwners.set(intent.sessionId, owner);
     }
-    logger.warn(
-      `[SessionManager] Adopted ${intents.length} unconfirmed terminal release(s) of dead daemon ` +
-        `${owner}: ${intents.map((intent) => intent.sessionId).join(", ")}`,
-    );
-    await this.applyRecoveredTerminalReleaseIntents();
+    if (intents.length > 0) {
+      logger.warn(
+        `[SessionManager] Adopted ${intents.length} unconfirmed terminal release(s) of dead ` +
+          `daemon ${owner}: ${intents.map((intent) => intent.sessionId).join(", ")}`,
+      );
+    }
     return true;
   }
 
-  /** The row's owner daemon, when it is a confirmed-dead peer whose journal is not adopted yet. */
-  private unadoptedDeadOwner(stored: DeviceSession): string | undefined {
+  private hasUnsettledAdoptedIntent(owner: string): boolean {
+    for (const adoptedFrom of this.adoptedTerminalReleaseOwners.values()) {
+      if (adoptedFrom === owner) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** The row's owner daemon, when it is a confirmed-dead peer whose journal can be adopted. */
+  private confirmedDeadOwner(stored: DeviceSession): string | undefined {
     const owner = stored.daemon_session_id ?? null;
     if (owner === null || this.daemonSessionId === undefined || owner === this.daemonSessionId) {
       return undefined;
     }
     if (
-      !this.terminalReleaseJournal.adoptDeadDaemon ||
+      !this.terminalReleaseJournal.readDeadDaemon ||
       (stored.release_reason !== null && isTerminalReleaseReason(stored.release_reason))
     ) {
       return undefined;
     }
-    return !this.adoptedDeadDaemonJournals.has(owner) && this.isConfirmedDeadDaemonSession(owner)
-      ? owner
-      : undefined;
+    return this.isConfirmedDeadDaemonSession(owner) ? owner : undefined;
   }
 
   /** True only when the live-daemon listing succeeded and does not name `daemonSessionId`. */

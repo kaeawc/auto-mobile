@@ -44,6 +44,41 @@ afterEach(async () => {
   db = undefined;
 });
 
+/** One daemon's terminal-release writes: let through, parked behind a wedged writer, or failing. */
+class ReleaseWriteGate {
+  mode: "open" | "parked" | "failing" = "open";
+  private readonly parked: Array<() => void> = [];
+
+  /** Let every parked write reach the database, and wait for them to land. */
+  async flush(): Promise<void> {
+    this.mode = "open";
+    const landed = this.parked.splice(0).map((run) => run());
+    await Promise.all(landed);
+  }
+
+  wrap(repository: DeviceSessionRepository): DeviceSessionRepository {
+    return new Proxy(repository, {
+      get: (target, property, receiver) => {
+        const value: unknown = Reflect.get(target, property, receiver);
+        if (property !== "markReleased" || typeof value !== "function") {
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return (...args: Parameters<DeviceSessionRepository["markReleased"]>) => {
+          if (this.mode === "failing") {
+            return Promise.reject(new Error("SQLITE_BUSY: database is locked"));
+          }
+          if (this.mode === "open") {
+            return target.markReleased(...args);
+          }
+          return new Promise<void>((resolve, reject) => {
+            this.parked.push(() => target.markReleased(...args).then(resolve, reject));
+          });
+        };
+      },
+    });
+  }
+}
+
 async function world() {
   const timer = new FakeTimer();
   timer.setCurrentTime(1_700_000_000_000);
@@ -53,7 +88,8 @@ async function world() {
   const live = new Set<string>();
   /** Start a daemon as daemon.ts does: listed live, then its journal adopts dead daemons' files. */
   const start = (daemonSessionId: string) => {
-    const manager = new SessionManager(timer, repository);
+    const gate = new ReleaseWriteGate();
+    const manager = new SessionManager(timer, gate.wrap(repository));
     managers.push(manager);
     manager.attachDaemonSessionId(daemonSessionId);
     manager.attachLiveDaemonSessionIds(() => new Set(live));
@@ -65,7 +101,9 @@ async function world() {
     });
     live.add(daemonSessionId);
     manager.attachTerminalReleaseJournal(journal);
-    return { manager, journal };
+    const name = (sessionId: string) =>
+      refusal(manager.getOrCreateSession(sessionId, assigner(manager), "android"));
+    return { manager, journal, gate, name };
   };
   /** Daemon A holds `s`, loses its device (a recoverable release), and B starts beside it. */
   const lostDeviceBesidePeer = async () => {
@@ -80,7 +118,23 @@ async function world() {
     // B starts while A is live: startup adoption leaves A's journal alone.
     return { a, b: start("daemon-b") };
   };
-  return { timer, repository, files, live, start, lostDeviceBesidePeer };
+  /** As above, then A upgrades the release to a terminal one whose row write never lands, and dies. */
+  const peerDiedWithParkedRelease = async () => {
+    const daemons = await lostDeviceBesidePeer();
+    const c = start("daemon-c");
+    daemons.a.journal.record({ sessionId: "s", reason: "device-killed", at: timer.now() });
+    live.delete("daemon-a");
+    return { ...daemons, c };
+  };
+  return {
+    timer,
+    repository,
+    files,
+    live,
+    start,
+    lostDeviceBesidePeer,
+    peerDiedWithParkedRelease,
+  };
 }
 
 /** A pool that would hand a recovering daemon the session's device back. */
@@ -137,6 +191,117 @@ describe("a survivor adopts a dead peer's terminal-release journal (#11355)", ()
     });
     expect(files.files.has(terminalReleaseJournalPath(DATA, "daemon-a"))).toBe(false);
     expect(b.journal.loadUnconfirmed()).toEqual([]);
+  });
+
+  // Review of #11355: the dead daemon's file is the one copy every survivor can read, so it
+  // stays until the terminal row is confirmed.
+  test("a second survivor still refuses the session while the first survivor's write is parked", async () => {
+    const { repository, files, peerDiedWithParkedRelease } = await world();
+    const { b, c } = await peerDiedWithParkedRelease();
+    b.gate.mode = "parked";
+    const viaB = b.name("s");
+    await Promise.resolve();
+
+    expect(await c.name("s")).toBeInstanceOf(TerminalSessionError);
+    expect(c.manager.getSession("s")).toBeNull();
+    expect(await repository.getSession("s")).toMatchObject({
+      release_reason: "device-killed",
+      daemon_session_id: "daemon-a",
+    });
+    expect(files.files.has(terminalReleaseJournalPath(DATA, "daemon-a"))).toBe(false);
+
+    await b.gate.flush();
+    expect(await viaB).toBeInstanceOf(TerminalSessionError);
+    expect((await repository.getSession("s"))?.release_reason).toBe("device-killed");
+  });
+
+  test("a parked adopted release never lands on a row another daemon took meanwhile", async () => {
+    const { repository, peerDiedWithParkedRelease } = await world();
+    const { b } = await peerDiedWithParkedRelease();
+    b.gate.mode = "parked";
+    const viaB = b.name("s");
+    for (let turn = 0; turn < 20; turn++) {
+      await Promise.resolve();
+    }
+    // Another daemon takes the row over after B read it as the dead daemon's.
+    const row = await repository.getSession("s");
+    expect(
+      await repository.claimRecoverableSession(
+        "s",
+        { rowGeneration: row?.stable_identity_generation ?? 0, daemonSessionId: "daemon-a" },
+        "daemon-c",
+      ),
+    ).toBeDefined();
+
+    await b.gate.flush();
+    await viaB;
+
+    expect(await repository.getSession("s")).toMatchObject({
+      release_reason: deviceRestartReleaseReason(STABLE_ID),
+      daemon_session_id: "daemon-c",
+    });
+  });
+
+  test("a failed adopted write keeps the dead daemon's journal for the next survivor", async () => {
+    const { repository, files, live, peerDiedWithParkedRelease } = await world();
+    const { b, c } = await peerDiedWithParkedRelease();
+    const journalText = files.files.get(terminalReleaseJournalPath(DATA, "daemon-a"));
+    b.gate.mode = "failing";
+
+    // B cannot write the row, but still refuses the session, and A's journal stays.
+    expect(await b.name("s")).toBeInstanceOf(TerminalSessionError);
+    expect((await repository.getSession("s"))?.release_reason).toBe(
+      deviceRestartReleaseReason(STABLE_ID),
+    );
+    expect(files.files.get(terminalReleaseJournalPath(DATA, "daemon-a"))).toBe(journalText);
+
+    live.delete("daemon-b");
+    expect(await c.name("s")).toBeInstanceOf(TerminalSessionError);
+    expect(c.manager.getSession("s")).toBeNull();
+    expect((await repository.getSession("s"))?.release_reason).toBe("device-killed");
+    expect(files.files.has(terminalReleaseJournalPath(DATA, "daemon-a"))).toBe(false);
+  });
+
+  test("a daemon started after the failed write still refuses the session once the adopter dies", async () => {
+    const { repository, live, start, peerDiedWithParkedRelease } = await world();
+    const { b } = await peerDiedWithParkedRelease();
+    b.gate.mode = "failing";
+    expect(await b.name("s")).toBeInstanceOf(TerminalSessionError);
+
+    const successor = start("daemon-b2");
+    live.delete("daemon-b");
+
+    expect(await successor.name("s")).toBeInstanceOf(TerminalSessionError);
+    expect(successor.manager.getSession("s")).toBeNull();
+    expect((await repository.getSession("s"))?.release_reason).not.toBe("device-killed");
+    await successor.manager.applyRecoveredTerminalReleaseIntents();
+    expect((await repository.getSession("s"))?.release_reason).toBe("device-killed");
+  });
+
+  test("a failed adopted write is retried when a row of the dead daemon is next read", async () => {
+    const { timer, repository, files, peerDiedWithParkedRelease } = await world();
+    const { b } = await peerDiedWithParkedRelease();
+    await repository.upsertActiveSession({
+      sessionUuid: "u",
+      deviceId: DEVICES[1],
+      stableDeviceId: STABLE_ID,
+      platform: "android",
+      createdAtMs: timer.now(),
+      lastUsedAtMs: timer.now(),
+      expiresAtMs: timer.now() + IDLE_MS,
+      sessionTimeoutMs: IDLE_MS,
+      heartbeatTimeoutMs: 10_000,
+      hasReceivedHeartbeat: true,
+      daemonSessionId: "daemon-a",
+    });
+    b.gate.mode = "failing";
+    expect(await b.name("s")).toBeInstanceOf(TerminalSessionError);
+
+    b.gate.mode = "open";
+    await b.name("u");
+
+    expect((await repository.getSession("s"))?.release_reason).toBe("device-killed");
+    expect(files.files.has(terminalReleaseJournalPath(DATA, "daemon-a"))).toBe(false);
   });
 
   test("a live peer's journal is never read: its in-flight release may still be lifted", async () => {

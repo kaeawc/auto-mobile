@@ -87,6 +87,9 @@ describe("cross-daemon ownership regressions", () => {
       step("settle"),
     ]);
     expect(result.violation).toBeUndefined();
-    expect(result.trace.join("\n")).toContain("B1 journal appended to");
+    // B settled the dead daemon's journal: it wrote the terminal row, then removed A's file.
+    expect(result.trace.join("\n")).toContain(
+      "B1 journal removed /automobile-data/terminal-release-intents/daemon-A-1.jsonl",
+    );
   });
 });

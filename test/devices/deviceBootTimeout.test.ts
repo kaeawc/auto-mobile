@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { DeviceBootService, DeviceBootTimeoutError } from "../../../src/devices/deviceBootService";
-import { DEFAULT_PROVISION_DEVICE_RETRYABILITY } from "../../../src/devices/exactDeviceProvisioning";
-import type { DeviceInfo } from "../../../src/models";
-import { FakeDeviceMatcher } from "../../fakes/FakeDeviceMatcher";
-import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
-import { FakeTimer } from "../../fakes/FakeTimer";
+import { DeviceBootService, DeviceBootTimeoutError } from "../../src/devices/deviceBootService";
+import { DEFAULT_PROVISION_DEVICE_RETRYABILITY } from "../../src/devices/exactDeviceProvisioning";
+import type { DeviceInfo } from "../../src/models";
+import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const images: DeviceInfo[] = [
   { name: "Pixel_9_API_35", platform: "android", isRunning: false, osVersion: "35" },
@@ -45,7 +45,7 @@ async function bootTimeout(image: DeviceInfo): Promise<unknown> {
     .catch((error: unknown) => error);
 }
 
-describe("hunt: boot timeout contract", () => {
+describe("boot timeout contract", () => {
   for (const image of images) {
     it(`${image.platform}: a boot timeout names the device being booted`, async () => {
       const error = await bootTimeout(image);

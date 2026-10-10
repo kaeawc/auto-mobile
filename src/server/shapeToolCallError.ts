@@ -13,6 +13,7 @@ import { SessionRecoveryAssignmentError } from "../models/SessionRecoveryAssignm
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
+import { typedRefusalFields } from "../models/typedRefusalFields";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
 import { recoveryIdentityLoss, recoveryIdentityLossPayload } from "./deviceSessionResult";
 import { DeviceOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
@@ -149,6 +150,12 @@ function typedRefusalPayload(error: unknown): Record<string, unknown> | undefine
   // a generic `Error:` string (#11493).
   if (error instanceof BootedDeviceDiscoveryIncompleteError) {
     return { code: error.code, retryable: error.retryable };
+  }
+  // A device boot or shutdown that ran out of budget is the typed retryable `timeout` on every
+  // tool that throws it, like `provisionDevice`'s (#11548).
+  const timeout = error instanceof ActionableError ? typedRefusalFields(error) : undefined;
+  if (timeout?.code === "timeout") {
+    return { code: timeout.code, retryable: timeout.retryable };
   }
   if (error instanceof RetryableDeviceAcquisitionError) {
     return {

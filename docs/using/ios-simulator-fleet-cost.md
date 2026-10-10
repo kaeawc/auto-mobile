@@ -31,6 +31,11 @@ The limit on concurrently booted simulators is the smaller of a memory budget
 clamped to 1.5-6 GiB, default 3 GiB) and a core budget (cores / 2), at least 1.
 Set `AUTOMOBILE_IOS_SIM_MAX_BOOTED` to override.
 
+Simulator boots wait on this gate by default (#11181); a boot that finds no slot
+before its deadline fails with the retryable `capacity_exhausted` error. See
+[Boot capacity](environment-variables.md#boot-capacity) for the opt-out and the
+shared Android gate.
+
 `SimulatorCapacityGate.evaluateBoot(request)` answers with:
 
 - `reuse-warm`: a booted simulator matches the requested device type, runtime and/or profile
@@ -49,5 +54,5 @@ Sampling is single-flight and independent of sessions, device epochs and runner 
 - `auto-mobile --cli doctor` (macOS): the "iOS Simulator Fleet Cost" check lists each booted
   simulator's memory, CPU, data size and last boot time, and warns when a new boot would exceed capacity.
 - Daemon-internal: `IosSimCapacityGate` and the optional `IosSimFleetMonitor` in
-  `src/features/iosSimFleet/`. The simulator preparation lifecycle (#6695) is expected to call the gate
-  and record boot durations via `BootDurationHistory`.
+  `src/features/iosSimFleet/`. Every simulator boot waits on one process-wide gate and records its
+  duration via `BootDurationHistory`. The shared admission logic lives in `src/features/bootAdmission/`.

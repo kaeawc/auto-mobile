@@ -606,26 +606,29 @@ export AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT=true
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                                              | Use and accepted values                                                                                                                                          | Default                                                            |
-| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `AUTOMOBILE_IOS_WARMUP_DEVICES`                                                       | Comma-separated simulator UDIDs allowed passive startup warm-up and observation streams without sessions.                                                        | empty list                                                         |
-| `AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES`                                          | Comma-separated Android serials allowed appearance sync without sessions.                                                                                        | empty list                                                         |
-| `AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES`                                       | Comma-separated Android serials allowed passive observation streams without sessions.                                                                            | empty list                                                         |
-| `AUTOMOBILE_APPEARANCE_SYNC`                                                          | Enable appearance sync; `0`, `false`, `off`, `no` disable (case-insensitive, trimmed).                                                                           | on                                                                 |
-| `AUTOMOBILE_ALLOW_DEVICE_CREATE`                                                      | Permit emulator/simulator creation; `1`/`true` enable (case-insensitive, trimmed). Explicit creation flag wins.                                                  | off                                                                |
-| `AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS`, `AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS`           | Exact `0` disables session continuity; exact `1` additionally opts eligible Android emulators into active restart. Other values warn and disable active restart. | passive continuity on; active restart off                          |
-| `AUTOMOBILE_ANDROID_REBOOT_ON_DEATH`, `AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH`           | Deprecated fallback for device recovery on loss, after both platform-neutral spellings; same `0`/`1` semantics.                                                  | unset                                                              |
-| `AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS`, `AUTO_MOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS` | Rolling active restart budget; integer `1..10`, invalid values fall back.                                                                                        | `2`                                                                |
-| `AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS`, `AUTO_MOBILE_DEVICE_RECOVERY_WINDOW_MS`       | Rolling recovery budget window; positive integer milliseconds (digits, no leading zero).                                                                         | `900000` ms                                                        |
-| `AUTOMOBILE_DEVICE_POOL_MATCHING`, `AUTO_MOBILE_DEVICE_POOL_MATCHING`                 | Device selection: exact `LATEST`, `RANDOM`, `MINIMUM`; invalid values fall back.                                                                                 | `LATEST`                                                           |
-| `AUTOMOBILE_DEVICE_POOL_AUTOLOCK`, `AUTO_MOBILE_DEVICE_POOL_AUTOLOCK`                 | Require acquired device session UUID and auto-release on idle; exact `1` enables.                                                                                | off                                                                |
-| `AUTOMOBILE_DEVICE_POOL_TIMEOUT`, `AUTO_MOBILE_DEVICE_POOL_TIMEOUT`                   | Autolock idle timeout in **seconds**, parsed as a positive base-10 integer prefix.                                                                               | `60` seconds                                                       |
-| `AUTOMOBILE_EMULATOR_HEADLESS`                                                        | Exact `true` forces headless, `false` forces windowed; other values use platform detection.                                                                      | headless on macOS and Linux without a display; otherwise windowed  |
-| `AUTOMOBILE_EMULATOR_AUDIO`                                                           | Exact `false` adds `-no-audio`; other values keep emulator audio.                                                                                                | audio on                                                           |
-| `AUTOMOBILE_EMULATOR_ARGS`                                                            | Extra emulator argv as a JSON array of nonempty strings; malformed JSON/entries fail.                                                                            | empty array                                                        |
-| `AUTOMOBILE_IOS_HEADLESS`                                                             | On macOS exact `true`/`1` forces headless; any other set value forces windowed. Non-macOS is always headless.                                                    | detect graphical login session                                     |
-| `AUTOMOBILE_IOS_SIM_MAX_BOOTED`                                                       | Cap on concurrently booted iOS Simulators used by the fleet capacity report and gate; positive integer. Invalid values are ignored with a warning.               | min(RAM x 0.5 / measured per-simulator RSS, cores / 2), at least 1 |
-| `AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS`                                            | Android work-profile package polling interval; base-10 integer milliseconds. Use positive values; this read has no invalid-value fallback.                       | `5000` ms                                                          |
+| Variable                                                                              | Use and accepted values                                                                                                                                               | Default                                                            |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `AUTOMOBILE_IOS_WARMUP_DEVICES`                                                       | Comma-separated simulator UDIDs allowed passive startup warm-up and observation streams without sessions.                                                             | empty list                                                         |
+| `AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES`                                          | Comma-separated Android serials allowed appearance sync without sessions.                                                                                             | empty list                                                         |
+| `AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES`                                       | Comma-separated Android serials allowed passive observation streams without sessions.                                                                                 | empty list                                                         |
+| `AUTOMOBILE_APPEARANCE_SYNC`                                                          | Enable appearance sync; `0`, `false`, `off`, `no` disable (case-insensitive, trimmed).                                                                                | on                                                                 |
+| `AUTOMOBILE_ALLOW_DEVICE_CREATE`                                                      | Permit emulator/simulator creation; `1`/`true` enable (case-insensitive, trimmed). Explicit creation flag wins.                                                       | off                                                                |
+| `AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS`, `AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS`           | Exact `0` disables session continuity; exact `1` additionally opts eligible Android emulators into active restart. Other values warn and disable active restart.      | passive continuity on; active restart off                          |
+| `AUTOMOBILE_ANDROID_REBOOT_ON_DEATH`, `AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH`           | Deprecated fallback for device recovery on loss, after both platform-neutral spellings; same `0`/`1` semantics.                                                       | unset                                                              |
+| `AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS`, `AUTO_MOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS` | Rolling active restart budget; integer `1..10`, invalid values fall back.                                                                                             | `2`                                                                |
+| `AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS`, `AUTO_MOBILE_DEVICE_RECOVERY_WINDOW_MS`       | Rolling recovery budget window; positive integer milliseconds (digits, no leading zero).                                                                              | `900000` ms                                                        |
+| `AUTOMOBILE_DEVICE_POOL_MATCHING`, `AUTO_MOBILE_DEVICE_POOL_MATCHING`                 | Device selection: exact `LATEST`, `RANDOM`, `MINIMUM`; invalid values fall back.                                                                                      | `LATEST`                                                           |
+| `AUTOMOBILE_DEVICE_POOL_AUTOLOCK`, `AUTO_MOBILE_DEVICE_POOL_AUTOLOCK`                 | Require acquired device session UUID and auto-release on idle; exact `1` enables.                                                                                     | off                                                                |
+| `AUTOMOBILE_DEVICE_POOL_TIMEOUT`, `AUTO_MOBILE_DEVICE_POOL_TIMEOUT`                   | Autolock idle timeout in **seconds**, parsed as a positive base-10 integer prefix.                                                                                    | `60` seconds                                                       |
+| `AUTOMOBILE_EMULATOR_HEADLESS`                                                        | Exact `true` forces headless, `false` forces windowed; other values use platform detection.                                                                           | headless on macOS and Linux without a display; otherwise windowed  |
+| `AUTOMOBILE_EMULATOR_AUDIO`                                                           | Exact `false` adds `-no-audio`; other values keep emulator audio.                                                                                                     | audio on                                                           |
+| `AUTOMOBILE_EMULATOR_ARGS`                                                            | Extra emulator argv as a JSON array of nonempty strings; malformed JSON/entries fail.                                                                                 | empty array                                                        |
+| `AUTOMOBILE_IOS_HEADLESS`                                                             | On macOS exact `true`/`1` forces headless; any other set value forces windowed. Non-macOS is always headless.                                                         | detect graphical login session                                     |
+| `AUTOMOBILE_BOOT_CAPACITY_GATE`                                                       | Boot admission gate for emulator and simulator cold boots; exact `0` disables it on both platforms. See [Boot capacity](#boot-capacity).                              | on                                                                 |
+| `AUTOMOBILE_IOS_SIM_CAPACITY_GATE`                                                    | iOS-only override of `AUTOMOBILE_BOOT_CAPACITY_GATE`: exact `0` disables, exact `1` enables; other values defer to the shared switch.                                 | unset (follows the shared switch)                                  |
+| `AUTOMOBILE_ANDROID_MAX_BOOTED`                                                       | Cap on concurrently booted Android emulators used by the boot admission gate; positive integer. Invalid values are ignored with a warning.                            | min(RAM x 0.5 / measured per-emulator RSS, cores / 2), at least 1  |
+| `AUTOMOBILE_IOS_SIM_MAX_BOOTED`                                                       | Cap on concurrently booted iOS Simulators used by the fleet capacity report and the boot admission gate; positive integer. Invalid values are ignored with a warning. | min(RAM x 0.5 / measured per-simulator RSS, cores / 2), at least 1 |
+| `AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS`                                            | Android work-profile package polling interval; base-10 integer milliseconds. Use positive values; this read has no invalid-value fallback.                            | `5000` ms                                                          |
 
 </div>
 
@@ -701,6 +704,47 @@ one: only restarts within the last `AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS`
 exhaust the budget of a long-lived daemon. A recovery cancelled before it
 touches the emulator (an ADB-reset takeover, or an intentional `killDevice`)
 does not spend an attempt either way.
+
+### Boot capacity
+
+Emulator and simulator cold boots wait for host capacity by default (#11181).
+Android and iOS each have their own limit: the smaller of half the host RAM
+divided by the per-device memory and half the CPU cores, at least 1. Android
+measures per-emulator memory from the `qemu-system-*` processes (4 GiB when it
+cannot); iOS measures each simulator's process tree (3 GiB when it cannot).
+Every booted device of the platform counts, including ones started outside
+AutoMobile: for Android, the larger of the emulators adb lists and the
+`qemu-system-*` processes on the host, so emulators still booting or on another
+adb server count too.
+
+A boot over the limit waits and checks again every 5 seconds. If no slot frees
+before the boot deadline, it fails with a retryable error:
+
+```json
+{
+  "success": false,
+  "error": "Timed out after 115000ms waiting for emulator capacity ...",
+  "code": "capacity_exhausted",
+  "retryable": true,
+  "retryAfterMs": 5000,
+  "limit": 2,
+  "booted": 2,
+  "platform": "android"
+}
+```
+
+Adopting an emulator or simulator that is already running or starting never
+waits. An admitted boot holds its slot until adb lists the new emulator (or the
+simulator boot finishes), the launch fails or is cancelled, or the boot deadline
+passes. `listDevices` reports `capacity` per gated platform as
+`{ limit, booted, inFlight }`.
+
+```bash
+export AUTOMOBILE_ANDROID_MAX_BOOTED=3     # fixed Android limit
+export AUTOMOBILE_IOS_SIM_MAX_BOOTED=2     # fixed iOS limit
+export AUTOMOBILE_BOOT_CAPACITY_GATE=0     # turn the gate off on both platforms
+export AUTOMOBILE_IOS_SIM_CAPACITY_GATE=0  # turn it off for iOS only
+```
 
 ## Shared ADB server
 

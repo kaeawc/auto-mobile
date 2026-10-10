@@ -8683,6 +8683,45 @@
           "required": ["complete", "missing", "retryable"],
           "additionalProperties": false
         },
+        "capacity": {
+          "description": "Boot admission capacity per gated platform: booted-device limit, booted devices (including ones started outside AutoMobile), and admitted boots in flight",
+          "type": "object",
+          "properties": {
+            "android": {
+              "type": "object",
+              "properties": {
+                "limit": {
+                  "type": "number"
+                },
+                "booted": {
+                  "type": "number"
+                },
+                "inFlight": {
+                  "type": "number"
+                }
+              },
+              "required": ["limit", "booted", "inFlight"],
+              "additionalProperties": false
+            },
+            "ios": {
+              "type": "object",
+              "properties": {
+                "limit": {
+                  "type": "number"
+                },
+                "booted": {
+                  "type": "number"
+                },
+                "inFlight": {
+                  "type": "number"
+                }
+              },
+              "required": ["limit", "booted", "inFlight"],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
         "note": {},
         "artifact": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",

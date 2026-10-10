@@ -1,5 +1,6 @@
 import type { SessionReleaseReason } from "./releaseReasons";
 import type { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
+import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { executionTracker, type ExecutionTracker } from "../server/executionTracker";
 
@@ -60,6 +61,40 @@ export function cancelExecutionsCutBySessionRelease(
   cut: SessionReleaseCut,
   cancellation: SessionReleasedDuringCallError,
 ): Promise<number> {
+  return cancelCutExecutions(executions, cut, cancellation, cancellation.releaseReason);
+}
+
+/** The release reason of a finished plan's sessions; the UUID stays re-issuable by name. */
+const PLAN_AUTO_RELEASE: SessionReleaseReason = "plan-auto-release";
+
+/**
+ * Abort the calls a plan's auto-release cuts (#11490): the same set
+ * {@link cancelExecutionsCutBySessionRelease} cuts, before the pool frees the device, so no call
+ * keeps driving a device the plan has given back. A `plan-auto-release` UUID is re-issuable by
+ * name, not terminal, so nothing here may tell a caller its session is gone for good: every cut
+ * call gets the plain cancellation, as a base call cut by a derived session's release does
+ * (#11386). `excludeExecutionId` is the plan's own call, which is running under the session it
+ * releases and is bound to its derived sessions' devices: it must never cut itself.
+ */
+export function cancelExecutionsCutByPlanAutoRelease(
+  executions: ReleaseCutExecutions,
+  cut: SessionReleaseCut,
+): Promise<number> {
+  return cancelCutExecutions(
+    executions,
+    cut,
+    `Session ${cut.sessionId} was released when its plan finished (${PLAN_AUTO_RELEASE}) while ` +
+      "this call was in flight; the session UUID is not terminal and may be named again",
+    PLAN_AUTO_RELEASE,
+  );
+}
+
+function cancelCutExecutions(
+  executions: ReleaseCutExecutions,
+  cut: SessionReleaseCut,
+  cancellation: SessionReleasedDuringCallError | string,
+  releaseReason: SessionReleaseReason,
+): Promise<number> {
   const { sessionId, baseSessionId, deviceId, excludeExecutionId } = cut;
   const cancellations = [
     executions.cancelDeviceSessionExecutions(sessionId, cancellation, { excludeExecutionId }),
@@ -68,13 +103,34 @@ export function cancelExecutionsCutBySessionRelease(
     cancellations.push(
       executions.cancelDeviceExecutions(
         deviceId,
-        `Session ${sessionId} was released (${cancellation.releaseReason}), so device ` +
+        `Session ${sessionId} was released (${releaseReason}), so device ` +
           `${deviceId} is no longer reachable through session ${baseSessionId}`,
         { onlySessionUuid: baseSessionId, excludeExecutionId },
       ),
     );
   }
   return Promise.all(cancellations).then((counts) => counts.reduce((sum, n) => sum + n, 0));
+}
+
+/**
+ * Release one of a finished plan's sessions and free its device: cut what the release cuts
+ * ({@link cancelExecutionsCutByPlanAutoRelease}), then {@link releaseSessionAndDevice}. The aborts
+ * are signalled before the release starts; nothing waits for the cut calls to settle, so a plan
+ * can never wait on itself.
+ */
+export async function releasePlanSessionAndDevice(
+  manager: SessionReleaseManager,
+  pool: SessionReleasePool,
+  cut: SessionReleaseCut & { deviceId: string | null },
+  executions: ReleaseCutExecutions = executionTracker,
+): Promise<void> {
+  cancelExecutionsCutByPlanAutoRelease(executions, cut).catch((error: unknown) => {
+    logger.warn(
+      `Failed to cancel executions of plan-released session ${cut.sessionId}: ${errorMessage(error)}`,
+      error,
+    );
+  });
+  await releaseSessionAndDevice(manager, pool, cut.deviceId, cut.sessionId, PLAN_AUTO_RELEASE);
 }
 
 export interface SessionReleaseManager {

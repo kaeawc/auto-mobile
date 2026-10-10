@@ -1547,6 +1547,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             // that label from the base map; unlabeled calls retain the derived
             // ambient session.
             routingSessionUuid: handlerRoutingSessionUuid,
+            // #11469: nested internal calls and plan steps run for this daemon connection.
+            callerMcpSessionId: requestMcpSessionId,
             ownsDeviceSession: (sessionUuid) =>
               sessionToolBinding.ownsSession(sessionId, sessionUuid),
             execution: {

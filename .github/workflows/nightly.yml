@@ -106,6 +106,15 @@ jobs:
           cat "$summary" >> "$GITHUB_STEP_SUMMARY"
           exit "$failed"
 
+      # #11473: the owner compares this with the clock-semantics table in
+      # src/utils/SystemTimer.ts before bumping MONOTONIC_CLOCK_SEMANTICS_VERIFIED_BUN.
+      - name: "Measure runtime clocks on Bun 1.4"
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p scratch/bun-14-canary
+          bun scripts/ci/measure-clock-semantics.ts > scratch/bun-14-canary/clock-semantics.json
+
       - name: "Upload Bun 1.4 canary summary"
         if: always()
         uses: actions/upload-artifact@v6

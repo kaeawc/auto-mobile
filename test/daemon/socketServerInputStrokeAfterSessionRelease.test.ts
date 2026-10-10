@@ -7,6 +7,7 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
+import { releasePlanSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
@@ -250,6 +251,42 @@ describe("an open input stroke vs. a release of its holder session", () => {
     socket.destroy();
     await settle();
     expect(strokes).toEqual(["start", "cancel"]);
+  });
+
+  // #11490: a plan's auto-release goes through the same release notification, so the stroke of
+  // #11470 is lifted exactly once, and a frame still in flight is cut before the device is freed.
+  test("a plan auto-release cuts an in-flight gesture frame and lifts the open stroke once", async () => {
+    sessionManager.onSessionRelease((sessionId) => void internals.liftStrokesHeldBy(sessionId));
+    expect(await sendGesture("Start")).toMatchObject({ success: true });
+    const frame = executionTracker.startExecution("input/gestureMove", undefined, SESSION);
+    executionTracker.bindDeviceExecution(frame.id, DEVICE);
+    const frameAbortedWhenFreed: boolean[] = [];
+
+    try {
+      await releasePlanSessionAndDevice(
+        sessionManager,
+        {
+          releaseDevice: async () => {
+            frameAbortedWhenFreed.push(frame.abortController.signal.aborted);
+          },
+        },
+        { sessionId: SESSION, deviceId: DEVICE },
+      );
+      await settle();
+    } finally {
+      executionTracker.endExecution(frame.id);
+    }
+
+    expect(frameAbortedWhenFreed).toEqual([true]);
+    expect(strokes).toEqual(["start", "cancel"]);
+    // Not terminal: the UUID is issued again by name and a new stroke starts under it.
+    expect(sessionManager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+    await sessionManager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+    await claimingHeartbeat();
+    expect(await sendGesture("Start")).toMatchObject({ success: true });
+    socket.destroy();
+    await settle();
+    expect(strokes).toEqual(["start", "cancel", "start", "cancel"]);
   });
 
   test("a gestureMove refused because the reaped holder's device has a new owner lifts the stroke", async () => {

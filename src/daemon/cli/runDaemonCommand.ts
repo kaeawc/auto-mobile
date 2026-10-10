@@ -137,11 +137,12 @@ export interface ResetSlotScopeCommandArgs {
   runnerIncarnation: string;
   managedHostScope?: string;
   waitMs?: number;
+  force?: boolean;
 }
 
 /**
  * Parse `--daemon reset-slot-scope --runner-namespace <ns> --incarnation <id>
- * [--managed-host-scope <scope>] [--wait-ms <ms>]` (#11174).
+ * [--managed-host-scope <scope>] [--wait-ms <ms>] [--force]` (#11174, #11336).
  */
 export function parseResetSlotScopeCommandArgs(args: string[]): ResetSlotScopeCommandArgs {
   const read = (flag: string, required: boolean): string | undefined => {
@@ -176,6 +177,7 @@ export function parseResetSlotScopeCommandArgs(args: string[]): ResetSlotScopeCo
     runnerIncarnation,
     ...(managedHostScope === undefined ? {} : { managedHostScope }),
     ...(waitMs === undefined ? {} : { waitMs }),
+    ...(args.includes("--force") ? { force: true } : {}),
   };
 }
 
@@ -569,6 +571,18 @@ async function runDaemonDiagnosticsCommand(
   }
 }
 
+/** " (released: <reason>[, idle])", or "" when the daemon gave neither. */
+function releasedLabel(reason: string | undefined, idle: boolean): string {
+  const label = [reason, idle ? "idle" : undefined].filter(Boolean).join(", ");
+  return label ? ` (released: ${label})` : "";
+}
+
+function recordOrUndefined(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 /**
  * A daemon query or release that failed, keeping the daemon's typed refusal fields (#11252)
  * instead of flattening them into a bare "Failed to ...: message".
@@ -579,6 +593,9 @@ export class DaemonCommandRefusal extends ActionableError {
   readonly retryable?: boolean;
   readonly retryAfterMs?: number;
   readonly releaseReason?: string;
+  /** True when the daemon released the session at its idle window (#10832). */
+  readonly idle?: true;
+  readonly details?: Record<string, unknown>;
   readonly detail: string;
 
   constructor(context: string, error: unknown) {
@@ -591,12 +608,13 @@ export class DaemonCommandRefusal extends ActionableError {
     const retryable = field("retryable");
     const retryAfterMs = field("retryAfterMs");
     const releaseReason = releaseReasonFromError(error);
+    const idle = field("idle") === true;
     const detail = errorMessage(error);
     const typedCode =
       typeof code === "string" || typeof code === "number" ? String(code) : undefined;
     const typedNextAction = typeof nextAction === "string" ? nextAction : undefined;
     super(
-      `${context}: ${detail}${releaseReason ? ` (released: ${releaseReason})` : ""}` +
+      `${context}: ${detail}${releasedLabel(releaseReason, idle)}` +
         `${typedCode ? ` [${typedCode}]` : ""}${typedNextAction ? ` Next: ${typedNextAction}` : ""}`,
       { cause: error },
     );
@@ -606,6 +624,8 @@ export class DaemonCommandRefusal extends ActionableError {
     this.retryable = typeof retryable === "boolean" ? retryable : undefined;
     this.retryAfterMs = typeof retryAfterMs === "number" ? retryAfterMs : undefined;
     this.releaseReason = releaseReason;
+    this.idle = idle ? true : undefined;
+    this.details = recordOrUndefined(field("details"));
   }
 }
 
@@ -620,6 +640,8 @@ function daemonQueryFailureJson(error: unknown): Record<string, unknown> {
     retryable: error.retryable,
     retryAfterMs: error.retryAfterMs,
     releaseReason: error.releaseReason,
+    idle: error.idle,
+    details: error.details,
   };
   return {
     ok: false,
@@ -856,7 +878,8 @@ function heartbeatFailureMessage(sessionId: string, error: unknown): string {
 /** " (released: <reason>)" when the daemon said why a not-found session is gone (#10730). */
 function releasedSuffix(error: unknown): string {
   const reason = releaseReasonFromError(error);
-  return reason ? ` (released: ${reason})` : "";
+  const idle = recordOrUndefined(error)?.idle === true;
+  return reason ? releasedLabel(reason, idle) : "";
 }
 
 async function recordDaemonHeartbeat(args: string[], manager: DaemonManager): Promise<void> {
@@ -1013,7 +1036,11 @@ const NO_POSITIONAL_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpe
   diagnose: { launchFlags: true },
   "available-devices": { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
   "active-sessions": { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
-  "reset-slot-scope": { launchFlags: true, valueFlags: RESET_SLOT_SCOPE_FLAGS },
+  "reset-slot-scope": {
+    launchFlags: true,
+    valueFlags: RESET_SLOT_SCOPE_FLAGS,
+    booleanFlags: ["--force"],
+  },
 };
 
 /**
@@ -1061,7 +1088,7 @@ function printDaemonUsageError(message: string): void {
       "  heartbeat <id>        Heartbeat a session (one-shot CLI: no-op; proxy-owned: refused)",
     );
     console.log(
-      "  reset-slot-scope --runner-namespace <ns> --incarnation <id>  Invalidate a managed slot scope; free its devices",
+      "  reset-slot-scope --runner-namespace <ns> --incarnation <id> [--force]  Invalidate a managed slot scope; free its devices",
     );
     console.log("\nOptions:");
     console.log(

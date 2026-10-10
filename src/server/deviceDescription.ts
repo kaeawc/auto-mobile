@@ -25,7 +25,7 @@ export type {
 export { projectConfiguredImage } from "../models/deviceDescription";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
 import { z } from "zod/v4";
-import type { PooledDevice } from "../daemon/devicePool";
+import type { GenericAvailability, PooledDevice } from "../daemon/devicePool";
 import type { Session } from "../daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../models";
 import type { ExactProvisionedDevice } from "../devices/exactDeviceProvisioning";
@@ -62,6 +62,8 @@ export type DeviceDescriptionInput =
       adbOfflineState?: string;
       /** The pool refuses generic allocation of this device: a managed slot or another daemon holds it. */
       heldBy?: DeviceHeldBy;
+      /** A readiness, shutdown or recovery reservation keeps allocation off this idle device. */
+      reserved?: boolean;
     }
   | {
       kind: "provisioned";
@@ -118,6 +120,7 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
     configured: input.kind === "booted" ? input.configured : undefined,
     adbOfflineState: input.kind === "booted" ? input.adbOfflineState : undefined,
     heldBy: input.kind === "booted" ? input.heldBy : undefined,
+    reserved: input.kind === "booted" ? input.reserved : undefined,
   });
   return input.unhealthy ? { ...description, unhealthy: input.unhealthy } : description;
 }
@@ -172,6 +175,7 @@ interface BootedDescriptionOptions {
   configured?: StableConfiguredDeviceImage;
   adbOfflineState?: string;
   heldBy?: DeviceHeldBy;
+  reserved?: boolean;
 }
 
 // oxlint-disable-next-line complexity -- one exhaustive canonical booted projection preserves precedence.
@@ -188,6 +192,7 @@ function describeBooted({
   configured,
   adbOfflineState,
   heldBy,
+  reserved,
 }: BootedDescriptionOptions): DeviceDescription {
   const merged = mergeRuntimeFacts(device, admittedImage, admittedImageAuthoritative);
   // A cold-boot adapter can report a temporary non-emulator transport id even
@@ -224,7 +229,7 @@ function describeBooted({
       readiness: {
         state: adbOfflineState ? "not_ready" : readinessFromServiceStatus(serviceStatus),
       },
-      poolStatus: poolStatus(pooled, heldBy),
+      poolStatus: poolStatus(pooled, heldBy ?? reserved),
       ...(heldBy ? { heldBy } : {}),
       session: session
         ? {
@@ -297,15 +302,34 @@ function readinessFromServiceStatus(
 
 function poolStatus(
   pooled: PooledDevice | undefined,
-  heldBy: DeviceHeldBy | undefined,
+  held: DeviceHeldBy | boolean | undefined,
 ): DevicePoolStatus | null {
   if (!pooled) {
     return null;
   }
-  if (pooled.status === "busy" || (heldBy && pooled.status === "idle")) {
+  if (pooled.status === "busy" || (held && pooled.status === "idle")) {
     return "assigned";
   }
   return pooled.status === "idle" || pooled.status === "error" ? pooled.status : null;
+}
+
+/**
+ * The one projection of the pool's {@link GenericAvailability} into description inputs, shared by
+ * `listDevices` and the booted-device resources. A managed-slot or other-daemon hold publishes
+ * `heldBy`; a reservation reports `assigned` without it. Both read `assigned`, as `getStats()` does.
+ */
+export function poolHoldFor(
+  devicePool: { genericAvailability(deviceId: string): GenericAvailability } | null | undefined,
+  deviceId: string,
+): { heldBy?: DeviceHeldBy; reserved?: boolean } {
+  const availability = devicePool?.genericAvailability(deviceId);
+  if (availability === "managed_slot") {
+    return { heldBy: "managed_slot" };
+  }
+  if (availability === "foreign_daemon") {
+    return { heldBy: "other_daemon" };
+  }
+  return availability === "reserved" ? { reserved: true } : {};
 }
 
 export type ListDevicesEntry = DeviceDescription;

@@ -33,6 +33,7 @@ import {
   withDeviceRuntimeObservation,
   withDeviceLifecycle,
   withDeviceServiceStatus,
+  poolHoldFor,
   type BootedDeviceDescription,
   type DeviceDescription,
 } from "./deviceDescription";
@@ -535,6 +536,7 @@ function toBootedDeviceInfo(
         ? { sessionId: poolContext.poolInfo.assignedSession }
         : undefined),
     deviceSessionUuid: poolContext?.deviceSessionUuid,
+    ...poolContext?.hold,
   });
   const projected = projectBootedDevice(description);
   return {
@@ -739,6 +741,17 @@ interface PoolDeviceContext {
   pooled: PooledDevice;
   session?: Session;
   deviceSessionUuid?: string;
+  /** Why generic allocation will not lend this device; the same answer `listDevices` publishes. */
+  hold: ReturnType<typeof poolHoldFor>;
+}
+
+/** An idle device allocation cannot lend counts as assigned, matching `DevicePool.getStats()`. */
+function effectivePoolStatus(
+  status: PooledDevice["status"],
+  hold: ReturnType<typeof poolHoldFor>,
+): PoolDeviceStatus {
+  const held = hold.heldBy !== undefined || hold.reserved === true;
+  return status === "busy" || (status === "idle" && held) ? "assigned" : status;
 }
 
 function resolvePoolDeviceContext(
@@ -756,8 +769,8 @@ function resolvePoolDeviceContext(
     return undefined;
   }
 
-  const poolStatus: PoolDeviceStatus =
-    pooledDevice.status === "busy" ? "assigned" : pooledDevice.status;
+  const hold = poolHoldFor(devicePool, device.deviceId);
+  const poolStatus = effectivePoolStatus(pooledDevice.status, hold);
 
   return {
     poolInfo: {
@@ -769,6 +782,7 @@ function resolvePoolDeviceContext(
       incarnation: pooledDevice.incarnation,
     },
     pooled: pooledDevice,
+    hold,
     session: sessionInfoByDeviceId?.get(device.deviceId),
     deviceSessionUuid: resolveDeviceSessionUuid(device.deviceId) ?? undefined,
   };
@@ -808,7 +822,7 @@ function summarizePoolStatus(
   for (const pooled of devicePool.getAllDevices()) {
     if (!succeededPlatforms.has(pooled.platform)) {
       if (!devicePool.getDeviceHealthMarker(pooled.id) || pooled.status !== "idle") {
-        tally(pooled.status === "busy" ? "assigned" : pooled.status);
+        tally(effectivePoolStatus(pooled.status, poolHoldFor(devicePool, pooled.id)));
       }
     }
   }
@@ -908,6 +922,8 @@ async function discoverBootedDevicesForPlatform(
     // resolver -- still trusting the stale label
     // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
     await devicePool?.reconcileDiscoveryObservation(discovery.devices, "booted-devices-resource");
+    // Refresh the managed-slot snapshot so held devices are not reported as free, as listDevices does.
+    await devicePool?.refreshInventoryOwnership();
     options.onDiscovery(
       discovery.devices.map((device) =>
         withIdentityQuarantineMarker(

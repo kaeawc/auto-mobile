@@ -237,6 +237,13 @@ function resolveConsoleBusyRegistry(
 /**
  * Error class for device pool operations with retryability flag.
  */
+/**
+ * Who, if anyone, keeps generic allocation off a pooled device: a managed slot, another AutoMobile
+ * daemon, or a readiness/shutdown/recovery reservation. Every inventory surface derives its
+ * "available" and `poolStatus` from this one answer.
+ */
+export type GenericAvailability = "free" | "managed_slot" | "foreign_daemon" | "reserved";
+
 /** A lifecycle stop that must not take a device another live daemon holds (#11200). */
 export interface ShutdownForeignClaim {
   toolName: string;
@@ -5722,6 +5729,23 @@ export class DevicePool {
     }
   }
 
+  /**
+   * Re-read the ownership facts {@link genericAvailability} and {@link getStats} depend on: the
+   * managed-slot snapshot and which idle devices other daemons drive. Every inventory surface calls
+   * this before reading availability so none answers from a stale or never-loaded snapshot. Throws
+   * {@link ManagedSlotDiscoveryIncompleteError} when the slot registry is unreadable and no snapshot
+   * was ever loaded: callers must not report such devices as free.
+   */
+  async refreshInventoryOwnership(): Promise<void> {
+    await this.refreshForeignOwnership();
+  }
+
+  /** {@link getStats} after {@link refreshInventoryOwnership}: what `availableDevices` surfaces report. */
+  async getRefreshedStats(): Promise<ReturnType<DevicePool["getStats"]>> {
+    await this.refreshInventoryOwnership();
+    return this.getStats();
+  }
+
   /** Re-read which idle Android devices other daemons drive, for this allocation pass. */
   private async refreshForeignOwnership(): Promise<void> {
     const idle = (platform: Platform) =>
@@ -8516,7 +8540,9 @@ export class DevicePool {
    * Get all idle devices (available for assignment)
    */
   getIdleDevices(): PooledDevice[] {
-    return Array.from(this.devices.values()).filter((device) => this.isIdleDeviceEligible(device));
+    return Array.from(this.devices.values()).filter(
+      (device) => this.isIdleDeviceEligible(device) && !this.isHeldOutsideGenericAllocation(device),
+    );
   }
 
   /**
@@ -8659,7 +8685,7 @@ export class DevicePool {
    * Whether generic allocation may lend `deviceId`, from the last managed-slot snapshot and the
    * live foreign-ownership probe: the same facts allocation filters on. Unknown devices are free.
    */
-  genericAvailability(deviceId: string): "free" | "managed_slot" | "foreign_daemon" {
+  genericAvailability(deviceId: string): GenericAvailability {
     const device = this.devices.get(deviceId);
     if (!device) {
       return "free";
@@ -8667,7 +8693,15 @@ export class DevicePool {
     if (this.isManagedSlotDevice(device)) {
       return "managed_slot";
     }
-    return this.isDrivenByForeignDaemon(device) ? "foreign_daemon" : "free";
+    if (this.isDrivenByForeignDaemon(device)) {
+      return "foreign_daemon";
+    }
+    return this.isReservedForAssignment(device) ? "reserved" : "free";
+  }
+
+  /** A managed slot or another daemon holds the device, so generic allocation never lends it. */
+  private isHeldOutsideGenericAllocation(device: PooledDevice): boolean {
+    return this.isManagedSlotDevice(device) || this.isDrivenByForeignDaemon(device);
   }
 
   /** Platform devices generic allocation may lend: none a managed slot holds. */
@@ -8939,7 +8973,10 @@ export class DevicePool {
     const all = this.getAllDevices();
     const idle = this.getIdleDevices().length;
     const assigned = all.filter(
-      (device) => device.status === "busy" || this.isReservedForAssignment(device),
+      (device) =>
+        device.status === "busy" ||
+        this.isReservedForAssignment(device) ||
+        (device.status === "idle" && this.isHeldOutsideGenericAllocation(device)),
     ).length;
     const error = this.getErrorDevices().length;
     const avgAssignments =

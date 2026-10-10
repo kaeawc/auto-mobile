@@ -633,7 +633,7 @@ async function queryAvailableDevices(args: string[], manager: DaemonManager): Pr
       const pool = daemonState.getDevicePool();
       console.log(
         formatPoolStats(
-          pool.getStats(),
+          await pool.getRefreshedStats(),
           pool.getRecoveryPolicy(),
           pool.getAllDevices().map((device) => ({
             deviceId: device.id,

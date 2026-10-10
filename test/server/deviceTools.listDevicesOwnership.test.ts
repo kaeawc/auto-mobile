@@ -80,4 +80,30 @@ describe("listDevices reports ownership allocation enforces", () => {
     expect(free.runtime.poolStatus).toBe("idle");
     expect(free.runtime.heldBy).toBeUndefined();
   });
+  test("a shutdown-reserved idle device is assigned (no heldBy), matching getStats", async () => {
+    const devices = [ios("SIM-KILL"), ios("SIM-FREE")];
+    const pool = await makePool(devices, {});
+    const reservation = await pool.reserveDeviceForShutdown("SIM-KILL");
+    expect(reservation).toBeDefined();
+
+    const [killed, free] = listDevicePayloads(devices, pool, new Map());
+    expect(killed.runtime.poolStatus).toBe("assigned");
+    expect(killed.runtime.heldBy).toBeUndefined();
+    expect(killed.runtime.session).toBeNull();
+    expect(free.runtime.poolStatus).toBe("idle");
+    expect(pool.getStats()).toMatchObject({ idle: 1, assigned: 1 });
+  });
+
+  test("a readiness-reserved idle device is assigned until released", async () => {
+    const devices = [ios("SIM-BOOT"), ios("SIM-FREE")];
+    const pool = await makePool(devices, {});
+    const release = await pool.reserveDeviceForReadiness("SIM-BOOT", devices[0]);
+
+    const [booting] = listDevicePayloads(devices, pool, new Map());
+    expect(booting.runtime.poolStatus).toBe("assigned");
+    expect(pool.getStats()).toMatchObject({ idle: 1, assigned: 1 });
+
+    await release();
+    expect(listDevicePayloads(devices, pool, new Map())[0].runtime.poolStatus).toBe("idle");
+  });
 });

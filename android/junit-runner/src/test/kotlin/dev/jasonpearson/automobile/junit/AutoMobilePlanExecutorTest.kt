@@ -84,6 +84,77 @@ class AutoMobilePlanExecutorTest {
   }
 
   @Test
+  fun `a cleanup refusal advertising the finalize cap is waited out past the 30 s budget`() {
+    // #11360: the daemon advertises its real finalize cap (about 125 s) in retryAfterMs.
+    val waits = mutableListOf<Long>()
+    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    fakeDaemonClient.queueExecutePlanResponse(
+      buildDaemonResponse(finalizeRefusalPayload("device_cleanup_in_progress", 125_000), true),
+    )
+    fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(successPayload()))
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
+
+    assertEquals(result.errorMessage, true, result.success)
+    assertEquals(listOf(125_000L), waits)
+    assertEquals(2, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
+  fun `the finalize wait budget stretches only for cleanup and shutting down refusals`() {
+    val cases =
+      listOf(
+        // code, retryAfterMs, expected budget
+        Triple("device_cleanup_in_progress", null, 30_000L),
+        Triple("device_cleanup_in_progress", 1_000L, 30_000L),
+        Triple("device_cleanup_in_progress", 125_000L, 125_000L),
+        Triple("device_cleanup_in_progress", 600_000L, 150_000L),
+        Triple("device_shutting_down", null, 30_000L),
+        Triple("device_shutting_down", 1_000L, 30_000L),
+        Triple("device_shutting_down", 125_000L, 125_000L),
+        Triple("device_shutting_down", 600_000L, 150_000L),
+        Triple("device_owned_by_other_session", 125_000L, 30_000L),
+        Triple("device_owned_by_other_daemon", 125_000L, 30_000L),
+        Triple("capacity_exhausted", 125_000L, 30_000L),
+        Triple("discovery_incomplete", 125_000L, 30_000L),
+      )
+    for ((code, retryAfterMs, budget) in cases) {
+      // The first delay is the hint clamped to the remaining budget, so it reveals the budget.
+      val first = AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(0, 0L, retryAfterMs, code) ?: -1L
+      assertEquals(
+        "$code/$retryAfterMs first",
+        minOf(maxOf(500L, retryAfterMs ?: 0L), budget),
+        first,
+      )
+      // Having waited exactly the budget, nothing is left; one millisecond less leaves one.
+      assertNull(
+        "$code/$retryAfterMs spent",
+        AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(1, budget, retryAfterMs, code),
+      )
+      assertEquals(
+        "$code/$retryAfterMs last ms",
+        1L,
+        AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(1, budget - 1, retryAfterMs, code),
+      )
+    }
+  }
+
+  @Test
+  fun `a cleanup refusal with no retryAfterMs keeps the 30 s budget`() {
+    val waits = mutableListOf<Long>()
+    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(finalizeRefusalPayload("device_cleanup_in_progress", null), true),
+    )
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(30_000L, waits.sum())
+  }
+
+  @Test
   fun `retryable capacity exhaustion waits within the budget honouring retryAfterMs`() {
     val waits = mutableListOf<Long>()
     AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
@@ -745,6 +816,14 @@ class AutoMobilePlanExecutorTest {
   private fun shuttingDownDevicePayload(): JsonObject =
     payload(
       """{"success":false,"error":"Device 'emulator-5554' is shutting down (code device_shutting_down)","code":"device_shutting_down","deviceId":"emulator-5554","retryable":true,"retryAfterMs":2000}""",
+    )
+
+  // Shape of shapeToolCallError for the recording-finalize cleanup refusal (#11360).
+  private fun finalizeRefusalPayload(code: String, retryAfterMs: Int?): JsonObject =
+    payload(
+      """{"success":false,"error":"finalizing","code":"$code","deviceId":"emulator-5554","retryable":true""" +
+        (retryAfterMs?.let { ""","retryAfterMs":$it""" } ?: "") +
+        "}",
     )
 
   // Shape of shapeToolCallError for a retryable capacity / discovery refusal (#11202).

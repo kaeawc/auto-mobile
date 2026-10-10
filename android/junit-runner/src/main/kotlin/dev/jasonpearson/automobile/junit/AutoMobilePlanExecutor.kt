@@ -489,7 +489,12 @@ internal object AutoMobilePlanExecutor {
         // or its previous session is still finishing cleanup (#10960). Wait for it to free up,
         // within its own bounded budget, without spending maxRetries.
         val delayMs =
-          deviceOwnedBackoffDelayMs(deviceOwnedWaits, deviceOwnedWaitMs, parsed.retryAfterMs)
+          deviceOwnedBackoffDelayMs(
+            deviceOwnedWaits,
+            deviceOwnedWaitMs,
+            parsed.retryAfterMs,
+            parsed.code,
+          )
         if (delayMs == null) {
           parsed = parsed.copy(errorMessage = deviceOwnedGiveUpMessage(parsed, deviceOwnedWaitMs))
           break
@@ -1370,16 +1375,38 @@ internal object AutoMobilePlanExecutor {
   @JvmStatic internal var deviceOwnedSleeper: (Long) -> Unit = { Thread.sleep(it) }
 
   /**
+   * Longest the runner waits on a recording-finalize refusal (#11360). The daemon advertises its
+   * real finalize cap (about 125 s) in `retryAfterMs`; this bounds a runaway hint.
+   */
+  internal const val DEVICE_FINALIZE_WAIT_CAP_MS = 150_000L
+
+  /** Refusals whose `retryAfterMs` is the daemon's real finalize time, not a polling hint. */
+  private val FINALIZE_WAIT_CODES =
+    setOf(DEVICE_CLEANUP_IN_PROGRESS_CODE, DEVICE_SHUTTING_DOWN_CODE)
+
+  /**
+   * Total wait budget for this refusal: [deviceOwnedWaitBudgetMs], stretched for the finalize codes
+   * to the daemon's `retryAfterMs` clamped to [DEVICE_FINALIZE_WAIT_CAP_MS] (#11360). Every other
+   * code, and a refusal with no hint, keeps the plain budget.
+   */
+  private fun deviceOwnedBudgetMs(retryAfterMs: Long?, code: String?): Long {
+    if (code !in FINALIZE_WAIT_CODES || retryAfterMs == null) return deviceOwnedWaitBudgetMs
+    return maxOf(deviceOwnedWaitBudgetMs, minOf(retryAfterMs, DEVICE_FINALIZE_WAIT_CAP_MS))
+  }
+
+  /**
    * Exponential delay (500ms doubling, capped at 4s) for the next wait on a held device, clamped to
-   * the remaining [deviceOwnedWaitBudgetMs]; null once the budget is spent. A daemon `retryAfterMs`
-   * hint lengthens a step but never extends the budget.
+   * the remaining budget; null once the budget is spent. A daemon `retryAfterMs` hint lengthens a
+   * step and, for the finalize codes only ([code]), extends the budget up to 150 s (#11360);
+   * otherwise it never extends [deviceOwnedWaitBudgetMs].
    */
   internal fun deviceOwnedBackoffDelayMs(
     waitsSoFar: Int,
     waitedMs: Long,
     retryAfterMs: Long? = null,
+    code: String? = null,
   ): Long? {
-    val remaining = deviceOwnedWaitBudgetMs - waitedMs
+    val remaining = deviceOwnedBudgetMs(retryAfterMs, code) - waitedMs
     if (remaining <= 0) return null
     val doubled = DEVICE_OWNED_INITIAL_DELAY_MS shl waitsSoFar.coerceAtMost(8)
     val backoff = minOf(doubled, DEVICE_OWNED_MAX_DELAY_MS)

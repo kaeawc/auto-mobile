@@ -286,8 +286,13 @@ The registry tracks each scope as `valid`, `invalidating` or `invalidated`
   ```bash
   auto-mobile --daemon reset-slot-scope \
     --runner-namespace runner-A --incarnation boot-1 \
-    [--managed-host-scope host-1] [--wait-ms 10000]
+    [--managed-host-scope host-1] [--wait-ms 10000] [--force]
   ```
+
+  `--force` abandons a slot stuck `settling` (its released work outlived the
+  settlement cap): the slot returns to `ready`, its release journal entry is
+  committed, and the reset proceeds. It never overrides a slot with a live
+  execution owner, which still reports `pending`; the stuck work may keep running.
 
   `--runner-namespace` and `--incarnation` are required; `--managed-host-scope`
   narrows to one host scope; `--wait-ms` is the bounded settle wait (integer 0 to

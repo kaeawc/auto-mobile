@@ -22,6 +22,12 @@ export type ToolSelectionContext = {
     progress?: ProgressCallback;
   };
   routingSessionUuid?: string;
+  /**
+   * The connection the enclosing call runs for (#11469). Plan steps and nested internal calls
+   * inherit it, so a session they name is judged by the same owner rule as a direct call. Absent
+   * for a call with no originating connection.
+   */
+  callerMcpSessionId?: string;
   /** Connection-bound ownership proof for read-only cross-device checks. */
   ownsDeviceSession?: (sessionUuid: string) => boolean;
   execution?: {
@@ -60,6 +66,14 @@ function resolveRoutingBaseSessionUuid(
   return context.routingBaseSessionUuid ?? parent?.routingBaseSessionUuid;
 }
 
+/** A nested call with no identity of its own keeps the enclosing call's (#11469). */
+function resolveCallerMcpSessionId(
+  context: ToolSelectionContext,
+  parent: ToolSelectionContext | undefined,
+): string | undefined {
+  return context.callerMcpSessionId ?? parent?.callerMcpSessionId;
+}
+
 export const runWithToolSelectionContext = async <T>(
   context: ToolSelectionContext,
   fn: () => Promise<T>,
@@ -71,6 +85,7 @@ export const runWithToolSelectionContext = async <T>(
       ...context,
       planRequest: context.planRequest ?? parent?.planRequest,
       routingSessionUuid: context.routingSessionUuid ?? parent?.routingSessionUuid,
+      callerMcpSessionId: resolveCallerMcpSessionId(context, parent),
       execution: context.execution ?? parent?.execution,
       toolSelectionProfileUuid:
         context.toolSelectionProfileUuid ?? parent?.toolSelectionProfileUuid,

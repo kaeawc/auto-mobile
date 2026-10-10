@@ -89,6 +89,7 @@ test/daemon/devicePool.selectionPresenceSweep.test.ts
 test/daemon/devicePool.staleIdentityRefresh.test.ts
 test/daemon/devicePool.stateChangeListener.test.ts
 test/daemon/devicePool.statsBuckets.test.ts
+test/daemon/devicePool.systemUiRecoverySameSerialClaim.test.ts
 test/daemon/devicePoolCreate.test.ts
 test/daemon/devicePoolPhysicalIosRename.test.ts
 test/daemon/devicePoolRecoveryPolicy.test.ts
@@ -787,6 +788,7 @@ test/scripts/buildReleaseNotes.test.ts
 test/scripts/checkUtilsImportDirection.test.ts
 test/scripts/ciLfsSkipSmudgePolicy.test.ts
 test/scripts/circleciMacosMigrationPolicy.test.ts
+test/scripts/clockSemanticsReport.test.ts
 test/scripts/copyDbRuntimeFiles.test.ts
 test/scripts/daemonLogWorkflow.test.ts
 test/scripts/dbMigrationsSelfContained.test.ts

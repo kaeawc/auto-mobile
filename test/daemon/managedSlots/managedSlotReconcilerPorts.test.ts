@@ -7,11 +7,15 @@ import {
 } from "../../../src/daemon/managedSlots/managedSlotReconcilerPorts";
 import type { PooledDevice } from "../../../src/daemon/devicePool";
 import { ProvisionDeviceError } from "../../../src/devices/exactDeviceProvisioning";
-import type { DeviceInfo } from "../../../src/models";
+import type { BootedDevice, DeviceInfo } from "../../../src/models";
 import {
   createProvisionDeviceResponse,
   createToolErrorResponse,
 } from "../../../src/server/deviceTools";
+import { MultiPlatformDeviceManager } from "../../../src/devices/deviceUtils";
+import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { createFakeAndroidEmulator } from "../../fakes/FakeAndroidEmulator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const IOS_18 = "com.apple.CoreSimulator.SimRuntime.iOS-18-0";
@@ -222,10 +226,70 @@ describe("PoolManagedSlotDeviceClaims", () => {
     expect(await claims.describe(avd)).toEqual({ kind: "held", reason: "owned by daemon 99" });
   });
 
-  test("an unidentified running device is unknown; an idle one is free", async () => {
+  test("an idle device with a known stopped state is free", async () => {
     const pool = { getAllDevices: () => [], assertNotClaimedByForeignDaemon: async () => {} };
     const claims = new PoolManagedSlotDeviceClaims(pool);
-    expect((await claims.describe({ ...avd, isRunningStateKnown: false })).kind).toBe("unknown");
     expect((await claims.describe({ ...avd, isRunning: false })).kind).toBe("free");
+  });
+
+  describe("driven by the real Android listing shape", () => {
+    async function listedAvd(booted: BootedDevice[] | Error): Promise<DeviceInfo> {
+      const fakeEmulator = createFakeAndroidEmulator({
+        listAvds: async () => [{ name: "amslot-a", platform: "android", isRunning: false }],
+        getBootedDevicesChecked: async () => {
+          if (booted instanceof Error) {
+            throw booted;
+          }
+          return booted;
+        },
+      });
+      const manager = new MultiPlatformDeviceManager(
+        new FakeAdbClient() as unknown as AdbClient,
+        undefined,
+        fakeEmulator,
+      );
+      const inventory = await new DeviceManagerSlotInventory(manager).list("android", {});
+      return inventory.devices[0];
+    }
+
+    const unresolved: BootedDevice = {
+      name: "Unknown (emulator-5554)",
+      platform: "android",
+      deviceId: "emulator-5554",
+      source: "local",
+    };
+
+    test("an AVD whose adb listing failed is unknown, not free", async () => {
+      const device = await listedAvd(new Error("adb devices unavailable"));
+      expect(device).toMatchObject({ isRunning: false, isRunningStateKnown: false });
+      const pool = { getAllDevices: () => [], assertNotClaimedByForeignDaemon: async () => {} };
+      expect((await new PoolManagedSlotDeviceClaims(pool).describe(device)).kind).toBe("unknown");
+    });
+
+    test("an unresolved emulator held by a session makes the AVD unknown, not free", async () => {
+      const device = await listedAvd([unresolved]);
+      expect(device.isRunningStateKnown).toBe(false);
+      const heldPool = {
+        getAllDevices: () =>
+          [
+            {
+              id: "emulator-5554",
+              name: "Unknown (emulator-5554)",
+              platform: "android",
+              sessionId: "s-1",
+            },
+          ] as PooledDevice[],
+        assertNotClaimedByForeignDaemon: async () => {},
+      };
+      expect((await new PoolManagedSlotDeviceClaims(heldPool).describe(device)).kind).toBe(
+        "unknown",
+      );
+    });
+
+    test("a fully listed stopped AVD stays free", async () => {
+      const device = await listedAvd([]);
+      const pool = { getAllDevices: () => [], assertNotClaimedByForeignDaemon: async () => {} };
+      expect((await new PoolManagedSlotDeviceClaims(pool).describe(device)).kind).toBe("free");
+    });
   });
 });

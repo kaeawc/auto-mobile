@@ -685,7 +685,10 @@ async function bindBootedDeviceSession(
   // Reserve the exact ready device before resource notifications publish it
   // to concurrent allocators.
   const daemonState = DaemonState.getInstance();
-  if (autolockEnabled && daemonState.isInitialized()) {
+  // A one-shot `--cli` call is anonymous: autolock keys its session on the per-connection MCP id,
+  // which the next CLI call never shares, so it would refuse that call. Bind it as an anonymous
+  // acquisition below, which later one-shot calls reuse (#11096, #11148).
+  if (autolockEnabled && args.__oneShotCli !== true && daemonState.isInitialized()) {
     const autolockSessionId = await daemonState
       .getDevicePool()
       .autolockDevice(

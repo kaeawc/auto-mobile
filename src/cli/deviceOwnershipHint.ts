@@ -16,9 +16,15 @@ function refusalCode(payload: unknown): unknown {
   const record = payload as Record<string, unknown>;
   // Tool-call refusals carry `code`; a deleteDevice precondition failure nests it in `failure`.
   const failure = record.failure;
-  return failure && typeof failure === "object"
-    ? (failure as Record<string, unknown>).code
-    : record.code;
+  if (failure && typeof failure === "object") {
+    return (failure as Record<string, unknown>).code;
+  }
+  // Ownership-loss payloads (session_ownership_lost, ...) nest the code under `error`.
+  const error = record.error;
+  return (
+    record.code ??
+    (error && typeof error === "object" ? (error as Record<string, unknown>).code : undefined)
+  );
 }
 
 /**
@@ -57,8 +63,9 @@ export function cliDeviceOwnershipHint(payload: unknown, toolName: string): stri
       `Hint: another session holds the device, and ${toolName} cannot join it: acquisition ` +
       "tools mint their own session and the CLI ignores --session-uuid for them. If that " +
       "session is yours, skip re-acquiring and pass --session-uuid <uuid> to your follow-up " +
-      "calls; to free the device, run --daemon release-session <uuid>; otherwise wait for the " +
-      "holder to release it."
+      "calls; to see who holds the device, run --daemon active-sessions (releasing a session " +
+      "that is not yours can break another agent's work); otherwise wait for the holder to " +
+      "release it."
     );
   }
   const forceHint = FORCE_OVERRIDE_TOOLS.has(toolName)

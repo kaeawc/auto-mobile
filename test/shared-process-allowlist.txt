@@ -910,6 +910,7 @@ test/server/provisionDevice.property.test.ts
 test/server/provisionDeviceRecoveryEvidence.test.ts
 test/server/queryParamValidation.property.test.ts
 test/server/queryParamValidation.test.ts
+test/server/resourceNotifySlowSibling.test.ts
 test/server/resourceUriLoneSurrogate.test.ts
 test/server/resources/hostToolchainResources.test.ts
 test/server/resources/list.test.ts

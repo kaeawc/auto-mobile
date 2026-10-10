@@ -1001,6 +1001,63 @@ jobs:
           path: scratch/fast-validate-*/
           retention-days: 7
 
+  # Changed-file shell gate (#11183). ShellCheck, the pipefail+grep -q ratchet and
+  # the BATS files relevant to the changed scripts used to run in full only after
+  # merge (merge.yml), so main went red from findings no PR check caught. This job
+  # runs the SAME selection `scripts/prepush-shell.sh` makes locally (changed
+  # scripts, their sourced consumers, the pipefail baseline/validator and BATS
+  # fixtures/helpers) against the PR base, never the full BATS sweep, so it stays
+  # fast enough to be a required check. It has no `needs` and no path filter: a
+  # PR that touches no shell input finishes in seconds with "nothing to validate",
+  # so the stable context name below always reports.
+  shell-changed-gate:
+    timeout-minutes: 15
+    name: "Shell Changed Files"
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          # Full history so `origin/<base>...HEAD` has a merge-base.
+          fetch-depth: 0
+
+      - name: "Install BATS"
+        shell: bash
+        background: true
+        id: install-bats
+        run: |
+          if command -v bats &>/dev/null; then
+            echo "bats already installed: $(bats --version)"
+          else
+            # Same pinned bats-core as the full BATS job.
+            git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            sudo /tmp/bats-core/install.sh /usr/local
+          fi
+          if ! command -v shellcheck &>/dev/null; then
+            echo "shellcheck missing on the runner" >&2
+            exit 1
+          fi
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      # Foreground: it appends node_modules/.bin to $GITHUB_PATH, and the
+      # selector resolves TypeScript check dependencies with bun.
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
+      - wait: install-bats
+
+      - name: "Run changed-file shell checks"
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: scripts/prepush-shell.sh --base "origin/${BASE_REF}"
+
   # Detekt used to be a step inside Fast Validation, where its ~7 minutes of
   # cold Gradle work dominated an otherwise ~1 minute job. It is its own job so
   # it runs concurrently instead of serially, and so it can go through

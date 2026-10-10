@@ -235,7 +235,7 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first' "${FAST_LOG}"
   ! grep -Fq -- 'mkdocs-nav' "${FAST_LOG}"
   grep -Fqx -- 'test/bats/example.bats' "${BATS_LOG}"
 }
@@ -247,7 +247,7 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,claude-plugin' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,claude-plugin' "${FAST_LOG}"
 }
 
 @test "a deleted registered fast-check implementation still selects that check" {
@@ -258,7 +258,7 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,deleted-check' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,deleted-check' "${FAST_LOG}"
 }
 
 @test "a changed sourced helper selects every registered consumer" {
@@ -270,7 +270,7 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-one,helper-consumer-two,helper-consumer-three,helper-consumer-four,helper-consumer-five' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,helper-consumer-one,helper-consumer-two,helper-consumer-three,helper-consumer-four,helper-consumer-five' "${FAST_LOG}"
 }
 
 @test "a changed second SC1091 helper selects its multi-source consumer" {
@@ -282,7 +282,7 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-five' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,helper-consumer-five' "${FAST_LOG}"
 }
 
 @test "a changed first SC1091 helper selects its multi-source consumer" {
@@ -294,7 +294,7 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-one,helper-consumer-two,helper-consumer-three,helper-consumer-four,helper-consumer-five' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,helper-consumer-one,helper-consumer-two,helper-consumer-three,helper-consumer-four,helper-consumer-five' "${FAST_LOG}"
 }
 
 @test "a deleted SC1091 helper in a removed directory still selects its consumer" {
@@ -306,7 +306,7 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-deleted-helper' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,helper-consumer-deleted-helper' "${FAST_LOG}"
 }
 
 @test "a changed leaf helper two source levels deep selects its consumer" {
@@ -330,7 +330,7 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,chain-consumer' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,chain-consumer' "${FAST_LOG}"
 }
 
 @test "a changed helper inside a source cycle selects its consumer and terminates" {
@@ -359,7 +359,7 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,cycle-consumer' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,cycle-consumer' "${FAST_LOG}"
 }
 
 @test "a deleted .tsx target of an extensionless import still selects its registered check" {
@@ -440,7 +440,7 @@ EOF
 
   [ "${status}" -eq 0 ]
   [ ! -e "${pwned_path}" ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-four' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,helper-consumer-four' "${FAST_LOG}"
 }
 
 @test "an SC1091 helper in an ampersand checkout selects its consumer" {
@@ -485,7 +485,7 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-four' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,helper-consumer-four' "${FAST_LOG}"
 }
 
 @test "a jj workspace uses the VCS diff seam without a git checkout" {
@@ -499,7 +499,7 @@ EOF
   run bash scripts/prepush-shell.sh --base feature-base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,lfs-pointers' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,lfs-pointers' "${FAST_LOG}"
   grep -Fqx -- 'test/bats/example.bats' "${BATS_LOG}"
 }
 
@@ -599,7 +599,7 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,pipefail-grep-q' "${FAST_LOG}"
   grep -Fqx -- '.githooks/pre-push' "${SHELLCHECK_LOG}"
 }
 
@@ -654,7 +654,7 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only bun-version-coherence,shellcheck,shell-portability,shell-sete,stdlib-first' "${FAST_LOG}"
+  grep -Fqx -- '--only bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first' "${FAST_LOG}"
 }
 
 @test "a renamed script searches BATS using both old and new basenames" {
@@ -779,4 +779,37 @@ FIXTURE
   [ "${status}" -eq 0 ]
   [ -n "${output}" ]
   [ "${output}" = "scripts/lib/helper.sh" ]
+}
+
+@test "a changed pipefail grep -q baseline selects its check and the real-tree BATS pin (#11183)" {
+  commit_change "test/bats/validate-shell-pipefail-grepq.bats" '@test "pin" { true; }'
+  commit_change "scripts/shellcheck/pipefail-grepq-baseline.txt" "baseline fixture"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fq -- 'pipefail-grep-q' "${FAST_LOG}"
+  grep -Fq -- 'test/bats/validate-shell-pipefail-grepq.bats' "${BATS_LOG}"
+}
+
+@test "a changed script selects the pipefail grep -q ratchet (#11183)" {
+  commit_change "scripts/new-script.sh" "#!/usr/bin/env bash"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fq -- ',pipefail-grep-q' "${FAST_LOG}"
+}
+
+@test "a changed BATS fixture runs only the BATS files that name it" {
+  commit_change "test/bats/uses-fixture.bats" '@test "x" { cat fixtures/shared-fixture.txt; }'
+  commit_change "test/bats/other.bats" '@test "y" { true; }'
+  git branch -f base HEAD
+  commit_change "test/bats/fixtures/shared-fixture.txt" "fixture"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fq -- 'test/bats/uses-fixture.bats' "${BATS_LOG}"
+  ! grep -Fq -- 'test/bats/other.bats' "${BATS_LOG}"
 }

@@ -522,3 +522,24 @@ wiring_requires_yq() {
   [[ "$output" == *":desktop-core:test"* ]]
   [[ "$output" == *"*DesktopWireFixtureCompositionTest"* ]]
 }
+
+@test "shell-changed-gate is a stable, always-reporting, changed-file-scoped PR job (#11183)" {
+  wiring_requires_yq
+  run yq -r '.jobs."shell-changed-gate".name' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "Shell Changed Files" ]
+
+  # No path filter and no needs: a required check that is skipped or blocked
+  # behind another job would hang as "Expected".
+  run yq -r '.jobs."shell-changed-gate".if // "none"' "$WF"
+  [ "$output" = "none" ]
+  run yq -r '.jobs."shell-changed-gate".needs // "none"' "$WF"
+  [ "$output" = "none" ]
+
+  # It uses the same selector as the local pre-push gate against the PR base and
+  # must never run the full BATS sweep.
+  block="$(job_block shell-changed-gate)"
+  [[ "$block" == *'scripts/prepush-shell.sh --base "origin/${BASE_REF}"'* ]]
+  [[ "$block" != *"run-bats.sh"* ]]
+  [[ "$block" != *"bats test/bats"* ]]
+}

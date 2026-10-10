@@ -373,9 +373,9 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
           deviceId: devices[0].deviceId,
           keepScreenAwake: false,
         }),
-      ).rejects.toThrow("does not match");
-      // A managed connection gets the typed refusal for a non-slot device, not the routing
-      // error above (#11268).
+      ).rejects.toThrow("device_outside_bound_session");
+      // A managed connection gets its own typed refusal for a non-slot device, not the
+      // bound-session one above (#11268, #11274).
       DaemonState.getInstance()
         .getManagedConnectionScopes()
         .bind(socketSessionId, { scopeKey: "scope-11268", sessionUuids: [apple] });

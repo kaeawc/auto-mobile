@@ -13,6 +13,7 @@ import { SessionRecoveryAssignmentError } from "../models/SessionRecoveryAssignm
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
+import { DeviceOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import {
   DeviceAssignedToManagedSlotError,
@@ -94,13 +95,25 @@ function toolCallErrorText(error: unknown, message: string): string {
   return `Error: ${message}`;
 }
 
-/** The typed fields of a device or session refusal, after `success` and `error`. */
-function typedRefusalPayload(error: unknown): Record<string, unknown> | undefined {
-  if (
+/** Refusals that build their own wire payload. */
+function hasSelfDescribedRefusalPayload(
+  error: unknown,
+): error is
+  | DeviceAssignedToManagedSlotError
+  | DeviceOutsideManagedSlotsError
+  | DeviceOutsideBoundSessionError
+  | ManagedSlotDiscoveryIncompleteError {
+  return (
     error instanceof DeviceAssignedToManagedSlotError ||
     error instanceof DeviceOutsideManagedSlotsError ||
+    error instanceof DeviceOutsideBoundSessionError ||
     error instanceof ManagedSlotDiscoveryIncompleteError
-  ) {
+  );
+}
+
+/** The typed fields of a device or session refusal, after `success` and `error`. */
+function typedRefusalPayload(error: unknown): Record<string, unknown> | undefined {
+  if (hasSelfDescribedRefusalPayload(error)) {
     return error.toPayload();
   }
   if (error instanceof InputDeviceOwnedError || isTerminalForeignOwnedRecoveryError(error)) {

@@ -195,7 +195,7 @@ describe("tools/call selector forwarding", () => {
         deviceId: "device-1",
         platform: "android",
       })),
-    ).toThrow("does not match");
+    ).toThrow("device_outside_bound_session");
   });
 
   test("preserves an explicit UUID matching the prior binding over a conflicting platform", () => {

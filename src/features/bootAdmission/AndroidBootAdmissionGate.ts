@@ -55,6 +55,8 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
   private warnedLimit: string | undefined;
   /** Serials of emulators this process launched through an admission. */
   private readonly startedSerials = new Set<string>();
+  /** Started serials adb has listed at least once: only these can be seen exiting. */
+  private readonly listedStartedSerials = new Set<string>();
 
   constructor(
     private readonly source: AndroidCapacitySource,
@@ -150,6 +152,7 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
   private decide(
     sample: AndroidCapacitySample,
   ): AndroidAdmissionDecision | RefusedCapacityDecision {
+    this.forgetExitedSerials(sample);
     const limits = this.limitsFor(sample);
     const bootedCount = this.count(sample).effective;
     return (
@@ -161,6 +164,24 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
         ),
       }) ?? { outcome: "allow", limits, bootedCount }
     );
+  }
+
+  /**
+   * Forget a started serial once its emulator has been listed and then disappears, so a later
+   * external emulator reusing the serial is not named as ours. Skipped when the listing failed.
+   */
+  private forgetExitedSerials(sample: AndroidCapacitySample): void {
+    if (sample.serialListingFailed) {
+      return;
+    }
+    const listed = new Set(sample.emulatorSerials);
+    for (const serial of this.startedSerials) {
+      if (listed.has(serial)) {
+        this.listedStartedSerials.add(serial);
+      } else if (this.listedStartedSerials.delete(serial)) {
+        this.startedSerials.delete(serial);
+      }
+    }
   }
 
   /**

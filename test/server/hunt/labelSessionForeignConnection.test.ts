@@ -143,6 +143,23 @@ describe("hunt: a derived label session of a base another connection owns", () =
     expect(wire(result).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
   });
 
+  test("the derived session's name does not reach the owner's base device through a label", async () => {
+    const result = await fixture!.client.callTool({
+      name: "tapAt",
+      arguments: {
+        x: 10,
+        y: 10,
+        sessionUuid: labelSession,
+        device: "A",
+        [INTERNAL_MCP_SESSION_PARAM]: OTHER,
+      },
+    });
+
+    expect(tools.runs).toEqual([]);
+    expect(result.isError).toBe(true);
+    expect(wire(result).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+  });
+
   test("the pool predicate counts a derived session as its base", () => {
     expect(pool.isSessionOwnedByOtherConnection(labelSession, OTHER)).toBe(true);
     expect(pool.isSessionOwnedByOtherConnection(labelSession, OWNER)).toBe(false);

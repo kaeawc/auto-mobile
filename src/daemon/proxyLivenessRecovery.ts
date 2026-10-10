@@ -371,7 +371,11 @@ export interface LivenessRecoveryDeps {
     /** The lease had already lapsed, so the daemon held the session as suspect. */
     restoredAfterLapse: boolean;
   }): void;
-  /** The daemon answered that a `daemon_stalled` session no longer exists. */
+  /**
+   * The daemon answered not-found for a `daemon_stalled` session. That alone is not proof of loss:
+   * a replacement daemon answers the same for a persisted session it has not materialised yet, so
+   * the owner decides by the release reason whether to fence it (#11411).
+   */
   onSessionGone(sessionUuid: string, code: LivenessStallCode): void;
   onHandover(handover: LivenessHandover): void;
 }

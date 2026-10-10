@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   assertManagedSlotOwnerRunning,
+  MANAGED_SLOTS_PROXY_WIRED,
   MANAGED_SLOTS_V1_CAPABILITY,
   ManagedSlotConfigError,
   assertManagedSlotContractSupported,
@@ -185,14 +186,17 @@ describe("contract negotiation", () => {
 });
 
 describe("assertManagedSlotsSupported", () => {
-  test("is not wired yet, so a supplied config is refused with a typed error", () => {
-    expect(codeOf(() => assertManagedSlotsSupported(parseManagedSlotConfig(validConfig)))).toBe(
-      "managed_slots_unsupported",
-    );
+  test("is wired (#11173): a supplied config is accepted", () => {
+    expect(MANAGED_SLOTS_PROXY_WIRED).toBe(true);
+    expect(() => assertManagedSlotsSupported(parseManagedSlotConfig(validConfig))).not.toThrow();
     expect(() => assertManagedSlotsSupported(undefined)).not.toThrow();
-    expect(() =>
-      assertManagedSlotsSupported(parseManagedSlotConfig(validConfig), true),
-    ).not.toThrow();
+  });
+
+  test("a build without the wiring refuses a supplied config with a typed error", () => {
+    expect(
+      codeOf(() => assertManagedSlotsSupported(parseManagedSlotConfig(validConfig), false)),
+    ).toBe("managed_slots_unsupported");
+    expect(() => assertManagedSlotsSupported(undefined, false)).not.toThrow();
   });
 });
 

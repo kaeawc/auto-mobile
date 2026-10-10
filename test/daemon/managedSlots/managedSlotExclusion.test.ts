@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
+  currentManagedSlotReconciler,
   managedSlotRefusal,
   RegistryManagedSlotExclusion,
+  runAsManagedSlotReconciler,
 } from "../../../src/daemon/managedSlots/managedSlotExclusion";
 import {
   DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE,
@@ -158,6 +160,61 @@ describe("managedSlotRefusal", () => {
     ).toBeUndefined();
     expect(
       managedSlotRefusal(undefined, { action: "killDevice", deviceId: "UDID-1", device }),
+    ).toBeUndefined();
+  });
+});
+
+describe("managed slot reconciler bypass (#11173)", () => {
+  test("the slot's own reconciler may act on its device; no other slot's, and only inside the run", async () => {
+    const timer = new FakeTimer();
+    const registry = new FakeSlotRegistry(timer);
+    const mine = await assignManagedSlotDevice(registry, "android", "mine-avd", "runner-a");
+    await assignManagedSlotDevice(registry, "android", "other-avd", "runner-b");
+    const exclusion = new RegistryManagedSlotExclusion(async () => registry, timer);
+    await exclusion.refresh();
+    const refusalFor = (stableId: string) =>
+      managedSlotRefusal(exclusion, {
+        action: "provisionDevice",
+        deviceId: stableId,
+        device: { platform: "android", stableIds: [stableId] },
+      });
+
+    const inside = await runAsManagedSlotReconciler(mine, async () => {
+      await Promise.resolve();
+      return {
+        current: currentManagedSlotReconciler(),
+        mine: refusalFor("mine-avd"),
+        other: refusalFor("other-avd"),
+      };
+    });
+
+    expect(inside.current).toEqual(mine);
+    expect(inside.mine).toBeUndefined();
+    expect(inside.other).toBeInstanceOf(DeviceAssignedToManagedSlotError);
+    expect(currentManagedSlotReconciler()).toBeUndefined();
+    expect(refusalFor("mine-avd")).toBeInstanceOf(DeviceAssignedToManagedSlotError);
+  });
+
+  test("a reconciler may adopt from the managed free pool", async () => {
+    const timer = new FakeTimer();
+    const registry = new FakeSlotRegistry(timer);
+    const freed = await assignManagedSlotDevice(registry, "ios", "UDID-FREE", "runner-old");
+    await registry.beginScopeInvalidation(freed.scopeKey, "operator_reset");
+    await registry.completeScopeInvalidation(freed.scopeKey);
+    const exclusion = new RegistryManagedSlotExclusion(async () => registry, timer);
+    await exclusion.refresh();
+    const refusal = () =>
+      managedSlotRefusal(exclusion, {
+        action: "provisionDevice",
+        deviceId: "UDID-FREE",
+        device: { platform: "ios", stableIds: ["UDID-FREE"] },
+      });
+
+    expect(refusal()).toBeInstanceOf(DeviceAssignedToManagedSlotError);
+    expect(
+      await runAsManagedSlotReconciler({ scopeKey: "any-scope", slotIndex: 0 }, async () =>
+        refusal(),
+      ),
     ).toBeUndefined();
   });
 });

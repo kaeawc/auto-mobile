@@ -55,7 +55,9 @@ import {
 import {
   assertManagedSlotOwnerRunning,
   assertManagedSlotsSupported,
+  type ManagedSlotConfig,
 } from "./models/managedSlotConfig";
+import type { ManagedSlotsResult } from "./models/managedSlotsResult";
 import { runShutdownCleanupStages } from "./shutdownCleanup";
 import { startStartupMaintenance } from "./utils/startupMaintenance";
 import { daemonCommandSkipsServerBootstrap } from "./daemon/cli/daemonCommandRouting";
@@ -137,7 +139,7 @@ async function main() {
 
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   const { createMcpServer, registerMcpTools } = await import("./server");
-  const { createProxyMcpServer } = await import("./server/proxyServer");
+  const { createDaemonMcpProxy, createProxyMcpServer } = await import("./server/proxyServer");
   const { logger, LogLevel } = await import("./utils/logger");
   fatalLogger = logger;
   const { runCliCommand } = await import("./cli");
@@ -728,23 +730,36 @@ async function main() {
 
       // Run as MCP server with STDIO transport
       const stdioTransport = new StdioServerTransport();
+      // A managed slot proxy reads stdin from the start, so EOF during its acquisition shuts it
+      // down (aborting the acquisition), while initialize waits for the acquisition's result.
+      const earlyTransport =
+        useProxyMode && managedSlotConfig
+          ? new (await import("./server/earlyStartTransport")).EarlyStartTransport(stdioTransport)
+          : undefined;
+      await earlyTransport?.startEarly();
       let server;
       let proxyToClaimInitialSession: { claimInitialSession(): Promise<void> } | undefined;
       try {
         if (useProxyMode) {
           const { getDefaultSessionHeartbeatTimeoutMs } = await import("./daemon/sessionManager");
+          const proxy = createDaemonMcpProxy({
+            autoStartDaemon: !noDaemon,
+            lifecycleNamespaceEnv: process.env,
+            daemonOptions: daemonStartupOptions,
+            initialSessionUuid,
+            livenessOwnerToken,
+            heartbeatTimeoutMs: getDefaultSessionHeartbeatTimeoutMs(),
+          });
+          // Published first, so shutdown (stdin EOF, SIGTERM) closes it and aborts an acquisition.
+          stdioProxy = proxy;
+          const managedSlots = managedSlotConfig
+            ? await acquireManagedSlotsBeforeServing(proxy, managedSlotConfig, launchParentPid)
+            : undefined;
           const result = createProxyMcpServer({
-            proxyConfig: {
-              autoStartDaemon: !noDaemon,
-              lifecycleNamespaceEnv: process.env,
-              daemonOptions: daemonStartupOptions,
-              initialSessionUuid,
-              livenessOwnerToken,
-              heartbeatTimeoutMs: getDefaultSessionHeartbeatTimeoutMs(),
-            },
+            proxy,
+            ...(managedSlots ? { managedSlots } : {}),
           });
           server = result.server;
-          stdioProxy = result.proxy;
           proxyToClaimInitialSession = result.proxy;
         } else {
           server = createMcpServer({ debug });
@@ -753,15 +768,10 @@ async function main() {
         logger.error("Failed to create MCP server:", error);
         throw error;
       }
-      if (useProxyMode && managedSlotConfig) {
-        // A managed slot execution's proxy must not outlive its owner (#11176): owner exit or
-        // re-parenting shuts it down, and shutdown releases its sessions promptly.
-        await startExecutionOwnerWatch(launchParentPid, managedSlotConfig.executionOwnerPid);
-      }
       try {
         logger.info("Connecting MCP server to stdio transport");
         startupBenchmark.startPhase("serverListening");
-        await server.connect(stdioTransport);
+        await server.connect(earlyTransport ?? stdioTransport);
         startupBenchmark.endPhase("serverListening");
         logger.info("MCP server connected to stdio transport");
         // `--initial-session-uuid` adopts its session now, not on the first tool call.
@@ -782,6 +792,27 @@ async function main() {
     logger.error("Error initializing server:", err);
     throw err;
   }
+}
+
+/**
+ * Acquire a managed slot execution's slots before the MCP server exists (#11173), so `initialize`
+ * and `tools/list` are answered only with the result: it rides in initialize and the
+ * `automobile:managed-slots` resource, and a failure serves no tools. The owner watch starts first
+ * (#11176): owner exit or re-parenting shuts the proxy down, which aborts the acquisition.
+ */
+async function acquireManagedSlotsBeforeServing(
+  proxy: { acquireManagedSlots(config: ManagedSlotConfig): Promise<ManagedSlotsResult> },
+  config: ManagedSlotConfig,
+  launchParentPid: number,
+): Promise<ManagedSlotsResult> {
+  await startExecutionOwnerWatch(launchParentPid, config.executionOwnerPid);
+  const result = await proxy.acquireManagedSlots(config);
+  const { logger } = await import("./utils/logger");
+  logger.info(
+    `[ManagedSlots] Acquisition ${result.outcome}` +
+      (result.failure ? ` (${result.failure.code})` : ""),
+  );
+  return result;
 }
 
 /** Watch the managed slot execution's owner (by default the launching parent) (#11176). */

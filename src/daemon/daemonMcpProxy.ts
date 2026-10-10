@@ -106,6 +106,9 @@ import {
 } from "./buildIdentity";
 import { ActionableError, toActionableError } from "../models";
 import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "./managedExecutionLiveness";
+import { acquireManagedSlotsThroughDaemon } from "./managedSlotProxyAcquisition";
+import type { ManagedSlotConfig } from "../models/managedSlotConfig";
+import type { ManagedSlotsResult } from "../models/managedSlotsResult";
 import { DeviceControlTransportError, isReplaySafeToolName } from "./deviceControlTransportFailure";
 import { McpOverloadError, McpTimeoutError } from "./McpTimeoutError";
 import {
@@ -1342,6 +1345,10 @@ export class DaemonMcpProxy {
   private readonly claimableSessions = new Set<string>();
   /** Sessions held for a managed slot execution; released promptly on close (#11176). */
   private readonly managedExecutionSessions = new Set<string>();
+  /** The managed slot acquisition's result, once it ran (#11173). */
+  private managedSlotsResult: ManagedSlotsResult | undefined;
+  /** Aborts an in-flight managed slot acquisition when the proxy closes (EOF, SIGTERM, owner loss). */
+  private managedSlotsAcquisitionAbort: AbortController | undefined;
   // Once the daemon confirms this transport's bound session is gone, preserve
   // that terminal identity instead of clearing it and allowing the same UUID to
   // acquire another device. `fromResultMint` records the binding's provenance at
@@ -1581,6 +1588,44 @@ export class DaemonMcpProxy {
     } catch (error) {
       throw toActionableError(error, `Failed to hold managed execution session ${trimmed}`);
     }
+  }
+
+  /**
+   * Acquire this execution's managed device slots before the proxy serves `initialize` (#11173):
+   * negotiate `managed-slots/v1`, have the daemon reconcile the slots and hand each a fresh session
+   * claimed for this proxy's owner token, then hold those sessions for the execution. Bounded by
+   * the config's preparation deadline and aborted by {@link close}. Never throws: a failure is a
+   * typed `failed` result, which the MCP server exposes instead of device tools.
+   */
+  async acquireManagedSlots(config: ManagedSlotConfig): Promise<ManagedSlotsResult> {
+    const abort = new AbortController();
+    this.managedSlotsAcquisitionAbort = abort;
+    try {
+      const result = await acquireManagedSlotsThroughDaemon(
+        config,
+        {
+          ensureConnected: () => this.ensureConnected(),
+          callDaemonMethod: (method, params, options) =>
+            this.requireClient().callDaemonMethod(method, params, options),
+          holdSession: (sessionUuid) => this.holdManagedExecutionSession(sessionUuid),
+          releaseHeldSessions: () => this.releaseManagedExecutionSessions(),
+          livenessOwnerToken: this.livenessOwnerToken,
+          timer: this.timer,
+        },
+        abort.signal,
+      );
+      this.managedSlotsResult = result;
+      return result;
+    } finally {
+      if (this.managedSlotsAcquisitionAbort === abort) {
+        this.managedSlotsAcquisitionAbort = undefined;
+      }
+    }
+  }
+
+  /** The managed slot acquisition result, once {@link acquireManagedSlots} ran. */
+  getManagedSlotsResult(): ManagedSlotsResult | undefined {
+    return this.managedSlotsResult;
   }
 
   /** The sessions this proxy holds for a managed execution (#11176). */
@@ -6808,6 +6853,7 @@ export class DaemonMcpProxy {
    */
   async close(): Promise<void> {
     this.closing = true;
+    this.managedSlotsAcquisitionAbort?.abort(new DaemonUnavailableError("MCP proxy is closing"));
     this.connected = false;
     this.livenessRecovery.stop();
     // Not awaited: a probe round waiting on a frozen daemon must not hold up close; `closing`

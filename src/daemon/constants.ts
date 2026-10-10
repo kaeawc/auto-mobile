@@ -545,6 +545,14 @@ export const DAEMON_RELEASE_EXECUTION_METHOD = "daemon/releaseExecution";
 export const DAEMON_RESET_SLOT_SCOPE_METHOD = "daemon/resetSlotScope";
 
 /**
+ * Acquires a stdio proxy's managed device slots before it serves `initialize` (#11173): ensures the
+ * runner scope (implicit incarnation transition, abandoned-scope revival), reconciles each slot to
+ * its declared spec, claims the slot for a fresh session owned by the caller's liveness token and
+ * puts that session on the `managed-execution` policy. Answers a typed `ManagedSlotsResult`.
+ */
+export const DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD = "daemon/acquireManagedSlots";
+
+/**
  * Lists the live device sessions whose liveness owner is the given token (#10990). A proxy
  * restarted with its harness-supplied stable `--liveness-owner-token` asks this on connect, then
  * re-claims and heartbeats every session it owned before the owner-disconnect grace ends. Only the

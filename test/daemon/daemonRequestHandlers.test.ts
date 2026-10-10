@@ -250,6 +250,8 @@ describe("handleDaemonRequest", () => {
           "input/typeText.mode:append",
           "input/gestureStream",
           "daemon/registerSession",
+          // Advertised once the proxy acquires managed slots (#11173).
+          "managed-slots/v1",
         ],
       },
     });

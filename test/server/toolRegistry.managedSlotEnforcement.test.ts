@@ -15,6 +15,11 @@ import {
 import type { SlotKey } from "../../src/daemon/managedSlots/slotRegistry";
 import { assertManagedConnectionPlainToolCall } from "../../src/server/managedConnectionToolGate";
 import type { BootedDevice } from "../../src/models";
+import {
+  DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+  type InputDeviceOwnedError,
+} from "../../src/daemon/inputDeviceOwnership";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -246,6 +251,36 @@ describe("ToolRegistry managed-slot enforcement (#11178)", () => {
       await sessionManager.createSession("generic-session", free.deviceId, "ios");
       await internal("generic-session");
       expect(handled).toEqual(["acquire"]);
+    });
+
+    // #11469: a sessionless plan's steps run for the managed connection that called executePlan.
+    test("a sessionless plan step may name its slot session, not one another connection owns", async () => {
+      const asManagedConnection = (sessionUuid: string): Promise<unknown> =>
+        runWithToolSelectionContext({ callerMcpSessionId: mcpA }, () =>
+          ToolRegistry.callInternal("controlProbe", { platform: "ios", sessionUuid }),
+        ).catch((error: unknown) => error);
+      await DaemonState.getInstance()
+        .getDevicePool()
+        .bindOrReuseDeviceSession(
+          "foreign-session",
+          free.deviceId,
+          "ios",
+          undefined,
+          undefined,
+          undefined,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          "mcp-socket-other",
+        );
+
+      const refused = await asManagedConnection("foreign-session");
+      expect((refused as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(handled).toEqual([]);
+
+      await asManagedConnection(execA);
+      expect(handled).toEqual([`control:${slotA.deviceId}`]);
     });
 
     test("an internal call on its slot session may not control an unassigned device", async () => {

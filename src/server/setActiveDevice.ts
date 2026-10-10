@@ -17,6 +17,7 @@ import {
 import { prepareSessionDisplayPin } from "./sessionDisplayPin";
 import { deviceAssignedToOtherSessionError } from "../daemon/inputDeviceOwnership";
 import { executionTracker } from "./executionTracker";
+import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 
 export interface SetActiveDeviceArgs {
   deviceId: string;
@@ -84,7 +85,10 @@ function refuseForeignOwnedSession(args: HandlerArgs): void {
     return;
   }
   const pool = DaemonState.getInstance().getDevicePool();
-  if (pool.isSessionOwnedByOtherConnection(args.sessionUuid, args.__mcpSessionId)) {
+  // #11469: a plan step or nested call carries no socket identity of its own and is judged as
+  // the connection of the call that started it.
+  const callerMcpSessionId = args.__mcpSessionId ?? getToolSelectionContext()?.callerMcpSessionId;
+  if (pool.isSessionOwnedByOtherConnection(args.sessionUuid, callerMcpSessionId)) {
     throw deviceAssignedToOtherSessionError(args.deviceId, args.sessionUuid, undefined);
   }
 }

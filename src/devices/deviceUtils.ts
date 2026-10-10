@@ -1037,7 +1037,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     const physical = await physicalPromise;
     const freshPhysicalIds = physical.complete
       ? physical.devices.map((device) => device.deviceId)
-      : [];
+      : "observedDeviceIds" in physical
+        ? (physical.observedDeviceIds ?? [])
+        : [];
     const physicalError = physical.complete ? undefined : physical.error;
     if ("simulators" in simulatorOutcome) {
       const { simulators } = simulatorOutcome;

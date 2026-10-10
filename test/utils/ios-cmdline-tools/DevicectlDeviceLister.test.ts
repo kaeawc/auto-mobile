@@ -328,7 +328,7 @@ describe("DevicectlDeviceLister", () => {
     expect(options?.signal).toBeUndefined();
   });
 
-  test("a sweep with an unidentifiable record is complete and includes recognized devices", async () => {
+  test("a sweep with an unidentifiable record is incomplete and includes recognized devices", async () => {
     const lister = makeLister({
       readFile: async () =>
         JSON.stringify(
@@ -339,7 +339,7 @@ describe("DevicectlDeviceLister", () => {
     const discovery = await lister.listConnectedDevices();
 
     expect(discovery.devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
-    expect(discovery.complete).toBe(true);
+    expect(discovery.complete).toBe(false);
   });
 
   test("retains the last good listing across a failing sweep, then lets it go stale", async () => {
@@ -795,7 +795,7 @@ describe("devicectl invocation failures (constructed errors)", () => {
     });
   });
 
-  test("unidentified sets debug once per change while recognized phones stay complete", async () => {
+  test("unidentified sets warn once per change and mark the listing incomplete", async () => {
     const timer = new FakeTimer();
     const warnings: string[] = [];
     const debug: string[] = [];
@@ -821,10 +821,10 @@ describe("devicectl invocation failures (constructed errors)", () => {
     });
     expect(await lister.listConnectedDevices()).toMatchObject({
       devices: [{ deviceId: PHYSICAL_UDID }],
-      complete: true,
+      complete: false,
     });
     const unidentifiedDebug = () =>
-      debug.filter((message) => message.includes("could not be identified"));
+      warnings.filter((message) => message.includes("could not be identified"));
     expect(unidentifiedDebug()).toHaveLength(1);
     expect(unidentifiedDebug()[0]).toContain("platform=ios, reality=missing, udid-shape=simulator");
     expect(unidentifiedDebug()[0]).toContain("connection-state=connected");
@@ -833,7 +833,6 @@ describe("devicectl invocation failures (constructed errors)", () => {
     timer.advanceTime(3_000);
     await lister.listConnectedDevices();
     expect(unidentifiedDebug()).toHaveLength(1);
-    expect(warnings).toEqual([]);
     // DERIVED unknown values may contain identifiers; diagnostics must only report fixed labels.
     record.properties.hardware.reality = record.identifier;
     record.properties.hardware.platform = record.identifier;
@@ -853,7 +852,24 @@ describe("devicectl invocation failures (constructed errors)", () => {
     timer.advanceTime(3_000);
     await lister.listConnectedDevices();
     expect(unidentifiedDebug()).toHaveLength(3);
-    expect(warnings).toEqual([]);
+  });
+
+  test("a drifted record keeps the omitted phone from accruing misses by replaying last-good", async () => {
+    const timer = new FakeTimer();
+    let payload: unknown = devicectlPayload([connectedIphone()]);
+    const lister = makeLister({ timer, readFile: async () => JSON.stringify(payload) });
+    expect(await lister.listConnectedDevices()).toMatchObject({ complete: true });
+    payload = devicectlPayload([{ hardwareProperties: { platform: "iOS" } }]);
+    timer.advanceTime(3_000);
+    const drifted = await lister.listConnectedDevices();
+    expect(drifted.complete).toBe(false);
+    expect(drifted).toMatchObject({
+      error: { message: expect.stringContaining("could not identify") },
+    });
+    expect(drifted.devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
+    payload = devicectlPayload([]);
+    timer.advanceTime(3_000);
+    expect(await lister.listConnectedDevices()).toEqual({ devices: [], complete: true });
   });
 
   test("failure transitions warn, repeats debug, and recovery resets suppression", async () => {

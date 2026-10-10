@@ -86,7 +86,17 @@ export interface DevicectlListingError {
 /** Invocation or envelope failures replay retained devices as incomplete. */
 export type PhysicalIosDeviceDiscovery =
   | { devices: BootedDevice[]; complete: true }
-  | { devices: BootedDevice[]; complete: false; error: DevicectlListingError };
+  | {
+      devices: BootedDevice[];
+      complete: false;
+      error: DevicectlListingError;
+      /**
+       * Devices positively recognized by THIS sweep, present only when it was
+       * incomplete because some other record was unidentifiable. They stay fresh
+       * even though the sweep is not authoritative about absences.
+       */
+      observedDeviceIds?: string[];
+    };
 
 type NotAvailableReason =
   | "non-ios"
@@ -576,6 +586,25 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
         `[DevicectlDeviceLister] dropped ${parsed.simulators.length} simulator record(s); simctl owns simulator discovery`,
       );
       this.previousFailureKey = undefined;
+      // An unrecognised record might be a known phone whose shape drifted, so the
+      // sweep is not authoritative: replay last-good rather than let the omitted
+      // device accrue disconnect misses.
+      if (parsed.unidentified.length > 0) {
+        return this.remember(
+          {
+            devices: parsed.physical,
+            complete: false,
+            observedDeviceIds: parsed.physical.map((device) => device.deviceId),
+            error: {
+              code: "failed",
+              message:
+                `devicectl listed ${parsed.unidentified.length} record(s) this daemon could not ` +
+                "identify; replaying the last good physical device inventory",
+            },
+          },
+          [],
+        );
+      }
       return this.remember({ devices: parsed.physical, complete: true });
     } catch (error) {
       const code = invoking ? classifyDevicectlInvocationError(error) : "failed";
@@ -634,8 +663,9 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
     // Sorted reasons plus occurrence indexes identify changes without retaining record contents.
     const key = JSON.stringify(reasons.toSorted().map((reason, index) => [reason, index]));
     if (reasons.length > 0 && key !== this.previousUnidentifiedKey) {
-      // Owner decision: an unrecognisable record is not evidence that a known device disappeared.
-      this.deps.logger.debug(
+      // An unrecognisable record is not evidence that a known device disappeared; the
+      // listing is reported incomplete, so surface the change at warn (once per change).
+      this.deps.logger.warn(
         `[DevicectlDeviceLister] ${reasons.length} devicectl record(s) could not be identified: ${reasons.join("; ")}`,
       );
     }
@@ -690,7 +720,12 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
           device,
         ]),
       );
-      resolved = { devices: [...devices.values()], complete: false, error: stamped.error };
+      resolved = {
+        devices: [...devices.values()],
+        complete: false,
+        error: stamped.error,
+        ...(stamped.observedDeviceIds ? { observedDeviceIds: stamped.observedDeviceIds } : {}),
+      };
     }
     this.cache = {
       discovery: resolved,

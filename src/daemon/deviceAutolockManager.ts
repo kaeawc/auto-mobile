@@ -365,11 +365,25 @@ export class DeviceAutolockManager {
         lastUsedAtMs: session.lastUsedAt,
         expiresAtMs: session.expiresAt,
       });
-      await raceWithDeadline(persistence, {
-        timer: defaultTimer,
-        signal,
-        label: "Autolock persistence",
-      });
+      try {
+        await raceWithDeadline(persistence, {
+          timer: defaultTimer,
+          signal,
+          label: "Autolock persistence",
+        });
+      } catch (error) {
+        if (signal?.aborted) {
+          throw error;
+        }
+        // A transient write failure (e.g. SQLITE_BUSY past the retry) leaves the live session
+        // usable in memory, exactly like the attach path's attached-not-persisted (#11164):
+        // only abort/deadline cancels the acquisition.
+        logger.warn(
+          `Autolock session ${session.sessionId} acquired on ${device.id} but not persisted; ` +
+            `a daemon restart will not restore it: ${errorMessage(error)}`,
+          error,
+        );
+      }
       signal?.throwIfAborted();
     } catch (error) {
       // Session release fences automation admission synchronously, then may

@@ -387,6 +387,22 @@ describe("DeviceAutolockManager", () => {
     sessions.stopCleanupTimer();
   });
 
+  test("keeps the acquisition when persistence fails without cancellation (#11164)", async () => {
+    const { manager, sessions, device, setPersistence } = harness();
+    setPersistence(async () => {
+      throw new Error("SQLITE_BUSY: database is locked");
+    });
+
+    const id = await manager.autolockDevice(device.id, "android", "mcp-1");
+
+    expect(id).toBeDefined();
+    expect(device.sessionId).toBe(id!);
+    expect(device.autolockSessionId).toBe(id);
+    expect(sessions.getSession(id!)).toBeDefined();
+    expect(manager.captureAutolockSessionForMcpSession("mcp-1")).toBe(id);
+    sessions.stopCleanupTimer();
+  });
+
   test("restores the assignment when persistence is cancelled", async () => {
     const { manager, sessions, device, events, setPersistence } = harness();
     const controller = new AbortController();

@@ -7,7 +7,7 @@ import type { Timer } from "../utils/SystemTimer";
 import { fixedBackoff } from "../utils/Backoff";
 import { getAbortSignal } from "../utils/AbortContext";
 import { DaemonState } from "../daemon/daemonState";
-import type { DevicePool, PooledDevice } from "../daemon/devicePool";
+import type { DevicePool, PooledDevice, ShutdownForeignClaim } from "../daemon/devicePool";
 import type { Session, SessionManager } from "../daemon/sessionManager";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
@@ -1738,6 +1738,8 @@ export async function shutdownDevice(
     pooledAvdIdentity?: PooledAvdKillIdentity;
     /** Re-checks the caller still holds the device; runs under the pool's assignment mutex. */
     assertHolder?: () => void;
+    /** Claim the device against other live daemons while it is stopped (#11200). */
+    foreignClaim?: ShutdownForeignClaim;
   },
 ): Promise<ShutdownResult> {
   const { strictDeadline, timeoutMs, retainLifecycleUntil, pooledAvdIdentity, assertHolder } =
@@ -1768,6 +1770,7 @@ export async function shutdownDevice(
                 signal,
                 undefined,
                 assertHolder,
+                options.foreignClaim,
               ),
             timeoutMs: timeoutMs,
           },

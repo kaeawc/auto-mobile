@@ -50,7 +50,7 @@ function shouldRetainLivenessOwner(reason: string): boolean {
  */
 export class DeviceSessionNotActiveError extends ActionableError {
   constructor(readonly sessionUuid: string) {
-    super(`Device session ${sessionUuid} has no active row to record activity on.`);
+    super(`Device session ${sessionUuid} has no active row to record activity or ownership on.`);
     this.name = "DeviceSessionNotActiveError";
   }
 }
@@ -101,6 +101,12 @@ export interface MarkReleasedOptions {
   expectedRowGeneration?: number;
 }
 
+/** The row incarnation a recovery read, which its ownership claim must still match (#11200). */
+export interface RecoverableRowIncarnation {
+  rowGeneration: number;
+  daemonSessionId: string | null;
+}
+
 export interface DeviceSessionPersistence {
   /**
    * Resolves with the row's `stable_identity_generation` after the write when the implementation
@@ -119,6 +125,18 @@ export interface DeviceSessionPersistence {
    * A row that is no longer device-restart-released (recovered, terminalized) is left untouched.
    */
   recordRestartRecoveryActivity?(sessionUuid: string, activityAtMs: number): Promise<void>;
+  /**
+   * Take ownership of a recoverable row before recovering it (#11200): stamp `daemonSessionId` as
+   * its owner and advance its `stable_identity_generation`, only while the row is still the
+   * incarnation `expected` describes. Resolves with the new generation, or undefined when another
+   * writer (a peer daemon recovering the same row) changed it first; the caller must then leave
+   * the row alone. Status and release reason are untouched, so the row stays recoverable.
+   */
+  claimRecoverableSession?(
+    sessionUuid: string,
+    expected: RecoverableRowIncarnation,
+    daemonSessionId: string,
+  ): Promise<number | undefined>;
   recordLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
   replaceLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
   markReleased(
@@ -385,6 +403,35 @@ export class DeviceSessionRepository {
     }
   }
 
+  async claimRecoverableSession(
+    sessionUuid: string,
+    expected: RecoverableRowIncarnation,
+    daemonSessionId: string,
+  ): Promise<number | undefined> {
+    try {
+      const claimed = await this.getDb()
+        .updateTable("device_sessions")
+        .set({
+          daemon_session_id: daemonSessionId,
+          stable_identity_generation: sql`stable_identity_generation + 1`,
+          updated_at: this.nowIso(),
+        })
+        .where("session_uuid", "=", sessionUuid)
+        .where("status", "!=", "active")
+        .where("stable_identity_generation", "=", expected.rowGeneration)
+        .where((eb) =>
+          expected.daemonSessionId === null
+            ? eb("daemon_session_id", "is", null)
+            : eb("daemon_session_id", "=", expected.daemonSessionId),
+        )
+        .returning("stable_identity_generation")
+        .executeTakeFirst();
+      return claimed?.stable_identity_generation ?? undefined;
+    } catch (error) {
+      throw toActionableError(error, `Failed to claim recoverable session ${sessionUuid}`);
+    }
+  }
+
   async recordLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void> {
     await this.replaceLivenessOwnership(sessionUuid, ownerToken);
   }
@@ -401,7 +448,7 @@ export class DeviceSessionRepository {
         .where("status", "=", "active")
         .executeTakeFirst();
       if (Number(result.numUpdatedRows) !== 1) {
-        throw new Error(`active device session ${sessionUuid} was not found`);
+        throw new DeviceSessionNotActiveError(sessionUuid);
       }
     } catch (error) {
       logger.warn(

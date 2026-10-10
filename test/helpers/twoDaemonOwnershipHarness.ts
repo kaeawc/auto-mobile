@@ -26,7 +26,10 @@ import type { Database } from "../../src/db/types";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import type { ForwardLeaseOwnerProbe } from "../../src/features/observe/shared/ctrlProxyForwardLeaseOwnership";
 import type { BootedDevice } from "../../src/models";
-import { assertLifecycleCallerHoldsDevice } from "../../src/server/lifecycleDeviceOwnership";
+import {
+  assertLifecycleCallerHoldsDevice,
+  assertLifecycleTargetNotHeldByOtherDaemon,
+} from "../../src/server/lifecycleDeviceOwnership";
 import { deviceLossCancellationReason } from "../../src/utils/deviceLossCancellationReason";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import type { LockContent } from "../../src/utils/fileLock";
@@ -408,7 +411,11 @@ class TwoDaemonWorld {
               });
             });
           }
-          return run().then((result) => (owner.dead ? never() : result));
+          // A process that died meanwhile never sees the outcome, success or failure.
+          return run().then(
+            (result) => (owner.dead ? never() : result),
+            (error: unknown) => (owner.dead ? never() : Promise.reject(error)),
+          );
         };
       },
     });
@@ -509,6 +516,10 @@ class TwoDaemonWorld {
     const manager = new SessionManager(timer, persistence);
     const daemonSessionId = `daemon-${name}-${generation}`;
     manager.attachDaemonSessionId(daemonSessionId);
+    // Like the daemon's pid-file listing: an incarnation is listed from its start until it dies.
+    manager.attachLiveDaemonSessionIds(
+      () => new Set(this.daemons.filter((p) => p && !p.dead).map((p) => p!.daemonSessionId)),
+    );
     const pid = ++this.nextPid;
     const socketPath = `/sockets/${name}.sock`;
     const ownership = new ForwardLeaseForeignDeviceOwnership(
@@ -811,9 +822,9 @@ class TwoDaemonWorld {
         process.state,
       );
     } catch (error) {
-      // A claim heartbeat racing the session's release can fail its liveness-owner row write
-      // ("active device session ... was not found"); the socket server answers the proxy with an
-      // error, which it treats as a failed heartbeat. Only a throw for a live session is a finding.
+      // A claim heartbeat whose liveness-owner row write lost to the session's release reports
+      // the session gone (#11200); a throw that the session ended around is still a failed
+      // heartbeat to the proxy, not a finding. Only a throw for a live session is a finding.
       if (
         process.manager.hasSession(sessionId) &&
         !process.manager.getReleasingSession(sessionId)
@@ -1004,6 +1015,7 @@ class TwoDaemonWorld {
       async () => {
         const daemonState = DaemonState.getInstance();
         daemonState.initialize(process.manager, process.pool);
+        let foreignCheck: Promise<void>;
         try {
           assertLifecycleCallerHoldsDevice({
             toolName: "killDevice",
@@ -1011,17 +1023,38 @@ class TwoDaemonWorld {
             requester,
             force: false,
           });
+          // Binds this daemon's state before its first await, as the tool handler does.
+          foreignCheck = assertLifecycleTargetNotHeldByOtherDaemon({
+            toolName: "killDevice",
+            device: { deviceId: device.deviceId, platform: "android" },
+            force: false,
+          });
         } finally {
           daemonState.reset();
         }
-        const reservation = await process.pool.reserveDeviceForShutdown(device.deviceId);
+        await foreignCheck;
+        const reservation = await process.pool.reserveDeviceForShutdown(
+          device.deviceId,
+          undefined,
+          undefined,
+          undefined,
+          { toolName: "killDevice", force: false },
+        );
         if (!reservation || process.dead) {
           return;
         }
         try {
           const peer = this.peerOf(process);
           const peerHolder = peer?.pool.getDevice(device.deviceId)?.sessionId;
-          if (peer && peerHolder && peer.manager.hasSession(peerHolder)) {
+          // An assignment whose claim the peer has not published yet is provisional: the claim
+          // this kill published wins it, so the peer rolls the assignment back (#11200).
+          const peerClaim = this.claims.files.get(this.claims.claimPath(device.deviceId));
+          if (
+            peer &&
+            peerHolder &&
+            peer.manager.hasSession(peerHolder) &&
+            peerClaim?.pid === peer.pid
+          ) {
             this.fail(
               "kill-foreign-device",
               `${process.name} killed ${device.deviceId} (requester ${requester.sessionUuid ?? "none"}) ` +

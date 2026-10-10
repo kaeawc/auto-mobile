@@ -9,6 +9,7 @@ import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { PortManager } from "../../src/utils/PortManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
+import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { BoundedAndroidDeviceReboot } from "../../src/devices/androidDeviceReboot";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
@@ -1126,6 +1127,62 @@ describe("deleteDevice handler", () => {
       const response = await teardownTool().handler({
         ...request("ios", device.deviceId, device.name),
         sessionUuid: "other-session",
+        force: true,
+      });
+
+      expect(responseBody(response).state).toBe("destroyed");
+      expect(manager.killedDevices.map((killed) => killed.deviceId)).toEqual([device.deviceId]);
+    });
+  });
+
+  // A booted simulator a live peer daemon holds reads as unheld to this daemon's sessions (#11200).
+  describe("a booted device another daemon holds (#11200)", () => {
+    const device: BootedDevice = { platform: "ios", name: "iPhone 16", deviceId: "IOS-PEER-1" };
+    const peerOwnership = (owned: boolean): ForeignDeviceOwnership => ({
+      refresh: async () => {},
+      foreignOwnerPid: () => (owned ? 4242 : undefined),
+      claim: async () => !owned,
+      release: () => {},
+    });
+
+    const peerHolds = async (owned = true) => {
+      const timer = new FakeTimer();
+      const sessionManager = new SessionManager(timer, new FakeDeviceSessionRepository());
+      const pool = new DevicePool(
+        createDevicePoolDependencies(sessionManager, "daemon-session", {
+          timer,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          deviceManager: manager,
+          retryExecutor: new DefaultRetryExecutor(timer),
+          iosForeignDeviceOwnership: peerOwnership(owned),
+        }),
+      );
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      manager.setBootedDevices("ios", [device]);
+      manager.setDeviceImages("ios", [{ ...device, isRunning: true }]);
+      await pool.addDevice(device, { ...device, isRunning: true });
+    };
+
+    test("is refused to a sessionless caller before teardown is accepted", async () => {
+      await peerHolds();
+
+      const response = await teardownTool().handler(request("ios", device.deviceId, device.name));
+
+      const body = responseBody(response);
+      expect(body.state).toBe("failed");
+      expect(body.failure).toMatchObject({
+        code: "device_owned_by_other_daemon",
+        phase: "precondition",
+      });
+      expect(manager.killedDevices).toEqual([]);
+      expect(manager.destroyRequests).toEqual([]);
+    });
+
+    test("force: true tears it down anyway", async () => {
+      await peerHolds();
+
+      const response = await teardownTool().handler({
+        ...request("ios", device.deviceId, device.name),
         force: true,
       });
 

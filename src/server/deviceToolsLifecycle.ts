@@ -14,9 +14,12 @@ import {
 } from "../devices/virtualDeviceLifecycleCoordinator";
 import { logger } from "../utils/logger";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
+import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import type { ProgressCallback } from "./toolRegistry";
 import {
   assertLifecycleCallerHoldsDevice,
+  assertLifecycleTargetNotHeldByOtherDaemon,
+  LIFECYCLE_TOOL_FOREIGN_DAEMON_REMEDY,
   lifecycleRequester,
   type LifecycleRequester,
 } from "./lifecycleDeviceOwnership";
@@ -93,14 +96,15 @@ type TeardownState = {
 };
 
 /**
- * Refuse to tear down a booted device another session holds (#10785), as a typed precondition
- * failure so the teardown is never accepted. Returns undefined when the caller may proceed.
+ * Refuse to tear down a booted device another session (#10785) or another live daemon (#11200)
+ * holds, as a typed precondition failure so the teardown is never accepted. Returns undefined
+ * when the caller may proceed.
  */
-function teardownOwnershipRefusal(
+async function teardownOwnershipRefusal(
   args: TeardownDeviceArgs,
   target: TeardownResolvedTarget,
   requester: LifecycleRequester | undefined,
-): TeardownToolResponse | undefined {
+): Promise<TeardownToolResponse | undefined> {
   if (!requester || !target.wasBooted) {
     return undefined;
   }
@@ -111,9 +115,16 @@ function teardownOwnershipRefusal(
       requester,
       force: args.force ?? false,
     });
+    await assertLifecycleTargetNotHeldByOtherDaemon({
+      toolName: "deleteDevice",
+      device: target.bootedDevice,
+      force: args.force ?? false,
+    });
     return undefined;
   } catch (error) {
-    if (!(error instanceof InputDeviceOwnedError)) {
+    if (
+      !(error instanceof InputDeviceOwnedError || error instanceof DeviceOwnedByOtherDaemonError)
+    ) {
       throw error;
     }
     return createTeardownFailureResponse(
@@ -152,7 +163,7 @@ function createDeleteDeviceWorkflow(
       if ("response" in resolution) {
         return { response: resolution.response };
       }
-      const ownershipRefusal = teardownOwnershipRefusal(args, resolution.target, requester);
+      const ownershipRefusal = await teardownOwnershipRefusal(args, resolution.target, requester);
       if (ownershipRefusal) {
         return { response: ownershipRefusal };
       }
@@ -193,6 +204,13 @@ function createDeleteDeviceWorkflow(
                     requester,
                     force: args.force ?? false,
                   })
+              : undefined,
+            foreignClaim: requester
+              ? {
+                  toolName: "deleteDevice",
+                  force: args.force ?? false,
+                  remedy: LIFECYCLE_TOOL_FOREIGN_DAEMON_REMEDY,
+                }
               : undefined,
           },
         );
@@ -274,11 +292,17 @@ export function createLifecycleHandlers() {
     _progress?: ProgressCallback,
     abortSignal?: AbortSignal,
   ) => {
-    // A device another session holds stops only for its holder or an explicit force (#10785).
+    // A device another session holds stops only for its holder or an explicit force (#10785),
+    // and one another live daemon holds only with an explicit force (#11200).
     assertLifecycleCallerHoldsDevice({
       toolName: "killDevice",
       device: args.device,
       requester: lifecycleRequester(args),
+      force: args.force ?? false,
+    });
+    await assertLifecycleTargetNotHeldByOtherDaemon({
+      toolName: "killDevice",
+      device: args.device,
       force: args.force ?? false,
     });
     const deps = getDeviceToolsDependencies();
@@ -346,6 +370,11 @@ export function createLifecycleHandlers() {
               requester: lifecycleRequester(args),
               force: args.force ?? false,
             }),
+          foreignClaim: {
+            toolName: "killDevice",
+            force: args.force ?? false,
+            remedy: LIFECYCLE_TOOL_FOREIGN_DAEMON_REMEDY,
+          },
         },
       );
       return createKillDeviceResponse(args, result.timing, result.alreadyStoppedMessage);

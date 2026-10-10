@@ -144,6 +144,8 @@ export interface DaemonStateAccess {
   };
   getDevicePool(): {
     isShutdownReserved?(deviceId: string): Promise<boolean>;
+    /** Synchronous: a shutdown reservation holds the device now (#11200). */
+    isUnderShutdownReservation?(deviceId: string): boolean;
     restoreAutolockSessionsForMcpSession?(
       sessionIds: readonly string[],
       mcpSessionId: string,
@@ -1088,15 +1090,34 @@ async function handleListDeviceSessions(
  * window would let a peer take over the allocation claim and assign the same device.
  */
 function deviceLeaseActivitySourcesFor(state: DaemonStateAccess): DeviceLeaseActivitySources {
+  const pool = state.getDevicePool();
   const override = state.getDeviceLeaseActivitySources?.();
   if (override) {
-    return override;
+    return withShutdownActivity(override, pool);
   }
   const manager = state.getSessionManager();
-  const pool = state.getDevicePool();
-  return daemonDeviceLeaseActivitySources(
-    (id) => manager.getSessionForDevice?.(id) ?? pool.getDevice?.(id)?.sessionId ?? null,
+  return withShutdownActivity(
+    daemonDeviceLeaseActivitySources(
+      (id) => manager.getSessionForDevice?.(id) ?? pool.getDevice?.(id)?.sessionId ?? null,
+    ),
+    pool,
   );
+}
+
+/**
+ * A device this daemon is stopping (killDevice, deleteDevice) is in use here even with no session
+ * on it: the stop published an allocation claim (#11200), and answering "idle" would let a peer
+ * take the claim over and bind the device while it is being killed.
+ */
+function withShutdownActivity(
+  sources: DeviceLeaseActivitySources,
+  pool: ReturnType<DaemonStateAccess["getDevicePool"]>,
+): DeviceLeaseActivitySources {
+  return {
+    ...sources,
+    activeExecutionCount: (id) =>
+      sources.activeExecutionCount(id) + (pool.isUnderShutdownReservation?.(id) ? 1 : 0),
+  };
 }
 
 /**

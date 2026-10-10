@@ -2,6 +2,11 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
+import {
+  DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+  DeviceOwnedByOtherDaemonError,
+} from "../../src/daemon/deviceAcquisitionRefusals";
+import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
@@ -247,5 +252,158 @@ describe("killDevice device ownership (#10785)", () => {
       deviceId: held.deviceId,
       retryable: false,
     });
+  });
+});
+
+/** Another live daemon's claims, as this daemon's claim store sees them. */
+class FakeForeignDeviceOwnership implements ForeignDeviceOwnership {
+  /** Devices another live daemon holds, by owner PID, as the next refresh reports them. */
+  readonly owners = new Map<string, number>();
+  /** Devices whose claim another daemon wins at claim time. */
+  readonly claimRefused = new Set<string>();
+  readonly claims: string[] = [];
+  readonly releases: string[] = [];
+  private refreshed = new Map<string, number>();
+
+  async refresh(deviceIds: readonly string[]): Promise<void> {
+    for (const id of deviceIds) {
+      const pid = this.owners.get(id);
+      if (pid === undefined) {
+        this.refreshed.delete(id);
+      } else {
+        this.refreshed.set(id, pid);
+      }
+    }
+  }
+  foreignOwnerPid(deviceId: string): number | undefined {
+    return this.refreshed.get(deviceId);
+  }
+  async claim(deviceId: string): Promise<boolean> {
+    this.claims.push(deviceId);
+    return !this.claimRefused.has(deviceId) && !this.owners.has(deviceId);
+  }
+  release(deviceId: string): void {
+    this.releases.push(deviceId);
+  }
+}
+
+/**
+ * A device a live peer daemon holds reads as unheld to this daemon's sessions, so the #10785 guard
+ * alone let a sessionless killDevice stop it and the peer's session died as device-disconnected.
+ * The kill now consults the peer's claim at entry, and publishes its own claim under the shutdown
+ * reservation so a peer cannot bind the device while it is stopped (#11200).
+ */
+describe("killDevice on a device another daemon holds (#11200)", () => {
+  const phone: BootedDevice = { name: "Pixel", deviceId: "R58M11200", platform: "android" };
+  const PEER_PID = 4242;
+
+  let manager: RecordingKillDeviceManager;
+  let ownership: FakeForeignDeviceOwnership;
+  let pool: DevicePool;
+  let sessionManager: SessionManager;
+
+  const outcome = async (args: Record<string, unknown>) => {
+    try {
+      await ToolRegistry.getTool("killDevice")!.handler(args);
+    } catch (error) {
+      return error;
+    }
+    return undefined;
+  };
+
+  beforeEach(async () => {
+    ToolRegistry.clearTools();
+    const timer = new FakeTimer();
+    manager = new RecordingKillDeviceManager();
+    ownership = new FakeForeignDeviceOwnership();
+    await setVideoRecordingManagerDependencies({
+      videoRecorderService: {} as never,
+      recordingRepository: { listRecordings: async () => [] } as never,
+      configRepository: {} as never,
+      highlightClient: {} as never,
+      timer,
+      now: () => new Date(0),
+    });
+    manager.setBootedDevices("android", [phone]);
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => manager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    sessionManager.stopCleanupTimer();
+    pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "lifecycle-foreign-daemon", {
+        timer,
+        deviceManager: manager,
+        foreignDeviceOwnership: ownership,
+      }),
+    );
+    await pool.initializeWithDevices([phone]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    registerDeviceTools();
+  });
+
+  afterEach(() => {
+    ToolRegistry.clearTools();
+    resetDeviceToolsDependencies();
+    resetVideoRecordingManagerDependencies();
+    DaemonState.getInstance().reset();
+    sessionManager.stopCleanupTimer();
+  });
+
+  test("a sessionless kill of a device a live peer daemon holds is refused with the typed code", async () => {
+    ownership.owners.set(phone.deviceId, PEER_PID);
+
+    const error = await outcome({ device: phone });
+
+    expect(error).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+    expect((error as DeviceOwnedByOtherDaemonError).code).toBe(DEVICE_OWNED_BY_OTHER_DAEMON_CODE);
+    expect((error as Error).message).toBe(
+      `Device '${phone.deviceId}' is claimed by another AutoMobile daemon (PID ${PEER_PID}) ` +
+        `(code ${DEVICE_OWNED_BY_OTHER_DAEMON_CODE}); two daemons must never drive the same device. ` +
+        "Stop it through the daemon that holds it, wait for that daemon to release it, or pass " +
+        "force: true to stop it anyway.",
+    );
+    expect(manager.killed).toEqual([]);
+    expect(ownership.claims).toEqual([]);
+  });
+
+  test("force: true stops it anyway and logs the override", async () => {
+    ownership.owners.set(phone.deviceId, PEER_PID);
+    const warn = spyOn(logger, "warn");
+    try {
+      await outcome({ device: phone, force: true });
+
+      expect(manager.killed).toEqual([phone.deviceId]);
+      expect(warn.mock.calls.map(([message]) => String(message))).toContain(
+        `[DeviceTools] killDevice force-stopping device '${phone.deviceId}' held by another ` +
+          `AutoMobile daemon (PID ${PEER_PID}).`,
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a peer that claims the device after the entry check wins it: the kill is refused", async () => {
+    // The entry check sees no claim; the peer's claim is in place by the time the kill claims.
+    ownership.claimRefused.add(phone.deviceId);
+
+    const error = await outcome({ device: phone });
+
+    expect((error as DeviceOwnedByOtherDaemonError).code).toBe(DEVICE_OWNED_BY_OTHER_DAEMON_CODE);
+    expect(manager.killed).toEqual([]);
+    expect(pool.isUnderShutdownReservation(phone.deviceId)).toBe(false);
+    expect(ownership.releases).toEqual([]);
+  });
+
+  test("an unheld device is claimed for the stop and the claim is withdrawn after", async () => {
+    await outcome({ device: phone });
+
+    expect(manager.killed).toEqual([phone.deviceId]);
+    expect(ownership.claims).toEqual([phone.deviceId]);
+    expect(ownership.releases).toEqual([phone.deviceId]);
   });
 });

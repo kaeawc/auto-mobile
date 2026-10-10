@@ -230,6 +230,14 @@ function resolveConsoleBusyRegistry(
 /**
  * Error class for device pool operations with retryability flag.
  */
+/** A lifecycle stop that must not take a device another live daemon holds (#11200). */
+export interface ShutdownForeignClaim {
+  toolName: string;
+  force: boolean;
+  /** What the refused caller can do instead. */
+  remedy?: string;
+}
+
 export class DevicePoolError extends Error {
   constructor(
     message: string,
@@ -5604,11 +5612,13 @@ export class DevicePool {
   /**
    * An explicit bind (startDevice, setActiveDevice, getAndroid/getApple with a deviceId) of a
    * device this daemon does not already hold is refused while another live daemon claims it
-   * (#10980, owner decision 2026-10-09): two daemons must never drive the same device.
+   * (#10980, owner decision 2026-10-09): two daemons must never drive the same device. Lifecycle
+   * tools that stop a device (killDevice, deleteDevice) apply the same check (#11200).
    */
-  private async assertNotClaimedByForeignDaemon(
+  async assertNotClaimedByForeignDaemon(
     deviceId: string,
     platform: Platform,
+    remedy?: string,
   ): Promise<void> {
     const ownership = this.foreignOwnershipFor(platform);
     if (!ownership || this.devices.get(deviceId)?.sessionId) {
@@ -5617,7 +5627,7 @@ export class DevicePool {
     await ownership.refresh([deviceId]);
     const ownerPid = ownership.foreignOwnerPid(deviceId);
     if (ownerPid !== undefined) {
-      throw new DeviceOwnedByOtherDaemonError(deviceId, ownerPid);
+      throw new DeviceOwnedByOtherDaemonError(deviceId, ownerPid, remedy);
     }
   }
 
@@ -6983,18 +6993,85 @@ export class DevicePool {
     );
   }
 
-  reserveDeviceForShutdown(
+  /**
+   * @param foreignClaim set by lifecycle tools that stop a device another daemon could be driving
+   *   (killDevice, deleteDevice, #11200): see {@link claimShutdownAgainstOtherDaemons}.
+   */
+  async reserveDeviceForShutdown(
     deviceId: string,
     abortSignal?: AbortSignal,
     autolockClient?: AutolockClient,
     assertHolder?: () => void,
+    foreignClaim?: ShutdownForeignClaim,
   ): Promise<ShutdownDeviceReservation | undefined> {
-    return this.shutdownReservationCoordinator.reserveDeviceForShutdown(
+    const reservation = await this.shutdownReservationCoordinator.reserveDeviceForShutdown(
       deviceId,
       abortSignal,
       autolockClient,
       assertHolder,
     );
+    if (!reservation || !foreignClaim) {
+      return reservation;
+    }
+    return await this.claimShutdownAgainstOtherDaemons(reservation, foreignClaim);
+  }
+
+  /**
+   * Publish this daemon's allocation claim on a device it reserved for shutdown, so another live
+   * daemon can neither be holding it nor bind it while it is stopped (#11200). The reservation
+   * already keeps this daemon's own allocation off the device; the claim does the same for other
+   * daemons, whose claim check sees the device in use here (`deviceLeaseStatus` counts the
+   * reservation as an active execution). When another live daemon's claim wins, the reservation
+   * is given back and the stop refused, unless the user forced it (logged). The claim is withdrawn
+   * with the reservation.
+   */
+  private async claimShutdownAgainstOtherDaemons(
+    reservation: ShutdownDeviceReservation,
+    foreignClaim: ShutdownForeignClaim,
+  ): Promise<ShutdownDeviceReservation> {
+    const { device } = reservation;
+    const ownership = this.foreignOwnershipFor(device.platform);
+    if (!ownership || this.claimedDeviceIds.has(device.id)) {
+      // No claims tracked for this platform, or a session of this daemon already claims it.
+      return reservation;
+    }
+    if (await ownership.claim(device.id)) {
+      let withdrawn = false;
+      return {
+        ...reservation,
+        release: async () => {
+          try {
+            await reservation.release();
+          } finally {
+            // Release may be called more than once; withdraw once, and never a claim a session
+            // of this daemon published since.
+            if (!withdrawn && !this.claimedDeviceIds.has(device.id)) {
+              ownership.release(device.id);
+            }
+            withdrawn = true;
+          }
+        },
+      };
+    }
+    await ownership.refresh([device.id]);
+    const ownerPid = ownership.foreignOwnerPid(device.id);
+    if (foreignClaim.force) {
+      logger.warn(
+        `[DevicePool] ${foreignClaim.toolName} force-stopping device '${device.id}' claimed by ` +
+          `another AutoMobile daemon${ownerPid === undefined ? "" : ` (PID ${ownerPid})`}.`,
+      );
+      return reservation;
+    }
+    await reservation.release();
+    throw new DeviceOwnedByOtherDaemonError(device.id, ownerPid, foreignClaim.remedy);
+  }
+
+  /**
+   * Whether a shutdown reservation holds the device's current incarnation right now. Synchronous
+   * (no assignment lock), for a lease-status answer to another daemon (#11200).
+   */
+  isUnderShutdownReservation(deviceId: string): boolean {
+    return this.shutdownReservationCoordinator.isDeviceUnderShutdownReservation(deviceId);
   }
 
   private isReservedForReadiness(deviceId: string): boolean {

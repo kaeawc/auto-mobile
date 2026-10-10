@@ -16,13 +16,7 @@ import {
 // Known, open bugs (#11200) with minimized regressions in
 // poolOwnershipConcurrency.twoDaemon.regressions.test.ts are tolerated; the fix for each removes
 // its kinds here so the property is enforced again.
-const KNOWN_VIOLATIONS: ReadonlySet<TwoDaemonViolationKind> = new Set<TwoDaemonViolationKind>([
-  // killDevice's lifecycle guard consults only its own daemon's sessions.
-  "kill-foreign-device",
-  // Concurrent startups both rehydrate one recoverable row; the loser terminalizes the winner's.
-  "foreign-session-revived",
-  "live-row-not-owned",
-]);
+const KNOWN_VIOLATIONS: ReadonlySet<TwoDaemonViolationKind> = new Set<TwoDaemonViolationKind>([]);
 
 const STEPS = 30;
 const SEEDS_PER_TEST = 3;

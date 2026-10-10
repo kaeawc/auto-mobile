@@ -35,7 +35,10 @@ import type {
   DeviceSessionPersistence,
   DeviceSessionRecord,
 } from "../../src/db/deviceSessionRepository";
-import { DEVICE_SESSION_RETENTION_MAX_AGE_MS } from "../../src/db/deviceSessionRepository";
+import {
+  DEVICE_SESSION_RETENTION_MAX_AGE_MS,
+  DeviceSessionNotActiveError,
+} from "../../src/db/deviceSessionRepository";
 import type { DeviceSession, DeviceSessionStatus } from "../../src/db/types";
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManager";
@@ -3757,6 +3760,33 @@ describe("SessionManager", () => {
       expect(manager.hasLivenessOwnership("session-1", "owner-token")).toBe(true);
     } finally {
       finishPersistence.resolve();
+      manager.stopCleanupTimer();
+    }
+  });
+
+  // A claim heartbeat racing the session's own release: the release terminalizes the row while
+  // the claim's ownership write is in flight, so the write matches no active row. The claim
+  // reports the session as gone instead of surfacing the row write's failure.
+  test("a claim whose ownership write loses to the session's release reports not-found", async () => {
+    let release: Promise<unknown> | undefined;
+    const manager: SessionManager = new SessionManager(fakeTimer, {
+      async upsertActiveSession() {},
+      async recordActivity() {},
+      async recordLivenessOwnership(sessionUuid) {
+        release = manager.releaseSession(sessionUuid, "explicit-release");
+        throw new DeviceSessionNotActiveError(sessionUuid);
+      },
+      async markReleased() {},
+    });
+    try {
+      await manager.createSession("session-1", "emulator-5554", "android");
+
+      await expect(manager.claimLivenessOwnership("session-1", "owner-token")).resolves.toBe(
+        "not-found",
+      );
+      await release;
+      expect(manager.getSession("session-1")).toBeNull();
+    } finally {
       manager.stopCleanupTimer();
     }
   });

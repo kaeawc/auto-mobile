@@ -1,4 +1,5 @@
 import { DaemonState } from "../daemon/daemonState";
+import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import { assertInputRequesterHoldsDevice } from "../daemon/inputDeviceOwnership";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
@@ -93,4 +94,59 @@ export function assertLifecycleCallerHoldsDevice(input: {
     sessionManager,
     remedy: LIFECYCLE_TOOL_REMEDY,
   });
+}
+
+/** Remedy text for a lifecycle call refused because another live daemon holds the device. */
+export const LIFECYCLE_TOOL_FOREIGN_DAEMON_REMEDY =
+  "Stop it through the daemon that holds it, wait for that daemon to release it, " +
+  "or pass force: true to stop it anyway.";
+
+/**
+ * Cross-daemon half of the lifecycle guard (#11200). {@link assertLifecycleCallerHoldsDevice}
+ * only sees this daemon's sessions; a device a live peer daemon holds (its allocation claim is
+ * published and its control socket reports a session on it) reads as unheld there. Refuse to stop
+ * such a device unless the user forces it, which is logged. A device this daemon holds is judged
+ * by the local guard instead.
+ *
+ * The daemon state is read synchronously, before the first await, so the check runs against the
+ * daemon that received the call.
+ *
+ * Throws `DeviceOwnedByOtherDaemonError` (code `device_owned_by_other_daemon`).
+ */
+export function assertLifecycleTargetNotHeldByOtherDaemon(input: {
+  toolName: string;
+  device: { deviceId: string; platform: Platform };
+  force: boolean;
+}): Promise<void> {
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return Promise.resolve();
+  }
+  return checkForeignHolder(daemonState.getDevicePool(), input);
+}
+
+async function checkForeignHolder(
+  pool: Pick<ReturnType<DaemonState["getDevicePool"]>, "assertNotClaimedByForeignDaemon">,
+  input: {
+    toolName: string;
+    device: { deviceId: string; platform: Platform };
+    force: boolean;
+  },
+): Promise<void> {
+  const { toolName, device, force } = input;
+  try {
+    await pool.assertNotClaimedByForeignDaemon(
+      device.deviceId,
+      device.platform,
+      LIFECYCLE_TOOL_FOREIGN_DAEMON_REMEDY,
+    );
+  } catch (error) {
+    if (!force || !(error instanceof DeviceOwnedByOtherDaemonError)) {
+      throw error;
+    }
+    logger.warn(
+      `[DeviceTools] ${toolName} force-stopping device '${device.deviceId}' held by another ` +
+        `AutoMobile daemon${error.ownerPid === undefined ? "" : ` (PID ${error.ownerPid})`}.`,
+    );
+  }
 }

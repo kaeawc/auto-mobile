@@ -93,6 +93,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
   DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+  DeviceOwnedByOtherDaemonError,
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
@@ -1332,6 +1333,7 @@ export class SessionManager {
    * database can tell this daemon's live rows from a dead predecessor's (#11114).
    */
   private daemonSessionId: string | undefined;
+  private liveDaemonSessionIds: (() => ReadonlySet<string>) | undefined;
   /**
    * Terminal releases a previous daemon recorded but never persisted. Until its row write lands, a
    * listed UUID reads as terminally released, so nothing can revive it.
@@ -1499,6 +1501,14 @@ export class SessionManager {
   /** Attach the owning daemon's id; every later active-row write is stamped with it (#11114). */
   attachDaemonSessionId(daemonSessionId: string): void {
     this.daemonSessionId = daemonSessionId;
+  }
+
+  /**
+   * Attach the live-daemon listing (the same one startup's stale-row sweep uses): a recoverable
+   * row another live daemon has taken is not recovered here (#11200).
+   */
+  attachLiveDaemonSessionIds(provider: () => ReadonlySet<string>): void {
+    this.liveDaemonSessionIds = provider;
   }
 
   /** A recovered row's dead owner is replaced by this daemon (#11114). */
@@ -3226,10 +3236,14 @@ export class SessionManager {
     sessionId: string,
     devicePool: SessionDeviceAssigner,
     platform: Platform | undefined,
-    persisted: DeviceSession | undefined,
+    listed: DeviceSession | undefined,
     initialOwnership: "owned" | "awaiting-owner",
     shared: SharedSessionAssignment,
   ): Promise<Session> {
+    const persisted =
+      listed && this.isRecoverablePersistedSession(listed)
+        ? await this.claimRecoverableRow(sessionId, listed)
+        : listed;
     const recoveryTarget = await this.recoveryTargetFromPersisted(
       sessionId,
       persisted,
@@ -3279,6 +3293,73 @@ export class SessionManager {
       `[SessionManager] Successfully created session ${sessionId} with device ${session.assignedDevice}`,
     );
     return session;
+  }
+
+  /**
+   * Take ownership of a recoverable row before recovering it (#11200). Two daemons starting
+   * together both list the same recoverable row; without this, both rehydrated it, and the loser
+   * (whose allocation claim then failed) terminalized the row under the winner's live session. The
+   * claim is a compare-and-set on the row's generation and owner, so exactly one daemon takes the
+   * incarnation both read. A row a live peer already took (its owner is another live daemon) is
+   * that peer's to recover. A refusal writes nothing; the returned copy carries the claimed
+   * generation, which this recovery's own later writes are conditioned on.
+   *
+   * Throws `DeviceOwnedByOtherDaemonError` (code `device_owned_by_other_daemon`).
+   */
+  private async claimRecoverableRow(
+    sessionId: string,
+    persisted: DeviceSession,
+  ): Promise<DeviceSession> {
+    const daemonSessionId = this.daemonSessionId;
+    const claim = this.deviceSessionRepository.claimRecoverableSession?.bind(
+      this.deviceSessionRepository,
+    );
+    if (!claim || daemonSessionId === undefined) {
+      return persisted;
+    }
+    const owner = persisted.daemon_session_id ?? null;
+    const refused = () => {
+      logger.info(
+        `[SessionManager] Not recovering session ${sessionId}: another AutoMobile daemon ` +
+          `${owner === null ? "" : `(${owner}) `}took its row first`,
+      );
+      return new DeviceOwnedByOtherDaemonError(persisted.device_id, undefined);
+    };
+    if (owner !== null && owner !== daemonSessionId && this.isLiveDaemonSession(owner)) {
+      throw refused();
+    }
+    const generation = await claim(
+      sessionId,
+      { rowGeneration: persisted.stable_identity_generation ?? 0, daemonSessionId: owner },
+      daemonSessionId,
+    );
+    if (generation === undefined) {
+      throw refused();
+    }
+    return {
+      ...persisted,
+      stable_identity_generation: generation,
+      daemon_session_id: daemonSessionId,
+    };
+  }
+
+  /** Whether `daemonSessionId` names a live daemon, by the attached provider (#11200). */
+  private isLiveDaemonSession(daemonSessionId: string): boolean {
+    if (!this.liveDaemonSessionIds) {
+      return false;
+    }
+    try {
+      return this.liveDaemonSessionIds().has(daemonSessionId);
+    } catch (error) {
+      // The row compare-and-set still keeps two concurrent recoveries apart; only a row a live
+      // peer took before this daemon read it is left to that check.
+      logger.warn(
+        `[SessionManager] Cannot list live daemons to check row owner ${daemonSessionId}: ` +
+          errorMessage(error),
+        error,
+      );
+      return false;
+    }
   }
 
   private rehydrationSkipReason(sessionId: string): string | undefined {
@@ -3433,6 +3514,10 @@ export class SessionManager {
       const terminalRelease = this.getTerminalReleaseSnapshot(sessionId);
       if (terminalRelease) {
         return { kind: "terminalized", reason: terminalRelease.releaseReason };
+      }
+      if (error instanceof DeviceOwnedByOtherDaemonError) {
+        // Another live daemon took the row or its device; that daemon recovers the session.
+        return { kind: "skipped", reason: "owned-by-other-daemon" };
       }
       const reason = errorMessage(error);
       logger.warn(`[SessionManager] Failed to rehydrate session ${sessionId}: ${reason}`);
@@ -7651,6 +7736,15 @@ export class SessionManager {
     } catch (error) {
       if (alreadyProcessed) {
         processedClaims.add(ownerToken);
+      }
+      if (!this.isAdmittedForAutomation(session)) {
+        // The session's release won the race with this claim: its row is no longer active, so
+        // the ownership write matched nothing. The session is gone, as the claim reports.
+        logger.info(
+          `Liveness ownership claim for session ${session.sessionId} lost to its release: ` +
+            errorMessage(error),
+        );
+        return "not-found";
       }
       throw error;
     }

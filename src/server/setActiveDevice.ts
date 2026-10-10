@@ -64,7 +64,11 @@ function resolveAutolockSelection(args: HandlerArgs): string | undefined {
     undefined,
     args.deviceId,
   );
-  const targetSession = ownedSession ?? pool.resolveAutolockSessionForMcpSession(mcpSessionId);
+  // #11167: without an explicit platform the pooled device names it. The default-session
+  // fallback must stay on that platform; a session is never rebound across platforms.
+  const fallbackPlatform = args.platform ?? pool.getDevice(args.deviceId)?.platform;
+  const targetSession =
+    ownedSession ?? pool.resolveAutolockSessionForMcpSession(mcpSessionId, fallbackPlatform);
   args.sessionUuid ??= targetSession;
   return targetSession === args.sessionUuid ? targetSession : undefined;
 }
@@ -109,6 +113,13 @@ async function bindRequestedDevice(input: {
   const existing = sessions.getSession(args.sessionUuid);
   if (existing?.assignedDevice === args.deviceId) {
     return;
+  }
+  if (existing && existing.platform !== device.platform) {
+    throw new ActionableError(
+      `Session ${args.sessionUuid} is a ${existing.platform} session and cannot be rebound to ` +
+        `${device.platform} device '${args.deviceId}'. Start or select a ${device.platform} ` +
+        `session for that device instead.`,
+    );
   }
   // The pool persists the replacement before releasing the previous binding.
   // #5870: infer platform from the resolved device when the caller omitted it.

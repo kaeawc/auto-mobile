@@ -19,6 +19,7 @@ interface PendingRequest<T> {
 
 /** What a timeout observer learns about the request that expired. */
 export interface TimedOutRequest {
+  id: string;
   type: string;
   timeoutMs: number;
   /** When the request was registered, on the manager's timer. */
@@ -103,7 +104,7 @@ export class RequestManager {
           logger.warn(
             `[RequestManager] Request timed out: ${type} (id: ${id}, timeout: ${timeoutMs}ms)`,
           );
-          this.onTimeout?.({ type, timeoutMs, createdAt: request.createdAt });
+          this.onTimeout?.({ id, type, timeoutMs, createdAt: request.createdAt });
           resolve(timeoutErrorFactory(id, type, timeoutMs));
         }
       }, timeoutMs);

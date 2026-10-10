@@ -85,6 +85,22 @@ describe("IOSCtrlProxyClient silent command timeout recovery (#11247)", () => {
     expect(h.manager.getCallCount("forceRestart")).toBe(0);
   });
 
+  test("a silent diagnostic hierarchy read on the main connection never starts recovery (#10724)", async () => {
+    const h = await connect("withhold");
+    expect(
+      await h.client.requestHierarchySyncForDiagnostics(undefined, false, undefined, 15_000),
+    ).toBeNull();
+    await h.timer.advanceTimeAsync(2_000);
+    expect(h.manager.getCallCount("forceRestart")).toBe(0);
+  });
+
+  test("a silent read-only request such as a screenshot never starts recovery", async () => {
+    const h = await connect("withhold");
+    await h.client.requestScreenshot();
+    await h.timer.advanceTimeAsync(2_000);
+    expect(h.manager.getCallCount("forceRestart")).toBe(0);
+  });
+
   test("repeated silent timeouts stay within one in-flight recovery", async () => {
     const h = await connect("withhold");
     await expectUnconfirmedTap(h.client);

@@ -863,6 +863,34 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private static readonly STALL_EVIDENCE_MIN_TIMEOUT_MS = 5000;
   /** How long an unanswered ping must stay unanswered after a silent command timeout. */
   private static readonly STALL_CONFIRMATION_MS = 2000;
+  /**
+   * Response types of control commands whose silent timeout is stall evidence.
+   * Diagnostic and read-only requests (screenshot, clipboard, capability and
+   * VoiceOver state reads, storage) are deliberately absent: per #10724 they
+   * never start recovery. The observe hierarchy read is admitted separately.
+   */
+  private static readonly STALL_EVIDENCE_CONTROL_RESPONSE_TYPES: ReadonlySet<string> = new Set([
+    "tap_coordinates",
+    "swipe",
+    "drag",
+    "pinch",
+    "multi_finger_swipe_result",
+    "action",
+    "press_key",
+    "press_button",
+    "press_home",
+    "press_back",
+    "recent_apps",
+    "keyboard",
+    "ime_action",
+    "select_all",
+    "set_text",
+    "append_text",
+    "clear_text",
+    "rotate",
+    "shake",
+    "magic_tap_result",
+  ]);
   private static readonly CONNECTION_RESET_MS = 2000;
   /** A briefly open socket is not evidence that the runner recovered. */
   private static readonly RESTART_REARM_STABILITY_MS = 2000;
@@ -3056,11 +3084,24 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   protected override silentTimeoutConfirmationMs(request: TimedOutRequest): number | undefined {
     if (
       this.transientObserver ||
-      request.timeoutMs < IOSCtrlProxyClient.STALL_EVIDENCE_MIN_TIMEOUT_MS
+      request.timeoutMs < IOSCtrlProxyClient.STALL_EVIDENCE_MIN_TIMEOUT_MS ||
+      !this.isStallEvidenceRequest(request)
     ) {
       return undefined;
     }
     return IOSCtrlProxyClient.STALL_CONFIRMATION_MS;
+  }
+
+  /**
+   * Control commands and the observe hierarchy read only. An observer-mode
+   * hierarchy read is a diagnostic read (doctor, observation stream) on
+   * whichever connection it uses, and must not start recovery (#10724).
+   */
+  private isStallEvidenceRequest(request: TimedOutRequest): boolean {
+    if (request.type === "hierarchy") {
+      return !this.observerHierarchyRequestIds.has(request.id);
+    }
+    return IOSCtrlProxyClient.STALL_EVIDENCE_CONTROL_RESPONSE_TYPES.has(request.type);
   }
 
   /**

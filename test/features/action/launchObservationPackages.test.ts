@@ -28,10 +28,25 @@ describe("getLaunchObservationPackageNames", () => {
     expect(getLaunchObservationPackageNames(observation)).toEqual(["com.fallback"]);
   });
 
+  test("a focused highlight window is not the prototype, so the CtrlProxy package is kept (#11346)", () => {
+    const observation = {
+      activeWindow: { appId: CTRL_PROXY_PACKAGE },
+      viewHierarchy: {
+        packageName: CTRL_PROXY_PACKAGE,
+        windows: [
+          { id: 1, type: 1, isFocused: false },
+          { id: 2, type: 4, isFocused: true, packageName: CTRL_PROXY_PACKAGE },
+        ],
+      },
+    } as ObserveResult;
+
+    expect(getLaunchObservationPackageNames(observation)).toEqual([CTRL_PROXY_PACKAGE]);
+  });
+
   describe("while CtrlProxy's own prototype holds window focus (#10000)", () => {
     const prototypeWindows = [
       { id: 1, type: 1, isFocused: false },
-      { id: 2, type: 4, isFocused: true },
+      { id: 2, type: 4, isFocused: true, hierarchy: { node: [{}] } },
     ];
 
     test("drops the prototype package in favour of the app behind it", () => {

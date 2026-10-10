@@ -6,7 +6,7 @@ import type {
 } from "../../../../src/features/observe/ios/types";
 import {
   assertAppGestureNotUnderPrototype,
-  hasOwnWindow,
+  hasOwnPrototype,
   ownWindowCoversPoint,
   scopeHierarchyForSelector,
   scopeHierarchyToLayer,
@@ -57,7 +57,7 @@ function ids(hierarchy: ViewHierarchyResult): Set<string> {
 describe("iOS prototype agent window with layer (iphone D2)", () => {
   test("the converted capture has the prototype and both layers split it from Settings", () => {
     const hierarchy = convert();
-    expect(hasOwnWindow(hierarchy)).toBe(true);
+    expect(hasOwnPrototype(hierarchy)).toBe(true);
 
     const prototype = ids(scopeHierarchyForSelector(hierarchy, "prototype"));
     const app = ids(scopeHierarchyForSelector(hierarchy, "app"));
@@ -73,7 +73,7 @@ describe("iOS prototype agent window with layer (iphone D2)", () => {
 
   test("the unconverted runner tree is split at the agent's UIWindow", () => {
     const hierarchy = unconverted();
-    expect(hasOwnWindow(hierarchy)).toBe(true);
+    expect(hasOwnPrototype(hierarchy)).toBe(true);
     expect(ids(scopeHierarchyToLayer(hierarchy, "prototype")).has("like-button")).toBe(true);
     expect(ids(scopeHierarchyToLayer(hierarchy, "prototype")).has("Toolbar")).toBe(false);
     expect(ids(scopeHierarchyToLayer(hierarchy, "app")).has("like-button")).toBe(false);
@@ -82,14 +82,14 @@ describe("iOS prototype agent window with layer (iphone D2)", () => {
 
   test("when only the agent's window contributes nodes, all of them are the prototype's", () => {
     const hierarchy = onlyWindow(1);
-    expect(hasOwnWindow(hierarchy)).toBe(true);
+    expect(hasOwnPrototype(hierarchy)).toBe(true);
     expect(ids(scopeHierarchyToLayer(hierarchy, "prototype")).has("like-button")).toBe(true);
     expect(ids(scopeHierarchyToLayer(hierarchy, "app")).has("like-button")).toBe(false);
   });
 
   test("Settings alone has no prototype, so layer prototype is the actionable error", () => {
     const hierarchy = onlyWindow(0);
-    expect(hasOwnWindow(hierarchy)).toBe(false);
+    expect(hasOwnPrototype(hierarchy)).toBe(false);
     expect(scopeHierarchyToLayer(hierarchy, "app")).toBe(hierarchy);
     expect(() => scopeHierarchyForSelector(hierarchy, "prototype")).toThrow(
       /no AutoMobile prototype is showing/,

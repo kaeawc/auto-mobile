@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import {
   assertAppGestureNotUnderPrototype,
-  hasOwnWindow,
+  hasOwnPrototype,
   ownWindowCoversPoint,
   scopeHierarchyForSelector,
   scopeHierarchyToLayer,
@@ -62,8 +62,8 @@ function selectSettings(hierarchy: ViewHierarchyResult): number | undefined {
 
 describe("scopeHierarchyToLayer (#9305)", () => {
   test("the relabelled capture is recognized as having the prototype", () => {
-    expect(hasOwnWindow(captureWithPrototype())).toBe(true);
-    expect(hasOwnWindow(convertedCapture())).toBe(false);
+    expect(hasOwnPrototype(captureWithPrototype())).toBe(true);
+    expect(hasOwnPrototype(convertedCapture())).toBe(false);
   });
 
   test("omitted layer returns the capture unchanged, prototype included", () => {
@@ -243,7 +243,7 @@ describe('app-layer prototype windows (window.layer "app", aovl D4)', () => {
 
   test("the captured app-layer window is AutoMobile's prototype and the status bar is not", () => {
     const hierarchy = capturedAppLayerPrototypeHierarchy();
-    expect(hasOwnWindow(hierarchy)).toBe(true);
+    expect(hasOwnPrototype(hierarchy)).toBe(true);
     const prototype = scopeHierarchyForSelector(hierarchy, "prototype");
     expect(rootWindowIds(prototype)).toEqual([PROTOTYPE_CAPTURE.appLayerPrototypeWindowId]);
     expect(selectByText(prototype, "Bump")).toBeDefined();
@@ -274,7 +274,7 @@ describe('app-layer prototype windows (window.layer "app", aovl D4)', () => {
       ),
       highlight,
     ];
-    expect(hasOwnWindow(hierarchy)).toBe(false);
+    expect(hasOwnPrototype(hierarchy)).toBe(false);
     expect(() => scopeHierarchyForSelector(hierarchy, "prototype")).toThrow(
       /no AutoMobile prototype is showing/,
     );
@@ -312,5 +312,23 @@ describe("app rows under a floating prototype (#10608/#10544, aovl D6 host half)
       /an AutoMobile prototype window covers that point/,
     );
     expect(elevated(scopeHierarchyForSelector(hierarchy, "prototype"))).toBeNull();
+  });
+});
+
+describe("a highlight window with no prototype (#11346)", () => {
+  const highlightOnly = () => {
+    const hierarchy = capturedTwoWindowHierarchy();
+    hierarchy.windows = [
+      ...hierarchy.windows!,
+      { id: 999, type: 4, isActive: true, packageName: CTRL_PROXY_PACKAGE },
+    ];
+    return hierarchy;
+  };
+
+  test("is not a showing prototype for layer scoping", () => {
+    const hierarchy = highlightOnly();
+    expect(hasOwnPrototype(hierarchy)).toBe(false);
+    expect(scopeHierarchyToLayer(hierarchy, "app")).toBe(hierarchy);
+    expect(() => scopeHierarchyForSelector(hierarchy, "prototype")).toThrow(ActionableError);
   });
 });

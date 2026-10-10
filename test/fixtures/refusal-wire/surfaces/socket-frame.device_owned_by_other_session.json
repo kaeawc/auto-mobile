@@ -1,0 +1,15 @@
+{
+  "surface": "socket-frame",
+  "name": "device_owned_by_other_session",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "input/tap refused: device 'emulator-5554' is held by another session. Session holder does not hold it; acquire the device (setActiveDevice) and send input with that session's sessionUuid.",
+    "code": "device_owned_by_other_session",
+    "retryable": false,
+    "details": {
+      "deviceId": "emulator-5554"
+    }
+  }
+}

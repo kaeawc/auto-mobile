@@ -11,6 +11,16 @@
         "externalDevices": ["emulator-5560"]
       }
     },
+    "capacity_exhausted.ios": {
+      "expected": "wait",
+      "fields": {
+        "code": "capacity_exhausted",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 5000,
+        "externalDevices": ["9A1B2C3D-0000-4000-8000-000000000001"]
+      }
+    },
     "daemon_session_suspect": {
       "expected": "retry",
       "fields": {
@@ -60,6 +70,14 @@
         "acquireNewSession": false
       }
     },
+    "device_outside_managed_slots.tool": {
+      "expected": "fail",
+      "fields": {
+        "code": "device_outside_managed_slots",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
     "device_owned_by_other_daemon": {
       "expected": "wait",
       "fields": {
@@ -94,6 +112,14 @@
         "acquireNewSession": false
       }
     },
+    "discovery_incomplete.ios": {
+      "expected": "wait",
+      "fields": {
+        "code": "discovery_incomplete",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
     "managed_slot_acquisition_failed.cancelled": {
       "expected": "fail",
       "fields": {
@@ -103,6 +129,22 @@
       }
     },
     "managed_slot_acquisition_failed.capacity_exhausted": {
+      "expected": "fail",
+      "fields": {
+        "code": "managed_slot_acquisition_failed",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
+    "managed_slot_acquisition_failed.capacity_exhausted.capacity": {
+      "expected": "fail",
+      "fields": {
+        "code": "managed_slot_acquisition_failed",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
+    "managed_slot_acquisition_failed.capacity_exhausted.capacity_external": {
       "expected": "fail",
       "fields": {
         "code": "managed_slot_acquisition_failed",
@@ -408,6 +450,62 @@
       }
     },
     "session_ownership_lost": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "session_ownership_lost.recovery_owned_by_other_daemon": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "session_ownership_lost.recovery_owned_by_other_daemon_unknown_pid": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "session_ownership_lost.recovery_target_absent": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "session_ownership_lost.released_cli_idle_timeout": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "session_ownership_lost.released_explicit_release": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "session_ownership_lost.released_heartbeat_timeout": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "session_ownership_lost.released_owner_disconnected": {
       "expected": "acquire-new-session",
       "fields": {
         "code": "session_ownership_lost",

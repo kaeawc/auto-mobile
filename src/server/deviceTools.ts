@@ -87,13 +87,13 @@ import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerServ
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import type { AvdInfo } from "../utils/android-cmdline-tools/avdmanager";
 import {
-  describeDevice,
   projectListDevicesEntry,
   listDevicesEntrySchema,
   provisionedDeviceSchema,
   configuredImageSchema,
 } from "./deviceDescription";
 import { poolHoldFor } from "./deviceDescription";
+import { describeInventoryDevice, type AdbOfflineHold } from "./inventoryDeviceDescription";
 import {
   notifyInstalledAppResourceListChanged,
   syncInstalledAppResourceRegistry,
@@ -1006,7 +1006,7 @@ export function listDevicePayloads(
   transportAvdNameForDevice: (deviceId: string) => string | undefined = (deviceId) =>
     devicePool?.getAndroidTransportAvdName(deviceId),
   /** Held devices `adb devices` lists in a non-`device` state, by serial (#11455). */
-  adbOfflineStates: ReadonlyMap<string, string> = new Map(),
+  adbOfflineHolds: ReadonlyMap<string, AdbOfflineHold> = new Map(),
 ) {
   const sessionManager = DaemonState.getInstance().isInitialized()
     ? DaemonState.getInstance().getSessionManager()
@@ -1021,36 +1021,29 @@ export function listDevicePayloads(
     const session = pooled?.sessionId
       ? (sessions.get(pooled.sessionId) ?? { sessionId: pooled.sessionId })
       : undefined;
-    const description = describeDevice({
-      kind: "booted",
-      adbOfflineState: adbOfflineStates.get(device.deviceId),
+    const description = describeInventoryDevice({
       device,
       pooled,
       unhealthy: pooled ? devicePool?.getDeviceHealthMarker(device.deviceId) : undefined,
-      configured: configuredImageForBootedDevice(device, configuredImages),
+      configuredImages,
       session,
       deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
-      ...(pooled ? poolHoldFor(devicePool, device.deviceId) : {}),
+      hold: pooled ? poolHoldFor(devicePool, device.deviceId) : undefined,
+      adbOffline: adbOfflineHolds.get(device.deviceId),
+      transportAvdName: transportAvdNameForDevice(device.deviceId),
     });
     if (device.platform === "android") {
-      return projectAndroidTransportDescription(
-        description,
-        aliasesForDevice(device.deviceId),
-        transportAvdNameForDevice(device.deviceId),
-      );
+      return projectAndroidTransportDescription(description, aliasesForDevice(device.deviceId));
     }
     return projectListDevicesEntry(description);
   });
 }
 
 function projectAndroidTransportDescription(
-  description: ReturnType<typeof describeDevice>,
+  description: ReturnType<typeof describeInventoryDevice>,
   aliases: string[],
-  avdName: string | undefined,
 ) {
-  const projected = projectListDevicesEntry(
-    avdName ? { ...description, isVirtual: true, identity: { stableId: avdName } } : description,
-  );
+  const projected = projectListDevicesEntry(description);
   return { ...projected, ...(aliases.length ? { transportAliases: aliases } : {}) };
 }
 

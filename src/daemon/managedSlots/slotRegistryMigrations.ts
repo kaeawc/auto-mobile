@@ -6,6 +6,7 @@ import { selectMigrationLock } from "../../db/migrationLock";
 import * as slotRegistry000 from "./migrations/2026_10_09_000_slot_registry";
 import * as slotRegistry001 from "./migrations/2026_10_09_001_slot_owner_fencing";
 import * as slotJournal002 from "./migrations/2026_10_09_002_slot_journal";
+import * as freeDeviceStop003 from "./migrations/2026_10_10_003_free_device_stop_state";
 
 /**
  * The slot registry's own migration set (#11174). Statically imported rather than read from a
@@ -16,6 +17,7 @@ export const SLOT_REGISTRY_MIGRATIONS: Readonly<Record<string, Migration>> = {
   "2026_10_09_000_slot_registry": slotRegistry000,
   "2026_10_09_001_slot_owner_fencing": slotRegistry001,
   "2026_10_09_002_slot_journal": slotJournal002,
+  "2026_10_10_003_free_device_stop_state": freeDeviceStop003,
 };
 
 export const slotRegistryMigrationProvider: MigrationProvider = {

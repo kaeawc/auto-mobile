@@ -48,6 +48,27 @@ export interface HeartbeatSessionSource {
   sessionNow?(): number;
   /** Register a detector the source runs before every expiry judgement; undefined detaches it. */
   setStallProbe?(probe: (() => void) | undefined): void;
+  /**
+   * The idle releases the source started itself (its idle sweep, a lazy expiry) that still hold
+   * their device, with when each started on the session clock (#11481). They are not reaps of the
+   * monitor, so it learns of them here to hold them to the same stuck deadline.
+   */
+  getIdleReleasesInProgress?(): IdleReleaseInProgress[];
+}
+
+/** One idle release the session source is still running. */
+export interface IdleReleaseInProgress {
+  sessionId: string;
+  startedAtMs: number;
+}
+
+/** A release the monitor holds to {@link STUCK_REAP_WARN_MS}. */
+interface TrackedRelease {
+  at: number;
+  /** Reported (and forced, when a force is wired) already: once per release. */
+  reported: boolean;
+  /** Started by the session source's idle release rather than by one of the monitor's reaps. */
+  idleRelease?: boolean;
 }
 
 type SessionHeartbeatReleaseReason =
@@ -184,8 +205,12 @@ export class SessionHeartbeatMonitor {
    * waits on them: one slow teardown must not delay the expiry checks of every other session.
    */
   private readonly reapsInFlight = new Map<string, Promise<void>>();
-  /** When each in-flight release started, and whether it has been reported as stuck. */
-  private readonly reapStartedAt = new Map<string, { at: number; reported: boolean }>();
+  /**
+   * When each release in progress started, and whether it has been reported as stuck: the
+   * monitor's own reaps and the source's idle releases (#11481). Stuck detection runs over this
+   * set, never over the visible sessions, which hide a session once its idle deadline passes.
+   */
+  private readonly reapStartedAt = new Map<string, TrackedRelease>();
 
   constructor(
     private readonly sessions: HeartbeatSessionSource,
@@ -447,6 +472,7 @@ export class SessionHeartbeatMonitor {
       // sweeping here gives them the monitor's interval granularity instead of the
       // 5-minute cleanup sweep.
       this.sessions.cleanupExpiredSessions();
+      this.forceStuckReleases();
       return this.reapStaleSessions();
     } finally {
       this.scanInFlight = false;
@@ -466,7 +492,6 @@ export class SessionHeartbeatMonitor {
     const reaps: Promise<void>[] = [];
     for (const session of this.sessions.getAllSessions()) {
       if (this.reapsInFlight.has(session.sessionId)) {
-        this.reportIfStuck(session.sessionId);
         continue;
       }
       // Awaiting-owner sessions never receive pre-first-heartbeat grace; judge them solely by
@@ -507,14 +532,55 @@ export class SessionHeartbeatMonitor {
       () => undefined,
     );
     this.reapsInFlight.set(sessionId, settled);
-    this.reapStartedAt.set(sessionId, { at: this.now(), reported: false });
+    const tracked: TrackedRelease = { at: this.now(), reported: false };
+    this.reapStartedAt.set(sessionId, tracked);
     void settled.then(() => {
       if (this.reapsInFlight.get(sessionId) === settled) {
         this.reapsInFlight.delete(sessionId);
+      }
+      if (this.reapStartedAt.get(sessionId) === tracked) {
         this.reapStartedAt.delete(sessionId);
       }
     });
     return logged;
+  }
+
+  /**
+   * Hold every release in progress to the stuck deadline (#10963), whether or not its session is
+   * still visible (#11481): a session past its idle deadline is hidden from `getAllSessions()`
+   * and skipped by the idle sweep while it is releasing, so a scan of visible sessions never
+   * reached a release that wedged across that deadline, nor any idle release.
+   */
+  private forceStuckReleases(): void {
+    this.trackIdleReleases();
+    for (const sessionId of this.reapStartedAt.keys()) {
+      this.reportIfStuck(sessionId);
+    }
+  }
+
+  /**
+   * Mirror the source's idle releases into {@link reapStartedAt}. One that settled, or was forced
+   * and so no longer holds its device, drops out of the source's list and is forgotten here; a new
+   * release of the same session id starts a new deadline. A reap of the monitor's own is left
+   * alone: it is already tracked from its own start and forgotten when it settles.
+   */
+  private trackIdleReleases(): void {
+    const inProgress = new Map(
+      (this.sessions.getIdleReleasesInProgress?.() ?? []).map((release) => [
+        release.sessionId,
+        release.startedAtMs,
+      ]),
+    );
+    for (const [sessionId, tracked] of this.reapStartedAt) {
+      if (tracked.idleRelease && inProgress.get(sessionId) !== tracked.at) {
+        this.reapStartedAt.delete(sessionId);
+      }
+    }
+    for (const [sessionId, startedAtMs] of inProgress) {
+      if (!this.reapStartedAt.has(sessionId)) {
+        this.reapStartedAt.set(sessionId, { at: startedAtMs, reported: false, idleRelease: true });
+      }
+    }
   }
 
   /** Warn once when a release has been tearing down for {@link STUCK_REAP_WARN_MS} (#10704). */

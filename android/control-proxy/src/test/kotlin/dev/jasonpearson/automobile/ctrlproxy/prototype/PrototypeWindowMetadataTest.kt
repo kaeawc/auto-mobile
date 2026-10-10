@@ -190,6 +190,43 @@ class PrototypeWindowMetadataTest {
   }
 
   @Test
+  fun `window entries carry the prototype appearance only when set and round trip it`() {
+    val wire = Json {
+      ignoreUnknownKeys = true
+      encodeDefaults = true
+    }
+    assertFalse(
+      wire
+        .encodeToString(WindowInfo.serializer(), WindowInfo(id = 3, type = 1))
+        .contains("prototypeAppearance"),
+    )
+    val prototype =
+      WindowInfo(
+        id = 4,
+        type = 4,
+        prototypePlacement = "fullscreen",
+        prototypeOpaque = false,
+        prototypeAppearance =
+          PrototypeAppearance(
+            PrototypeAppearanceMode.DARK,
+            PrototypeAppearanceSource.AUTHORED_BACKGROUND,
+            deviceDark = false,
+          ),
+      )
+    val encoded = wire.encodeToString(WindowInfo.serializer(), prototype)
+    assertTrue(
+      encoded,
+      encoded.contains(
+        """"prototypeAppearance":{"mode":"dark","source":"authoredBackground","deviceDark":false}""",
+      ),
+    )
+    assertEquals(prototype, wire.decodeFromString(WindowInfo.serializer(), encoded))
+    // An APK that predates prototype_appearance_v1 sends placement and opacity alone.
+    val older = """{"id":4,"type":4,"prototypePlacement":"fullscreen","prototypeOpaque":false}"""
+    assertNull(wire.decodeFromString(WindowInfo.serializer(), older).prototypeAppearance)
+  }
+
+  @Test
   fun `controller reports the active prototype and nothing once it is dismissed`() = runTest {
     val host = FakePrototypeHost()
     val controller =
@@ -202,10 +239,12 @@ class PrototypeWindowMetadataTest {
     assertNull(controller.windowMetadata())
 
     controller.show("r1", spec(PrototypeFullscreenPlacement()))
-    assertEquals(PrototypeWindowMetadata("fullscreen", false), controller.windowMetadata())
+    // The appearance the show resolved to rides along; PrototypeAppearanceTest covers it.
+    fun placementAndOpacity() = controller.windowMetadata()?.copy(appearance = null)
+    assertEquals(PrototypeWindowMetadata("fullscreen", false), placementAndOpacity())
 
     controller.show("r2", spec(PrototypeSheetPlacement("bottom", 120.0), opacity = 50))
-    assertEquals(PrototypeWindowMetadata("sheet", false), controller.windowMetadata())
+    assertEquals(PrototypeWindowMetadata("sheet", false), placementAndOpacity())
 
     controller.dismiss("r3", "panel", null)
     assertNull(controller.windowMetadata())

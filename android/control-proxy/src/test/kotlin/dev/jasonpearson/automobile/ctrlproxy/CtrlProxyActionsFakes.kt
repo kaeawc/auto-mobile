@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
+import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 
 /**
@@ -158,6 +159,7 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     spec: PrototypeSpec,
     displayId: Int?,
     reset: Boolean,
+    appearance: PrototypeAppearanceOverride?,
   ) {}
 
   override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {}
@@ -521,7 +523,8 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     spec: PrototypeSpec,
     displayId: Int?,
     reset: Boolean,
-  ) = record("showPrototype", requestId, spec, displayId, reset)
+    appearance: PrototypeAppearanceOverride?,
+  ) = record("showPrototype", requestId, spec, displayId, reset, appearance)
 
   override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) =
     record("dismissPrototype", requestId, id, all)

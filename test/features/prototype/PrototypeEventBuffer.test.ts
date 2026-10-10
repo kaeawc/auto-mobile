@@ -49,6 +49,25 @@ describe("PrototypeEventBuffer", () => {
     expect(buffer.push(event(1))).toBe(true);
     expect(buffer.push(event(1))).toBe(false);
   });
+  test("an appearance_changed event is buffered and taken by kind", () => {
+    const buffer = new PrototypeEventBuffer();
+    buffer.push(event(1));
+    buffer.push({ ...event(2, "panel", "appearance_changed"), name: null });
+    expect(buffer.take({ kind: "appearance_changed" })?.sequence).toBe(2);
+    expect(buffer.status().pendingCount).toBe(1);
+  });
+  test("an event of an unknown kind advances the high-water mark and is never buffered", () => {
+    const buffer = new PrototypeEventBuffer();
+    expect(buffer.push(event(1))).toBe(true);
+    expect(buffer.push(event(2, "panel", "unknown"))).toBe(false);
+    expect(buffer.status()).toEqual({ pendingCount: 1, lastSequence: 2, droppedCount: 0 });
+    // Its sequence is spent: a replay of it, or of anything older, is still a duplicate.
+    expect(buffer.push(event(2))).toBe(false);
+    expect(buffer.push(event(3))).toBe(true);
+    expect(buffer.take({})?.sequence).toBe(1);
+    expect(buffer.take({})?.sequence).toBe(3);
+    expect(buffer.take({})).toBeUndefined();
+  });
   test("advanceTo seeds the high-water mark without events and never lowers it", () => {
     const buffer = new PrototypeEventBuffer();
     buffer.advanceTo(5);

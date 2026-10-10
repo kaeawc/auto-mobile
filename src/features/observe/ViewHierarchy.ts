@@ -274,9 +274,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       )) !== "recovered"
     ) {
       // This call may have started recovery after the first read assigned its reason.
-      result.hierarchy.unavailableReason = this.accessibilityServiceClient.isRecoveryInFlight?.()
-        ? "service_recovering"
-        : "connection_lost";
+      Object.assign(result.hierarchy, this.androidTransportFailureFields());
       return result;
     }
     if (!this.hasRecoveryRefetchBudget(context)) {
@@ -295,6 +293,31 @@ export class ViewHierarchy implements ViewHierarchyInterface {
           }
         : this.remainingRecoveryBudget(context),
     );
+  }
+
+  /**
+   * Typed cause for an Android transport failure. An exhausted or suspended forced-restart budget
+   * means automatic recovery will not run again, so say so (with the last failure) rather than
+   * reporting a generic `connection_lost` that implies a retry could help (#11246).
+   */
+  private androidTransportFailureFields(): Pick<
+    Hierarchy,
+    "unavailableReason" | "unavailableDetail"
+  > {
+    if (this.accessibilityServiceClient.isRecoveryInFlight?.()) {
+      return { unavailableReason: "service_recovering" };
+    }
+    const budget = this.accessibilityServiceClient.getRestartBudgetSnapshot?.();
+    if (budget && (budget.state === "exhausted" || budget.state === "suspended")) {
+      return {
+        unavailableReason: "runner_unavailable",
+        unavailableDetail:
+          `Automatic CtrlProxy recovery is ${budget.state} after ${budget.attempts} attempt(s)` +
+          `${budget.lastFailureReason ? `; last failure: ${budget.lastFailureReason}` : ""}. ` +
+          "Run startDevice or begin a new session to rearm it.",
+      };
+    }
+    return { unavailableReason: "connection_lost" };
   }
 
   private async retryRootlessAndroidCapture(
@@ -505,10 +528,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         );
         const prepared = this.prepareHierarchyForResponse(accessibilityHierarchy);
         if (prepared.hierarchy.transportFailure) {
-          prepared.hierarchy.unavailableReason =
-            this.accessibilityServiceClient.isRecoveryInFlight?.()
-              ? "service_recovering"
-              : "connection_lost";
+          Object.assign(prepared.hierarchy, this.androidTransportFailureFields());
         } else if (prepared.ctrlProxyIncomplete && !prepared.hierarchy.node) {
           prepared.hierarchy.unavailableReason = "incomplete_capture";
         }
@@ -537,15 +557,11 @@ export class ViewHierarchy implements ViewHierarchyInterface {
           ...(transportFailure ? { transportFailure: true } : {}),
           ...(signal?.aborted
             ? {}
-            : {
-                unavailableReason: deviceLocked
-                  ? ("device_locked" as const)
-                  : this.accessibilityServiceClient.isRecoveryInFlight?.()
-                    ? ("service_recovering" as const)
-                    : transportFailure
-                      ? ("connection_lost" as const)
-                      : ("unknown" as const),
-              }),
+            : deviceLocked
+              ? { unavailableReason: "device_locked" as const }
+              : transportFailure || this.accessibilityServiceClient.isRecoveryInFlight?.()
+                ? this.androidTransportFailureFields()
+                : { unavailableReason: "unknown" as const }),
         },
         updatedAt: this.timer.now(),
       };
@@ -575,13 +591,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
             timeoutMs,
           ),
           ...(transportFailure ? { transportFailure: true } : {}),
-          ...(transportFailure
-            ? {
-                unavailableReason: this.accessibilityServiceClient.isRecoveryInFlight?.()
-                  ? ("service_recovering" as const)
-                  : ("connection_lost" as const),
-              }
-            : {}),
+          ...(transportFailure ? this.androidTransportFailureFields() : {}),
         },
         updatedAt: this.timer.now(),
       };

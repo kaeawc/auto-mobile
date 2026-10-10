@@ -56,7 +56,10 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/Perfo
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import { exponentialBackoff, fixedBackoff } from "../../../utils/Backoff";
-import { ForcedRestartBudget } from "../../../ctrlProxy/ForcedRestartBudget";
+import {
+  ForcedRestartBudget,
+  type ForcedRestartSnapshot,
+} from "../../../ctrlProxy/ForcedRestartBudget";
 import {
   NavigationGraphManager,
   NavigationEvent,
@@ -1615,6 +1618,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     | undefined;
   /** One client exists per device; this budget gates both failure bursts and observe calls. */
   private readonly forcedRestartBudget: ForcedRestartBudget;
+  /** Set when recovery found the device absent; consumed by the next offline-to-online rearm. */
+  private deviceSeenAbsent = false;
   public static readonly OBSERVE_RECOVERY_WAIT_MS = 10_000;
   private readonly serviceManagerFactory: AndroidServiceManagerFactory;
 
@@ -1909,9 +1914,26 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   public static resumeAfterDeviceStart(deviceId: string): void {
+    // An explicit startDevice/setup is a fresh start for forced-restart admission (#11246).
+    AndroidCtrlProxyClient.instances
+      .get(deviceId)
+      ?.forcedRestartBudget.rearm("explicit device start");
     if (AndroidCtrlProxyClient.retiredDeviceIds.delete(deviceId)) {
       AndroidCtrlProxyClient.instances.delete(deviceId);
     }
+  }
+
+  /** The device re-entered the ready state; rearm only if recovery saw it absent (#11246). */
+  public static noteDeviceOnline(deviceId: string): void {
+    AndroidCtrlProxyClient.instances.get(deviceId)?.rearmAfterDeviceOnline();
+  }
+
+  private rearmAfterDeviceOnline(): void {
+    if (!this.deviceSeenAbsent) {
+      return;
+    }
+    this.deviceSeenAbsent = false;
+    this.forcedRestartBudget.rearm("device back online");
   }
 
   /** Remove only the singleton captured before asynchronous incarnation cleanup began. */
@@ -2077,6 +2099,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         );
       }
       this.boundSessionId = sessionId;
+      // A new session is a fresh owner: do not let a previous session's exhausted budget strand it.
+      this.forcedRestartBudget.rearm("new session bound");
       // Invalidate cached hierarchy detector so it picks up the new session's NavigationGraphManager
       if (this.hierarchyNavigationDetector) {
         this.hierarchyNavigationDetector.dispose();
@@ -2831,6 +2855,28 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
+  /**
+   * An absent device never exercised the runner, so its attempt is given back instead of burning
+   * a forced-restart slot (#11246); every other unrecovered outcome is a recorded failure.
+   */
+  private settleUnrecoveredAttempt(outcome: string, token: number): void {
+    if (!this.closed && outcome === "unavailable") {
+      this.releasePendingRecoveryStability(token);
+      return;
+    }
+    this.failPendingRecoveryStability(`service recovery ${outcome}`);
+    this.forcedRestartBudget.recordFailure(`service recovery ${outcome}`, token);
+  }
+
+  private releasePendingRecoveryStability(token: number): void {
+    const pending = this.pendingRecoveryStability;
+    if (pending?.token === token) {
+      this.pendingRecoveryStability = undefined;
+      pending.resolve(false);
+    }
+    this.forcedRestartBudget.releaseAttempt(token);
+  }
+
   private completePendingRecoveryStability(): void {
     const pending = this.pendingRecoveryStability;
     if (pending?.eligible && pending.stableSocket === this.ws && this.isConnected()) {
@@ -2912,8 +2958,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     })
       .then(async (outcome) => {
         if (this.closed || outcome === "failed" || outcome === "unavailable") {
-          this.failPendingRecoveryStability(`service recovery ${outcome}`);
-          this.forcedRestartBudget.recordFailure(`service recovery ${outcome}`, token);
+          this.settleUnrecoveredAttempt(outcome, token);
           return false;
         }
         // A repaired service may clear the foreground connection cooldown;
@@ -3013,6 +3058,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
+  /** Current forced-restart admission state, for typed observe/action failure reasons. */
+  public getRestartBudgetSnapshot(): ForcedRestartSnapshot {
+    return this.forcedRestartBudget.snapshot();
+  }
+
   public isRecoveryInFlight(): boolean {
     return this.recoveryPromise !== null;
   }
@@ -3038,6 +3088,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       return "failed";
     }
     if (!present) {
+      this.deviceSeenAbsent = true;
       logger.info(
         `[AndroidCtrlProxyClient] Device ${this.device.deviceId} is offline or missing; skipping recovery`,
       );

@@ -107,6 +107,21 @@ export class ForcedRestartBudget {
         : this.timer.now() + this.backoff.delayForAttempt(this.attempts);
   }
 
+  /**
+   * Gives back an admitted attempt that never exercised the runner (e.g. the device was absent), so
+   * it consumes no budget, records no failure, and starts no backoff. Stale tokens are ignored.
+   */
+  releaseAttempt(token: number): void {
+    if (!this.inFlight || token !== this.generation) {
+      return;
+    }
+    this.inFlight = false;
+    if (this.attempts === 0) {
+      // Time spent waiting for the device must not count toward the episode's elapsed limit.
+      this.firstAttemptAtMs = undefined;
+    }
+  }
+
   /** Rearms the budget on success, rejecting a completion from an invalidated attempt. */
   recordSuccess(token?: number): boolean {
     if (token !== undefined && (!this.inFlight || token !== this.generation)) {

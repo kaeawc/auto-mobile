@@ -268,14 +268,17 @@ export class BootAdmissionLedger {
    * kept only the boots in flight when it opened lost a boot admitted and ended inside it, and
    * a listing older than that boot then admitted past the limit (#11537).
    */
-  private end(token: symbol): void {
+  private end(token: symbol, listed = false): void {
     const entry = this.entries.get(token);
     if (!entry) {
       return;
     }
     this.entries.delete(token);
+    // A device a listing showed is running whatever its boot deadline says: an older listing
+    // still open counts it until that sample decides, so the window keeps it without a deadline.
+    const kept = listed ? { deviceId: entry.deviceId } : entry;
     for (const window of this.openWindows) {
-      window.ended.push(entry);
+      window.ended.push(kept);
     }
   }
 
@@ -306,7 +309,7 @@ export class BootAdmissionLedger {
       const visible = entry.deviceId !== undefined && visibleDeviceIds.has(entry.deviceId);
       if (entry.handedOffUntilMs !== undefined && (visible || now >= entry.handedOffUntilMs)) {
         // Visible in this listing, but a sample still open may hold an older one without it.
-        this.end(token);
+        this.end(token, visible);
       } else if (
         !visible &&
         (excludeDeviceId === undefined || entry.deviceId !== excludeDeviceId)

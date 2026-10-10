@@ -3,7 +3,10 @@ import type { ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ActionableError } from "../../../src/models";
-import { AvdManagerClient } from "../../../src/utils/android-cmdline-tools/AvdManagerClient";
+import {
+  AvdCreateInterruptedError,
+  AvdManagerClient,
+} from "../../../src/utils/android-cmdline-tools/AvdManagerClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const listDeviceOutput = readFileSync(
@@ -211,10 +214,14 @@ The following Android Virtual Devices could not be loaded:
       timer.advanceTime(1);
       child.close(0);
 
-      if (operation === "createAvd" || operation === "deleteAvd") {
+      if (operation === "createAvd") {
+        // A killed create may have written the AVD: it is not a clean rejection (#11155).
+        await expect(pending).rejects.toBeInstanceOf(AvdCreateInterruptedError);
+        await expect(pending).rejects.toThrow("avdmanager command timed out after 1000ms");
+      } else if (operation === "deleteAvd") {
         await expect(pending).resolves.toEqual({
           success: false,
-          message: `Failed to ${operation === "createAvd" ? "create" : "delete"} AVD pixel: avdmanager command timed out after 1000ms`,
+          message: "Failed to delete AVD pixel: avdmanager command timed out after 1000ms",
         });
       } else {
         await expect(pending).rejects.toThrow("avdmanager command timed out after 1000ms");
@@ -543,6 +550,26 @@ The following Android Virtual Devices could not be loaded:
 
     await expect(pending).resolves.toEqual([]);
     expect(validations).toEqual([["avdmanager"]]);
+  });
+
+  test("createAvd reports an externally killed avdmanager as interrupted, not rejected (#11155)", async () => {
+    const { client, child } = createClient();
+    const pending = client.createAvd({ name: "pixel", package: "unused" });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    child.close(null);
+
+    await expect(pending).rejects.toBeInstanceOf(AvdCreateInterruptedError);
+    await expect(pending).rejects.toThrow(/may have been partially created/);
+  });
+
+  test("createAvd keeps a clean non-zero exit as a rejection (#11155)", async () => {
+    const { client, child } = createClient();
+    const pending = client.createAvd({ name: "pixel", package: "unused" });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    child.stderrText("Error: Android Virtual Device 'pixel' already exists.");
+    child.close(1);
+
+    await expect(pending).resolves.toMatchObject({ success: false });
   });
 
   test("rejects null exits and retains stderr-only diagnostics", async () => {

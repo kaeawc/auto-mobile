@@ -16,6 +16,7 @@ import {
 } from "../../src/utils/android-cmdline-tools/avdmanager";
 import { FakeAndroidAvdCreator, FakeIosSimulatorCreator } from "../fakes/FakeDeviceProvisioner";
 import { logger } from "../../src/utils/logger";
+import { ProvisionDeviceCreateRejectedError } from "../../src/devices/exactDeviceProvisioning";
 
 function deviceType(name: string, productFamily = "iPhone"): AppleDeviceType {
   return {
@@ -765,6 +766,44 @@ describe("DefaultDeviceProvisioner", () => {
     await expect(provisioner.provision({ platform: "android" })).rejects.toThrow(
       /Failed to create Android AVD .*package not installed/,
     );
+    // A clean avdmanager rejection created nothing, so it must not be rolled back (#11155).
+    await expect(provisioner.provision({ platform: "android" })).rejects.toBeInstanceOf(
+      ProvisionDeviceCreateRejectedError,
+    );
+  });
+
+  it("claims the exact iOS identity before simctl create runs (#11155)", async () => {
+    const claimed: unknown[] = [];
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () =>
+        new FakeIosSimulatorCreator(
+          [deviceType("iPhone 17")],
+          "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+          "NEW-UDID",
+        ),
+      androidCreator: () => new FakeAndroidAvdCreator(),
+      idGenerator: new CountingIdGenerator("uuid"),
+      architecture: "arm64",
+      identityHooks: {
+        reserveBeforeCreate: async (identity) => {
+          claimed.push(identity);
+          return undefined;
+        },
+        bindAfterCreate: async () => {},
+      },
+    });
+
+    await provisioner.provision({ platform: "ios" });
+
+    expect(claimed).toEqual([
+      {
+        platform: "ios",
+        name: "AutoMobile-iPhone-17-uuid1",
+        deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        runtimeId: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+        runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+      },
+    ]);
   });
 
   it("reports an actionable error when simctl is unavailable", async () => {

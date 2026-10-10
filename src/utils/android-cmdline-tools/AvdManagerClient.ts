@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { ActionableError } from "../../models";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
-import { runAndroidCommand } from "./runAndroidCommand";
+import { AndroidCommandTerminatedError, runAndroidCommand } from "./runAndroidCommand";
 import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import {
   DefaultHostCommandExecutor,
@@ -138,6 +138,42 @@ export interface AvdInventory {
   unloadable: Array<{ name: string; path: string; error: string }>;
 }
 
+function createAvdArgs(params: CreateAvdParams): string[] {
+  const args = ["create", "avd", "-n", params.name, "-k", params.package];
+  if (params.device) {
+    args.push("-d", params.device);
+  }
+  if (params.force) {
+    args.push("--force");
+  }
+  for (const [flag, value] of [
+    ["-p", params.path],
+    ["-t", params.tag],
+    ["--abi", params.abi],
+  ] as const) {
+    if (value) {
+      args.push(flag, value);
+    }
+  }
+  return args;
+}
+
+/**
+ * `avdmanager create avd` was killed (timeout or signal) before it reported an
+ * outcome, so the AVD may exist half-written. Unlike a clean non-zero exit
+ * (`success: false`), the caller must treat the AVD as possibly created and
+ * roll it back (#11155).
+ */
+export class AvdCreateInterruptedError extends ActionableError {
+  constructor(
+    public readonly avdName: string,
+    detail: string,
+  ) {
+    super(`Failed to create AVD ${avdName}: ${detail}. The AVD may have been partially created.`);
+    this.name = "AvdCreateInterruptedError";
+  }
+}
+
 export class AvdManagerClient {
   private static readonly homebrewWarningLoggers = new WeakSet<object>();
 
@@ -167,25 +203,9 @@ export class AvdManagerClient {
   ): Promise<{ success: boolean; message: string; avdName?: string }> {
     try {
       const { path, env } = await this.resolve();
-      const args = ["create", "avd", "-n", params.name, "-k", params.package];
-      if (params.device) {
-        args.push("-d", params.device);
-      }
-      if (params.force) {
-        args.push("--force");
-      }
-      for (const [flag, value] of [
-        ["-p", params.path],
-        ["-t", params.tag],
-        ["--abi", params.abi],
-      ] as const) {
-        if (value) {
-          args.push(flag, value);
-        }
-      }
       const result = await this.execute(
         path,
-        args,
+        createAvdArgs(params),
         { input: "\n", env, timeoutMs: options.timeoutMs ?? 300_000 },
         options,
       );
@@ -196,6 +216,13 @@ export class AvdManagerClient {
           avdName: params.name,
         };
       }
+      if (result.exitCode === null) {
+        // Killed by a signal before it reported an outcome; not a clean rejection.
+        throw new AvdCreateInterruptedError(
+          params.name,
+          `avdmanager was killed: ${getFailureSummary(result)}`,
+        );
+      }
       return {
         success: false,
         message:
@@ -203,8 +230,12 @@ export class AvdManagerClient {
           `AVD creation failed: ${getFailureSummary(result)}`,
       };
     } catch (error) {
-      if (options.signal?.aborted) {
+      if (options.signal?.aborted || error instanceof AvdCreateInterruptedError) {
         throw error;
+      }
+      if (error instanceof AndroidCommandTerminatedError) {
+        // A timed-out create was killed mid-write and may have left the AVD (#11155).
+        throw new AvdCreateInterruptedError(params.name, error.message);
       }
       const message = `Failed to create AVD ${params.name}: ${(error as Error).message}`;
       this.dependencies.logger.warn(message, error);

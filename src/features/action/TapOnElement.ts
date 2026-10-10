@@ -305,6 +305,24 @@ function findTapTargetNode(
 }
 
 /**
+ * The tree `element` was selected from, so the IME guard can recover its ancestry by
+ * source identity. Unscoped iOS selection reads the registered capture's projected
+ * tree; a `layer`-scoped selection projects an unregistered tree that keeps the
+ * original capture's nodes (`scopeHierarchyToLayer`), so fall back to the original.
+ */
+function selectionHierarchyFor(
+  element: Element,
+  hierarchy: ViewHierarchyResult,
+  platform: "android" | "ios",
+): ViewHierarchyResult {
+  const snapshot = platform === "ios" ? getHierarchySnapshot(hierarchy) : undefined;
+  const source = getHierarchyNodeSource(element);
+  return snapshot && (!source || snapshot.nodes.some((node) => node.source === source))
+    ? snapshot.hierarchy
+    : hierarchy;
+}
+
+/**
  * Dependencies for TapOnElement that can be injected for testing.
  */
 interface TapOnElementDependencies extends DisplayFenceDependencies {
@@ -757,7 +775,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (platform !== "android" && platform !== "ios") {
       return undefined;
     }
-    const elements = new DefaultObserveElementCollector().collect(hierarchy, platform);
+    const elements = new DefaultObserveElementCollector().collect(
+      selectionHierarchyFor(element, hierarchy, platform),
+      platform,
+    );
     const ime = elements && getImeOccluderForElement(elements, element);
     return ime && platform === "ios" ? getIosImeOccluder(ime, screenSize) : ime;
   }

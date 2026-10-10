@@ -22,6 +22,7 @@ export interface DecodedCtrlProxyMessage {
   result?: unknown;
   errorMessage?: string;
   runnerBusy?: boolean;
+  runnerStalled?: boolean;
   totalTimeMs?: number;
   perfTiming?: CtrlProxyPerfTiming | CtrlProxyPerfTiming[];
 }
@@ -108,6 +109,7 @@ function decodeRunnerBusy(message: WebSocketMessage, requestId: string): Decoded
       ? `${(elapsedMs / 1000).toFixed(1)}s`
       : "an unknown duration";
   const remainingMs = message.blockingDeadlineRemainingMs;
+  const runnerStalled = shouldRecoverBusyRunner(message);
   let deadlineDetail = "";
   if (typeof remainingMs === "number" && Number.isFinite(remainingMs)) {
     const deadlineStatus =
@@ -119,9 +121,36 @@ function decodeRunnerBusy(message: WebSocketMessage, requestId: string): Decoded
   return {
     requestId,
     runnerBusy: true,
-    errorMessage: `iOS runner is busy executing ${blockingType} for ${elapsedDuration}${deadlineDetail}; retry shortly`,
+    ...(runnerStalled ? { runnerStalled: true } : {}),
+    errorMessage:
+      `iOS runner is busy executing ${blockingType} for ${elapsedDuration}${deadlineDetail}; ` +
+      (runnerStalled
+        ? "bounded runner recovery is required. The blocking action's outcome is unknown; observe fresh state before deciding whether to repeat it"
+        : "retry shortly"),
     totalTimeMs: message.totalTimeMs ?? 0,
   };
+}
+
+function shouldRecoverBusyRunner(message: WebSocketMessage): boolean {
+  // These commands have 5s/10s host waits, but timing out does not cancel the
+  // native call. Leave grace for completion and any explicit runner deadline.
+  // Other commands (including potentially long text input) retain their policy.
+  if (
+    !["request_activate_accessibility_link", "request_launch_app"].includes(
+      message.blockingCommandType ?? "",
+    )
+  ) {
+    return false;
+  }
+  const elapsedMs = message.blockingElapsedMs;
+  const remainingMs = message.blockingDeadlineRemainingMs;
+  return (
+    typeof elapsedMs === "number" &&
+    Number.isFinite(elapsedMs) &&
+    elapsedMs >= 30_000 &&
+    (remainingMs === undefined ||
+      (typeof remainingMs === "number" && Number.isFinite(remainingMs) && remainingMs <= 0))
+  );
 }
 
 function decodeScreenshot(message: WebSocketMessage): unknown {

@@ -1,5 +1,9 @@
 import { buildSimctlArgs } from "../utils/ios-cmdline-tools/simctlArgs";
 import { DefaultIosTunnelClient, type IosTunnelClient } from "./ios/IosTunnelClient";
+import {
+  getSharedDevicectlDeviceLister,
+  type IosPhysicalDeviceLister,
+} from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { runnerQueryTimeoutEnv } from "./ios/runnerQueryTimeoutEnv";
 import { runnerHierarchyPairCaptureEnv } from "./ios/runnerHierarchyPairCaptureEnv";
 import type { DoctorProbeOptions } from "../doctor/types";
@@ -250,6 +254,11 @@ interface CtrlProxyIosCapabilities {
   reason?: string;
 }
 
+/** Unit-test default: an authoritative empty inventory, so tests never spawn devicectl. */
+const NO_PHYSICAL_DEVICES: IosPhysicalDeviceLister = {
+  listConnectedDevices: async () => ({ devices: [], complete: true }),
+};
+
 interface IosCtrlProxyManagerOptions {
   device: BootedDevice;
   timer?: Timer;
@@ -262,6 +271,8 @@ interface IosCtrlProxyManagerOptions {
   xcodebuild?: Xcodebuild;
   processClient?: IosCtrlProxyProcessClient;
   tunnelClient?: IosTunnelClient;
+  /** Authoritative physical-device inventory (devicectl); defaults to the shared lister. */
+  physicalDeviceLister?: IosPhysicalDeviceLister;
 }
 
 /**
@@ -364,6 +375,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // Process supervision
   private readonly processSupervisor: ProcessSupervisor;
   private readonly tunnelClient: IosTunnelClient;
+  private readonly physicalDeviceLister: IosPhysicalDeviceLister | undefined;
+  private warnedIdeviceIdUnavailable = false;
   private isProcessSupervisorRestarting = false;
   private static readonly MAX_RESTART_ATTEMPTS = 5;
   private static readonly RESTART_BASE_DELAY_MS = 2000;
@@ -434,6 +447,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       processClient,
     } = options;
     this.device = device;
+    this.physicalDeviceLister = options.physicalDeviceLister;
     this.timer = timer;
     // iOS automatic runner recovery has a five-minute episode limit in addition
     // to the shared budget's three-attempt cap; Android keeps its own policy.
@@ -625,7 +639,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     builder?: IosCtrlProxyBuilder,
     tunnelClient?: IosTunnelClient,
   ): IOSCtrlProxyManager {
-    return new IOSCtrlProxyManager({ device, timer, builder, tunnelClient });
+    return new IOSCtrlProxyManager({
+      device,
+      timer,
+      builder,
+      tunnelClient,
+      physicalDeviceLister: NO_PHYSICAL_DEVICES,
+    });
   }
 
   /**
@@ -642,6 +662,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     hostPortAvailabilityChecker?: HostPortAvailabilityChecker,
     xcodebuild?: Xcodebuild,
     processClient?: IosCtrlProxyProcessClient,
+    physicalDeviceLister?: IosPhysicalDeviceLister,
   ): IOSCtrlProxyManager {
     return new IOSCtrlProxyManager({
       device,
@@ -660,6 +681,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           processExecutor.spawn.bind(processExecutor),
         ),
       processClient: processClient ?? new IosCtrlProxyProcessClient(processExecutor, timer),
+      physicalDeviceLister: physicalDeviceLister ?? NO_PHYSICAL_DEVICES,
     });
   }
 
@@ -1846,8 +1868,18 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return;
     }
 
-    // Stop iproxy tunnel if running
-    await this.stopIproxyTunnel({ clearDevicePort: true });
+    // A tunnel-stop failure must not skip runner termination, and it must not leave
+    // the port reservation or the retiring runner's abort signal behind once the
+    // runner is gone. They are retained only when the runner is confirmed still
+    // alive, so its port is not handed to another device while it holds it.
+    let tunnelStopError: unknown;
+    try {
+      // Stop iproxy tunnel if running
+      await this.stopIproxyTunnel({ clearDevicePort: true });
+    } catch (error) {
+      tunnelStopError = error;
+      logger.warn(`[IOSCtrlProxy] iproxy tunnel stop failed: ${errorMessage(error)}`, error);
+    }
 
     const runnerTerminationError = await this.terminateTrackedRunner(retiringController, deadline);
 
@@ -1859,12 +1891,18 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           `${errorMessage(runnerTerminationError)}`,
       );
     }
-    // Terminate descendants before abort can synchronously clear process tracking.
-    retiringController?.abort(new Error("iOS CtrlProxy runner stopped"));
-    if (this.runnerAbortController === retiringController) {
-      this.runnerAbortController = null;
+    try {
+      // Terminate descendants before abort can synchronously clear process tracking.
+      retiringController?.abort(new Error("iOS CtrlProxy runner stopped"));
+      if (this.runnerAbortController === retiringController) {
+        this.runnerAbortController = null;
+      }
+    } finally {
+      PortManager.release(this.device.deviceId);
     }
-    PortManager.release(this.device.deviceId);
+    if (tunnelStopError !== undefined) {
+      throw toActionableError(tunnelStopError, "Failed to stop iOS CtrlProxy iproxy tunnel");
+    }
     logger.info("[IOSCtrlProxy] Service stopped");
   }
 
@@ -4159,6 +4197,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (this.isSimulator()) {
       return Promise.resolve();
     }
+    // A supervised restart (allowServicePortReallocation: false) re-establishes a tunnel
+    // that already passed this check, so only fresh starts pay for the probe.
+    if (!this.useRemoteRunner() && options.allowServicePortReallocation !== false) {
+      return this.assertUsbAttachedForTunnel().then(() => this.startTunnel(options));
+    }
+    return this.startTunnel(options);
+  }
+
+  private startTunnel(options: IproxyTunnelStartOptions): Promise<void> {
     return this.tunnelClient.start({
       // Computed ports must follow options: an explicit undefined is not an override.
       ...options,
@@ -4200,22 +4247,69 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return this.isSimulatorDetected();
     }
 
-    try {
-      if (this.useRemoteRunner()) {
+    if (this.useRemoteRunner()) {
+      try {
         const result = await this.remoteRunner.runIdeviceId(["-l"]);
         if (!result.success || !result.data) {
           return false;
         }
         return result.data.stdout.split("\n").some((line) => line.trim() === this.device.deviceId);
+      } catch (error) {
+        logger.warn(`[IOSCtrlProxy] Remote idevice_id probe failed: ${errorMessage(error)}`, error);
+        return false;
       }
+    }
 
-      const { stdout } = await this.processExecutor.executeCommand("idevice_id", ["-l"]);
+    // `idevice_id -l` lists USB devices only, so a miss is not evidence the device
+    // is gone (Wi-Fi iPhone, missing libimobiledevice). Only a complete devicectl
+    // inventory that omits the device may stop the tunnel.
+    if (await this.isUsbListed(["-l"])) {
+      return true;
+    }
+    return this.isPresentInDevicectlInventory();
+  }
+
+  /** True when `idevice_id` lists this device; false on a miss or a failed probe. */
+  private async isUsbListed(args: string[]): Promise<boolean> {
+    try {
+      const { stdout } = await this.processExecutor.executeCommand("idevice_id", args);
       return stdout.split("\n").some((line) => line.trim() === this.device.deviceId);
     } catch (error) {
-      // `idevice_id -l` failing (libimobiledevice missing, or no physical device
-      // attached) means we can't enumerate physical devices; report undetected.
-      logger.debug(`src/ctrlProxy/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
+      if (!this.warnedIdeviceIdUnavailable) {
+        this.warnedIdeviceIdUnavailable = true;
+        logger.warn(
+          `[IOSCtrlProxy] idevice_id probe failed (is libimobiledevice installed?): ${errorMessage(error)}`,
+          error,
+        );
+      }
       return false;
+    }
+  }
+
+  private async isPresentInDevicectlInventory(): Promise<boolean> {
+    const lister = this.physicalDeviceLister ?? getSharedDevicectlDeviceLister();
+    const listing = await lister.listConnectedDevices();
+    if (!listing.complete) {
+      // A failed or drifted listing is not authoritative; keep the tunnel.
+      return true;
+    }
+    return listing.devices.some((device) => device.deviceId === this.device.deviceId);
+  }
+
+  /**
+   * The iproxy tunnel here is USB-only (no `-n`), so a device reachable only over
+   * Wi-Fi can never be forwarded. Reject it up front with an actionable error
+   * rather than starting a tunnel that cannot connect.
+   */
+  private async assertUsbAttachedForTunnel(): Promise<void> {
+    if (await this.isUsbListed(["-l"])) {
+      return;
+    }
+    if (await this.isUsbListed(["-l", "-n"])) {
+      throw new ActionableError(
+        `iOS device ${this.device.deviceId} is reachable over Wi-Fi only. The CtrlProxy tunnel ` +
+          "requires a USB connection; connect the device with a cable and retry.",
+      );
     }
   }
 

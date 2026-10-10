@@ -5,7 +5,10 @@ import {
 import { runWithAbortSignal } from "../../../../src/utils/AbortContext";
 import { describe, expect, test } from "bun:test";
 import { CtrlProxyText } from "../../../../src/features/observe/ios/CtrlProxyText";
-import { IosRunnerBusyError } from "../../../../src/features/observe/ios/runnerErrorCodes";
+import {
+  IosRunnerBusyError,
+  IosRunnerStalledError,
+} from "../../../../src/features/observe/ios/runnerErrorCodes";
 import { createIosDelegateHarness } from "../../../helpers/iosDelegateHarness";
 
 describe("iOS text transport safety", () => {
@@ -185,27 +188,30 @@ describe("iOS text transport safety", () => {
     expect(h.sentMessages).toHaveLength(0);
   });
 
-  test("a runner_busy refusal after dispatch is a plain, retryable failure", async () => {
-    const h = createIosDelegateHarness();
-    const textState = new TextRequestState();
-    const busy = new IosRunnerBusyError(
-      "iOS runner is busy executing request_swipe for 4.5s; retry shortly",
-    );
-    const pending = runWithTextRequestContext({ getDeadlineMs: () => undefined, textState }, () =>
-      new CtrlProxyText(h.context).requestAppendText("wifi"),
-    );
-    await flush();
-    expect(h.sentMessages).toHaveLength(1);
-    // IOSCtrlProxyClient rejects the pending request with this type on a runner_busy reply.
-    h.requestManager.cancelAll(busy);
-    const result = await pending;
-    expect(result.success).toBe(false);
-    expect(result.error).toBe(busy.message);
-    expect(result.error).not.toContain("indeterminate");
-    expect(result.retryable).toBeUndefined();
-    // Nothing is left for the request-level timeout to relabel as indeterminate.
-    expect(textState.timeoutError(busy)).toBeUndefined();
-  });
+  test.each([IosRunnerBusyError, IosRunnerStalledError])(
+    "a %p refusal after dispatch is a plain failure without replay",
+    async (BusyError) => {
+      const h = createIosDelegateHarness();
+      const textState = new TextRequestState();
+      const busy = new BusyError(
+        "iOS runner is busy executing request_swipe for 4.5s; retry shortly",
+      );
+      const pending = runWithTextRequestContext({ getDeadlineMs: () => undefined, textState }, () =>
+        new CtrlProxyText(h.context).requestAppendText("wifi"),
+      );
+      await flush();
+      expect(h.sentMessages).toHaveLength(1);
+      // IOSCtrlProxyClient rejects the pending request with this type on a runner_busy reply.
+      h.requestManager.cancelAll(busy);
+      const result = await pending;
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(busy.message);
+      expect(result.error).not.toContain("indeterminate");
+      expect(result.retryable).toBeUndefined();
+      // Nothing is left for the request-level timeout to relabel as indeterminate.
+      expect(textState.timeoutError(busy)).toBeUndefined();
+    },
+  );
 
   test("confirmed runner failure stays plain", async () => {
     const h = createIosDelegateHarness();

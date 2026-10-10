@@ -16,6 +16,73 @@ const msg = (partial: Partial<WebSocketMessage> & { type: string }): WebSocketMe
 });
 
 describe("decodeCtrlProxyMessage", () => {
+  test.each(["request_activate_accessibility_link", "request_launch_app"])(
+    "classifies prolonged %s blocking without encouraging action replay",
+    (blockingCommandType) => {
+      const decoded = decodeCtrlProxyMessage(
+        msg({
+          type: "error",
+          error: "runner_busy",
+          blockingCommandType,
+          blockingElapsedMs: 30_000,
+        }),
+      );
+      expect(decoded?.runnerStalled).toBe(true);
+      expect(decoded?.errorMessage).toContain("30.0s");
+      expect(decoded?.errorMessage).toContain("outcome is unknown");
+      expect(decoded?.errorMessage).not.toContain("retry shortly");
+    },
+  );
+
+  test.each([undefined, -1, NaN, Infinity, "61000", 29_999])(
+    "does not recover a link command with elapsed time %p",
+    (blockingElapsedMs) => {
+      const decoded = decodeCtrlProxyMessage(
+        msg({
+          type: "error",
+          error: "runner_busy",
+          blockingCommandType: "request_activate_accessibility_link",
+          blockingElapsedMs,
+        } as never),
+      );
+      expect(decoded?.runnerStalled).toBeUndefined();
+      expect(decoded?.errorMessage).toContain("retry shortly");
+    },
+  );
+
+  test.each(["request_set_text", "request_swipe", "unknown", ""])(
+    "does not apply the launch/link recovery policy to %s",
+    (blockingCommandType) => {
+      expect(
+        decodeCtrlProxyMessage(
+          msg({
+            type: "error",
+            error: "runner_busy",
+            blockingCommandType,
+            blockingElapsedMs: 61_200,
+          }),
+        )?.runnerStalled,
+      ).toBeUndefined();
+    },
+  );
+
+  test.each([1000, NaN, Infinity, "0", null])(
+    "does not recover when a supplied deadline is still pending or invalid: %p",
+    (blockingDeadlineRemainingMs) => {
+      expect(
+        decodeCtrlProxyMessage(
+          msg({
+            type: "error",
+            error: "runner_busy",
+            blockingCommandType: "request_launch_app",
+            blockingElapsedMs: 61_200,
+            blockingDeadlineRemainingMs,
+          } as never),
+        )?.runnerStalled,
+      ).toBeUndefined();
+    },
+  );
+
   test("decodes runner_busy with the blocking command and elapsed time", () => {
     expect(
       decodeCtrlProxyMessage(

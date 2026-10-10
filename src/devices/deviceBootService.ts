@@ -34,7 +34,9 @@ import type {
   DeviceProvisioner,
   DeviceProvisioningIdentityHooks,
   ProvisionedDevice,
+  ProvisioningCreateIdentity,
 } from "./deviceProvisioning";
+import { ProvisionDeviceCreateRejectedError } from "./exactDeviceProvisioning";
 import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "./deviceBootRecovery";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -424,8 +426,17 @@ export interface DeviceBootServiceDependencies {
    * Removes a device this boot created (createIfMissing) when binding or booting
    * it then fails, so it is not orphaned (#11100). The original failure is still
    * thrown; a rollback failure is the callee's to report.
+   *
+   * When the create itself was cancelled or timed out, `device` carries only the
+   * identity the create claimed (no iOS UDID) and `pendingCreation` settles once
+   * the platform create has; the callee resolves the exact device after it
+   * (#11155).
    */
-  rollbackCreatedDevice?: (device: DeviceInfo, failure: unknown) => Promise<void>;
+  rollbackCreatedDevice?: (
+    device: DeviceInfo,
+    failure: unknown,
+    options?: { pendingCreation?: Promise<unknown> },
+  ) => Promise<void>;
 }
 
 interface BootDeadlineContext {
@@ -468,11 +479,14 @@ function noMatchingDeviceError(
   );
 }
 
-function createdImageFor(provisioned: ProvisionedDevice, request: DeviceBootRequest): DeviceInfo {
+function createdImageFor(
+  provisioned: ProvisionedDevice | ProvisioningCreateIdentity,
+  request: DeviceBootRequest,
+): DeviceInfo {
   return {
     name: provisioned.name,
     platform: provisioned.platform,
-    deviceId: provisioned.deviceId,
+    deviceId: "deviceId" in provisioned ? provisioned.deviceId : undefined,
     isRunning: false,
     formFactor: request.formFactor,
     runtimeId: provisioned.runtimeId,
@@ -1043,20 +1057,63 @@ export class DeviceBootService {
       throw new ActionableError(describeDisplayRequirements(criteria, describedCandidates));
     }
     let created: ProvisionedDevice | undefined;
-    const identityHooks = this.provisioningIdentityHooks(context, (device) => {
-      created = device;
-    });
+    // Set before the platform create runs: a cancelled or timed-out create may
+    // still have created the device under this identity (#11155).
+    let creationStarted: ProvisioningCreateIdentity | undefined;
+    let provisioning: Promise<ProvisionedDevice> | undefined;
+    const identityHooks = this.provisioningIdentityHooks(
+      context,
+      (device) => {
+        created = device;
+      },
+      (identity) => {
+        creationStarted = identity;
+      },
+    );
     try {
-      const provisioned = await this.runPhase(context, "provisioning a device", (signal) =>
-        this.dependencies.deviceProvisioner.provision(criteria, signal, identityHooks),
-      );
+      const provisioned = await this.runPhase(context, "provisioning a device", (signal) => {
+        provisioning = this.dependencies.deviceProvisioner.provision(
+          criteria,
+          signal,
+          identityHooks,
+        );
+        return provisioning;
+      });
       created = provisioned;
       return await this.bootImage(createdImageFor(provisioned, request), context, progress, true);
     } catch (error) {
-      if (created) {
-        await this.dependencies.rollbackCreatedDevice?.(createdImageFor(created, request), error);
-      }
+      await this.rollbackFailedProvisioning(request, error, {
+        created,
+        creationStarted,
+        provisioning,
+      });
       throw error;
+    }
+  }
+
+  private async rollbackFailedProvisioning(
+    request: DeviceBootRequest,
+    error: unknown,
+    {
+      created,
+      creationStarted,
+      provisioning,
+    }: {
+      created: ProvisionedDevice | undefined;
+      creationStarted: ProvisioningCreateIdentity | undefined;
+      provisioning: Promise<ProvisionedDevice> | undefined;
+    },
+  ): Promise<void> {
+    if (created) {
+      await this.dependencies.rollbackCreatedDevice?.(createdImageFor(created, request), error);
+    } else if (creationStarted && !(error instanceof ProvisionDeviceCreateRejectedError)) {
+      // The platform tool did not report its outcome. Roll back whatever it
+      // created under the claimed identity once the create settles.
+      await this.dependencies.rollbackCreatedDevice?.(
+        createdImageFor(creationStarted, request),
+        error,
+        { pendingCreation: provisioning },
+      );
     }
   }
 
@@ -1064,6 +1121,7 @@ export class DeviceBootService {
   private provisioningIdentityHooks(
     context: BootDeadlineContext,
     onCreated: (device: ProvisionedDevice) => void,
+    onCreationStarting: (identity: ProvisioningCreateIdentity) => void,
   ): DeviceProvisioningIdentityHooks {
     return {
       reserveBeforeCreate: async (identity) => {
@@ -1073,6 +1131,7 @@ export class DeviceBootService {
             stableId: identity.name,
           });
         }
+        onCreationStarting(identity);
         return context.signal;
       },
       bindAfterCreate: async (device) => {

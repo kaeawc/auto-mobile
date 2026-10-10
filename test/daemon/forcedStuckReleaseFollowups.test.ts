@@ -8,6 +8,7 @@ import {
   SESSION_RELEASE_TEARDOWN_CAP_MS,
   SESSION_SETUP_DRAIN_TIMEOUT_MS,
   SessionManager,
+  TerminalSessionError,
   type KeepScreenAwakeRestorer,
 } from "../../src/daemon/sessionManager";
 import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
@@ -246,6 +247,126 @@ describe("the force threshold and its fence (#11058 item 2)", () => {
       await flush();
       expect((await h.persistence.getSession!("a"))?.status).toBe("expired");
       h.keepAwake.gate.resolve();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("a forced stuck release keeps the release's own reason (#11361 item 2)", () => {
+  /** The daemon that starts after this one, reading the same rows. */
+  function restartedDaemon(h: Awaited<ReturnType<typeof harness>>): SessionManager {
+    const next = new SessionManager(h.timer, h.persistence, () => new FakeDbWriteBarrier());
+    managers.push(next);
+    return next;
+  }
+
+  test.each(["daemon-shutdown", `device-restart:${first.deviceId}`, "plan-auto-release"] as const)(
+    "forcing a stuck %s release frees the device without a terminal fence",
+    async (reason) => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const h = await harness();
+        const notified: Array<{ reason: string; terminal: boolean }> = [];
+        h.manager.onSessionRelease((_id, _device, releaseReason, snapshot) =>
+          notified.push({ reason: releaseReason, terminal: snapshot.terminal }),
+        );
+        await bindShapedSession(h, "a");
+        void h.manager.releaseSession("a", reason);
+        await flush();
+
+        const forced = h.manager.forceStuckRelease("a");
+        expect(forced).toEqual({ deviceId: first.deviceId, stage: "teardown" });
+        await flush();
+
+        // The session is gone from this daemon and its device is on its way back to the pool,
+        // but the UUID is not fenced: the release keeps the reason it was started with.
+        expect(h.manager.getSession("a")).toBeNull();
+        expect(h.manager.getSessionForDevice(first.deviceId)).toBeNull();
+        expect(h.manager.getTerminalReleaseSnapshot("a")).toBeUndefined();
+        expect(notified).toEqual([{ reason, terminal: false }]);
+        expect(await h.persistence.getSession!("a")).toMatchObject({
+          status: "released",
+          release_reason: reason,
+        });
+        expect(h.persistence.releaseWrites).toEqual([`a:released:${reason}`]);
+        h.keepAwake.gate.resolve();
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  test("a name forced out of a stuck plan-auto-release is issued again without waiting on it", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await harness();
+      await bindShapedSession(h, "a");
+      void h.manager.releaseSession("a", "plan-auto-release");
+      await flush();
+      const freeing = forceStuckSessionRelease(h.manager, h.pool, "a");
+      await h.timer.advanceTimeAsync(SESSION_RELEASE_TEARDOWN_CAP_MS);
+      await freeing;
+      await flush();
+
+      // The stuck teardown is still parked; the name is issued again regardless.
+      const reissued = await h.manager.getOrCreateSession("a", h.pool, "android");
+      expect(reissued.assignedDevice).toBe(first.deviceId);
+
+      // The stuck release settling later neither removes nor re-releases the new incarnation.
+      h.keepAwake.gate.resolve();
+      await flush();
+      await h.timer.advanceTimeAsync(SESSION_RELEASE_TEARDOWN_CAP_MS);
+      await flush();
+      expect(h.manager.getSession("a")).toBe(reissued);
+      expect((await h.persistence.getSession!("a"))?.status).toBe("active");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a session forced out of a stuck daemon-shutdown release is recoverable after a restart", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await harness();
+      await bindShapedSession(h, "a");
+      void h.manager.releaseSession("a", "daemon-shutdown");
+      await flush();
+      h.manager.forceStuckRelease("a");
+      await flush();
+      h.keepAwake.gate.resolve();
+
+      // Admitted as a recoverable identity (undefined: nothing live yet), not refused as terminal.
+      const next = restartedDaemon(h);
+      await expect(
+        next.admitIssuedSessionForAutomation("a", undefined, { access: "read-only" }),
+      ).resolves.toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a session forced out of a stuck heartbeat-timeout release is fenced after a restart", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await harness();
+      await bindShapedSession(h, "a");
+      void h.manager.releaseSession("a", "heartbeat-timeout");
+      await flush();
+      h.manager.forceStuckRelease("a");
+      await flush();
+      h.keepAwake.gate.resolve();
+
+      expect(h.manager.getTerminalReleaseSnapshot("a")).toMatchObject({
+        releaseReason: "heartbeat-timeout",
+        terminal: true,
+      });
+      const next = restartedDaemon(h);
+      const refusal = await next
+        .admitIssuedSessionForAutomation("a", undefined, { access: "read-only" })
+        .catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(TerminalSessionError);
+      expect((refusal as TerminalSessionError).release.releaseReason).toBe("heartbeat-timeout");
     } finally {
       warn.mockRestore();
     }

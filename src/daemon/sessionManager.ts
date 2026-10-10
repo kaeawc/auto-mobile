@@ -2220,7 +2220,9 @@ export class SessionManager {
 
   /**
    * Force a release that is stuck past the heartbeat monitor's deadline (#10963). The session is
-   * fenced terminally (so its UUID never routes again) and removed from the device maps, and its
+   * released with the reason the stuck release carries (#11361): fenced terminally when that
+   * reason is terminal (so its UUID never routes again), left recoverable or re-issuable when it
+   * is not. Either way it is removed from the device maps, and its
    * device is quarantined only until the stuck release settles or {@link SESSION_RELEASE_TEARDOWN_CAP_MS}
    * passes, whichever is first; the caller then returns the device to the pool. Returns the device
    * to release and the stage the release was stuck in, or undefined when no release of this
@@ -2240,33 +2242,14 @@ export class SessionManager {
     operation.forcedAbort?.abort(
       new ActionableError(`Release of session ${sessionId} was forced; its teardown is abandoned`),
     );
-    if (!this.terminalReleaseSnapshots.has(sessionId)) {
-      const releasedAtMs = this.sessionNow();
-      const releaseReason = isTerminalReleaseReason(operation.reason.value)
-        ? operation.reason.value
-        : "heartbeat-timeout";
-      this.terminalReleaseSnapshots.set(sessionId, {
-        sessionId,
-        deviceId,
-        releaseReason,
-        releasedAtMs,
-        terminal: true,
-        heartbeat: {
-          lastHeartbeatMs: session.lastHeartbeat,
-          hasReceivedHeartbeat: session.hasReceivedHeartbeat,
-          timeoutMs: session.heartbeatTimeoutMs,
-          ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
-        },
-      });
-    }
-    const fence = this.terminalReleaseSnapshots.get(sessionId)!;
+    const fence = this.forcedReleaseSnapshot(sessionId, session, operation.reason.value);
     if (this.removeSession(sessionId, session)) {
       // The stuck release never reached its own notification: announce the release now so
       // proxies and stream servers stop treating the session as live.
       this.notifySessionRelease({ ...fence, ...managedExecutionReleaseMarker(session) });
     }
-    // The stuck release may never reach its own write: persist the fence now (#11058), or a
-    // restart would admit the released UUID again.
+    // The stuck release may never reach its own write: persist the release now (#11058), or a
+    // restart would admit a terminally released UUID again.
     this.persistForcedReleaseFence(fence);
     const settled = operation.promise.then(
       () => undefined,
@@ -2285,16 +2268,70 @@ export class SessionManager {
     this.trackPendingDeviceCleanup(deviceId, [capped]);
     logger.warn(
       `[SessionManager] Forcing the stuck release of session ${sessionId} ` +
-        `(stage=${operation.stage ?? "unknown"}): the session stays fenced and device ` +
+        `(stage=${operation.stage ?? "unknown"}, reason=${fence.releaseReason}): the session ` +
+        `${fence.terminal ? "stays fenced" : "is released"} and device ` +
         `${deviceId} returns to the pool after at most ${SESSION_RELEASE_TEARDOWN_CAP_MS}ms`,
     );
     return { deviceId, stage: operation.stage };
   }
 
   /**
-   * Write a forced release's terminal fence in the background, tracked by the shutdown drain. A
+   * What a forced release releases the session as (#11361): the reason the stuck release was
+   * started with, exactly as that release would have recorded it. A terminal reason raises (or
+   * keeps) the in-memory fence; a non-terminal one (a `daemon-shutdown` or `device-restart:`
+   * handoff, a `plan-auto-release`) raises none, so the session stays recoverable or its name
+   * re-issuable as the reason says. Forcing only stops the wait for the device.
+   */
+  private forcedReleaseSnapshot(
+    sessionId: string,
+    session: Session,
+    releaseReason: string,
+  ): SessionReleaseSnapshot {
+    const held = this.terminalReleaseSnapshots.get(sessionId);
+    if (held) {
+      return held;
+    }
+    const releasedAtMs = this.sessionNow();
+    const snapshot: SessionReleaseSnapshot = {
+      sessionId,
+      deviceId: session.assignedDevice,
+      releaseReason,
+      releasedAtMs,
+      terminal: isTerminalReleaseReason(releaseReason),
+      heartbeat: {
+        lastHeartbeatMs: session.lastHeartbeat,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+        timeoutMs: session.heartbeatTimeoutMs,
+        ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
+      },
+    };
+    if (snapshot.terminal) {
+      this.terminalReleaseSnapshots.set(sessionId, snapshot);
+    } else {
+      // Applies only to the incarnation it released, like any non-terminal release (#11129).
+      this.captureReleaseRowGeneration(snapshot, this.persistedRowGenerations.get(session));
+    }
+    return snapshot;
+  }
+
+  /**
+   * The in-flight release a later call for this UUID must wait on or join. A release forced with a
+   * non-terminal reason (#11361) is not one: it already released the session and raised no fence,
+   * so a recovery, a re-issue of the name or a later release of it must not wait on a teardown
+   * that may stay wedged. A release forced with a terminal reason is answered by its fence first.
+   */
+  private inFlightReleaseStillOwning(sessionId: string): SessionReleaseOperation | undefined {
+    const operation = this.releasePromises.get(sessionId);
+    return operation?.forced && !this.terminalReleaseSnapshots.has(sessionId)
+      ? undefined
+      : operation;
+  }
+
+  /**
+   * Write a forced release's row in the background, tracked by the shutdown drain. A terminal
    * write that fails falls back to the terminal-write retry (#10959); one that times out is
-   * already retried by the late-write tracker if it then fails.
+   * already retried by the late-write tracker if it then fails. A non-terminal write that fails
+   * is kept as a pending non-terminal release by {@link persistSessionRelease}.
    */
   private persistForcedReleaseFence(fence: SessionReleaseSnapshot): void {
     const write = this.persistSessionRelease(fence).then(
@@ -2304,7 +2341,7 @@ export class SessionManager {
           `[SessionManager] Failed to persist the forced release of ${fence.sessionId}: ` +
             errorMessage(error),
         );
-        if (!(error instanceof SessionReleasePersistTimeoutError)) {
+        if (fence.terminal && !(error instanceof SessionReleasePersistTimeoutError)) {
           this.scheduleTerminalReleaseRetry(fence);
         }
       },
@@ -3132,7 +3169,7 @@ export class SessionManager {
       throw new TerminalSessionError(sessionId, terminalRelease);
     }
 
-    const inFlightRelease = this.releasePromises.get(sessionId);
+    const inFlightRelease = this.inFlightReleaseStillOwning(sessionId);
     const currentSession = this.sessions.get(sessionId);
     if (
       inFlightRelease &&
@@ -4728,7 +4765,7 @@ export class SessionManager {
     releaseReason: string,
     allowExpired: boolean,
   ): Promise<string | null> {
-    const inFlightRelease = this.releasePromises.get(sessionId);
+    const inFlightRelease = this.inFlightReleaseStillOwning(sessionId);
     if (inFlightRelease) {
       if (inFlightRelease.reason.finalizedSnapshot && isTerminalReleaseReason(releaseReason)) {
         return await this.releaseFinalizedSession(inFlightRelease.reason, releaseReason);

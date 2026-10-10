@@ -561,6 +561,12 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
         return { kind: "unsupported", code: "spec_unsupported", message: missing };
       }
     }
+    if (platform === "ios" && spec.deviceType !== undefined) {
+      const missing = await this.findMissingIosDeviceType(spec.deviceType, options.signal);
+      if (missing) {
+        return { kind: "unsupported", code: "spec_unsupported", message: missing };
+      }
+    }
     const model = await this.resolveDeviceType(platform, spec, options.signal);
     if (model.kind !== "resolved") {
       return model.resolution;
@@ -661,6 +667,38 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
       return undefined;
     }
     return `Android system image '${runtime}' is not installed. Install it with sdkmanager, or request an installed image (${installed.join(", ") || "none installed"}).`;
+  }
+
+  /**
+   * The refusal for an iOS device type the simulator catalog does not list (#11271), checked before
+   * anything is created instead of surfacing simctl's raw "Invalid device type" text. No catalog,
+   * or an unreadable one, is not proof; simctl stays the authority.
+   */
+  private async findMissingIosDeviceType(
+    deviceType: string,
+    signal: AbortSignal | undefined,
+  ): Promise<string | undefined> {
+    if (!this.iosRuntimeCatalog) {
+      return undefined;
+    }
+    let deviceTypes: AppleDeviceType[];
+    try {
+      deviceTypes = await this.iosRuntimeCatalog.getDeviceTypesChecked(signal);
+    } catch (error) {
+      logger.warn(`[ManagedSlots] iOS device-type check skipped: ${errorMessage(error)}`, error);
+      return undefined;
+    }
+    if (deviceTypes.some((entry) => entry.identifier === deviceType)) {
+      return undefined;
+    }
+    const iphones = deviceTypes
+      .filter((entry) => entry.productFamily === "iPhone")
+      .map((entry) => entry.identifier);
+    return (
+      `iOS device type '${deviceType}' is not installed on this host. Request an installed ` +
+      `device type (iPhone types: ${iphones.join(", ") || "none installed"}; all types: ` +
+      "xcrun simctl list devicetypes)."
+    );
   }
 
   private async findIosIncompatibility(

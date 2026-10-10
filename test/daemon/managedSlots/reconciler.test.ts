@@ -1305,6 +1305,26 @@ describe("DefaultManagedSpecResolver any model", () => {
     });
   });
 
+  test("an iOS device type the simulator catalog does not list is a typed spec_unsupported (#11271)", async () => {
+    const resolver = new DefaultManagedSpecResolver(ANY_MODEL_CATALOG);
+    const nonexistent = "com.apple.CoreSimulator.SimDeviceType.iPhone-99-Nonexistent";
+    const missing = await resolver.resolve("ios", { runtime: IOS_18, deviceType: nonexistent }, {});
+    expect(missing).toMatchObject({ kind: "unsupported", code: "spec_unsupported" });
+    expect((missing as { message: string }).message).toContain(nonexistent);
+    expect((missing as { message: string }).message).toContain(IPHONE_16);
+    expect(await resolver.resolve("ios", SPEC_18, {})).toMatchObject({ kind: "resolved" });
+    // An unreadable catalog is not proof the type is missing; simctl stays the authority.
+    const unreadable = new DefaultManagedSpecResolver({
+      getRuntimesChecked: ANY_MODEL_CATALOG.getRuntimesChecked,
+      getDeviceTypesChecked: async () => {
+        throw new Error("simctl timed out");
+      },
+    });
+    expect(
+      await unreadable.resolve("ios", { runtime: IOS_18, deviceType: nonexistent }, {}),
+    ).toMatchObject({ kind: "resolved" });
+  });
+
   test("a cutout preference needs an explicit model; 'any' does not", async () => {
     const resolver = new DefaultManagedSpecResolver(ANY_MODEL_CATALOG);
     expect(

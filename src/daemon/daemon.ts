@@ -1245,15 +1245,7 @@ export class Daemon {
       // interval above (issue #6232). Guarded on the committed flag so a throw
       // after the bind is committed never rewrites the file this process now owns.
       if (!this.socketBindCommitted) {
-        try {
-          this.incumbentOwnerGuard.restoreIncumbentAfterRefusal();
-        } catch (restoreError) {
-          // Repairing a displaced PID record is best effort. The startup
-          // failure remains the actionable diagnostic for the operator.
-          logger.warn(
-            `Failed to restore the incumbent daemon owner record after a refused start: ${restoreError}`,
-          );
-        }
+        this.restoreIncumbentOwnerRecord();
       }
       throw error;
     }
@@ -4481,10 +4473,33 @@ export class Daemon {
         // this one is still alive and still writing, and unlinks a launch log out
         // from under it (issue #6194). The unconditional `process.once("exit", ...)`
         // cleanup remains as a safety net for shutdown paths that never reach here.
-        { name: "daemon files", run: () => cleanupDaemonFiles(this.getDaemonFileCleanupOptions()) },
+        { name: "daemon files", run: () => this.cleanupDaemonFilesForShutdown() },
       ],
       (message, error) => logger.warn(message, error),
     );
+  }
+
+  private async cleanupDaemonFilesForShutdown(): Promise<void> {
+    // A signal during a contended start stops us before the socket bind: exit
+    // cleanup is suppressed then, so put the live incumbent's record back here or
+    // the PID file keeps naming this exiting contender (#11156).
+    if (!this.socketBindCommitted) {
+      this.restoreIncumbentOwnerRecord();
+    }
+    await cleanupDaemonFiles(this.getDaemonFileCleanupOptions());
+  }
+
+  /** Put a displaced live incumbent's PID record back after this contender gave up (#6232). */
+  private restoreIncumbentOwnerRecord(): void {
+    try {
+      this.incumbentOwnerGuard.restoreIncumbentAfterRefusal();
+    } catch (restoreError) {
+      // Repairing a displaced PID record is best effort. The startup failure or
+      // shutdown remains the actionable diagnostic for the operator.
+      logger.warn(
+        `Failed to restore the incumbent daemon owner record after a refused start: ${restoreError}`,
+      );
+    }
   }
 
   private unsubscribeAdbMissing(): void {

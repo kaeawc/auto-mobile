@@ -1018,8 +1018,17 @@ export class ManagedSlotReconciler {
       }
       return (await run) as ManagedSlotReconcileResult;
     } finally {
-      if (this.inFlight.get(id) === run) {
-        this.inFlight.delete(id);
+      const release = () => {
+        if (this.inFlight.get(id) === run) {
+          this.inFlight.delete(id);
+        }
+      };
+      if (abandoned) {
+        // An abandoned waiter's run settles only after every earlier run has, so it keeps the
+        // slot's queue entry until then: a later caller must still queue behind the running one.
+        void run.then(release, release);
+      } else {
+        release();
       }
     }
   }

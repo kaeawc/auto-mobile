@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { assignManagedSlotDevice } from "./managedSlotFixtures";
 import {
   createSlotExecOwnerLiveness,
   currentSlotOwnerProcess,
@@ -81,5 +84,77 @@ describe("owner liveness that counts this daemon's live executions (#11275)", ()
     expect(withLiveExecutionSessions(deadProcess, sessions)({ daemonId: "d", pid: 10 })).toBe(
       false,
     );
+  });
+});
+
+describe("a record this daemon wrote is judged by session, never by PID (#11339)", () => {
+  const SELF_PID = 4242;
+  const held = new Set<string>();
+  const live = new Set<string>();
+  const reservations = new Set<string>();
+  const sessions = {
+    isLiveManagedExecutionSession: (id: string) => live.has(id),
+    hasSession: (id: string) => held.has(id),
+  };
+  // This process is running, as it always is while it judges.
+  const liveness = withLiveExecutionSessions(() => true, sessions, {
+    thisProcess: { pid: SELF_PID },
+    reservations: { has: (id) => reservations.has(id) },
+  });
+  const mine = (sessionUuid: string): SlotExecOwner => ({
+    daemonId: "pid-4242",
+    pid: SELF_PID,
+    sessionUuid,
+  });
+
+  afterEach(() => {
+    held.clear();
+    live.clear();
+    reservations.clear();
+  });
+
+  test("a gone session's record is dead although this process is running", () => {
+    expect(liveness(mine("S1"))).toBe(false);
+  });
+
+  test("a held or live session's record is live", () => {
+    live.add("live");
+    held.add("held");
+    expect(liveness(mine("live"))).toBe(true);
+    expect(liveness(mine("held"))).toBe(true);
+  });
+
+  test("an in-flight reservation is live until it is gone", () => {
+    reservations.add("reserve-1");
+    expect(liveness(mine("reserve-1"))).toBe(true);
+    reservations.delete("reserve-1");
+    expect(liveness(mine("reserve-1"))).toBe(false);
+  });
+
+  test("a record naming another process is still judged by that process", () => {
+    const other: SlotExecOwner = { daemonId: "other", pid: 99, sessionUuid: "S9" };
+    expect(liveness(other)).toBe(true);
+    const otherDead = withLiveExecutionSessions(() => false, sessions, {
+      thisProcess: { pid: SELF_PID },
+    });
+    expect(otherDead(other)).toBe(false);
+  });
+
+  test("a settler of this process (no session) is judged by its process", () => {
+    expect(liveness({ daemonId: "pid-4242", pid: SELF_PID })).toBe(true);
+  });
+
+  test("P2: a record left by a failed clear frees once S1's session is gone", async () => {
+    const registry = new FakeSlotRegistry(new FakeTimer(), liveness);
+    const key = await assignManagedSlotDevice(registry, "android", "AVD");
+    const binding = { generation: 1, stableDeviceId: "AVD" };
+    held.add("S1");
+    expect((await registry.claimExecution(key, binding, mine("S1"))).kind).toBe("claimed");
+    // The clear of S1's record failed with SQLITE_BUSY, so S1 still owns the slot while it lives.
+    expect((await registry.claimExecution(key, binding, mine("S2"))).kind).toBe("slot_in_use");
+
+    held.delete("S1");
+
+    expect((await registry.claimExecution(key, binding, mine("S2"))).kind).toBe("claimed");
   });
 });

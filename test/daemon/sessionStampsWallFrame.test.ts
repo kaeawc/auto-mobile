@@ -5,7 +5,10 @@ import type {
   TerminalReleaseIntent,
   TerminalReleaseJournal,
 } from "../../src/daemon/terminalReleaseJournal";
-import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
+import {
+  DeviceSessionRepository,
+  deviceRestartReleaseReason,
+} from "../../src/db/deviceSessionRepository";
 import type { Database } from "../../src/db/types";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -159,5 +162,55 @@ describe("persisted session stamps cross daemons as wall epoch ms (#11162)", () 
       release_reason: "explicit-release",
       released_at_ms: releasedAt,
     });
+  });
+});
+
+// #11358: a daemon reads back rows it wrote itself. A wall step between its own write and read
+// must not move the stamps, or the restart-recovery window opens or closes by the size of the step.
+describe("a daemon reads back its own rows without a wall step shifting them (#11358)", () => {
+  test.each([
+    { name: "no step", stepMs: 0 },
+    { name: "forward step", stepMs: HOUR_MS },
+    { name: "backward step", stepMs: -HOUR_MS },
+  ])("restart window is open at 10 s and closed at 4 min across a $name", async ({ stepMs }) => {
+    const { timer, daemon } = await world();
+    // Linux model: the monotonic clock already includes sleep, so a forward wall step is not
+    // counted as host sleep and the session clock ignores it.
+    timer.simulateSleepCountingMonotonicClock();
+    const writer = daemon();
+    await writer.createSession("s", DEVICE, "android", IDLE_MS);
+    await writer.releaseSession("s", deviceRestartReleaseReason("Pixel_8_API_35"));
+
+    timer.stepWallClock(stepMs);
+    timer.advanceTime(10_000);
+    expect(await writer.isReleasedSessionInRestartRecoveryWindow("s")).toBe(true);
+
+    timer.advanceTime(230_000);
+    expect(await writer.isReleasedSessionInRestartRecoveryWindow("s")).toBe(false);
+  });
+
+  test("a stamp another process wrote is converted, not served from the writer's memory", async () => {
+    const { timer, repository, daemon } = await world();
+    const writer = daemon();
+    await writer.createSession("s", DEVICE, "android", IDLE_MS);
+    await writer.releaseSession("s", deviceRestartReleaseReason("Pixel_8_API_35"));
+    // A peer daemon takes the row over and releases it again 5 minutes later in wall ms.
+    timer.advanceTime(300_000);
+    await repository.upsertActiveSession({
+      sessionUuid: "s",
+      deviceId: DEVICE,
+      stableDeviceId: "Pixel_8_API_35",
+      platform: "android",
+      createdAtMs: timer.now(),
+      lastUsedAtMs: timer.now(),
+      expiresAtMs: timer.now() + IDLE_MS,
+      sessionTimeoutMs: IDLE_MS,
+      heartbeatTimeoutMs: 10_000,
+      hasReceivedHeartbeat: true,
+    });
+    await repository.markReleased("s", "released", timer.now(), deviceRestartReleaseReason("P"));
+    timer.advanceTime(10_000);
+
+    expect(await writer.isReleasedSessionInRestartRecoveryWindow("s")).toBe(true);
   });
 });

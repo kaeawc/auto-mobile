@@ -12,6 +12,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { ActionableError } from "../../src/models/ActionableError";
+import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 
 /**
  * #9945: in daemon mode a `deviceId` sent alongside a `sessionUuid` is a routing
@@ -113,6 +114,27 @@ describe("ToolRegistry daemon session/deviceId routing contract (#9945)", () => 
     expect(seenDevices).toEqual([]);
     // The session stays on its own device; nothing was rebound to the hint.
     expect(sessionManager.getSession(sessionUuid)?.assignedDevice).toBe(androidA.deviceId);
+  });
+
+  test("the refusal is the typed device_outside_bound_session on the wire (#11351)", async () => {
+    registerProbe("tapProbe");
+    let rejection: unknown;
+    try {
+      await call("tapProbe", { sessionUuid, deviceId: androidB.deviceId });
+    } catch (error) {
+      rejection = error;
+    }
+    const wire = JSON.parse(
+      shapeToolCallError(rejection, { toolName: "tapProbe", source: "MCP" }).content[0].text,
+    );
+    expect(wire).toMatchObject({
+      success: false,
+      code: "device_outside_bound_session",
+      boundSessionUuid: sessionUuid,
+      boundDeviceId: androidA.deviceId,
+      deviceId: androidB.deviceId,
+      retryable: false,
+    });
   });
 
   test("the error text for observe is unchanged (same rule, tool name interpolated)", async () => {

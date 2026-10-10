@@ -21,6 +21,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { DAEMON_SESSION_NOT_FOUND_CODE, type DaemonRequest } from "../../src/daemon/types";
+import { sessionReleaseReasonTraits } from "../../src/daemon/releaseReasons";
+import { SESSION_OWNERSHIP_LOST_CODE } from "../../src/daemon/sessionReleasedDuringCall";
+import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../../src/models/deviceSessionRecovery";
 
 const sessionId = "00000000-0000-4000-8000-000000000001";
 const notFound = {
@@ -212,6 +215,63 @@ describe("registration-only daemon requests", () => {
       ).success,
     ).toBe(true);
     expect(registry.list()).toEqual([]);
+  });
+
+  // #11367: an idle or heartbeat release ends the UUID; registering it must not revive it.
+  for (const releaseReason of [
+    "cleanup-expired",
+    "lazy-expiry",
+    "cli-idle-timeout",
+    "heartbeat-timeout",
+    "missing-first-heartbeat",
+  ] as const) {
+    test(`registration refuses a UUID released by ${releaseReason} and its heartbeat still fails`, async () => {
+      await manager.createSession(sessionId, "device-a", "android");
+      timer.advanceTime(5);
+      await manager.releaseSession(sessionId, releaseReason);
+      const idle = sessionReleaseReasonTraits(releaseReason).idle;
+
+      const response = await handleDaemonRequest(
+        request(DAEMON_REGISTER_SESSION_METHOD, { sessionId, clientName: "other-client" }),
+        state,
+      );
+
+      expect(response).toEqual({
+        success: false,
+        code: SESSION_OWNERSHIP_LOST_CODE,
+        retryable: false,
+        nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
+        error: expect.stringContaining(`Session ${sessionId} is terminal after ${releaseReason}`),
+        details: { sessionUuid: sessionId, reason: releaseReason },
+        releaseReason,
+        ...(idle ? { idle: true } : {}),
+      });
+      expect(registry.list()).toEqual([]);
+      expect(await handleDaemonRequest(request("daemon/heartbeat", { sessionId }), state)).toEqual({
+        ...notFound,
+        releaseReason,
+        ...(idle ? { idle: true } : {}),
+      });
+      expect(manager.getSession(sessionId)).toBeNull();
+      expect(poolLookups).toBe(0);
+    });
+  }
+
+  test("a fresh observer UUID is still accepted while another UUID is terminal", async () => {
+    await manager.createSession(sessionId, "device-a", "android");
+    await manager.releaseSession(sessionId, "cleanup-expired");
+    const freshId = "00000000-0000-4000-8000-000000000002";
+
+    expect(
+      await handleDaemonRequest(
+        request(DAEMON_REGISTER_SESSION_METHOD, { sessionId: freshId, clientName: "desktop" }),
+        state,
+      ),
+    ).toEqual({
+      success: true,
+      result: { accepted: true, heartbeatTimeoutMs: 10000, expiresAtMs: 10000 },
+    });
+    expect(registry.list().map((entry) => entry.sessionId)).toEqual([freshId]);
   });
 
   test("registration waits for teardown, then registers an observer that can heartbeat", async () => {

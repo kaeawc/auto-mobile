@@ -1,0 +1,13 @@
+{
+  "code": "managed_slot_acquisition_failed.provision_failed",
+  "builder": "reconciler failure via managedSlotsFailedToolResult",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":{\"code\":\"managed_slot_acquisition_failed\",\"message\":\"Tool tapOn is unavailable: this execution's managed slot acquisition failed (provision_failed: provision_failed fixture). Read automobile:managed-slots for the evidence.\",\"acquisitionFailure\":{\"code\":\"provision_failed\",\"retryable\":false,\"message\":\"provision_failed fixture\",\"nextAction\":\"Inspect the provision failure code; retry if it is retryable.\"}}}"
+      }
+    ]
+  }
+}

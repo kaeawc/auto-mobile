@@ -1,0 +1,13 @@
+{
+  "code": "provision_device.device_offline",
+  "builder": "ProvisionDeviceError via createToolErrorResponse",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"message\":\"device_offline fixture\",\"error\":{\"code\":\"device_offline\",\"message\":\"device_offline fixture\",\"retryable\":true}}"
+      }
+    ]
+  }
+}

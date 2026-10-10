@@ -1,0 +1,13 @@
+{
+  "code": "provision_device.resource_profile_unproven",
+  "builder": "ProvisionDeviceError via createToolErrorResponse",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"message\":\"resource_profile_unproven fixture\",\"error\":{\"code\":\"resource_profile_unproven\",\"message\":\"resource_profile_unproven fixture\",\"retryable\":false}}"
+      }
+    ]
+  }
+}

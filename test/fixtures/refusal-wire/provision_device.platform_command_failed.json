@@ -1,0 +1,13 @@
+{
+  "code": "provision_device.platform_command_failed",
+  "builder": "ProvisionDeviceError via createToolErrorResponse",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"message\":\"platform_command_failed fixture\",\"error\":{\"code\":\"platform_command_failed\",\"message\":\"platform_command_failed fixture\",\"retryable\":false}}"
+      }
+    ]
+  }
+}

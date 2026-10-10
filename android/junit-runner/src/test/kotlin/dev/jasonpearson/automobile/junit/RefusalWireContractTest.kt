@@ -2,8 +2,13 @@ package dev.jasonpearson.automobile.junit
 
 import java.io.File
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -30,12 +35,10 @@ class RefusalWireContractTest {
       val expected = row.getValue("expected").jsonPrimitive.content
       val gap = row["knownGaps"]?.jsonObject?.get("kotlin")?.jsonPrimitive?.content
       val result = json.parseToJsonElement(file.readText()).jsonObject.getValue("result")
-      val actual =
-        AutoMobilePlanExecutor.classifyRefusal(
-            DaemonResponse(id = code, type = "mcp_response", success = true, result = result),
-            json,
-          )
-          .wire
+      val response =
+        DaemonResponse(id = code, type = "mcp_response", success = true, result = result)
+      assertFields(code, row.getValue("fields").jsonObject, response, result)
+      val actual = AutoMobilePlanExecutor.classifyRefusal(response, json).wire
       if (gap == null) {
         assertEquals(code, expected, actual)
       } else {
@@ -43,6 +46,47 @@ class RefusalWireContractTest {
         assertEquals("$code: known gap no longer matches; remove it", gap, actual)
       }
     }
+  }
+
+  /** The runner reads the code, retryable, nextAction and retryAfterMs the expectations pin. */
+  private fun assertFields(
+    code: String,
+    fields: JsonObject,
+    response: DaemonResponse,
+    result: JsonElement,
+  ) {
+    val evidence = AutoMobilePlanExecutor.refusalEvidence(response, json)
+    assertEquals("$code: code", fields["code"]?.jsonPrimitive?.content, evidence.code)
+    assertEquals(
+      "$code: retryable",
+      fields.getValue("retryable").jsonPrimitive.boolean,
+      evidence.retryable,
+    )
+    assertEquals(
+      "$code: acquireNewSession",
+      fields.getValue("acquireNewSession").jsonPrimitive.boolean,
+      evidence.acquireNewSession,
+    )
+    assertEquals(
+      "$code: retryAfterMs",
+      fields["retryAfterMs"]?.jsonPrimitive?.long,
+      evidence.retryAfterMs,
+    )
+    // The runner does not act on externalDevices; the wire must still carry the pinned list.
+    val text =
+      result.jsonObject
+        .getValue("content")
+        .jsonArray
+        .first()
+        .jsonObject
+        .getValue("text")
+        .jsonPrimitive
+        .content
+    assertEquals(
+      "$code: externalDevices",
+      fields["externalDevices"],
+      json.parseToJsonElement(text).jsonObject["externalDevices"],
+    )
   }
 
   private fun locateFixtureDir(): File {

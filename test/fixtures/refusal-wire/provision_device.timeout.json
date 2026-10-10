@@ -1,0 +1,13 @@
+{
+  "code": "provision_device.timeout",
+  "builder": "ProvisionDeviceError via createToolErrorResponse",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"message\":\"timeout fixture\",\"error\":{\"code\":\"timeout\",\"message\":\"timeout fixture\",\"retryable\":true}}"
+      }
+    ]
+  }
+}

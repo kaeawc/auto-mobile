@@ -979,6 +979,19 @@ internal object AutoMobilePlanExecutor {
   internal fun classifyRefusal(response: DaemonResponse, json: Json): RefusalDisposition =
     refusalDisposition(parseDaemonToolResult(response, json))
 
+  /** What the runner reads from a refusal; pinned per fixture in `expectations.json`. */
+  internal data class RefusalEvidence(
+    val code: String?,
+    val retryable: Boolean,
+    val acquireNewSession: Boolean,
+    val retryAfterMs: Long?,
+  )
+
+  internal fun refusalEvidence(response: DaemonResponse, json: Json): RefusalEvidence =
+    parseDaemonToolResult(response, json).let {
+      RefusalEvidence(it.code, it.retryable, it.acquireNewSession, it.retryAfterMs)
+    }
+
   private fun planFailureMessage(payload: JsonObject, isError: Boolean): String {
     val errorObject = payload["error"] as? JsonObject
     val failedStepObj = payload["failedStep"] as? JsonObject

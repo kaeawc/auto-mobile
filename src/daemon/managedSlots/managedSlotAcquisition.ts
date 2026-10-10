@@ -28,6 +28,7 @@ import type { ManagedSlotConfig, ManagedSlotRequest } from "../../models/managed
 import type {
   ManagedSlotResultEntry,
   ManagedSlotsFailure,
+  ManagedSlotAcquisitionOwnFailureCode,
   ManagedSlotsResult,
 } from "../../models/managedSlotsResult";
 import { DEFAULT_PROVISION_DEVICE_TIMEOUT_MS } from "../../utils/deviceTimeouts";
@@ -103,8 +104,8 @@ const ACQUISITION_NEXT_ACTION: Readonly<Record<string, string>> = {
   cancelled: "The preparation was cancelled; retry when needed.",
 };
 
-function acquisitionFailure(
-  code: string,
+export function acquisitionFailure(
+  code: ManagedSlotAcquisitionOwnFailureCode,
   message: string,
   retryable: boolean,
 ): ManagedSlotsFailure {

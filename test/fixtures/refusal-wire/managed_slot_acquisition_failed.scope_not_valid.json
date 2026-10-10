@@ -1,0 +1,13 @@
+{
+  "code": "managed_slot_acquisition_failed.scope_not_valid",
+  "builder": "reconciler failure via managedSlotsFailedToolResult",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":{\"code\":\"managed_slot_acquisition_failed\",\"message\":\"Tool tapOn is unavailable: this execution's managed slot acquisition failed (scope_not_valid: scope_not_valid fixture). Read automobile:managed-slots for the evidence.\",\"acquisitionFailure\":{\"code\":\"scope_not_valid\",\"retryable\":false,\"message\":\"scope_not_valid fixture\",\"nextAction\":\"Use the current runner incarnation; this scope no longer accepts work.\"}}}"
+      }
+    ]
+  }
+}

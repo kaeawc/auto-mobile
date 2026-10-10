@@ -1,11 +1,11 @@
 {
   "code": "capacity_exhausted",
-  "builder": "BootCapacityExhaustedError via shapeToolCallError",
+  "builder": "assertBootCapacityGranted via shapeToolCallError",
   "result": {
     "content": [
       {
         "type": "text",
-        "text": "{\"success\":false,\"error\":\"Timed out waiting for emulator capacity\",\"platform\":\"android\",\"limit\":2,\"booted\":2,\"retryAfterMs\":5000,\"code\":\"capacity_exhausted\",\"retryable\":true}"
+        "text": "{\"success\":false,\"error\":\"Refused to boot: no emulator capacity (code capacity_exhausted, retryable; retry after 5000ms): 2 emulator(s) booted; limit is 2 (default). 1 of them were not started by AutoMobile but still count toward the limit: emulator-5560. Shut one down, raise the limit with AUTO_MOBILE_MAX_BOOTED or disable the gate with AUTOMOBILE_BOOT_CAPACITY_GATE=0.\",\"platform\":\"android\",\"limit\":2,\"booted\":2,\"retryAfterMs\":5000,\"externalDevices\":[\"emulator-5560\"],\"code\":\"capacity_exhausted\",\"retryable\":true}"
       }
     ],
     "isError": true

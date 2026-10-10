@@ -1,0 +1,13 @@
+{
+  "code": "provision_device.identity_conflict",
+  "builder": "ProvisionDeviceError via createToolErrorResponse",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"message\":\"identity_conflict fixture\",\"error\":{\"code\":\"identity_conflict\",\"message\":\"identity_conflict fixture\",\"retryable\":false}}"
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "code": "managed_slot_acquisition_failed.slot_in_use",
+  "builder": "reconciler failure via managedSlotsFailedToolResult",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":{\"code\":\"managed_slot_acquisition_failed\",\"message\":\"Tool tapOn is unavailable: this execution's managed slot acquisition failed (slot_in_use: slot_in_use fixture). Read automobile:managed-slots for the evidence.\",\"acquisitionFailure\":{\"code\":\"slot_in_use\",\"retryable\":true,\"message\":\"slot_in_use fixture\",\"nextAction\":\"Wait for the slot's live execution to end, then retry.\"}}}"
+      }
+    ]
+  }
+}

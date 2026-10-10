@@ -1,0 +1,13 @@
+{
+  "code": "managed_slot_acquisition_failed.execution_hold_failed",
+  "builder": "acquisitionFailure via managedSlotsFailedToolResult",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":{\"code\":\"managed_slot_acquisition_failed\",\"message\":\"Tool tapOn is unavailable: this execution's managed slot acquisition failed (execution_hold_failed: execution_hold_failed fixture). Read automobile:managed-slots for the evidence.\",\"acquisitionFailure\":{\"code\":\"execution_hold_failed\",\"retryable\":true,\"message\":\"execution_hold_failed fixture\",\"nextAction\":\"Retry.\"}}}"
+      }
+    ]
+  }
+}

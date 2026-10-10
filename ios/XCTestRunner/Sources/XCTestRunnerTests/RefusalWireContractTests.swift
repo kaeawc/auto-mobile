@@ -10,6 +10,15 @@ final class RefusalWireContractTests: XCTestCase {
         struct Row: Decodable {
             let expected: String
             let knownGaps: [String: String]?
+            let fields: Fields
+        }
+
+        struct Fields: Decodable {
+            let code: String?
+            let retryable: Bool
+            let acquireNewSession: Bool
+            let retryAfterMs: Int?
+            let externalDevices: [String]?
         }
 
         let codes: [String: Row]
@@ -46,6 +55,17 @@ final class RefusalWireContractTests: XCTestCase {
             let text = try XCTUnwrap(content.first?["text"] as? String, code)
             let refusal = try XCTUnwrap(
                 AutoMobilePlanExecutor.DaemonRefusal.parse(text), "\(code) did not decode as a refusal"
+            )
+            XCTAssertEqual(refusal.code, row.fields.code, "\(code): code")
+            XCTAssertEqual(refusal.retryable, row.fields.retryable, "\(code): retryable")
+            XCTAssertEqual(refusal.acquiresNewSession, row.fields.acquireNewSession, "\(code): nextAction")
+            XCTAssertEqual(refusal.retryAfterMs, row.fields.retryAfterMs, "\(code): retryAfterMs")
+            // The runner does not act on externalDevices; the wire must still carry the pinned list.
+            let payload = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any], code
+            )
+            XCTAssertEqual(
+                payload["externalDevices"] as? [String], row.fields.externalDevices, "\(code): externalDevices"
             )
             let actual = refusal.disposition.rawValue
             if let gap = row.knownGaps?["swift"] {

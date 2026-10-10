@@ -14,6 +14,8 @@ export interface BootCapacityExhaustedDetails {
   /** Booted devices (including admitted boots in flight) counted against the limit. */
   booted: number;
   platform: Platform;
+  /** Counted devices AutoMobile did not start; present only when there are any. */
+  externalDevices?: string[];
 }
 
 /**

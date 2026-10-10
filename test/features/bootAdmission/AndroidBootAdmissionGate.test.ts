@@ -189,3 +189,39 @@ describe("AndroidBootAdmissionGate (#11181)", () => {
     expect((await gate.describeCapacity()).limit).toBe(4);
   });
 });
+
+describe("capacity_exhausted names external devices (#11209)", () => {
+  test("lists counted emulators AutoMobile did not start and the override and opt-out env vars", async () => {
+    const { timer, source, gate } = setup({ [ANDROID_MAX_BOOTED_ENV]: "2" });
+    timer.enableAutoAdvance();
+    source.emulatorSerials = ["emulator-5554"];
+    const owned = await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+    owned.handOff("emulator-5556");
+    source.emulatorSerials = ["emulator-5554", "emulator-5556"];
+
+    const error = await rejection(gate.admit({ timeoutMs: 6_000, avdName: AVD }));
+
+    expect(error).toBeInstanceOf(BootCapacityExhaustedError);
+    const exhausted = error as BootCapacityExhaustedError;
+    expect(exhausted.details.externalDevices).toEqual(["emulator-5554"]);
+    expect(exhausted.message).toContain("emulator-5554");
+    expect(exhausted.message).not.toContain("emulator-5556,");
+    expect(exhausted.message).toContain("AUTOMOBILE_ANDROID_MAX_BOOTED");
+    expect(exhausted.message).toContain("AUTOMOBILE_BOOT_CAPACITY_GATE=0");
+  });
+
+  test("omits the external note when every counted emulator was started here", async () => {
+    const { timer, source, gate } = setup({ [ANDROID_MAX_BOOTED_ENV]: "1" });
+    timer.enableAutoAdvance();
+    const owned = await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+    owned.handOff("emulator-5554");
+    source.emulatorSerials = ["emulator-5554"];
+
+    const error = (await rejection(
+      gate.admit({ timeoutMs: 6_000, avdName: AVD }),
+    )) as BootCapacityExhaustedError;
+
+    expect(error.details.externalDevices).toBeUndefined();
+    expect(error.message).not.toContain("not started by AutoMobile");
+  });
+});

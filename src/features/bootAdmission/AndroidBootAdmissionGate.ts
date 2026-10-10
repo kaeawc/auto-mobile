@@ -50,6 +50,8 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter {
   private readonly retryAfterMs: number;
   private readonly ledger: BootAdmissionLedger;
   private warnedLimit: string | undefined;
+  /** Serials of emulators this process launched through an admission. */
+  private readonly startedSerials = new Set<string>();
 
   constructor(
     private readonly source: AndroidCapacitySource,
@@ -94,7 +96,12 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter {
     }
     return {
       release: ledgerAdmission.release,
-      handOff: (deviceId) => ledgerAdmission.handOff(deviceId, deadlineMs),
+      handOff: (deviceId) => {
+        if (deviceId !== undefined) {
+          this.startedSerials.add(deviceId);
+        }
+        ledgerAdmission.handOff(deviceId, deadlineMs);
+      },
     };
   }
 
@@ -117,6 +124,7 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter {
       atCapacityDecision(bootedCount, limits, this.retryAfterMs, {
         noun: "emulator",
         envName: ANDROID_MAX_BOOTED_ENV,
+        externalDevices: sample.emulatorSerials.filter((serial) => !this.startedSerials.has(serial)),
       }) ?? { outcome: "allow", limits, bootedCount }
     );
   }

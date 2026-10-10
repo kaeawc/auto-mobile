@@ -40,6 +40,8 @@ export interface QueuedCapacityDecision {
   bootedCount: number;
   retryAfterMs: number;
   message: string;
+  /** Counted devices this process did not start (e.g. launched from Android Studio). */
+  externalDevices?: string[];
 }
 
 export interface BootAdmissionWaitResult<D> {
@@ -59,18 +61,26 @@ export function atCapacityDecision(
   bootedCount: number,
   limits: CapacityLimits,
   retryAfterMs: number,
-  describe: { noun: string; envName: string },
+  describe: { noun: string; envName: string; externalDevices?: readonly string[] },
 ): QueuedCapacityDecision | undefined {
   if (bootedCount < limits.maxBooted) {
     return undefined;
   }
+  const external = describe.externalDevices ?? [];
+  const externalNote =
+    external.length > 0
+      ? ` ${external.length} of them were not started by AutoMobile but still count toward the limit: ${external.join(", ")}.`
+      : "";
+  const optOut =
+    external.length > 0 ? ` or disable the gate with ${BOOT_CAPACITY_GATE_ENV}=0` : "";
   return {
     outcome: "queue",
     reason: "at-capacity",
     limits,
     bootedCount,
     retryAfterMs,
-    message: `${bootedCount} ${describe.noun}(s) booted; limit is ${limits.maxBooted} (${limits.source}). Shut one down or raise the limit with ${describe.envName}.`,
+    ...(external.length > 0 ? { externalDevices: [...external] } : {}),
+    message: `${bootedCount} ${describe.noun}(s) booted; limit is ${limits.maxBooted} (${limits.source}).${externalNote} Shut one down, raise the limit with ${describe.envName}${optOut}.`,
   };
 }
 
@@ -163,6 +173,7 @@ export function assertBootCapacityGranted<D extends { outcome: string }>(
       limit: decision.limits.maxBooted,
       booted: decision.bootedCount,
       retryAfterMs: decision.retryAfterMs,
+      ...(decision.externalDevices ? { externalDevices: decision.externalDevices } : {}),
     },
     `Timed out after ${result.waitedMs}ms waiting for ${noun} capacity (code capacity_exhausted, retryable): ${decision.message}`,
   );

@@ -1,9 +1,9 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleReportContract
-import dev.jasonpearson.automobile.protocol.OverlayEvent
-import dev.jasonpearson.automobile.protocol.OverlayResult
-import dev.jasonpearson.automobile.protocol.OverlayStatusEntry
+import dev.jasonpearson.automobile.protocol.PrototypeEvent
+import dev.jasonpearson.automobile.protocol.PrototypeResult
+import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.serialization.encodeToString
@@ -136,14 +136,14 @@ internal fun traversalOrderErrorFrame(
     put("error", error ?: "Unknown error")
   }
 
-internal fun overlayResultFrame(
+internal fun prototypeResultFrame(
   requestId: String?,
   success: Boolean,
   error: String?,
   missingAssets: List<String> = emptyList(),
 ): String =
   resultFrameJson.encodeToString<WebSocketResponse>(
-    OverlayResult(
+    PrototypeResult(
       timestamp = System.currentTimeMillis(),
       requestId = requestId,
       success = success,
@@ -152,22 +152,22 @@ internal fun overlayResultFrame(
     ),
   )
 
-internal fun overlayStatusFrame(
+internal fun prototypeStatusFrame(
   requestId: String?,
-  overlays: List<OverlayStatusEntry>,
+  prototypes: List<PrototypeStatusEntry>,
   droppedEvents: Long,
 ): String =
   resultFrameJson.encodeToString<WebSocketResponse>(
-    OverlayResult(
+    PrototypeResult(
       timestamp = System.currentTimeMillis(),
       requestId = requestId,
       success = true,
-      overlays = overlays,
+      prototypes = prototypes,
       droppedEvents = droppedEvents,
     ),
   )
 
-internal fun overlayEventFrame(event: OverlayEvent): String =
+internal fun prototypeEventFrame(event: PrototypeEvent): String =
   resultFrameJson.encodeToString<WebSocketResponse>(event)
 
 /**

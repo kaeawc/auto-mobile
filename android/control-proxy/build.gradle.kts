@@ -37,7 +37,7 @@ android {
   buildFeatures { compose = true }
 
   // Robolectric needs the merged resources to render Compose Material 3 off-device (its components
-  // read library string resources); used by the overlay renderer screenshot tests. The default
+  // read library string resources); used by the prototype renderer screenshot tests. The default
   // Robolectric SDK this would otherwise change is pinned in
   // src/test/resources/robolectric.properties.
   testOptions { unitTests.isIncludeAndroidResources = true }
@@ -92,7 +92,7 @@ dependencies {
   testImplementation(libs.bundles.unit.test)
   testImplementation(projects.junitRunner)
   testImplementation(libs.robolectric)
-  // createComposeRule's mainClock drives overlay motion frame by frame (#10442).
+  // createComposeRule's mainClock drives prototype motion frame by frame (#10442).
   testImplementation(libs.compose.ui.junit)
   testImplementation(libs.ktor.client.core)
   testImplementation(libs.ktor.client.cio)
@@ -103,9 +103,10 @@ dependencies {
   debugImplementation(libs.bundles.compose.ui.debug)
 }
 
-// Forward the overlay renderer screenshot and preview switches from the Gradle invocation to the
+// Forward the prototype renderer screenshot and preview switches from the Gradle invocation to the
 // forked test JVM so `-Dscreenshot.record=true` (and friends) reach the tests. See
-// src/test/kotlin/.../overlay/screenshot/OverlayScreenshotEnvironment.kt and OverlayPreview.kt for
+// src/test/kotlin/.../prototype/screenshot/PrototypeScreenshotEnvironment.kt and
+// PrototypePreview.kt for
 // the supported flags.
 val screenshotProperties =
   listOf(
@@ -113,12 +114,12 @@ val screenshotProperties =
     "screenshot.reference.os",
     "screenshot.golden.dir",
     "screenshot.report.dir",
-    "overlay.preview.spec",
-    "overlay.preview.out",
-    "overlay.preview.width",
-    "overlay.preview.height",
-    "overlay.preview.density",
-    "overlay.preview.theme",
+    "prototype.preview.spec",
+    "prototype.preview.out",
+    "prototype.preview.width",
+    "prototype.preview.height",
+    "prototype.preview.density",
+    "prototype.preview.theme",
   )
 
 tasks.withType<Test>().configureEach {
@@ -127,8 +128,8 @@ tasks.withType<Test>().configureEach {
   }
   // A preview reads spec files Gradle does not track, so never reuse an up-to-date or cached
   // result.
-  if (System.getProperty("overlay.preview.spec") != null) {
+  if (System.getProperty("prototype.preview.spec") != null) {
     outputs.upToDateWhen { false }
-    outputs.doNotCacheIf("overlay preview reads untracked spec files") { true }
+    outputs.doNotCacheIf("prototype preview reads untracked spec files") { true }
   }
 }

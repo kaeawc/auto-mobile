@@ -3,9 +3,9 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
-import dev.jasonpearson.automobile.ctrlproxy.overlay.FakeInteractiveOverlayHost
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayController
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayResultSink
+import dev.jasonpearson.automobile.ctrlproxy.prototype.FakePrototypeHost
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeController
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeResultSink
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import org.junit.After
@@ -112,11 +112,11 @@ class CtrlProxyOnDestroyTest {
 
   @Test
   fun `onDestroy destroys interactive host outside the cancelled service scope`() {
-    val host = FakeInteractiveOverlayHost()
+    val host = FakePrototypeHost()
     ReflectionHelpers.setField(
       service,
-      "overlayController",
-      OverlayController(host, OverlayResultSink { _, _, _ -> }),
+      "prototypeController",
+      PrototypeController(host, PrototypeResultSink { _, _, _ -> }),
     )
     destroyService()
     shadowOf(Looper.getMainLooper()).idle()

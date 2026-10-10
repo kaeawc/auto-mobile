@@ -37,7 +37,7 @@ class OverlayManager(
       }
   }
 
-  private var interactiveOverlayAttached = false
+  private var prototypeAttached = false
   private var overlayView: View? = null
   private var overlayAdded = false
   private var overlayVisible = false
@@ -64,13 +64,13 @@ class OverlayManager(
   }
 
   /**
-   * Call on main after interactive addView: highlights use the same accessibility type and are
-   * re-added last, above the interactive window. Preserve the view, drawing state and visibility.
+   * Call on main after prototype addView: highlights use the same accessibility type and are
+   * re-added last, above the prototype window. Preserve the view, drawing state and visibility.
    * Dismissal restores the normal permission-based type. Touch/focus flags never change.
    */
-  fun setInteractiveOverlayAttached(attached: Boolean): Boolean {
-    if (!attached && !interactiveOverlayAttached) return true
-    interactiveOverlayAttached = attached
+  fun setPrototypeAttached(attached: Boolean): Boolean {
+    if (!attached && !prototypeAttached) return true
+    prototypeAttached = attached
     val view = overlayView
     if (view != null && overlayAdded) {
       try {
@@ -143,7 +143,7 @@ class OverlayManager(
   }
 
   private fun resolveOverlayType(): Int {
-    return if (interactiveOverlayAttached) {
+    return if (prototypeAttached) {
       WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
     } else if (canDrawOverlays(context)) {
       WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY

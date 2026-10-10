@@ -3,9 +3,9 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HierarchyUpdateEvent
-import dev.jasonpearson.automobile.protocol.OverlayEvent
-import dev.jasonpearson.automobile.protocol.OverlayEventKind
-import dev.jasonpearson.automobile.protocol.OverlayResult
+import dev.jasonpearson.automobile.protocol.PrototypeEvent
+import dev.jasonpearson.automobile.protocol.PrototypeEventKind
+import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.RequestHierarchy
 import dev.jasonpearson.automobile.protocol.RequestHierarchyIfStale
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
@@ -1105,7 +1105,7 @@ class WebSocketServerTest {
     }
 
   @Test
-  fun `known overlay nested decode failures return correlated overlay results`() =
+  fun `known prototype nested decode failures return correlated prototype results`() =
     runTest(testScope.testScheduler) {
       server = serverWithHandler { error("Malformed payload must never dispatch") }
       val transport = RecordingTransport()
@@ -1121,7 +1121,7 @@ class WebSocketServerTest {
           "root" to
             """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"text":"Missing type"}}""",
         )
-      for (command in listOf("show_overlay")) {
+      for (command in listOf("show_prototype")) {
         for ((index, case) in cases.withIndex()) {
           val (field, spec) = case
           val requestId = "$command-$index"
@@ -1129,8 +1129,8 @@ class WebSocketServerTest {
           server.handleClientMessage(raw, owner)
           runCurrent()
           val response = Json.decodeFromString<WebSocketResponse>(transport.messages.last())
-          assertTrue("Expected overlay_result: $response", response is OverlayResult)
-          val result = response as OverlayResult
+          assertTrue("Expected prototype_result: $response", response is PrototypeResult)
+          val result = response as PrototypeResult
           assertEquals(requestId, result.requestId)
           assertFalse(result.success)
           assertTrue(
@@ -1143,7 +1143,7 @@ class WebSocketServerTest {
     }
 
   @Test
-  fun `malformed overlay asset requests get one correlated overlay result and no echoed bytes`() =
+  fun `malformed prototype asset requests get one correlated prototype result and no echoed bytes`() =
     runTest(testScope.testScheduler) {
       server = serverWithHandler { error("Malformed payload must never dispatch") }
       val transport = RecordingTransport()
@@ -1151,9 +1151,9 @@ class WebSocketServerTest {
       val bytes = "SECRETBYTES".repeat(8)
       val cases =
         listOf(
-          """{"type":"put_overlay_asset","requestId":"put-bad","id":"hero","mimeType":"image/png","dataBase64":{}}""",
-          """{"type":"put_overlay_asset","requestId":"put-missing","mimeType":"image/png","dataBase64":"$bytes"}""",
-          """{"type":"remove_overlay_asset","requestId":"remove-bad","id":7}""",
+          """{"type":"put_prototype_asset","requestId":"put-bad","id":"hero","mimeType":"image/png","dataBase64":{}}""",
+          """{"type":"put_prototype_asset","requestId":"put-missing","mimeType":"image/png","dataBase64":"$bytes"}""",
+          """{"type":"remove_prototype_asset","requestId":"remove-bad","id":7}""",
         )
       for (raw in cases) {
         val before = transport.messages.size
@@ -1161,7 +1161,7 @@ class WebSocketServerTest {
         runCurrent()
         assertEquals(before + 1, transport.messages.size)
         val result =
-          Json.decodeFromString<WebSocketResponse>(transport.messages.last()) as OverlayResult
+          Json.decodeFromString<WebSocketResponse>(transport.messages.last()) as PrototypeResult
         assertEquals(
           Regex("\"requestId\":\"([^\"]+)\"").find(raw)!!.groupValues[1],
           result.requestId,
@@ -1184,23 +1184,23 @@ class WebSocketServerTest {
               override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? =
                 error("An oversized frame must never dispatch")
             },
-          inboundFrameLimits = InboundFrameLimits(mapOf("put_overlay_asset" to 128L)),
+          inboundFrameLimits = InboundFrameLimits(mapOf("put_prototype_asset" to 128L)),
         )
       val transport = RecordingTransport()
       val owner = server.registerClient(1, transport)
       // `dataBase64` is not a string, so a full decode would fail with "Malformed request:"; the
       // cap reply proves the frame was never deserialized.
       val raw =
-        """{"requestId":"put-big","id":"hero","mimeType":"image/png","dataBase64":["${"SECRETBYTES".repeat(16)}"],"type":"put_overlay_asset"}"""
+        """{"requestId":"put-big","id":"hero","mimeType":"image/png","dataBase64":["${"SECRETBYTES".repeat(16)}"],"type":"put_prototype_asset"}"""
       server.handleInboundTextFrame(1, Frame.Text(raw), owner)
       runCurrent()
       val reply = transport.messages.single()
       assertFalse(reply, reply.contains("SECRETBYTES"))
-      val result = Json.decodeFromString<WebSocketResponse>(reply) as OverlayResult
+      val result = Json.decodeFromString<WebSocketResponse>(reply) as PrototypeResult
       assertEquals("put-big", result.requestId)
       assertFalse(result.success)
       assertEquals(
-        "Request frame for put_overlay_asset is ${raw.encodeToByteArray().size} bytes; " +
+        "Request frame for put_prototype_asset is ${raw.encodeToByteArray().size} bytes; " +
           "the limit is 128 bytes.",
         result.error,
       )
@@ -1221,7 +1221,7 @@ class WebSocketServerTest {
                 return null
               }
             },
-          inboundFrameLimits = InboundFrameLimits(mapOf("put_overlay_asset" to 16L)),
+          inboundFrameLimits = InboundFrameLimits(mapOf("put_prototype_asset" to 16L)),
         )
       val owner = server.registerClient(1, RecordingTransport())
       // Above the smallest cap but of an uncapped type, so it decodes as before.
@@ -1244,7 +1244,7 @@ class WebSocketServerTest {
       // The parser fails right after the data, so its input snippet is made of the data. The
       // frame is not valid JSON, so its type is unreadable and the reply is a generic error.
       val raw =
-        """{"type":"put_overlay_asset","requestId":"put-adjacent","id":"hero","mimeType":"image/png","dataBase64":"$bytes" "x"}"""
+        """{"type":"put_prototype_asset","requestId":"put-adjacent","id":"hero","mimeType":"image/png","dataBase64":"$bytes" "x"}"""
       server.handleClientMessage(raw, owner)
       runCurrent()
       assertEquals(1, transport.messages.size)
@@ -1262,14 +1262,14 @@ class WebSocketServerTest {
       val owner = server.registerClient(1, transport)
       val bytes = "SECRETBYTES".repeat(8)
       server.handleClientMessage(
-        """{"type":"put_overlay_asset","requestId":"adj","dataBase64":"$bytes","mimeType":["image/png"],"id":"hero"}""",
+        """{"type":"put_prototype_asset","requestId":"adj","dataBase64":"$bytes","mimeType":["image/png"],"id":"hero"}""",
         owner,
       )
       runCurrent()
       assertEquals(1, transport.messages.size)
       val reply = transport.messages.single()
       assertFalse(reply, reply.contains("SECRETBYTES"))
-      assertTrue(Json.decodeFromString<WebSocketResponse>(reply) is OverlayResult)
+      assertTrue(Json.decodeFromString<WebSocketResponse>(reply) is PrototypeResult)
     }
 
   @Test
@@ -1280,7 +1280,7 @@ class WebSocketServerTest {
       val owner = server.registerClient(1, transport)
       val bytes = "SECRETBYTES".repeat(8)
       server.handleClientMessage(
-        """{"type":"put_overlay_asset","requestId":"cut","id":"hero","dataBase64":"$bytes""",
+        """{"type":"put_prototype_asset","requestId":"cut","id":"hero","dataBase64":"$bytes""",
         owner,
       )
       runCurrent()
@@ -1292,39 +1292,39 @@ class WebSocketServerTest {
   fun `describeDecodeFailure drops the parser input snippet for asset frames only`() {
     val snippet = "JSON input: ...SECRETBYTES..."
     val failure = IllegalArgumentException("Unexpected JSON token at offset 40: bad\n$snippet")
-    val asset = """{"type":"put_overlay_asset","dataBase64":"SECRETBYTES"}"""
+    val asset = """{"type":"put_prototype_asset","dataBase64":"SECRETBYTES"}"""
     assertEquals(
       "Malformed request: Unexpected JSON token at offset 40: bad",
       WebSocketServer.describeDecodeFailure(asset, failure),
     )
-    val other = """{"type":"show_overlay","x":"oops"}"""
+    val other = """{"type":"show_prototype","x":"oops"}"""
     assertTrue(WebSocketServer.describeDecodeFailure(other, failure).contains("SECRETBYTES"))
   }
 
   @Test
   fun `asset requests are advertised so older devices can be detected by absence`() {
     val commands = WebSocketServer(port = 0, scope = testScope).supportedCommands()
-    assertTrue(commands.contains("put_overlay_asset"))
-    assertTrue(commands.contains("remove_overlay_asset"))
+    assertTrue(commands.contains("put_prototype_asset"))
+    assertTrue(commands.contains("remove_prototype_asset"))
     assertTrue(commands.contains("full_command_set_v1"))
   }
 
   @Test
-  fun `dismiss payload failure is an overlay result while other known commands keep error frames`() =
+  fun `dismiss payload failure is a prototype result while other known commands keep error frames`() =
     runTest(testScope.testScheduler) {
       server = serverWithHandler { error("Malformed payload must never dispatch") }
       val transport = RecordingTransport()
       val owner = server.registerClient(1, transport)
       server.handleClientMessage(
-        """{"type":"dismiss_overlay","requestId":"dismiss-bad","all":{}}""",
+        """{"type":"dismiss_prototype","requestId":"dismiss-bad","all":{}}""",
         owner,
       )
       runCurrent()
-      val overlay =
-        Json.decodeFromString<WebSocketResponse>(transport.messages.last()) as OverlayResult
-      assertEquals("dismiss-bad", overlay.requestId)
-      assertFalse(overlay.success)
-      assertTrue(overlay.error?.contains("all") == true)
+      val prototype =
+        Json.decodeFromString<WebSocketResponse>(transport.messages.last()) as PrototypeResult
+      assertEquals("dismiss-bad", prototype.requestId)
+      assertFalse(prototype.success)
+      assertTrue(prototype.error?.contains("all") == true)
       server.handleClientMessage(
         """{"type":"request_screenshot","requestId":"known-bad","displayId":{}}""",
         owner,
@@ -1343,20 +1343,20 @@ class WebSocketServerTest {
     }
 
   @Test
-  fun `overlay results correlate while overlay events do not`() {
+  fun `prototype results correlate while prototype events do not`() {
     assertEquals(
-      "overlay-r",
+      "prototype-r",
       WebSocketServer.correlationRequestId(
-        OverlayResult(timestamp = 0L, requestId = "overlay-r", success = false),
+        PrototypeResult(timestamp = 0L, requestId = "prototype-r", success = false),
       ),
     )
     assertNull(
       WebSocketServer.correlationRequestId(
-        OverlayEvent(
+        PrototypeEvent(
           timestamp = 0L,
           id = "panel",
           sequence = 1L,
-          kind = OverlayEventKind.DISMISSED,
+          kind = PrototypeEventKind.DISMISSED,
           name = null,
           payload = null,
           state = emptyMap(),

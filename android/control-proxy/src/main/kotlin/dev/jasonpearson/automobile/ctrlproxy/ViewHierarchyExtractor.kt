@@ -18,8 +18,8 @@ import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.models.WindowInfo
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayWindowMetadata
-import dev.jasonpearson.automobile.ctrlproxy.overlay.hasInteractiveOverlayTitle
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowMetadata
+import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
 import kotlin.math.max
 import kotlin.math.min
 
@@ -33,17 +33,17 @@ internal constructor(
   internal val stats: CtrlProxyWorkStats = CtrlProxyWorkStats(),
   internal val logOptimizationDecisions: Boolean = false,
   /**
-   * Metadata for CtrlProxy's own interactive overlay window, asked per captured window that carries
-   * the interactive overlay's type and title (either layer) with the window's root package and
-   * title; null for any other window or when none is showing.
+   * Metadata for CtrlProxy's own prototype window, asked per captured window that carries the
+   * prototype's type and title (either layer) with the window's root package and title; null for
+   * any other window or when none is showing.
    */
-  private val ownOverlayMetadata:
-    (windowPackage: String?, title: CharSequence?) -> OverlayWindowMetadata? =
+  private val ownPrototypeMetadata:
+    (windowPackage: String?, title: CharSequence?) -> PrototypeWindowMetadata? =
     { _, _ ->
       null
     },
-  /** Whether an overlay is hidden because its app left the foreground (#10261). */
-  private val overlaySuspended: () -> Boolean = { false },
+  /** Whether a prototype is hidden because its app left the foreground (#10261). */
+  private val prototypeSuspended: () -> Boolean = { false },
 ) {
 
   internal data class DisplayWindows(val displayId: Int, val windows: List<AccessibilityWindowInfo>)
@@ -260,7 +260,7 @@ internal constructor(
           accessibilityFocusedElement?.let { WireNodeCodec.materialize(it) },
         contentHiddenRegions = contentHiddenRegions?.takeIf { it.isNotEmpty() },
         truncationReasons = budget.truncationReasons().ifEmpty { null },
-        overlaySuspended = overlaySuspended().takeIf { it },
+        prototypeSuspended = prototypeSuspended().takeIf { it },
       )
     } catch (e: Exception) {
       Log.e(TAG, "Error extracting view hierarchy", e)
@@ -484,7 +484,7 @@ internal constructor(
                 isFocused = window.isFocused,
                 hierarchy = processedElement,
                 windowBounds = ElementBounds(windowBounds),
-                isOwnInteractiveOverlay = hasInteractiveOverlayTitle(window.type, window.title),
+                isOwnPrototype = hasPrototypeTitle(window.type, window.title),
               ),
             )
           }
@@ -691,7 +691,7 @@ internal constructor(
         contentHiddenRegions =
           detectContentHiddenRegions(contentHiddenRegionRoots, screenDimensions),
         truncationReasons = budget.truncationReasons().ifEmpty { null },
-        overlaySuspended = overlaySuspended().takeIf { it },
+        prototypeSuspended = prototypeSuspended().takeIf { it },
       )
     } finally {
       accessibilityFocusedNode?.recycle()
@@ -731,9 +731,9 @@ internal constructor(
   ): WindowInfo {
     // Both layers' windows (the app layer reports as TYPE_SYSTEM) carry the metadata; the title
     // keeps SystemUI's type-3 windows and the highlight overlay out (#10544).
-    val overlay =
-      if (hasInteractiveOverlayTitle(window.type, window.title))
-        ownOverlayMetadata(packageName, window.title)
+    val prototypeMetadata =
+      if (hasPrototypeTitle(window.type, window.title))
+        ownPrototypeMetadata(packageName, window.title)
       else null
     return WindowInfo(
       id = window.id,
@@ -748,8 +748,8 @@ internal constructor(
       isFocused = window.isFocused,
       bounds = ElementBounds(bounds),
       packageName = packageName,
-      overlayPlacement = overlay?.placement,
-      overlayOpaque = overlay?.opaque,
+      prototypePlacement = prototypeMetadata?.placement,
+      prototypeOpaque = prototypeMetadata?.opaque,
     )
   }
 
@@ -1641,8 +1641,8 @@ internal constructor(
     val isFocused: Boolean,
     val hierarchy: UIElementInfo,
     val windowBounds: ElementBounds? = null,
-    /** CtrlProxy's own interactive overlay window (either layer); never an occluder here. */
-    val isOwnInteractiveOverlay: Boolean = false,
+    /** CtrlProxy's own prototype window (either layer); never an occluder here. */
+    val isOwnPrototype: Boolean = false,
   )
 
   private data class OrderCounter(var value: Int = 0)
@@ -1806,13 +1806,13 @@ internal constructor(
         .mapTo(mutableSetOf()) {
           it.windowId
         }
-    // The host decides what CtrlProxy's own interactive overlay covers (isFullyCoveredByOwnOverlay,
+    // The host decides what CtrlProxy's own prototype covers (isFullyCoveredByOwnOverlay,
     // layer:"app", covered-tap refusal), so its windows must not prune the app nodes beneath them
     // here; dropping those nodes left the host nothing to scope or refuse (#10608/#10544).
-    val ownOverlayWindowKeys =
+    val ownPrototypeWindowKeys =
       windowEntries
         .asSequence()
-        .filter { it.isOwnInteractiveOverlay }
+        .filter { it.isOwnPrototype }
         .mapTo(mutableSetOf()) {
           it.windowId
         }
@@ -1919,10 +1919,10 @@ internal constructor(
         // Skip cross-window IME occluders: the IME's a11y root has a transparent wrapper that
         // overstates the keyboard rectangle and would falsely mark the app underneath as hidden.
         // Same-window IME-vs-IME occlusion is preserved by the `windowKey != node.windowKey` guard.
-        // CtrlProxy's own interactive overlay windows are skipped the same way (see above).
+        // CtrlProxy's own prototype windows are skipped the same way (see above).
         if (
           occluder.windowKey != node.windowKey &&
-            (occluder.windowKey in imeWindowKeys || occluder.windowKey in ownOverlayWindowKeys)
+            (occluder.windowKey in imeWindowKeys || occluder.windowKey in ownPrototypeWindowKeys)
         ) {
           continue
         }

@@ -1,0 +1,446 @@
+package dev.jasonpearson.automobile.ctrlproxy.prototype
+
+import dev.jasonpearson.automobile.protocol.*
+import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import org.junit.Assert.*
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [30])
+class PrototypeLifecycleTest {
+  private val host = FakePrototypeHost()
+  private val timer = FakePrototypeTimer()
+  private val events = mutableListOf<PrototypeEvent>()
+  private var blocked = false
+  private var session = 1
+  private val lifecycle =
+    PrototypeLifecycle(timer, TTL, isBlocked = { blocked }, observerSession = { session })
+  private val controller =
+    PrototypeController(
+      host,
+      PrototypeResultSink { _, success, error -> check(success) { error.orEmpty() } },
+      eventSink = PrototypeEventSink { events += it },
+      clock = { timer.now },
+      lifecycle = lifecycle,
+    )
+
+  private fun spec(id: String = "panel") =
+    PrototypeSpec(
+      id,
+      PrototypeWindow(PrototypeFullscreenPlacement()),
+      root = PrototypePagerNode("pager", children = List(4) { PrototypeTextNode(text = "page") }),
+    )
+
+  private suspend fun show(id: String = "panel") = controller.show(null, spec(id))
+
+  private suspend fun interact(interaction: PrototypeInteraction) =
+    controller.interact(checkNotNull(controller.activeRuntime), interaction)
+
+  private fun assertDismiss(reason: String, sequence: Long = 1L) {
+    val event = events.last()
+    assertEquals(PrototypeEventKind.DISMISSED, event.kind)
+    assertNull(event.name)
+    assertEquals(Json.parseToJsonElement("""{"reason":"$reason"}"""), event.payload)
+    assertEquals(sequence, event.sequence)
+  }
+
+  @Test
+  fun `host and spec dismiss are user agent dismiss is agent and each is terminal`() = runTest {
+    for (trigger in listOf("host", "spec", "agent")) {
+      show()
+      val runtime = checkNotNull(controller.activeRuntime)
+      val before = events.size
+      when (trigger) {
+        "host" -> host.requests.last().onHostDismiss()
+        "spec" -> interact(PrototypeInteraction.Tap(listOf(PrototypeDismissAction)))
+        else -> controller.dismiss(null, "panel", null)
+      }
+      assertDismiss(if (trigger == "agent") "agent" else "user", (before + 1).toLong())
+      controller.interact(runtime, PrototypeInteraction.HostDismiss)
+      runtime.dismiss(PrototypeDismissReason.DISCONNECT)
+      timer.advance(TTL)
+      assertEquals(before + 1, events.size)
+      assertTrue(timer.tasks.last().cancelled)
+    }
+  }
+
+  @Test
+  fun `last client disconnect dismisses once with next sequence but remaining clients do not`() =
+    runTest {
+      show()
+      interact(PrototypeInteraction.SettledPage("pager", 2))
+      controller.onClientCountChanged(2)
+      controller.onClientCountChanged(1)
+      assertTrue(host.isShowing)
+      assertEquals(1, events.size)
+      controller.onClientCountChanged(0)
+      controller.onClientCountChanged(0)
+      controller.destroy()
+      assertEquals(2, events.size)
+      assertDismiss("disconnect", 2L)
+      assertFalse(host.isShowing)
+    }
+
+  @Test
+  fun `delayed last-client event cannot dismiss prototype shown by a new observer session`() =
+    runTest {
+      show()
+      session++
+      show()
+      controller.onClientCountChanged(0, observerSession = 1)
+      assertTrue(host.isShowing)
+      assertTrue(events.isEmpty())
+      controller.onClientCountChanged(0, observerSession = session)
+      assertDismiss("disconnect")
+    }
+
+  @Test
+  fun `ttl arms on show restarts on interaction and same-id show then expires exactly once`() =
+    runTest {
+      show()
+      assertEquals(TTL, timer.tasks.single().deadline)
+      timer.advance(TTL - 1)
+      interact(
+        PrototypeInteraction.Tap(
+          listOf(PrototypeSetStateAction("label", PrototypeScalar.Text("new"))),
+        ),
+      )
+      assertTrue(timer.tasks.first().cancelled)
+      timer.advance(TTL - 1)
+      controller.show(null, spec().copy(state = mapOf("label" to PrototypeScalar.Text("patch"))))
+      timer.advance(TTL - 1)
+      assertTrue(host.isShowing)
+      timer.advance(1)
+      assertDismiss("ttl", 2L)
+      // The tap's one change event precedes the ttl dismissal.
+      assertEquals(listOf("change", null), events.map { it.name })
+      assertEquals(PrototypeScalar.Text("patch"), events.last().state["label"])
+      timer.advance(TTL)
+      controller.onClientCountChanged(0)
+      assertEquals(2, events.size)
+    }
+
+  @Test
+  fun `initial and restored settled pager reports neither extend ttl nor emit but swipes are activity`() =
+    runTest {
+      show()
+      val task = timer.tasks.single()
+      interact(PrototypeInteraction.PagerMotion("pager", 0, false))
+      controller.onConfigurationChanged()
+      interact(PrototypeInteraction.PagerMotion("pager", 0, false))
+      assertSame(task, timer.tasks.single())
+      assertTrue(events.isEmpty())
+      timer.advance(TTL - 1)
+      interact(PrototypeInteraction.PagerMotion("pager", 0, true))
+      assertTrue(task.cancelled)
+      timer.advance(1)
+      assertTrue(host.isShowing)
+      timer.advance(TTL - 1)
+      assertDismiss("ttl")
+    }
+
+  @Test
+  fun `replace cancels old timer emits nothing and stale queued callbacks cannot dismiss new runtime`() =
+    runTest {
+      show()
+      val old = timer.tasks.single()
+      val runtime = checkNotNull(controller.activeRuntime)
+      timer.advance(TTL - 1)
+      show()
+      assertTrue(old.cancelled)
+      assertFalse(runtime.current.active)
+      old.action()
+      timer.advance(1)
+      assertTrue(events.isEmpty())
+      assertTrue(host.isShowing)
+      timer.advance(TTL - 1)
+      assertDismiss("ttl")
+      assertEquals(1, events.size)
+    }
+
+  @Test
+  fun `same-runtime stale expiry is invalid after activity and ttl override is positive and restartable`() =
+    runTest {
+      show()
+      val old = timer.tasks.single()
+      controller.setIdleTtlMillis(TTL * 2)
+      old.action()
+      timer.advance(TTL)
+      assertTrue(events.isEmpty())
+      val error = runCatching { controller.setIdleTtlMillis(0) }.exceptionOrNull()
+      assertTrue(error is IllegalArgumentException)
+      timer.advance(TTL)
+      assertDismiss("ttl")
+    }
+
+  @Test
+  fun `teardown succeeds with next sequence and repeated teardown or late triggers emit nothing`() =
+    runTest {
+      show()
+      val runtime = checkNotNull(controller.activeRuntime)
+      interact(PrototypeInteraction.SettledPage("pager", 2))
+      controller.destroy()
+      assertDismiss("teardown", 2L)
+      controller.destroy()
+      controller.onClientCountChanged(0)
+      runtime.dismiss(PrototypeDismissReason.USER)
+      timer.advance(TTL)
+      assertFalse(host.isShowing)
+      assertEquals(2, events.size)
+    }
+
+  @Test
+  fun `rejected same-id show leaves the idle deadline unchanged`() = runTest {
+    val rejecting =
+      PrototypeController(
+        host,
+        PrototypeResultSink { _, _, _ -> },
+        eventSink = PrototypeEventSink { events += it },
+        lifecycle = lifecycle,
+      )
+    rejecting.show(null, spec())
+    val task = timer.tasks.single()
+    rejecting.show(null, spec().copy(state = mapOf("bad-key" to PrototypeScalar.Text("invalid"))))
+    assertSame(task, timer.tasks.single())
+    timer.advance(TTL)
+    assertDismiss("ttl")
+  }
+
+  @Test
+  fun `teardown allocates one terminal sequence even when delivery or window removal fails`() =
+    runTest {
+      val attempted = mutableListOf<PrototypeEvent>()
+      val failing =
+        PrototypeController(
+          host,
+          PrototypeResultSink { _, _, _ -> },
+          eventSink =
+            PrototypeEventSink {
+              attempted += it
+              error("sink gone")
+            },
+          lifecycle = PrototypeLifecycle(timer, TTL),
+        )
+      failing.show(null, spec())
+      val runtime = checkNotNull(failing.activeRuntime)
+      host.accept = false
+      failing.destroy()
+      failing.destroy()
+      runtime.dismiss()
+      timer.advance(TTL)
+      assertEquals(1, attempted.size)
+      assertEquals(1L, attempted.single().sequence)
+      assertEquals(Json.parseToJsonElement("""{"reason":"teardown"}"""), attempted.single().payload)
+      assertFalse(runtime.current.active)
+      assertTrue(timer.tasks.single().cancelled)
+    }
+
+  @Test
+  fun `configuration changes retain page three state timer and sequence without emitting`() =
+    runTest {
+      show()
+      interact(PrototypeInteraction.SettledPage("pager", 2))
+      interact(
+        PrototypeInteraction.Tap(
+          listOf(PrototypeSetStateAction("label", PrototypeScalar.Text("changed"))),
+        ),
+      )
+      val runtime = checkNotNull(controller.activeRuntime)
+      val snapshot = runtime.current
+      val task = timer.tasks.last()
+      repeat(3) { controller.onConfigurationChanged() }
+      assertSame(runtime, controller.activeRuntime)
+      assertSame(snapshot, runtime.current)
+      assertEquals(2, runtime.current.pages["pager"])
+      assertEquals(PrototypeScalar.Text("changed"), runtime.current.state["label"])
+      assertEquals(3, host.calls.count { it == "relayout" })
+      assertSame(task, timer.tasks.last())
+      // Only the tap's change event; configuration changes emit nothing.
+      assertEquals(2, events.size)
+      controller.dismiss(null, "panel", null)
+      assertDismiss("agent", 3L)
+    }
+
+  @Test
+  fun `missing display dismisses as teardown never migrates and does not revive on return`() =
+    runTest {
+      show()
+      controller.onConfigurationChanged(displayAvailable = false)
+      assertDismiss("teardown")
+      controller.onConfigurationChanged()
+      controller.destroy()
+      assertFalse(host.isShowing)
+      assertEquals(1, events.size)
+      assertEquals(1, host.requests.size)
+      assertEquals(PrototypeWindowDecision.DISMISS, prototypeWindowDecision(false, true))
+    }
+
+  @Test
+  fun `keyguard hides and restores the same runtime with state and no events while ttl keeps running`() =
+    runTest {
+      show()
+      interact(PrototypeInteraction.SettledPage("pager", 2))
+      val runtime = checkNotNull(controller.activeRuntime)
+      blocked = true
+      controller.onConfigurationChanged()
+      assertFalse(host.isShowing)
+      assertSame(runtime, controller.activeRuntime)
+      assertTrue(runtime.current.active)
+      blocked = false
+      controller.onConfigurationChanged()
+      assertTrue(host.isShowing)
+      assertSame(runtime, controller.activeRuntime)
+      assertEquals(2, runtime.current.pages["pager"])
+      assertEquals(1, events.size)
+      blocked = true
+      controller.onConfigurationChanged()
+      timer.advance(TTL)
+      blocked = false
+      controller.onConfigurationChanged()
+      assertFalse(host.isShowing)
+      assertDismiss("ttl", 2L)
+    }
+
+  @Test
+  fun `show while keyguard blocked installs no window and can expire without becoming visible`() =
+    runTest {
+      blocked = true
+      show()
+      assertTrue(host.requests.isEmpty())
+      assertFalse(host.isShowing)
+      assertTrue(checkNotNull(controller.activeRuntime).current.active)
+      timer.advance(TTL)
+      assertDismiss("ttl")
+      blocked = false
+      controller.onConfigurationChanged()
+      assertTrue(host.requests.isEmpty())
+      assertEquals(DEFAULT_PROTOTYPE_IDLE_TTL_MILLIS, PrototypeLifecycle(timer).ttlMillis)
+    }
+
+  @Test
+  fun `fullscreen host chrome is outside hidden zero-opacity authored modal content`() {
+    val malicious =
+      spec()
+        .copy(
+          window = PrototypeWindow(PrototypeFullscreenPlacement(), 0),
+          state = mapOf("open" to PrototypeScalar.BooleanValue(true)),
+          root =
+            PrototypeBottomSheetNode(
+              child = PrototypeSpacerNode(style = PrototypeStyle(alpha = 0.0)),
+              openWhen = PrototypeSheetCondition("open", true),
+              detents = listOf(PrototypeDetent.Full),
+              dragHandle = false,
+              dismissOnSwipe = false,
+            ),
+        )
+    val request = mapPrototypeSpec(malicious).request()
+    val chrome = prototypeHostChrome(request)
+    assertTrue(chrome.dismissVisible)
+    assertEquals(1f, chrome.windowAlpha, 0f)
+    assertEquals(0f, chrome.contentAlpha, 0f)
+    assertTrue(
+      prototypeHostChrome(mapPrototypeSpec(spec().copy(root = PrototypeSpacerNode())).request())
+        .dismissVisible,
+    )
+    assertFalse(prototypeHostChrome(PrototypeRequest()).dismissVisible)
+  }
+
+  @Test
+  fun `failed ttl removal re-arms a bounded retry and then dismisses once as ttl`() = runTest {
+    show()
+    host.accept = false
+    timer.advance(TTL)
+    assertTrue(events.isEmpty())
+    assertTrue(host.isShowing)
+    assertEquals(2, timer.tasks.size)
+    assertEquals(timer.now + PROTOTYPE_DISMISS_RETRY_MILLIS, timer.tasks.last().deadline)
+    host.accept = true
+    timer.advance(PROTOTYPE_DISMISS_RETRY_MILLIS)
+    assertDismiss("ttl")
+    assertEquals(1, events.size)
+    assertFalse(host.isShowing)
+    timer.advance(PROTOTYPE_DISMISS_RETRY_MILLIS * 2)
+    assertEquals(1, events.size)
+  }
+
+  @Test
+  fun `ttl retries stop after the bound when removal keeps failing`() = runTest {
+    show()
+    host.accept = false
+    timer.advance(TTL)
+    repeat(PROTOTYPE_DISMISS_MAX_RETRIES + 2) { timer.advance(PROTOTYPE_DISMISS_RETRY_MILLIS) }
+    assertEquals(1 + PROTOTYPE_DISMISS_MAX_RETRIES, timer.tasks.size)
+    assertTrue(events.isEmpty())
+    assertTrue(host.isShowing)
+  }
+
+  @Test
+  fun `failed disconnect removal is retried by the next lifecycle signal exactly once`() = runTest {
+    show()
+    host.accept = false
+    controller.onClientCountChanged(0)
+    assertTrue(events.isEmpty())
+    assertTrue(host.isShowing)
+    host.accept = true
+    controller.onConfigurationChanged()
+    assertDismiss("disconnect")
+    assertEquals(1, events.size)
+    assertFalse(host.isShowing)
+    controller.onConfigurationChanged()
+    controller.onClientCountChanged(0)
+    assertEquals(1, events.size)
+  }
+
+  @Test
+  fun `a show after its disconnect edge dismisses as disconnect instead of waiting for ttl`() =
+    runTest {
+      var clients = 0
+      val gone =
+        PrototypeController(
+          host,
+          PrototypeResultSink { _, success, error -> check(success) { error.orEmpty() } },
+          eventSink = PrototypeEventSink { events += it },
+          clock = { timer.now },
+          lifecycle =
+            PrototypeLifecycle(
+              timer,
+              TTL,
+              observerSession = { session },
+              clientCount = { clients },
+            ),
+        )
+      gone.show(null, spec())
+      assertDismiss("disconnect")
+      assertEquals(1, events.size)
+      assertFalse(host.isShowing)
+      assertNull(gone.activeRuntime)
+      timer.advance(TTL)
+      assertEquals(1, events.size)
+      clients = 1
+      gone.show(null, spec())
+      assertTrue(host.isShowing)
+      assertEquals(1, events.size)
+    }
+
+  companion object {
+    private const val TTL = 10L
+
+    @JvmStatic
+    @org.junit.BeforeClass
+    fun warmLifecycle() {
+      runTest {}
+      PrototypeSpecValidator.validate("{}")
+      mapPrototypeSpec(
+        PrototypeSpec(
+          "warm",
+          PrototypeWindow(PrototypeFullscreenPlacement()),
+          root = PrototypeSpacerNode(),
+        ),
+      )
+    }
+  }
+}

@@ -117,22 +117,22 @@ Pixel tolerances (per-channel and max differing-pixel ratio) are set per test vi
 | `ScreenshotComparator.kt`   | Pure record/compare/diff logic (no Compose; unit-tested for speed).     |
 | `ComponentScreenshotTest.kt`| Starter baselines for representative components (light + dark).         |
 
-## Overlay renderer snapshots (control-proxy)
+## Prototype renderer snapshots (control-proxy)
 
-`control-proxy` snapshots the overlay renderer (`OverlaySpecContent`) off-device with the same flags,
+`control-proxy` snapshots the prototype renderer (`PrototypeSpecContent`) off-device with the same flags,
 OS gating, `pending` flow and tolerances (#10445). The tests live in
-`control-proxy/src/test/kotlin/.../ctrlproxy/overlay/screenshot/` and render the shared specs in
+`control-proxy/src/test/kotlin/.../ctrlproxy/prototype/screenshot/` and render the shared specs in
 `test/fixtures/prototype-spec/valid/` through Robolectric's native graphics mode
 (`@GraphicsMode(NATIVE)`), so no screenshot library or device is needed. Baselines live in
-`control-proxy/src/test/resources/screenshots/overlay/` and are committed directly to git (the
+`control-proxy/src/test/resources/screenshots/prototype/` and are committed directly to git (the
 `android/control-proxy/src/**/*.png` rule in `.gitattributes` keeps them out of LFS).
 
 Record them with the same workflow, choosing module `control-proxy` and test filter
-`*OverlaySpecContentScreenshotTest`; the PR's `kotlin-code-coverage` job (Linux) verifies them. To
+`*PrototypeSpecContentScreenshotTest`; the PR's `kotlin-code-coverage` job (Linux) verifies them. To
 look at the renders locally on another OS (not for committing):
 
 ```bash
-./gradlew -p android :control-proxy:testDebugUnitTest --tests '*OverlaySpecContentScreenshotTest' \
+./gradlew -p android :control-proxy:testDebugUnitTest --tests '*PrototypeSpecContentScreenshotTest' \
   -Dscreenshot.record=true -Dscreenshot.reference.os=any
 ```
 
@@ -144,17 +144,17 @@ device).
 
 ### Previewing a spec without a device
 
-`scripts/android/overlay-preview.sh` renders any spec files through the same harness
-(`OverlayPreviewRenderTest`) and writes `<spec-name>.png` per spec, plus `contact-sheet.png` when
+`scripts/android/prototype-preview.sh` renders any spec files through the same harness
+(`PrototypePreviewRenderTest`) and writes `<spec-name>.png` per spec, plus `contact-sheet.png` when
 there is more than one. It runs on any OS, because nothing is compared:
 
 ```bash
-scripts/android/overlay-preview.sh --width 411 --height 891 --density 420 --theme dark \
-  --out scratch/overlay-preview my-spec.json other-spec.json
+scripts/android/prototype-preview.sh --width 411 --height 891 --density 420 --theme dark \
+  --out scratch/prototype-preview my-spec.json other-spec.json
 ```
 
-`--width`/`--height` (dp, default 360 x 640) set the surface the overlay lays out in, `--density`
+`--width`/`--height` (dp, default 360 x 640) set the surface the prototype lays out in, `--density`
 (dpi, default 160) its pixel density, and `--theme` (`light` or `dark`) the device night mode, which
-only affects specs whose theme mode is `system` or unset. The PNG is the overlay content's own
+only affects specs whose theme mode is `system` or unset. The PNG is the prototype content's own
 bounds with a transparent background; window placement (floating anchors, sheets over an app) is
 not composited. Expect about half a minute with a warm Gradle daemon.

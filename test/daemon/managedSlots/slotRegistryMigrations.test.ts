@@ -11,6 +11,50 @@ import {
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("slot registry migrations", () => {
+  test("free rows from before migration 003 become state free with no claim, nothing lost (#11337)", async () => {
+    const db = new Kysely<SlotRegistryDatabase>({
+      dialect: new BunSqliteDialect({ database: new Sqlite(":memory:") }),
+    });
+    try {
+      await slotRegistry000.up(db as Kysely<unknown>);
+      await sql`INSERT INTO slot_free_devices (platform, stable_device_id, spec_fingerprint,
+          from_scope_key, freed_at_ms)
+        VALUES ('android', 'avd-1', 'fp-1', 'scope-old', 11),
+               ('ios', 'UDID-2', NULL, 'scope-old', 22)`.execute(db);
+
+      await migrateSlotRegistry(db, ":memory:");
+
+      const registry = new SqliteSlotRegistry(db, {
+        timer: new FakeTimer(),
+        isExecOwnerLive: () => false,
+      });
+      expect(await registry.listFreeDevices()).toEqual([
+        {
+          platform: "android",
+          stableDeviceId: "avd-1",
+          specFingerprint: "fp-1",
+          fromScopeKey: "scope-old",
+          freedAtMs: 11,
+          state: "free",
+          stopClaimedBy: null,
+          stopClaimedAtMs: null,
+        },
+        {
+          platform: "ios",
+          stableDeviceId: "UDID-2",
+          specFingerprint: null,
+          fromScopeKey: "scope-old",
+          freedAtMs: 22,
+          state: "free",
+          stopClaimedBy: null,
+          stopClaimedAtMs: null,
+        },
+      ]);
+    } finally {
+      await db.destroy();
+    }
+  });
+
   test("upgrading a step-1 registry keeps its slots and allows the settling state", async () => {
     const db = new Kysely<SlotRegistryDatabase>({
       dialect: new BunSqliteDialect({ database: new Sqlite(":memory:") }),

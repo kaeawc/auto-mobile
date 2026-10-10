@@ -85,7 +85,7 @@ import {
   SESSION_OWNERSHIP_LOST_CODE,
   SessionReleasedDuringCallError,
 } from "./sessionReleasedDuringCall";
-import { isExpiryReleaseReason } from "./releaseReasons";
+import { isExpiryReleaseReason, isTerminalReleaseReason } from "./releaseReasons";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import type { ManagedConnectionScopes } from "./managedSlots/managedConnectionScope";
 import {
@@ -395,13 +395,18 @@ async function releaseDrainRefusal(
  * observer would let a client heartbeat and re-authenticate streams under a dead session. The
  * answer is the standard `session_ownership_lost` (not retryable, `acquire_new_session`) with the
  * release reason and, for an idle-window release, `idle: true`. A never-issued UUID has no
- * snapshot and still registers as an observer.
+ * snapshot and no row, and still registers as an observer.
+ *
+ * The in-memory snapshot is empty after a daemon restart, so a UUID without one is judged by its
+ * persisted `release_reason` under the same predicate. The read changes nothing: a recoverable
+ * handoff or a re-issuable `plan-auto-release` row keeps registering and stays as it was.
  */
-function terminalSessionRegistrationRefusal(
+async function terminalSessionRegistrationRefusal(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
-): DaemonMethodResult | undefined {
-  const release = manager.getTerminalReleaseSnapshot?.(sessionId);
+): Promise<DaemonMethodResult | undefined> {
+  const snapshot = manager.getTerminalReleaseSnapshot?.(sessionId);
+  const release = snapshot ?? (await persistedTerminalRelease(manager, sessionId));
   if (!release?.terminal || !isExpiryReleaseReason(release.releaseReason)) {
     return undefined;
   }
@@ -423,12 +428,45 @@ function terminalSessionRegistrationRefusal(
   };
 }
 
+/** The persisted release of a UUID this daemon holds no snapshot for (best-effort read). */
+async function persistedTerminalRelease(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+): Promise<Pick<SessionReleaseSnapshot, "releaseReason" | "terminal" | "ownerPid"> | undefined> {
+  const releaseReason = await lookupReleasedSessionReason(manager, sessionId);
+  return releaseReason === undefined
+    ? undefined
+    : { releaseReason, terminal: isTerminalReleaseReason(releaseReason) };
+}
+
 /** A session-clock instant as wall-clock epoch ms, for a report another process reads (#11105). */
 function reportedWallClock(
   manager: { sessionClockToWall?(sessionClockMs: number): number },
   sessionClockMs: number,
 ): number {
   return manager.sessionClockToWall?.(sessionClockMs) ?? sessionClockMs;
+}
+
+/** The accepted registration of a UUID that is a live device session, or undefined. */
+function liveSessionRegistration(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+  clientName: string,
+): DaemonMethodResult | undefined {
+  const session = manager.getSession(sessionId);
+  if (!session) {
+    return undefined;
+  }
+  manager.recordSessionClientName?.(sessionId, clientName);
+  return {
+    success: true,
+    result: {
+      accepted: true,
+      heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+      // Reported to another process: wall-clock epoch ms, not the session clock (#11243).
+      expiresAtMs: reportedWallClock(manager, session.lastHeartbeat + session.heartbeatTimeoutMs),
+    },
+  };
 }
 
 async function handleRegisterSession(
@@ -461,22 +499,18 @@ async function handleRegisterSession(
   if (draining) {
     return draining;
   }
-  const session = manager.getSession(sessionId);
-  if (session) {
-    manager.recordSessionClientName?.(sessionId, clientName);
-    return {
-      success: true,
-      result: {
-        accepted: true,
-        heartbeatTimeoutMs: session.heartbeatTimeoutMs,
-        // Reported to another process: wall-clock epoch ms, not the session clock (#11243).
-        expiresAtMs: reportedWallClock(manager, session.lastHeartbeat + session.heartbeatTimeoutMs),
-      },
-    };
+  const live = liveSessionRegistration(manager, sessionId, clientName);
+  if (live) {
+    return live;
   }
-  const terminal = terminalSessionRegistrationRefusal(manager, sessionId);
+  const terminal = await terminalSessionRegistrationRefusal(manager, sessionId);
   if (terminal) {
     return terminal;
+  }
+  // The persisted read yielded: a session issued meanwhile answers as itself, never an observer.
+  const issued = liveSessionRegistration(manager, sessionId, clientName);
+  if (issued) {
+    return issued;
   }
   const registry = state.getObserverSessionRegistry?.();
   if (!registry) {

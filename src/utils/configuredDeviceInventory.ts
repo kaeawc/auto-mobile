@@ -65,11 +65,13 @@ export function configuredImagesByStableId(
 export function configuredImageForBootedDevice(
   device: BootedDevice,
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
+  /** The pooled AVD name, when the booted device's own name is not the configured image key. */
+  avdName?: string,
 ): StableConfiguredDeviceImage | undefined {
   if (device.platform === "android" && !isAndroidEmulatorSerial(device.deviceId)) {
     return undefined;
   }
-  const stableId = device.platform === "android" ? device.name : device.deviceId;
+  const stableId = device.platform === "android" ? (avdName ?? device.name) : device.deviceId;
   return configuredImages.get(configuredImageKey(device.platform, stableId));
 }
 

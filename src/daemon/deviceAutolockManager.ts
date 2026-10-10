@@ -64,6 +64,8 @@ interface AutolockAcquisitionOptions {
 }
 
 export interface DeviceAutolockPoolPort {
+  /** Tell resource subscribers a status or holder write committed (#11413). */
+  noteDeviceStateChanged?(device: Pick<PooledDevice, "id" | "platform">): void;
   getSessionManager(): SessionManager;
   getDaemonSessionId(): string;
   getDevice(id: string): PooledDevice | undefined;
@@ -351,11 +353,16 @@ export class DeviceAutolockManager {
       owner,
       collectCancellationSettlement,
     );
+    this.noteStateChanged(device);
 
     logger.info(
       `Autolocked device ${deviceId} with session ${sessionId} (timeout: ${timeoutMs}ms)`,
     );
     return sessionId;
+  }
+
+  private noteStateChanged(device: PooledDevice): void {
+    this.pool.noteDeviceStateChanged?.(device);
   }
 
   private unavailableMessage(deviceId: string): string {

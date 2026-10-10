@@ -413,6 +413,9 @@ class PrototypeRenderModelTest {
         "f" to PrototypeScalar.Numeric(1.5),
         "t" to PrototypeScalar.BooleanValue(true),
         "nest" to PrototypeScalar.Text("{a}"),
+        "big" to PrototypeScalar.Numeric(12_345_678.0),
+        "zero" to PrototypeScalar.Numeric(-0.0),
+        "small" to PrototypeScalar.Numeric(0.00001),
       )
     val cases =
       mapOf(
@@ -429,6 +432,8 @@ class PrototypeRenderModelTest {
         "{ a }" to "{ a }",
         "{missing}" to "{missing}",
         "{n} {f} {t}" to "3 1.5 true",
+        // Numbers go through the helper repeat bindings use: no exponent, no negative zero.
+        "{big} {zero} {small}" to "12345678 0 0.00001",
         "{nest}" to "{a}",
         "{page}/{pageCount}" to "{page}/{pageCount}",
       )

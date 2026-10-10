@@ -162,7 +162,13 @@ the system setting. Every per-mode form below reads that one resolved mode. A de
   prototype.
 - **Window metadata.** `prototypeOpaque` follows what is drawn. The root background and the window
   scrim are resolved in the mode the show resolved to and count as solid only when the result is
-  fully opaque. An opaque role counts; the `scrim` role in a scrim slot never does.
+  fully opaque. An opaque role counts; the `scrim` role in a scrim slot never does. The root
+  counts only when it is drawn over the whole window (#11408): `width` and `height` both `fill`,
+  no `anchor` (an anchored root is laid out at its anchor's rectangle, in every placement),
+  no `maxWidth`/`maxHeight` cap and no `aspectRatio`, no non-zero `offset`, no rounded corner
+  (`cornerRadius` absent, `0`, `none` or all corners `0`) and no `pressScale` below one. A root
+  that fails any of these lets the app show at an edge or corner, so only an opaque fullscreen
+  scrim behind it can still make the window opaque.
 
 ### Live appearance (#11221, `prototype_appearance_v1`)
 
@@ -315,6 +321,10 @@ the future renderer. Nav item count need not equal pager page count; authors
 should match them when each item represents a page. Per-pager selection starts
 at zero, is separate from the flat state map, and is changed by `setPage`.
 
+When a pager settles on another page the device sends one `page_changed` event whose
+`name` is the pager id and whose `payload` is the new zero-based page index, the same
+shape as the iOS agent (#11409). The event `pages` map still carries every pager.
+
 `bottomSheet.openWhen` is `{key, equals}` with a **boolean** equals value. Its
 state key may be absent (sheet closed); an existing value must be boolean. A
 swipe dismissal with `dismissOnSwipe: true` writes `!equals` to that key, making
@@ -420,6 +430,22 @@ keys may appear in text. No expressions or interpolation parsing occurs during
 validation. Pager context is the nearest enclosing pager; outside a pager those
 two reserved placeholders remain literal. State keys `page` and `pageCount` are
 permitted but the pager placeholders take precedence within a pager.
+
+A number renders the same in a `{key}` placeholder and in a `repeat` binding (#11408),
+and as the TypeScript host renders it (`renderScalar`):
+
+- An integral number prints every digit with no decimal point and no exponent at any
+  magnitude (`12345678`, `1000000000000000000000`), and negative zero prints `0`.
+- Any other number prints as JavaScript's `String(number)`: the shortest decimal digits
+  that read back as the same double, in plain notation down to `0.000001`
+  (`0.30000000000000004`, `0.00001`) and as `<digits>e-<exponent>` below that (`1e-7`,
+  `2.5e-7`). Android computes the digits itself, so the result does not depend on the
+  device's `Double.toString`.
+
+Known divergence: the iOS agent formats a non-integral number with Swift's own
+description, which switches to an exponent earlier and pads it (`0.00001` shows as
+`1e-05`). Integral numbers agree on all three. Prefer integral state for numbers a
+prototype shows, or keep display text in a string key.
 
 ## Style
 
@@ -638,6 +664,8 @@ A condition is exactly one of these forms. `visibleWhen` takes any of them;
 | `{any: [condition, ...]}`  | At least one member holds. One to 16 members.                            |
 | `{not: condition}`         | The member does not hold.                                                |
 
+Numbers compare by value, so a state of `-0` equals `0` on every platform (#11408).
+
 Conditions nest to a depth of 8 (`MAX_PROTOTYPE_CONDITION_DEPTH` in the shared
 contract). `key` takes exactly one comparison, and comparisons need `key`;
 errors point at the offending field (for example `root.visibleWhen.gt`).
@@ -650,6 +678,20 @@ key sends `{key, value}`; several send `{keys, values}`. `emit` actions still fi
 in order with the state at that point, a list that nets no change emits nothing,
 and a switch or checkbox tap keeps its own `{key, value}` change before its
 `onTap` runs. Wire patches from the host stay silent.
+
+An action list is atomic on Android (#11408). The runtime re-validates the state every
+write would leave (binding types, numeric ranges, the size cap) before the first action
+runs; if any write is rejected, nothing in the list is applied and nothing is emitted,
+so device state and the host's event-fed copy never drift apart. Actions after a
+`dismiss` never run and are not checked. A control's own write (a switch flip, a chosen
+option, a slider value, a picked time, a tab selection, a dialog close) is part of the
+same unit as its `onTap` list: a rejected list leaves the control's value and a bound
+pager's page untouched too. An accepted control still reports its own `change` first
+and then its list, as the iOS agent does. A rejected interaction is logged on the device
+only; no event or status field reports it, so the host sees nothing change. The iOS
+agent does not re-validate at runtime, so the same list applies there in full with
+one `change`; the list the validators should refuse at `show` (a `setState` whose
+value type does not fit a control bound to the key) is the gap between the two.
 
 ### Conditional style: styleWhen
 

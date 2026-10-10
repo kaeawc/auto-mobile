@@ -347,12 +347,7 @@ private fun resolveInterpolation(
 ): String {
   val key = token.substring(1, token.length - 1)
   if (!inPager && (key == "page" || key == "pageCount")) return token
-  return when (val value = state[key]) {
-    is PrototypeScalar.Text -> value.value
-    is PrototypeScalar.BooleanValue -> value.value.toString()
-    is PrototypeScalar.Numeric -> value.value.toString().removeSuffix(".0")
-    null -> token
-  }
+  return state[key]?.renderedText() ?: token
 }
 
 /** The settled design specifies AARRGGBB (alpha first), not CSS RRGGBBAA. */

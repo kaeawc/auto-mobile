@@ -795,7 +795,10 @@ Accepted events are pushed once to telemetry under category `prototype`, with
 owning device/session ids, event id, kind, name, sequence, pages and state. This
 telemetry is push-only, with no database persistence or historical backfill.
 A device-side `dismissed` event removes shown presence across that device's host
-sessions. `page_changed` events update the last known snapshot and event bookkeeping, preserving host mutation
+sessions. A `page_changed` event has the pager id as `name` and the new zero-based page index as
+`payload`, on Android and iOS, so `awaitEvent` with `kind: "page_changed"` and `eventName` set to a
+pager id waits for that pager; its `pages` map still carries every pager. `page_changed` events
+update the last known snapshot and event bookkeeping, preserving host mutation
 status. Raw transport disconnects are not observed; session release, device removal,
 and device unbinding clear the corresponding buffers and host status.
 

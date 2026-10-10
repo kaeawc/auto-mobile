@@ -133,75 +133,96 @@ class PrototypeRuntime(
     if (!current.active) return
     when (interaction) {
       PrototypeInteraction.HostDismiss -> dismiss()
-      is PrototypeInteraction.Tap -> tap(interaction.actions)
+      is PrototypeInteraction.Tap -> control(emptyMap(), interaction.actions)
       is PrototypeInteraction.PagerMotion ->
         if (!interaction.scrolling) setPage(interaction.pager, interaction.page)
       is PrototypeInteraction.SettledPage -> setPage(interaction.pager, interaction.page)
       is PrototypeInteraction.TextChange -> textChange(interaction)
-      is PrototypeInteraction.Select -> {
-        if (interaction.pager != null) setPage(interaction.pager, interaction.index)
-        else
-          interaction.key?.let { change(it, PrototypeScalar.Numeric(interaction.index.toDouble())) }
-        tap(interaction.actions)
-      }
-      is PrototypeInteraction.SheetDismiss -> close(interaction.condition)
-      is PrototypeInteraction.CloseModal -> {
-        close(interaction.condition)
-        tap(interaction.actions)
-      }
+      is PrototypeInteraction.Select -> select(interaction)
+      is PrototypeInteraction.SheetDismiss -> control(closing(interaction.condition), emptyList())
+      is PrototypeInteraction.CloseModal ->
+        control(closing(interaction.condition), interaction.actions)
       is PrototypeInteraction.SetTime -> setTime(interaction)
       is PrototypeInteraction.Toggle -> {
         // The validator keeps the bound key boolean; anything else leaves the control inert.
         val stored = current.state[interaction.key] as? PrototypeScalar.BooleanValue ?: return
-        change(interaction.key, PrototypeScalar.BooleanValue(!stored.value))
-        tap(interaction.actions)
+        control(
+          mapOf(interaction.key to PrototypeScalar.BooleanValue(!stored.value)),
+          interaction.actions,
+        )
       }
       is PrototypeInteraction.Choose -> {
         // The validator keeps the bound key a string; anything else leaves the group inert.
         if (current.state[interaction.key] !is PrototypeScalar.Text) return
-        change(interaction.key, PrototypeScalar.Text(interaction.value))
-        tap(interaction.actions)
+        control(
+          mapOf(interaction.key to PrototypeScalar.Text(interaction.value)),
+          interaction.actions,
+        )
       }
       is PrototypeInteraction.Slide -> {
         val stored = current.state[interaction.key] as? PrototypeScalar.Numeric ?: return
         if (stored.value == interaction.value) return
-        change(interaction.key, PrototypeScalar.Numeric(interaction.value))
-        tap(interaction.actions)
+        control(
+          mapOf(interaction.key to PrototypeScalar.Numeric(interaction.value)),
+          interaction.actions,
+        )
       }
     }
   }
 
   /**
-   * Runs an action list in order. If any `setState`/`toggle`/`increment` changed state, exactly one
-   * `change` event carrying the final state follows the last action (#10622); `emit` actions fire
-   * in order with the state as it was at that point. A list that nets no change emits nothing.
+   * One interaction as one unit (#11408): the control's [own] write (a switch flip, a chosen
+   * option, a closed dialog; empty for a plain tap) and every state write of its [actions] are
+   * validated before anything is applied, so a rejected interaction throws with nothing applied and
+   * nothing emitted. The host mirrors device state through events and is never left behind by a
+   * half-applied interaction.
+   *
+   * An accepted one reports as the iOS agent does: the control's own `change` first, when its value
+   * moved, then the action list via [run].
    */
-  private suspend fun tap(actions: List<PrototypeAction>) {
+  private suspend fun control(own: Map<String, PrototypeScalar>, actions: List<PrototypeAction>) {
+    val moved = own.filter { (key, value) -> current.state[key] != value }
+    val written = if (moved.isEmpty()) current.spec else validated(current.spec, moved)
+    val writes = plannedWrites(actions, written)
+    if (moved.isNotEmpty()) {
+      mutableSnapshot.value = current.copy(spec = written)
+      emitStateChange(moved.keys.toList())
+    }
+    run(actions, writes)
+  }
+
+  /**
+   * A `tabBar`/`bottomNav` selection: drives its pager, else its state key, then runs the actions.
+   * The pager only moves once the action list is known to be accepted.
+   */
+  private suspend fun select(interaction: PrototypeInteraction.Select) {
+    val pager = interaction.pager
+    if (pager == null) {
+      val index = PrototypeScalar.Numeric(interaction.index.toDouble())
+      control(interaction.key?.let { mapOf(it to index) }.orEmpty(), interaction.actions)
+      return
+    }
+    val writes = plannedWrites(interaction.actions, current.spec)
+    setPage(pager, interaction.index)
+    run(interaction.actions, writes)
+  }
+
+  /**
+   * Runs an action list in order, applying the [writes] planned for it. If any
+   * `setState`/`toggle`/`increment` changed state, exactly one `change` event carrying the final
+   * state follows the last action (#10622); `emit` actions fire in order with the state as it was
+   * at that point. A list that nets no change emits nothing.
+   */
+  private suspend fun run(
+    actions: List<PrototypeAction>,
+    writes: Map<Int, Pair<String, PrototypeSpec>>,
+  ) {
     val baseline = current.state
     val touched = LinkedHashSet<String>()
-    for (action in actions) {
+    for ((index, action) in actions.withIndex()) {
       if (!current.active) break
       when (action) {
         is PrototypeEmitAction -> emit(PrototypeEventKind.EMIT, action.name, action.payload)
-        is PrototypeSetStateAction -> {
-          setState(action.key, action.value)
-          touched += action.key
-        }
-        is PrototypeToggleAction ->
-          action.nextValue(current.state)?.let {
-            setState(action.key, it)
-            touched += action.key
-          }
-        is PrototypeIncrementAction ->
-          action.nextValue(current.state)?.let {
-            setState(action.key, it)
-            touched += action.key
-          }
-        is PrototypeDecrementAction ->
-          action.nextValue(current.state)?.let {
-            setState(action.key, it)
-            touched += action.key
-          }
         is PrototypeSetPageAction -> {
           val page = current.pages[action.pager] ?: continue
           setPage(
@@ -214,36 +235,61 @@ class PrototypeRuntime(
           )
         }
         PrototypeDismissAction -> dismiss()
+        else ->
+          writes[index]?.let { (key, spec) ->
+            mutableSnapshot.value = current.copy(spec = spec)
+            touched += key
+          }
       }
     }
     if (current.active) emitStateChange(touched.filter { baseline[it] != current.state[it] })
   }
 
-  private suspend fun close(condition: PrototypeSheetCondition) {
-    if (current.state[condition.key] == PrototypeScalar.BooleanValue(condition.equals))
-      change(condition.key, PrototypeScalar.BooleanValue(!condition.equals))
+  /**
+   * The validated spec each state action of [actions] leaves behind when the list starts from
+   * [from], by action index, with the key it writes. Nothing is applied here. Actions after a
+   * `dismiss` never run, so they are not planned; a toggle or step that is a no-op has no entry.
+   * Throws [IllegalArgumentException] for the first write the validator rejects.
+   */
+  private fun plannedWrites(
+    actions: List<PrototypeAction>,
+    from: PrototypeSpec,
+  ): Map<Int, Pair<String, PrototypeSpec>> {
+    var spec = from
+    val writes = HashMap<Int, Pair<String, PrototypeSpec>>()
+    for ((index, action) in actions.withIndex()) {
+      if (action == PrototypeDismissAction) break
+      val (key, value) = action.stateWrite(spec.state.orEmpty()) ?: continue
+      spec = validated(spec, mapOf(key to value))
+      writes[index] = key to spec
+    }
+    return writes
   }
+
+  /**
+   * The write that makes [condition] false, closing its sheet, dialog or snackbar, if it is open.
+   */
+  private fun closing(condition: PrototypeSheetCondition): Map<String, PrototypeScalar> =
+    if (current.state[condition.key] == PrototypeScalar.BooleanValue(condition.equals))
+      mapOf(condition.key to PrototypeScalar.BooleanValue(!condition.equals))
+    else emptyMap()
 
   /** Both keys change together, so a new time reports one `change` event, never a half-set one. */
   private suspend fun setTime(interaction: PrototypeInteraction.SetTime) {
-    val keys = listOf(interaction.hourKey, interaction.minuteKey)
-    // The validator keeps both keys numeric; anything else leaves the picker inert.
-    if (keys.any { current.state[it] !is PrototypeScalar.Numeric }) return
-    val baseline = current.state
     val next =
       mapOf(
         interaction.hourKey to PrototypeScalar.Numeric(interaction.hour.toDouble()),
         interaction.minuteKey to PrototypeScalar.Numeric(interaction.minute.toDouble()),
       )
-    if (next.all { (key, value) -> baseline[key] == value }) return
-    setStates(next)
-    emitStateChange(keys.filter { baseline[it] != current.state[it] })
-    tap(interaction.actions)
+    // The validator keeps both keys numeric; anything else leaves the picker inert.
+    if (next.keys.any { current.state[it] !is PrototypeScalar.Numeric }) return
+    if (next.all { (key, value) -> current.state[key] == value }) return
+    control(next, interaction.actions)
   }
 
   /**
-   * One key keeps the `{key, value}` payload of [change]. Several keys cannot fit it, so they send
-   * `{keys, values}` instead; the event's `state` always carries the full final state.
+   * One key keeps the `{key, value}` payload. Several keys cannot fit it, so they send `{keys,
+   * values}` instead; the event's `state` always carries the full final state.
    */
   private suspend fun emitStateChange(keys: List<String>) {
     if (keys.isEmpty()) return
@@ -267,20 +313,20 @@ class PrototypeRuntime(
     val page = requested.coerceIn(0, count - 1)
     if (current.pages[id] == page) return
     mutableSnapshot.value = current.copy(pages = current.pages + (id to page))
-    emit(PrototypeEventKind.PAGE_CHANGED)
+    // Names the pager that moved and its new page, as the iOS agent does (#11409).
+    emit(PrototypeEventKind.PAGE_CHANGED, id, JsonPrimitive(page))
   }
 
-  private fun setState(key: String, value: PrototypeScalar) = setStates(mapOf(key to value))
-
-  private fun setStates(values: Map<String, PrototypeScalar>) {
-    val spec = current.spec.copy(state = current.state + values)
+  /** [from] with [values] written, or [IllegalArgumentException] when the result is not valid. */
+  private fun validated(from: PrototypeSpec, values: Map<String, PrototypeScalar>): PrototypeSpec {
+    val spec = from.copy(state = from.state.orEmpty() + values)
     // Reuse the structured protocol validator to enforce keys, numeric ranges and binding types.
     val validation =
       PrototypeSpecValidator.validate(runtimeJson.encodeToString(PrototypeSpec.serializer(), spec))
     require(validation is PrototypeSpecValidation.Success) {
       (validation as? PrototypeSpecValidation.Failure)?.error.toString()
     }
-    mutableSnapshot.value = current.copy(spec = spec)
+    return spec
   }
 
   /**
@@ -293,29 +339,12 @@ class PrototypeRuntime(
     val key = interaction.key
     if (interaction.epoch < (current.textEpochs[key] ?: 0)) return
     try {
-      change(key, PrototypeScalar.Text(interaction.value))
+      control(mapOf(key to PrototypeScalar.Text(interaction.value)), emptyList())
     } catch (error: IllegalArgumentException) {
       mutableSnapshot.value =
         current.copy(textEpochs = current.textEpochs + (key to (current.textEpochs[key] ?: 0) + 1))
       throw error
     }
-  }
-
-  /**
-   * Changes emit once only for a changed value; wire patches are silent. A tap's action list
-   * reports its own mutations via [tap].
-   */
-  private suspend fun change(key: String, value: PrototypeScalar) {
-    if (current.state[key] == value) return
-    setState(key, value)
-    emit(
-      PrototypeEventKind.EMIT,
-      "change",
-      buildJsonObject {
-        put("key", key)
-        put("value", runtimeJson.encodeToJsonElement(PrototypeScalar.serializer(), value))
-      },
-    )
   }
 
   suspend fun dismiss(reason: PrototypeDismissReason = PrototypeDismissReason.USER) =

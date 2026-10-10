@@ -29,6 +29,15 @@ final class HeldSessionHeartbeatTests: XCTestCase {
         XCTAssertNil(HeldSessionLoss.lostReason(in: ["success": false, "error": "busy"], sessionId: "s1"))
     }
 
+    func testDefaultCadenceKeepsTheWorstHeartbeatGapWellUnderTheDaemonLease() {
+        // A beat that runs to its request timeout, then the sleep, must still land with half the
+        // lease to spare; 2 s + 2 s used the whole 4 s lease (#11195).
+        XCTAssertLessThanOrEqual(
+            DaemonSocketHeldSessionController.worstCaseHeartbeatGapSeconds,
+            DaemonSocketHeldSessionController.daemonOwnerLeaseSeconds / 2
+        )
+    }
+
     func testLoopRecordsLossAndStopsHeartbeating() async throws {
         let calls = Counter()
         let controller = DaemonSocketHeldSessionController(
@@ -41,7 +50,7 @@ final class HeldSessionHeartbeatTests: XCTestCase {
             }
         )
         let handle = controller.startHeartbeating(sessionId: "s1")
-        for _ in 0..<500 where handle.lostReason == nil {
+        for _ in 0 ..< 500 where handle.lostReason == nil {
             try await Task.sleep(nanoseconds: 2_000_000)
         }
         XCTAssertEqual(handle.lostReason, "the daemon released session s1 (daemon-shutdown)")

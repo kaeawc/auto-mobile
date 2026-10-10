@@ -5,6 +5,7 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
@@ -225,6 +226,62 @@ class DaemonHeartbeatTest {
 
     assertEquals(listOf("s1", "s1"), fake.sentSessions)
     assertNull(fake.manager.sessionLoss("s1"))
+  }
+
+  @Test
+  fun `one cycle dispatches every session without waiting on any in-flight beat`() {
+    val fake = HeartbeatFake()
+    val queued = mutableListOf<Runnable>()
+    fake.beatExecutor = Executor { queued.add(it) }
+    val handle = fake.manager.start(10L)
+    val ids = (1..5).map { "s$it" }
+    ids.forEach(fake.manager::addSession)
+    val dispatchedBeforeSleep = mutableListOf<Int>()
+    fake.onSleep = {
+      dispatchedBeforeSleep.add(queued.size)
+      when (fake.sleepIntervals.size) {
+        // Cycle 1 dispatched all five while none has answered; cycle 2 must not stack a second
+        // request for any of them. Now the daemon answers every beat.
+        2 -> queued.toList().forEach { it.run() }
+        3 -> handle.close()
+      }
+    }
+
+    fake.runnables.single().run()
+
+    assertEquals(listOf(5, 5, 10), dispatchedBeforeSleep)
+    assertEquals(ids, fake.sentSessions.sorted())
+  }
+
+  @Test
+  fun `a slow beat for one session does not delay another session's beat in the same cycle`() {
+    // Each beat blocks until both beats have started: a serial loop stalls on the first one.
+    val bothStarted = CountDownLatch(2)
+    val bothFinished = CountDownLatch(2)
+    val overlapped = ConcurrentLinkedQueue<String>()
+    lateinit var handle: java.io.Closeable
+    val runnables = mutableListOf<Runnable>()
+    val manager =
+      BackgroundHeartbeatManager(
+        sendHeartbeat = { sessionId ->
+          bothStarted.countDown()
+          if (bothStarted.await(2, TimeUnit.SECONDS)) overlapped.add(sessionId)
+          bothFinished.countDown()
+        },
+        sleeper = { handle.close() },
+        threadFactory = { name, runnable ->
+          runnables.add(runnable)
+          Thread(runnable, name)
+        },
+      )
+    handle = manager.start(10L)
+    manager.addSession("slow")
+    manager.addSession("fast")
+
+    runnables.single().run()
+
+    assertTrue("both beats must finish", bothFinished.await(5, TimeUnit.SECONDS))
+    assertEquals(setOf("slow", "fast"), overlapped.toSet())
   }
 
   @Test
@@ -498,6 +555,9 @@ class DaemonHeartbeatTest {
           runnables.add(runnable)
           Thread(runnable, name)
         },
+        beatExecutor = Executor { beat -> beatExecutor.execute(beat) },
       )
+    /** Runs each beat inline by default, so a cycle is synchronous and deterministic. */
+    var beatExecutor: Executor = Executor { it.run() }
   }
 }

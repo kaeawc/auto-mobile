@@ -43,9 +43,21 @@ enum HeldSessionLoss {
 /// `daemon/releaseSession`). The blocking socket I/O runs on a utility queue, never on the
 /// cooperative pool.
 public struct DaemonSocketHeldSessionController: HeldSessionControlling {
-    /// Well inside the daemon's heartbeat lease plus grace.
-    public static let defaultHeartbeatIntervalSeconds: TimeInterval = 2
-    static let requestTimeoutSeconds: TimeInterval = 2
+    /// The daemon's owner lease (`DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS` in
+    /// `src/daemon/sessionLivenessWindows.ts`): a session with no heartbeat for this long turns
+    /// suspect, and is released after the suspect grace.
+    static let daemonOwnerLeaseSeconds: TimeInterval = 4
+    /// The loop sleeps this long after each reply, so the worst gap between two beats is the
+    /// interval plus a request that runs to its timeout. Both stay at 1 s so that gap (2 s) is half
+    /// the 4 s lease: one slow reply never lapses it (#11195). At 2 s + 2 s a single timed-out
+    /// request used the whole lease.
+    public static let defaultHeartbeatIntervalSeconds: TimeInterval = 1
+    static let requestTimeoutSeconds: TimeInterval = 1
+
+    /// Worst-case time between two heartbeats at the default cadence.
+    static var worstCaseHeartbeatGapSeconds: TimeInterval {
+        defaultHeartbeatIntervalSeconds + requestTimeoutSeconds
+    }
 
     private static let queue = DispatchQueue(
         label: "com.automobile.xctestrunner.held-session",

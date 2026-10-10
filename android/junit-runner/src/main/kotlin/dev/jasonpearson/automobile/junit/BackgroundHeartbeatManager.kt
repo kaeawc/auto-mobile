@@ -2,18 +2,29 @@ package dev.jasonpearson.automobile.junit
 
 import java.io.Closeable
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
+/**
+ * Heartbeats every registered session once per interval. Each beat runs on [beatExecutor] so one
+ * slow daemon round-trip (up to the 2 s connect + 2 s read timeouts) never delays the other
+ * sessions' beats or the next cycle: a serial loop over N sessions could take N x 4 s and starve
+ * live sessions past the daemon's 10 s no-heartbeat budget (#11195). A session whose previous beat
+ * is still in flight is skipped that cycle rather than stacking a second request.
+ */
 internal class BackgroundHeartbeatManager(
   private val sendHeartbeat: (String) -> Unit,
   private val sleeper: (Long) -> Unit = { Thread.sleep(it) },
   private val threadFactory: (String, Runnable) -> Thread = { name, runnable ->
     thread(start = true, isDaemon = true, name = name) { runnable.run() }
   },
+  private val beatExecutor: Executor = defaultBeatExecutor,
 ) {
   private val sessions = ConcurrentHashMap.newKeySet<String>()
+  private val inFlight = ConcurrentHashMap.newKeySet<String>()
   private val losses = ConcurrentHashMap<String, DaemonSessionLoss>()
   // Sessions the daemon has acknowledged at least once; only then is a bare 404 a real loss.
   private val confirmed = ConcurrentHashMap.newKeySet<String>()
@@ -144,18 +155,7 @@ internal class BackgroundHeartbeatManager(
 
   private fun runLoop(loopRunning: AtomicBoolean) {
     while (loopRunning.get()) {
-      val snapshot = sessions.toList()
-      snapshot.forEach { sessionId ->
-        try {
-          sendHeartbeat(sessionId)
-          recordAcknowledged(sessionId, loopRunning)
-        } catch (released: DaemonSessionReleasedException) {
-          recordRelease(sessionId, released, loopRunning)
-        } catch (_: Exception) {
-          // A missed heartbeat is transient (daemon restarting, socket busy); the next tick
-          // retries.
-        }
-      }
+      sessions.toList().forEach { sessionId -> dispatchBeat(sessionId, loopRunning) }
 
       try {
         sleeper(intervalMs)
@@ -165,8 +165,39 @@ internal class BackgroundHeartbeatManager(
     }
   }
 
+  private fun dispatchBeat(sessionId: String, loopRunning: AtomicBoolean) {
+    // The previous beat for this id is still waiting on the daemon; do not stack another.
+    if (!inFlight.add(sessionId)) return
+    try {
+      beatExecutor.execute { beat(sessionId, loopRunning) }
+    } catch (error: Exception) {
+      inFlight.remove(sessionId)
+      throw error
+    }
+  }
+
+  private fun beat(sessionId: String, loopRunning: AtomicBoolean) {
+    try {
+      sendHeartbeat(sessionId)
+      recordAcknowledged(sessionId, loopRunning)
+    } catch (released: DaemonSessionReleasedException) {
+      recordRelease(sessionId, released, loopRunning)
+    } catch (_: Exception) {
+      // A missed heartbeat is transient (daemon restarting, socket busy); the next tick retries.
+    } finally {
+      inFlight.remove(sessionId)
+    }
+  }
+
   private companion object {
     /** About 30 s at the 1 s cadence: how long a never-acknowledged id may 404 before giving up. */
     const val MAX_UNCONFIRMED_MISSES = 30
+
+    /**
+     * Daemon threads, created on demand and reaped when idle; at most one per session in flight.
+     */
+    val defaultBeatExecutor: Executor = Executors.newCachedThreadPool { runnable ->
+      Thread(runnable, "auto-mobile-daemon-heartbeat-beat").apply { isDaemon = true }
+    }
   }
 }

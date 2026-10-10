@@ -215,8 +215,9 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
    * Taking the plain process count instead lost an external emulator adb had not listed
    * whenever an admitted boot had not spawned yet (#11564).
    *
-   * "Launched" is the hand-off, the only launch signal an admission carries. A boot whose
-   * process runs but which is not handed off yet counts twice until it is: fail closed.
+   * "Launched" is the hand-off, the only launch signal an admission carries, so the emulator
+   * client hands off the moment the process exists (`spawnUnderBootAdmission`). A boot whose
+   * process runs but which is not handed off counts twice until it is: fail closed.
    */
   private count(
     sample: AndroidCapacitySample,

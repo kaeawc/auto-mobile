@@ -309,8 +309,10 @@ final class PrototypeAtomicTapTests: XCTestCase {
             ("select key", { $0.select(index: 1, pager: nil, key: "tab", then: actions) }),
             ("select pager", { $0.select(index: 1, pager: "pager", key: nil, then: actions) }),
             ("closeModal", { session in
-                let dialog = session.spec?.root.children?.first { $0.type == "dialog" }
-                return session.closeModal(dialog!, then: actions)
+                guard let dialog = session.spec?.root.children?.first(where: { $0.type == "dialog" }) else {
+                    return []
+                }
+                return session.closeModal(dialog, then: actions)
             }),
         ]
     }

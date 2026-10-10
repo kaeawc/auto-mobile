@@ -17,7 +17,7 @@ if ! command -v bun >/dev/null 2>&1; then
 fi
 
 # Without node_modules, bun silently auto-installs the *latest* zod (4.x) into its
-# global cache; overlayTools then feeds a Zod 3 spec to the Zod 4 converter and the
+# global cache; prototypeTools then feeds a Zod 3 spec to the Zod 4 converter and the
 # hook dies with "Custom types cannot be represented in JSON Schema". Install the
 # locked dependency graph first and forbid auto-install so the pinned zod 3 is used.
 if [[ ! -f "${PROJECT_ROOT}/node_modules/zod/package.json" ]]; then

@@ -8,7 +8,7 @@ APK_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 IPA_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 RUNNER_SHA="cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 VIDEO_JAR_SHA="dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-OVERLAY_SHA="1111111111111111111111111111111111111111111111111111111111111111"
+PROTOTYPE_SHA="1111111111111111111111111111111111111111111111111111111111111111"
 HELPER_SHA="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 FILTER_SHA="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 
@@ -31,7 +31,7 @@ teardown() {
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
-    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -45,7 +45,7 @@ teardown() {
   grep -q "runnerSha256: \"${RUNNER_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
   grep -q 'runnerSha256Target: "xctest"' "${TEST_ROOT}/src/constants/release.ts"
   grep -q "screenCaptureHelperSha256: \"${HELPER_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
-  grep -q "overlayAgentSha256: \"${OVERLAY_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
+  grep -q "prototypeAgentSha256: \"${PROTOTYPE_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
 }
 
 @test "writes runnerSha256 in release mode" {
@@ -55,7 +55,7 @@ teardown() {
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
-    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -146,7 +146,7 @@ read_field_for_version() {
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
-    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
   [ "$status" -eq 0 ]
@@ -159,7 +159,7 @@ read_field_for_version() {
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
-    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
   [ "$status" -eq 0 ]
@@ -203,7 +203,7 @@ PY
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
-    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -239,7 +239,7 @@ PY
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
-    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -292,7 +292,7 @@ PY
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
-    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -349,7 +349,7 @@ PY
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
-    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -370,7 +370,7 @@ PY
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
-    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -382,7 +382,7 @@ PY
 @test "writes NIGHTLY_CHECKSUM_ENTRY screenCaptureHelperSha256 in checksum-only mode" {
   run env \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
-    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -410,7 +410,7 @@ PY
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
-    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -435,7 +435,7 @@ PY
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
-    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
@@ -450,7 +450,7 @@ PY
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
-    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -ne 0 ]
@@ -475,9 +475,9 @@ PY
   [[ "$output" == *"SCREEN_CAPTURE_HELPER_SHA256 must be a valid SHA256"* ]]
 }
 
-# --- iOS simulator overlay-agent release asset (#10564) ---
+# --- iOS simulator prototype-agent release asset (#10564) ---
 
-@test "rejects a release without an overlay-agent checksum" {
+@test "rejects a release without a prototype-agent checksum" {
   run env \
     RELEASE_VERSION="99.99.99" \
     APK_SHA256_CHECKSUM="$APK_SHA" \
@@ -487,39 +487,39 @@ PY
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"OVERLAY_AGENT_SHA256"* ]]
+  [[ "$output" == *"PROTOTYPE_AGENT_SHA256"* ]]
 }
 
-@test "rejects a malformed OVERLAY_AGENT_SHA256" {
+@test "rejects a malformed PROTOTYPE_AGENT_SHA256" {
   run env \
-    OVERLAY_AGENT_SHA256="not-a-sha" \
+    PROTOTYPE_AGENT_SHA256="not-a-sha" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"OVERLAY_AGENT_SHA256 must be a valid SHA256"* ]]
+  [[ "$output" == *"PROTOTYPE_AGENT_SHA256 must be a valid SHA256"* ]]
 }
 
-@test "writes NIGHTLY_CHECKSUM_ENTRY overlayAgentSha256 in checksum-only mode" {
+@test "writes NIGHTLY_CHECKSUM_ENTRY prototypeAgentSha256 in checksum-only mode" {
   run env \
-    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
-  [ "$(read_field_for_version nightly overlayAgentSha256 "${TEST_ROOT}/src/constants/release.ts")" = "$OVERLAY_SHA" ]
+  [ "$(read_field_for_version nightly prototypeAgentSha256 "${TEST_ROOT}/src/constants/release.ts")" = "$PROTOTYPE_SHA" ]
 }
 
-@test "refreshes overlayAgentSha256 for an already-registered version" {
+@test "refreshes prototypeAgentSha256 for an already-registered version" {
   run env \
     RELEASE_VERSION="0.0.46" \
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
-    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
-  [ "$(read_field_for_version 0.0.46 overlayAgentSha256 "${TEST_ROOT}/src/constants/release.ts")" = "$OVERLAY_SHA" ]
+  [ "$(read_field_for_version 0.0.46 prototypeAgentSha256 "${TEST_ROOT}/src/constants/release.ts")" = "$PROTOTYPE_SHA" ]
 }
 
 # Regression guard for #4683. prepare-release adds the registry entry first, then
@@ -545,7 +545,7 @@ PY
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
-    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
     NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 

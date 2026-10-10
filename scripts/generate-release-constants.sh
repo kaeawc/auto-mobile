@@ -10,7 +10,7 @@ ios_app_hash="${IOS_CTRL_PROXY_APP_HASH:-}"
 ios_runner_sha256="${IOS_CTRL_PROXY_RUNNER_SHA256:-}"
 video_jar_checksum="${VIDEO_JAR_SHA256:-}"
 screen_capture_helper_checksum="${SCREEN_CAPTURE_HELPER_SHA256:-}"
-overlay_agent_checksum="${OVERLAY_AGENT_SHA256:-}"
+prototype_agent_checksum="${PROTOTYPE_AGENT_SHA256:-}"
 network_filter_checksum="${NETWORK_FILTER_SHA256:-}"
 
 max_registry_entries=100
@@ -20,7 +20,7 @@ max_registry_entries=100
 #   - Checksums only (no version): update registry[0] checksums in place
 #   - Nothing set: no-op
 has_checksums=false
-if [ -n "$apk_checksum" ] || [ -n "$ios_checksum" ] || [ -n "$video_jar_checksum" ] || [ -n "$screen_capture_helper_checksum" ] || [ -n "$overlay_agent_checksum" ] || [ -n "$network_filter_checksum" ]; then
+if [ -n "$apk_checksum" ] || [ -n "$ios_checksum" ] || [ -n "$video_jar_checksum" ] || [ -n "$screen_capture_helper_checksum" ] || [ -n "$prototype_agent_checksum" ] || [ -n "$network_filter_checksum" ]; then
   has_checksums=true
 fi
 
@@ -66,9 +66,9 @@ if [ -n "$screen_capture_helper_checksum" ] && ! [[ "$screen_capture_helper_chec
   exit 1
 fi
 
-if [ -n "$overlay_agent_checksum" ] && ! [[ "$overlay_agent_checksum" =~ ^[a-f0-9]{64}$ ]]; then
-  echo "ERROR: OVERLAY_AGENT_SHA256 must be a valid SHA256 hash (64 hex characters)"
-  echo "   Got: ${overlay_agent_checksum}"
+if [ -n "$prototype_agent_checksum" ] && ! [[ "$prototype_agent_checksum" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "ERROR: PROTOTYPE_AGENT_SHA256 must be a valid SHA256 hash (64 hex characters)"
+  echo "   Got: ${prototype_agent_checksum}"
   exit 1
 fi
 
@@ -170,8 +170,8 @@ PY
 
 if [ -n "$release_version" ]; then
   # Mode: add new registry entry (requires every production release artifact).
-  if [ -z "$apk_checksum" ] || [ -z "$ios_checksum" ] || [ -z "$screen_capture_helper_checksum" ] || [ -z "$overlay_agent_checksum" ] || [ -z "$network_filter_checksum" ]; then
-    echo "ERROR: RELEASE_VERSION requires APK_SHA256_CHECKSUM, IOS_CTRL_PROXY_SHA256_CHECKSUM, SCREEN_CAPTURE_HELPER_SHA256, OVERLAY_AGENT_SHA256, and NETWORK_FILTER_SHA256"
+  if [ -z "$apk_checksum" ] || [ -z "$ios_checksum" ] || [ -z "$screen_capture_helper_checksum" ] || [ -z "$prototype_agent_checksum" ] || [ -z "$network_filter_checksum" ]; then
+    echo "ERROR: RELEASE_VERSION requires APK_SHA256_CHECKSUM, IOS_CTRL_PROXY_SHA256_CHECKSUM, SCREEN_CAPTURE_HELPER_SHA256, PROTOTYPE_AGENT_SHA256, and NETWORK_FILTER_SHA256"
     exit 1
   fi
 
@@ -192,7 +192,7 @@ if [ -n "$release_version" ]; then
     runnerSha256Target: \"xctest\",
     videoJarSha256: \"${video_jar_checksum}\",
     screenCaptureHelperSha256: \"${screen_capture_helper_checksum}\",
-    overlayAgentSha256: \"${overlay_agent_checksum}\",
+    prototypeAgentSha256: \"${prototype_agent_checksum}\",
     networkFilterSha256: \"${network_filter_checksum}\",
   },"
 
@@ -259,8 +259,8 @@ else
     update_registry_field "$tmp_file" "nightly" "screenCaptureHelperSha256" "$screen_capture_helper_checksum"
   fi
 
-  if [ -n "$overlay_agent_checksum" ]; then
-    update_registry_field "$tmp_file" "nightly" "overlayAgentSha256" "$overlay_agent_checksum"
+  if [ -n "$prototype_agent_checksum" ]; then
+    update_registry_field "$tmp_file" "nightly" "prototypeAgentSha256" "$prototype_agent_checksum"
   fi
 
   if [ -n "$network_filter_checksum" ]; then
@@ -280,8 +280,8 @@ else
   if [ -n "$screen_capture_helper_checksum" ]; then
     echo "   screen-capture-helper checksum (nightly): ${screen_capture_helper_checksum}"
   fi
-  if [ -n "$overlay_agent_checksum" ]; then
-    echo "   overlay-agent checksum (nightly): ${overlay_agent_checksum}"
+  if [ -n "$prototype_agent_checksum" ]; then
+    echo "   prototype-agent checksum (nightly): ${prototype_agent_checksum}"
   fi
   if [ -n "$network_filter_checksum" ]; then
     echo "   network-filter checksum (nightly): ${network_filter_checksum}"
@@ -341,11 +341,11 @@ if [ -n "$screen_capture_helper_checksum" ]; then
   echo "   screen-capture-helper checksum: ${screen_capture_helper_checksum}"
 fi
 
-if [ -n "$overlay_agent_checksum" ]; then
+if [ -n "$prototype_agent_checksum" ]; then
   if [ -n "$release_version" ]; then
-    update_registry_field "$tmp_file" "$release_version" "overlayAgentSha256" "$overlay_agent_checksum"
+    update_registry_field "$tmp_file" "$release_version" "prototypeAgentSha256" "$prototype_agent_checksum"
   fi
-  echo "   overlay-agent checksum: ${overlay_agent_checksum}"
+  echo "   prototype-agent checksum: ${prototype_agent_checksum}"
 fi
 
 if [ -n "$network_filter_checksum" ]; then

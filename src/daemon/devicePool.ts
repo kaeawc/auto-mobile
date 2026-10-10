@@ -65,6 +65,7 @@ import {
   waitForDeviceReadyOrCancel,
 } from "../devices/deviceUtils";
 import { BootedDeviceDiscoveryIncompleteError } from "../devices/deviceBootService";
+import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { SingleFlight } from "../utils/cache/SingleFlight";
@@ -3432,6 +3433,7 @@ export class DevicePool {
       return 0;
     }
 
+    let started = 0;
     try {
       const candidates = await this.getStartableDeviceImageCandidates(platform);
       if (candidates.length === 0) {
@@ -3439,7 +3441,6 @@ export class DevicePool {
       }
 
       const toStart = candidates.slice(0, requiredCount);
-      let started = 0;
 
       for (const device of toStart) {
         const label = device.deviceId ?? device.name;
@@ -3461,9 +3462,30 @@ export class DevicePool {
 
       return started;
     } catch (error) {
+      if (error instanceof BootCapacityExhaustedError) {
+        await this.rethrowCapacityRefusal(error, started);
+      }
       logger.warn(`[DevicePool] Failed to start additional devices: ${error}`);
-      return 0;
+      return started;
     }
+  }
+
+  /**
+   * A boot refused at the booted-device limit fails the allocation at once with the typed
+   * retryable refusal (#11236) instead of degrading into a generic "not enough devices". Devices
+   * this allocation already started stay published; the pool is refreshed so its stats count them.
+   */
+  private async rethrowCapacityRefusal(
+    error: BootCapacityExhaustedError,
+    started: number,
+  ): Promise<never> {
+    logger.warn(
+      `[DevicePool] Boot capacity exhausted after starting ${started} device(s): ${error.message}`,
+    );
+    if (started > 0) {
+      await this.refreshDevicesWithOutcome();
+    }
+    throw error;
   }
 
   /**
@@ -3786,6 +3808,10 @@ export class DevicePool {
           await this.refreshForeignOwnership();
           return findExisting(request);
         },
+      ).catch((error: unknown) =>
+        error instanceof BootCapacityExhaustedError
+          ? this.rethrowCapacityRefusal(error, started)
+          : Promise.reject(error),
       );
       if (outcome) {
         reservedDeviceIds.add(outcome.device.id);
@@ -3845,6 +3871,10 @@ export class DevicePool {
       const pooled = ready ? this.devices.get(ready.deviceId) : undefined;
       return pooled ? { device: pooled, started: true } : null;
     } catch (error) {
+      if (error instanceof BootCapacityExhaustedError) {
+        // The caller fails the allocation with the typed refusal (#11236).
+        throw error;
+      }
       logger.warn(
         `[DevicePool] Failed to start device for criteria ${this.criteriaMatcher.formatCriteriaSummary(criteria)}: ${error}`,
       );

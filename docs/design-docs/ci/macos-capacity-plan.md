@@ -79,7 +79,7 @@ The Xcode 26.5 sweeps run last because every iOS PR already builds on 26.5. The
 nightly sweeps build unsigned (the CircleCI executor pins signing off); the
 GitHub sweeps signed when certificates were configured. Release and signing
 workflows (`build-ctrl-proxy-ios-ipa`, `build-network-filter-probe`,
-`build-overlay-agent`, `build-screen-capture-helper`, the desktop installers)
+`build-prototype-agent`, `build-screen-capture-helper`, the desktop installers)
 stay on GitHub.
 
 ## Self-hosted Mac (#11011)

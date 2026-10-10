@@ -1,10 +1,10 @@
-# Agent-authored overlay specification
+# Agent-authored prototype specification
 
 This is the current, unversioned contract for #9296, child of #9295. Compose
 rendering on Android (#9299, #9300), asset transport (#9301), wire messages
 (#9298), the `prototype` MCP tool (#9302) and the
-[iOS simulator agent](../ios/overlay-agent.md) implement it; the iOS agent's
-[feature support table](../ios/overlay-agent.md#feature-support) lists what is Android only
+[iOS simulator agent](../ios/prototype-agent.md) implement it; the iOS agent's
+[feature support table](../ios/prototype-agent.md#feature-support) lists what is Android only
 (`display`, `window.layer: "app"`, `window.persistence: "device"`, `inspect`, idle TTL).
 No code,
 expressions, URLs, image bytes, or migration instructions are accepted in a
@@ -26,8 +26,8 @@ The 2026-10-04 decisions supersede the issue's earlier proposals:
 - Built-in icons come from a closed list (the bundled Material icon set); other artwork uses image assets.
 
 Earlier decisions still apply: the renderer is Compose; sizes and positions use
-dp; overlay opacity is a percentage; app-element anchoring is supported; observe
-includes overlay nodes by default; existing tap/text tools target overlay nodes;
+dp; prototype opacity is a percentage; app-element anchoring is supported; observe
+includes prototype nodes by default; existing tap/text tools target prototype nodes;
 screenshots come from observe, with no separate screenshot tool. Focus management
 belongs to the window host: accessibility set-text does not require focus, while
 human keyboard input does (the later device findings in #9300 supersede the older
@@ -37,7 +37,7 @@ blanket focusability proposal).
 
 | Property | Type / meaning                                                    |
 | -------- | ----------------------------------------------------------------- |
-| `id`     | Required nonempty overlay identifier string.                      |
+| `id`     | Required nonempty prototype identifier string.                    |
 | `window` | Required window configuration below.                              |
 | `state`  | Optional flat object of string, finite number, or boolean values. |
 | `motion` | Optional `none` or `standard` (default). See Motion below.        |
@@ -45,21 +45,21 @@ blanket focusability proposal).
 
 All numeric values are finite. State keys (including action/binding/condition
 keys) match `[A-Za-z_][A-Za-z0-9_]{0,63}`. No nested state, arrays, or nulls.
-Overlay IDs, pager IDs, tags, event names, and asset IDs are opaque nonempty
+Prototype IDs, pager IDs, tags, event names, and asset IDs are opaque nonempty
 strings; they do not share the state-key restriction.
 
-| Constant                         | Value           | Counting rule                                                                                      |
-| -------------------------------- | --------------- | -------------------------------------------------------------------------------------------------- |
-| `MAX_OVERLAY_NODES`              | 2000            | Includes root and every child/page/sheet child; `repeat` templates count once per instance.        |
-| `MAX_OVERLAY_DEPTH`              | 24              | Root has depth 1; only node nesting counts.                                                        |
-| `MAX_OVERLAY_IMAGES`             | 32              | Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again. |
-| `MAX_OVERLAY_SPEC_BYTES`         | 1048576 (1 MiB) | UTF-8 bytes of raw JSON, including whitespace.                                                     |
-| `MAX_OVERLAY_EMIT_PAYLOAD_BYTES` | 4096 (4 KiB)    | Conservative compact JSON byte budget for each emit payload; numbers reserve 32 bytes.             |
+| Constant                           | Value           | Counting rule                                                                                      |
+| ---------------------------------- | --------------- | -------------------------------------------------------------------------------------------------- |
+| `MAX_PROTOTYPE_NODES`              | 2000            | Includes root and every child/page/sheet child; `repeat` templates count once per instance.        |
+| `MAX_PROTOTYPE_DEPTH`              | 24              | Root has depth 1; only node nesting counts.                                                        |
+| `MAX_PROTOTYPE_IMAGES`             | 32              | Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again. |
+| `MAX_PROTOTYPE_SPEC_BYTES`         | 1048576 (1 MiB) | UTF-8 bytes of raw JSON, including whitespace.                                                     |
+| `MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES` | 4096 (4 KiB)    | Conservative compact JSON byte budget for each emit payload; numbers reserve 32 bytes.             |
 
-Navigation item `image` uses also count toward `MAX_OVERLAY_IMAGES`. Assets have
+Navigation item `image` uses also count toward `MAX_PROTOTYPE_IMAGES`. Assets have
 separate transport and decoded-memory limits in #9301. These spec limits keep
 parsing/layout work bounded without limiting image pixel data inside this file.
-Emit payload nesting has a separate `MAX_OVERLAY_EMIT_PAYLOAD_DEPTH` of 24
+Emit payload nesting has a separate `MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH` of 24
 (root payload depth 0). To avoid different number spellings in JVM/JS decoders,
 the byte budget counts each finite number as 32 bytes; strings, keys, booleans,
 null, punctuation, and separators use compact JSON UTF-8 bytes. This bounds
@@ -74,7 +74,7 @@ The single structural rule source is `schemas/prototype-spec-contract.json`,
 imported by TypeScript and packaged as a JVM protocol resource. TypeScript's
 concrete Zod schema supplies inferred types and the final typed decode. Kotlin
 uses kotlinx.serialization models with sealed discriminated hierarchies. Use
-`validateOverlaySpec` / `OverlaySpecValidator.validate` as the complete entry
+`validatePrototypeSpec` / `PrototypeSpecValidator.validate` as the complete entry
 points: structural validation, limits, and cross-references precede typed decode.
 Do not bypass them with a model decoder. Untagged dimension, detent, page-target,
 and scalar unions have explicit Kotlin serializers; only arbitrary emit payloads
@@ -115,14 +115,14 @@ without `textStyle` keeps its authored 14 sp default and is not scaled; it takes
 
 A text node with no `color` draws in the theme's content colour (`onSurface`). A `cornerRadius` token maps to the
 theme's Shapes (`shapes.corner` shifts them), `none` is square and `full` a pill. A
-role-valued `background` does not take part in inferring the overlay's light/dark
+role-valued `background` does not take part in inferring the prototype's light/dark
 theme from authored backgrounds (it would be circular); set `theme.mode` or
 `colors.seed` for that.
 
 ## Windows
 
 `window` has required `placement` and optional integer `opacity` (0–100, default
-100). Opacity applies to the entire overlay, including content and scrims.
+100). Opacity applies to the entire prototype, including content and scrims.
 
 | Placement `type` | Properties                                                                                                               |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
@@ -145,12 +145,12 @@ needs SYSTEM_ALERT_WINDOW; the host grants it with
 `adb shell appops set dev.jasonpearson.automobile.ctrlproxy SYSTEM_ALERT_WINDOW allow`
 before the show, and the device refuses the show with that command when it is
 still missing. Application overlays are not trusted for touch pass-through on
-Android 12+, so gestures dispatched through an `app` overlay can be blocked as
+Android 12+, so gestures dispatched through an `app` prototype can be blocked as
 untrusted touches.
 
 Optional `persistence` (#10494) is `session` (default) or `device`. See
 Lifecycle and safety. Both fields are honoured only by a CtrlProxy that advertises
-`overlay_window_options_v1`; the request decoder ignores unknown spec fields, so
+`prototype_window_options_v1`; the request decoder ignores unknown spec fields, so
 the host refuses them for an older device instead of sending them.
 
 ## Common node properties
@@ -243,7 +243,7 @@ swipe dismissal with `dismissOnSwipe: true` writes `!equals` to that key, making
 the condition false. Defaults: `dragHandle: true`, `dismissOnSwipe: true`. Setting
 both false is permitted; the host's non-removable safety dismiss control remains
 outside author content (#9307). Detents are unique values: positive `{dp: n}`,
-`"half"`, or `"full"`. They preserve author order. Half/full refer to the overlay
+`"half"`, or `"full"`. They preserve author order. Half/full refer to the prototype
 window's height. Sheet node scrim applies inside that window, not beyond a
 floating or sheet window's bounds. A modal sheet intercepts touches inside the
 window while open; a sheet placement is only a window placement.
@@ -311,7 +311,7 @@ range info over 0..1; an unbound one reports indeterminate progress.
 
 `dialog` and `snackbar` open while `openWhen` holds, like `bottomSheet` (an
 existing key must be boolean), and are drawn above the whole author tree inside
-the overlay window, never as a separate window. A dialog is modal: a scrim tap
+the prototype window, never as a separate window. A dialog is modal: a scrim tap
 closes it, and so does either button. While it is open the page behind it is
 removed from the accessibility tree (`clearAndSetSemantics` on the page), so
 `observe` and screen readers see only the dialog, as on iOS and as touches
@@ -391,7 +391,7 @@ of the Material 3 `ColorScheme` role names (`primary`, `onPrimary`,
 `primaryContainer`, `secondary`, `tertiary`, `background`, `surface`, `onSurface`,
 `surfaceVariant`, `surfaceContainer` and its `Low`/`High`/`Highest`/`Lowest`
 steps, `surfaceBright`, `surfaceDim`, `error`, `outline`, `scrim`, and the rest
-of the scheme, 36 in all). A role resolves against the overlay's active theme
+of the scheme, 36 in all). A role resolves against the prototype's active theme
 (`theme.mode`, `colors.seed`, device colour, `colors.<role>` overrides), so it follows light/dark and the
 seed. No short hex, other named colors, CSS functions, or separate color opacity. Style
 properties that do not apply to a node have no rendering effect; their shape is
@@ -419,8 +419,8 @@ MIME types, URLs, cache paths, and screenshot handles are not spec properties.
 
 ### Asset transport (#9301, first slice)
 
-`put_overlay_asset {id, mimeType, dataBase64}` uploads one asset and
-`remove_overlay_asset {id}` deletes one; each gets one `overlay_result` carrying the
+`put_prototype_asset {id, mimeType, dataBase64}` uploads one asset and
+`remove_prototype_asset {id}` deletes one; each gets one `prototype_result` carrying the
 request ID. Bytes travel as base64 in the single JSON text frame, like screenshots.
 Heap, not the 64 MiB frame limit, is the binding constraint, so caps are
 conservative and shared with the host through `schemas/prototype-asset-contract.json`:
@@ -428,9 +428,9 @@ conservative and shared with the host through `schemas/prototype-asset-contract.
 `image/png`, `image/jpeg` or `image/webp` (exact lowercase) whose bytes must start
 with the matching signature, plus `font/ttf` and `font/otf` (2 MiB each, see Custom fonts). Putting an existing ID replaces it; a full store rejects
 the put with a clear error and never evicts. Removing an unknown ID succeeds. Assets
-sit in the CtrlProxy cache directory and are cleared when the overlay session ends:
-on any dismissal, on service start, unbind or teardown, on `dismiss_overlay` with
-`all`, and when the last client disconnects (even with no overlay showing). A show
+sit in the CtrlProxy cache directory and are cleared when the prototype session ends:
+on any dismissal, on service start, unbind or teardown, on `dismiss_prototype` with
+`all`, and when the last client disconnects (even with no prototype showing). A show
 replacement and a temporary lock-screen hide keep them.
 
 ### Rendering assets (#9301, second slice)
@@ -450,25 +450,25 @@ square. While an image decodes the node shows a plain gray box. An unknown asset
 file the OS evicted from the cache directory (the store still lists it but `read`
 returns null) or undecodable bytes renders a gray box with a broken-image glyph.
 
-`show_overlay` lists the referenced ids the device has no copy of in
-`overlay_result.missingAssets`, in first-use order. It is a warning: `success` stays true
-and the overlay is shown with placeholders, so the host can upload the assets and the
+`show_prototype` lists the referenced ids the device has no copy of in
+`prototype_result.missingAssets`, in first-use order. It is a warning: `success` stays true
+and the prototype is shown with placeholders, so the host can upload the assets and the
 nodes fill in without another `show`. The field is omitted when nothing is missing and
 from every other result, so older hosts see the frame they always did. An id the store
 lists but whose file was evicted is not reported at `show` time; it renders the
 placeholder. Dismissal clearing is unchanged.
 
-Host surface: the `overlay` tool's `show` takes
+Host surface: the `prototype` tool's `show` takes
 `assets: [{id, path}]`, an absolute daemon-readable file path per asset. The host
 reads and validates every file first (signature-detected MIME type, the contract
-limits, unique ids), then uploads sequentially before the overlay request; any
-failure fails the call before the overlay changes and names the assets already
+limits, unique ids), then uploads sequentially before the prototype request; any
+failure fails the call before the prototype changes and names the assets already
 stored. An entry may instead be `{id, observation}`, an
 `automobile:observation/{deviceId}/{observationId}/screenshot` URI; the host reads it
 through the same handler as that resource (current-observation check, pending-capture
 wait, retention lease), which is readable by any client, so no access is widened.
 
-When `overlay_result.missingAssets` lists an id the same call uploaded (the device
+When `prototype_result.missingAssets` lists an id the same call uploaded (the device
 cleared its store between the upload and the show), the host re-uploads those assets
 once from the bytes it already holds and re-sends the show once. It never
 loops: if they are still missing, or the retry fails or is cancelled, the first
@@ -479,22 +479,22 @@ deadline model.
 ### Custom fonts (#10443)
 
 `style.fontFamily` also accepts `{asset: "<id>"}`, an opaque id of a font uploaded through
-the same asset pipeline as images (`put_overlay_asset`, or `assets: [{id, path}]` on the
+the same asset pipeline as images (`put_prototype_asset`, or `assets: [{id, path}]` on the
 host). The spec carries only the id; font bytes, MIME types and caps stay out of it.
 
 - Transport: `font/ttf` and `font/otf` join the contract's MIME types. The bytes must start
   with an sfnt version tag, `0x00010000`, `true` or `OTTO`, accepted for either MIME type
   because an OpenType file may carry TrueType outlines. TrueType collections (`ttcf`) and
   WOFF are rejected. Fonts are never decoded as images. The per-font cap is 2 MiB
-  (`MAX_OVERLAY_FONT_ASSET_BYTES`); fonts count toward the 32-asset and 16 MiB totals
+  (`MAX_PROTOTYPE_FONT_ASSET_BYTES`); fonts count toward the 32-asset and 16 MiB totals
   like images. The host detects a font from the file signature, not the extension.
 - Missing assets: a referenced font the device has no copy of is listed in
-  `overlay_result.missingAssets` with the image ids (references in `style` and `styleWhen`
+  `prototype_result.missingAssets` with the image ids (references in `style` and `styleWhen`
   count, including hidden nodes) and the text draws in the default family until it is
   uploaded.
 - Rendering: the font is loaded from the stored asset file with `FontFamily(Font(file))`,
   once per asset, and cached. A file that cannot be parsed logs one warning and draws
-  with the default family; the overlay is never failed for it. Replacing an asset reloads
+  with the default family; the prototype is never failed for it. Replacing an asset reloads
   it; removing it (or ending the session) while a spec still references it falls back to
   the default family, the same as a removed image becoming a placeholder.
 - Weights: one file is one face, so `fontWeight` selects that face rather than a bolder
@@ -502,14 +502,14 @@ host). The spec carries only the id; font bytes, MIME types and caps stay out of
 
 ## Motion
 
-Overlay state changes animate by default (#10442). A node with `visibleWhen`
+Prototype state changes animate by default (#10442). A node with `visibleWhen`
 fades and expands in and fades and shrinks out; a pager page change driven by
 `setPage` animates the scroll instead of jumping. Spec-level `motion: "none"`
 opts out and keeps every change instant. Motion is also off when the system
 animator duration scale is 0 (`adb shell settings put global
 animator_duration_scale 0`), so `observe` screenshots are settled with no
 extra waits; other scales are honored by Compose's animation clock. The scale is
-observed while the overlay is shown, so setting it to 0 after the overlay is up
+observed while the prototype is shown, so setting it to 0 after the prototype is up
 makes the next visibility or page change instant, and turning motion off
 mid-scroll snaps the pager to its target page. Only nodes with `visibleWhen` get
 an animation wrapper.
@@ -560,7 +560,7 @@ A condition is exactly one of these forms. `visibleWhen` takes any of them;
 | `{any: [condition, ...]}`  | At least one member holds. One to 16 members.                            |
 | `{not: condition}`         | The member does not hold.                                                |
 
-Conditions nest to a depth of 8 (`MAX_OVERLAY_CONDITION_DEPTH` in the shared
+Conditions nest to a depth of 8 (`MAX_PROTOTYPE_CONDITION_DEPTH` in the shared
 contract). `key` takes exactly one comparison, and comparisons need `key`;
 errors point at the offending field (for example `root.visibleWhen.gt`).
 `toggle`, `increment` and `decrement` validate their `key` against the declared `state`
@@ -594,7 +594,7 @@ template: they are instantiated once per entry of `items`, in item order, as
 siblings inside the same container (the container itself is not repeated, so a
 list is a `column` with `repeat` whose single child is the row template).
 `items` holds 1–128 entries, and the expanded tree still counts against
-`MAX_OVERLAY_NODES`.
+`MAX_PROTOTYPE_NODES`.
 
 ```json
 {
@@ -657,10 +657,10 @@ list is a `column` with `repeat` whose single child is the row template).
   repeat template`). A bound key missing from `state` behaves exactly like a literal
   missing key: the type checks run once per item and fail at the key, naming the item
   (`Toggle requires a boolean state key (repeat item 1)`).
-- Limits count the expanded tree. `MAX_OVERLAY_NODES` and `MAX_OVERLAY_IMAGES` are
+- Limits count the expanded tree. `MAX_PROTOTYPE_NODES` and `MAX_PROTOTYPE_IMAGES` are
   checked against every instance, and an overflow fails at the container's
   `repeat` (for example `root.children[2].repeat`, `Expanded node limit exceeded`).
-  `MAX_OVERLAY_DEPTH` is unaffected by design: instances are siblings, so a
+  `MAX_PROTOTYPE_DEPTH` is unaffected by design: instances are siblings, so a
   template child is exactly as deep as it was written. Because items are literal,
   all of this is decided statically; the renderer re-checks the expanded count
   before layout as a backstop.
@@ -705,7 +705,7 @@ written once.
 }
 ```
 
-- Components are expanded on the host (`src/features/overlay/overlayComponents.ts`)
+- Components are expanded on the host (`src/features/prototype/prototypeComponents.ts`)
   before validation and transport: each `use` is replaced by a copy of the
   component's `root` and `components` is dropped. Devices never see either, so the
   Kotlin and Swift renderers and the device validator are unchanged.
@@ -724,7 +724,7 @@ written once.
   (`.component`, message `Component cycle: a → b → a`), and `use` nesting deeper
   than 8. Unused components are allowed.
 - Limits apply to the expanded tree: nodes, depth and images as usual (expansion
-  itself stops at `MAX_OVERLAY_NODES`), and the byte limit applies to both the
+  itself stops at `MAX_PROTOTYPE_NODES`), and the byte limit applies to both the
   authored and the expanded spec (`Expanded spec byte limit exceeded`), because the
   device re-validates bytes.
 - An error inside an expansion names each `use` it went through, for example
@@ -732,11 +732,11 @@ written once.
   Nodes outside every component keep their authored paths, because a `use` expands
   to exactly one node.
 
-### Re-showing an overlay
+### Re-showing a prototype
 
-`show_overlay` always carries a full spec; there is no partial update (#10490).
-When `spec.id` is the overlay already on screen and `reset` is absent or false,
-the device replaces it in place: it keeps the display the overlay is on (the
+`show_prototype` always carries a full spec; there is no partial update (#10490).
+When `spec.id` is the prototype already on screen and `reset` is absent or false,
+the device replaces it in place: it keeps the display the prototype is on (the
 request's `displayId` is ignored), and each pager keeps its settled page,
 matched by pager id and clamped to the new page count. The new spec's `state`
 is authoritative; values the user changed by tapping or typing are not carried
@@ -789,14 +789,14 @@ container shape: exactly one nonempty `elementId` or nonblank `text`, optional
 nonnegative integer `index` (up to 2147483647), optional `selectionStrategy`, and
 an optional nested `container`. Anchors accept only `selectionStrategy: "unique"`
 (default); first/random selection would contradict #9316's ambiguous-anchor
-rejection. Container chains have a separate `MAX_OVERLAY_SELECTOR_DEPTH` of 8;
+rejection. Container chains have a separate `MAX_PROTOTYPE_SELECTOR_DEPTH` of 8;
 the first container has depth 1. The existing TypeScript
 `ElementContainerSelector` type is reused. Strings are preserved as authored. Alignment is required: `cover`, `top`, `bottom`,
 `start`, or `end`; optional offset defaults to zero. Cover adopts target bounds;
 edge alignment aligns the same node edge to the target edge, centered along the
 other axis, preserving authored node dimensions, then applies the offset.
 
-The host resolves selectors against the app hierarchy with the overlay excluded,
+The host resolves selectors against the app hierarchy with the prototype excluded,
 using tap's resolution (a text match is promoted to its clickable owner) with
 `unique` selection, and converts the element's px bounds to dp once with the
 display density the capture reports (`px * 160 / densityDpi`). Resolution happens at
@@ -809,13 +809,13 @@ On the wire the device only receives bounds anchors: the host replaces each elem
 anchor with `{ "type": "bounds", "bounds", "alignment", "offset"? }`, keeping its
 alignment and offset. A bounds anchor may also be authored with `alignment` (default
 `cover`) and `offset`. The renderer refuses an element anchor that reaches it
-unresolved. A host only sends anchors to a CtrlProxy advertising `overlay_anchor_v1`;
+unresolved. A host only sends anchors to a CtrlProxy advertising `prototype_anchor_v1`;
 older APKs decode and ignore them, so the host refuses the show there. Element anchors
 resolve against the default display (another `display` is refused). On an iOS simulator
-the injected overlay agent positions anchors too, advertising the same
-`overlay_anchor_v1` capability in its handshake; there, hierarchy bounds and spec sizes
+the injected prototype agent positions anchors too, advertising the same
+`prototype_anchor_v1` capability in its handshake; there, hierarchy bounds and spec sizes
 are both points, so nothing is converted (see the
-[iOS overlay agent](../ios/overlay-agent.md#anchors)).
+[iOS prototype agent](../ios/prototype-agent.md#anchors)).
 
 The renderer lays an anchored node at its screen rectangle by subtracting the window's
 screen origin and the node's own position inside the window (cutout, system bars, the
@@ -857,36 +857,36 @@ inset padding does not reinterpret their coordinate origin.
 ## Lifecycle and safety
 
 Fullscreen windows reserve an opaque host row above clipped authored content, with
-“Dismiss AutoMobile overlay”. Its visibility, style and opacity are independent of
+“Dismiss AutoMobile prototype”. Its visibility, style and opacity are independent of
 the spec, including modal sheets and `window.opacity: 0`. The authored content
 viewport excludes the host row; relative sheet detents use that remaining height.
 Spec opacity continues
 to apply to authored content and scrims; it cannot fade the safety control.
 
-A `persistence: "device"` overlay outlives its host session: it is not dismissed
+A `persistence: "device"` prototype outlives its host session: it is not dismissed
 when the last client disconnects (including a show queued after that edge), it
 has no idle TTL, and its uploaded assets are kept until it is dismissed. Because
 nobody may be connected to remove it, sheet and floating windows also carry an
 opaque “Close” control drawn above the authored content, and spec opacity fades
 only the content. It ends through that control or the fullscreen dismiss row
-(`user`), `dismiss_overlay` (`agent`), a replacing show, or service
+(`user`), `dismiss_prototype` (`agent`), a replacing show, or service
 unbind/destroy (`teardown`). Keyguard hiding is unchanged.
 
-Events a persisted overlay emits while no client is connected (checked per event
-against the live client count) go to a bounded ring in `OverlayController`
-(`OverlayOfflineEventBuffer`, 200 events, oldest dropped and counted). The ring
+Events a persisted prototype emits while no client is connected (checked per event
+against the live client count) go to a bounded ring in `PrototypeController`
+(`PrototypeOfflineEventBuffer`, 200 events, oldest dropped and counted). The ring
 is flushed under the controller mutex, so order is preserved: when a client
 connects (`onClientConnected`), before the next live event, and before an
-`inspect_overlays` reply. Session-scoped overlays never use it. `inspect_overlays`
-returns one `overlay_result` with `overlays` (`id`, `persistent`, `state`,
+`inspect_prototypes` reply. Session-scoped prototypes never use it. `inspect_prototypes`
+returns one `prototype_result` with `prototypes` (`id`, `persistent`, `state`,
 `pages`, `lastSequence`) and `droppedEvents`, the cumulative count dropped from
 the ring. The host adopts the report into its status store and event buffers,
 because the host clears both on session release. Both behaviours are advertised
-as `overlay_persistence_replay_v1`; a host refuses `inspect` without it.
+as `prototype_persistence_replay_v1`; a host refuses `inspect` without it.
 
-Every dismissal emits one `overlay_event` with `kind: "dismissed"`, null `name`,
+Every dismissal emits one `prototype_event` with `kind: "dismissed"`, null `name`,
 and `payload: {"reason": "user|agent|disconnect|ttl|teardown"}` (one reason string).
-Host and authored dismiss controls use `user`; `dismiss_overlay` uses `agent`;
+Host and authored dismiss controls use `user`; `dismiss_prototype` uses `agent`;
 last-client disconnect uses `disconnect`; idle expiry uses `ttl`; service teardown,
 unbind/restart and owning-display removal use `teardown`. Sequence allocation
 precedes delivery even if no socket remains. A show replacement closes the old
@@ -899,7 +899,7 @@ Idle means no interaction or accepted show. The device fallback TTL is five
 minutes (300,000 ms), positive and settable locally on the controller. Shows
 (including a same-id show) and user interactions restart it (initial/restored
 unchanged pager reports are rendering and do not count); configuration
-changes and safety hide/restore do not. Hidden overlays still expire. The current
+changes and safety hide/restore do not. Hidden prototypes still expire. The current
 strict protocol has no TTL or device-session-release message: no wire field is
 added here. Session release is covered only when it closes the last WebSocket;
 a release that retains sockets requires a future daemon/device contract.
@@ -917,43 +917,43 @@ events are dropped before hierarchy debouncing and navigation tracking.
 
 ### Foreground scoping (#10261, owner decision 2026-10-09)
 
-A session overlay is tied to the app (package) it was shown over, matching the iOS
+A session prototype is tied to the app (package) it was shown over, matching the iOS
 agent, which lives inside the app. When that app leaves the foreground the window is
 hidden (state, pages and the idle TTL are kept; no `dismissed` event, no sequence
 allocation) and when the app returns the same runtime is shown again. A
-`window.persistence: "device"` overlay is a standalone mock and is not tied to an app.
+`window.persistence: "device"` prototype is a standalone mock and is not tied to an app.
 
 - **Anchor.** Each `show` (including an in-place replace) reads the application
   window in front (the active application-type accessibility window, else the topmost)
-  and clears any suspension. If no application window qualifies, the overlay is
+  and clears any suspension. If no application window qualifies, the prototype is
   unscoped and stays up everywhere.
 - **Signal.** `TYPE_WINDOW_STATE_CHANGED` events already delivered to CtrlProxy; no new
   poller. An event moves the foreground only when its window is `TYPE_APPLICATION`
   and its package is not CtrlProxy's own and not in the ignore set. IME, dialogs of
-  type system, accessibility overlays (this overlay's own windows) and the shade
+  type system, accessibility overlays (this prototype's own windows) and the shade
   are therefore never candidates. Ignore set: `com.android.systemui`,
   `com.google.android.permissioncontroller`, `com.android.permissioncontroller`,
   `com.google.android.packageinstaller`, `com.android.packageinstaller`, `android`
   (resolver, ANR and crash dialogs). A dialog of the same app is the same package.
   An event whose window type cannot be read is ignored (fails open: nothing hides).
 - **Debounce.** A flip, either way, applies only after the new state holds for 400 ms
-  (`OVERLAY_FOREGROUND_DEBOUNCE_MILLIS`), so a transient window does not flicker it.
+  (`PROTOTYPE_FOREGROUND_DEBOUNCE_MILLIS`), so a transient window does not flicker it.
 - **Hidden means gone.** The window is removed, so it takes no touches and is absent
-  from `observe`. `inspect` reports `suspended: true` on the overlay entry, and the
-  hierarchy capture carries top-level `overlaySuspended: true`, so `layer: "overlay"`
+  from `observe`. `inspect` reports `suspended: true` on the prototype entry, and the
+  hierarchy capture carries top-level `prototypeSuspended: true`, so `layer: "prototype"`
   calls fail with "hidden because the app it was shown over is not in front" instead
-  of "no overlay is showing".
-  The host stores `suspended` from `inspect` and surfaces it on `overlay` status
+  of "no prototype is showing".
+  The host stores `suspended` from `inspect` and surfaces it on `prototype` status
   entries (host-local, so it is as fresh as the last `inspect`; a new `show` or an
   `inspect` after the app returns clears it), and an `awaitEvent` that times out on
-  a suspended overlay carries the same explanation as a `warning`. Absent on iOS.
+  a suspended prototype carries the same explanation as a `warning`. Absent on iOS.
 - **Separate from other hides.** Suspension is its own state
-  (`OverlayForegroundTracker.suspended`). The host's `isBlocked` is the lock-screen
+  (`PrototypeForegroundTracker.suspended`). The host's `isBlocked` is the lock-screen
   check OR suspension, so any restore path (unlock, relayout, or a future capture-time
   hide from #9305) that calls `show` while suspended is refused; a capture restore
-  can never re-show a suspended overlay, and ending suspension does not undo a
+  can never re-show a suspended prototype, and ending suspension does not undo a
   capture hide held by another component.
-- Dismissal, TTL expiry and teardown release the anchor. A hidden overlay still
+- Dismissal, TTL expiry and teardown release the anchor. A hidden prototype still
   expires on its idle TTL.
 
 Deferred: secure-window detection has no trusted existing signal.
@@ -967,7 +967,7 @@ is shown and returns to the screen edge when it hides.
   top and side sheet windows never move. A `bottomSheet` node lives inside its window
   and rides with it; it needs no separate handling.
 - **Source.** The input-method window's bounds from the accessibility window list
-  (`TYPE_INPUT_METHOD`), not the overlay window's `WindowInsets.Type.ime()`. Overlay
+  (`TYPE_INPUT_METHOD`), not the prototype window's `WindowInsets.Type.ime()`. Prototype
   windows are `TYPE_ACCESSIBILITY_OVERLAY` windows that are not the IME target, and the
   platform dispatches the IME inset only to the IME target, so a sheet over another app's
   field would read 0. The service sees the keyboard window whichever app owns the field.
@@ -992,7 +992,7 @@ across rotation, fold/display removal, and API 30/34/36 keyboard/cutout geometry
 
 This is Android only. The iOS agent does not lift a sheet above the keyboard, and whether to
 rely on UIKit keyboard avoidance or match this behaviour is an open decision (see
-[iOS overlay agent](../ios/overlay-agent.md#open-decisions)).
+[iOS prototype agent](../ios/prototype-agent.md#open-decisions)).
 
 ## Rejection paths and deterministic first error
 

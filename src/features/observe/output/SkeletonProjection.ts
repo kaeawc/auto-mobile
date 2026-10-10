@@ -13,7 +13,7 @@ import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/Vie
 import {
   applicationWindowCoverIndex,
   isFullyCoveredByApplicationWindow,
-  ownWindowNodeSources,
+  ownPrototypeNodeSources,
   type ApplicationWindowCoverIndex,
 } from "../ApplicationWindowCover";
 import { visibleTapBounds } from "../../utility/ElementGeometry";
@@ -1513,7 +1513,7 @@ export function projectSkeleton(
   androidHierarchy?: ViewHierarchyResult,
 ): SkeletonProjectionResult {
   const ime = detectImeWindow(elements);
-  const prototypeSources = ownWindowNodeSources(androidHierarchy);
+  const prototypeSources = ownPrototypeNodeSources(androidHierarchy);
   const accumulators = accumulateByIdentity(elements, ime, prototypeSources);
   const clickable = accumulators.filter((acc) => acc.affordances.has("tap"));
   // Hoist descendant text onto labelless/underlabelled clickable rows (issue

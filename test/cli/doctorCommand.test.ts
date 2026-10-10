@@ -1,5 +1,5 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -32,6 +32,12 @@ function report(failed = 0): DoctorReport {
 isolateToolRegistry();
 
 describe("runDoctorCommand", () => {
+  // parseCliArgs lazily registers every CLI tool on first use (~15 ms); pay it in
+  // setup so the first test in the file is not charged for it.
+  beforeAll(() => {
+    parseCliArgs(["doctor"]);
+  });
+
   test("rejects removed doctor flags before diagnosis with supported daemon remedies", async () => {
     const diagnosis = spyOn(DaemonClient.prototype, "callTool");
     try {

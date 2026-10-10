@@ -291,13 +291,22 @@ function nullableString(record: Record<string, unknown>, field: string): string 
   return value;
 }
 
+function isSlotPlatform(value: unknown): value is SlotPlatform {
+  return value === "android" || value === "ios";
+}
+
 function parseJournalTarget(json: string): SlotJournalTarget {
   const parsed: unknown = JSON.parse(json);
   if (typeof parsed !== "object" || parsed === null) {
     throw new ActionableError("Managed slot journal target is not an object");
   }
   const record = parsed as Record<string, unknown>;
+  const newPlatform = record.newPlatform;
+  if (newPlatform !== undefined && newPlatform !== null && !isSlotPlatform(newPlatform)) {
+    throw new ActionableError("Managed slot journal target field 'newPlatform' is not a platform");
+  }
   return {
+    ...(newPlatform ? { newPlatform } : {}),
     oldStableId: nullableString(record, "oldStableId"),
     oldName: nullableString(record, "oldName"),
     newName: nullableString(record, "newName"),

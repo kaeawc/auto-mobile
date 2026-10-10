@@ -769,8 +769,19 @@ export type SessionReleaseCallback = (
 export type SessionCreatedCallback = (session: Session) => void;
 export interface SessionExecutionMetadata {
   executionId: string;
+  /** When the call started, on the wall clock of the tracker that stamped it. */
   startTime: number;
+  /**
+   * {@link startTime} on the session clock, captured when the call started (#11290). Session
+   * stamps are judged against this; without it the start is converted with the offset in force
+   * when the session is looked up, which is the same instant unless the wall clock stepped in
+   * between.
+   */
+  sessionClockStartTime?: number;
 }
+
+/** A call whose start is known on the session clock, as every expiry judgement needs it. */
+type SessionClockExecution = SessionExecutionMetadata & { sessionClockStartTime: number };
 
 export interface ActiveSessionExecutionQuery {
   startedAtOrBefore?: number;
@@ -2650,7 +2661,7 @@ export class SessionManager {
   }
 
   /**
-   * A tool call started, joined or ended against a session waiting out a device restart.
+   * A control call started, joined or ended against a session waiting out a device restart.
    *
    * The in-memory mark applies at once (see {@link readPersistedSession}); the durable write
    * (#10713) lets the extended expiry survive a daemon restart during the device restart, which
@@ -2808,15 +2819,16 @@ export class SessionManager {
     if (!session) {
       return null;
     }
+    const startedExecution = execution && this.executionOnSessionClock(execution);
     if (
       expireDespiteActiveExecution &&
-      this.isLateExecutionWhileEarlierWorkIsActive(session, execution)
+      this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution)
     ) {
       throw new Error(
         `Session ${sessionId} expired before this execution began while earlier work is still active.`,
       );
     }
-    if (this.shouldExpireSession(session, expireDespiteActiveExecution, execution)) {
+    if (this.shouldExpireSession(session, expireDespiteActiveExecution, startedExecution)) {
       if (!releaseExpired) {
         return null;
       }
@@ -2843,10 +2855,22 @@ export class SessionManager {
     return session;
   }
 
+  /**
+   * A call's start on the clock `expiresAt` is stamped with (#11290): its wall-clock `startTime`
+   * is not comparable with a session stamp once the wall clock has stepped.
+   */
+  private executionOnSessionClock(execution: SessionExecutionMetadata): SessionClockExecution {
+    return {
+      ...execution,
+      sessionClockStartTime:
+        execution.sessionClockStartTime ?? this.wallToSessionClock(execution.startTime),
+    };
+  }
+
   private shouldExpireSession(
     session: Session,
     expireDespiteActiveExecution: boolean,
-    execution?: SessionExecutionMetadata,
+    execution?: SessionClockExecution,
   ): boolean {
     return expireDespiteActiveExecution
       ? this.isSessionExpiredForNewExecution(session, execution)
@@ -2996,6 +3020,22 @@ export class SessionManager {
     );
   }
 
+  /**
+   * A control call that waited on a device restart and failed is still the client using the
+   * session, so the recovery's idle window restarts where the call's admission failed (#11281).
+   * It is credited here rather than at the call's end: a call that fails admission ends
+   * unadmitted, exactly like a read, and a read must never extend the window.
+   */
+  private creditControlCallFailedOnRestartRecovery(sessionId: string, access: SessionAccess): void {
+    if (
+      access === "acquire" &&
+      !this.sessions.has(sessionId) &&
+      this.restartRecoveryActivityAt.has(sessionId)
+    ) {
+      this.recordRestartRecoveryActivity(sessionId);
+    }
+  }
+
   /** Preserve the existing access-string API while admitting request-local options. */
   private resolveSessionAcquisitionOptions(options: SessionAccess | SessionAcquisitionOptions): {
     access: SessionAccess;
@@ -3019,9 +3059,33 @@ export class SessionManager {
     access: SessionAccess,
     requestDeadlineMs?: number,
   ): Promise<Session> {
+    try {
+      return await this.joinOrStartUnseenAssignment(
+        sessionId,
+        devicePool,
+        platform,
+        requireIssuedSession,
+        access,
+        requestDeadlineMs,
+      );
+    } catch (error) {
+      this.creditControlCallFailedOnRestartRecovery(sessionId, access);
+      throw error;
+    }
+  }
+
+  private async joinOrStartUnseenAssignment(
+    sessionId: string,
+    devicePool: SessionDeviceAssigner | undefined,
+    platform: Platform | undefined,
+    requireIssuedSession: boolean,
+    access: SessionAccess,
+    requestDeadlineMs?: number,
+  ): Promise<Session> {
     const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
     if (pendingAssignment) {
-      if (this.restartRecoveryActivityAt.has(sessionId)) {
+      // Only a control call joining the recovery is use; a read joins without extending (#11281).
+      if (access === "acquire" && this.restartRecoveryActivityAt.has(sessionId)) {
         this.recordRestartRecoveryActivity(sessionId);
       }
       const shared = this.sharedSessionAssignments.get(sessionId);
@@ -7763,16 +7827,22 @@ export class SessionManager {
    * the session's activity heartbeat, exactly as the start did (`reclaimAndRefreshExistingSession`).
    */
   recordToolCallEnded(sessionId: string, end: { admitted: boolean } = { admitted: true }): void {
+    // A call refused at admission (suspect, expired, not the holder) never used the session, so
+    // its end must not restore a suspect lease or push an expired deadline out (#10824). A read
+    // ends unadmitted too, and never extends the idle window, restart recovery included (#11281).
+    if (!end.admitted) {
+      return;
+    }
     const session = this.sessions.get(sessionId);
     if (!session && this.restartRecoveryActivityAt.has(sessionId)) {
-      // A call that waited on, or failed because of, a device restart is still the client using
-      // the session: restart its idle window so recovery is only lost after real quiet.
+      // An admitted control call that waited on, or failed because of, a device restart is still
+      // the client using the session: restart its idle window so recovery is only lost after real
+      // quiet. One that failed at admission was credited there
+      // ({@link creditControlCallFailedOnRestartRecovery}).
       this.recordRestartRecoveryActivity(sessionId);
       return;
     }
-    // A call refused at admission (suspect, expired, not the holder) never used the session, so
-    // its end must not restore a suspect lease or push an expired deadline out (#10824).
-    if (!end.admitted || !session || this.releasingSessions.has(session)) {
+    if (!session || this.releasingSessions.has(session)) {
       return;
     }
     const now = this.sessionNow();
@@ -8529,7 +8599,7 @@ export class SessionManager {
 
   private isSessionExpiredForNewExecution(
     session: Session,
-    execution?: SessionExecutionMetadata,
+    execution?: SessionClockExecution,
   ): boolean {
     // A lookup that carries no execution (routing resolution: autolock, setActiveDevice, the
     // lifecycle ownership check) is not a call that arrived after the deadline; it only asks who
@@ -8541,17 +8611,17 @@ export class SessionManager {
     if (this.sessionNow() <= session.expiresAt) {
       return false;
     }
-    return execution.startTime > session.expiresAt;
+    return execution.sessionClockStartTime > session.expiresAt;
   }
 
   private isLateExecutionWhileEarlierWorkIsActive(
     session: Session,
-    execution: SessionExecutionMetadata | undefined,
+    execution: SessionClockExecution | undefined,
   ): boolean {
     return (
       execution !== undefined &&
       this.sessionNow() > session.expiresAt &&
-      execution.startTime > session.expiresAt &&
+      execution.sessionClockStartTime > session.expiresAt &&
       this.activeSessionExecutionChecker(session.sessionId, {
         excludeExecutionId: execution.executionId,
       })

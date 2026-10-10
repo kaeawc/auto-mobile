@@ -905,7 +905,13 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     const mcpSessionId = typeof args.__mcpSessionId === "string" ? args.__mcpSessionId : undefined;
     const execution =
       typeof args.__executionId === "string" && typeof args.__executionStartTime === "number"
-        ? { executionId: args.__executionId, startTime: args.__executionStartTime }
+        ? {
+            executionId: args.__executionId,
+            startTime: args.__executionStartTime,
+            // The forwarded start is a wall-clock stamp; session expiry judges the session-clock
+            // one the tracker took when the call started (#11290).
+            sessionClockStartTime: executionTracker.getSessionClockStartTime(args.__executionId),
+          }
         : undefined;
     // Internal tool-to-tool marker (#3053 / #3087): internal callers (PlanExecutor
     // steps, navigation/setup replays) set this via `markInternalToolCall` so a

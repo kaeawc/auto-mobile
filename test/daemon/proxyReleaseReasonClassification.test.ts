@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
-import { DaemonBoundSessionExpiredError, DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import {
+  DaemonBoundSessionExpiredError,
+  DaemonMcpProxy,
+  RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
+} from "../../src/daemon/daemonMcpProxy";
 import {
   isRecoverableDaemonReleaseReason,
   SESSION_RELEASE_REASON_FAMILY_TRAITS,
@@ -100,6 +104,12 @@ function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } 
           : undefined,
       onCallTool: (toolName, params) => {
         forwarded.push({ toolName, sessionUuid: params.sessionUuid });
+        const handsBack = releasedAs === "" || isRecoverableDaemonReleaseReason(releasedAs ?? "-");
+        if (params.sessionUuid === SESSION && handsBack) {
+          // The daemon hands a session it can recover back to the call that reaches it, and
+          // answers its heartbeats again.
+          releasedAs = undefined;
+        }
       },
       // Answered in the caller's turn unless a round trip is asked for: the table below pins the
       // order of a heartbeat's answer and the call it races as it is without one.
@@ -159,7 +169,8 @@ function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } 
     connectionResets: () => connectionResets,
     close: async () => {
       proxyClosing = true;
-      await proxy.close();
+      // A heartbeat still on its round trip is answered as time passes.
+      await timer.resolvePromise(proxy.close(), 1);
     },
     forwardedCalls: () => forwarded.filter((call) => call.toolName !== "getAndroid"),
     heartbeats: () => heartbeats,
@@ -217,24 +228,43 @@ describe("release reasons are classified alike on every path", () => {
     "%s: a not-found heartbeat fences exactly when the notification does",
     async (reason) => {
       // An answer that ends the session is about that session, on a connection that works:
-      // nothing is reconnected to hear it again (#11520). A recoverable handoff reconnects, because
-      // the daemon that released the session is going away or is still recovering it.
-      const expected = isRecoverableDaemonReleaseReason(reason)
-        ? "answered, forwarded under the released session, connection reset"
-        : "refused, never forwarded under it, connection kept";
+      // nothing is reconnected to hear it again (#11520). A recoverable handoff keeps the binding
+      // on every path. It reconnects where the answer came from a daemon the proxy had been
+      // talking to, which is going away or restarting the device: the notification, and a keeper
+      // tick on an established connection. It keeps the connection where the answer came straight
+      // from a connection that was just made, because that daemon is the one to wait for and
+      // resetting its connection cuts the call that established it (#11529).
+      const recoverable = isRecoverableDaemonReleaseReason(reason);
+      const handedBack = "answered, forwarded under the released session, connection";
+      const ended = "refused, never forwarded under it, connection kept";
       const byPath: Record<string, string> = {};
       for (const path of ["notification", ...HEARTBEAT_PATHS] as const) {
         byPath[path] = await sessionlessCallAfter(path, reason);
       }
       expect(byPath).toEqual({
-        notification: expected,
-        "keeper tick": expected,
-        "first heartbeat": expected,
-        "establishment heartbeat": expected,
-        "liveness recovery": expected,
+        notification: recoverable ? `${handedBack} reset` : ended,
+        "keeper tick": recoverable ? `${handedBack} reset` : ended,
+        "first heartbeat": recoverable ? `${handedBack} kept` : ended,
+        "establishment heartbeat": recoverable ? `${handedBack} kept` : ended,
+        "liveness recovery": recoverable ? `${handedBack} kept` : ended,
       });
     },
   );
+
+  // The row for an answer with no reason: a daemon that holds no release record, which is also
+  // what a restarted daemon answers until it has rehydrated the session. Only a heartbeat can say
+  // so. On an established connection it is retried once on a fresh one; on the connection that was
+  // just established there is nothing fresher to ask (#11529).
+  test("no reason: the binding is kept on every heartbeat path, and the new connection with it", async () => {
+    const kept = "answered, forwarded under the released session, connection";
+    expect({
+      "keeper tick": await sessionlessCallAfter("keeper tick", ""),
+      "establishment heartbeat": await sessionlessCallAfter("establishment heartbeat", ""),
+    }).toEqual({
+      "keeper tick": `${kept} reset`,
+      "establishment heartbeat": `${kept} kept`,
+    });
+  });
 
   // The missed-notification backstop for a plan release: `plan-auto-release` is not terminal (the
   // daemon re-issues the UUID to a client that names it in its next plan), yet the proxy must not
@@ -290,6 +320,69 @@ describe("release reasons are classified alike on every path", () => {
       const before = world.heartbeats();
       await world.timer.advanceTimeAsync(3 * INTERVAL_MS);
       expect(world.heartbeats()).toBe(before);
+    } finally {
+      await world.close();
+    }
+  });
+
+  // #11529: the same restart, but the daemon has not rehydrated the session yet (no reason) or
+  // released it for a recoverable handoff. The answer came from the connection being established,
+  // so nothing is stale: the connection stays and the call itself reaches the daemon.
+  test.each(["", "daemon-restart", "daemon-shutdown", "device-restart:emulator-5554"])(
+    "the first call after a restart answered not-found (%p) reaches the daemon, not a connection error",
+    async (reason) => {
+      const world = harness({ livenessOwnerToken: "stable-owner-token", roundTripMs: 5 });
+      try {
+        await world.timer.resolvePromise(world.proxy.callTool("getAndroid", {}), 1);
+        await world.timer.advanceTimeAsync(INTERVAL_MS + 10);
+        world.release(reason);
+        world.replaceDaemon();
+
+        const outcome = await world.timer
+          .resolvePromise(world.proxy.callTool("observe", {}), 1)
+          .then(
+            () => "answered",
+            (error: unknown) => error,
+          );
+
+        expect(outcome).toBe("answered");
+        expect(world.connectionResets()).toBe(0);
+        expect(world.forwardedCalls()).toEqual([{ toolName: "observe", sessionUuid: SESSION }]);
+      } finally {
+        await world.close();
+      }
+    },
+  );
+
+  // No call arrives: the owner keeps heartbeating the session the restarted daemon has not
+  // rehydrated, once a tick on the one connection, for the recovery window and no longer.
+  test("a restarted daemon that does not know the session yet is heartbeated once a tick for the window", async () => {
+    const world = harness({ livenessOwnerToken: "stable-owner-token", roundTripMs: 5 });
+    try {
+      await world.timer.resolvePromise(world.proxy.callTool("getAndroid", {}), 1);
+      await world.timer.advanceTimeAsync(INTERVAL_MS + 10);
+      world.release("");
+      world.replaceDaemon();
+
+      const perTick: number[] = [];
+      const ticks = RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS / INTERVAL_MS + 4;
+      for (let tick = 0; tick < ticks; tick += 1) {
+        const before = world.heartbeats();
+        await world.timer.advanceTimeAsync(INTERVAL_MS);
+        perTick.push(world.heartbeats() - before);
+      }
+
+      expect(world.connectionResets()).toBe(0);
+      expect(Math.max(...perTick)).toBe(1);
+      // Every tick whose answer arrived inside the window, and the one whose answer closed it.
+      const asked = perTick.filter((sent) => sent === 1).length;
+      const windowTicks = RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS / INTERVAL_MS;
+      expect(asked).toBeGreaterThanOrEqual(windowTicks);
+      expect(asked).toBeLessThanOrEqual(windowTicks + 2);
+      expect(perTick.slice(-2)).toEqual([0, 0]);
+      // Still bound: the call that comes later reaches the daemon under the session.
+      await world.timer.resolvePromise(world.proxy.callTool("observe", {}), 1);
+      expect(world.forwardedCalls()).toEqual([{ toolName: "observe", sessionUuid: SESSION }]);
     } finally {
       await world.close();
     }

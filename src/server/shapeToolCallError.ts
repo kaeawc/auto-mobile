@@ -14,7 +14,17 @@ import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
-import { recoveryIdentityLoss, recoveryIdentityLossPayload } from "./deviceSessionResult";
+import {
+  recoveryIdentityLoss,
+  recoveryIdentityLossPayload,
+  sessionReleasedDuringCallPayload,
+} from "./deviceSessionResult";
+import {
+  DaemonRestartDeferredError,
+  DaemonRestartPendingError,
+  daemonRestartDeferredPayload,
+  daemonRestartPendingPayload,
+} from "../daemon/daemonRestartAdmission";
 import { DeviceOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
 import { AppNotRunningError } from "../models/AppNotRunningError";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
@@ -102,6 +112,19 @@ function toolCallErrorText(error: unknown, message: string): string {
   const lostToRecovery = recoveryIdentityLoss(error);
   if (lostToRecovery) {
     return JSON.stringify(recoveryIdentityLossPayload(lostToRecovery));
+  }
+  // A call cut by its session's release is the same terminal refusal a later call naming the
+  // session gets (#11381).
+  const releasedDuringCall = sessionReleasedDuringCallPayload(error);
+  if (releasedDuringCall) {
+    return JSON.stringify(releasedDuringCall);
+  }
+  // Retryable daemon restart refusals keep the envelope their tool results use (#11544).
+  if (error instanceof DaemonRestartDeferredError) {
+    return JSON.stringify(daemonRestartDeferredPayload(error));
+  }
+  if (error instanceof DaemonRestartPendingError) {
+    return JSON.stringify(daemonRestartPendingPayload(error));
   }
   const refusal = typedRefusalPayload(error);
   if (refusal) {

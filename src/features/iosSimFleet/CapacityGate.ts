@@ -97,8 +97,8 @@ export class IosSimCapacityGate
   }
 
   /** Collect a fresh report and fold it into the pressure history. Used by the monitor too. */
-  async refresh(options: { fresh?: boolean } = {}): Promise<FleetCostReport> {
-    const report = await (options.fresh ? this.fleet.collectFresh() : this.fleet.collect());
+  async refresh(): Promise<FleetCostReport> {
+    const report = await this.fleet.collect();
     this.foldIntoPressureHistory(report);
     return report;
   }
@@ -164,8 +164,7 @@ export class IosSimCapacityGate
       platform: "ios",
       signal: options.signal,
       label: "iOS simulator capacity",
-      // Fresh: the listing must start after the ledger window opened (see FleetCostSource).
-      sample: () => this.refresh({ fresh: true }),
+      sample: () => this.refresh(),
       ledger: this.admittedBoots,
       decide: (report, window) => this.decide(report, request, "hint", options.bootUdid, window),
       admit: () => {

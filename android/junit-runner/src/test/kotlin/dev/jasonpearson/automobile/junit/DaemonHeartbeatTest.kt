@@ -330,6 +330,84 @@ class DaemonHeartbeatTest {
   }
 
   @Test
+  fun `a session registered with no holder runs the loop only until it is removed`() {
+    val fake = HeartbeatFake()
+    fake.manager.addSession("s1")
+    assertTrue(fake.manager.isRunning)
+
+    fake.manager.removeSession("s1")
+
+    assertFalse("no holder and no session: the loop must end", fake.manager.isRunning)
+    fake.runnables.single().run()
+    assertTrue(fake.sentSessions.isEmpty())
+    assertTrue(fake.sleepIntervals.isEmpty())
+  }
+
+  @Test
+  fun `a holderless loop ends once its last session is released by the daemon`() {
+    val fake = HeartbeatFake()
+    fake.onSend = { throw DaemonSessionReleasedException(it, "idle", "Session not found: $it") }
+    fake.onSleep = {}
+    fake.manager.addSession("s1")
+
+    fake.runnables.single().run()
+
+    assertFalse(fake.manager.isRunning)
+    assertEquals(listOf("s1"), fake.sentSessions)
+    assertEquals(1, fake.sleepIntervals.size)
+  }
+
+  @Test
+  fun `a holder keeps the loop running after its sessions are removed`() {
+    val fake = HeartbeatFake()
+    val handle = fake.manager.start(10L)
+    fake.manager.addSession("s1")
+    fake.manager.removeSession("s1")
+
+    assertTrue(fake.manager.isRunning)
+    handle.close()
+    assertFalse(fake.manager.isRunning)
+  }
+
+  @Test
+  fun `non-404 heartbeat failures warn at most once per window with a suppressed count`() {
+    val fake = HeartbeatFake()
+    fake.onSend = { throw java.io.IOException("Daemon heartbeat for $it failed with HTTP 500") }
+    fake.maxSleeps = 4
+    val handle = fake.manager.start(1_000L)
+    fake.manager.addSession("s1")
+    fake.onSleep = {
+      fake.nowMs += if (fake.sleepIntervals.size == 3) 30_000L else 1_000L
+      if (fake.sleepIntervals.size == 4) handle.close()
+    }
+
+    fake.runnables.single().run()
+
+    assertEquals(4, fake.sentSessions.size)
+    assertEquals(
+      listOf(
+        "Daemon heartbeat for s1 failed: Daemon heartbeat for s1 failed with HTTP 500",
+        "Daemon heartbeat for s1 failed: Daemon heartbeat for s1 failed with HTTP 500 " +
+          "(2 similar warnings suppressed)",
+      ),
+      fake.warnings,
+    )
+  }
+
+  @Test
+  fun `a 404 for a never-acknowledged id is not a heartbeat-failure warning`() {
+    val fake = HeartbeatFake()
+    fake.onSend = { throw DaemonSessionReleasedException(it, null, "Session not found") }
+    val handle = fake.manager.start(10L)
+    fake.manager.addSession("new")
+    fake.onSleep = { if (fake.sleepIntervals.size == 2) handle.close() }
+
+    fake.runnables.single().run()
+
+    assertTrue(fake.warnings.isEmpty())
+  }
+
+  @Test
   fun `last close stops the active loop`() {
     val fake = HeartbeatFake()
     val handle = fake.manager.start(10L)
@@ -556,7 +634,11 @@ class DaemonHeartbeatTest {
           Thread(runnable, name)
         },
         beatExecutor = Executor { beat -> beatExecutor.execute(beat) },
+        nowMs = { nowMs },
+        warn = { warnings.add(it) },
       )
+    var nowMs = 0L
+    val warnings = mutableListOf<String>()
     /** Runs each beat inline by default, so a cycle is synchronous and deterministic. */
     var beatExecutor: Executor = Executor { it.run() }
   }

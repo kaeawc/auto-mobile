@@ -14,6 +14,10 @@ import kotlin.concurrent.thread
  * sessions' beats or the next cycle: a serial loop over N sessions could take N x 4 s and starve
  * live sessions past the daemon's 10 s no-heartbeat budget (#11195). A session whose previous beat
  * is still in flight is skipped that cycle rather than stacking a second request.
+ *
+ * The loop runs only while something needs it: a [start] holder, or a registered session. A session
+ * registered with no holder starts it, and removing the last such session stops it, so the thread
+ * never outlives its sessions (#11195).
  */
 internal class BackgroundHeartbeatManager(
   private val sendHeartbeat: (String) -> Unit,
@@ -22,6 +26,8 @@ internal class BackgroundHeartbeatManager(
     thread(start = true, isDaemon = true, name = name) { runnable.run() }
   },
   private val beatExecutor: Executor = defaultBeatExecutor,
+  private val nowMs: () -> Long = System::currentTimeMillis,
+  private val warn: (String) -> Unit = { println("Warning: $it") },
 ) {
   private val sessions = ConcurrentHashMap.newKeySet<String>()
   private val inFlight = ConcurrentHashMap.newKeySet<String>()
@@ -34,6 +40,7 @@ internal class BackgroundHeartbeatManager(
   private val refCount = AtomicInteger(0)
   @Volatile private var intervalMs: Long = 1_000L
   @Volatile private var heartbeatThread: Thread? = null
+  private val failureWarnings = RateLimitedWarning(FAILURE_WARNING_INTERVAL_MS, nowMs, warn)
 
   internal val isRunning: Boolean
     get() = running.get()
@@ -68,6 +75,7 @@ internal class BackgroundHeartbeatManager(
       // Prune per-id bookkeeping so a long-lived JVM does not grow with every plan UUID. `losses`
       // stays: it is the terminal marker that keeps a released id from being heartbeated again.
       clearProgress(sessionId)
+      stopIfUnneededLocked()
     }
   }
 
@@ -100,10 +108,19 @@ internal class BackgroundHeartbeatManager(
       if (refCount.decrementAndGet() > 0) {
         return
       }
-      running.set(false)
-      heartbeatThread?.interrupt()
-      heartbeatThread = null
+      stopLoopLocked()
     }
+  }
+
+  /** A holderless loop exists only for its sessions; once none remain it ends. */
+  private fun stopIfUnneededLocked() {
+    if (refCount.get() == 0 && sessions.isEmpty()) stopLoopLocked()
+  }
+
+  private fun stopLoopLocked() {
+    running.set(false)
+    heartbeatThread?.interrupt()
+    heartbeatThread = null
   }
 
   /**
@@ -141,7 +158,8 @@ internal class BackgroundHeartbeatManager(
     losses[sessionId] = loss
     sessions.remove(sessionId)
     clearProgress(sessionId)
-    println("Warning: ${loss.describe()}; no longer heartbeating it")
+    warn("${loss.describe()}; no longer heartbeating it")
+    stopIfUnneededLocked()
   }
 
   private fun recordAcknowledged(sessionId: String, loopRunning: AtomicBoolean) {
@@ -182,8 +200,10 @@ internal class BackgroundHeartbeatManager(
       recordAcknowledged(sessionId, loopRunning)
     } catch (released: DaemonSessionReleasedException) {
       recordRelease(sessionId, released, loopRunning)
-    } catch (_: Exception) {
-      // A missed heartbeat is transient (daemon restarting, socket busy); the next tick retries.
+    } catch (error: Exception) {
+      // A missed heartbeat is transient (daemon restarting, socket busy, a 5xx) and the next tick
+      // retries, but a daemon that keeps refusing beats must leave a trace: warn, rate-limited.
+      failureWarnings.record("Daemon heartbeat for $sessionId failed: ${error.message ?: error}")
     } finally {
       inFlight.remove(sessionId)
     }
@@ -193,11 +213,41 @@ internal class BackgroundHeartbeatManager(
     /** About 30 s at the 1 s cadence: how long a never-acknowledged id may 404 before giving up. */
     const val MAX_UNCONFIRMED_MISSES = 30
 
+    /** At most one heartbeat-failure warning per this window; the rest are counted, not printed. */
+    const val FAILURE_WARNING_INTERVAL_MS = 30_000L
+
     /**
      * Daemon threads, created on demand and reaped when idle; at most one per session in flight.
      */
     val defaultBeatExecutor: Executor = Executors.newCachedThreadPool { runnable ->
       Thread(runnable, "auto-mobile-daemon-heartbeat-beat").apply { isDaemon = true }
     }
+  }
+}
+
+/**
+ * Prints the first warning, then at most one per [intervalMs], noting how many were suppressed in
+ * between, so a daemon that fails every beat does not flood test output.
+ */
+internal class RateLimitedWarning(
+  private val intervalMs: Long,
+  private val nowMs: () -> Long,
+  private val warn: (String) -> Unit,
+) {
+  private var lastWarnedAtMs: Long? = null
+  private var suppressed = 0
+
+  @Synchronized
+  fun record(message: String) {
+    val now = nowMs()
+    val last = lastWarnedAtMs
+    if (last != null && now - last < intervalMs) {
+      suppressed++
+      return
+    }
+    val note = if (suppressed > 0) " ($suppressed similar warnings suppressed)" else ""
+    warn("$message$note")
+    lastWarnedAtMs = now
+    suppressed = 0
   }
 }

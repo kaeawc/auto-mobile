@@ -16,6 +16,8 @@ const IDLE_MS = 10 * 60_000;
 class FakeOrphanPort implements PrivateDaemonOrphanPort {
   ppid = 1;
   launcher = 4242;
+  explicit = false;
+  alive = new Set<number>();
   clients = 0;
   sessions = 0;
   shutdowns: string[] = [];
@@ -24,6 +26,12 @@ class FakeOrphanPort implements PrivateDaemonOrphanPort {
   }
   launcherPid(): number {
     return this.launcher;
+  }
+  launcherIsExplicit(): boolean {
+    return this.explicit;
+  }
+  isProcessRunning(pid: number): boolean {
+    return this.alive.has(pid);
   }
   clientCount(): number {
     return this.clients;
@@ -102,6 +110,45 @@ describe("PrivateDaemonOrphanWatchdog (#10497)", () => {
     timer.setCurrentTime(IDLE_MS);
     expect(watchdog.check()).toBe(false);
     timer.setCurrentTime(IDLE_MS * 2);
+    expect(watchdog.check()).toBe(true);
+  });
+
+  test("an alive explicit launcher behind an intermediate parent is not orphaned (#11370)", () => {
+    port.explicit = true;
+    port.launcher = 400;
+    port.ppid = 500;
+    port.alive.add(400);
+    watchdog.check();
+    timer.setCurrentTime(IDLE_MS * 10);
+    expect(watchdog.check()).toBe(false);
+    expect(port.shutdowns).toEqual([]);
+  });
+
+  test("a dead explicit launcher behind an intermediate parent is orphaned (#11370)", () => {
+    port.explicit = true;
+    port.launcher = 400;
+    port.ppid = 500;
+    expect(watchdog.check()).toBe(false);
+    timer.setCurrentTime(IDLE_MS);
+    expect(watchdog.check()).toBe(true);
+    expect(port.shutdowns).toHaveLength(1);
+  });
+
+  test("an explicit launcher does not keep a daemon adopted by init (#11370)", () => {
+    port.explicit = true;
+    port.launcher = 400;
+    port.ppid = 1;
+    port.alive.add(400);
+    watchdog.check();
+    timer.setCurrentTime(IDLE_MS);
+    expect(watchdog.check()).toBe(true);
+  });
+
+  test("without an explicit launcher a changed parent still orphans (#11370)", () => {
+    port.ppid = 777;
+    port.alive.add(4242);
+    watchdog.check();
+    timer.setCurrentTime(IDLE_MS);
     expect(watchdog.check()).toBe(true);
   });
 

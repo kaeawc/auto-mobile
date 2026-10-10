@@ -957,27 +957,46 @@ test("last joined restart waiter aborts slow discovery and fences its late devic
   expect(timer.getPendingTimeouts()).toEqual([]);
 });
 
-test("single restart acquisition retains its deadline and fences late availability", async () => {
-  const { timer, sessions, pool, manager } = await setupPassiveRestart();
-  sessions.stopCleanupTimer();
-  const acquisition = sessions
-    .getOrCreateSession("session", pool, "android", undefined, true, {
-      requestDeadlineMs: 3_500,
-    })
-    .then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-  await drainUntilQuiescent(timer);
-  timer.advanceTime(2_500);
-  expect(String(await acquisition)).toContain("Cannot safely recover session");
-  manager.bootedDevices = [original];
-  timer.advanceTime(1_000);
-  await drainUntilQuiescent(timer);
-  expect(sessions.getSession("session")).toBeNull();
-  expect(pool.getDevice(original.deviceId)?.sessionId ?? null).toBeNull();
-  expect(timer.getPendingTimeouts()).toEqual([]);
-});
+// #11359: the request deadline is wall time, so a wall step must not move the wait's budget.
+test.each([
+  ["no step", 0],
+  ["a backward step", -3_600_000],
+  ["a forward step (Linux model)", 3_600_000],
+])(
+  "single restart acquisition retains its deadline and fences late availability across %s",
+  async (_name, stepMs) => {
+    const { timer, sessions, pool, manager } = await setupPassiveRestart();
+    sessions.stopCleanupTimer();
+    // Linux: the monotonic clock includes host sleep, so a forward wall step is not counted as sleep.
+    timer.simulateSleepCountingMonotonicClock();
+    timer.stepWallClock(stepMs);
+    const acquisition = sessions
+      .getOrCreateSession("session", pool, "android", undefined, true, {
+        requestDeadlineMs: timer.now() + 3_500,
+      })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    let settled = false;
+    void acquisition.then(() => {
+      settled = true;
+    });
+    await drainUntilQuiescent(timer);
+    // The 3.5 s request less its 1 s response margin: neither early nor late, whatever the step.
+    timer.advanceTime(2_400);
+    await drainUntilQuiescent(timer);
+    expect(settled).toBe(false);
+    timer.advanceTime(100);
+    expect(String(await acquisition)).toContain("Cannot safely recover session");
+    manager.bootedDevices = [original];
+    timer.advanceTime(1_000);
+    await drainUntilQuiescent(timer);
+    expect(sessions.getSession("session")).toBeNull();
+    expect(pool.getDevice(original.deviceId)?.sessionId ?? null).toBeNull();
+    expect(timer.getPendingTimeouts()).toEqual([]);
+  },
+);
 
 test.each([
   [60_000, false],

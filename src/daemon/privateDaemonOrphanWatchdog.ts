@@ -7,6 +7,14 @@ export interface PrivateDaemonOrphanPort {
   parentPid(): number;
   /** The parent PID recorded when this daemon started: the launcher. */
   launcherPid(): number;
+  /**
+   * True when the launcher named itself (`AUTOMOBILE_DAEMON_LAUNCHER_PID`) rather than
+   * being inferred from the entry parent: its direct parent may then be an intermediate
+   * shell or wrapper, so liveness of the launcher decides instead of the parent pid.
+   */
+  launcherIsExplicit(): boolean;
+  /** Whether a process is alive; injected so tests never signal a real pid. */
+  isProcessRunning(pid: number): boolean;
   /** Open control-socket and auxiliary-socket connections and in-flight HTTP requests. */
   clientCount(): number;
   /**
@@ -125,13 +133,20 @@ export class PrivateDaemonOrphanWatchdog {
   }
 
   /**
-   * The launcher is gone once init adopted us or any other process did: under a
-   * Linux subreaper (systemd --user, container inits) the new parent is not pid 1
-   * but is still not the launcher we recorded at start.
+   * Orphaned when init adopted us, or: with an explicit launcher pid, the launcher is no
+   * longer alive (an intermediate shell or wrapper parent is expected, #11370); without
+   * one, the parent is no longer the entry parent. The second case covers a Linux
+   * subreaper (systemd --user, container inits) whose pid is not 1.
    */
   private isOrphaned(): boolean {
     const parent = this.port.parentPid();
-    return parent === INIT_PID || parent !== this.port.launcherPid();
+    if (parent === INIT_PID) {
+      return true;
+    }
+    const launcher = this.port.launcherPid();
+    return this.port.launcherIsExplicit()
+      ? !this.port.isProcessRunning(launcher)
+      : parent !== launcher;
   }
 
   /** One check; returns true when it requested shutdown. */

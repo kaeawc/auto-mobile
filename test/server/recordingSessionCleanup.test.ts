@@ -17,7 +17,7 @@ type UnboundCallback = Parameters<SessionManager["onSessionDeviceUnbound"]>[0];
 class FakeSessionManager implements CleanupManager {
   releaseCallbacks: ReleaseCallback[] = [];
   unboundCallbacks: UnboundCallback[] = [];
-  pendingCleanups: Array<{ deviceId: string; cleanup: Promise<unknown> }> = [];
+  pendingCleanups: Array<{ deviceId: string; cleanup: Promise<unknown>; capMs?: number }> = [];
   acquisitionCleanups: Array<{ deviceId: string; cleanup: Promise<unknown> }> = [];
 
   onSessionRelease(callback: ReleaseCallback): void {
@@ -26,8 +26,8 @@ class FakeSessionManager implements CleanupManager {
   onSessionDeviceUnbound(callback: UnboundCallback): void {
     this.unboundCallbacks.push(callback);
   }
-  registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
-    this.pendingCleanups.push({ deviceId, cleanup });
+  registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>, capMs?: number): void {
+    this.pendingCleanups.push({ deviceId, cleanup, capMs });
   }
 
   registerAcquisitionDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
@@ -167,6 +167,16 @@ describe("registerRecordingSessionCleanup", () => {
     expect(manager.pendingCleanups.map((entry) => entry.deviceId)).toEqual(["SIM-1"]);
     recordings.start("SIM-1", "session-b");
     expect(recordings.active.get("SIM-1")?.ownerSessionUuid).toBe("session-b");
+  });
+
+  test("the pending cleanup advertises the real finalize cap plus the incomplete-mark grace, so a refused bind's retryAfterMs is not the 1 s default", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+
+    manager.release("session-a", "SIM-1");
+    await manager.settle();
+
+    expect(manager.pendingCleanups.map((entry) => entry.capMs)).toEqual([125_000]);
   });
 
   test("release captures the recording ids it finalizes before stopping them, once", async () => {

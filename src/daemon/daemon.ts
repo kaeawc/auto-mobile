@@ -1125,7 +1125,12 @@ export class Daemon {
 
       // Adopt terminal releases a crashed predecessor never persisted (#10959) before any
       // listener can admit a session; startup rehydration writes their rows.
-      this.sessionManager.attachTerminalReleaseJournal(createDaemonTerminalReleaseJournal());
+      this.sessionManager.attachTerminalReleaseJournal(
+        createDaemonTerminalReleaseJournal({
+          daemonSessionId: this.daemonSessionId,
+          liveDaemonSessionIds: this.startupLiveDaemonSessionIds,
+        }),
+      );
 
       this.warmAndroidAvdProvenanceCache();
       // iOS device-type profiles are memoized per SimCtlClient and populated inline

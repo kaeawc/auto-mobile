@@ -7,6 +7,7 @@ import {
   nodeTerminalReleaseJournalFileSystem,
   createDaemonTerminalReleaseJournal,
   TERMINAL_RELEASE_JOURNAL_FILE_NAME,
+  terminalReleaseJournalPath,
 } from "../../src/daemon/terminalReleaseJournal";
 import { logger } from "../../src/utils/logger";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
@@ -194,14 +195,20 @@ describe("FileTerminalReleaseJournal (#10959)", () => {
   test("the daemon journal round-trips through a real data directory", () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "terminal-release-journal-"));
     try {
-      const filePath = path.join(dataDir, "nested", TERMINAL_RELEASE_JOURNAL_FILE_NAME);
-      const journal = createDaemonTerminalReleaseJournal(path.dirname(filePath));
+      const filePath = terminalReleaseJournalPath(path.join(dataDir, "nested"), "daemon-a");
+      const open = () =>
+        createDaemonTerminalReleaseJournal({
+          dataDir: path.join(dataDir, "nested"),
+          daemonSessionId: "daemon-a",
+          liveDaemonSessionIds: new Set(["daemon-a"]),
+        });
+      const journal = open();
       journal.record({ sessionId: "a", reason: "explicit-release", at: 1 });
       journal.record({ sessionId: "b", reason: "heartbeat-timeout", at: 2 });
       journal.resolve("a");
 
       expect(fs.readFileSync(filePath, "utf-8")).toBe(line("b", "heartbeat-timeout", 2));
-      expect(createDaemonTerminalReleaseJournal(path.dirname(filePath)).loadUnconfirmed()).toEqual([
+      expect(open().loadUnconfirmed()).toEqual([
         { sessionId: "b", reason: "heartbeat-timeout", at: 2 },
       ]);
 
@@ -210,6 +217,85 @@ describe("FileTerminalReleaseJournal (#10959)", () => {
       expect(fs.readdirSync(path.dirname(filePath))).toEqual([]);
     } finally {
       fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("per-daemon terminal release journals (#11158)", () => {
+  const DATA = "/data";
+  const legacy = path.join(DATA, TERMINAL_RELEASE_JOURNAL_FILE_NAME);
+  const own = terminalReleaseJournalPath(DATA, "self");
+  const peer = terminalReleaseJournalPath(DATA, "live-peer");
+  const dead = terminalReleaseJournalPath(DATA, "dead-daemon");
+
+  function open(fs: FakeTerminalReleaseJournalFileSystem, live: string[] = ["self", "live-peer"]) {
+    return createDaemonTerminalReleaseJournal({
+      dataDir: DATA,
+      daemonSessionId: "self",
+      liveDaemonSessionIds: new Set(live),
+      fileSystem: fs,
+    });
+  }
+
+  test("adopts a dead daemon's intents and never reads or touches a live peer's", () => {
+    const fs = new FakeTerminalReleaseJournalFileSystem();
+    fs.files.set(peer, line("peer-session", "heartbeat-timeout", 1));
+    fs.files.set(dead, line("dead-session", "explicit-release", 2) + '{"torn');
+
+    const journal = open(fs);
+
+    expect(journal.loadUnconfirmed()).toEqual([
+      { sessionId: "dead-session", reason: "explicit-release", at: 2 },
+    ]);
+    expect(fs.files.get(own)).toBe(line("dead-session", "explicit-release", 2));
+    expect(fs.files.has(dead)).toBe(false);
+    expect(fs.files.get(peer)).toBe(line("peer-session", "heartbeat-timeout", 1));
+  });
+
+  test("compaction rewrites only this daemon's file", () => {
+    const fs = new FakeTerminalReleaseJournalFileSystem();
+    const peerText = line("peer-a", "heartbeat-timeout", 1) + line("peer-b", "device-killed", 2);
+    fs.files.set(peer, peerText);
+    const journal = open(fs);
+    journal.record({ sessionId: "mine", reason: "explicit-release", at: 3 });
+    journal.record({ sessionId: "mine-2", reason: "explicit-release", at: 4 });
+
+    journal.resolve("mine");
+    journal.resolve("mine-2");
+
+    expect(fs.files.has(own)).toBe(false);
+    expect(fs.files.get(peer)).toBe(peerText);
+  });
+
+  test("the legacy shared file is adopted only when no peer daemon is live", () => {
+    const withPeer = new FakeTerminalReleaseJournalFileSystem();
+    withPeer.files.set(legacy, line("legacy-session", "explicit-release", 1));
+    expect(open(withPeer).loadUnconfirmed()).toEqual([]);
+    expect(withPeer.files.has(legacy)).toBe(true);
+
+    const alone = new FakeTerminalReleaseJournalFileSystem();
+    alone.files.set(legacy, line("legacy-session", "explicit-release", 1));
+    expect(open(alone, ["self"]).loadUnconfirmed()).toEqual([
+      { sessionId: "legacy-session", reason: "explicit-release", at: 1 },
+    ]);
+    expect(alone.files.has(legacy)).toBe(false);
+  });
+
+  test("a dead daemon's file is kept when its intents cannot be adopted durably", () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const fs = new FakeTerminalReleaseJournalFileSystem();
+      fs.files.set(dead, line("dead-session", "explicit-release", 2));
+      fs.failNextAppend = new Error("ENOSPC");
+
+      expect(open(fs).loadUnconfirmed()).toEqual([]);
+      expect(fs.files.get(dead)).toBe(line("dead-session", "explicit-release", 2));
+      // The next startup adopts it.
+      expect(open(fs).loadUnconfirmed()).toEqual([
+        { sessionId: "dead-session", reason: "explicit-release", at: 2 },
+      ]);
+    } finally {
+      warn.mockRestore();
     }
   });
 });

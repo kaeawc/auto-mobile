@@ -8655,6 +8655,21 @@ export class DevicePool {
     return true;
   }
 
+  /**
+   * Whether generic allocation may lend `deviceId`, from the last managed-slot snapshot and the
+   * live foreign-ownership probe: the same facts allocation filters on. Unknown devices are free.
+   */
+  genericAvailability(deviceId: string): "free" | "managed_slot" | "foreign_daemon" {
+    const device = this.devices.get(deviceId);
+    if (!device) {
+      return "free";
+    }
+    if (this.isManagedSlotDevice(device)) {
+      return "managed_slot";
+    }
+    return this.isDrivenByForeignDaemon(device) ? "foreign_daemon" : "free";
+  }
+
   /** Platform devices generic allocation may lend: none a managed slot holds. */
   private getGenericallyAllocatableDevices(platform?: Platform): PooledDevice[] {
     return this.getDevicesByPlatform(platform).filter(

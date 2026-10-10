@@ -197,6 +197,8 @@ export function createListingHandlers() {
       matchingBooted,
       deps.timer,
     );
+    // Refresh the managed-slot snapshot so held devices are not reported as free.
+    await pool?.managedSlotStableIds("android");
     const devices = listDevicePayloads(
       matchingBooted,
       pool,

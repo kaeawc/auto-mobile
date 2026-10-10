@@ -905,6 +905,7 @@ test/server/inventoryDeviceDescription.test.ts
 test/server/iosSimulatorMediaClient.test.ts
 test/server/isMutationQuery.test.ts
 test/server/listChangedBroadcast.test.ts
+test/server/livenessHandoverNotificationPayloads.test.ts
 test/server/managedSlotDeviceDeleter.test.ts
 test/server/navigationRelevantTools.test.ts
 test/server/networkGraph.test.ts

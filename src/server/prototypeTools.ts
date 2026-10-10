@@ -856,6 +856,29 @@ async function appearanceRefusal(
   return { success: false, error: new ActionableError(message).message };
 }
 
+const IOS_RESET_UNSUPPORTED_MESSAGE = `The connected iOS prototype agent does not advertise ${PROTOTYPE_SHOW_IN_PLACE_CAPABILITY}, so it does not support reset: it would keep the pager pages instead of starting fresh. Nothing was shown. Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version, or omit reset.`;
+
+/**
+ * Refuses, before anything is sent or any host state changes (#11394), `reset: true` on an iOS
+ * prototype agent that does not advertise `prototype_show_in_place_v1`: the transport refuses it
+ * too, but only after the event epoch was reset and assets uploaded. Android needs no refusal
+ * here: an older CtrlProxy re-shows fresh, which [legacyInPlaceWarning] reports.
+ */
+function iosResetRefusal(
+  target: PrototypeTarget,
+  args: z.infer<typeof prototypeSchema>,
+): PrototypeResult | undefined {
+  if (
+    args.action !== "show" ||
+    args.reset !== true ||
+    !target.ios ||
+    target.ios.supportsCapability(PROTOTYPE_SHOW_IN_PLACE_CAPABILITY)
+  ) {
+    return undefined;
+  }
+  return { success: false, error: new ActionableError(IOS_RESET_UNSUPPORTED_MESSAGE).message };
+}
+
 interface AnchorStage {
   /** The spec to send, element anchors replaced by bounds anchors; absent when unchanged. */
   spec?: PrototypeSpec;
@@ -1148,7 +1171,7 @@ async function resolveShowDisplay(
 }
 
 /**
- * Display resolution, then the theme-modes refusal, then the appearance-override refusal, then
+ * Display resolution, then the iOS reset refusal, the theme-modes refusal, then the appearance-override refusal, then
  * window-option support, then anchor
  * resolution: any refusal ends the call unsent and leaves the device untouched (the app-layer grant
  * is a device side effect that runs later, in [sendPrototype]). An in-place show stays on [show.shownDisplayId], so anchors are checked against that.
@@ -1169,6 +1192,7 @@ async function preflightMutation(
     return resolved;
   }
   const failure =
+    iosResetRefusal(target, args) ??
     (await themeModesRefusal(target, args, signal)) ??
     (await appearanceRefusal(target, args, signal)) ??
     (await windowOptionsRefusal(target, args, signal));
@@ -1324,9 +1348,6 @@ async function performMutation(
   );
   // The device is sent resolved bounds anchors; host status keeps the authored spec's identity.
   const sendArgs = resolved.spec ? { ...args, spec: resolved.spec } : args;
-  if (!resolved.failure) {
-    startFreshShowEvents(events, scope, source, { target, args, inPlace });
-  }
   const comparable = await comparableForMutation(resolved, inPlace, device, args, dependencies);
   // An in-place show names the display it replaces on: if the prototype is dismissed while assets
   // stage, the runner then shows it fresh there instead of on the default display.
@@ -1346,7 +1367,12 @@ async function performMutation(
     displayId,
     {
       superseded: () => isSuperseded(commits, scope, target, generation),
-      beforeSend: appLayerGrant(prototypeTarget, device, args, dependencies, signal),
+      beforeSend: async () => {
+        await appLayerGrant(prototypeTarget, device, args, dependencies, signal)?.();
+        // Last step before dispatch: a refusal, a failed upload, a lost race or a failed grant
+        // must leave the event epoch of a prototype still on screen alone (#11394).
+        startFreshShowEvents(events, scope, source, { target, args, inPlace });
+      },
     },
   );
   retireObservation(dependencies.cacheInvalidator, device, result);

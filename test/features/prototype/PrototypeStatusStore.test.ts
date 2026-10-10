@@ -107,6 +107,37 @@ describe("InMemoryPrototypeStatusStore scope bound", () => {
   });
 });
 
+describe("InMemoryPrototypeStatusStore failed mutations", () => {
+  test("a failed show or dismiss leaves the shown prototype's flags and snapshot intact (#11394)", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    const scope = { deviceId: "dev" };
+    store.adopt(scope, {
+      id: "panel",
+      persistent: true,
+      suspended: true,
+      pages: { pager: 1 },
+      state: { title: "typed" },
+    });
+    const failed = { success: false, error: "boom" };
+    const shown = store.record(scope, "show", { id: "panel" }, failed);
+    store.record(scope, "dismiss", { id: "panel" }, failed);
+    expect(shown).toMatchObject({ success: false, error: "boom" });
+    expect(store.status(scope).prototypes).toMatchObject([
+      {
+        id: "panel",
+        adopted: true,
+        persistent: true,
+        suspended: true,
+        success: true,
+        pages: { pager: 1 },
+        lastKnown: true,
+      },
+    ]);
+    expect(store.status(scope).prototypes[0]).not.toHaveProperty("error");
+    expect(store.status(scope).lastResult).toMatchObject({ success: false, error: "boom" });
+  });
+});
+
 describe("InMemoryPrototypeStatusStore suspended", () => {
   test("adopt records suspended only when true, and a fresh show clears it", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());

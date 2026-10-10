@@ -1006,11 +1006,10 @@ describe("prototype MCP tool", () => {
     client.setPrototypeResult({ success: false, error: "Service refused" });
     await call({ action: "show", spec });
     status = (await call({ action: "status" })).payload;
-    expect(status.prototypes![0]).toMatchObject({
-      lastAction: "show",
-      success: false,
-      error: "Service refused",
-    });
+    // The prototype still on screen keeps its own entry; the failure is lastResult's.
+    expect(status.prototypes![0]).toMatchObject({ lastAction: "show", success: true });
+    expect(status.prototypes![0]).not.toHaveProperty("error");
+    expect(status.lastResult).toMatchObject({ success: false, error: "Service refused" });
     await call({ action: "dismiss", all: true });
     expect((await call({ action: "status" })).payload.prototypes).toHaveLength(1);
   });

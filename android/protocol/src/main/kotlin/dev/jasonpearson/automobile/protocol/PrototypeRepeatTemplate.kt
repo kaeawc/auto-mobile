@@ -477,4 +477,12 @@ internal object PrototypeRepeatValidator {
     }
     return scope.items.mapIndexed { index, item -> bindKeys(value, scope, item, index) to index }
   }
+
+  /**
+   * True when the entry's `value` operand holds a repeat placeholder, so its type is not static.
+   */
+  fun operandTemplated(scopes: List<Scope>, value: JsonObject, path: String): Boolean {
+    val scope = scopes.firstOrNull { path.startsWith("${it.path}.children[") } ?: return false
+    return value.text("value")?.let { hasPlaceholder(it, scope.alias) } == true
+  }
 }

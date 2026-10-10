@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { invokeResourceTemplate } from "../helpers/invokeResourceTemplate";
 import { registerDatabaseResources } from "../../src/server/databaseResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -40,7 +41,7 @@ describe("database resources: malformed percent-escapes (#10117)", () => {
   async function read(uri: string) {
     const match = ResourceRegistry.matchTemplate(uri);
     expect(match).toBeDefined();
-    return match!.template.handler(match!.params);
+    return invokeResourceTemplate(match!);
   }
 
   const prefix = "automobile:devices/emulator-5554/databases";

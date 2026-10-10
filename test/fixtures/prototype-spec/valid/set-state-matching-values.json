@@ -1,0 +1,119 @@
+{
+  "id": "a",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "b": true,
+    "t": "x",
+    "n": 1,
+    "r": "a",
+    "tab": 0,
+    "d": "2026-10-08",
+    "h": 7,
+    "m": 30
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "switch",
+        "stateKey": "b",
+        "label": "S"
+      },
+      {
+        "type": "textField",
+        "stateKey": "t"
+      },
+      {
+        "type": "slider",
+        "stateKey": "n",
+        "min": 0,
+        "max": 10
+      },
+      {
+        "type": "radioGroup",
+        "stateKey": "r",
+        "options": [
+          {
+            "value": "a",
+            "label": "A"
+          },
+          {
+            "value": "b",
+            "label": "B"
+          }
+        ]
+      },
+      {
+        "type": "tabBar",
+        "stateKey": "tab",
+        "items": [
+          {
+            "label": "A"
+          },
+          {
+            "label": "B"
+          }
+        ]
+      },
+      {
+        "type": "datePicker",
+        "stateKey": "d"
+      },
+      {
+        "type": "timePicker",
+        "hourKey": "h",
+        "minuteKey": "m"
+      },
+      {
+        "type": "button",
+        "label": "Go",
+        "onTap": [
+          {
+            "type": "setState",
+            "key": "b",
+            "value": false
+          },
+          {
+            "type": "setState",
+            "key": "t",
+            "value": "hello"
+          },
+          {
+            "type": "setState",
+            "key": "n",
+            "value": 10
+          },
+          {
+            "type": "setState",
+            "key": "r",
+            "value": "zzz"
+          },
+          {
+            "type": "setState",
+            "key": "tab",
+            "value": 3
+          },
+          {
+            "type": "setState",
+            "key": "d",
+            "value": "2024-02-29"
+          },
+          {
+            "type": "setState",
+            "key": "h",
+            "value": 23
+          },
+          {
+            "type": "setState",
+            "key": "m",
+            "value": 0
+          }
+        ]
+      }
+    ]
+  }
+}

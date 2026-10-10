@@ -7,6 +7,7 @@ import android.os.Looper
 import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.Composable
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSpecContent
 import dev.jasonpearson.automobile.ctrlproxy.prototype.mapPrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
@@ -56,14 +57,32 @@ internal object BitmapPngCodec : PrototypeScreenshotComparator.PngCodec {
 internal fun validPrototypeFixture(
   name: String,
   resolveElementAnchors: Boolean = false,
+  stateOverrides: Map<String, JsonElement> = emptyMap(),
 ): PrototypeSpec {
   val file =
     generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
       .map { File(it, "test/fixtures/prototype-spec/valid/$name.json") }
       .first { it.isFile }
-  if (!resolveElementAnchors) return loadPrototypeSpec(file)
-  val resolved = resolveElementAnchors(Json.parseToJsonElement(file.readText()))
-  return loadPrototypeSpecText(file.path, Json.encodeToString(JsonElement.serializer(), resolved))
+  if (!resolveElementAnchors && stateOverrides.isEmpty()) return loadPrototypeSpec(file)
+  var edited = Json.parseToJsonElement(file.readText())
+  if (resolveElementAnchors) edited = resolveElementAnchors(edited)
+  if (stateOverrides.isNotEmpty()) edited = overrideInitialState(edited, stateOverrides)
+  return loadPrototypeSpecText(file.path, Json.encodeToString(JsonElement.serializer(), edited))
+}
+
+/**
+ * Replaces keys of the spec's initial `state`, so a gallery case can open a dialog or bottom sheet
+ * that the shared fixture authors closed. Only keys the fixture already declares may be set.
+ */
+private fun overrideInitialState(
+  spec: JsonElement,
+  overrides: Map<String, JsonElement>,
+): JsonElement {
+  val root = spec as JsonObject
+  val state = root["state"] as JsonObject
+  val unknown = overrides.keys - state.keys
+  check(unknown.isEmpty()) { "fixture state has no keys $unknown" }
+  return JsonObject(root + ("state" to JsonObject(state + overrides)))
 }
 
 private val RESOLVED_BOUNDS =
@@ -116,11 +135,22 @@ internal fun renderPrototype(
   spec: PrototypeSpec,
 ): PrototypeScreenshotComparator.Image {
   val model = mapPrototypeSpec(spec)
+  // The spec's own theme must reach the renderer, as it does in the live prototype host.
+  return renderComposable(name) { PrototypeSpecContent(model.root, theme = model.theme) }
+}
+
+/**
+ * Draws [content] in a Robolectric activity and captures the composed view. Shared by
+ * [renderPrototype] and the host-chrome screenshot test.
+ */
+internal fun renderComposable(
+  name: String,
+  content: @Composable () -> Unit,
+): PrototypeScreenshotComparator.Image {
   val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
   try {
     val activity = controller.get()
-    // The spec's own theme must reach the renderer, as it does in the live prototype host.
-    activity.setContent { PrototypeSpecContent(model.root, theme = model.theme) }
+    activity.setContent(content = content)
     shadowOf(Looper.getMainLooper()).idleFor(SETTLE)
     val view = activity.findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
     check(view.width > 0 && view.height > 0) { "$name: prototype view was not laid out" }

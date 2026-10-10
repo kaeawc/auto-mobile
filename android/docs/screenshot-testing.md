@@ -140,7 +140,12 @@ The gallery covers every node type (`fullscreen-all-nodes`, the doc examples), t
 components (`material-controls`, `material-slider-chip-card`, `selection-controls`), style tokens
 (colour roles, corners, elevation, gradients, aspect ratio, `when` styles, text roles, row weights)
 and the theme options (seed, typography and shapes, and a `system` theme on a light and a dark
-device).
+device). Dark-mode (`+night`) cases cover the full gallery, an open bottom sheet (scrim and drag
+handle, light and dark), an open dialog (scrim) and a spec with no theme and a dark authored
+background (inferred dark). Open sheets and dialogs come from `validPrototypeFixture(...,
+stateOverrides = ...)`, which flips a declared initial state key. `PrototypeHostChromeScreenshotTest`
+captures the host chrome (fullscreen dismiss bar and persistent Close control) in light and dark.
+`renderPrototype` applies the spec's own `theme`, so `theme_*` baselines show the authored scheme.
 
 ### Previewing a spec without a device
 
@@ -154,7 +159,8 @@ scripts/android/prototype-preview.sh --width 411 --height 891 --density 420 --th
 ```
 
 `--width`/`--height` (dp, default 360 x 640) set the surface the prototype lays out in, `--density`
-(dpi, default 160) its pixel density, and `--theme` (`light` or `dark`) the device night mode, which
-only affects specs whose theme mode is `system` or unset. The PNG is the prototype content's own
+(dpi, default 160) its pixel density, and `--theme` (`light`, `dark` or `both`) the device night mode,
+which only affects specs whose theme mode is `system` or unset. `--theme both` renders twice and
+writes `<name>-light.png` and `<name>-dark.png` (and `contact-sheet-light.png`/`-dark.png`). The PNG is the prototype content's own
 bounds with a transparent background; window placement (floating anchors, sheets over an app) is
 not composited. Expect about half a minute with a warm Gradle daemon.

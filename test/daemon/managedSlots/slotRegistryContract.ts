@@ -1023,6 +1023,36 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
         expect((await registry.getAssignment(key))?.state).toBe("replacing");
       });
 
+      test("a cross-platform target's newPlatform survives the store and a later advance (#11457)", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        const opened = await registry.openSlotJournal(key, {
+          kind: "replace",
+          phase: "deleting",
+          owner: OWNER_1,
+          target: { ...TARGET, newPlatform: "ios" },
+          assignment: { kind: "state", expected: BOUND, state: "replacing" },
+        });
+        if (opened.kind !== "opened") {
+          throw new Error(`journal not opened: ${opened.kind}`);
+        }
+        expect(opened.entry.target.newPlatform).toBe("ios");
+        const [reread] = await registry.listOpenSlotJournal(key);
+        expect(reread?.target).toEqual({ ...TARGET, newPlatform: "ios" });
+        const advanced = await registry.advanceSlotJournal(opened.entry.id, {
+          owner: OWNER_1,
+          expectedPhase: "deleting",
+          phase: "deleted",
+          target: { newName: "amslot-new-g2" },
+        });
+        expect(advanced).toMatchObject({
+          kind: "advanced",
+          entry: { target: { newPlatform: "ios", newName: "amslot-new-g2" } },
+        });
+        const [afterAdvance] = await registry.listOpenSlotJournal(key);
+        expect(afterAdvance?.target.newPlatform).toBe("ios");
+      });
+
       test("a stale binding refuses to open and writes nothing", async () => {
         const key = { scopeKey: await readyScope(), slotIndex: 0 };
         await boundSlot(key, "avd-1");

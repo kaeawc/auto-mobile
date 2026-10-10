@@ -16,6 +16,8 @@ import type {
 } from "./devicePool";
 
 export interface AdbServerResetQuarantinePoolPort {
+  /** Tell resource subscribers a status or holder write committed (#11413). */
+  noteDeviceStateChanged?(device: Pick<PooledDevice, "id" | "platform">): void;
   getAssignmentMutex(): Mutex;
   getDevices(): Map<string, PooledDevice>;
   getSessionManager(): SessionManager;
@@ -147,6 +149,7 @@ export class AdbServerResetQuarantine {
         this.reserveAdbServerResetRecovery(device);
         device.sessionId = null;
         device.status = "idle";
+        this.pool.noteDeviceStateChanged?.(device);
         await this.pool.removeDevice(device.id, false, device);
         detached.push(device);
       }

@@ -14,6 +14,15 @@ import type {
 } from "./types";
 
 export const BOOTED_STATE = "Booted";
+/**
+ * Simulator states that already hold a capacity slot: a booting or shutting-down
+ * simulator uses CPU and memory although `simctl` does not list it as Booted (#11291).
+ */
+export const SLOT_OCCUPYING_STATES: ReadonlySet<string> = new Set([
+  BOOTED_STATE,
+  "Booting",
+  "Shutting Down",
+]);
 
 /** Narrow consumer-facing seam: anything that can produce a fleet cost report. */
 export interface FleetCostSource {

@@ -425,6 +425,40 @@ describe("capacity gate", () => {
   });
 });
 
+describe("capacity gate occupying states (#11291)", () => {
+  const oneSlot = { [IOS_SIM_MAX_BOOTED_ENV]: "1" };
+  const inState = (udid: string, state: string) =>
+    parseSimctlInventory(SIMCTL).map((entry) =>
+      entry.udid === udid ? { ...entry, state } : entry,
+    );
+
+  test("a Booting simulator holds a slot: admission refuses and capacity reports it", async () => {
+    const { collector, timer, source } = setup([]);
+    source.inventory = inState(IOS27, "Booting");
+    const gate = new IosSimCapacityGate(collector, timer, { env: oneSlot });
+    const result = await gate.admitBoot(undefined, { bootUdid: "NEW" });
+    expect(result.decision).toMatchObject({ outcome: "refuse", bootedCount: 1 });
+    expect((await gate.describeCapacity()).booted).toBe(1);
+  });
+
+  test("a Shutting Down simulator still holds its slot", async () => {
+    const { collector, timer, source } = setup([]);
+    source.inventory = inState(IOS27, "Shutting Down");
+    const gate = new IosSimCapacityGate(collector, timer, { env: oneSlot });
+    expect((await gate.admitBoot(undefined, { bootUdid: "NEW" })).decision.outcome).toBe("refuse");
+  });
+
+  test("an own admitted boot already Booting is counted once", async () => {
+    const { collector, timer, source } = setup([]);
+    const gate = new IosSimCapacityGate(collector, timer, {
+      env: { [IOS_SIM_MAX_BOOTED_ENV]: "3" },
+    });
+    await gate.admitBoot(undefined, { bootUdid: IOS27 });
+    source.inventory = inState(IOS27, "Booting");
+    expect(await gate.evaluateBoot()).toMatchObject({ outcome: "allow", bootedCount: 1 });
+  });
+});
+
 describe("fleet monitor", () => {
   test("ticks never overlap while a sample is slow", async () => {
     const { collector, timer, source } = setup([IOS27]);

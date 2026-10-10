@@ -11,7 +11,7 @@ import {
   type BootCapacitySnapshot,
   type RefusedCapacityDecision,
 } from "../bootAdmission/BootAdmissionGate";
-import { BOOTED_STATE, type FleetCostSource } from "./FleetCostCollector";
+import { SLOT_OCCUPYING_STATES, type FleetCostSource } from "./FleetCostCollector";
 import {
   estimatePerSimulatorBytes,
   findWarmCompatibleDevices,
@@ -125,7 +125,7 @@ export class IosSimCapacityGate
       return { outcome: "reuse-warm", udid: warm.udid };
     }
     const limits = this.limitsFor(report);
-    const bootedCount = report.totals.bootedCount + this.inFlightBootCount(report);
+    const bootedCount = this.occupiedCount(report) + this.inFlightBootCount(report);
     const queued = this.queueReason(bootedCount, limits);
     if (queued) {
       return {
@@ -172,7 +172,7 @@ export class IosSimCapacityGate
     const report = await this.fleet.collect();
     return {
       limit: this.limitsFor(report).maxBooted,
-      booted: report.totals.bootedCount,
+      booted: this.occupiedCount(report),
       inFlight: this.inFlightBootCount(report),
       hostPressure: {
         sustained: this.pressuredStreak >= this.sustainedSamples,
@@ -182,10 +182,19 @@ export class IosSimCapacityGate
     };
   }
 
-  /** Admitted boots that the latest sample does not already show as Booted. */
+  /** Simulators holding a slot: Booted, Booting or Shutting Down, whoever started them. */
+  private occupiedCount(report: FleetCostReport): number {
+    return report.simulators.filter((sim) => SLOT_OCCUPYING_STATES.has(sim.state)).length;
+  }
+
+  /** Admitted boots that the latest sample does not already show as occupying a slot. */
   private inFlightBootCount(report: FleetCostReport): number {
     return this.admittedBoots.inFlightCount(
-      new Set(report.simulators.filter((sim) => sim.state === BOOTED_STATE).map((sim) => sim.udid)),
+      new Set(
+        report.simulators
+          .filter((sim) => SLOT_OCCUPYING_STATES.has(sim.state))
+          .map((sim) => sim.udid),
+      ),
     );
   }
 

@@ -1258,6 +1258,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       toolName: name,
       sessionId,
       sessionUuid: executionSessionUuid,
+      readOnly: tool.isDeviceReadOnlyCall?.(toolParams) === true,
     });
     if (decision.blocked) {
       logger.warn(

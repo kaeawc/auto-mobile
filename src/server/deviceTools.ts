@@ -101,6 +101,7 @@ import {
 import { stopSegmentedVideoRecordingsForDevice } from "./videoRecordingTools";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
+import type { BootCapacityReporter } from "../features/bootAdmission/BootAdmissionGate";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
@@ -1261,6 +1262,12 @@ export interface DeviceToolsDependencies {
    * defaults to the process-wide admission gates.
    */
   checkBootCapacity?: (platform: Platform, signal?: AbortSignal) => Promise<void>;
+  /**
+   * Per-platform boot capacity reporters the `listDevices` `capacity` field samples; defaults to
+   * the process-wide admission gates, which probe adb/simctl/ps. Injected by the benchmark so the
+   * listing runs without spawning host processes.
+   */
+  bootCapacityReporters?: Partial<Record<Platform, BootCapacityReporter>>;
   clearInstalledAppsForDevice: (deviceId: string) => Promise<void>;
   stopPerformanceMonitoring: (deviceId: string) => void;
   stopAndroidObservers: (device: BootedDevice) => Promise<void>;
@@ -3507,6 +3514,7 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     deviceCreationGateFactory:
       deps.deviceCreationGateFactory ?? currentDeps.deviceCreationGateFactory,
     deviceProvisionerFactory: deps.deviceProvisionerFactory ?? currentDeps.deviceProvisionerFactory,
+    bootCapacityReporters: deps.bootCapacityReporters ?? currentDeps.bootCapacityReporters,
     ...provisionDeviceDependencyOverrides(deps, currentDeps),
     clearInstalledAppsForDevice:
       deps.clearInstalledAppsForDevice ?? currentDeps.clearInstalledAppsForDevice,

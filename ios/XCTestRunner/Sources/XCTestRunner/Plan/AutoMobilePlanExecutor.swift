@@ -129,6 +129,8 @@ public final class AutoMobilePlanExecutor: Sendable {
             try await ensureDaemonRunning()
         }
 
+        // One held-device wait budget for the whole run, as on Android: waits never spend a retry.
+        var deviceWait = DeviceWaitBackoff()
         for attempt in 0 ... configuration.retryCount {
             do {
                 if attempt > 0 {
@@ -137,12 +139,10 @@ public final class AutoMobilePlanExecutor: Sendable {
                 // A transient retry runs under a fresh session (#11072), as on Android: the failed
                 // attempt's session was released (by the daemon, or by this runner when it was held
                 // for recovery), and a released UUID is terminal on the daemon.
-                return try await executeAttempt(
-                    startStep: configuration.startStep,
-                    recoveryAlreadyAttempted: false,
-                    deviceIdOverride: nil,
-                    sessionUuidOverride: attempt == 0 ? sessionUuid : idGenerator(),
-                    testMetadata: testMetadata
+                return try await executeAttemptWaitingForDevice(
+                    sessionUuid: attempt == 0 ? sessionUuid : idGenerator(),
+                    testMetadata: testMetadata,
+                    deviceWait: &deviceWait
                 )
             } catch is CancellationError {
                 throw CancellationError()
@@ -164,6 +164,43 @@ public final class AutoMobilePlanExecutor: Sendable {
             throw error
         }
         throw ExecutorError.executionFailed("Unknown failure")
+    }
+
+    /// Run one attempt, waiting out a device another session holds (or is still cleaning up, or is
+    /// shutting down) within the bounded `deviceWait` budget instead of failing at once (#11195). Each
+    /// wait honours the daemon's `retryAfterMs` and runs the next pass under a fresh session, as the
+    /// Android runner does; once the budget is spent the attempt fails without a further retry.
+    private func executeAttemptWaitingForDevice(
+        sessionUuid: String,
+        testMetadata: TestMetadata?,
+        deviceWait: inout DeviceWaitBackoff
+    )
+        async throws -> ExecutePlanResult
+    {
+        var session = sessionUuid
+        while true {
+            do {
+                return try await executeAttempt(
+                    startStep: configuration.startStep,
+                    recoveryAlreadyAttempted: false,
+                    deviceIdOverride: nil,
+                    sessionUuidOverride: session,
+                    testMetadata: testMetadata
+                )
+            } catch let ExecutorError.refused(_, refusal) where refusal.waitsForDevice {
+                guard let delayMs = deviceWait.nextDelayMs(retryAfterMs: refusal.retryAfterMs) else {
+                    throw ExecutorError.deviceUnavailable(
+                        Self.deviceWaitGiveUpMessage(refusal, waitedMs: deviceWait.waitedMs)
+                    )
+                }
+                logger.info(
+                    "Device is unavailable (\(refusal.code ?? "unknown")); waiting \(delayMs)ms before retrying " +
+                        "(wait \(deviceWait.waits)): \(refusal.message)"
+                )
+                try await deadlineScheduler.sleep(seconds: TimeInterval(delayMs) / 1000)
+                session = idGenerator()
+            }
+        }
     }
 
     /// Before retrying a failed plan execution over the daemon socket, restart a version-skewed
@@ -287,12 +324,17 @@ public final class AutoMobilePlanExecutor: Sendable {
             try Task.checkCancellation()
             try await mcpClient.initialize(timeout: configuration.timeoutSeconds)
             try Task.checkCancellation()
-            _ = try await mcpClient.callTool(
+            let enabled = try await mcpClient.callTool(
                 name: "setToolEnabled",
                 arguments: ["toolName": "executePlan", "sessionUuid": sessionUuid],
                 timeout: configuration.timeoutSeconds
             )
             try Task.checkCancellation()
+            // A refused opt-in (held device, terminal session) must not go on to executePlan, which
+            // the daemon would then refuse as not enabled for this session.
+            if let refusal = DaemonRefusal.parse(enabled.text) {
+                throw ExecutorError.refused(tool: "setToolEnabled", refusal)
+            }
             let result: ExecutePlanResult
             do {
                 executePlanDispatch?.sent = true
@@ -619,6 +661,10 @@ public final class AutoMobilePlanExecutor: Sendable {
     private func decodeExecutePlanResult(from text: String) throws -> ExecutePlanResult {
         guard let data = text.data(using: .utf8) else {
             throw ExecutorError.invalidResponse("Response text is not valid UTF-8")
+        }
+        // A refusal carries no step counts; decoding it as a plan result would hide its typed code.
+        if let refusal = DaemonRefusal.parse(text) {
+            throw ExecutorError.refused(tool: "executePlan", refusal)
         }
         do {
             return try JSONDecoder().decode(ExecutePlanResult.self, from: data)

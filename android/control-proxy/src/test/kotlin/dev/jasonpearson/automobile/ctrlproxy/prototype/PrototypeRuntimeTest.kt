@@ -85,7 +85,9 @@ class PrototypeRuntimeTest {
         PrototypePageTarget.Index(0),
       )) runtime.handle(tap(PrototypeSetPageAction("pager", target)))
     assertEquals(listOf(1, 3, 2, 0), events.map { it.pages.getValue("pager") })
-    assertTrue(events.all { it.name == null && it.payload == null })
+    // Every page_changed names its pager and carries the new page index (#11409).
+    assertTrue(events.all { it.kind == PrototypeEventKind.PAGE_CHANGED && it.name == "pager" })
+    assertEquals(listOf(1, 3, 2, 0).map { JsonPrimitive(it) }, events.map { it.payload })
   }
 
   @Test

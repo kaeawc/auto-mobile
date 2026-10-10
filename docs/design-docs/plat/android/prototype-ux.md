@@ -320,6 +320,10 @@ the future renderer. Nav item count need not equal pager page count; authors
 should match them when each item represents a page. Per-pager selection starts
 at zero, is separate from the flat state map, and is changed by `setPage`.
 
+When a pager settles on another page the device sends one `page_changed` event whose
+`name` is the pager id and whose `payload` is the new zero-based page index, the same
+shape as the iOS agent (#11409). The event `pages` map still carries every pager.
+
 `bottomSheet.openWhen` is `{key, equals}` with a **boolean** equals value. Its
 state key may be absent (sheet closed); an existing value must be boolean. A
 swipe dismissal with `dismissOnSwipe: true` writes `!equals` to that key, making

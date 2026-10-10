@@ -277,7 +277,8 @@ class PrototypeRuntime(
     val page = requested.coerceIn(0, count - 1)
     if (current.pages[id] == page) return
     mutableSnapshot.value = current.copy(pages = current.pages + (id to page))
-    emit(PrototypeEventKind.PAGE_CHANGED)
+    // Names the pager that moved and its new page, as the iOS agent does (#11409).
+    emit(PrototypeEventKind.PAGE_CHANGED, id, JsonPrimitive(page))
   }
 
   private fun setState(key: String, value: PrototypeScalar) = setStates(mapOf(key to value))

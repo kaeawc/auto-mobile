@@ -70,6 +70,7 @@ import {
   parseManagedSlotConfig,
   type ManagedSlotConfigErrorCode,
 } from "../models/managedSlotConfig";
+import type { ManagedSlotsResult } from "../models/managedSlotsResult";
 import { executionTracker } from "../server/executionTracker";
 import { sessionHoldDiagnostics, vetoedIdleReleaseAt } from "./sessionHoldDiagnostics";
 import {
@@ -121,7 +122,7 @@ export interface DaemonStateAccess {
   /** The managed slot scope reset behind `daemon/resetSlotScope` (#11174). */
   getSlotScopeReset?(): Pick<SlotScopeReset, "reset"> | undefined;
   /** Socket sessions bound to managed slots (#11178). */
-  getManagedConnectionScopes?(): Pick<ManagedConnectionScopes, "get" | "unbind">;
+  getManagedConnectionScopes?(): Pick<ManagedConnectionScopes, "bind" | "get" | "unbind">;
   /** The managed-slot acquisition behind `daemon/acquireManagedSlots` (#11173). */
   getManagedSlotAcquisition?(): Pick<ManagedSlotAcquisition, "acquire"> | undefined;
   getSessionManager(): {
@@ -299,12 +300,19 @@ async function handleRegisterSession(
     : { success: false, error: registration.error };
 }
 
+/** Who sent a socket daemon request. */
+export interface DaemonRequestContext {
+  /** The requesting socket session (the `__mcpSessionId` its forwarded tool calls carry). */
+  socketSessionId?: string;
+}
+
 export async function handleDaemonRequest(
   request: DaemonRequest,
   state: DaemonStateAccess,
   executions?: SessionExecutionCanceller,
   /** Aborts when the requesting socket closes or cancels this request. */
   signal?: AbortSignal,
+  context: DaemonRequestContext = {},
 ): Promise<DaemonMethodResult> {
   if (!request.method.startsWith("daemon/")) {
     return {
@@ -336,14 +344,15 @@ export async function handleDaemonRequest(
     };
   }
 
-  return handleInitializedDaemonRequest(request, state, executions, signal);
+  return handleInitializedDaemonRequest(request, state, executions, signal, context);
 }
 
 type InitializedDaemonMethodHandler = (
   request: DaemonRequest,
   state: DaemonStateAccess,
-  executions?: SessionExecutionCanceller,
-  signal?: AbortSignal,
+  executions: SessionExecutionCanceller | undefined,
+  signal: AbortSignal | undefined,
+  context: DaemonRequestContext,
 ) => DaemonMethodResult | Promise<DaemonMethodResult>;
 
 /** Socket daemon methods served once the daemon is initialized, by method name. */
@@ -365,7 +374,8 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
     [DAEMON_RESET_SLOT_SCOPE_METHOD, handleResetSlotScope],
     [
       DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD,
-      (request, state, _executions, signal) => handleAcquireManagedSlots(request, state, signal),
+      (request, state, _executions, signal, context) =>
+        handleAcquireManagedSlots(request, state, signal, context),
     ],
     [DAEMON_LIST_DEVICE_SESSIONS_METHOD, handleListDeviceSessions],
     [DAEMON_DEVICE_LEASE_STATUS_METHOD, handleDeviceLeaseStatus],
@@ -375,8 +385,9 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
 async function handleInitializedDaemonRequest(
   request: DaemonRequest,
   state: DaemonStateAccess,
-  executions?: SessionExecutionCanceller,
-  signal?: AbortSignal,
+  executions: SessionExecutionCanceller | undefined,
+  signal: AbortSignal | undefined,
+  context: DaemonRequestContext,
 ): Promise<DaemonMethodResult> {
   const handler = INITIALIZED_DAEMON_METHOD_HANDLERS.get(request.method);
   if (!handler) {
@@ -385,7 +396,7 @@ async function handleInitializedDaemonRequest(
       error: `Unsupported daemon method: ${request.method}`,
     };
   }
-  return await handler(request, state, executions, signal);
+  return await handler(request, state, executions, signal, context);
 }
 
 async function handleReleaseLivenessOwnership(
@@ -1127,7 +1138,8 @@ const acquireManagedSlotsParams = z.object({
 async function handleAcquireManagedSlots(
   request: DaemonRequest,
   state: DaemonStateAccess,
-  signal?: AbortSignal,
+  signal: AbortSignal | undefined,
+  context: DaemonRequestContext,
 ): Promise<DaemonMethodResult> {
   const parsed = acquireManagedSlotsParams.safeParse(request.params);
   if (!parsed.success) {
@@ -1155,7 +1167,33 @@ async function handleAcquireManagedSlots(
     livenessOwnerToken: parsed.data.livenessOwnerToken,
     signal,
   });
+  // A socket that closed mid-acquisition was already unbound; never bind its dead session id.
+  if (!signal?.aborted) {
+    bindManagedConnection(state, context.socketSessionId, result);
+  }
   return { success: true, result: { ...result } };
+}
+
+/**
+ * Confine the acquiring socket session to what the acquisition granted (#11178): its slot sessions
+ * on `ready`, nothing on a failure (owner decision Q5: device calls refused). Bound fail-closed: a
+ * failed managed proxy's connection must not fall back to generic acquisition. A config that never
+ * reached a scope (no scope key) binds nothing.
+ */
+function bindManagedConnection(
+  state: DaemonStateAccess,
+  socketSessionId: string | undefined,
+  result: ManagedSlotsResult,
+): void {
+  const scopeKey = result.scope.scopeKey;
+  if (socketSessionId === undefined || scopeKey === null) {
+    return;
+  }
+  const sessionUuids =
+    result.outcome === "ready"
+      ? result.slots.flatMap((slot) => (slot.sessionUuid ? [slot.sessionUuid] : []))
+      : [];
+  state.getManagedConnectionScopes?.().bind(socketSessionId, { scopeKey, sessionUuids });
 }
 
 /**

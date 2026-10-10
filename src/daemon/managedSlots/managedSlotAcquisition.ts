@@ -45,7 +45,9 @@ import {
   type SlotProcessIdentity,
   type SlotRegistry,
   type SlotScopeIdentity,
+  type SlotScopeRecord,
 } from "./slotRegistry";
+import { SLOT_SCOPE_RESET_DEFAULT_WAIT_MS, type SlotScopeResetScopeResult } from "./slotScopeReset";
 
 export interface ManagedSlotAcquisitionSessions {
   /** Claim the session's liveness for the caller's owner token. */
@@ -73,6 +75,15 @@ export interface ManagedSlotAcquisitionDependencies {
   /** This daemon, recorded as the slots' execution owner. */
   owner: () => SlotProcessIdentity;
   timer: Pick<Timer, "now">;
+  /**
+   * The implicit reset of a superseded incarnation (`SlotScopeReset.resetSupersededScope`, #11174):
+   * waits up to `waitMs` for the old scope's owners and cleanup to settle. Absent, or returning
+   * undefined (no reset wired), the acquisition checks the old scope once without waiting.
+   */
+  resetSupersededScope?: (
+    scope: SlotScopeRecord,
+    waitMs: number,
+  ) => Promise<Pick<SlotScopeResetScopeResult, "outcome" | "pending">> | undefined;
 }
 
 export interface ManagedSlotAcquireOptions {
@@ -149,7 +160,7 @@ export class ManagedSlotAcquisition {
     const deadlineMs =
       this.deps.timer.now() + (config.preparationTimeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
     const registry = await this.deps.registry();
-    const admission = await this.admitScope(registry, identity);
+    const admission = await this.admitScope(registry, identity, deadlineMs);
     if (admission.kind === "failed") {
       return {
         ...base(computeSlotScopeKey(identity)),
@@ -226,24 +237,13 @@ export class ManagedSlotAcquisition {
   private async admitScope(
     registry: SlotRegistry,
     identity: SlotScopeIdentity,
+    deadlineMs: number,
   ): Promise<ScopeAdmission> {
     let ensured = await registry.ensureScope(identity);
     if (ensured.kind === "incarnation_conflict") {
-      const previous = ensured.current;
-      await registry.beginScopeInvalidation(previous.scopeKey, "incarnation_reset");
-      const completed = await registry.completeScopeInvalidation(previous.scopeKey);
-      if (completed.kind === "pending") {
-        return {
-          kind: "failed",
-          failure: acquisitionFailure(
-            "scope_transition_pending",
-            `Runner incarnation '${previous.runnerIncarnation}' of namespace ` +
-              `'${previous.runnerNamespace}' still has ${completed.liveOwners.length} live ` +
-              `execution(s), ${completed.settling.length} settling and ` +
-              `${completed.cleanupPending.length} cleanup-pending slot(s).`,
-            true,
-          ),
-        };
+      const pending = await this.retireSupersededScope(registry, ensured.current, deadlineMs);
+      if (pending) {
+        return { kind: "failed", failure: pending };
       }
       ensured = await registry.ensureScope(identity);
     }
@@ -276,6 +276,56 @@ export class ManagedSlotAcquisition {
           ),
         };
     }
+  }
+
+  /**
+   * Retire the superseded incarnation through the settle-waiting reset when one is wired (bounded by
+   * the preparation deadline), else with one settle check. Returns the `scope_transition_pending`
+   * failure while the old scope is unsettled, undefined once it is invalidated.
+   */
+  private async retireSupersededScope(
+    registry: SlotRegistry,
+    previous: SlotScopeRecord,
+    deadlineMs: number,
+  ): Promise<ManagedSlotsFailure | undefined> {
+    const waitMs = Math.max(
+      0,
+      Math.min(SLOT_SCOPE_RESET_DEFAULT_WAIT_MS, deadlineMs - this.deps.timer.now()),
+    );
+    const reset = await this.deps.resetSupersededScope?.(previous, waitMs);
+    let waiting: { liveOwners: number; settling: number; cleanupPending: number } | undefined;
+    if (reset) {
+      waiting =
+        reset.outcome === "pending"
+          ? {
+              liveOwners: reset.pending?.liveOwners.length ?? 0,
+              settling: reset.pending?.settling.length ?? 0,
+              cleanupPending: reset.pending?.cleanupPending.length ?? 0,
+            }
+          : undefined;
+    } else {
+      await registry.beginScopeInvalidation(previous.scopeKey, "incarnation_reset");
+      const completed = await registry.completeScopeInvalidation(previous.scopeKey);
+      waiting =
+        completed.kind === "pending"
+          ? {
+              liveOwners: completed.liveOwners.length,
+              settling: completed.settling.length,
+              cleanupPending: completed.cleanupPending.length,
+            }
+          : undefined;
+    }
+    if (!waiting) {
+      return undefined;
+    }
+    return acquisitionFailure(
+      "scope_transition_pending",
+      `Runner incarnation '${previous.runnerIncarnation}' of namespace ` +
+        `'${previous.runnerNamespace}' still has ${waiting.liveOwners} live ` +
+        `execution(s), ${waiting.settling} settling and ` +
+        `${waiting.cleanupPending} cleanup-pending slot(s).`,
+      true,
+    );
   }
 
   private async acquireSlot(

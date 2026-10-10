@@ -18,6 +18,7 @@ import {
   ManagedExecutionRelease,
   managedExecutionSessionsFrom,
 } from "../../src/daemon/managedSlots/managedExecutionRelease";
+import { ManagedConnectionScopes } from "../../src/daemon/managedSlots/managedConnectionScope";
 import { ManagedSlotAcquisition } from "../../src/daemon/managedSlots/managedSlotAcquisition";
 import {
   DefaultManagedSpecResolver,
@@ -112,6 +113,8 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
   let provisioner: SessionMintingProvisioner;
   let deleter: FakeDeleter;
   let state: DaemonStateAccess;
+  let connectionScopes: ManagedConnectionScopes;
+  let socketCount: number;
   let advertiseManagedSlots: boolean;
   let isAvailableSpy: ReturnType<typeof spyOn>;
   let warnSpy: ReturnType<typeof spyOn>;
@@ -167,8 +170,11 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
       timer,
       settler: { daemonId: "daemon-1", pid: 4242 },
     });
+    connectionScopes = new ManagedConnectionScopes();
+    socketCount = 0;
     state = {
       isInitialized: () => true,
+      getManagedConnectionScopes: () => connectionScopes,
       getManagedSlotAcquisition: () => acquisition,
       getManagedExecutionRelease: () => drain,
       getSessionManager: () => sessionManager,
@@ -194,6 +200,8 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
       livenessOwnerToken: TOKEN,
       heartbeatIntervalMs: 2_000,
       clientFactory: () => {
+        // Each daemon client is one socket session, as the socket server stamps it.
+        const socketSessionId = `socket-${++socketCount}`;
         const client = new FakeDaemonClient({
           daemonMethodResults: new Map<string, unknown>([
             ["resources/list", { resources: [] }],
@@ -206,6 +214,9 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
             const response = await handleDaemonRequest(
               { id: "r", type: "daemon_request", method, params },
               state,
+              undefined,
+              undefined,
+              { socketSessionId },
             );
             if (!response.success) {
               throw Object.assign(new Error(response.error), { code: response.code });
@@ -289,6 +300,27 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
     } finally {
       await mcp.close();
     }
+  });
+
+  test("the acquiring socket session is bound to exactly its slot sessions", async () => {
+    const proxy = newProxy();
+
+    const result = await proxy.acquireManagedSlots(configFor());
+
+    const binding = connectionScopes.get("socket-1");
+    expect(binding?.scopeKey).toBe(computeSlotScopeKey(configFor()));
+    expect([...(binding?.sessionUuids ?? [])]).toEqual([result.slots[0]!.sessionUuid!]);
+  });
+
+  test("a failed acquisition binds its socket session to no slot session (fail closed)", async () => {
+    provisioner.failWith = () => new Error("simctl create failed");
+    const proxy = newProxy();
+
+    await proxy.acquireManagedSlots(configFor());
+
+    const binding = connectionScopes.get("socket-1");
+    expect(binding?.scopeKey).toBe(computeSlotScopeKey(configFor()));
+    expect(binding?.sessionUuids.size).toBe(0);
   });
 
   test("a later execution reuses the slot after the first one's release, then a spec change replaces it", async () => {

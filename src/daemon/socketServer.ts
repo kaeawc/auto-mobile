@@ -2022,6 +2022,7 @@ export class UnixSocketServer {
             this.daemonState,
             undefined,
             cancellation.signal,
+            { socketSessionId: sessionId },
           );
           return {
             id: request.id,

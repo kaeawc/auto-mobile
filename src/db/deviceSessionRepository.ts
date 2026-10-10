@@ -1,4 +1,4 @@
-import { sql, type Kysely } from "kysely";
+import { sql, type ExpressionBuilder, type Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database, DeviceSession, DeviceSessionStatus, NewDeviceSession } from "./types";
 import { logger } from "../utils/logger";
@@ -38,6 +38,14 @@ export function isRecoverableDeviceSession(session: DeviceSession, nowMs: number
     session.expires_at_ms > nowMs &&
     (session.released_at_ms === null || session.released_at_ms >= retentionCutoffMs)
   );
+}
+
+/** SQL form of {@link isRecoverableDaemonReleaseReason} on `device_sessions.release_reason`. */
+function hasRecoverableReleaseReason(eb: ExpressionBuilder<Database, "device_sessions">) {
+  return eb.or([
+    eb("release_reason", "in", Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS)),
+    eb("release_reason", "like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`),
+  ]);
 }
 
 function shouldRetainLivenessOwner(reason: string): boolean {
@@ -137,6 +145,20 @@ export interface DeviceSessionPersistence {
     expected: RecoverableRowIncarnation,
     daemonSessionId: string,
   ): Promise<number | undefined>;
+  /**
+   * Hand back a claim {@link claimRecoverableSession} took, after the recovery failed without
+   * recovering or terminalizing the row (#11243): restore `previousOwner` and advance the
+   * generation, only while the row is still the recoverable incarnation `claimed` describes.
+   * Advancing (rather than restoring the pre-claim generation) keeps any late write of the failed
+   * recovery, conditioned on the claimed generation, from landing. Resolves with whether the
+   * claim was handed back; false when another writer (the recovery's own upsert, a terminal
+   * release, a peer) changed the row first.
+   */
+  releaseRecoverableSessionClaim?(
+    sessionUuid: string,
+    claimed: RecoverableRowIncarnation,
+    previousOwner: string | null,
+  ): Promise<boolean>;
   recordLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
   replaceLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
   markReleased(
@@ -432,6 +454,35 @@ export class DeviceSessionRepository {
     }
   }
 
+  async releaseRecoverableSessionClaim(
+    sessionUuid: string,
+    claimed: RecoverableRowIncarnation,
+    previousOwner: string | null,
+  ): Promise<boolean> {
+    try {
+      const released = await this.getDb()
+        .updateTable("device_sessions")
+        .set({
+          daemon_session_id: previousOwner,
+          stable_identity_generation: sql`stable_identity_generation + 1`,
+          updated_at: this.nowIso(),
+        })
+        .where("session_uuid", "=", sessionUuid)
+        .where("status", "!=", "active")
+        .where("stable_identity_generation", "=", claimed.rowGeneration)
+        .where((eb) =>
+          claimed.daemonSessionId === null
+            ? eb("daemon_session_id", "is", null)
+            : eb("daemon_session_id", "=", claimed.daemonSessionId),
+        )
+        .where((eb) => hasRecoverableReleaseReason(eb))
+        .executeTakeFirst();
+      return Number(released.numUpdatedRows) === 1;
+    } catch (error) {
+      throw toActionableError(error, `Failed to release the claim on session ${sessionUuid}`);
+    }
+  }
+
   async recordLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void> {
     await this.replaceLivenessOwnership(sessionUuid, ownerToken);
   }
@@ -606,16 +657,10 @@ export class DeviceSessionRepository {
   async listRecoverableSessions(nowMs: number = this.timer.now()): Promise<DeviceSession[]> {
     const db = await this.getDb();
     await this.pruneExpiredSessions(nowMs);
-    const reasons = Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS);
     const expired = await db
       .selectFrom("device_sessions")
       .select(["session_uuid", "stable_identity_generation"])
-      .where((eb) =>
-        eb.or([
-          eb("release_reason", "in", reasons),
-          eb("release_reason", "like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`),
-        ]),
-      )
+      .where((eb) => hasRecoverableReleaseReason(eb))
       .where("expires_at_ms", "<=", nowMs)
       .execute();
     for (const row of expired) {
@@ -634,12 +679,7 @@ export class DeviceSessionRepository {
     return await db
       .selectFrom("device_sessions")
       .selectAll()
-      .where((eb) =>
-        eb.or([
-          eb("release_reason", "in", reasons),
-          eb("release_reason", "like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`),
-        ]),
-      )
+      .where((eb) => hasRecoverableReleaseReason(eb))
       .where((eb) =>
         eb.or([
           eb("released_at_ms", "is", null),

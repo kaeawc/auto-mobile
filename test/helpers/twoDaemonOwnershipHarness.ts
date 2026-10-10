@@ -23,7 +23,10 @@ import {
   type TerminalReleaseJournalDirectory,
 } from "../../src/daemon/terminalReleaseJournal";
 import type { Database } from "../../src/db/types";
-import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
+import {
+  DeviceSessionRepository,
+  isRecoverableDaemonReleaseReason,
+} from "../../src/db/deviceSessionRepository";
 import type { ForwardLeaseOwnerProbe } from "../../src/features/observe/shared/ctrlProxyForwardLeaseOwnership";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -32,6 +35,7 @@ import {
 } from "../../src/server/lifecycleDeviceOwnership";
 import { deviceLossCancellationReason } from "../../src/utils/deviceLossCancellationReason";
 import { errorMessage } from "../../src/utils/describeUnknownError";
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import type { LockContent } from "../../src/utils/fileLock";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { createTestDatabase } from "../db/testDbHelper";
@@ -71,6 +75,9 @@ import { isExpectedRefusal, processTimer } from "./poolOwnershipConcurrencyHarne
 //   - peer-journal-touched: a daemon never writes or removes a live peer's journal file.
 //   - live-row-not-owned: at a settle point a daemon's live session has an active row stamped
 //     with that daemon's id.
+//   - stranded-claim: at a settle point a recoverable row a live daemon claimed (#11243) is live
+//     in that daemon; a recovery that failed or was cancelled hands its claim back, so a peer
+//     or a later startup can still recover the session.
 
 export const TWO_DAEMON_DEVICE_COUNT = 3;
 export const TWO_DAEMON_CLIENT_COUNT = 4;
@@ -96,6 +103,7 @@ const SETTLE_NUDGE_MS = 1_000;
 export type TwoDaemonStepKind =
   | "acquire"
   | "acquireAny"
+  | "cancelRecovery"
   | "release"
   | "control"
   | "loseHeartbeat"
@@ -155,6 +163,7 @@ export function describeTwoDaemonStep(step: TwoDaemonStep, index: number): strin
       case "acquire":
         return `c${step.client} ${daemon} d${step.device}`;
       case "acquireAny":
+      case "cancelRecovery":
         return `c${step.client} ${daemon}`;
       case "kill":
         return `${daemon} d${step.device} by c${step.client}`;
@@ -184,6 +193,7 @@ export type TwoDaemonViolationKind =
   | "peer-row-expired"
   | "peer-journal-touched"
   | "live-row-not-owned"
+  | "stranded-claim"
   | "unsettled-operation"
   | "unexpected-error";
 
@@ -231,6 +241,18 @@ interface DaemonProcess {
   /** Terminal-release DB writes parked while wedged; flushed by `unwedge`. */
   wedged: boolean;
   parked: Array<() => void>;
+}
+
+/**
+ * The session manager's in-progress recoveries/assignments (session id -> promise), read without
+ * side effects. Private state, read only by the stranded-claim invariant.
+ */
+function pendingSessionAssignments(manager: SessionManager): ReadonlyMap<string, unknown> {
+  const raw: unknown = Reflect.get(manager, "pendingSessionAssignments");
+  if (!(raw instanceof Map)) {
+    throw new Error("SessionManager no longer keeps pendingSessionAssignments; update the harness");
+  }
+  return raw;
 }
 
 /** A promise that never settles: the continuation of work a dead process never finishes. */
@@ -726,6 +748,7 @@ class TwoDaemonWorld {
 
   async checkSettled(): Promise<void> {
     await this.checkLiveRowsOwned();
+    await this.checkNoStrandedClaims();
     const holders = new Map<string, string>();
     for (const process of this.daemons) {
       if (!process || process.dead) {
@@ -779,6 +802,41 @@ class TwoDaemonWorld {
               `${row?.daemon_session_id ?? "-"})`,
           );
         }
+      }
+    }
+  }
+
+  /**
+   * At a settle point a recoverable row stamped with a listening daemon's id is that daemon's live
+   * session, or one it is still recovering. A claim left behind by a recovery that failed or was cancelled (#11243) would make
+   * the peer and that daemon's own startup refuse the row until the daemon exits.
+   */
+  private async checkNoStrandedClaims(): Promise<void> {
+    const rows = await this.db
+      .selectFrom("device_sessions")
+      .selectAll()
+      .where("status", "!=", "active")
+      .where("expires_at_ms", ">", this.timer.now())
+      .execute();
+    for (const row of rows) {
+      if (!row.release_reason || !isRecoverableDaemonReleaseReason(row.release_reason)) {
+        continue;
+      }
+      const owner = this.daemons.find(
+        (p) => p && !p.dead && p.listening && p.daemonSessionId === row.daemon_session_id,
+      );
+      if (
+        owner &&
+        !owner.manager.hasSession(row.session_uuid) &&
+        // A recovery still in progress (past the startup deadline, waiting out a restart grace)
+        // holds its claim legitimately; only a claim no recovery holds is stranded.
+        !pendingSessionAssignments(owner.manager).has(row.session_uuid)
+      ) {
+        this.fail(
+          "stranded-claim",
+          `${owner.name} owns recoverable row ${row.session_uuid} (${row.release_reason}, ` +
+            `generation ${row.stable_identity_generation}) but is not recovering it`,
+        );
       }
     }
   }
@@ -918,6 +976,45 @@ class TwoDaemonWorld {
         this.log(
           `  c${client.index} allocated ${session.assignedDevice} -> ${sessionId} on ${process.name}`,
         );
+        if (process.dead) {
+          return;
+        }
+        this.adoptSession(client, process, sessionId);
+        await this.heartbeat(client);
+      },
+      process,
+    );
+  }
+
+  /**
+   * The client asks daemon `index` for its session (a recoverable row there) and cancels the
+   * request after `turns` microtask turns: the recovery may be cancelled before, during or after
+   * it claims the row (#11243).
+   */
+  cancelRecovery(client: ClientState, index: number, turns: number): void {
+    const process = this.liveDaemon(index);
+    const sessionId = client.sessionId;
+    if (!process || !sessionId || process.manager.hasSession(sessionId)) {
+      return;
+    }
+    const controller = new AbortController();
+    this.log(`c${client.index} recover ${sessionId} via ${process.name}, cancel after ${turns}t`);
+    void drainMicrotasks(turns).then(() => controller.abort(new Error("client cancelled")));
+    this.launch(
+      `c${client.index} cancelled recovery of ${sessionId} via ${process.name}`,
+      async () => {
+        try {
+          await runWithAbortSignal(controller.signal, () =>
+            process.manager.getOrCreateSession(sessionId, process.pool, "android"),
+          );
+        } catch (error) {
+          if (controller.signal.aborted && !isExpectedRefusal(error)) {
+            this.log(`  c${client.index} recovery cancelled: ${errorMessage(error).slice(0, 140)}`);
+            return;
+          }
+          throw error;
+        }
+        this.log(`  c${client.index} recovered ${sessionId} on ${process.name} before the cancel`);
         if (process.dead) {
           return;
         }
@@ -1292,6 +1389,9 @@ class TwoDaemonWorld {
         break;
       case "acquireAny":
         this.acquireAny(client, step.daemon);
+        break;
+      case "cancelRecovery":
+        this.cancelRecovery(client, step.daemon, step.turns);
         break;
       case "release":
         this.release(client);

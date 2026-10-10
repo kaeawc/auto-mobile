@@ -6,6 +6,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "fs";
@@ -87,6 +88,57 @@ export interface ExclusiveLockOptions {
    * encode it before passing it here.
    */
   metadata?: string;
+
+  /**
+   * How long an empty or unparsable lock file is treated as a peer caught between its `wx`
+   * create and its PID write before it is reclaimed as torn. Defaults to
+   * {@link UNREADABLE_LOCK_GRACE_MS}.
+   */
+  unreadableGraceMs?: number;
+
+  /** Clock for the grace check (defaults to `Date.now`); inject a fake in tests. */
+  nowMs?: () => number;
+
+  /** Modification time of a lock file (defaults to `fs.statSync`); undefined when unreadable. */
+  mtimeMs?: (lockFilePath: string) => number | undefined;
+}
+
+/**
+ * How long an empty or unparsable lock file may sit before it is considered torn (a writer that
+ * crashed between create and write) rather than a peer mid-write. The create-then-write burst
+ * is a single synchronous pair of syscalls, so this only has to outlast scheduler and
+ * filesystem stalls, not real work.
+ */
+export const UNREADABLE_LOCK_GRACE_MS = 5_000;
+
+function defaultMtimeMs(lockFilePath: string): number | undefined {
+  try {
+    return statSync(lockFilePath).mtimeMs;
+  } catch (error) {
+    // The file vanished (released or reclaimed) between the read and the stat.
+    logger.debug(`src/utils/fileLock.ts mtime unreadable at ${lockFilePath}: ${error}`);
+    return undefined;
+  }
+}
+
+/**
+ * Age in ms of the lock file at `lockFilePath` when it exists but is empty or has no readable
+ * PID, else undefined (missing, or a readable lock). Compare with
+ * {@link UNREADABLE_LOCK_GRACE_MS}: younger is a peer that may still be writing, older is torn.
+ */
+export function unreadableLockAgeMs(
+  lockFilePath: string,
+  options: Pick<ExclusiveLockOptions, "nowMs" | "mtimeMs"> = {},
+): number | undefined {
+  const content = readContendedLockContent(lockFilePath);
+  if (
+    content === undefined ||
+    (content.length > 0 && !Number.isNaN(parseLockContent(content).pid))
+  ) {
+    return undefined;
+  }
+  const mtime = (options.mtimeMs ?? defaultMtimeMs)(lockFilePath);
+  return mtime === undefined ? undefined : Math.max(0, (options.nowMs ?? Date.now)() - mtime);
 }
 
 /**
@@ -173,14 +225,10 @@ export function tryAcquireExclusiveLock(
   }
 
   if (content.length === 0) {
-    // A writer created the file but hasn't written its PID yet; treat as actively
-    // held to avoid stealing a lock mid-write.
-    //
-    // Known limitation: a crash in the microsecond window between the `wx` create
-    // and the PID write leaves an empty file that is never reclaimable. This is
-    // astronomically rare (the create+write is a single synchronous burst) and is
-    // shared with the daemon lock; tracked as a follow-up, not fixed here.
-    return false;
+    // A writer created the file but hasn't written its PID yet: held while young, so a lock
+    // is never stolen mid-write. Past the grace it is the leftover of a crash between create
+    // and write, which would otherwise block every acquirer forever.
+    return reclaimIfTorn(lockFilePath, pid, ownerToken, metadata, options);
   }
 
   // The PID is the first line; a per-process-instance token (if any) is the
@@ -188,8 +236,8 @@ export function tryAcquireExclusiveLock(
   // off line 1, keeping the positional contract in one place (#3006).
   const { pid: ownerPid, token: tokenLine } = parseLockContent(content);
   if (Number.isNaN(ownerPid)) {
-    // Unreadable PID — a writer may still be filling it in; treat as held.
-    return false;
+    // Unreadable PID — a writer may still be filling it in (held), or a torn write (reclaimed).
+    return reclaimIfTorn(lockFilePath, pid, ownerToken, metadata, options);
   }
 
   const isOwnStaleLeak = isOwnStaleLock(ownerPid, tokenLine, pid, ownerToken, reclaimOwnPid);
@@ -198,6 +246,40 @@ export function tryAcquireExclusiveLock(
   }
 
   return reclaimExclusiveLock(lockFilePath, pid, ownerToken, metadata, ownerPid, tokenLine);
+}
+
+function reclaimIfTorn(
+  lockFilePath: string,
+  pid: number,
+  ownerToken: string | undefined,
+  metadata: string | undefined,
+  options: ExclusiveLockOptions,
+): boolean {
+  const age = unreadableLockAgeMs(lockFilePath, options);
+  if (age === undefined || age < (options.unreadableGraceMs ?? UNREADABLE_LOCK_GRACE_MS)) {
+    return false;
+  }
+  // Rename-then-verify, as for a dead owner: whoever renames the path owns this exact torn
+  // instance, and the final `wx` create arbitrates with any third acquirer. The marker keeps
+  // the file's mtime, so a fresh unreadable file a peer created after our check is restored.
+  const marker = `${lockFilePath}.${pid}.reclaim`;
+  try {
+    renameSync(lockFilePath, marker);
+  } catch (error) {
+    // A racing acquirer already took this torn instance; losing the race means not ours.
+    logger.debug(`src/utils/fileLock.ts: torn lock already reclaimed at ${lockFilePath}: ${error}`);
+    return false;
+  }
+  const markerAge = unreadableLockAgeMs(marker, options);
+  if (
+    markerAge === undefined ||
+    markerAge < (options.unreadableGraceMs ?? UNREADABLE_LOCK_GRACE_MS)
+  ) {
+    restoreDisplacedLock(lockFilePath, marker);
+    return false;
+  }
+  removeStaleLockMarker(marker);
+  return writeExclusiveLockFile(lockFilePath, pid, ownerToken, metadata);
 }
 
 function readContendedLockContent(lockFilePath: string): string | undefined {

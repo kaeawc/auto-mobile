@@ -45,6 +45,8 @@ test/daemon/clientNonFiniteEncoding.test.ts
 test/daemon/clientOptionsSchema.test.ts
 test/daemon/clientRequestIdGenerator.test.ts
 test/daemon/clientRequestTimeout.test.ts
+test/daemon/crossDaemonCorruptClaim.test.ts
+test/daemon/crossDaemonSystemUiRecoveryClaim.test.ts
 test/daemon/daemonCapturedDisconnectArguments.test.ts
 test/daemon/daemonCommandRouting.test.ts
 test/daemon/daemonCompactMetadataReuse.test.ts

@@ -1,4 +1,5 @@
 import { ActionableError } from "../models/ActionableError";
+import { DeviceOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 
 export class SessionToolBinding {
@@ -93,6 +94,7 @@ export class SessionToolBinding {
         matches,
         fallback,
         deferForeignDevice && deviceId !== undefined,
+        { deviceId, platform },
       );
       return fallback;
     }
@@ -316,11 +318,10 @@ function assertBoundSessionMatches(
   matches: (device: { deviceId: string; platform: string }) => boolean,
   sessionUuid: string | undefined,
   deferForeignDevice: boolean,
+  requested: { deviceId?: string; platform?: string },
 ): void {
   if (!device || matches(device) || deferForeignDevice) {
     return;
   }
-  throw new Error(
-    `Bound device session ${sessionUuid} does not match the requested platform/deviceId. Pass an explicit sessionUuid.`,
-  );
+  throw new DeviceOutsideBoundSessionError(sessionUuid, device, requested);
 }

@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
+import {
+  DEVICE_OUTSIDE_BOUND_SESSION_CODE,
+  DeviceOutsideBoundSessionError,
+} from "../../src/server/deviceOutsideBoundSessionRefusal";
+import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 
 const devices = new Map([
   ["android-a", { deviceId: "emulator-5554", platform: "android" }],
@@ -93,10 +98,31 @@ describe("connection device selectors", () => {
     ).toBeUndefined();
   });
 
-  test("seeded connection cannot switch device", () => {
+  test("seeded connection cannot switch device, and the refusal is typed with a next step (#11274)", () => {
     const binding = new SessionToolBinding("ios-a");
-    expect(() =>
-      binding.resolveDeviceSessionUuid(undefined, { platform: "android" }, lookup),
-    ).toThrow();
+    const refusal = (params: Record<string, unknown>) => {
+      try {
+        binding.resolveDeviceSessionUuid(undefined, params, lookup);
+      } catch (error) {
+        return error;
+      }
+      return undefined;
+    };
+    for (const params of [{ platform: "android" }, { deviceId: "emulator-5554" }]) {
+      const error = refusal(params);
+      expect(error).toBeInstanceOf(DeviceOutsideBoundSessionError);
+      expect(error).toMatchObject({ code: DEVICE_OUTSIDE_BOUND_SESSION_CODE, retryable: false });
+      expect((error as Error).message).toContain("separate MCP connection");
+      const wire = JSON.parse(
+        shapeToolCallError(error, { toolName: "tapOn", source: "MCP" }).content[0].text,
+      );
+      expect(wire).toMatchObject({
+        success: false,
+        code: DEVICE_OUTSIDE_BOUND_SESSION_CODE,
+        boundSessionUuid: "ios-a",
+        boundDeviceId: "iphone",
+        retryable: false,
+      });
+    }
   });
 });

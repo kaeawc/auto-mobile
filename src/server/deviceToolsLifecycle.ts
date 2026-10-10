@@ -213,17 +213,33 @@ async function assertKillDeviceCaller(args: KillDeviceArgs): Promise<void> {
   });
 }
 
+interface PreLeaseTeardown {
+  args: TeardownDeviceArgs;
+  deps: DeviceToolsDependencies;
+  deadlineMs: number;
+  timeoutMs: number;
+  requestAbortSignal: AbortSignal | undefined;
+}
+
+/** Every deleteDevice refusal that must precede the teardown lease reservation. */
+async function preLeaseRefusal(
+  pre: PreLeaseTeardown,
+  requester: LifecycleRequester | undefined,
+  lifecycleLease: VirtualDeviceLifecycleLease | undefined,
+): Promise<TeardownToolResponse | undefined> {
+  const slotRefusal = await managedSlotDeleteRefusal(pre.args, requester);
+  return slotRefusal
+    ? slotRefusal.response
+    : await preLeaseHolderRefusal(pre, requester, lifecycleLease);
+}
+
 /**
  * deleteDevice's ownership refusal before the teardown lease is reserved: reserving it aborts the
  * current lease holder, which a refused delete must never do. Resolution is read-only without a
  * lease; a target that does not resolve here is left to the workflow's own resolution.
  */
 async function preLeaseHolderRefusal(
-  args: TeardownDeviceArgs,
-  deps: DeviceToolsDependencies,
-  deadlineMs: number,
-  timeoutMs: number,
-  requestAbortSignal: AbortSignal | undefined,
+  { args, deps, deadlineMs, timeoutMs, requestAbortSignal }: PreLeaseTeardown,
   requester: LifecycleRequester | undefined,
   lifecycleLease: VirtualDeviceLifecycleLease | undefined,
 ): Promise<TeardownToolResponse | undefined> {
@@ -405,6 +421,27 @@ function createDeleteDeviceWorkflow(
   };
 }
 
+/** Maps a deleteDevice failure before or during the teardown to its typed precondition response. */
+function deleteDeviceCatchResponse(
+  args: TeardownDeviceArgs,
+  error: unknown,
+  callerSignal: AbortSignal | undefined,
+): TeardownToolResponse {
+  const message = String(error instanceof Error ? error.message : error);
+  if (isProvisionDeviceCallerAbort(error, callerSignal)) {
+    // Caller cancellation ends only this wait; the accepted teardown continues independently.
+    logger.debug(
+      `[DeviceTools] teardown caller stopped waiting for ${args.target.platform}:${args.target.stableId}: ${message}`,
+    );
+    return createTeardownFailureResponse(args, "precondition", "operation_cancelled", message);
+  }
+  logger.warn(
+    `[DeviceTools] teardown failed for ${args.target.platform}:${args.target.stableId}: ${message}`,
+    error,
+  );
+  return createTeardownFailureResponse(args, "precondition", "operation_failed", message);
+}
+
 export function createLifecycleHandlers() {
   const killDeviceHandler = async (
     args: KillDeviceArgs,
@@ -508,33 +545,19 @@ export function createLifecycleHandlers() {
     // that reservation preempts the slot's in-flight acquisition even when the delete is then
     // refused (#11271). The workflow re-checks under the lease.
     try {
-      const slotRefusal = await managedSlotDeleteRefusal(args, requester).catch(
-        (error: unknown) => {
-          lifecycleLease?.release();
-          throw error;
-        },
-      );
-      if (slotRefusal) {
-        lifecycleLease?.release();
-        return slotRefusal.response;
-      }
-      // Likewise the session-holder refusal: it needs the resolved target, so resolve read-only
-      // first. The workflow re-checks under the lease (#11274).
-      const holderRefusal = await preLeaseHolderRefusal(
-        args,
-        deps,
-        deadlineMs,
-        timeoutMs,
-        callerSignal,
+      // Likewise the session-holder refusal (#11274); it needs the resolved target, so it
+      // resolves read-only first. The workflow re-checks both under the lease.
+      const refusal = await preLeaseRefusal(
+        { args, deps, deadlineMs, timeoutMs, requestAbortSignal: callerSignal },
         requester,
         lifecycleLease,
       ).catch((error: unknown) => {
         lifecycleLease?.release();
         throw error;
       });
-      if (holderRefusal) {
+      if (refusal) {
         lifecycleLease?.release();
-        return holderRefusal;
+        return refusal;
       }
       return await teardownService.teardown<
         TeardownState,
@@ -551,19 +574,7 @@ export function createLifecycleHandlers() {
         createDeleteDeviceWorkflow(args, deps, deadlineMs, timeoutMs, requester),
       );
     } catch (error) {
-      const message = String(error instanceof Error ? error.message : error);
-      if (isProvisionDeviceCallerAbort(error, callerSignal)) {
-        // Caller cancellation ends only this wait; the accepted teardown continues independently.
-        logger.debug(
-          `[DeviceTools] teardown caller stopped waiting for ${args.target.platform}:${args.target.stableId}: ${message}`,
-        );
-        return createTeardownFailureResponse(args, "precondition", "operation_cancelled", message);
-      }
-      logger.warn(
-        `[DeviceTools] teardown failed for ${args.target.platform}:${args.target.stableId}: ${message}`,
-        error,
-      );
-      return createTeardownFailureResponse(args, "precondition", "operation_failed", message);
+      return deleteDeviceCatchResponse(args, error, callerSignal);
     }
   }
 

@@ -140,6 +140,7 @@ import {
   parseInputRequesterSessionUuid,
 } from "./inputDeviceOwnership";
 import { ToolRegistry } from "../server/toolRegistry";
+import { DeviceOutsideBoundSessionError } from "../server/deviceOutsideBoundSessionRefusal";
 import {
   DeviceAssignedToManagedSlotError,
   DeviceOutsideManagedSlotsError,
@@ -327,6 +328,7 @@ const JSONRPC_INVALID_PARAMS = -32602;
 function managedSlotRefusalCode(error: unknown): { code?: string } {
   return error instanceof DeviceAssignedToManagedSlotError ||
     error instanceof DeviceOutsideManagedSlotsError ||
+    error instanceof DeviceOutsideBoundSessionError ||
     error instanceof ManagedSlotDiscoveryIncompleteError
     ? { code: error.code }
     : {};

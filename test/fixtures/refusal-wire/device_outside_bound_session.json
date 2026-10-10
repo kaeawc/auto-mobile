@@ -1,0 +1,13 @@
+{
+  "code": "device_outside_bound_session",
+  "builder": "DeviceOutsideBoundSessionError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Bound device session 11111111-1111-4111-8111-111111111111 controls only android device 'emulator-5556', but this call named device 'emulator-5554' (code device_outside_bound_session). Use a separate MCP connection for that device, release the bound session first, or omit the device selector to target the bound device.\",\"code\":\"device_outside_bound_session\",\"boundSessionUuid\":\"11111111-1111-4111-8111-111111111111\",\"boundDeviceId\":\"emulator-5556\",\"deviceId\":\"emulator-5554\",\"retryable\":false}"
+      }
+    ],
+    "isError": true
+  }
+}

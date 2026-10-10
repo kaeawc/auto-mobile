@@ -19,6 +19,7 @@ import {
   DeviceAssignedToManagedSlotError,
   DeviceOutsideManagedSlotsError,
 } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { DeviceOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/devices/deviceBootService";
 import { createToolErrorResponse } from "../../src/server/deviceTools";
 import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
@@ -183,6 +184,18 @@ const BUILDERS: readonly (readonly [string, string, () => RefusalWireResult])[] 
     () =>
       shaped(
         new DeviceOutsideManagedSlotsError("tapOn", "device", "0123abcd", { deviceId: DEVICE }),
+      ),
+  ],
+  [
+    "device_outside_bound_session",
+    "DeviceOutsideBoundSessionError via shapeToolCallError",
+    () =>
+      shaped(
+        new DeviceOutsideBoundSessionError(
+          "11111111-1111-4111-8111-111111111111",
+          { deviceId: "emulator-5556", platform: "android" },
+          { deviceId: DEVICE },
+        ),
       ),
   ],
   [

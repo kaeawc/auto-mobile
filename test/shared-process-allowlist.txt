@@ -788,6 +788,7 @@ test/scripts/buildReleaseNotes.test.ts
 test/scripts/checkUtilsImportDirection.test.ts
 test/scripts/ciLfsSkipSmudgePolicy.test.ts
 test/scripts/circleciMacosMigrationPolicy.test.ts
+test/scripts/clockSemanticsReport.test.ts
 test/scripts/copyDbRuntimeFiles.test.ts
 test/scripts/daemonLogWorkflow.test.ts
 test/scripts/dbMigrationsSelfContained.test.ts

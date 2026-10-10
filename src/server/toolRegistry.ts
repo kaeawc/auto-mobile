@@ -533,6 +533,20 @@ export function stripNavigationInternalParams(
   return stripNavigationToolParams(args);
 }
 
+/**
+ * Tell the tracker what kind of device call runs under `executionId`. A read is not use of the
+ * session it runs under, so it is never echoed as routed (#10974) and never vetoes its release
+ * (#11322); but nested calls share their outer call's execution, so only the top-level call's own
+ * read marks it, and any control step, nested or not, makes the execution a control call.
+ */
+function markDeviceCallKind(executionId: string, toolName: string, readOnly: boolean): void {
+  if (readOnly) {
+    executionTracker.markDeviceReadCall(executionId, toolName);
+  } else {
+    executionTracker.markDeviceControlCall(executionId);
+  }
+}
+
 function withAmbientDeviceContext(
   args: Record<string, unknown>,
   routingSessionUuid: string | undefined,
@@ -1009,9 +1023,8 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
 
     const readOnly = isDeviceReadOnlyCall(options, args);
-    if (readOnly && execution) {
-      // A read is not use of the session it runs under, so it is never echoed as routed (#10974).
-      executionTracker.markDeviceReadCall(execution.executionId);
+    if (execution) {
+      markDeviceCallKind(execution.executionId, name, readOnly);
     }
     // A read is admitted read-only (#10964): it never refreshes or claims the session, and its end
     // is not use. Only control calls extend a session's idle deadline.

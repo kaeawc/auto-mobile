@@ -7231,7 +7231,7 @@ describe("restart recovery idle window counts control calls only (#11281)", () =
     );
     const metadata = sessionExecutionMetadataOf(execution);
     if (kind === "read") {
-      tracker.markDeviceReadCall(execution.id);
+      tracker.markDeviceReadCall(execution.id, execution.toolName);
     }
     const admission =
       kind === "read"
@@ -7294,7 +7294,7 @@ describe("restart recovery idle window counts control calls only (#11281)", () =
 
     timer.advanceTime(50_000);
     const read = tracker.startExecution("observe", undefined, SESSION);
-    tracker.markDeviceReadCall(read.id);
+    tracker.markDeviceReadCall(read.id, read.toolName);
     tracker.endExecution(read.id);
     await settle();
 

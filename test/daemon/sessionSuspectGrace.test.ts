@@ -511,7 +511,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       async function startRead(kind: "device" | "inventory"): Promise<string> {
         const execution = tracker.startExecution("observe", undefined, SESSION);
         if (kind === "device") {
-          tracker.markDeviceReadCall(execution.id);
+          tracker.markDeviceReadCall(execution.id, execution.toolName);
         } else {
           tracker.markReadOnlySessionAccess(execution.id);
         }

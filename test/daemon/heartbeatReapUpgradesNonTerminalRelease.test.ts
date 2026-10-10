@@ -300,6 +300,36 @@ describe("a non-terminal release and the bounds the heartbeat monitor still keep
     expect(forcedAt).toHaveLength(1);
   });
 
+  test("the source names one release in progress: its session, its start, while it holds the device", async () => {
+    persistence.parkUpsert = new Promise<void>(() => undefined);
+    void manager.rebindSession(SESSION, "emulator-5556", "android").catch(() => undefined);
+    await drainMicrotasks(20);
+    void manager.releaseSession(SESSION, RELEASE_REASON).catch(() => undefined);
+    const [{ startedAtMs }] = manager.getNonTerminalReleasesInProgress();
+    void manager.releaseSession(SESSION, "owner-disconnected").catch(() => undefined);
+
+    const whileWedged = {
+      upgradedStillListed: manager.getNonTerminalReleasesInProgress().length,
+      thisRelease: manager.isReleaseInProgress(SESSION, startedAtMs),
+      // A release of the same session id that began at another instant is another release.
+      anotherStart: manager.isReleaseInProgress(SESSION, startedAtMs + 1),
+      anotherSession: manager.isReleaseInProgress("another-session", startedAtMs),
+    };
+    manager.forceStuckRelease(SESSION);
+
+    expect({
+      ...whileWedged,
+      onceForced: manager.isReleaseInProgress(SESSION, startedAtMs),
+    }).toEqual({
+      upgradedStillListed: 0,
+      thisRelease: true,
+      anotherStart: false,
+      anotherSession: false,
+      // A forced release no longer holds its device: the monitor forgets it, so it is forced once.
+      onceForced: false,
+    });
+  });
+
   test("a new release of the same session id is held to its own deadline, not the settled one's", async () => {
     monitor.start();
     const first = manager.releaseSession(SESSION, RELEASE_REASON);

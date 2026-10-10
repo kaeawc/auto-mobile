@@ -120,14 +120,17 @@ describe.each(HOST_CLOCKS)("observer lease across a gap (monotonic clock %s)", (
     expect({ accepted: registry.heartbeat(OBSERVER), gone }).toEqual({ accepted: true, gone: [] });
   });
 
-  test("an observer that is gone is not kept by scans that keep arriving late", async () => {
-    const { timer, gone } = await harness(hostClock);
+  test("an observer that is gone is not kept by a daemon that keeps stalling", async () => {
+    const setup = await harness(hostClock);
+    const { timer, gone } = setup;
 
-    // Each gap alone is shorter than the budget and every scan after it is late, so each one is
-    // forgiven on its own; only a gap that began while the observer could still be live counts.
-    for (let lateScans = 0; lateScans < 4; lateScans++) {
+    // Stall after stall, each noticed by a lookup the moment the daemon runs again, so no awake
+    // time is ever counted against the observer: every gap would be forgiven in full on its own.
+    // Only a gap that began while the observer's budget was still running may be.
+    const { registry } = setup;
+    for (let stalls = 0; stalls < 6; stalls++) {
       stallDaemon(timer, BUDGET_MS - 3_000);
-      await advance(timer, SCAN_MS);
+      registry.list();
     }
 
     expect(gone).toEqual([OBSERVER]);
@@ -214,6 +217,19 @@ describe("observer lease forgiveness without a heartbeat monitor", () => {
       accepted: false,
       gone: [OBSERVER],
     });
+  });
+
+  test("a gap longer than the time that passed never buys more than one budget from now", () => {
+    const timer = new FakeTimer();
+    const registry = new ObserverSessionRegistry(timer, BUDGET_MS);
+    expect(registry.register(OBSERVER, "desktop")).toMatchObject({ accepted: true });
+    timer.advanceTime(SCAN_MS);
+
+    registry.forgiveStall({ lostMs: 60_000, sleptMs: 60_000 });
+
+    expect(registry.list().map((observer) => observer.expiresAtMs - timer.now())).toEqual([
+      BUDGET_MS,
+    ]);
   });
 
   test.each([

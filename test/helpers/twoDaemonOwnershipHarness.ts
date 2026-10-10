@@ -822,9 +822,9 @@ class TwoDaemonWorld {
         process.state,
       );
     } catch (error) {
-      // A claim heartbeat racing the session's release can fail its liveness-owner row write
-      // ("active device session ... was not found"); the socket server answers the proxy with an
-      // error, which it treats as a failed heartbeat. Only a throw for a live session is a finding.
+      // A claim heartbeat whose liveness-owner row write lost to the session's release reports
+      // the session gone (#11200); a throw that the session ended around is still a failed
+      // heartbeat to the proxy, not a finding. Only a throw for a live session is a finding.
       if (
         process.manager.hasSession(sessionId) &&
         !process.manager.getReleasingSession(sessionId)

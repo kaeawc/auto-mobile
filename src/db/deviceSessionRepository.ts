@@ -50,7 +50,7 @@ function shouldRetainLivenessOwner(reason: string): boolean {
  */
 export class DeviceSessionNotActiveError extends ActionableError {
   constructor(readonly sessionUuid: string) {
-    super(`Device session ${sessionUuid} has no active row to record activity on.`);
+    super(`Device session ${sessionUuid} has no active row to record activity or ownership on.`);
     this.name = "DeviceSessionNotActiveError";
   }
 }
@@ -448,7 +448,7 @@ export class DeviceSessionRepository {
         .where("status", "=", "active")
         .executeTakeFirst();
       if (Number(result.numUpdatedRows) !== 1) {
-        throw new Error(`active device session ${sessionUuid} was not found`);
+        throw new DeviceSessionNotActiveError(sessionUuid);
       }
     } catch (error) {
       logger.warn(

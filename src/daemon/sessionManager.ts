@@ -7737,6 +7737,15 @@ export class SessionManager {
       if (alreadyProcessed) {
         processedClaims.add(ownerToken);
       }
+      if (!this.isAdmittedForAutomation(session)) {
+        // The session's release won the race with this claim: its row is no longer active, so
+        // the ownership write matched nothing. The session is gone, as the claim reports.
+        logger.info(
+          `Liveness ownership claim for session ${session.sessionId} lost to its release: ` +
+            errorMessage(error),
+        );
+        return "not-found";
+      }
       throw error;
     }
     return "claimed";

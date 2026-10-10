@@ -20,6 +20,8 @@ export interface EmulatorLossIncidentPoolPort {
   getRecoveryPolicy(): DeviceRecoveryPolicy;
   getSessionForDevice(deviceId: string): string | null;
   getSession(sessionId: string): Session | null;
+  /** A session-clock instant as wall epoch ms, the frame every other incident stamp is in. */
+  sessionClockToWall(sessionClockMs: number): number;
   getProcessOutputTail(
     deviceId: string,
   ): { finalize(): Promise<string | undefined>; snapshot(): string | undefined } | undefined;
@@ -92,7 +94,7 @@ export class EmulatorLossIncidentLedger {
       ? {
           sessionUuid: session.sessionId,
           state: "recovering",
-          lastHeartbeatMs: session.lastHeartbeat,
+          lastHeartbeatMs: this.pool.sessionClockToWall(session.lastHeartbeat),
           hasReceivedHeartbeat: session.hasReceivedHeartbeat,
           heartbeatTimeoutMs: session.heartbeatTimeoutMs,
         }

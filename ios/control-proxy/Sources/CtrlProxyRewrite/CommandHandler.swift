@@ -332,7 +332,7 @@ final class CommandHandler: CommandHandling {
                 requestId: request.requestId,
                 error: error.localizedDescription,
                 totalTimeMs: totalTimeMs(from: startTime),
-                errorCode: (error as? CommandError)?.wireCode
+                errorCode: WireError.code(for: error)
             )
         }
     }

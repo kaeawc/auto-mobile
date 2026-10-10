@@ -84,7 +84,7 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     private var orientation = "portrait"
     private var keyboardOpen = false
     var keyCalls: [(String, [String])] = []
-    var keyError: CommandError?
+    var keyError: (any Error)?
     var tapCalls = 0
     var tapDurations: [TimeInterval] = []
     var lastTap: (x: Double, y: Double)?

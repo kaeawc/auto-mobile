@@ -357,6 +357,8 @@ export interface SendKeysCommandResult extends BaseActionResult {
   /** Device upper bound; this is not the verified committedGraphemes count. */
   committedUnits?: number;
   error?: string;
+  /** iOS runner's typed failure code for a key command (`runnerErrorCodes.ts`). */
+  errorCode?: string;
   retryable?: boolean;
   verified?: boolean;
   warning?: string;
@@ -542,7 +544,25 @@ export interface SendKeysInputKey {
     timeoutMs?: number,
     frameContext?: string,
     modifiers?: readonly InputKeyModifier[],
-  ): Promise<{ success: boolean; error?: string; verified?: boolean; warning?: string }>;
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    errorCode?: string;
+    verified?: boolean;
+    warning?: string;
+  }>;
+}
+
+/** The optional outcome fields of an InputKey press, copied onto a sendKeys key result. */
+function inputKeyOutcomeFields(
+  result: Awaited<ReturnType<SendKeysInputKey["press"]>>,
+): Pick<SendKeysCommandResult, "verified" | "warning" | "error" | "errorCode"> {
+  return {
+    ...(result.verified === undefined ? {} : { verified: result.verified }),
+    ...(result.warning === undefined ? {} : { warning: result.warning }),
+    ...(result.error ? { error: result.error } : {}),
+    ...(result.errorCode === undefined ? {} : { errorCode: result.errorCode }),
+  };
 }
 
 interface ImeCommitRouting {
@@ -923,9 +943,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       key: command.key,
       modifiers,
       success: result.success,
-      ...(result.verified === undefined ? {} : { verified: result.verified }),
-      ...(result.warning === undefined ? {} : { warning: result.warning }),
-      ...(result.error ? { error: result.error } : {}),
+      ...inputKeyOutcomeFields(result),
     };
   }
 

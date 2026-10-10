@@ -9,6 +9,10 @@ import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import {
+  isRunnerFocusQueryFailed,
+  RUNNER_FOCUS_QUERY_FAILED_FALLBACK_MESSAGE,
+} from "../observe/ios/runnerErrorCodes";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "../../utils/android-cmdline-tools/asciiKeyEvents";
@@ -106,6 +110,8 @@ export interface InputKeyResult {
   verified?: boolean;
   warning?: string;
   error?: string;
+  /** iOS runner's typed failure code (`runnerErrorCodes.ts`), e.g. `focus_query_failed`. */
+  errorCode?: string;
 }
 
 interface InputKeyRouting {
@@ -130,7 +136,13 @@ export interface InputKeyIosClient {
     signal?: AbortSignal,
     onDispatch?: () => void,
   ): Promise<
-    IOSDispatchResult<{ success: boolean; error?: string; verified?: boolean; warning?: string }>
+    IOSDispatchResult<{
+      success: boolean;
+      error?: string;
+      errorCode?: string;
+      verified?: boolean;
+      warning?: string;
+    }>
   >;
 }
 
@@ -138,6 +150,27 @@ export type InputKeyIosClientFactory = (device: BootedDevice) => InputKeyIosClie
 
 const defaultInputKeyIosClientFactory: InputKeyIosClientFactory = (device) =>
   IOSCtrlProxyClient.getInstance(device);
+
+/** Shapes a runner reply that is not an indeterminate dispatch into an InputKeyResult. */
+function iosInputKeyResult(
+  key: InputKeyName,
+  result: Awaited<ReturnType<InputKeyIosClient["requestPressKey"]>>,
+): InputKeyResult {
+  if (!result.success && isRunnerFocusQueryFailed(result)) {
+    // A definite non-delivery: the runner answered before sending the key.
+    const error = result.error || RUNNER_FOCUS_QUERY_FAILED_FALLBACK_MESSAGE;
+    logger.warn(`iOS input/key ${key} not sent: ${error}`);
+    return { success: false, key, keyCode: key, error, errorCode: result.errorCode };
+  }
+  return {
+    success: result.success,
+    key,
+    keyCode: key,
+    ...(result.verified === undefined ? {} : { verified: result.verified }),
+    ...(result.warning === undefined ? {} : { warning: result.warning }),
+    ...(result.error ? { error: result.error } : {}),
+  };
+}
 
 export class InputKey {
   private readonly device: BootedDevice;
@@ -358,14 +391,7 @@ export class InputKey {
     if (!result.success && result.dispatched && result.acknowledged === false) {
       throw InputKey.indeterminateError(result.error ?? "unknown error");
     }
-    return {
-      success: result.success,
-      key,
-      keyCode: key,
-      ...(result.verified === undefined ? {} : { verified: result.verified }),
-      ...(result.warning === undefined ? {} : { warning: result.warning }),
-      ...(result.error ? { error: result.error } : {}),
-    };
+    return iosInputKeyResult(key, result);
   }
 
   private async validateFrameContext(

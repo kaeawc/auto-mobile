@@ -5,9 +5,11 @@ import {
   RUNNER_DEADLINE_COMPLETED_LATE_CODE,
   RUNNER_DEADLINE_COMPLETED_LATE_WORDING,
   RUNNER_DEADLINE_NOT_STARTED_CODE,
+  RUNNER_FOCUS_QUERY_FAILED_CODE,
   RUNNER_GESTURE_BOUND_EXCEEDED_CODE,
   RUNNER_GESTURE_BOUND_EXCEEDED_WORDING,
   isRunnerDeadlineCompletedLate,
+  isRunnerFocusQueryFailed,
   isRunnerGestureBoundExceeded,
   isRunnerGestureOutcomeUnknown,
 } from "../../../../src/features/observe/ios/runnerErrorCodes";
@@ -143,5 +145,35 @@ describe("runner gesture-bound error: Swift CommandError <-> host contract (#100
     expect(isRunnerGestureOutcomeUnknown({ errorCode: RUNNER_DEADLINE_NOT_STARTED_CODE })).toBe(
       false,
     );
+  });
+});
+
+// GestureError lives in GesturePerformer.swift; WireError.code(for:) puts its wireCode on the wire.
+const gesturePerformerSwift = readFileSync(
+  join(
+    import.meta.dir,
+    "../../../../ios/control-proxy/Sources/CtrlProxyRewrite/GesturePerformer.swift",
+  ),
+  "utf8",
+);
+
+describe("arrow focus-query failure: Swift GestureError <-> host contract (#10924)", () => {
+  test("the Swift wire code is the TypeScript constant", () => {
+    const match = /case \.focusQueryFailed:[\s\S]*?return "([^"]+)"/.exec(gesturePerformerSwift);
+    expect(match?.[1]).toBe(RUNNER_FOCUS_QUERY_FAILED_CODE);
+  });
+
+  test("the Swift description says the key was not sent and is not a raw NSException string", () => {
+    const match = /case let \.focusQueryFailed\(phase, detail\):\s*return "([^"]+)"/.exec(
+      gesturePerformerSwift,
+    );
+    expect(match?.[1]).toStartWith("arrow key was not sent: ");
+    expect(match?.[1]).not.toContain("NSException(");
+  });
+
+  test("only the code identifies the failure", () => {
+    expect(isRunnerFocusQueryFailed({ errorCode: RUNNER_FOCUS_QUERY_FAILED_CODE })).toBe(true);
+    expect(isRunnerFocusQueryFailed({ errorCode: RUNNER_GESTURE_BOUND_EXCEEDED_CODE })).toBe(false);
+    expect(isRunnerFocusQueryFailed({})).toBe(false);
   });
 });

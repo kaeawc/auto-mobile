@@ -300,6 +300,8 @@ export interface CtrlProxyKeyboardResult extends BaseResult {
 export interface CtrlProxyPressKeyResult extends BaseResult {
   verified?: boolean;
   warning?: string;
+  /** iOS runner's typed failure code (`runnerErrorCodes.ts`); absent from older runners. */
+  errorCode?: string;
 }
 
 /** Press home result from CtrlProxy iOS */

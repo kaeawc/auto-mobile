@@ -44,6 +44,18 @@ private final class ArrowKeyScenario {
     var restorations = 0
     var focusChecks = 0
     var resolutions = 0
+    var scanCandidateCount: Int?
+    var candidateDuration: Duration = .zero
+    var focusedCandidate: Int?
+    var scannedCandidates: [Int] = []
+    var useProductionResolver = false
+    var nativeCandidateCount = 0
+    var nativeQueries = 0
+    var otherQueries = 0
+    /// XCUITest exception (as `catchingObjCException` bridges it) raised by the focused-element
+    /// predicate query, or by the snapshot of `exceptionCandidate` mid-scan.
+    var scanException: ObjCExceptionError?
+    var exceptionCandidate: Int?
 
     func run(
         knownCaret: (String) -> Int? = { _ in nil },
@@ -57,9 +69,45 @@ private final class ArrowKeyScenario {
                 self.focusChecks += 1
                 self.clock.advance(by: self.focusDuration)
             },
-            resolveInput: {
+            resolveInput: { checkBudget in
                 self.resolutions += 1
                 self.clock.advance(by: self.lookupDuration)
+                if let count = self.scanCandidateCount {
+                    let hasFocus: (Int) throws -> Bool = { index in
+                        self.scannedCandidates.append(index)
+                        self.clock.advance(by: self.candidateDuration)
+                        if index == self.exceptionCandidate, let exception = self.scanException {
+                            throw exception
+                        }
+                        return index == self.focusedCandidate
+                    }
+                    let match: Int?
+                    if self.useProductionResolver {
+                        match = try GesturePerformer.resolveFocusedTextElement(
+                            checkBudget: checkBudget,
+                            predicateMatch: {
+                                if self.exceptionCandidate == nil, let exception = self.scanException {
+                                    throw exception
+                                }
+                                return nil
+                            },
+                            nativeQueries: [{
+                                self.nativeQueries += 1
+                                return Array(0 ..< self.nativeCandidateCount)
+                            }],
+                            otherQuery: {
+                                self.otherQueries += 1
+                                return 0 ..< count
+                            },
+                            nativeHasFocus: hasFocus, otherHasFocus: hasFocus
+                        )
+                    } else {
+                        match = try GesturePerformer.firstFocusedCandidate(
+                            in: 0 ..< count, checkBudget: checkBudget, hasFocus: hasFocus
+                        )
+                    }
+                    return match.map { ("field-\($0)", "abc") } ?? (nil, nil)
+                }
                 return ("field", "abc")
             },
             probeCaret: { _, _ in
@@ -311,6 +359,127 @@ final class PressKeyTests: XCTestCase {
             XCTAssertEqual(elapsedMs, 4000)
             XCTAssertTrue(error.localizedDescription.contains("was not sent"))
         }
+        XCTAssertEqual(scenario.sends, 0)
+        XCTAssertEqual(scenario.probes, 0)
+    }
+
+    func testArrowStopsScanningUnfocusedCandidatesWhenResolutionBudgetExpires() {
+        // Retained iPad input failure: the runner kept resolving Other indices 0...253
+        // for over a minute after the host's 9s timeout. No live device is needed here.
+        let scenario = ArrowKeyScenario()
+        scenario.scanCandidateCount = 254
+        scenario.candidateDuration = .milliseconds(250)
+        XCTAssertThrowsError(try scenario.run()) { error in
+            guard case let GesturePerformer.GestureError.arrowBudgetExhausted(step, elapsedMs) = error else {
+                return XCTFail("Expected pre-send budget error, got \(error)")
+            }
+            XCTAssertEqual(step, "focus check")
+            XCTAssertEqual(elapsedMs, 3500)
+        }
+        XCTAssertEqual(scenario.scannedCandidates, Array(0 ..< 14))
+        XCTAssertEqual(scenario.sends, 0)
+        XCTAssertEqual(scenario.probes, 0)
+    }
+
+    func testArrowStillUsesFocusedCandidateWithinResolutionBudget() throws {
+        let scenario = ArrowKeyScenario()
+        scenario.scanCandidateCount = 254
+        scenario.candidateDuration = .milliseconds(250)
+        scenario.focusedCandidate = 2
+        XCTAssertTrue(try scenario.run())
+        XCTAssertEqual(scenario.scannedCandidates, [0, 1, 2])
+        XCTAssertEqual(scenario.sends, 1)
+    }
+
+    func testProductionResolverStopsNativeScanBeforeQueryingCustomWrappers() {
+        assertProductionResolverStopsScan(nativeCandidateCount: 254, expectedOtherQueries: 0)
+    }
+
+    func testProductionResolverStopsCustomWrapperScanAfterNativeQueries() {
+        assertProductionResolverStopsScan(nativeCandidateCount: 0, expectedOtherQueries: 1)
+    }
+
+    func testFocusedElementQueryExceptionFailsWithTypedErrorAndSendsNoKey() {
+        let scenario = ArrowKeyScenario()
+        scenario.useProductionResolver = true
+        scenario.scanCandidateCount = 254
+        scenario.scanException = ObjCExceptionError(
+            name: "XCTestException", reason: "Failed to get matching snapshot"
+        )
+        assertFocusQueryFailed(scenario, detail: "XCTestException: Failed to get matching snapshot")
+        XCTAssertEqual(scenario.scannedCandidates, [])
+        XCTAssertEqual(scenario.nativeQueries, 0)
+    }
+
+    func testStaleCandidateExceptionMidScanFailsWithTypedErrorAndSendsNoKey() {
+        // Before #10924 an NSException mid-scan degraded to "no element" and the key was sent
+        // unverified; the scan now fails the request, typed, before anything is sent.
+        let scenario = ArrowKeyScenario()
+        scenario.useProductionResolver = true
+        scenario.scanCandidateCount = 254
+        scenario.exceptionCandidate = 3
+        scenario.scanException = ObjCExceptionError(name: "XCTestException", reason: nil)
+        assertFocusQueryFailed(scenario, detail: "XCTestException: no reason")
+        XCTAssertEqual(scenario.scannedCandidates, [0, 1, 2, 3])
+        XCTAssertEqual(scenario.otherQueries, 1)
+    }
+
+    func testFocusQueryExceptionMappingKeepsBudgetAndOtherErrorsUnchanged() {
+        let budget = GesturePerformer.GestureError.arrowBudgetExhausted(step: "focus check", elapsedMs: 3500)
+        XCTAssertThrowsError(try GesturePerformer.mappingFocusQueryException(phase: "value read") {
+            throw budget
+        }) { error in
+            guard case GesturePerformer.GestureError.arrowBudgetExhausted("focus check", 3500) = error else {
+                return XCTFail("Budget errors must pass through unchanged, got \(error)")
+            }
+            XCTAssertNil(WireError.code(for: error))
+        }
+        XCTAssertThrowsError(try GesturePerformer.mappingFocusQueryException(phase: "value read") {
+            throw ObjCExceptionError(name: "NSRangeException", reason: "index 4 beyond bounds")
+        }) { error in
+            guard case let GesturePerformer.GestureError.focusQueryFailed(phase, detail) = error else {
+                return XCTFail("Expected focusQueryFailed, got \(error)")
+            }
+            XCTAssertEqual(phase, "value read")
+            XCTAssertEqual(detail, "NSRangeException: index 4 beyond bounds")
+        }
+        XCTAssertEqual(try GesturePerformer.mappingFocusQueryException(phase: "value read") { 7 }, 7)
+    }
+
+    private func assertFocusQueryFailed(
+        _ scenario: ArrowKeyScenario, detail: String, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        XCTAssertThrowsError(try scenario.run(), file: file, line: line) { error in
+            guard case let GesturePerformer.GestureError.focusQueryFailed(phase, actualDetail) = error else {
+                return XCTFail("Expected focusQueryFailed, got \(error)", file: file, line: line)
+            }
+            XCTAssertEqual(phase, "element resolution", file: file, line: line)
+            XCTAssertEqual(actualDetail, detail, file: file, line: line)
+            XCTAssertEqual(WireError.code(for: error), "focus_query_failed", file: file, line: line)
+            XCTAssertTrue(
+                error.localizedDescription.hasPrefix("arrow key was not sent: "), file: file, line: line
+            )
+        }
+        XCTAssertEqual(scenario.sends, 0, file: file, line: line)
+        XCTAssertEqual(scenario.probes, 0, file: file, line: line)
+    }
+
+    private func assertProductionResolverStopsScan(nativeCandidateCount: Int, expectedOtherQueries: Int) {
+        let scenario = ArrowKeyScenario()
+        scenario.useProductionResolver = true
+        scenario.nativeCandidateCount = nativeCandidateCount
+        scenario.scanCandidateCount = 254
+        scenario.candidateDuration = .milliseconds(250)
+        XCTAssertThrowsError(try scenario.run()) { error in
+            guard case let GesturePerformer.GestureError.arrowBudgetExhausted(step, elapsedMs) = error else {
+                return XCTFail("Expected pre-send budget error, got \(error)")
+            }
+            XCTAssertEqual(step, "focus check")
+            XCTAssertEqual(elapsedMs, 3500)
+        }
+        XCTAssertEqual(scenario.scannedCandidates, Array(0 ..< 14))
+        XCTAssertEqual(scenario.nativeQueries, 1)
+        XCTAssertEqual(scenario.otherQueries, expectedOtherQueries)
         XCTAssertEqual(scenario.sends, 0)
         XCTAssertEqual(scenario.probes, 0)
     }
@@ -839,12 +1008,38 @@ final class PressKeyDispatchTests: XCTestCase {
         let unverified = try XCTUnwrap(unverifiedResult as? WebSocketResponse)
         XCTAssertEqual(unverified.success, true)
         XCTAssertEqual(unverified.verified, false)
-        gestures.keyError = .executionFailed("No focus")
+        gestures.keyError = CommandError.executionFailed("No focus")
         let failedResult = await handler.handle(request)
         let failure = try XCTUnwrap(failedResult as? WebSocketResponse)
         XCTAssertEqual(failure.success, false)
         XCTAssertEqual(failure.type, "press_key_result")
         XCTAssertEqual(failure.requestId, "key-1")
         XCTAssertEqual(gestures.keyCalls.count, 3)
+    }
+
+    func testFocusQueryFailureReachesTheWireAsATypedErrorResponse() async throws {
+        let gestures = RewriteFakeGesturePerformer()
+        gestures.keyError = GesturePerformer.GestureError.focusQueryFailed(
+            phase: "element resolution", detail: "XCTestException: Failed to get matching snapshot"
+        )
+        let handler = CommandHandler(
+            elementLocator: RewriteFakeElementLocator(),
+            gesturePerformer: gestures,
+            perf: PerfProvider()
+        )
+        let result = await handler.handle(.pressKey(RequestPressKey(
+            requestId: "arrow-1", key: "arrow_left", modifiers: []
+        )))
+        let response = try XCTUnwrap(result as? WebSocketResponse)
+        XCTAssertEqual(response.type, "press_key_result")
+        XCTAssertEqual(response.requestId, "arrow-1")
+        XCTAssertEqual(response.success, false)
+        XCTAssertEqual(response.errorCode, "focus_query_failed")
+        XCTAssertEqual(
+            response.error,
+            "arrow key was not sent: XCUITest failed while finding the focused text input during element resolution (XCTestException: Failed to get matching snapshot); the UI likely changed mid-query, so observe again and retry"
+        )
+        XCTAssertFalse(response.error?.contains("NSException(") ?? true)
+        XCTAssertEqual(gestures.keyCalls.count, 0)
     }
 }

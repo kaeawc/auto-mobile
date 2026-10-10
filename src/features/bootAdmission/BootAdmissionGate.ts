@@ -100,8 +100,13 @@ export interface BootAdmissionOptions<S, D extends { outcome: string }> {
   sampleTimeoutMs?: number;
   /** One fresh capacity sample. */
   sample: () => Promise<S>;
-  /** Synchronous so a caller decides and records its admission without an interleaving. */
-  decide: (sample: S) => D | RefusedCapacityDecision;
+  /** The ledger whose in-flight boots the sample may not yet reflect. */
+  ledger: BootAdmissionLedger;
+  /**
+   * Synchronous so a caller decides and records its admission without an interleaving. Pass the
+   * `window` to the ledger's `inFlightCount` so a boot released mid-sample still counts.
+   */
+  decide: (sample: S, window: LedgerSampleWindow) => D | RefusedCapacityDecision;
   /** Records the admission; returns its release. Called synchronously after `decide`. */
   admit: (decision: D) => () => void;
 }
@@ -119,9 +124,17 @@ export async function admitBootNow<S, D extends { outcome: string }>(
   options: BootAdmissionOptions<S, D>,
 ): Promise<BootAdmissionResult<D>> {
   options.signal?.throwIfAborted();
-  const sample = await sampleWithin(options);
+  // A boot in flight when the sample starts must still hold its slot in this decision even if it
+  // ends before the sample returns: the (possibly slow) listing may predate it (#11465).
+  const window = options.ledger.beginSample();
+  let sample: S;
+  try {
+    sample = await sampleWithin(options);
+  } finally {
+    window.close();
+  }
   options.signal?.throwIfAborted();
-  const decision = options.decide(sample);
+  const decision = options.decide(sample, window);
   if (isRefused(decision)) {
     return { decision };
   }
@@ -203,12 +216,34 @@ export interface LedgerAdmission {
 }
 
 /**
+ * Boots in flight when a capacity sample started. Entries released while it runs stay in
+ * `released`, because the sample may have been taken before the device showed up in the listing.
+ */
+export interface LedgerSampleWindow {
+  close(): void;
+}
+
+class SampleWindow implements LedgerSampleWindow {
+  readonly released: LedgerEntry[] = [];
+
+  constructor(
+    readonly inFlightAtStart: ReadonlySet<symbol>,
+    private readonly onClose: (window: SampleWindow) => void,
+  ) {}
+
+  close(): void {
+    this.onClose(this);
+  }
+}
+
+/**
  * Boots admitted by a gate and not yet visible in the platform listing. Each
  * counts toward the limit, so concurrent callers cannot all be admitted
  * against one free slot.
  */
 export class BootAdmissionLedger {
   private readonly entries = new Map<symbol, LedgerEntry>();
+  private readonly openWindows = new Set<SampleWindow>();
 
   constructor(private readonly timer: Pick<Timer, "now">) {}
 
@@ -217,7 +252,16 @@ export class BootAdmissionLedger {
     this.entries.set(token, { deviceId });
     return {
       release: () => {
+        const entry = this.entries.get(token);
+        if (!entry) {
+          return;
+        }
         this.entries.delete(token);
+        for (const window of this.openWindows) {
+          if (window.inFlightAtStart.has(token)) {
+            window.released.push(entry);
+          }
+        }
       },
       handOff: (handedOffDeviceId, untilMs) => {
         const entry = this.entries.get(token);
@@ -231,14 +275,27 @@ export class BootAdmissionLedger {
     };
   }
 
+  /** Start tracking the boots in flight now; `close` it once the sample returns. */
+  beginSample(): LedgerSampleWindow {
+    const window = new SampleWindow(new Set(this.entries.keys()), (closed) =>
+      this.openWindows.delete(closed),
+    );
+    this.openWindows.add(window);
+    return window;
+  }
+
   /**
    * Admitted boots the listing does not already show. A handed-off boot that
    * is now visible, or past its hand-off window, leaves the ledger here.
    * An entry for `excludeDeviceId` is not counted: a boot's own target needs no second slot.
    */
-  inFlightCount(visibleDeviceIds: ReadonlySet<string>, excludeDeviceId?: string): number {
+  inFlightCount(
+    visibleDeviceIds: ReadonlySet<string>,
+    excludeDeviceId?: string,
+    sampleWindow?: LedgerSampleWindow,
+  ): number {
     const now = this.timer.now();
-    let count = 0;
+    let count = this.releasedDuringSample(sampleWindow, visibleDeviceIds, excludeDeviceId, now);
     for (const [token, entry] of this.entries) {
       const visible = entry.deviceId !== undefined && visibleDeviceIds.has(entry.deviceId);
       if (entry.handedOffUntilMs !== undefined && (visible || now >= entry.handedOffUntilMs)) {
@@ -251,6 +308,24 @@ export class BootAdmissionLedger {
       }
     }
     return count;
+  }
+
+  /** Boots that ended after the sample started and that the sample does not show either. */
+  private releasedDuringSample(
+    window: LedgerSampleWindow | undefined,
+    visibleDeviceIds: ReadonlySet<string>,
+    excludeDeviceId: string | undefined,
+    now: number,
+  ): number {
+    if (!(window instanceof SampleWindow)) {
+      return 0;
+    }
+    return window.released.filter(
+      (entry) =>
+        !(entry.handedOffUntilMs !== undefined && now >= entry.handedOffUntilMs) &&
+        !(entry.deviceId !== undefined && visibleDeviceIds.has(entry.deviceId)) &&
+        (excludeDeviceId === undefined || entry.deviceId !== excludeDeviceId),
+    ).length;
   }
 }
 

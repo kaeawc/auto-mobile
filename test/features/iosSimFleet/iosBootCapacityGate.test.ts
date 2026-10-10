@@ -61,6 +61,28 @@ async function tick(): Promise<void> {
 }
 
 describe("iOS boot capacity gate", () => {
+  // A listing taken before boot A's slot was visible, still in flight when A finishes booting
+  // and releases its ledger entry, undercounts A: neither the ledger nor the stale listing
+  // holds A's slot, so a second boot is admitted over a limit of 1.
+  test("a sample started before a boot finished does not admit past the limit", async () => {
+    const source = new ScriptedSource();
+    const { gate } = build(source);
+    source.immediate = [sim(A, "Shutdown"), sim(B, "Shutdown")];
+    const first = await gate.admitBoot(undefined, { bootUdid: A });
+    expect(first.decision.outcome).toBe("allow");
+
+    source.immediate = undefined; // second listing hangs open (simctl is slow)
+    const second = gate.admitBoot(undefined, { bootUdid: B });
+    await tick();
+    expect(source.pending.length).toBe(1);
+
+    // A finishes booting and releases; the in-flight listing still shows it Shutdown.
+    first.releaseAdmission?.();
+    source.pending[0]([sim(A, "Shutdown"), sim(B, "Shutdown")]);
+
+    expect((await second).decision.outcome).toBe("refuse");
+  });
+
   // The boot's own target never needs a second slot (decide() excludes it from the listing
   // count), yet a ledger entry for the SAME udid is counted as another in-flight boot.
   test("a second admission for a udid already in flight does not count its own target twice", async () => {

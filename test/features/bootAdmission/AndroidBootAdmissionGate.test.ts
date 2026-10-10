@@ -183,6 +183,20 @@ describe("AndroidBootAdmissionGate (#11181)", () => {
     expect(source.samples).toBe(3);
   });
 
+  // #11465: an adb listing taken before the emulator showed up, still running when the boot ends.
+  test("a sample started before a boot finished does not admit past the limit", async () => {
+    const { source, gate } = setup({ [ANDROID_MAX_BOOTED_ENV]: "1" });
+    const first = await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+    first.handOff("emulator-5554");
+    source.onSample = () => first.release();
+
+    const error = await rejection(gate.admit({ timeoutMs: 60_000, avdName: AVD }));
+
+    expect(error).toBeInstanceOf(BootCapacityExhaustedError);
+    source.onSample = undefined;
+    expect((await gate.describeCapacity()).inFlight).toBe(0);
+  });
+
   test("a sample timeout is reported as retryable discovery_incomplete", async () => {
     const { timer, source, gate } = setup();
     source.sample = () => new Promise(() => {});

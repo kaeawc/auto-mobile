@@ -15,6 +15,7 @@ import {
   type BootCapacityReporter,
   type BootCapacitySnapshot,
   type LedgerAdmission,
+  type LedgerSampleWindow,
   type RefusedCapacityDecision,
 } from "./BootAdmissionGate";
 import {
@@ -83,7 +84,8 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
       sampleTimeoutMs: Math.min(request.timeoutMs, DEFAULT_SAMPLE_TIMEOUT_MS),
       label: "Android emulator capacity",
       sample: () => this.sampleKnownCount({ signal: request.signal }),
-      decide: (sample) => this.decide(sample),
+      ledger: this.ledger,
+      decide: (sample, window) => this.decide(sample, window),
       admit: () => {
         admitted = this.ledger.admit();
         return admitted.release;
@@ -152,10 +154,11 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
   /** Synchronous so the waiter decides and records its admission without an interleaving. */
   private decide(
     sample: AndroidCapacitySample,
+    window?: LedgerSampleWindow,
   ): AndroidAdmissionDecision | RefusedCapacityDecision {
     this.forgetExitedSerials(sample);
     const limits = this.limitsFor(sample);
-    const bootedCount = this.count(sample).effective;
+    const bootedCount = this.count(sample, window).effective;
     return (
       atCapacityDecision(bootedCount, limits, this.retryAfterMs, {
         noun: "emulator",
@@ -191,14 +194,17 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
    * `effective` adds admitted boots adb does not list yet, but never counts
    * one twice when its qemu process is already in the process count.
    */
-  private count(sample: AndroidCapacitySample): {
+  private count(
+    sample: AndroidCapacitySample,
+    window?: LedgerSampleWindow,
+  ): {
     booted: number;
     inFlight: number;
     effective: number;
   } {
     const listed = sample.emulatorSerials.length;
     const processes = sample.emulatorProcessRssBytes?.length ?? 0;
-    const inFlight = this.ledger.inFlightCount(new Set(sample.emulatorSerials));
+    const inFlight = this.ledger.inFlightCount(new Set(sample.emulatorSerials), undefined, window);
     return {
       booted: Math.max(listed, processes),
       inFlight,

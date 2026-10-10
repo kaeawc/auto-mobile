@@ -93,6 +93,7 @@ test/daemon/devicePoolCreate.test.ts
 test/daemon/devicePoolPhysicalIosRename.test.ts
 test/daemon/devicePoolRecoveryPolicy.test.ts
 test/daemon/devicePoolRefresh.test.ts
+test/daemon/devicePoolStateChangeSites.test.ts
 test/daemon/deviceRecoveryPolicy.test.ts
 test/daemon/deviceRuntimeIdentity.test.ts
 test/daemon/deviceSessionResolver.test.ts
@@ -103,6 +104,7 @@ test/daemon/emulatorLossIncident.test.ts
 test/daemon/emulatorLossIncidentLedger.test.ts
 test/daemon/executionOwnerWatch.test.ts
 test/daemon/explicitReleaseCutCall.test.ts
+test/daemon/explicitReleaseOfUnrecoveredRestartRow.test.ts
 test/daemon/failuresPushSocketServer.test.ts
 test/daemon/findAvailableDaemonPort.test.ts
 test/daemon/forwardLeaseHolders.test.ts
@@ -116,6 +118,7 @@ test/daemon/hierarchyStreamDiff.test.ts
 test/daemon/idleDeviceReaper.test.ts
 test/daemon/incumbentOwnerGuard.test.ts
 test/daemon/inputDeviceOwnership.test.ts
+test/daemon/lateRehydrationOwnerToldNotFound.test.ts
 test/daemon/liveDeadlineRegistry.test.ts
 test/daemon/livenessKeeperSuspectInteractions.test.ts
 test/daemon/livenessOwnerLease.test.ts
@@ -125,11 +128,14 @@ test/daemon/managedSlots/abandonedScopeReclaimer.test.ts
 test/daemon/managedSlots/capacityExternalDevices.test.ts
 test/daemon/managedSlots/daemonManagedSlotAcquisition.ownDevice.test.ts
 test/daemon/managedSlots/daemonManagedSlotAcquisition.redrive.test.ts
+test/daemon/managedSlots/defaultFreeDeviceReclaimer.test.ts
+test/daemon/managedSlots/freeDeviceReclaimer.test.ts
 test/daemon/managedSlots/managedExecutionDaemonRestart.test.ts
 test/daemon/managedSlots/managedSlotAcquisition.test.ts
 test/daemon/managedSlots/managedSlotExclusion.test.ts
 test/daemon/managedSlots/managedSlotLateRehydrationReown.test.ts
 test/daemon/managedSlots/managedSlotReconcilerPorts.test.ts
+test/daemon/managedSlots/poolManagedSlotDeviceStopper.test.ts
 test/daemon/managedSlots/reconciler.test.ts
 test/daemon/managedSlots/slotJournal.test.ts
 test/daemon/managedSlots/slotOwnerLiveness.test.ts
@@ -168,6 +174,7 @@ test/daemon/refusalWireContract.test.ts
 test/daemon/registerSessionManagedConnection.test.ts
 test/daemon/rehydratedLegacyLivenessDefaults.test.ts
 test/daemon/rehydrationIdleOrigin.test.ts
+test/daemon/rehydrationReservationAutolock.test.ts
 test/daemon/releaseReasons.test.ts
 test/daemon/releasingSessionRequests.test.ts
 test/daemon/sessionCacheNoEscapeHatch.test.ts
@@ -386,6 +393,7 @@ test/features/featureFlags/FeatureFlagService.toolListChanged.test.ts
 test/features/featureFlags/persistedOutputReductionOverrides.test.ts
 test/features/featureFlags/toolDefinitionAffectingFlags.drift.test.ts
 test/features/iosSimFleet/IosBootInstrumentation.test.ts
+test/features/iosSimFleet/iosBootCapacityGate.test.ts
 test/features/iosSimFleet/iosSimFleet.test.ts
 test/features/memory/MemoryAudit.characterization.test.ts
 test/features/memory/MemoryMetricsCollector.test.ts
@@ -894,9 +902,11 @@ test/server/internalToolCall.property.test.ts
 test/server/internalToolCall.test.ts
 test/server/internalToolPayloads.property.test.ts
 test/server/internalToolPayloads.test.ts
+test/server/inventoryDeviceDescription.test.ts
 test/server/iosSimulatorMediaClient.test.ts
 test/server/isMutationQuery.test.ts
 test/server/listChangedBroadcast.test.ts
+test/server/livenessHandoverNotificationPayloads.test.ts
 test/server/managedSlotDeviceDeleter.test.ts
 test/server/navigationRelevantTools.test.ts
 test/server/networkGraph.test.ts
@@ -922,6 +932,8 @@ test/server/prototypeResources.test.ts
 test/server/prototypeToolAnchors.test.ts
 test/server/prototypeToolAppearance.test.ts
 test/server/prototypeToolAssets.test.ts
+test/server/prototypeToolCancelledShow.test.ts
+test/server/prototypeToolRefusedShowSupersede.test.ts
 test/server/prototypeToolSpecPath.test.ts
 test/server/prototypeToolThemeModes.test.ts
 test/server/prototypeToolsIos.test.ts

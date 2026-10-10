@@ -30,8 +30,10 @@ class BusyRewritePersistence extends FakeDeviceSessionPersistence {
   /** Plain upserts still to fail; `Infinity` keeps the database busy. */
   failPlainUpserts = 0;
   plainUpserts = 0;
-  /** Runs once, while the next plain upsert is in flight. */
+  /** Runs once, while the next plain upsert is in flight (before it lands or fails). */
   duringPlainUpsert: (() => Promise<void>) | undefined;
+  /** Runs once, right after the next plain upsert has landed. */
+  afterPlainUpsert: (() => Promise<void>) | undefined;
 
   override async markReleased(
     sessionUuid: string,
@@ -51,13 +53,18 @@ class BusyRewritePersistence extends FakeDeviceSessionPersistence {
   ): Promise<number> {
     if (!options.unlessTerminal) {
       this.plainUpserts++;
+      const hook = this.duringPlainUpsert;
+      this.duringPlainUpsert = undefined;
+      await hook?.();
       if (this.failPlainUpserts > 0) {
         this.failPlainUpserts--;
         throw new Error("SQLITE_BUSY: database is locked");
       }
-      const hook = this.duringPlainUpsert;
-      this.duringPlainUpsert = undefined;
-      await hook?.();
+      const generation = await super.upsertActiveSession(record, nowMs, options);
+      const landed = this.afterPlainUpsert;
+      this.afterPlainUpsert = undefined;
+      await landed?.();
+      return generation;
     }
     return await super.upsertActiveSession(record, nowMs, options);
   }
@@ -247,6 +254,62 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
       release_reason: "explicit-release",
     });
     expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a retry whose write fails after the session ended owes nothing and arms no timer", async () => {
+    await supersededReleaseWithFailingRewrite(2);
+    let released: Promise<unknown> | undefined;
+    store.duringPlainUpsert = async () => {
+      released = manager.releaseSession(SESSION, "explicit-release");
+      await settleMicrotasks(100);
+    };
+
+    await timer.advanceTimeAsync(RETRY_DELAY_MS);
+    await settleMicrotasks();
+    await released;
+    await settleMicrotasks();
+
+    // The scenario was driven: the retry's write was issued and failed, with the session gone.
+    expect(store.plainUpserts).toBe(2);
+    expect(store.failPlainUpserts).toBe(0);
+    expect(manager.getSession(SESSION)).toBeNull();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    await timer.advanceTimeAsync(RETRY_DELAY_MS * 4);
+    await settleMicrotasks();
+    expect(store.plainUpserts).toBe(2);
+    expect(await store.getSession?.(SESSION)).toMatchObject({
+      status: "released",
+      release_reason: "explicit-release",
+    });
+  });
+
+  test("a retry due while a rebind is under way does not write the old binding over the rebind's row", async () => {
+    const REBOUND_DEVICE = "emulator-5556";
+    await supersededReleaseWithFailingRewrite(1);
+    // The rebind's row has landed and the rebind has not published yet when the retry is due.
+    store.afterPlainUpsert = async () => {
+      await timer.advanceTimeAsync(RETRY_DELAY_MS);
+      await settleMicrotasks(50);
+    };
+
+    await manager.rebindSession(SESSION, REBOUND_DEVICE, "android");
+
+    expect(store.afterPlainUpsert).toBeUndefined();
+    expect(manager.getSession(SESSION)?.assignedDevice).toBe(REBOUND_DEVICE);
+    expect(await store.getSession?.(SESSION)).toMatchObject({
+      status: "active",
+      device_id: REBOUND_DEVICE,
+    });
+    // The deferred retry then writes the session as rebound, and nothing is left armed.
+    await timer.advanceTimeAsync(RETRY_DELAY_MS * 2);
+    await settleMicrotasks();
+    expect(await store.getSession?.(SESSION)).toMatchObject({
+      status: "active",
+      release_reason: null,
+      device_id: REBOUND_DEVICE,
+    });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(releases).toEqual([]);
   });
 
   test("stopping the manager cancels a pending retry", async () => {

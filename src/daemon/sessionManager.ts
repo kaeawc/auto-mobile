@@ -5895,7 +5895,10 @@ export class SessionManager {
         error,
       );
       // Owed before the in-flight count ends, so an activity write always sees one of the two.
-      this.oweSupersededRowReassert(session, supersededReasons);
+      // A session that ended during the write is owed nothing, nor is one revived under its UUID.
+      if (this.sessions.get(session.sessionId) === session) {
+        this.oweSupersededRowReassert(session, supersededReasons);
+      }
       return false;
     } finally {
       settle();
@@ -6001,8 +6004,12 @@ export class SessionManager {
       this.dropOwedSupersededRowReassert(entry);
       return false;
     }
-    if (this.releasingSessions.has(session)) {
+    if (
+      this.releasingSessions.has(session) ||
+      this.pendingSessionRebinds.get(sessionId)?.session === session
+    ) {
       // A release is under way: it removes the session (and this entry) unless it is superseded.
+      // Or a rebind is: its row carries the new binding, which this session does not hold yet.
       this.deferOwedSupersededRowReassert(entry);
       return false;
     }

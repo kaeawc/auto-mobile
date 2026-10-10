@@ -5738,6 +5738,11 @@ export class DevicePool {
       return;
     }
     await ownership.refresh([deviceId]);
+    if (ownership.foreignOwnerPid(deviceId) !== undefined) {
+      // A peer that only holds an idle CtrlProxy forwarding lease is asked to give it up before
+      // the device is refused; it stays the owner when it declines (#11349).
+      await ownership.relinquishIdleLease?.(deviceId);
+    }
     const ownerPid = ownership.foreignOwnerPid(deviceId);
     if (ownerPid !== undefined || ownership.foreignClaimUnreadable?.(deviceId)) {
       throw new DeviceOwnedByOtherDaemonError(deviceId, ownerPid, remedy);

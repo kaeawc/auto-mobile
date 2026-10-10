@@ -1,3 +1,4 @@
+import { ActionableError } from "../../models/ActionableError";
 import type { Platform } from "../../models/Platform";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { DefaultHostCommandExecutor } from "../../utils/HostCommandExecutor";
@@ -11,7 +12,7 @@ import {
 import type { IosSimCapacityGate } from "../iosSimFleet/CapacityGate";
 import { createIosSimCapacityGate } from "../iosSimFleet/defaultIosBootInstrumentation";
 import { AndroidBootAdmissionGate } from "./AndroidBootAdmissionGate";
-import { CommandAndroidCapacitySource } from "./AndroidCapacitySource";
+import { adbEmulatorSerialLister, CommandAndroidCapacitySource } from "./AndroidCapacitySource";
 import {
   isBootCapacityGateEnabled,
   type BootCapacityReporter,
@@ -72,17 +73,22 @@ export function createBootAdmissionGates(
   return {
     android: androidEnabled
       ? new AndroidBootAdmissionGate(
-          new CommandAndroidCapacitySource(async (signal) => {
-            const devices = await defaultAdbClientFactory.create(null).getBootedAndroidDevices({
-              bypassCache: true,
-              throwOnMissingAdb: true,
-              timeoutMs: ADB_LISTING_TIMEOUT_MS,
-              signal,
-            });
-            return devices
-              .map((device) => device.deviceId)
-              .filter((deviceId) => deviceId.startsWith("emulator-"));
-          }, executor),
+          new CommandAndroidCapacitySource(
+            adbEmulatorSerialLister(
+              {
+                getDeviceStates: async (options) => {
+                  const adb = defaultAdbClientFactory.create(null);
+                  if (!adb.getDeviceStates) {
+                    // A failed listing, never zero emulators: the gate must not fail open.
+                    throw new ActionableError("adb client cannot list raw device states");
+                  }
+                  return adb.getDeviceStates(options);
+                },
+              },
+              ADB_LISTING_TIMEOUT_MS,
+            ),
+            executor,
+          ),
           timer,
           { env },
         )

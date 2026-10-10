@@ -286,7 +286,13 @@ async function main() {
     }
     // Refuse before any daemon or device work rather than run unmanaged (#11208).
     assertManagedSlotsSupported(managedSlotConfig);
-    if (managedSlotConfig?.executionOwnerPid !== undefined) {
+    // Only the STDIO proxy has an execution owner; daemon and CLI calls may run after it exited (#11286).
+    if (
+      !cliMode &&
+      !daemonMode &&
+      !daemonRequested &&
+      managedSlotConfig?.executionOwnerPid !== undefined
+    ) {
       const { isProcessRunning } = await import("./utils/processLiveness");
       assertManagedSlotOwnerRunning(managedSlotConfig, (pid) => isProcessRunning(pid));
     }

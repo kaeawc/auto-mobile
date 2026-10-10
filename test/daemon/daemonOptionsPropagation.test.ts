@@ -549,3 +549,11 @@ describe("compact metadata tri-state startup", () => {
     expect(STARTUP_OPTION_DEFICIT_KEYS).not.toContain("actionsCompactMetadata");
   });
 });
+
+describe("daemonProcessEnvironment managed slot config (#11286)", () => {
+  test("does not hand the proxy's managed slot config to the spawned daemon", () => {
+    const env = daemonProcessEnvironment({ AUTOMOBILE_MANAGED_SLOT_CONFIG: "p1.json", KEEP: "1" });
+    expect(env.AUTOMOBILE_MANAGED_SLOT_CONFIG).toBeUndefined();
+    expect(env.KEEP).toBe("1");
+  });
+});

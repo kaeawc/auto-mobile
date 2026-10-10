@@ -738,6 +738,10 @@ Every booted device of the platform counts, including ones started outside
 AutoMobile: for Android, the larger of the emulators adb lists and the
 `qemu-system-*` processes on the host, so emulators still booting or on another
 adb server count too.
+On iOS, simulators that are Booting or Shutting Down count as well, and a
+simulator inventory that cannot be read refuses the boot with the retryable
+`discovery_incomplete` rather than counting zero. A failed `ps` read does not
+lower the iOS limit: it is still derived from host RAM and cores.
 
 Only the device-count limit refuses a boot: iOS host memory/CPU pressure is
 reported (`hostPressure` in the capacity snapshot) but never refuses one.

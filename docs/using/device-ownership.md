@@ -47,12 +47,24 @@ below are the defaults; the constants live in
   `SUSPECT_GRACE_MS` (4 s). With the 2 s expiry sweep, a session is released about
   10 s after its owner's last heartbeat. The lease is judged on the owner's own
   heartbeats only: tool calls from other callers do not keep a dead owner alive.
+  The release is terminal: the client then sees `session_ownership_lost` with
+  `retryable: false` and `nextAction: "acquire_new_session"` (#11315, #11372).
+  A control call that arrives after the lease and grace have lapsed but before the
+  expiry sweep runs is refused with that terminal refusal at once, and the session
+  is released. A control call in the suspect grace gets the retryable
+  `daemon_session_suspect` refusal instead: retry it now.
+- **Reads and a lapsing session.** A read is never refused, not even in the
+  suspect window, and it never holds a session: for a lost heartbeat, a missing
+  first heartbeat or a one-shot CLI idle release, a read in flight cannot keep the
+  session past its release (#11372). The same release cuts a read still running
+  and answers it with the typed terminal refusal (#11384).
 - **Idle.** `DEFAULT_SESSION_IDLE_TIMEOUT_MS` (2 min) after the last control tool
   call ends. An idle release is terminal: the session UUID ends with it. The
   grace does not stretch it: a heartbeating session is released at the idle
   deadline. Heartbeats and reads (`observe`, `listDevices`, `doctor`,
   `recordSteps` status and the other reads listed above) never extend it. A call
-  still in flight holds the release, up to a bounded ceiling.
+  still in flight holds the release, up to a bounded ceiling (a one-shot CLI
+  session's idle release is the exception for reads: see above).
 - **`idleReleaseAt`** is the idle deadline as wall-clock epoch milliseconds. The
   daemon computes it (session-clock instants are converted to wall time at the
   daemon boundary), reports it in the session hold diagnostics and the heartbeat
@@ -75,23 +87,31 @@ refused with `session_ownership_lost`, `retryable: false` and `nextAction:
 liveness policy (heartbeat, one-shot CLI or managed execution; owner decision
 2026-10-09).
 
-| Reason                                                                                                  | Terminal?  | What the client sees                                                                                                           |
-| ------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `explicit-release`                                                                                      | Yes        | `session_ownership_lost`; acquire a new session.                                                                               |
-| `lazy-expiry`, `cleanup-expired`                                                                        | Yes (idle) | `session_ownership_lost`; session-not-found answers (heartbeat, `daemon/sessionInfo`) add `idle: true`. Acquire a new session. |
-| `cli-idle-timeout`                                                                                      | Yes (idle) | Same as the other idle reasons, for a one-shot CLI session.                                                                    |
-| `heartbeat-timeout`, `missing-first-heartbeat`                                                          | Yes        | `session_ownership_lost`, with the heartbeat age and limit in the message.                                                     |
-| `rehydration-owner-timeout`                                                                             | Yes        | `session_ownership_lost`: a rehydrated session's owner never reclaimed it.                                                     |
-| `owner-disconnected`                                                                                    | Yes        | `session_ownership_lost`: the owning connection closed and no other client owns the session.                                   |
-| `device-killed`                                                                                         | Yes        | `session_terminal_release_in_progress` while the kill runs, then `session_ownership_lost`.                                     |
-| `device-disconnected:<device>`                                                                          | Yes        | `session_ownership_lost`: the device was lost.                                                                                 |
-| `identity-recovery-<reason>`                                                                            | Yes        | `session_ownership_lost`: restart recovery could not prove the device's identity.                                              |
-| `session-creation-cancelled`                                                                            | Yes        | `session_ownership_lost`: the creation was cancelled before the session was handed out.                                        |
-| `daemon-shutdown`, `daemon-restart`, `device-restart:<device>`                                          | No         | The restarted daemon rehydrates the session; its owner reclaims it under the same UUID.                                        |
-| `superseded`                                                                                            | No         | Nothing: a newer incarnation of the same UUID holds the device.                                                                |
-| `plan-auto-release`                                                                                     | No         | The plan freed the device; its base and label UUIDs may be issued again.                                                       |
-| `session-creation-timeout`, `allocation-rollback`, `device-disconnected-during-session-create:<device>` | No         | The session was never handed out; the UUID may be created again.                                                               |
-| `expired`                                                                                               | No         | A stored row found past its deadline; it cannot be recovered, and a call naming it is refused as not active.                   |
+| Reason                                                                                                  | Terminal?  | What the client sees                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `explicit-release`                                                                                      | Yes        | `session_ownership_lost`; acquire a new session.                                                                                                                                      |
+| `lazy-expiry`, `cleanup-expired`                                                                        | Yes (idle) | `session_ownership_lost`; session-not-found answers (heartbeat, `daemon/sessionInfo`) add `idle: true`. Acquire a new session.                                                        |
+| `cli-idle-timeout`                                                                                      | Yes (idle) | Same as the other idle reasons, for a one-shot CLI session.                                                                                                                           |
+| `heartbeat-timeout`, `missing-first-heartbeat`                                                          | Yes        | `session_ownership_lost`, with the heartbeat age and limit in the message.                                                                                                            |
+| `rehydration-owner-timeout`                                                                             | Yes        | `session_ownership_lost`: a rehydrated session's owner never reclaimed it.                                                                                                            |
+| `owner-disconnected`                                                                                    | Yes        | `session_ownership_lost`: the owning connection closed and no other client owns the session.                                                                                          |
+| `device-killed`                                                                                         | Yes        | `session_terminal_release_in_progress` while the kill runs, then `session_ownership_lost`.                                                                                            |
+| `device-disconnected:<device>`                                                                          | Yes        | `session_ownership_lost`: the device was lost.                                                                                                                                        |
+| `identity-recovery-<reason>`                                                                            | Yes        | `session_ownership_lost` with `recoveryReason` and `deviceId` (and `ownerPid` when another daemon holds the device): restart recovery could not prove the device's identity (#11414). |
+| `session-creation-cancelled`                                                                            | Yes        | `session_ownership_lost`: the creation was cancelled before the session was handed out.                                                                                               |
+| `daemon-shutdown`, `daemon-restart`, `device-restart:<device>`                                          | No         | The restarted daemon rehydrates the session; its owner reclaims it under the same UUID.                                                                                               |
+| `superseded`                                                                                            | No         | Nothing: a newer incarnation of the same UUID holds the device.                                                                                                                       |
+| `plan-auto-release`                                                                                     | No         | The plan freed the device.                                                                                                                                                            |
+| `session-creation-timeout`, `allocation-rollback`, `device-disconnected-during-session-create:<device>` | No         | The session was never handed out; the UUID may be created again.                                                                                                                      |
+| `expired`                                                                                               | No         | A stored row found past its deadline; it cannot be recovered, and a call naming it is refused as not active.                                                                          |
+
+A call still running when its session is released (heartbeat reap, idle sweep,
+owner disconnect or explicit release) is cut and answered with
+`session_ownership_lost`, `retryable: false` and `nextAction:
+"acquire_new_session"`, carrying its own session id (#11384, #11429). The
+requester of an explicit release is not cut. A derived `<base>:<label>` session
+released alone does not tell its live base session's call that it lost
+ownership: that call gets a plain cancellation (#11386).
 
 When two releases of one session race, a terminal reason replaces a
 non-terminal one, and any other terminal reason replaces an idle one, so the
@@ -141,8 +161,15 @@ it, and two emulators that merely share an AVD name are never merged.
 
 The restarted daemon stamps itself as owner of every session it rehydrates (#11114),
 so a later peer daemon does not mistake them for a dead predecessor's. Each
-rehydrated session gets a fresh idle window; a session already past its deadline
-at restart is not rehydrated. A release whose database write had not landed is
+rehydrated session's idle window starts together with its owner-reconnect window
+(#11404), so it cannot expire before its owner can reconnect; a session already
+past its deadline at restart is not rehydrated. At the start of recovery the
+device of every persisted session is reserved, so no other caller takes it while
+rows are recovered one by one. A reservation is released when its row fails to
+recover, or when the 15 s recovery deadline passes with the row unstarted (#11372).
+A managed slot wins over a reservation: a reservation never blocks a slot that
+takes the device. A session lost to identity loss at restart is answered as
+`session_ownership_lost` (see the reasons table). A release whose database write had not landed is
 recorded first in a crash-safe sidecar (`terminal-release-intents.jsonl` in the
 daemon data directory, `src/daemon/terminalReleaseJournal.ts`), and the restarted
 daemon finishes it before rehydrating, so a released UUID is never revived.
@@ -185,7 +212,9 @@ the other daemon cannot bind it mid-kill.
 `force` keeps its older meaning too: for a wedged Android emulator it also skips
 the AVD-name comparison. Use it only when the device really should be stopped
 out from under its holder. Deleting a stopped image is not affected, since no
-session can hold it.
+session can hold it. A refused `deleteDevice` carries the same typed fields as a
+refused `killDevice` (`code`, `retryable` and the rest of the refusal's evidence,
+#11419).
 
 ## Ownership is cooperative
 
@@ -245,6 +274,18 @@ kill naming a device the session has left with `session_no_longer_owns_device`
 (`retryable: false`, no `nextAction`; check who holds the device before killing
 it, a new session would not help).
 
+## Device status in listings
+
+`listDevices`, the `automobile:devices/booted` resources, `daemon/availableDevices`
+(`--daemon available-devices`) and the pool stats report one status per device
+(#11317, #11401). A device that allocation cannot lend is `assigned`, not
+`idle`: that covers a device with a session, a reserved device (shutting down or
+still becoming ready), a device held by a managed slot or by another daemon, and
+an idle device carrying an unhealthy marker. A device in error stays `error`.
+Every device is in exactly one bucket, so `idle + assigned + error` equals the
+total. A per-platform booted resource (`automobile:devices/booted/ios`) counts
+only that platform's devices (#11415).
+
 ## Boot capacity
 
 Cold boots are admitted against host capacity (owner decision 2026-10-09,
@@ -252,7 +293,11 @@ Cold boots are admitted against host capacity (owner decision 2026-10-09,
 platform has its own limit on booted devices: the smaller of half the host RAM
 divided by the measured per-device memory and half the CPU cores, at least 1.
 Every booted emulator or simulator counts, including ones started outside
-AutoMobile. A boot that would go over the limit is not queued: it fails at once
+AutoMobile; on iOS, simulators that are Booting or Shutting Down count too
+(#11318). If the booted count cannot be read (simctl or adb failed), the boot is
+refused with the retryable `discovery_incomplete` instead of counting zero. A
+failed `ps` read no longer lowers the iOS limit: the limit still derives from host
+RAM and cores (#11396). A boot that would go over the limit is not queued: it fails at once
 with the retryable code `capacity_exhausted`, which carries `retryAfterMs`,
 `limit`, `booted`, `platform` and, when emulators AutoMobile did not start occupy
 slots, `externalDevices` (the message names them and the

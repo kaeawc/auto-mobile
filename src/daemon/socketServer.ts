@@ -5475,6 +5475,11 @@ export class UnixSocketServer {
    * is allowed and set. Reads stay open to watchers. Unheld devices stay open to any client,
    * except a device a managed slot holds, which only that slot's execution may mutate, `force`
    * or not (#11178).
+   *
+   * The holder's own mutation is a control call on its session, so it also passes the session
+   * admission `input/*` passes (#11486): a suspect, lapsed or idle-expired holder is refused with
+   * the typed code before anything is written. `force` overrides the local holder, so a forced
+   * call is not judged against the holder's session.
    */
   private async assertIdeMutationOwnership(
     request: DaemonRequest,
@@ -5505,15 +5510,37 @@ export class UnixSocketServer {
     if (force) {
       return;
     }
+    const holderSessionUuid = sessionManager.getSessionForDevice?.(deviceId) ?? undefined;
     assertInputRequesterHoldsDevice({
       action,
       deviceId,
-      ownerSessionUuid: sessionManager.getSessionForDevice?.(deviceId) ?? undefined,
+      ownerSessionUuid: holderSessionUuid,
       requesterSessionUuid,
       sessionManager,
       remedy:
         "pass the holding session's sessionUuid, or wait for the holder to release the device.",
     });
+    await this.admitIdeMutationOnHolderSession(action, deviceId, holderSessionUuid);
+  }
+
+  /**
+   * Judge a mutating `ide/*` frame against the session holding its device, under an execution of
+   * its own so the admission does not mistake it for earlier work still in flight.
+   */
+  private async admitIdeMutationOnHolderSession(
+    action: string,
+    deviceId: string,
+    holderSessionUuid: string | undefined,
+  ): Promise<void> {
+    if (!holderSessionUuid) {
+      return;
+    }
+    const execution = executionTracker.startExecution(action, undefined, holderSessionUuid);
+    try {
+      await this.admitInputAsControlCall(execution, deviceId, holderSessionUuid);
+    } finally {
+      executionTracker.endExecution(execution.id);
+    }
   }
 
   /**

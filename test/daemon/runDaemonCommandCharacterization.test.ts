@@ -92,7 +92,8 @@ describe("daemon command characterization with fake I/O", () => {
     const state = {
       isInitialized: () => true,
       getDevicePool: () => ({
-        getStats: () => {
+        // The in-daemon path refreshes slot and foreign ownership before reading stats (#11317).
+        getRefreshedStats: async () => {
           events.push("stats");
           return { idle: 1, assigned: 0, error: 0, total: 1 };
         },

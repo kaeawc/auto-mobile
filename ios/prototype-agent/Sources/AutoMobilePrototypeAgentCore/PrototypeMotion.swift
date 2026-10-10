@@ -125,12 +125,13 @@ private final class WorkItemTimer: PrototypeTimerHandle, @unchecked Sendable {
 }
 
 /// Closes a `snackbar` that sets `durationMs` that long after it opens. `sync` is called with the
-/// snackbars currently open; one timer runs per open snackbar, keyed by its position, `openWhen`
-/// key and duration (Android's `LaunchedEffect(openWhen, durationMs)`), so a re-show of the same
-/// spec keeps the running timer while a closed or changed snackbar cancels or restarts it.
+/// snackbars currently open; one timer runs per open snackbar, keyed by its `openWhen` key and
+/// duration (Android's `LaunchedEffect(openWhen, durationMs)`), so another snackbar opening or
+/// closing earlier in the tree never restarts it, while a closed or changed snackbar cancels or
+/// restarts. `duplicate` only separates snackbars that share both, so each keeps its own timer.
 final class SnackbarTimeouts {
     private struct Key: Hashable {
-        let ordinal: Int
+        let duplicate: Int
         let openKey: String
         let durationMs: Int
     }
@@ -150,16 +151,24 @@ final class SnackbarTimeouts {
 
     func sync(openModals: [PrototypeNode]) {
         var wanted: [Key: PrototypeNode] = [:]
-        for (ordinal, node) in openModals.filter({ $0.type == "snackbar" }).enumerated() {
+        var order: [Key] = []
+        var seen: [Key: Int] = [:]
+        for node in openModals where node.type == "snackbar" {
             guard let duration = node.durationMs, duration > 0, let openKey = node.openCondition?.key else {
                 continue
             }
-            wanted[Key(ordinal: ordinal, openKey: openKey, durationMs: duration)] = node
+            let base = Key(duplicate: 0, openKey: openKey, durationMs: duration)
+            let copy = seen[base, default: 0]
+            seen[base] = copy + 1
+            let key = Key(duplicate: copy, openKey: openKey, durationMs: duration)
+            wanted[key] = node
+            order.append(key)
         }
         for key in timers.keys where wanted[key] == nil {
             timers.removeValue(forKey: key)?.cancel()
         }
-        for (key, node) in wanted where timers[key] == nil {
+        for key in order where timers[key] == nil {
+            guard let node = wanted[key] else { continue }
             timers[key] = clock.schedule(afterMilliseconds: key.durationMs) { [weak self] in
                 self?.fire(key, node)
             }

@@ -5549,6 +5549,41 @@ describe("DevicePool", () => {
       expect(sessionManager.getSession("session-2")).toBeNull();
     });
 
+    // #11153: one-shot A cold-boots the emulator while one-shot B's anonymous bind of the same
+    // serial lands first; A must be refused rather than silently sharing B's session.
+    test("refuses a one-shot CLI bind that cold-booted the device when another anonymous session took it", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
+      await bindAs("session-1", "cli-connection-1", false, true);
+
+      const refusal = await refusalOf(
+        devicePool.bindOrReuseDeviceSession(
+          "session-2",
+          "sim-1",
+          "ios",
+          {
+            name: "iPhone 15",
+            platform: "ios",
+            deviceId: "sim-1",
+            isRunning: true,
+            source: "local",
+          },
+          new FakeChildProcess() as unknown as ChildProcess,
+          undefined,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          "cli-connection-2",
+          true,
+        ),
+      );
+
+      expect(refusal).toBeInstanceOf(Error);
+      expect((refusal as Error).message).toContain("Freshly started device 'sim-1'");
+      expect(devicePool.getDevice("sim-1")?.sessionId).toBe("session-1");
+    });
+
     test("refuses a one-shot CLI bind of a device an MCP connection acquired, typed", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
       fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];

@@ -1,0 +1,13 @@
+{
+  "code": "session_ownership_lost.recovery_target_absent",
+  "builder": "SessionRecoveryIdentityLossError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"code\":\"session_ownership_lost\",\"message\":\"Cannot safely recover session 11111111-2222-4333-8444-555555555555: android device 'Pixel_8_API_35' is unavailable (recovery reason: target-absent). The persisted session is terminal; acquire a new device with getAndroid or getApple.\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"reason\":\"identity-recovery-target-absent\",\"retryable\":false,\"nextAction\":\"acquire_new_session\",\"recovery\":{\"action\":\"acquire_replacement_session\",\"tools\":[\"getAndroid\",\"getApple\"]},\"recoveryReason\":\"target-absent\",\"deviceId\":\"emulator-5554\"}}"
+      }
+    ],
+    "isError": true
+  }
+}

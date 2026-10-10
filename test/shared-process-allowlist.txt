@@ -117,6 +117,7 @@ test/daemon/livenessOwnerLease.test.ts
 test/daemon/managedExecutionLiveness.test.ts
 test/daemon/managedSlots/abandonedScopeReclaimer.test.ts
 test/daemon/managedSlots/capacityExternalDevices.test.ts
+test/daemon/managedSlots/daemonManagedSlotAcquisition.ownDevice.test.ts
 test/daemon/managedSlots/managedExecutionDaemonRestart.test.ts
 test/daemon/managedSlots/managedSlotAcquisition.test.ts
 test/daemon/managedSlots/managedSlotExclusion.test.ts
@@ -900,6 +901,7 @@ test/server/prompts/list.test.ts
 test/server/prototypeDisplay.test.ts
 test/server/prototypeDisplayAssets.test.ts
 test/server/prototypeInspect.test.ts
+test/server/prototypeIosResetRefusal.test.ts
 test/server/prototypeResources.test.ts
 test/server/prototypeToolAnchors.test.ts
 test/server/prototypeToolAppearance.test.ts

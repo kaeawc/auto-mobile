@@ -1,0 +1,236 @@
+{
+  "description": "Refusals that cross the wire outside an MCP tool result, which the runners' refusal classifier never reads: socket-frame (the control socket failure frame, from mcpRequestFailureDetails), delete-device (deleteDevice's failure result, fields under failure) and managed-slots-result (the ManagedSlotsResult of the MCP initialize outcome and the automobile:managed-slots resource, failure on the slot). Each file is <surface>.<name>.json, regenerated with UPDATE_CAPTURED_FIXTURES=1 bun test test/daemon/refusalWireContract.test.ts. expected uses the vocabulary of ../expectations.json; fields pins the code, retryable, acquireNewSession (nextAction is acquire_new_session), a positive retryAfterMs, and the evidence (details, or capacity for a slot failure). A field absent from a row is absent on the wire.",
+  "fixtures": {
+    "socket-frame.device_owned_by_other_session": {
+      "expected": "wait",
+      "fields": {
+        "code": "device_owned_by_other_session",
+        "retryable": false,
+        "acquireNewSession": false,
+        "details": {
+          "deviceId": "emulator-5554"
+        }
+      }
+    },
+    "socket-frame.device_outside_bound_session": {
+      "expected": "fail",
+      "fields": {
+        "code": "device_outside_bound_session",
+        "retryable": false,
+        "acquireNewSession": false,
+        "details": {
+          "boundSessionUuid": "11111111-1111-4111-8111-111111111111",
+          "boundDeviceId": "emulator-5556",
+          "deviceId": "emulator-5554"
+        }
+      }
+    },
+    "socket-frame.capacity_exhausted.ios": {
+      "expected": "wait",
+      "fields": {
+        "code": "capacity_exhausted",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 5000,
+        "details": {
+          "platform": "ios",
+          "limit": 2,
+          "booted": 2,
+          "retryAfterMs": 5000,
+          "externalDevices": ["9A1B2C3D-0000-4000-8000-000000000001"],
+          "code": "capacity_exhausted",
+          "retryable": true
+        }
+      }
+    },
+    "socket-frame.discovery_incomplete.ios": {
+      "expected": "wait",
+      "fields": {
+        "code": "discovery_incomplete",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "socket-frame.device_outside_managed_slots": {
+      "expected": "fail",
+      "fields": {
+        "code": "device_outside_managed_slots",
+        "retryable": false,
+        "acquireNewSession": false,
+        "details": {
+          "action": "tapOn",
+          "reason": "device",
+          "scopeKey": "0123abcd",
+          "deviceId": "emulator-5554"
+        }
+      }
+    },
+    "socket-frame.device_outside_managed_slots.tool": {
+      "expected": "fail",
+      "fields": {
+        "code": "device_outside_managed_slots",
+        "retryable": false,
+        "acquireNewSession": false,
+        "details": {
+          "action": "startDevice",
+          "reason": "tool",
+          "scopeKey": "0123abcd"
+        }
+      }
+    },
+    "socket-frame.device_assigned_to_managed_slot": {
+      "expected": "fail",
+      "fields": {
+        "code": "device_assigned_to_managed_slot",
+        "retryable": false,
+        "acquireNewSession": false,
+        "details": {
+          "deviceId": "emulator-5554",
+          "platform": "android",
+          "stableId": "amslot-0123abcd-0-g1",
+          "scopeKey": "0123abcd",
+          "declaredSlot": 0
+        }
+      }
+    },
+    "socket-frame.session_ownership_lost.recovery_owned_by_other_daemon": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "identity-recovery-owned-by-other-daemon",
+          "recoveryReason": "owned-by-other-daemon",
+          "deviceId": "emulator-5554",
+          "ownerPid": 4242
+        }
+      }
+    },
+    "socket-frame.session_ownership_lost.recovery_target_absent": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "identity-recovery-target-absent",
+          "recoveryReason": "target-absent",
+          "deviceId": "emulator-5554"
+        }
+      }
+    },
+    "socket-frame.session_ownership_lost.recovery_owned_by_other_daemon_unknown_pid": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "identity-recovery-owned-by-other-daemon",
+          "recoveryReason": "owned-by-other-daemon",
+          "deviceId": "emulator-5554"
+        }
+      }
+    },
+    "socket-frame.session_ownership_lost.released_heartbeat_timeout": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "heartbeat-timeout"
+        }
+      }
+    },
+    "socket-frame.session_ownership_lost.released_cli_idle_timeout": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "cli-idle-timeout"
+        }
+      }
+    },
+    "socket-frame.session_ownership_lost.released_owner_disconnected": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "owner-disconnected"
+        }
+      }
+    },
+    "socket-frame.session_ownership_lost.released_explicit_release": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "explicit-release"
+        }
+      }
+    },
+    "delete-device.device_owned_by_other_daemon": {
+      "expected": "wait",
+      "fields": {
+        "code": "device_owned_by_other_daemon",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 2000,
+        "details": {
+          "deviceId": "emulator-5554"
+        }
+      }
+    },
+    "delete-device.discovery_incomplete": {
+      "expected": "wait",
+      "fields": {
+        "code": "discovery_incomplete",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 2000
+      }
+    },
+    "managed-slots-result.capacity_exhausted.capacity": {
+      "expected": "wait",
+      "fields": {
+        "code": "capacity_exhausted",
+        "retryable": true,
+        "acquireNewSession": false,
+        "capacity": {
+          "limit": 2,
+          "booted": 2,
+          "retryAfterMs": 5000
+        }
+      }
+    },
+    "managed-slots-result.capacity_exhausted.capacity_external": {
+      "expected": "wait",
+      "fields": {
+        "code": "capacity_exhausted",
+        "retryable": true,
+        "acquireNewSession": false,
+        "capacity": {
+          "limit": 2,
+          "booted": 2,
+          "retryAfterMs": 5000,
+          "externalDevices": ["emulator-5560"]
+        }
+      }
+    }
+  }
+}

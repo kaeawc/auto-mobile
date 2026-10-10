@@ -38,6 +38,7 @@ object ValidTools {
         "highlight",
         "homeScreen",
         "identifyInteractions",
+        "inspectPackageSigning",
         "installApp",
         "keyboard",
         "killDevice",

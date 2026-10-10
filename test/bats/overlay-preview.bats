@@ -33,6 +33,8 @@ IFS=: read -r -a list <<< "${specs}"
 for spec in "${list[@]}"; do
   : > "${out}/$(basename "${spec}" .json).png"
 done
+[[ ${#list[@]} -gt 1 ]] && : > "${out}/contact-sheet.png"
+exit 0
 SCRIPT
   chmod +x "${STUB}"
   export CALLS
@@ -89,4 +91,28 @@ SCRIPT
   STUB_WRITE_NOTHING=1 run bash "${SCRIPT}" --out "${OUT}" "${SPECS}/one.json"
   [ "$status" -eq 2 ]
   [[ "$output" == *"did not write"* ]]
+}
+
+@test "--theme both renders light and dark and names the PNGs by theme" {
+  run bash "${SCRIPT}" --out "${OUT}" --theme both "${SPECS}/one.json"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "${OUT}/one-light.png" ]
+  [ "${lines[1]}" = "${OUT}/one-dark.png" ]
+  [ -f "${OUT}/one-light.png" ]
+  [ -f "${OUT}/one-dark.png" ]
+  [ ! -e "${OUT}/one.png" ]
+  [ -z "$(find "${OUT}" -maxdepth 1 -name '.stage-*')" ]
+}
+
+@test "--theme both names each theme's contact sheet" {
+  run bash "${SCRIPT}" --out "${OUT}" --theme both "${SPECS}/one.json" "${SPECS}/two.json"
+  [ "$status" -eq 0 ]
+  [ -f "${OUT}/contact-sheet-light.png" ]
+  [ -f "${OUT}/contact-sheet-dark.png" ]
+}
+
+@test "rejects an unknown --theme" {
+  run bash "${SCRIPT}" --out "${OUT}" --theme sepia "${SPECS}/one.json"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--theme must be"* ]]
 }

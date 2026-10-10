@@ -104,10 +104,16 @@ class OverlaySpecContentScreenshotTest {
       validOverlayFixture("elevation-gradient-aspect-ratio"),
     )
 
+  // Pending: renderOverlay now honours spec.theme (#11217), so the theme-bearing baselines must be
+  // re-recorded on Linux from an LFS-enabled plain-git clone, then pending dropped.
   /** Text style roles under a scaled typography theme. */
   @Test
   fun textStyleRole() =
-    overlayScreenshotTest("text_style_role", validOverlayFixture("text-style-role"))
+    overlayScreenshotTest(
+      "text_style_role",
+      validOverlayFixture("text-style-role"),
+      pending = true,
+    )
 
   /** Conditional styles resolved against the initial state. */
   @Test fun styleWhen() = overlayScreenshotTest("style_when", validOverlayFixture("style-when"))
@@ -146,7 +152,9 @@ class OverlaySpecContentScreenshotTest {
     )
 
   /** Dark mode with a seed colour scheme. */
-  @Test fun themeSeed() = overlayScreenshotTest("theme_seed", validOverlayFixture("theme-seed"))
+  @Test
+  fun themeSeed() =
+    overlayScreenshotTest("theme_seed", validOverlayFixture("theme-seed"), pending = true)
 
   /** Light mode with scaled serif typography and custom shapes. */
   @Test
@@ -154,6 +162,7 @@ class OverlaySpecContentScreenshotTest {
     overlayScreenshotTest(
       "theme_typography_shapes",
       validOverlayFixture("theme-typography-shapes"),
+      pending = true,
     )
 
   /** A `system` theme on a light device. */
@@ -163,6 +172,7 @@ class OverlaySpecContentScreenshotTest {
     overlayScreenshotTest(
       "theme_device_light",
       validOverlayFixture("theme-device"),
+      pending = true,
     )
 
   /** A `system` theme on a dark device. */
@@ -172,5 +182,6 @@ class OverlaySpecContentScreenshotTest {
     overlayScreenshotTest(
       "theme_device_dark",
       validOverlayFixture("theme-device"),
+      pending = true,
     )
 }

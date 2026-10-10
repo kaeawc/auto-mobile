@@ -34,6 +34,8 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 | Per-mode colours and images, gradients, role scrims (#11220)             | Supported, not yet device-verified (`prototype_theme_modes_v1`); see [Light and dark values](#light-and-dark-values) |
 | Appearance override, inference, live re-theme, reported mode (#11222)    | Supported, not yet device-verified (`prototype_appearance_v1`); see [Appearance](#appearance)                        |
 | Bottom sheet lifting above the keyboard                                  | Supported, not yet device-verified; see [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard)              |
+| Style `weight`, `minWidth`/`maxWidth`/`minHeight`/`maxHeight`, `aspectRatio` (#11543) | Supported, not yet device-verified: sized by `PrototypeSizing` in Android's order (bounds, then `width`/`height`, then aspect ratio); a weight takes exactly its share of a `row`/`column`'s main axis and beats that axis's size and bounds, and is ignored outside a row or column; `min` wins when it exceeds `max`; sizes are fractional points, not rounded to pixels |
+| Non-scalar state values (`null`, array, object)                          | Refused at `show`, as Android and the host schema do: state is string, number or boolean only                        |
 | Foreground scoping to the shown-over app                                 | Not needed: the agent lives in the app, so backgrounding the app hides its window                                    |
 
 ## Open decisions

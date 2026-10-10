@@ -33,7 +33,11 @@ import {
   releaseReasonFromError,
 } from "../types";
 import type { AcceptanceSessionRestartScope } from "../daemonRestartAdmission";
-import { parseDaemonArgs } from "./daemonArgs";
+import {
+  invalidDaemonCommandArgument,
+  parseDaemonArgs,
+  type DaemonCommandFlagSpec,
+} from "./daemonArgs";
 import { describeForeignForwardLeaseHolders } from "../forwardLeaseHolders";
 
 /**
@@ -727,28 +731,56 @@ export function printUnknownDaemonCommand(command: string | undefined): void {
   );
 }
 
-/** Daemon commands that take no positional arguments. */
-const NO_POSITIONAL_DAEMON_COMMANDS = new Set([
-  "status",
-  "health",
-  "diagnose",
-  "available-devices",
-  "active-sessions",
-]);
+const ACCEPTANCE_SESSION_RESTART_FLAGS = [
+  "--session-uuid",
+  "--platform",
+  "--stable-device-id",
+  "--android-sibling-avd-name",
+  "--android-duplicate-serial",
+  "--ios-same-name-sibling-uuid",
+  "--expires-at",
+];
 
 /**
- * The first stray positional word given to a no-argument daemon command. A word
- * right after a `--flag` is treated as that flag's value, so launch options such
- * as `--port 3001` keep working after the command.
+ * Daemon commands that take no positional arguments, with the options each accepts. The
+ * lifecycle commands are strict (#11252): a stray word or a misspelled option is refused
+ * rather than silently stopping or restarting the daemon without it.
  */
-export function strayDaemonCommandArgument(command: string, args: string[]): string | undefined {
-  if (!NO_POSITIONAL_DAEMON_COMMANDS.has(command)) {
+const NO_POSITIONAL_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpec>> = {
+  start: { launchFlags: true },
+  stop: { launchFlags: true },
+  restart: { launchFlags: true },
+  "restart-admitted": { launchFlags: true, valueFlags: ["--maintenance-token"] },
+  "restart-acceptance-session": {
+    launchFlags: false,
+    valueFlags: ACCEPTANCE_SESSION_RESTART_FLAGS,
+  },
+  status: { launchFlags: true },
+  health: { launchFlags: true },
+  diagnose: { launchFlags: true },
+  "available-devices": { launchFlags: true },
+  "active-sessions": { launchFlags: true },
+};
+
+/**
+ * The usage error for a no-argument daemon command given a stray positional word or an unknown
+ * option, or undefined when its arguments are valid. A word right after a value-taking flag is
+ * that flag's value, so launch options such as `--port 3001` keep working after the command.
+ */
+export function daemonCommandArgumentError(command: string, args: string[]): string | undefined {
+  const spec = Object.hasOwn(NO_POSITIONAL_DAEMON_COMMANDS, command)
+    ? NO_POSITIONAL_DAEMON_COMMANDS[command]
+    : undefined;
+  if (!spec) {
     return undefined;
   }
-  return args.find(
-    (arg, index) =>
-      arg !== "" && !arg.startsWith("-") && (index === 0 || !args[index - 1].startsWith("--")),
-  );
+  const invalid = invalidDaemonCommandArgument(args, spec);
+  if (!invalid) {
+    return undefined;
+  }
+  return invalid.kind === "positional"
+    ? `Unexpected argument for daemon ${command}: ${invalid.argument}`
+    : `Unknown option for daemon ${command}: ${invalid.argument}`;
 }
 
 function printDaemonUsageError(message: string): void {
@@ -813,9 +845,9 @@ export async function runDaemonCommand(
   if (!handler) {
     return printUnknownDaemonCommand(command);
   }
-  const stray = strayDaemonCommandArgument(command, args);
-  if (stray !== undefined) {
-    return printDaemonUsageError(`Unexpected argument for daemon ${command}: ${stray}`);
+  const argumentError = daemonCommandArgumentError(command, args);
+  if (argumentError !== undefined) {
+    return printDaemonUsageError(argumentError);
   }
   return handler();
 }

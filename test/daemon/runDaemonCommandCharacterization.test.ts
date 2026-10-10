@@ -169,53 +169,50 @@ describe("daemon command characterization with fake I/O", () => {
     }
   });
 
-  test.each(["start", "stop", "restart", "restart-admitted", "restart-acceptance-session"])(
-    "%s dispatches only to the injected fake manager",
-    async (command) => {
-      const events: string[] = [];
-      class Manager extends SafeDaemonManager {
-        override async start() {
-          events.push("start");
-        }
-        override async stop() {
-          events.push("stop");
-        }
-        override async restart() {
-          events.push("restart");
-        }
-        override async restartAdmitted() {
-          events.push("restart-admitted");
-        }
-        override async restartAcceptanceSession() {
-          events.push("restart-acceptance-session");
-        }
+  const acceptanceScopeArgs = [
+    "--session-uuid",
+    "session",
+    "--platform",
+    "ios",
+    "--stable-device-id",
+    "device",
+    "--android-sibling-avd-name",
+    "sibling",
+    "--android-duplicate-serial",
+    "serial",
+    "--ios-same-name-sibling-uuid",
+    "udid",
+    "--expires-at",
+    "1",
+  ];
+  test.each([
+    ["start", []],
+    ["stop", []],
+    ["restart", []],
+    ["restart-admitted", ["--maintenance-token", "fake"]],
+    ["restart-acceptance-session", acceptanceScopeArgs],
+  ])("%s dispatches only to the injected fake manager", async (command, args) => {
+    const events: string[] = [];
+    class Manager extends SafeDaemonManager {
+      override async start() {
+        events.push("start");
       }
-      await runDaemonCommand(
-        command,
-        [
-          "--maintenance-token",
-          "fake",
-          "--session-uuid",
-          "session",
-          "--platform",
-          "ios",
-          "--stable-device-id",
-          "device",
-          "--android-sibling-avd-name",
-          "sibling",
-          "--android-duplicate-serial",
-          "serial",
-          "--ios-same-name-sibling-uuid",
-          "udid",
-          "--expires-at",
-          "1",
-        ],
-        {},
-        Manager,
-      );
-      expect(events).toEqual([command]);
-    },
-  );
+      override async stop() {
+        events.push("stop");
+      }
+      override async restart() {
+        events.push("restart");
+      }
+      override async restartAdmitted() {
+        events.push("restart-admitted");
+      }
+      override async restartAcceptanceSession() {
+        events.push("restart-acceptance-session");
+      }
+    }
+    await runDaemonCommand(command, args, {}, Manager);
+    expect(events).toEqual([command]);
+  });
 
   test("diagnose awaits the fake health report before fake socket diagnostics", async () => {
     const events: unknown[] = [];

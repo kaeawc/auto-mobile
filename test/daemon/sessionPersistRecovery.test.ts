@@ -9,8 +9,14 @@ import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { DeviceSessionRowChangedError } from "../../src/db/deviceSessionRepository";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { Database } from "../../src/db/types";
+import { DevicePool } from "../../src/daemon/devicePool";
+import type { BootedDevice } from "../../src/models";
+import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { createTestDatabase } from "../db/testDbHelper";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // A call naming a UUID may issue it again for the recoverable handoffs and for `plan-auto-release`
 // (#11418): the list, startup rehydration and the claim's category are separate, and the claim,
@@ -175,5 +181,96 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
     await repo.markReleased(SESSION, "released", 3_000, PLAN_AUTO_RELEASE_REASON);
 
     expect((await repo.getSession(SESSION))?.release_reason).toBe("explicit-release");
+  });
+
+  // The real DevicePool refuses a recovery whose device another session holds (or that is gone)
+  // as identity loss, which ends the UUID. A re-issued plan session has no identity to lose.
+  describe("on the real device pool", () => {
+    const SIM_A = "SIM-PLAN-A";
+    const SIM_B = "SIM-PLAN-B";
+    const ios = (deviceId: string): BootedDevice => ({ deviceId, name: deviceId, platform: "ios" });
+    let manager: SessionManager;
+    let pool: DevicePool;
+
+    async function setUp(devices: BootedDevice[]): Promise<void> {
+      manager = new SessionManager(timer, repo);
+      manager.stopCleanupTimer();
+      manager.attachDaemonSessionId("daemon-new");
+      manager.attachLiveDaemonSessionIds(() => new Set(["daemon-new"]));
+      const deviceManager = new FakeDeviceManager();
+      deviceManager.bootedDevices = devices;
+      pool = new DevicePool(
+        createDevicePoolDependencies(manager, "plan-reissue", {
+          timer,
+          deviceManager,
+          retryExecutor: new DefaultRetryExecutor(timer),
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+        }),
+      );
+      await pool.initializeWithDevices(devices);
+    }
+
+    /** A session that ran a plan on SIM_A and was released by the plan's cleanup. */
+    async function runPlanOnSimA(reason: string = PLAN_AUTO_RELEASE_REASON): Promise<void> {
+      await pool.bindOrReuseDeviceSession(SESSION, SIM_A, "ios", undefined, undefined, ios(SIM_A));
+      await manager.releaseSession(SESSION, reason);
+      await pool.releaseDevice(SIM_A, SESSION);
+      expect(await repo.getSession(SESSION)).toMatchObject({ release_reason: reason });
+      expect(pool.getDevice(SIM_A)?.sessionId).toBeNull();
+    }
+
+    test("re-issues on the same device when it is free", async () => {
+      await setUp([ios(SIM_B), ios(SIM_A)]);
+      await runPlanOnSimA();
+
+      const session = await manager.getOrCreateSession(SESSION, pool, "ios", undefined, true);
+
+      expect(session.assignedDevice).toBe(SIM_A);
+    });
+
+    test("re-issues on another device when a session took the old one", async () => {
+      await setUp([ios(SIM_A), ios(SIM_B)]);
+      await runPlanOnSimA();
+      await pool.bindOrReuseDeviceSession("other", SIM_A, "ios", undefined, undefined, ios(SIM_A));
+
+      const session = await manager.getOrCreateSession(SESSION, pool, "ios", undefined, true);
+
+      expect(session.assignedDevice).toBe(SIM_B);
+      expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+      expect(pool.getDevice(SIM_A)?.sessionId).toBe("other");
+      expect(await repo.getSession(SESSION)).toMatchObject({
+        status: "active",
+        release_reason: null,
+        device_id: SIM_B,
+        daemon_session_id: "daemon-new",
+      });
+    });
+
+    test("re-issues on another device when the old one is gone", async () => {
+      await setUp([ios(SIM_A), ios(SIM_B)]);
+      await runPlanOnSimA();
+      // A daemon that no longer has the plan's device.
+      await setUp([ios(SIM_B)]);
+
+      const session = await manager.getOrCreateSession(SESSION, pool, "ios", undefined, true);
+
+      expect(session.assignedDevice).toBe(SIM_B);
+      expect(await repo.getSession(SESSION)).toMatchObject({ status: "active", device_id: SIM_B });
+    });
+
+    test("a recoverable row whose device was taken still ends as identity loss", async () => {
+      await setUp([ios(SIM_A), ios(SIM_B)]);
+      await runPlanOnSimA("daemon-restart");
+      await pool.bindOrReuseDeviceSession("other", SIM_A, "ios", undefined, undefined, ios(SIM_A));
+
+      await expect(
+        manager.getOrCreateSession(SESSION, pool, "ios", undefined, true),
+      ).rejects.toThrow("target-busy");
+
+      expect(pool.getDevice(SIM_B)?.sessionId).toBeNull();
+      expect((await repo.getSession(SESSION))?.release_reason).toBe(
+        "identity-recovery-target-busy",
+      );
+    });
   });
 });

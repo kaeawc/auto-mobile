@@ -3354,8 +3354,14 @@ export class SessionManager {
    * that peer's to recover. A refusal writes nothing; the returned copy carries the claimed
    * generation, which this recovery's own later writes are conditioned on.
    *
+   * A compare-and-set that misses re-reads the row once and claims the current incarnation
+   * (#11243): a startup listing can predate this daemon's own on-demand claim of the row, or that
+   * claim's hand-back, and must not refuse the row as if a peer had taken it. A second miss is a
+   * writer racing this one, and refuses.
+   *
    * Resolves undefined when the persistence cannot claim rows (the row is recovered as read).
-   * Throws `DeviceOwnedByOtherDaemonError` (code `device_owned_by_other_daemon`).
+   * Throws `DeviceOwnedByOtherDaemonError` (code `device_owned_by_other_daemon`), or
+   * `TerminalSessionError` when the re-read finds the row terminal.
    */
   private async claimRecoverableRow(
     sessionId: string,
@@ -3372,7 +3378,24 @@ export class SessionManager {
     if (claimed) {
       return claimed;
     }
-    throw this.recoverableRowClaimRefusal(sessionId, listed);
+    const current = await this.readPersistedSession(sessionId);
+    const terminalRelease = current && this.terminalReleaseFromPersisted(sessionId, current);
+    if (terminalRelease) {
+      this.terminalReleaseSnapshots.set(sessionId, terminalRelease);
+      throw new TerminalSessionError(sessionId, terminalRelease);
+    }
+    if (current && this.isRecoverablePersistedSession(current)) {
+      const reclaimed = await this.tryClaimRecoverableRow(
+        sessionId,
+        current,
+        claim,
+        daemonSessionId,
+      );
+      if (reclaimed) {
+        return reclaimed;
+      }
+    }
+    throw this.recoverableRowClaimRefusal(sessionId, current ?? listed);
   }
 
   /** One compare-and-set against `row`; undefined when the row is no longer that incarnation. */

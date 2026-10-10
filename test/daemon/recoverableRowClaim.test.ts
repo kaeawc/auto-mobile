@@ -8,7 +8,8 @@ import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // A recoverable row's claim (#11200) after #11243: a recovery that fails without terminalizing
-// the row hands the claim back.
+// the row hands the claim back, and a startup listing older than this daemon's own claim does
+// not refuse the row.
 
 const SESSION = "s1";
 const DEVICE = "emulator-5554";
@@ -119,6 +120,35 @@ describe("recoverable-row claim lifecycle (#11243)", () => {
 
     const summary = await b.rehydratePersistedSessions(poolFor(b));
     expect(summary.rehydrated).toEqual([SESSION]);
+  });
+
+  test("a startup listing older than this daemon's own claim still rehydrates the row", async () => {
+    await seedRecoverableRow();
+    const live = () => new Set(["daemon-a"]);
+    // An on-demand recovery with the wrong platform claims the row (and fails) between the
+    // startup listing and the startup worker's claim.
+    const interleaved: { manager?: SessionManager } = {};
+    class InterleavingRepository extends DeviceSessionRepository {
+      override async listRecoverableSessions(nowMs?: number) {
+        const rows = await super.listRecoverableSessions(nowMs);
+        const onDemand = interleaved.manager!;
+        await expect(
+          onDemand.getOrCreateSession(SESSION, poolFor(onDemand), "ios"),
+        ).rejects.toThrow("does not match persisted platform");
+        return rows;
+      }
+    }
+    const manager = daemon("daemon-a", live, new InterleavingRepository(db, timer));
+    interleaved.manager = manager;
+
+    const summary = await manager.rehydratePersistedSessions(poolFor(manager));
+
+    expect(summary.skipped).toEqual([]);
+    expect(summary.rehydrated).toEqual([SESSION]);
+    expect(await repo.getSession(SESSION)).toMatchObject({
+      status: "active",
+      daemon_session_id: "daemon-a",
+    });
   });
 
   test("a peer that took the row first is still refused", async () => {

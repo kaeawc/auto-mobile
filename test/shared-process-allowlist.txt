@@ -240,6 +240,7 @@ test/devices/DisplayInventoryProvider.test.ts
 test/devices/androidDeviceReboot.test.ts
 test/devices/ciIosBootRecovery.test.ts
 test/devices/deviceBootRecovery.test.ts
+test/devices/deviceBootTimeout.test.ts
 test/devices/deviceIdentityEvidence.test.ts
 test/devices/deviceShutdownService.test.ts
 test/devices/physicalIosDeviceResolution.test.ts

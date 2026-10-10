@@ -1,11 +1,9 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
-import { logger } from "../../src/utils/logger";
 import {
   setDeviceToolsDependencies,
   resetDeviceToolsDependencies,
   registerDeviceTools,
-  startDeviceSchema,
 } from "../../src/server/deviceTools";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
@@ -110,7 +108,9 @@ describe("createIfMissing rollback after System UI recovery", () => {
     }
     const result = await tool.handler(args);
     return JSON.parse(
-      typeof result === "string" ? result : ((result as any).content?.[0]?.text ?? "{}"),
+      typeof result === "string"
+        ? result
+        : ((result as { content?: { text?: string }[] }).content?.[0]?.text ?? "{}"),
     );
   }
   /** Teardown dependencies the rollback reaches; without them it falls through to real I/O. */

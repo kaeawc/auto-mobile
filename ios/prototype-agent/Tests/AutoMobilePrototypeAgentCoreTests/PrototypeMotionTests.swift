@@ -150,6 +150,59 @@ final class PrototypeMotionTests: XCTestCase {
         XCTAssertEqual(clock.timers.map(\.cancelled), [true, false])
     }
 
+    // MARK: Snackbar timer identity (#11409)
+
+    private func twoSnackbarRoot() throws -> PrototypeNode {
+        try spec("""
+        {"id":"a","window":{"placement":{"type":"fullscreen"}},"state":{"first":false,"second":true},
+         "root":{"type":"box","children":[
+           {"type":"snackbar","openWhen":{"key":"first","equals":true},"text":"A","durationMs":3000},
+           {"type":"snackbar","openWhen":{"key":"second","equals":true},"text":"B","durationMs":3000}]}}
+        """).root
+    }
+
+    /// B is open and counting down; A (earlier in the tree) then opens or closes, shifting B's
+    /// position. B's timer keeps running, as Android's `LaunchedEffect(openWhen, durationMs)` does.
+    func testAnotherSnackbarOpeningOrClosingBeforeDoesNotRestartTheRunningCountdown() throws {
+        let root = try twoSnackbarRoot()
+        let clock = FakeClock()
+        let timeouts = SnackbarTimeouts(clock: clock) { _ in }
+        timeouts.sync(openModals: root.openModals(state: ["first": .bool(false), "second": .bool(true)], pages: [:]))
+        let bTimer = try XCTUnwrap(clock.timers.first)
+        timeouts.sync(openModals: root.openModals(state: ["first": .bool(true), "second": .bool(true)], pages: [:]))
+        XCTAssertFalse(bTimer.cancelled)
+        XCTAssertEqual(clock.timers.count, 2, "only A should have started a new timer")
+        timeouts.sync(openModals: root.openModals(state: ["first": .bool(false), "second": .bool(true)], pages: [:]))
+        XCTAssertFalse(bTimer.cancelled, "A closing ahead of B must not restart B either")
+        XCTAssertEqual(clock.live.count, 1)
+    }
+
+    func testClosingAndReopeningTheSameSnackbarStillRestartsItsCountdown() throws {
+        let root = try twoSnackbarRoot()
+        let clock = FakeClock()
+        let timeouts = SnackbarTimeouts(clock: clock) { _ in }
+        timeouts.sync(openModals: root.openModals(state: ["first": .bool(true), "second": .bool(true)], pages: [:]))
+        timeouts.sync(openModals: root.openModals(state: ["first": .bool(true), "second": .bool(false)], pages: [:]))
+        timeouts.sync(openModals: root.openModals(state: ["first": .bool(true), "second": .bool(true)], pages: [:]))
+        XCTAssertEqual(clock.timers.map(\.cancelled), [false, true, false])
+    }
+
+    func testTrueDuplicateSnackbarsEachKeepTheirOwnTimer() throws {
+        let root = try spec("""
+        {"id":"a","window":{"placement":{"type":"fullscreen"}},"state":{"s":true},
+         "root":{"type":"box","children":[
+           {"type":"snackbar","openWhen":{"key":"s","equals":true},"text":"A","durationMs":3000},
+           {"type":"snackbar","openWhen":{"key":"s","equals":true},"text":"B","durationMs":3000}]}}
+        """).root
+        let clock = FakeClock()
+        let timeouts = SnackbarTimeouts(clock: clock) { _ in }
+        let open = root.openModals(state: ["s": .bool(true)], pages: [:])
+        timeouts.sync(openModals: open)
+        timeouts.sync(openModals: open)
+        XCTAssertEqual(clock.timers.count, 2)
+        XCTAssertEqual(clock.live.count, 2)
+    }
+
     // MARK: Container size animation (#10442)
 
     func testContainerSizeAnimatesUnlessMotionIsOff() {

@@ -7,55 +7,40 @@
       "description": "Baseline measurements from actual tool handler execution (MCP overhead without device I/O)",
       "sampleSize": 50,
       "generatedBy": "benchmark-mcp-tools.ts",
-      "note": "Measures tool registry lookup, schema validation, device resolution, and handler wrapper overhead. Updated after ViewHierarchy caching removal (commit 724ae74d). listDevices (#11332) is measured against fakes with a daemon-shaped DevicePool (see scripts/benchmark-listdevices-fixture.ts): local max over 5 runs of 50 samples p50 0.096 / p95 0.314 / mean 0.133 ms, thresholds = 3x that rounded up to 0.1 ms for slower CI runners (the 20% tolerance applies on top)."
+      "note": "Measures tool registry lookup, schema validation, device resolution, and handler wrapper overhead. Updated after ViewHierarchy caching removal (commit 724ae74d). listDevices (#11332) is measured against fakes with a daemon-shaped DevicePool (see scripts/benchmark-listdevices-fixture.ts): local max over 5 runs of 50 samples p50 0.096 / p95 0.314 / mean 0.133 ms, thresholds = 3x that rounded up to 0.1 ms for slower CI runners (the 20% tolerance applies on top). observe, pressButton, tapOn, launchApp and installApp (#11375) are likewise measured against fakes (see scripts/benchmark-device-tools-fixture.ts; observe/tapOn serve the captured test/fixtures/observe/android-home.json, the other three return a canned success from the handler action seam): local max over 5 runs of 50 samples, thresholds = 3x that rounded up to 0.1 ms. getForegroundApp, inputText and swipe were removed: no tool is registered under those names."
     },
     "regressionTolerance": "20%"
   },
   "thresholds": {
     "listDevices": {
       "p50": 0.3,
-      "p95": 1.0,
+      "p95": 1,
       "mean": 0.4
     },
-    "getForegroundApp": {
-      "p50": 0.5,
-      "p95": 1.0,
-      "mean": 0.5
-    },
     "pressButton": {
-      "p50": 220.0,
-      "p95": 250.0,
-      "mean": 225.0
+      "p50": 0.4,
+      "p95": 0.7,
+      "mean": 0.5
     },
     "observe": {
-      "p50": 150.0,
-      "p95": 250.0,
-      "mean": 180.0
+      "p50": 0.5,
+      "p95": 0.6,
+      "mean": 0.5
     },
     "tapOn": {
-      "p50": 0.5,
-      "p95": 1.0,
-      "mean": 0.5
-    },
-    "inputText": {
-      "p50": 350.0,
-      "p95": 400.0,
-      "mean": 360.0
-    },
-    "swipe": {
-      "p50": 0.5,
-      "p95": 1.0,
-      "mean": 0.5
+      "p50": 17.5,
+      "p95": 49.8,
+      "mean": 22.3
     },
     "launchApp": {
-      "p50": 140.0,
-      "p95": 145.0,
-      "mean": 140.0
+      "p50": 0.4,
+      "p95": 0.7,
+      "mean": 0.5
     },
     "installApp": {
-      "p50": 0.5,
-      "p95": 1.0,
-      "mean": 0.5
+      "p50": 0.1,
+      "p95": 0.1,
+      "mean": 0.1
     }
   }
 }

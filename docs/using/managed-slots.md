@@ -23,9 +23,9 @@ Known gaps at the time of writing:
 
 - `listDevices` on a managed connection failed output-schema validation in the
   Android acceptance run (fixed on `main` by #11269; not re-verified live).
-- A well-formed but not-installed Android system image fails with the generic
-  `provision_failed` (with the tool's raw text) rather than `spec_unsupported`;
-  only malformed runtime identifiers are `spec_unsupported`.
+- A well-formed but not-installed Android system image is refused before any
+  device is created with `spec_unsupported`, naming the installed images
+  (fixed on `main` by #11269; the acceptance run saw a generic `provision_failed`).
 - `setActiveDevice` on a device outside the connection is refused with a
   typed refusal on `main` (#11269); the acceptance run saw an untyped message.
 

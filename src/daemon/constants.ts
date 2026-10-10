@@ -535,6 +535,13 @@ export const DAEMON_HEARTBEAT_METHOD = "daemon/heartbeat";
 export const DAEMON_RELEASE_SESSION_METHOD = "daemon/releaseSession";
 
 /**
+ * Ends a managed slot execution (#11177): cancels and drains its in-flight work within a bounded
+ * budget, releases the session's live control, and KEEPS the slot's device assignment (the device
+ * is never returned to generic allocation). Answers `reusable_for_this_slot` or `cleanup_pending`.
+ */
+export const DAEMON_RELEASE_EXECUTION_METHOD = "daemon/releaseExecution";
+
+/**
  * Lists the live device sessions whose liveness owner is the given token (#10990). A proxy
  * restarted with its harness-supplied stable `--liveness-owner-token` asks this on connect, then
  * re-claims and heartbeats every session it owned before the owner-disconnect grace ends. Only the

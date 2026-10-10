@@ -555,6 +555,15 @@ function sessionCreationLiveness(
   };
 }
 
+/** The {@link SessionReleaseSnapshot.livenessPolicy} marker for a managed execution's session. */
+function managedExecutionReleaseMarker(
+  session: Pick<Session, "livenessPolicy">,
+): Pick<SessionReleaseSnapshot, "livenessPolicy"> {
+  return session.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY
+    ? { livenessPolicy: MANAGED_EXECUTION_LIVENESS_POLICY }
+    : {};
+}
+
 /**
  * Session Manager
  *
@@ -575,6 +584,12 @@ export interface SessionReleaseSnapshot {
   terminal: boolean;
   /** PID of the other daemon that claimed the device, when the terminal reason names one (#11098). */
   ownerPid?: number;
+  /**
+   * Set to `managed-execution` when a managed slot execution's session is released on a live path
+   * (commit or forced stuck release), so release listeners can keep its slot assignment while
+   * clearing the execution owner (#11177). Absent for every other policy.
+   */
+  livenessPolicy?: typeof MANAGED_EXECUTION_LIVENESS_POLICY;
   heartbeat: {
     lastHeartbeatMs: number;
     hasReceivedHeartbeat: boolean;
@@ -2171,7 +2186,7 @@ export class SessionManager {
     if (this.removeSession(sessionId, session)) {
       // The stuck release never reached its own notification: announce the release now so
       // proxies and stream servers stop treating the session as live.
-      this.notifySessionRelease(fence);
+      this.notifySessionRelease({ ...fence, ...managedExecutionReleaseMarker(session) });
     }
     // The stuck release may never reach its own write: persist the fence now (#11058), or a
     // restart would admit the released UUID again.
@@ -4488,6 +4503,7 @@ export class SessionManager {
         releaseReason,
         releasedAtMs,
         terminal: isTerminalReleaseReason(releaseReason),
+        ...managedExecutionReleaseMarker(session),
         heartbeat: {
           lastHeartbeatMs: session.lastHeartbeat,
           hasReceivedHeartbeat: session.hasReceivedHeartbeat,

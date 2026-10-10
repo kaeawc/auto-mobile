@@ -9,9 +9,15 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import {
   DAEMON_HEARTBEAT_METHOD,
+  DAEMON_RELEASE_EXECUTION_METHOD,
   DAEMON_RELEASE_SESSION_METHOD,
   DAEMON_VERSION,
 } from "../../src/daemon/constants";
+import {
+  ManagedExecutionRelease,
+  managedExecutionSessionsFrom,
+} from "../../src/daemon/managedSlots/managedExecutionRelease";
+import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../src/daemon/managedExecutionLiveness";
 import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
 import { logger } from "../../src/utils/logger";
@@ -22,6 +28,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 // #11176: the proxy holds a managed execution's session from launch (not from its first tool
 // call) and releases it promptly when the execution ends (stdin EOF / owner loss close it).
+// #11177: that release is `daemon/releaseExecution`, which keeps the slot's device assignment.
 
 const SESSION = "managed-slot-session";
 const OTHER = "other-session";
@@ -34,6 +41,8 @@ describe("proxy managed-execution session hold", () => {
   let isAvailableSpy: ReturnType<typeof spyOn>;
   let state: DaemonStateAccess;
   let releaseFails: boolean;
+  let registry: FakeSlotRegistry;
+  let slotKey: { scopeKey: string; slotIndex: number };
 
   beforeEach(async () => {
     timer = new FakeTimer();
@@ -43,8 +52,46 @@ describe("proxy managed-execution session hold", () => {
       idleTimeoutMs: 10 * 60_000,
     });
     releaseFails = false;
+    registry = new FakeSlotRegistry(timer);
+    const scope = await registry.ensureScope({
+      managedHostScope: "host",
+      runnerNamespace: "ns",
+      runnerIncarnation: "boot-1",
+    });
+    if (scope.kind !== "ready") {
+      throw new Error(`scope not ready: ${scope.kind}`);
+    }
+    slotKey = { scopeKey: scope.scope.scopeKey, slotIndex: 0 };
+    await registry.initSlot(slotKey, { role: "primary", platform: "android", requestedSpec: {} });
+    await registry.commitBinding(
+      slotKey,
+      { generation: 0, stableDeviceId: null },
+      {
+        stableDeviceId: "Pixel_8_API_35",
+        deviceName: "amslot-test-0-g1",
+        resolvedSpec: {},
+        specFingerprint: "fp",
+        state: "ready",
+      },
+    );
+    await registry.claimExecution(
+      slotKey,
+      { generation: 1, stableDeviceId: "Pixel_8_API_35" },
+      { daemonId: "daemon", pid: 1, sessionUuid: SESSION },
+    );
+    const drain = new ManagedExecutionRelease({
+      registry: async () => registry,
+      work: {
+        cancelDeviceSessionExecutions: async () => 0,
+        waitForDeviceSessionExecutionsToEnd: async () => true,
+        hasActiveDeviceSessionExecutions: () => false,
+      },
+      sessions: managedExecutionSessionsFrom(sessionManager, { releaseDevice: async () => {} }),
+      timer,
+    });
     state = {
       isInitialized: () => true,
+      getManagedExecutionRelease: () => drain,
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
@@ -67,12 +114,8 @@ describe("proxy managed-execution session hold", () => {
       clientFactory: () => {
         const client = new FakeDaemonClient({
           onCallDaemonMethod: async (method, params) => {
-            if (method === DAEMON_RELEASE_SESSION_METHOD) {
-              if (releaseFails) {
-                throw new Error("daemon stalled");
-              }
-              await sessionManager.releaseSession(params.sessionId, "explicit-release");
-              return { success: true };
+            if (method === DAEMON_RELEASE_EXECUTION_METHOD && releaseFails) {
+              throw new Error("daemon stalled");
             }
             const response = await handleDaemonRequest(
               { id: "r", type: "daemon_request", method, params },
@@ -160,10 +203,32 @@ describe("proxy managed-execution session hold", () => {
     expect(timer.now()).toBe(closedAt);
     expect(sessionManager.hasSession(SESSION)).toBe(false);
     const release = clients[0]!.callDaemonMethodCalls.find(
-      (call) => call.method === DAEMON_RELEASE_SESSION_METHOD,
+      (call) => call.method === DAEMON_RELEASE_EXECUTION_METHOD,
     );
     expect(release?.params).toEqual({ sessionId: SESSION });
     expect(proxy.getManagedExecutionSessions()).toEqual([]);
+  });
+
+  test("close drains through daemon/releaseExecution and keeps the slot's device (#11177)", async () => {
+    const clients: FakeDaemonClient[] = [];
+    const proxy = proxyWith(clients);
+    await proxy.holdManagedExecutionSession(SESSION);
+
+    await proxy.close();
+
+    // Never the device-freeing release: the slot keeps its device, only the owner is cleared.
+    expect(
+      clients[0]!.callDaemonMethodCalls.some(
+        (call) => call.method === DAEMON_RELEASE_SESSION_METHOD,
+      ),
+    ).toBe(false);
+    expect(await registry.getAssignment(slotKey)).toMatchObject({
+      stableDeviceId: "Pixel_8_API_35",
+      generation: 1,
+      state: "ready",
+      execOwner: null,
+    });
+    expect(await registry.isDeviceAssignedToValidSlot("android", "Pixel_8_API_35")).toBe(true);
   });
 
   test("a failed release still closes the proxy and leaves the no-heartbeat release", async () => {
@@ -203,7 +268,9 @@ describe("proxy managed-execution session hold", () => {
     await proxy.close();
     expect(
       clients[0]!.callDaemonMethodCalls.some(
-        (call) => call.method === DAEMON_RELEASE_SESSION_METHOD,
+        (call) =>
+          call.method === DAEMON_RELEASE_SESSION_METHOD ||
+          call.method === DAEMON_RELEASE_EXECUTION_METHOD,
       ),
     ).toBe(false);
     expect(sessionManager.hasSession(SESSION)).toBe(true);

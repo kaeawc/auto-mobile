@@ -497,6 +497,17 @@ export class SqliteSlotRegistry implements SlotRegistry {
     return rows.map(toAssignment);
   }
 
+  async findExecutionAssignments(sessionUuid: string): Promise<SlotAssignmentRecord[]> {
+    const rows = await this.db
+      .selectFrom("slot_assignments")
+      .selectAll()
+      .where("exec_session_uuid", "=", sessionUuid)
+      .orderBy("scope_key")
+      .orderBy("slot_index")
+      .execute();
+    return rows.map(toAssignment);
+  }
+
   async findDeviceHolder(
     platform: SlotPlatform,
     stableDeviceId: string,

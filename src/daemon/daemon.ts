@@ -54,6 +54,12 @@ import type { SessionExecutionProbe } from "./unsettledExecutionVeto";
 import { isDeviceSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./poolConfig";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
 import { DaemonState } from "./daemonState";
+import {
+  ManagedExecutionRelease,
+  managedExecutionSessionsFrom,
+} from "./managedSlots/managedExecutionRelease";
+import { openSqliteSlotRegistry } from "./managedSlots/sqliteSlotRegistry";
+import type { SlotRegistry } from "./managedSlots/slotRegistry";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import {
   DEFAULT_DAEMON_PORT,
@@ -591,6 +597,8 @@ export class Daemon {
   private installedAppsRepository: InstalledAppsStore;
   private deviceSessionRepository: DeviceSessionRepository;
   private timer: Timer;
+  private managedExecutionRelease: ManagedExecutionRelease | undefined;
+  private managedSlotRegistry: Promise<SlotRegistry> | undefined;
   private readonly generationStartedAt: number;
   private readonly processStartedAt: number;
   private readonly processGenerationToken: string | undefined;
@@ -762,10 +770,60 @@ export class Daemon {
       this.deviceSessionRegistry,
       this.observerSessionRegistry,
     );
+    this.installManagedExecutionRelease();
 
     this.applyRuntimeOptions(options);
     this.applyAccessibilityOptions(options);
     this.applyToolOutputOptions(options);
+  }
+
+  /**
+   * Wire `daemon/releaseExecution` and the managed-session release listener (#11177). The host-wide
+   * slot registry opens lazily, on the first managed execution's release, so daemons that never
+   * serve a managed slot never touch it.
+   */
+  private installManagedExecutionRelease(): void {
+    const release = new ManagedExecutionRelease({
+      registry: () => this.openManagedSlotRegistry(),
+      work: executionTracker,
+      sessions: managedExecutionSessionsFrom(this.sessionManager, {
+        releaseDevice: (deviceId, sessionId) => this.devicePool.releaseDevice(deviceId, sessionId),
+      }),
+      timer: this.timer,
+    });
+    this.managedExecutionRelease = release;
+    this.sessionManager.onSessionRelease((_sessionId, _deviceId, _reason, snapshot, options) =>
+      release.onSessionReleased(snapshot, options),
+    );
+    DaemonState.getInstance().setManagedExecutionRelease(release);
+  }
+
+  private openManagedSlotRegistry(): Promise<SlotRegistry> {
+    const opening = (this.managedSlotRegistry ??= openSqliteSlotRegistry({ timer: this.timer }));
+    opening.catch((error: unknown) => {
+      // The release that asked reports this failure; forgetting the failed open lets the next
+      // release retry instead of failing forever.
+      logger.debug(`[Daemon] Managed slot registry open failed: ${errorMessage(error)}`);
+      if (this.managedSlotRegistry === opening) {
+        this.managedSlotRegistry = undefined;
+      }
+    });
+    return opening;
+  }
+
+  /** Stop the drain's settlement watchers and close the slot registry if this daemon opened it. */
+  private async closeManagedExecutionRelease(): Promise<void> {
+    this.managedExecutionRelease?.close();
+    const registry = this.managedSlotRegistry;
+    this.managedSlotRegistry = undefined;
+    try {
+      await (await registry)?.close();
+    } catch (error) {
+      logger.warn(
+        `[Daemon] Closing the managed slot registry failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   private createDevicePool(
@@ -4433,6 +4491,8 @@ export class Daemon {
     const forwardLeaseIdleReleaser = this.forwardLeaseIdleReleaser;
     this.forwardLeaseIdleReleaser = null;
     await forwardLeaseIdleReleaser?.stop();
+    // A shutdown release keeps the execution owner: the rehydrated session awaits its owner (#11177).
+    await this.closeManagedExecutionRelease();
     await runShutdownCleanupStages(
       [
         {

@@ -35,7 +35,7 @@ import {
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
   DAEMON_HEARTBEAT_METHOD,
-  DAEMON_RELEASE_SESSION_METHOD,
+  DAEMON_RELEASE_EXECUTION_METHOD,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   CLI_SESSION_LIVENESS_POLICY,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
@@ -1109,6 +1109,24 @@ const DEVICE_CLEANUP_BACKOFF = exponentialBackoff({
   maxDelayMs: 5_000,
 });
 
+/**
+ * Record a managed execution's release outcome (#11177). `cleanup_pending` means some of the
+ * execution's work outlived the drain budget: the slot keeps its device but its next acquisition
+ * waits until that work settles.
+ */
+function logManagedExecutionReleaseOutcome(sessionId: string, result: unknown): void {
+  const outcome =
+    typeof result === "object" && result !== null && "outcome" in result
+      ? String(result.outcome)
+      : "unknown";
+  const message = `[DaemonMcpProxy] Released managed execution session ${sessionId}: ${outcome}`;
+  if (outcome === "reusable_for_this_slot") {
+    logger.info(message);
+  } else {
+    logger.warn(message);
+  }
+}
+
 export class DaemonMcpProxy {
   private client: DaemonClientLike | null = null;
   private config: DaemonMcpProxyConfig;
@@ -1561,9 +1579,11 @@ export class DaemonMcpProxy {
   }
 
   /**
-   * Release every managed execution session this proxy holds, bounded so a wedged daemon cannot
-   * hold up shutdown (#11176). A failed or timed-out release falls back to the daemon's
-   * owner-disconnect / no-heartbeat release (~10 s) once the keeper stops.
+   * End every managed execution this proxy holds (#11176, #11177) through `daemon/releaseExecution`:
+   * the daemon drains the session's work, releases its live control and keeps the slot's device
+   * assignment, so the device never returns to generic allocation. Bounded so a wedged daemon
+   * cannot hold up shutdown; a failed or timed-out release falls back to the daemon's
+   * owner-disconnect / no-heartbeat release (~10 s), which keeps the assignment the same way.
    */
   private async releaseManagedExecutionSessions(): Promise<void> {
     const client = this.client;
@@ -1575,11 +1595,12 @@ export class DaemonMcpProxy {
     await Promise.all(
       sessions.map(async (sessionId) => {
         try {
-          await client.callDaemonMethod(
-            DAEMON_RELEASE_SESSION_METHOD,
+          const result: unknown = await client.callDaemonMethod(
+            DAEMON_RELEASE_EXECUTION_METHOD,
             { sessionId },
             { timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS },
           );
+          logManagedExecutionReleaseOutcome(sessionId, result);
         } catch (error) {
           logger.warn(
             `[DaemonMcpProxy] Releasing managed execution session ${sessionId} failed; the daemon ` +

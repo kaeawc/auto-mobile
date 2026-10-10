@@ -276,6 +276,7 @@ run_parallel_files() {
 run_serial_files() {
   local list_file="$1"
   local max_seconds="${2:-}"
+  local durations_file="${3:-}"
   local bats_file rc=0 started elapsed
   if [[ ! -s "$list_file" ]]; then
     return 0
@@ -286,6 +287,9 @@ run_serial_files() {
     bats "$bats_file" || rc=1
     elapsed=$((SECONDS - started))
     log "BATS file duration: ${elapsed}s ${bats_file}"
+    if [[ -n "$durations_file" ]]; then
+      printf '%s\t%s\n' "$elapsed" "$bats_file" >> "$durations_file"
+    fi
     if [[ -n "$max_seconds" && "$elapsed" -gt "$max_seconds" ]]; then
       log "ERROR: ${bats_file} took ${elapsed}s, exceeding the ${max_seconds}s unit-file budget; tag genuine real-I/O coverage as integration"
       rc=1
@@ -316,8 +320,58 @@ enforce_parallel_file_budget() {
   return "$rc"
 }
 
+# Appends "<seconds>\t<file>" for every file of a parallel pass to the shared
+# durations file, so the serial and parallel passes report in one format on
+# every platform. GNU Parallel's --joblog is the source (it is written on macOS
+# too); sequence N is the Nth entry of the NUL-separated list file. A timed-out
+# job has two records for one sequence, so the longest runtime wins. A missing
+# or empty job log is reported, never fatal: timing is diagnostics only.
+record_parallel_durations() {
+  local joblog="$1"
+  local list_file="$2"
+  local durations_file="$3"
+  local bats_file sequence duration
+  local files=()
+  if [[ ! -s "$list_file" ]]; then
+    return 0
+  fi
+  if [[ ! -s "$joblog" ]]; then
+    log "note: no GNU Parallel job log at ${joblog}; per-file durations for that pass were not recorded"
+    return 0
+  fi
+
+  while IFS= read -r -d '' bats_file; do
+    files+=("$bats_file")
+  done < "$list_file"
+
+  while IFS=$'\t' read -r sequence duration; do
+    bats_file="${files[$((sequence - 1))]:-unknown file}"
+    printf '%s\t%s\n' "$duration" "$bats_file" >> "$durations_file"
+  done < <(awk 'NR > 1 && $1 ~ /^[0-9]+$/ { runtime = $4 + 0; if (!($1 in best) || runtime > best[$1]) best[$1] = runtime } END { for (seq in best) printf "%d\t%.2f\n", seq, best[seq] }' "$joblog")
+  return 0
+}
+
+# Names the slowest files from the shared durations file ("<seconds>\t<file>"
+# lines) so a budget breach is diagnosable from the failing log alone. Prints a
+# notice instead when there is nothing to report; never affects the exit code.
+report_slowest_files() {
+  local durations_file="$1"
+  local count="${2:-10}"
+  local duration bats_file
+  if [[ ! -s "$durations_file" ]]; then
+    log "note: no per-file durations were recorded, so the slowest files cannot be named"
+    return 0
+  fi
+  log "Slowest ${count} BATS files (seconds):"
+  while IFS=$'\t' read -r duration bats_file; do
+    log "  ${duration}s ${bats_file}"
+  done < <(sort -t $'\t' -k1,1nr -k2,2 "$durations_file" | head -n "$count")
+  return 0
+}
+
 enforce_unit_budget() {
   local elapsed="$1"
+  local durations_file="${2:-}"
   local budget="${AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS:-}"
   if [[ -z "$budget" ]]; then
     return 0
@@ -328,6 +382,9 @@ enforce_unit_budget() {
   fi
   if [[ "$elapsed" -gt "$budget" ]]; then
     log "ERROR: BATS unit lane took ${elapsed}s, exceeding ${budget}s"
+    if [[ -n "$durations_file" ]]; then
+      report_slowest_files "$durations_file" 10
+    fi
     return 1
   fi
 }
@@ -380,18 +437,19 @@ main() {
   fi
   outer_jobs="$(within_file_outer_jobs "$jobs" "$inner_jobs")"
 
-  local temp_dir parallel_list serial_list within_list joblog within_joblog
+  local temp_dir parallel_list serial_list within_list joblog within_joblog durations_file
   temp_dir="$(mktemp -d)"
   parallel_list="$temp_dir/parallel-files"
   serial_list="$temp_dir/serial-files"
   within_list="$temp_dir/within-files"
   joblog="${AUTOMOBILE_BATS_JOBLOG:-scratch/bats-${lane}-joblog.tsv}"
   within_joblog="${joblog%.tsv}-within.tsv"
+  durations_file="${joblog%.tsv}-durations.tsv"
   : > "$parallel_list"
   : > "$serial_list"
   : > "$within_list"
   mkdir -p "$(dirname "$joblog")"
-  rm -f "$joblog" "$within_joblog"
+  rm -f "$joblog" "$within_joblog" "$durations_file"
   classify_files "$bats_dir" "$lane" "$parallel_list" "$serial_list" "$within_list"
   if [[ "$have_parallel" == "false" ]]; then
     cat "$within_list" "$parallel_list" "$serial_list" > "$temp_dir/all-files"
@@ -425,15 +483,17 @@ main() {
   if [[ -s "$parallel_list" ]]; then
     log "Parallel ${lane} pass: one BATS file per GNU Parallel job (${jobs} jobs)"
     run_parallel_files "$parallel_list" "$jobs" "$joblog" || rc=1
+    record_parallel_durations "$joblog" "$parallel_list" "$durations_file"
   fi
 
   if [[ -s "$within_list" ]]; then
     log "Within-file ${lane} pass: files tagged parallel-within-file (${outer_jobs} files x ${inner_jobs} tests <= ${jobs} cores)"
     run_parallel_files "$within_list" "$outer_jobs" "$within_joblog" "$inner_jobs" || rc=1
+    record_parallel_durations "$within_joblog" "$within_list" "$durations_file"
   fi
 
   log "Serial ${lane} pass: files tagged serial (or all files without GNU parallel)"
-  run_serial_files "$serial_list" "$file_budget" || rc=1
+  run_serial_files "$serial_list" "$file_budget" "$durations_file" || rc=1
 
   local elapsed=$((SECONDS - started))
   log "BATS ${lane} lane completed in ${elapsed}s (job log: ${joblog})"
@@ -442,7 +502,7 @@ main() {
       enforce_parallel_file_budget "$joblog" "$file_budget" "$parallel_list" || rc=1
       enforce_parallel_file_budget "$within_joblog" "$file_budget" "$within_list" || rc=1
     fi
-    enforce_unit_budget "$elapsed" || rc=1
+    enforce_unit_budget "$elapsed" "$durations_file" || rc=1
   fi
 
   rm -rf "$temp_dir"

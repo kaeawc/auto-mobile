@@ -248,8 +248,10 @@ export class SlotScopeReset {
           assignment: { kind: "state", expected: release.binding, state: "ready" },
         });
         logger.warn(
-          `[SlotScopeReset] --force abandoned the settlement of slot ${key.scopeKey}/${key.slotIndex} ` +
-            `(${result.kind}); its released work may still be running (#11336)`,
+          result.kind === "advanced"
+            ? `[SlotScopeReset] --force abandoned the settlement of slot ${key.scopeKey}/${key.slotIndex}; ` +
+                "its released work may still be running (#11336)"
+            : `[SlotScopeReset] --force could not abandon slot ${key.scopeKey}/${key.slotIndex}: ${result.kind}`,
         );
       } catch (error) {
         logger.warn(

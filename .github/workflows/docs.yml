@@ -105,46 +105,29 @@ jobs:
       # jobs, not this run. Kotlin lands on every merge; Swift lands only when
       # coverage inputs change. Per the "let them lag" decision, this refreshes
       # the badges only when the site republishes.
+      # A run with no badge artifact is not an error: Swift's badge only uploads
+      # when ios/** changed, so a long window of merges can carry none (#11467).
+      # The resolver pages back to the newest successful merge run that has one;
+      # if none exists it warns, and the published badge is kept instead.
       - name: "Resolve latest Kotlin coverage badge run"
         id: kotlin-badge-run
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          run_id="$(gh run list --repo "${{ github.repository }}" \
-            --workflow merge.yml --branch main --status success \
-            --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-          if [ -z "$run_id" ]; then
-            echo "::error::No successful On Merge run found to source coverage badges from" >&2
-            exit 1
-          fi
-          echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: scripts/ci/resolve-coverage-badge-run.sh resolve kotlin-coverage-badge
 
       - name: "Resolve latest Swift coverage badge run"
         id: swift-badge-run
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          run_ids="$(gh run list --repo "${{ github.repository }}" \
-            --workflow merge.yml --branch main --status success \
-            --limit 20 --json databaseId --jq '.[].databaseId')"
-          while IFS= read -r run_id; do
-            if [ -z "$run_id" ]; then
-              continue
-            fi
-            badge_id="$(gh api --paginate "repos/${{ github.repository }}/actions/runs/$run_id/artifacts?per_page=100" \
-              --jq '[.artifacts[] | select(.name == "swift-coverage-badge" and .expired == false) | .id] | first // empty')"
-            if [ -n "$badge_id" ]; then
-              echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          done <<< "$run_ids"
-          echo "::error::No Swift coverage badge found in the latest 20 successful On Merge runs" >&2
-          exit 1
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: scripts/ci/resolve-coverage-badge-run.sh resolve swift-coverage-badge
 
       # Distinct artifacts landing on distinct filenames, so they overlap. They
       # must stay AFTER "Build documentation" -- mkdocs regenerates/cleans
       # site/, which would delete a badge that landed early.
       - name: "Download Kotlin Coverage Badge"
+        if: steps.kotlin-badge-run.outputs.run-id != ''
         uses: actions/download-artifact@v7
         background: true
         id: dl-kotlin-badge
@@ -155,6 +138,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: "Download Swift Coverage Badge"
+        if: steps.swift-badge-run.outputs.run-id != ''
         uses: actions/download-artifact@v7
         background: true
         id: dl-swift-badge
@@ -165,6 +149,20 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - wait: [dl-kotlin-badge, dl-swift-badge]
+
+      - name: "Keep published coverage badges when no run has one"
+        if: steps.kotlin-badge-run.outputs.run-id == '' || steps.swift-badge-run.outputs.run-id == ''
+        env:
+          KOTLIN_RUN_ID: ${{ steps.kotlin-badge-run.outputs.run-id }}
+          SWIFT_RUN_ID: ${{ steps.swift-badge-run.outputs.run-id }}
+        run: |
+          base="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}"
+          if [ -z "$KOTLIN_RUN_ID" ]; then
+            scripts/ci/resolve-coverage-badge-run.sh keep-published site kotlin-coverage-badge.json "$base/kotlin-coverage-badge.json"
+          fi
+          if [ -z "$SWIFT_RUN_ID" ]; then
+            scripts/ci/resolve-coverage-badge-run.sh keep-published site swift-coverage-badge.json "$base/swift-coverage-badge.json"
+          fi
 
       - name: "Setup Pages"
         uses: actions/configure-pages@v5

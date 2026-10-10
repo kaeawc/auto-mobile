@@ -11,6 +11,7 @@ import {
   type BootCapacityChecker,
   type BootCapacityReporter,
   type BootCapacitySnapshot,
+  type LedgerSampleWindow,
   type RefusedCapacityDecision,
 } from "../bootAdmission/BootAdmissionGate";
 import { occupyingUdids, type FleetCostSource } from "./FleetCostCollector";
@@ -128,6 +129,7 @@ export class IosSimCapacityGate
     request: WarmDeviceRequest | undefined,
     warmMatch: "substitute" | "hint",
     bootUdid?: string,
+    window?: LedgerSampleWindow,
   ): CapacityDecision {
     this.assertCountKnown(report);
     const warm = findWarmCompatibleDevices(report, request ?? {})[0];
@@ -138,7 +140,7 @@ export class IosSimCapacityGate
     // The boot's own target (already Booting or Booted) needs no new slot.
     const occupied = occupyingUdids(report, bootUdid);
     this.forgetExitedStarted(report);
-    const bootedCount = occupied.length + this.inFlightBootCount(report);
+    const bootedCount = occupied.length + this.inFlightBootCount(report, bootUdid, window);
     const refused = atCapacityDecision(bootedCount, limits, this.retryAfterMs, {
       noun: "simulator",
       envName: IOS_SIM_MAX_BOOTED_ENV,
@@ -159,10 +161,12 @@ export class IosSimCapacityGate
   ): Promise<CapacityAdmission> {
     return await admitBootNow<FleetCostReport, CapacityDecision>({
       timer: this.timer,
+      platform: "ios",
       signal: options.signal,
       label: "iOS simulator capacity",
       sample: () => this.refresh(),
-      decide: (report) => this.decide(report, request, "hint", options.bootUdid),
+      ledger: this.admittedBoots,
+      decide: (report, window) => this.decide(report, request, "hint", options.bootUdid, window),
       admit: () => {
         if (options.bootUdid) {
           this.startedUdids.add(options.bootUdid);
@@ -231,9 +235,16 @@ export class IosSimCapacityGate
     }
   }
 
-  /** Admitted boots that the latest sample does not already show as occupying a slot. */
-  private inFlightBootCount(report: FleetCostReport): number {
-    return this.admittedBoots.inFlightCount(new Set(occupyingUdids(report)));
+  /**
+   * Admitted boots that the latest sample does not already show as occupying a slot, except
+   * `bootUdid`'s own: that target is excluded from the listing count and needs no second slot.
+   */
+  private inFlightBootCount(
+    report: FleetCostReport,
+    bootUdid?: string,
+    window?: LedgerSampleWindow,
+  ): number {
+    return this.admittedBoots.inFlightCount(new Set(occupyingUdids(report)), bootUdid, window);
   }
 
   private limitsFor(report: FleetCostReport): CapacityLimits {

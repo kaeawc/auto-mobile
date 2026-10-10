@@ -1568,6 +1568,7 @@ export class DevicePool {
 
   private createMissingDevicePort(): MissingDeviceLivenessPoolPort {
     return {
+      noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
       getDevices: () => this.devices,
       getRefreshMissingDeviceMisses: () => this.refreshMissingDeviceMisses,
       getAssignmentMutex: () => this.assignmentMutex,
@@ -1681,6 +1682,7 @@ export class DevicePool {
       {
         getSessionManager: () => this.sessionManager,
         getDaemonSessionId: () => this.daemonSessionId,
+        noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
         getDevice: (id) => this.devices.get(id),
         withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
         withTargetDeviceDiscovery: (options) => this.withTargetDeviceDiscovery(options),
@@ -1688,6 +1690,8 @@ export class DevicePool {
           this.runtimeIdentity.assertRuntimeIdentity(device, identity),
         assertNotReservedForShutdown: (device, message) =>
           this.assertNotReservedForShutdown(device, message),
+        assertNotReservedForOtherRehydration: (device) =>
+          this.assertNotReservedForOtherRehydration(device, undefined),
         recordSourceAndroidAvd: (id, image) => this.recordSourceAndroidAvd(id, image),
         notifyTargetDeviceReady: (options) => this.notifyTargetDeviceReady(options),
         trackStartedDeviceProcess: (device, process) =>
@@ -1781,6 +1785,7 @@ export class DevicePool {
   private createSessionPreservingRecovery(): SessionPreservingRecoveryRunner {
     return new SessionPreservingRecoveryRunner({
       getRecoveringSessionLoss: (id) => this.recoveringSessionLosses.get(id),
+      noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
       startAndroidRecoveryRecord: (id, details, reservations, replace) =>
         this.startAndroidRecoveryRecord(id, details, reservations, replace),
       isAndroidEmulatorActiveRelaunchEligible: (device): device is AndroidEmulatorRecoveryDevice =>
@@ -1967,6 +1972,7 @@ export class DevicePool {
   ): AdbServerResetQuarantine {
     return createAdbServerResetQuarantine(
       {
+        noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
         getAssignmentMutex: () => this.assignmentMutex,
         getDevices: () => this.devices,
         getSessionManager: () => this.sessionManager,
@@ -4201,6 +4207,7 @@ export class DevicePool {
     }
     this.discardReleasedCapture(sessionId, device.id);
     device.sessionId = null;
+    this.notifyDeviceStateChanged(device);
     return true;
   }
 
@@ -4840,6 +4847,7 @@ export class DevicePool {
     // proven. removeDevice requires an unassigned pool entry.
     device.sessionId = null;
     device.status = "idle";
+    this.notifyDeviceStateChanged(device);
     return true;
   }
 
@@ -7593,7 +7601,10 @@ export class DevicePool {
   }
 
   /** Restart recovery is about to put another session back on `device` (#11294). */
-  private assertNotReservedForOtherRehydration(device: PooledDevice, sessionId: string): void {
+  private assertNotReservedForOtherRehydration(
+    device: PooledDevice,
+    sessionId: string | undefined,
+  ): void {
     const holder = this.rehydrationReservationHolder(device);
     if (holder !== undefined && holder !== sessionId) {
       throw deviceAssignedToOtherSessionError(device.id, holder, sessionId);
@@ -7767,6 +7778,7 @@ export class DevicePool {
           this.assertDeviceCleanupComplete(deviceId);
           device.sessionId = null;
           device.status = "idle";
+          this.notifyDeviceStateChanged(device);
         }
 
         await this.assignDeviceToBoundSession(device, sessionId, platform, caller, options);
@@ -8586,11 +8598,20 @@ export class DevicePool {
   }
 
   /**
-   * Whether `sessionId` is a live autolock session that a still-connected MCP client other than
-   * `mcpSessionId` owns or routes to by autolock.
+   * Whether a still-connected MCP client other than `mcpSessionId` owns the live session
+   * `sessionId` (#11344): it acquired or restored it, or routes to it by autolock. The general
+   * rule {@link mayRestoreMcpSessionOwnership} applies, with autolock on or off.
    */
-  isAutolockSessionOwnedByOtherConnection(sessionId: string, mcpSessionId?: string): boolean {
-    if (!this.autolockManager.hasMcpSessionOwner(sessionId, mcpSessionId)) {
+  isSessionOwnedByOtherConnection(sessionId: string, mcpSessionId?: string): boolean {
+    if (mcpSessionId !== undefined) {
+      return (
+        this.hasConnectedMcpSessionOwner(sessionId, mcpSessionId) &&
+        this.sessionManager.getSession(sessionId) !== null
+      );
+    }
+    // A caller with no connection identity cannot be told apart from the owner of an ordinary
+    // session, so only a live autolock, which is owned by connection, is foreign to it (#11235).
+    if (!this.autolockManager.hasMcpSessionOwner(sessionId)) {
       return false;
     }
     const session = this.sessionManager.getSession(sessionId);

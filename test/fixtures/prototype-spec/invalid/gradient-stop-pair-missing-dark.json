@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "style": {
+        "gradient": {
+          "type": "radial",
+          "stops": [
+            {
+              "color": "primary"
+            },
+            {
+              "color": {
+                "light": "#000000"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "expectedPath": "root.style.gradient.stops[1].color.dark"
+}

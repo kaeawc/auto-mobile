@@ -587,7 +587,7 @@ struct PrototypeRootView: View {
         default:
             // Fullscreen blocks the app, like the Android full-screen window.
             ZStack(alignment: .topLeading) {
-                Color(hex: placement.scrim) ?? .clear
+                Color(hex: placement.scrim?.rendered) ?? .clear
                 root
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

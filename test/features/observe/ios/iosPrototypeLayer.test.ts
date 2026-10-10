@@ -7,7 +7,7 @@ import type {
 import {
   assertAppGestureNotUnderPrototype,
   hasOwnPrototype,
-  ownPrototypeCoversPoint,
+  ownWindowCoversPoint,
   scopeHierarchyForSelector,
   scopeHierarchyToLayer,
   scopeObserveResultToLayer,
@@ -101,9 +101,9 @@ describe("iOS prototype agent window with layer (iphone D2)", () => {
     const like = { x: 96, y: 802 };
     const dismiss = { x: 372, y: 84 };
     const settingsRow = { x: 200, y: 213 };
-    expect(ownPrototypeCoversPoint(hierarchy, like)).toBe(true);
-    expect(ownPrototypeCoversPoint(hierarchy, dismiss)).toBe(true);
-    expect(ownPrototypeCoversPoint(hierarchy, settingsRow)).toBe(false);
+    expect(ownWindowCoversPoint(hierarchy, like)).toBe(true);
+    expect(ownWindowCoversPoint(hierarchy, dismiss)).toBe(true);
+    expect(ownWindowCoversPoint(hierarchy, settingsRow)).toBe(false);
     expect(() => assertAppGestureNotUnderPrototype(hierarchy, "app", like, "tap")).toThrow(
       /prototype window covers that point/,
     );

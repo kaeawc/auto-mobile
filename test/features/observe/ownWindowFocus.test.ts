@@ -3,11 +3,14 @@ import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import {
   isOwnPrototypeFocused,
   ownPrototypeWindows,
-} from "../../../src/features/observe/ownPrototypeFocus";
+  ownWindows,
+} from "../../../src/features/observe/ownWindowFocus";
 import {
   PROTOTYPE_CAPTURE,
+  RELABELLED_CAPTURE,
   capturedAppLayerPrototypeHierarchy,
   capturedPrototypeHierarchy,
+  capturedTwoWindowHierarchy,
 } from "../../helpers/prototypeWindowCapture";
 import launcherCapture from "../../fixtures/android-launcher/launcher-recents-emulator-5602.json";
 import { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
@@ -18,6 +21,7 @@ import type {
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const bounds = { left: 0, top: 0, right: 1080, bottom: 2400 };
+const HOSTS_NODES = { node: [{}] };
 
 describe("prototype_window_metadata_v1 window fields", () => {
   test("CtrlProxyHierarchy conversion keeps the fields from the wire window entry", () => {
@@ -42,11 +46,11 @@ describe("prototype_window_metadata_v1 window fields", () => {
       prototypePlacement: "fullscreen",
       prototypeOpaque: true,
     });
-    const window = ownPrototypeWindows(opaque)[0];
+    const window = ownWindows(opaque)[0];
     expect(window.prototypePlacement).toBe("fullscreen");
     expect(window.prototypeOpaque).toBe(true);
 
-    const bare = ownPrototypeWindows(capturedPrototypeHierarchy({ fullScreen: true }))[0];
+    const bare = ownWindows(capturedPrototypeHierarchy({ fullScreen: true }))[0];
     expect(bare.prototypePlacement).toBeUndefined();
   });
 });
@@ -58,7 +62,7 @@ describe("isOwnPrototypeFocused (#10000)", () => {
         packageName: CTRL_PROXY_PACKAGE,
         windows: [
           { id: 1, type: 1, isFocused: false, bounds },
-          { id: 2, type: 4, isFocused: true, bounds },
+          { id: 2, type: 4, isFocused: true, bounds, hierarchy: HOSTS_NODES },
         ],
       }),
     ).toBe(true);
@@ -68,7 +72,9 @@ describe("isOwnPrototypeFocused (#10000)", () => {
     expect(
       isOwnPrototypeFocused({
         packageName: CTRL_PROXY_PACKAGE,
-        windows: [{ id: 2, type: 4, isActive: true, isFocused: false, bounds }],
+        windows: [
+          { id: 2, type: 4, isActive: true, isFocused: false, bounds, hierarchy: HOSTS_NODES },
+        ],
       }),
     ).toBe(true);
   });
@@ -114,7 +120,14 @@ describe("isOwnPrototypeFocused (#10000)", () => {
         packageName: CTRL_PROXY_PACKAGE,
         windows: [
           { id: 1, type: 1, isFocused: false, packageName: "com.example.app", bounds },
-          { id: 2, type: 4, isFocused: true, packageName: CTRL_PROXY_PACKAGE, bounds },
+          {
+            id: 2,
+            type: 4,
+            isFocused: true,
+            packageName: CTRL_PROXY_PACKAGE,
+            bounds,
+            prototypePlacement: "floating" as const,
+          },
         ],
       }),
     ).toBe(true);
@@ -135,7 +148,16 @@ describe("isOwnPrototypeFocused (#10000)", () => {
     expect(
       isOwnPrototypeFocused({
         packageName: "com.example.app",
-        windows: [{ id: 2, type: 4, isActive: true, packageName: CTRL_PROXY_PACKAGE, bounds }],
+        windows: [
+          {
+            id: 2,
+            type: 4,
+            isActive: true,
+            packageName: CTRL_PROXY_PACKAGE,
+            bounds,
+            prototypePlacement: "floating" as const,
+          },
+        ],
       }),
     ).toBe(true);
   });
@@ -149,14 +171,14 @@ describe("isOwnPrototypeFocused (#10000)", () => {
     ).toBe(false);
   });
 
-  test("ownPrototypeWindows lists unfocused own prototype windows and skips other packages (#10086)", () => {
+  test("ownWindows lists unfocused own prototype windows and skips other packages (#10086)", () => {
     const own = { id: 2, type: 4, packageName: CTRL_PROXY_PACKAGE, bounds };
     const other = { id: 3, type: 4, packageName: "com.example.screenreader", bounds };
     const app = { id: 1, type: 1, packageName: CTRL_PROXY_PACKAGE, bounds };
-    expect(
-      ownPrototypeWindows({ packageName: "com.example.app", windows: [app, own, other] }),
-    ).toEqual([own]);
-    expect(ownPrototypeWindows(undefined)).toEqual([]);
+    expect(ownWindows({ packageName: "com.example.app", windows: [app, own, other] })).toEqual([
+      own,
+    ]);
+    expect(ownWindows(undefined)).toEqual([]);
   });
 
   test("entries without a window package behave as before (older APKs)", () => {
@@ -169,10 +191,10 @@ describe("isOwnPrototypeFocused (#10000)", () => {
   });
 });
 
-describe("ownPrototypeWindows: app-layer prototype windows (aovl D4)", () => {
+describe("ownWindows: app-layer prototype windows (aovl D4)", () => {
   test("the captured app-layer window (TYPE_SYSTEM, no metadata) is listed; the status bar is not", () => {
     const hierarchy = capturedAppLayerPrototypeHierarchy();
-    expect(ownPrototypeWindows(hierarchy).map((window) => window.id)).toEqual([
+    expect(ownWindows(hierarchy).map((window) => window.id)).toEqual([
       PROTOTYPE_CAPTURE.appLayerPrototypeWindowId,
     ]);
   });
@@ -180,9 +202,7 @@ describe("ownPrototypeWindows: app-layer prototype windows (aovl D4)", () => {
   test("a TYPE_SYSTEM window counts only when its own package is CtrlProxy's", () => {
     const statusBar = { id: 3, type: 3, isFocused: true, bounds };
     // A CtrlProxy-labelled capture from an APK that omits window packages must not adopt SystemUI.
-    expect(ownPrototypeWindows({ packageName: CTRL_PROXY_PACKAGE, windows: [statusBar] })).toEqual(
-      [],
-    );
+    expect(ownWindows({ packageName: CTRL_PROXY_PACKAGE, windows: [statusBar] })).toEqual([]);
     const own = {
       id: 4,
       type: 3,
@@ -197,13 +217,13 @@ describe("ownPrototypeWindows: app-layer prototype windows (aovl D4)", () => {
   test("CtrlProxy's highlight window (TYPE_SYSTEM once SYSTEM_ALERT_WINDOW is granted, no nodes) is not a prototype", () => {
     const highlight = { id: 6, type: 3, isActive: true, packageName: CTRL_PROXY_PACKAGE, bounds };
     const emptyRoot = { ...highlight, id: 7, hierarchy: { node: [] } };
-    expect(
-      ownPrototypeWindows({ packageName: "com.example.app", windows: [highlight, emptyRoot] }),
-    ).toEqual([]);
+    expect(ownWindows({ packageName: "com.example.app", windows: [highlight, emptyRoot] })).toEqual(
+      [],
+    );
     // The captured app-layer prototype still counts beside a highlight.
     const hierarchy = capturedAppLayerPrototypeHierarchy();
     hierarchy.windows = [...hierarchy.windows!, highlight];
-    expect(ownPrototypeWindows(hierarchy).map((window) => window.id)).toEqual([
+    expect(ownWindows(hierarchy).map((window) => window.id)).toEqual([
       PROTOTYPE_CAPTURE.appLayerPrototypeWindowId,
     ]);
   });
@@ -219,8 +239,42 @@ describe("ownPrototypeWindows: app-layer prototype windows (aovl D4)", () => {
     };
     const app = { id: 1, type: 1, packageName: CTRL_PROXY_PACKAGE, bounds };
     const ime = { id: 2, type: 2, packageName: CTRL_PROXY_PACKAGE, bounds };
-    expect(
-      ownPrototypeWindows({ packageName: "com.example.app", windows: [app, ime, stamped] }),
-    ).toEqual([stamped]);
+    expect(ownWindows({ packageName: "com.example.app", windows: [app, ime, stamped] })).toEqual([
+      stamped,
+    ]);
+  });
+});
+
+describe("the highlight window is an own window but not a prototype (#11346)", () => {
+  // The captured Recents overview with a node-free CtrlProxy accessibility-overlay window added, the
+  // shape of the highlight window (no captured highlight-only hierarchy exists yet).
+  const highlight = { id: 999, type: 4, isActive: true, packageName: CTRL_PROXY_PACKAGE, bounds };
+  const withHighlight = () => {
+    const hierarchy = capturedTwoWindowHierarchy();
+    hierarchy.windows = [...hierarchy.windows!, highlight];
+    return hierarchy;
+  };
+
+  test("ownWindows keeps it, ownPrototypeWindows and focus do not", () => {
+    const hierarchy = withHighlight();
+    expect(ownWindows(hierarchy)).toEqual([highlight]);
+    expect(ownPrototypeWindows(hierarchy)).toEqual([]);
+    expect(isOwnPrototypeFocused(hierarchy)).toBe(false);
+  });
+
+  test("a prototype beside it is the only prototype window", () => {
+    const hierarchy = capturedPrototypeHierarchy({ prototypePlacement: "floating" });
+    hierarchy.windows = [...hierarchy.windows!, highlight];
+    expect(ownPrototypeWindows(hierarchy).map((window) => window.id)).toEqual([
+      RELABELLED_CAPTURE.prototypeWindowId,
+    ]);
+    expect(ownWindows(hierarchy)).toHaveLength(2);
+  });
+
+  test("a metadata-less prototype is recognised by hosting nodes", () => {
+    const hierarchy = capturedPrototypeHierarchy();
+    expect(ownPrototypeWindows(hierarchy).map((window) => window.id)).toEqual([
+      RELABELLED_CAPTURE.prototypeWindowId,
+    ]);
   });
 });

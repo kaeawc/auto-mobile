@@ -23,7 +23,7 @@ struct ComponentColors {
     }
 
     /// A colour field as authored: hex or a role name.
-    func authored(_ spec: String?) -> Color? {
+    func authored(_ spec: PrototypeModeValue?) -> Color? {
         palette.color(spec)
     }
 

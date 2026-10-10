@@ -1,0 +1,139 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "tab": 0
+    },
+    "root": {
+      "type": "tabBar",
+      "stateKey": "tab",
+      "items": [
+        {
+          "label": "t0",
+          "image": {
+            "light": "l0",
+            "dark": "d0"
+          }
+        },
+        {
+          "label": "t1",
+          "image": {
+            "light": "l1",
+            "dark": "d1"
+          }
+        },
+        {
+          "label": "t2",
+          "image": {
+            "light": "l2",
+            "dark": "d2"
+          }
+        },
+        {
+          "label": "t3",
+          "image": {
+            "light": "l3",
+            "dark": "d3"
+          }
+        },
+        {
+          "label": "t4",
+          "image": {
+            "light": "l4",
+            "dark": "d4"
+          }
+        },
+        {
+          "label": "t5",
+          "image": {
+            "light": "l5",
+            "dark": "d5"
+          }
+        },
+        {
+          "label": "t6",
+          "image": {
+            "light": "l6",
+            "dark": "d6"
+          }
+        },
+        {
+          "label": "t7",
+          "image": {
+            "light": "l7",
+            "dark": "d7"
+          }
+        },
+        {
+          "label": "t8",
+          "image": {
+            "light": "l8",
+            "dark": "d8"
+          }
+        },
+        {
+          "label": "t9",
+          "image": {
+            "light": "l9",
+            "dark": "d9"
+          }
+        },
+        {
+          "label": "t10",
+          "image": {
+            "light": "l10",
+            "dark": "d10"
+          }
+        },
+        {
+          "label": "t11",
+          "image": {
+            "light": "l11",
+            "dark": "d11"
+          }
+        },
+        {
+          "label": "t12",
+          "image": {
+            "light": "l12",
+            "dark": "d12"
+          }
+        },
+        {
+          "label": "t13",
+          "image": {
+            "light": "l13",
+            "dark": "d13"
+          }
+        },
+        {
+          "label": "t14",
+          "image": {
+            "light": "l14",
+            "dark": "d14"
+          }
+        },
+        {
+          "label": "t15",
+          "image": {
+            "light": "l15",
+            "dark": "d15"
+          }
+        },
+        {
+          "label": "t16",
+          "image": {
+            "light": "l16",
+            "dark": "d16"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.items[16].image"
+}

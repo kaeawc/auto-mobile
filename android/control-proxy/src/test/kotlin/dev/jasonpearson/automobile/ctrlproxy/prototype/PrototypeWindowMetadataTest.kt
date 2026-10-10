@@ -32,7 +32,7 @@ class PrototypeWindowMetadataTest {
             PrototypeStyle(
               width = if (fill) PrototypeDimension.Fill else null,
               height = if (fill) PrototypeDimension.Fill else null,
-              background = background,
+              background = background?.let(PrototypeModeValue::Single),
               alpha = alpha,
             ),
           children = emptyList(),

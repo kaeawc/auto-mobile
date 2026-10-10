@@ -1,21 +1,21 @@
 {
   "version": "1.2.0",
   "metadata": {
-    "generatedAt": "2026-02-02",
+    "generatedAt": "2026-10-10",
     "description": "MCP tool call throughput thresholds with 20% regression tolerance",
     "baseline": {
       "description": "Baseline measurements from actual tool handler execution (MCP overhead without device I/O)",
       "sampleSize": 50,
       "generatedBy": "benchmark-mcp-tools.ts",
-      "note": "Measures tool registry lookup, schema validation, device resolution, and handler wrapper overhead. Updated after ViewHierarchy caching removal (commit 724ae74d)."
+      "note": "Measures tool registry lookup, schema validation, device resolution, and handler wrapper overhead. Updated after ViewHierarchy caching removal (commit 724ae74d). listDevices (#11332) is measured against fakes with a daemon-shaped DevicePool (see scripts/benchmark-listdevices-fixture.ts): local max over 5 runs of 50 samples p50 0.096 / p95 0.314 / mean 0.133 ms, thresholds = 3x that rounded up to 0.1 ms for slower CI runners (the 20% tolerance applies on top)."
     },
     "regressionTolerance": "20%"
   },
   "thresholds": {
     "listDevices": {
-      "p50": 0.5,
+      "p50": 0.3,
       "p95": 1.0,
-      "mean": 0.5
+      "mean": 0.4
     },
     "getForegroundApp": {
       "p50": 0.5,

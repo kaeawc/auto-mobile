@@ -130,7 +130,7 @@ export function createListingHandlers() {
     const pool = initializedDevicePool();
     const directAliases = new AndroidTransportAliases(deps.androidAdbFactory);
     // Sampled alongside discovery; best-effort and absent when no platform is gated (#11181).
-    const capacity = describeBootCapacity(requestedPlatforms);
+    const capacity = describeBootCapacity(requestedPlatforms, deps.bootCapacityReporters);
     let booted: BootedDevice[] = [];
     // #5893 item 4: `getBootedDevices` collapses a failed per-platform probe to
     // `[]`, so a transient tooling failure is indistinguishable from a genuinely

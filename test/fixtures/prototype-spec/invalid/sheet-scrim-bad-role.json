@@ -1,0 +1,26 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": false
+    },
+    "root": {
+      "type": "bottomSheet",
+      "openWhen": {
+        "key": "open",
+        "equals": true
+      },
+      "detents": ["half"],
+      "scrim": "shade",
+      "child": {
+        "type": "spacer"
+      }
+    }
+  },
+  "expectedPath": "root.scrim"
+}

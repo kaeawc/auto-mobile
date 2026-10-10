@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "style": {
+        "gradient": {
+          "type": "radial",
+          "stops": [
+            {
+              "color": "onPurple"
+            },
+            {
+              "color": "#000000"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "expectedPath": "root.style.gradient.stops[0].color"
+}

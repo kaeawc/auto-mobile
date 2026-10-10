@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import {
-  isOwnPrototypeNode,
+  isOwnWindowNode,
   resolvePrototypeTapUnderSystemBar,
 } from "../../../src/features/action/prototypeTapUnderSystemBars";
 import type { ObservationInsets } from "../../../src/models/ObservationInsets";
@@ -218,7 +218,7 @@ describe("the navigation bar band by navigation mode (#10156)", () => {
   });
 });
 
-describe("isOwnPrototypeNode (#10086)", () => {
+describe("isOwnWindowNode (#10086)", () => {
   const prototypeControl: ViewHierarchyNode = { bounds: fullScreen };
   const appControl: ViewHierarchyNode = { bounds: fullScreen };
   const windows = (packageName: string, type = 4) => [
@@ -233,21 +233,18 @@ describe("isOwnPrototypeNode (#10086)", () => {
 
   test("only a node inside an own prototype window's tree belongs to the prototype", () => {
     const hierarchy = capture({ windows: windows(CTRL_PROXY_PACKAGE) });
-    expect(isOwnPrototypeNode(hierarchy, prototypeControl)).toBe(true);
-    expect(isOwnPrototypeNode(hierarchy, appControl)).toBe(false);
-    expect(isOwnPrototypeNode(hierarchy, undefined)).toBe(false);
-    expect(isOwnPrototypeNode(undefined, prototypeControl)).toBe(false);
+    expect(isOwnWindowNode(hierarchy, prototypeControl)).toBe(true);
+    expect(isOwnWindowNode(hierarchy, appControl)).toBe(false);
+    expect(isOwnWindowNode(hierarchy, undefined)).toBe(false);
+    expect(isOwnWindowNode(undefined, prototypeControl)).toBe(false);
   });
 
   test("another package's prototype window and application windows do not own the node", () => {
     expect(
-      isOwnPrototypeNode(
-        capture({ windows: windows("com.example.screenreader") }),
-        prototypeControl,
-      ),
+      isOwnWindowNode(capture({ windows: windows("com.example.screenreader") }), prototypeControl),
     ).toBe(false);
     expect(
-      isOwnPrototypeNode(capture({ windows: windows(CTRL_PROXY_PACKAGE, 1) }), prototypeControl),
+      isOwnWindowNode(capture({ windows: windows(CTRL_PROXY_PACKAGE, 1) }), prototypeControl),
     ).toBe(false);
   });
 });

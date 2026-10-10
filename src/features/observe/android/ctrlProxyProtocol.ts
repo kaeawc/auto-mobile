@@ -927,6 +927,14 @@ export const PROTOTYPE_SHOW_IN_PLACE_CAPABILITY = "prototype_show_in_place_v1";
 export const PROTOTYPE_ANCHOR_CAPABILITY = "prototype_anchor_v1";
 
 /**
+ * Advertised by a CtrlProxy or iOS prototype agent whose renderer resolves the per-mode spec forms
+ * (#11218): `{light, dark}` colour pairs, role names in gradient stops and scrims,
+ * `theme.colors.light` / `theme.colors.dark`, and `{light, dark}` image assets. A device without it
+ * rejects or misdraws those forms, so the host refuses the show before sending.
+ */
+export const PROTOTYPE_THEME_MODES_CAPABILITY = "prototype_theme_modes_v1";
+
+/**
  * Advertised by a CtrlProxy that answers `set_network_mock_rules` (when it carries a requestId)
  * with `set_network_mock_rules_result` naming the rules the app's regex engine rejected (#10101).
  * The host only waits for that reply when the flag is present.

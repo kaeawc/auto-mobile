@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "style": {
+        "shadowColor": {
+          "light": "#12345",
+          "dark": "#000000"
+        }
+      }
+    }
+  },
+  "expectedPath": "root.style.shadowColor.light"
+}

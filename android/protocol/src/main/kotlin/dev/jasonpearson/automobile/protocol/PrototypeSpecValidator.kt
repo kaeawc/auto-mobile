@@ -263,8 +263,11 @@ object PrototypeSpecValidator {
   ): PrototypeSpecError? {
     val target = definitions.getValue(checkNotNull(rule.text("name"))).jsonObject
     if (rule.text("name") == "container") return visitContainer(value, target, path, context, depth)
-    if (rule.text("name") == "item" && (value as? JsonObject)?.text("image") != null) {
-      context.images++
+    val itemImages =
+      if (rule.text("name") == "item") prototypeImageSlotUses((value as? JsonObject)?.get("image"))
+      else 0
+    if (itemImages > 0) {
+      context.images += itemImages
       if (context.images > MAX_PROTOTYPE_IMAGES) return fail("$path.image", "Image limit exceeded")
     }
     if (rule.text("name") == "condition") return visitCondition(value, target, path, context, depth)
@@ -273,7 +276,8 @@ object PrototypeSpecValidator {
     context.nodes.add(Located(node, path))
     if (context.nodes.size > MAX_PROTOTYPE_NODES) return fail(path, "Node limit exceeded")
     if (depth + 1 > MAX_PROTOTYPE_DEPTH) return fail(path, "Tree depth limit exceeded")
-    if (node.text("type") == "image") context.images++
+    if (node.text("type") == "image")
+      context.images += maxOf(1, prototypeImageSlotUses(node["asset"]))
     if (context.images > MAX_PROTOTYPE_IMAGES) return fail(path, "Image limit exceeded")
     return walk(value, target, path, context, depth + 1)
   }

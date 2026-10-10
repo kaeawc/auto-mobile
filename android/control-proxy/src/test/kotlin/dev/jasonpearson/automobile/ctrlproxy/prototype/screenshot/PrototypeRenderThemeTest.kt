@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import android.app.Application
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -29,6 +30,40 @@ class PrototypeRenderThemeTest {
     val image =
       renderPrototype("theme-typography-shapes", validPrototypeFixture("theme-typography-shapes"))
     assertTrue("expected dark ink, got ${luminance(image)}", luminance(image) < 0.3)
+  }
+
+  /** The dark gallery cases open a sheet and a dialog through state overrides; they must show. */
+  @Test
+  fun stateOverridesOpenTheSheetAndDialog() {
+    val open = JsonPrimitive(true)
+    listOf(
+        Triple("fullscreen-all-nodes", "open", open),
+        Triple("material-app-bar-dialog-pickers", "editing", open),
+      )
+      .forEach { (fixture, key, value) ->
+        val closed = renderPrototype(fixture, validPrototypeFixture(fixture))
+        val opened =
+          renderPrototype(
+            fixture,
+            validPrototypeFixture(fixture, stateOverrides = mapOf(key to value)),
+          )
+        assertTrue(
+          "$fixture: $key=true changed nothing",
+          !closed.pixels.contentEquals(opened.pixels),
+        )
+      }
+  }
+
+  @Test
+  fun hostChromeFollowsDarkThemeRequest() {
+    listOf(true, false).forEach { fullscreen ->
+      val light = renderPrototypeChrome("chrome-light", dark = false, fullscreen = fullscreen)
+      val dark = renderPrototypeChrome("chrome-dark", dark = true, fullscreen = fullscreen)
+      assertTrue(
+        "fullscreen=$fullscreen: dark chrome ${luminance(dark)} not darker than ${luminance(light)}",
+        luminance(dark) < luminance(light),
+      )
+    }
   }
 
   /** Mean luminance of the opaque-ish pixels: the surface when painted, else the text ink. */

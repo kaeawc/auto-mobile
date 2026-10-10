@@ -1,0 +1,127 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen",
+      "scrim": {
+        "light": "#66000000",
+        "dark": "scrim"
+      }
+    }
+  },
+  "theme": {
+    "colors": {
+      "seed": "#6750A4",
+      "primary": "#B3261E",
+      "light": {
+        "surface": "#FFFBFE",
+        "onSurface": "#1C1B1F"
+      },
+      "dark": {
+        "surface": "#1C1B1F",
+        "onSurface": "#E6E1E5",
+        "primary": "#F2B8B5"
+      }
+    }
+  },
+  "state": {
+    "open": false
+  },
+  "root": {
+    "type": "column",
+    "style": {
+      "background": {
+        "light": "#FFFFFF",
+        "dark": "#101014"
+      },
+      "border": {
+        "width": 1,
+        "color": {
+          "light": "outline",
+          "dark": "#44FFFFFF"
+        }
+      },
+      "elevation": 2,
+      "shadowColor": {
+        "light": "#40000000",
+        "dark": "scrim"
+      },
+      "gradient": {
+        "type": "linear",
+        "angle": 90,
+        "stops": [
+          {
+            "color": "primary"
+          },
+          {
+            "color": {
+              "light": "#FF6200EE",
+              "dark": "primaryContainer"
+            },
+            "position": 0.5
+          },
+          {
+            "color": "#00000000"
+          }
+        ]
+      }
+    },
+    "styleWhen": [
+      {
+        "when": {
+          "key": "open",
+          "equals": true
+        },
+        "style": {
+          "background": {
+            "light": "surface",
+            "dark": "surfaceDim"
+          }
+        }
+      }
+    ],
+    "children": [
+      {
+        "type": "text",
+        "text": "Brand",
+        "style": {
+          "color": {
+            "light": "#0B57D0",
+            "dark": "#A8C7FA"
+          }
+        }
+      },
+      {
+        "type": "bottomSheet",
+        "openWhen": {
+          "key": "open",
+          "equals": true
+        },
+        "detents": ["half"],
+        "scrim": {
+          "light": "#52000000",
+          "dark": "#99000000"
+        },
+        "child": {
+          "type": "text",
+          "text": "Sheet",
+          "style": {
+            "background": "surfaceContainer"
+          }
+        }
+      },
+      {
+        "type": "bottomSheet",
+        "openWhen": {
+          "key": "open",
+          "equals": true
+        },
+        "detents": ["full"],
+        "scrim": "scrim",
+        "child": {
+          "type": "spacer"
+        }
+      }
+    ]
+  }
+}

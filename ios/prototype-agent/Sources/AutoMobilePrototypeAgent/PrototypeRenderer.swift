@@ -69,6 +69,11 @@ extension PrototypePalette {
     func color(_ spec: String?) -> Color? {
         resolve(spec).map { Color($0) }
     }
+
+    /// A spec colour slot, through the `PrototypeModeValue.rendered` seam.
+    func color(_ spec: PrototypeModeValue?) -> Color? {
+        color(spec?.rendered)
+    }
 }
 
 func swiftUIAlignment(_ name: String?) -> Alignment {
@@ -388,7 +393,7 @@ struct NodeView: View {
     }
 
     @ViewBuilder private var imageView: some View {
-        if let id = node.asset, let image = model.assets[id] {
+        if let id = node.asset?.rendered, let image = model.assets[id] {
             let resizable = Image(uiImage: image).resizable()
             switch node.contentScale {
             case "crop": resizable.aspectRatio(contentMode: .fill).clipped()

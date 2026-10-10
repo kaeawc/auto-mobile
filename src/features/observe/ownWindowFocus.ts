@@ -53,7 +53,8 @@ export function isOwnPrototypeFocused(
 }
 
 /**
- * CtrlProxy's own prototype windows in a capture, focused or not.
+ * CtrlProxy's own windows in a capture, focused or not: the prototype and, via the type-4 branch, the
+ * highlight tool's accessibility-overlay window (nothing tells them apart there without metadata).
  *
  * Explicit evidence decides first: a window the APK stamped with prototype metadata
  * (`prototypePlacement` / `prototypeOpaque`, `prototype_window_metadata_v1`) and that reports CtrlProxy's
@@ -66,7 +67,7 @@ export function isOwnPrototypeFocused(
  *   granted.
  * CtrlProxy's activity (an application window) and its keyboard (an input-method window) never count.
  */
-export function ownPrototypeWindows(
+export function ownWindows(
   hierarchy: Pick<ViewHierarchyResult, "packageName" | "windows"> | undefined,
 ): ViewHierarchyWindowInfo[] {
   return (hierarchy?.windows ?? []).filter((window) => {
@@ -82,6 +83,26 @@ export function ownPrototypeWindows(
       hostsNodes(window)
     );
   });
+}
+
+/**
+ * CtrlProxy's prototype windows only: `ownWindows` minus the highlight tool's window. Decisions
+ * that are specific to the prototype (layer scoping, "a prototype is showing", the active window
+ * type, which app a focused window hides) must use this, not `ownWindows`.
+ *
+ * The wire carries no window title, so the highlight is told apart by what it lacks. A window the
+ * APK stamped with prototype metadata is the prototype. Without metadata (older APKs) the window
+ * must host nodes: the prototype renders a node tree and the highlight window hosts none. A
+ * metadata-less prototype whose nodes were all filtered away is therefore not recognised.
+ */
+export function ownPrototypeWindows(
+  hierarchy: Pick<ViewHierarchyResult, "packageName" | "windows"> | undefined,
+): ViewHierarchyWindowInfo[] {
+  return ownWindows(hierarchy).filter(
+    (window) =>
+      (window.packageName === CTRL_PROXY_PACKAGE && hasPrototypeMetadata(window)) ||
+      hostsNodes(window),
+  );
 }
 
 /** Whether a captured window carries any hierarchy nodes; CtrlProxy's highlight window has none. */

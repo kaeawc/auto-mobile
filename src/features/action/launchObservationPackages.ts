@@ -1,6 +1,6 @@
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
 import type { ObserveResult } from "../../models";
-import { isOwnPrototypeFocused } from "../observe/ownPrototypeFocus";
+import { isOwnPrototypeFocused } from "../observe/ownWindowFocus";
 
 /**
  * The package that owns the foreground task, from the adb back stack. Used to

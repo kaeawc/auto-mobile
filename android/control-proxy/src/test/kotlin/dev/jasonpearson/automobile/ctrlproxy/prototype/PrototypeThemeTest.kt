@@ -23,7 +23,8 @@ class PrototypeThemeTest {
 
   private val hiddenCondition = PrototypeCondition("show", PrototypeScalar.BooleanValue(true))
 
-  private fun styled(background: String?) = PrototypeStyle(background = background)
+  private fun styled(background: String?) =
+    PrototypeStyle(background = background?.let(PrototypeModeValue::Single))
 
   @Test
   fun `a dark root background selects the dark scheme and sets surfaces to it`() {
@@ -263,10 +264,19 @@ class PrototypeThemeTest {
 
   @Test
   fun `colour role tokens map to no literal colour and hex stays parsed`() {
-    val style = mapPrototypeStyle(PrototypeStyle(background = "surface", color = "#112233"))
+    val style =
+      mapPrototypeStyle(
+        PrototypeStyle(
+          background = PrototypeModeValue.Single("surface"),
+          color = PrototypeModeValue.Single("#112233"),
+        ),
+      )
     assertNull(style.background)
     assertEquals(Color(0xFF112233), style.color)
-    assertEquals(Color.Unspecified, mapPrototypeStyle(PrototypeStyle(color = "onSurface")).color)
+    assertEquals(
+      Color.Unspecified,
+      mapPrototypeStyle(PrototypeStyle(color = PrototypeModeValue.Single("onSurface"))).color,
+    )
   }
 
   @Test
@@ -372,7 +382,7 @@ class PrototypeThemeTest {
 
   private val roleNames =
     PrototypeSpecThemeColors.serializer().descriptor.let { d ->
-      (0 until d.elementsCount).map(d::getElementName) - setOf("seed", "source")
+      (0 until d.elementsCount).map(d::getElementName) - setOf("seed", "source", "light", "dark")
     }
 
   @Test

@@ -32,6 +32,26 @@ sealed class PrototypeFontFamily {
 }
 
 /**
+ * A colour or image-asset slot that can differ by appearance (#11218): one value used in both
+ * modes, or a `{light, dark}` pair. A colour slot holds a hex value or a Material role name, an
+ * asset slot an opaque asset id; the shared contract validates the contents.
+ */
+@Serializable(with = PrototypeModeValueSerializer::class)
+sealed class PrototypeModeValue {
+  data class Single(val value: String) : PrototypeModeValue()
+
+  data class Modes(val light: String, val dark: String) : PrototypeModeValue()
+
+  /** Every distinct value the slot names, light first. */
+  val values: List<String>
+    get() =
+      when (this) {
+        is Single -> listOf(value)
+        is Modes -> listOf(light, dark).distinct()
+      }
+}
+
+/**
  * A dp number, a Material 3 Shapes step (`none`, `extraSmall` ... `extraLarge`, `full`), or
  * per-corner dp radii where an omitted corner is square.
  */
@@ -129,6 +149,42 @@ object PrototypeDimensionSerializer :
       PrototypeDimension.Wrap -> JsonPrimitive("wrap")
       is PrototypeDimension.Dp -> dpJson(value.dp)
     }
+}
+
+object PrototypeModeValueSerializer :
+  PrototypeJsonValueSerializer<PrototypeModeValue>("PrototypeModeValue") {
+  override fun fromJson(value: JsonElement): PrototypeModeValue {
+    if (value is JsonPrimitive && value.isString) return PrototypeModeValue.Single(value.content)
+    val data = value as? JsonObject ?: throw SerializationException("Expected value or mode pair")
+    if (data.keys != setOf("light", "dark")) throw SerializationException("Expected light and dark")
+    fun mode(name: String): String =
+      (data.getValue(name) as? JsonPrimitive)?.takeIf { it.isString }?.content
+        ?: throw SerializationException("Expected $name value")
+    return PrototypeModeValue.Modes(mode("light"), mode("dark"))
+  }
+
+  override fun toJson(value: PrototypeModeValue): JsonElement =
+    when (value) {
+      is PrototypeModeValue.Single -> JsonPrimitive(value.value)
+      is PrototypeModeValue.Modes ->
+        buildJsonObject {
+          put("light", value.light)
+          put("dark", value.dark)
+        }
+    }
+}
+
+/**
+ * What one image slot costs against `MAX_PROTOTYPE_IMAGES`: an asset id costs 1, and a `{light,
+ * dark}` pair costs 2 when the two modes name different assets (#11218). Absent is 0.
+ */
+internal fun prototypeImageSlotUses(value: JsonElement?): Int {
+  if (value is JsonPrimitive) return if (value.isString) 1 else 0
+  val pair = value as? JsonObject ?: return 0
+  fun mode(name: String) = (pair[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
+  val light = mode("light")
+  val dark = mode("dark")
+  return if (light != null && dark != null && light != dark) 2 else 1
 }
 
 object PrototypeFontFamilySerializer :

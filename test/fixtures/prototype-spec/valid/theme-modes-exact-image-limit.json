@@ -1,0 +1,132 @@
+{
+  "id": "boundaries",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "row",
+    "children": [
+      {
+        "type": "image",
+        "asset": {
+          "light": "l0",
+          "dark": "d0"
+        }
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "l1",
+          "dark": "d1"
+        }
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "l2",
+          "dark": "d2"
+        }
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "l3",
+          "dark": "d3"
+        }
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "l4",
+          "dark": "d4"
+        }
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "l5",
+          "dark": "d5"
+        }
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "l6",
+          "dark": "d6"
+        }
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "l7",
+          "dark": "d7"
+        }
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "l8",
+          "dark": "d8"
+        }
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "l9",
+          "dark": "d9"
+        }
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "l10",
+          "dark": "d10"
+        }
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "l11",
+          "dark": "d11"
+        }
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "l12",
+          "dark": "d12"
+        }
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "l13",
+          "dark": "d13"
+        }
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "l14",
+          "dark": "d14"
+        }
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "same",
+          "dark": "same"
+        }
+      },
+      {
+        "type": "image",
+        "asset": {
+          "light": "same",
+          "dark": "same"
+        }
+      }
+    ]
+  }
+}

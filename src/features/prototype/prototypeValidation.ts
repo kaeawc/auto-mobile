@@ -2,7 +2,12 @@ import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { logger } from "../../utils/logger";
 import { expandPrototypeComponents } from "./prototypeComponents";
-import { repeatErrors, repeatKeyInstances, type KeyInstance } from "./prototypeRepeat";
+import {
+  imageSlotUses,
+  repeatErrors,
+  repeatKeyInstances,
+  type KeyInstance,
+} from "./prototypeRepeat";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
 
@@ -99,8 +104,9 @@ function visitReference(
   if (nested) {
     return nested(value, rule, path, context, depth);
   }
-  if (rule.name === "item" && typeof object(value)?.image === "string") {
-    context.images++;
+  const itemImages = rule.name === "item" ? imageSlotUses(object(value)?.image) : 0;
+  if (itemImages > 0) {
+    context.images += itemImages;
     if (context.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
       return fail(`${path}.image`, "Image limit exceeded");
     }
@@ -120,7 +126,7 @@ function visitReference(
     return fail(path, "Tree depth limit exceeded");
   }
   if (node.type === "image") {
-    context.images++;
+    context.images += Math.max(1, imageSlotUses(node.asset));
   }
   if (context.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
     return fail(path, "Image limit exceeded");

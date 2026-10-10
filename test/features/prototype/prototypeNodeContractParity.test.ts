@@ -116,9 +116,15 @@ describe("prototype node contract parity", () => {
     const zodFields = Object.keys(colors.innerType().shape).sort();
     const contractFields = Object.keys(contract.definitions.themeColors.fields).sort();
     expect(zodFields).toEqual(contractFields);
-    expect(contractFields.filter((field) => field !== "seed" && field !== "source")).toEqual(
+    const nonRoles = ["seed", "source", "light", "dark"];
+    expect(contractFields.filter((field) => !nonRoles.includes(field))).toEqual(
       [...PROTOTYPE_COLOR_ROLES].sort(),
     );
+    expect(contract.definitions.colorRole.values).toEqual([...PROTOTYPE_COLOR_ROLES]);
+    // A per-mode map overrides exactly the roles the flat overrides do.
+    expect(Object.keys(contract.definitions.themeModeColors.fields)).toEqual([
+      ...PROTOTYPE_COLOR_ROLES,
+    ]);
   });
 
   test("a role override takes hex only in both validators", () => {

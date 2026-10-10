@@ -45,6 +45,7 @@ import {
   PROTOTYPE_ANCHOR_CAPABILITY,
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
+  PROTOTYPE_THEME_MODES_CAPABILITY,
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
 } from "../features/observe/android/ctrlProxyProtocol";
@@ -81,6 +82,10 @@ import {
   prototypeWindowOptionsUnsupportedMessage,
   requestedPrototypeWindowOptions,
 } from "../features/prototype/prototypeWindowOptions";
+import {
+  prototypeThemeModeFields,
+  prototypeThemeModesUnsupportedMessage,
+} from "../features/prototype/prototypeThemeModes";
 import {
   resolvePrototypeDisplayId,
   type PrototypeDisplayDependencies,
@@ -308,7 +313,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       spec: specInput
         .optional()
         .describe(
-          'Full prototype spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source "device", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. show always renders the whole spec; spec.state is authoritative. window.layer "app" and window.persistence "device" need a CtrlProxy advertising prototype_window_options_v1.',
+          'Full prototype spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source "device", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. show always renders the whole spec; spec.state is authoritative. window.layer "app" and window.persistence "device" need a CtrlProxy advertising prototype_window_options_v1. Per-mode forms need a device advertising prototype_theme_modes_v1 and are refused otherwise: a colour field, gradient stop or scrim as {light, dark} (each hex or a role), a role name in a gradient stop or scrim, theme.colors.light / theme.colors.dark {role: hex} maps applied after the flat overrides for the resolved mode, and image.asset or a tabBar/bottomNav item image as {light, dark} asset ids.',
         ),
       specPath: z
         .string()
@@ -735,6 +740,34 @@ async function prepareWindowOptions(
   return undefined;
 }
 
+/**
+ * Refuses, before anything is sent, a spec that uses a per-mode form (#11218) on a device whose
+ * renderer does not resolve them: an older device rejects the spec or draws one mode's value.
+ */
+async function themeModesRefusal(
+  target: PrototypeTarget,
+  args: z.infer<typeof prototypeSchema>,
+  signal: AbortSignal | undefined,
+): Promise<PrototypeResult | undefined> {
+  if (args.action !== "show" || args.spec === undefined) {
+    return undefined;
+  }
+  const fields = prototypeThemeModeFields(args.spec);
+  if (fields.length === 0) {
+    return undefined;
+  }
+  const supported = target.android
+    ? await target.android.supportsCommand(PROTOTYPE_THEME_MODES_CAPABILITY)
+    : target.ios?.supportsCapability(PROTOTYPE_THEME_MODES_CAPABILITY) === true;
+  // The lookup waits for connection and handshake; an abort during it must stop the show.
+  signal?.throwIfAborted();
+  if (supported) {
+    return undefined;
+  }
+  const message = prototypeThemeModesUnsupportedMessage(fields, target.android ? "android" : "ios");
+  return { success: false, error: new ActionableError(message).message };
+}
+
 interface AnchorStage {
   /** The spec to send, element anchors replaced by bounds anchors; absent when unchanged. */
   spec?: PrototypeSpec;
@@ -1024,8 +1057,9 @@ async function resolveShowDisplay(
 }
 
 /**
- * Display resolution, then window-option support, then anchor resolution: any refusal ends the call
- * unsent. An in-place show stays on [show.shownDisplayId], so anchors are checked against that.
+ * Display resolution, then the theme-modes refusal, then window-option support and the app-layer
+ * grant (a device side effect, so refusals that need no grant come first), then anchor resolution:
+ * any refusal ends the call unsent. An in-place show stays on [show.shownDisplayId], so anchors are checked against that.
  */
 async function preflightMutation(
   show: { inPlace: boolean; shownDisplayId?: number },
@@ -1042,7 +1076,9 @@ async function preflightMutation(
   if (resolved.failure) {
     return resolved;
   }
-  const failure = await prepareWindowOptions(target, device, args, dependencies, signal);
+  const failure =
+    (await themeModesRefusal(target, args, signal)) ??
+    (await prepareWindowOptions(target, device, args, dependencies, signal));
   if (failure) {
     return { displayId: resolved.displayId, failure };
   }

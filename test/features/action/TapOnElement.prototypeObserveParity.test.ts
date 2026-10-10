@@ -2,7 +2,7 @@ import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { TapOnElement, type TapOnElementOptions } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
-import { ownPrototypeWindows } from "../../../src/features/observe/ownPrototypeFocus";
+import { ownWindows } from "../../../src/features/observe/ownWindowFocus";
 import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
 import type { ElementBounds } from "../../../src/models/ElementBounds";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
@@ -205,9 +205,7 @@ describe("observe and default-layer tapOn agree on app rows under AutoMobile pro
       expect(row?.affordances).toContain("tap");
       expect(result.success).toBe(true);
       const [tap] = service.getTapHistory();
-      const prototypes = ownPrototypeWindows(observation.viewHierarchy).map(
-        (window) => window.bounds!,
-      );
+      const prototypes = ownWindows(observation.viewHierarchy).map((window) => window.bounds!);
       expect(prototypes.some((bounds) => inside(bounds, tap))).toBe(false);
     });
   }

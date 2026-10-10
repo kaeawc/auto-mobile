@@ -121,7 +121,7 @@ class PrototypeAnchorLayerTest {
       testTag = tag,
       anchor = PrototypeBoundsAnchor(PrototypeBounds(x, y, size, size), "cover"),
       onTap = onTap,
-      style = PrototypeStyle(background = "#FF0000"),
+      style = PrototypeStyle(background = PrototypeModeValue.Single("#FF0000")),
       children = emptyList(),
     )
 

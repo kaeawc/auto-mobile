@@ -6,7 +6,7 @@ import {
   type ViewHierarchyWindowInfo,
 } from "../../../models/ViewHierarchyResult";
 import { linkWindowRoots } from "../linkWindowRoots";
-import { ownPrototypeWindows } from "../ownPrototypeFocus";
+import { ownWindows } from "../ownWindowFocus";
 
 /** AccessibilityWindowInfo.TYPE_APPLICATION. */
 const WINDOW_TYPE_APPLICATION = 1;
@@ -29,7 +29,7 @@ function foregroundAppWindow(
   viewHierarchy: ViewHierarchyResult,
   packageName: string,
 ): ViewHierarchyNode | undefined {
-  const prototypes = new Set(ownPrototypeWindows(viewHierarchy).map((window) => window.id));
+  const prototypes = new Set(ownWindows(viewHierarchy).map((window) => window.id));
   const appWindows = (linkWindowRoots(viewHierarchy.hierarchy, viewHierarchy.windows) ?? []).filter(
     (window): window is ViewHierarchyWindowInfo & { hierarchy: ViewHierarchyNode } =>
       window.type === WINDOW_TYPE_APPLICATION &&

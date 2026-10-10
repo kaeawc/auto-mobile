@@ -20,6 +20,7 @@ import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../utils/runnerReadinessCon
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { logger } from "../utils/logger";
+import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { ProgressCallback } from "./toolRegistry";
 import {
@@ -30,6 +31,7 @@ import {
   getAndroidSchema,
   getAppleSchema,
   getDeviceToolsDependencies,
+  initializedDevicePool,
   reserveAndroidStartupLease,
   reserveStableDeviceLifecycle,
   resolveAndroidStartStableDeviceLifecycleTarget,
@@ -324,6 +326,25 @@ async function reserveStartSelectorDeviceLifecycle(
   }
 }
 
+/**
+ * An explicit acquisition target (an AVD name or simulator UDID) a managed slot holds is refused
+ * before anything boots or binds it, idle or not (#11174): generic acquisition never lends a
+ * slot's device. Selector-based starts skip managed devices instead (see bootAndPrepareDevice).
+ */
+async function assertStartTargetNotManaged(
+  stableTarget: StableDeviceTarget | undefined,
+  operationName: string,
+): Promise<void> {
+  if (!stableTarget) {
+    return;
+  }
+  await managedSlotPoolGate(initializedDevicePool()).assertNotAssignedToManagedSlot?.({
+    action: operationName,
+    deviceId: stableTarget.stableId,
+    platform: stableTarget.platform,
+  });
+}
+
 async function reserveStartDeviceLifecycleReservations(
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
@@ -357,6 +378,7 @@ async function reserveStartDeviceLifecycleReservations(
       deps.timer,
       signal,
     );
+    await assertStartTargetNotManaged(stableTarget, budgets.operationName);
     lifecycleLease =
       (await reserveStartStableDeviceLifecycle(
         stableTarget,

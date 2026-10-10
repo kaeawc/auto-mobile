@@ -15,6 +15,10 @@ import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import {
+  DeviceAssignedToManagedSlotError,
+  ManagedSlotDiscoveryIncompleteError,
+} from "../daemon/managedSlots/managedSlotRefusal";
+import {
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   RetryableDeviceAcquisitionError,
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
@@ -91,6 +95,12 @@ function toolCallErrorText(error: unknown, message: string): string {
 
 /** The typed fields of a device or session refusal, after `success` and `error`. */
 function typedRefusalPayload(error: unknown): Record<string, unknown> | undefined {
+  if (
+    error instanceof DeviceAssignedToManagedSlotError ||
+    error instanceof ManagedSlotDiscoveryIncompleteError
+  ) {
+    return error.toPayload();
+  }
   if (error instanceof InputDeviceOwnedError || isTerminalForeignOwnedRecoveryError(error)) {
     return { code: error.code, deviceId: error.deviceId, retryable: false };
   }

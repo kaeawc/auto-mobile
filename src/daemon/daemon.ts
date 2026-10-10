@@ -1,3 +1,7 @@
+import {
+  createDefaultManagedSlotExclusion,
+  type ManagedSlotExclusion,
+} from "./managedSlots/managedSlotExclusion";
 import { getDaemonStreamDeviceLifecycleEmitter } from "./streamDeviceLifecycleEvents";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 import { isSessionReleasing } from "./sessionReleaseState";
@@ -664,6 +668,10 @@ export class Daemon {
     incumbentOwnerGuard: IncumbentOwnerGuard = new IncumbentOwnerGuard(),
     private readonly avdManagerFactory: () => Pick<AvdManager, "listDeviceImages"> = () =>
       new AvdManagerService(),
+    /** Managed-slot exclusion for the pool (#11174); defaults to the host-wide SQLite registry. */
+    private readonly managedSlotExclusionFactory: (
+      timer: Timer,
+    ) => ManagedSlotExclusion = createDefaultManagedSlotExclusion,
   ) {
     installDefaultProvisionedDeviceTransportFence();
     this.startupCompletion = new Promise<void>((resolve, reject) => {
@@ -841,6 +849,7 @@ export class Daemon {
       sessionManager: this.sessionManager,
       daemonSessionId: this.daemonSessionId,
       timer: this.timer,
+      managedSlotExclusion: this.managedSlotExclusionFactory(this.timer),
       missingDeviceMisses: this.deviceDisconnectMisses,
       installedAppsRepository: this.installedAppsRepository,
       deviceSessionRepository: this.deviceSessionRepository,

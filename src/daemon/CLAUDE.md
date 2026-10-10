@@ -197,6 +197,18 @@ allocation claim under its shutdown reservation (reported as an active execution
 Acquisition (`getAndroid`, `getApple`, `startDevice` on a running device) is
 guarded by the pool's own owner check instead.
 
+Managed slots (#11174, #11178): a device a valid managed slot holds, or one parked in
+the managed free pool, is never generic capacity, idle or not. `DevicePool` reads a
+host-wide registry snapshot through the injected `ManagedSlotExclusion`
+(`src/daemon/managedSlots/managedSlotExclusion.ts`) and skips such devices in idle
+selection, multi-device allocation and auto-start; explicit binds, autolock,
+`provisionDevice` adoption, `getAndroid`/`getApple`/`startDevice` targets,
+`killDevice`/`deleteDevice` (stopped targets included) and `input/*`/`ide/*` mutations
+refuse them with non-retryable `device_assigned_to_managed_slot` unless the caller is
+the slot's recorded execution session; `force` never overrides. Reads stay open. A
+registry never read refuses with retryable `discovery_incomplete`; an unreadable one
+keeps the last good snapshot.
+
 Owner decisions 2026-10-08 (#10730) settle the viewing question: watching is
 allowed on any device, whichever session owns it, and watching is not use.
 Owner decision 2026-10-09 (#10964) extends that to the owner: no read counts as

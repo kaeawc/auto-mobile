@@ -1,0 +1,13 @@
+{
+  "code": "device_assigned_to_managed_slot",
+  "builder": "DeviceAssignedToManagedSlotError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"killDevice refused: device 'emulator-5554' (android amslot-0123abcd-0-g1) is assigned to managed slot 0 (code device_assigned_to_managed_slot). It stays reserved while idle; use another device, or reset the slot's scope to release it.\",\"code\":\"device_assigned_to_managed_slot\",\"deviceId\":\"emulator-5554\",\"platform\":\"android\",\"stableId\":\"amslot-0123abcd-0-g1\",\"scopeKey\":\"0123abcd\",\"declaredSlot\":0,\"retryable\":false}"
+      }
+    ],
+    "isError": true
+  }
+}

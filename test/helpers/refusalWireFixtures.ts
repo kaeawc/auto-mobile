@@ -15,6 +15,7 @@ import {
   SessionTerminalReleaseInProgressError,
 } from "../../src/daemon/sessionManager";
 import { ProvisionDeviceError } from "../../src/devices/exactDeviceProvisioning";
+import { DeviceAssignedToManagedSlotError } from "../../src/daemon/managedSlots/managedSlotRefusal";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/devices/deviceBootService";
 import { createToolErrorResponse } from "../../src/server/deviceTools";
 import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
@@ -156,6 +157,22 @@ const BUILDERS: readonly (readonly [string, string, () => RefusalWireResult])[] 
     "daemon_session_suspect",
     "SessionSuspectError via shapeToolCallError",
     () => shaped(new SessionSuspectError(SESSION, 8_000)),
+  ],
+  [
+    "device_assigned_to_managed_slot",
+    "DeviceAssignedToManagedSlotError via shapeToolCallError",
+    () =>
+      shaped(
+        new DeviceAssignedToManagedSlotError("killDevice", DEVICE, {
+          platform: "android",
+          stableDeviceId: "amslot-0123abcd-0-g1",
+          holder: "slot",
+          scopeKey: "0123abcd",
+          slotIndex: 0,
+          scopeState: "valid",
+          execSessionUuid: null,
+        }),
+      ),
   ],
   [
     "daemon_shutting_down",

@@ -136,6 +136,11 @@ import {
 } from "./sessionPreservingRecovery";
 import { DeviceAutolockManager, type AutolockClient } from "./deviceAutolockManager";
 import {
+  managedSlotRefusal,
+  type ManagedDeviceRef,
+  type ManagedSlotExclusion,
+} from "./managedSlots/managedSlotExclusion";
+import {
   AdbServerResetQuarantine,
   type AdbServerResetQuarantinePoolPort,
 } from "./adbServerResetQuarantine";
@@ -813,6 +818,11 @@ export interface DevicePoolDependencies {
   foreignDeviceOwnership?: ForeignDeviceOwnership;
   /** The same for iOS simulators, claimed by UDID (#10980). */
   iosForeignDeviceOwnership?: ForeignDeviceOwnership;
+  /**
+   * Devices managed slots hold (#11174, #11178). Generic allocation, auto-start and explicit binds
+   * never lend one, even while it is idle. A directly built pool has none.
+   */
+  managedSlotExclusion?: ManagedSlotExclusion;
   env?: Environment;
   deviceHealthMarkers?: DeviceHealthMarkers;
   deviceHealthRecoveryBackoff?: BackoffPolicy;
@@ -853,6 +863,14 @@ export interface DevicePoolDependencies {
     pool: EmulatorProcessLifecyclePoolPort,
   ) => EmulatorProcessLifecycle;
   deviceSessionContinuityEnabled?: boolean;
+}
+
+/** A device image's managed-slot identity: the AVD name on Android, the UDID on iOS. */
+function managedRefForImage(image: DeviceInfo): ManagedDeviceRef {
+  return {
+    platform: image.platform,
+    stableIds: [image.platform === "android" ? image.name : undefined, image.deviceId],
+  };
 }
 
 function createAdbServerResetQuarantine(
@@ -1152,6 +1170,7 @@ export class DevicePool {
   private readonly deviceHealthMarkers: DeviceHealthMarkers;
   private readonly foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
   private readonly iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
+  private readonly managedSlotExclusion: ManagedSlotExclusion | undefined;
   /** Last foreign owner PID logged per device, so a waiting allocation logs each owner once. */
   private readonly loggedForeignDeviceOwners = new Map<string, number>();
   /** Devices whose allocation claim this daemon published and has not withdrawn, by claim store. */
@@ -1193,10 +1212,12 @@ export class DevicePool {
     androidAdbFactory,
     foreignDeviceOwnership,
     iosForeignDeviceOwnership,
+    managedSlotExclusion,
   }: DevicePoolDependencies) {
     this.sessionManager = sessionManager;
     this.foreignDeviceOwnership = foreignDeviceOwnership;
     this.iosForeignDeviceOwnership = iosForeignDeviceOwnership;
+    this.managedSlotExclusion = managedSlotExclusion;
     this.daemonSessionId = daemonSessionId;
     this.timer = timer;
     this.androidTransportAliases = createAndroidTransportAliases(androidAdbFactory);
@@ -1635,6 +1656,15 @@ export class DevicePool {
         isAdbServerResetQuarantined: (id) => this.adbServerResetQuarantinedSessions.has(id),
         assertNotClaimedByForeignDaemon: (deviceId, platform) =>
           this.assertNotClaimedByForeignDaemon(deviceId, platform),
+        assertNotAssignedToManagedSlot: this.managedSlotExclusion
+          ? (deviceId, platform, sourceImage) =>
+              this.assertNotAssignedToManagedSlot({
+                action: "acquire",
+                deviceId,
+                platform,
+                stableIds: [platform === "android" ? sourceImage?.name : undefined],
+              })
+          : undefined,
         claimAcquiredDevice: async (sessionId, deviceId, heldBefore, platform) => {
           if (this.foreignOwnershipFor(platform)) {
             await this.claimExplicitlyBoundDevice(sessionId, deviceId, heldBefore);
@@ -2946,7 +2976,9 @@ export class DevicePool {
     const available = new Set<string>();
     let canClaim = true;
     for (const request of this.criteriaMatcher.sortBySpecificity(claims)) {
-      const matching = this.getDevicesMatchingCriteria(request.criteria);
+      const matching = this.getDevicesMatchingCriteria(request.criteria).filter(
+        (candidate) => !this.isManagedSlotDevice(candidate),
+      );
       const candidates = matching.filter((candidate) => !this.isDrivenByForeignDaemon(candidate));
       const device = candidates.find(
         (candidate) => this.isIdleDeviceEligible(candidate) && !available.has(candidate.id),
@@ -3841,6 +3873,9 @@ export class DevicePool {
     criteria?: DeviceAllocationCriteria,
     excludedImageIds: Set<string> = new Set(),
   ): Promise<DeviceInfo[]> {
+    if (this.managedSlotExclusion) {
+      await this.managedSlotExclusion.refresh();
+    }
     const availableImages = await this.deviceManager.listDeviceImages(platform);
     if (availableImages.length === 0) {
       return [];
@@ -3861,7 +3896,7 @@ export class DevicePool {
       if (excludedImageIds.has(this.criteriaMatcher.getDeviceImageKey(image))) {
         continue;
       }
-      if (this.isAutoStartSuppressed(image)) {
+      if (this.isExcludedFromAutoStart(image)) {
         continue;
       }
       if (image.deviceId && bootedIds.has(image.deviceId)) {
@@ -3896,6 +3931,14 @@ export class DevicePool {
       return image.deviceId ? bootedIds.has(image.deviceId) : bootedNames.has(image.name);
     }
     return await this.deviceManager.isDeviceImageRunning(image);
+  }
+
+  /** Suppressed, or held by a managed slot: generic auto-start never boots a slot's device (#11174). */
+  private isExcludedFromAutoStart(image: DeviceInfo): boolean {
+    return (
+      this.isAutoStartSuppressed(image) ||
+      this.managedSlotExclusion?.holderOf(managedRefForImage(image)) !== undefined
+    );
   }
 
   private isAutoStartSuppressed(image: DeviceInfo): boolean {
@@ -5411,6 +5454,10 @@ export class DevicePool {
     refreshFailure?: string;
     refreshCompleted?: boolean;
   }> {
+    if (!recoveryTarget && this.managedSlotExclusion) {
+      // Guarded, not awaited unconditionally: an extra tick reorders allocation interleavings.
+      await this.managedSlotExclusion.refresh();
+    }
     if (!recoveryTarget && this.tracksForeignOwnership(platform)) {
       return this.tryAssignUnclaimedDevice(sessionId, platform);
     }
@@ -5418,7 +5465,7 @@ export class DevicePool {
       // A pool built without ownership tracking (tests) publishes no claims.
       return this.tryAssignFrom(
         sessionId,
-        () => this.getDevicesByPlatform(platform),
+        () => this.getGenericallyAllocatableDevices(platform),
         "platform pool empty",
         () => this.hasPendingAndroidRecovery(platform),
       );
@@ -5528,7 +5575,7 @@ export class DevicePool {
       await this.tryAssignFrom(
         sessionId,
         () =>
-          this.getDevicesByPlatform(platform).filter(
+          this.getGenericallyAllocatableDevices(platform).filter(
             (device) => !this.isDrivenByForeignDaemon(device),
           ),
         "platform pool empty",
@@ -5650,6 +5697,7 @@ export class DevicePool {
     await Promise.all([
       this.foreignDeviceOwnership?.refresh(idle("android")),
       this.iosForeignDeviceOwnership?.refresh(idle("ios")),
+      this.managedSlotExclusion?.refresh(),
     ]);
   }
 
@@ -7340,6 +7388,17 @@ export class DevicePool {
     } = options;
     const caller: AutolockClient = { mcpSessionId, oneShotCli };
     await this.assertNotClaimedByForeignDaemon(deviceId, platform);
+    if (this.managedSlotExclusion) {
+      await this.assertNotAssignedToManagedSlot({
+        action: "acquire",
+        deviceId,
+        platform,
+        stableIds: [
+          platform === "android" ? (verifiedAndroidAvdIdentity ?? sourceImage)?.name : undefined,
+        ],
+        requesterSessionUuid: sessionId,
+      });
+    }
     const heldBefore = this.devices.get(deviceId)?.sessionId ?? null;
     const boundSessionId = await this.withTargetDeviceDiscovery({
       deviceId,
@@ -8535,7 +8594,7 @@ export class DevicePool {
   /** Devices matching `criteria` that no other live daemon drives (mt-0083 D2). */
   private getUnownedDevicesMatchingCriteria(criteria?: DeviceAllocationCriteria): PooledDevice[] {
     return this.getDevicesMatchingCriteria(criteria).filter(
-      (device) => !this.isDrivenByForeignDaemon(device),
+      (device) => !this.isManagedSlotDevice(device) && !this.isDrivenByForeignDaemon(device),
     );
   }
 
@@ -8560,6 +8619,109 @@ export class DevicePool {
       );
     }
     return true;
+  }
+
+  /** Platform devices generic allocation may lend: none a managed slot holds. */
+  private getGenericallyAllocatableDevices(platform?: Platform): PooledDevice[] {
+    return this.getDevicesByPlatform(platform).filter(
+      (device) => !this.isManagedSlotDevice(device),
+    );
+  }
+
+  /** Every stable identity the pool knows `deviceId` by, plus any the caller supplies. */
+  private managedRefFor(
+    deviceId: string,
+    platform: Platform,
+    extraStableIds: ReadonlyArray<string | undefined> = [],
+  ): ManagedDeviceRef {
+    const device = this.devices.get(deviceId);
+    return {
+      platform,
+      stableIds: [
+        device ? this.stableDeviceIdFor(device) : undefined,
+        device?.avdName,
+        deviceId,
+        ...extraStableIds,
+      ],
+    };
+  }
+
+  /**
+   * A device a managed slot holds is never generic capacity, idle or not (#11174). An Android
+   * emulator whose AVD identity is still unresolved cannot be proven free while any Android device
+   * is managed, so it is excluded too: unknown identity never frees an assignment.
+   */
+  private isManagedSlotDevice(device: PooledDevice): boolean {
+    const exclusion = this.managedSlotExclusion;
+    if (!exclusion) {
+      return false;
+    }
+    if (exclusion.holderOf(this.managedRefFor(device.id, device.platform))) {
+      return true;
+    }
+    return (
+      device.platform === "android" &&
+      this.isPooledAndroidEmulator(device.id) &&
+      this.stableDeviceIdFor(device) === undefined &&
+      exclusion.stableIdsFor("android").size > 0
+    );
+  }
+
+  /**
+   * The synchronous managed-slot refusal for a device, from the last snapshot: undefined when no
+   * managed slot holds it or the requester is that slot's live execution. For lifecycle re-checks
+   * that run under the assignment mutex; entry points refresh first through
+   * {@link assertNotAssignedToManagedSlot}.
+   */
+  managedSlotRefusalFor(input: {
+    action: string;
+    deviceId: string;
+    platform: Platform;
+    stableIds?: ReadonlyArray<string | undefined>;
+    requesterSessionUuid?: string;
+  }): Error | undefined {
+    return managedSlotRefusal(this.managedSlotExclusion, {
+      action: input.action,
+      deviceId: input.deviceId,
+      device: this.managedRefFor(input.deviceId, input.platform, input.stableIds),
+      requesterSessionUuid: input.requesterSessionUuid,
+    });
+  }
+
+  /**
+   * Refuse a generic caller's control of a device a managed slot holds (#11174, #11178), with a
+   * fresh registry read: `device_assigned_to_managed_slot`, not retryable. Only the slot's own
+   * live execution session passes; no force flag overrides it.
+   */
+  async assertNotAssignedToManagedSlot(input: {
+    action: string;
+    deviceId: string;
+    platform: Platform;
+    stableIds?: ReadonlyArray<string | undefined>;
+    requesterSessionUuid?: string;
+    /** Reuse a snapshot younger than this; destructive callers leave it unset (always fresh). */
+    maxAgeMs?: number;
+  }): Promise<void> {
+    if (!this.managedSlotExclusion) {
+      return;
+    }
+    await this.managedSlotExclusion.refresh({ maxAgeMs: input.maxAgeMs });
+    const refusal = this.managedSlotRefusalFor(input);
+    if (refusal) {
+      throw refusal;
+    }
+  }
+
+  /**
+   * Stable ids a selector-based start must skip on `platform` (AVD names, simulator UDIDs): every
+   * device a managed slot holds, read fresh (#11174). Empty when the pool tracks no slots.
+   */
+  async managedSlotStableIds(platform: Platform): Promise<ReadonlySet<string>> {
+    if (!this.managedSlotExclusion) {
+      return new Set();
+    }
+    await this.managedSlotExclusion.refresh();
+    return this.managedSlotExclusion.stableIdsFor(platform);
   }
 
   private getDevicesMatchingCriteria(criteria?: DeviceAllocationCriteria): PooledDevice[] {

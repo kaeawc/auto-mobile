@@ -2,6 +2,8 @@ import {
   assertValidSlotKey,
   bindingMatches,
   computeSlotScopeKey,
+  isPermanentInvalidationReason,
+  isRevivableScope,
   resolveAbandonmentThresholdMs,
   type AbandonmentQuery,
   type BeginScopeInvalidationResult,
@@ -60,21 +62,35 @@ export class FakeSlotRegistry implements SlotRegistry {
     const scopeKey = computeSlotScopeKey(identity);
     const nowMs = this.timer.now();
     const existing = this.scopes.get(scopeKey);
-    if (existing) {
-      if (existing.state !== "valid") {
-        return { kind: "scope_invalidated", scope: { ...existing } };
-      }
+    if (existing?.state === "valid") {
       existing.lastAcquiredAtMs = nowMs;
-      return { kind: "ready", scope: { ...existing }, created: false };
+      return { kind: "ready", scope: { ...existing }, created: false, revived: false };
     }
-    const live = [...this.scopes.values()].find(
+    if (existing && !isRevivableScope(existing)) {
+      return { kind: "scope_invalidated", scope: { ...existing } };
+    }
+    const sameNamespace = [...this.scopes.values()].filter(
       (scope) =>
         scope.managedHostScope === identity.managedHostScope &&
         scope.runnerNamespace === identity.runnerNamespace &&
-        scope.state !== "invalidated",
+        scope.scopeKey !== scopeKey,
     );
+    const live = sameNamespace.find((scope) => scope.state !== "invalidated");
     if (live) {
       return { kind: "incarnation_conflict", current: { ...live } };
+    }
+    if (existing) {
+      existing.state = "valid";
+      existing.invalidationReason = null;
+      existing.invalidatingAtMs = null;
+      existing.invalidatedAtMs = null;
+      existing.lastAcquiredAtMs = nowMs;
+      return { kind: "ready", scope: { ...existing }, created: false, revived: true };
+    }
+    for (const superseded of sameNamespace) {
+      if (superseded.invalidationReason === "abandoned") {
+        superseded.invalidationReason = "incarnation_reset";
+      }
     }
     const scope: SlotScopeRecord = {
       ...identity,
@@ -87,7 +103,7 @@ export class FakeSlotRegistry implements SlotRegistry {
       invalidatedAtMs: null,
     };
     this.scopes.set(scopeKey, scope);
-    return { kind: "ready", scope: { ...scope }, created: true };
+    return { kind: "ready", scope: { ...scope }, created: true, revived: false };
   }
 
   async getScope(scopeKey: string): Promise<SlotScopeRecord | null> {
@@ -277,6 +293,7 @@ export class FakeSlotRegistry implements SlotRegistry {
           scopeKey: assignment.scopeKey,
           slotIndex: assignment.slotIndex,
           scopeState: scope.state,
+          execSessionUuid: assignment.execOwner?.sessionUuid ?? null,
         },
       ];
     });
@@ -287,6 +304,7 @@ export class FakeSlotRegistry implements SlotRegistry {
       scopeKey: device.fromScopeKey,
       slotIndex: null,
       scopeState: null,
+      execSessionUuid: null,
     }));
     return [...bound, ...freed];
   }
@@ -305,14 +323,16 @@ export class FakeSlotRegistry implements SlotRegistry {
     if (!scope) {
       return { kind: "not_found" };
     }
-    if (scope.state === "invalidating") {
-      return { kind: "already_invalidating", scope: { ...scope } };
+    if (scope.state === "valid") {
+      this.markInvalidating(scope, reason);
+      return { kind: "invalidating", scope: { ...scope } };
     }
-    if (scope.state === "invalidated") {
-      return { kind: "already_invalidated", scope: { ...scope } };
+    if (isRevivableScope(scope) && isPermanentInvalidationReason(reason)) {
+      scope.invalidationReason = reason;
     }
-    this.markInvalidating(scope, reason);
-    return { kind: "invalidating", scope: { ...scope } };
+    return scope.state === "invalidating"
+      ? { kind: "already_invalidating", scope: { ...scope } }
+      : { kind: "already_invalidated", scope: { ...scope } };
   }
 
   async completeScopeInvalidation(scopeKey: string): Promise<CompleteScopeInvalidationResult> {

@@ -520,6 +520,27 @@ describe("DeviceBootService", () => {
     expect(devices.getExecutedOperations()).toContain("startDevice:Pixel_9_API_34:180000");
   });
 
+  it("does not cold-boot a simulator image whose UDID is excluded (managed slots, #11174)", async () => {
+    const devices = new FakeDeviceUtils();
+    const excluded: DeviceInfo = {
+      name: "iPhone 16",
+      platform: "ios",
+      deviceId: "UDID-SLOT",
+      isRunning: false,
+      source: "local",
+    };
+    const allowed: DeviceInfo = { ...excluded, deviceId: "UDID-FREE" };
+    devices.setDeviceImages("ios", [excluded, allowed]);
+
+    const result = await service(devices, new DefaultDeviceMatcher()).boot({
+      platform: "ios",
+      preferRunning: false,
+      excludeDeviceIds: new Set([excluded.deviceId!]),
+    });
+
+    expect(result.sourceImage?.deviceId).toBe(allowed.deviceId);
+  });
+
   it("does not reuse a running Android device excluded by a recovery snapshot", async () => {
     const devices = new FakeDeviceUtils();
     const excluded = {

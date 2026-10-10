@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
 import * as inputOwnership from "../../src/daemon/inputDeviceOwnership";
+import * as managedSlotRefusals from "../../src/daemon/managedSlots/managedSlotRefusal";
 import * as bootCapacity from "../../src/models/BootCapacityExhaustedError";
 import {
   REFUSAL_FIXTURES_DIR,
@@ -37,7 +38,7 @@ const fixtureCodes = fixtures.map((fixture) => fixture.code);
  */
 function exportedCodeConstants(): Map<string, string> {
   const found = new Map<string, string>();
-  for (const module of [acquisitionRefusals, inputOwnership, bootCapacity]) {
+  for (const module of [acquisitionRefusals, inputOwnership, bootCapacity, managedSlotRefusals]) {
     for (const [name, value] of Object.entries(module)) {
       if (name.endsWith("_CODE") && typeof value === "string") {
         found.set(value, name);

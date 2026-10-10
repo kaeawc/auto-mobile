@@ -367,9 +367,16 @@ export interface DeviceBootRequest {
   matchNamedDeviceIgnoringOsVersion?: boolean;
   /** Internal identity policy: select a named runtime only when its name is an exact match. */
   matchExactName?: boolean;
-  /** Recovery snapshots keep preserved Android AVDs out of a concurrent startup match. */
+  /**
+   * Recovery snapshots keep preserved Android AVDs out of a concurrent startup match; managed
+   * slots keep their AVDs out of generic starts (#11174).
+   */
   excludeDeviceNames?: ReadonlySet<string>;
-  /** Recovery snapshots keep preserved Android serials out of a concurrent startup match. */
+  /**
+   * Recovery snapshots keep preserved Android serials out of a concurrent startup match; managed
+   * slots keep their simulator UDIDs out of generic starts (#11174). Matched against both booted
+   * devices and images.
+   */
   excludeDeviceIds?: ReadonlySet<string>;
   /** Non-mutating acceptance control for deterministic discovery-order coverage. */
   presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"];
@@ -822,10 +829,9 @@ export class DeviceBootService {
     const images = await this.runPhase(context, "listing device images", () =>
       deviceManager.listDeviceImages(request.platform),
     );
-    const excludedDeviceNames = request.excludeDeviceNames;
-    const matchingImages = excludedDeviceNames
-      ? images.filter((image) => !excludedDeviceNames.has(image.name))
-      : images;
+    const matchingImages = images.filter(
+      (image) => !isExcludedImage(image, request.excludeDeviceNames, request.excludeDeviceIds),
+    );
     const bootedCandidates: BootedDevice[] = [];
     const running = await this.findRunningMatch(
       request,
@@ -1251,7 +1257,7 @@ export class DeviceBootService {
     };
     const eligible = images.filter(
       (candidate) =>
-        !request.excludeDeviceNames?.has(candidate.name) &&
+        !isExcludedImage(candidate, request.excludeDeviceNames, request.excludeDeviceIds) &&
         matchesDeviceCriteria(candidate, criteria),
     );
     const current = request.deviceId
@@ -1861,4 +1867,16 @@ function withCleanupNote(error: unknown, note: string): unknown {
     return copy;
   }
   return new ActionableError(`${errorMessage(error)} ${note}`, { cause: error });
+}
+
+/** Whether a startup match must skip this image: its name or its device id is excluded. */
+function isExcludedImage(
+  image: DeviceInfo,
+  excludedNames: ReadonlySet<string> | undefined,
+  excludedIds: ReadonlySet<string> | undefined,
+): boolean {
+  return (
+    excludedNames?.has(image.name) === true ||
+    (image.deviceId !== undefined && excludedIds?.has(image.deviceId) === true)
+  );
 }

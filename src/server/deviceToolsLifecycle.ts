@@ -20,9 +20,11 @@ import {
   assertLifecycleCallerHoldsDevice,
   assertLifecycleTargetNotHeldByOtherDaemon,
   LIFECYCLE_TOOL_FOREIGN_DAEMON_REMEDY,
+  assertLifecycleCallerNotOnForeignManagedSlot,
   lifecycleRequester,
   type LifecycleRequester,
 } from "./lifecycleDeviceOwnership";
+import { DeviceAssignedToManagedSlotError } from "../daemon/managedSlots/managedSlotRefusal";
 import {
   DEVICE_SHUTDOWN_TIMEOUT_MS,
   PooledAvdIdentityError,
@@ -114,6 +116,7 @@ async function teardownOwnershipRefusal(
       device: target.bootedDevice,
       requester,
       force: args.force ?? false,
+      stableIds: [args.target.stableId],
     });
     await assertLifecycleTargetNotHeldByOtherDaemon({
       toolName: "deleteDevice",
@@ -122,6 +125,9 @@ async function teardownOwnershipRefusal(
     });
     return undefined;
   } catch (error) {
+    if (error instanceof DeviceAssignedToManagedSlotError) {
+      return managedSlotTeardownRefusal(args, error, target.device);
+    }
     if (
       !(error instanceof InputDeviceOwnedError || error instanceof DeviceOwnedByOtherDaemonError)
     ) {
@@ -135,6 +141,76 @@ async function teardownOwnershipRefusal(
       target.device,
     );
   }
+}
+
+/** deleteDevice's typed precondition failure for a device a managed slot holds (#11174). */
+function managedSlotTeardownRefusal(
+  args: TeardownDeviceArgs,
+  error: DeviceAssignedToManagedSlotError,
+  resolved?: TeardownResolvedTarget["device"],
+): TeardownToolResponse {
+  const { code, retryable, ...evidence } = error.toPayload();
+  return createTeardownFailureResponse(
+    args,
+    "precondition",
+    String(code),
+    error.message,
+    resolved,
+    { ...evidence, retryable },
+  );
+}
+
+/**
+ * Refuse deleteDevice of a device a managed slot holds before any teardown work, stopped or not:
+ * an idle assigned AVD has no session, so only the registry knows it is taken. Internal rollbacks
+ * (no requester) are not generic callers and skip it.
+ */
+async function managedSlotDeleteRefusal(
+  args: TeardownDeviceArgs,
+  requester: LifecycleRequester | undefined,
+): Promise<{ response: TeardownToolResponse } | undefined> {
+  if (!requester) {
+    return undefined;
+  }
+  try {
+    await assertLifecycleCallerNotOnForeignManagedSlot({
+      toolName: "deleteDevice",
+      device: { deviceId: args.target.stableId, platform: args.target.platform },
+      requester,
+    });
+    return undefined;
+  } catch (error) {
+    if (error instanceof DeviceAssignedToManagedSlotError) {
+      return { response: managedSlotTeardownRefusal(args, error) };
+    }
+    throw error;
+  }
+}
+
+/**
+ * killDevice's entry check: a managed slot's device stops only for that slot's execution, force or
+ * not (#11174); a device another session holds stops only for its holder or an explicit force
+ * (#10785), and one another live daemon holds only with an explicit force (#11200).
+ */
+async function assertKillDeviceCaller(args: KillDeviceArgs): Promise<void> {
+  await assertLifecycleCallerNotOnForeignManagedSlot({
+    toolName: "killDevice",
+    device: args.device,
+    requester: lifecycleRequester(args),
+    stableIds: [args.device.name],
+  });
+  assertLifecycleCallerHoldsDevice({
+    toolName: "killDevice",
+    device: args.device,
+    requester: lifecycleRequester(args),
+    force: args.force ?? false,
+    stableIds: [args.device.name],
+  });
+  await assertLifecycleTargetNotHeldByOtherDaemon({
+    toolName: "killDevice",
+    device: args.device,
+    force: args.force ?? false,
+  });
 }
 
 function createDeleteDeviceWorkflow(
@@ -159,7 +235,8 @@ function createDeleteDeviceWorkflow(
         mode: args.force === true ? "serial-only" : "named",
         initialScan: { serials: new Set(), pooledEntries: [] },
       };
-      const resolution = await resolveTeardownTarget(context);
+      const resolution =
+        (await managedSlotDeleteRefusal(args, requester)) ?? (await resolveTeardownTarget(context));
       if ("response" in resolution) {
         return { response: resolution.response };
       }
@@ -203,6 +280,7 @@ function createDeleteDeviceWorkflow(
                     device: target.bootedDevice,
                     requester,
                     force: args.force ?? false,
+                    stableIds: [args.target.stableId],
                   })
               : undefined,
             foreignClaim: requester
@@ -267,6 +345,10 @@ function createDeleteDeviceWorkflow(
           `for ${args.target.platform}:${args.target.stableId}: ${effectiveError}`,
         effectiveError,
       );
+      if (effectiveError instanceof DeviceAssignedToManagedSlotError) {
+        // A managed slot took the device between the entry check and the shutdown reservation.
+        return managedSlotTeardownRefusal(args, effectiveError, state?.target.device);
+      }
       return createTeardownFailureResponse(
         args,
         phase,
@@ -292,19 +374,7 @@ export function createLifecycleHandlers() {
     _progress?: ProgressCallback,
     abortSignal?: AbortSignal,
   ) => {
-    // A device another session holds stops only for its holder or an explicit force (#10785),
-    // and one another live daemon holds only with an explicit force (#11200).
-    assertLifecycleCallerHoldsDevice({
-      toolName: "killDevice",
-      device: args.device,
-      requester: lifecycleRequester(args),
-      force: args.force ?? false,
-    });
-    await assertLifecycleTargetNotHeldByOtherDaemon({
-      toolName: "killDevice",
-      device: args.device,
-      force: args.force ?? false,
-    });
+    await assertKillDeviceCaller(args);
     const deps = getDeviceToolsDependencies();
     const requestAbortSignal = abortSignal ?? getAbortSignal();
     const deadlineMs = deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
@@ -369,6 +439,7 @@ export function createLifecycleHandlers() {
               device: args.device,
               requester: lifecycleRequester(args),
               force: args.force ?? false,
+              stableIds: [args.device.name],
             }),
           foreignClaim: {
             toolName: "killDevice",

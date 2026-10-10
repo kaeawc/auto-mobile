@@ -127,3 +127,46 @@ export function parseInputRequesterSessionUuid(
   }
   return value.trim();
 }
+
+/** The pool's managed-slot gate, optional so older daemon-state fakes keep compiling. */
+export interface ManagedSlotInputGate {
+  assertNotAssignedToManagedSlot?(input: {
+    action: string;
+    deviceId: string;
+    platform: "android" | "ios";
+    requesterSessionUuid?: string;
+    maxAgeMs?: number;
+  }): Promise<void>;
+}
+
+/**
+ * How stale the managed-slot snapshot may be for a device-driving frame. Input is frequent, and a
+ * slot assignment is a rare host-wide event, so frames share one registry read per second.
+ */
+export const MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS = 1_000;
+
+/**
+ * A device a managed slot holds takes input only from that slot's live execution (#11178), even
+ * while idle: no session holds it, so the holder check above would otherwise let any local client
+ * drive it. Refuses with `device_assigned_to_managed_slot`; `force` never overrides it.
+ */
+export async function assertInputNotOnForeignManagedSlotDevice(input: {
+  action: string;
+  deviceId: string;
+  platform: "android" | "ios";
+  requesterSessionUuid: string | undefined;
+  sessionManager: ToolSelectionSessionManager | undefined;
+  gate: ManagedSlotInputGate;
+}): Promise<void> {
+  const { requesterSessionUuid, sessionManager } = input;
+  await input.gate.assertNotAssignedToManagedSlot?.({
+    action: input.action,
+    deviceId: input.deviceId,
+    platform: input.platform,
+    requesterSessionUuid: requesterSessionUuid
+      ? (resolveToolSelectionBaseSessionUuid(requesterSessionUuid, sessionManager) ??
+        requesterSessionUuid)
+      : undefined,
+    maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
+  });
+}

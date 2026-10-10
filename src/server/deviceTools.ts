@@ -1,3 +1,4 @@
+import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
 import type { QrPosterWriter } from "../utils/qr/QrPosterWriter";
 import {
   DefaultDeviceResourceObserver,
@@ -1081,6 +1082,18 @@ export function initializedDevicePool(): DevicePool | undefined {
   return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
 }
 
+/** Generic provisionDevice never adopts a device a managed slot holds (#11174). */
+async function assertNotManagedSlotDeviceForAdoption(device: {
+  platform: "android" | "ios";
+  stableId: string;
+}): Promise<void> {
+  await managedSlotPoolGate(initializedDevicePool()).assertNotAssignedToManagedSlot?.({
+    action: "provisionDevice",
+    deviceId: device.stableId,
+    platform: device.platform,
+  });
+}
+
 function initializedDeviceSessionUuid(deviceId: string): string | undefined {
   const daemonState = DaemonState.getInstance();
   if (!daemonState.isInitialized()) {
@@ -2010,6 +2023,8 @@ export function createTeardownFailureResponse(
   code: string,
   message: string,
   resolved?: DeviceInfo,
+  /** Typed refusal evidence carried beside the code (e.g. the managed slot holding the device). */
+  details?: Record<string, unknown>,
 ) {
   return {
     isError: true,
@@ -2027,7 +2042,7 @@ export function createTeardownFailureResponse(
             platform: resolved?.platform ?? args.target.platform,
             isVirtual: args.target.isVirtual,
           },
-          failure: { code, phase, message },
+          failure: { ...details, code, phase, message },
         }),
       },
     ],
@@ -3378,7 +3393,12 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       deviceCreationGateFactory: () => getDeviceCreationGate(),
       deviceProvisionerFactory: () => createDefaultDeviceProvisioner(),
       exactDeviceProvisionerFactory: (deviceManager, deviceCreationGate) =>
-        createDefaultExactDeviceProvisioner(deviceManager, deviceCreationGate),
+        createDefaultExactDeviceProvisioner(
+          deviceManager,
+          deviceCreationGate,
+          undefined,
+          assertNotManagedSlotDeviceForAdoption,
+        ),
       clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
       stopPerformanceMonitoring: (deviceId) => getPerformanceMonitor().stopMonitoring(deviceId),
       stopAndroidObservers: defaultStopAndroidObservers,

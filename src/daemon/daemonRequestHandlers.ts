@@ -1,3 +1,4 @@
+import type { ManagedSlotInputGate } from "./inputDeviceOwnership";
 import { isSessionReleasing } from "./sessionReleaseState";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -178,6 +179,8 @@ export interface DaemonStateAccess {
      * has it ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
      */
     assertDeviceActionable?(deviceId: string, purpose: string): void;
+    /** Refuse control of a device a managed slot holds (#11178); see `DevicePool`. */
+    assertNotAssignedToManagedSlot?: ManagedSlotInputGate["assertNotAssignedToManagedSlot"];
     /** FUNNEL 1 — fold a discovery observation into pooled identity. */
     reconcileDiscoveryObservation?(devices: readonly BootedDevice[], source: string): Promise<void>;
     resolveAutolockSessionForMcpSession?(

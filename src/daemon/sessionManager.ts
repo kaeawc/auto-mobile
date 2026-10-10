@@ -4763,8 +4763,79 @@ export class SessionManager {
         return snapshot.deviceId;
       }
     }
+    if (releaseReason === "explicit-release") {
+      const released = await this.releaseUnrecoveredReissuableRow(sessionId);
+      if (released !== undefined) {
+        return released;
+      }
+    }
     logger.warn(`Cannot release session ${sessionId}: not found`);
     return null;
+  }
+
+  /**
+   * An explicit release of a session this daemon does not hold, whose row a call naming the UUID
+   * could still issue again (#11461): a restart handoff the startup deadline left to the follow-up
+   * sweep, one whose recovery failed without terminalizing it, or a `plan-auto-release`. An
+   * explicit release is terminal and never rehydrated, so the row is terminalized rather than
+   * answered "already released" and brought back. One statement, conditioned on the incarnation
+   * read: a recovery's claim (this daemon's or a peer's) advances the generation, so a row someone
+   * took in between is left alone, as is a row another live daemon owns. An active row is never
+   * touched: it is not in this daemon's map, so it is not this daemon's session.
+   *
+   * Resolves the row's device once terminalized, or undefined when there was nothing to release.
+   */
+  private async releaseUnrecoveredReissuableRow(sessionId: string): Promise<string | undefined> {
+    const persisted = await this.readPersistedSession(sessionId);
+    if (!persisted?.release_reason || !this.isReissuablePersistedSession(persisted)) {
+      return undefined;
+    }
+    if (this.isRowOwnedByLivePeer(persisted)) {
+      logger.info(
+        `[SessionManager] Not releasing session ${sessionId}: another AutoMobile daemon ` +
+          `(${persisted.daemon_session_id}) owns its row`,
+      );
+      return undefined;
+    }
+    await this.deviceSessionRepository.markReleased(
+      sessionId,
+      releasedRowStatus("explicit-release"),
+      this.sessionNow(),
+      "explicit-release",
+      persisted.stable_identity_generation === undefined
+        ? {}
+        : { expectedRowGeneration: persisted.stable_identity_generation },
+    );
+    return await this.fenceExplicitlyReleasedRow(sessionId);
+  }
+
+  /** Whether another live daemon owns `row`: such a row is that daemon's to recover or end. */
+  private isRowOwnedByLivePeer(row: DeviceSession): boolean {
+    const owner = row.daemon_session_id ?? null;
+    return owner !== null && owner !== this.daemonSessionId && this.isLiveDaemonSession(owner);
+  }
+
+  /**
+   * Fence a UUID whose row now reads `explicit-release`, and announce it. Resolves the row's
+   * device, or undefined when the conditional release did not apply (the row changed first).
+   */
+  private async fenceExplicitlyReleasedRow(sessionId: string): Promise<string | undefined> {
+    const current = await this.readPersistedSession(sessionId);
+    const snapshot = current && this.terminalReleaseFromPersisted(sessionId, current);
+    if (snapshot?.releaseReason !== "explicit-release") {
+      logger.info(
+        `[SessionManager] Session ${sessionId} was not released: its row changed first ` +
+          `(now ${current?.status ?? "missing"}, ${current?.release_reason ?? "no release reason"})`,
+      );
+      return undefined;
+    }
+    this.terminalReleaseSnapshots.set(sessionId, snapshot);
+    this.restartRecoveryActivityAt.delete(sessionId);
+    // The handoff release already ran this session's device cleanup, and the row's device may
+    // belong to another session by now: announce only the terminal reason (#11206).
+    this.notifySessionRelease(snapshot, { upgradeOnly: true });
+    logger.info(`[SessionManager] Released unrecovered session ${sessionId} (explicit-release)`);
+    return snapshot.deviceId;
   }
 
   private async releasePendingSessionWork(

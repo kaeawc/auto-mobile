@@ -192,6 +192,8 @@ export interface DaemonStateAccess {
       livenessOwnerToken?: string,
     ): Promise<readonly RefusedOwnedSessionRestore[] | void>;
     releaseMcpSessionBindings?(mcpSessionId: string): void;
+    /** Give up the restart-recovery reservation made for a session, if any (#11294). */
+    releaseRehydrationReservation?(sessionId: string): void;
     refreshDevices(): Promise<number>;
     refreshDevicesWithOutcome?(): Promise<import("./devicePoolRefresh").DevicePoolRefreshResult>;
     getStats(): DevicePoolStats;
@@ -1268,7 +1270,7 @@ async function handleReleaseSession(
         },
       };
     }
-    return await releaseUnknownSession(manager, sessionId, params?.requireKnown === true);
+    return await releaseUnknownSession(state, manager, sessionId, params?.requireKnown === true);
   }
   return releaseBoundSession(state, manager, sessionId, session, executions);
 }
@@ -1426,10 +1428,30 @@ function bindManagedConnection(
  * (#11148). A session this daemon issued and already released stays idempotent either way.
  */
 async function releaseUnknownSession(
+  state: DaemonStateAccess,
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
   requireKnown: boolean,
 ): Promise<DaemonMethodResult> {
+  // Not in the session map is not the same as released (#11461): a restart handoff this daemon has
+  // not recovered yet, or a session still being created, would come back after an "already
+  // released" answer. The manager's release path ends those terminally; it resolves null when
+  // there was nothing to release. A UUID already fenced terminal needs no second release.
+  if (!manager.getTerminalReleaseSnapshot?.(sessionId)) {
+    const deviceId = await manager.releaseSession(sessionId);
+    if (deviceId !== null && deviceId !== undefined) {
+      // The row no longer recovers, so its device is no longer held for it (#11294).
+      state.getDevicePool().releaseRehydrationReservation?.(sessionId);
+      return {
+        success: true,
+        result: {
+          message: `Session ${sessionId} released`,
+          device: deviceId,
+          alreadyReleased: false,
+        },
+      };
+    }
+  }
   if (requireKnown && (await lookupReleasedSessionReason(manager, sessionId)) === undefined) {
     return {
       success: false,

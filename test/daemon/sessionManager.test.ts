@@ -7343,7 +7343,40 @@ describe("terminal release of persisted restart recovery", () => {
     }
   });
 
-  test.each(["missing", "daemon-restart", "expired-window"])(
+  // #11461: an explicit release is terminal and never rehydrated, so it ends a restart handoff
+  // this daemon has not recovered yet; no other reason reaches a row the daemon does not hold.
+  test("an explicit release terminalizes an unrecovered daemon-restart row", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    persistence.seed(persistedRecoverySession({ release_reason: "daemon-restart" }));
+    const manager = new SessionManager(new FakeTimer(), persistence);
+    manager.stopCleanupTimer();
+
+    expect(await manager.releaseSession("persisted-session", "explicit-release")).toBe(
+      "emulator-5554",
+    );
+
+    expect(await persistence.getSession?.("persisted-session")).toMatchObject({
+      release_reason: "explicit-release",
+    });
+    await expect(
+      manager.getOrCreateSession("persisted-session", undefined, undefined, undefined, true),
+    ).rejects.toThrow(TerminalSessionError);
+  });
+
+  test("a heartbeat-timeout release leaves an unrecovered daemon-restart row unchanged", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    persistence.seed(persistedRecoverySession({ release_reason: "daemon-restart" }));
+    const manager = new SessionManager(new FakeTimer(), persistence);
+    manager.stopCleanupTimer();
+    const before = { ...(await persistence.getSession?.("persisted-session")) };
+
+    expect(await manager.releaseSession("persisted-session", "heartbeat-timeout")).toBeNull();
+
+    expect({ ...(await persistence.getSession?.("persisted-session")) }).toEqual(before);
+    expect(manager.getTerminalReleaseSnapshot("persisted-session")).toBeUndefined();
+  });
+
+  test.each(["missing", "expired-window"])(
     "terminal release leaves %s outside restart recovery unchanged",
     async (state) => {
       const timer = new FakeTimer();
@@ -7351,7 +7384,7 @@ describe("terminal release of persisted restart recovery", () => {
       if (state !== "missing") {
         persistence.seed(
           persistedRecoverySession({
-            release_reason: state === "daemon-restart" ? "daemon-restart" : "device-restart:Pixel",
+            release_reason: "device-restart:Pixel",
           }),
         );
       }

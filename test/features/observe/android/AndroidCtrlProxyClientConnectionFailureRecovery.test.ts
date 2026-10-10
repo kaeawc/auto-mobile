@@ -641,6 +641,79 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     expect(manager.isAccessibilityServiceHealthyCallCount).toBe(0);
   });
 
+  describe("rearming an exhausted forced-restart budget (#11246)", function () {
+    const buildClient = (timer: FakeTimer): ForcedRestartBudget => {
+      client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        buildFakeAdb(),
+        createInstantFailureWebSocketFactory(timer),
+        timer,
+      );
+      const budget = (client as any).forcedRestartBudget as ForcedRestartBudget;
+      for (let i = 0; i < 3; i++) {
+        budget.recordFailure("service recovery failed", budget.tryBeginAttempt()!);
+        timer.advanceTime(600_000);
+      }
+      expect(budget.snapshot().state).toBe("exhausted");
+      return budget;
+    };
+
+    test("a new session bind rearms; rebinding the same session does not", function () {
+      const budget = buildClient(new FakeTimer());
+      client!.bindSession("session-a");
+      expect(budget.snapshot().state).toBe("idle");
+      budget.recordFailure("again", budget.tryBeginAttempt()!);
+      client!.bindSession("session-a");
+      expect(budget.snapshot().attempts).toBe(1);
+    });
+
+    test("an explicit device start rearms the registered client", function () {
+      const budget = buildClient(new FakeTimer());
+      AndroidCtrlProxyClient.registerForTesting(client!, testDevice.deviceId);
+      try {
+        AndroidCtrlProxyClient.resumeAfterDeviceStart(testDevice.deviceId);
+        expect(budget.snapshot().state).toBe("idle");
+      } finally {
+        AndroidCtrlProxyClient.removeInstance(testDevice.deviceId);
+      }
+    });
+
+    test("offline to online rearms only after recovery saw the device absent", async function () {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const adb = buildFakeAdb(false);
+      client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        adb,
+        createInstantFailureWebSocketFactory(timer),
+        timer,
+      );
+      AndroidCtrlProxyClient.registerForTesting(client, testDevice.deviceId);
+      try {
+        const budget = (client as any).forcedRestartBudget as ForcedRestartBudget;
+        for (let i = 0; i < 3; i++) {
+          budget.recordFailure("service recovery failed", budget.tryBeginAttempt()!);
+          timer.advanceTime(600_000);
+        }
+        AndroidCtrlProxyClient.noteDeviceOnline(testDevice.deviceId);
+        expect(budget.snapshot().state).toBe("exhausted");
+        // Rearm to observe the absent device through a real recovery attempt, then exhaust again.
+        budget.rearm("test setup");
+        client.ensureRecoveryStarted();
+        await client.awaitRecovery(10_000);
+        for (let i = 0; i < 3; i++) {
+          budget.recordFailure("service recovery failed", budget.tryBeginAttempt()!);
+          timer.advanceTime(600_000);
+        }
+        expect(budget.snapshot().state).toBe("exhausted");
+        AndroidCtrlProxyClient.noteDeviceOnline(testDevice.deviceId);
+        expect(budget.snapshot().state).toBe("idle");
+      } finally {
+        AndroidCtrlProxyClient.removeInstance(testDevice.deviceId);
+      }
+    });
+  });
+
   test("falls back to full setup when rebind does not restore health", async function () {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();

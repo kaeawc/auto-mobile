@@ -1615,6 +1615,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     | undefined;
   /** One client exists per device; this budget gates both failure bursts and observe calls. */
   private readonly forcedRestartBudget: ForcedRestartBudget;
+  /** Set when recovery found the device absent; consumed by the next offline-to-online rearm. */
+  private deviceSeenAbsent = false;
   public static readonly OBSERVE_RECOVERY_WAIT_MS = 10_000;
   private readonly serviceManagerFactory: AndroidServiceManagerFactory;
 
@@ -1909,9 +1911,24 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   public static resumeAfterDeviceStart(deviceId: string): void {
+    // An explicit startDevice/setup is a fresh start for forced-restart admission (#11246).
+    AndroidCtrlProxyClient.instances.get(deviceId)?.forcedRestartBudget.rearm("explicit device start");
     if (AndroidCtrlProxyClient.retiredDeviceIds.delete(deviceId)) {
       AndroidCtrlProxyClient.instances.delete(deviceId);
     }
+  }
+
+  /** The device re-entered the ready state; rearm only if recovery saw it absent (#11246). */
+  public static noteDeviceOnline(deviceId: string): void {
+    AndroidCtrlProxyClient.instances.get(deviceId)?.rearmAfterDeviceOnline();
+  }
+
+  private rearmAfterDeviceOnline(): void {
+    if (!this.deviceSeenAbsent) {
+      return;
+    }
+    this.deviceSeenAbsent = false;
+    this.forcedRestartBudget.rearm("device back online");
   }
 
   /** Remove only the singleton captured before asynchronous incarnation cleanup began. */
@@ -2077,6 +2094,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         );
       }
       this.boundSessionId = sessionId;
+      // A new session is a fresh owner: do not let a previous session's exhausted budget strand it.
+      this.forcedRestartBudget.rearm("new session bound");
       // Invalidate cached hierarchy detector so it picks up the new session's NavigationGraphManager
       if (this.hierarchyNavigationDetector) {
         this.hierarchyNavigationDetector.dispose();
@@ -3053,6 +3072,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       return "failed";
     }
     if (!present) {
+      this.deviceSeenAbsent = true;
       logger.info(
         `[AndroidCtrlProxyClient] Device ${this.device.deviceId} is offline or missing; skipping recovery`,
       );

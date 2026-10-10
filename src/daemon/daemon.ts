@@ -2299,6 +2299,9 @@ export class Daemon {
         );
       });
     }
+    if (pooled.platform === "android") {
+      AndroidCtrlProxyClient.noteDeviceOnline(deviceId);
+    }
     this.deviceSessionRegistry.onDeviceConnected({
       deviceId: pooled.id,
       platform: pooled.platform,

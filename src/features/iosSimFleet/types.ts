@@ -29,6 +29,11 @@ export interface HostSnapshot {
   takenAtMs: number;
   resources: HostResources;
   processes: HostProcessRow[];
+  /**
+   * Set when the `ps` read failed: `resources` are still valid, but `processes` is empty
+   * because it was not measured, not because nothing is running (#11389).
+   */
+  processesError?: string;
 }
 
 /** Simulator facts from `simctl list devices -j`, including its own data-dir size. */

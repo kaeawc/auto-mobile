@@ -864,7 +864,10 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       name: "Pixel",
     };
     const platformSpy = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue({
-      getBootedDevices: async () => [device],
+      getBootedDevicesDetailed: async () => ({
+        devices: [device],
+        succeededPlatforms: new Set([device.platform]),
+      }),
     } as any);
     const ctrlProxySpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
       ensureCompatibleVersion: async () => ({
@@ -954,7 +957,10 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
   test("A4 Android updateService resumes a freshly rediscovered booted emulator", async () => {
     const device: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "Pixel" };
     const discovery = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue({
-      getBootedDevices: async () => [device],
+      getBootedDevicesDetailed: async () => ({
+        devices: [device],
+        succeededPlatforms: new Set([device.platform]),
+      }),
     } as never);
     const manager = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
       ensureCompatibleVersion: async () => ({ status: "compatible" }),

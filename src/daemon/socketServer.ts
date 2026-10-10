@@ -169,7 +169,11 @@ import {
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
-import { BootedDeviceDiscoveryIncompleteError } from "../devices/deviceBootService";
+import {
+  AndroidBootedDeviceDiscoveryIncompleteError,
+  BootedDeviceDiscoveryIncompleteError,
+} from "../models/BootedDeviceDiscoveryIncompleteError";
+import { didSourceSucceedForDevice } from "../utils/discoverySource";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { PressButton } from "../features/action/PressButton";
@@ -5645,26 +5649,27 @@ export class UnixSocketServer {
   }
 
   /**
-   * Booted devices for an `ide/*` action on one serial. iOS discovery has two
-   * sources, and the legacy listing turns a failed simctl sweep into `[]`, which
-   * surfaced as a misleading "Device not found". When the serial is absent from an
-   * incomplete iOS sweep the absence proves nothing, so refuse with the retryable
-   * discovery error instead (#11122, cf. #11103).
+   * Booted devices for an `ide/*` action on one serial. The legacy listing turns a
+   * failed sweep into `[]`, which surfaced as a misleading "Device not found". When
+   * the serial is absent and the discovery source that would have observed it failed
+   * (adb for Android; simctl or devicectl for iOS, by serial shape), the absence
+   * proves nothing, so refuse with the retryable discovery error instead (#11122,
+   * cf. #11103, #11535).
    */
   private async listBootedDevicesForIdeAction(
     platform: "android" | "ios",
     serial: string,
   ): Promise<BootedDevice[]> {
     const manager = PlatformDeviceManagerFactory.getInstance();
-    if (platform !== "ios") {
-      return manager.getBootedDevices(platform);
-    }
-    const discovery = await manager.getBootedDevicesDetailed("ios");
+    const discovery = await manager.getBootedDevicesDetailed(platform);
     if (
-      !discovery.succeededPlatforms.has("ios") &&
-      !discovery.devices.map((device) => device.deviceId).includes(serial)
+      !discovery.devices.map((device) => device.deviceId).includes(serial) &&
+      !didSourceSucceedForDevice(discovery, platform, serial)
     ) {
-      throw new BootedDeviceDiscoveryIncompleteError("ios", discovery.discoveryErrors?.ios);
+      const discoveryError = discovery.discoveryErrors?.[platform];
+      throw platform === "android"
+        ? new AndroidBootedDeviceDiscoveryIncompleteError(discoveryError)
+        : new BootedDeviceDiscoveryIncompleteError(platform, discoveryError);
     }
     return discovery.devices;
   }

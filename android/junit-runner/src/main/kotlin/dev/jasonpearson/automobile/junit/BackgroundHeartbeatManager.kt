@@ -10,8 +10,8 @@ import kotlin.concurrent.thread
 
 /**
  * Heartbeats every registered session once per interval. Each beat runs on [beatExecutor] so one
- * slow daemon round-trip (up to the 2 s connect + 2 s read timeouts) never delays the other
- * sessions' beats or the next cycle: a serial loop over N sessions could take N x 4 s and starve
+ * slow daemon round-trip (up to the 1 s connect + 1 s read timeouts) never delays the other
+ * sessions' beats or the next cycle: a serial loop over N sessions could take N x 2 s and starve
  * live sessions past the daemon's 10 s no-heartbeat budget (#11195). A session whose previous beat
  * is still in flight is skipped that cycle rather than stacking a second request.
  *
@@ -173,13 +173,28 @@ internal class BackgroundHeartbeatManager(
 
   private fun runLoop(loopRunning: AtomicBoolean) {
     while (loopRunning.get()) {
-      sessions.toList().forEach { sessionId -> dispatchBeat(sessionId, loopRunning) }
+      sessions.toList().forEach { sessionId -> dispatchBeatSafely(sessionId, loopRunning) }
 
       try {
         sleeper(intervalMs)
       } catch (_: InterruptedException) {
         // Allow loop to exit if stopped.
       }
+    }
+  }
+
+  /**
+   * A dispatch failure (e.g. a [java.util.concurrent.RejectedExecutionException] from the beat
+   * executor) must not kill the loop while [running] stays true: record a rate-limited warning and
+   * carry on with the next session and cycle (#11208).
+   */
+  private fun dispatchBeatSafely(sessionId: String, loopRunning: AtomicBoolean) {
+    try {
+      dispatchBeat(sessionId, loopRunning)
+    } catch (error: Exception) {
+      failureWarnings.record(
+        "Daemon heartbeat for $sessionId could not be dispatched: ${error.message ?: error}",
+      )
     }
   }
 

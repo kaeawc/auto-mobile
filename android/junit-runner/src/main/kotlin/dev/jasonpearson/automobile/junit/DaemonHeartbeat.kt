@@ -54,6 +54,24 @@ internal data class DaemonSessionLoss(
 
 internal object DaemonHeartbeat {
   private const val DEFAULT_INTERVAL_MS = 1_000L
+
+  /**
+   * Connect and read timeouts for one beat. A hung beat blocks its session's next beat (in-flight
+   * skip), so the worst gap between beats reaching the daemon is roughly the interval plus both
+   * timeouts; at 1 s each (iOS parity) that stays under the daemon's 4 s lease (#11208).
+   */
+  internal const val HEARTBEAT_CONNECT_TIMEOUT_MS = 1_000
+  internal const val HEARTBEAT_READ_TIMEOUT_MS = 1_000
+
+  internal fun applyBeatTimeouts(connection: HttpURLConnection) {
+    connection.connectTimeout = HEARTBEAT_CONNECT_TIMEOUT_MS
+    connection.readTimeout = HEARTBEAT_READ_TIMEOUT_MS
+  }
+
+  /** Worst-case gap between two beats reaching the daemon when one beat hangs to its timeouts. */
+  internal fun worstCaseBeatGapMs(intervalMs: Long = DEFAULT_INTERVAL_MS): Long =
+    intervalMs + HEARTBEAT_CONNECT_TIMEOUT_MS + HEARTBEAT_READ_TIMEOUT_MS
+
   private val HTTP_SUCCESS = 200..299
   private val json = Json { ignoreUnknownKeys = true }
   private val backgroundHeartbeat = BackgroundHeartbeatManager(sendHeartbeat = ::sendHeartbeat)
@@ -113,8 +131,7 @@ internal object DaemonHeartbeat {
     try {
       connection.requestMethod = "POST"
       connection.setRequestProperty("Content-Type", "application/json")
-      connection.connectTimeout = 2000
-      connection.readTimeout = 2000
+      applyBeatTimeouts(connection)
       connection.doOutput = true
 
       val payload =

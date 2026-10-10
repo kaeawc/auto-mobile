@@ -285,6 +285,41 @@ class DaemonHeartbeatTest {
   }
 
   @Test
+  fun `a rejected beat dispatch warns and the loop keeps beating the other sessions`() {
+    val fake = HeartbeatFake()
+    fake.beatExecutor = Executor { beat ->
+      if (fake.sleepIntervals.size == 0 && fake.rejectFirstCycle) {
+        throw java.util.concurrent.RejectedExecutionException("executor shut down")
+      }
+      beat.run()
+    }
+    fake.rejectFirstCycle = true
+    val handle = fake.manager.start(1_000L)
+    fake.manager.addSession("s1")
+    fake.manager.addSession("s2")
+    fake.onSleep = { if (fake.sleepIntervals.size == 2) handle.close() }
+
+    fake.runnables.single().run()
+
+    // Cycle 1 rejected both dispatches (one rate-limited warning); cycle 2 beat both normally.
+    assertEquals(2, fake.sleepIntervals.size)
+    assertEquals(listOf("s1", "s2"), fake.sentSessions.sorted())
+    assertEquals(1, fake.warnings.size)
+    assertTrue(fake.warnings.single(), fake.warnings.single().contains("could not be dispatched"))
+    assertTrue(fake.warnings.single(), fake.warnings.single().contains("executor shut down"))
+  }
+
+  @Test
+  fun `a hung beat leaves a worst gap under the daemon lease and times out within one second`() {
+    assertTrue(DaemonHeartbeat.worstCaseBeatGapMs() < 4_000L)
+    val connection =
+      java.net.URL("http://localhost:1/heartbeat").openConnection() as java.net.HttpURLConnection
+    DaemonHeartbeat.applyBeatTimeouts(connection)
+    assertEquals(1_000, connection.connectTimeout)
+    assertEquals(1_000, connection.readTimeout)
+  }
+
+  @Test
   fun `the http heartbeat maps a 404 to the daemon's release reason`() {
     withHeartbeatServer(
       404,
@@ -638,6 +673,7 @@ class DaemonHeartbeatTest {
         warn = { warnings.add(it) },
       )
     var nowMs = 0L
+    var rejectFirstCycle = false
     val warnings = mutableListOf<String>()
     /** Runs each beat inline by default, so a cycle is synchronous and deterministic. */
     var beatExecutor: Executor = Executor { it.run() }

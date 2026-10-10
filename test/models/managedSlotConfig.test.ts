@@ -12,6 +12,10 @@ import {
   resolveManagedSlotConfig,
   type ManagedSlotConfigErrorCode,
 } from "../../src/models/managedSlotConfig";
+import {
+  androidProvisionDeviceSpecSchema,
+  iosProvisionDeviceSpecSchema,
+} from "../../src/server/provisionDeviceSpecSchemas";
 
 const androidRequest = {
   slotIndex: 0,
@@ -106,6 +110,63 @@ describe("parseManagedSlotConfig", () => {
     expect(codeOf(() => parseManagedSlotConfig({ ...validConfig, ...override }))).toBe(
       "managed_slot_config_invalid",
     );
+  });
+
+  test("an omitted deviceType is unconstrained on both platforms (owner decision Q4)", () => {
+    const anyModel = parseManagedSlotConfig({
+      ...validConfig,
+      requests: [
+        { ...androidRequest, requestedSpec: { runtime: androidRequest.requestedSpec.runtime } },
+      ],
+    });
+    expect(anyModel.requests[0]!.requestedSpec).toEqual({
+      runtime: androidRequest.requestedSpec.runtime,
+    });
+    const iosAnyModel = parseManagedSlotConfig({
+      ...validConfig,
+      requests: [
+        {
+          slotIndex: 0,
+          role: "primary",
+          platform: "ios",
+          requestedSpec: { runtime: "com.apple.CoreSimulator.SimRuntime.iOS-18-0" },
+        },
+      ],
+    });
+    expect(iosAnyModel.requests[0]!.requestedSpec).toEqual({
+      runtime: "com.apple.CoreSimulator.SimRuntime.iOS-18-0",
+    });
+  });
+
+  test("the generic provisionDevice specs still require an exact deviceType", () => {
+    expect(
+      androidProvisionDeviceSpecSchema.safeParse({ runtime: androidRequest.requestedSpec.runtime })
+        .success,
+    ).toBe(false);
+    expect(
+      iosProvisionDeviceSpecSchema.safeParse({
+        runtime: "com.apple.CoreSimulator.SimRuntime.iOS-18-0",
+      }).success,
+    ).toBe(false);
+  });
+
+  test("a supplied deviceType is still checked against its platform", () => {
+    expect(
+      codeOf(() =>
+        parseManagedSlotConfig({
+          ...validConfig,
+          requests: [
+            {
+              ...androidRequest,
+              requestedSpec: {
+                runtime: androidRequest.requestedSpec.runtime,
+                deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+              },
+            },
+          ],
+        }),
+      ),
+    ).toBe("managed_slot_config_invalid");
   });
 
   test("rejects non-object input", () => {

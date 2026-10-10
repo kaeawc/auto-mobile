@@ -1,8 +1,7 @@
-import type { ExactDeviceSpecification } from "../../devices/exactDeviceProvisioning";
 import type { DeviceInfo } from "../../models";
 import {
-  androidProvisionDeviceSpecSchema,
-  iosProvisionDeviceSpecSchema,
+  androidManagedSlotSpecSchema,
+  iosManagedSlotSpecSchema,
 } from "../../server/provisionDeviceSpecSchemas";
 import {
   exponentialBackoff,
@@ -19,6 +18,7 @@ import type {
   ManagedSlotDeviceDeleter,
   ManagedSlotInventory,
   ManagedSlotInventorySnapshot,
+  ManagedSlotRequestedSpec,
   ManagedSpecMatcher,
 } from "./reconciler";
 import { deviceStableId } from "./slotDeviceIdentity";
@@ -899,12 +899,16 @@ function toRecord(
   };
 }
 
-/** The entry's recorded requested spec, validated; undefined when it no longer parses. */
-function recordedSpec(entry: SlotJournalEntry): ExactDeviceSpecification | undefined {
+/**
+ * The entry's recorded requested spec, validated; undefined when it no longer parses. A managed
+ * slot's requested spec may omit `deviceType` (owner decision Q4), so it is read with the managed
+ * schema: reading it as an exact spec would turn an adoptable create into a deletion.
+ */
+function recordedSpec(entry: SlotJournalEntry): ManagedSlotRequestedSpec | undefined {
   const schema =
     journalCreationPlatform(entry) === "android"
-      ? androidProvisionDeviceSpecSchema
-      : iosProvisionDeviceSpecSchema;
+      ? androidManagedSlotSpecSchema
+      : iosManagedSlotSpecSchema;
   const parsed = schema.safeParse(entry.target.requestedSpec);
   return parsed.success ? parsed.data : undefined;
 }

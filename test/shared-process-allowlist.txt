@@ -41,6 +41,7 @@ test/daemon/canonicalPixels.property.test.ts
 test/daemon/canonicalPixels.test.ts
 test/daemon/childProcessCleanup.test.ts
 test/daemon/cliIdleDaemonStallForgiveness.test.ts
+test/daemon/cliIdleReadInFlightReportedDeadline.test.ts
 test/daemon/clientNonFiniteEncoding.test.ts
 test/daemon/clientOptionsSchema.test.ts
 test/daemon/clientRequestIdGenerator.test.ts
@@ -99,6 +100,7 @@ test/daemon/disconnectMonitor-physicalImmediate.test.ts
 test/daemon/emulatorLossIncident.test.ts
 test/daemon/emulatorLossIncidentLedger.test.ts
 test/daemon/executionOwnerWatch.test.ts
+test/daemon/explicitReleaseCutCall.test.ts
 test/daemon/failuresPushSocketServer.test.ts
 test/daemon/findAvailableDaemonPort.test.ts
 test/daemon/forwardLeaseHolders.test.ts
@@ -117,6 +119,7 @@ test/daemon/livenessOwnerLease.test.ts
 test/daemon/managedExecutionLiveness.test.ts
 test/daemon/managedSlots/abandonedScopeReclaimer.test.ts
 test/daemon/managedSlots/capacityExternalDevices.test.ts
+test/daemon/managedSlots/daemonManagedSlotAcquisition.ownDevice.test.ts
 test/daemon/managedSlots/managedExecutionDaemonRestart.test.ts
 test/daemon/managedSlots/managedSlotAcquisition.test.ts
 test/daemon/managedSlots/managedSlotExclusion.test.ts
@@ -900,6 +903,7 @@ test/server/prompts/list.test.ts
 test/server/prototypeDisplay.test.ts
 test/server/prototypeDisplayAssets.test.ts
 test/server/prototypeInspect.test.ts
+test/server/prototypeIosResetRefusal.test.ts
 test/server/prototypeResources.test.ts
 test/server/prototypeToolAnchors.test.ts
 test/server/prototypeToolAppearance.test.ts

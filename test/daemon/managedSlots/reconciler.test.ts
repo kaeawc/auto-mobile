@@ -507,6 +507,48 @@ describe("ManagedSlotReconciler", () => {
       expect(provisioner.calls).toEqual([]);
     });
 
+    test("a live execution whose recorded owner died with a restart is refused slot_in_use, never released (#11275)", async () => {
+      const stableId = await seedAssigned();
+      // The registry names a daemon that restarted; this daemon still holds the session live.
+      await registry.claimExecution(
+        key,
+        { generation: 1, stableDeviceId: stableId },
+        { daemonId: "before-restart", pid: 4101, sessionUuid: "live-execution" },
+      );
+      registry.setExecOwnerLiveness((owner) => owner.pid !== 4101);
+      reconciler = new ManagedSlotReconciler({
+        registry,
+        inventory,
+        matcher,
+        resolver: new DefaultManagedSpecResolver(),
+        provisioner,
+        deleter,
+        claims,
+        capacity,
+        timer,
+        idGenerator: new FakeIdGenerator(),
+        isExecOwnerLive: (owner) => owner.pid !== 4101,
+      });
+      claims.sessions.set(stableId, ["live-execution"]);
+      claims.liveExecutions.add("live-execution");
+      bindOrReuse();
+
+      const failed = expectFailed(
+        await reconciler.reconcile(
+          request(SPEC_18, { owner: { daemonId: "after-restart", pid: 4102 } }),
+        ),
+      );
+
+      expect(failed.failure).toMatchObject({ code: "slot_in_use", retryable: true });
+      expect(provisioner.released).toEqual([]);
+      expect(provisioner.calls).toEqual([]);
+      expect(claims.sessions.get(stableId)).toEqual(["live-execution"]);
+      // Refused before reserving, so the live execution's record is left exactly as it was.
+      expect((await registry.getAssignment(key))?.execOwner).toMatchObject({
+        sessionUuid: "live-execution",
+      });
+    });
+
     test("an orphan leftover someone holds a session on is never adopted", async () => {
       inventory.devices.push({
         name: managedSlotDeviceName(key, 1, "earlier"),

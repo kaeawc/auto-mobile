@@ -4,6 +4,7 @@ import type { ManagedExecutionRelease } from "./managedSlots/managedExecutionRel
 import { ManagedConnectionScopes } from "./managedSlots/managedConnectionScope";
 import type { SlotScopeReset } from "./managedSlots/slotScopeReset";
 import type { ManagedSlotAcquisition } from "./managedSlots/managedSlotAcquisition";
+import type { ManagedExecutionReowner } from "./managedSlots/managedExecutionReowner";
 import { SessionManager } from "./sessionManager";
 import { DevicePool } from "./devicePool";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
@@ -37,6 +38,7 @@ export class DaemonState implements DaemonStateLike {
   private slotScopeReset: SlotScopeReset | null = null;
   private readonly managedConnectionScopes = new ManagedConnectionScopes();
   private managedSlotAcquisition: ManagedSlotAcquisition | null = null;
+  private managedExecutionReowner: ManagedExecutionReowner | null = null;
 
   private constructor() {}
 
@@ -135,6 +137,15 @@ export class DaemonState implements DaemonStateLike {
     return this.managedSlotAcquisition ?? undefined;
   }
 
+  /** Publish the re-owner a re-bound managed connection re-stamps its slots through (#11275). */
+  setManagedExecutionReowner(reowner: ManagedExecutionReowner | null): void {
+    this.managedExecutionReowner = reowner;
+  }
+
+  getManagedExecutionReowner(): ManagedExecutionReowner | undefined {
+    return this.managedExecutionReowner ?? undefined;
+  }
+
   getObserverSessionRegistry(): ObserverSessionStore | undefined {
     return this.observerSessionRegistry ?? undefined;
   }
@@ -190,6 +201,7 @@ export class DaemonState implements DaemonStateLike {
     this.slotScopeReset = null;
     this.managedConnectionScopes.clear();
     this.managedSlotAcquisition = null;
+    this.managedExecutionReowner = null;
     this.sessionManager = null;
     this.devicePool = null;
     setDeviceAdmissionGate(undefined);

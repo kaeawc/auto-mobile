@@ -180,7 +180,10 @@ connection used for tools and resources:
    owner heartbeat. Only the owner's heartbeats keep it alive. The daemon also
    refuses `daemon/registerSession` binding to managed sessions it cannot prove it
    holds (`managed_slot_registration_refused`, a protocol answer rather than a
-   device-tool refusal).
+   device-tool refusal). A daemon restart does not end the execution: its session
+   is rehydrated, the proxy re-binds, and the restarted daemon records itself as
+   the slot's owner. While the session is live, a duplicate proxy still gets
+   `slot_in_use` and the scope is never treated as abandoned.
 4. **Drain and release.** When the execution ends (stdin EOF, cancellation or
    owner loss) the proxy releases its sessions with a bounded wait
    (`MANAGED_EXECUTION_RELEASE_TIMEOUT_MS`, 1.5 s). The daemon cancels the

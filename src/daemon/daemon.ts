@@ -63,9 +63,14 @@ import {
   ManagedExecutionRelease,
   managedExecutionSessionsFrom,
 } from "./managedSlots/managedExecutionRelease";
-import { currentSlotOwnerProcess } from "./managedSlots/slotOwnerLiveness";
+import {
+  currentSlotOwnerProcess,
+  defaultSlotExecOwnerLiveness,
+  withLiveExecutionSessions,
+} from "./managedSlots/slotOwnerLiveness";
 import { openSqliteSlotRegistry, slotRegistryFileExists } from "./managedSlots/sqliteSlotRegistry";
 import { SlotScopeReset } from "./managedSlots/slotScopeReset";
+import { ManagedExecutionReowner } from "./managedSlots/managedExecutionReowner";
 import {
   createDefaultAbandonedScopeReclaimer,
   type ManagedSlotReclaimerFactory,
@@ -625,6 +630,7 @@ export class Daemon {
   private readonly managedSlotJournalInFlight = new SlotJournalInFlight();
   private managedSlotReclaimer: ManagedSlotReclaimerHandle | undefined;
   private managedSlotAcquisition: DaemonManagedSlotAcquisitionHandle | undefined;
+  private managedExecutionReowner: ManagedExecutionReowner | undefined;
   private managedSlotRedrive: SlotJournalRedriveLoop | undefined;
   private readonly generationStartedAt: number;
   private readonly processStartedAt: number;
@@ -874,6 +880,18 @@ export class Daemon {
     return acquisition ? (registry) => acquisition.journalFor(registry as SlotRegistry) : undefined;
   }
 
+  /**
+   * Rehydrated managed executions are live again, held by this daemon, but their slots still name
+   * the previous daemon as owner: re-own them now, before any acquisition or sweep sees a dead
+   * owner (#11275). The proxy's re-bind re-owns them too; this covers the window before it.
+   */
+  private async reownRehydratedManagedExecutions(rehydrated: readonly string[]): Promise<void> {
+    const executions = rehydrated.filter((sessionUuid) =>
+      this.sessionManager.isLiveManagedExecutionSession(sessionUuid),
+    );
+    await this.managedExecutionReowner?.reown(executions);
+  }
+
   /** A host that never served a managed slot has no registry; maintenance must not create one. */
   private managedSlotRegistryExists(): boolean {
     return this.managedSlotRegistry !== undefined || slotRegistryFileExists();
@@ -911,6 +929,7 @@ export class Daemon {
         },
       },
       pool: this.devicePool,
+      executions: this.sessionManager,
       owner: () => this.managedSlotJournalOwner(),
       timer: this.timer,
       journal: {
@@ -924,6 +943,12 @@ export class Daemon {
     });
     this.managedSlotAcquisition = acquisition;
     DaemonState.getInstance().setManagedSlotAcquisition(acquisition.acquisition);
+    this.managedExecutionReowner = new ManagedExecutionReowner({
+      registry: () => this.openManagedSlotRegistry(),
+      registryExists: () => this.managedSlotRegistryExists(),
+      owner: () => this.managedSlotJournalOwner(),
+    });
+    DaemonState.getInstance().setManagedExecutionReowner(this.managedExecutionReowner);
     // Interrupted journaled work (#11179) is redriven in the background, but only on a host that
     // has a slot registry: a daemon that never served a managed slot never creates one.
     if (process.env.NODE_ENV !== "test" && slotRegistryFileExists()) {
@@ -947,7 +972,12 @@ export class Daemon {
     if (this.managedSlotRegistry) {
       return this.managedSlotRegistry;
     }
-    const opening = openSqliteSlotRegistry({ timer: this.timer });
+    const opening = openSqliteSlotRegistry({
+      timer: this.timer,
+      // A live execution's slot is in use while this daemon holds its session, even when the
+      // recorded owner is a previous daemon that died with a restart (#11275).
+      isExecOwnerLive: withLiveExecutionSessions(defaultSlotExecOwnerLiveness, this.sessionManager),
+    });
     this.managedSlotRegistry = opening;
     // Restart-time recovery (#11242): slots a previous daemon left settling are settled once that
     // daemon is gone. Runs once per open, after the open succeeds.
@@ -1483,6 +1513,7 @@ export class Daemon {
         const rehydration = await startupBenchmark.runPhase("sessionRehydration", () =>
           this.sessionManager.rehydratePersistedSessions(this.devicePool),
         );
+        await this.reownRehydratedManagedExecutions(rehydration.rehydrated);
         await sweepStaleAppearanceConfigs(rehydration, this.sessionManager, {
           liveDaemonSessionIds: this.startupLiveDaemonSessionIds,
           ownDaemonSessionId: this.daemonSessionId,

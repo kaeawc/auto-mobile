@@ -62,6 +62,30 @@ export function createSlotExecOwnerLiveness(
 /** The default for the registry and the reconciler: PID plus process start identity. */
 export const defaultSlotExecOwnerLiveness: SlotExecOwnerLiveness = createSlotExecOwnerLiveness();
 
+/** The sessions this daemon holds as live managed executions (#11275). */
+export interface LiveExecutionSessions {
+  isLiveManagedExecutionSession(sessionUuid: string): boolean;
+}
+
+/**
+ * Owner liveness as one daemon judges it (#11275): a recorded execution owner is live while its
+ * process is (`processLiveness`), or while this daemon still holds the owner's session as a live
+ * managed execution. A daemon restart leaves the slot naming the previous, dead daemon until the
+ * execution is re-owned; the session's own liveness keeps the slot in use meanwhile, so neither a
+ * duplicate acquisition nor the abandonment sweep treats a live execution as ownerless. Settlers
+ * and journal owners carry no session and are judged by their process alone.
+ */
+export function withLiveExecutionSessions(
+  processLiveness: SlotExecOwnerLiveness,
+  sessions: LiveExecutionSessions,
+): SlotExecOwnerLiveness {
+  return (owner) =>
+    processLiveness(owner) ||
+    ("sessionUuid" in owner &&
+      typeof owner.sessionUuid === "string" &&
+      sessions.isLiveManagedExecutionSession(owner.sessionUuid));
+}
+
 /**
  * The identity this process records when it claims a slot: its PID and its process-generation
  * token (when the platform exposes one).

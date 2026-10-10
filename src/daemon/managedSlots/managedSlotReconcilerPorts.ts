@@ -33,6 +33,7 @@ import {
   type ManagedSlotProvisionRequest,
   type ManagedSlotProvisionedDevice,
 } from "./reconciler";
+import type { LiveExecutionSessions } from "./slotOwnerLiveness";
 import type { SlotPlatform } from "./slotRegistry";
 
 /** Invokes a registered tool handler in-process and returns its raw MCP tool response. */
@@ -259,7 +260,14 @@ export interface ManagedSlotClaimPool {
  * running device whose runtime identity the pool cannot resolve is unknown, never free.
  */
 export class PoolManagedSlotDeviceClaims implements ManagedSlotDeviceClaims {
-  constructor(private readonly pool: ManagedSlotClaimPool) {}
+  constructor(
+    private readonly pool: ManagedSlotClaimPool,
+    private readonly executions?: LiveExecutionSessions,
+  ) {}
+
+  isLiveExecution(sessionUuid: string): boolean {
+    return this.executions?.isLiveManagedExecutionSession(sessionUuid) ?? false;
+  }
 
   async describe(device: DeviceInfo): Promise<ManagedSlotDeviceClaim> {
     const runtimes = this.runtimesOf(device);

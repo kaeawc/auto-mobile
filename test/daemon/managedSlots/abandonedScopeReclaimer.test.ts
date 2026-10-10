@@ -14,6 +14,7 @@ import {
   type SlotKey,
   type SlotRegistry,
 } from "../../../src/daemon/managedSlots/slotRegistry";
+import { withLiveExecutionSessions } from "../../../src/daemon/managedSlots/slotOwnerLiveness";
 import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeClaims, FakeDeleter, FakeInventory, FakeMatcher } from "./fixtures/reconcilerFakes";
@@ -141,6 +142,38 @@ describe("AbandonedScopeReclaimer", () => {
     expect(deleter.calls).toEqual([]);
     expect((await registry.getAssignment(recent))?.stableDeviceId).toBe("UDID-RECENT");
     expect((await registry.getAssignment(owned))?.stableDeviceId).toBe("UDID-OWNED");
+  });
+
+  test("a live execution whose recorded owner died with a restart is never abandoned (#11275)", async () => {
+    // Daemon pid 1 claimed the slot for the session, then restarted: pid 1 is dead, but this
+    // daemon holds the rehydrated session live.
+    inventory.devices.push({ name: "s", deviceId: "UDID-LIVE", platform: "ios", isRunning: true });
+    const key = await assignManagedSlotDevice(registry, "ios", "UDID-LIVE", "runner-a", "live");
+    const liveSessions = new Set(["live"]);
+    registry.setExecOwnerLiveness(
+      withLiveExecutionSessions((process) => livePids.has(process.pid), {
+        isLiveManagedExecutionSession: (sessionUuid) => liveSessions.has(sessionUuid),
+      }),
+    );
+    timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS + 60_000);
+
+    expect(await reclaimer().sweep()).toEqual({
+      marked: [],
+      deleted: [],
+      blocked: [],
+      skipped: [],
+    });
+    expect(deleter.calls).toEqual([]);
+    expect((await registry.getScope(key.scopeKey))?.state).toBe("valid");
+    expect(await registry.getAssignment(key)).toMatchObject({
+      generation: 1,
+      state: "ready",
+      stableDeviceId: "UDID-LIVE",
+    });
+
+    // Once the execution ends without a recorded release, the dead owner no longer pins the scope.
+    liveSessions.clear();
+    expect((await reclaimer().sweep()).marked).toEqual([key.scopeKey]);
   });
 
   test("a revive before the sweep keeps the device", async () => {

@@ -105,6 +105,8 @@ import {
 import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
 import {
   isExpiryReleaseReason,
+  isRecoverableDaemonReleaseReason,
+  isReissuableByNameReleaseReason,
   isTerminalReleaseReason,
   outranksReleaseReason,
   releasedRowStatus,
@@ -1303,7 +1305,7 @@ function releaseSuperseded(shouldCommit: ReleaseCommitFence | undefined): boolea
   return shouldCommit !== undefined && shouldCommit() === false;
 }
 
-/** Plan cleanup frees devices while allowing the base and label UUIDs to be reused. */
+/** Plan cleanup frees devices; the base and label UUIDs may be issued again by name (not rehydrated). */
 export const PLAN_AUTO_RELEASE_REASON = "plan-auto-release" satisfies SessionReleaseReason;
 
 export function getDefaultSessionHeartbeatTimeoutMs(): number {
@@ -2762,7 +2764,7 @@ export class SessionManager {
     if (
       !persisted ||
       this.terminalReleaseSnapshots.has(sessionId) ||
-      !this.isRecoverablePersistedSession(persisted)
+      !this.isReissuablePersistedSession(persisted)
     ) {
       return false;
     }
@@ -2778,17 +2780,46 @@ export class SessionManager {
   }
 
   /**
-   * #6069: True when this persisted row is a non-terminal identity this daemon
-   * issued that survived a restart and may be re-materialized with a pooled
-   * device (live-during-restart recovery). Mirrors the persisted-recovery
-   * admission in {@link admitIssuedSessionForAutomation}. A missing row (never
-   * issued) is not recoverable.
+   * #6069, #11418: True when a call naming this persisted row's UUID may issue
+   * the session again with a pooled device: an active row, or one released for a
+   * re-issuable-by-name reason (a daemon/device handoff, or a plan's
+   * `plan-auto-release`), that has not expired. Terminal reasons and the
+   * never-reissuable ones (`superseded`, `allocation-rollback`, ...) are refused,
+   * as is a missing row. This is wider than startup rehydration, which only takes
+   * the recoverable handoffs. The claim and the claimed-row upsert share it.
+   */
+  private isReissuablePersistedSession(persisted: DeviceSession | undefined): boolean {
+    return Boolean(
+      persisted &&
+      (!persisted.release_reason || isReissuableByNameReleaseReason(persisted.release_reason)) &&
+      isRecoverableDeviceSession(persisted, this.sessionNow()),
+    );
+  }
+
+  /**
+   * The narrower startup-rehydration predicate (#11418): an active row, or one released for a
+   * recoverable handoff, that has not expired. A `plan-auto-release` row is re-issuable by name
+   * but is never rehydrated, so a finished plan's session does not come back to hold its device.
    */
   private isRecoverablePersistedSession(persisted: DeviceSession | undefined): boolean {
     return Boolean(
       persisted &&
-      (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason)) &&
+      (!persisted.release_reason || isRecoverableDaemonReleaseReason(persisted.release_reason)) &&
       isRecoverableDeviceSession(persisted, this.sessionNow()),
+    );
+  }
+
+  /**
+   * True for a row that is re-issued rather than recovered (#11418): released for a reason that
+   * is re-issuable by name but not recoverable (`plan-auto-release`). Its plan already gave the
+   * device up, so the session has no device identity to keep: the re-issue prefers the old device
+   * and otherwise takes any device ordinary allocation would, instead of ending the UUID.
+   */
+  private isNameReissueOnlyRow(persisted: DeviceSession | undefined): boolean {
+    return Boolean(
+      persisted?.release_reason &&
+      !isRecoverableDaemonReleaseReason(persisted.release_reason) &&
+      this.isReissuablePersistedSession(persisted),
     );
   }
 
@@ -3352,7 +3383,7 @@ export class SessionManager {
       this.terminalReleaseSnapshots.set(sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(sessionId, persistedTerminalRelease);
     }
-    if (persisted && this.isRecoverablePersistedSession(persisted)) {
+    if (persisted && this.isReissuablePersistedSession(persisted)) {
       return undefined;
     }
     throw unissuedSessionError;
@@ -3384,7 +3415,7 @@ export class SessionManager {
     // never-issued sessionUuid (e.g. "kumquat-D") whenever the #6045 admit guard
     // was bypassed by the call path — the ownership bypass this closes. The
     // pool-less `if (!devicePool)` throw below stays as a secondary safety net.
-    if (requireIssuedSession && !this.isRecoverablePersistedSession(persisted)) {
+    if (requireIssuedSession && !this.isReissuablePersistedSession(persisted)) {
       await this.terminalizeExpiredPersistedSession(persisted);
       throw new UnissuedSessionError(
         `Session ${sessionId} is not an active daemon session (not found). ` +
@@ -3422,7 +3453,7 @@ export class SessionManager {
     shared: SharedSessionAssignment,
   ): Promise<Session> {
     const claim =
-      listed && this.isRecoverablePersistedSession(listed)
+      listed && this.isReissuablePersistedSession(listed)
         ? await this.claimRecoverableRow(sessionId, listed)
         : undefined;
     try {
@@ -3462,7 +3493,8 @@ export class SessionManager {
     logger.info(
       `[SessionManager] Creating new session ${sessionId}, calling devicePool.assignDeviceToSession()`,
     );
-    if (persisted && recoveryTarget) {
+    // A re-issue with no usable target still writes over its claimed row, as a recovery does.
+    if (persisted && (recoveryTarget || this.isNameReissueOnlyRow(persisted))) {
       this.pendingPersistedRecoveries.set(sessionId, persisted);
     }
     try {
@@ -3540,7 +3572,7 @@ export class SessionManager {
       this.terminalReleaseSnapshots.set(sessionId, terminalRelease);
       throw new TerminalSessionError(sessionId, terminalRelease);
     }
-    if (current && this.isRecoverablePersistedSession(current)) {
+    if (current && this.isReissuablePersistedSession(current)) {
       const reclaimed = await this.tryClaimRecoverableRow(
         sessionId,
         current,
@@ -4067,13 +4099,23 @@ export class SessionManager {
       await devicePool.assignDeviceToSession(sessionId, platform, recoveryTarget);
     } catch (error) {
       if (
-        persisted &&
-        isSessionRecoveryIdentityLossError(error) &&
-        error.sessionUuid === sessionId
+        !persisted ||
+        !isSessionRecoveryIdentityLossError(error) ||
+        error.sessionUuid !== sessionId
       ) {
-        await this.terminalizePersistedRecoveryFailure(sessionId, persisted, error);
+        throw error;
       }
-      throw error;
+      if (!this.isNameReissueOnlyRow(persisted)) {
+        await this.terminalizePersistedRecoveryFailure(sessionId, persisted, error);
+        throw error;
+      }
+      // #11418: a re-issued plan session has no device identity to protect. Its old device being
+      // taken or gone is not a loss; the UUID stays usable on whatever ordinary allocation grants.
+      logger.info(
+        `[SessionManager] Re-issuing session ${sessionId} on another device: its previous device ` +
+          `${persisted.device_id} cannot be reused (${error.reason})`,
+      );
+      await devicePool.assignDeviceToSession(sessionId, platform ?? persisted.platform);
     }
   }
 
@@ -4695,7 +4737,7 @@ export class SessionManager {
       const deadline = persisted && restartRecoveryDeadlineFromPersisted(persisted);
       if (
         persisted &&
-        this.isRecoverablePersistedSession(persisted) &&
+        this.isReissuablePersistedSession(persisted) &&
         deadline !== undefined &&
         this.sessionNow() < deadline
       ) {
@@ -9020,10 +9062,14 @@ export class SessionManager {
     requestedPlatform: Platform | undefined,
     callerInFlight: boolean,
   ): Promise<SessionRecoveryTarget | undefined> {
-    if (!persisted || !this.isRecoverablePersistedSession(persisted)) {
+    if (!persisted || !this.isReissuablePersistedSession(persisted)) {
       return undefined;
     }
     const stableDeviceId = persistedStableDeviceId(persisted);
+    if (!stableDeviceId && this.isNameReissueOnlyRow(persisted)) {
+      // Nothing to prefer: the re-issue is an ordinary allocation (#11418).
+      return undefined;
+    }
     if (!stableDeviceId) {
       await this.terminalizePersistedRecoveryFailure(sessionId, persisted, {
         terminalReleaseReason: "identity-recovery-identity-continuity-lost",

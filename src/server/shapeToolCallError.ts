@@ -12,6 +12,7 @@ import {
 import { SessionRecoveryAssignmentError } from "../models/SessionRecoveryAssignmentError";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
+import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
 import { recoveryIdentityLoss, recoveryIdentityLossPayload } from "./deviceSessionResult";
 import { DeviceOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
@@ -143,6 +144,11 @@ function typedRefusalPayload(error: unknown): Record<string, unknown> | undefine
   }
   if (error instanceof BootCapacityExhaustedError) {
     return { ...error.details };
+  }
+  // Incomplete booted-device discovery is typed and retryable on every tool that throws it, not
+  // a generic `Error:` string (#11493).
+  if (error instanceof BootedDeviceDiscoveryIncompleteError) {
+    return { code: error.code, retryable: error.retryable };
   }
   if (error instanceof RetryableDeviceAcquisitionError) {
     return {

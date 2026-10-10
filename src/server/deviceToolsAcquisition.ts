@@ -8,6 +8,7 @@ import type { DeviceMatcher } from "../utils/deviceMatcher";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
 import type { DeviceBootResult } from "../devices/deviceBootService";
+import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import {
   selectorLifecycleIdentity,
   type VirtualDeviceLifecycleCoordinator,
@@ -272,7 +273,10 @@ async function resolveStartStableDeviceLifecycleTarget(
     },
   );
   if (!discovery.succeededPlatforms.has("ios")) {
-    throw new ActionableError(
+    // Incomplete simctl discovery is typed and retryable, not a generic failure (#11493).
+    throw new BootedDeviceDiscoveryIncompleteError(
+      "ios",
+      discovery.discoveryErrors?.ios,
       `Cannot uniquely resolve iOS device '${args.name}' for lifecycle coordination; provide deviceId.`,
     );
   }

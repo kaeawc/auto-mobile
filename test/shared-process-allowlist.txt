@@ -802,6 +802,7 @@ test/scripts/ffmpegInstallHoist.test.ts
 test/scripts/generateMdmProfile.test.ts
 test/scripts/gradleTaskRunAction.test.ts
 test/scripts/installerStartupDiagnostics.test.ts
+test/scripts/integrationSafeTier.test.ts
 test/scripts/iosIntegrationWorkflowChangeGuard.test.ts
 test/scripts/iosSimulatorProductBootLifecycle.test.ts
 test/scripts/ipaInstallFanOut.test.ts
@@ -850,6 +851,7 @@ test/server/TopLevelUnionFlattener.test.ts
 test/server/TopLevelUnionFlattenerCharacterization.test.ts
 test/server/accessibilityFocusTools.test.ts
 test/server/androidSegmentedPlanVideoSessionFinalizeWithoutDevice.test.ts
+test/server/androidStartLifecycleDiscoveryTyped.test.ts
 test/server/appFileContract.property.test.ts
 test/server/appFileContract.test.ts
 test/server/appFileResources.test.ts
@@ -924,6 +926,7 @@ test/server/observeWaitForMultiPanel.test.ts
 test/server/performanceMonitorSessionCleanup.test.ts
 test/server/ping.test.ts
 test/server/planHealthSummary.test.ts
+test/server/planOrchestratorVideoRecorderInjection.test.ts
 test/server/platform/PlatformClient.test.ts
 test/server/prompts/list.test.ts
 test/server/prototypeDisplay.test.ts

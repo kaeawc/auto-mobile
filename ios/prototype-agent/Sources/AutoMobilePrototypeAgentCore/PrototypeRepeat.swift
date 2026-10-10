@@ -259,11 +259,8 @@ private struct Instance {
         }.joined()
     }
 
-    /// Integral numbers render without a decimal point or exponent at any magnitude, as on Android.
+    /// Numbers render as the host does (`PrototypeScalarText`); strings and booleans pass through.
     private func rendered(_ value: JSONValue) -> String {
-        if case let .number(number) = value, number.isFinite, number.rounded() == number {
-            return String(format: "%.0f", number == 0 ? 0 : number)
-        }
-        return value.displayString
+        value.displayString
     }
 }

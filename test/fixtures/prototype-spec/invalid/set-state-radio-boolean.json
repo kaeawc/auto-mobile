@@ -1,0 +1,44 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "k": "a"
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "radioGroup",
+          "stateKey": "k",
+          "options": [
+            {
+              "value": "a",
+              "label": "A"
+            },
+            {
+              "value": "b",
+              "label": "B"
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Go",
+          "onTap": [
+            {
+              "type": "setState",
+              "key": "k",
+              "value": true
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onTap[0].value"
+}

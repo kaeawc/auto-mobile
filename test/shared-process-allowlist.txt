@@ -582,6 +582,7 @@ test/features/prototype/prototypeMissingAssets.test.ts
 test/features/prototype/prototypeNodeContractParity.test.ts
 test/features/prototype/prototypeRepeat.test.ts
 test/features/prototype/prototypeSelectionControls.test.ts
+test/features/prototype/prototypeSetStateBinding.test.ts
 test/features/prototype/prototypeThemeModes.test.ts
 test/features/record/McpCallRecorder.test.ts
 test/features/record/McpCallRecorderCoverage.test.ts

@@ -1,0 +1,42 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "k": 0
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "tabBar",
+          "stateKey": "k",
+          "items": [
+            {
+              "label": "A"
+            },
+            {
+              "label": "B"
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Go",
+          "onTap": [
+            {
+              "type": "setState",
+              "key": "k",
+              "value": -1
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onTap[0].value"
+}

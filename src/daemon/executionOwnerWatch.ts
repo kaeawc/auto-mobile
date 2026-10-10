@@ -20,6 +20,9 @@ import { logger } from "../utils/logger";
 /** How often the owner is checked. With a ~1.5 s bounded release this keeps death-to-release ≲ 2.5 s. */
 export const EXECUTION_OWNER_CHECK_INTERVAL_MS = 1_000;
 
+/** The pid that adopts orphans; a launch parent of 1 means the launcher was already gone. */
+const INIT_PID = 1;
+
 export type ExecutionOwnerLossReason = "owner-exited" | "parent-changed";
 
 export interface ExecutionOwnerProcessProbe {
@@ -30,7 +33,10 @@ export interface ExecutionOwnerProcessProbe {
 }
 
 export interface ExecutionOwnerWatchOptions {
-  /** The parent pid this proxy was launched by. */
+  /**
+   * The parent pid this proxy was launched by, captured at the very top of `main()` (#11232):
+   * read after async startup it could already be the reaper's pid, and the watch would never fire.
+   */
   launchParentPid: number;
   /** A declared supervising process; defaults to {@link launchParentPid}. */
   ownerPid?: number;
@@ -105,6 +111,11 @@ export class ExecutionOwnerWatch {
   }
 
   private judge(): ExecutionOwnerLossReason | undefined {
+    // Launched already orphaned (#11232): the launcher died before `main()` captured the parent, so
+    // init adopted the proxy and the parent pid never changes again. Nothing owns this execution.
+    if (this.options.launchParentPid === INIT_PID) {
+      return "parent-changed";
+    }
     if (this.probe.currentParentPid() !== this.options.launchParentPid) {
       return "parent-changed";
     }

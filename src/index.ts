@@ -99,6 +99,9 @@ setFatalProcessHandler((event) => {
 });
 
 async function main() {
+  // Captured before any await (#11232): a launcher that dies during async startup would otherwise
+  // leave `process.ppid` already re-parented to init, and the execution-owner watch never fires.
+  const launchParentPid = process.ppid;
   startupBenchmark.mark("processEntry");
   startupBenchmark.startPhase("moduleImports");
 
@@ -753,7 +756,7 @@ async function main() {
       if (useProxyMode && managedSlotConfig) {
         // A managed slot execution's proxy must not outlive its owner (#11176): owner exit or
         // re-parenting shuts it down, and shutdown releases its sessions promptly.
-        await startExecutionOwnerWatch(managedSlotConfig.executionOwnerPid);
+        await startExecutionOwnerWatch(launchParentPid, managedSlotConfig.executionOwnerPid);
       }
       try {
         logger.info("Connecting MCP server to stdio transport");
@@ -782,7 +785,7 @@ async function main() {
 }
 
 /** Watch the managed slot execution's owner (by default the launching parent) (#11176). */
-async function startExecutionOwnerWatch(ownerPid?: number): Promise<void> {
+async function startExecutionOwnerWatch(launchParentPid: number, ownerPid?: number): Promise<void> {
   const [{ ExecutionOwnerWatch }, { isProcessRunning }, { defaultTimer }] = await Promise.all([
     import("./daemon/executionOwnerWatch"),
     import("./utils/processLiveness"),
@@ -790,7 +793,7 @@ async function startExecutionOwnerWatch(ownerPid?: number): Promise<void> {
   ]);
   new ExecutionOwnerWatch(
     {
-      launchParentPid: process.ppid,
+      launchParentPid,
       ownerPid,
       onOwnerLost: () => requestProcessShutdown("execution-owner-lost"),
     },

@@ -11,10 +11,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 const PARENT = 4100;
 const SUPERVISOR = 4200;
 
-function harness(options: { ownerPid?: number } = {}) {
+function harness(options: { ownerPid?: number; launchParentPid?: number } = {}) {
   const timer = new FakeTimer();
-  const running = new Set([PARENT, SUPERVISOR]);
-  let parent = PARENT;
+  const running = new Set([1, PARENT, SUPERVISOR]);
+  let parent = options.launchParentPid ?? PARENT;
   const losses: { at: number; reason: ExecutionOwnerLossReason }[] = [];
   const watch = new ExecutionOwnerWatch(
     {
@@ -73,6 +73,13 @@ describe("ExecutionOwnerWatch", () => {
     watch.start();
     reparent(1);
     timer.advanceTime(EXECUTION_OWNER_CHECK_INTERVAL_MS);
+    await settle();
+    expect(losses.map((loss) => loss.reason)).toEqual(["parent-changed"]);
+  });
+
+  test("a proxy launched already orphaned (parent pid 1) is lost at the first check (#11232)", async () => {
+    const { watch, losses } = harness({ launchParentPid: 1 });
+    watch.start();
     await settle();
     expect(losses.map((loss) => loss.reason)).toEqual(["parent-changed"]);
   });

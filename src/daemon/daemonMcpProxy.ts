@@ -117,7 +117,7 @@ import {
   getStaticToolDefinitions,
 } from "./staticToolDefinitions";
 import { DaemonRestartDeferredError } from "./daemonRestartAdmission";
-import { isRecoverableDaemonReleaseReason } from "./releaseReasons";
+import { isRecoverableDaemonReleaseReason, isTerminalReleaseReason } from "./releaseReasons";
 import { daemonProcessOptions, daemonReuseOptions } from "./daemonOptionScopes";
 import {
   DAEMON_STALLED_CODE,
@@ -4935,10 +4935,14 @@ export class DaemonMcpProxy {
         // proceeding to a keeper that can only re-confirm the loss — this keeps
         // terminal fencing intact and gives the caller an ownership-lost error on
         // its next operation. Synchronous fence: no reconnect, no reentrancy.
-        this.fenceBoundSessionUuid(
-          sessionUuid,
-          releaseReasonFromError(error) ?? "session-not-found",
-        );
+        const releaseReason = releaseReasonFromError(error);
+        if (releaseReason !== undefined && !isTerminalReleaseReason(releaseReason)) {
+          // A recoverable release (the device is restarting) is handed back to the next call
+          // that names the session, exactly as on a keeper tick (#11400).
+          this.stopHeartbeatingUnknownLatestBinding(sessionUuid, releaseReason);
+          return;
+        }
+        this.fenceBoundSessionUuid(sessionUuid, releaseReason ?? "session-not-found");
         return;
       }
       // Safe to swallow the rest: the establishment heartbeat is best-effort. The
@@ -6081,9 +6085,12 @@ export class DaemonMcpProxy {
   /**
    * The daemon answered a heartbeat for the latest binding, retried on a fresh connection, with
    * not-found: it released the session and this proxy missed the notification (#10702). Stop
-   * heartbeating it rather than every tick resetting the socket to ask again. The binding is not
-   * fenced: a replacement daemon may restore a persisted session when a tool call reaches it, and a
-   * call that does so re-arms the heartbeat; otherwise that call reports the loss.
+   * heartbeating it rather than every tick resetting the socket to ask again. The binding is
+   * fenced only when the daemon names a terminal release reason, the one a missed release
+   * notification would have carried (#10972). With no reason (a replacement daemon that has not
+   * materialised a persisted session) or a recoverable one (`device-restart:<id>`, a daemon
+   * restart) the daemon may hand the session back (#11400): a tool call that reaches it restores
+   * it and re-arms the heartbeat; otherwise that call reports the loss.
    */
   private stopHeartbeatingUnknownLatestBinding(sessionUuid: string, releaseReason?: string): void {
     if (this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
@@ -6091,10 +6098,7 @@ export class DaemonMcpProxy {
     }
     // A not-found answer is no idle report: the daemon's instant no longer describes the session.
     this.daemonIdleReports.delete(sessionUuid);
-    if (releaseReason) {
-      // The daemon recorded why it released the session, so it is not a replacement daemon that
-      // may still restore it: fence with the daemon's reason, which a missed release notification
-      // would have carried (#10972).
+    if (releaseReason !== undefined && isTerminalReleaseReason(releaseReason)) {
       this.fenceBoundSessionUuid(sessionUuid, releaseReason);
       return;
     }
@@ -6105,9 +6109,7 @@ export class DaemonMcpProxy {
       );
     }
     this.latestBindingNotFound = sessionUuid;
-    if (this.otherHeldSessions.size === 0) {
-      void this.stopBoundSessionHeartbeat();
-    }
+    this.syncHeartbeatKeeper();
   }
 
   /**

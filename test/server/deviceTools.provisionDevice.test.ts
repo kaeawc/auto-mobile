@@ -1,3 +1,4 @@
+import { AvdCreateInterruptedError } from "../../src/utils/android-cmdline-tools/AvdManagerClient";
 import { provisionCancellationOutcomes } from "../../src/server/provisionCancellationOutcomes";
 import {
   DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
@@ -1949,6 +1950,59 @@ describe("provisionDevice handler", () => {
     expect(await deviceManager.listDeviceImages("android")).toEqual([
       { name: args.device.name, platform: "android", isRunning: false },
     ]);
+  });
+
+  test("deletes an AVD whose avdmanager create timed out mid-write (#11155)", async () => {
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator,
+      exactDeviceProvisionerFactory: (manager, creationGate) =>
+        new DefaultExactDeviceProvisioner({
+          listDeviceImages: async (platform) => await manager.listDeviceImages(platform),
+          isCreationAllowed: (createIfMissing) => creationGate.isCreationAllowed(createIfMissing),
+          avdManager: {
+            createAvd: async ({ name }) => {
+              // avdmanager wrote the AVD, then was killed at its timeout.
+              deviceManager.setDeviceImages("android", [
+                { name, platform: "android", isRunning: false },
+              ]);
+              throw new AvdCreateInterruptedError(
+                name,
+                "avdmanager command timed out after 300000ms",
+              );
+            },
+          },
+          androidConfigReader: {
+            readConfig: async () => undefined,
+          },
+          androidConfigWriter: {
+            setMemoryMb: async () => {
+              throw new Error("unexpected AVD config write");
+            },
+          },
+          iosSimulator: {
+            createSimulator: async () => {
+              throw new Error("unexpected iOS simulator creation");
+            },
+          },
+          lifecycleCoordinator,
+          timer,
+        }),
+      idGenerator: new FakeIdGenerator(["cleanup-interrupted-create"]),
+    });
+    registerDeviceTools();
+    const args = { ...provisionTestArgs("android"), boot: false, readiness: "none" as const };
+
+    const response = JSON.parse(await provisionResponseText(args));
+
+    expect(response).toMatchObject({
+      success: false,
+      cleanup: { status: "succeeded", state: "destroyed" },
+    });
+    expect(await deviceManager.listDeviceImages("android")).toEqual([]);
   });
 
   test("cancelled exact configuration cannot overwrite a replacement AVD after rollback", async () => {

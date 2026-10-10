@@ -33,6 +33,20 @@ interface AndroidCommandRequest {
   onOutput?: (stream: "stdout" | "stderr", output: string) => void;
 }
 
+/**
+ * The command was stopped by its timeout or caller cancellation rather than
+ * exiting on its own, so whatever it was doing may be half done.
+ */
+export class AndroidCommandTerminatedError extends Error {
+  constructor(
+    message: string,
+    public readonly reason: "timeout" | "cancelled",
+  ) {
+    super(message);
+    this.name = "AndroidCommandTerminatedError";
+  }
+}
+
 /** Orchestration over the existing injectable host spawn seam, not a new process seam. */
 class AndroidCommandRun {
   private settled = false;
@@ -61,7 +75,12 @@ class AndroidCommandRun {
     request.signal?.addEventListener("abort", this.onAbort, { once: true });
     this.timeout = this.dependencies.timer.setTimeout(
       () =>
-        this.terminate(new Error(`${request.name} command timed out after ${request.timeoutMs}ms`)),
+        this.terminate(
+          new AndroidCommandTerminatedError(
+            `${request.name} command timed out after ${request.timeoutMs}ms`,
+            "timeout",
+          ),
+        ),
       request.timeoutMs,
     );
     request.onStart();
@@ -102,7 +121,9 @@ class AndroidCommandRun {
   }
 
   private readonly onAbort = () =>
-    this.terminate(new Error(`${this.request.name} command cancelled`));
+    this.terminate(
+      new AndroidCommandTerminatedError(`${this.request.name} command cancelled`, "cancelled"),
+    );
 
   private readonly rejectTermination = () => {
     this.settle(() => this.reject(this.terminationError!));

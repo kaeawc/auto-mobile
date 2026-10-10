@@ -39,6 +39,7 @@ import {
   lastScopeActivityMs,
   resolveAbandonmentThresholdMs,
   type AbandonmentQuery,
+  type BeginFreeDeviceStopResult,
   type BeginScopeInvalidationResult,
   type ClaimExecutionOptions,
   type ClaimExecutionResult,
@@ -46,6 +47,8 @@ import {
   type CompleteScopeInvalidationResult,
   type DeviceHolder,
   type EnsureScopeResult,
+  type FreeDeviceState,
+  type FreeDeviceStopTarget,
   type FreeSlotDeviceRecord,
   type InitSlotResult,
   type ManagedDeviceEntry,
@@ -155,6 +158,7 @@ interface SlotFreeDevicesTable {
   spec_fingerprint: string | null;
   from_scope_key: string;
   freed_at_ms: number;
+  state: Generated<FreeDeviceState>;
 }
 
 interface SlotJournalTable {
@@ -277,6 +281,7 @@ function toFreeDevice(row: FreeDeviceRow): FreeSlotDeviceRecord {
     specFingerprint: row.spec_fingerprint,
     fromScopeKey: row.from_scope_key,
     freedAtMs: row.freed_at_ms,
+    state: row.state,
   };
 }
 
@@ -612,13 +617,12 @@ export class SqliteSlotRegistry implements SlotRegistry {
       if (holder) {
         return { kind: "device_assigned_elsewhere", holder: toAssignment(holder) };
       }
-      const free = await trx
-        .deleteFrom("slot_free_devices")
-        .where("platform", "=", platform)
-        .where("stable_device_id", "=", next.stableDeviceId)
-        .returningAll()
-        .executeTakeFirst();
-      adoptedFreeDevice = free ? toFreeDevice(free) : null;
+      const taken = await this.takeFreeDevice(trx, platform, next.stableDeviceId);
+      if (taken === "stopping") {
+        // A reclaim sweep is shutting this device down; adopting now would race that shutdown.
+        return { kind: "free_device_stopping" };
+      }
+      adoptedFreeDevice = taken;
     }
     const deviceChanged =
       next.stableDeviceId !== checked.stableDeviceId || platform !== checked.platform;
@@ -1049,9 +1053,41 @@ export class SqliteSlotRegistry implements SlotRegistry {
       .selectFrom("slot_free_devices")
       .selectAll()
       .where("freed_at_ms", "<=", cutoffMs)
+      .where("state", "<>", "stopped")
       .orderBy("freed_at_ms")
       .execute();
     return rows.map(toFreeDevice);
+  }
+
+  async beginFreeDeviceStop(
+    device: FreeDeviceStopTarget,
+    query?: AbandonmentQuery,
+  ): Promise<BeginFreeDeviceStopResult> {
+    const cutoffMs = this.timer.now() - resolveAbandonmentThresholdMs(query);
+    const claimed = await this.db
+      .updateTable("slot_free_devices")
+      .set({ state: "stopping" })
+      .where("platform", "=", device.platform)
+      .where("stable_device_id", "=", device.stableDeviceId)
+      .where("freed_at_ms", "=", device.freedAtMs)
+      .where("freed_at_ms", "<=", cutoffMs)
+      .where("state", "in", ["free", "stopping"])
+      .returning("stable_device_id")
+      .executeTakeFirst();
+    return claimed ? { kind: "begun" } : { kind: "not_reclaimable" };
+  }
+
+  async completeFreeDeviceStop(device: FreeDeviceStopTarget): Promise<boolean> {
+    const stopped = await this.db
+      .updateTable("slot_free_devices")
+      .set({ state: "stopped" })
+      .where("platform", "=", device.platform)
+      .where("stable_device_id", "=", device.stableDeviceId)
+      .where("freed_at_ms", "=", device.freedAtMs)
+      .where("state", "=", "stopping")
+      .returning("stable_device_id")
+      .executeTakeFirst();
+    return stopped !== undefined;
   }
 
   async openSlotJournal(key: SlotKey, input: OpenSlotJournalInput): Promise<OpenSlotJournalResult> {
@@ -1324,6 +1360,31 @@ export class SqliteSlotRegistry implements SlotRegistry {
     );
   }
 
+  /** Take a device out of the free pool for adoption, unless a reclaim sweep is stopping it. */
+  private async takeFreeDevice(
+    trx: Executor,
+    platform: SlotPlatform,
+    stableDeviceId: string,
+  ): Promise<FreeSlotDeviceRecord | "stopping" | null> {
+    const taken = await trx
+      .deleteFrom("slot_free_devices")
+      .where("platform", "=", platform)
+      .where("stable_device_id", "=", stableDeviceId)
+      .where("state", "<>", "stopping")
+      .returningAll()
+      .executeTakeFirst();
+    if (taken) {
+      return toFreeDevice(taken);
+    }
+    const stopping = await trx
+      .selectFrom("slot_free_devices")
+      .select("state")
+      .where("platform", "=", platform)
+      .where("stable_device_id", "=", stableDeviceId)
+      .executeTakeFirst();
+    return stopping ? "stopping" : null;
+  }
+
   /**
    * Move a scope's bound devices to the free pool and remove its slots. Used when an invalidation
    * is (or becomes) permanent.
@@ -1351,6 +1412,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
               specFingerprint: assignment.specFingerprint,
               fromScopeKey: scopeKey,
               freedAtMs: nowMs,
+              state: "free",
             },
           ],
     );

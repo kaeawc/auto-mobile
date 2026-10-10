@@ -33,6 +33,8 @@ import {
   type CompleteScopeInvalidationResult,
   type DeviceHolder,
   type EnsureScopeResult,
+  type BeginFreeDeviceStopResult,
+  type FreeDeviceStopTarget,
   type FreeSlotDeviceRecord,
   type InitSlotResult,
   type ManagedDeviceEntry,
@@ -201,6 +203,9 @@ export class FakeSlotRegistry implements SlotRegistry {
       }
       const freeId = deviceId(platform, next.stableDeviceId);
       const freed = this.free.get(freeId);
+      if (freed?.state === "stopping") {
+        return { kind: "free_device_stopping" };
+      }
       if (freed) {
         this.free.delete(freeId);
         adoptedFreeDevice = { ...freed };
@@ -522,7 +527,36 @@ export class FakeSlotRegistry implements SlotRegistry {
 
   async findReclaimableFreeDevices(query?: AbandonmentQuery): Promise<FreeSlotDeviceRecord[]> {
     const cutoffMs = this.timer.now() - resolveAbandonmentThresholdMs(query);
-    return (await this.listFreeDevices()).filter((device) => device.freedAtMs <= cutoffMs);
+    return (await this.listFreeDevices()).filter(
+      (device) => device.freedAtMs <= cutoffMs && device.state !== "stopped",
+    );
+  }
+
+  async beginFreeDeviceStop(
+    device: FreeDeviceStopTarget,
+    query?: AbandonmentQuery,
+  ): Promise<BeginFreeDeviceStopResult> {
+    const cutoffMs = this.timer.now() - resolveAbandonmentThresholdMs(query);
+    const row = this.free.get(deviceId(device.platform, device.stableDeviceId));
+    if (
+      !row ||
+      row.freedAtMs !== device.freedAtMs ||
+      row.freedAtMs > cutoffMs ||
+      row.state === "stopped"
+    ) {
+      return { kind: "not_reclaimable" };
+    }
+    row.state = "stopping";
+    return { kind: "begun" };
+  }
+
+  async completeFreeDeviceStop(device: FreeDeviceStopTarget): Promise<boolean> {
+    const row = this.free.get(deviceId(device.platform, device.stableDeviceId));
+    if (!row || row.freedAtMs !== device.freedAtMs || row.state !== "stopping") {
+      return false;
+    }
+    row.state = "stopped";
+    return true;
   }
 
   async openSlotJournal(key: SlotKey, input: OpenSlotJournalInput): Promise<OpenSlotJournalResult> {
@@ -732,6 +766,7 @@ export class FakeSlotRegistry implements SlotRegistry {
               specFingerprint: assignment.specFingerprint,
               fromScopeKey: scopeKey,
               freedAtMs: nowMs,
+              state: "free",
             },
           ],
     );

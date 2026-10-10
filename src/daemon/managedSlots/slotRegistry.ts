@@ -112,7 +112,27 @@ export interface FreeSlotDeviceRecord {
   specFingerprint: string | null;
   fromScopeKey: string;
   freedAtMs: number;
+  /**
+   * `free`: not yet reclaimed (the device may be booted). `stopping`: a reclaim sweep claimed it and
+   * is shutting it down, so adoption waits. `stopped`: shut down with its image kept; a matching
+   * slot may adopt it and boots it (#11337).
+   */
+  state: FreeDeviceState;
 }
+
+export type FreeDeviceState = "free" | "stopping" | "stopped";
+
+/** The identity a reclaim sweep read; the CAS refuses when the row moved on since. */
+export type FreeDeviceStopTarget = Pick<
+  FreeSlotDeviceRecord,
+  "platform" | "stableDeviceId" | "freedAtMs"
+>;
+
+export type BeginFreeDeviceStopResult =
+  /** The row is now `stopping` (or already was, from an earlier interrupted attempt). */
+  | { kind: "begun" }
+  /** Adopted, re-freed since, not yet due or already stopped: nothing to shut down. */
+  | { kind: "not_reclaimable" };
 
 /** The optimistic-concurrency token every mutating slot step must present. */
 export interface SlotBindingExpectation {
@@ -169,7 +189,9 @@ export type SlotCasFailure =
   | { kind: "scope_not_valid"; scope: SlotScopeRecord | null }
   | { kind: "slot_missing" }
   | { kind: "stale_binding"; current: SlotAssignmentRecord }
-  | { kind: "device_assigned_elsewhere"; holder: SlotAssignmentRecord };
+  | { kind: "device_assigned_elsewhere"; holder: SlotAssignmentRecord }
+  /** The free-pool device is being shut down by a reclaim sweep; adopt it once it is `stopped`. */
+  | { kind: "free_device_stopping" };
 
 export type CommitBindingResult =
   | {
@@ -544,8 +566,21 @@ export interface SlotRegistry {
    * so no acquisition races the later device deletion.
    */
   markScopeAbandoned(scopeKey: string, query?: AbandonmentQuery): Promise<MarkScopeAbandonedResult>;
-  /** Free-pool devices that have sat unadopted for at least the threshold. */
+  /**
+   * Free-pool devices that have sat unadopted for at least the threshold and are not yet
+   * `stopped` (a `stopping` one is returned so an interrupted shutdown is retried).
+   */
   findReclaimableFreeDevices(query?: AbandonmentQuery): Promise<FreeSlotDeviceRecord[]>;
+  /**
+   * CAS `free`/`stopping` to `stopping`, only while the row is the one that was read (same
+   * `freedAtMs`) and still past the threshold. A concurrent adoption deletes the row, so it wins.
+   */
+  beginFreeDeviceStop(
+    device: FreeDeviceStopTarget,
+    query?: AbandonmentQuery,
+  ): Promise<BeginFreeDeviceStopResult>;
+  /** CAS `stopping` to `stopped` after the shutdown was verified; false when the row moved on. */
+  completeFreeDeviceStop(device: FreeDeviceStopTarget): Promise<boolean>;
   /** Every scope of `(namespace, incarnation)`, optionally narrowed to one host scope. */
   findScopes(query: SlotScopeQuery): Promise<SlotScopeRecord[]>;
   /**

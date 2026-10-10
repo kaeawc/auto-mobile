@@ -7,7 +7,11 @@ struct PagerPosition: Equatable {
 }
 
 /// Fills `{key}` state placeholders (and `{page}`/`{pageCount}` inside a pager) the way
-/// Android's `interpolatePrototypeText` does; an unknown placeholder stays as written.
+/// Android's `interpolatePrototypeText` does: one left-to-right scan over `{token}` placeholders
+/// whose key is `[A-Za-z_][A-Za-z0-9_]*`. A substituted value is never scanned again, an unknown
+/// placeholder stays as written, and `{page}`/`{pageCount}` resolve only inside a pager (they stay
+/// literal outside one even when state has keys of those names). Unicode scalars are scanned, so a
+/// brace followed by a combining mark is not mistaken for part of a token.
 func interpolatePrototypeText(
     _ text: String,
     state: [String: JSONValue],
@@ -15,15 +19,52 @@ func interpolatePrototypeText(
 )
     -> String
 {
-    var result = text
-    if let pager {
-        result = result.replacingOccurrences(of: "{page}", with: String(pager.page + 1))
-            .replacingOccurrences(of: "{pageCount}", with: String(pager.count))
+    let scalars = Array(text.unicodeScalars)
+    var out = String.UnicodeScalarView()
+    var index = 0
+    while index < scalars.count {
+        guard let end = interpolationTokenEnd(scalars, from: index) else {
+            out.append(scalars[index])
+            index += 1
+            continue
+        }
+        let key = String(String.UnicodeScalarView(scalars[(index + 1) ..< (end - 1)]))
+        let token = String(String.UnicodeScalarView(scalars[index ..< end]))
+        out.append(contentsOf: resolveInterpolation(key: key, token: token, state: state, pager: pager).unicodeScalars)
+        index = end
     }
-    for (key, value) in state where result.contains("{\(key)}") {
-        result = result.replacingOccurrences(of: "{\(key)}", with: value.displayString)
+    return String(out)
+}
+
+/// The index just past the `{key}` token starting at `start`, or nil when none starts there.
+private func interpolationTokenEnd(_ scalars: [Unicode.Scalar], from start: Int) -> Int? {
+    guard scalars[start] == "{", start + 1 < scalars.count, isInterpolationKeyStart(scalars[start + 1]) else {
+        return nil
     }
-    return result
+    var index = start + 2
+    while index < scalars.count, isInterpolationKeyPart(scalars[index]) { index += 1 }
+    return index < scalars.count && scalars[index] == "}" ? index + 1 : nil
+}
+
+private func isInterpolationKeyStart(_ scalar: Unicode.Scalar) -> Bool {
+    ("A" ... "Z").contains(scalar) || ("a" ... "z").contains(scalar) || scalar == "_"
+}
+
+private func isInterpolationKeyPart(_ scalar: Unicode.Scalar) -> Bool {
+    isInterpolationKeyStart(scalar) || ("0" ... "9").contains(scalar)
+}
+
+private func resolveInterpolation(
+    key: String,
+    token: String,
+    state: [String: JSONValue],
+    pager: PagerPosition?
+) -> String {
+    if key == "page" || key == "pageCount" {
+        guard let pager else { return token }
+        return key == "page" ? String(pager.page + 1) : String(pager.count)
+    }
+    return state[key]?.displayString ?? token
 }
 
 extension PrototypeNode {

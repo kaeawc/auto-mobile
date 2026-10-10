@@ -44,10 +44,10 @@ export const PROTOTYPE_WINDOW_TYPE = "prototype";
  * window; a lone CtrlProxy-labelled capture with no prototype window stays subject
  * to the ordinary identity check.
  */
-export function isOwnWindowFocused(
+export function isOwnPrototypeFocused(
   hierarchy: Pick<ViewHierarchyResult, "packageName" | "windows"> | undefined,
 ): boolean {
-  return ownWindows(hierarchy).some(
+  return ownPrototypeWindows(hierarchy).some(
     (window) => window.isFocused === true || window.isActive === true,
   );
 }
@@ -83,6 +83,26 @@ export function ownWindows(
       hostsNodes(window)
     );
   });
+}
+
+/**
+ * CtrlProxy's prototype windows only: `ownWindows` minus the highlight tool's window. Decisions
+ * that are specific to the prototype (layer scoping, "a prototype is showing", the active window
+ * type, which app a focused window hides) must use this, not `ownWindows`.
+ *
+ * The wire carries no window title, so the highlight is told apart by what it lacks. A window the
+ * APK stamped with prototype metadata is the prototype. Without metadata (older APKs) the window
+ * must host nodes: the prototype renders a node tree and the highlight window hosts none. A
+ * metadata-less prototype whose nodes were all filtered away is therefore not recognised.
+ */
+export function ownPrototypeWindows(
+  hierarchy: Pick<ViewHierarchyResult, "packageName" | "windows"> | undefined,
+): ViewHierarchyWindowInfo[] {
+  return ownWindows(hierarchy).filter(
+    (window) =>
+      (window.packageName === CTRL_PROXY_PACKAGE && hasPrototypeMetadata(window)) ||
+      hostsNodes(window),
+  );
 }
 
 /** Whether a captured window carries any hierarchy nodes; CtrlProxy's highlight window has none. */

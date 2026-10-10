@@ -17,7 +17,7 @@ import { iosWindowLayer } from "./ios/iosWindowLayer";
 import { linkWindowRoots } from "./linkWindowRoots";
 import type { XCTestHierarchy } from "./ios/types";
 import { ObserveElementsBuilder } from "./ObserveElementsBuilder";
-import { PROTOTYPE_WINDOW_TYPE, ownWindows } from "./ownWindowFocus";
+import { PROTOTYPE_WINDOW_TYPE, ownPrototypeWindows, ownWindows } from "./ownWindowFocus";
 
 /** AccessibilityWindowInfo.TYPE_APPLICATION. */
 const ACCESSIBILITY_WINDOW_TYPE_APPLICATION = 1;
@@ -41,8 +41,8 @@ const IOS_PROTOTYPE_DISMISS_IDENTIFIER = "automobile-prototype-dismiss";
 type WindowRoots = Map<ViewHierarchyNode, boolean>;
 
 /** Whether the capture contains one of AutoMobile's own prototype windows. */
-export function hasOwnWindow(hierarchy: ViewHierarchyResult | undefined): boolean {
-  if (ownWindows(hierarchy).length > 0) {
+export function hasOwnPrototype(hierarchy: ViewHierarchyResult | undefined): boolean {
+  if (ownPrototypeWindows(hierarchy).length > 0) {
     return true;
   }
   const roots = hierarchy ? iosWindowRoots(hierarchy) : undefined;
@@ -51,7 +51,7 @@ export function hasOwnWindow(hierarchy: ViewHierarchyResult | undefined): boolea
 
 function prototypeWindowIds(hierarchy: ViewHierarchyResult): Set<number> {
   return new Set(
-    ownWindows(hierarchy)
+    ownPrototypeWindows(hierarchy)
       .map((window) => window.id)
       .filter((id): id is number => Number.isInteger(id)),
   );
@@ -243,7 +243,7 @@ function scopeSingleHierarchy(
   hierarchy: ViewHierarchyResult,
   layer: HierarchyLayer,
 ): ViewHierarchyResult {
-  const prototypeWindowSet = new Set(ownWindows(hierarchy));
+  const prototypeWindowSet = new Set(ownPrototypeWindows(hierarchy));
   const keepWindow = (window: ViewHierarchyWindowInfo) =>
     layer === "prototype" ? prototypeWindowSet.has(window) : !prototypeWindowSet.has(window);
   // iOS window entries describe the app, not the agent's UIWindow, so they stay as captured.
@@ -276,7 +276,7 @@ function scopeSingleHierarchy(
 
 /**
  * Scope a capture to the app or to AutoMobile's own prototype (issue #9305).
- * Android prototype windows are recognized by window entry (`ownWindows`);
+ * Android prototype windows are recognized by window entry (`ownPrototypeWindows`);
  * their nodes by the `windowId` CtrlProxy stamps on every window root. On iOS
  * the prototype agent's UIWindow is recognized by its host dismiss control
  * (`iosWindowRoots`).
@@ -292,7 +292,7 @@ export function scopeHierarchyToLayer(
   if (layer === undefined) {
     return hierarchy;
   }
-  if (layer === "app" && !hasOwnWindow(hierarchy)) {
+  if (layer === "app" && !hasOwnPrototype(hierarchy)) {
     return hierarchy;
   }
   const cached = scopedCache.get(hierarchy)?.[layer];
@@ -368,7 +368,7 @@ export function scopeHierarchyForSelector(
   hierarchy: ViewHierarchyResult,
   layer: HierarchyLayer | undefined,
 ): ViewHierarchyResult {
-  if (layer === "prototype" && !hasOwnWindow(hierarchy)) {
+  if (layer === "prototype" && !hasOwnPrototype(hierarchy)) {
     throw new ActionableError(noPrototypeMessage(hierarchy));
   }
   return scopeHierarchyToLayer(hierarchy, layer);
@@ -464,7 +464,7 @@ export function layerGestureRefusal(
     const covered = points.find((point) => ownWindowCoversPoint(hierarchy, point));
     return covered ? appPointUnderPrototype(covered, action) : undefined;
   }
-  if (!hasOwnWindow(hierarchy)) {
+  if (!hasOwnPrototype(hierarchy)) {
     return noPrototypeMessage(hierarchy);
   }
   const outside = points.find((point) => !ownWindowCoversPoint(hierarchy, point));
@@ -501,7 +501,7 @@ export function focusedFieldLayerRefusal(
   if (layer === undefined || !hierarchy) {
     return undefined;
   }
-  const prototypeShowing = hasOwnWindow(hierarchy);
+  const prototypeShowing = hasOwnPrototype(hierarchy);
   if (layer === "prototype" && !prototypeShowing) {
     return noPrototypeMessage(hierarchy);
   }

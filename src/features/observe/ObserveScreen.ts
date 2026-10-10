@@ -121,7 +121,7 @@ import {
 } from "./observationFreshness";
 import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
-import { PROTOTYPE_WINDOW_TYPE, isOwnWindowFocused } from "./ownWindowFocus";
+import { PROTOTYPE_WINDOW_TYPE, isOwnPrototypeFocused } from "./ownWindowFocus";
 import { DefaultElementParser } from "../utility/ElementParser";
 import {
   ALERT_TITLE_RESOURCE_ID,
@@ -353,7 +353,7 @@ function isExpectedFocusDivergence(
   return (
     SYSTEM_UI_WINDOW_PACKAGES.has(observed) ||
     SYSTEM_UI_WINDOW_PACKAGES.has(foreground) ||
-    (ownWindowEvidenceCurrent && isOwnWindowFocused(hierarchy))
+    (ownWindowEvidenceCurrent && isOwnPrototypeFocused(hierarchy))
   );
 }
 
@@ -3876,7 +3876,7 @@ export class RealObserveScreen implements ObserveScreen {
     const activeWindow = result.activeWindow;
     if (
       activeWindow?.appId !== CTRL_PROXY_PACKAGE ||
-      !isOwnWindowFocused(result.viewHierarchy) ||
+      !isOwnPrototypeFocused(result.viewHierarchy) ||
       !this.isOwnWindowEvidenceCurrent(result, minTimestamp)
     ) {
       return;

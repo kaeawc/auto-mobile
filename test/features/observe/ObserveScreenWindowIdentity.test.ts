@@ -418,7 +418,15 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
 
     const focusedPrototypeWindows: ViewHierarchyWindowInfo[] = [
       { id: 1, type: 1, isFocused: false, windowLayer: 10, bounds: screenBounds },
-      { id: 2, type: 4, isFocused: true, isActive: true, windowLayer: 20, bounds: screenBounds },
+      {
+        id: 2,
+        type: 4,
+        isFocused: true,
+        isActive: true,
+        windowLayer: 20,
+        bounds: screenBounds,
+        hierarchy: { node: [{}] },
+      },
     ];
 
     test("is not a stale wrong-window capture and triggers no recovery re-read", async () => {
@@ -504,6 +512,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
             isActive: true,
             packageName: CTRL_PROXY_PACKAGE,
             bounds: screenBounds,
+            prototypePlacement: "floating",
           },
         ]),
         playground,

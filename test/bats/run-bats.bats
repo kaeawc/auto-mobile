@@ -374,3 +374,88 @@ STUB
   run env PATH="$STUB_BIN:$PATH" BANNER_STATUS=7 bash -euo pipefail -c 'source "$1"; if is_gnu_parallel; then exit 0; else exit 7; fi' _ "$FIXTURES/predicate.sh"
   [ "$status" -eq 7 ]
 }
+
+# --- per-file duration recording and slowest-file report (#11474) -----------
+# The job log fixture is a trimmed real capture of the ubuntu `bats-unit-joblog`
+# artifact (merge.yml run 38085793737): sequences 1-12 of the parallel pass.
+
+JOBLOG_FIXTURE_REL="test/fixtures/bats-joblog/ubuntu-parallel-pass.tsv"
+
+# Rebuild the NUL-separated list file the runner would have passed to GNU
+# Parallel from the captured Command column (the file follows ` _ `).
+fixture_list_file() {
+  local list_file="$1"
+  local joblog="$REPO_ROOT/$JOBLOG_FIXTURE_REL"
+  awk -F'\t' 'NR > 1 { sub(/^.* _ /, "", $9); split($9, parts, " "); print $1 "\t" parts[1] }' "$joblog" \
+    | sort -n | cut -f2 | tr '\n' '\0' > "$list_file"
+}
+
+@test "record_parallel_durations maps job log sequences to files" {
+  source "$SCRIPT"
+  fixture_list_file "$FIXTURES/list"
+  record_parallel_durations "$REPO_ROOT/$JOBLOG_FIXTURE_REL" "$FIXTURES/list" "$FIXTURES/durations.tsv"
+  [ "$(wc -l < "$FIXTURES/durations.tsv" | tr -d ' ')" -eq 12 ]
+  grep -qx -- $'76.85\ttest/bats/prepush-ios.bats' "$FIXTURES/durations.tsv"
+  grep -qx -- $'0.42\ttest/bats/ctrl-proxy-xcodegen-drift.bats' "$FIXTURES/durations.tsv"
+}
+
+@test "a budget breach prints the ten slowest files in descending order" {
+  source "$SCRIPT"
+  fixture_list_file "$FIXTURES/list"
+  record_parallel_durations "$REPO_ROOT/$JOBLOG_FIXTURE_REL" "$FIXTURES/list" "$FIXTURES/durations.tsv"
+  printf '%s\t%s\n' 91 test/bats/serial-slow.bats >> "$FIXTURES/durations.tsv"
+  AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS=420 run enforce_unit_budget 468 "$FIXTURES/durations.tsv"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"BATS unit lane took 468s, exceeding 420s"* ]]
+  report="$(printf '%s\n' "$output" | sed -n '/^Slowest/,$p')"
+  [ "$(printf '%s\n' "$report" | sed -n '1p')" = "Slowest 10 BATS files (seconds):" ]
+  [ "$(printf '%s\n' "$report" | sed -n '2p')" = "  91s test/bats/serial-slow.bats" ]
+  [ "$(printf '%s\n' "$report" | sed -n '3p')" = "  76.85s test/bats/prepush-ios.bats" ]
+  [ "$(printf '%s\n' "$report" | sed -n '4p')" = "  36.01s test/bats/maven-publication-manifest.bats" ]
+  [ "$(printf '%s\n' "$report" | wc -l | tr -d ' ')" -eq 11 ]
+  [[ "$report" != *"check-no-new-direct-security.bats"* ]]
+  [[ "$report" != *"ctrl-proxy-xcodegen-drift.bats"* ]]
+}
+
+@test "no budget breach prints nothing extra" {
+  source "$SCRIPT"
+  fixture_list_file "$FIXTURES/list"
+  record_parallel_durations "$REPO_ROOT/$JOBLOG_FIXTURE_REL" "$FIXTURES/list" "$FIXTURES/durations.tsv"
+  AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS=420 run enforce_unit_budget 300 "$FIXTURES/durations.tsv"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a missing job log is noted and does not fail the pass" {
+  source "$SCRIPT"
+  printf '%s\0' test/bats/a.bats > "$FIXTURES/list"
+  run record_parallel_durations "$FIXTURES/absent.tsv" "$FIXTURES/list" "$FIXTURES/durations.tsv"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no GNU Parallel job log"* ]]
+  [ ! -s "$FIXTURES/durations.tsv" ]
+}
+
+@test "an empty job log is noted and does not fail the pass" {
+  source "$SCRIPT"
+  : > "$FIXTURES/empty.tsv"
+  printf '%s\0' test/bats/a.bats > "$FIXTURES/list"
+  run record_parallel_durations "$FIXTURES/empty.tsv" "$FIXTURES/list" "$FIXTURES/durations.tsv"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no GNU Parallel job log"* ]]
+}
+
+@test "a breach with no recorded durations says so and still fails on the budget" {
+  source "$SCRIPT"
+  AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS=420 run enforce_unit_budget 468 "$FIXTURES/absent-durations.tsv"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"exceeding 420s"* ]]
+  [[ "$output" == *"no per-file durations were recorded"* ]]
+}
+
+@test "the runner records parallel and serial file durations in one file" {
+  run_runner unit
+  [ "$status" -eq 0 ]
+  [ -s "$FIXTURES/joblog-durations.tsv" ]
+  grep -q -- $'\t'"$FIXTURES/unit.bats\$" "$FIXTURES/joblog-durations.tsv"
+  grep -q -- $'\t'"$FIXTURES/serial.bats\$" "$FIXTURES/joblog-durations.tsv"
+}

@@ -19,6 +19,15 @@ import {
   triggerAppearanceSync,
 } from "./AppearanceSyncScheduler";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { runWithAbortSignal } from "../utils/AbortContext";
+import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
+import {
+  executionTracker,
+  sessionExecutionMetadataOf,
+  type ActiveExecution,
+} from "../server/executionTracker";
+import { admitInputOnHolderSession } from "./inputDeviceOwnership";
+import { sessionReleaseThatCancelledCall } from "./sessionReleasedDuringCall";
 import { isAppearanceSyncEnabledFromEnvironment } from "../utils/appearance/appearanceSyncPolicy";
 import { DaemonState } from "./daemonState";
 import type {
@@ -42,6 +51,17 @@ export interface AppearanceDeviceSource {
   getCurrentDevice(): BootedDevice | undefined;
   /** Session registry owner, including derived device-label session IDs. */
   getSessionForDevice(deviceId: string): string | null;
+  /**
+   * The registry that admits control calls on a holder's session. A source without one (direct
+   * mode, or a fake that models no session lifecycle) admits every apply.
+   */
+  getSessionManager?(): object | undefined;
+}
+
+/** A device a command will re-theme, with the execution tracking it on its holder's session. */
+interface AppearanceTarget {
+  device: BootedDevice;
+  execution?: ActiveExecution;
 }
 
 const defaultDeviceSource: AppearanceDeviceSource = {
@@ -65,6 +85,10 @@ const defaultDeviceSource: AppearanceDeviceSource = {
     return daemonState.isInitialized()
       ? daemonState.getSessionManager().getSessionForDevice(deviceId)
       : null;
+  },
+  getSessionManager: () => {
+    const daemonState = DaemonState.getInstance();
+    return daemonState.isInitialized() ? daemonState.getSessionManager() : undefined;
   },
 };
 
@@ -151,22 +175,24 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
     if (typeof enabled !== "boolean") {
       throw new Error("set_appearance_sync requires enabled boolean");
     }
-    const config = await this.dependencies.updateConfig(
-      { syncWithHost: enabled },
-      this.configKey(request.sessionUuid),
-    );
-    const appliedMode = await this.applyToTargets(config, request.sessionUuid);
-    await this.dependencies.triggerSync();
-    return {
-      id: request.id,
-      type: "appearance_response",
-      success: true,
-      result: {
-        config,
-        appliedMode: appliedMode ?? undefined,
-        ...this.automaticSyncWarning(enabled),
-      },
-    };
+    return this.asControlCall("set_appearance_sync", request.sessionUuid, async (targets) => {
+      const config = await this.dependencies.updateConfig(
+        { syncWithHost: enabled },
+        this.configKey(request.sessionUuid),
+      );
+      const appliedMode = await this.applyToTargets(config, targets);
+      await this.dependencies.triggerSync();
+      return {
+        id: request.id,
+        type: "appearance_response",
+        success: true,
+        result: {
+          config,
+          appliedMode: appliedMode ?? undefined,
+          ...this.automaticSyncWarning(enabled),
+        },
+      };
+    });
   }
 
   private async handleSetAppearance(
@@ -178,25 +204,85 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
       throw new Error("set_appearance requires mode: light | dark | auto");
     }
     const normalizedMode = String(mode).toLowerCase();
-    const config = await this.dependencies.updateConfig(
-      {
-        defaultMode: normalizedMode,
-        syncWithHost: normalizedMode === "auto",
-      },
-      this.configKey(request.sessionUuid),
-    );
-    const appliedMode = await this.applyToTargets(config, request.sessionUuid, normalizedMode);
-    await this.dependencies.triggerSync();
-    return {
-      id: request.id,
-      type: "appearance_response",
-      success: true,
-      result: {
-        config,
-        appliedMode: appliedMode ?? undefined,
-        ...this.automaticSyncWarning(normalizedMode === "auto"),
-      },
-    };
+    return this.asControlCall("set_appearance", request.sessionUuid, async (targets) => {
+      const config = await this.dependencies.updateConfig(
+        {
+          defaultMode: normalizedMode,
+          syncWithHost: normalizedMode === "auto",
+        },
+        this.configKey(request.sessionUuid),
+      );
+      const appliedMode = await this.applyToTargets(config, targets, normalizedMode);
+      await this.dependencies.triggerSync();
+      return {
+        id: request.id,
+        type: "appearance_response",
+        success: true,
+        result: {
+          config,
+          appliedMode: appliedMode ?? undefined,
+          ...this.automaticSyncWarning(normalizedMode === "auto"),
+        },
+      };
+    });
+  }
+
+  /**
+   * Re-theming a held device is a control call on its holder's session (#11486). Each target's
+   * holder passes the admission `input/*` passes before the command stores or applies anything: a
+   * suspect, lapsed or idle-expired holder refuses the whole command. The admitted executions stay
+   * in flight until the command settles, so no holder is released under its apply. With stream
+   * auth off there is no verified caller, and targets are applied without admission as before.
+   */
+  private async asControlCall<T>(
+    command: string,
+    sessionUuid: string | undefined,
+    run: (targets: AppearanceTarget[]) => Promise<T>,
+  ): Promise<T> {
+    const targets: AppearanceTarget[] = [];
+    try {
+      for (const device of this.getTargets(sessionUuid)) {
+        const target: AppearanceTarget = { device };
+        targets.push(target);
+        await this.admitOnHolderSession(command, target);
+      }
+      return await run(targets);
+    } finally {
+      for (const { execution } of targets) {
+        if (execution) {
+          executionTracker.endExecution(execution.id);
+        }
+      }
+    }
+  }
+
+  private async admitOnHolderSession(command: string, target: AppearanceTarget): Promise<void> {
+    const deviceId = target.device.deviceId;
+    const sessionManager = this.deviceSource.getSessionManager?.();
+    if (!sessionManager || this.authenticator.isAuthenticationEnforced?.() === false) {
+      // AUTOMOBILE_DAEMON_STREAM_AUTH=0 keeps its all-devices targeting with no ownership lookup.
+      return;
+    }
+    const holderSessionUuid = this.deviceSource.getSessionForDevice(deviceId);
+    if (!holderSessionUuid) {
+      return;
+    }
+    const execution = executionTracker.startExecution(command, undefined, holderSessionUuid);
+    target.execution = execution;
+    executionTracker.bindDeviceExecution(execution.id, deviceId);
+    await admitInputOnHolderSession({
+      deviceId,
+      holderSessionUuid,
+      sessionManager,
+      execution: sessionExecutionMetadataOf(execution),
+    });
+    const signal = execution.abortController.signal;
+    if (signal.aborted) {
+      // A release that landed while admission was awaited answers its own refusal.
+      throw sessionReleaseThatCancelledCall(execution.cancelReason) ?? signal.reason;
+    }
+    // With a verified identity every target is the caller's own, so this is use of its session.
+    executionTracker.markSessionAdmitted(execution.id);
   }
 
   protected createErrorResponse(id: string | undefined, error: string): AppearanceSocketResponse {
@@ -219,7 +305,7 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
 
   private async applyToTargets(
     config: AppearanceConfig,
-    sessionUuid: string | undefined,
+    targets: AppearanceTarget[],
     explicitMode?: string,
   ): Promise<AppearanceMode | null> {
     const mode =
@@ -227,24 +313,42 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
         ? (explicitMode as AppearanceMode)
         : await this.dependencies.resolveMode(config);
 
-    const targets = this.getTargets(sessionUuid);
     if (targets.length === 0) {
       return null;
     }
 
-    for (const device of targets) {
+    for (const target of targets) {
+      const { device } = target;
       try {
-        await raceWithDeadline(() => this.dependencies.applyToDevice(device, mode), {
+        await raceWithDeadline(() => this.applyToTarget(target, mode), {
           timer: this.timer,
           timeoutMs: this.dependencies.applyDeadlineMs ?? DEFAULT_APPEARANCE_APPLY_DEADLINE_MS,
           label: `Appearance apply for ${device.deviceId}`,
         });
       } catch (error) {
+        const released = sessionReleaseThatCancelledCall(target.execution?.cancelReason);
+        if (released) {
+          // The holder's session was released under the apply: the command answers that refusal.
+          throw released;
+        }
         logger.warn(`[Appearance] Failed to apply appearance to ${device.deviceId}: ${error}`);
       }
     }
 
     return mode;
+  }
+
+  /**
+   * Record the device default first, so the next session to acquire the device gets it back
+   * (#11145), then apply under the tracked call's signal so a release cuts the device work.
+   */
+  private async applyToTarget(target: AppearanceTarget, mode: AppearanceMode): Promise<void> {
+    const apply = async () => {
+      await recordDeviceSettingDefaultsBeforeChange(target.device, ["nightMode"]);
+      await this.dependencies.applyToDevice(target.device, mode);
+    };
+    const signal = target.execution?.abortController.signal;
+    await (signal ? runWithAbortSignal(signal, apply) : apply());
   }
 
   /**

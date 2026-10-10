@@ -1,3 +1,7 @@
+import {
+  FREE_DEVICE_STOP_CLAIM_STALE_MS,
+  type FreeDeviceStopClaim,
+} from "../../../src/daemon/managedSlots/slotRegistry";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS,
@@ -957,6 +961,174 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect(
         await registry.findReclaimableFreeDevices({ thresholdMs: 2 * 60 * 60 * 1000 }),
       ).toEqual([]);
+    });
+
+    describe("free-pool stop state (#11337)", () => {
+      async function dueFreeDevice(): Promise<{
+        target: FreeDeviceStopClaim;
+        key: SlotKey;
+      }> {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
+        await registry.completeScopeInvalidation(key.scopeKey);
+        const [freed] = await registry.listFreeDevices();
+        timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS);
+        return {
+          target: {
+            platform: "android",
+            stableDeviceId: "avd-1",
+            freedAtMs: freed!.freedAtMs,
+            fromScopeKey: key.scopeKey,
+            claimedBy: "daemon-1",
+          },
+          key,
+        };
+      }
+
+      test("a due device goes free to stopping to stopped and keeps its row", async () => {
+        const { target } = await dueFreeDevice();
+        expect((await registry.listFreeDevices())[0]).toMatchObject({ state: "free" });
+
+        expect(await registry.beginFreeDeviceStop(target)).toEqual({ kind: "begun" });
+        expect((await registry.listFreeDevices())[0]).toMatchObject({ state: "stopping" });
+        // An interrupted attempt is retried: still reclaimable, and begin is idempotent.
+        expect(await registry.findReclaimableFreeDevices()).toHaveLength(1);
+        expect(await registry.beginFreeDeviceStop(target)).toEqual({ kind: "begun" });
+
+        expect(await registry.completeFreeDeviceStop(target)).toBe(true);
+        expect((await registry.listFreeDevices())[0]).toMatchObject({ state: "stopped" });
+        expect(await registry.findReclaimableFreeDevices()).toEqual([]);
+        expect(await registry.beginFreeDeviceStop(target)).toEqual({ kind: "not_reclaimable" });
+        // Still excluded from generic use while stopped.
+        expect(await registry.snapshotManagedDevices()).toMatchObject([
+          { stableDeviceId: "avd-1", holder: "free" },
+        ]);
+      });
+
+      test("a stopping row is owned: only the claimer drives it until the claim is stale", async () => {
+        const { target } = await dueFreeDevice();
+        const other = { ...target, claimedBy: "daemon-2" };
+        await registry.beginFreeDeviceStop(target);
+
+        expect(await registry.holdsFreeDeviceStop(target)).toBe(true);
+        expect(await registry.holdsFreeDeviceStop(other)).toBe(false);
+        expect(await registry.beginFreeDeviceStop(other)).toEqual({ kind: "not_reclaimable" });
+        expect(await registry.completeFreeDeviceStop(other)).toBe(false);
+        expect(await registry.revertFreeDeviceStop(other)).toBe(false);
+        expect((await registry.listFreeDevices())[0]).toMatchObject({
+          state: "stopping",
+          stopClaimedBy: "daemon-1",
+        });
+
+        // The claimer died: past the stale bound another daemon takes the stop over.
+        timer.advanceTime(FREE_DEVICE_STOP_CLAIM_STALE_MS);
+        expect(await registry.beginFreeDeviceStop(other)).toEqual({ kind: "begun" });
+        expect(await registry.holdsFreeDeviceStop(target)).toBe(false);
+        expect(await registry.completeFreeDeviceStop(target)).toBe(false);
+        expect(await registry.completeFreeDeviceStop(other)).toBe(true);
+      });
+
+      test("a failed shutdown reverts to free so the device is adoptable again", async () => {
+        const { target } = await dueFreeDevice();
+        await registry.beginFreeDeviceStop(target);
+
+        expect(await registry.revertFreeDeviceStop(target)).toBe(true);
+        expect((await registry.listFreeDevices())[0]).toMatchObject({
+          state: "free",
+          stopClaimedBy: null,
+          stopClaimedAtMs: null,
+        });
+        expect(await registry.findReclaimableFreeDevices()).toHaveLength(1);
+
+        const slot = { scopeKey: await readyScope(SCOPE_B1), slotIndex: 0 };
+        await registry.initSlot(slot, INIT);
+        const adopted = await registry.commitBinding(
+          slot,
+          { generation: 0, stableDeviceId: null },
+          readyBinding("avd-1", 1),
+        );
+        expect(adopted).toMatchObject({ kind: "committed" });
+      });
+
+      test("a stale stopping claim no longer blocks adoption", async () => {
+        const { target } = await dueFreeDevice();
+        await registry.beginFreeDeviceStop(target);
+        timer.advanceTime(FREE_DEVICE_STOP_CLAIM_STALE_MS);
+        const slot = { scopeKey: await readyScope(SCOPE_B1), slotIndex: 0 };
+        await registry.initSlot(slot, INIT);
+
+        const adopted = await registry.commitBinding(
+          slot,
+          { generation: 0, stableDeviceId: null },
+          readyBinding("avd-1", 1),
+        );
+
+        expect(adopted).toMatchObject({ kind: "committed" });
+        expect(await registry.holdsFreeDeviceStop(target)).toBe(false);
+      });
+
+      test("a device that is not yet due is not claimed", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
+        await registry.completeScopeInvalidation(key.scopeKey);
+        const [freed] = await registry.listFreeDevices();
+        timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS - 1);
+        expect(
+          await registry.beginFreeDeviceStop({
+            platform: "android",
+            stableDeviceId: "avd-1",
+            freedAtMs: freed!.freedAtMs,
+            fromScopeKey: key.scopeKey,
+            claimedBy: "daemon-1",
+          }),
+        ).toEqual({ kind: "not_reclaimable" });
+      });
+
+      test("an adoption that wins the race keeps the device and fails the stop CAS", async () => {
+        const { target } = await dueFreeDevice();
+        const slot = { scopeKey: await readyScope(SCOPE_B1), slotIndex: 0 };
+        await registry.initSlot(slot, INIT);
+        const adopted = await registry.commitBinding(
+          slot,
+          { generation: 0, stableDeviceId: null },
+          readyBinding("avd-1", 1),
+        );
+        expect(adopted).toMatchObject({ kind: "committed" });
+
+        expect(await registry.beginFreeDeviceStop(target)).toEqual({ kind: "not_reclaimable" });
+        expect(await registry.completeFreeDeviceStop(target)).toBe(false);
+        expect(await registry.listFreeDevices()).toEqual([]);
+      });
+
+      test("adoption is refused while stopping and succeeds once stopped", async () => {
+        const { target } = await dueFreeDevice();
+        const slot = { scopeKey: await readyScope(SCOPE_B1), slotIndex: 0 };
+        await registry.initSlot(slot, INIT);
+        await registry.beginFreeDeviceStop(target);
+
+        expect(
+          await registry.commitBinding(
+            slot,
+            { generation: 0, stableDeviceId: null },
+            readyBinding("avd-1", 1),
+          ),
+        ).toEqual({ kind: "free_device_stopping" });
+        expect(await registry.listFreeDevices()).toHaveLength(1);
+
+        await registry.completeFreeDeviceStop(target);
+        const adopted = await registry.commitBinding(
+          slot,
+          { generation: 0, stableDeviceId: null },
+          readyBinding("avd-1", 1),
+        );
+        expect(adopted).toMatchObject({
+          kind: "committed",
+          adoptedFreeDevice: { stableDeviceId: "avd-1", state: "stopped" },
+        });
+        expect(await registry.listFreeDevices()).toEqual([]);
+      });
     });
 
     describe("daemon restart (#11275)", () => {

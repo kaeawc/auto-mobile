@@ -865,6 +865,8 @@ interface SessionReleaseOperation extends PendingSessionRelease {
   session: Session;
   /** When the release started; bounds the retry hint for a bind it refuses (#10960). */
   startedAtMs?: number;
+  /** Set for an idle release the manager started itself (#11481): see `getIdleReleasesInProgress`. */
+  expiryOrigin?: SessionReleaseOptions["expiryOrigin"];
   /** The release's current stage, named when it is reported stuck (#10963). */
   stage?: SessionReleaseStage;
   /** Set once a stuck release has been forced: it no longer holds the device (#10963). */
@@ -2337,6 +2339,21 @@ export class SessionManager {
         (release) => !release.forced && release.session.assignedDevice === deviceId,
       )
     );
+  }
+
+  /**
+   * The idle releases this manager started itself (the idle sweep, a lazy expiry) that still hold
+   * their device (#11481). No caller awaits them and they are not reaps of the heartbeat monitor,
+   * so the monitor reads them here to hold them to its stuck deadline (#10963). A forced release
+   * no longer holds its device and is not listed, so it is forced exactly once.
+   */
+  getIdleReleasesInProgress(): { sessionId: string; startedAtMs: number }[] {
+    return Array.from(this.activeReleasePromises)
+      .filter((release) => release.expiryOrigin !== undefined && !release.forced)
+      .map((release) => ({
+        sessionId: release.session.sessionId,
+        startedAtMs: release.startedAtMs ?? this.sessionNow(),
+      }));
   }
 
   /**
@@ -4838,6 +4855,7 @@ export class SessionManager {
       promise: Promise.resolve(null),
       reason,
       startedAtMs: this.sessionNow(),
+      expiryOrigin: options.expiryOrigin,
       forcedAbort: new AbortController(),
     };
     const run = () =>
@@ -8793,6 +8811,15 @@ export class SessionManager {
         // Shift, never reset (#10662), and never past the resume point.
         const idleStart = effectiveLastToolActivity(session);
         session.idleStallForgivenAt = Math.max(idleStart, Math.min(resumedAt, idleStart + lostMs));
+        // A rehydrated one is judged on its owner-reconnect window alone, so that window moves
+        // with the idle anchor (#11481): by the daemon's stall, never by host sleep, which counts
+        // toward a CLI session's idle window.
+        if (session.awaitingOwnerSince !== undefined) {
+          session.awaitingOwnerSince = Math.max(
+            session.awaitingOwnerSince,
+            Math.min(session.awaitingOwnerSince + lostMs, resumedAt),
+          );
+        }
         forgiven++;
         continue;
       }

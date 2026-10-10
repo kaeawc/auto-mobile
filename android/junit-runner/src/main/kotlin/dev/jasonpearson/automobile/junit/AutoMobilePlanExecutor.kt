@@ -15,6 +15,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import org.junit.Test
 
 /**
@@ -483,11 +484,12 @@ internal object AutoMobilePlanExecutor {
       }
 
       val errorMessage = response.error ?: parsed.errorMessage
-      if (parsed.code in DEVICE_WAIT_CODES) {
+      if (waitsForDevice(parsed)) {
         // Another session holds the device (typically a concurrent test attempt in this runner),
         // or its previous session is still finishing cleanup (#10960). Wait for it to free up,
         // within its own bounded budget, without spending maxRetries.
-        val delayMs = deviceOwnedBackoffDelayMs(deviceOwnedWaits, deviceOwnedWaitMs)
+        val delayMs =
+          deviceOwnedBackoffDelayMs(deviceOwnedWaits, deviceOwnedWaitMs, parsed.retryAfterMs)
         if (delayMs == null) {
           parsed = parsed.copy(errorMessage = deviceOwnedGiveUpMessage(parsed, deviceOwnedWaitMs))
           break
@@ -947,6 +949,11 @@ internal object AutoMobilePlanExecutor {
             else -> null
           },
         acquireNewSession = acquireNewSession,
+        retryAfterMs =
+          ((errorObject?.get("retryAfterMs") ?: parsed["retryAfterMs"]) as? JsonPrimitive)
+            ?.takeIf { !it.isString }
+            ?.longOrNull
+            ?.takeIf { it > 0 },
       )
     }
     return ParsedToolResult(true, "")
@@ -1267,6 +1274,21 @@ internal object AutoMobilePlanExecutor {
       DEVICE_SHUTTING_DOWN_CODE,
     )
 
+  /** Typed codes that wait only when the daemon marks the refusal retryable (iOS parity, #11202). */
+  internal const val CAPACITY_EXHAUSTED_CODE = "capacity_exhausted"
+  internal const val DISCOVERY_INCOMPLETE_CODE = "discovery_incomplete"
+
+  private val RETRYABLE_WAIT_CODES = setOf(CAPACITY_EXHAUSTED_CODE, DISCOVERY_INCOMPLETE_CODE)
+
+  /**
+   * Whether the runner waits out this refusal within the bounded device wait: the held-device codes
+   * always, capacity and discovery refusals only when the daemon says they are retryable.
+   */
+  private fun waitsForDevice(parsed: ParsedToolResult): Boolean {
+    val code = parsed.code ?: return false
+    return code in DEVICE_WAIT_CODES || (parsed.retryable && code in RETRYABLE_WAIT_CODES)
+  }
+
   private const val DEVICE_OWNED_INITIAL_DELAY_MS = 500L
   private const val DEVICE_OWNED_MAX_DELAY_MS = 4_000L
   private const val DEVICE_OWNED_DEFAULT_BUDGET_MS = 30_000L
@@ -1279,13 +1301,19 @@ internal object AutoMobilePlanExecutor {
 
   /**
    * Exponential delay (500ms doubling, capped at 4s) for the next wait on a held device, clamped to
-   * the remaining [deviceOwnedWaitBudgetMs]; null once the budget is spent.
+   * the remaining [deviceOwnedWaitBudgetMs]; null once the budget is spent. A daemon
+   * `retryAfterMs` hint lengthens a step but never extends the budget.
    */
-  internal fun deviceOwnedBackoffDelayMs(waitsSoFar: Int, waitedMs: Long): Long? {
+  internal fun deviceOwnedBackoffDelayMs(
+    waitsSoFar: Int,
+    waitedMs: Long,
+    retryAfterMs: Long? = null,
+  ): Long? {
     val remaining = deviceOwnedWaitBudgetMs - waitedMs
     if (remaining <= 0) return null
     val doubled = DEVICE_OWNED_INITIAL_DELAY_MS shl waitsSoFar.coerceAtMost(8)
-    return minOf(doubled, DEVICE_OWNED_MAX_DELAY_MS, remaining)
+    val backoff = minOf(doubled, DEVICE_OWNED_MAX_DELAY_MS)
+    return minOf(maxOf(backoff, retryAfterMs ?: 0L), remaining)
   }
 
   private const val RELEASE_SESSION_METHOD = "daemon/releaseSession"
@@ -1298,6 +1326,9 @@ internal object AutoMobilePlanExecutor {
       DEVICE_OWNED_BY_OTHER_DAEMON_CODE ->
         "Device is claimed by another AutoMobile daemon ($DEVICE_OWNED_BY_OTHER_DAEMON_CODE)"
       DEVICE_SHUTTING_DOWN_CODE -> "Device is shutting down ($DEVICE_SHUTTING_DOWN_CODE)"
+      CAPACITY_EXHAUSTED_CODE -> "No device capacity is available ($CAPACITY_EXHAUSTED_CODE)"
+      DISCOVERY_INCOMPLETE_CODE ->
+        "Device discovery has not finished ($DISCOVERY_INCOMPLETE_CODE)"
       else -> "Device is held by another session ($DEVICE_OWNED_BY_OTHER_SESSION_CODE)"
     }) +
       (parsed.daemonMessage?.let { ": $it" } ?: "") +
@@ -1340,5 +1371,7 @@ internal object AutoMobilePlanExecutor {
     val sessionHeld: Boolean? = null,
     /** The refusal named a terminal session UUID and told the client to acquire a new one. */
     val acquireNewSession: Boolean = false,
+    /** The daemon's `retryAfterMs` hint for a retryable refusal, when it sent one. */
+    val retryAfterMs: Long? = null,
   )
 }

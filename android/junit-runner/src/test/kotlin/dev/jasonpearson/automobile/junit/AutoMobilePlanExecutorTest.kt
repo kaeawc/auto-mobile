@@ -78,8 +78,50 @@ class AutoMobilePlanExecutorTest {
     val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
 
     assertEquals(true, result.success)
-    assertEquals(listOf(500L, 1000L), waits)
+    // The daemon's retryAfterMs (4000) lengthens each step beyond the 500/1000 backoff.
+    assertEquals(listOf(4000L, 4000L), waits)
     assertEquals(3, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
+  fun `retryable capacity exhaustion waits within the budget honouring retryAfterMs`() {
+    val waits = mutableListOf<Long>()
+    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    AutoMobilePlanExecutor.deviceOwnedWaitBudgetMs = 5_000L
+    fakeDaemonClient.queueExecutePlanResponse(
+      buildDaemonResponse(capacityPayload("capacity_exhausted", true, 3000), isError = true),
+    )
+    fakeDaemonClient.queueExecutePlanResponse(
+      buildDaemonResponse(capacityPayload("discovery_incomplete", true, 100), isError = true),
+    )
+    fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(successPayload()))
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
+
+    assertEquals(true, result.success)
+    assertEquals(listOf(3000L, 1000L), waits)
+    assertEquals(3, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
+  fun `non retryable capacity exhaustion is not waited on and exhausted waits report the code`() {
+    val waits = mutableListOf<Long>()
+    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(capacityPayload("capacity_exhausted", false, null), isError = true),
+    )
+    assertEquals(false, executePlan(AutoMobilePlanExecutionOptions(aiAssistance = false)).success)
+    assertEquals(emptyList<Long>(), waits)
+
+    AutoMobilePlanExecutor.deviceOwnedWaitBudgetMs = 600L
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(capacityPayload("capacity_exhausted", true, null), isError = true),
+    )
+    val result = executePlan(AutoMobilePlanExecutionOptions(aiAssistance = false))
+    assertEquals(listOf(500L, 100L), waits)
+    assertTrue(result.errorMessage, result.errorMessage.contains("capacity_exhausted"))
   }
 
   @Test
@@ -94,7 +136,7 @@ class AutoMobilePlanExecutorTest {
     val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
 
     assertEquals(true, result.success)
-    assertEquals(listOf(500L), waits)
+    assertEquals(listOf(2000L), waits)
     assertEquals(2, fakeDaemonClient.executePlanCalls)
   }
 
@@ -110,7 +152,7 @@ class AutoMobilePlanExecutorTest {
     val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
 
     assertEquals(true, result.success)
-    assertEquals(listOf(500L), waits)
+    assertEquals(listOf(2000L), waits)
     assertEquals(2, fakeDaemonClient.executePlanCalls)
   }
 
@@ -703,6 +745,14 @@ class AutoMobilePlanExecutorTest {
   private fun shuttingDownDevicePayload(): JsonObject =
     payload(
       """{"success":false,"error":"Device 'emulator-5554' is shutting down (code device_shutting_down)","code":"device_shutting_down","deviceId":"emulator-5554","retryable":true,"retryAfterMs":2000}""",
+    )
+
+  // Shape of shapeToolCallError for a retryable capacity / discovery refusal (#11202).
+  private fun capacityPayload(code: String, retryable: Boolean, retryAfterMs: Int?): JsonObject =
+    payload(
+      """{"success":false,"error":"no capacity","code":"$code","retryable":$retryable""" +
+        (retryAfterMs?.let { ""","retryAfterMs":$it""" } ?: "") +
+        "}",
     )
 
   private fun deviceLostPayload(): JsonObject =

@@ -26,9 +26,16 @@ import { normalizePlanDevices } from "../utils/plan/PlanDevices";
 import { decodePlanYamlContent } from "../utils/plan/planYaml";
 
 type NormalizedPlanDevices = ReturnType<typeof normalizePlanDevices>;
-import { buildDeviceLabelMap, registerDeviceLabelMap } from "./deviceLabelMapping";
+import {
+  buildDeviceLabelMap,
+  planLifecycleSessionUuid,
+  registerDeviceLabelMap,
+} from "./deviceLabelMapping";
 import { importPlanFromYaml, executePlan } from "../utils/planUtils";
 import { DaemonState } from "../daemon/daemonState";
+import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
+import { managedConnectionPlanLabelRefusal } from "../daemon/managedSlots/managedConnectionScope";
+import { DeviceOutsideManagedSlotsError } from "../daemon/managedSlots/managedSlotRefusal";
 import type { DevicePool } from "../daemon/devicePool";
 import type { SessionManager } from "../daemon/sessionManager";
 import {
@@ -633,6 +640,13 @@ export class PlanExecutionOrchestrator {
       this.request.device,
     );
     const sessionIds = Object.values(labelToSessionMap);
+    // A managed connection is refused here, before anything is published, allocated or booted.
+    const slotDevices = this.managedSlotLabelDevices(
+      sessionUuid,
+      labelToSessionMap,
+      normalized,
+      sessionManager,
+    );
 
     // The plan execution is tracked on its base session. Publish its derived
     // label-session ownership before the allocator's first await so heartbeat
@@ -654,14 +668,16 @@ export class PlanExecutionOrchestrator {
       throw error;
     };
 
-    const allocation = Promise.resolve().then(() =>
-      this.requestDeviceAllocation(
-        devicePool,
-        normalized,
-        effectiveLabels,
-        labelToSessionMap,
-        sessionIds,
-      ),
+    const allocation = Promise.resolve().then(
+      () =>
+        slotDevices ??
+        this.requestDeviceAllocation(
+          devicePool,
+          normalized,
+          effectiveLabels,
+          labelToSessionMap,
+          sessionIds,
+        ),
     );
 
     const sessionToDeviceMap = await allocation.catch((error) => {
@@ -690,6 +706,52 @@ export class PlanExecutionOrchestrator {
     );
 
     return deviceMapping;
+  }
+
+  /**
+   * Managed slots (#11397): a managed connection controls only its own slot devices, so its plan
+   * labels are never handed to the generic pool allocator, which lends generic devices and can boot
+   * more. Returns the session -> device map for labels its own slot sessions serve, throws
+   * `device_outside_managed_slots` for a label they cannot serve, and returns undefined for a
+   * generic connection. A plan step carries no socket session id, so the connection is also
+   * recognized by the slot session the plan runs on.
+   */
+  private managedSlotLabelDevices(
+    sessionUuid: string,
+    labelToSessionMap: Record<string, string>,
+    normalized: NormalizedPlanDevices,
+    sessionManager: SessionManager,
+  ): Map<string, string> | undefined {
+    const scopes = DaemonState.getInstance().getManagedConnectionScopes();
+    const connectionId: unknown = Reflect.get(this.request, INTERNAL_MCP_SESSION_PARAM);
+    const binding =
+      scopes.get(typeof connectionId === "string" ? connectionId : undefined) ??
+      scopes.forSlotSession(planLifecycleSessionUuid(sessionUuid));
+    if (!binding) {
+      return undefined;
+    }
+    const refusal = managedConnectionPlanLabelRefusal({
+      binding,
+      action: "executePlan",
+      labelSessions: labelToSessionMap,
+    });
+    if (refusal) {
+      throw refusal;
+    }
+    const slotDevices = new Map<string, string>();
+    for (const [label, slotSessionUuid] of Object.entries(labelToSessionMap)) {
+      const slotSession = sessionManager.getSession(slotSessionUuid);
+      const platform = normalized.definitions.find(
+        (definition) => definition.label === label,
+      )?.platform;
+      if (!slotSession?.assignedDevice || (platform && slotSession.platform !== platform)) {
+        throw new DeviceOutsideManagedSlotsError("executePlan", "tool", binding.scopeKey, {
+          deviceLabel: label,
+        });
+      }
+      slotDevices.set(slotSessionUuid, slotSession.assignedDevice);
+    }
+    return slotDevices;
   }
 
   private requestDeviceAllocation(

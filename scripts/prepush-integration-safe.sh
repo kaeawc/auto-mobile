@@ -112,7 +112,7 @@ tmp_base="${tmp_base%/}"
 refuse_shared_location TMPDIR "$tmp_base"
 
 work_dir="$(mktemp -d "${tmp_base}/am-int-safe.XXXXXX")"
-# shellcheck disable=SC2329 # invoked via the EXIT trap
+# shellcheck disable=SC2317,SC2329 # invoked via the EXIT trap
 cleanup() {
   rm -rf "$work_dir"
 }

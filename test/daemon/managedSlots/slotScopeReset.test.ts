@@ -3,6 +3,7 @@ import {
   SLOT_SCOPE_RESET_POLL_MS,
   SlotScopeReset,
 } from "../../../src/daemon/managedSlots/slotScopeReset";
+import { MANAGED_EXECUTION_SETTLEMENT_CAP_MS } from "../../../src/daemon/managedSlots/managedExecutionRelease";
 import { MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS } from "../../../src/daemon/managedSlots/slotRegistry";
 import { DAEMON_RESET_SLOT_SCOPE_METHOD } from "../../../src/daemon/constants";
 import {
@@ -288,7 +289,7 @@ describe("SlotScopeReset", () => {
     }
   });
 
-  test("--force returns a journaled stuck settling slot to ready and commits its entry", async () => {
+  async function openSettlingRelease(): Promise<void> {
     const key = await assignManagedSlotDevice(registry, "android", "avd-a", "runner-a");
     livePids.add(7);
     const settler = { daemonId: "d", pid: 7, processGenerationToken: "t" };
@@ -313,13 +314,53 @@ describe("SlotScopeReset", () => {
       },
     });
     expect(opened.kind).toBe("opened");
+  }
+
+  test("--force returns a slot stuck settling past the cap to ready and commits its entry", async () => {
+    await openSettlingRelease();
     expect((await reset.reset({ ...RESET, waitMs: 0 })).outcome).toBe("pending");
+    timer.setCurrentTime(timer.now() + MANAGED_EXECUTION_SETTLEMENT_CAP_MS);
 
     const forced = await reset.reset({ ...RESET, waitMs: 0, force: true });
 
     expect(forced.outcome).toBe("invalidated");
     expect(await registry.listOpenSlotJournal()).toEqual([]);
     expect((await registry.listFreeDevices()).map((d) => d.stableDeviceId)).toEqual(["avd-a"]);
+  });
+
+  test("--force refuses a settling slot still inside the cap and reports the time remaining (#11539)", async () => {
+    await openSettlingRelease();
+    timer.setCurrentTime(timer.now() + 500);
+
+    const result = await reset.reset({ ...RESET, waitMs: 0, force: true });
+
+    expect(result.outcome).toBe("pending");
+    expect(result.retryable).toBe(true);
+    expect(result.scopes[0]?.forceRefusals).toEqual([
+      {
+        slotIndex: 0,
+        reason: "within_settlement_cap",
+        remainingMs: MANAGED_EXECUTION_SETTLEMENT_CAP_MS - 500,
+        message: expect.stringContaining("retry --force"),
+      },
+    ]);
+    expect(await registry.listFreeDevices()).toEqual([]);
+    expect(await registry.listOpenSlotJournal()).toHaveLength(1);
+  });
+
+  test("--force says so when a settling slot has no release entry instead of skipping it", async () => {
+    await openSettlingRelease();
+    const [entry] = await registry.listOpenSlotJournal();
+    await registry.advanceSlotJournal(entry!.id, {
+      owner: entry!.owner,
+      expectedPhase: entry!.phase,
+      phase: "committed",
+    });
+    timer.setCurrentTime(timer.now() + MANAGED_EXECUTION_SETTLEMENT_CAP_MS);
+
+    const result = await reset.reset({ ...RESET, waitMs: 0, force: true });
+
+    expect(result.scopes[0]?.forceRefusals?.map((r) => r.reason)).toEqual(["no_release_entry"]);
   });
 
   test("--force never overrides a slot in use by a live execution owner", async () => {

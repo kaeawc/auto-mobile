@@ -68,6 +68,8 @@ import {
   type DeviceLossOutcome,
 } from "./deviceLossOutcome";
 
+import { refuseControlOnForeignOwnedSession } from "./foreignOwnedSessionRefusal";
+
 // Import the tool registry
 import { ToolRegistry, toolHasOutputSchema } from "./toolRegistry";
 import {
@@ -1294,6 +1296,17 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       sessionUuid: providedSessionUuid,
     });
 
+    // #11344: a control call never runs on a session another connected client owns. Refused
+    // before the execution starts, so naming the session neither extends nor binds it.
+    if (
+      daemonMode &&
+      tool.requiresDevice &&
+      !isDeviceSessionAcquisitionTool(name) &&
+      tool.isDeviceReadOnlyCall?.(parsedParams) !== true
+    ) {
+      refuseControlOnForeignOwnedSession(name, providedSessionUuid, requestMcpSessionId);
+    }
+
     // #6869: the capabilities this acquisition declares, validated up front.
     const requestedEnableTools = resolveRequestedEnableTools(name, parsedParams);
 
@@ -1358,16 +1371,16 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // The daemon echoes the session it routed an admitted, non-read call to, so a proxy credits
     // exactly that session instead of guessing it from a selector (#10974). Read before the
     // execution ends.
-    // #11235: an explicitly named session another connected client owns by autolock. Naming a
-    // UUID is not proof of ownership (#11164): the call may still run on that session, but this
-    // connection must never bind it for later sessionless calls. Decided before any bind, and
-    // read at bind time so an ownership change during the handler is honored.
+    // #11235, #11344: an explicitly named session another connected client owns, with autolock
+    // on or off. Naming a UUID is not proof of ownership (#11164): a read may still watch that
+    // session, but this connection must never bind it for later sessionless calls. Decided
+    // before any bind, and read at bind time so an ownership change during the handler is honored.
     const foreignOwnedExplicitSessionUuid = (): string | undefined =>
       providedSessionUuid &&
       DaemonState.getInstance().isInitialized() &&
       DaemonState.getInstance()
         .getDevicePool()
-        .isAutolockSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)
+        .isSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)
         ? providedSessionUuid
         : undefined;
     // The proxy learns from the marker not to remember a foreign-owned session it named.

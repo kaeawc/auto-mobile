@@ -437,6 +437,17 @@ for path in "${changed_files[@]}"; do
       add_check "shellcheck"
       add_check "shell-portability"
       add_check "shell-sete"
+      add_check "pipefail-grep-q"
+      ;;
+  esac
+
+  # The pipefail+grep -q ratchet is keyed by per-file counts, so a changed
+  # baseline (or any changed script, above) must re-run it together with the
+  # BATS file that pins the committed tree against that baseline (#11183).
+  case "${path}" in
+    scripts/shellcheck/pipefail-grepq-baseline.txt)
+      add_check "pipefail-grep-q"
+      add_bats_file "test/bats/validate-shell-pipefail-grepq.bats"
       ;;
   esac
 
@@ -556,6 +567,14 @@ for path in "${changed_files[@]}"; do
     test/bats/*.bats)
       if [[ -f "${path}" ]]; then
         add_bats_file "${path}"
+      fi
+      ;;
+    test/bats/*)
+      # A BATS helper or fixture: run every BATS file that names it.
+      if [[ -f "${path}" ]]; then
+        while IFS= read -r bats_file; do
+          add_bats_file "${bats_file}"
+        done < <(grep -l -F -- "${path##*/}" test/bats/*.bats || true)
       fi
       ;;
   esac

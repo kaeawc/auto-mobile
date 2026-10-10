@@ -888,6 +888,24 @@ describe("overlay MCP tool", () => {
     expect((await call({ action: "status" })).payload).toEqual({ success: true, overlays: [] });
   });
 
+  test("an upgrade-only re-announcement keeps the device's next owner's overlay state (#11206)", async () => {
+    await call({ action: "show", spec });
+    SessionReleaseBroadcaster.emit(
+      "earlier-owner",
+      "explicit-release",
+      {
+        sessionId: "earlier-owner",
+        deviceId: device.deviceId,
+        releaseReason: "explicit-release",
+        releasedAtMs: timer.now(),
+        terminal: true,
+        heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: true, timeoutMs: 50, ageMs: 0 },
+      },
+      { upgradeOnly: true },
+    );
+    expect((await call({ action: "status" })).payload.overlays).toHaveLength(1);
+  });
+
   test("dismiss id and all update local status", async () => {
     await call({ action: "show", spec });
     await call({ action: "dismiss", id: "panel" });

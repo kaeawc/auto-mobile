@@ -32,6 +32,7 @@ export function announceSessionRelease(
   sessionId: string,
   releaseReason: string,
   snapshot: SessionReleaseSnapshot,
+  options: { upgradeOnly?: boolean } = {},
 ): void {
   const recordingIds = announcer.takeRecordingIds(sessionId);
   if (shutdown.fallbacks?.has(sessionId)) {
@@ -40,10 +41,14 @@ export function announceSessionRelease(
   if (releaseReason === "daemon-shutdown") {
     shutdown.announced?.add(sessionId);
   }
+  const extras: SessionReleaseExtras = {
+    ...(recordingIds.length > 0 ? { recordingIds } : {}),
+    ...(options.upgradeOnly ? { upgradeOnly: true } : {}),
+  };
   announcer.emit(
     sessionId,
     releaseReason,
     snapshot,
-    recordingIds.length > 0 ? { recordingIds } : undefined,
+    Object.keys(extras).length > 0 ? extras : undefined,
   );
 }

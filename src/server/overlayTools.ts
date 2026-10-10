@@ -1755,8 +1755,10 @@ function overlayPlatformError(
 function defaultOverlayLifecycle(): OverlayEventLifecycle {
   return {
     subscribeSessionRelease: (listener) =>
-      SessionReleaseBroadcaster.subscribe((sessionUuid, _reason, snapshot) =>
-        listener(sessionUuid, snapshot?.deviceId),
+      SessionReleaseBroadcaster.subscribe((sessionUuid, _reason, snapshot, extras) =>
+        // An upgrade-only re-announcement's device may belong to its next owner by now (#11206):
+        // clear the released session's own state only.
+        listener(sessionUuid, extras?.upgradeOnly ? undefined : snapshot?.deviceId),
       ),
     subscribeDeviceRemoval: (listener) =>
       getDaemonStreamDeviceLifecycleEmitter().onDeviceRemoved(listener),

@@ -97,6 +97,12 @@ if (!globalFlags[cleanupFlagKey]) {
  */
 testOverrides.telemetryNoOpDefault = true;
 
+// Device-manager boot tests run against fake emulators and simulators; the
+// shared boot admission gates (#11181) would otherwise sample the real host's
+// adb listing and process table, and could queue a fake boot behind real
+// emulators. Gate tests construct gates over fake sources directly.
+testOverrides.bootAdmissionGatesDisabled = true;
+
 // Emulator launch tests must never create real TCP probes. Individual tests
 // inject unavailable ports when exercising allocation behavior.
 testOverrides.hostPortAvailabilityChecker = {

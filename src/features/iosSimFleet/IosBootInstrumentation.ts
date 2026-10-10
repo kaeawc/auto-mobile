@@ -5,8 +5,8 @@ import type { SimulatorWorkloadProfile } from "../../models/DeviceResourceReconc
 import type { BootDurationHistory } from "./BootDurationHistory";
 import { assertCapacityGranted, type SimulatorCapacityGate } from "./CapacityGate";
 
-/** Opt-in switch for queueing simulator boots behind the fleet capacity gate. */
-export const IOS_SIM_CAPACITY_GATE_ENV = "AUTOMOBILE_IOS_SIM_CAPACITY_GATE";
+/** iOS-only override of the boot admission gate switch (#11181); see `isBootCapacityGateEnabled`. */
+export { IOS_SIM_CAPACITY_GATE_ENV } from "../bootAdmission/BootAdmissionGate";
 
 /** Fingerprint of the empty profile: boots that requested no resource overrides share one identity. */
 export function bootProfileId(profile?: SimulatorWorkloadProfile): string {

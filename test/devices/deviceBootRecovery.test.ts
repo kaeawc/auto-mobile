@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { CiIosBootRecovery } from "../../src/devices/deviceBootRecovery";
 import type { DeviceInfo } from "../../src/models";
+import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 
 describe("CiIosBootRecovery", () => {
   const target: DeviceInfo = {
@@ -35,6 +36,35 @@ describe("CiIosBootRecovery", () => {
     ).rejects.toThrow("cancelled boot");
 
     expect(recovered).toEqual([]);
+  });
+
+  // #11181: no capacity is freed by erasing the simulator that could not get a slot.
+  it("does not shut down or erase an owned simulator refused for capacity", async () => {
+    const recovered: string[] = [];
+    let bootAttempts = 0;
+    const recovery = new CiIosBootRecovery({
+      ownedSimulatorName: target.name,
+      shutdown: async () => {
+        recovered.push("shutdown");
+      },
+      erase: async () => {
+        recovered.push("erase");
+      },
+    });
+    const refusal = new BootCapacityExhaustedError(
+      { platform: "ios", limit: 1, booted: 1, retryAfterMs: 5_000 },
+      "no simulator capacity",
+    );
+
+    await expect(
+      recovery.run(target, async () => {
+        bootAttempts++;
+        throw refusal;
+      }),
+    ).rejects.toBe(refusal);
+
+    expect(recovered).toEqual([]);
+    expect(bootAttempts).toBe(1);
   });
 
   it("stops recovery when cancellation arrives during shutdown", async () => {

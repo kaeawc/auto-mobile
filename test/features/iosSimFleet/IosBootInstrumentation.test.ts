@@ -5,7 +5,12 @@ import {
   IOS_SIM_CAPACITY_GATE_ENV,
   bootProfileId,
 } from "../../../src/features/iosSimFleet/IosBootInstrumentation";
-import { createDefaultIosBootInstrumentation } from "../../../src/features/iosSimFleet/defaultIosBootInstrumentation";
+import {
+  createDefaultIosBootInstrumentation,
+  createIosSimCapacityGate,
+} from "../../../src/features/iosSimFleet/defaultIosBootInstrumentation";
+import { BOOT_CAPACITY_GATE_ENV } from "../../../src/features/bootAdmission/BootAdmissionGate";
+import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import type { CapacityDecision } from "../../../src/features/iosSimFleet/CapacityGate";
 import { deviceResourceProfileFingerprint } from "../../../src/utils/deviceResourceDrift";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
@@ -85,7 +90,7 @@ describe("FleetBootInstrumentation", () => {
       instrumentation.run({ udid: UDID, timeoutMs: 1_000 }, async () => {
         booted = true;
       }),
-    ).rejects.toThrow(/waiting for simulator capacity/);
+    ).rejects.toThrow(BootCapacityExhaustedError);
     expect(booted).toBe(false);
   });
 
@@ -126,29 +131,38 @@ describe("FleetBootInstrumentation", () => {
   });
 });
 
-describe("createDefaultIosBootInstrumentation", () => {
-  test("never consults the host without the capacity-gate env flag", async () => {
-    const simctl = new FakeSimCtlClient();
-    const instrumentation = createDefaultIosBootInstrumentation({
-      simctl,
-      timer: new FakeTimer(),
-      env: {},
-    });
-    await instrumentation.run({ udid: UDID, timeoutMs: 1_000 }, async () => undefined);
-    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
-  });
-
-  test("the env flag arms the gate, reading the inventory through the injected simctl", async () => {
+describe("createIosSimCapacityGate", () => {
+  function gateFor(env: NodeJS.ProcessEnv) {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandArgsResult(["list", "devices", "--json"], '{"devices":{}}');
-    const instrumentation = createDefaultIosBootInstrumentation({
+    const gate = createIosSimCapacityGate({
       simctl,
       timer: new FakeTimer(),
-      env: { [IOS_SIM_CAPACITY_GATE_ENV]: "1" },
+      history: new InMemoryBootDurationHistory(),
+      env,
       executor: new FakeHostCommandExecutor(),
     });
+    return { simctl, gate };
+  }
+
+  // #11181: the gate is on by default.
+  test("arms the gate by default, reading the inventory through the injected simctl", async () => {
+    const { simctl, gate } = gateFor({});
+    expect(gate).toBeDefined();
+    const instrumentation = createDefaultIosBootInstrumentation({ timer: new FakeTimer(), gate });
     // An unreadable host snapshot is non-fatal for an empty fleet.
     await instrumentation.run({ udid: UDID, timeoutMs: 1_000 }, async () => undefined);
     expect(simctl.getMethodCalls("executeCommandArgs").length).toBeGreaterThan(0);
+  });
+
+  test("the shared opt-out disables it", () => {
+    expect(gateFor({ [BOOT_CAPACITY_GATE_ENV]: "0" }).gate).toBeUndefined();
+  });
+
+  test("the iOS override wins over the shared switch in both directions", () => {
+    expect(gateFor({ [IOS_SIM_CAPACITY_GATE_ENV]: "0" }).gate).toBeUndefined();
+    expect(
+      gateFor({ [BOOT_CAPACITY_GATE_ENV]: "0", [IOS_SIM_CAPACITY_GATE_ENV]: "1" }).gate,
+    ).toBeDefined();
   });
 });

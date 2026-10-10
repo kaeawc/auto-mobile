@@ -832,6 +832,54 @@ describe("MultiPlatformDeviceManager", () => {
     expect(start).toEqual({ process: null, outcome: "joined-in-process-launch" });
   });
 
+  // #11181: the launch receives an admission hook bound to the boot budget and signal.
+  test("startDevice hands the Android launcher an admission hook bound to the boot budget", async () => {
+    const admitRequests: Array<{ timeoutMs: number; signal?: AbortSignal; avdName: string }> = [];
+    let admitColdBoot: (() => Promise<unknown>) | undefined;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      createFakeAndroidEmulator({
+        getBootedDevicesChecked: async () => [],
+        launchEmulator: async (request) => {
+          admitColdBoot = request.admitColdBoot;
+          return { process: null };
+        },
+      }),
+    ).withAndroidBootAdmission({
+      admit: async (request) => {
+        admitRequests.push(request);
+        return { release: () => {}, handOff: () => {} };
+      },
+    });
+
+    await manager.startDevice({ name: "Pixel", platform: "android", isRunning: false }, 42_000);
+
+    // The launcher decides whether to call it (only on a cold spawn).
+    expect(admitRequests).toEqual([]);
+    await admitColdBoot?.();
+    expect(admitRequests).toEqual([{ timeoutMs: 42_000, signal: undefined, avdName: "Pixel" }]);
+  });
+
+  test("startDevice gives the Android launcher no admission hook when gating is off", async () => {
+    let sawHook = true;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      createFakeAndroidEmulator({
+        getBootedDevicesChecked: async () => [],
+        launchEmulator: async (request) => {
+          sawHook = request.admitColdBoot !== undefined;
+          return { process: null };
+        },
+      }),
+    ).withAndroidBootAdmission(null);
+
+    await manager.startDevice({ name: "Pixel", platform: "android", isRunning: false });
+
+    expect(sawHook).toBe(false);
+  });
+
   test("startDevice forwards the poster option to the Android launcher", async () => {
     let received: string | undefined;
     const manager = new MultiPlatformDeviceManager(

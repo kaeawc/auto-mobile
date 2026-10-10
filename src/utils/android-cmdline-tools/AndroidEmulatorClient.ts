@@ -15,6 +15,7 @@ import {
 import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../models";
 import { toActionableError } from "../../models/ActionableError";
 import { EmulatorLaunchCancelledError } from "../../models/EmulatorLaunchCancelledError";
+import type { AdmitColdBoot, BootAdmission } from "../../models/BootAdmission";
 import { AdbClientFactory, unadmittedAdbClientFactory } from "./AdbClientFactory";
 import { AdbClient } from "./AdbClient";
 import {
@@ -246,6 +247,10 @@ interface EmulatorProcessOptions {
   capturePreLaunchDeviceIds?: boolean;
   expectedDeviceId?: string;
   signal?: AbortSignal;
+  /** Waits for capacity before the cold spawn; see {@link AndroidEmulatorLaunchRequest.admitColdBoot}. */
+  admitColdBoot?: AdmitColdBoot;
+  /** Receives the admission so the launch can free it when it is cancelled. */
+  onAdmitted?: (admission: BootAdmission) => void;
 }
 
 interface EmulatorReadinessState {
@@ -359,6 +364,12 @@ export interface AndroidEmulatorLaunchRequest {
   extraArgs?: readonly string[];
   /** Cancels a launch that has not begun, or disposes a completed launch. */
   signal?: AbortSignal;
+  /**
+   * Boot admission (#11181), awaited only on the cold-spawn path: after the
+   * in-process join and the already-running/starting adoption checks, so
+   * adopting a running AVD never queues for capacity.
+   */
+  admitColdBoot?: AdmitColdBoot;
 }
 
 /** Optional readiness behavior for callers recovering an existing guest state. */
@@ -2722,6 +2733,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     let process: ChildProcess | null = null;
     let outcome: AndroidEmulatorLaunchOutcome = "launched";
     let disposed = false;
+    let admission: BootAdmission | undefined;
     const dispose = () => {
       if (disposed) {
         return;
@@ -2758,6 +2770,10 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
               capturePreLaunchDeviceIds: shouldCaptureEmulatorReservationSnapshot(request.deviceId),
               expectedDeviceId: request.deviceId,
               signal: request.signal,
+              admitColdBoot: request.admitColdBoot,
+              onAdmitted: (admitted) => {
+                admission = admitted;
+              },
             }),
           ),
         { timer: this.timer, signal: request.signal, label: "Android emulator launch" },
@@ -2774,6 +2790,8 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       }
     } catch (error) {
       request.signal?.removeEventListener("abort", dispose);
+      // A failed or cancelled launch frees its capacity slot; the owner confirms the child's exit.
+      admission?.release();
       // Hand the spawned child to the owner: one SIGTERM is only a request, and
       // the owner must confirm the exit before freeing the AVD (#10075).
       throw disposed ? asLaunchCancellation(request.avdName, error, process) : error;
@@ -2928,14 +2946,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
     options: EmulatorProcessOptions = {},
   ): Promise<EmulatorProcessLaunch> {
-    const {
-      requestedExtraArgs,
-      onSpawn,
-      isCancelled,
-      capturePreLaunchDeviceIds = false,
-      expectedDeviceId,
-      signal,
-    } = options;
+    const { requestedExtraArgs, isCancelled, signal } = options;
     if (await this.adoptsExistingAvdLaunch(avdName, perf, signal)) {
       this.assertCameraPosterColdBoot(options.cameraPosterPath);
       // Some other actor already owns this AVD, so we hold no process handle for
@@ -2975,6 +2986,56 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     }
     this.appendCameraPosterArguments(args, options.cameraPosterPath);
     this.throwIfLaunchCancelled(avdName, isCancelled);
+    // Queue for capacity only now that this launch will spawn: every adoption
+    // path above returned first, and an invalid AVD has already failed fast.
+    return await this.spawnWithBootAdmission(avdName, perf, args, options);
+  }
+
+  /**
+   * Holds a boot admission (#11181) across the spawn: freed when the spawn fails or
+   * finds a duplicate, handed off to the reserved serial when an emulator starts,
+   * and freed early if that emulator exits before adb lists it.
+   */
+  private async spawnWithBootAdmission(
+    avdName: string,
+    perf: ReturnType<typeof createGlobalPerformanceTracker>,
+    args: string[],
+    options: EmulatorProcessOptions,
+  ): Promise<EmulatorProcessLaunch> {
+    const admission = await options.admitColdBoot?.();
+    if (!admission) {
+      return await this.spawnAdmittedEmulator(avdName, perf, args, options);
+    }
+    options.onAdmitted?.(admission);
+    try {
+      const launch = await this.spawnAdmittedEmulator(avdName, perf, args, options);
+      if (launch.process) {
+        launch.process.once("exit", () => admission.release());
+        admission.handOff(launch.reservedDeviceId ?? options.expectedDeviceId);
+      } else {
+        admission.release();
+      }
+      return launch;
+    } catch (error) {
+      admission.release();
+      throw error;
+    }
+  }
+
+  private async spawnAdmittedEmulator(
+    avdName: string,
+    perf: ReturnType<typeof createGlobalPerformanceTracker>,
+    args: string[],
+    options: EmulatorProcessOptions,
+  ): Promise<EmulatorProcessLaunch & { reservedDeviceId?: string }> {
+    const {
+      onSpawn,
+      isCancelled,
+      capturePreLaunchDeviceIds = false,
+      expectedDeviceId,
+      signal,
+    } = options;
+    this.throwIfLaunchCancelled(avdName, isCancelled);
     const preLaunchEmulatorDeviceSnapshot = await this.capturePreLaunchEmulatorDeviceIds(
       capturePreLaunchDeviceIds,
       signal,
@@ -3001,7 +3062,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     // The spawn resolves without a process only when the emulator exited as a duplicate of one
     // started outside this process.
     return child
-      ? { process: child, outcome: "launched" }
+      ? { process: child, outcome: "launched", reservedDeviceId: reservedEmulator?.deviceId }
       : { process: null, outcome: "duplicate-of-external" };
   }
 

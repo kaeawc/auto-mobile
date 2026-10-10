@@ -1,3 +1,4 @@
+import { adbOfflineHeldDevices } from "./adbOfflineHeldDevices";
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { androidTransportIdentityAdbFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
@@ -607,50 +608,25 @@ interface AdbOfflineHeldInput {
 async function adbOfflineHeldDeviceDescriptions(
   input: AdbOfflineHeldInput,
 ): Promise<BootedDeviceInfo[]> {
-  const { platform, devicePool, deviceManager } = input;
-  if (platform !== "android" || !devicePool || !deviceManager.getAndroidListedDeviceStates) {
-    return [];
-  }
-  const discoveredIds = new Set(input.discovered.map((device) => device.deviceId));
-  const held = devicePool
-    .getAssignedDevices()
-    .filter((pooled) => pooled.platform === "android" && !discoveredIds.has(pooled.id));
-  if (held.length === 0) {
-    return [];
-  }
-  let states: Map<string, string>;
-  try {
-    states = await deviceManager.getAndroidListedDeviceStates(
-      held.map((pooled) => pooled.id),
-      { signal: getAbortSignal() },
-    );
-  } catch (error) {
-    logger.warn(
-      `[BootedDeviceResources] Offline held-device probe failed: ${errorMessage(error)}`,
-      error,
-    );
-    return [];
-  }
-  return held.flatMap((pooled) => {
-    const adbState = states.get(pooled.id);
-    if (!adbState) {
-      return [];
-    }
-    const device: BootedDevice = { deviceId: pooled.id, name: pooled.name, platform: "android" };
-    return [
-      toBootedDeviceInfo(
-        device,
-        resolvePoolDeviceContext(
-          devicePool,
-          device,
-          input.sessionInfoByDeviceId,
-          input.resolveDeviceSessionUuid,
-        ),
-        input.configuredImages.get(`android:${pooled.avdName ?? pooled.name}`),
-        adbState,
-      ),
-    ];
+  const held = await adbOfflineHeldDevices({
+    platform: input.platform,
+    discovered: input.discovered,
+    devicePool: input.devicePool,
+    deviceManager: input.deviceManager,
   });
+  return held.map(({ device, avdName, adbState }) =>
+    toBootedDeviceInfo(
+      device,
+      resolvePoolDeviceContext(
+        input.devicePool,
+        device,
+        input.sessionInfoByDeviceId,
+        input.resolveDeviceSessionUuid,
+      ),
+      input.configuredImages.get(`android:${avdName}`),
+      adbState,
+    ),
+  );
 }
 
 export async function configuredImagesForBootedPlatform(
@@ -794,12 +770,12 @@ function resolvePoolDeviceContext(
   };
 }
 
-function summarizePoolStatus(
+async function summarizePoolStatus(
   devicePool: DevicePool,
   discoveredDevices: BootedDeviceInfo[],
   succeededPlatforms: Set<Platform>,
   requestedPlatforms: readonly Platform[],
-): PoolStatusSummary {
+): Promise<PoolStatusSummary> {
   let idle = 0;
   let assigned = 0;
   let error = 0;
@@ -824,15 +800,36 @@ function summarizePoolStatus(
 
   // For platforms whose discovery failed/was unavailable, keep the pool's own
   // tracked counts — we cannot confirm which of those entries are phantom.
-  for (const pooled of devicePool.getAllDevices()) {
-    if (requestedPlatforms.includes(pooled.platform) && !succeededPlatforms.has(pooled.platform)) {
-      tally(
-        effectivePoolStatus(
-          pooled.status,
-          poolHoldFor(devicePool, pooled.id),
-          devicePool.getDeviceHealthMarker(pooled.id) !== undefined,
-        ),
+  const fallback = devicePool
+    .getAllDevices()
+    .filter(
+      (pooled) =>
+        requestedPlatforms.includes(pooled.platform) && !succeededPlatforms.has(pooled.platform),
+    );
+  // Whether a managed slot holds an idle device is only known after the ownership refresh the
+  // other inventory surfaces perform. When it fails (slot registry unreadable, never loaded), an
+  // idle tally would report a possibly-held device free: omit it, as available-devices refuses
+  // (#11455). Assigned/error stay exact -- a session or health marker is independent of slots.
+  let ownershipKnown = true;
+  if (fallback.length > 0) {
+    try {
+      await devicePool.refreshInventoryOwnership();
+    } catch (refreshError) {
+      ownershipKnown = false;
+      logger.warn(
+        `[BootedDeviceResources] Managed-slot ownership unknown; omitting idle pool counts: ${errorMessage(refreshError)}`,
+        refreshError,
       );
+    }
+  }
+  for (const pooled of fallback) {
+    const status = effectivePoolStatus(
+      pooled.status,
+      poolHoldFor(devicePool, pooled.id),
+      devicePool.getDeviceHealthMarker(pooled.id) !== undefined,
+    );
+    if (ownershipKnown || status !== "idle") {
+      tally(status);
     }
   }
 
@@ -1571,7 +1568,7 @@ async function computeBootedDevicesForPlatforms(
   const physicalCount = devices.length - virtualCount;
   const poolStatus =
     daemonContext.poolStatus && daemonContext.devicePool
-      ? summarizePoolStatus(daemonContext.devicePool, devices, succeededPlatforms, platforms)
+      ? await summarizePoolStatus(daemonContext.devicePool, devices, succeededPlatforms, platforms)
       : undefined;
 
   return {

@@ -71,6 +71,11 @@ export interface DeviceAutolockPoolPort {
   withTargetDeviceDiscovery(options: TargetDeviceDiscoveryOptions): Promise<string>;
   assertRuntimeIdentity(device: PooledDevice, identity: ExpectedIdentity | undefined): void;
   assertNotReservedForShutdown(device: PooledDevice, message: string): void;
+  /**
+   * Refuse a device reserved for another session's restart recovery, like an explicit bind
+   * (#11294, #11461). An autolock mints a fresh session, so it is never the reserved row's own.
+   */
+  assertNotReservedForOtherRehydration(device: PooledDevice): void;
   recordSourceAndroidAvd(id: string, image: DeviceInfo | undefined): void;
   notifyTargetDeviceReady(options: {
     device: PooledDevice;
@@ -234,6 +239,7 @@ export class DeviceAutolockManager {
     this.assertMcpSessionCanAutolockDevice(mcpSessionId, device);
     this.pool.assertRuntimeIdentity(device, expectedIdentity);
     this.pool.assertNotReservedForShutdown(device, "and cannot be autolocked");
+    this.pool.assertNotReservedForOtherRehydration(device);
     if (alreadyPooled) {
       this.pool.recordSourceAndroidAvd(deviceId, androidAvdIdentity);
       this.pool.notifyTargetDeviceReady({ device, snapshot });

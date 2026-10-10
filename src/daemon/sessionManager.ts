@@ -2350,7 +2350,9 @@ export class SessionManager {
 
   /**
    * Force a release that is stuck past the heartbeat monitor's deadline (#10963). The session is
-   * fenced terminally (so its UUID never routes again) and removed from the device maps, and its
+   * released with the reason the stuck release carries (#11361): fenced terminally when that
+   * reason is terminal (so its UUID never routes again), left recoverable or re-issuable when it
+   * is not. Either way it is removed from the device maps, and its
    * device is quarantined only until the stuck release settles or {@link SESSION_RELEASE_TEARDOWN_CAP_MS}
    * passes, whichever is first; the caller then returns the device to the pool. Returns the device
    * to release and the stage the release was stuck in, or undefined when no release of this
@@ -2370,33 +2372,14 @@ export class SessionManager {
     operation.forcedAbort?.abort(
       new ActionableError(`Release of session ${sessionId} was forced; its teardown is abandoned`),
     );
-    if (!this.terminalReleaseSnapshots.has(sessionId)) {
-      const releasedAtMs = this.sessionNow();
-      const releaseReason = isTerminalReleaseReason(operation.reason.value)
-        ? operation.reason.value
-        : "heartbeat-timeout";
-      this.terminalReleaseSnapshots.set(sessionId, {
-        sessionId,
-        deviceId,
-        releaseReason,
-        releasedAtMs,
-        terminal: true,
-        heartbeat: {
-          lastHeartbeatMs: session.lastHeartbeat,
-          hasReceivedHeartbeat: session.hasReceivedHeartbeat,
-          timeoutMs: session.heartbeatTimeoutMs,
-          ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
-        },
-      });
-    }
-    const fence = this.terminalReleaseSnapshots.get(sessionId)!;
+    const fence = this.forcedReleaseSnapshot(sessionId, session, operation.reason.value);
     if (this.removeSession(sessionId, session)) {
       // The stuck release never reached its own notification: announce the release now so
       // proxies and stream servers stop treating the session as live.
       this.notifySessionRelease({ ...fence, ...managedExecutionReleaseMarker(session) });
     }
-    // The stuck release may never reach its own write: persist the fence now (#11058), or a
-    // restart would admit the released UUID again.
+    // The stuck release may never reach its own write: persist the release now (#11058), or a
+    // restart would admit a terminally released UUID again.
     this.persistForcedReleaseFence(fence);
     const settled = operation.promise.then(
       () => undefined,
@@ -2415,16 +2398,70 @@ export class SessionManager {
     this.trackPendingDeviceCleanup(deviceId, [capped]);
     logger.warn(
       `[SessionManager] Forcing the stuck release of session ${sessionId} ` +
-        `(stage=${operation.stage ?? "unknown"}): the session stays fenced and device ` +
+        `(stage=${operation.stage ?? "unknown"}, reason=${fence.releaseReason}): the session ` +
+        `${fence.terminal ? "stays fenced" : "is released"} and device ` +
         `${deviceId} returns to the pool after at most ${SESSION_RELEASE_TEARDOWN_CAP_MS}ms`,
     );
     return { deviceId, stage: operation.stage };
   }
 
   /**
-   * Write a forced release's terminal fence in the background, tracked by the shutdown drain. A
+   * What a forced release releases the session as (#11361): the reason the stuck release was
+   * started with, exactly as that release would have recorded it. A terminal reason raises (or
+   * keeps) the in-memory fence; a non-terminal one (a `daemon-shutdown` or `device-restart:`
+   * handoff, a `plan-auto-release`) raises none, so the session stays recoverable or its name
+   * re-issuable as the reason says. Forcing only stops the wait for the device.
+   */
+  private forcedReleaseSnapshot(
+    sessionId: string,
+    session: Session,
+    releaseReason: string,
+  ): SessionReleaseSnapshot {
+    const held = this.terminalReleaseSnapshots.get(sessionId);
+    if (held) {
+      return held;
+    }
+    const releasedAtMs = this.sessionNow();
+    const snapshot: SessionReleaseSnapshot = {
+      sessionId,
+      deviceId: session.assignedDevice,
+      releaseReason,
+      releasedAtMs,
+      terminal: isTerminalReleaseReason(releaseReason),
+      heartbeat: {
+        lastHeartbeatMs: session.lastHeartbeat,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+        timeoutMs: session.heartbeatTimeoutMs,
+        ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
+      },
+    };
+    if (snapshot.terminal) {
+      this.terminalReleaseSnapshots.set(sessionId, snapshot);
+    } else {
+      // Applies only to the incarnation it released, like any non-terminal release (#11129).
+      this.captureReleaseRowGeneration(snapshot, this.persistedRowGenerations.get(session));
+    }
+    return snapshot;
+  }
+
+  /**
+   * The in-flight release a later call for this UUID must wait on or join. A release forced with a
+   * non-terminal reason (#11361) is not one: it already released the session and raised no fence,
+   * so a recovery, a re-issue of the name or a later release of it must not wait on a teardown
+   * that may stay wedged. A release forced with a terminal reason is answered by its fence first.
+   */
+  private inFlightReleaseStillOwning(sessionId: string): SessionReleaseOperation | undefined {
+    const operation = this.releasePromises.get(sessionId);
+    return operation?.forced && !this.terminalReleaseSnapshots.has(sessionId)
+      ? undefined
+      : operation;
+  }
+
+  /**
+   * Write a forced release's row in the background, tracked by the shutdown drain. A terminal
    * write that fails falls back to the terminal-write retry (#10959); one that times out is
-   * already retried by the late-write tracker if it then fails.
+   * already retried by the late-write tracker if it then fails. A non-terminal write that fails
+   * is kept as a pending non-terminal release by {@link persistSessionRelease}.
    */
   private persistForcedReleaseFence(fence: SessionReleaseSnapshot): void {
     const write = this.persistSessionRelease(fence).then(
@@ -2434,7 +2471,7 @@ export class SessionManager {
           `[SessionManager] Failed to persist the forced release of ${fence.sessionId}: ` +
             errorMessage(error),
         );
-        if (!(error instanceof SessionReleasePersistTimeoutError)) {
+        if (fence.terminal && !(error instanceof SessionReleasePersistTimeoutError)) {
           this.scheduleTerminalReleaseRetry(fence);
         }
       },
@@ -2989,6 +3026,50 @@ export class SessionManager {
     return this.releaseSnapshotFromPersisted(sessionId, persisted, persisted.release_reason);
   }
 
+  /**
+   * The release a call naming a row past its deadline is refused with (#11361), or undefined when
+   * the row is not one: a session that ran out its idle or recovery window while no daemon was
+   * there to release it is gone, so a control call naming it gets the typed terminal refusal (with
+   * the `expired` reason) rather than the untyped "not found" of a never-issued id. Only that
+   * answer is terminal: the row keeps its non-terminal `expired` reason and no in-memory fence is
+   * raised, so `daemon/registerSession` still accepts the UUID as an observer and createSession
+   * or a plan re-issue can issue the name again.
+   */
+  private expiredReleaseFromPersisted(
+    sessionId: string,
+    persisted: DeviceSession,
+  ): SessionReleaseSnapshot | undefined {
+    if (persisted.release_reason && isTerminalReleaseReason(persisted.release_reason)) {
+      return undefined;
+    }
+    if (persisted.release_reason !== "expired" && persisted.expires_at_ms > this.sessionNow()) {
+      return undefined;
+    }
+    return {
+      ...this.releaseSnapshotFromPersisted(sessionId, persisted, "expired"),
+      terminal: true,
+    };
+  }
+
+  /**
+   * What a call naming a UUID that cannot be admitted is answered with. A control call naming a
+   * row past its deadline gets the typed terminal refusal; a never-issued id gets `neverIssued`.
+   * A read is never refused for an expired row: it gets `neverIssued` too, which its caller turns
+   * into a sessionless read, exactly as before the expired answer existed (#11361).
+   */
+  private unadmittedSessionError(
+    sessionId: string,
+    persisted: DeviceSession | undefined,
+    neverIssued: UnissuedSessionError,
+    access?: SessionAccess,
+  ): Error {
+    if (access === "read-only") {
+      return neverIssued;
+    }
+    const expired = persisted && this.expiredReleaseFromPersisted(sessionId, persisted);
+    return expired ? new TerminalSessionError(sessionId, expired) : neverIssued;
+  }
+
   private releaseSnapshotFromPersisted(
     sessionId: string,
     persisted: DeviceSession,
@@ -3084,6 +3165,44 @@ export class SessionManager {
       return null;
     }
     return session;
+  }
+
+  /**
+   * The live session a read is admitted under, releasing nothing. A read that arrives after the
+   * idle deadline while earlier work still holds the session (#11361) is not admitted under it and
+   * does not get the untyped refusal a late control call gets: this returns null, read-only
+   * admission resolves undefined, and the caller runs the read without a session on the device
+   * {@link deviceHeldForLateRead} names. Any other read past the deadline also gets null here.
+   */
+  private observeSessionForRead(
+    sessionId: string,
+    execution: SessionExecutionMetadata | undefined,
+  ): Session | null {
+    if (this.deviceHeldForLateRead(sessionId, execution) !== undefined) {
+      return null;
+    }
+    return this.getSessionInternal(sessionId, true, execution, false);
+  }
+
+  /**
+   * The device of the live session a read named but arrived too late to be admitted under: past
+   * the idle deadline, with earlier work still holding the session (#11361). The read runs
+   * sessionless against this device, the one it asked about, rather than whatever device a
+   * sessionless call would otherwise select. Undefined in every other case. Reads no device and
+   * changes nothing: no release, no refresh, no idle credit.
+   */
+  deviceHeldForLateRead(
+    sessionId: string,
+    execution: SessionExecutionMetadata | undefined,
+  ): string | undefined {
+    const session = this.sessions.get(sessionId);
+    if (!session || this.terminalReleaseSnapshots.has(sessionId)) {
+      return undefined;
+    }
+    const started = execution && this.executionOnSessionClock(execution);
+    return this.isLateExecutionWhileEarlierWorkIsActive(session, started)
+      ? session.assignedDevice
+      : undefined;
   }
 
   /**
@@ -3232,7 +3351,7 @@ export class SessionManager {
       throw new TerminalSessionError(sessionId, terminalRelease);
     }
 
-    const inFlightRelease = this.releasePromises.get(sessionId);
+    const inFlightRelease = this.inFlightReleaseStillOwning(sessionId);
     const currentSession = this.sessions.get(sessionId);
     if (
       inFlightRelease &&
@@ -3492,7 +3611,7 @@ export class SessionManager {
         // startup-rehydrated session is not proof that its owner returned. In
         // particular, do not enter reclaimAndRefreshExistingSession(), whose
         // acquisition semantics promote awaiting-owner to owned.
-        const observed = this.getSessionInternal(sessionId, true, execution, false);
+        const observed = this.observeSessionForRead(sessionId, execution);
         if (observed) {
           // Answered in every lease phase (#11322): a read is never refused, and never restores
           // or extends the lease it is watching.
@@ -3527,7 +3646,7 @@ export class SessionManager {
     if (persisted && this.isReissuablePersistedSession(persisted)) {
       return undefined;
     }
-    throw unissuedSessionError;
+    throw this.unadmittedSessionError(sessionId, persisted, unissuedSessionError, options.access);
   }
 
   private async createUnseenSession(
@@ -3558,9 +3677,13 @@ export class SessionManager {
     // pool-less `if (!devicePool)` throw below stays as a secondary safety net.
     if (requireIssuedSession && !this.isReissuablePersistedSession(persisted)) {
       await this.terminalizeExpiredPersistedSession(persisted);
-      throw new UnissuedSessionError(
-        `Session ${sessionId} is not an active daemon session (not found). ` +
-          "Acquire a device with getAndroid or getApple before using its sessionUuid.",
+      throw this.unadmittedSessionError(
+        sessionId,
+        persisted,
+        new UnissuedSessionError(
+          `Session ${sessionId} is not an active daemon session (not found). ` +
+            "Acquire a device with getAndroid or getApple before using its sessionUuid.",
+        ),
       );
     }
     // Need to create new session - assign device from pool
@@ -4831,7 +4954,7 @@ export class SessionManager {
     releaseReason: string,
     allowExpired: boolean,
   ): Promise<string | null> {
-    const inFlightRelease = this.releasePromises.get(sessionId);
+    const inFlightRelease = this.inFlightReleaseStillOwning(sessionId);
     if (inFlightRelease) {
       if (inFlightRelease.reason.finalizedSnapshot && isTerminalReleaseReason(releaseReason)) {
         return await this.releaseFinalizedSession(inFlightRelease.reason, releaseReason);
@@ -4897,8 +5020,103 @@ export class SessionManager {
         return snapshot.deviceId;
       }
     }
+    if (releaseReason === "explicit-release") {
+      const released = await this.releaseUnrecoveredReissuableRow(sessionId);
+      if (released !== undefined) {
+        return released;
+      }
+    }
     logger.warn(`Cannot release session ${sessionId}: not found`);
     return null;
+  }
+
+  /**
+   * An explicit release of a session this daemon does not hold, whose row a call naming the UUID
+   * could still issue again (#11461): a restart handoff the startup deadline left to the follow-up
+   * sweep, one whose recovery failed without terminalizing it, or a `plan-auto-release`. An
+   * explicit release is terminal and never rehydrated, so the row is terminalized rather than
+   * answered "already released" and brought back. One statement, conditioned on the incarnation
+   * read: a recovery's claim (this daemon's or a peer's) advances the generation, so a row someone
+   * took in between is left alone, as is a row another live daemon owns. An active row is never
+   * touched: it is not in this daemon's map, so it is not this daemon's session.
+   *
+   * Resolves the row's device once terminalized, or undefined when there was nothing to release.
+   */
+  private async releaseUnrecoveredReissuableRow(sessionId: string): Promise<string | undefined> {
+    // A recovery's claim can land between the read and the conditional write. The release is
+    // not dropped for that: the row is released at its new generation, or, once the recovery
+    // has started publishing the session, through the path that releases a session being created.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (this.sessions.has(sessionId)) {
+        break;
+      }
+      if (this.isSessionBeingRecreated(sessionId)) {
+        return (await this.releaseSession(sessionId, "explicit-release")) ?? undefined;
+      }
+      const released = await this.tryReleaseUnrecoveredReissuableRow(sessionId);
+      if (released !== "row-changed") {
+        return released;
+      }
+    }
+    // Published by the recovery that won: the caller releases the live session (the daemon
+    // request handler does, cutting its calls like any explicit release).
+    return undefined;
+  }
+
+  /** One conditional release of the row as read; `row-changed` when another writer got there first. */
+  private async tryReleaseUnrecoveredReissuableRow(
+    sessionId: string,
+  ): Promise<string | undefined | "row-changed"> {
+    const persisted = await this.readPersistedSession(sessionId);
+    if (!persisted?.release_reason || !this.isReissuablePersistedSession(persisted)) {
+      return undefined;
+    }
+    if (this.isRowOwnedByLivePeer(persisted)) {
+      logger.info(
+        `[SessionManager] Not releasing session ${sessionId}: another AutoMobile daemon ` +
+          `(${persisted.daemon_session_id}) owns its row`,
+      );
+      return undefined;
+    }
+    await this.deviceSessionRepository.markReleased(
+      sessionId,
+      releasedRowStatus("explicit-release"),
+      this.sessionNow(),
+      "explicit-release",
+      persisted.stable_identity_generation === undefined
+        ? {}
+        : { expectedRowGeneration: persisted.stable_identity_generation },
+    );
+    return (await this.fenceExplicitlyReleasedRow(sessionId)) ?? "row-changed";
+  }
+
+  /** Whether another live daemon owns `row`: such a row is that daemon's to recover or end. */
+  private isRowOwnedByLivePeer(row: DeviceSession): boolean {
+    const owner = row.daemon_session_id ?? null;
+    return owner !== null && owner !== this.daemonSessionId && this.isLiveDaemonSession(owner);
+  }
+
+  /**
+   * Fence a UUID whose row now reads `explicit-release`, and announce it. Resolves the row's
+   * device, or undefined when the conditional release did not apply (the row changed first).
+   */
+  private async fenceExplicitlyReleasedRow(sessionId: string): Promise<string | undefined> {
+    const current = await this.readPersistedSession(sessionId);
+    const snapshot = current && this.terminalReleaseFromPersisted(sessionId, current);
+    if (snapshot?.releaseReason !== "explicit-release") {
+      logger.info(
+        `[SessionManager] Session ${sessionId} was not released: its row changed first ` +
+          `(now ${current?.status ?? "missing"}, ${current?.release_reason ?? "no release reason"})`,
+      );
+      return undefined;
+    }
+    this.terminalReleaseSnapshots.set(sessionId, snapshot);
+    this.restartRecoveryActivityAt.delete(sessionId);
+    // The handoff release already ran this session's device cleanup, and the row's device may
+    // belong to another session by now: announce only the terminal reason (#11206).
+    this.notifySessionRelease(snapshot, { upgradeOnly: true });
+    logger.info(`[SessionManager] Released unrecovered session ${sessionId} (explicit-release)`);
+    return snapshot.deviceId;
   }
 
   private async releasePendingSessionWork(

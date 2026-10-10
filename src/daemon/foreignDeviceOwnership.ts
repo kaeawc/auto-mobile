@@ -26,10 +26,15 @@ import {
   decodeForwardLeaseOwnerMetadata,
   encodeForwardLeaseOwnerMetadata,
   getCtrlProxyForwardLeaseOwnerSocketPath,
+  type ForwardLeaseOwnerMetadata,
   type ForwardLeaseOwnerProbe,
   type ForwardLeaseOwnerReport,
+  type ForwardLeaseRelinquishProbe,
 } from "../features/observe/shared/ctrlProxyForwardLeaseOwnership";
-import { DaemonDeviceLeaseOwnerProbe } from "./deviceLeaseOwnerQuery";
+import {
+  DaemonDeviceLeaseOwnerProbe,
+  DEVICE_LEASE_OWNER_QUERY_TIMEOUT_MS,
+} from "./deviceLeaseOwnerQuery";
 
 /**
  * Whether another live AutoMobile process drives a device this pool can see. Multi-device
@@ -53,6 +58,13 @@ export interface ForeignDeviceOwnership {
    * owner PID rather than treated as unclaimed yet unclaimable.
    */
   foreignClaimUnreadable?(deviceId: string): boolean;
+  /**
+   * When the only foreign ownership of `deviceId` at the latest refresh was a CtrlProxy forwarding
+   * lease whose holder reported no session and no running tool call, ask that holder once to give
+   * the lease up, then re-read ownership (#11349). The holder decides; {@link foreignOwnerPid}
+   * still names it when it kept the lease. Does nothing for any other kind of ownership.
+   */
+  relinquishIdleLease?(deviceId: string): Promise<void>;
   /**
    * Publish this daemon's allocation claim on a device it just assigned, so other daemons see it
    * before any CtrlProxy forward exists. False when another live daemon's claim on the device is
@@ -105,6 +117,31 @@ export interface DeviceOwnershipFileSource {
  * A crashed owner's PID is normally dead, which lapses its claim regardless of this window.
  */
 export const DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS = 60_000;
+
+/**
+ * How long a live owner may keep accepting connections on its control socket without answering
+ * before its claims and leases lapse (#11349, owner decision 2026-10-10). One unanswered request
+ * means a busy owner; an unbroken run of them this long means a wedged one, which would otherwise
+ * hold its devices for as long as its process lives.
+ */
+export const DEVICE_OWNER_UNANSWERED_LAPSE_MS = 5 * 60_000;
+
+/**
+ * The longest gap between two unanswered requests that still counts as one run. Ownership is only
+ * probed on demand, so two timeouts far apart say nothing about the time between them: a live
+ * owner that happened to be busy twice must keep its devices. Fifteen probe timeouts, so a prober
+ * that retries every few seconds (allocation waits, readiness retries) stays within it while
+ * unrelated calls minutes apart do not.
+ */
+export const DEVICE_OWNER_UNANSWERED_MAX_SAMPLE_GAP_MS = 15 * DEVICE_LEASE_OWNER_QUERY_TIMEOUT_MS;
+
+/**
+ * The fewest distinct unanswered samples a lapse needs: what it takes to span
+ * {@link DEVICE_OWNER_UNANSWERED_LAPSE_MS} at the widest allowed gap. The gap rule already implies
+ * it on a steady clock; stating it keeps a clock anomaly from lapsing a claim on a few samples.
+ */
+export const DEVICE_OWNER_UNANSWERED_MIN_SAMPLES =
+  Math.ceil(DEVICE_OWNER_UNANSWERED_LAPSE_MS / DEVICE_OWNER_UNANSWERED_MAX_SAMPLE_GAP_MS) + 1;
 
 /** Directory of device allocation claims, one lock per device, under each ADB server's scope. */
 export const DEVICE_ALLOCATION_CLAIM_SUBDIR = "device-allocations";
@@ -297,17 +334,23 @@ export const iosDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
  * detects an orphaned lease (#10497): an unreachable socket, or one now served by a different
  * PID, means the owner is gone. A claim also lapses once its owner reports no session and no
  * running tool call on the device. An owner that records no socket (an older build) keeps the
- * live-PID check.
+ * live-PID check. An owner whose socket accepts but never answers keeps its devices while that
+ * could be a busy moment, and loses them after {@link DEVICE_OWNER_UNANSWERED_LAPSE_MS} of it.
  */
 export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnership {
   private readonly owners = new Map<string, number>();
   private readonly unreadable = new Set<string>();
+  /** Device -> control socket of an idle holder whose lease was its only foreign ownership. */
+  private readonly idleLeaseHolders = new Map<string, string>();
+  /** Owner PID -> its current run of unanswered status requests, cleared by any answer. */
+  private readonly unanswered = new Map<number, UnansweredRun>();
   private readonly ownerToken = defaultIdGenerator.next();
 
   constructor(
     private readonly selfPid: number = process.pid,
     private readonly source: DeviceOwnershipFileSource = defaultDeviceOwnershipFileSource,
-    private readonly probe: ForwardLeaseOwnerProbe = new DaemonDeviceLeaseOwnerProbe(),
+    private readonly probe: ForwardLeaseOwnerProbe &
+      Partial<ForwardLeaseRelinquishProbe> = new DaemonDeviceLeaseOwnerProbe(),
     private readonly ownerSocketPath: () =>
       | string
       | undefined = getCtrlProxyForwardLeaseOwnerSocketPath,
@@ -335,6 +378,22 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
 
   foreignClaimUnreadable(deviceId: string): boolean {
     return this.unreadable.has(deviceId);
+  }
+
+  async relinquishIdleLease(deviceId: string): Promise<void> {
+    const socketPath = this.idleLeaseHolders.get(deviceId);
+    if (socketPath === undefined || !this.probe.requestRelinquish) {
+      return;
+    }
+    // One bounded request; whatever the holder answers, the re-read below is the verdict.
+    const report = await this.probe.requestRelinquish(socketPath, deviceId);
+    logger.info(
+      `[DevicePool] Asked the idle forwarding-lease holder of ${deviceId} to relinquish it: ` +
+        (report.kind === "relinquish"
+          ? `${report.result.released ? "released" : "kept"} (${report.result.reason})`
+          : `${report.kind} (${report.detail})`),
+    );
+    await this.refresh([deviceId]);
   }
 
   /** A claim file (ours or a 0.0.84 daemon's) exists but names no PID: its writer is unknown. */
@@ -420,12 +479,17 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   private async readForeignOwner(deviceId: string): Promise<number | undefined> {
     const leasePath = this.resolvePath(() => this.source.leasePath(deviceId), deviceId);
     const claimPath = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
-    const [leaseOwner, claimOwner, legacyOwner] = await Promise.all([
-      leasePath === undefined ? undefined : this.evaluateOwner(leasePath, deviceId, "lease"),
+    const [lease, claimOwner, legacyOwner] = await Promise.all([
+      leasePath === undefined ? undefined : this.evaluateLock(leasePath, deviceId, "lease"),
       claimPath === undefined ? undefined : this.evaluateOwner(claimPath, deviceId, "claim"),
       this.legacyClaimOwner(deviceId),
     ]);
-    return leaseOwner ?? claimOwner ?? legacyOwner;
+    if (lease?.idleSocketPath !== undefined && (claimOwner ?? legacyOwner) === undefined) {
+      this.idleLeaseHolders.set(deviceId, lease.idleSocketPath);
+    } else {
+      this.idleLeaseHolders.delete(deviceId);
+    }
+    return lease?.pid ?? claimOwner ?? legacyOwner;
   }
 
   /** The live foreign owner of a 0.0.84-format claim in the coordination directory, if any. */
@@ -452,27 +516,129 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     deviceId: string,
     kind: "lease" | "claim",
   ): Promise<number | undefined> {
-    const content = this.source.read(path);
-    const pid = content?.pid;
-    if (
-      pid === undefined ||
-      Number.isNaN(pid) ||
-      pid === this.selfPid ||
-      !this.source.isProcessRunning(pid)
-    ) {
+    return (await this.evaluateLock(path, deviceId, kind))?.pid;
+  }
+
+  /**
+   * The live foreign owner of the lock at `path` that still uses `deviceId`, and its control
+   * socket when it answered that it has no session and no running tool call on the device.
+   */
+  private async evaluateLock(
+    path: string,
+    deviceId: string,
+    kind: "lease" | "claim",
+  ): Promise<{ pid: number; idleSocketPath?: string } | undefined> {
+    const lock = this.liveForeignLock(path);
+    if (!lock) {
       return undefined;
     }
-    const metadata = decodeForwardLeaseOwnerMetadata(content?.metadata);
+    const { pid, metadata } = lock;
     if (!metadata) {
       // An older build records no control socket, so the live PID is the only evidence.
-      return pid;
+      return { pid };
     }
     const report = await this.probe.query(metadata.socketPath, deviceId);
+    if (this.wedgedOwnerLapsed(report, pid, deviceId, kind)) {
+      return undefined;
+    }
     const startingUp =
       kind === "claim" &&
       this.timer.now() - metadata.acquiredAt < DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS;
-    return ownerStillHolds(report, pid, kind, deviceId, startingUp) ? pid : undefined;
+    if (!ownerStillHolds(report, pid, kind, deviceId, startingUp)) {
+      return undefined;
+    }
+    return ownerReportsNoUse(report) ? { pid, idleSocketPath: metadata.socketPath } : { pid };
   }
+
+  /** The lock at `path` when a live process other than this one holds it. */
+  private liveForeignLock(
+    path: string,
+  ): { pid: number; metadata: ForwardLeaseOwnerMetadata | undefined } | undefined {
+    const content = this.source.read(path);
+    const pid = content?.pid;
+    if (pid === undefined || Number.isNaN(pid) || pid === this.selfPid) {
+      return undefined;
+    }
+    if (!this.source.isProcessRunning(pid)) {
+      this.unanswered.delete(pid);
+      return undefined;
+    }
+    return { pid, metadata: decodeForwardLeaseOwnerMetadata(content?.metadata) };
+  }
+
+  /**
+   * Whether owner `pid` has now gone unanswered for {@link DEVICE_OWNER_UNANSWERED_LAPSE_MS}: it
+   * is alive but wedged, and its hold on `deviceId` has lapsed (#11349). Any answer ends the run,
+   * and so does a gap in sampling: the run must be densely observed for the whole window.
+   * Warns once per device until the owner answers again.
+   */
+  private wedgedOwnerLapsed(
+    report: ForwardLeaseOwnerReport,
+    pid: number,
+    deviceId: string,
+    kind: "lease" | "claim",
+  ): boolean {
+    if (report.kind !== "no-response") {
+      this.unanswered.delete(pid);
+      return false;
+    }
+    // Monotonic where available: a wall-clock step or a host suspend is not unanswered time.
+    const now = this.timer.monotonicNow?.() ?? this.timer.now();
+    const streak = this.unansweredRun(pid, now);
+    const unansweredForMs = now - streak.since;
+    if (
+      unansweredForMs < DEVICE_OWNER_UNANSWERED_LAPSE_MS ||
+      streak.samples < DEVICE_OWNER_UNANSWERED_MIN_SAMPLES
+    ) {
+      return false;
+    }
+    if (!streak.warnedDevices.has(deviceId)) {
+      streak.warnedDevices.add(deviceId);
+      logger.warn(
+        `[DevicePool] ${kind} owner PID ${pid} of ${deviceId} is alive but has not answered on its ` +
+          `control socket for ${Math.round(unansweredForMs / 1000)}s; treating its hold on the ` +
+          "device as lapsed",
+      );
+    }
+    return true;
+  }
+
+  /**
+   * Owner `pid`'s run of unanswered requests with this one counted. A sample that follows the
+   * previous one by more than {@link DEVICE_OWNER_UNANSWERED_MAX_SAMPLE_GAP_MS} starts a new run:
+   * nothing was observed in between, so the owner may have answered anyone throughout.
+   */
+  private unansweredRun(pid: number, now: number): UnansweredRun {
+    const previous = this.unanswered.get(pid);
+    if (!previous || now - previous.lastAt > DEVICE_OWNER_UNANSWERED_MAX_SAMPLE_GAP_MS) {
+      const started = { since: now, lastAt: now, samples: 1, warnedDevices: new Set<string>() };
+      this.unanswered.set(pid, started);
+      return started;
+    }
+    if (now > previous.lastAt) {
+      // Requests answered (or not) at the same instant are one observation, not several.
+      previous.samples += 1;
+      previous.lastAt = now;
+    }
+    return previous;
+  }
+}
+
+/** One owner's unbroken, densely sampled run of unanswered status requests. */
+interface UnansweredRun {
+  since: number;
+  lastAt: number;
+  samples: number;
+  warnedDevices: Set<string>;
+}
+
+/** Whether an owner answered that it has no session and no running tool call on the device. */
+function ownerReportsNoUse(report: ForwardLeaseOwnerReport): boolean {
+  return (
+    report.kind === "status" &&
+    report.status.sessionId === null &&
+    report.status.activeExecutions === 0
+  );
 }
 
 /**
@@ -505,7 +671,8 @@ function ownerStillHolds(
       return false;
     case "no-response":
     case "unsupported":
-      // A busy or older owner cannot report its use; keep treating the device as its own.
+      // A busy or older owner cannot report its use; keep treating the device as its own. An
+      // owner unanswered for DEVICE_OWNER_UNANSWERED_LAPSE_MS never reaches here.
       return true;
     case "status":
       if (report.status.pid !== pid) {

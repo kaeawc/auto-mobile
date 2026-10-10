@@ -73,6 +73,7 @@ import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../uti
 import { Mutex } from "async-mutex";
 import { errorMessage } from "../utils/describeUnknownError";
 import { effectiveLastToolActivity, sessionIdleDeadline } from "./sessionClocks";
+import { forgivenLeaseStart, type StallForgivingLeases } from "./stallForgiveness";
 import { onSessionClock } from "./sessionClockPersistence";
 import {
   isLivenessOwnerLeaseLive,
@@ -1646,7 +1647,8 @@ export class SessionManager {
   private readonly screenReaderRemovalGenerations = new Map<string, number>();
   private readonly screenReaderMutationQueues = new Map<string, Promise<unknown>>();
   private observerSessions?: Pick<ObserverSessionStore, "release"> &
-    Partial<Pick<ObserverSessionStore, "list">>;
+    Partial<Pick<ObserverSessionStore, "list">> &
+    Partial<StallForgivingLeases>;
 
   /** Retry delays for terminal release writes that failed after their deadline (#10959). */
   setTerminalReleaseRetryBackoff(backoff: BackoffPolicy): void {
@@ -1894,9 +1896,13 @@ export class SessionManager {
 
   /** Optional daemon wiring; existing constructors and device-session lookups stay unchanged. */
   setObserverSessionRegistry(
-    registry: Pick<ObserverSessionStore, "release"> & Partial<Pick<ObserverSessionStore, "list">>,
+    registry: Pick<ObserverSessionStore, "release"> &
+      Partial<Pick<ObserverSessionStore, "list">> &
+      Partial<StallForgivingLeases>,
   ): void {
     this.observerSessions = registry;
+    // Observer leases are excused the same stalls and host sleep as owner leases (#11554).
+    registry.setStallProbe?.(this.stallProbe);
   }
 
   /**
@@ -9223,6 +9229,8 @@ export class SessionManager {
    */
   setStallProbe(probe: (() => void) | undefined): void {
     this.stallProbe = probe;
+    // The observer registry judges its own expiries, so it runs the same detector first (#11554).
+    this.observerSessions?.setStallProbe?.(probe);
   }
 
   /**
@@ -9274,9 +9282,17 @@ export class SessionManager {
    * daemon; forgiving it anyway let a dead owner keep its device for as long as the daemon's scans
    * kept arriving late. A live owner is forgiven in full however long the gap. Returns how many
    * sessions were extended.
+   *
+   * Observer registrations are excused the same gap under the same rule (#11554): it is handed
+   * on as durations, because the observer registry keeps its own clock.
    */
   forgiveDaemonStall(resumedAt: number, lostMs: number, sleptMs = 0, gapBeganAt?: number): number {
     const leaseLostMs = lostMs + sleptMs;
+    this.observerSessions?.forgiveStall?.({
+      lostMs,
+      sleptMs,
+      gapAgeMs: gapBeganAt === undefined ? undefined : resumedAt - gapBeganAt,
+    });
     let forgiven = 0;
     for (const session of this.sessions.values()) {
       if (session.livenessPolicy === "cli-idle") {
@@ -9299,10 +9315,7 @@ export class SessionManager {
         // The lease that is judged (#11162): for a session judged on its owner's heartbeats, a
         // non-owner's tool call must not move the forgiven lease start.
         const leaseStart = judgedLeaseHeartbeat(session);
-        session.stallForgivenAt = Math.max(
-          leaseStart,
-          Math.min(resumedAt, leaseStart + leaseLostMs),
-        );
+        session.stallForgivenAt = forgivenLeaseStart(leaseStart, resumedAt, leaseLostMs);
       }
       // Shift, never reset (#10662): a full window per late tick would let a session whose
       // owner is gone outlive its lease for as long as the ticks keep arriving late.

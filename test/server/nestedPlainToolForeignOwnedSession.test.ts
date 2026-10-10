@@ -207,6 +207,7 @@ describe("a nested plain control call naming a session another connection owns (
       });
 
       expect(named?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(named?.message).toContain("leave sessionUuid out");
       expect(manager.killed).toEqual([]);
 
       await nested(OTHER, "killDevice", { device: held, force: true });

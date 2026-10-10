@@ -1309,10 +1309,20 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // control tool (killDevice, recordSteps) is admitted on the session it names, so it is judged
     // like a device call (#11542); nested internal calls are judged by the same predicate (#11555).
     if (daemonMode && isControlCallOnNamedSession(tool, parsedParams)) {
-      refuseControlOnForeignOwnedSession(name, providedSessionUuid, requestMcpSessionId);
+      refuseControlOnForeignOwnedSession(
+        name,
+        providedSessionUuid,
+        requestMcpSessionId,
+        parsedParams,
+      );
       // The session a `device` label resolves to is the one the call runs on (#11542).
       if (derivedLabelSessionUuid !== providedSessionUuid) {
-        refuseControlOnForeignOwnedSession(name, derivedLabelSessionUuid, requestMcpSessionId);
+        refuseControlOnForeignOwnedSession(
+          name,
+          derivedLabelSessionUuid,
+          requestMcpSessionId,
+          parsedParams,
+        );
       }
     }
 

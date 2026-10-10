@@ -5,6 +5,9 @@ import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
 
 const FOREIGN_SESSION_REMEDY =
   "Acquire a device on this connection (getAndroid, getApple or startDevice), or wait for the owner to release the session.";
+/** `force` overrides the device-holder check, never the naming of another client's session. */
+const FORCED_CALL_REMEDY =
+  "force: true does not override this: to force the call on a device another session holds, leave sessionUuid out.";
 
 /** What the owner rule reads off a registered tool. */
 export interface OwnerRuleTool {
@@ -35,12 +38,14 @@ export function isControlCallOnNamedSession(tool: OwnerRuleTool, args: unknown):
  * #11344: a control call naming a session that another connected client owns is refused with the
  * typed `device_owned_by_other_session`, with autolock on or off. Ownership is cooperative: no
  * token is needed, but a session is never driven or taken over by merely naming its UUID. A
- * caller with no connection identity is left to the device-holder check.
+ * caller with no connection identity is left to the device-holder check. `args` are the refused
+ * call's own: one carrying `force: true` is told how a forced stop is made (#11555).
  */
 export function refuseControlOnForeignOwnedSession(
   toolName: string,
   sessionUuid: string | undefined,
   mcpSessionId: string | undefined,
+  args?: unknown,
 ): void {
   const daemonState = DaemonState.getInstance();
   if (!sessionUuid || !mcpSessionId || !daemonState.isInitialized()) {
@@ -50,12 +55,15 @@ export function refuseControlOnForeignOwnedSession(
     return;
   }
   const deviceId = daemonState.getSessionManager().getSession(sessionUuid)?.assignedDevice;
+  const forced = typeof args === "object" && args !== null && Reflect.get(args, "force") === true;
+  const remedy = forced
+    ? `${FOREIGN_SESSION_REMEDY} ${FORCED_CALL_REMEDY}`
+    : FOREIGN_SESSION_REMEDY;
   throw new InputDeviceOwnedError(
     toolName,
     deviceId ?? "unknown",
     sessionUuid,
-    FOREIGN_SESSION_REMEDY,
-    `${toolName} refused: session ${sessionUuid} is owned by another connected client. ` +
-      FOREIGN_SESSION_REMEDY,
+    remedy,
+    `${toolName} refused: session ${sessionUuid} is owned by another connected client. ${remedy}`,
   );
 }

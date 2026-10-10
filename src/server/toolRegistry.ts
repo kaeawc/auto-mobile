@@ -2518,7 +2518,12 @@ function refuseInternalControlOnForeignOwnedSession(
   ) {
     return;
   }
-  refuseControlOnForeignOwnedSession(tool.name, namedSessionUuid, callerMcpSessionId);
+  refuseControlOnForeignOwnedSession(
+    tool.name,
+    namedSessionUuid,
+    callerMcpSessionId,
+    invocation.args,
+  );
 }
 
 /**

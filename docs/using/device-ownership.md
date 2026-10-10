@@ -258,7 +258,8 @@ the holder. From the CLI: `auto-mobile --cli killDevice --device '{...}' --force
 Naming the holder's `sessionUuid` makes a call the holder's only for the
 connection that owns that session, or once that owner has disconnected. From any
 other connection the call is refused, with or without `force` (#11542): to
-force-stop the device, leave `sessionUuid` out.
+force-stop the device, leave `sessionUuid` out. The refusal of a call that
+carried `force: true` says so (#11555).
 
 A device another live AutoMobile daemon holds (two daemons sharing one adb server
 or simulator set) is refused the same way, with `device_owned_by_other_daemon`:

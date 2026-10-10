@@ -10,6 +10,12 @@ import type { DeviceInfo } from "../../src/models";
 import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
+import {
+  managedSlotRefusal,
+  RegistryManagedSlotExclusion,
+} from "../../src/daemon/managedSlots/managedSlotExclusion";
 import {
   DefaultExactDeviceProvisioner,
   FileAndroidAvdConfigWriter,
@@ -46,6 +52,7 @@ describe("ProvisionDeviceError retryability", () => {
       device_cleanup_in_progress: true,
       session_creation_timeout: true,
       device_shutting_down: true,
+      device_assigned_to_managed_slot: false,
       device_offline: true,
       discovery_incomplete: true,
       identity_conflict: false,
@@ -71,6 +78,56 @@ describe("ProvisionDeviceError retryability", () => {
 });
 
 describe("DefaultExactDeviceProvisioner", () => {
+  test("refuses to adopt an existing device a managed slot holds, before reading its config (#11174)", async () => {
+    const timer = new FakeTimer();
+    const registry = new FakeSlotRegistry(timer);
+    const slot = await assignManagedSlotDevice(registry, "android", "slot-avd");
+    const exclusion = new RegistryManagedSlotExclusion(async () => registry, timer);
+    const configReads: string[] = [];
+    const guarded: string[] = [];
+    const provisioner = new DefaultExactDeviceProvisioner({
+      listDeviceImages: async () => [androidImage("slot-avd")],
+      isCreationAllowed: () => true,
+      avdManager: {} as ExactAndroidAvdClient,
+      androidConfigReader: {
+        readConfig: async (name: string) => {
+          configReads.push(name);
+          return null;
+        },
+      },
+      androidConfigWriter: {} as AndroidAvdConfigWriter,
+      iosSimulator: {} as ExactIosSimulatorClient,
+      assertAdoptable: async (device) => {
+        guarded.push(`${device.platform}:${device.stableId}`);
+        await exclusion.refresh();
+        const refusal = managedSlotRefusal(exclusion, {
+          action: "provisionDevice",
+          deviceId: device.stableId,
+          device: { platform: device.platform, stableIds: [device.stableId] },
+        });
+        if (refusal) {
+          throw refusal;
+        }
+      },
+    });
+
+    const error = await provisioner
+      .provision({ platform: "android", name: "slot-avd", spec: ANDROID_SPEC })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ProvisionDeviceError);
+    expect(error).toMatchObject({
+      code: "device_assigned_to_managed_slot",
+      retryable: false,
+      diagnostics: {
+        deviceId: "slot-avd",
+        managedSlot: { scopeKey: slot.scopeKey, declaredSlot: 0, stableId: "slot-avd" },
+      },
+    });
+    expect(guarded).toEqual(["android:slot-avd"]);
+    expect(configReads).toEqual([]);
+  });
+
   test("invalidates cached Android AVD provenance after exact creation", async () => {
     AndroidAvdProvenanceCache.resetForTests();
     try {

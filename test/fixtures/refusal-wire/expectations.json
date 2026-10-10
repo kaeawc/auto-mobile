@@ -4,6 +4,7 @@
     "capacity_exhausted": { "expected": "wait" },
     "daemon_session_suspect": { "expected": "retry" },
     "daemon_shutting_down": { "expected": "retry" },
+    "device_assigned_to_managed_slot": { "expected": "fail" },
     "device_cleanup_in_progress": { "expected": "wait" },
     "device_owned_by_other_daemon": { "expected": "wait" },
     "device_owned_by_other_session": { "expected": "wait" },

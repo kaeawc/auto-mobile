@@ -6,6 +6,7 @@ import { getToolSelectionContext } from "../features/toolSelection/toolSelection
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import type { Platform } from "../models";
 import { logger } from "../utils/logger";
+import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
 
 /** Remedy text for a refused device lifecycle call (killDevice, deleteDevice). */
 export const LIFECYCLE_TOOL_REMEDY =
@@ -44,13 +45,17 @@ export function lifecycleRequester(args: object): LifecycleRequester {
  * device's owning MCP connection counts as its holder), or by an explicit user `force`, which is
  * logged. Unheld devices, and calls with no initialized daemon, are unaffected.
  *
- * Throws `InputDeviceOwnedError` (code `device_owned_by_other_session`).
+ * Throws `InputDeviceOwnedError` (code `device_owned_by_other_session`), or
+ * `DeviceAssignedToManagedSlotError` (code `device_assigned_to_managed_slot`) for a device a
+ * managed slot holds, idle or not, unless the requester is that slot's execution (#11174).
  */
 export function assertLifecycleCallerHoldsDevice(input: {
   toolName: string;
   device: { deviceId: string; platform: Platform };
   requester: LifecycleRequester;
   force: boolean;
+  /** Extra stable identities of the target (an AVD name the caller resolved). */
+  stableIds?: ReadonlyArray<string | undefined>;
 }): void {
   const { toolName, device, requester, force } = input;
   const daemonState = DaemonState.getInstance();
@@ -58,11 +63,12 @@ export function assertLifecycleCallerHoldsDevice(input: {
     return;
   }
   const sessionManager = daemonState.getSessionManager();
+  const base = (uuid: string) => resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
+  assertNotForeignManagedSlotFromSnapshot(daemonState, input);
   const owner = sessionManager.getSessionForDevice(device.deviceId) ?? undefined;
   if (!owner) {
     return;
   }
-  const base = (uuid: string) => resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
   if (requester.sessionUuid && base(requester.sessionUuid) === base(owner)) {
     return;
   }
@@ -149,4 +155,68 @@ async function checkForeignHolder(
         `AutoMobile daemon${error.ownerPid === undefined ? "" : ` (PID ${error.ownerPid})`}.`,
     );
   }
+}
+
+/**
+ * A managed slot's device, idle or not, stops only for that slot's execution; `force` does not
+ * override it (#11174). This synchronous re-check reads the snapshot the entry check refreshed.
+ */
+function assertNotForeignManagedSlotFromSnapshot(
+  daemonState: DaemonState,
+  input: {
+    toolName: string;
+    device: { deviceId: string; platform: Platform };
+    requester: LifecycleRequester;
+    stableIds?: ReadonlyArray<string | undefined>;
+  },
+): void {
+  const managedRefusal = managedSlotPoolGate(daemonState.getDevicePool()).managedSlotRefusalFor?.({
+    action: input.toolName,
+    deviceId: input.device.deviceId,
+    platform: input.device.platform,
+    stableIds: input.stableIds,
+    requesterSessionUuid: baseRequesterSession(daemonState, input.requester),
+  });
+  if (managedRefusal) {
+    throw managedRefusal;
+  }
+}
+
+function baseRequesterSession(
+  daemonState: DaemonState,
+  requester: LifecycleRequester,
+): string | undefined {
+  if (!requester.sessionUuid) {
+    return undefined;
+  }
+  return (
+    resolveToolSelectionBaseSessionUuid(requester.sessionUuid, daemonState.getSessionManager()) ??
+    requester.sessionUuid
+  );
+}
+
+/**
+ * Entry check for a lifecycle tool on a device a managed slot may hold (#11174): refreshes the
+ * registry snapshot and refuses any caller but the slot's own execution, idle device or not, with
+ * `device_assigned_to_managed_slot`. Covers stopped devices too (deleteDevice of an AVD), which the
+ * session-holder check never sees. Calls with no initialized daemon are unaffected.
+ */
+export async function assertLifecycleCallerNotOnForeignManagedSlot(input: {
+  toolName: string;
+  device: { deviceId: string; platform: Platform };
+  requester: LifecycleRequester;
+  stableIds?: ReadonlyArray<string | undefined>;
+}): Promise<void> {
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return;
+  }
+  const requesterSessionUuid = baseRequesterSession(daemonState, input.requester);
+  await managedSlotPoolGate(daemonState.getDevicePool()).assertNotAssignedToManagedSlot?.({
+    action: input.toolName,
+    deviceId: input.device.deviceId,
+    platform: input.device.platform,
+    stableIds: input.stableIds,
+    requesterSessionUuid,
+  });
 }

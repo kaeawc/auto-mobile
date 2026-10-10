@@ -101,6 +101,12 @@ export interface DeviceAutolockPoolPort {
   isAdbServerResetQuarantined(id: string): boolean;
   /** Refuse a device another live daemon claims, like an explicit bind (#10980). */
   assertNotClaimedByForeignDaemon(deviceId: string, platform: Platform): Promise<void>;
+  /** Refuse a device a managed slot holds, like an explicit bind (#11174). Optional for fakes. */
+  assertNotAssignedToManagedSlot?(
+    deviceId: string,
+    platform: Platform,
+    sourceImage?: DeviceInfo,
+  ): Promise<void>;
   /** Publish this daemon's claim, rolling a fresh acquisition back when another daemon won. */
   claimAcquiredDevice(
     sessionId: string,
@@ -168,6 +174,11 @@ export class DeviceAutolockManager {
     // Two daemons must never drive one device (#10980, #11071): check before assigning, then
     // publish the claim or roll the acquisition back, as an explicit bind does.
     await this.pool.assertNotClaimedByForeignDaemon(deviceId, platform);
+    await this.pool.assertNotAssignedToManagedSlot?.(
+      deviceId,
+      platform,
+      verifiedAndroidAvdIdentity ?? sourceImage,
+    );
     const heldBefore = this.pool.getDevice(deviceId)?.sessionId ?? null;
     const sessionId = await this.pool.withTargetDeviceDiscovery({
       deviceId,

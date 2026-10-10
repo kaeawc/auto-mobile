@@ -8,6 +8,10 @@ import {
   RetryableDeviceAcquisitionError,
 } from "../daemon/deviceAcquisitionRefusals";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
+import {
+  DeviceAssignedToManagedSlotError,
+  ManagedSlotDiscoveryIncompleteError,
+} from "../daemon/managedSlots/managedSlotRefusal";
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { observeConfiguredDeviceResources } from "./deviceResourceTools";
 import { computeDeviceResourceDrift } from "../utils/deviceResourceDrift";
@@ -61,6 +65,7 @@ import {
 } from "../utils/deviceTimeouts";
 import {
   type ExactDeviceProvisioner,
+  managedSlotProvisionError,
   ProvisionDeviceCreateRejectedError,
   type ProvisionDeviceFailureCode,
   ProvisionDeviceError,
@@ -460,6 +465,20 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
     const knownError = knownProvisionDeviceError(error);
     if (knownError) {
       return knownError;
+    }
+    if (error instanceof DeviceAssignedToManagedSlotError) {
+      return managedSlotProvisionError(
+        error,
+        `Failed to provision ${args.device.platform} device '${args.device.name}'`,
+      );
+    }
+    if (error instanceof ManagedSlotDiscoveryIncompleteError) {
+      return new ProvisionDeviceError(
+        "discovery_incomplete",
+        `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
+        true,
+        { retryAfterMs: error.retryAfterMs },
+      );
     }
     if (error instanceof InputDeviceOwnedError) {
       return new ProvisionDeviceError(
@@ -2127,6 +2146,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       ...(diagnostics.runtimeCompatibility
         ? { runtimeCompatibility: diagnostics.runtimeCompatibility }
         : {}),
+      ...(diagnostics.managedSlot ? { managedSlot: diagnostics.managedSlot } : {}),
       daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
     };
   }

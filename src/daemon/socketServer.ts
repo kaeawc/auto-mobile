@@ -132,12 +132,17 @@ import {
 import { assertToolEnabledForAnySession } from "../features/toolSelection/toolSelectionPolicy";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
+  assertInputNotOnForeignManagedSlotDevice,
   assertInputRequesterHoldsDevice,
   deviceAlreadyAssignedToAnotherSessionError,
   InputDeviceOwnedError,
   parseInputRequesterSessionUuid,
 } from "./inputDeviceOwnership";
 import { ToolRegistry } from "../server/toolRegistry";
+import {
+  DeviceAssignedToManagedSlotError,
+  ManagedSlotDiscoveryIncompleteError,
+} from "./managedSlots/managedSlotRefusal";
 import { provisionCancellationOutcomes } from "../server/provisionCancellationOutcomes";
 import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../server/deviceTools";
 
@@ -329,6 +334,10 @@ export function mcpRequestFailureDetails(
       : {}),
     ...(isToolUnavailableWireError(error) ? { code: DAEMON_TOOL_UNAVAILABLE_CODE } : {}),
     ...(error instanceof InputDeviceOwnedError ? { code: error.code } : {}),
+    ...(error instanceof DeviceAssignedToManagedSlotError ||
+    error instanceof ManagedSlotDiscoveryIncompleteError
+      ? { code: error.code }
+      : {}),
     ...(cause ? { requestFailureCause: cause } : {}),
   };
 }
@@ -5111,9 +5120,9 @@ export class UnixSocketServer {
         }
         // A lifecycle action on a held device: only the holder, or an explicit `force` (as
         // killDevice allows), may reinstall/restart its CtrlProxy (#10827).
-        this.assertIdeMutationOwnership(
+        await this.assertIdeMutationOwnership(
           request,
-          targetDevice.deviceId,
+          targetDevice,
           "ide/updateService",
           (request.params as { force?: unknown }).force === true,
         );
@@ -5289,19 +5298,33 @@ export class UnixSocketServer {
   /**
    * `ide/*` routes that mutate a device follow device ownership like `input/*` (#10827): a held
    * device accepts them only from its holder (the optional `sessionUuid` param), or when `force`
-   * is allowed and set. Reads stay open to watchers. Unheld devices stay open to any client.
+   * is allowed and set. Reads stay open to watchers. Unheld devices stay open to any client,
+   * except a device a managed slot holds, which only that slot's execution may mutate, `force`
+   * or not (#11178).
    */
-  private assertIdeMutationOwnership(
+  private async assertIdeMutationOwnership(
     request: DaemonRequest,
-    deviceId: string,
+    device: BootedDevice,
     action: string,
     force = false,
-  ): void {
+  ): Promise<void> {
+    const deviceId = device.deviceId;
     const requesterSessionUuid = parseInputRequesterSessionUuid(request.method, request.params);
-    if (force || !this.daemonState.isInitialized()) {
+    if (!this.daemonState.isInitialized()) {
       return;
     }
     const sessionManager = this.daemonState.getSessionManager();
+    await assertInputNotOnForeignManagedSlotDevice({
+      action,
+      deviceId,
+      platform: device.platform,
+      requesterSessionUuid,
+      sessionManager,
+      gate: this.daemonState.getDevicePool(),
+    });
+    if (force) {
+      return;
+    }
     assertInputRequesterHoldsDevice({
       action,
       deviceId,
@@ -5366,7 +5389,7 @@ export class UnixSocketServer {
     if (!targetDevice) {
       throw new Error(`Device not found: ${deviceId}`);
     }
-    this.assertIdeMutationOwnership(request, targetDevice.deviceId, action);
+    await this.assertIdeMutationOwnership(request, targetDevice, action);
     const client =
       platform === "ios"
         ? IOSCtrlProxyClient.getInstance(targetDevice)
@@ -7036,6 +7059,25 @@ export class UnixSocketServer {
     this.daemonState.getDevicePool().assertDeviceActionable?.(deviceId, purpose);
   }
 
+  /** A managed slot's device, idle or held, takes input only from that slot's execution (#11178). */
+  private async assertInputManagedSlotGate(
+    toolName: string,
+    targetDevice: BootedDevice,
+    requester: (() => string | undefined) | undefined,
+  ): Promise<void> {
+    if (!this.daemonState.isInitialized()) {
+      return;
+    }
+    await assertInputNotOnForeignManagedSlotDevice({
+      action: toolName,
+      deviceId: targetDevice.deviceId,
+      platform: targetDevice.platform,
+      requesterSessionUuid: requester?.(),
+      sessionManager: this.daemonState.getSessionManager(),
+      gate: this.daemonState.getDevicePool(),
+    });
+  }
+
   private async runTrackedDeviceInput<T>(
     toolName: string,
     targetDevice: BootedDevice,
@@ -7055,6 +7097,7 @@ export class UnixSocketServer {
     const sessionUuid = sessionManager?.getSessionForDevice?.(targetDevice.deviceId) ?? undefined;
     // A held device takes input only from its holder (#10698); checked here, the one funnel every
     // `input/*` handler runs through, before anything reaches the device.
+    await this.assertInputManagedSlotGate(toolName, targetDevice, requester);
     assertInputRequesterHoldsDevice({
       action: toolName,
       deviceId: targetDevice.deviceId,

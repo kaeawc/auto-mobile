@@ -25,8 +25,10 @@ export interface SlotScopeIdentity {
 
 /**
  * `valid` scopes accept acquisitions. `invalidating` blocks new acquisitions while old owners and
- * cleanup settle. `invalidated` is a permanent tombstone so an old-incarnation request can never
- * recreate the scope's assignments.
+ * cleanup settle. `invalidated` is a tombstone so an old-incarnation request can never recreate the
+ * scope's assignments. The one exception is a scope invalidated only because it was abandoned: the
+ * same incarnation returning revives it (owner decision 2026-10-09), until an explicit reset or a
+ * newer incarnation of its namespace makes the invalidation permanent.
  */
 export type SlotScopeState = "valid" | "invalidating" | "invalidated";
 
@@ -106,8 +108,19 @@ export interface SlotBindingCommit {
 }
 
 export type EnsureScopeResult =
-  | { kind: "ready"; scope: SlotScopeRecord; created: boolean }
-  /** This exact incarnation is invalidating or invalidated; it can never be revived. */
+  | {
+      kind: "ready";
+      scope: SlotScopeRecord;
+      created: boolean;
+      /**
+       * The scope had been abandoned and this acquisition reactivated it. Its remaining slot rows
+       * keep their bindings: surviving devices are reused, and a device the abandonment cleanup
+       * already deleted is recreated by the reconciler. Devices an abandoned scope had already
+       * released to the free pool stay there, adoptable like any free device.
+       */
+      revived: boolean;
+    }
+  /** This exact incarnation was reset (explicitly or by a newer incarnation); permanent. */
   | { kind: "scope_invalidated"; scope: SlotScopeRecord }
   /** Another incarnation of the same `(host, namespace)` is not yet invalidated. */
   | { kind: "incarnation_conflict"; current: SlotScopeRecord };
@@ -161,6 +174,8 @@ export interface ManagedDeviceEntry {
   scopeKey: string;
   slotIndex: number | null;
   scopeState: SlotScopeState | null;
+  /** The live execution's session for a slot entry, if one is recorded; null for free devices. */
+  execSessionUuid: string | null;
 }
 
 export type BeginScopeInvalidationResult =
@@ -208,7 +223,9 @@ export type SlotExecOwnerLiveness = (owner: SlotExecOwner) => boolean;
 export interface SlotRegistry {
   /**
    * Admit an acquisition into a scope, creating it on first use and recording the acquisition time.
-   * Never revives an invalidated scope and never silently replaces another incarnation.
+   * Revives a scope invalidated only by abandonment; never revives one that was reset, and never
+   * silently replaces another incarnation. Creating a new incarnation makes every abandoned
+   * incarnation of the same namespace permanently invalid.
    */
   ensureScope(identity: SlotScopeIdentity): Promise<EnsureScopeResult>;
   getScope(scopeKey: string): Promise<SlotScopeRecord | null>;
@@ -263,7 +280,10 @@ export interface SlotRegistry {
   snapshotManagedDevices(): Promise<ManagedDeviceEntry[]>;
   listFreeDevices(): Promise<FreeSlotDeviceRecord[]>;
 
-  /** valid → invalidating. Idempotent; blocks new acquisitions immediately. */
+  /**
+   * valid → invalidating. Idempotent; blocks new acquisitions immediately. An explicit reset of a
+   * scope already abandoned records the reset reason, so the scope can no longer be revived.
+   */
   beginScopeInvalidation(
     scopeKey: string,
     reason: SlotScopeInvalidationReason,
@@ -323,6 +343,19 @@ export function resolveAbandonmentThresholdMs(query: AbandonmentQuery | undefine
     );
   }
   return thresholdMs;
+}
+
+/**
+ * Whether an acquisition of the same incarnation may reactivate this scope: it left `valid` only
+ * because it was abandoned, not because of a reset (owner decision 2026-10-09).
+ */
+export function isRevivableScope(scope: SlotScopeRecord): boolean {
+  return scope.state !== "valid" && scope.invalidationReason === "abandoned";
+}
+
+/** Whether a reason makes an invalidation permanent (anything but abandonment). */
+export function isPermanentInvalidationReason(reason: SlotScopeInvalidationReason): boolean {
+  return reason !== "abandoned";
 }
 
 export function bindingMatches(

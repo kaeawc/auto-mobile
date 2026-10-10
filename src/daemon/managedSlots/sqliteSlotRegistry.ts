@@ -12,6 +12,8 @@ import {
   assertValidSlotKey,
   bindingMatches,
   computeSlotScopeKey,
+  isPermanentInvalidationReason,
+  isRevivableScope,
   resolveAbandonmentThresholdMs,
   type AbandonmentQuery,
   type BeginScopeInvalidationResult,
@@ -260,19 +262,24 @@ export class SqliteSlotRegistry implements SlotRegistry {
 
   async ensureScope(identity: SlotScopeIdentity): Promise<EnsureScopeResult> {
     const scopeKey = computeSlotScopeKey(identity);
-    return this.db.transaction().execute(async (trx) => {
+    return this.db.transaction().execute(async (trx): Promise<EnsureScopeResult> => {
       const nowMs = this.timer.now();
       const existing = await this.readScope(trx, scopeKey);
-      if (existing) {
-        if (existing.state !== "valid") {
-          return { kind: "scope_invalidated", scope: existing };
-        }
+      if (existing?.state === "valid") {
         await trx
           .updateTable("slot_scopes")
           .set({ last_acquired_at_ms: nowMs })
           .where("scope_key", "=", scopeKey)
           .execute();
-        return { kind: "ready", scope: { ...existing, lastAcquiredAtMs: nowMs }, created: false };
+        return {
+          kind: "ready",
+          scope: { ...existing, lastAcquiredAtMs: nowMs },
+          created: false,
+          revived: false,
+        };
+      }
+      if (existing && !isRevivableScope(existing)) {
+        return { kind: "scope_invalidated", scope: existing };
       }
       const live = await trx
         .selectFrom("slot_scopes")
@@ -280,10 +287,34 @@ export class SqliteSlotRegistry implements SlotRegistry {
         .where("managed_host_scope", "=", identity.managedHostScope)
         .where("runner_namespace", "=", identity.runnerNamespace)
         .where("state", "<>", "invalidated")
+        .where("scope_key", "<>", scopeKey)
         .executeTakeFirst();
       if (live) {
         return { kind: "incarnation_conflict", current: toScope(live) };
       }
+      if (existing) {
+        const revived = await trx
+          .updateTable("slot_scopes")
+          .set({
+            state: "valid",
+            invalidation_reason: null,
+            invalidating_at_ms: null,
+            invalidated_at_ms: null,
+            last_acquired_at_ms: nowMs,
+          })
+          .where("scope_key", "=", scopeKey)
+          .returningAll()
+          .executeTakeFirstOrThrow();
+        return { kind: "ready", scope: toScope(revived), created: false, revived: true };
+      }
+      // A newer incarnation supersedes every abandoned one of this namespace for good.
+      await trx
+        .updateTable("slot_scopes")
+        .set({ invalidation_reason: "incarnation_reset" })
+        .where("managed_host_scope", "=", identity.managedHostScope)
+        .where("runner_namespace", "=", identity.runnerNamespace)
+        .where("invalidation_reason", "=", "abandoned")
+        .execute();
       const row: ScopeRow = {
         scope_key: scopeKey,
         managed_host_scope: identity.managedHostScope,
@@ -297,7 +328,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
         invalidated_at_ms: null,
       };
       await trx.insertInto("slot_scopes").values(row).execute();
-      return { kind: "ready", scope: toScope(row), created: true };
+      return { kind: "ready", scope: toScope(row), created: true, revived: false };
     });
   }
 
@@ -557,6 +588,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
         "slot_assignments.stable_device_id as stable_device_id",
         "slot_assignments.scope_key as scope_key",
         "slot_assignments.slot_index as slot_index",
+        "slot_assignments.exec_session_uuid as exec_session_uuid",
         "slot_scopes.state as scope_state",
       ])
       .where("slot_assignments.stable_device_id", "is not", null)
@@ -575,6 +607,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
                 scopeKey: row.scope_key,
                 slotIndex: row.slot_index,
                 scopeState: row.scope_state,
+                execSessionUuid: row.exec_session_uuid,
               },
             ],
       ),
@@ -585,6 +618,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
         scopeKey: row.from_scope_key,
         slotIndex: null,
         scopeState: null,
+        execSessionUuid: null,
       })),
     ];
   }
@@ -607,13 +641,13 @@ export class SqliteSlotRegistry implements SlotRegistry {
       if (!scope) {
         return { kind: "not_found" };
       }
-      if (scope.state === "invalidating") {
-        return { kind: "already_invalidating", scope };
+      if (scope.state === "valid") {
+        return { kind: "invalidating", scope: await this.markInvalidating(trx, scope, reason) };
       }
-      if (scope.state === "invalidated") {
-        return { kind: "already_invalidated", scope };
-      }
-      return { kind: "invalidating", scope: await this.markInvalidating(trx, scope, reason) };
+      const current = await this.makeResetPermanent(trx, scope, reason);
+      return current.state === "invalidating"
+        ? { kind: "already_invalidating", scope: current }
+        : { kind: "already_invalidated", scope: current };
     });
   }
 
@@ -795,6 +829,24 @@ export class SqliteSlotRegistry implements SlotRegistry {
       const owner = toExecOwner(row);
       return owner !== null && this.isExecOwnerLive(owner);
     });
+  }
+
+  /** An explicit reset of an abandoned scope replaces the revivable reason with the reset's. */
+  private async makeResetPermanent(
+    trx: Executor,
+    scope: SlotScopeRecord,
+    reason: SlotScopeInvalidationReason,
+  ): Promise<SlotScopeRecord> {
+    if (!isRevivableScope(scope) || !isPermanentInvalidationReason(reason)) {
+      return scope;
+    }
+    const row = await trx
+      .updateTable("slot_scopes")
+      .set({ invalidation_reason: reason })
+      .where("scope_key", "=", scope.scopeKey)
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    return toScope(row);
   }
 
   private async markInvalidating(

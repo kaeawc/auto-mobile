@@ -1,3 +1,4 @@
+import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
 import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
@@ -294,11 +295,8 @@ const bootAndPrepareDevice = async (
       });
     },
   });
+  const exclusions = await startMatchExclusions(args.platform);
   perf.startOperation("bootDevice");
-  const recoveryTargets =
-    args.platform === "android"
-      ? getStartDevicePool(DaemonState.getInstance())?.getRecoveringAndroidTargets()
-      : undefined;
   // Establish the (--debug-perf-gated) ambient tracker around the shared
   // acquisition boot attempt (getAndroid/getApple/startDevice), matching
   // provisionDevice's boot scope, so the emulator/simctl/adb discovery, boot,
@@ -311,8 +309,7 @@ const bootAndPrepareDevice = async (
         timeoutMs: budgets.bootTimeoutMs,
         totalDeadlineMs: bootDeadlineMs,
         signal,
-        excludeDeviceNames: recoveryTargets?.names,
-        excludeDeviceIds: recoveryTargets?.serials,
+        ...exclusions,
       },
       progress ? { report: progress } : undefined,
     ),
@@ -426,6 +423,40 @@ const bootAndPrepareDevice = async (
     configuredImage: configuredImageForAcquiredDevice(state.boot.device, preparation.sourceImage),
   });
 };
+
+/**
+ * Devices a selector-based start must not match: recovering Android AVDs and serials, and every
+ * device a managed slot holds, idle ones included (#11174): AVD names on Android, UDIDs on iOS.
+ */
+async function startMatchExclusions(platform: "android" | "ios"): Promise<{
+  excludeDeviceNames: ReadonlySet<string> | undefined;
+  excludeDeviceIds: ReadonlySet<string> | undefined;
+}> {
+  const managed =
+    (await managedSlotPoolGate(initializedDevicePool()).managedSlotStableIds?.(platform)) ??
+    new Set<string>();
+  if (platform === "ios") {
+    return { excludeDeviceNames: undefined, excludeDeviceIds: unionSets(undefined, managed) };
+  }
+  const recoveryTargets = getStartDevicePool(
+    DaemonState.getInstance(),
+  )?.getRecoveringAndroidTargets();
+  return {
+    excludeDeviceNames: unionSets(recoveryTargets?.names, managed),
+    excludeDeviceIds: recoveryTargets?.serials,
+  };
+}
+
+/** Undefined when both are empty, so an unrestricted boot request stays unrestricted. */
+function unionSets(
+  first: ReadonlySet<string> | undefined,
+  second: ReadonlySet<string>,
+): ReadonlySet<string> | undefined {
+  if (second.size === 0) {
+    return first;
+  }
+  return first ? new Set([...first, ...second]) : second;
+}
 
 type BootPreparationState = {
   recovered: boolean;

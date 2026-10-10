@@ -1,3 +1,4 @@
+import { DeviceAssignedToManagedSlotError } from "../daemon/managedSlots/managedSlotRefusal";
 import type { DeviceResourceDrift } from "../models/DeviceResourceReconciliation";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
@@ -99,6 +100,7 @@ export type ProvisionDeviceFailureCode =
   | "device_cleanup_in_progress"
   | "session_creation_timeout"
   | "device_shutting_down"
+  | "device_assigned_to_managed_slot"
   | "device_offline"
   | "discovery_incomplete"
   | "identity_conflict"
@@ -124,6 +126,8 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   session_creation_timeout: true,
   // Transient: the kill reservation clears once the shutdown finishes.
   device_shutting_down: true,
+  // An idle assigned device stays assigned; only a scope reset frees it (#11174).
+  device_assigned_to_managed_slot: false,
   device_offline: true,
   discovery_incomplete: true,
   identity_conflict: false,
@@ -151,6 +155,8 @@ interface ProvisionDeviceErrorDiagnostics {
   runtimeCompatibility?: IosRuntimeIncompatibility;
   /** Structured recovery evidence delivered with the error (a snapshot, not live state). */
   recovery?: ProvisionDeviceRecoveryEvidence;
+  /** The managed slot holding the device (`device_assigned_to_managed_slot`); no credentials. */
+  managedSlot?: { scopeKey: string; declaredSlot: number | null; stableId: string };
 }
 
 export interface IosRuntimeIncompatibility {
@@ -344,6 +350,37 @@ export interface DefaultExactDeviceProvisionerDependencies {
   iosRuntimeCatalog?: ExactIosRuntimeCatalog;
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
   timer?: Pick<Timer, "now">;
+  /**
+   * Refuses adopting an existing device a managed slot holds (#11174): generic provisioning must
+   * never take over a slot's device, idle or not. Throws to refuse; absent means no slots.
+   */
+  assertAdoptable?: ExactDeviceAdoptionGuard;
+}
+
+export type ExactDeviceAdoptionGuard = (device: {
+  platform: "android" | "ios";
+  /** AVD name on Android, UDID on iOS. */
+  stableId: string;
+}) => Promise<void>;
+
+/** The provisionDevice failure for a device a managed slot holds (non-retryable). */
+export function managedSlotProvisionError(
+  error: DeviceAssignedToManagedSlotError,
+  context: string,
+): ProvisionDeviceError {
+  return new ProvisionDeviceError(
+    "device_assigned_to_managed_slot",
+    `${context}: ${error.message}`,
+    false,
+    {
+      deviceId: error.deviceId,
+      managedSlot: {
+        scopeKey: error.scopeKey,
+        declaredSlot: error.declaredSlot,
+        stableId: error.stableId,
+      },
+    },
+  );
 }
 
 /**
@@ -438,6 +475,28 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     }
   }
 
+  /** Refuse adopting a device a managed slot holds, before reading or touching it (#11174). */
+  private async assertAdoptable(
+    request: ExactDeviceProvisionRequest,
+    existing: DeviceInfo,
+  ): Promise<void> {
+    const stableId = existing.platform === "android" ? existing.name : existing.deviceId;
+    if (!this.dependencies.assertAdoptable || !stableId) {
+      return;
+    }
+    try {
+      await this.dependencies.assertAdoptable({ platform: existing.platform, stableId });
+    } catch (error) {
+      if (error instanceof DeviceAssignedToManagedSlotError) {
+        throw managedSlotProvisionError(
+          error,
+          `Cannot adopt existing ${request.platform} device '${request.name}'`,
+        );
+      }
+      throw error;
+    }
+  }
+
   private initialLifecycleIdentity(
     request: ExactDeviceProvisionRequest,
   ): VirtualDeviceLifecycleIdentity {
@@ -460,6 +519,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     );
     const existing = this.findExisting(images, request);
     if (existing) {
+      await this.assertAdoptable(request, existing);
       await trackAmbient("provision:matchExisting", () =>
         this.assertExistingMatches(request, existing),
       );
@@ -759,8 +819,10 @@ export function createDefaultExactDeviceProvisioner(
   deviceManager: PlatformDeviceManager,
   deviceCreationGate: DeviceCreationGate,
   androidConfigWriter: AndroidAvdConfigWriter = new FileAndroidAvdConfigWriter(),
+  assertAdoptable?: ExactDeviceAdoptionGuard,
 ): ExactDeviceProvisioner {
   return new DefaultExactDeviceProvisioner({
+    assertAdoptable,
     listDeviceImages: deviceManager.listDeviceImages.bind(deviceManager),
     isCreationAllowed: deviceCreationGate.isCreationAllowed.bind(deviceCreationGate),
     avdManager: new AvdManagerClient(),

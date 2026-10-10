@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
 import { DaemonBoundSessionExpiredError, DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
@@ -44,7 +44,7 @@ let client: FakeDaemonClient;
 let proxy: DaemonMcpProxy;
 let spies: Array<ReturnType<typeof spyOn>>;
 
-beforeEach(() => {
+const setUp = (): void => {
   client = new FakeDaemonClient({
     daemonMethodResults: new Map<string, unknown>([
       ["tools/list", { tools: TOOLS }],
@@ -91,14 +91,28 @@ beforeEach(() => {
     heartbeatTimeoutMs: 4_000,
     heartbeatIntervalMs: 2_000,
   });
-});
+};
 
-afterEach(async () => {
+const tearDown = async (): Promise<void> => {
   await proxy.close();
   for (const spy of spies) {
     spy.mockRestore();
   }
+};
+
+// The first acquisition pays the proxy's one-time module cost; pay it outside the timed tests.
+beforeAll(async () => {
+  setUp();
+  try {
+    await proxy.callTool("getAndroid", {});
+    await proxy.listTools();
+  } finally {
+    await tearDown();
+  }
 });
+
+beforeEach(setUp);
+afterEach(tearDown);
 
 /** Acquire both devices; iOS is the latest binding and Android is held beside it. */
 async function acquireBoth(): Promise<void> {

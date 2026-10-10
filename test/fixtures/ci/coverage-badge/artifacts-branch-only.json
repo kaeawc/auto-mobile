@@ -1,0 +1,35 @@
+{
+  "total_count": 2394,
+  "artifacts": [
+    {
+      "id": 11676473061,
+      "name": "swift-coverage-badge",
+      "size_in_bytes": 264,
+      "expired": false,
+      "created_at": "2026-10-10T17:07:12Z",
+      "expires_at": "2026-10-17T17:07:11Z",
+      "workflow_run": {
+        "id": 38070104506,
+        "repository_id": 1071744484,
+        "head_repository_id": 1071744484,
+        "head_branch": "work/prototype-appearance-combined",
+        "head_sha": "32ba43988eb5666596d3df8b1485880a53220d70"
+      }
+    },
+    {
+      "id": 11676159614,
+      "name": "swift-coverage-badge",
+      "size_in_bytes": 264,
+      "expired": false,
+      "created_at": "2026-10-10T17:20:32Z",
+      "expires_at": "2026-10-17T17:20:31Z",
+      "workflow_run": {
+        "id": 38070775402,
+        "repository_id": 1071744484,
+        "head_repository_id": 1071744484,
+        "head_branch": "work/ios-prototype-repeat-snackbar-11409",
+        "head_sha": "4f9126ad33806fc0534ec7554b1e021cbd6b1b35"
+      }
+    }
+  ]
+}

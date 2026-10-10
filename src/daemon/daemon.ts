@@ -136,6 +136,7 @@ import {
   DeviceSettingDefaults,
   createDeviceSettingDefaultsAcquisitionReset,
   installDeviceSettingDefaults,
+  registerDeviceSettingDefaultsIdentityListener,
   recordDeviceSettingDefaultsBeforeChange,
 } from "../features/utility/DeviceSettingDefaults";
 import { DeviceSettingDefaultsRepository } from "../db/deviceSettingDefaultsRepository";
@@ -967,6 +968,7 @@ export class Daemon {
       this.timer,
     );
     installDeviceSettingDefaults(settingDefaults);
+    registerDeviceSettingDefaultsIdentityListener(settingDefaults);
     const resetSettingDefaults = createDeviceSettingDefaultsAcquisitionReset(
       this.sessionManager,
       settingDefaults,

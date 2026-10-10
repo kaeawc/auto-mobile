@@ -8,6 +8,10 @@ import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
+  registerDeviceIncarnationListener,
+  type DeviceIncarnationListener,
+} from "../../utils/deviceIncarnation";
+import {
   DisplayConfig,
   type DisplayTheme,
   type SetDisplayConfigInput,
@@ -80,6 +84,8 @@ export const PENDING_RESET_WAIT_MS = 15_000;
  */
 export class DeviceSettingDefaults {
   private readonly queues = new Map<string, Promise<void>>();
+  /** Bumped when a different device takes over a serial: queued work of the old one is dropped. */
+  private readonly identityEpochs = new Map<string, number>();
 
   constructor(
     private readonly persistence: DeviceSettingDefaultsPersistence,
@@ -190,16 +196,36 @@ export class DeviceSettingDefaults {
     });
   }
 
+  /**
+   * A different device now holds this serial: drop the predecessor's recorded defaults, and any
+   * queued record or reset of its, so they are never written onto the new device.
+   */
+  forget(deviceId: string): Promise<void> {
+    this.identityEpochs.set(deviceId, (this.identityEpochs.get(deviceId) ?? 0) + 1);
+    return this.enqueue(deviceId, () => this.persistence.delete(deviceId), true);
+  }
+
   /** Settles once the record/reset work queued for the device so far has finished. */
   settled(deviceId: string): Promise<void> {
     return this.queues.get(deviceId) ?? Promise.resolve();
   }
 
-  private enqueue(deviceId: string, work: () => Promise<void>): Promise<void> {
+  private enqueue(
+    deviceId: string,
+    work: () => Promise<void>,
+    survivesIdentityChange = false,
+  ): Promise<void> {
     const previous = this.queues.get(deviceId) ?? Promise.resolve();
-    const next = previous.then(work).catch((error: unknown) => {
-      logger.warn(`Device setting defaults failed on ${deviceId}: ${errorMessage(error)}`, error);
-    });
+    const epoch = this.identityEpochs.get(deviceId) ?? 0;
+    const next = previous
+      .then(() =>
+        survivesIdentityChange || (this.identityEpochs.get(deviceId) ?? 0) === epoch
+          ? work()
+          : undefined,
+      )
+      .catch((error: unknown) => {
+        logger.warn(`Device setting defaults failed on ${deviceId}: ${errorMessage(error)}`, error);
+      });
     this.queues.set(deviceId, next);
     void next.then(() => {
       if (this.queues.get(deviceId) === next) {
@@ -395,4 +421,29 @@ export function createDeviceSettingDefaultsAcquisitionReset(
       defaults.resetOnAcquisition(deviceId, sessionId),
     );
   };
+}
+
+export const DEVICE_SETTING_DEFAULTS_LISTENER_NAME = "device-setting-defaults";
+
+/**
+ * A different device now holds this serial (wipe, recreate, port reuse): the defaults recorded
+ * for its predecessor must never be written onto it (#11145). Same-device incarnation changes keep
+ * the record, since the guest's settings survive them.
+ */
+export function createDeviceSettingDefaultsIdentityListener(
+  defaults: Pick<DeviceSettingDefaults, "forget">,
+): DeviceIncarnationListener {
+  return {
+    name: DEVICE_SETTING_DEFAULTS_LISTENER_NAME,
+    onDeviceIdentityReplaced: (deviceId) => {
+      void defaults.forget(deviceId);
+    },
+    onDeviceIncarnationChanged: () => {},
+  };
+}
+
+export function registerDeviceSettingDefaultsIdentityListener(
+  defaults: Pick<DeviceSettingDefaults, "forget">,
+): () => void {
+  return registerDeviceIncarnationListener(createDeviceSettingDefaultsIdentityListener(defaults));
 }

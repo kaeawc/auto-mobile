@@ -3,6 +3,7 @@ import type { BootedDevice } from "../../../src/models";
 import {
   DeviceSettingDefaults,
   createDeviceSettingDefaultsAcquisitionReset,
+  createDeviceSettingDefaultsIdentityListener,
   type DeviceSettingKey,
   type DeviceSettingValues,
 } from "../../../src/features/utility/DeviceSettingDefaults";
@@ -197,6 +198,47 @@ describe("DeviceSettingDefaults (#11145)", () => {
       await h.defaults.settled(device.deviceId);
       const recorded = h.persistence.records.get(device.deviceId);
       expect(recorded?.values.nightMode).not.toBe("dark");
+    });
+  });
+
+  describe("device identity replacement (#11145)", () => {
+    test("the recorded defaults of the replaced device are dropped", async () => {
+      const h = harness({ nightMode: "light" });
+      await h.change({ nightMode: "dark" });
+      createDeviceSettingDefaultsIdentityListener(h.defaults).onDeviceIdentityReplaced?.(
+        device.deviceId,
+      );
+      await h.defaults.settled(device.deviceId);
+      expect(h.persistence.records.size).toBe(0);
+      await h.defaults.resetOnAcquisition(device.deviceId, "session-b");
+      expect(h.settings.writes).toEqual([]);
+    });
+
+    test("a reset queued before the replacement never writes the predecessor's defaults", async () => {
+      const persistence = new FakePersistence();
+      const settings = new GatedSettings({ nightMode: "dark" });
+      const defaults = new DeviceSettingDefaults(persistence, settings, () => "session-b");
+      persistence.records.set(device.deviceId, {
+        platform: "android",
+        name: "Pixel",
+        sessionId: "session-a",
+        values: { nightMode: "light" },
+      });
+      const reset = defaults.resetOnAcquisition(device.deviceId, "session-b");
+      const forgotten = defaults.forget(device.deviceId);
+      settings.open();
+      await Promise.all([reset, forgotten]);
+      expect(settings.writes).toEqual([]);
+      expect(persistence.records.size).toBe(0);
+    });
+
+    test("a same-device incarnation change keeps the record", async () => {
+      const h = harness({ nightMode: "light" });
+      await h.change({ nightMode: "dark" });
+      await createDeviceSettingDefaultsIdentityListener(h.defaults).onDeviceIncarnationChanged(
+        device.deviceId,
+      );
+      expect(h.persistence.records.size).toBe(1);
     });
   });
 });

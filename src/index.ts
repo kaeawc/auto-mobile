@@ -50,7 +50,10 @@ import {
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "./processLifecycle";
-import { assertManagedSlotsSupported } from "./models/managedSlotConfig";
+import {
+  assertManagedSlotOwnerRunning,
+  assertManagedSlotsSupported,
+} from "./models/managedSlotConfig";
 import { runShutdownCleanupStages } from "./shutdownCleanup";
 import { startStartupMaintenance } from "./utils/startupMaintenance";
 
@@ -287,6 +290,10 @@ async function main() {
     }
     // Refuse before any daemon or device work rather than run unmanaged (#11208).
     assertManagedSlotsSupported(managedSlotConfig);
+    if (managedSlotConfig?.executionOwnerPid !== undefined) {
+      const { isProcessRunning } = await import("./utils/processLiveness");
+      assertManagedSlotOwnerRunning(managedSlotConfig, (pid) => isProcessRunning(pid));
+    }
     if (daemonRequested && daemonCommand === undefined) {
       const { printUnknownDaemonCommand } = await import("./daemon/cli/runDaemonCommand");
       printUnknownDaemonCommand(undefined);
@@ -751,7 +758,7 @@ async function main() {
       if (useProxyMode && managedSlotConfig) {
         // A managed slot execution's proxy must not outlive its owner (#11176): owner exit or
         // re-parenting shuts it down, and shutdown releases its sessions promptly.
-        await startExecutionOwnerWatch();
+        await startExecutionOwnerWatch(managedSlotConfig.executionOwnerPid);
       }
       try {
         logger.info("Connecting MCP server to stdio transport");
@@ -780,7 +787,7 @@ async function main() {
 }
 
 /** Watch the managed slot execution's owner (by default the launching parent) (#11176). */
-async function startExecutionOwnerWatch(): Promise<void> {
+async function startExecutionOwnerWatch(ownerPid?: number): Promise<void> {
   const [{ ExecutionOwnerWatch }, { isProcessRunning }, { defaultTimer }] = await Promise.all([
     import("./daemon/executionOwnerWatch"),
     import("./utils/processLiveness"),
@@ -789,6 +796,7 @@ async function startExecutionOwnerWatch(): Promise<void> {
   new ExecutionOwnerWatch(
     {
       launchParentPid: process.ppid,
+      ownerPid,
       onOwnerLost: () => requestProcessShutdown("execution-owner-lost"),
     },
     { isProcessRunning: (pid) => isProcessRunning(pid), currentParentPid: () => process.ppid },

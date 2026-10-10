@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  assertManagedSlotOwnerRunning,
   MANAGED_SLOTS_V1_CAPABILITY,
   ManagedSlotConfigError,
   assertManagedSlotContractSupported,
@@ -137,6 +138,35 @@ describe("parseManagedSlotConfig", () => {
         parseManagedSlotConfig({ ...validConfig, requests: [androidRequest, androidRequest] }),
       ),
     ).toBe("managed_slot_config_invalid");
+  });
+});
+
+describe("executionOwnerPid", () => {
+  test("accepts a positive integer and stays optional", () => {
+    expect(
+      parseManagedSlotConfig({ ...validConfig, executionOwnerPid: 4242 }).executionOwnerPid,
+    ).toBe(4242);
+    expect(parseManagedSlotConfig(validConfig).executionOwnerPid).toBeUndefined();
+  });
+
+  test.each([0, -5, 1.5, "42", null])("rejects %p", (value) => {
+    expect(codeOf(() => parseManagedSlotConfig({ ...validConfig, executionOwnerPid: value }))).toBe(
+      "managed_slot_config_invalid",
+    );
+  });
+
+  test("startup validation requires the owner process to exist", () => {
+    const config = parseManagedSlotConfig({ ...validConfig, executionOwnerPid: 4242 });
+    expect(codeOf(() => assertManagedSlotOwnerRunning(config, () => false))).toBe(
+      "managed_slot_config_invalid",
+    );
+    expect(
+      codeOf(() => assertManagedSlotOwnerRunning(config, (pid) => pid === 4242)),
+    ).toBeUndefined();
+    expect(codeOf(() => assertManagedSlotOwnerRunning(undefined, () => false))).toBeUndefined();
+    expect(
+      codeOf(() => assertManagedSlotOwnerRunning(parseManagedSlotConfig(validConfig), () => false)),
+    ).toBeUndefined();
   });
 });
 

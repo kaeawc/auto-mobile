@@ -86,6 +86,18 @@ describe("ExecutionOwnerWatch", () => {
     expect(losses.map((loss) => loss.reason)).toEqual(["owner-exited"]);
   });
 
+  test("a live parent does not mask the declared owner's death, and a live owner is not lost", async () => {
+    const { timer, watch, losses, kill } = harness({ ownerPid: SUPERVISOR });
+    watch.start();
+    timer.advanceTime(3 * EXECUTION_OWNER_CHECK_INTERVAL_MS);
+    await settle();
+    expect(losses).toEqual([]);
+    kill(SUPERVISOR);
+    timer.advanceTime(EXECUTION_OWNER_CHECK_INTERVAL_MS);
+    await settle();
+    expect(losses.map((loss) => loss.reason)).toEqual(["owner-exited"]);
+  });
+
   test("an owner already gone at launch is caught by the first check", async () => {
     const { watch, losses, kill } = harness();
     kill(PARENT);

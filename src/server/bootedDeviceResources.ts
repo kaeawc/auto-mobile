@@ -770,12 +770,12 @@ function resolvePoolDeviceContext(
   };
 }
 
-function summarizePoolStatus(
+async function summarizePoolStatus(
   devicePool: DevicePool,
   discoveredDevices: BootedDeviceInfo[],
   succeededPlatforms: Set<Platform>,
   requestedPlatforms: readonly Platform[],
-): PoolStatusSummary {
+): Promise<PoolStatusSummary> {
   let idle = 0;
   let assigned = 0;
   let error = 0;
@@ -800,15 +800,36 @@ function summarizePoolStatus(
 
   // For platforms whose discovery failed/was unavailable, keep the pool's own
   // tracked counts — we cannot confirm which of those entries are phantom.
-  for (const pooled of devicePool.getAllDevices()) {
-    if (requestedPlatforms.includes(pooled.platform) && !succeededPlatforms.has(pooled.platform)) {
-      tally(
-        effectivePoolStatus(
-          pooled.status,
-          poolHoldFor(devicePool, pooled.id),
-          devicePool.getDeviceHealthMarker(pooled.id) !== undefined,
-        ),
+  const fallback = devicePool
+    .getAllDevices()
+    .filter(
+      (pooled) =>
+        requestedPlatforms.includes(pooled.platform) && !succeededPlatforms.has(pooled.platform),
+    );
+  // Whether a managed slot holds an idle device is only known after the ownership refresh the
+  // other inventory surfaces perform. When it fails (slot registry unreadable, never loaded), an
+  // idle tally would report a possibly-held device free: omit it, as available-devices refuses
+  // (#11455). Assigned/error stay exact -- a session or health marker is independent of slots.
+  let ownershipKnown = true;
+  if (fallback.length > 0) {
+    try {
+      await devicePool.refreshInventoryOwnership();
+    } catch (refreshError) {
+      ownershipKnown = false;
+      logger.warn(
+        `[BootedDeviceResources] Managed-slot ownership unknown; omitting idle pool counts: ${errorMessage(refreshError)}`,
+        refreshError,
       );
+    }
+  }
+  for (const pooled of fallback) {
+    const status = effectivePoolStatus(
+      pooled.status,
+      poolHoldFor(devicePool, pooled.id),
+      devicePool.getDeviceHealthMarker(pooled.id) !== undefined,
+    );
+    if (ownershipKnown || status !== "idle") {
+      tally(status);
     }
   }
 
@@ -1547,7 +1568,7 @@ async function computeBootedDevicesForPlatforms(
   const physicalCount = devices.length - virtualCount;
   const poolStatus =
     daemonContext.poolStatus && daemonContext.devicePool
-      ? summarizePoolStatus(daemonContext.devicePool, devices, succeededPlatforms, platforms)
+      ? await summarizePoolStatus(daemonContext.devicePool, devices, succeededPlatforms, platforms)
       : undefined;
 
   return {

@@ -9,6 +9,7 @@ import {
   type SlotRegistry,
   type SlotScopeIdentity,
 } from "../../../src/daemon/managedSlots/slotRegistry";
+import { ManagedExecutionReowner } from "../../../src/daemon/managedSlots/managedExecutionReowner";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 export type SlotRegistryFactory = (
@@ -881,6 +882,85 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect(
         await registry.findReclaimableFreeDevices({ thresholdMs: 2 * 60 * 60 * 1000 }),
       ).toEqual([]);
+    });
+
+    describe("daemon restart (#11275)", () => {
+      const BEFORE_RESTART = { daemonId: "daemon-before", pid: 301, processGenerationToken: "t-1" };
+      const AFTER_RESTART = { daemonId: "daemon-after", pid: 302, processGenerationToken: "t-2" };
+
+      // Daemon 301 claims the slot for the live session, then restarts as 302: the session is
+      // rehydrated and its proxy re-binds, but the registry still names the dead 301.
+      async function liveExecutionAcrossRestart(): Promise<SlotKey> {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        const assignment = await registry.getAssignment(key);
+        livePids.add(BEFORE_RESTART.pid);
+        expect(
+          (
+            await registry.claimExecution(
+              key,
+              { generation: assignment!.generation, stableDeviceId: "avd-1" },
+              { ...BEFORE_RESTART, sessionUuid: "live-session" },
+            )
+          ).kind,
+        ).toBe("claimed");
+        livePids.delete(BEFORE_RESTART.pid);
+        livePids.add(AFTER_RESTART.pid);
+        return key;
+      }
+
+      function reowner(): ManagedExecutionReowner {
+        return new ManagedExecutionReowner({
+          registry: async () => registry,
+          owner: () => AFTER_RESTART,
+        });
+      }
+
+      test("the restarted daemon re-owns the live execution, so a duplicate claim is slot_in_use", async () => {
+        const key = await liveExecutionAcrossRestart();
+
+        const reowned = await reowner().reown(["live-session"]);
+
+        expect(reowned.map((slot) => slot.execOwner)).toEqual([
+          { ...AFTER_RESTART, sessionUuid: "live-session" },
+        ]);
+        const assignment = await registry.getAssignment(key);
+        const duplicate = await registry.claimExecution(
+          key,
+          { generation: assignment!.generation, stableDeviceId: "avd-1" },
+          { ...AFTER_RESTART, sessionUuid: "reserve-duplicate" },
+        );
+        expect(duplicate).toMatchObject({
+          kind: "slot_in_use",
+          owner: { sessionUuid: "live-session", pid: AFTER_RESTART.pid },
+        });
+        // The binding is untouched: re-owning is not a binding change.
+        expect(assignment).toMatchObject({ generation: 1, stableDeviceId: "avd-1" });
+      });
+
+      test("a re-owned execution keeps its scope from being abandoned past the threshold", async () => {
+        const key = await liveExecutionAcrossRestart();
+        await reowner().reown(["live-session"]);
+
+        timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS + 60_000);
+
+        expect(await registry.findAbandonedScopes()).toEqual([]);
+        expect(await registry.markScopeAbandoned(key.scopeKey)).toMatchObject({
+          kind: "not_abandoned",
+          reason: "live_owner",
+        });
+      });
+
+      test("re-owning is idempotent and never takes a slot another execution holds", async () => {
+        const key = await liveExecutionAcrossRestart();
+        expect(await reowner().reown(["live-session"])).toHaveLength(1);
+        expect(await reowner().reown(["live-session"])).toEqual([]);
+        expect(await reowner().reown(["some-other-session"])).toEqual([]);
+        expect((await registry.getAssignment(key))?.execOwner).toEqual({
+          ...AFTER_RESTART,
+          sessionUuid: "live-session",
+        });
+      });
     });
 
     describe("slot journal (#11179)", () => {

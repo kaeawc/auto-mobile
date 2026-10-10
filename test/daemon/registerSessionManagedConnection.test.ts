@@ -25,6 +25,7 @@ describe("daemon/registerSession on managed connections", () => {
   let sessionManager: SessionManager;
   let scopes: ManagedConnectionScopes;
   let state: DaemonStateAccess;
+  let reowned: string[][];
 
   async function managedSession(sessionId: string, deviceId: string, token: string) {
     await sessionManager.createSession(sessionId, deviceId, "android");
@@ -37,7 +38,14 @@ describe("daemon/registerSession on managed connections", () => {
     timer.setCurrentTime(1_000_000);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     scopes = new ManagedConnectionScopes();
+    reowned = [];
     state = {
+      getManagedExecutionReowner: () => ({
+        reown: async (sessionUuids) => {
+          reowned.push([...sessionUuids]);
+          return [];
+        },
+      }),
       isInitialized: () => true,
       getManagedConnectionScopes: () => scopes,
       getSessionManager: () => sessionManager,
@@ -97,6 +105,8 @@ describe("daemon/registerSession on managed connections", () => {
     expect(response).toMatchObject({ success: true });
     expect(scopes.get("socket-2")?.scopeKey).toBe(SCOPE);
     expect([...scopes.get("socket-2")!.sessionUuids]).toEqual([SLOT_SESSION]);
+    // After a daemon restart the slot still names the previous daemon: re-own it (#11275).
+    expect(reowned).toEqual([[SLOT_SESSION]]);
   });
 
   test("a re-bind naming another execution's session, or a non-managed one, binds nothing", async () => {
@@ -113,6 +123,7 @@ describe("daemon/registerSession on managed connections", () => {
     expect(scopes.get("socket-2")).toBeUndefined();
     expect(scopes.get("socket-3")).toBeUndefined();
     expect(scopes.get("socket-4")).toBeUndefined();
+    expect(reowned).toEqual([]);
   });
 
   test("a re-bind must register one of its slot sessions, from a known socket, in its own scope", async () => {

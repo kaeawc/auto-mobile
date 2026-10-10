@@ -87,6 +87,7 @@ import {
 } from "./managedSlots/managedSlotRefusal";
 import { SLOT_SCOPE_RESET_MAX_WAIT_MS, type SlotScopeReset } from "./managedSlots/slotScopeReset";
 import type { ManagedSlotAcquisition } from "./managedSlots/managedSlotAcquisition";
+import type { ManagedExecutionReowner } from "./managedSlots/managedExecutionReowner";
 import {
   daemonDeviceLeaseActivitySources,
   daemonDeviceLeaseRelinquishPort,
@@ -130,6 +131,8 @@ export interface DaemonStateAccess {
   getManagedConnectionScopes?(): Pick<ManagedConnectionScopes, "bind" | "get" | "unbind">;
   /** The managed-slot acquisition behind `daemon/acquireManagedSlots` (#11173). */
   getManagedSlotAcquisition?(): Pick<ManagedSlotAcquisition, "acquire"> | undefined;
+  /** Re-stamps a re-bound managed connection's slots with this daemon as their owner (#11275). */
+  getManagedExecutionReowner?(): Pick<ManagedExecutionReowner, "reown"> | undefined;
   getSessionManager(): {
     hasSession(sessionId: string): boolean;
     getSession(sessionId: string): Session | null;
@@ -330,6 +333,35 @@ function managedConnectionRegistrationRefusal(
   return undefined;
 }
 
+/**
+ * A re-bound managed connection proved it holds these slot sessions: re-own their slots, which
+ * after a daemon restart still name the previous daemon and would otherwise read as ownerless
+ * (#11275). Best effort; the re-owner logs and never throws.
+ */
+async function reownManagedSlots(
+  state: DaemonStateAccess,
+  managedSlots: ManagedSlotsRegistration,
+): Promise<void> {
+  await state.getManagedExecutionReowner?.()?.reown(managedSlots.sessionUuids);
+}
+
+/** Wait (bounded) for an in-flight release of `sessionId`; a retry failure when it outlasts it. */
+async function releaseDrainRefusal(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+): Promise<DaemonMethodResult | undefined> {
+  const drained = await manager.waitForSessionReleaseWithin?.(
+    sessionId,
+    SESSION_RELEASE_DRAIN_TIMEOUT_MS,
+  );
+  return drained === false
+    ? {
+        success: false,
+        error: `Session ${sessionId} release is still in progress after ${SESSION_RELEASE_DRAIN_TIMEOUT_MS}ms; retry registration`,
+      }
+    : undefined;
+}
+
 /** A session-clock instant as wall-clock epoch ms, for a report another process reads (#11105). */
 function reportedWallClock(
   manager: { sessionClockToWall?(sessionClockMs: number): number },
@@ -360,15 +392,13 @@ async function handleRegisterSession(
   if (refusal) {
     return refusal;
   }
+  if (managedSlots) {
+    await reownManagedSlots(state, managedSlots);
+  }
   const manager = state.getSessionManager();
-  if (
-    (await manager.waitForSessionReleaseWithin?.(sessionId, SESSION_RELEASE_DRAIN_TIMEOUT_MS)) ===
-    false
-  ) {
-    return {
-      success: false,
-      error: `Session ${sessionId} release is still in progress after ${SESSION_RELEASE_DRAIN_TIMEOUT_MS}ms; retry registration`,
-    };
+  const draining = await releaseDrainRefusal(manager, sessionId);
+  if (draining) {
+    return draining;
   }
   const session = manager.getSession(sessionId);
   if (session) {

@@ -117,7 +117,7 @@ import {
   getStaticToolDefinitions,
 } from "./staticToolDefinitions";
 import { DaemonRestartDeferredError } from "./daemonRestartAdmission";
-import { isRecoverableDaemonReleaseReason, isTerminalReleaseReason } from "./releaseReasons";
+import { isRecoverableDaemonReleaseReason } from "./releaseReasons";
 import { daemonProcessOptions, daemonReuseOptions } from "./daemonOptionScopes";
 import {
   DAEMON_STALLED_CODE,
@@ -2438,8 +2438,6 @@ export class DaemonMcpProxy {
       return;
     }
     this.endLostSessionHandover(releasedSessionUuid);
-    const isRecoverableHandoff =
-      notification.reason !== undefined && isRecoverableDaemonReleaseReason(notification.reason);
     if (notification.reason === "daemon-shutdown") {
       this.daemonShutdownAnnouncedAt = this.timer.now();
       // Daemon shutdown is connection-wide. Arm the successor barrier even when
@@ -2447,7 +2445,7 @@ export class DaemonMcpProxy {
       // the current binding yet.
       this.waitForDaemonShutdownDisconnect();
     }
-    if (this.isRecoverableBoundSessionHandoff(releasedSessionUuid, isRecoverableHandoff)) {
+    if (this.releaseKeepsBinding(releasedSessionUuid, notification.reason)) {
       // The replacement daemon rehydrates this UUID as awaiting-owner. Preserve
       // the binding so the next call/heartbeat can reclaim it after reconnecting.
       this.recoverableBoundSessionHandoff = releasedSessionUuid;
@@ -2480,11 +2478,21 @@ export class DaemonMcpProxy {
     }
   }
 
-  private isRecoverableBoundSessionHandoff(
-    releasedSessionUuid: string,
-    isRecoverableHandoff: boolean,
-  ): boolean {
-    return isRecoverableHandoff && this.ownedDeviceSessions.has(releasedSessionUuid);
+  /**
+   * The one classification of a release the daemon reports for `sessionUuid`, whether in a
+   * session-released notification or with a not-found heartbeat (keeper tick, first heartbeat,
+   * liveness recovery): the binding survives only a recoverable handoff (`device-restart:<id>`,
+   * a daemon shutdown or restart) of a session this proxy owns, because the daemon hands that
+   * session back to the next call. Every other reason, terminal, merely reusable by name
+   * (`plan-auto-release`) or unknown to this build, ends the binding: the proxy stops heartbeating
+   * it and never attaches the UUID to a sessionless call again.
+   */
+  private releaseKeepsBinding(sessionUuid: string, releaseReason: string | undefined): boolean {
+    return (
+      releaseReason !== undefined &&
+      isRecoverableDaemonReleaseReason(releaseReason) &&
+      this.ownedDeviceSessions.has(sessionUuid)
+    );
   }
 
   private hasRecoverableBoundSessionHandoff(): boolean {
@@ -4696,14 +4704,17 @@ export class DaemonMcpProxy {
    * |   `device-restart:<id>`)                             |            | it again    | and success re-arms it    |
    * | held                                                 | runs       | every tick  | forwarded                 |
    * | held, heartbeat answered not-found                   | for others | never       | forwarded, daemon decides |
-   * | fenced (terminal release reason, expired replay      | for others | never       | refused locally           |
-   * |   lease, exhausted liveness recovery)                |            |             |                           |
+   * | fenced (any release reason that is not recoverable,  | for others | never       | refused locally           |
+   * |   expired replay lease, exhausted liveness recovery) |            |             |                           |
    *
    * "for others" means the session itself asks for no keeper: the keeper runs exactly when some
    * session in a "runs" row exists ({@link hasHeartbeatTargets}), whatever became of its siblings.
-   * A fence never coexists with a latest binding. A not-found heartbeat fences only with a terminal
-   * release reason ({@link heartbeatSessionNotFound}). {@link syncHeartbeatKeeper} is the one place
-   * that starts or stops the keeper to match.
+   * A fence never coexists with a latest binding. A release reason is classified in one place,
+   * {@link releaseKeepsBinding}, for the release notification and every not-found heartbeat alike.
+   * {@link syncHeartbeatKeeper} is the one place that starts the keeper, and the one that stops it
+   * because nothing is left to heartbeat. The only other stops are awaited pauses with sessions
+   * still held: binding a result-minted session (which syncs again on every way out), a one-shot
+   * CLI handing its session to the daemon's idle timeout, and close().
    */
   private hasHeartbeatTargets(): boolean {
     return this.otherHeldSessions.size > 0 || this.latestBindingHeartbeatable();
@@ -4750,8 +4761,7 @@ export class DaemonMcpProxy {
       !this.closing
     ) {
       void this.heartbeatKeeper.run();
-      this.heartbeatKeeper.start();
-      this.heartbeatKeeperStarted = true;
+      this.syncHeartbeatKeeper();
     }
   }
 
@@ -4951,16 +4961,16 @@ export class DaemonMcpProxy {
    * The bound session was already reaped before our first heartbeat reached the daemon (the #5637
    * race lost). Surface it as terminal now instead of proceeding to a keeper that can only
    * re-confirm the loss: this keeps terminal fencing intact and gives the caller an ownership-lost
-   * error on its next operation. Synchronous fence: no reconnect, no reentrancy. Only a
-   * recoverable release (the device is restarting) is handed back to the next call that names the
-   * session, exactly as on a keeper tick (#11400).
+   * error on its next operation. Synchronous fence: no reconnect, no reentrancy. An answer that
+   * names a release reason is classified exactly as on a keeper tick, so only a recoverable
+   * release (the device is restarting) is handed back to the next call (#11400).
    */
   private firstHeartbeatSessionNotFound(sessionUuid: string, releaseReason?: string): void {
-    if (releaseReason !== undefined && !isTerminalReleaseReason(releaseReason)) {
-      this.heartbeatSessionNotFound(sessionUuid, releaseReason);
+    if (releaseReason === undefined) {
+      this.fenceBoundSessionUuid(sessionUuid, "session-not-found");
       return;
     }
-    this.fenceBoundSessionUuid(sessionUuid, releaseReason ?? "session-not-found");
+    this.heartbeatSessionNotFound(sessionUuid, releaseReason);
   }
 
   /**
@@ -6102,12 +6112,13 @@ export class DaemonMcpProxy {
    *
    * A held session is dropped: no longer heartbeated, never fenced. For the latest binding the
    * daemon released the session and this proxy missed the notification (#10702): stop
-   * heartbeating it rather than every tick resetting the socket to ask again. The binding is
-   * fenced only when the daemon names a terminal release reason, the one a missed release
-   * notification would have carried (#10972). With no reason (a replacement daemon that has not
-   * materialised a persisted session) or a recoverable one (`device-restart:<id>`, a daemon
-   * restart) the daemon may hand the session back (#11400): a tool call that reaches it restores
-   * it and re-arms the heartbeat; otherwise that call reports the loss.
+   * heartbeating it rather than every tick resetting the socket to ask again. A release reason
+   * is the one a missed notification would have carried (#10972) and is classified as that
+   * notification is ({@link releaseKeepsBinding}): the binding is fenced unless the reason is a
+   * recoverable handoff. With a recoverable reason (`device-restart:<id>`, a daemon restart), or
+   * with no reason at all (a replacement daemon that has not materialised a persisted session),
+   * the daemon may hand the session back (#11400): a tool call that reaches it restores it and
+   * re-arms the heartbeat; otherwise that call reports the loss.
    */
   private heartbeatSessionNotFound(sessionUuid: string, releaseReason?: string): void {
     if (this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
@@ -6121,7 +6132,7 @@ export class DaemonMcpProxy {
     }
     // A not-found answer is no idle report: the daemon's instant no longer describes the session.
     this.daemonIdleReports.delete(sessionUuid);
-    if (releaseReason !== undefined && isTerminalReleaseReason(releaseReason)) {
+    if (releaseReason !== undefined && !this.releaseKeepsBinding(sessionUuid, releaseReason)) {
       this.fenceBoundSessionUuid(sessionUuid, releaseReason);
       return;
     }
@@ -6472,8 +6483,9 @@ export class DaemonMcpProxy {
   ): void {
     if (name === "executePlan") {
       // The daemon owns plan-session release. Preserve the binding until its
-      // release notification (or heartbeat not-found fallback) terminally fences
-      // this transport.
+      // release notification fences this transport, or, when that notification is
+      // missed, the not-found heartbeat naming `plan-auto-release` does
+      // (releaseKeepsBinding classifies both alike).
       return;
     }
     if (name === SET_TOOL_ENABLED_TOOL_NAME) {

@@ -18,9 +18,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // | live, acquired or reached by a call since           | runs         | every tick   | forwarded         |
 // | gone with no reason or a recoverable one, told by a | for others   | none needed  | forwarded, and    |
 // |   not-found heartbeat                               |              |              | success re-arms   |
-// | gone with a terminal reason, proxy told (release    | for others   | never again  | refused locally   |
-// |   notification or not-found heartbeat)              |              |              | while it is the   |
-// |                                                     |              |              | fenced binding    |
+// | gone with any reason that is not recoverable        | for others   | never again  | refused locally   |
+// |   (terminal, `plan-auto-release`, unknown to this   |              |              | while it is the   |
+// |   build), proxy told (release notification or       |              |              | fenced binding    |
+// |   not-found heartbeat)                              |              |              |                   |
 //
 // "keeper runs" is observed as the keeper's interval being scheduled: it is, exactly while some
 // session the proxy must heartbeat exists.
@@ -31,8 +32,14 @@ const RUN_OPTIONS = { seed: 11_411, numRuns: 100 } as const;
 const INTERVAL_MS = 1_000;
 const LEASE_MS = 4_000;
 const TERMINAL_REASON = "device-killed";
+/**
+ * Reasons that end the binding like a terminal one although they are not terminal: the UUID stays
+ * re-issuable by name on the daemon, or this build does not know the reason at all.
+ */
+const ENDING_REASONS = [TERMINAL_REASON, "plan-auto-release", "reason-from-a-newer-daemon"];
 const RECOVERABLE_REASON = "device-restart:emulator-5554";
 
+/** `terminal`: released for any reason that is not recoverable, which ends the binding. */
 type Gone = "terminal" | "recoverable" | "unknown";
 
 /**
@@ -43,7 +50,7 @@ type Birth = "lives" | "reaped" | "released";
 
 type Command =
   | { kind: "acquire"; birth: Birth }
-  | { kind: "release"; target: number; gone: Gone; notify: boolean }
+  | { kind: "release"; target: number; gone: Gone; notify: boolean; reason?: string }
   | { kind: "call"; target: number; rejected: boolean }
   /** The daemon is replaced; nothing listens for `gapMs` in between. */
   | { kind: "daemon-restart"; gapMs: number }
@@ -58,14 +65,16 @@ const command: fc.Arbitrary<Command> = fc.oneof(
       birth: fc.constantFrom<Birth>("lives", "lives", "reaped", "released"),
     }),
   },
-  // A terminal release, announced by its notification or learned from the next heartbeat.
+  // A release that ends the binding (terminal, plan cleanup or a reason this build does not
+  // know), announced by its notification or learned from the next heartbeat.
   {
-    weight: 2,
+    weight: 3,
     arbitrary: fc.record({
       kind: fc.constant("release" as const),
       target,
       gone: fc.constant<Gone>("terminal"),
       notify: fc.boolean(),
+      reason: fc.constantFrom(...ENDING_REASONS),
     }),
   },
   // A recoverable handoff: the device restarts and the daemon hands the session back.
@@ -113,6 +122,8 @@ interface SessionModel {
    * is retried once on a fresh connection, within the same command.
    */
   deadSince: number;
+  /** The reason the daemon gives once the session is gone for good. */
+  endedAs: string;
   heartbeats: number;
 }
 
@@ -178,6 +189,7 @@ class World {
       daemon: this.nextBirth === "reaped" ? "terminal" : "live",
       told: false,
       deadSince: -1,
+      endedAs: TERMINAL_REASON,
       heartbeats: 0,
     });
     // The proxy binds what an acquisition mints, before the session's first heartbeat.
@@ -212,7 +224,7 @@ class World {
     session.told = true;
     throw Object.assign(new Error(`Session not found: ${sessionUuid}`), {
       code: DAEMON_SESSION_NOT_FOUND_CODE,
-      ...(session.daemon === "terminal" ? { releaseReason: TERMINAL_REASON } : {}),
+      ...(session.daemon === "terminal" ? { releaseReason: session.endedAs } : {}),
       ...(session.daemon === "recoverable" ? { releaseReason: RECOVERABLE_REASON } : {}),
     });
   }
@@ -279,12 +291,13 @@ class World {
     }
   }
 
-  release(sessionUuid: string, gone: Gone, notify: boolean): void {
+  release(sessionUuid: string, gone: Gone, notify: boolean, reason = TERMINAL_REASON): void {
     const session = this.sessions.get(sessionUuid)!;
     if (session.daemon === "terminal") {
       return;
     }
     session.daemon = gone;
+    session.endedAs = reason;
     this.mustBeat.delete(sessionUuid);
     // A daemon the proxy has not reconnected to yet has nobody to notify.
     if (!notify || !this.client.isConnected()) {
@@ -293,7 +306,7 @@ class World {
     this.client.emitNotification(
       SESSION_RELEASED_NOTIFICATION_METHOD,
       sessionUuid,
-      gone === "terminal" ? TERMINAL_REASON : RECOVERABLE_REASON,
+      gone === "terminal" ? reason : RECOVERABLE_REASON,
     );
     if (gone === "terminal") {
       this.learnDead(sessionUuid);
@@ -415,7 +428,7 @@ class World {
         return;
       }
       if (step.kind === "release") {
-        this.release(sessionUuid, step.gone, step.notify);
+        this.release(sessionUuid, step.gone, step.notify, step.reason);
       } else {
         await this.call(sessionUuid, step.rejected);
       }
@@ -473,6 +486,34 @@ const REGRESSIONS: ReadonlyArray<readonly [string, readonly Command[]]> = [
       TICK,
       TICK,
       { kind: "call", target: 0, rejected: false },
+      TICK,
+    ],
+  ],
+  [
+    "a heartbeat is answered not-found with plan-auto-release and no notification arrived",
+    [
+      ACQUIRE,
+      TICK,
+      { kind: "release", target: 0, gone: "terminal", notify: false, reason: "plan-auto-release" },
+      TICK,
+      { kind: "call", target: 0, rejected: false },
+      TICK,
+    ],
+  ],
+  [
+    "a heartbeat is answered not-found with a reason this build does not know",
+    [
+      ACQUIRE,
+      ACQUIRE,
+      {
+        kind: "release",
+        target: 1,
+        gone: "terminal",
+        notify: false,
+        reason: "reason-from-a-newer-daemon",
+      },
+      TICK,
+      { kind: "call", target: 1, rejected: true },
       TICK,
     ],
   ],

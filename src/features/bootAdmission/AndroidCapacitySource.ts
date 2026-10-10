@@ -1,3 +1,4 @@
+import type { AdbDeviceState } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -11,7 +12,10 @@ import type { CapacityHostResources } from "./capacityLimits";
 
 /** What the Android boot admission gate counts. Missing data is reported, never read as zero load. */
 export interface AndroidCapacitySample {
-  /** adb serials of emulators in `device` state. */
+  /**
+   * adb serials of emulators in any adb state: one that is `offline` (still booting) or
+   * `unauthorized` already runs and holds a slot, whoever launched it (#11369).
+   */
   emulatorSerials: string[];
   /**
    * RSS of every `qemu-system-*` process on the host: emulators still booting,
@@ -32,8 +36,35 @@ export interface AndroidCapacitySource {
   sample(options?: { signal?: AbortSignal }): Promise<AndroidCapacitySample>;
 }
 
-/** Lists the adb serials of emulators in `device` state; throws when adb is unusable. */
+/** Lists the adb serials of emulators in any adb state; throws when adb is unusable. */
 export type EmulatorSerialLister = (signal?: AbortSignal) => Promise<string[]>;
+
+/** The raw `adb devices` rows, including devices that are not online yet. */
+export interface AdbDeviceStateSource {
+  getDeviceStates(options: {
+    timeoutMs: number;
+    signal?: AbortSignal;
+    throwOnMissingAdb: true;
+  }): Promise<AdbDeviceState[]>;
+}
+
+/**
+ * Emulator serials from the raw adb states rather than the online-only device list: with no
+ * process table (Windows, or a failed `ps`) the listing is the only count, and an emulator a
+ * peer daemon or a person is still booting is listed `offline` before it is `device` (#11369).
+ */
+export function adbEmulatorSerialLister(
+  adb: AdbDeviceStateSource,
+  timeoutMs: number,
+): EmulatorSerialLister {
+  return async (signal) => {
+    const states = await adb.getDeviceStates({ timeoutMs, signal, throwOnMissingAdb: true });
+    const serials = states
+      .map((state) => state.deviceId)
+      .filter((deviceId) => deviceId.startsWith("emulator-"));
+    return [...new Set(serials)];
+  };
+}
 
 /** The emulator's guest runs in a `qemu-system-<arch>` process (one per running emulator). */
 export function isEmulatorQemuProcess(row: Pick<HostProcessRow, "command">): boolean {

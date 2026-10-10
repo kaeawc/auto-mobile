@@ -3778,11 +3778,11 @@ export class DevicePool {
     }
     await this.foreignDeviceOwnership.refresh([deviceId]);
     const ownerPid = this.foreignDeviceOwnership.foreignOwnerPid(deviceId);
-    if (ownerPid === undefined) {
+    if (ownerPid === undefined && !this.foreignDeviceOwnership.foreignClaimUnreadable?.(deviceId)) {
       return false;
     }
     logger.warn(
-      `[DevicePool] AVD '${device.name}' (${deviceId}) is driven by another AutoMobile process (PID ${ownerPid}); not adopting it for allocation`,
+      `[DevicePool] AVD '${device.name}' (${deviceId}) is driven by another AutoMobile process${ownerPid === undefined ? "" : ` (PID ${ownerPid})`}; not adopting it for allocation`,
     );
     return true;
   }
@@ -5739,7 +5739,7 @@ export class DevicePool {
     }
     await ownership.refresh([deviceId]);
     const ownerPid = ownership.foreignOwnerPid(deviceId);
-    if (ownerPid !== undefined) {
+    if (ownerPid !== undefined || ownership.foreignClaimUnreadable?.(deviceId)) {
       throw new DeviceOwnedByOtherDaemonError(deviceId, ownerPid, remedy);
     }
   }
@@ -7059,6 +7059,10 @@ export class DevicePool {
         `Session '${session.sessionId}' was released while System UI recovery was in progress.`,
       );
     }
+    // Publish the claim before the session is bound to the replacement, so another daemon never
+    // sees a device this session drives as free. A refusal here fails the recovery through the
+    // caller's rollback, which removes the replacement and releases the session.
+    await this.claimSystemUiAnrReplacement(replacementDevice);
     const reboundSession = await this.sessionManager.rebindSessionForTerminalReleaseRecovery(
       session,
       replacementDevice.id,
@@ -7082,6 +7086,27 @@ export class DevicePool {
     // lock forward so the original session keeps exclusive access.
     replacementDevice.autolockSessionId = autolockSessionId;
     replacementDevice.lastUsedAt = this.nextLastUsedAt();
+  }
+
+  /**
+   * Publish this daemon's claim on the System UI recovery replacement the session is about to be
+   * bound to. The caller's rollback removes the replacement (withdrawing the claim) on any later
+   * failure. Throws the typed refusal when another live daemon holds the replacement.
+   */
+  private async claimSystemUiAnrReplacement(replacementDevice: PooledDevice): Promise<void> {
+    const ownership = this.foreignOwnershipFor(replacementDevice.platform);
+    if (!ownership) {
+      return;
+    }
+    if (await ownership.claim(replacementDevice.id)) {
+      this.claimedDeviceIds.set(replacementDevice.id, ownership);
+      return;
+    }
+    await ownership.refresh([replacementDevice.id]);
+    throw new DeviceOwnedByOtherDaemonError(
+      replacementDevice.id,
+      ownership.foreignOwnerPid(replacementDevice.id),
+    );
   }
 
   private sourceImageForSameAndroidReplacement(
@@ -8795,10 +8820,12 @@ export class DevicePool {
     if (device.sessionId !== null) {
       return false;
     }
-    const ownerPid = this.foreignOwnershipFor(device.platform)?.foreignOwnerPid(device.id);
+    const ownership = this.foreignOwnershipFor(device.platform);
+    const ownerPid = ownership?.foreignOwnerPid(device.id);
     if (ownerPid === undefined) {
       this.loggedForeignDeviceOwners.delete(device.id);
-      return false;
+      // An unreadable claim names no owner but is not free either.
+      return ownership?.foreignClaimUnreadable?.(device.id) === true;
     }
     if (this.loggedForeignDeviceOwners.get(device.id) !== ownerPid) {
       this.loggedForeignDeviceOwners.set(device.id, ownerPid);

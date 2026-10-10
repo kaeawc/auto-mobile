@@ -29,6 +29,8 @@ export interface InventoryDeviceInput {
   sessionsById?: ReadonlyMap<string, Session>;
   deviceSessionUuid?: string;
   hold?: Pick<BootedInput, "heldBy" | "reserved">;
+  /** `DevicePool.poolBucket(deviceId)`: the pool's one status answer, the same `getStats()` counts. */
+  poolStatus?: BootedInput["poolStatus"];
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>;
   adbOffline?: AdbOfflineHold;
   /** The AVD name the Android transport-alias fold resolved for this serial, when it did. */
@@ -61,6 +63,7 @@ export function describeInventoryDevice(input: InventoryDeviceInput) {
     session,
     deviceSessionUuid: input.deviceSessionUuid,
     ...input.hold,
+    poolStatus: input.poolStatus,
   });
   return input.device.platform === "android" && input.transportAvdName
     ? {

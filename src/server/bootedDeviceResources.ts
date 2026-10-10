@@ -21,7 +21,6 @@ import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
 import { DaemonState } from "../daemon/daemonState";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
-import { classifyPoolStatus } from "../daemon/devicePool";
 import type { Session } from "../daemon/sessionManager";
 import type {
   DevicePool,
@@ -533,6 +532,7 @@ function toBootedDeviceInfo(
     sessionsById: poolContext?.sessionsById,
     deviceSessionUuid: poolContext?.deviceSessionUuid,
     hold: poolContext?.hold,
+    poolStatus: poolContext?.poolInfo.poolStatus,
     ...extras,
   });
   const projected = projectBootedDevice(description);
@@ -721,16 +721,6 @@ interface PoolDeviceContext {
   hold: ReturnType<typeof poolHoldFor>;
 }
 
-/** The same classification as `DevicePool.getStats()` (#11387): see {@link classifyPoolStatus}. */
-function effectivePoolStatus(
-  status: PooledDevice["status"],
-  hold: ReturnType<typeof poolHoldFor>,
-  unhealthy: boolean,
-): PoolDeviceStatus {
-  const held = hold.heldBy !== undefined || hold.reserved === true;
-  return classifyPoolStatus(status, held || unhealthy);
-}
-
 function resolvePoolDeviceContext(
   devicePool: DevicePool | null,
   device: BootedDevice,
@@ -747,11 +737,7 @@ function resolvePoolDeviceContext(
   }
 
   const hold = poolHoldFor(devicePool, device.deviceId);
-  const poolStatus = effectivePoolStatus(
-    pooledDevice.status,
-    hold,
-    devicePool.getDeviceHealthMarker(device.deviceId) !== undefined,
-  );
+  const poolStatus = devicePool.poolBucket(device.deviceId) ?? "idle";
 
   return {
     poolInfo: {
@@ -822,11 +808,7 @@ async function summarizePoolStatus(
     }
   }
   for (const pooled of fallback) {
-    const status = effectivePoolStatus(
-      pooled.status,
-      poolHoldFor(devicePool, pooled.id),
-      devicePool.getDeviceHealthMarker(pooled.id) !== undefined,
-    );
+    const status = devicePool.poolBucket(pooled.id) ?? "idle";
     if (ownershipKnown || status !== "idle") {
       tally(status);
     }

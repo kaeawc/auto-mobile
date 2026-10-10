@@ -1026,6 +1026,7 @@ export function listDevicePayloads(
       sessionsById: sessions,
       deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
       hold: pooled ? poolHoldFor(devicePool, device.deviceId) : undefined,
+      poolStatus: pooled ? devicePool?.poolBucket(device.deviceId) : undefined,
       adbOffline: adbOfflineHolds.get(device.deviceId),
       transportAvdName: transportAvdNameForDevice(device.deviceId),
     });

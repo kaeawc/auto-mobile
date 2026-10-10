@@ -60,6 +60,8 @@ interface Scenario {
   name: string;
   build(ctx: ScenarioContext): Promise<{ pool: DevicePool; discovered: BootedDevice[] }>;
   adbOffline?: boolean;
+  /** The row the scenario is about; defaults to the emulator. */
+  focus?: string;
 }
 
 interface ScenarioContext {
@@ -163,6 +165,38 @@ const scenarios: Scenario[] = [
     },
   },
   {
+    // A pooled USB phone whose serial a Wi-Fi peer now claims while the USB row has no identity
+    // evidence: the pool keeps the row but allocation can no longer lend it.
+    name: "pooled phone whose serial is now claimed by an unproven transport",
+    focus: "R5CT123",
+    async build(ctx) {
+      const usb: BootedDevice = { platform: "android", name: "Pixel 9", deviceId: "R5CT123" };
+      const wifi: BootedDevice = {
+        platform: "android",
+        name: "192.168.1.9:5555",
+        deviceId: "192.168.1.9:5555",
+      };
+      const wifiAdb = new FakeAdbExecutor();
+      wifiAdb.setCommandResponse("getprop ro.serialno", createExecResult(usb.deviceId, ""));
+      wifiAdb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
+      wifiAdb.setCommandResponse("getprop ro.kernel.qemu", createExecResult("0", ""));
+      const factory = {
+        create: (device?: BootedDevice | null) => {
+          if (device?.deviceId === wifi.deviceId) {
+            return wifiAdb;
+          }
+          throw new Error("usb transport has no identity");
+        },
+      } as unknown as FakeAdbClientFactory;
+      const pool = poolFor(ctx, { androidAdbFactory: factory });
+      await pool.initializeWithDevices([usb]);
+      const rows = [usb, wifi];
+      ctx.manager.setBootedDevices("android", rows);
+      await pool.refreshDevices();
+      return { pool, discovered: rows };
+    },
+  },
+  {
     name: "error (health marker)",
     async build(ctx) {
       const markers = new FakeDeviceHealthMarkers(ctx.timer);
@@ -211,10 +245,10 @@ const scenarios: Scenario[] = [
   },
 ];
 
-function describeEntry(entries: Entry[]): Entry {
-  const entry = entries.find((candidate) => candidate.runtime.deviceId === android.deviceId);
+function describeEntry(entries: Entry[], deviceId: string): Entry {
+  const entry = entries.find((candidate) => candidate.runtime.deviceId === deviceId);
   if (!entry) {
-    throw new Error(`no entry for ${android.deviceId} among ${JSON.stringify(entries)}`);
+    throw new Error(`no entry for ${deviceId} among ${JSON.stringify(entries)}`);
   }
   return entry;
 }
@@ -274,8 +308,46 @@ describe("listDevices tool and booted resource describe a device identically", (
     const response = await ToolRegistry.getTool("listDevices")!.handler({ platform: "android" });
     const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
 
-    const fromResource = describeEntry(resource.devices as unknown as Entry[]);
-    const fromTool = describeEntry(payload.devices as Entry[]);
+    const fromResource = describeEntry(
+      resource.devices as unknown as Entry[],
+      scenario.focus ?? android.deviceId,
+    );
+    const fromTool = describeEntry(payload.devices as Entry[], scenario.focus ?? android.deviceId);
+
+    // One status authority: every row either surface publishes carries the pool's own bucket.
+    const surfaces = {
+      resource: resource.devices as unknown as Entry[],
+      tool: payload.devices as Entry[],
+    };
+    for (const [surface, rows] of Object.entries(surfaces)) {
+      for (const row of rows) {
+        const id = String(row.runtime.deviceId);
+        const bucket = pool.poolBucket(id);
+        // A null poolStatus is the deliberate withholding of pool context from a row whose pooled
+        // entry does not describe the discovered runtime (quarantine, drifted label; #6863).
+        if (bucket !== null && row.runtime.poolStatus !== null) {
+          expect({ surface, id, poolStatus: row.runtime.poolStatus }).toEqual({
+            surface,
+            id,
+            poolStatus: bucket,
+          });
+        }
+      }
+    }
+
+    // The CLI `available-devices` counts and `getStats` are the same buckets as the rows, whenever
+    // every pooled device is published with its pool context.
+    const stats = pool.getStats();
+    const pooledRows = (resource.devices as unknown as Entry[]).filter(
+      (row) => row.runtime.poolStatus !== null,
+    );
+    if (pooledRows.length === stats.total) {
+      expect(resource.poolStatus).toMatchObject({
+        idle: stats.idle,
+        assigned: stats.assigned,
+        error: stats.error,
+      });
+    }
 
     const resourceView = withoutResourceOnly(fromResource);
     const toolView = withoutResourceOnly(fromTool);

@@ -180,12 +180,7 @@ function createdDeviceRollbackFor(
         // Keeps the lease held by prepareDevice until the deferred rollback ends.
         collectDeferredCleanup: (cleanup) => state.coldBootSettlements.push(cleanup),
       });
-      if (cleanup.status === "failed") {
-        logger.warn(
-          `[DeviceTools] Rollback of created ${device.platform} device '${device.name}' failed: ` +
-            `${cleanup.failure?.message ?? "unknown cleanup failure"}`,
-        );
-      }
+      logCreatedDeviceRollback(device, failure, cleanup);
     } catch (error) {
       // The boot failure is what the caller must see; the rollback failure is logged.
       logger.warn(
@@ -194,6 +189,31 @@ function createdDeviceRollbackFor(
       );
     }
   };
+}
+
+/**
+ * Leave a daemon-log trace of every createIfMissing rollback (#11205): which
+ * device, why it was rolled back, and whether the delete succeeded. A failed
+ * cleanup is logged at warn; the user-visible error only carries the boot failure.
+ */
+function logCreatedDeviceRollback(
+  device: DeviceInfo,
+  failure: unknown,
+  cleanup: ProvisionDeviceCleanup,
+): void {
+  const deviceId = device.deviceId ?? cleanup.target.stableId;
+  const outcome =
+    cleanup.status === "failed"
+      ? `failed (${cleanup.failure?.code ?? "unknown"}: ${cleanup.failure?.message ?? "unknown cleanup failure"})`
+      : `succeeded${cleanup.state ? ` (${cleanup.state})` : ""}`;
+  const message =
+    `[DeviceTools] createIfMissing rollback of created ${device.platform} device ` +
+    `'${device.name}' (id=${deviceId}) after: ${errorMessage(failure)}; outcome: ${outcome}`;
+  if (cleanup.status === "failed") {
+    logger.warn(message);
+  } else {
+    logger.info(message);
+  }
 }
 
 /**

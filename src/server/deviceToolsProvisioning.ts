@@ -2251,6 +2251,12 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
           `[DeviceTools] Deferred rollback of created iOS simulator '${createdDevice.name}' failed: ` +
             `${cleanup.failure?.message ?? "unknown cleanup failure"}`,
         );
+      } else {
+        logger.info(
+          `[DeviceTools] Deferred createIfMissing rollback of created iOS simulator ` +
+            `'${createdDevice.name}' (id=${cleanup.target.stableId}) after: ${errorMessage(failure)}; ` +
+            `outcome: succeeded${cleanup.state ? ` (${cleanup.state})` : ""}`,
+        );
       }
     };
     collectDeferredCleanup(

@@ -1,5 +1,6 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { logger } from "../../src/utils/logger";
 import {
   setDeviceToolsDependencies,
   resetDeviceToolsDependencies,
@@ -378,6 +379,48 @@ describe("startDevice --create-if-missing wiring", () => {
 
     expect(fakeDeviceUtils.getExecutedOperations()).toContain("destroyDevice:ios:CREATED-UDID");
     expect(await fakeDeviceUtils.listDeviceImages("ios")).toEqual([]);
+  });
+
+  it("logs the createIfMissing rollback with device id, reason and outcome at info (#11205)", async () => {
+    fakeGate.setAllowed(true);
+    const created = {
+      platform: "ios" as const,
+      name: "AutoMobile-iPhone-17-feed1234",
+      deviceId: "ROLLED-BACK-UDID",
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+      runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+    };
+    setDeviceToolsDependencies({
+      deviceProvisionerFactory: () => ({
+        provision: async (criteria, _signal, identityHooks) => {
+          fakeProvisioner.requests.push(criteria);
+          await identityHooks?.reserveBeforeCreate(created);
+          fakeDeviceUtils.setDeviceImages("ios", [{ ...created, isRunning: false }]);
+          await identityHooks?.bindAfterCreate(created);
+          return created;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        throw new Error("XCTestRunner never became ready");
+      },
+    });
+    await useFakeTeardown("ios");
+    const info = spyOn(logger, "info");
+    try {
+      await expect(callStartDevice({ platform: "ios", createIfMissing: true })).rejects.toThrow(
+        /XCTestRunner never became ready/,
+      );
+
+      const rollbackLines = info.mock.calls
+        .map(([message]) => String(message))
+        .filter((message) => message.includes("createIfMissing rollback"));
+      expect(rollbackLines).toHaveLength(1);
+      expect(rollbackLines[0]).toContain("id=ROLLED-BACK-UDID");
+      expect(rollbackLines[0]).toContain("XCTestRunner never became ready");
+      expect(rollbackLines[0]).toContain("outcome: succeeded");
+    } finally {
+      info.mockRestore();
+    }
   });
 
   it("deletes the AVD a timed-out create left behind (#11155)", async () => {

@@ -395,6 +395,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // before untracking, and must not reach the supervisor: its onExit would abort
   // the shared start and schedule a restart racing the relaunch.
   private readonly retiredRunnerPids = new Set<number>();
+  // Service ports a forced restart retired because this daemon judged the runner
+  // on them unhealthy (#11205). Killing the daemon's xcodebuild does not kill the
+  // in-simulator runner it hosted (launchd_sim owns it), so a stalled runner can
+  // keep listening on the retired port and look like an "external" runner to the
+  // next start. A direct runner on one of these ports is adopted only when it
+  // passes a health probe; otherwise it is terminated and a fresh one spawned.
+  private readonly unhealthyRetiredPorts = new Set<number>();
 
   // Shared process startup prevents concurrent callers from launching duplicate runners.
   private sharedStart: SharedCtrlProxyStart | null = null;
@@ -2734,6 +2741,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // readiness phase has already timed out.
     this.forceRestartGeneration += 1;
     const retiredServicePort = this.servicePort;
+    this.unhealthyRetiredPorts.add(retiredServicePort);
     const restart = (async () => {
       try {
         await this.stop();
@@ -2757,6 +2765,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           ),
         });
         this.runnerGeneration += 1;
+        this.unhealthyRetiredPorts.clear();
       } catch (error) {
         if (options.signal?.aborted && !(error instanceof ForceRestartCancelledError)) {
           throw new ForceRestartCancelledError(options.signal.reason ?? error);
@@ -3527,12 +3536,53 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         if (!(await this.processAncestryContainsDeviceId(process))) {
           continue;
         }
+        if (!(await this.mayAdoptDirectRunnerOnPort(process, port))) {
+          continue;
+        }
         logger.info(`[IOSCtrlProxy] Found external direct CtrlProxy runner: ${process.pid}`);
         return { pid: process.pid, port };
       }
     }
 
     return null;
+  }
+
+  /**
+   * Health-gate a direct runner still listening on a port a forced restart retired
+   * as unhealthy (#11205). Killing our xcodebuild leaves the in-simulator runner
+   * alive under launchd_sim; a stalled one would otherwise be re-adopted as
+   * "external" and waited on for the whole health budget. When it does not answer
+   * for this device, terminate it so the caller spawns a fresh runner.
+   */
+  private async mayAdoptDirectRunnerOnPort(
+    process: ListeningProcess,
+    port: number,
+  ): Promise<boolean> {
+    if (!this.unhealthyRetiredPorts.has(port)) {
+      return true;
+    }
+    if (
+      await this.checkHealthEndpointOnPortForDevice(port, this.device.deviceId, undefined, {
+        requireDeviceId: true,
+      })
+    ) {
+      this.unhealthyRetiredPorts.delete(port);
+      return true;
+    }
+    logger.warn(
+      `[IOSCtrlProxy] CtrlProxy runner ${process.pid} on port ${port} was retired as unhealthy ` +
+        `by a forced restart and still fails its health probe; terminating it instead of reusing it`,
+    );
+    try {
+      await this.processClient.terminateProcessTree(process.pid);
+    } catch (error) {
+      // The caller still skips adoption; the port-readiness check before spawn
+      // reallocates away from a listener that survived termination.
+      logger.warn(
+        `[IOSCtrlProxy] Unhealthy retired runner ${process.pid} survived termination: ${errorMessage(error)}`,
+      );
+    }
+    return false;
   }
 
   private parseCtrlProxyPortFromProcessArgs(args: string): number | null {

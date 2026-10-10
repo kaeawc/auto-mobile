@@ -865,6 +865,8 @@ interface SessionReleaseOperation extends PendingSessionRelease {
   session: Session;
   /** When the release started; bounds the retry hint for a bind it refuses (#10960). */
   startedAtMs?: number;
+  /** Set for an idle release the manager started itself (#11481): see `getIdleReleasesInProgress`. */
+  expiryOrigin?: SessionReleaseOptions["expiryOrigin"];
   /** The release's current stage, named when it is reported stuck (#10963). */
   stage?: SessionReleaseStage;
   /** Set once a stuck release has been forced: it no longer holds the device (#10963). */
@@ -2207,6 +2209,21 @@ export class SessionManager {
         (release) => !release.forced && release.session.assignedDevice === deviceId,
       )
     );
+  }
+
+  /**
+   * The idle releases this manager started itself (the idle sweep, a lazy expiry) that still hold
+   * their device (#11481). No caller awaits them and they are not reaps of the heartbeat monitor,
+   * so the monitor reads them here to hold them to its stuck deadline (#10963). A forced release
+   * no longer holds its device and is not listed, so it is forced exactly once.
+   */
+  getIdleReleasesInProgress(): { sessionId: string; startedAtMs: number }[] {
+    return Array.from(this.activeReleasePromises)
+      .filter((release) => release.expiryOrigin !== undefined && !release.forced)
+      .map((release) => ({
+        sessionId: release.session.sessionId,
+        startedAtMs: release.startedAtMs ?? this.sessionNow(),
+      }));
   }
 
   /**
@@ -4704,6 +4721,7 @@ export class SessionManager {
       promise: Promise.resolve(null),
       reason,
       startedAtMs: this.sessionNow(),
+      expiryOrigin: options.expiryOrigin,
       forcedAbort: new AbortController(),
     };
     const run = () =>

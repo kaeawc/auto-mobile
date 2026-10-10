@@ -178,6 +178,9 @@ function interpretIosMockRulesReply(reply: IosMockRulesReply): IosMockRuleSyncRe
 
 export type BootedDeviceLister = () => Promise<BootedDevice[]>;
 
+/** What raised a client-side runner restart: repeated failed dials, or an observed command failure. */
+type RestartTrigger = "connection-failures" | "observed-failure";
+
 export interface IosCtrlProxyClientOptions {
   transientObserver?: boolean;
   iosSource?: IosAppMetadataSource;
@@ -844,6 +847,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // Connection failure tracking for auto-restart
   private consecutiveConnectionFailures: number = 0;
   private isRequestingServiceRestart: boolean = false;
+  /**
+   * Bumped for every established (non-transient) connection. A restart trigger
+   * records it so a trigger queued against an older socket is dropped once a
+   * newer runner incarnation is connected (#11247).
+   */
+  private connectionIncarnation = 0;
   private lastDeniedRestartState: string | undefined;
   private static readonly MAX_FAILURES_BEFORE_RESTART = 3;
   private static readonly CONNECTION_RESET_MS = 2000;
@@ -2050,6 +2059,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
     // Reset failure counter on successful connection
     this.consecutiveConnectionFailures = 0;
+    this.connectionIncarnation++;
     this.connectedSocketPort = this.port;
     if (this.pendingRestartToken !== undefined && this.restartAcceptsReplacement) {
       this.restartReplacementSocket = this.ws;
@@ -2488,7 +2498,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this.consecutiveConnectionFailures % IOSCtrlProxyClient.MAX_FAILURES_BEFORE_RESTART === 0 &&
       !this.isRequestingServiceRestart
     ) {
-      this.triggerServiceRestart();
+      this.triggerServiceRestart("connection-failures");
     }
   }
 
@@ -2942,7 +2952,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * Connection failures or a stalled native command observed by normal
    * hierarchy reads can require recovery even when the socket remains healthy.
    */
-  private triggerServiceRestart(): void {
+  private triggerServiceRestart(trigger: RestartTrigger = "observed-failure"): void {
     if (
       this.closed ||
       IOSCtrlProxyManager.isDeviceRetired(this.device.deviceId) ||
@@ -2958,7 +2968,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return;
     }
     this.isRequestingServiceRestart = true;
-    const recovery = this.restartServiceIfBooted(manager, budget).finally(() => {
+    const triggeredAt = { trigger, incarnation: this.connectionIncarnation };
+    const recovery = this.restartServiceIfBooted(manager, budget, triggeredAt).finally(() => {
       // An older completion must not erase a newer recovery's promise or guard.
       if (this.recoveryPromise === recovery) {
         this.isRequestingServiceRestart = false;
@@ -3083,23 +3094,18 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private async restartServiceIfBooted(
     manager: CtrlProxyIosManager,
     budget: ForcedRestartBudget,
+    triggeredAt: { trigger: RestartTrigger; incarnation: number },
   ): Promise<boolean> {
-    try {
-      const booted = await this.bootedDeviceLister();
-      if (!booted.some((device) => device.deviceId === this.device.deviceId)) {
-        logger.info(
-          `[IOSCtrlProxyClient] Target simulator ${this.device.deviceId} is no longer booted, skipping restart`,
-        );
-        return false;
-      }
-    } catch (error) {
-      logger.warn(
-        `[IOSCtrlProxyClient] Failed to check simulator boot state: ${errorMessage(error)}`,
-      );
+    if (!(await this.isTargetStillBooted())) {
       return false;
     }
     if (this.closed || IOSCtrlProxyManager.isDeviceRetired(this.device.deviceId)) {
       return false;
+    }
+    const superseded = this.restartTriggerSupersededBy(triggeredAt);
+    if (superseded !== undefined) {
+      logger.info(`[IOSCtrlProxyClient] Dropping stale CtrlProxy restart trigger: ${superseded}`);
+      return this.isConnected();
     }
     const token = budget.tryBeginAttempt();
     if (token === undefined) {
@@ -3150,6 +3156,43 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       logger.warn(`[IOSCtrlProxyClient] CtrlProxy restart failed: ${errorMessage(error)}`);
       return false;
     }
+  }
+
+  /** Fails closed: an unknown boot state never starts a restart that could re-boot the simulator. */
+  private async isTargetStillBooted(): Promise<boolean> {
+    try {
+      const booted = await this.bootedDeviceLister();
+      if (!booted.some((device) => device.deviceId === this.device.deviceId)) {
+        logger.info(
+          `[IOSCtrlProxyClient] Target simulator ${this.device.deviceId} is no longer booted, skipping restart`,
+        );
+        return false;
+      }
+      return true;
+    } catch (error) {
+      logger.warn(
+        `[IOSCtrlProxyClient] Failed to check simulator boot state: ${errorMessage(error)}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * The boot check above is asynchronous, so a trigger can outlive the failure
+   * that raised it. A connection established since then is a newer runner
+   * incarnation; restarting it would only kill a healthy runner (#11247).
+   */
+  private restartTriggerSupersededBy(triggeredAt: {
+    trigger: RestartTrigger;
+    incarnation: number;
+  }): string | undefined {
+    if (this.connectionIncarnation !== triggeredAt.incarnation && this.isConnected()) {
+      return "a newer runner connection is healthy";
+    }
+    if (triggeredAt.trigger === "connection-failures" && this.consecutiveConnectionFailures === 0) {
+      return "no consecutive connection failures remain";
+    }
+    return undefined;
   }
 
   protected async setupBeforeConnect(

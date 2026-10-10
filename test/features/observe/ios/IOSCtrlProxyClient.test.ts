@@ -3585,6 +3585,7 @@ describe("IOSCtrlProxyClient", function () {
         const recovery = h.client["restartServiceIfBooted"](
           h.manager,
           h.manager.getForcedRestartBudget(),
+          { trigger: "observed-failure", incarnation: h.client["connectionIncarnation"] },
         );
         await flushMicrotasks();
         const before = h.state();

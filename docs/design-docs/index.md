@@ -27,5 +27,5 @@ Start with [installation](../index.md#install), then see the
 [interaction loop](mcp/interaction-loop.md) for how AutoMobile observes,
 acts, and returns updated state.
 
-Android contract design: [agent-authored overlay specification](plat/android/overlay-ux.md).
-iOS simulator overlays: [overlay agent](plat/ios/overlay-agent.md).
+Android contract design: [agent-authored prototype specification](plat/android/prototype-ux.md).
+iOS simulator prototypes: [prototype agent](plat/ios/prototype-agent.md).

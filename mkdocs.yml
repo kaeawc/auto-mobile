@@ -137,8 +137,8 @@ nav:
       - "iOS network capture wire contract": design-docs/plat/ios/network-capture-wire-contract.md
       - "iOS Playground theme parity": design-docs/plat/ios/playground-theme-parity.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
-      - "Android overlay specification": design-docs/plat/android/overlay-ux.md
-      - "iOS simulator overlay agent": design-docs/plat/ios/overlay-agent.md
+      - "Android prototype specification": design-docs/plat/android/prototype-ux.md
+      - "iOS simulator prototype agent": design-docs/plat/ios/prototype-agent.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
       - "CircleCI macOS migration": design-docs/ci/circleci-macos-migration.md

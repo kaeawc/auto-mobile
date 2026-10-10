@@ -452,7 +452,7 @@ Keep `contentDescription` as the accessibility-owned label. `observe` exposes th
 ID as `testTag` in its searchable output; select it with
 `tapOn({ testTag: "widget_<id>" })`. The raw hierarchy field is `test-tag`.
 
-Compose with `testTagsAsResourceId = true` (including the AutoMobile overlay)
+Compose with `testTagsAsResourceId = true` (including AutoMobile's prototypes)
 reports `Modifier.testTag` as a bare `resource-id` and no `test-tag`. A
 `testTag` selector therefore matches nodes by `test-tag` first; only when no
 node carries that tag does it match a node without a `test-tag` whose
@@ -585,13 +585,12 @@ response size, so use it only when the client needs image bytes in the tool resu
 | 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                             |
 | 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                             |
 | 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
-| 🪟 <code>prototype</code>            | Shows, dismisses, awaits events, or reports overlay prototypes.           |
+| 🪟 <code>prototype</code>            | Shows, dismisses, awaits events, or reports prototypes.                   |
 | 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
 
 ### prototype
 
-The `prototype` tool, on Android and iOS simulators (formerly `overlay`, which remains a hidden
-deprecated alias for one release) is omitted from discovery by default. Enable it
+The `prototype` tool (Android and iOS simulators) is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "prototype", enabled: true }`. Its `action` is
 `show`, `dismiss`, `status`, `inspect`, or `awaitEvent`. `show` requires a full `spec` (id,
 window, optional state, root) and always renders the whole spec. Instead of an inline
@@ -603,18 +602,18 @@ The path is never sent to the device. A spec holds up to 2000 nodes, and a `repe
 requires either `id` or `all: true`. `spec.window.opacity` is an integer
 percentage from 0 to 100, default 100; show the spec again to change it.
 
-A `show` whose `spec.id` is the overlay already on screen replaces it in place:
+A `show` whose `spec.id` is the prototype already on screen replaces it in place:
 it stays on the display it is on, and each pager keeps its current page (matched
 by pager id, clamped to the new page count). The new spec's `state` is
 authoritative: values the user changed by tapping or typing are not carried
 over unless the spec includes them, and the rebuilt tree starts any text field
 from the spec's value. `reset: true` starts it fresh instead: pages come from
 the spec and `display` is resolved again. A show with a different id, or with
-nothing on screen, replaces any other overlay as before. A CtrlProxy that
+nothing on screen, replaces any other prototype as before. A CtrlProxy that
 predates in-place replacement ignores `reset` and always starts fresh.
 
 Two optional window fields need a CtrlProxy advertising
-`overlay_window_options_v1`; an older one is refused before anything is sent.
+`prototype_window_options_v1`; an older one is refused before anything is sent.
 `spec.window.layer` is `system` (default; an accessibility overlay above system
 UI) or `app` (an application overlay just above apps, so the notification shade,
 keyboard, toasts and the screenshot flash and preview draw over the prototype,
@@ -622,7 +621,7 @@ and the status and navigation bars draw over a fullscreen one). Before an `app`
 show the daemon runs
 `adb shell appops set dev.jasonpearson.automobile.ctrlproxy SYSTEM_ALERT_WINDOW allow`;
 if the permission is still missing the device fails the show with that command.
-`spec.window.persistence` is `session` (default) or `device`: the overlay stays
+`spec.window.persistence` is `session` (default) or `device`: the prototype stays
 interactive after the last host client disconnects (USB unplugged, adb or the
 daemon gone) and after session end, has no idle timeout, and keeps its uploaded
 assets. `setPage`, `setState`, text fields and the `dismiss` action keep working
@@ -631,16 +630,16 @@ row, or a Close button on sheet and floating windows), an explicit `dismiss`, a
 replacing `show`, or the CtrlProxy service stopping. Host-side status and event
 buffers are still cleared on session release.
 
-With no host connected, a persisted overlay's events (tap `emit`s, page changes,
+With no host connected, a persisted prototype's events (tap `emit`s, page changes,
 text input, a close) are kept on the device, the most recent 200, dropping the
 oldest and counting what it dropped. They are delivered, oldest first, when a
 host connects or on `inspect`, and sequences continue from the device's ledger
 with no rewind. `status` is host memory, so after a session release it shows
-nothing; `inspect` asks the device which overlays it is showing and adopts them
+nothing; `inspect` asks the device which prototypes it is showing and adopts them
 (`adopted: true`, with the last known `pages` and `state`), so `status`,
 `dismiss` and `awaitEvent` work again. It also returns
 `deviceDroppedEvents`. `inspect` needs a CtrlProxy advertising
-`overlay_persistence_replay_v1` and is refused with an error naming the flag
+`prototype_persistence_replay_v1` and is refused with an error naming the flag
 otherwise.
 
 The `showVariants` and `update` actions were removed (#10489, #10490); calling
@@ -653,7 +652,7 @@ never wait on the device for a choice.
 
 Target via `deviceId`, `platform`, `device`, or `sessionUuid`; the shared
 `keepScreenAwake` option also applies. `timeoutMs` bounds device requests
-(default 5000 ms). Validation uses the existing overlay schema and limits
+(default 5000 ms). Validation uses the existing prototype schema and limits
 before contacting CtrlProxy. Verify rendering with `observe`; prototype returns
 no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
 Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker
@@ -664,39 +663,39 @@ overrides, typography and shapes), per-node `style` and `styleWhen` fields,
 `transition` on `visibleWhen` nodes, and a spec-level `motion` of `none` to make
 every change instant. Android also accepts element anchors, which place a node on
 an app element resolved at `show` time; the result lists the resolved `anchors`.
-See the [overlay vocabulary](design-docs/plat/android/overlay-ux.md).
+See the [prototype vocabulary](design-docs/plat/android/prototype-ux.md).
 
 #### iOS simulators
 
-On iOS simulators `prototype` is backed by an overlay agent injected into the app at launch
-(`launchApp { overlay: true }`), with no SDK in the app. It works on simulators only, only for
+On iOS simulators `prototype` is backed by a prototype agent injected into the app at launch
+(`launchApp { prototype: true }`), with no SDK in the app. It works on simulators only, only for
 apps launched with the agent (a relaunch loses app state; SpringBoard is not covered), and
 offers `show`, `dismiss`, `status` and `awaitEvent`; showing
-the same `id` again updates the overlay. For apps run from Xcode, add `DYLD_INSERT_LIBRARIES`
-to the scheme. See the [iOS overlay agent](design-docs/plat/ios/overlay-agent.md).
+the same `id` again updates the prototype. For apps run from Xcode, add `DYLD_INSERT_LIBRARIES`
+to the scheme. See the [iOS prototype agent](design-docs/plat/ios/prototype-agent.md).
 
 `show` accepts the same optional `display` selector as the tap tools (a panel
 key, a role such as `inner` or `cover`, or `active`), resolved with the same
 precedence: an explicit `display`, then the session display pin, then the default
 display. Omitting it sends no display and behaves exactly as before. A resolved
 non-default display is sent as the panel's logical `displayId` and needs a
-CtrlProxy advertising `overlay_display_id_v1`; an older APK is refused with an
-error rather than showing the overlay on the default display. An unknown or
+CtrlProxy advertising `prototype_display_id_v1`; an older APK is refused with an
+error rather than showing the prototype on the default display. An unknown or
 disconnected panel is refused with the usual disconnected-panel guidance. If the
-panel disappears while the overlay is up (fold), the device dismisses it with
+panel disappears while the prototype is up (fold), the device dismisses it with
 reason `teardown`; it is never moved to another display. `dismiss` acts on the
-overlay where it is shown and does not take `display`. A same-id `show` without
-`reset` keeps the display the overlay is on: a `display` (explicit or from the
+prototype where it is shown and does not take `display`. A same-id `show` without
+`reset` keeps the display the prototype is on: a `display` (explicit or from the
 session pin) that resolves elsewhere is ignored, and the result carries a
 `warning` saying so; pass `reset: true` to move it.
 
 `display` and `assets` combine on `show`: the display is resolved and checked first, so a
-refused display uploads nothing; assets are then uploaded and the overlay is shown on that
+refused display uploads nothing; assets are then uploaded and the prototype is shown on that
 display. The one missing-asset re-send goes to the same resolved display without re-reading the
-display inventory. A same-id `show` with `assets` stays on the display the overlay is already on.
+display inventory. A same-id `show` with `assets` stays on the display the prototype is already on.
 
 `show` accepts `assets`: an array of `{ id, path }`
-or `{ id, observation }` that uploads images (or, with `path`, TTF/OTF fonts) before the overlay is sent, so no
+or `{ id, observation }` that uploads images (or, with `path`, TTF/OTF fonts) before the prototype is sent, so no
 separate upload step is needed. `path` is an absolute path the daemon can read
 (relative paths are rejected); `observation` is an
 `automobile:observation/{deviceId}/{observationId}/screenshot` URI (the
@@ -713,23 +712,23 @@ never carries paths or bytes. Every file is read and checked first, so an
 unreadable file, unsupported format or exceeded cap fails the call with nothing
 sent. Uploads then run one at a time. Any failure (a device refusal, an old
 CtrlProxy without asset support, a cancelled request, or a write that was never
-answered, reported as indeterminate) fails the call before the overlay is shown
+answered, reported as indeterminate) fails the call before the prototype is shown
 or replaced; the error and `uploadedAssets` name the assets already stored, which
-stay on the device until the overlay session ends and are replaced if the call is
+stay on the device until the prototype session ends and are replaced if the call is
 repeated. On success `uploadedAssets` lists each `{ id, mimeType, bytes }`.
 
 When the device accepts a `show` but lists referenced asset ids it has
 no copy of, the result stays successful and adds `missingAssets` (the ids; absent
 when none) and a `warning` naming what to upload. If the same call supplied
 `assets` for some of those ids (the upload-then-cleared race), they are
-re-uploaded from the bytes already read and the overlay re-sent exactly once; the
+re-uploaded from the bytes already read and the prototype re-sent exactly once; the
 result is the re-sent one. A retry that fails, or a cancelled request, keeps the
 first result and says so in `warning`. The MCP request deadline grows by 15 s per
 asset plus the request's `timeoutMs` (default 5000 ms), doubled for that one
 retry, plus 10 s per `observation` source for a capture still in flight, and
 30 s of headroom.
 
-`status` performs no device request. It reports only overlays successfully
+`status` performs no device request. It reports only prototypes successfully
 shown by this host in the current session and device, with their last action,
 result, and host timestamp in milliseconds, plus the logical `displayId` when a
 display was requested. It also returns the last attempted
@@ -740,10 +739,10 @@ After an event arrives, each shown entry also reports `pendingCount`, `lastSeque
 (the highest accepted sequence), and cumulative overflow `droppedCount`. Before any
 event, these optional fields are omitted to preserve existing responses.
 Each shown entry also includes `pages` (pager id to zero-based page index), flat
-`state`, and `lastKnown: true` from its latest accepted `overlay_event`. These
+`state`, and `lastKnown: true` from its latest accepted `prototype_event`. These
 snapshots survive event consumption and failed show attempts; a successful show (same id or not) clears them
 until another event arrives. Requested state is never reported as observed state.
-Accepted events are pushed once to telemetry under category `overlay`, with
+Accepted events are pushed once to telemetry under category `prototype`, with
 owning device/session ids, event id, kind, name, sequence, pages and state. This
 telemetry is push-only, with no database persistence or historical backfill.
 A device-side `dismissed` event removes shown presence across that device's host
@@ -758,7 +757,7 @@ are valid only for `awaitEvent`. Its `timeoutMs` defaults to 30000 ms and cannot
 exceed 60000 ms; the MCP request deadline for an `awaitEvent` call is that wait plus 30 s of
 headroom, so a quiet wait ends with `timedOut: true` rather than a transport timeout. Request cancellation preserves the abort reason and removes the
 waiter's timer and abort listener. When the client supplies an MCP progress callback,
-wait start/finish notifications are best-effort and do not delay event delivery. Background subscriptions for shown overlays
+wait start/finish notifications are best-effort and do not delay event delivery. Background subscriptions for shown prototypes
 remain active to buffer events between calls.
 
 The result is `{ success: true, event, pendingCount, lastSequence, droppedCount }`,
@@ -767,7 +766,7 @@ and `timestamp` (device clock milliseconds). If the wait expires, it returns
 `success: true, timedOut: true` with counts and no event. If the scope ends without
 a matching event, it returns `success: true, reason: "dismissed"` with counts.
 
-The exported `OVERLAY_EVENT_BUFFER_CAPACITY` is 64 events per scope. Overflow drops
+The exported `PROTOTYPE_EVENT_BUFFER_CAPACITY` is 64 events per scope. Overflow drops
 the oldest event and increments `droppedCount`; that count is cumulative until
 explicit dismiss or scope release. Calls consume one matching event; excluded events
 remain pending, including those skipped by a cursor. Accepted events are ordered
@@ -777,7 +776,7 @@ previously unseen late lower arrivals; this implements the wire high-water rule.
 Because pushes carry no session id, the latest show of a device/id owns its events;
 awaiting that id from another scope is rejected until it is shown in that scope.
 Awaiting an unknown id can establish ownership without a show; an unused scope is
-removed on timeout/abort. Multiple overlays on a device share one subscription.
+removed on timeout/abort. Multiple prototypes on a device share one subscription.
 Explicit successful dismiss (id or all) clears buffers across that device's host
 sessions. Each show, including a same-id show, starts a fresh sequence epoch for that id: pending events and the
 sequence high-water mark are cleared (the device's sequence ledger is in memory, so a
@@ -785,14 +784,14 @@ CtrlProxy restart restarts a re-shown id at 1), while the cumulative `droppedCou
 is kept until explicit dismiss or scope release. Events carry only id, sequence and
 timestamp, so a late event from the previous showing cannot be told apart from the new
 showing's and is accepted if it arrives after the new show. A successful show of
-another id replaces the device's overlay: the replaced overlay's waiters settle with
+another id replaces the device's prototype: the replaced prototype's waiters settle with
 `reason: "dismissed"` and its buffers are removed. A terminal `dismissed` event remains
 buffered until consumed or the next explicit show/dismiss. Consuming it clears all
 remaining pending events and, once no waiter remains, removes the entry, so a later
 await behaves as for an unknown id (it waits, then times out). Session release clears
 the buffers, waiters and subscription of every scope on each device the release
 clears from host status, so event state and status never disagree.
-The device subscription ends when no nonterminal overlays remain.
+The device subscription ends when no nonterminal prototypes remain.
 
 ```json
 {
@@ -1059,33 +1058,33 @@ malformed recursive containers are rejected.
 
 `observe`, `tapOn`, `tapAny`, `sendKeys`, `highlight`, `dragAndDrop`, `swipeOn`,
 `pinchOn`, `tapAt`, `selectAllText`, and `identifyInteractions` accept an optional top-level `layer`
-(`"app"` or `"overlay"`) that scopes the call to one layer of the screen. `app`
-excludes AutoMobile's own overlay window; `overlay` keeps only overlay nodes and
-fails with an actionable error when no overlay is showing. Omit it to search both,
+(`"app"` or `"prototype"`) that scopes the call to one layer of the screen. `app`
+excludes AutoMobile's own prototype window; `prototype` keeps only prototype nodes and
+fails with an actionable error when no prototype is showing. Omit it to search both,
 topmost first. `observe` applies it to the returned hierarchy and to `waitFor`
 element conditions. `identifyInteractions.layer` analyzes only that layer's
 elements. `dragAndDrop.layer` scopes both the `source` and the `target`
 drop-target resolution; `swipeOn.layer` scopes `container`, auto-target, and
 `lookFor` resolution; `pinchOn.layer` scopes `container` and auto-target resolution.
 With `layer: "app"`, an Android CtrlProxy that advertises
-`screenshot_hide_overlay_v1` hides its overlay for the `observe` capture: it hides
+`screenshot_hide_prototype_v1` hides its prototype for the `observe` capture: it hides
 the window, waits for a rendered frame, captures and restores, all on the device in
-one request, so a cancelled observe never leaves the overlay hidden. While an
-overlay is showing, the result then reports `screenshotIncludesOverlay: false`; a
+one request, so a cancelled observe never leaves the prototype hidden. While an
+prototype is showing, the result then reports `screenshotIncludesPrototype: false`; a
 capture that cannot confirm the hide fails instead of falling back to ADB. Older
 CtrlProxy builds, iOS, and `deviceId` reads (which capture through ADB) still
-include the overlay in the screenshot or crop, and the result says so with
-`screenshotIncludesOverlay: true`. Navigation-graph
+include the prototype in the screenshot or crop, and the result says so with
+`screenshotIncludesPrototype: true`. Navigation-graph
 screen identity always uses the app's windows only, so showing, paging, or
-dismissing an overlay records no navigation.
+dismissing a prototype records no navigation.
 
 Touches go to the window under the point where a finger goes down, so gestures
 are checked there before dispatch: the tap point (`tapAt`, `tapOn`, `tapAny`), the
 swipe start (`swipeOn`), both finger start points (`pinchOn`), and both drag
 endpoints (`dragAndDrop`). With `layer: "app"` a gesture whose point lies under an
-overlay window is refused. With `layer: "overlay"`, `tapAt`, `swipeOn`, and
-`pinchOn` also refuse a point outside every overlay window, because it would
-reach the app. There is no touch-through mode: hide or move the overlay to reach
+prototype window is refused. With `layer: "prototype"`, `tapAt`, `swipeOn`, and
+`pinchOn` also refuse a point outside every prototype window, because it would
+reach the app. There is no touch-through mode: hide or move the prototype to reach
 the app beneath it.
 `selectAllText` acts on the input-focused field and is refused when that field is
 on the other layer. `layer` on `sendKeys` and `highlight` requires a selector,
@@ -1308,7 +1307,7 @@ subtree, or the whole active-window tree when owner-less.
 | Tool                                                                                             | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 📱 <code>listApps</code>                                                                         | Lists installed apps with optional label/launchability when reported (`device`, `type`, `search`, `profile`; default `type=launchable`).                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| 🚀 <code>launchApp</code>                                                                        | Launches an app by package name. On iOS, optional `launchArguments` start a fresh process and pass argv after the bundle ID. DEBUG storage writes require a launch-scoped mutation token; the daemon supplies it when `--allow-storage-mutations` is present. Android rejects non-empty launch arguments; an app already in the foreground is a success flagged `alreadyForeground`. On iOS simulators, `overlay: true` relaunches the app with the overlay agent injected (state is lost); physical iOS, Android and `com.apple.*` apps reject it.                                       |
+| 🚀 <code>launchApp</code>                                                                        | Launches an app by package name. On iOS, optional `launchArguments` start a fresh process and pass argv after the bundle ID. DEBUG storage writes require a launch-scoped mutation token; the daemon supplies it when `--allow-storage-mutations` is present. Android rejects non-empty launch arguments; an app already in the foreground is a success flagged `alreadyForeground`. On iOS simulators, `prototype: true` relaunches the app with the prototype agent injected (state is lost); physical iOS, Android and `com.apple.*` apps reject it.                                   |
 | ❌ <code>terminateApp</code>                                                                     | Terminates an app by package name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | 💥 <code>crashApp</code>                                                                         | Intentionally crashes a running app through the platform crash path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ♻️ <code>appLifecycle</code>                                                                     | State-preserving background-process kill for saved-state restoration tests (Android only).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |

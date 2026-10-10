@@ -196,8 +196,8 @@ Make the target device active and leave the other alone. For **each** checklist 
   sendKeys, pressButton, dragAndDrop, pinchOn, rotate, launch/terminate,
   device state, navigation) and confirm well-formed output on the fresh runners.
 
-**Overlay (`prototype`) acceptance:** when the range touches the overlay host, tool or
-`layer` scoping, run the recipe in [overlay-acceptance.md](overlay-acceptance.md).
+**Prototype acceptance:** when the range touches the prototype host, tool or
+`layer` scoping, run the recipe in [prototype-acceptance.md](prototype-acceptance.md).
 
 **Device-session idle release:** when the range touches session liveness, run
 `bash scripts/live-idle-release-check.sh --confirm-live --serial <emulator> --port <unused-port>`

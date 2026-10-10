@@ -114,6 +114,7 @@ test/daemon/gatedToolThroughDaemon.test.ts
 test/daemon/gestureOwnership.test.ts
 test/daemon/getApplePreparationTimeout.property.test.ts
 test/daemon/heartbeatExpiryPersistence.test.ts
+test/daemon/heartbeatReapUpgradesNonTerminalRelease.test.ts
 test/daemon/hierarchyStreamDiff.property.test.ts
 test/daemon/hierarchyStreamDiff.test.ts
 test/daemon/idleDeviceReaper.test.ts

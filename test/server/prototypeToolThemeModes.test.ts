@@ -11,6 +11,7 @@ import {
   FAKE_PROTOTYPE_AGENT_CAPABILITIES,
   FakePrototypeAgentClient,
 } from "../fakes/FakePrototypeAgentClient";
+import { FakePrototypeAssetFileReader } from "../fakes/FakePrototypeAssetFileReader";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -51,8 +52,13 @@ describe("prototype show with per-mode spec forms (#11218)", () => {
   let restore: () => void;
   let unsubscribe: () => void;
 
+  let adb: FakeAdbExecutor;
+  let reader: FakePrototypeAssetFileReader;
+
   function register(agentCapabilities: readonly string[]) {
     const timer = new FakeTimer();
+    adb = new FakeAdbExecutor();
+    reader = new FakePrototypeAssetFileReader();
     client = new FakeCtrlProxy(timer);
     agent = new FakePrototypeAgentClient({
       agentVersion: "0.1.0",
@@ -62,7 +68,8 @@ describe("prototype show with per-mode spec forms (#11218)", () => {
     unsubscribe = registerPrototypeTools({
       clientFactory: () => client,
       agentConnections: { get: (deviceId) => (deviceId === ios.deviceId ? agent : undefined) },
-      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      adbFactory: new FakeAdbClientFactory(adb),
+      assetFileReader: reader,
       lastRenderedObservation: () => undefined,
       clock: timer,
       timer,
@@ -79,8 +86,11 @@ describe("prototype show with per-mode spec forms (#11218)", () => {
   });
 
   async function call(device: BootedDevice, spec: unknown) {
+    return callWith(device, { action: "show", spec });
+  }
+  async function callWith(device: BootedDevice, input: unknown) {
     const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
-    const response = await handler(device, { action: "show", spec });
+    const response = await handler(device, input);
     return prototypeOutputSchema.parse(response.structuredContent);
   }
   const agentShows = () => agent.requests.filter((request) => request.type === "show_prototype");
@@ -140,5 +150,52 @@ describe("prototype show with per-mode spec forms (#11218)", () => {
       theme: { colors: { light: { primary: "#B3261E" } } },
     });
     expect(payload.error).toContain("per-mode value at theme.colors.light (and 1 more)");
+  });
+
+  test("a refused per-mode show grants nothing and sends nothing for an app-layer window (#11377)", async () => {
+    client.setSupportedCommands(["prototype_window_options_v1"]);
+    const payload = await call(android, {
+      ...paired,
+      window: { ...window, layer: "app" },
+    });
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain(PROTOTYPE_THEME_MODES_CAPABILITY);
+    expect(adb.getExecutedCommands()).toEqual([]);
+    expect(client.getPrototypeHistory()).toEqual([]);
+  });
+
+  test("a per-mode pair inside a component definition is refused after expansion", async () => {
+    client.setSupportedCommands([]);
+    const payload = await call(android, {
+      ...plain,
+      components: {
+        card: {
+          root: {
+            type: "text",
+            text: "Hi",
+            style: { background: { light: "#FFFFFF", dark: "surface" } },
+          },
+        },
+      },
+      root: { type: "use", component: "card" },
+    });
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain(
+      `CtrlProxy does not advertise ${PROTOTYPE_THEME_MODES_CAPABILITY}`,
+    );
+    expect(payload.error).toContain("per-mode value at root.style.background");
+    expect(client.getPrototypeHistory()).toEqual([]);
+  });
+
+  test("a specPath show of a per-mode spec is refused unsent", async () => {
+    client.setSupportedCommands([]);
+    reader.addFile("/work/modes.json", Buffer.from(JSON.stringify(paired)));
+    const payload = await callWith(android, { action: "show", specPath: "/work/modes.json" });
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain(
+      `CtrlProxy does not advertise ${PROTOTYPE_THEME_MODES_CAPABILITY}`,
+    );
+    expect(payload.error).toContain("per-mode value at root.style.background");
+    expect(client.getPrototypeHistory()).toEqual([]);
   });
 });

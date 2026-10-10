@@ -1749,68 +1749,84 @@ export class DaemonMcpProxy {
 
     // Create and connect client
     this.throwIfClosing();
+    // A previous attempt may have left a client behind; close it before it is
+    // overwritten so the daemon socket is not leaked (#11117).
+    const previousClient = this.client;
     this.client = this.clientFactory();
     const client = this.client;
-    // Wire daemon-pushed list-changed forwarding (issue #3223) when the client
-    // supports it. The handler is registered BEFORE connect so no early frame
-    // is dropped; the opt-in subscription request goes out after connect.
-    const supportsNotifications = [client.onNotification, client.subscribeToNotifications].every(
-      (method) => typeof method === "function",
-    );
-    if (supportsNotifications) {
-      this.notificationUnsubscribe?.();
-      this.notificationUnsubscribe = client.onNotification!((notification) =>
-        this.handleDaemonNotification(notification, client),
+    this.closePreviousClient(previousClient, client);
+    try {
+      // Wire daemon-pushed list-changed forwarding (issue #3223) when the client
+      // supports it. The handler is registered BEFORE connect so no early frame
+      // is dropped; the opt-in subscription request goes out after connect.
+      const supportsNotifications = [client.onNotification, client.subscribeToNotifications].every(
+        (method) => typeof method === "function",
       );
-    }
-    this.subscribeToClientConnectionClosed(client);
-    await runPreflightTransport(() => client.connect());
-    if (this.closing) {
-      await client.close();
-      throw new DaemonUnavailableError("MCP proxy is closing");
-    }
-    logger.info("[DaemonMcpProxy] Connected to daemon");
+      if (supportsNotifications) {
+        this.notificationUnsubscribe?.();
+        this.notificationUnsubscribe = client.onNotification!((notification) =>
+          this.handleDaemonNotification(notification, client),
+        );
+      }
+      this.subscribeToClientConnectionClosed(client);
+      await runPreflightTransport(() => client.connect());
+      if (this.closing) {
+        await client.close();
+        throw new DaemonUnavailableError("MCP proxy is closing");
+      }
+      logger.info("[DaemonMcpProxy] Connected to daemon");
 
-    // Start notification opt-in BEFORE awaiting the ownership heartbeat so a
-    // shutdown that releases the initial binding during that round trip cannot
-    // publish to an unsubscribed socket (#6336). Do not await the subscription
-    // yet: it is a best-effort daemon RPC that can stall up to the connection
-    // timeout, while the time-critical first heartbeat must still be dispatched
-    // immediately to beat the pre-first-heartbeat reclaim grace (#5637).
-    const notificationSubscription = supportsNotifications
-      ? client.subscribeToNotifications!().catch((error) => {
-          logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
-        })
-      : Promise.resolve();
-    const [firstConnectionStep, secondConnectionStep] =
-      this.connectionOwnershipAndPresentationSteps(client);
-    await firstConnectionStep();
-    await secondConnectionStep();
-    // Re-check closing before the deferred flip: the establishment heartbeat awaits a
-    // real daemon round-trip, and a close() landing during it already set
-    // connected=false and nulled the client. Without this guard doConnect would
-    // resume and set connected=true again — leaving a stale connected flag over a
-    // closed transport (the old pre-await placement flipped before this await, so
-    // close() ran last). Mirrors the closing rechecks above.
-    this.throwIfClosing();
-    // Fence the flip to the transport this attempt established (#6389): a socket
-    // close during the establishment heartbeat already ran resetConnection() and
-    // nulled the client, and the best-effort heartbeat swallowed the rejection.
-    // Publishing connected=true now would pair the flag with a null client. No
-    // request was dispatched on the lost transport, so surface it as a preflight
-    // failure that withRecoverableReconnect reconnects from.
-    this.assertConnectedClient(client);
-    this.connected = true;
-    this.cancelBackgroundConnectRetry();
+      // Start notification opt-in BEFORE awaiting the ownership heartbeat so a
+      // shutdown that releases the initial binding during that round trip cannot
+      // publish to an unsubscribed socket (#6336). Do not await the subscription
+      // yet: it is a best-effort daemon RPC that can stall up to the connection
+      // timeout, while the time-critical first heartbeat must still be dispatched
+      // immediately to beat the pre-first-heartbeat reclaim grace (#5637).
+      const notificationSubscription = supportsNotifications
+        ? client.subscribeToNotifications!().catch((error) => {
+            logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
+          })
+        : Promise.resolve();
+      const [firstConnectionStep, secondConnectionStep] =
+        this.connectionOwnershipAndPresentationSteps(client);
+      await firstConnectionStep();
+      await secondConnectionStep();
+      // Re-check closing before the deferred flip: the establishment heartbeat awaits a
+      // real daemon round-trip, and a close() landing during it already set
+      // connected=false and nulled the client. Without this guard doConnect would
+      // resume and set connected=true again — leaving a stale connected flag over a
+      // closed transport (the old pre-await placement flipped before this await, so
+      // close() ran last). Mirrors the closing rechecks above.
+      this.throwIfClosing();
+      // Fence the flip to the transport this attempt established (#6389): a socket
+      // close during the establishment heartbeat already ran resetConnection() and
+      // nulled the client, and the best-effort heartbeat swallowed the rejection.
+      // Publishing connected=true now would pair the flag with a null client. No
+      // request was dispatched on the lost transport, so surface it as a preflight
+      // failure that withRecoverableReconnect reconnects from.
+      this.assertConnectedClient(client);
+      this.connected = true;
+      this.cancelBackgroundConnectRetry();
 
-    // Connection establishment still waits for the already-running subscription
-    // so callers do not race later requests ahead of notification opt-in. Failure
-    // was converted to a warning above and preserves the prior best-effort policy.
-    await notificationSubscription;
-    if (this.resourceSubscriptions.size > 0) {
-      await this.replayResourceSubscriptions(client);
+      // Connection establishment still waits for the already-running subscription
+      // so callers do not race later requests ahead of notification opt-in. Failure
+      // was converted to a warning above and preserves the prior best-effort policy.
+      await notificationSubscription;
+      if (this.resourceSubscriptions.size > 0) {
+        await this.replayResourceSubscriptions(client);
+      }
+
+      this.notifyStaticListsServedBeforeConnect();
+    } catch (error) {
+      // A failed partial connect (e.g. presentation profile rejected) must not
+      // leave a live socket or subscriptions behind: the next attempt would
+      // overwrite this.client and orphan it (#11117).
+      await this.abandonFailedClient(client);
+      throw error;
     }
+  }
 
+  private notifyStaticListsServedBeforeConnect(): void {
     // If a client `tools/list` was served statically before this connection
     // existed (issue #5879), prompt it to re-fetch now that the daemon can
     // return the accurate (session-scoped) list. A no-op in the common case
@@ -1824,6 +1840,28 @@ export class DaemonMcpProxy {
       this.servedStaticResourceList = false;
       this.notifyListChanged("resources");
     }
+  }
+
+  /**
+   * Not awaited: an extra turn in doConnect reorders reconnect timing that quiescence handling
+   * (#6336) depends on; a close failure is only logged.
+   */
+  private closePreviousClient(previous: DaemonClientLike | null, current: DaemonClientLike): void {
+    if (previous && previous !== current) {
+      void previous.close().catch((closeError) => {
+        logger.warn(`[DaemonMcpProxy] Failed to close previous daemon client: ${closeError}`);
+      });
+    }
+  }
+
+  private async abandonFailedClient(client: DaemonClientLike): Promise<void> {
+    if (this.client === client) {
+      await this.resetConnection();
+      return;
+    }
+    await client.close().catch((closeError) => {
+      logger.warn(`[DaemonMcpProxy] Failed to close abandoned daemon client: ${closeError}`);
+    });
   }
 
   private connectionOwnershipAndPresentationSteps(

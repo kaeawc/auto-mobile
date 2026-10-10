@@ -395,8 +395,9 @@ export function handleTokenOwnedSessions(
         deviceId: session.assignedDevice,
         platform: session.platform,
         // The daemon's own idle clock, so the resuming proxy judges idleness from the last tool
-        // call rather than from the resume (#10656).
-        lastUsedAt: session.lastUsedAt,
+        // call rather than from the resume (#10656). Reported as wall-clock epoch ms: the proxy
+        // compares it with its own wall clock, not the daemon's session clock (#11117).
+        lastUsedAt: manager.sessionClockToWall?.(session.lastUsedAt) ?? session.lastUsedAt,
       })),
     },
   };

@@ -66,4 +66,43 @@ describe("session reports in wall-clock ms after a wall step (#11243)", () => {
     );
     expect(expiresAtMs).toBe(session.lastHeartbeat + session.heartbeatTimeoutMs + WALL_STEP_MS);
   });
+
+  test("daemon/sessionInfo lastUsedAt of an unmoved session reads back the same under wall-read jitter (#11368)", async () => {
+    const jitter = [0, 0, -1, 0, -2, -2, 1, 2];
+    class JitteryTimer extends FakeTimer {
+      private reads = 0;
+      override now(): number {
+        return super.now() + jitter[this.reads++ % jitter.length]!;
+      }
+    }
+    const timer = new JitteryTimer();
+    timer.setCurrentTime(10_000_000);
+    const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    manager.stopCleanupTimer();
+    await manager.createSession(SESSION, "emulator-5554", "android", 600_000);
+    const state: DaemonStateAccess = {
+      isInitialized: () => true,
+      getSessionManager: () => manager,
+      getDevicePool: () => ({
+        refreshDevices: async () => 0,
+        getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
+      }),
+      getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
+    };
+    const seen = new Set<number>();
+    for (let i = 0; i < 20; i++) {
+      timer.advanceTime(31);
+      const response = await handleDaemonRequest(
+        {
+          id: "r",
+          type: "daemon_request",
+          method: "daemon/sessionInfo",
+          params: { sessionId: SESSION },
+        },
+        state,
+      );
+      seen.add((response.result as { lastUsedAt: number }).lastUsedAt);
+    }
+    expect(seen.size).toBe(1);
+  });
 });

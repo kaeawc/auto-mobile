@@ -18,6 +18,7 @@ import { PlanExecutionOrchestrator, PlanExecutionRequest } from "./planExecution
 import { failedPlanSessionHoldable, planLifecycleSessionUuid } from "./deviceLabelMapping";
 import type { ExecutePlanResult } from "../models/ExecutePlanResult";
 import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import { planCallerContext } from "./planCallerIdentity";
 import {
   INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
@@ -269,6 +270,8 @@ const executePlanTool = async (
   const internalParams = params as Record<string, unknown>;
   const result = await runWithToolSelectionContext(
     {
+      // #11469: steps run for the connection that called executePlan.
+      ...planCallerContext(internalParams),
       planRequest: {
         deadlineMs: internalParams[INTERNAL_MCP_REQUEST_DEADLINE_PARAM],
         timeoutMs: internalParams[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM],

@@ -136,16 +136,9 @@ import {
   assertInputNotOnForeignManagedSlotDevice,
   assertInputRequesterHoldsDevice,
   deviceAlreadyAssignedToAnotherSessionError,
-  InputDeviceOwnedError,
   parseInputRequesterSessionUuid,
 } from "./inputDeviceOwnership";
 import { ToolRegistry } from "../server/toolRegistry";
-import { DeviceOutsideBoundSessionError } from "../server/deviceOutsideBoundSessionRefusal";
-import {
-  DeviceAssignedToManagedSlotError,
-  DeviceOutsideManagedSlotsError,
-  ManagedSlotDiscoveryIncompleteError,
-} from "./managedSlots/managedSlotRefusal";
 import { managedConnectionControlRefusal } from "./managedSlots/managedConnectionScope";
 import { provisionCancellationOutcomes } from "../server/provisionCancellationOutcomes";
 import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../server/deviceTools";
@@ -232,7 +225,12 @@ import {
   recordedProcessGenerationToken,
 } from "./processGenerationFields";
 import { CONTROL_SOCKET_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
-import { sessionReleaseThatCancelledCall } from "./sessionReleasedDuringCall";
+import {
+  SESSION_OWNERSHIP_LOST_CODE,
+  sessionReleaseThatCancelledCall,
+} from "./sessionReleasedDuringCall";
+import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
+import { recoveryIdentityLoss, recoveryIdentityLossDetails } from "../server/deviceSessionResult";
 import {
   createDeviceSessionErrorResolver,
   DeviceSessionSupersededByRestoreError,
@@ -329,14 +327,61 @@ function logRequestFailureCause(cause: DaemonRequestFailureCause | undefined): v
 
 const JSONRPC_INVALID_PARAMS = -32602;
 
-/** The typed code of a managed-slot refusal (#11174, #11178), for the failure frame. */
-function managedSlotRefusalCode(error: unknown): { code?: string } {
-  return error instanceof DeviceAssignedToManagedSlotError ||
-    error instanceof DeviceOutsideManagedSlotsError ||
-    error instanceof DeviceOutsideBoundSessionError ||
-    error instanceof ManagedSlotDiscoveryIncompleteError
-    ? { code: error.code }
-    : {};
+type RefusalFrameFields = Pick<
+  DaemonResponse,
+  "code" | "retryable" | "retryAfterMs" | "nextAction" | "details"
+>;
+
+/**
+ * The payload a refusal builds for the MCP result (`toPayload()`), when it is a typed one. Read
+ * structurally so a new self-describing refusal reaches the socket without a branch here.
+ */
+function selfDescribedRefusalPayload(error: unknown): Record<string, unknown> | undefined {
+  if (!(error instanceof Error) || !("toPayload" in error)) {
+    return undefined;
+  }
+  const { toPayload } = error;
+  if (typeof toPayload !== "function") {
+    return undefined;
+  }
+  const payload: unknown = toPayload.call(error);
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return undefined;
+  }
+  const fields: Record<string, unknown> = Object.fromEntries(Object.entries(payload));
+  return typeof fields.code === "string" && typeof fields.retryable === "boolean"
+    ? fields
+    : undefined;
+}
+
+/**
+ * The typed fields a refusal puts on a failure frame: the same code, retry intent and evidence its
+ * MCP result carries (#11244, #11391). A self-describing refusal's payload supplies the evidence
+ * (`deviceId`, `boundSessionUuid`, ...) as `details`; a persisted session lost to recovery is the
+ * terminal `session_ownership_lost`; any other typed refusal is read from the error's own fields.
+ */
+function refusalFrameFields(error: unknown): RefusalFrameFields {
+  const lostToRecovery = recoveryIdentityLoss(error);
+  if (lostToRecovery) {
+    return {
+      code: SESSION_OWNERSHIP_LOST_CODE,
+      retryable: false,
+      nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
+      details: recoveryIdentityLossDetails(lostToRecovery),
+    };
+  }
+  const payload = selfDescribedRefusalPayload(error);
+  if (!payload) {
+    return typedRefusalFields(error) ?? {};
+  }
+  const { code, retryable, retryAfterMs, nextAction, ...details } = payload;
+  return {
+    ...(typeof code === "string" ? { code } : {}),
+    ...(typeof retryable === "boolean" ? { retryable } : {}),
+    ...(typeof retryAfterMs === "number" ? { retryAfterMs } : {}),
+    ...(typeof nextAction === "string" ? { nextAction } : {}),
+    ...(Object.keys(details).length > 0 ? { details } : {}),
+  };
 }
 
 export function mcpRequestFailureDetails(
@@ -354,9 +399,9 @@ export function mcpRequestFailureDetails(
 > {
   return {
     // Any typed refusal (e.g. retryable discovery_incomplete from an ide/* device lookup) keeps
-    // its code and retry intent on the socket wire, not just its message (#11244). The
-    // class-specific codes below still win.
-    ...typedRefusalFields(error),
+    // its code, retry intent and evidence on the socket wire, not just its message (#11244,
+    // #11391). The class-specific codes below still win.
+    ...refusalFrameFields(error),
     ...(error instanceof McpOverloadError ? { overloadFailure: error.failure } : {}),
     ...(error instanceof McpTimeoutError && error.code ? { code: error.code } : {}),
     // Keep the daemon MCP server's invalid-params verdict (e.g. a malformed
@@ -365,8 +410,6 @@ export function mcpRequestFailureDetails(
       ? { code: JSONRPC_INVALID_PARAMS }
       : {}),
     ...(isToolUnavailableWireError(error) ? { code: DAEMON_TOOL_UNAVAILABLE_CODE } : {}),
-    ...(error instanceof InputDeviceOwnedError ? { code: error.code } : {}),
-    ...managedSlotRefusalCode(error),
     ...(cause ? { requestFailureCause: cause } : {}),
   };
 }

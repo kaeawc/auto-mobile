@@ -124,15 +124,15 @@ class PrototypeThemeTest {
   @Test
   fun `the host chrome follows an explicit mode`() {
     val dark = model(PrototypeBoxNode(style = styled("#121316"), children = emptyList()))
-    assertEquals(true, prototypeHostDark(dark))
-    assertEquals(false, prototypeHostDark(dark.copy(theme = themed(mode = "light"))))
-    assertNull(prototypeHostDark(model(PrototypeSpacerNode())))
+    assertEquals(true, prototypeSpecDark(dark))
+    assertEquals(false, prototypeSpecDark(dark.copy(theme = themed(mode = "light"))))
+    assertNull(prototypeSpecDark(model(PrototypeSpacerNode())))
   }
 
   @Test
   fun `a system mode leaves the host chrome to the device even over an authored background`() {
     val dark = model(PrototypeBoxNode(style = styled("#121316"), children = emptyList()))
-    assertNull(prototypeHostDark(dark.copy(theme = themed(mode = "system"))))
+    assertNull(prototypeSpecDark(dark.copy(theme = themed(mode = "system"))))
   }
 
   @Test
@@ -452,7 +452,7 @@ class PrototypeThemeTest {
     assertNull(theme.surface) // the light authored background must not paint a dark scheme
     assertEquals(Color(0xFF101010), prototypeColorScheme(theme).background)
     assertEquals(darkColorScheme().onSurface, prototypeColorScheme(theme).onSurface)
-    assertEquals(true, prototypeHostDark(lightAuthored.copy(theme = explicit)))
+    assertEquals(true, prototypeSpecDark(lightAuthored.copy(theme = explicit)))
   }
 
   @Test
@@ -461,6 +461,6 @@ class PrototypeThemeTest {
       PrototypeSpecTheme(mode = "light", colors = PrototypeSpecThemeColors(surface = "#101010"))
     val root = model(PrototypeSpacerNode())
     assertFalse(prototypeThemeSpec(root.root, true, explicit).dark)
-    assertEquals(false, prototypeHostDark(root.copy(theme = explicit)))
+    assertEquals(false, prototypeSpecDark(root.copy(theme = explicit)))
   }
 }

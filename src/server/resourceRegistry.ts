@@ -255,6 +255,8 @@ class ResourceRegistryClass {
   // retained server would be last-writer-wins (issue #3223). Entries and their
   // subscriptions are pruned when a session's transport closes.
   private servers: Set<McpServer> = new Set();
+  // Tail of each session's pending notification chain (per-session ordering).
+  private deliveryTails: Map<McpServer, Promise<void>> = new Map();
   private subscriptions: Map<McpServer, Set<string>> = new Map();
   private readContexts = new Map<McpServer, (signal: AbortSignal) => ResourceReadContext>();
 
@@ -561,6 +563,9 @@ class ResourceRegistryClass {
     );
 
     // Retain every live session (issue #3223), but resolve its own subscriptions.
+    // Sessions are delivered independently (a stalled one never delays another);
+    // the returned promise settles once every session's delivery has settled.
+    const deliveries: Promise<void>[] = [];
     for (const server of this.servers) {
       if (!this.ownsUpdateSession(server, sessionUuid, unboundSessionUuid)) {
         continue;
@@ -575,8 +580,28 @@ class ResourceRegistryClass {
         templateMatch,
         subscriptions,
       );
-      await this.notifySubscribedServer(server, targetUris);
+      deliveries.push(
+        this.enqueueForServer(server, () => this.notifySubscribedServer(server, targetUris)),
+      );
     }
+    await Promise.allSettled(deliveries);
+  }
+
+  // Per-session FIFO: two notifications to the same session are never reordered,
+  // while different sessions proceed independently. A failing task never poisons
+  // the tail (tasks catch their own errors; the chain logs any remainder).
+  private enqueueForServer(server: McpServer, task: () => Promise<void>): Promise<void> {
+    const previous = this.deliveryTails.get(server) ?? Promise.resolve();
+    const tail = previous.then(task).catch((error) => {
+      logger.warn(`[ResourceRegistry] Notification delivery failed unexpectedly: ${error}`);
+    });
+    this.deliveryTails.set(server, tail);
+    void tail.then(() => {
+      if (this.deliveryTails.get(server) === tail) {
+        this.deliveryTails.delete(server);
+      }
+    });
+    return tail;
   }
 
   private ownsUpdateSession(
@@ -606,8 +631,8 @@ class ResourceRegistryClass {
           params: { uri: targetUri },
         });
       } catch (error) {
-        // Transport disconnects are expected; best-effort delivery must not block sibling sessions.
-        logger.debug(
+        // Best-effort: a failed send to one session must not block siblings.
+        logger.warn(
           `[ResourceRegistry] Failed to notify resource update for ${targetUri}: ${error}`,
         );
       }
@@ -632,24 +657,29 @@ class ResourceRegistryClass {
   // to connected DaemonMcpProxy clients, which invalidate their resource caches
   // and re-emit to their own external clients.
   async notifyResourceListChanged(): Promise<void> {
-    for (const server of this.servers) {
-      try {
-        await server.server.notification({
-          method: "notifications/resources/list_changed",
-          params: {},
-        });
-      } catch (error) {
-        // Best-effort: a failed notification must never break the resource
-        // change that triggered it, nor block sibling sessions.
-        logger.warn(`[ResourceRegistry] Failed to notify resource list change: ${error}`);
-      }
-    }
+    // Emit first and synchronously: the daemon-socket push never waits on a session.
     ListChangedBroadcaster.emit("resources");
+    const deliveries = [...this.servers].map((server) =>
+      this.enqueueForServer(server, async () => {
+        try {
+          await server.server.notification({
+            method: "notifications/resources/list_changed",
+            params: {},
+          });
+        } catch (error) {
+          // Best-effort: a failed notification must never break the resource
+          // change that triggered it, nor block sibling sessions.
+          logger.warn(`[ResourceRegistry] Failed to notify resource list change: ${error}`);
+        }
+      }),
+    );
+    await Promise.allSettled(deliveries);
   }
 
   // Test-only: drop tracked servers so suites sharing the singleton stay hermetic.
   clearServersForTesting(): void {
     this.servers.clear();
+    this.deliveryTails.clear();
     this.readContexts.clear();
     this.subscriptions.clear();
   }

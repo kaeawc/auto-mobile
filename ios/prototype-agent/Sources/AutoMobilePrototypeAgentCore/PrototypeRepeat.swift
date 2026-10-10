@@ -22,25 +22,32 @@ enum PrototypeRepeat {
         case field(String)
     }
 
-    /// Splits `text` into placeholder segments by a plain scan; any other brace text, including a
-    /// `{state_key}` placeholder, stays literal for the ordinary state interpolation.
+    /// Splits `text` into placeholder segments by a plain scan over Unicode scalars; any other
+    /// brace text, including a `{state_key}` placeholder, stays literal for the ordinary state
+    /// interpolation. Scalars, not `Character`s: a combining mark after `}` would otherwise fuse
+    /// with it into one grapheme cluster that is not `}`, unlike the host's UTF-16 scan
+    /// (`templateSegments` in src/features/prototype/prototypeTemplate.ts) and Kotlin's.
     static func segments(_ text: String, alias: String) -> [Segment] {
+        let scalars = text.unicodeScalars
         var segments: [Segment] = []
-        var literal = ""
-        var cursor = text.startIndex
-        while cursor < text.endIndex {
-            let token = text[cursor] == "{" ? placeholder(in: text, openingAt: cursor, alias: alias) : nil
+        var literal = String.UnicodeScalarView()
+        var cursor = scalars.startIndex
+        func flush() {
+            if !literal.isEmpty { segments.append(.literal(String(literal))) }
+            literal = String.UnicodeScalarView()
+        }
+        while cursor < scalars.endIndex {
+            let token = scalars[cursor] == "{" ? placeholder(in: scalars, openingAt: cursor, alias: alias) : nil
             if let (segment, end) = token {
-                if !literal.isEmpty { segments.append(.literal(literal)) }
-                literal = ""
+                flush()
                 segments.append(segment)
                 cursor = end
             } else {
-                literal.append(text[cursor])
-                cursor = text.index(after: cursor)
+                literal.append(scalars[cursor])
+                cursor = scalars.index(after: cursor)
             }
         }
-        if !literal.isEmpty { segments.append(.literal(literal)) }
+        flush()
         return segments
     }
 
@@ -68,23 +75,27 @@ enum PrototypeRepeat {
         }
     }
 
-    /// A placeholder segment and the index just past its closing brace.
-    private typealias Token = (segment: Segment, end: String.Index)
+    /// A placeholder segment and the scalar index just past its closing brace.
+    private typealias Scalars = String.UnicodeScalarView
+    private typealias Token = (segment: Segment, end: Scalars.Index)
 
-    private static func placeholder(in text: String, openingAt open: String.Index, alias: String) -> Token? {
-        let start = text.index(after: open)
-        guard let close = text[start...].firstIndex(of: "}") else { return nil }
-        let inner = text[start ..< close]
-        let end = text.index(after: close)
-        if inner == "index" { return (.index, end) }
-        let prefix = "\(alias)."
-        guard inner.hasPrefix(prefix) else { return nil }
-        let name = String(inner.dropFirst(prefix.count))
-        return isFieldName(name) ? (.field(name), end) : nil
+    private static func placeholder(in scalars: Scalars, openingAt open: Scalars.Index, alias: String) -> Token? {
+        let start = scalars.index(after: open)
+        guard let close = scalars[start...].firstIndex(of: "}") else { return nil }
+        let inner = Array(scalars[start ..< close])
+        let end = scalars.index(after: close)
+        if inner == Array("index".unicodeScalars) { return (.index, end) }
+        let prefix = Array("\(alias).".unicodeScalars)
+        guard inner.starts(with: prefix) else { return nil }
+        var name = String.UnicodeScalarView()
+        name.append(contentsOf: inner.dropFirst(prefix.count))
+        let field = String(name)
+        return isFieldName(field) ? (.field(field), end) : nil
     }
 
     private static func isFieldName(_ name: String) -> Bool {
-        guard (1 ... 64).contains(name.count), let first = name.unicodeScalars.first else { return false }
+        guard (1 ... 64).contains(name.unicodeScalars.count),
+              let first = name.unicodeScalars.first else { return false }
         func letter(_ scalar: Unicode.Scalar) -> Bool {
             ("A" ... "Z").contains(scalar) || ("a" ... "z").contains(scalar) || scalar == "_"
         }

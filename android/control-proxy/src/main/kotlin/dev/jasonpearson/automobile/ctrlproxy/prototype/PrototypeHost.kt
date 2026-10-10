@@ -10,7 +10,6 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -18,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -36,7 +36,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
-import dev.jasonpearson.automobile.protocol.PrototypeSpecTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -44,6 +43,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -90,11 +90,11 @@ data class PrototypeRequest(
    * that a person holding the device can use, whatever the placement.
    */
   val persistent: Boolean = false,
-  /** Dark or light host chrome as the spec paints it; null follows the device setting. */
-  val darkTheme: Boolean? = null,
-  /** The spec's render root and theme, so host chrome follows the spec; null uses the baseline. */
-  val themeRoot: PrototypeRenderNode? = null,
-  val specTheme: PrototypeSpecTheme? = null,
+  /**
+   * The show's theme as the controller resolves it, live: host chrome and the content both draw in
+   * its mode and follow its changes. Null draws baseline chrome in the device's mode.
+   */
+  val theme: StateFlow<PrototypeShownTheme>? = null,
   val onHostDismiss: suspend () -> Unit = {},
   val content: @Composable () -> Unit = { PrototypeTestContent() },
 ) {
@@ -769,13 +769,8 @@ internal fun PrototypeWindowContent(
   val floor = remember(request.placement, configuration) { insetFloor() }
   val chrome = prototypeHostChrome(request)
   val scope = rememberCoroutineScope()
-  PrototypeHostTheme(
-    request.themeRoot,
-    request.specTheme,
-    request.darkTheme ?: isSystemInDarkTheme(),
-  ) {
-    PrototypeChrome(request, chrome, floor, scope)
-  }
+  val shown = request.theme?.collectAsState()?.value
+  PrototypeHostTheme(shown) { PrototypeChrome(request, chrome, floor, scope) }
 }
 
 @Composable

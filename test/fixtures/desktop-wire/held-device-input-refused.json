@@ -93,7 +93,11 @@
       "response": {
         "success": false,
         "error": "input/tap refused: device 'emulator-5554' is held by another session. Session d0000000-0000-4000-8000-000000000001 does not hold it; acquire the device (setActiveDevice) and send input with that session's sessionUuid.",
-        "code": "device_owned_by_other_session"
+        "code": "device_owned_by_other_session",
+        "retryable": false,
+        "details": {
+          "deviceId": "emulator-5554"
+        }
       }
     },
     {

@@ -751,7 +751,44 @@ data class PrototypeResult(
   @EncodeDefault(EncodeDefault.Mode.NEVER) val prototypes: List<PrototypeStatusEntry>? = null,
   /** Only with [prototypes]: events dropped from the offline buffer since the service started. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val droppedEvents: Long? = null,
+  /**
+   * Only the reply to a successful `show_prototype`: the light or dark mode the prototype resolved
+   * to (`prototype_appearance_v1`). Omitted by every other result and by older APKs.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val appearance: PrototypeAppearance? = null,
 ) : WebSocketResponse()
+
+@Serializable
+enum class PrototypeAppearanceMode {
+  @SerialName("light") LIGHT,
+  @SerialName("dark") DARK,
+}
+
+/** Which step of the resolution order decided the mode, highest precedence first. */
+@Serializable
+enum class PrototypeAppearanceSource {
+  /** The spec's `theme.mode` is `light` or `dark`. */
+  @SerialName("explicit") EXPLICIT,
+  /** The show's `appearance` override stood in for the system setting. */
+  @SerialName("override") OVERRIDE,
+  /** The luminance of the flat `theme.colors.background` (else `surface`) role override. */
+  @SerialName("roleLuminance") ROLE_LUMINANCE,
+  /** The first opaque authored background on the root chain. */
+  @SerialName("authoredBackground") AUTHORED_BACKGROUND,
+  /** The device's own light or dark setting. */
+  @SerialName("system") SYSTEM,
+}
+
+/**
+ * The appearance a shown prototype resolved to. [deviceDark] is the device's own setting whatever
+ * decided [mode], so a host can tell a prototype that differs from the app behind it.
+ */
+@Serializable
+data class PrototypeAppearance(
+  val mode: PrototypeAppearanceMode,
+  val source: PrototypeAppearanceSource,
+  val deviceDark: Boolean,
+)
 
 /**
  * One prototype the device is showing. [id] is the prototype id, which is its spec id.
@@ -770,6 +807,8 @@ data class PrototypeStatusEntry(
    * kept, and it returns with the app. Omitted when false and by older APKs.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val suspended: Boolean = false,
+  /** The mode it is drawn in right now (`prototype_appearance_v1`). Omitted by older APKs. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val appearance: PrototypeAppearance? = null,
 )
 
 @Serializable
@@ -777,6 +816,11 @@ enum class PrototypeEventKind {
   @SerialName("emit") EMIT,
   @SerialName("page_changed") PAGE_CHANGED,
   @SerialName("dismissed") DISMISSED,
+  /**
+   * The resolved light or dark mode of a shown prototype changed (`prototype_appearance_v1`). The
+   * payload is `{mode, source}`, with the values of [PrototypeAppearance]; `name` is null.
+   */
+  @SerialName("appearance_changed") APPEARANCE_CHANGED,
 }
 
 /** Unsolicited frame. Pager selection is separate from authored scalar state. */

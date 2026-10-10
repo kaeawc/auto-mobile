@@ -798,6 +798,7 @@ function summarizePoolStatus(
   devicePool: DevicePool,
   discoveredDevices: BootedDeviceInfo[],
   succeededPlatforms: Set<Platform>,
+  requestedPlatforms: readonly Platform[],
 ): PoolStatusSummary {
   let idle = 0;
   let assigned = 0;
@@ -824,7 +825,7 @@ function summarizePoolStatus(
   // For platforms whose discovery failed/was unavailable, keep the pool's own
   // tracked counts — we cannot confirm which of those entries are phantom.
   for (const pooled of devicePool.getAllDevices()) {
-    if (!succeededPlatforms.has(pooled.platform)) {
+    if (requestedPlatforms.includes(pooled.platform) && !succeededPlatforms.has(pooled.platform)) {
       tally(
         effectivePoolStatus(
           pooled.status,
@@ -1570,7 +1571,7 @@ async function computeBootedDevicesForPlatforms(
   const physicalCount = devices.length - virtualCount;
   const poolStatus =
     daemonContext.poolStatus && daemonContext.devicePool
-      ? summarizePoolStatus(daemonContext.devicePool, devices, succeededPlatforms)
+      ? summarizePoolStatus(daemonContext.devicePool, devices, succeededPlatforms, platforms)
       : undefined;
 
   return {

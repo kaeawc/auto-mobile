@@ -431,13 +431,30 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
     return this.routes.get(deviceId) ?? deviceId;
   }
 
-  /** The pooled canonical id a known alias serial belongs to, else the serial itself. */
+  /**
+   * The pooled canonical id a known alias serial belongs to, else the serial itself. An alias maps
+   * only with current transport evidence, like {@link mapDiscovery}: an additive fold can keep a
+   * stale `ip:port` alias that another phone now answers on (#11164).
+   */
   canonicalFor(serial: string): string {
     return (
       [...this.groups.values()].find(
-        (group) => group.canonical === serial || group.serials.has(serial),
+        (group) =>
+          group.canonical === serial ||
+          (group.serials.has(serial) && this.hasCurrentTransport(group, serial)),
       )?.canonical ?? serial
     );
+  }
+
+  /** Whether the latest probed connection for `serial` is the one `group` folded. */
+  private hasCurrentTransport(group: TransportGroup, serial: string): boolean {
+    const connection = this.connections.get(serial);
+    if (!connection) {
+      // Only a transport address can be reused by another device; an unprobed emulator console
+      // or USB serial names one device, so its folded membership stands on its own.
+      return !isAndroidTransportAddressSerial(serial);
+    }
+    return connection.transportId === group.transportIds.get(serial);
   }
 
   aliases(deviceId: string): string[] {

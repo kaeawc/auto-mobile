@@ -1327,6 +1327,8 @@ export class DevicePool {
         getRecoveryPolicy: () => this.getRecoveryPolicy(),
         getSessionForDevice: (deviceId) => this.sessionManager.getSessionForDevice(deviceId),
         getSession: (sessionId) => this.sessionManager.getSession(sessionId),
+        sessionClockToWall: (sessionClockMs) =>
+          this.sessionManager.sessionClockToWall(sessionClockMs),
         getProcessOutputTail: (deviceId) => this.startedDeviceProcessOutput.get(deviceId),
       },
       emulatorLossIncidentStore,

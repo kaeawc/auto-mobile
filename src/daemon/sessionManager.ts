@@ -1,5 +1,4 @@
 import type { TimingData } from "../utils/PerformanceTracker";
-import { isDeviceLossCancellationReason } from "./emulatorLossIncident";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import type { DeviceHealthMarkers, DeviceHealthReason } from "./deviceHealthMarkers";
@@ -86,7 +85,6 @@ import {
   type LivenessLeaseState,
   type LivenessOwnerHold,
 } from "./livenessOwnerLease";
-import { OWNER_DISCONNECTED_RELEASE_REASON } from "./ownerDisconnectRelease";
 import { isReleaseVetoedByExecutions } from "./unsettledExecutionVeto";
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
@@ -103,7 +101,14 @@ import {
   SessionCreationTimeoutError,
   SessionReleasedDuringCreationError,
 } from "./deviceAcquisitionRefusals";
-import { DAEMON_SESSION_SUSPECT_CODE, isIdleReleaseReason } from "./types";
+import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
+import {
+  isExpiryReleaseReason,
+  isIdleReleaseReason,
+  isTerminalReleaseReason,
+  releasedRowStatus,
+  type SessionReleaseReason,
+} from "./releaseReasons";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import {
   NoopTerminalReleaseJournal,
@@ -1173,7 +1178,8 @@ export const RELEASE_PERSIST_TIMEOUT_REASON = "release-persist-timeout";
 export const SESSION_CREATE_WAIT_TIMEOUT_MS =
   SESSION_RELEASE_TEARDOWN_CAP_MS + 2 * SESSION_RELEASE_PERSIST_TIMEOUT_MS + 10_000;
 /** Non-terminal release reason recorded for a creation abandoned at its deadline (#10963). */
-export const SESSION_CREATION_TIMEOUT_REASON = "session-creation-timeout";
+export const SESSION_CREATION_TIMEOUT_REASON =
+  "session-creation-timeout" satisfies SessionReleaseReason;
 
 /**
  * Retry delays for a terminal release write that timed out and then failed (#10959). The in-memory
@@ -1193,14 +1199,6 @@ type RehydrationRowOutcome =
   | { kind: "rehydrated" }
   | { kind: "terminalized"; reason: string }
   | { kind: "skipped"; reason: string };
-const EXPIRY_RELEASE_REASONS = new Set([
-  "lazy-expiry",
-  "cleanup-expired",
-  "missing-first-heartbeat",
-  "heartbeat-timeout",
-  "cli-idle-timeout",
-  "rehydration-owner-timeout",
-]);
 
 export class UnissuedSessionError extends ActionableError {}
 
@@ -1214,7 +1212,7 @@ export type ReleaseCommitFence = () => boolean;
 export interface RecoveryExpiryReleaseHandler {
   release(
     sessionId: string,
-    releaseReason: string,
+    releaseReason: SessionReleaseReason,
     attempt: () => Promise<string | null>,
     options: SessionReleaseOptions,
   ): Promise<string | null> | undefined;
@@ -1229,22 +1227,7 @@ function releaseSuperseded(shouldCommit: ReleaseCommitFence | undefined): boolea
 }
 
 /** Plan cleanup frees devices while allowing the base and label UUIDs to be reused. */
-export const PLAN_AUTO_RELEASE_REASON = "plan-auto-release";
-
-function isTerminalReleaseReason(releaseReason: string): boolean {
-  return (
-    releaseReason === "explicit-release" ||
-    releaseReason === "missing-first-heartbeat" ||
-    releaseReason === "heartbeat-timeout" ||
-    releaseReason === "cli-idle-timeout" ||
-    releaseReason === "rehydration-owner-timeout" ||
-    releaseReason === OWNER_DISCONNECTED_RELEASE_REASON ||
-    releaseReason === "device-killed" ||
-    releaseReason === "session-creation-cancelled" ||
-    releaseReason.startsWith("identity-recovery-") ||
-    isDeviceLossCancellationReason(releaseReason)
-  );
-}
+export const PLAN_AUTO_RELEASE_REASON = "plan-auto-release" satisfies SessionReleaseReason;
 
 export function getDefaultSessionHeartbeatTimeoutMs(): number {
   const rawValue =
@@ -1583,7 +1566,7 @@ export class SessionManager {
           await raceWithDeadline(
             this.deviceSessionRepository.markReleased(
               intent.sessionId,
-              EXPIRY_RELEASE_REASONS.has(intent.reason) ? "expired" : "released",
+              releasedRowStatus(intent.reason),
               intent.at,
               intent.reason,
             ),
@@ -1633,7 +1616,7 @@ export class SessionManager {
     }
     return {
       ...persisted,
-      status: EXPIRY_RELEASE_REASONS.has(intent.reason) ? "expired" : "released",
+      status: releasedRowStatus(intent.reason),
       released_at_ms: intent.at,
       release_reason: intent.reason,
     };
@@ -4233,9 +4216,30 @@ export class SessionManager {
    * Called when a test completes or times out.
    * Returns the device ID so DevicePool can mark it as available.
    */
-  async releaseSession(
+  releaseSession(
     sessionId: string,
-    releaseReason: string = "explicit-release",
+    releaseReason: SessionReleaseReason = "explicit-release",
+    allowExpired: boolean = false,
+    shouldCommit?: ReleaseCommitFence,
+    options: SessionReleaseOptions = {},
+  ): Promise<string | null> {
+    // Not async: a pass-through, so it adds no microtask to the release's settled budget.
+    return this.releaseSessionForReason(
+      sessionId,
+      releaseReason,
+      allowExpired,
+      shouldCommit,
+      options,
+    );
+  }
+
+  /**
+   * {@link releaseSession} for a reason already recorded on a release in flight. New releases go
+   * through `releaseSession`, whose typed reason must be tagged in the release-reason table.
+   */
+  private async releaseSessionForReason(
+    sessionId: string,
+    releaseReason: string,
     allowExpired: boolean = false,
     shouldCommit?: ReleaseCommitFence,
     options: SessionReleaseOptions = {},
@@ -4249,7 +4253,7 @@ export class SessionManager {
         shouldCommit,
         releaseOptions,
       );
-    if (EXPIRY_RELEASE_REASONS.has(releaseReason)) {
+    if (isExpiryReleaseReason(releaseReason)) {
       const recoveryRelease = this.recoveryExpiryReleaseHandler?.release(
         sessionId,
         releaseReason,
@@ -4329,7 +4333,7 @@ export class SessionManager {
    */
   async releaseSessionUnlessSuperseded(
     sessionId: string,
-    releaseReason: string,
+    releaseReason: SessionReleaseReason,
     shouldCommit: ReleaseCommitFence | undefined,
     allowExpired: boolean = false,
   ): Promise<ConditionalSessionRelease> {
@@ -4353,7 +4357,7 @@ export class SessionManager {
     sessionId: string,
     expectedSession: Session,
     expectedDeviceId: string,
-    releaseReason: string = "explicit-release",
+    releaseReason: SessionReleaseReason = "explicit-release",
   ): Promise<string | null> {
     const session = this.sessions.get(sessionId);
     if (session === expectedSession && session.assignedDevice === expectedDeviceId) {
@@ -4520,7 +4524,7 @@ export class SessionManager {
         unref: true,
         label: "Release of a session still being created",
       });
-      return await this.releaseSession(sessionId, reason.value, allowExpired);
+      return await this.releaseSessionForReason(sessionId, reason.value, allowExpired);
     } catch (error) {
       logger.warn(`Session ${sessionId} assignment failed before release: ${error}`);
       return null;
@@ -5355,9 +5359,7 @@ export class SessionManager {
       return false;
     }
     try {
-      const terminalStatus = EXPIRY_RELEASE_REASONS.has(snapshot.releaseReason)
-        ? "expired"
-        : "released";
+      const terminalStatus = releasedRowStatus(snapshot.releaseReason);
       if (snapshot.terminal) {
         // Durable before the write is issued: a crash while it is parked must not revive the UUID.
         this.terminalReleaseJournal.record({
@@ -5524,7 +5526,7 @@ export class SessionManager {
       await raceWithDeadline(
         this.deviceSessionRepository.markReleased(
           snapshot.sessionId,
-          EXPIRY_RELEASE_REASONS.has(snapshot.releaseReason) ? "expired" : "released",
+          releasedRowStatus(snapshot.releaseReason),
           snapshot.releasedAtMs,
           snapshot.releaseReason,
         ),
@@ -8458,7 +8460,7 @@ export class SessionManager {
   private expiredSessionReleaseReason(
     session: Session,
     idleReason: "lazy-expiry" | "cleanup-expired",
-  ): string {
+  ): SessionReleaseReason {
     if (
       suspectGraceMsFor(session) > 0 &&
       livenessLeaseState(sessionJudgedLeaseSnapshot(session, this.sessionNow())).phase === "lapsed"

@@ -1,3 +1,4 @@
+import type { SessionReleaseReason } from "./releaseReasons";
 import { deviceRestartReleaseReason } from "../db/deviceSessionRepository";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
@@ -35,7 +36,7 @@ export interface AdbResetSessionRecoveryPoolPort extends Pick<
   releaseDisconnectedRecoverySessionWithRetry(
     sessionId: string,
     deviceId: string,
-    releaseReason: string,
+    releaseReason: SessionReleaseReason,
   ): Promise<void>;
   refreshEmulatorLossRecoverySettlement(
     incidentId: string | undefined,

@@ -1,3 +1,4 @@
+import type { SessionReleaseReason } from "./releaseReasons";
 import {
   createDefaultManagedSlotExclusion,
   type ManagedSlotExclusion,
@@ -4134,7 +4135,7 @@ export class Daemon {
 
   private async cancelAndReleaseSession(
     sessionId: string,
-    releaseReason: string = "explicit-release",
+    releaseReason: SessionReleaseReason = "explicit-release",
     allowExpired: boolean = false,
     expectedSession?: Session,
     shouldCommit?: () => boolean,

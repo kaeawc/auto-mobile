@@ -113,7 +113,7 @@ import {
   getStaticToolDefinitions,
 } from "./staticToolDefinitions";
 import { DaemonRestartDeferredError } from "./daemonRestartAdmission";
-import { isRecoverableDaemonReleaseReason } from "../db/deviceSessionRepository";
+import { isRecoverableDaemonReleaseReason } from "./releaseReasons";
 import { daemonProcessOptions, daemonReuseOptions } from "./daemonOptionScopes";
 import {
   DAEMON_STALLED_CODE,

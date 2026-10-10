@@ -1,3 +1,4 @@
+import type { SessionReleaseReason } from "./releaseReasons";
 import type { SessionReleaseOptions } from "./sessionManager";
 import type { DeviceInfo } from "../models";
 import type { BootedDeviceDiscovery } from "../devices/deviceUtils";
@@ -99,7 +100,7 @@ export interface DeviceRecoveryPoolPort {
   releaseDisconnectedRecoverySessionWithRetry(
     sessionId: string,
     deviceId: string,
-    releaseReason: string,
+    releaseReason: SessionReleaseReason,
     attempt: () => Promise<void>,
   ): Promise<void>;
   releaseDevice(deviceId: string, sessionId: string): Promise<unknown>;
@@ -775,7 +776,7 @@ export class DeviceRecoveryCoordinator {
 
   releaseFailedRecoveryOnExpiry(
     sessionId: string,
-    releaseReason: string,
+    releaseReason: SessionReleaseReason,
     attempt: () => Promise<string | null>,
     options: SessionReleaseOptions = {},
   ): Promise<string | null> | undefined {
@@ -808,7 +809,7 @@ export class DeviceRecoveryCoordinator {
 
   private async retryFailedRecoveryRelease(
     record: AndroidRecoveryRecord,
-    releaseReason: string,
+    releaseReason: SessionReleaseReason,
     attempt: () => Promise<string | null>,
     options: SessionReleaseOptions,
   ): Promise<string | null> {

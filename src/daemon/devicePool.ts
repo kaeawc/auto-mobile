@@ -1,3 +1,4 @@
+import type { SessionReleaseReason } from "./releaseReasons";
 import type { Environment } from "./poolConfig";
 import {
   DeviceCleanupInProgressError,
@@ -681,7 +682,7 @@ interface DeviceDisconnectSessionReleaser {
   (
     sessionId: string,
     deviceId: string,
-    releaseReason: string,
+    releaseReason: SessionReleaseReason,
     shouldCommit?: () => boolean,
   ): Promise<boolean | void>;
 }
@@ -805,7 +806,10 @@ export interface OwnerDisconnectOptions {
    * Defaults to an ownership-fenced session release that returns the device to the pool. Resolve
    * with a deferral to keep the session while in-flight work vetoes the release.
    */
-  release?: (session: Session, reason: string) => Promise<OwnerDisconnectReleaseDeferral | void>;
+  release?: (
+    session: Session,
+    reason: SessionReleaseReason,
+  ) => Promise<OwnerDisconnectReleaseDeferral | void>;
   /** Grace before the session is released. Defaults to {@link OWNER_DISCONNECT_GRACE_MS}. */
   graceMs?: number;
 }
@@ -1360,7 +1364,7 @@ export class DevicePool {
 
   private async releaseSessionForDisconnectedOwner(
     session: Session,
-    reason: string,
+    reason: SessionReleaseReason,
   ): Promise<void> {
     const { sessionId, assignedDevice } = session;
     await releaseSessionAndDevice(this.sessionManager, this, assignedDevice, sessionId, reason, {
@@ -4517,7 +4521,7 @@ export class DevicePool {
   private async releaseDisconnectedRecoverySessionWithRetry(
     sessionId: string,
     deviceId: string,
-    releaseReason: string,
+    releaseReason: SessionReleaseReason,
     attempt?: () => Promise<void>,
   ): Promise<void> {
     await this.retrySessionRelease(

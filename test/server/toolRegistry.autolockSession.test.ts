@@ -297,6 +297,18 @@ describe("ToolRegistry autolock session enforcement", () => {
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
+  test("a read under mixed-platform ambiguity is asked for a deviceId, never a session (#11351)", async () => {
+    setAutolock(true);
+    fakeDeviceSessionManager.setConnectedDevices([androidA, iosA]);
+
+    const tool = registerTool("autolockEitherPlatformRead", { deviceReadOnly: true });
+
+    const ambiguousCall = tool.handler({});
+    await expect(ambiguousCall).rejects.toBeInstanceOf(ActionableError);
+    await expect(ambiguousCall).rejects.toThrow("Provide a deviceId to target a specific device.");
+    await expect(ambiguousCall).rejects.not.toThrow("getAndroid");
+  });
+
   test("rejects mixed-platform ambiguity after a deviceId-only resolution", async () => {
     setAutolock(true);
     fakeDeviceSessionManager.setConnectedDevices([androidA, iosA]);

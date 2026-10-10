@@ -324,9 +324,9 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
     const acquiredAt = timer.now();
     await idleFor(SESSION_IDLE_TIMEOUT_MS - 60_000);
     const usedAt = timer.now();
-    await proxy.callTool("observe", {});
+    await proxy.callTool("tapOn", { action: "tap", text: "OK" });
     expect(forwarded.at(-1)).toEqual({
-      tool: "observe",
+      tool: "tapOn",
       sessionUuid: SESSION,
       boundSession: SESSION,
     });

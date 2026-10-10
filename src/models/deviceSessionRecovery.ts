@@ -20,3 +20,17 @@ export const DEVICE_SESSION_RECOVERY_TOOLS = ["getAndroid", "getApple"] as const
  * retry the UUID. Such a refusal carries `retryable: false` for the UUID (#11098).
  */
 export const ACQUIRE_NEW_SESSION_NEXT_ACTION = "acquire_new_session" as const;
+
+/**
+ * Wire code of a managed connection's answer to a call after its execution's session was terminally
+ * released (#11341). `session_ownership_lost` would tell the agent to acquire a new session, which a
+ * managed connection never does (`getAndroid`/`getApple` are always refused there), so the managed
+ * proxy answers this instead.
+ */
+export const MANAGED_EXECUTION_ENDED_CODE = "managed_execution_ended" as const;
+
+/**
+ * `nextAction` on {@link MANAGED_EXECUTION_ENDED_CODE}: the runner, not the agent, decides whether
+ * to relaunch the execution, which acquires fresh slot sessions. The refusal names no recovery tools.
+ */
+export const RELAUNCH_EXECUTION_NEXT_ACTION = "relaunch_execution" as const;

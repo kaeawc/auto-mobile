@@ -429,8 +429,9 @@ export class ManagedSlotAcquisition {
     try {
       await registry.releaseExecution(key, sessionUuid);
     } catch (error) {
-      // The owner names this daemon's PID and the released session, so the slot frees once the
-      // session is gone or this daemon exits; log it so a stuck slot has a trace.
+      // The owner names this daemon and the session about to be released; the registry judges a
+      // record this daemon wrote by its session, so the slot frees once that session is gone
+      // (#11339). Log it so a stuck slot has a trace.
       logger.warn(
         `[ManagedSlots] Clearing slot ${key.slotIndex}'s owner ${sessionUuid} failed: ${errorMessage(error)}`,
         error,

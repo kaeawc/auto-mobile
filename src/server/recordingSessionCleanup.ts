@@ -271,6 +271,9 @@ export function registerRecordingSessionCleanup(
     manager.registerPendingDeviceCleanup(
       deviceId,
       stopOwnedRecordingsWithinCap(deps, sessionId, deviceId),
+      // The stop is capped, then force-stopped recordings are marked incomplete within a grace;
+      // a refused bind must advertise that, not the 1 s default (#11360).
+      deps.finalizeCapMs(deviceId) + INCOMPLETE_MARK_GRACE_MS,
     );
   };
   // A terminal upgrade of a finished release would stop the device's next owner's recording (#10825).

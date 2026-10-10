@@ -185,6 +185,35 @@ final class DaemonRefusalTests: XCTestCase {
         }
     }
 
+    /// `managedEndedPayload` (#11341): a managed connection's answer after its execution's session was
+    /// released. The runner decides whether to relaunch, so it is neither retried nor treated as
+    /// acquire-new-session.
+    func testManagedExecutionEndedIsTerminalAndNotRetried() async throws {
+        let payload = """
+        {"error":{"code":"managed_execution_ended","message":"ended","sessionUuid":"s1",\
+        "reason":"heartbeat_timeout","retryable":false,"nextAction":"relaunch_execution",\
+        "slotIndex":1,"assignmentGeneration":3}}
+        """
+        let refusal = try XCTUnwrap(Refusal.parse(payload))
+        XCTAssertEqual(refusal.code, "managed_execution_ended")
+        XCTAssertFalse(refusal.retryable)
+        XCTAssertFalse(refusal.acquiresNewSession)
+        XCTAssertFalse(refusal.waitsForDevice)
+
+        let client = RefusalMCPClient()
+        client.executePlanReplies = [payload, successPayload]
+        let scheduler = RecordingScheduler()
+        let executor = makeExecutor(client: client, scheduler: scheduler, retryCount: 2)
+        do {
+            _ = try await executor.execute(sessionUuid: "first")
+            XCTFail("expected the refusal to throw")
+        } catch let AutoMobilePlanExecutor.ExecutorError.refused(_, refused) {
+            XCTAssertEqual(refused.code, "managed_execution_ended")
+        }
+        XCTAssertEqual(client.executePlanSessions, ["first"])
+        XCTAssertTrue(scheduler.delays.isEmpty)
+    }
+
     func testNonRetryableTypedRefusalIsNotRetried() async throws {
         let client = RefusalMCPClient()
         client.executePlanReplies = [

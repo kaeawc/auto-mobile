@@ -22,6 +22,7 @@ import {
   serializeRefusalSurfaceFixture,
   surfaceFixtureStem,
   UNFIXTURED_REFUSAL_CODES,
+  LITERAL_CLIENT_REACHABLE_CODES,
   buildRefusalWireFixtures,
   serializeRefusalFixture,
   type RefusalDisposition,
@@ -281,6 +282,17 @@ describe("refusal wire contract", () => {
     // Add a builder to test/helpers/refusalWireFixtures.ts, run
     // `bun scripts/generate-refusal-wire-fixtures.ts`, and add a row to expectations.json.
     expect(missing).toEqual([]);
+  });
+
+  test("every client-reachable code defined as a literal has a fixture or a recorded reason", () => {
+    const missing = LITERAL_CLIENT_REACHABLE_CODES.filter(
+      (code) => !fixtureCodes.includes(code) && !(code in UNFIXTURED_REFUSAL_CODES),
+    );
+    expect(missing).toEqual([]);
+    // A recorded reason never outlives its gap: a code with a fixture must not stay excused.
+    expect(
+      Object.keys(UNFIXTURED_REFUSAL_CODES).filter((code) => fixtureCodes.includes(code)),
+    ).toEqual([]);
   });
 
   test("every retryable acquisition code has a fixture", () => {

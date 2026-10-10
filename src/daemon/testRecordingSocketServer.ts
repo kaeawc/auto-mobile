@@ -19,6 +19,8 @@ import {
 } from "./streamSocketAuth";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
+import { assertInputNotOnForeignManagedSlotDevice } from "./inputDeviceOwnership";
+import { DaemonState } from "./daemonState";
 
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
 const TEST_RECORDING_PURPOSE = "to start a test recording";
@@ -96,6 +98,32 @@ export async function resolveTestRecordingDevice(
   );
 }
 
+/**
+ * The managed-slot exclusion for a recording start or stop (#11352): a device a managed slot
+ * holds, idle or executing, is recorded only by that slot's own execution. Refuses with the typed
+ * `device_assigned_to_managed_slot`. Injected so tests can assert on the call without a pool.
+ */
+export type TestRecordingManagedSlotGate = (input: {
+  action: string;
+  device: { deviceId: string; platform: Platform };
+  requesterSessionUuid: string | undefined;
+}) => Promise<void>;
+
+const defaultManagedSlotGate: TestRecordingManagedSlotGate = async (input) => {
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return;
+  }
+  await assertInputNotOnForeignManagedSlotDevice({
+    action: input.action,
+    deviceId: input.device.deviceId,
+    platform: input.device.platform,
+    requesterSessionUuid: input.requesterSessionUuid,
+    sessionManager: daemonState.getSessionManager(),
+    gate: daemonState.getDevicePool(),
+  });
+};
+
 const defaultDeviceResolution: TestRecordingDeviceResolution = {
   selectDevice: (deviceId, platform) => {
     const deviceSessionManager = DeviceSessionManager.getInstance();
@@ -136,6 +164,7 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
   private readonly authenticator: StreamSocketAuthenticator;
   private readonly admissionGate: DeviceAdmissionGate;
   private readonly deviceResolution: TestRecordingDeviceResolution;
+  private readonly managedSlotGate: TestRecordingManagedSlotGate;
 
   constructor(
     socketPath: string = getSocketPath(TEST_RECORDING_SOCKET_CONFIG),
@@ -145,11 +174,13 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
     ),
     admissionGate: DeviceAdmissionGate = daemonDeviceAdmissionGate,
     deviceResolution: TestRecordingDeviceResolution = defaultDeviceResolution,
+    managedSlotGate: TestRecordingManagedSlotGate = defaultManagedSlotGate,
   ) {
     super(socketPath, timer, "TestRecording");
     this.authenticator = authenticator;
     this.admissionGate = admissionGate;
     this.deviceResolution = deviceResolution;
+    this.managedSlotGate = managedSlotGate;
   }
 
   protected async handleRequest(request: TestRecordingCommand): Promise<TestRecordingResponse> {
@@ -184,6 +215,13 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
         authorizeResolvedDevice(this.authenticator, {
           sessionUuid: request.sessionUuid,
           deviceId: selected.deviceId,
+        });
+        // A managed slot's device is idle (no owner), so the authorization above admits it; the
+        // slot exclusion refuses before readiness sets up a runner on it (#11352).
+        await this.managedSlotGate({
+          action: "testRecording start",
+          device: selected,
+          requesterSessionUuid: request.sessionUuid,
         });
         const device = await this.deviceResolution.readyDevice(selected);
         const result = await startTestRecording(
@@ -248,6 +286,11 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
     if (request.deviceId !== undefined && active.deviceId !== request.deviceId) {
       throw new ActionableError(`No active recording found for device ${request.deviceId}.`);
     }
+    await this.managedSlotGate({
+      action: "testRecording stop",
+      device: { deviceId: active.deviceId, platform: active.platform },
+      requesterSessionUuid: request.sessionUuid,
+    });
     const result = await stopTestRecording(request.recordingId, request.planName);
     return this.toStopResponse(result);
   }

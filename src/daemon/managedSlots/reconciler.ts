@@ -25,7 +25,11 @@ import type { AvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfi
 import { parseAndroidSystemImageRuntime } from "../../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
-import { defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
+import {
+  defaultSlotExecOwnerLiveness,
+  type InFlightSlotReservations,
+  inFlightSlotReservations,
+} from "./slotOwnerLiveness";
 import type { BackoffInput } from "../../utils/Backoff";
 import { currentDaemonProcessGenerationToken } from "../processGeneration";
 import { deviceStableId } from "./slotDeviceIdentity";
@@ -278,6 +282,8 @@ export interface ManagedSlotReconcilerDependencies {
   timer: Pick<Timer, "now">;
   /** Execution-reservation ids (default: random UUIDs). */
   idGenerator?: IdGenerator;
+  /** Reservations in flight, which the registry's owner liveness reads (default: process-wide). */
+  reservations?: Pick<InFlightSlotReservations, "add" | "delete">;
   /** Journal ownership and redrive policy (#11179). */
   journal?: ManagedSlotReconcilerJournalOptions;
 }
@@ -961,12 +967,14 @@ export class ManagedSlotReconciler {
   private readonly inFlight = new Map<string, Promise<unknown>>();
   private readonly isExecOwnerLive: SlotExecOwnerLiveness;
   private readonly idGenerator: IdGenerator;
+  private readonly reservations: Pick<InFlightSlotReservations, "add" | "delete">;
 
   readonly journal: ManagedSlotJournal;
 
   constructor(private readonly deps: ManagedSlotReconcilerDependencies) {
     this.isExecOwnerLive = deps.isExecOwnerLive ?? defaultSlotExecOwnerLiveness;
     this.idGenerator = deps.idGenerator ?? defaultIdGenerator;
+    this.reservations = deps.reservations ?? inFlightSlotReservations;
     this.journal = new ManagedSlotJournal({
       registry: deps.registry,
       inventory: deps.inventory,
@@ -1278,6 +1286,11 @@ export class ManagedSlotReconciler {
         await this.releaseReservation(context.request.key, reservation);
       }
       throw error;
+    } finally {
+      // Superseded by the real claim or released: it no longer keeps the slot in use (#11339).
+      if (reservation) {
+        this.reservations.delete(reservation);
+      }
     }
   }
 
@@ -1332,12 +1345,19 @@ export class ManagedSlotReconciler {
       return undefined;
     }
     const reservation = `reserve-${this.idGenerator.next()}`;
-    const claimed = await this.deps.registry.claimExecution(key, expectationOf(assignment), {
-      ...owner,
-      sessionUuid: reservation,
-    });
-    if (claimed.kind !== "claimed") {
-      throw new ReconcileAbort(claimFailure(claimed, "reservation"));
+    // Recorded before the claim: the registry judges the new record by this set (#11339).
+    this.reservations.add(reservation);
+    try {
+      const claimed = await this.deps.registry.claimExecution(key, expectationOf(assignment), {
+        ...owner,
+        sessionUuid: reservation,
+      });
+      if (claimed.kind !== "claimed") {
+        throw new ReconcileAbort(claimFailure(claimed, "reservation"));
+      }
+    } catch (error) {
+      this.reservations.delete(reservation);
+      throw error;
     }
     return reservation;
   }
@@ -1346,8 +1366,8 @@ export class ManagedSlotReconciler {
     try {
       await this.deps.registry.releaseExecution(key, reservation);
     } catch (error) {
-      // A leaked reservation names this daemon's PID, so it blocks the slot only until this
-      // process exits; log it so the stuck slot has a trace.
+      // The reservation is no longer in flight, so the registry judges a leaked record dead and
+      // the next claim takes the slot over (#11339); log it so a stuck slot has a trace.
       logger.warn(
         `[ManagedSlots] releasing reservation ${reservation} failed: ${errorMessage(error)}`,
         error,

@@ -308,6 +308,88 @@ test("recording stop cannot disguise another device as the caller's own", async 
   }
 });
 
+describe("TestRecordingSocketServer managed-slot exclusion (#11352)", () => {
+  const slotDevice: BootedDevice = { deviceId: "slot-1", name: "Pixel_8", platform: "android" };
+  const openGate: DeviceAdmissionGate = { assertDeviceActionable: () => {} };
+
+  function harness(refuse: boolean) {
+    const order: string[] = [];
+    const resolution: TestRecordingDeviceResolution = {
+      selectDevice: async () => slotDevice,
+      readyDevice: async (device) => {
+        order.push(`ready:${device.deviceId}`);
+        throw new ActionableError("runner setup failed");
+      },
+    };
+    const slotGate = async (input: {
+      action: string;
+      device: { deviceId: string; platform: string };
+      requesterSessionUuid: string | undefined;
+    }) => {
+      order.push(`slot:${input.action}:${input.device.deviceId}:${input.requesterSessionUuid}`);
+      if (refuse) {
+        throw new ActionableError("device_assigned_to_managed_slot");
+      }
+    };
+    const server = new TestableServer(
+      undefined,
+      undefined,
+      recordingAuthenticator([]),
+      openGate,
+      resolution,
+      slotGate,
+    );
+    return { order, server };
+  }
+
+  test("refuses a start on an idle slot device before readiness", async () => {
+    const { order, server } = harness(true);
+
+    await expect(
+      server.invoke({ command: "start", sessionUuid: "live", platform: "android" }),
+    ).rejects.toThrow("device_assigned_to_managed_slot");
+    expect(order).toEqual(["slot:testRecording start:slot-1:live"]);
+  });
+
+  test("the slot's own execution (gate admits) reaches readiness", async () => {
+    const { order, server } = harness(false);
+
+    await expect(
+      server.invoke({ command: "start", sessionUuid: "live", platform: "android" }),
+    ).rejects.toThrow("runner setup failed");
+    expect(order).toEqual(["slot:testRecording start:slot-1:live", "ready:slot-1"]);
+  });
+
+  test("refuses a stop of an active recording on a slot device without stopping it", async () => {
+    const timer = new FakeTimer();
+    let stops = 0;
+    const recorder = {
+      start: async () => {},
+      stop: async () => {
+        stops++;
+        return { steps: [{ tool: "tapOn", params: { text: "OK" } }], stepCount: 1 };
+      },
+      stepCount: 1,
+    };
+    const active = await startTestRecording(
+      slotDevice,
+      timer,
+      new CountingIdGenerator(),
+      () => recorder,
+    );
+    const { order, server } = harness(true);
+    try {
+      await expect(server.invoke({ command: "stop", sessionUuid: "live" })).rejects.toThrow(
+        "device_assigned_to_managed_slot",
+      );
+      expect(order).toEqual(["slot:testRecording stop:slot-1:live"]);
+      expect(stops).toBe(0);
+    } finally {
+      await stopTestRecording(active.recordingId, "cleanup", timer);
+    }
+  });
+});
+
 test("socket stop preserves a partial-plan warning in its existing error field", async () => {
   const timer = new FakeTimer();
   const error = new Error("getevent exited with code 1");

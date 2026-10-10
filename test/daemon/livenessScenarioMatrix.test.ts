@@ -927,8 +927,13 @@ describe("IDE retries setActiveDevice after a refusal (#10660)", () => {
     const ideBeats = scenario.startTokenlessHeartbeats(ide);
     await scenario.toolCall(agent);
     const lastCallAt = scenario.timer.now();
+    // The IDE retries on the connection that acquired its session: any other is refused (#11344).
     const retry = () =>
-      scenario.daemonToolCallWith({ deviceId: DEVICE_A, sessionUuid: ide }, "setActiveDevice");
+      scenario.daemonToolCallWith(
+        { deviceId: DEVICE_A, sessionUuid: ide },
+        "setActiveDevice",
+        "desktop-connection",
+      );
 
     // Held side: the IDE keeps retrying; every attempt is refused and the agent keeps the device.
     for (let attempt = 0; attempt < 8; attempt++) {

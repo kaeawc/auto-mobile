@@ -799,7 +799,7 @@ interface SocketDaemonStateAccess extends DaemonStateAccess {
       mcpSessionId: string | undefined,
       deviceId: string,
     ): string | undefined;
-    isAutolockSessionOwnedByOtherConnection?(sessionId: string, mcpSessionId?: string): boolean;
+    isSessionOwnedByOtherConnection?(sessionId: string, mcpSessionId?: string): boolean;
   };
 }
 
@@ -3418,15 +3418,12 @@ export class UnixSocketServer {
     );
   }
 
-  private isAutolockSessionOwnedByOtherConnection(
-    sessionUuid: string,
-    socketSessionId: string,
-  ): boolean {
+  private isSessionOwnedByOtherConnection(sessionUuid: string, socketSessionId: string): boolean {
     return (
       this.daemonState.isInitialized() &&
       this.daemonState
         .getDevicePool()
-        .isAutolockSessionOwnedByOtherConnection?.(sessionUuid, socketSessionId) === true
+        .isSessionOwnedByOtherConnection?.(sessionUuid, socketSessionId) === true
     );
   }
 
@@ -3461,9 +3458,14 @@ export class UnixSocketServer {
       this.clearBoundMcpClientKey(socketSessionId);
       return;
     }
-    if (this.isAutolockSessionOwnedByOtherConnection(sessionUuid, socketSessionId)) {
-      // Naming another connected client's autolock session is not ownership (#11235): the call
-      // ran there, but this socket keeps its own route so its sessionless calls never follow it.
+    if (this.isSessionOwnedByOtherConnection(sessionUuid, socketSessionId)) {
+      // Naming a session another connected client owns is not ownership (#11235, #11344): this
+      // socket keeps its own route so its sessionless calls never follow it.
+      return;
+    }
+    if (this.targetsOneCallOnly(args, sessionUuid)) {
+      // The proxy named its own binding beside an explicit session: the call targeted that
+      // session only, and the connection's default route does not move (#11347).
       return;
     }
     const sessionIsActiveAfterForward = this.hasActiveDaemonSession(sessionUuid);
@@ -3485,6 +3487,19 @@ export class UnixSocketServer {
     if (previousBinding && previousBinding.clientKey !== route.clientKey) {
       this.scheduleMcpClientIdleClose(previousBinding.clientKey);
     }
+  }
+
+  /**
+   * Whether the call carried the connection's bound session ({@link DAEMON_BOUND_SESSION_PARAM})
+   * beside a different session it routed to. Only setActiveDevice or an acquisition moves a
+   * connection's default (#11347); an explicit `sessionUuid` targets its own call.
+   */
+  private targetsOneCallOnly(args: unknown, routedSessionUuid: string): boolean {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      return false;
+    }
+    const bound = (args as Record<string, unknown>)[DAEMON_BOUND_SESSION_PARAM];
+    return isNonBlankSessionUuid(bound) && bound !== routedSessionUuid;
   }
 
   private recordGeneratedToolSelectionProfile(

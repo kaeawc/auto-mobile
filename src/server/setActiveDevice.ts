@@ -74,15 +74,17 @@ function resolveAutolockSelection(args: HandlerArgs): string | undefined {
 }
 
 /**
- * #11167: sharing an autolock session needs its owner to release it first. Naming a session
- * another connected client owns is refused, typed, before anything is selected or rebound.
+ * #11167, #11344: sharing a session needs its owner to release it first. Naming a session another
+ * connected client owns is refused, typed, before anything is selected or rebound, with autolock
+ * on or off: otherwise the caller could move that client's session to another device and adopt it
+ * as its own default.
  */
-function refuseForeignOwnedAutolock(args: HandlerArgs): void {
+function refuseForeignOwnedSession(args: HandlerArgs): void {
   if (!args.sessionUuid || !DaemonState.getInstance().isInitialized()) {
     return;
   }
   const pool = DaemonState.getInstance().getDevicePool();
-  if (pool.isAutolockSessionOwnedByOtherConnection(args.sessionUuid, args.__mcpSessionId)) {
+  if (pool.isSessionOwnedByOtherConnection(args.sessionUuid, args.__mcpSessionId)) {
     throw deviceAssignedToOtherSessionError(args.deviceId, args.sessionUuid, undefined);
   }
 }
@@ -271,7 +273,7 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
     const mcpSessionId = args.__mcpSessionId;
     try {
       const selectedAutolockSession = resolveAutolockSelection(args);
-      refuseForeignOwnedAutolock(args);
+      refuseForeignOwnedSession(args);
       admitSessionlessSelection(args);
       const sessionUuid = args.sessionUuid;
       const sessionScoped = Boolean(sessionUuid) && DaemonState.getInstance().isInitialized();

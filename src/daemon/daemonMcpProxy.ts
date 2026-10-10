@@ -4039,7 +4039,7 @@ export class DaemonMcpProxy {
       // being mistaken for idleness, so a later reconnect re-seeds the still-live
       // session instead of creating an unseeded transport (issue #4610).
       if (!this.namesForeignOwnedSession(forwardedArgs, result)) {
-        this.rememberSessionUuid(name, forwardedArgs, callReleaseEpoch);
+        this.rememberSessionUuid(name, forwardedArgs, callReleaseEpoch, false);
       }
       this.rememberActiveDeviceSession(name, result, callReleaseEpoch);
       return { result };
@@ -4120,7 +4120,11 @@ export class DaemonMcpProxy {
           : this.withBoundSessionUuid(callerArgs, usesDeviceSelector);
     const canUseSurvivingSession = this.canUseSurvivingSession(callerArgs, usesDeviceSelector);
     const forwardedArgs = this.withToolSelectionProfile(
-      this.withOwnedSessionCapabilities(routingArgs, usesDeviceSelector || isSessionAcquisition),
+      this.withOwnedSessionCapabilities(
+        routingArgs,
+        usesDeviceSelector || isSessionAcquisition,
+        this.namesOwnedSession(callerArgs),
+      ),
     );
     return {
       forwardedArgs,
@@ -4170,11 +4174,27 @@ export class DaemonMcpProxy {
     );
   }
 
+  /**
+   * The caller explicitly named a session this proxy owns. After a reconnect the daemon may still
+   * record a stale connection of this proxy as the session's owner, and it refuses a control call
+   * naming a session another connection owns (#11344): such a call carries the owned sessions and
+   * the owner token, so the daemon restores ownership to this connection first.
+   */
+  private namesOwnedSession(callerArgs: Record<string, unknown>): boolean {
+    const named = this.sessionUuidFromArgs(callerArgs);
+    return (
+      named !== undefined &&
+      named !== this.terminalBoundSession?.sessionUuid &&
+      this.ownedDeviceSessions.has(named)
+    );
+  }
+
   private withOwnedSessionCapabilities(
     args: Record<string, unknown>,
     restore: boolean,
+    namesOwnedSession = false,
   ): Record<string, unknown> {
-    if (!restore || this.sessionUuidFromArgs(args)) {
+    if (!namesOwnedSession && (!restore || this.sessionUuidFromArgs(args))) {
       return args;
     }
     const retained = [...this.ownedDeviceSessions].filter(
@@ -4203,7 +4223,7 @@ export class DaemonMcpProxy {
     const selection = getActiveDeviceSelectionFromResult(result);
     if (selection) {
       this.throwIfSessionReleasedSince(selection.sessionUuid, releaseEpoch);
-      this.rememberSessionUuid(name, selection, releaseEpoch);
+      this.rememberSessionUuid(name, selection, releaseEpoch, true);
     }
   }
 
@@ -4257,7 +4277,9 @@ export class DaemonMcpProxy {
       );
     }
     if (explicitSessionUuid) {
-      return normalizedArgs;
+      // The call targets the named session only. Carrying the binding beside it tells the daemon
+      // socket that this connection's default is unchanged, so its route stays put (#11347).
+      return { ...normalizedArgs, [DAEMON_BOUND_SESSION_PARAM]: this.boundSessionUuid };
     }
     // A caller's device selector must reach daemon autolock resolution without
     // being disguised as an explicitly supplied session UUID (#6807).
@@ -6476,10 +6498,13 @@ export class DaemonMcpProxy {
   // sessionless call that had the bound UUID injected refreshes the replay lease
   // just like an explicit-sessionUuid call, matching the daemon session it just
   // extended (issue #4610).
+  // `selectsDefault` is a setActiveDevice selection: with an acquisition result (bound by
+  // bindResultMintedDeviceSession) it is the only thing that moves an existing binding (#11347).
   private rememberSessionUuid(
     name: string,
     forwardedArgs: Record<string, unknown>,
     callReleaseEpoch: number,
+    selectsDefault: boolean,
   ): void {
     if (name === "executePlan") {
       // The daemon owns plan-session release. Preserve the binding until its
@@ -6519,12 +6544,28 @@ export class DaemonMcpProxy {
         this.terminalBoundSession = undefined;
       }
       this.rememberSessionDevice(rememberedSessionUuid, forwardedArgs.deviceId);
-      if (this.keepsStartupBindingFor(rememberedSessionUuid)) {
+      if (this.keepsBindingFor(rememberedSessionUuid, selectsDefault)) {
         return;
       }
       this.updateBoundSessionUuid(rememberedSessionUuid);
       this.startBoundSessionHeartbeat();
     }
+  }
+
+  /**
+   * An explicit `sessionUuid` other than the connection's binding targets that one call (#11347):
+   * the binding, and with it every later sessionless call, stays where setActiveDevice or an
+   * acquisition put it. A connection with no binding still adopts the first session it names.
+   */
+  private keepsBindingFor(sessionUuid: string, selectsDefault: boolean): boolean {
+    if (this.keepsStartupBindingFor(sessionUuid)) {
+      return true;
+    }
+    return (
+      !selectsDefault &&
+      this.boundSessionUuid !== undefined &&
+      sessionUuid !== this.boundSessionUuid
+    );
   }
 
   /**
@@ -6610,6 +6651,10 @@ export class DaemonMcpProxy {
       this.fenceReleasedForwardedSession(forwardedArgs, releaseReason);
       return;
     }
+    // A thrown failure carries no routed-session echo, so it proves nothing about whose session
+    // the call named: it refreshes the lease of the session already bound and never establishes
+    // or switches a binding (#11344). Otherwise one rejected call naming another connection's
+    // session would send this connection's later sessionless calls to that session's device.
     const admittedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     if (
       this.terminalBoundSession !== undefined ||
@@ -6621,7 +6666,7 @@ export class DaemonMcpProxy {
       // use is credited when it ends (endSessionCall).
       return;
     }
-    if (admittedSessionUuid) {
+    if (admittedSessionUuid && admittedSessionUuid === this.boundSessionUuid) {
       this.updateBoundSessionUuid(admittedSessionUuid);
       this.startBoundSessionHeartbeat();
     }
@@ -6649,7 +6694,9 @@ export class DaemonMcpProxy {
    * without it the session stayed on the 10 s heartbeat policy and the retry
    * after ordinary think-time got `session_ownership_lost` (issue #6870).
    *
-   * An error result may only ESTABLISH a first binding, never SWITCH one: a call
+   * An error result may only ESTABLISH a first binding, never SWITCH one, and only
+   * when the daemon echoed the forwarded session as the one it admitted the call
+   * under (`automobile/routedSessionUuid`, #11344): a call
    * that names some OTHER session and fails leaves the connection on the session
    * it already had, so an unissued UUID cannot steal the binding (issue #2737).
    * executePlan is excluded before checking for a released forwarded session:
@@ -6694,7 +6741,10 @@ export class DaemonMcpProxy {
       !alreadyBound &&
       (this.boundSessionUuid !== undefined ||
         this.terminalBoundSession !== undefined ||
-        !this.mayBindSessionFromErrorResult(name))
+        !this.mayBindSessionFromErrorResult(name) ||
+        // Only the daemon's echo proves the call was admitted under the session it named; a
+        // refusal or a prose error establishes nothing (#11344).
+        routedSessionUuidFromResult(result) !== forwardedSessionUuid)
     ) {
       return;
     }

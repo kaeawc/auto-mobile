@@ -124,6 +124,7 @@ test/daemon/managedRebindRefusedFailsClosed.test.ts
 test/daemon/managedSlots/abandonedScopeReclaimer.test.ts
 test/daemon/managedSlots/capacityExternalDevices.test.ts
 test/daemon/managedSlots/daemonManagedSlotAcquisition.ownDevice.test.ts
+test/daemon/managedSlots/daemonManagedSlotAcquisition.redrive.test.ts
 test/daemon/managedSlots/managedExecutionDaemonRestart.test.ts
 test/daemon/managedSlots/managedSlotAcquisition.test.ts
 test/daemon/managedSlots/managedSlotExclusion.test.ts
@@ -134,7 +135,10 @@ test/daemon/managedSlots/slotJournal.test.ts
 test/daemon/managedSlots/slotOwnerLiveness.test.ts
 test/daemon/managedSlots/slotRegistryMigrations.test.ts
 test/daemon/managedSlots/slotScopeReset.test.ts
+test/daemon/managedSlots/slotsOwnExecutionStaleSnapshot.test.ts
+test/daemon/managedSlots/slotsPlatformChangeSqliteJournal.test.ts
 test/daemon/managedSlots/slotsRegistryAbsentThenUnreadable.test.ts
+test/daemon/managedSlots/slotsUnresolvedEmulatorIdentityGate.test.ts
 test/daemon/managedSlots/sqliteSlotRegistry.test.ts
 test/daemon/managerOutputReductionArgs.test.ts
 test/daemon/observationRequestBatch.test.ts
@@ -585,6 +589,7 @@ test/features/prototype/prototypeMissingAssets.test.ts
 test/features/prototype/prototypeNodeContractParity.test.ts
 test/features/prototype/prototypeRepeat.test.ts
 test/features/prototype/prototypeSelectionControls.test.ts
+test/features/prototype/prototypeSetStateBinding.test.ts
 test/features/prototype/prototypeThemeModes.test.ts
 test/features/record/McpCallRecorder.test.ts
 test/features/record/McpCallRecorderCoverage.test.ts

@@ -269,6 +269,26 @@ describe("the idle window counts from the end of the last tool call", () => {
     );
   });
 
+  // #11361 item 3: a read is never refused. One arriving after the idle deadline while earlier
+  // work holds the veto is not admitted to the session (it runs sessionless) and changes nothing.
+  it("a late read while earlier work runs is answered sessionless, not refused untyped", async () => {
+    await manager.getOrCreateSession(SESSION);
+    inFlight = true;
+    const idleDeadline = manager.getAllSessions()[0]!.expiresAt;
+    timer.setCurrentTime(idleDeadline + 10_000);
+
+    await expect(
+      manager.admitIssuedSessionForAutomation(
+        SESSION,
+        { executionId: "late-read", startTime: timer.now() },
+        { access: "read-only" },
+      ),
+    ).resolves.toBeUndefined();
+    expect(manager.hasSession(SESSION)).toBe(true);
+    expect(manager.getAllSessions()[0]!.expiresAt).toBe(idleDeadline);
+    expect(releases).toEqual([]);
+  });
+
   it("ignores an unknown session", () => {
     expect(() => manager.recordToolCallEnded("missing")).not.toThrow();
   });

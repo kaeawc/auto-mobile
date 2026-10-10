@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import * as videoRecordingManager from "../../src/server/videoRecordingManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -22,10 +22,16 @@ function disconnectRecordingStopHarness(timer: FakeTimer): DisconnectRecordingSt
 }
 
 describe("recording stop after a device disconnect (#10217)", () => {
-  const stop = spyOn(videoRecordingManager, "stopVideoRecordingUnattended");
+  // Installed per test and restored after: a describe-time spy that is only mockReset leaves
+  // the real module export replaced by an undefined-returning stub for every later file.
+  let stop: ReturnType<typeof spyOn<typeof videoRecordingManager, "stopVideoRecordingUnattended">>;
+
+  beforeEach(() => {
+    stop = spyOn(videoRecordingManager, "stopVideoRecordingUnattended");
+  });
 
   afterEach(() => {
-    stop.mockReset();
+    stop.mockRestore();
   });
 
   test("returns once a quick stop finishes", async () => {

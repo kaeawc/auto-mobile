@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "k": true
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "checkbox",
+          "stateKey": "k",
+          "label": "C"
+        },
+        {
+          "type": "button",
+          "label": "Go",
+          "onTap": [
+            {
+              "type": "setState",
+              "key": "k",
+              "value": 1
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onTap[0].value"
+}

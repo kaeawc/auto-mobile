@@ -149,11 +149,21 @@ export function getTestRecordingStatus(timer: Timer = defaultTimer): TestRecordi
 }
 
 /**
+ * The recording whose capture may still be running: active, starting, or stopping (#11533). A
+ * stop in flight keeps its owner until the recorder has torn down, so a release in that window
+ * still registers its device cleanup and awaits the stop rather than returning the device to the
+ * pool with capture running.
+ */
+function ownableSession(): RecordingSession | null {
+  return activeRecording ?? startingRecording?.session ?? stoppingRecording?.session ?? null;
+}
+
+/**
  * Whether the daemon session `sessionUuid` owns the live test recording on `deviceId`;
  * `undefined` asks about an owner-less (sessionless) one.
  */
 export function isTestRecordingOwnedBy(sessionUuid: string | undefined, deviceId: string): boolean {
-  const session = activeRecording ?? startingRecording?.session ?? null;
+  const session = ownableSession();
   return (
     session !== null && session.ownerSessionUuid === sessionUuid && session.deviceId === deviceId
   );
@@ -164,7 +174,7 @@ export function ownedTestRecordingId(
   sessionUuid: string | undefined,
   deviceId: string,
 ): string | undefined {
-  const session = activeRecording ?? startingRecording?.session ?? null;
+  const session = ownableSession();
   return session && isTestRecordingOwnedBy(sessionUuid, deviceId) ? session.recordingId : undefined;
 }
 

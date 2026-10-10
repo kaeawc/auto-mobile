@@ -8,7 +8,7 @@ import {
 } from "../../../src/features/overlay/overlayComponents";
 import { validateOverlaySpec } from "../../../src/features/overlay/overlayValidation";
 
-const fixtures = join(import.meta.dir, "../../fixtures/overlay-spec");
+const fixtures = join(import.meta.dir, "../../fixtures/prototype-spec");
 const read = (path: string): unknown => JSON.parse(readFileSync(join(fixtures, path), "utf8"));
 const names = (directory: string) =>
   readdirSync(join(fixtures, directory))

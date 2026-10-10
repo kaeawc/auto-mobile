@@ -64,7 +64,7 @@ class OverlayRenderModelTest {
   fun `closed contract icon names all map and unknown names remain placeholders`() {
     val input =
       checkNotNull(
-          OverlaySpecValidator.javaClass.getResourceAsStream("/overlay-spec-contract.json"),
+          OverlaySpecValidator.javaClass.getResourceAsStream("/prototype-spec-contract.json"),
         )
         .bufferedReader()
         .use { it.readText() }
@@ -548,7 +548,7 @@ class OverlayRenderModelTest {
   fun `shared valid fixtures map and round trip without model loss`() {
     val directory =
       generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
-        .map { File(it, "test/fixtures/overlay-spec/valid") }
+        .map { File(it, "test/fixtures/prototype-spec/valid") }
         .first { it.isDirectory }
     val fixtures = checkNotNull(directory.listFiles()).filter { it.extension == "json" }
     assertTrue(fixtures.isNotEmpty())

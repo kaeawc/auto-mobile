@@ -26,7 +26,7 @@ object OverlaySpecValidator {
   private val contract: JsonObject =
     json
       .parseToJsonElement(
-        checkNotNull(javaClass.getResourceAsStream("/overlay-spec-contract.json")) {
+        checkNotNull(javaClass.getResourceAsStream("/prototype-spec-contract.json")) {
             "Missing overlay structural contract"
           }
           .bufferedReader()

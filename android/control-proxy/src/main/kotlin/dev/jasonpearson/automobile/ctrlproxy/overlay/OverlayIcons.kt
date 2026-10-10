@@ -8,7 +8,7 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Resolves a contract icon name (snake_case, e.g. `alarm_add`) to a bundled Material icon.
  *
- * The names are closed by the `iconName` definition in `schemas/overlay-spec-contract.json`, which
+ * The names are closed by the `iconName` definition in `schemas/prototype-spec-contract.json`, which
  * lists exactly the icons in `androidx.compose.material:material-icons-extended`. That library is
  * already part of the APK (the release build does not shrink), so the lookup adds no bytes. Each
  * icon is a top-level extension property compiled to a static getter on `<Pascal>Kt` in the package

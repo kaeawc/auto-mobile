@@ -2,7 +2,7 @@
 import XCTest
 
 /// `styleWhen` and `repeat` on iOS, checked against the shared validator fixtures that the
-/// TypeScript and Kotlin validators accept (test/fixtures/overlay-spec/valid), so the three
+/// TypeScript and Kotlin validators accept (test/fixtures/prototype-spec/valid), so the three
 /// implementations read the same specs the same way.
 final class OverlayStateExpressivenessTests: XCTestCase {
     private func sharedFixture(_ name: String) throws -> OverlaySpec {
@@ -12,7 +12,7 @@ final class OverlayStateExpressivenessTests: XCTestCase {
             .deletingLastPathComponent() // overlay-agent
             .deletingLastPathComponent() // ios
             .deletingLastPathComponent()
-        let url = root.appendingPathComponent("test/fixtures/overlay-spec/valid/\(name).json")
+        let url = root.appendingPathComponent("test/fixtures/prototype-spec/valid/\(name).json")
         return try JSONDecoder().decode(OverlaySpec.self, from: Data(contentsOf: url))
     }
 
@@ -179,7 +179,7 @@ final class OverlayStateExpressivenessTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-        let url = root.appendingPathComponent("test/fixtures/overlay-spec/valid/repeat-component-labels.json")
+        let url = root.appendingPathComponent("test/fixtures/prototype-spec/valid/repeat-component-labels.json")
         let raw = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: url))
         guard case let .object(spec) = raw, let tree = spec["root"] else { return XCTFail("no root") }
         guard case let .object(expanded) = OverlayRepeat.expand(tree),

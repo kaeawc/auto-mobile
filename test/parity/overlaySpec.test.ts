@@ -11,7 +11,7 @@ import {
 } from "../../src/features/overlay/overlaySpec";
 import { validateOverlaySpec } from "../../src/features/overlay/overlayValidation";
 
-const fixtures = join(import.meta.dir, "../fixtures/overlay-spec");
+const fixtures = join(import.meta.dir, "../fixtures/prototype-spec");
 function files(kind: string): string[] {
   return readdirSync(join(fixtures, kind))
     .filter((name) => name.endsWith(".json"))

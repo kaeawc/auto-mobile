@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { overlaySpecSchema } from "../../../src/features/overlay/overlaySpec";
 import { validateOverlaySpec } from "../../../src/features/overlay/overlayValidation";
-import contract from "../../../schemas/overlay-spec-contract.json";
+import contract from "../../../schemas/prototype-spec-contract.json";
 
 /** Every enum in the contract that lists icon names other than the shared `iconName` itself. */
 function staleIconEnums(value: unknown, path: string, found: string[]): string[] {

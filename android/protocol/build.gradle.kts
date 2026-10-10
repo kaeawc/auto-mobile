@@ -78,6 +78,6 @@ tasks.withType<KotlinCompile>().configureEach {
 // TypeScript.
 sourceSets.main {
   resources.srcDir(layout.projectDirectory.dir("../../schemas"))
-  resources.include("overlay-spec-contract.json")
-  resources.include("overlay-asset-contract.json")
+  resources.include("prototype-spec-contract.json")
+  resources.include("prototype-asset-contract.json")
 }

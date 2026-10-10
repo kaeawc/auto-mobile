@@ -260,7 +260,7 @@ class OverlayRepeatTest {
   private fun fixture(name: String): OverlaySpec {
     val file =
       generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
-        .map { File(it, "test/fixtures/overlay-spec/valid/$name.json") }
+        .map { File(it, "test/fixtures/prototype-spec/valid/$name.json") }
         .first { it.isFile }
     val validated = OverlaySpecValidator.validate(file.readText())
     return (validated as? OverlaySpecValidation.Success)?.spec ?: error(validated.toString())

@@ -9,7 +9,7 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * Renderer snapshot tests for [dev.jasonpearson.automobile.ctrlproxy.overlay.OverlaySpecContent]
- * over the shared, validator-checked specs in `test/fixtures/overlay-spec/valid` (issue #10445).
+ * over the shared, validator-checked specs in `test/fixtures/prototype-spec/valid` (issue #10445).
  * Each renders off-device on the JVM and compares against a baseline in
  * `control-proxy/src/test/resources/screenshots/overlay/`, recorded on the Linux reference OS.
  *

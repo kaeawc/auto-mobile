@@ -70,7 +70,7 @@ limit. Nonfinite JSON numbers are rejected, including inside emit payloads.
 Every onTap list has 1–32 actions; tab bars have 1–32 items; bottom navigation has
 2–5 items; sheet detents have 1–8 entries.
 
-The single structural rule source is `schemas/overlay-spec-contract.json`,
+The single structural rule source is `schemas/prototype-spec-contract.json`,
 imported by TypeScript and packaged as a JVM protocol resource. TypeScript's
 concrete Zod schema supplies inferred types and the final typed decode. Kotlin
 uses kotlinx.serialization models with sealed discriminated hierarchies. Use
@@ -402,7 +402,7 @@ Start/end use layout direction, including RTL.
 
 Built-in Material names are the 2,075 icons of `material-icons-extended`, written
 in snake_case (`home`, `timer`, `bedtime`, `alarm_add`, `add_a_photo`). The closed list is the
-`iconName` definition in `schemas/overlay-spec-contract.json`, shared by the TypeScript
+`iconName` definition in `schemas/prototype-spec-contract.json`, shared by the TypeScript
 and JVM validators. The renderer already ships that library, so the full set adds no APK
 size beyond the list itself (about 10 KB measured). An icon node may set `variant`:
 `filled` (default), `outlined`, `rounded`, `sharp` or `twoTone`; nav items are always
@@ -423,7 +423,7 @@ MIME types, URLs, cache paths, and screenshot handles are not spec properties.
 `remove_overlay_asset {id}` deletes one; each gets one `overlay_result` carrying the
 request ID. Bytes travel as base64 in the single JSON text frame, like screenshots.
 Heap, not the 64 MiB frame limit, is the binding constraint, so caps are
-conservative and shared with the host through `schemas/overlay-asset-contract.json`:
+conservative and shared with the host through `schemas/prototype-asset-contract.json`:
 4 MiB per asset, 32 assets, 16 MiB total, ids of 1 to 256 characters, and
 `image/png`, `image/jpeg` or `image/webp` (exact lowercase) whose bytes must start
 with the matching signature, plus `font/ttf` and `font/otf` (2 MiB each, see Custom fonts). Putting an existing ID replaces it; a full store rejects
@@ -1153,7 +1153,7 @@ alignment) before rendering; only the host resolves selectors.
 
 ## Shared verification and sibling updates
 
-Both test suites enumerate the same `test/fixtures/overlay-spec/valid` and
+Both test suites enumerate the same `test/fixtures/prototype-spec/valid` and
 `invalid` JSON files, assert nonempty directories, and require coverage of every
 node/action/placement. Invalid files wrap `{spec, expectedPath}`. The byte limit
 has no fixture file: each suite generates its own input and checks the exact

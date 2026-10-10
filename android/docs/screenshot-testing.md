@@ -122,7 +122,7 @@ Pixel tolerances (per-channel and max differing-pixel ratio) are set per test vi
 `control-proxy` snapshots the overlay renderer (`OverlaySpecContent`) off-device with the same flags,
 OS gating, `pending` flow and tolerances (#10445). The tests live in
 `control-proxy/src/test/kotlin/.../ctrlproxy/overlay/screenshot/` and render the shared specs in
-`test/fixtures/overlay-spec/valid/` through Robolectric's native graphics mode
+`test/fixtures/prototype-spec/valid/` through Robolectric's native graphics mode
 (`@GraphicsMode(NATIVE)`), so no screenshot library or device is needed. Baselines live in
 `control-proxy/src/test/resources/screenshots/overlay/` and are committed directly to git (the
 `android/control-proxy/src/**/*.png` rule in `.gitattributes` keeps them out of LFS).

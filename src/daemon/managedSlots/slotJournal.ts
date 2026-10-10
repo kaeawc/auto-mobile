@@ -35,6 +35,7 @@ import {
   type SlotJournalPhase,
   type SlotKey,
   type SlotRegistry,
+  journalCreationPlatform,
 } from "./slotRegistry";
 
 /**
@@ -338,7 +339,11 @@ export class ManagedSlotJournal {
       assignment: {
         kind: "commit",
         expected: entry.binding,
-        next: emptySlotCommit(entry.target.requestedSpec),
+        // A cross-platform replacement moves the emptied slot to the new platform (#11232).
+        next: {
+          ...emptySlotCommit(entry.target.requestedSpec),
+          platform: journalCreationPlatform(entry),
+        },
       },
     });
     if (emptied.kind !== "advanced" || !emptied.assignment) {
@@ -374,7 +379,10 @@ export class ManagedSlotJournal {
       return this.recordBlocked(entry, located.reason, located.message);
     }
     const { device, stableId } = located;
-    const holder = await this.deps.registry.findDeviceHolder(entry.platform, stableId);
+    const holder = await this.deps.registry.findDeviceHolder(
+      journalCreationPlatform(entry),
+      stableId,
+    );
     if (holder) {
       // Bound to a slot or parked in the free pool: never ours to adopt or delete.
       return this.close(entry, "rolled_back");
@@ -640,7 +648,8 @@ export class ManagedSlotJournal {
     if (!newStableId && !newName) {
       return { kind: "absent" };
     }
-    const inventory = await this.listInventory(entry);
+    const platform = journalCreationPlatform(entry);
+    const inventory = await this.listInventory(entry, platform);
     if (!inventory) {
       return {
         kind: "blocked",
@@ -650,7 +659,7 @@ export class ManagedSlotJournal {
     }
     const candidates = inventory.devices.filter(
       (device) =>
-        device.platform === entry.platform &&
+        device.platform === platform &&
         (newStableId ? deviceStableId(device) === newStableId : device.name === newName),
     );
     if (candidates.length === 0) {
@@ -723,7 +732,7 @@ export class ManagedSlotJournal {
       );
     }
     const deletion = await this.deleteDevice({
-      platform: entry.platform,
+      platform: journalCreationPlatform(entry),
       stableId,
       name: device.name,
       deadlineMs: deadlineMs ?? this.deps.timer.now() + SLOT_JOURNAL_STEP_BUDGET_MS,
@@ -820,9 +829,10 @@ export class ManagedSlotJournal {
 
   private async listInventory(
     entry: SlotJournalEntry,
+    platform: SlotJournalEntry["platform"] = entry.platform,
   ): Promise<ManagedSlotInventorySnapshot | null> {
     try {
-      return await this.deps.inventory.list(entry.platform, {});
+      return await this.deps.inventory.list(platform, {});
     } catch (error) {
       logger.warn(
         `[SlotJournal] device discovery for entry ${entry.id} failed: ${errorMessage(error)}`,
@@ -892,7 +902,9 @@ function toRecord(
 /** The entry's recorded requested spec, validated; undefined when it no longer parses. */
 function recordedSpec(entry: SlotJournalEntry): ExactDeviceSpecification | undefined {
   const schema =
-    entry.platform === "android" ? androidProvisionDeviceSpecSchema : iosProvisionDeviceSpecSchema;
+    journalCreationPlatform(entry) === "android"
+      ? androidProvisionDeviceSpecSchema
+      : iosProvisionDeviceSpecSchema;
   const parsed = schema.safeParse(entry.target.requestedSpec);
   return parsed.success ? parsed.data : undefined;
 }

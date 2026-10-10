@@ -70,6 +70,7 @@ import {
   type SlotScopeState,
   type UpdateSlotStateOptions,
   type UpdateSlotStateResult,
+  assertPlatformChangeAllowed,
 } from "./slotRegistry";
 
 /** Scope under the ADB-server coordination root: host-wide, independent of any one adb server. */
@@ -596,12 +597,13 @@ export class SqliteSlotRegistry implements SlotRegistry {
     if ("kind" in checked) {
       return checked;
     }
+    const platform = assertPlatformChangeAllowed(checked, next);
     let adoptedFreeDevice: FreeSlotDeviceRecord | null = null;
     if (next.stableDeviceId !== null) {
       const holder = await trx
         .selectFrom("slot_assignments")
         .selectAll()
-        .where("platform", "=", checked.platform)
+        .where("platform", "=", platform)
         .where("stable_device_id", "=", next.stableDeviceId)
         .where((eb) =>
           eb.or([eb("scope_key", "<>", key.scopeKey), eb("slot_index", "<>", key.slotIndex)]),
@@ -612,17 +614,19 @@ export class SqliteSlotRegistry implements SlotRegistry {
       }
       const free = await trx
         .deleteFrom("slot_free_devices")
-        .where("platform", "=", checked.platform)
+        .where("platform", "=", platform)
         .where("stable_device_id", "=", next.stableDeviceId)
         .returningAll()
         .executeTakeFirst();
       adoptedFreeDevice = free ? toFreeDevice(free) : null;
     }
-    const deviceChanged = next.stableDeviceId !== checked.stableDeviceId;
+    const deviceChanged =
+      next.stableDeviceId !== checked.stableDeviceId || platform !== checked.platform;
     const updated = await trx
       .updateTable("slot_assignments")
       .set({
         generation: checked.generation + 1,
+        platform,
         stable_device_id: next.stableDeviceId,
         device_name: next.deviceName,
         resolved_spec_json: resolvedSpecJson,

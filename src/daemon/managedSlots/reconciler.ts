@@ -305,7 +305,6 @@ export type ManagedSlotReconcileFailureCode =
   | "spec_unsupported"
   | "runtime_incompatible"
   | "scope_not_valid"
-  | "slot_platform_conflict"
   | "discovery_incomplete"
   | "slot_in_use"
   | "slot_settling"
@@ -323,7 +322,6 @@ const FAILURE_RETRYABILITY: Readonly<Record<ManagedSlotReconcileFailureCode, boo
   spec_unsupported: false,
   runtime_incompatible: false,
   scope_not_valid: false,
-  slot_platform_conflict: false,
   discovery_incomplete: true,
   slot_in_use: true,
   slot_settling: true,
@@ -342,7 +340,6 @@ const FAILURE_NEXT_ACTION: Readonly<Record<ManagedSlotReconcileFailureCode, stri
   spec_unsupported: "Fix the requested spec; nothing was changed.",
   runtime_incompatible: "Request a model/runtime pair the host supports; nothing was changed.",
   scope_not_valid: "Use the current runner incarnation; this scope no longer accepts work.",
-  slot_platform_conflict: "Use a different slot index for a different platform.",
   discovery_incomplete: "Retry once device discovery completes; nothing destructive was done.",
   slot_in_use: "Wait for the slot's live execution to end, then retry.",
   slot_settling: "Wait for the previous execution's released work to settle, then retry.",
@@ -890,6 +887,9 @@ export class ManagedSlotReconciler {
       state: assignment.state,
     };
     this.assertSlotAcceptsWork(request, assignment);
+    if (assignment.platform !== request.platform) {
+      return await this.changePlatform(context, assignment);
+    }
 
     const inventory = await this.deps.inventory.list(request.platform, { signal: request.signal });
     evidence.inventoryComplete = inventory.complete;
@@ -987,14 +987,6 @@ export class ManagedSlotReconciler {
     request: ManagedSlotReconcileRequest,
     assignment: SlotAssignmentRecord,
   ): void {
-    if (assignment.platform !== request.platform) {
-      throw new ReconcileAbort(
-        failure(
-          "slot_platform_conflict",
-          `Slot ${request.key.slotIndex} is a ${assignment.platform} slot; ${request.platform} was requested.`,
-        ),
-      );
-    }
     if (assignment.execOwner && this.isExecOwnerLive(assignment.execOwner)) {
       throw new ReconcileAbort(
         failure(
@@ -1021,6 +1013,78 @@ export class ManagedSlotReconciler {
         ),
       );
     }
+  }
+
+  // --- platform change -------------------------------------------------------------------------
+
+  /**
+   * The slot is requested on another platform (owner decision 2026-10-09, #11232): a replacement
+   * like any spec change. The old platform's device is deleted and verified absent under the
+   * journaled replace (its entry records both platforms), the slot moves to the new platform with
+   * an empty binding, and a device of the new platform is created into the same slot.
+   */
+  private async changePlatform(
+    context: ReconcileContext,
+    assignment: SlotAssignmentRecord,
+  ): Promise<ReadyResult> {
+    const { request, evidence } = context;
+    if (assignment.stableDeviceId === null) {
+      const moved = await this.emptyOnRequestedPlatform(context, assignment);
+      const inventory = await this.deps.inventory.list(request.platform, {
+        signal: request.signal,
+      });
+      evidence.inventoryComplete = inventory.complete;
+      this.checkBudget(request);
+      return await this.fillEmptySlot(context, moved, inventory);
+    }
+    const inventory = await this.deps.inventory.list(assignment.platform, {
+      signal: request.signal,
+    });
+    evidence.inventoryComplete = inventory.complete;
+    this.checkBudget(request);
+    const assigned = inventory.devices.find(
+      (device) =>
+        device.platform === assignment.platform &&
+        deviceStableId(device) === assignment.stableDeviceId,
+    );
+    if (!assigned) {
+      if (!inventory.complete) {
+        throw new ReconcileAbort(
+          failure(
+            "discovery_incomplete",
+            `Assigned device '${assignment.stableDeviceId}' was not listed and discovery was incomplete.`,
+          ),
+        );
+      }
+      // Removed out of band: complete discovery proves absence, so nothing is left to delete.
+      evidence.assignedMissing = true;
+      const moved = await this.emptyOnRequestedPlatform(context, assignment);
+      return await this.createAndCommit(context, moved, "created");
+    }
+    // A device of another platform can never satisfy the spec.
+    evidence.assignedMatch = "mismatch";
+    return await this.replaceAssigned(context, assignment, assigned, inventory.complete);
+  }
+
+  /** Empty the slot onto the requested platform (generation + 1); only when no device is bound. */
+  private async emptyOnRequestedPlatform(
+    context: ReconcileContext,
+    assignment: SlotAssignmentRecord,
+  ): Promise<SlotAssignmentRecord> {
+    const { request } = context;
+    const emptied = await this.deps.registry.commitBinding(request.key, expectationOf(assignment), {
+      platform: request.platform,
+      stableDeviceId: null,
+      deviceName: null,
+      requestedSpec: request.requestedSpec,
+      resolvedSpec: null,
+      specFingerprint: null,
+      state: "provisioning",
+    });
+    if (emptied.kind !== "committed") {
+      throw new ReconcileAbort(casFailure(emptied, "platform change"));
+    }
+    return emptied.assignment;
   }
 
   // --- reuse -----------------------------------------------------------------------------------
@@ -1517,6 +1581,11 @@ export class ManagedSlotReconciler {
     return {
       oldStableId: assignment.stableDeviceId,
       oldName: assignment.deviceName,
+      // The old device lives on the slot's platform (the entry's); a cross-platform replacement
+      // records the platform it creates on (#11232).
+      ...(assignment.platform !== context.request.platform
+        ? { newPlatform: context.request.platform }
+        : {}),
       newName,
       newStableId: null,
       requestedSpec: context.request.requestedSpec,
@@ -1559,7 +1628,7 @@ export class ManagedSlotReconciler {
       await this.assertBootCapacity(request, undefined);
     }
     this.checkBudget(request);
-    const holder = await this.deps.registry.findDeviceHolder(request.platform, oldId);
+    const holder = await this.deps.registry.findDeviceHolder(assignment.platform, oldId);
     if (
       holder?.kind !== "slot" ||
       holder.assignment.scopeKey !== request.key.scopeKey ||

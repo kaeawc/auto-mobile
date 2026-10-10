@@ -327,6 +327,58 @@ describe("managed slot journal redrive", () => {
   });
 
   describe("an interrupted create of an empty slot", () => {
+    describe("cross-platform replacement (#11232)", () => {
+      const ANDROID: ExactDeviceSpecification = {
+        runtime: "system-images;android-35;google_apis;arm64-v8a",
+        deviceType: "pixel_8",
+      };
+      const androidRequest = (): ManagedSlotReconcileRequest => ({
+        ...request(ANDROID),
+        platform: "android",
+      });
+
+      test("crash before the delete: the old platform's device is deleted, the new one created", async () => {
+        const oldId = await seedOldDevice();
+        const crash = crashPoint();
+        deleter.beforeDelete = crash.hang;
+        void daemon("daemon-1").reconcile(androidRequest());
+        await crash.reached;
+        deleter.beforeDelete = undefined;
+
+        const result = expectReady(await restart().reconcile(androidRequest()));
+
+        expect(inventory.has(oldId)).toBe(false);
+        expect(deleter.calls.map((call) => call.platform)).toEqual(["ios", "ios"]);
+        expect(provisioner.created().map((call) => call.platform)).toEqual(["android"]);
+        expect(result.assignment).toMatchObject({ platform: "android", state: "ready" });
+        await expectSettledSlot();
+      });
+
+      test("crash after the create: the new platform's device is adopted, not recreated", async () => {
+        const oldId = await seedOldDevice();
+        const crash = crashPoint();
+        provisioner.beforeReturn = crash.hang;
+        void daemon("daemon-1").reconcile(androidRequest());
+        await crash.reached;
+        provisioner.beforeReturn = undefined;
+        const created = inventory.devices.find((device) => device.platform === "android")!;
+        // The device mid-creation is excluded from generic allocation on its own platform.
+        expect(
+          (await registry.snapshotManagedDevices()).some(
+            (entry) => entry.platform === "android" && entry.stableDeviceId === created.name,
+          ),
+        ).toBe(true);
+
+        const result = expectReady(await restart().reconcile(androidRequest()));
+
+        expect(result.disposition).toBe("reused");
+        expect(result.device.stableId).toBe(created.name);
+        expect(provisioner.created()).toHaveLength(1);
+        expect(deleter.stableIds()).toEqual([oldId]);
+        await expectSettledSlot();
+      });
+    });
+
     test("crash after the create: the next acquisition adopts the device under the generated name", async () => {
       const crash = crashPoint();
       provisioner.beforeReturn = crash.hang;

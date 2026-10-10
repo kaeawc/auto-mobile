@@ -55,6 +55,7 @@ import {
   type SlotScopeRecord,
   type UpdateSlotStateOptions,
   type UpdateSlotStateResult,
+  assertPlatformChangeAllowed,
 } from "../../src/daemon/managedSlots/slotRegistry";
 import type { Timer } from "../../src/utils/SystemTimer";
 
@@ -186,26 +187,29 @@ export class FakeSlotRegistry implements SlotRegistry {
     if ("kind" in checked) {
       return checked;
     }
+    const platform = assertPlatformChangeAllowed(checked, next);
     let adoptedFreeDevice: FreeSlotDeviceRecord | null = null;
     if (next.stableDeviceId !== null) {
       const holder = [...this.assignments.values()].find(
         (assignment) =>
-          assignment.platform === checked.platform &&
+          assignment.platform === platform &&
           assignment.stableDeviceId === next.stableDeviceId &&
           slotId(assignment) !== slotId(key),
       );
       if (holder) {
         return { kind: "device_assigned_elsewhere", holder: copy(holder) };
       }
-      const freeId = deviceId(checked.platform, next.stableDeviceId);
+      const freeId = deviceId(platform, next.stableDeviceId);
       const freed = this.free.get(freeId);
       if (freed) {
         this.free.delete(freeId);
         adoptedFreeDevice = { ...freed };
       }
     }
-    const deviceChanged = next.stableDeviceId !== checked.stableDeviceId;
+    const deviceChanged =
+      next.stableDeviceId !== checked.stableDeviceId || platform !== checked.platform;
     checked.generation += 1;
+    checked.platform = platform;
     checked.stableDeviceId = next.stableDeviceId;
     checked.deviceName = next.deviceName;
     checked.resolvedSpec =

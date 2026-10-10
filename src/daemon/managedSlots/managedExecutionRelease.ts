@@ -1,3 +1,4 @@
+import type { SessionReleaseReason } from "../releaseReasons";
 /**
  * End-of-execution drain for managed device slots (epic #11172, #11177).
  *
@@ -722,7 +723,7 @@ export interface ManagedExecutionSessionManager {
   getSession(sessionId: string): { assignedDevice: string } | null;
   getReleasingSession(sessionId: string): { assignedDevice: string } | null;
   getTerminalReleaseSnapshot(sessionId: string): { deviceId: string } | undefined;
-  releaseSession(sessionId: string, reason?: string): Promise<string | null>;
+  releaseSession(sessionId: string, reason?: SessionReleaseReason): Promise<string | null>;
   forceStuckRelease(sessionId: string): { deviceId: string } | undefined;
   hasDeviceCleanupInProgress(deviceId: string): boolean;
 }

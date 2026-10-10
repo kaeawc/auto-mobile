@@ -1,3 +1,4 @@
+import { isIdleReleaseReason, isRecoverableDaemonReleaseReason } from "./releaseReasons";
 import type { DeviceControlTransportFailure } from "./deviceControlTransportFailure";
 import type { SessionReleaseSnapshot } from "./sessionManager";
 import type { DaemonHandshakeFailure } from "./daemonHandshake";
@@ -191,17 +192,7 @@ export function releaseReasonFromError(error: unknown): string | undefined {
   return typeof releaseReason === "string" && releaseReason.length > 0 ? releaseReason : undefined;
 }
 
-/** Release reasons that mean the session ran out its idle window rather than being taken away. */
-const IDLE_EXPIRY_LOSS_REASONS: ReadonlySet<string> = new Set([
-  "lazy-expiry",
-  "cleanup-expired",
-  "cli-idle-timeout",
-]);
-
-/** Whether a release reason is an idle-window release (#10832), as opposed to a lapse or loss. */
-export function isIdleReleaseReason(reason: string): boolean {
-  return IDLE_EXPIRY_LOSS_REASONS.has(reason);
-}
+export { isIdleReleaseReason };
 
 /**
  * The release fields of a session-not-found answer: the recorded `releaseReason` and, for an
@@ -218,10 +209,6 @@ export function releasedSessionNotFoundFields(releaseReason: string | undefined)
 }
 
 const OWNER_DISCONNECTED_LOSS_REASON = "owner-disconnected";
-
-function isDaemonRestartLossReason(reason: string): boolean {
-  return reason === "daemon-shutdown" || reason.startsWith("device-restart");
-}
 
 /** The owner stopped heartbeating: its liveness lease lapsed, whatever its tool activity. */
 const HEARTBEAT_TIMEOUT_LOSS_REASON = "heartbeat-timeout";
@@ -248,13 +235,13 @@ export function boundSessionLossMessage(failure: BoundSessionLoss): string {
       `device. ${next}`
     );
   }
-  if (isDaemonRestartLossReason(failure.reason)) {
+  if (isRecoverableDaemonReleaseReason(failure.reason)) {
     return (
       `${base}The daemon shut down or restarted, or the device restarted, and this session was ` +
       `not restored. ${next}`
     );
   }
-  return IDLE_EXPIRY_LOSS_REASONS.has(failure.reason)
+  return isIdleReleaseReason(failure.reason)
     ? `${base}The session was released after sitting idle past its window; time the host spent ` +
         `asleep counts toward that window. ${next}`
     : `${base}${next}`;

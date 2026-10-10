@@ -6,6 +6,12 @@ import { errorMessage } from "../utils/describeUnknownError";
 import type { Platform } from "../models";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { ActionableError, toActionableError } from "../models/ActionableError";
+import {
+  isRecoverableDaemonReleaseReason,
+  literalReleaseReasonsWhere,
+  sessionReleaseReasonFamily,
+  type SessionReleaseReasonFamily,
+} from "../daemon/releaseReasons";
 
 // Terminal-state (`released`/`expired`) rows accumulate for the life of the
 // on-disk DB with no delete path (#6464). Bound their retention window rather
@@ -14,23 +20,22 @@ import { ActionableError, toActionableError } from "../models/ActionableError";
 // `markStaleActiveSessionsExpired`), so it is a reliable "became terminal" age
 // marker without a migration.
 export const DEVICE_SESSION_RETENTION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-export const RECOVERABLE_DAEMON_RELEASE_REASONS = new Set(["daemon-shutdown", "daemon-restart"]);
-export const DEVICE_RESTART_RELEASE_REASON_PREFIX = "device-restart:";
+/** The literal recoverable release reasons, from the release-reason table (#11258). */
+export const RECOVERABLE_DAEMON_RELEASE_REASONS: ReadonlySet<string> = new Set(
+  literalReleaseReasonsWhere("recoverable"),
+);
+export const DEVICE_RESTART_RELEASE_REASON_PREFIX =
+  "device-restart:" satisfies SessionReleaseReasonFamily;
 
-export function deviceRestartReleaseReason(stableDeviceId: string): string {
+export function deviceRestartReleaseReason(stableDeviceId: string): `device-restart:${string}` {
   return `${DEVICE_RESTART_RELEASE_REASON_PREFIX}${stableDeviceId}`;
 }
 
 export function isDeviceRestartReleaseReason(reason: string): boolean {
-  return (
-    reason.startsWith(DEVICE_RESTART_RELEASE_REASON_PREFIX) &&
-    reason.length > DEVICE_RESTART_RELEASE_REASON_PREFIX.length
-  );
+  return sessionReleaseReasonFamily(reason) === DEVICE_RESTART_RELEASE_REASON_PREFIX;
 }
 
-export function isRecoverableDaemonReleaseReason(reason: string): boolean {
-  return RECOVERABLE_DAEMON_RELEASE_REASONS.has(reason) || isDeviceRestartReleaseReason(reason);
-}
+export { isRecoverableDaemonReleaseReason };
 
 export function isRecoverableDeviceSession(session: DeviceSession, nowMs: number): boolean {
   const retentionCutoffMs = nowMs - DEVICE_SESSION_RETENTION_MAX_AGE_MS;

@@ -1,4 +1,7 @@
-export function deviceLossCancellationReason(deviceId: string, incidentId?: string): string {
+export function deviceLossCancellationReason(
+  deviceId: string,
+  incidentId?: string,
+): `device-disconnected:${string}` {
   return incidentId
     ? `device-disconnected:${deviceId};incident=${incidentId}`
     : `device-disconnected:${deviceId}`;

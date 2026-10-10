@@ -1,3 +1,4 @@
+import type { SessionReleaseReason } from "./releaseReasons";
 /**
  * Release a device session shortly after the client connection that acquired it
  * closes, when no other connection owns it and its owner has gone silent (#10503).
@@ -30,7 +31,8 @@ import type { Session } from "./sessionManager";
 import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "./sessionLivenessWindows";
 
 /** The release reason recorded for a session whose owning connection closed. */
-export const OWNER_DISCONNECTED_RELEASE_REASON = "owner-disconnected";
+export const OWNER_DISCONNECTED_RELEASE_REASON =
+  "owner-disconnected" satisfies SessionReleaseReason;
 
 /**
  * How long a session whose owning connection closed is held before it is released: the time a
@@ -65,7 +67,10 @@ export interface OwnerDisconnectReleasePort {
    * `deferredUntil`. Resolving with no deferral while the session is still held leaves the
    * session to its heartbeat lease.
    */
-  release(session: Session, reason: string): Promise<OwnerDisconnectReleaseDeferral | void>;
+  release(
+    session: Session,
+    reason: SessionReleaseReason,
+  ): Promise<OwnerDisconnectReleaseDeferral | void>;
 }
 
 type OwnerSession = Pick<

@@ -520,6 +520,9 @@ describe("ToolExecutionContext", () => {
       isVersionCompatible: async () => true,
     }));
     await sessionManager.createSession("session-abort-retry-sleep", "device-1", "android");
+    // The auto-advancing timer would otherwise jump to the idle sweep while the turns drain, and
+    // an idle release is terminal (#11258): the follow-up call below must find the same session.
+    sessionManager.stopCleanupTimer();
     const controller = new AbortController();
     const context = createToolExecutionContext(
       "session-abort-retry-sleep",

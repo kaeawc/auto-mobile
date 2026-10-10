@@ -938,6 +938,9 @@ describe("IDE retries setActiveDevice after a refusal (#10660)", () => {
       expectHeld(agent, DEVICE_A);
       expectHeld(ide, DEVICE_B);
     }
+    // The IDE uses its own device once, so its own idle window outlasts the agent's: an idle
+    // release is terminal (#11258), and an idle-released IDE session could not be moved.
+    expect(await rejection(scenario.daemonToolCall(ide))).toBeUndefined();
 
     // Released side: the refusals were not the agent's use, so its window ends on schedule; the
     // next retry then succeeds and moves the IDE's session onto the freed device.

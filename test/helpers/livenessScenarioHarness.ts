@@ -876,7 +876,11 @@ export class LivenessScenario {
       await this.idle(Math.min(stepMs, deadline - this.timer.now()));
       await drainMicrotasks(TURNS_PER_EVENT);
       if (!this.isHeld(sessionId)) {
-        return this.timer.now();
+        const releasedAt = this.timer.now();
+        // The probe may itself start the lazy expiry. An idle release is terminal (#11258) and
+        // writes its row before it notifies, so let it reach `releases` before returning.
+        await this.daemon.manager.waitForSessionRelease(sessionId);
+        return releasedAt;
       }
     }
     return undefined;

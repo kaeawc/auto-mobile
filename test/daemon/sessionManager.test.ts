@@ -1093,6 +1093,7 @@ describe("SessionManager", () => {
     });
 
     // #10832: an idle-released UUID was issued; it must read as released, not as never issued.
+    // Idle releases are terminal (#11258), so the release reads back as terminal.
     test.each(["lazy-expiry", "cleanup-expired"])(
       "an explicit UUID idle-released by %s gets the ownership-lost release, not not-found",
       async (releaseReason) => {
@@ -1146,7 +1147,7 @@ describe("SessionManager", () => {
               deviceId: "emulator-5554",
               releaseReason,
               releasedAtMs: 2_000,
-              terminal: false,
+              terminal: true,
             });
           }
           expect(assignments).toBe(0);
@@ -1944,7 +1945,7 @@ describe("SessionManager", () => {
       expect(sessionManager.getActiveSessionCount()).toBe(1);
     });
 
-    test("keeps an expired session unavailable while its teardown restores device state", async () => {
+    test("keeps an idle-expired session unavailable during teardown, then refuses its UUID for good", async () => {
       let finishRestore!: () => void;
       const restoration = new Promise<void>((resolve) => {
         finishRestore = resolve;
@@ -2002,11 +2003,20 @@ describe("SessionManager", () => {
         await Promise.resolve();
         expect(assignedSessionIds).toEqual([]);
 
+        // The idle release is terminal (#11258): once its teardown ends the UUID stays refused
+        // with the ownership-lost release instead of being recreated on a pooled device.
         finishRestore();
-        await expect(replacement).resolves.toMatchObject({
+        const refusal = await replacement.then(
+          () => undefined,
+          (caught: unknown) => caught,
+        );
+        expect(refusal).toBeInstanceOf(TerminalSessionError);
+        expect((refusal as TerminalSessionError).release).toMatchObject({
           sessionId: "s1",
-          assignedDevice: "device-2",
+          releaseReason: "lazy-expiry",
+          terminal: true,
         });
+        expect(assignedSessionIds).toEqual([]);
       } finally {
         manager.stopCleanupTimer();
       }
@@ -2055,7 +2065,7 @@ describe("SessionManager", () => {
       }
     });
 
-    test("waits for expired session terminal work before recreating its UUID", async () => {
+    test("waits for an idle-expired session's terminal work, then refuses its UUID for good", async () => {
       const persistenceStarted = Promise.withResolvers<void>();
       const finishPersistence = Promise.withResolvers<void>();
       const manager = new SessionManager(
@@ -2089,11 +2099,19 @@ describe("SessionManager", () => {
         await Promise.resolve();
         expect(assignedSessionIds).toEqual([]);
 
+        // The idle release is terminal (#11258): once its row lands the UUID is refused with the
+        // ownership-lost release instead of being recreated on a pooled device.
         finishPersistence.resolve();
-        await expect(replacement).resolves.toMatchObject({
+        const refusal = await replacement.then(
+          () => undefined,
+          (caught: unknown) => caught,
+        );
+        expect(refusal).toBeInstanceOf(TerminalSessionError);
+        expect((refusal as TerminalSessionError).release).toMatchObject({
           sessionId: "s1",
-          assignedDevice: "device-2",
+          terminal: true,
         });
+        expect(assignedSessionIds).toEqual([]);
       } finally {
         manager.stopCleanupTimer();
       }

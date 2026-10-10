@@ -1,3 +1,4 @@
+import type { SessionReleaseReason } from "./releaseReasons";
 import { logger } from "../utils/logger";
 import { executionTracker } from "../server/executionTracker";
 
@@ -19,7 +20,7 @@ export async function cancelAndReleaseSession<T>(
 
 export interface SessionReleaseManager {
   hasSession(sessionId: string): boolean;
-  releaseSession(sessionId: string, reason?: string): Promise<string | null>;
+  releaseSession(sessionId: string, reason?: SessionReleaseReason): Promise<string | null>;
 }
 
 export interface SessionReleasePool {
@@ -35,7 +36,7 @@ export async function releaseSessionAndDevice(
   pool: SessionReleasePool,
   deviceId: string | null,
   sessionId: string,
-  reason?: string,
+  reason?: SessionReleaseReason,
   options: { release?: () => Promise<string | null>; deferFailureFallback?: boolean } = {},
 ): Promise<void> {
   let releasedDeviceId = deviceId;

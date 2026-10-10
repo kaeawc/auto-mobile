@@ -1,3 +1,4 @@
+import type { SessionReleaseReason } from "./releaseReasons";
 import type {
   PooledDevice,
   SessionContinuityDevice,
@@ -60,7 +61,7 @@ export interface SessionPreservingRecoveryPoolPort {
   releaseDisconnectedRecoverySessionWithRetry(
     sessionId: string,
     deviceId: string,
-    releaseReason: string,
+    releaseReason: SessionReleaseReason,
   ): Promise<void>;
   stableDeviceIdFor(device: PooledDevice): string | undefined;
   getPooledDevice(deviceId: string): PooledDevice | undefined;

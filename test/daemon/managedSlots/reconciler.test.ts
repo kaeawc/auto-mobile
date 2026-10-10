@@ -154,6 +154,45 @@ describe("ManagedSlotReconciler", () => {
     return result.device.stableId;
   }
 
+  describe("booting a device that already exists", () => {
+    test("the slot's own stopped or booting device is provisioned without asking the probe", async () => {
+      const ownId = await seedAssigned();
+      Object.assign(
+        inventory.devices.find((device) => device.deviceId === ownId)!,
+        {
+          isRunning: false,
+          state: "Booting",
+        },
+      );
+      capacity.result = { kind: "exhausted", limit: 1, booted: 1, retryAfterMs: 5_000 };
+      capacity.checks = 0;
+
+      const result = expectReady(await reconciler.reconcile(request()));
+
+      expect(result.disposition).toBe("reused");
+      expect(result.device.stableId).toBe(ownId);
+      expect(capacity.checks).toBe(0);
+    });
+
+    test("an adopted leftover device is provisioned without asking the probe", async () => {
+      inventory.devices.push({
+        name: managedSlotDeviceName(key, 1, "earlier"),
+        platform: "ios",
+        deviceId: "UDID-LEFTOVER",
+        isRunning: false,
+        state: "Booting",
+        runtime: IOS_18,
+        deviceType: IPHONE_16,
+      });
+      capacity.result = { kind: "exhausted", limit: 1, booted: 1, retryAfterMs: 5_000 };
+
+      const result = expectReady(await reconciler.reconcile(request()));
+
+      expect(result.disposition).toBe("adopted");
+      expect(capacity.checks).toBe(0);
+    });
+  });
+
   describe("empty slot", () => {
     test("creates a device under the generated name and commits it ready at generation 1", async () => {
       const result = expectReady(await reconciler.reconcile(request()));
@@ -776,6 +815,40 @@ describe("ManagedSlotReconciler", () => {
       };
       const running = expectReady(await reconciler.reconcile(request(SPEC_18)));
       expect(running.disposition).toBe("replaced");
+    });
+
+    test("a booting or shutting-down old simulator holds the boot slot its replacement takes", async () => {
+      for (const state of ["Booting", "Shutting Down"]) {
+        const oldId = await seedAssigned(SPEC_17);
+        Object.assign(
+          inventory.devices.find((device) => device.deviceId === oldId)!,
+          {
+            isRunning: false,
+            state,
+          },
+        );
+        capacity.result = { kind: "exhausted", limit: 1, booted: 1, retryAfterMs: 5_000 };
+
+        const result = expectReady(await reconciler.reconcile(request(SPEC_18)));
+
+        expect(result.disposition).toBe("replaced");
+        expect(deleter.calls.at(-1)?.stableId).toBe(oldId);
+        capacity.result = { kind: "available" };
+      }
+    });
+
+    test("a replacement is not refused after the delete while the old device is still counted", async () => {
+      const oldId = await seedAssigned(SPEC_17);
+      inventory.devices.find((device) => device.deviceId === oldId)!.isRunning = true;
+      // The gate keeps counting the deleted device (still shutting down) for the whole attempt.
+      capacity.result = { kind: "exhausted", limit: 1, booted: 1, retryAfterMs: 5_000 };
+      capacity.checks = 0;
+
+      const result = expectReady(await reconciler.reconcile(request(SPEC_18)));
+
+      expect(result.disposition).toBe("replaced");
+      expect(capacity.checks).toBe(1);
+      expect(result.device.stableId).not.toBe(oldId);
     });
 
     test("an unknown booted count never replaces: discovery_incomplete before deleting", async () => {

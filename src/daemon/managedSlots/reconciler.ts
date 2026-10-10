@@ -19,6 +19,7 @@ import type {
   AppleDeviceRuntime,
   AppleDeviceType,
 } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { SLOT_OCCUPYING_STATES } from "../../features/iosSimFleet/FleetCostCollector";
 import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
 import type { AvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "../../utils/android-cmdline-tools/AndroidSystemImageRuntime";
@@ -74,7 +75,8 @@ import {
  *   overwrites a newer binding. A deletion that fails leaves the old binding as `cleanup_pending`;
  *   a creation that fails after a verified deletion leaves the slot empty (`provisioning`).
  * - Boot capacity fails immediately with retryable `capacity_exhausted` (owner decision): the
- *   reconciler never waits for capacity and never creates a device it could not boot.
+ *   reconciler never waits for capacity, never creates a device it could not boot, and checks
+ *   before it deletes the device a replacement would not be able to boot.
  * - Every create and replace is journaled (`slot_journal`, #11179) with its exact devices, and each
  *   acquisition first redrives the slot's unfinished work of a dead owner (see `slotJournal.ts`),
  *   so a retry after an interruption converges instead of repeating destructive work.
@@ -920,6 +922,19 @@ function provisionFailure(error: unknown): ManagedSlotReconcileFailure {
   return failure("provision_failed", errorMessage(error), { retryable: false });
 }
 
+/**
+ * Whether the device counts toward its platform's boot limit, by the gates' own definition: a
+ * simulator that is booting or shutting down holds its slot although it is not listed as running.
+ */
+function holdsBootSlot(device: DeviceInfo): boolean {
+  return (
+    device.isRunning ||
+    (device.platform === "ios" &&
+      device.state !== undefined &&
+      SLOT_OCCUPYING_STATES.has(device.state))
+  );
+}
+
 function slotId(key: SlotKey): string {
   return `${key.scopeKey}#${key.slotIndex}`;
 }
@@ -1249,7 +1264,8 @@ export class ManagedSlotReconciler {
     assignment: SlotAssignmentRecord,
     device: DeviceInfo,
   ): Promise<ReadyResult> {
-    await this.assertBootCapacity(context.request, device);
+    // No capacity pre-check: booting the slot's own device is the provision path's decision, which
+    // exempts a boot target that already holds its slot (booted, booting, or running unseen).
     // Before reserving: a reservation would take the slot over from the live execution's record.
     this.assertNoLiveExecutionOn(context, device);
     // Reserve the slot before binding a session to its device, so a concurrent replacement can
@@ -1413,7 +1429,6 @@ export class ManagedSlotReconciler {
   ): Promise<ReadyResult> {
     const { request } = context;
     const stableId = deviceStableId(device)!;
-    await this.assertBootCapacity(request, device);
     // Commit first: the CAS atomically takes the device out of the free pool and reserves it,
     // so a failed provision leaves the slot bound (`provisioning`) and the next attempt reuses.
     const reserved = await this.deps.registry.commitBinding(
@@ -1460,10 +1475,15 @@ export class ManagedSlotReconciler {
     assignment: SlotAssignmentRecord,
     disposition: "created" | "replaced",
     replacing?: SlotJournalEntry,
+    options: { capacityAsserted?: boolean } = {},
   ): Promise<ReadyResult> {
     const { request } = context;
     this.checkBudget(request);
-    await this.assertBootCapacity(request, undefined);
+    // A replacement asserted capacity before deleting, counting the slot its old device frees;
+    // asking again here could refuse after the deletion while that device is still being counted.
+    if (!options.capacityAsserted) {
+      await this.assertBootCapacity(request);
+    }
     const name = managedSlotDeviceName(
       request.key,
       assignment.generation + 1,
@@ -1735,7 +1755,9 @@ export class ManagedSlotReconciler {
     } finally {
       this.journal.inFlight.delete(opened.entry.id);
     }
-    return await this.createAndCommit(context, emptied, "replaced", deletedEntry);
+    return await this.createAndCommit(context, emptied, "replaced", deletedEntry, {
+      capacityAsserted: true,
+    });
   }
 
   private journalTarget(
@@ -1788,9 +1810,10 @@ export class ManagedSlotReconciler {
         ),
       );
     }
-    // Fail before deleting: only a running device of the platform being booted frees a boot slot.
-    const freedBootSlots = device.isRunning && assignment.platform === request.platform ? 1 : 0;
-    await this.assertBootCapacity(request, undefined, freedBootSlots);
+    // Fail before deleting: only a device holding a boot slot of the platform being booted frees one.
+    const freedBootSlots =
+      assignment.platform === request.platform && holdsBootSlot(device) ? 1 : 0;
+    await this.assertBootCapacity(request, freedBootSlots);
     this.checkBudget(request);
     const holder = await this.deps.registry.findDeviceHolder(assignment.platform, oldId);
     if (
@@ -1927,15 +1950,16 @@ export class ManagedSlotReconciler {
   }
 
   /**
-   * Fail immediately at the boot limit when the device would need a boot. `freedBootSlots` counts
-   * booted devices the caller is about to delete; an unknown count is never free capacity.
+   * Fail immediately at the boot limit before creating a device (and before deleting the one it
+   * replaces). `freedBootSlots` counts slot-holding devices the caller is about to delete; an
+   * unknown count is never free capacity. Booting a device that already exists is not checked
+   * here: the provision path owns that decision and its own-target exemption.
    */
   private async assertBootCapacity(
     request: ManagedSlotReconcileRequest,
-    device: DeviceInfo | undefined,
     freedBootSlots = 0,
   ): Promise<void> {
-    if (!this.deps.capacity || device?.isRunning) {
+    if (!this.deps.capacity) {
       return;
     }
     const check = await this.deps.capacity.check(request.platform, { signal: request.signal });

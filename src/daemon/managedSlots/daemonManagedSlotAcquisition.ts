@@ -5,6 +5,7 @@
  */
 
 import { MultiPlatformDeviceManager, type PlatformDeviceManager } from "../../devices/deviceUtils";
+import type { ExactIosRuntimeCatalog } from "../../devices/exactDeviceProvisioning";
 import {
   FileAvdConfigReader,
   type AvdConfigReader,
@@ -72,6 +73,7 @@ export interface DaemonManagedSlotTooling {
   deviceManager?: Pick<PlatformDeviceManager, "listDeviceImages">;
   androidConfigReader?: Pick<AvdConfigReader, "readConfig">;
   androidImageCatalog?: ManagedAndroidImageCatalog;
+  iosRuntimeCatalog?: ExactIosRuntimeCatalog;
   /** Defaults to the process-wide boot admission gates. */
   checkBootCapacity?: ManagedSlotBootCapacityAssertion;
 }
@@ -82,6 +84,20 @@ const sdkAndroidImageCatalog: ManagedAndroidImageCatalog = {
       (image) => image.packageName,
     ),
 };
+
+/** The injected tooling with the host's real tooling filled in. */
+function hostTooling(tooling: DaemonManagedSlotTooling = {}) {
+  return {
+    deviceManager: tooling.deviceManager ?? new MultiPlatformDeviceManager(),
+    androidConfigReader: tooling.androidConfigReader ?? new FileAvdConfigReader(),
+    androidImageCatalog: tooling.androidImageCatalog ?? sdkAndroidImageCatalog,
+    // The simulator catalog exists only where simctl does.
+    iosRuntimeCatalog:
+      tooling.iosRuntimeCatalog ??
+      (process.platform === "darwin" ? new SimCtlClient(null) : undefined),
+    checkBootCapacity: tooling.checkBootCapacity,
+  };
+}
 
 /**
  * The in-process registry invoker the daemon uses by default: the same handlers MCP callers run,
@@ -113,17 +129,15 @@ export function createDaemonManagedSlotAcquisition(
     let reconciler = reconcilers.get(registry);
     if (!reconciler) {
       // Built on the first acquisition: daemons that never serve a managed slot never touch them.
-      const deviceManager = options.tooling?.deviceManager ?? new MultiPlatformDeviceManager();
-      const androidConfigReader = options.tooling?.androidConfigReader ?? new FileAvdConfigReader();
+      const tooling = hostTooling(options.tooling);
+      const { deviceManager, androidConfigReader } = tooling;
       reconciler = new ManagedSlotReconciler({
         registry,
         inventory: new DeviceManagerSlotInventory(deviceManager),
         matcher: new DefaultManagedSpecMatcher(androidConfigReader),
-        // The simulator catalog exists only where simctl does.
-        resolver: new DefaultManagedSpecResolver(
-          process.platform === "darwin" ? new SimCtlClient(null) : undefined,
-          { androidImageCatalog: options.tooling?.androidImageCatalog ?? sdkAndroidImageCatalog },
-        ),
+        resolver: new DefaultManagedSpecResolver(tooling.iosRuntimeCatalog, {
+          androidImageCatalog: tooling.androidImageCatalog,
+        }),
         provisioner: new ToolManagedSlotProvisioner({
           invokeTool,
           deviceManager,
@@ -146,7 +160,7 @@ export function createDaemonManagedSlotAcquisition(
           : {}),
         // The provision path refuses a boot at the limit, but only after a replacement deleted the
         // old device: the reconciler asks the same gates first, so it fails before deleting.
-        capacity: new GateManagedSlotBootCapacity(options.tooling?.checkBootCapacity),
+        capacity: new GateManagedSlotBootCapacity(options.timer, tooling.checkBootCapacity),
         timer: options.timer,
         journal: { owner: options.journal.owner, inFlight: options.journal.inFlight },
       });

@@ -19,6 +19,8 @@ import {
 import type { PlatformDeviceManager } from "../../devices/deviceUtils";
 import { assertBootCapacityAvailable } from "../../features/bootAdmission/sharedBootAdmissionGates";
 import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
+import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { AvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -270,12 +272,18 @@ export type ManagedSlotBootCapacityAssertion = (
   signal: AbortSignal | undefined,
 ) => Promise<void>;
 
+const BOOT_CAPACITY_CHECK_TIMEOUT_MS = 5_000;
+
+class BootCapacityCheckTimeoutError extends Error {}
+
 /**
  * The process-wide boot admission gates as the reconciler's capacity probe: the same read-only
  * check the provision path runs before creating a device, asked before a replacement deletes one.
+ * Bounded, because the simulator fleet sample has no deadline of its own.
  */
 export class GateManagedSlotBootCapacity implements ManagedSlotBootCapacity {
   constructor(
+    private readonly timer: Timer,
     private readonly assertAvailable: ManagedSlotBootCapacityAssertion = (platform, signal) =>
       assertBootCapacityAvailable(platform, { signal }),
   ) {}
@@ -285,10 +293,18 @@ export class GateManagedSlotBootCapacity implements ManagedSlotBootCapacity {
     options: { signal?: AbortSignal },
   ): Promise<ManagedSlotCapacityCheck> {
     try {
-      await this.assertAvailable(platform, options.signal);
+      await raceWithDeadline(() => this.assertAvailable(platform, options.signal), {
+        timer: this.timer,
+        timeoutMs: BOOT_CAPACITY_CHECK_TIMEOUT_MS,
+        signal: options.signal,
+        label: `Checking ${platform} boot capacity`,
+        timeoutError: () =>
+          new BootCapacityCheckTimeoutError(
+            `Timed out after ${BOOT_CAPACITY_CHECK_TIMEOUT_MS}ms checking ${platform} boot capacity.`,
+          ),
+      });
       return { kind: "available" };
     } catch (error) {
-      options.signal?.throwIfAborted();
       if (error instanceof BootCapacityExhaustedError) {
         const { externalDevices } = error.details;
         return {
@@ -299,12 +315,20 @@ export class GateManagedSlotBootCapacity implements ManagedSlotBootCapacity {
           ...(externalDevices && externalDevices.length > 0 ? { externalDevices } : {}),
         };
       }
-      // A count that could not be read (or a sample that failed) is unknown, never free capacity.
-      logger.warn(
-        `[ManagedSlots] ${platform} boot capacity is unknown: ${errorMessage(error)}`,
-        error,
-      );
-      return { kind: "unknown", message: errorMessage(error) };
+      if (
+        error instanceof BootedDeviceDiscoveryIncompleteError ||
+        error instanceof BootCapacityCheckTimeoutError
+      ) {
+        // A count that could not be read in time is unknown, never free capacity.
+        logger.warn(
+          `[ManagedSlots] ${platform} boot capacity is unknown: ${errorMessage(error)}`,
+          error,
+        );
+        return { kind: "unknown", message: errorMessage(error) };
+      }
+      // Cancellation, or a defect: neither is a capacity answer, and a defect must not hide as a
+      // retryable refusal.
+      throw error;
     }
   }
 }

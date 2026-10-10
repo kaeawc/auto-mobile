@@ -300,7 +300,7 @@ describe("PoolManagedSlotDeviceClaims", () => {
 describe("GateManagedSlotBootCapacity", () => {
   test("a passing gate check is available capacity", async () => {
     const platforms: string[] = [];
-    const capacity = new GateManagedSlotBootCapacity(async (platform) => {
+    const capacity = new GateManagedSlotBootCapacity(new FakeTimer(), async (platform) => {
       platforms.push(platform);
     });
 
@@ -309,7 +309,7 @@ describe("GateManagedSlotBootCapacity", () => {
   });
 
   test("the gate's refusal keeps its limit, count, wait hint and external devices", async () => {
-    const capacity = new GateManagedSlotBootCapacity(async () => {
+    const capacity = new GateManagedSlotBootCapacity(new FakeTimer(), async () => {
       throw new BootCapacityExhaustedError(
         { platform: "ios", limit: 2, booted: 3, retryAfterMs: 5_000, externalDevices: ["UDID-1"] },
         "full",
@@ -325,33 +325,54 @@ describe("GateManagedSlotBootCapacity", () => {
     });
   });
 
-  test("an unknown booted count, or a failed sample, is unknown and never available", async () => {
-    const unknown = new GateManagedSlotBootCapacity(async () => {
+  test("the gate's unknown booted count is unknown, never available", async () => {
+    const capacity = new GateManagedSlotBootCapacity(new FakeTimer(), async () => {
       throw new BootedDeviceDiscoveryIncompleteError("ios", {
         code: "failed",
         message: "simulator count unknown",
         retryable: true,
       });
     });
-    const failed = new GateManagedSlotBootCapacity(async () => {
-      throw new Error("sample timed out");
-    });
 
-    expect(await unknown.check("ios", {})).toMatchObject({
+    expect(await capacity.check("ios", {})).toMatchObject({
       kind: "unknown",
       message: expect.stringContaining("simulator count unknown"),
     });
-    expect(await failed.check("android", {})).toEqual({
-      kind: "unknown",
-      message: "sample timed out",
+  });
+
+  test("a check that never answers is unknown after 5 s, with no real wait", async () => {
+    const timer = new FakeTimer();
+    const capacity = new GateManagedSlotBootCapacity(timer, () => new Promise<void>(() => {}));
+
+    const check = capacity.check("ios", {});
+    await timer.advanceTimersByTimeAsync(4_999);
+    let settled = false;
+    void check.then(() => {
+      settled = true;
     });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    await timer.advanceTimersByTimeAsync(1);
+
+    expect(await check).toEqual({
+      kind: "unknown",
+      message: "Timed out after 5000ms checking ios boot capacity.",
+    });
+  });
+
+  test("a defect in the gate propagates instead of becoming a retryable refusal", async () => {
+    const capacity = new GateManagedSlotBootCapacity(new FakeTimer(), async () => {
+      throw new TypeError("gate.decide is not a function");
+    });
+
+    await expect(capacity.check("android", {})).rejects.toThrow("gate.decide is not a function");
   });
 
   test("a cancelled check rethrows the cancellation instead of reporting a count", async () => {
     const controller = new AbortController();
-    const capacity = new GateManagedSlotBootCapacity(async () => {
+    const capacity = new GateManagedSlotBootCapacity(new FakeTimer(), async () => {
       controller.abort(new Error("cancelled"));
-      throw new Error("aborted sample");
+      await new Promise<void>(() => {});
     });
 
     await expect(capacity.check("android", { signal: controller.signal })).rejects.toThrow(

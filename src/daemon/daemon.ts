@@ -12,6 +12,7 @@ import {
   forceStuckSessionRelease,
   releaseSessionAndDevice,
 } from "./releaseSessionAndDevice";
+import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
 import { ambientExecutionIdReader } from "../server/deviceExecutionBinding";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { ObserverReleaseBroadcaster } from "./observerReleaseBroadcast";
@@ -3091,7 +3092,11 @@ export class Daemon {
       // quiet is answered, but it is not the owner's liveness and must not hold the device.
       this.sessionExecutionProbe({ excludeReads: true }),
       async (sessionId, reason) => {
-        await this.cancelAndReleaseSession(sessionId, reason);
+        // A call still in flight (a read never keeps the session) learns why it was cancelled:
+        // the typed terminal refusal, not a generic abort (#11322).
+        await this.cancelAndReleaseSession(sessionId, reason, false, undefined, undefined, {
+          cancellation: new SessionReleasedDuringCallError(sessionId, reason),
+        });
       },
       this.timer,
       {
@@ -4253,9 +4258,10 @@ export class Daemon {
     allowExpired: boolean = false,
     expectedSession?: Session,
     shouldCommit?: () => boolean,
-    options?: { deferFailureFallback?: boolean },
+    options?: { deferFailureFallback?: boolean; cancellation?: Error },
   ): Promise<boolean> {
-    return cancelExecutionsAndReleaseSession(sessionId, releaseReason, async (cancelled) => {
+    const cancelWith = options?.cancellation ?? releaseReason;
+    return cancelExecutionsAndReleaseSession(sessionId, cancelWith, async (cancelled) => {
       // Early identity fence: discovery can replace a same-serial runtime while
       // execution cancellation is in flight. It is not the final one — the
       // session manager re-evaluates `shouldCommit` immediately before it
@@ -4278,7 +4284,7 @@ export class Daemon {
         sessionId,
         releaseReason,
         {
-          ...options,
+          deferFailureFallback: options?.deferFailureFallback,
           release: async () => {
             if (expectedSession) {
               deviceId = await this.sessionManager.releaseSessionIfOwned(

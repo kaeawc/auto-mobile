@@ -4,13 +4,16 @@ import { executionTracker } from "../server/executionTracker";
 
 export interface SessionExecutionCanceller {
   hasActiveSessionUuidExecutions(sessionId: string): boolean;
-  cancelSessionUuidExecutions(sessionId: string, reason: string): Promise<number>;
+  cancelSessionUuidExecutions(sessionId: string, reason: string | Error): Promise<number>;
 }
 
-/** Signal abort before release; like daemon lifecycle release, do not drain executions. */
+/**
+ * Signal abort before release; like daemon lifecycle release, do not drain executions. An `Error`
+ * reason is what the cancelled calls are aborted with, so a typed one reaches their callers.
+ */
 export async function cancelAndReleaseSession<T>(
   sessionId: string,
-  reason: string,
+  reason: string | Error,
   release: (cancelled: number) => Promise<T>,
   executions: SessionExecutionCanceller = executionTracker,
 ): Promise<T> {

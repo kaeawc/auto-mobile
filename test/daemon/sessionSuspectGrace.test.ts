@@ -16,6 +16,9 @@ import {
   hasActiveSessionExecution,
   sessionExecutionProbe,
 } from "../../src/daemon/toolCallActivity";
+import { cancelAndReleaseSession } from "../../src/daemon/releaseSessionAndDevice";
+import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
+import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
 import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -495,20 +498,46 @@ describe("suspect grace window and daemon stall (#10051)", () => {
         readMonitor = new SessionHeartbeatMonitor(
           sessionManager,
           sessionExecutionProbe(tracker, sessionManager, pool, { excludeReads: true }),
+          // The daemon's reap: cancel what is still in flight with the typed reason, then release.
           async (sessionId, reason) => {
             reaped.push({ sessionId, reason });
-            await sessionManager.releaseSession(sessionId, reason);
+            await cancelAndReleaseSession(
+              sessionId,
+              new SessionReleasedDuringCallError(sessionId, reason),
+              () => sessionManager.releaseSession(sessionId, reason),
+              tracker,
+            );
           },
           timer,
         );
       });
+
+      /** What the MCP server answers a call the release cancelled (index.ts). */
+      function expectTerminalRefusal(
+        execution: ReturnType<ExecutionTracker["startExecution"]>,
+        reason: string,
+      ): void {
+        expect(execution.abortController.signal.aborted).toBe(true);
+        expect(execution.abortController.signal.reason).toBe(execution.cancelReason);
+        expect(sessionReleasedDuringCallPayload(execution.cancelReason)).toMatchObject({
+          error: {
+            code: "session_ownership_lost",
+            sessionUuid: SESSION,
+            reason,
+            retryable: false,
+            nextAction: "acquire_new_session",
+          },
+        });
+      }
 
       afterEach(async () => {
         await readMonitor.stop();
       });
 
       /** Start a read the way the MCP server does and leave it running. */
-      async function startRead(kind: "device" | "inventory"): Promise<string> {
+      async function startRead(
+        kind: "device" | "inventory",
+      ): Promise<ReturnType<ExecutionTracker["startExecution"]>> {
         const execution = tracker.startExecution("observe", undefined, SESSION);
         if (kind === "device") {
           tracker.markDeviceReadCall(execution.id, execution.toolName);
@@ -521,7 +550,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
           { access: "read-only" },
         );
         tracker.markSessionAdmitted(execution.id);
-        return execution.id;
+        return execution;
       }
 
       async function advanceToReleaseBudgetAndScan(): Promise<void> {
@@ -538,15 +567,38 @@ describe("suspect grace window and daemon stall (#10051)", () => {
             timer.advanceTime(elapsedMs);
             expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe(phase);
 
-            await startRead(kind);
+            const read = await startRead(kind);
             await advanceToReleaseBudgetAndScan();
 
             expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
             expect(sessionManager.getSession(SESSION)).toBeNull();
             expect(sessionManager.getAssignedDevices().has(DEVICE)).toBe(false);
+            // The read was cut by the release, and is told so in the terminal refusal's terms.
+            expectTerminalRefusal(read, "heartbeat-timeout");
           });
         }
       }
+
+      test("a read cut by a cli-idle-timeout release gets the typed terminal refusal too", async () => {
+        const idleMs = 30_000;
+        expect(sessionManager.adoptCliLivenessPolicy(SESSION, idleMs)).toBe(true);
+        timer.advanceTime(idleMs + 1);
+        const read = await startRead("device");
+
+        await readMonitor.tick();
+
+        expect(reaped).toEqual([{ sessionId: SESSION, reason: "cli-idle-timeout" }]);
+        expect(sessionManager.getSession(SESSION)).toBeNull();
+        expectTerminalRefusal(read, "cli-idle-timeout");
+      });
+
+      test("a call cancelled for any other reason is not answered as a session release", async () => {
+        const read = await startRead("device");
+        await tracker.cancelSessionUuidExecutions(SESSION, "explicit-release");
+
+        expect(read.abortController.signal.aborted).toBe(true);
+        expect(sessionReleasedDuringCallPayload(read.cancelReason)).toBeUndefined();
+      });
 
       test("a control call after the lapse gets the terminal refusal while a read is in flight", async () => {
         timer.advanceTime(LEASE_MS + SUSPECT_GRACE_MS + 1);

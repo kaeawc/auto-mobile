@@ -5,6 +5,7 @@ import {
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
 import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
+import { SessionReleasedDuringCallError } from "../daemon/sessionReleasedDuringCall";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
 import { SUSPECT_GRACE_MS } from "../daemon/sessionLivenessWindows";
 import {
@@ -94,6 +95,24 @@ export function sessionOwnershipLostPayload({
       ...(release ? { release } : {}),
     },
   };
+}
+
+/**
+ * The ownership-loss envelope for a call cancelled because its session was released under it
+ * (#11322), or undefined when `cancelReason` (the tracker's record of why the call was aborted)
+ * is anything else. The session is terminal, exactly as a call arriving after the release is told.
+ */
+export function sessionReleasedDuringCallPayload(
+  cancelReason: unknown,
+): ReturnType<typeof sessionOwnershipLostPayload> | undefined {
+  if (!(cancelReason instanceof SessionReleasedDuringCallError)) {
+    return undefined;
+  }
+  return sessionOwnershipLostPayload({
+    message: cancelReason.message,
+    sessionUuid: cancelReason.sessionUuid,
+    reason: cancelReason.releaseReason,
+  });
 }
 
 /** Whether `name` is a device-session acquisition tool (see above). */

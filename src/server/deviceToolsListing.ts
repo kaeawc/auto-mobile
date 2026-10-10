@@ -30,6 +30,7 @@ import {
 } from "./deviceTools";
 import type { ListDeviceImagesArgs, ListDevicesArgs } from "./deviceTools";
 import { AndroidTransportAliases } from "../utils/androidSerial";
+import { describeBootCapacity } from "../features/bootAdmission/sharedBootAdmissionGates";
 
 function selectBootedDevices(
   booted: BootedDevice[],
@@ -128,6 +129,8 @@ export function createListingHandlers() {
     const deviceManager = deps.deviceManagerFactory();
     const pool = initializedDevicePool();
     const directAliases = new AndroidTransportAliases(deps.androidAdbFactory);
+    // Sampled alongside discovery; best-effort and absent when no platform is gated (#11181).
+    const capacity = describeBootCapacity(requestedPlatforms);
     let booted: BootedDevice[] = [];
     // #5893 item 4: `getBootedDevices` collapses a failed per-platform probe to
     // `[]`, so a transient tooling failure is indistinguishable from a genuinely
@@ -209,6 +212,7 @@ export function createListingHandlers() {
       count: devices.length,
       discovery,
       ...(configured.enrichment ? { enrichment: configured.enrichment } : {}),
+      ...(await capacity.then((report) => (report ? { capacity: report } : {}))),
       note: availableDeviceResourceNote(),
     });
   };

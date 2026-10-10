@@ -7,6 +7,7 @@ import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlC
 import { PS_SNAPSHOT_ARGS, parsePsSnapshot } from "./psSnapshot";
 import { SIMCTL_LIST_DEVICES_ARGS, parseSimctlInventory } from "./simctlInventory";
 import type {
+  HostProcessRow,
   HostResources,
   HostSnapshot,
   MemoryPressureLevel,
@@ -41,6 +42,26 @@ export const nodeHostOsInfo: HostOsInfo = {
   },
 };
 
+/**
+ * One read-only `ps` snapshot of the host process table. Shared by the iOS
+ * fleet cost source and the Android boot admission source (#11181), so the
+ * host's single `ps` call site stays here.
+ */
+export async function readHostProcessTable(
+  executor: HostCommandExecutor,
+  options: FleetReadOptions = {},
+): Promise<HostProcessRow[]> {
+  const ps = await executor.executeCommand("ps", PS_SNAPSHOT_ARGS, {
+    signal: options.signal,
+    timeoutMs: options.timeoutMs,
+  });
+  const { rows, skipped } = parsePsSnapshot(ps.stdout);
+  if (rows.length === 0) {
+    throw new Error(`ps returned no parseable processes (${skipped} unparseable rows)`);
+  }
+  return rows;
+}
+
 const MEMORY_PRESSURE_SYSCTL = ["-n", "kern.memorystatus_vm_pressure_level"];
 
 /** kern.memorystatus_vm_pressure_level: 1 normal, 2 warn, 4 critical. */
@@ -68,18 +89,11 @@ export class CommandFleetHostSource implements FleetHostSource {
   ) {}
 
   async readHostSnapshot(options: FleetReadOptions = {}): Promise<HostSnapshot> {
-    const [ps, resources] = await Promise.all([
-      this.executor.executeCommand("ps", PS_SNAPSHOT_ARGS, {
-        signal: options.signal,
-        timeoutMs: options.timeoutMs,
-      }),
+    const [processes, resources] = await Promise.all([
+      readHostProcessTable(this.executor, options),
       this.readResources(options),
     ]);
-    const { rows, skipped } = parsePsSnapshot(ps.stdout);
-    if (rows.length === 0) {
-      throw new Error(`ps returned no parseable processes (${skipped} unparseable rows)`);
-    }
-    return { takenAtMs: this.timer.now(), resources, processes: rows };
+    return { takenAtMs: this.timer.now(), resources, processes };
   }
 
   async readInventory(options: FleetReadOptions = {}): Promise<SimulatorInventoryEntry[]> {

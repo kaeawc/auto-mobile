@@ -30,10 +30,13 @@ export const testOverrides: {
   telemetryNoOpDefault: boolean;
   /** Directory read by auxiliary socket configs during in-process tests. */
   auxSocketDir: string | undefined;
+  /** Keeps the shared boot admission gates from sampling the real host (adb, ps, simctl). */
+  bootAdmissionGatesDisabled: boolean;
 } = {
   gitMetadataClient: undefined,
   hostPortAvailabilityChecker: undefined,
   deviceReadinessProxyDriverProvider: null,
   telemetryNoOpDefault: false,
   auxSocketDir: undefined,
+  bootAdmissionGatesDisabled: false,
 };

@@ -1,4 +1,5 @@
 import { ActionableError, type DeviceInfo } from "../models";
+import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
 import type { DeviceBootRequest } from "./deviceBootService";
 import {
   DefaultDeviceProvisioner,
@@ -50,7 +51,8 @@ export class CiIosBootRecovery implements DeviceBootRecovery {
     try {
       return await boot();
     } catch (error) {
-      if (signal?.aborted) {
+      // Capacity exhaustion is not a broken simulator: erasing it would not free a slot.
+      if (signal?.aborted || error instanceof BootCapacityExhaustedError) {
         throw error;
       }
       firstFailure = error;

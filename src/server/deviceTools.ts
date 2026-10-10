@@ -249,6 +249,12 @@ const listDeviceImagesOutputSchema = z.object({
   configuredInventory: z.unknown(),
 });
 
+const bootCapacitySchema = z.object({
+  limit: z.number(),
+  booted: z.number(),
+  inFlight: z.number(),
+});
+
 const listDevicesOutputSchema = z.object({
   message: z.string(),
   devices: z.array(
@@ -265,6 +271,15 @@ const listDevicesOutputSchema = z.object({
       reason: z.string().optional(),
     })
     .optional(),
+  capacity: z
+    .object({
+      android: bootCapacitySchema.optional(),
+      ios: bootCapacitySchema.optional(),
+    })
+    .optional()
+    .describe(
+      "Boot admission capacity per gated platform: booted-device limit, booted devices (including ones started outside AutoMobile), and admitted boots in flight",
+    ),
   note: z.unknown(),
 });
 

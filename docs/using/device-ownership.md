@@ -195,6 +195,21 @@ code (owner decision 2026-10-09, #10982): `device_cleanup_in_progress` while the
 device is still being released (#10960), and `device_owned_by_other_daemon` when
 another daemon holds it. Clients may wait and retry.
 
+## Boot capacity
+
+Cold boots wait for host capacity (owner decision 2026-10-09, #11181). Each
+platform has its own limit on booted devices: the smaller of half the host RAM
+divided by the measured per-device memory and half the CPU cores, at least 1.
+Every booted emulator or simulator counts, including ones started outside
+AutoMobile. A boot that would go over the limit waits until a device shuts
+down. If no slot frees before the boot deadline, it fails with the retryable
+code `capacity_exhausted`, which carries `retryAfterMs`, `limit`, `booted` and
+`platform`. Adopting an emulator or simulator that is already running never
+waits. `listDevices` reports `capacity` per gated platform as
+`{ limit, booted, inFlight }`. See
+[environment variables](environment-variables.md#boot-capacity) for the opt-out
+and the per-platform overrides.
+
 ## Per-session settings
 
 Appearance configuration is per session (owner decision 2026-10-09, #10982).

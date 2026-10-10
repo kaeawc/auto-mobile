@@ -10,6 +10,7 @@ import {
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
 } from "../daemon/McpTimeoutError";
 import { SessionRecoveryAssignmentError } from "../models/SessionRecoveryAssignmentError";
+import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import {
@@ -72,30 +73,32 @@ export function shapeToolCallError(
                         deviceId: error.deviceId,
                         retryable: false,
                       })
-                    : error instanceof RetryableDeviceAcquisitionError
-                      ? JSON.stringify({
-                          success: false,
-                          error: message,
-                          code: error.code,
-                          deviceId: error.deviceId,
-                          retryable: true,
-                          retryAfterMs: error.retryAfterMs,
-                        })
-                      : isTerminalForeignOwnedRecoveryError(error)
+                    : error instanceof BootCapacityExhaustedError
+                      ? JSON.stringify({ success: false, error: message, ...error.details })
+                      : error instanceof RetryableDeviceAcquisitionError
                         ? JSON.stringify({
                             success: false,
                             error: message,
                             code: error.code,
                             deviceId: error.deviceId,
-                            retryable: false,
+                            retryable: true,
+                            retryAfterMs: error.retryAfterMs,
                           })
-                        : error instanceof ActionableError && error.containerFailure
+                        : isTerminalForeignOwnedRecoveryError(error)
                           ? JSON.stringify({
                               success: false,
                               error: message,
-                              containerFailure: error.containerFailure,
+                              code: error.code,
+                              deviceId: error.deviceId,
+                              retryable: false,
                             })
-                          : `Error: ${message}`,
+                          : error instanceof ActionableError && error.containerFailure
+                            ? JSON.stringify({
+                                success: false,
+                                error: message,
+                                containerFailure: error.containerFailure,
+                              })
+                            : `Error: ${message}`,
       },
     ],
     isError: true,

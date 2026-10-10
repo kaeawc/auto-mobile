@@ -1,6 +1,15 @@
-import { ActionableError } from "../../models/ActionableError";
-import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
+import {
+  assertBootCapacityGranted,
+  atCapacityDecision,
+  BootAdmissionLedger,
+  DEFAULT_ADMISSION_RETRY_AFTER_MS,
+  waitForBootAdmission,
+  type BootAdmissionWaitResult,
+  type BootCapacityReporter,
+  type BootCapacitySnapshot,
+  type QueuedCapacityDecision,
+} from "../bootAdmission/BootAdmissionGate";
 import { BOOTED_STATE, type FleetCostSource } from "./FleetCostCollector";
 import {
   estimatePerSimulatorBytes,
@@ -13,7 +22,6 @@ import {
 } from "./capacityPolicy";
 import type { FleetCostReport, HostResources } from "./types";
 
-const DEFAULT_RETRY_AFTER_MS = 5_000;
 const DEFAULT_SUSTAINED_SAMPLES = 3;
 
 export type CapacityDecision =
@@ -25,26 +33,10 @@ export type CapacityDecision =
   /** A new boot fits within capacity. */
   | { outcome: "allow"; limits: CapacityLimits; bootedCount: number }
   /** A new boot would exceed capacity or add to sustained host pressure; wait and re-ask. */
-  | {
-      outcome: "queue";
-      reason: "at-capacity" | "sustained-pressure";
-      limits: CapacityLimits;
-      bootedCount: number;
-      retryAfterMs: number;
-      message: string;
-    };
+  | QueuedCapacityDecision;
 
-export interface CapacityWaitResult {
-  decision: CapacityDecision;
-  waitedMs: number;
-  timedOut: boolean;
-  /**
-   * Present when the wait admitted a boot: it counts toward the limit until
-   * released, so concurrent waiters cannot all be admitted against one free
-   * slot before the first boot shows up as Booted. Call once the boot ends.
-   */
-  releaseAdmission?: () => void;
-}
+/** `releaseAdmission` is present when the wait admitted a boot; call it once the boot ends. */
+export type CapacityWaitResult = BootAdmissionWaitResult<CapacityDecision>;
 
 export interface CapacityWaitOptions {
   signal?: AbortSignal;
@@ -74,14 +66,14 @@ export interface CapacityGateOptions {
   sustainedSamples?: number;
 }
 
-export class IosSimCapacityGate implements SimulatorCapacityGate {
+export class IosSimCapacityGate implements SimulatorCapacityGate, BootCapacityReporter {
   private readonly env: NodeJS.ProcessEnv;
   private readonly retryAfterMs: number;
   private readonly sustainedSamples: number;
   private pressuredStreak = 0;
   private latestReport: FleetCostReport | undefined;
-  /** Boots admitted by `waitForCapacity` and not yet released, keyed by admission token. */
-  private readonly admittedBoots = new Map<symbol, string | undefined>();
+  /** Boots admitted by `waitForCapacity` and not yet released. */
+  private readonly admittedBoots: BootAdmissionLedger;
 
   constructor(
     private readonly fleet: FleetCostSource,
@@ -89,8 +81,9 @@ export class IosSimCapacityGate implements SimulatorCapacityGate {
     options: CapacityGateOptions = {},
   ) {
     this.env = options.env ?? process.env;
-    this.retryAfterMs = options.retryAfterMs ?? DEFAULT_RETRY_AFTER_MS;
+    this.retryAfterMs = options.retryAfterMs ?? DEFAULT_ADMISSION_RETRY_AFTER_MS;
     this.sustainedSamples = options.sustainedSamples ?? DEFAULT_SUSTAINED_SAMPLES;
+    this.admittedBoots = new BootAdmissionLedger(timer);
   }
 
   /** Collect a fresh report and fold it into the pressure history. Used by the monitor too. */
@@ -148,63 +141,32 @@ export class IosSimCapacityGate implements SimulatorCapacityGate {
     request: WarmDeviceRequest | undefined,
     options: CapacityWaitOptions,
   ): Promise<CapacityWaitResult> {
-    const startedAt = this.timer.now();
-    for (;;) {
-      options.signal?.throwIfAborted();
-      const report = await this.refreshWithin(options, startedAt);
-      options.signal?.throwIfAborted();
-      const decision = this.decide(report, request, "hint");
-      const waitedMs = this.timer.now() - startedAt;
-      if (decision.outcome !== "queue") {
-        return { decision, waitedMs, timedOut: false, releaseAdmission: this.admit(options) };
-      }
-      if (this.timer.now() + decision.retryAfterMs > options.deadlineMs) {
-        return { decision, waitedMs, timedOut: true };
-      }
-      await raceWithDeadline(this.timer.sleep(decision.retryAfterMs), {
-        timer: this.timer,
-        signal: options.signal,
-        label: "Waiting for iOS simulator capacity",
-      });
-    }
-  }
-
-  /** A fleet sample bounded by the wait's deadline and cancellation. */
-  private async refreshWithin(
-    options: CapacityWaitOptions,
-    startedAt: number,
-  ): Promise<FleetCostReport> {
-    const remainingMs = Math.floor(options.deadlineMs - this.timer.now());
-    const timedOut = () =>
-      new ActionableError(
-        `Timed out after ${this.timer.now() - startedAt}ms collecting iOS simulator capacity.`,
-      );
-    if (remainingMs <= 0) {
-      throw timedOut();
-    }
-    return await raceWithDeadline(() => this.refresh(), {
+    return await waitForBootAdmission<FleetCostReport, CapacityDecision>({
       timer: this.timer,
-      timeoutMs: remainingMs,
+      deadlineMs: options.deadlineMs,
       signal: options.signal,
-      label: "Collecting iOS simulator capacity",
-      timeoutError: timedOut,
+      label: "iOS simulator capacity",
+      sample: () => this.refresh(),
+      decide: (report) => this.decide(report, request, "hint"),
+      admit: () => this.admittedBoots.admit(options.bootUdid).release,
     });
   }
 
-  private admit(options: CapacityWaitOptions): () => void {
-    const token = Symbol("ios-boot-admission");
-    this.admittedBoots.set(token, options.bootUdid);
-    return () => {
-      this.admittedBoots.delete(token);
+  /** Current limit, booted simulators (every Booted one, owned or not) and admitted boots in flight. */
+  async describeCapacity(): Promise<BootCapacitySnapshot> {
+    const report = await this.refresh();
+    return {
+      limit: this.limitsFor(report).maxBooted,
+      booted: report.totals.bootedCount,
+      inFlight: this.inFlightBootCount(report),
     };
   }
 
   /** Admitted boots that the latest sample does not already show as Booted. */
   private inFlightBootCount(report: FleetCostReport): number {
-    const booted = new Set(
-      report.simulators.filter((sim) => sim.state === BOOTED_STATE).map((sim) => sim.udid),
+    return this.admittedBoots.inFlightCount(
+      new Set(report.simulators.filter((sim) => sim.state === BOOTED_STATE).map((sim) => sim.udid)),
     );
-    return [...this.admittedBoots.values()].filter((udid) => !udid || !booted.has(udid)).length;
   }
 
   private limitsFor(report: FleetCostReport): CapacityLimits {
@@ -220,11 +182,12 @@ export class IosSimCapacityGate implements SimulatorCapacityGate {
     bootedCount: number,
     limits: CapacityLimits,
   ): { reason: "at-capacity" | "sustained-pressure"; message: string } | undefined {
-    if (bootedCount >= limits.maxBooted) {
-      return {
-        reason: "at-capacity",
-        message: `${bootedCount} simulator(s) booted; limit is ${limits.maxBooted} (${limits.source}). Shut one down or raise the limit with ${IOS_SIM_MAX_BOOTED_ENV}.`,
-      };
+    const atCapacity = atCapacityDecision(bootedCount, limits, this.retryAfterMs, {
+      noun: "simulator",
+      envName: IOS_SIM_MAX_BOOTED_ENV,
+    });
+    if (atCapacity) {
+      return { reason: atCapacity.reason, message: atCapacity.message };
     }
     if (bootedCount > 0 && this.pressuredStreak >= this.sustainedSamples) {
       return {
@@ -236,11 +199,10 @@ export class IosSimCapacityGate implements SimulatorCapacityGate {
   }
 }
 
-/** Throws an actionable error when a wait ended without capacity. */
+/**
+ * Throws the typed retryable `capacity_exhausted` error
+ * (`BootCapacityExhaustedError`) when a wait ended without capacity.
+ */
 export function assertCapacityGranted(result: CapacityWaitResult): void {
-  if (result.timedOut && result.decision.outcome === "queue") {
-    throw new ActionableError(
-      `Timed out after ${result.waitedMs}ms waiting for simulator capacity: ${result.decision.message}`,
-    );
-  }
+  assertBootCapacityGranted(result, "ios", "simulator");
 }

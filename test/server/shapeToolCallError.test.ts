@@ -1,5 +1,6 @@
 import { TextIndeterminateError } from "../../src/features/action/textTransportTimeout";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
+import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
@@ -31,6 +32,26 @@ describe("shapeToolCallError", () => {
       retryable: false,
     });
     expect(result.isError).toBe(true);
+  });
+
+  // #11181: a boot that waited out its budget for capacity is typed and retryable.
+  test("serializes boot capacity exhaustion as a typed retryable failure", () => {
+    const error = new BootCapacityExhaustedError(
+      { platform: "android", limit: 2, booted: 2, retryAfterMs: 5_000 },
+      "Timed out waiting for emulator capacity",
+    );
+    const result = shapeToolCallError(error, context);
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      success: false,
+      error: "Timed out waiting for emulator capacity",
+      code: "capacity_exhausted",
+      retryable: true,
+      retryAfterMs: 5_000,
+      limit: 2,
+      booted: 2,
+      platform: "android",
+    });
   });
 
   test("serializes pending recovery with the established error vocabulary", () => {

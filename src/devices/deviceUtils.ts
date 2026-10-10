@@ -1,5 +1,7 @@
 import { AdbCommandTimeoutError } from "../utils/android-cmdline-tools/AdbClient";
 import { createDefaultIosBootInstrumentation } from "../features/iosSimFleet/defaultIosBootInstrumentation";
+import { getSharedBootAdmissionGates } from "../features/bootAdmission/sharedBootAdmissionGates";
+import type { BootAdmission } from "../models/BootAdmission";
 import type { IosBootInstrumentation } from "../features/iosSimFleet/IosBootInstrumentation";
 import type { SimulatorWorkloadProfile } from "../models/DeviceResourceReconciliation";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -424,6 +426,16 @@ function mergeIosDevices(simulators: BootedDevice[], physical: BootedDevice[]): 
   return [...simulators, ...physical.filter((device) => !seen.has(device.deviceId))];
 }
 
+/** Admits an Android emulator cold boot once the host has capacity for it (#11181). */
+export interface AndroidColdBootAdmitter {
+  /** Rejects with `BootCapacityExhaustedError` when no slot frees within `timeoutMs`. */
+  admit(request: {
+    timeoutMs: number;
+    signal?: AbortSignal;
+    avdName: string;
+  }): Promise<BootAdmission>;
+}
+
 export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorForDeviceManager;
@@ -435,6 +447,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private physicalIosScanBudgetMs = PHYSICAL_IOS_SCAN_BUDGET_MS;
   private iosBootInstrumentationOverride: IosBootInstrumentation | null = null;
   private defaultIosBootInstrumentation: IosBootInstrumentation | null = null;
+  private androidBootAdmitterOverride: AndroidColdBootAdmitter | null | undefined;
 
   /**
    * Create a PlatformDeviceManager instance
@@ -475,13 +488,38 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     return this;
   }
 
-  /** Per-manager default: durations recorded in memory; the capacity gate is env-flag opt-in. */
+  /**
+   * Replaces the Android boot admission gate (tests, embedders); `null` turns
+   * gating off for this manager.
+   */
+  withAndroidBootAdmission(admitter: AndroidColdBootAdmitter | null): this {
+    this.androidBootAdmitterOverride = admitter;
+    return this;
+  }
+
+  /**
+   * Per-manager durations over the process-wide simulator capacity gate (on
+   * by default, #11181), so every manager's boots count against one limit.
+   */
   private get iosBootInstrumentation(): IosBootInstrumentation {
+    if (this.iosBootInstrumentationOverride) {
+      return this.iosBootInstrumentationOverride;
+    }
+    const gates = getSharedBootAdmissionGates();
     this.defaultIosBootInstrumentation ??= createDefaultIosBootInstrumentation({
-      simctl: this.simctl,
       timer: defaultTimer,
+      history: gates.iosBootHistory,
+      gate: gates.ios,
     });
-    return this.iosBootInstrumentationOverride ?? this.defaultIosBootInstrumentation;
+    return this.defaultIosBootInstrumentation;
+  }
+
+  /** The process-wide Android gate unless overridden; undefined when boots are not gated. */
+  private get androidBootAdmitter(): AndroidColdBootAdmitter | undefined {
+    if (this.androidBootAdmitterOverride !== undefined) {
+      return this.androidBootAdmitterOverride ?? undefined;
+    }
+    return getSharedBootAdmissionGates().android;
   }
 
   private async canDiscoverIosLocally(signal?: AbortSignal): Promise<boolean> {
@@ -1146,11 +1184,25 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
 
     switch (device.platform) {
       case "android": {
+        const signal = getAbortSignal();
+        const admitter = this.androidBootAdmitter;
+        // Admission is awaited inside the launch, only on its cold-spawn path, so
+        // adopting an AVD that is running or starting never queues. By the time a
+        // caller gets here it already holds the Android startup lease and the AVD's
+        // lifecycle lease: a request takes a capacity slot only once it is certain
+        // to cold-boot, and the order is always lease -> admission, so no request
+        // holds a slot while it waits on a lease (which could deadlock against the
+        // lease holder queued for that slot).
         const launch = await this.emulator.launchEmulator({
           avdName: device.name,
           deviceId: device.deviceId,
-          signal: getAbortSignal(),
+          signal,
           cameraPosterPath: options.cameraPosterPath,
+          ...(admitter
+            ? {
+                admitColdBoot: () => admitter.admit({ timeoutMs, signal, avdName: device.name }),
+              }
+            : {}),
         });
         return { process: launch.process, outcome: launch.outcome };
       }

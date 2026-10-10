@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
@@ -340,6 +341,24 @@ describe("capacity gate", () => {
     const result = await gate.waitForCapacity(undefined, { deadlineMs: timer.now() + 7_000 });
     expect(result.timedOut).toBe(true);
     expect(() => assertCapacityGranted(result)).toThrow("waiting for simulator capacity");
+    // #11181: the same typed, retryable error the Android gate throws.
+    let thrown: unknown;
+    try {
+      assertCapacityGranted(result);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(BootCapacityExhaustedError);
+    expect(thrown).toMatchObject({
+      details: {
+        code: "capacity_exhausted",
+        retryable: true,
+        retryAfterMs: 5_000,
+        limit: 2,
+        booted: 2,
+        platform: "ios",
+      },
+    });
   });
 
   test("waitForCapacity honors cancellation", async () => {

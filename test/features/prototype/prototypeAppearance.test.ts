@@ -67,18 +67,17 @@ describe("prototype appearance helpers", () => {
     expect(shownAppearance("dismiss", { success: true, appearance: dark })).toEqual({});
   });
 
-  test("a change event keeps deviceDark unless the device's own setting decided the mode", () => {
+  test("a change event takes mode and source and never reports deviceDark", () => {
     expect(prototypeAppearanceAfterChange(dark, { mode: "light", source: "system" })).toEqual({
       mode: "light",
       source: "system",
-      deviceDark: false,
     });
     expect(
       prototypeAppearanceAfterChange(dark, { mode: "light", source: "authoredBackground" }),
-    ).toEqual({ mode: "light", source: "authoredBackground", deviceDark: false });
+    ).toEqual({ mode: "light", source: "authoredBackground" });
     expect(
       prototypeAppearanceAfterChange(undefined, { mode: "dark", source: "roleLuminance" }),
-    ).toBeUndefined();
+    ).toEqual({ mode: "dark", source: "roleLuminance" });
     expect(prototypeAppearanceAfterChange(dark, { mode: "light" })).toBe(dark);
     expect(prototypeAppearanceAfterChange(dark, null)).toBe(dark);
   });

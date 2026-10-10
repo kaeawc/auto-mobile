@@ -201,6 +201,32 @@ export function outranksReleaseReason(candidate: string, current: string): boole
   return !held.terminal || (held.idle && !next.idle);
 }
 
+/**
+ * How firmly a release reason ends a session, the one ordering of "which release stands" for a
+ * row's stored reason: 0 non-terminal (including recoverable handoffs and unknown reasons),
+ * 1 idle terminal (the weakest terminal reason, see {@link outranksReleaseReason}), 2 any other
+ * terminal reason.
+ */
+export type ReleaseReasonStrength = 0 | 1 | 2;
+
+export function releaseReasonStrength(reason: string): ReleaseReasonStrength {
+  const traits = sessionReleaseReasonTraits(reason);
+  if (!traits.terminal) {
+    return 0;
+  }
+  return traits.idle ? 1 : 2;
+}
+
+/**
+ * Whether a release with `candidate` may overwrite a row holding `held` (null: no reason yet).
+ * A stored terminal reason is never replaced by a weaker one, so a late non-terminal release (a
+ * sweep's `expired`, a `daemon-shutdown` handoff) cannot erase a terminal fence; an equal or
+ * stronger reason replaces it.
+ */
+export function releaseReasonMayReplace(candidate: string, held: string | null): boolean {
+  return held === null || releaseReasonStrength(candidate) >= releaseReasonStrength(held);
+}
+
 /** The persisted status of a released row. */
 export function releasedRowStatus(reason: string): "expired" | "released" {
   return isExpiryReleaseReason(reason) ? "expired" : "released";
@@ -221,5 +247,23 @@ export function releaseReasonFamiliesWhere(
 ): SessionReleaseReasonFamily[] {
   return (Object.keys(SESSION_RELEASE_REASON_FAMILY_TRAITS) as SessionReleaseReasonFamily[]).filter(
     (family) => SESSION_RELEASE_REASON_FAMILY_TRAITS[family][tag],
+  );
+}
+
+/** The literal reasons strictly stronger than `strength`, for SQL filters. */
+export function literalReleaseReasonsStrongerThan(
+  strength: ReleaseReasonStrength,
+): SessionReleaseReasonLiteral[] {
+  return (Object.keys(SESSION_RELEASE_REASON_TRAITS) as SessionReleaseReasonLiteral[]).filter(
+    (reason) => releaseReasonStrength(reason) > strength,
+  );
+}
+
+/** The prefix families strictly stronger than `strength`, for SQL filters. */
+export function releaseReasonFamiliesStrongerThan(
+  strength: ReleaseReasonStrength,
+): SessionReleaseReasonFamily[] {
+  return (Object.keys(SESSION_RELEASE_REASON_FAMILY_TRAITS) as SessionReleaseReasonFamily[]).filter(
+    (family) => releaseReasonStrength(`${family}x`) > strength,
   );
 }

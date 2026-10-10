@@ -89,6 +89,11 @@ import {
   type ManagedSlotReclaimerFactory,
   type ManagedSlotReclaimerHandle,
 } from "./managedSlots/defaultAbandonedScopeReclaimer";
+import {
+  createDefaultFreeDeviceReclaimer,
+  type FreeDeviceReclaimerFactory,
+  type FreeDeviceReclaimerHandle,
+} from "./managedSlots/defaultFreeDeviceReclaimer";
 import type {
   AbandonedScopeReclaimJournal,
   AbandonedScopeReclaimRegistry,
@@ -650,6 +655,7 @@ export class Daemon {
   /** Journal entries this daemon is driving; shared by the drain and the slot reconciler. */
   private readonly managedSlotJournalInFlight = new SlotJournalInFlight();
   private managedSlotReclaimer: ManagedSlotReclaimerHandle | undefined;
+  private freeDeviceReclaimer: FreeDeviceReclaimerHandle | undefined;
   private managedSlotAcquisition: DaemonManagedSlotAcquisitionHandle | undefined;
   private managedExecutionReowner: ManagedExecutionReowner | undefined;
   private managedSlotRedrive: SlotJournalRedriveLoop | undefined;
@@ -731,6 +737,8 @@ export class Daemon {
     private readonly managedSlotJournalFactory?: (
       registry: AbandonedScopeReclaimRegistry,
     ) => AbandonedScopeReclaimJournal,
+    /** Free-pool device reclamation (#11337); not armed under `bun test`. */
+    private readonly freeDeviceReclaimerFactory: FreeDeviceReclaimerFactory = createDefaultFreeDeviceReclaimer,
   ) {
     installDefaultProvisionedDeviceTransportFence();
     this.startupCompletion = new Promise<void>((resolve, reject) => {
@@ -895,6 +903,16 @@ export class Daemon {
       timer: this.timer,
     });
     this.managedSlotReclaimer?.start();
+    // Free-pool devices unadopted for an hour are shut down, image kept (#11337).
+    this.freeDeviceReclaimer ??= this.freeDeviceReclaimerFactory({
+      registry: () => this.openManagedSlotRegistry(),
+      registryExists: () => this.managedSlotRegistryExists(),
+      pool: this.devicePool,
+      executions: this.sessionManager,
+      timer: this.timer,
+      claimedBy: this.daemonSessionId,
+    });
+    this.freeDeviceReclaimer?.start();
   }
 
   /**
@@ -1033,6 +1051,8 @@ export class Daemon {
     this.managedExecutionRelease?.close();
     this.managedSlotReclaimer?.stop();
     this.managedSlotReclaimer = undefined;
+    this.freeDeviceReclaimer?.stop();
+    this.freeDeviceReclaimer = undefined;
     // Signalled, not awaited: the loop may be in its inter-pass sleep, and shutdown must not wait
     // it out. A pass still running when the registry closes fails, logs, and the loop exits.
     void this.managedSlotRedrive?.stop();

@@ -926,6 +926,8 @@ test/server/prototypeResources.test.ts
 test/server/prototypeToolAnchors.test.ts
 test/server/prototypeToolAppearance.test.ts
 test/server/prototypeToolAssets.test.ts
+test/server/prototypeToolCancelledShow.test.ts
+test/server/prototypeToolRefusedShowSupersede.test.ts
 test/server/prototypeToolSpecPath.test.ts
 test/server/prototypeToolThemeModes.test.ts
 test/server/prototypeToolsIos.test.ts

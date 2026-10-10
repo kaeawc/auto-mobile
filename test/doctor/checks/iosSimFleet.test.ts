@@ -14,11 +14,16 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 const FIXTURES = join(import.meta.dir, "../../fixtures/ios-sim-fleet");
 const GIB = 1024 ** 3;
 
-function fleet(booted: string[]): FleetCostSource {
+function fleet(booted: string[], booting: string[] = []): FleetCostSource {
   const source = new FakeFleetHostSource();
   source.inventory = parseSimctlInventory(
     readFileSync(join(FIXTURES, "../ios-simctl/list-devices.json"), "utf8"),
-  ).map((entry) => (booted.includes(entry.udid) ? { ...entry, state: "Booted" } : entry));
+  ).map((entry) => {
+    if (booted.includes(entry.udid)) {
+      return { ...entry, state: "Booted" };
+    }
+    return booting.includes(entry.udid) ? { ...entry, state: "Booting" } : entry;
+  });
   source.snapshot = {
     takenAtMs: 0,
     resources: {
@@ -67,6 +72,17 @@ describe("checkIosSimulatorFleetCost", () => {
     expect(result.status).toBe("warn");
     expect(result.message).toContain("exceed capacity");
     expect(result.recommendation).toContain(IOS_SIM_MAX_BOOTED_ENV);
+  });
+
+  test("counts a Booting simulator toward the limit like the gate does", async () => {
+    const result = await checkIosSimulatorFleetCost({
+      platform: () => "darwin",
+      createFleetSource: () => fleet([IOS27], [IOS18]),
+      env: () => ({ [IOS_SIM_MAX_BOOTED_ENV]: "2" }),
+    });
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("2/2 booted simulators");
+    expect(result.message).toContain("exceed capacity");
   });
 
   test("a throwing source is a skip, not a crash", async () => {

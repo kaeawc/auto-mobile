@@ -1,3 +1,5 @@
+import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
+import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import {
   assertBootCapacityGranted,
@@ -11,7 +13,7 @@ import {
   type BootCapacitySnapshot,
   type RefusedCapacityDecision,
 } from "../bootAdmission/BootAdmissionGate";
-import { BOOTED_STATE, type FleetCostSource } from "./FleetCostCollector";
+import { occupyingUdids, type FleetCostSource } from "./FleetCostCollector";
 import {
   estimatePerSimulatorBytes,
   findWarmCompatibleDevices,
@@ -73,6 +75,10 @@ export class IosSimCapacityGate
   private readonly sustainedSamples: number;
   private pressuredStreak = 0;
   private latestReport: FleetCostReport | undefined;
+  /** UDIDs this process admitted a boot for; any other occupying simulator is external. */
+  private readonly startedUdids = new Set<string>();
+  /** Started UDIDs a sample has shown occupying a slot: only these can be seen leaving. */
+  private readonly seenStartedUdids = new Set<string>();
   /** Boots admitted by `admitBoot` and not yet released. */
   private readonly admittedBoots: BootAdmissionLedger;
 
@@ -119,23 +125,26 @@ export class IosSimCapacityGate
     report: FleetCostReport,
     request: WarmDeviceRequest | undefined,
     warmMatch: "substitute" | "hint",
+    bootUdid?: string,
   ): CapacityDecision {
+    this.assertCountKnown(report);
     const warm = findWarmCompatibleDevices(report, request ?? {})[0];
     if (warm && warmMatch === "substitute") {
       return { outcome: "reuse-warm", udid: warm.udid };
     }
     const limits = this.limitsFor(report);
-    const bootedCount = report.totals.bootedCount + this.inFlightBootCount(report);
-    const queued = this.queueReason(bootedCount, limits);
-    if (queued) {
-      return {
-        outcome: "refuse",
-        reason: queued.reason,
-        limits,
-        bootedCount,
-        retryAfterMs: this.retryAfterMs,
-        message: queued.message,
-      };
+    // The boot's own target (already Booting or Booted) needs no new slot.
+    const occupied = occupyingUdids(report, bootUdid);
+    this.forgetExitedStarted(report);
+    const bootedCount = occupied.length + this.inFlightBootCount(report);
+    const refused = atCapacityDecision(bootedCount, limits, this.retryAfterMs, {
+      noun: "simulator",
+      envName: IOS_SIM_MAX_BOOTED_ENV,
+      externalDevices: occupied.filter((udid) => !this.startedUdids.has(udid)),
+    });
+    // Owner decision (#11209): host pressure is reported, never a reason to refuse a boot.
+    if (refused) {
+      return refused;
     }
     return warm
       ? { outcome: "reuse-warm", udid: warm.udid }
@@ -151,8 +160,13 @@ export class IosSimCapacityGate
       signal: options.signal,
       label: "iOS simulator capacity",
       sample: () => this.refresh(),
-      decide: (report) => this.decide(report, request, "hint"),
-      admit: () => this.admittedBoots.admit(options.bootUdid).release,
+      decide: (report) => this.decide(report, request, "hint", options.bootUdid),
+      admit: () => {
+        if (options.bootUdid) {
+          this.startedUdids.add(options.bootUdid);
+        }
+        return this.admittedBoots.admit(options.bootUdid).release;
+      },
     });
   }
 
@@ -170,9 +184,10 @@ export class IosSimCapacityGate
   async describeCapacity(): Promise<BootCapacitySnapshot> {
     // A listing is not a boot decision: reading must not advance the sustained-pressure streak.
     const report = await this.fleet.collect();
+    this.assertCountKnown(report);
     return {
       limit: this.limitsFor(report).maxBooted,
-      booted: report.totals.bootedCount,
+      booted: occupyingUdids(report).length,
       inFlight: this.inFlightBootCount(report),
       hostPressure: {
         sustained: this.pressuredStreak >= this.sustainedSamples,
@@ -182,11 +197,41 @@ export class IosSimCapacityGate
     };
   }
 
-  /** Admitted boots that the latest sample does not already show as Booted. */
+  /**
+   * With `simctl list` failed the booted count is unknown; zero would admit past the limit.
+   * Refuse with retryable `discovery_incomplete`, as the Android gate does (#11280).
+   */
+  private assertCountKnown(report: FleetCostReport): void {
+    if (!report.inventoryFailed) {
+      return;
+    }
+    const detail = report.errors.join("; ") || "simctl list failed";
+    logger.warn(`[BootAdmission] iOS simulator count unknown; refusing to boot: ${detail}`);
+    throw new BootedDeviceDiscoveryIncompleteError("ios", {
+      code: "failed",
+      message: `simulator count unknown (${detail})`,
+      retryable: true,
+    });
+  }
+
+  /**
+   * Forget a started UDID once a sample showed it occupying a slot and then not, so a later
+   * external boot of the same simulator is not named as ours.
+   */
+  private forgetExitedStarted(report: FleetCostReport): void {
+    const occupied = new Set(occupyingUdids(report));
+    for (const udid of this.startedUdids) {
+      if (occupied.has(udid)) {
+        this.seenStartedUdids.add(udid);
+      } else if (this.seenStartedUdids.delete(udid)) {
+        this.startedUdids.delete(udid);
+      }
+    }
+  }
+
+  /** Admitted boots that the latest sample does not already show as occupying a slot. */
   private inFlightBootCount(report: FleetCostReport): number {
-    return this.admittedBoots.inFlightCount(
-      new Set(report.simulators.filter((sim) => sim.state === BOOTED_STATE).map((sim) => sim.udid)),
-    );
+    return this.admittedBoots.inFlightCount(new Set(occupyingUdids(report)));
   }
 
   private limitsFor(report: FleetCostReport): CapacityLimits {
@@ -195,21 +240,6 @@ export class IosSimCapacityGate
       return resolveCapacityLimits(this.env, { totalMemoryBytes: 0, cpuCount: 0 });
     }
     return resolveCapacityLimits(this.env, report.host, estimatePerSimulatorBytes(report));
-  }
-
-  private queueReason(
-    bootedCount: number,
-    limits: CapacityLimits,
-  ): { reason: "at-capacity"; message: string } | undefined {
-    const atCapacity = atCapacityDecision(bootedCount, limits, this.retryAfterMs, {
-      noun: "simulator",
-      envName: IOS_SIM_MAX_BOOTED_ENV,
-    });
-    if (atCapacity) {
-      return { reason: atCapacity.reason, message: atCapacity.message };
-    }
-    // Owner decision (#11209): host pressure is reported, never a reason to refuse a boot.
-    return undefined;
   }
 }
 

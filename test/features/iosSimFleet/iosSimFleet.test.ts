@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { BootedDeviceDiscoveryIncompleteError } from "../../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -422,6 +423,136 @@ describe("capacity gate", () => {
     expect(admitted.decision).toMatchObject({ outcome: "allow", bootedCount: 1 });
     source.inventory = inventoryWithBooted(IOS27, IOS18);
     expect(await gate.evaluateBoot()).toMatchObject({ outcome: "allow", bootedCount: 2 });
+  });
+});
+
+describe("capacity gate occupying states (#11291)", () => {
+  const oneSlot = { [IOS_SIM_MAX_BOOTED_ENV]: "1" };
+  const inState = (udid: string, state: string) =>
+    parseSimctlInventory(SIMCTL).map((entry) =>
+      entry.udid === udid ? { ...entry, state } : entry,
+    );
+
+  test("a Booting simulator holds a slot: admission refuses and capacity reports it", async () => {
+    const { collector, timer, source } = setup([]);
+    source.inventory = inState(IOS27, "Booting");
+    const gate = new IosSimCapacityGate(collector, timer, { env: oneSlot });
+    const result = await gate.admitBoot(undefined, { bootUdid: "NEW" });
+    expect(result.decision).toMatchObject({ outcome: "refuse", bootedCount: 1 });
+    expect((await gate.describeCapacity()).booted).toBe(1);
+  });
+
+  test("a Shutting Down simulator still holds its slot", async () => {
+    const { collector, timer, source } = setup([]);
+    source.inventory = inState(IOS27, "Shutting Down");
+    const gate = new IosSimCapacityGate(collector, timer, { env: oneSlot });
+    expect((await gate.admitBoot(undefined, { bootUdid: "NEW" })).decision.outcome).toBe("refuse");
+  });
+
+  test("an own admitted boot already Booting is counted once", async () => {
+    const { collector, timer, source } = setup([]);
+    const gate = new IosSimCapacityGate(collector, timer, {
+      env: { [IOS_SIM_MAX_BOOTED_ENV]: "3" },
+    });
+    await gate.admitBoot(undefined, { bootUdid: IOS27 });
+    source.inventory = inState(IOS27, "Booting");
+    expect(await gate.evaluateBoot()).toMatchObject({ outcome: "allow", bootedCount: 1 });
+  });
+});
+
+describe("capacity gate boot target and external devices (#11282)", () => {
+  const oneSlot = { [IOS_SIM_MAX_BOOTED_ENV]: "1" };
+  const withState = (udid: string, state: string) =>
+    parseSimctlInventory(SIMCTL).map((entry) =>
+      entry.udid === udid ? { ...entry, state } : entry,
+    );
+
+  test.each(["Booting", "Booted"])(
+    "the boot's own %s target at the limit needs no new slot",
+    async (state) => {
+      const { collector, timer, source } = setup([]);
+      source.inventory = withState(IOS27, state);
+      const gate = new IosSimCapacityGate(collector, timer, { env: oneSlot });
+      const result = await gate.admitBoot(undefined, { bootUdid: IOS27 });
+      expect(result.decision).toMatchObject({ outcome: "allow", bootedCount: 0 });
+      // Another simulator's boot is still refused: the target holds the only slot.
+      expect((await gate.admitBoot(undefined, { bootUdid: "OTHER" })).decision.outcome).toBe(
+        "refuse",
+      );
+    },
+  );
+
+  test("a refusal names simulators this process did not start", async () => {
+    const { collector, timer } = setup([IOS27, IOS18]);
+    const gate = new IosSimCapacityGate(collector, timer, {
+      env: { [IOS_SIM_MAX_BOOTED_ENV]: "2" },
+    });
+    const error = await gate.assertCapacityAvailable().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(BootCapacityExhaustedError);
+    expect((error as BootCapacityExhaustedError).details.externalDevices?.sort()).toEqual(
+      [IOS27, IOS18].sort(),
+    );
+    expect((error as Error).message).toContain("not started by AutoMobile");
+  });
+
+  test("simulators this gate started are not named external", async () => {
+    const { collector, timer, source } = setup([]);
+    const gate = new IosSimCapacityGate(collector, timer, { env: oneSlot });
+    await gate.admitBoot(undefined, { bootUdid: IOS27 });
+    source.inventory = withState(IOS27, "Booted");
+    const error = await gate.assertCapacityAvailable().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(BootCapacityExhaustedError);
+    expect((error as BootCapacityExhaustedError).details.externalDevices).toBeUndefined();
+  });
+
+  test("a started simulator that shut down and returns is external again", async () => {
+    const { collector, timer, source } = setup([]);
+    const gate = new IosSimCapacityGate(collector, timer, { env: oneSlot });
+    await gate.admitBoot(undefined, { bootUdid: IOS27 });
+    source.inventory = withState(IOS27, "Booted");
+    await gate.evaluateBoot();
+    source.inventory = withState(IOS27, "Shutdown");
+    await gate.evaluateBoot();
+    source.inventory = withState(IOS27, "Booted");
+    const error = await gate.assertCapacityAvailable().catch((e: unknown) => e);
+    expect((error as BootCapacityExhaustedError).details.externalDevices).toEqual([IOS27]);
+  });
+});
+
+describe("capacity gate with an unknown count (#11280)", () => {
+  const failedInventory = () => {
+    const { collector, timer, source } = setup([]);
+    source.inventoryError = new Error("simctl list timed out");
+    return new IosSimCapacityGate(collector, timer, { env: { [IOS_SIM_MAX_BOOTED_ENV]: "2" } });
+  };
+
+  test("admitBoot refuses with retryable discovery_incomplete instead of admitting", async () => {
+    const error = await failedInventory()
+      .admitBoot(undefined, { bootUdid: "NEW" })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(BootedDeviceDiscoveryIncompleteError);
+    expect(error).toMatchObject({ code: "discovery_incomplete", retryable: true, platform: "ios" });
+  });
+
+  test("assertCapacityAvailable refuses with discovery_incomplete", async () => {
+    await expect(failedInventory().assertCapacityAvailable()).rejects.toBeInstanceOf(
+      BootedDeviceDiscoveryIncompleteError,
+    );
+  });
+
+  test("describeCapacity throws so listDevices omits capacity.ios instead of booted:0", async () => {
+    await expect(failedInventory().describeCapacity()).rejects.toBeInstanceOf(
+      BootedDeviceDiscoveryIncompleteError,
+    );
+  });
+
+  test("a host snapshot failure alone still counts from the inventory", async () => {
+    const { collector, timer, source } = setup([IOS27]);
+    source.snapshot = new Error("ps failed");
+    const gate = new IosSimCapacityGate(collector, timer, {
+      env: { [IOS_SIM_MAX_BOOTED_ENV]: "2" },
+    });
+    expect((await gate.describeCapacity()).booted).toBe(1);
   });
 });
 

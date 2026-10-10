@@ -52,6 +52,24 @@ function deviceStartResult(sessionUuid: string): {
   };
 }
 
+/** setActiveDevice's real payload (src/server/setActiveDevice.ts): not a device-start envelope. */
+function setActiveDeviceResult(sessionUuid: string): {
+  content: Array<{ type: string; text: string }>;
+} {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          message: "Active device set to 'emulator-5554'",
+          deviceId: "emulator-5554",
+          sessionUuid,
+        }),
+      },
+    ],
+  };
+}
+
 interface AcquiringClientOptions {
   acquisitionTool?: "getAndroid" | "getApple";
   deviceId?: string;
@@ -122,8 +140,11 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
   test("keeps platform selectors implicit and adopts the session selected by setActiveDevice", async () => {
     const client = new FakeDaemonClient({
       toolResultFor: (name) => {
-        if (name === "getAndroid" || name === "setActiveDevice") {
+        if (name === "getAndroid") {
           return deviceStartResult("android-session");
+        }
+        if (name === "setActiveDevice") {
+          return setActiveDeviceResult("android-session");
         }
         if (name === "getApple") {
           return deviceStartResult("ios-session");
@@ -206,8 +227,11 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
         }
       },
       toolResultFor: (name) => {
-        if (name === "getAndroid" || name === "setActiveDevice") {
+        if (name === "getAndroid") {
           return deviceStartResult("android-session");
+        }
+        if (name === "setActiveDevice") {
+          return setActiveDeviceResult("android-session");
         }
         if (name === "getApple") {
           return deviceStartResult("ios-session");

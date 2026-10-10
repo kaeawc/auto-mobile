@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { registerUtilityTools } from "../../src/server/utilityTools";
-import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import {
+  getActiveDeviceSelectionFromResult,
+  getDeviceSessionIdFromResult,
+} from "../../src/server/deviceSessionResult";
 
 /**
  * Ergonomics fixes for the device-acquisition workflow (issue #5870).
@@ -70,6 +73,32 @@ describe("device acquisition ergonomics (#5870)", () => {
       expect(getDeviceSessionIdFromResult(envelope({ sessionId: "provision-9" }))).toBe(
         "provision-9",
       );
+    });
+
+    test("setActiveDevice's top-level sessionUuid is not an acquisition session", () => {
+      expect(
+        getDeviceSessionIdFromResult(envelope({ deviceId: "emulator-5554", sessionUuid: "s1" })),
+      ).toBeUndefined();
+    });
+  });
+
+  describe("getActiveDeviceSelectionFromResult reads setActiveDevice's payload (#11235)", () => {
+    const envelope = (payload: Record<string, unknown>) => ({
+      content: [{ type: "text", text: JSON.stringify(payload) }],
+    });
+
+    test("reads the selected session and device", () => {
+      expect(
+        getActiveDeviceSelectionFromResult(
+          envelope({ message: "Active device set", deviceId: "emulator-5554", sessionUuid: "s1" }),
+        ),
+      ).toEqual({ sessionUuid: "s1", deviceId: "emulator-5554" });
+    });
+
+    test("is undefined when no session was selected", () => {
+      expect(
+        getActiveDeviceSelectionFromResult(envelope({ deviceId: "emulator-5554" })),
+      ).toBeUndefined();
     });
   });
 });

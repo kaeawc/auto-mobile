@@ -9,18 +9,24 @@
  */
 export const ROUTED_SESSION_META_KEY = "automobile/routedSessionUuid";
 
-/** Add the routed session to a tool result's `_meta`; returns the result unchanged without one. */
-export function withRoutedSessionMeta<T>(result: T, sessionUuid: string | undefined): T {
+/**
+ * The explicitly named `sessionUuid` of a call belongs to another connected client's autolock
+ * (#11235). Naming a UUID is not proof of ownership (#11164): the call may run on that session,
+ * but the caller's connection must not bind it for later sessionless calls. The proxy reads this
+ * to skip remembering the session; additive like {@link ROUTED_SESSION_META_KEY}.
+ */
+export const FOREIGN_OWNED_SESSION_META_KEY = "automobile/foreignOwnedSessionUuid";
+
+function withSessionMeta<T>(result: T, key: string, sessionUuid: string | undefined): T {
   if (!sessionUuid || result === null || typeof result !== "object") {
     return result;
   }
   const existing = (result as { _meta?: unknown })._meta;
   const meta = existing !== null && typeof existing === "object" ? existing : {};
-  return { ...result, _meta: { ...meta, [ROUTED_SESSION_META_KEY]: sessionUuid } };
+  return { ...result, _meta: { ...meta, [key]: sessionUuid } };
 }
 
-/** The routed session a daemon echoed in a tool result, when it did. */
-export function routedSessionUuidFromResult(result: unknown): string | undefined {
+function sessionMetaFromResult(result: unknown, key: string): string | undefined {
   if (result === null || typeof result !== "object") {
     return undefined;
   }
@@ -28,6 +34,26 @@ export function routedSessionUuidFromResult(result: unknown): string | undefined
   if (meta === null || typeof meta !== "object") {
     return undefined;
   }
-  const value = (meta as Record<string, unknown>)[ROUTED_SESSION_META_KEY];
+  const value = (meta as Record<string, unknown>)[key];
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/** Add the routed session to a tool result's `_meta`; returns the result unchanged without one. */
+export function withRoutedSessionMeta<T>(result: T, sessionUuid: string | undefined): T {
+  return withSessionMeta(result, ROUTED_SESSION_META_KEY, sessionUuid);
+}
+
+/** The routed session a daemon echoed in a tool result, when it did. */
+export function routedSessionUuidFromResult(result: unknown): string | undefined {
+  return sessionMetaFromResult(result, ROUTED_SESSION_META_KEY);
+}
+
+/** Mark a result whose named session another connection owns; unchanged without one. */
+export function withForeignOwnedSessionMeta<T>(result: T, sessionUuid: string | undefined): T {
+  return withSessionMeta(result, FOREIGN_OWNED_SESSION_META_KEY, sessionUuid);
+}
+
+/** The named session a daemon reported as owned by another connection, when it did. */
+export function foreignOwnedSessionUuidFromResult(result: unknown): string | undefined {
+  return sessionMetaFromResult(result, FOREIGN_OWNED_SESSION_META_KEY);
 }

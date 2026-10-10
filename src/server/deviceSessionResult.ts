@@ -145,6 +145,26 @@ export function getDeviceIdFromResult(result: unknown): string | undefined {
 }
 
 /**
+ * The session and device a successful `setActiveDevice` selected. Its payload is
+ * `{ message, deviceId, sessionUuid? }`, not a device-start envelope, so
+ * {@link getDeviceSessionIdFromResult} never finds its session (#11235): the proxy kept
+ * replaying its previous binding and untargeted calls stayed on the old device.
+ */
+export function getActiveDeviceSelectionFromResult(
+  result: unknown,
+): { sessionUuid: string; deviceId?: string } | undefined {
+  const payload = readToolEnvelopePayload(result)?.payload;
+  const sessionUuid = payload?.sessionUuid;
+  if (typeof sessionUuid !== "string" || sessionUuid.trim().length === 0) {
+    return undefined;
+  }
+  const deviceId = payload?.deviceId;
+  return typeof deviceId === "string" && deviceId.trim().length > 0
+    ? { sessionUuid, deviceId }
+    : { sessionUuid };
+}
+
+/**
  * The platform a device-start tool result describes (the device description's top-level
  * `platform`). A proxy records it so a call routed by a `platform` selector can tell which of its
  * sessions it reached (#10692).

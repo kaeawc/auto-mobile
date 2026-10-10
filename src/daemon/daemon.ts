@@ -4454,6 +4454,22 @@ export class Daemon {
         },
         { name: "active device sessions", run: () => this.releaseActiveSessionsForShutdown() },
         {
+          // Session release broadcasts must be written while subscribed proxy
+          // sockets are still connected; closing first degrades the exact
+          // daemon-shutdown reason into session-not-found after reconnect.
+          // Runs right after session release, before the device-cleanup and
+          // forward-release drains, so a wedged stage behind it cannot push the
+          // daemon-shutdown notification past the 9 s process limit (#11156).
+          name: "Unix socket server",
+          run: async () => {
+            if (this.socketServer) {
+              this.publishMissingShutdownReleaseNotifications();
+              await this.socketServer.drainSessionReleaseNotifications();
+              await this.socketServer.close();
+            }
+          },
+        },
+        {
           name: "pending device cleanups",
           run: async () => {
             await this.sessionManager.drainPendingDeviceCleanups(
@@ -4465,19 +4481,6 @@ export class Daemon {
         {
           name: "device allocation claims",
           run: () => this.devicePool.releaseDeviceClaimsForShutdown(),
-        },
-        {
-          // Session release broadcasts must be written while subscribed proxy
-          // sockets are still connected; closing first degrades the exact
-          // daemon-shutdown reason into session-not-found after reconnect.
-          name: "Unix socket server",
-          run: async () => {
-            if (this.socketServer) {
-              this.publishMissingShutdownReleaseNotifications();
-              await this.socketServer.drainSessionReleaseNotifications();
-              await this.socketServer.close();
-            }
-          },
         },
         { name: "managed ADB server", run: this.stopManagedAdbServer },
         {

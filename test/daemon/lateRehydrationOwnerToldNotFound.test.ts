@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
-import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import {
+  DaemonMcpProxy,
+  RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
+} from "../../src/daemon/daemonMcpProxy";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -193,27 +196,64 @@ async function ownerOutcomeAfterRestart(recovery: "lands-before-owner" | "lands-
   }
 }
 
+/** A client whose close, like the real one, rejects every request still pending on it. */
+class ClosableDaemonClient extends FakeDaemonClient {
+  closes = 0;
+  readonly pending = new Set<(error: Error) => void>();
+
+  override async close(): Promise<void> {
+    this.closes += 1;
+    for (const reject of this.pending) {
+      reject(new Error("Socket connection closed"));
+    }
+    this.pending.clear();
+    await super.close();
+  }
+}
+
 describe("a heartbeat answered not-found with a release reason", () => {
-  /** Heartbeat claims the daemon saw, per keeper tick, once it starts answering not-found. */
-  async function heartbeatsAfterNotFound(releaseReason: string): Promise<boolean[][]> {
+  /**
+   * The owner's keeper against a daemon that answers every heartbeat not-found with
+   * `releaseReason`, for `ticks` keeper ticks after the first such answer, with a tool call of a
+   * sibling session in flight on the same connection throughout.
+   */
+  async function keeperAfterNotFound(releaseReason: string, ticks: number) {
     const timer = new FakeTimer();
     let gone = false;
     const claims: boolean[] = [];
-    const daemon = new FakeDaemonClient({
-      onCallDaemonMethod: (method, params) => {
-        if (method !== "daemon/heartbeat" || !gone) {
-          return;
-        }
-        claims.push(params.claimLivenessOwnership === true);
-        throw Object.assign(new Error(`Session not found: ${SESSION}`), {
-          code: "daemon_session_not_found",
-          releaseReason,
-        });
-      },
-    });
+    let connections = 0;
+    const releaseInFlight = Promise.withResolvers<void>();
+    const clients: ClosableDaemonClient[] = [];
+    const newClient = (): ClosableDaemonClient => {
+      const client: ClosableDaemonClient = new ClosableDaemonClient({
+        onCallDaemonMethod: (method, params) => {
+          if (method !== "daemon/heartbeat" || !gone || params.sessionId !== SESSION) {
+            return;
+          }
+          claims.push(params.claimLivenessOwnership === true);
+          throw Object.assign(new Error(`Session not found: ${SESSION}`), {
+            code: "daemon_session_not_found",
+            releaseReason,
+          });
+        },
+        onCallTool: async (name) => {
+          if (name !== "listDevices") {
+            return;
+          }
+          const closed = Promise.withResolvers<void>();
+          client.pending.add(closed.reject);
+          await Promise.race([releaseInFlight.promise, closed.promise]);
+        },
+      });
+      clients.push(client);
+      return client;
+    };
     const proxy = new DaemonMcpProxy({
       initialSessionUuid: SESSION,
-      clientFactory: () => daemon,
+      clientFactory: () => {
+        connections += 1;
+        return newClient();
+      },
       daemonAvailabilityProbe: async () => true,
       daemonManager: matchingDaemonManager(),
       autoStartDaemon: false,
@@ -226,30 +266,68 @@ describe("a heartbeat answered not-found with a release reason", () => {
       await proxy.callTool("observe", { sessionUuid: SESSION });
       await timer.advanceTimeAsync(INTERVAL_MS);
       gone = true;
-      const perTick: boolean[][] = [];
-      for (let tick = 0; tick < 3; tick++) {
+      // The first not-found answer is retried once on a fresh connection, as on main.
+      await timer.advanceTimeAsync(INTERVAL_MS);
+      const baseline = {
+        connections,
+        closes: clients.reduce((sum, client) => sum + client.closes, 0),
+      };
+      const inFlight = proxy.callTool("listDevices", {}).then(
+        () => "answered",
+        (error: unknown) => `cut: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      const perTick: number[] = [];
+      const claimed: boolean[] = [];
+      for (let tick = 0; tick < ticks; tick++) {
         const before = claims.length;
         await timer.advanceTimeAsync(INTERVAL_MS);
-        perTick.push(claims.slice(before));
+        perTick.push(claims.length - before);
+        claimed.push(...claims.slice(before));
       }
-      return perTick;
+      const resets = {
+        connections: connections - baseline.connections,
+        closes: clients.reduce((sum, client) => sum + client.closes, 0) - baseline.closes,
+      };
+      releaseInFlight.resolve();
+      return { perTick, claimed, resets, inFlight: await inFlight };
     } finally {
+      releaseInFlight.resolve();
       await proxy.close();
     }
   }
 
-  test("a recoverable handoff is heartbeated on every tick, claiming again", async () => {
-    const perTick = await heartbeatsAfterNotFound("daemon-restart");
+  test.each(["daemon-restart", "device-restart:Pixel"])(
+    "%s: one heartbeat per tick, no connection reset, a call in flight survives",
+    async (reason) => {
+      const outcome = await keeperAfterNotFound(reason, 10);
 
-    expect(perTick.map((tick) => tick.length > 0)).toEqual([true, true, true]);
-    // Every heartbeat after the first not-found answer asks for ownership again.
-    expect(perTick.slice(1).flat()).not.toContain(false);
+      expect(outcome).toEqual({
+        perTick: Array.from({ length: 10 }, () => 1),
+        // Every heartbeat asks for ownership again, so the session is reclaimed when it lands.
+        claimed: Array.from({ length: 10 }, () => true),
+        resets: { connections: 0, closes: 0 },
+        inFlight: "answered",
+      });
+    },
+  );
+
+  test("the keeper stops once the restart-recovery window has passed", async () => {
+    const windowTicks = RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS / INTERVAL_MS;
+    const { perTick, resets } = await keeperAfterNotFound("daemon-restart", windowTicks + 20);
+
+    // The window is counted from the first not-found answer, one tick before these.
+    expect(perTick.slice(0, windowTicks - 1)).toEqual(
+      Array.from({ length: windowTicks - 1 }, () => 1),
+    );
+    // The tick at the bound still asks once (and learns the window is over); none follow.
+    expect(perTick.slice(windowTicks)).toEqual(Array.from({ length: 20 }, () => 0));
+    expect(resets).toEqual({ connections: 0, closes: 0 });
   });
 
   test("a terminal reason is never heartbeated again", async () => {
-    const perTick = await heartbeatsAfterNotFound("heartbeat-timeout");
+    const { perTick } = await keeperAfterNotFound("heartbeat-timeout", 3);
 
-    expect(perTick.map((tick) => tick.length > 0)).toEqual([true, false, false]);
+    expect(perTick).toEqual([0, 0, 0]);
   });
 });
 

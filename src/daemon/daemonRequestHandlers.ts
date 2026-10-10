@@ -1270,7 +1270,13 @@ async function handleReleaseSession(
         },
       };
     }
-    return await releaseUnknownSession(state, manager, sessionId, params?.requireKnown === true);
+    return await releaseUnknownSession(
+      state,
+      manager,
+      sessionId,
+      params?.requireKnown === true,
+      executions,
+    );
   }
   return releaseBoundSession(state, manager, sessionId, session, executions);
 }
@@ -1432,6 +1438,7 @@ async function releaseUnknownSession(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
   requireKnown: boolean,
+  executions?: ReleaseCutExecutions,
 ): Promise<DaemonMethodResult> {
   // Not in the session map is not the same as released (#11461): a restart handoff this daemon has
   // not recovered yet, or a session still being created, would come back after an "already
@@ -1439,9 +1446,18 @@ async function releaseUnknownSession(
   // there was nothing to release. A UUID already fenced terminal needs no second release.
   if (!manager.getTerminalReleaseSnapshot?.(sessionId)) {
     const deviceId = await manager.releaseSession(sessionId);
+    // A recovery that won the race published the session meanwhile: release it like any held one.
+    const published = manager.getSession(sessionId) ?? manager.getReleasingSession?.(sessionId);
+    if (published || manager.hasSession(sessionId)) {
+      return releaseBoundSession(state, manager, sessionId, published, executions);
+    }
     if (deviceId !== null && deviceId !== undefined) {
+      const pool = state.getDevicePool();
       // The row no longer recovers, so its device is no longer held for it (#11294).
-      state.getDevicePool().releaseRehydrationReservation?.(sessionId);
+      pool.releaseRehydrationReservation?.(sessionId);
+      // A session released while it was being created may already hold its device in the pool;
+      // this frees it only if this session is the holder.
+      await pool.releaseDevice(deviceId, sessionId);
       return {
         success: true,
         result: {

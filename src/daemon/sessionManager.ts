@@ -4786,6 +4786,30 @@ export class SessionManager {
    * Resolves the row's device once terminalized, or undefined when there was nothing to release.
    */
   private async releaseUnrecoveredReissuableRow(sessionId: string): Promise<string | undefined> {
+    // A recovery's claim can land between the read and the conditional write. The release is
+    // not dropped for that: the row is released at its new generation, or, once the recovery
+    // has started publishing the session, through the path that releases a session being created.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (this.sessions.has(sessionId)) {
+        break;
+      }
+      if (this.isSessionBeingRecreated(sessionId)) {
+        return (await this.releaseSession(sessionId, "explicit-release")) ?? undefined;
+      }
+      const released = await this.tryReleaseUnrecoveredReissuableRow(sessionId);
+      if (released !== "row-changed") {
+        return released;
+      }
+    }
+    // Published by the recovery that won: the caller releases the live session (the daemon
+    // request handler does, cutting its calls like any explicit release).
+    return undefined;
+  }
+
+  /** One conditional release of the row as read; `row-changed` when another writer got there first. */
+  private async tryReleaseUnrecoveredReissuableRow(
+    sessionId: string,
+  ): Promise<string | undefined | "row-changed"> {
     const persisted = await this.readPersistedSession(sessionId);
     if (!persisted?.release_reason || !this.isReissuablePersistedSession(persisted)) {
       return undefined;
@@ -4806,7 +4830,7 @@ export class SessionManager {
         ? {}
         : { expectedRowGeneration: persisted.stable_identity_generation },
     );
-    return await this.fenceExplicitlyReleasedRow(sessionId);
+    return (await this.fenceExplicitlyReleasedRow(sessionId)) ?? "row-changed";
   }
 
   /** Whether another live daemon owns `row`: such a row is that daemon's to recover or end. */

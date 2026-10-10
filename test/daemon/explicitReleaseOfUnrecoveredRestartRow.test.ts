@@ -151,6 +151,33 @@ describe("explicit release of a restart-recoverable session the daemon has not r
     expect(sessions.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
   });
 
+  test("a recovery that claims the row during the release does not keep the session", async () => {
+    // A call naming the UUID recovers it between the release's read and its conditional write:
+    // the claim advances the row's generation, so that write misses.
+    const markReleased = persistence.markReleased.bind(persistence);
+    let raced = false;
+    persistence.markReleased = async (...args) => {
+      if (!raced) {
+        raced = true;
+        await sessions.getOrCreateSession(SESSION, pool, "ios", undefined, true);
+        expect(pool.getDevice(SIM)?.sessionId).toBe(SESSION);
+      }
+      await markReleased(...args);
+    };
+
+    expect(await explicitRelease()).toMatchObject({
+      success: true,
+      result: { alreadyReleased: false, device: SIM },
+    });
+
+    expect({
+      raced,
+      live: sessions.hasSession(SESSION),
+      rowReason: (await persistence.getSession?.(SESSION))?.release_reason,
+      holder: pool.getDevice(SIM)?.sessionId ?? null,
+    }).toEqual({ raced: true, live: false, rowReason: "explicit-release", holder: null });
+  });
+
   test("a repeated release answers already released", async () => {
     expect(await explicitRelease()).toMatchObject({
       success: true,

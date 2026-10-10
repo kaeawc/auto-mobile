@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
-import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import {
+  DaemonMcpProxy,
+  RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
+} from "../../src/daemon/daemonMcpProxy";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -16,10 +19,11 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // | what the daemon holds / told the proxy              | keeper       | heartbeats   | a call naming it  |
 // | --------------------------------------------------- | ------------ | ------------ | ----------------- |
 // | live, acquired or reached by a call since           | runs         | every tick   | forwarded         |
-// | gone with a recoverable reason, told by a not-found | may run      | allowed: the | forwarded         |
-// |   heartbeat (#11461)                                |              | owner waits  |                   |
-// | gone with no reason, told by a not-found heartbeat  | for others   | none needed  | forwarded, and    |
-// |                                                     |              |              | success re-arms   |
+// | gone with a recoverable reason, told by a not-found | runs         | exactly once | forwarded         |
+// |   heartbeat, within the recovery window of the      |              | a tick       |                   |
+// |   first such answer (#11461)                        |              |              |                   |
+// | gone with no reason, or a recoverable one past its  | for others   | none needed  | forwarded, and    |
+// |   window, told by a not-found heartbeat             |              |              | success re-arms   |
 // | gone with any reason that is not recoverable        | for others   | never again  | refused locally   |
 // |   (terminal, `plan-auto-release`, unknown to this   |              |              | while it is the   |
 // |   build), proxy told (release notification or       |              |              | fenced binding    |
@@ -127,6 +131,11 @@ interface SessionModel {
   /** The reason the daemon gives once the session is gone for good. */
   endedAs: string;
   heartbeats: number;
+  /**
+   * When the daemon first answered a heartbeat not-found with the recoverable reason, until a
+   * call restores the session: the proxy keeps heartbeating it for the recovery window (#11461).
+   */
+  recoverableSince?: number;
 }
 
 /** A daemon the proxy talks to, with the model of what the proxy must do about each session. */
@@ -223,14 +232,20 @@ class World {
       }
       this.learnDead(sessionUuid);
     }
-    // A recoverable handoff is not "told gone": its owner keeps heartbeating so a daemon that is
-    // still recovering the session finds it reclaimed when it lands (#11461).
-    session.told = session.daemon !== "recoverable";
+    // A recoverable handoff is not "told gone" until its recovery window has passed: its owner
+    // keeps heartbeating so a daemon still recovering the session finds it reclaimed (#11461).
+    session.told = session.daemon !== "recoverable" || this.recoveryWindowPassed(session);
     throw Object.assign(new Error(`Session not found: ${sessionUuid}`), {
       code: DAEMON_SESSION_NOT_FOUND_CODE,
       ...(session.daemon === "terminal" ? { releaseReason: session.endedAs } : {}),
       ...(session.daemon === "recoverable" ? { releaseReason: RECOVERABLE_REASON } : {}),
     });
+  }
+
+  /** Notes a recoverable not-found answer; true once the window since the first has passed. */
+  private recoveryWindowPassed(session: SessionModel): boolean {
+    session.recoverableSince ??= this.timer.now();
+    return this.timer.now() - session.recoverableSince >= RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS;
   }
 
   private answerCall(sessionUuid: string): void {
@@ -243,6 +258,7 @@ class World {
     // the proxy may heartbeat it again.
     session.daemon = "live";
     session.told = false;
+    session.recoverableSince = undefined;
     if (this.rejectNextCall) {
       this.rejectNextCall = false;
       throw new Error("Element not found: text 'Continue'");
@@ -396,7 +412,24 @@ class World {
 
   async tick(): Promise<void> {
     const before = new Map([...this.mustBeat].map((id) => [id, this.sessions.get(id)!.heartbeats]));
+    // Sessions the proxy already knows are recoverable-not-found and still waits for.
+    const awaited = [...this.sessions]
+      .filter(
+        ([, session]) =>
+          session.daemon === "recoverable" &&
+          session.recoverableSince !== undefined &&
+          !session.told,
+      )
+      .map(([id, session]) => ({ id, session, heartbeats: session.heartbeats }));
     await this.timer.advanceTimeAsync(INTERVAL_MS);
+    for (const { id, session, heartbeats } of awaited) {
+      const sent = session.heartbeats - heartbeats;
+      if (session.daemon === "recoverable" && sent !== 1) {
+        this.violations.push(
+          `recoverable not-found session ${id} got ${sent} heartbeats on a keeper tick, not 1`,
+        );
+      }
+    }
     for (const [sessionUuid, heartbeats] of before) {
       if (this.sessions.get(sessionUuid)!.heartbeats === heartbeats) {
         this.violations.push(`held session ${sessionUuid} was not heartbeated on a keeper tick`);
@@ -519,6 +552,17 @@ const REGRESSIONS: ReadonlyArray<readonly [string, readonly Command[]]> = [
       TICK,
       { kind: "call", target: 1, rejected: true },
       TICK,
+    ],
+  ],
+  [
+    "#11461.2 a recoverable not-found is heartbeated once a tick until its recovery window passes",
+    [
+      ACQUIRE,
+      { kind: "release", target: 0, gone: "recoverable", notify: false },
+      ...Array.from(
+        { length: RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS / INTERVAL_MS + 3 },
+        () => TICK,
+      ),
     ],
   ],
   [

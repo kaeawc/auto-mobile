@@ -28,7 +28,8 @@ interface AppliedAppearance {
 interface AppearanceSyncDependencies {
   getConfig: typeof getAppearanceConfig;
   resolveMode: typeof resolveAppearanceMode;
-  getTargets: () => AppearanceSyncTarget[];
+  /** Omitted: the scheduler's own targets, the pooled Android devices a session holds. */
+  getTargets?: () => AppearanceSyncTarget[];
   apply: typeof applyAppearanceToDevice;
   isEnabled?: () => boolean;
   applyDeadlineMs?: number;
@@ -58,7 +59,6 @@ export class AppearanceSyncScheduler {
     dependencies: AppearanceSyncDependencies = {
       getConfig: getAppearanceConfig,
       resolveMode: resolveAppearanceMode,
-      getTargets: () => this.getSyncTargets(),
       apply: applyAppearanceToDevice,
       isEnabled: isAppearanceSyncEnabledFromEnvironment,
     },
@@ -151,7 +151,7 @@ export class AppearanceSyncScheduler {
   }
 
   private async tick(): Promise<void> {
-    const targets = this.scope?.getTargets() ?? this.dependencies.getTargets();
+    const targets = this.scope?.getTargets() ?? this.ownTargets();
     if (this.stopped) {
       return;
     }
@@ -239,6 +239,11 @@ export class AppearanceSyncScheduler {
         device.incarnation === undefined ||
         previous.incarnation === device.incarnation)
     );
+  }
+
+  /** The targets of a scheduler nothing has scoped: the injected ones, else the pool's. */
+  private ownTargets(): AppearanceSyncTarget[] {
+    return this.dependencies.getTargets?.() ?? this.getSyncTargets();
   }
 
   private getSyncTargets(): AppearanceSyncTarget[] {

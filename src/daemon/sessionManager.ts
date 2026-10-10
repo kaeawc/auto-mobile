@@ -37,6 +37,7 @@ import {
   DeviceSessionNotActiveError,
   DeviceSessionRepository,
   DeviceSessionRowChangedError,
+  DeviceSessionTerminallyReleasedError,
   isDeviceRestartReleaseReason,
   isRecoverableDeviceSession,
   type DeviceSessionActivityUpdate,
@@ -1539,6 +1540,12 @@ export class SessionManager {
    * {@link readPersistedSession}. In memory only: a daemon restart falls back to the row.
    */
   private readonly restartRecoveryActivityAt: Map<string, number> = new Map();
+  /**
+   * UUIDs whose live row this daemon is about to rewrite over a terminal row its own superseded
+   * release wrote or may still write (#11206), counted per pending rewrite. While one is pending,
+   * a terminal row under the live session is that release's, not the end of the UUID (#11498).
+   */
+  private readonly pendingSupersededRowReasserts: Map<string, number> = new Map();
   /** Releases received before an assignment has published its session. */
   private readonly pendingSessionReleases: Map<string, PendingSessionRelease> = new Map();
   /** Rebinds that a release must await before it can remove the live binding. */
@@ -3022,26 +3029,48 @@ export class SessionManager {
     );
   }
 
+  /**
+   * Mark a row found past its deadline `expired`, and resolve with the row as it stands afterwards
+   * (the row given when nothing was written). The write is conditioned, in the statement, on the
+   * deadline still being at or before the instant it was judged at (#11498): an activity write by
+   * the row's owner does not advance the generation, so a lease or a device-restart recovery
+   * window it extended after this read would otherwise be released anyway. The caller answers from
+   * the returned row, never from the one it read before the write.
+   */
   private async terminalizeExpiredPersistedSession(
     persisted: DeviceSession | undefined,
-  ): Promise<void> {
+  ): Promise<DeviceSession | undefined> {
+    const now = this.sessionNow();
     if (
-      persisted &&
-      persisted.expires_at_ms <= this.sessionNow() &&
-      (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason))
+      !persisted ||
+      persisted.expires_at_ms > now ||
+      (persisted.release_reason && isTerminalReleaseReason(persisted.release_reason))
     ) {
-      this.restartRecoveryActivityAt.delete(persisted.session_uuid);
-      // Only the row judged expired: a peer may re-upsert the UUID after this read (#11129).
-      await this.deviceSessionRepository.markReleased(
-        persisted.session_uuid,
-        "expired",
-        this.sessionNow(),
-        "expired",
-        persisted.stable_identity_generation === undefined
-          ? {}
-          : { expectedRowGeneration: persisted.stable_identity_generation },
-      );
+      return persisted;
     }
+    // Only the row judged expired: a peer may re-upsert the UUID after this read (#11129).
+    await this.deviceSessionRepository.markReleased(
+      persisted.session_uuid,
+      "expired",
+      now,
+      "expired",
+      {
+        ...(persisted.stable_identity_generation === undefined
+          ? {}
+          : { expectedRowGeneration: persisted.stable_identity_generation }),
+        // The repository compares stored stamps, which are wall ms; the session-clock wrapper
+        // converts the release stamp but passes options through as given. A stamp this daemon
+        // wrote itself is judged above as the session-clock instant it was written from (#11358),
+        // so after a wall step the statement can disagree with that judgement by the step; then
+        // nothing is written and the row is still answered as it reads below.
+        onlyIfExpiredAtMs: this.sessionClockToWall(now),
+      },
+    );
+    const current = await this.readPersistedSession(persisted.session_uuid);
+    if (!this.isReissuablePersistedSession(current)) {
+      this.restartRecoveryActivityAt.delete(persisted.session_uuid);
+    }
+    return current;
   }
 
   private terminalReleaseFromPersisted(
@@ -3684,7 +3713,7 @@ export class SessionManager {
     requireIssuedSession: boolean,
     shared: SharedSessionAssignment,
   ): Promise<Session> {
-    const persisted = await this.readPersistedSession(sessionId);
+    let persisted = await this.readPersistedSession(sessionId);
     const persistedTerminalRelease = persisted
       ? this.terminalReleaseFromPersisted(sessionId, persisted)
       : undefined;
@@ -3704,15 +3733,24 @@ export class SessionManager {
     // was bypassed by the call path — the ownership bypass this closes. The
     // pool-less `if (!devicePool)` throw below stays as a secondary safety net.
     if (requireIssuedSession && !this.isReissuablePersistedSession(persisted)) {
-      await this.terminalizeExpiredPersistedSession(persisted);
-      throw this.unadmittedSessionError(
-        sessionId,
-        persisted,
-        new UnissuedSessionError(
-          `Session ${sessionId} is not an active daemon session (not found). ` +
-            "Acquire a device with getAndroid or getApple before using its sessionUuid.",
-        ),
-      );
+      // Answered from the row as the expiry write left it (#11498): a row whose deadline was
+      // extended under this call is still live or recoverable, and is admitted like any other.
+      persisted = await this.terminalizeExpiredPersistedSession(persisted);
+      const terminalRelease = persisted && this.terminalReleaseFromPersisted(sessionId, persisted);
+      if (terminalRelease) {
+        this.terminalReleaseSnapshots.set(sessionId, terminalRelease);
+        throw new TerminalSessionError(sessionId, terminalRelease);
+      }
+      if (!this.isReissuablePersistedSession(persisted)) {
+        throw this.unadmittedSessionError(
+          sessionId,
+          persisted,
+          new UnissuedSessionError(
+            `Session ${sessionId} is not an active daemon session (not found). ` +
+              "Acquire a device with getAndroid or getApple before using its sessionUuid.",
+          ),
+        );
+      }
     }
     // Need to create new session - assign device from pool
     if (!devicePool) {
@@ -5810,6 +5848,7 @@ export class SessionManager {
     ) {
       return;
     }
+    const settle = this.expectSupersededRowReassert(session.sessionId);
     try {
       await this.persistSession(session, session);
     } catch (error) {
@@ -5818,7 +5857,28 @@ export class SessionManager {
           `superseded release: ${errorMessage(error)}`,
         error,
       );
+    } finally {
+      settle();
     }
+  }
+
+  /** Count a pending rewrite of `sessionId`'s live row; the returned function ends it, once. */
+  private expectSupersededRowReassert(sessionId: string): () => void {
+    const pending = this.pendingSupersededRowReasserts;
+    pending.set(sessionId, (pending.get(sessionId) ?? 0) + 1);
+    let settled = false;
+    return () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      const remaining = (pending.get(sessionId) ?? 1) - 1;
+      if (remaining > 0) {
+        pending.set(sessionId, remaining);
+      } else {
+        pending.delete(sessionId);
+      }
+    };
   }
 
   private upgradeReleaseReason(reason: ReleaseReasonState, candidate: string): void {
@@ -6080,23 +6140,30 @@ export class SessionManager {
   }
 
   private trackLateReleaseWrite(write: Promise<void>, snapshot: SessionReleaseSnapshot): void {
-    const settled = write.then(
-      async () => {
-        this.confirmTerminalReleaseWrite(snapshot);
-        // A superseded release lifted its fence while this write was parked (#11206).
-        const live = this.sessions.get(snapshot.sessionId);
-        if (snapshot.terminal && live) {
-          await this.reassertSupersededLiveRow(live);
-        }
-      },
-      (error: unknown) => {
-        logger.warn(`[SessionManager] Late session release write failed: ${errorMessage(error)}`);
-        // The row is still active: without a retry a restart would revive the released UUID.
-        if (snapshot.terminal) {
-          this.scheduleTerminalReleaseRetry(snapshot);
-        }
-      },
-    );
+    // From here until the rewrite below is done, a terminal row under a session that lives on is
+    // this parked write's: an activity write that finds it must not end the session (#11498).
+    const settleReassert = snapshot.terminal
+      ? this.expectSupersededRowReassert(snapshot.sessionId)
+      : undefined;
+    const settled = write
+      .then(
+        async () => {
+          this.confirmTerminalReleaseWrite(snapshot);
+          // A superseded release lifted its fence while this write was parked (#11206).
+          const live = this.sessions.get(snapshot.sessionId);
+          if (snapshot.terminal && live) {
+            await this.reassertSupersededLiveRow(live);
+          }
+        },
+        (error: unknown) => {
+          logger.warn(`[SessionManager] Late session release write failed: ${errorMessage(error)}`);
+          // The row is still active: without a retry a restart would revive the released UUID.
+          if (snapshot.terminal) {
+            this.scheduleTerminalReleaseRetry(snapshot);
+          }
+        },
+      )
+      .finally(() => settleReassert?.());
     this.trackReleaseDrainWrite(settled);
   }
 
@@ -9600,15 +9667,20 @@ export class SessionManager {
       if (this.issuedActivityWrites.get(session) === issued) {
         this.issuedActivityWrites.delete(session);
       }
+      if (error instanceof TerminalSessionError) {
+        // Not a storage failure: the session ended, and the caller gets that typed answer.
+        throw error;
+      }
       throw new SessionActivityPersistenceError(session.sessionId, error);
     }
   }
 
   /**
    * Write an activity row. When no active row matched (#11129) while this daemon still holds the
-   * session — a peer expired it — re-upsert the whole row so the live session stays recoverable; a
-   * terminal row stays a failure, so the dedupe forgets the write. A session this daemon already
-   * released has no row to keep.
+   * session — a peer expired it — re-upsert the whole row so the live session stays recoverable. A
+   * terminal row is final, whoever wrote it: the upsert refuses, in its statement, to make such a
+   * row active again (#11498), and the refusal ends the session here with the row's release. A
+   * session this daemon already released has no row to keep.
    */
   private async persistSessionActivity(
     session: Session,
@@ -9628,16 +9700,60 @@ export class SessionManager {
       logger.debug(`[SessionManager] Activity for released session ${session.sessionId} skipped`);
       return;
     }
-    // A terminal row is final, whoever wrote it: never revive it.
-    const terminal = await this.getPersistedTerminalRelease(session.sessionId);
-    if (terminal || !this.isAdmittedForAutomation(session)) {
-      throw new DeviceSessionNotActiveError(session.sessionId);
-    }
     logger.warn(
       `[SessionManager] Session ${session.sessionId} is live but its row is not active; ` +
         "re-persisting it",
     );
-    await this.persistSession(session, session);
+    try {
+      // No read decides this: a terminal release can land after any read, and while the upsert
+      // awaits its retention prune (this daemon's own release included).
+      await this.persistSession(session, session, { unlessTerminal: true });
+    } catch (error) {
+      if (!(error instanceof DeviceSessionTerminallyReleasedError)) {
+        throw error;
+      }
+      throw await this.endSessionTerminallyReleasedInRow(session);
+    }
+  }
+
+  /**
+   * The re-persist of a live session found its row terminally released (#11498): the UUID has
+   * ended, so the session is not kept in memory behind a row that says otherwise. It is released
+   * with the row's own reason (cutting its calls in flight, and returning its device as a lookup
+   * that finds an expired session does, because no caller is there to return it), and the typed
+   * terminal refusal is resolved for the caller to throw. A session this daemon is already
+   * releasing is left to that release.
+   */
+  private async endSessionTerminallyReleasedInRow(session: Session): Promise<Error> {
+    const sessionId = session.sessionId;
+    if (this.pendingSupersededRowReasserts.has(sessionId)) {
+      // The terminal row is this daemon's own superseded release's, about to be rewritten live
+      // (#11206): the session lives on, and only this activity write did not persist.
+      return new DeviceSessionNotActiveError(sessionId);
+    }
+    const persistedRelease = await this.getPersistedTerminalRelease(sessionId);
+    if (!persistedRelease || this.pendingSupersededRowReasserts.has(sessionId)) {
+      // The refused row is gone or unreadable (pruned, or a store without lookup), or is being
+      // rewritten live: there is no release to adopt, and the activity still did not persist.
+      return new DeviceSessionNotActiveError(sessionId);
+    }
+    const releaseReason = persistedRelease.releaseReason;
+    if (this.isAdmittedForAutomation(session)) {
+      logger.warn(
+        `[SessionManager] Session ${sessionId} is live but its row was terminally released ` +
+          `(${releaseReason}); releasing it`,
+      );
+      if (isTaggedTerminalReleaseReason(releaseReason)) {
+        this.cancelExecutionsCutByRelease(sessionId, releaseReason);
+      }
+      await this.releaseSessionForReason(sessionId, releaseReason, true, undefined, {
+        expiryOrigin: "lazy-expiry",
+      });
+    }
+    return new TerminalSessionError(
+      sessionId,
+      this.terminalReleaseSnapshots.get(sessionId) ?? persistedRelease,
+    );
   }
 
   /** Whether the session's persisted activity fields differ from the newest issued write. */
@@ -9665,6 +9781,11 @@ export class SessionManager {
       assignedDevices: this.getAssignedDevices().size,
     };
   }
+}
+
+/** Only reasons tagged in the release-reason table are terminal, so a match is a known reason. */
+function isTaggedTerminalReleaseReason(reason: string): reason is SessionReleaseReason {
+  return isTerminalReleaseReason(reason);
 }
 
 /** One issued activity write; compared by identity so a newer write is never forgotten. */

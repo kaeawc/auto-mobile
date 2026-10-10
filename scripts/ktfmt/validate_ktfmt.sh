@@ -217,8 +217,10 @@ if ! ktfmt --google-style "${formatted_files[@]}" > "$ktfmt_log" 2>&1; then
     errors="ktfmt failed to run (non-zero exit):\n$(<"$ktfmt_log")\n"
 fi
 
+declare -a unformatted_files=()
 for index in "${!files_to_process[@]}"; do
     if ! diff -q "${files_to_process[$index]}" "${formatted_files[$index]}" >/dev/null 2>&1; then
+        unformatted_files+=("${files_to_process[$index]}")
         errors="${errors}${files_to_process[$index]}: File needs formatting\n"
     fi
 done
@@ -237,7 +239,10 @@ if [[ -n "$errors" ]]; then
     echo -e "$errors"
     echo -e "${YELLOW}To fix these issues, run:${NC}"
     echo "cat <<EOF | xargs ktfmt --google-style"
-    printf '%s\n' "${files_to_process[@]}"
+    # List only the files that need formatting, not every checked file.
+    if [[ ${#unformatted_files[@]} -gt 0 ]]; then
+        printf '%s\n' "${unformatted_files[@]}"
+    fi
     echo "EOF"
     echo -e "${RED}Total time elapsed: $total_elapsed ms.${NC}"
     exit 1

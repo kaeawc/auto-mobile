@@ -46,6 +46,7 @@ describe("VideoRecordingRepository owner scope with a base session (#11533)", ()
       ["other-derived", "other:pixel"],
       ["other-prefix", "plan-base2:pixel"],
       ["wild", "plan_base:pixel"],
+      ["emoji", "😀:pixel"],
       ["legacy", undefined],
     ];
     for (const [id, owner] of rows) {
@@ -94,6 +95,10 @@ describe("VideoRecordingRepository owner scope with a base session (#11533)", ()
         ownerBaseSessionUuid: "other",
       }),
     ).toBeNull();
+  });
+
+  test("a non-BMP base id matches by code points, as the in-memory rule does", async () => {
+    expect(await visible("😀", "😀")).toEqual(["emoji", "legacy"]);
   });
 
   test("without a base the scope stays exact-owner", async () => {

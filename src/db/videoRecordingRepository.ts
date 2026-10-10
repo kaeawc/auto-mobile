@@ -180,7 +180,7 @@ function applyOwnerScope<O>(
       const prefix = `${ownerBaseSessionUuid}:`;
       owners.push(
         eb("owner_session_uuid", "=", ownerBaseSessionUuid),
-        eb(sql<string>`substr(owner_session_uuid, 1, ${prefix.length})`, "=", prefix),
+        eb(sql<string>`substr(owner_session_uuid, 1, ${Array.from(prefix).length})`, "=", prefix),
       );
     }
     return eb.or(owners);

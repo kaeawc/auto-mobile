@@ -9,11 +9,12 @@
 #
 # Usage:
 #   scripts/android/overlay-preview.sh [--out DIR] [--width DP] [--height DP]
-#     [--density DPI] [--theme light|dark] SPEC.json [SPEC.json ...]
+#     [--density DPI] [--theme light|dark|both] SPEC.json [SPEC.json ...]
 #
 # Defaults: --out scratch/overlay-preview, 360x640 dp, 160 dpi, light.
 # --theme sets the device night mode; a spec whose theme mode is light or dark
-# still decides for itself.
+# still decides for itself. --theme both renders twice and writes
+# <name>-light.png and <name>-dark.png (plus contact-sheet-light/dark.png).
 #
 # OVERLAY_PREVIEW_GRADLEW overrides the Gradle wrapper (tests use a stub).
 
@@ -22,7 +23,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 usage() {
-  sed -n '3,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '3,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 die() {
@@ -87,20 +88,49 @@ done
 
 mkdir -p "${out_dir}"
 
-gradle_args=(
-  -p "${REPO_ROOT}/android"
-  :control-proxy:testDebugUnitTest
-  --tests '*OverlayPreviewRenderTest'
-  --rerun
-  "-Doverlay.preview.spec=${spec_list}"
-  "-Doverlay.preview.out=${out_dir}"
-)
-[[ -z "${width}" ]] || gradle_args+=("-Doverlay.preview.width=${width}")
-[[ -z "${height}" ]] || gradle_args+=("-Doverlay.preview.height=${height}")
-[[ -z "${density}" ]] || gradle_args+=("-Doverlay.preview.density=${density}")
-[[ -z "${theme}" ]] || gradle_args+=("-Doverlay.preview.theme=${theme}")
+case "${theme}" in
+  "" | light | dark | both) ;;
+  *) die "--theme must be light, dark or both, got '${theme}'" ;;
+esac
 
-"${OVERLAY_PREVIEW_GRADLEW:-${REPO_ROOT}/android/gradlew}" "${gradle_args[@]}"
+# run_gradle THEME OUT_DIR renders every spec once at the given night mode.
+run_gradle() {
+  local run_theme="$1" run_out="$2"
+  local gradle_args=(
+    -p "${REPO_ROOT}/android"
+    :control-proxy:testDebugUnitTest
+    --tests '*OverlayPreviewRenderTest'
+    --rerun
+    "-Doverlay.preview.spec=${spec_list}"
+    "-Doverlay.preview.out=${run_out}"
+  )
+  [[ -z "${width}" ]] || gradle_args+=("-Doverlay.preview.width=${width}")
+  [[ -z "${height}" ]] || gradle_args+=("-Doverlay.preview.height=${height}")
+  [[ -z "${density}" ]] || gradle_args+=("-Doverlay.preview.density=${density}")
+  [[ -z "${run_theme}" ]] || gradle_args+=("-Doverlay.preview.theme=${run_theme}")
+  "${OVERLAY_PREVIEW_GRADLEW:-${REPO_ROOT}/android/gradlew}" "${gradle_args[@]}"
+}
+
+if [[ "${theme}" == "both" ]]; then
+  for variant in light dark; do
+    stage="$(mktemp -d "${out_dir}/.stage-${variant}.XXXXXX")"
+    run_gradle "${variant}" "${stage}"
+    for spec in ${specs[@]+"${specs[@]}"}; do
+      name="$(basename "${spec}" .json)"
+      [[ -f "${stage}/${name}.png" ]] || die "renderer did not write ${stage}/${name}.png"
+      mv "${stage}/${name}.png" "${out_dir}/${name}-${variant}.png"
+      echo "${out_dir}/${name}-${variant}.png"
+    done
+    if [[ ${#specs[@]} -gt 1 ]]; then
+      mv "${stage}/contact-sheet.png" "${out_dir}/contact-sheet-${variant}.png"
+      echo "${out_dir}/contact-sheet-${variant}.png"
+    fi
+    rm -rf "${stage}"
+  done
+  exit 0
+fi
+
+run_gradle "${theme}" "${out_dir}"
 
 for spec in ${specs[@]+"${specs[@]}"}; do
   name="$(basename "${spec}" .json)"

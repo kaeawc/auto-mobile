@@ -112,11 +112,12 @@ private fun loadOverlaySpecText(source: String, text: String): OverlaySpec {
  * and night mode come from the current Robolectric qualifiers.
  */
 internal fun renderOverlay(name: String, spec: OverlaySpec): OverlayScreenshotComparator.Image {
-  val root = mapOverlaySpec(spec).root
+  val model = mapOverlaySpec(spec)
   val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
   try {
     val activity = controller.get()
-    activity.setContent { OverlaySpecContent(root) }
+    // The spec's own theme must reach the renderer, as it does in the live overlay host.
+    activity.setContent { OverlaySpecContent(model.root, theme = model.theme) }
     shadowOf(Looper.getMainLooper()).idleFor(SETTLE)
     val view = activity.findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
     check(view.width > 0 && view.height > 0) { "$name: overlay view was not laid out" }

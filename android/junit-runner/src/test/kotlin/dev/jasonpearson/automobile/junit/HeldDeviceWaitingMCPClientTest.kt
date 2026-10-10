@@ -96,12 +96,17 @@ class HeldDeviceWaitingMCPClientTest {
   }
 
   @Test
-  fun `a cleanup refusal advertising the finalize cap is waited out past 30 s`() {
-    // #11360: the real backoff stretches the budget for device_cleanup_in_progress.
+  fun `a cleanup refusal advertising the finalize cap is polled on the ordinary backoff`() {
+    // #11538: the real backoff uses retryAfterMs only as the total bound for the finalize codes.
     val client =
       HeldDeviceWaitingMCPClient(
         ScriptedClient(
           mutableListOf(
+            {
+              throw RuntimeException(
+                """MCP tool tapOn returned an error: {"success":false,"error":"finalizing","code":"device_cleanup_in_progress","retryable":true,"retryAfterMs":125000}""",
+              )
+            },
             {
               throw RuntimeException(
                 """MCP tool tapOn returned an error: {"success":false,"error":"finalizing","code":"device_cleanup_in_progress","retryable":true,"retryAfterMs":125000}""",
@@ -114,7 +119,7 @@ class HeldDeviceWaitingMCPClientTest {
       )
 
     assertEquals("ok", client.callTool("tapOn", emptyMap()))
-    assertEquals(listOf(125_000L), sleeps)
+    assertEquals(listOf(500L, 1_000L), sleeps)
   }
 
   @Test

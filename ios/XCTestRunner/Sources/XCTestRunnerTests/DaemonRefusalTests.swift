@@ -112,52 +112,47 @@ final class DaemonRefusalTests: XCTestCase {
         XCTAssertNil(nearlySpent.nextDelayMs(retryAfterMs: nil))
     }
 
-    /// #11360: the finalize budget stretches only for the two finalize codes, to the daemon's
-    /// `retryAfterMs` clamped to 150 s; every other code keeps the 30 s budget.
-    func testFinalizeBudgetStretchesOnlyForCleanupAndShuttingDownRefusals() {
-        let hints: [Int?] = [nil, 1000, 125_000, 600_000]
-        let finalizeBudgets = [30000, 30000, 125_000, 150_000]
-        let codes: [(String, Bool)] = [
-            ("device_cleanup_in_progress", true),
-            ("device_shutting_down", true),
-            ("device_owned_by_other_session", false),
-            ("device_owned_by_other_daemon", false),
-            ("capacity_exhausted", false),
-            ("discovery_incomplete", false),
+    /// #11538: the finalize wait ends when the daemon finishes and is bounded by the remaining-time
+    /// hint (clamped to 150 s) for the two finalize codes only; every other code keeps 30 s.
+    func testFinalizeWaitEndsWhenTheDaemonFinishesAndIsBoundedForFinalizeCodesOnly() {
+        let cases: [(String, Bool, Int?, Int)] = [
+            ("device_cleanup_in_progress", true, nil, 30000),
+            ("device_cleanup_in_progress", true, 1000, 1500),
+            ("device_cleanup_in_progress", true, 125_000, 125_000),
+            ("device_cleanup_in_progress", true, 600_000, 150_000),
+            ("device_shutting_down", true, nil, 30000),
+            ("device_shutting_down", true, 1000, 1500),
+            ("device_shutting_down", true, 125_000, 125_000),
+            ("device_shutting_down", true, 600_000, 150_000),
+            ("device_owned_by_other_session", false, 125_000, 30000),
+            ("device_owned_by_other_daemon", false, 125_000, 30000),
+            ("capacity_exhausted", false, 125_000, 30000),
+            ("discovery_incomplete", false, 125_000, 30000),
         ]
-        for (code, stretches) in codes {
-            for (index, hint) in hints.enumerated() {
-                let budget = stretches ? finalizeBudgets[index] : 30000
-                let label = "\(code)/\(String(describing: hint))"
-                // The first delay is the hint clamped to the budget, so it reveals the budget.
-                var first = AutoMobilePlanExecutor.DeviceWaitBackoff()
-                XCTAssertEqual(
-                    first.nextDelayMs(retryAfterMs: hint, code: code),
-                    min(max(500, hint ?? 0), budget),
-                    label
-                )
-                // Having waited exactly the budget leaves nothing.
-                var exhausted = AutoMobilePlanExecutor.DeviceWaitBackoff(budgetMs: budget)
-                XCTAssertEqual(exhausted.nextDelayMs(retryAfterMs: budget, code: code), budget, label)
-                XCTAssertNil(exhausted.nextDelayMs(retryAfterMs: hint, code: code), label)
+        for (code, finalizes, finalizeAtMs, total) in cases {
+            var backoff = AutoMobilePlanExecutor.DeviceWaitBackoff()
+            while !(finalizes && finalizeAtMs.map { backoff.waitedMs >= $0 } == true) {
+                // For the finalize codes the daemon's retryAfterMs is the finalize time remaining.
+                let hint = finalizes ? finalizeAtMs.map { $0 - backoff.waitedMs } : finalizeAtMs
+                if backoff.nextDelayMs(retryAfterMs: hint, code: code) == nil { break }
             }
+            XCTAssertEqual(backoff.waitedMs, total, "\(code)/\(String(describing: finalizeAtMs))")
         }
     }
 
-    func testCleanupRefusalAdvertisingTheFinalizeCapIsWaitedOutPastThirtySeconds() async throws {
+    func testCleanupRefusalAdvertisingTheFinalizeCapIsRetriedOnTheOrdinaryBackoff() async throws {
         let client = RefusalMCPClient()
-        client.executePlanReplies = [
-            #"{"success":false,"error":"finalizing","code":"device_cleanup_in_progress","retryable":true,"retryAfterMs":125000}"#,
-            successPayload,
-        ]
+        let refusal =
+            #"{"success":false,"error":"finalizing","code":"device_cleanup_in_progress","retryable":true,"retryAfterMs":125000}"#
+        client.executePlanReplies = [refusal, refusal, refusal, successPayload]
         let scheduler = RecordingScheduler()
         let executor = makeExecutor(client: client, scheduler: scheduler, retryCount: 0)
 
         let result = try await executor.execute(sessionUuid: "first")
 
         XCTAssertTrue(result.success)
-        XCTAssertEqual(scheduler.delays, [125.0])
-        XCTAssertEqual(client.executePlanSessions, ["first", "session-1"])
+        XCTAssertEqual(scheduler.delays, [0.5, 1.0, 2.0])
+        XCTAssertEqual(client.executePlanSessions.count, 4)
     }
 
     // MARK: - Executor
@@ -171,7 +166,7 @@ final class DaemonRefusalTests: XCTestCase {
         let result = try await executor.execute(sessionUuid: "first")
 
         XCTAssertTrue(result.success)
-        XCTAssertEqual(scheduler.delays, [0.5, 4.0], "backoff, then the daemon's retryAfterMs")
+        XCTAssertEqual(scheduler.delays, [0.5, 1.0], "the finalize refusal stays on the ordinary backoff (#11538)")
         XCTAssertEqual(client.executePlanSessions, ["first", "session-1", "session-2"])
     }
 
@@ -203,7 +198,7 @@ final class DaemonRefusalTests: XCTestCase {
         let result = try await executor.execute(sessionUuid: "first")
 
         XCTAssertTrue(result.success)
-        XCTAssertEqual(scheduler.delays, [2.0])
+        XCTAssertEqual(scheduler.delays, [0.5], "a shutting-down refusal stays on the ordinary backoff (#11538)")
         XCTAssertEqual(client.setToolEnabledSessions, ["first", "session-1"])
         XCTAssertEqual(client.executePlanSessions, ["session-1"], "the refused session never ran executePlan")
     }

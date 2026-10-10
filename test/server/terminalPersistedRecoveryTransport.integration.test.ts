@@ -89,7 +89,7 @@ describe("terminal persisted recovery MCP transport", () => {
       resolveAutolockSessionForMcpSession() {
         return undefined;
       },
-      isAutolockSessionOwnedByOtherConnection() {
+      isSessionOwnedByOtherConnection() {
         return false;
       },
       getDeviceIncarnation() {

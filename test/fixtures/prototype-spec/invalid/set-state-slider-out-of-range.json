@@ -1,0 +1,36 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "k": 1
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "slider",
+          "stateKey": "k",
+          "min": 0,
+          "max": 10
+        },
+        {
+          "type": "button",
+          "label": "Go",
+          "onTap": [
+            {
+              "type": "setState",
+              "key": "k",
+              "value": 99
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onTap[0].value"
+}

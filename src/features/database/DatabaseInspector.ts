@@ -6,6 +6,7 @@ import { shellQuote } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { ProviderUnavailableError } from "../storage/ProviderUnavailableError";
 import { parseJsonKeepingBigIntegers } from "./bigIntegerJson";
+import { AppNotRunningError } from "../../models/AppNotRunningError";
 
 /**
  * Database descriptor returned from listDatabases
@@ -103,6 +104,11 @@ export class DatabaseInspector {
     private device: BootedDevice,
     private adb: AdbExecutor,
     private timer: Pick<Timer, "sleep"> = defaultTimer,
+    /**
+     * True when the reader is not the holder of a device another session holds. Such a read must
+     * not start a dead app's process, so it is refused with `app_not_running` (#11350).
+     */
+    private isNonOwnerReaderOfHeldDevice: () => boolean = () => false,
   ) {}
 
   /**
@@ -190,7 +196,12 @@ export class DatabaseInspector {
     }
 
     // Read before the call: the call itself starts a dead app's process.
-    const wasRunning = await this.isAppProcessRunning(appId);
+    const nonOwner = this.isNonOwnerReaderOfHeldDevice();
+    const wasRunning = await this.isAppProcessRunning(appId, nonOwner);
+    if (!wasRunning && nonOwner) {
+      // Starting the process is a control action on the holder's device (#11350).
+      throw new AppNotRunningError(appId, this.device.deviceId);
+    }
     try {
       return await this.runContentCall<T>(cmd);
     } catch (error) {
@@ -222,12 +233,21 @@ export class DatabaseInspector {
     return this.parseContentCallResult<T>(output);
   }
 
-  /** True when the app has a live process; a failed probe counts as not running. */
-  private async isAppProcessRunning(appId: string): Promise<boolean> {
+  /**
+   * True when the app has a live process. `pidof` exits 1 with no output when nothing matches. For
+   * a non-owner reader (`strict`) that is the only answer that means "not running": any other
+   * failure (device offline, timeout, abort) propagates, so it is never reported as the typed
+   * `app_not_running` refusal (#11350). The owner keeps the lenient reading, where a failed probe
+   * counts as not running.
+   */
+  private async isAppProcessRunning(appId: string, strict: boolean): Promise<boolean> {
     try {
       const result = await this.adb.executeCommand(`shell pidof ${shellQuote(appId)}`);
       return result.stdout.trim().length > 0;
     } catch (error) {
+      if (strict && !isPidofNoMatch(error)) {
+        throw error;
+      }
       // pidof exits non-zero when no process matches; that is the expected "not running" answer.
       logger.debug(`pidof ${appId} found no process: ${error}`);
       return false;
@@ -425,4 +445,14 @@ const DISABLED_ERROR_PREFIX = "Database error (DISABLED):";
 
 function isInspectionDisabled(error: unknown): boolean {
   return error instanceof Error && error.message.startsWith(DISABLED_ERROR_PREFIX);
+}
+
+/** A clean `pidof` miss: exit status 1 and nothing on either stream, as node's execFile rejects. */
+function isPidofNoMatch(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const { code, stdout, stderr } = error as { code?: unknown; stdout?: unknown; stderr?: unknown };
+  const empty = (value: unknown) => value === undefined || String(value).trim().length === 0;
+  return code === 1 && empty(stdout) && empty(stderr);
 }

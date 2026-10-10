@@ -5,6 +5,7 @@ import { ActionableError, BootedDevice } from "../models";
 import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { iosSqlErrorMessage } from "./storageSdkErrors";
+import { isNonOwnerReaderOfHeldDevice } from "./sdkProviderReadAccess";
 import { DatabaseInspector } from "../features/database/DatabaseInspector";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { notifyDatabaseChanged } from "./databaseResources";
@@ -261,7 +262,9 @@ export function registerDatabaseTools() {
 async function executeSqlForDevice(device: BootedDevice, args: SqlQueryArgs): Promise<SQLResult> {
   if (device.platform === "android") {
     const adb = defaultAdbClientFactory.create(device);
-    const inspector = new DatabaseInspector(device, adb);
+    const inspector = new DatabaseInspector(device, adb, undefined, () =>
+      isNonOwnerReaderOfHeldDevice(device.deviceId),
+    );
     // Defence in depth: when the host classifier calls the query a read, tell the SDK to enforce it
     // so a classifier gap can never become a write on the device (#10966).
     return inspector.executeSQL(

@@ -1,0 +1,49 @@
+{
+  "id": "a",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "picked": 1
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "slider",
+        "stateKey": "picked",
+        "min": 0,
+        "max": 10
+      },
+      {
+        "type": "column",
+        "repeat": {
+          "items": [
+            {
+              "tag": 2
+            },
+            {
+              "tag": 3
+            }
+          ],
+          "as": "item"
+        },
+        "children": [
+          {
+            "type": "button",
+            "label": "Pick",
+            "onTap": [
+              {
+                "type": "setState",
+                "key": "picked",
+                "value": "{item.tag}"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

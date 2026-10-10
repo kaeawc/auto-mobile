@@ -19,6 +19,7 @@ import {
   HEARTBEAT_SESSION_LIVENESS_POLICY,
 } from "../../src/daemon/constants";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
+import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { logger } from "../../src/utils/logger";
@@ -685,11 +686,18 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     // (isError: true), not a rejection. The handler still ran against the
     // forwarded session, so that session is live and this one-shot process owns
     // it — without binding it, the adoption below is a no-op and the next
-    // invocation loses the session to the 10 s heartbeat policy (#6870).
+    // invocation loses the session to the 10 s heartbeat policy (#6870). The daemon's echo of
+    // the session it admitted the call under is the proof that the handler ran (#11344).
     const client = new FakeDaemonClient({
       toolResultFor: (name) =>
         name === "tapOn"
-          ? { content: [{ type: "text", text: "No element matched the selector" }], isError: true }
+          ? withRoutedSessionMeta(
+              {
+                content: [{ type: "text", text: "No element matched the selector" }],
+                isError: true,
+              },
+              "joined",
+            )
           : undefined,
       onCallDaemonMethod: daemonHeartbeatHandler(sessionManager),
     });
@@ -705,6 +713,28 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     }
 
     expect(sessionManager.getSession("joined")?.livenessPolicy).toBe("cli-idle");
+  });
+
+  test("does not adopt a session whose error envelope carries no admission echo (#11344)", async () => {
+    // A refusal answers before the handler runs and echoes no routed session: naming a session
+    // is not proof the call was admitted under it, so the connection stays unbound.
+    const client = new FakeDaemonClient({
+      toolResultFor: (name) =>
+        name === "tapOn"
+          ? { content: [{ type: "text", text: "tapOn refused" }], isError: true }
+          : undefined,
+      onCallDaemonMethod: daemonHeartbeatHandler(sessionManager),
+    });
+    await sessionManager.createSession("joined", "emulator-5554", "android", 30 * 60_000);
+    const proxy = proxyOver(client);
+
+    try {
+      const result = await proxy.callTool("tapOn", { sessionUuid: "joined" });
+      expect(result.isError).toBe(true);
+      expect(await proxy.adoptCliSessionLiveness()).toBeUndefined();
+    } finally {
+      await proxy.close();
+    }
   });
 
   test("does not adopt a session the error envelope declares lost", async () => {

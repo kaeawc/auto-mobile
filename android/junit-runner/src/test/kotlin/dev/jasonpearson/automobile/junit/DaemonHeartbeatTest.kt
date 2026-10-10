@@ -5,6 +5,7 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
@@ -228,6 +229,62 @@ class DaemonHeartbeatTest {
   }
 
   @Test
+  fun `one cycle dispatches every session without waiting on any in-flight beat`() {
+    val fake = HeartbeatFake()
+    val queued = mutableListOf<Runnable>()
+    fake.beatExecutor = Executor { queued.add(it) }
+    val handle = fake.manager.start(10L)
+    val ids = (1..5).map { "s$it" }
+    ids.forEach(fake.manager::addSession)
+    val dispatchedBeforeSleep = mutableListOf<Int>()
+    fake.onSleep = {
+      dispatchedBeforeSleep.add(queued.size)
+      when (fake.sleepIntervals.size) {
+        // Cycle 1 dispatched all five while none has answered; cycle 2 must not stack a second
+        // request for any of them. Now the daemon answers every beat.
+        2 -> queued.toList().forEach { it.run() }
+        3 -> handle.close()
+      }
+    }
+
+    fake.runnables.single().run()
+
+    assertEquals(listOf(5, 5, 10), dispatchedBeforeSleep)
+    assertEquals(ids, fake.sentSessions.sorted())
+  }
+
+  @Test
+  fun `a slow beat for one session does not delay another session's beat in the same cycle`() {
+    // Each beat blocks until both beats have started: a serial loop stalls on the first one.
+    val bothStarted = CountDownLatch(2)
+    val bothFinished = CountDownLatch(2)
+    val overlapped = ConcurrentLinkedQueue<String>()
+    lateinit var handle: java.io.Closeable
+    val runnables = mutableListOf<Runnable>()
+    val manager =
+      BackgroundHeartbeatManager(
+        sendHeartbeat = { sessionId ->
+          bothStarted.countDown()
+          if (bothStarted.await(2, TimeUnit.SECONDS)) overlapped.add(sessionId)
+          bothFinished.countDown()
+        },
+        sleeper = { handle.close() },
+        threadFactory = { name, runnable ->
+          runnables.add(runnable)
+          Thread(runnable, name)
+        },
+      )
+    handle = manager.start(10L)
+    manager.addSession("slow")
+    manager.addSession("fast")
+
+    runnables.single().run()
+
+    assertTrue("both beats must finish", bothFinished.await(5, TimeUnit.SECONDS))
+    assertEquals(setOf("slow", "fast"), overlapped.toSet())
+  }
+
+  @Test
   fun `the http heartbeat maps a 404 to the daemon's release reason`() {
     withHeartbeatServer(
       404,
@@ -270,6 +327,84 @@ class DaemonHeartbeatTest {
     } finally {
       server.stop(0)
     }
+  }
+
+  @Test
+  fun `a session registered with no holder runs the loop only until it is removed`() {
+    val fake = HeartbeatFake()
+    fake.manager.addSession("s1")
+    assertTrue(fake.manager.isRunning)
+
+    fake.manager.removeSession("s1")
+
+    assertFalse("no holder and no session: the loop must end", fake.manager.isRunning)
+    fake.runnables.single().run()
+    assertTrue(fake.sentSessions.isEmpty())
+    assertTrue(fake.sleepIntervals.isEmpty())
+  }
+
+  @Test
+  fun `a holderless loop ends once its last session is released by the daemon`() {
+    val fake = HeartbeatFake()
+    fake.onSend = { throw DaemonSessionReleasedException(it, "idle", "Session not found: $it") }
+    fake.onSleep = {}
+    fake.manager.addSession("s1")
+
+    fake.runnables.single().run()
+
+    assertFalse(fake.manager.isRunning)
+    assertEquals(listOf("s1"), fake.sentSessions)
+    assertEquals(1, fake.sleepIntervals.size)
+  }
+
+  @Test
+  fun `a holder keeps the loop running after its sessions are removed`() {
+    val fake = HeartbeatFake()
+    val handle = fake.manager.start(10L)
+    fake.manager.addSession("s1")
+    fake.manager.removeSession("s1")
+
+    assertTrue(fake.manager.isRunning)
+    handle.close()
+    assertFalse(fake.manager.isRunning)
+  }
+
+  @Test
+  fun `non-404 heartbeat failures warn at most once per window with a suppressed count`() {
+    val fake = HeartbeatFake()
+    fake.onSend = { throw java.io.IOException("Daemon heartbeat for $it failed with HTTP 500") }
+    fake.maxSleeps = 4
+    val handle = fake.manager.start(1_000L)
+    fake.manager.addSession("s1")
+    fake.onSleep = {
+      fake.nowMs += if (fake.sleepIntervals.size == 3) 30_000L else 1_000L
+      if (fake.sleepIntervals.size == 4) handle.close()
+    }
+
+    fake.runnables.single().run()
+
+    assertEquals(4, fake.sentSessions.size)
+    assertEquals(
+      listOf(
+        "Daemon heartbeat for s1 failed: Daemon heartbeat for s1 failed with HTTP 500",
+        "Daemon heartbeat for s1 failed: Daemon heartbeat for s1 failed with HTTP 500 " +
+          "(2 similar warnings suppressed)",
+      ),
+      fake.warnings,
+    )
+  }
+
+  @Test
+  fun `a 404 for a never-acknowledged id is not a heartbeat-failure warning`() {
+    val fake = HeartbeatFake()
+    fake.onSend = { throw DaemonSessionReleasedException(it, null, "Session not found") }
+    val handle = fake.manager.start(10L)
+    fake.manager.addSession("new")
+    fake.onSleep = { if (fake.sleepIntervals.size == 2) handle.close() }
+
+    fake.runnables.single().run()
+
+    assertTrue(fake.warnings.isEmpty())
   }
 
   @Test
@@ -498,6 +633,13 @@ class DaemonHeartbeatTest {
           runnables.add(runnable)
           Thread(runnable, name)
         },
+        beatExecutor = Executor { beat -> beatExecutor.execute(beat) },
+        nowMs = { nowMs },
+        warn = { warnings.add(it) },
       )
+    var nowMs = 0L
+    val warnings = mutableListOf<String>()
+    /** Runs each beat inline by default, so a cycle is synchronous and deterministic. */
+    var beatExecutor: Executor = Executor { it.run() }
   }
 }

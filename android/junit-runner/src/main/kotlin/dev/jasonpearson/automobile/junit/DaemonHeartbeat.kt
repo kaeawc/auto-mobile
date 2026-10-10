@@ -5,8 +5,6 @@ import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.concurrent.thread
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
@@ -94,34 +92,6 @@ internal object DaemonHeartbeat {
   /** Why the daemon released [sessionId] while it was heartbeated, or null (#11072). */
   fun sessionLoss(sessionId: String): DaemonSessionLoss? = controller().sessionLoss(sessionId)
 
-  fun start(sessionId: String, intervalMs: Long = DEFAULT_INTERVAL_MS): Closeable {
-    val running = AtomicBoolean(true)
-    val heartbeatThread =
-      thread(start = true, isDaemon = true, name = "auto-mobile-daemon-heartbeat") {
-        while (running.get()) {
-          try {
-            sendHeartbeat(sessionId)
-          } catch (_: DaemonSessionReleasedException) {
-            // The daemon released the session; heartbeating a dead id forever helps nobody.
-            running.set(false)
-          } catch (_: Exception) {
-            // Best-effort heartbeat; ignore failures
-          }
-
-          try {
-            Thread.sleep(intervalMs)
-          } catch (_: InterruptedException) {
-            running.set(false)
-          }
-        }
-      }
-
-    return Closeable {
-      running.set(false)
-      heartbeatThread.interrupt()
-    }
-  }
-
   private fun controller(): DaemonHeartbeatController {
     return testController ?: defaultController
   }
@@ -135,8 +105,8 @@ internal object DaemonHeartbeat {
   /**
    * POSTs one heartbeat. A 404 means the daemon released the session (#11072), reported as
    * [DaemonSessionReleasedException] with the daemon's `releaseReason`; any other failure throws an
-   * ordinary exception the caller treats as a transient miss. The connection is always
-   * disconnected.
+   * ordinary exception the caller treats as a transient miss and warns about, rate-limited. The
+   * connection is always disconnected.
    */
   internal fun sendHeartbeat(endpoint: URL, sessionId: String) {
     val connection = endpoint.openConnection() as HttpURLConnection

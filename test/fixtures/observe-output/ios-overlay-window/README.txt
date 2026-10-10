@@ -14,5 +14,5 @@ gravity bottomCenter, offset 0) is shown in a second UIWindow at window level al
 Raw windows under XCUIApplication, back to front:
   0  Settings app window: UINavigationBar [0,62,402,168], UIToolbar "Toolbar" [0,788,402,874]
   1  overlay window: floating-card [36,708,366,874], like-button and close-button [.., 780, .., 824] (inside the toolbar band),
-     automobile-overlay-dismiss [350,62,394,106] (inside the navigation bar band)
+     automobile-prototype-dismiss [350,62,394,106] (inside the navigation bar band)
 Simulator appearance was dark at capture time.

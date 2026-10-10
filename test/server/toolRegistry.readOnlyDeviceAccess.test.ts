@@ -19,7 +19,7 @@ import { registerInteractionTools } from "../../src/server/interactionTools";
 import { registerNavigationTools } from "../../src/server/navigationTools";
 import { registerNotificationTools } from "../../src/server/notificationTools";
 import { registerObserveTools } from "../../src/server/observeTools";
-import { registerOverlayTools } from "../../src/server/overlayTools";
+import { registerPrototypeTools } from "../../src/server/prototypeTools";
 import {
   DEVICE_OWNED_BY_OTHER_SESSION_CODE,
   InputDeviceOwnedError,
@@ -271,7 +271,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
   });
 
   describe("registered read tools", () => {
-    let disposeOverlayTools: () => void;
+    let disposePrototypeTools: () => void;
 
     beforeEach(() => {
       serverConfig.setEmbeddedSdkEnabled(true);
@@ -283,7 +283,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       registerNavigationTools();
       registerNotificationTools();
       registerObserveTools();
-      disposeOverlayTools = registerOverlayTools();
+      disposePrototypeTools = registerPrototypeTools();
       registerAppTools();
       registerDatabaseTools();
       registerNetworkTools();
@@ -334,7 +334,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     ];
 
     afterEach(() => {
-      disposeOverlayTools();
+      disposePrototypeTools();
       setDebugModeEnabled(false);
     });
 

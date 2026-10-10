@@ -96,12 +96,12 @@ function unsafeSchemaParses(file: string, source: string): string[] {
       ) {
         return;
       }
-      // Device-reported overlay entries parsed from an inspect reply are not tool
+      // Device-reported prototype entries parsed from an inspect reply are not tool
       // arguments, so there is no transport metadata to strip.
       if (
-        file === "overlayTools.ts" &&
+        file === "prototypeTools.ts" &&
         receiver.type === "Identifier" &&
-        receiver.name === "deviceOverlayEntrySchema" &&
+        receiver.name === "devicePrototypeEntrySchema" &&
         first?.type === "Identifier" &&
         first.name === "entry"
       ) {
@@ -109,7 +109,7 @@ function unsafeSchemaParses(file: string, source: string): string[] {
       }
       // The injected iOS agent's status reply, likewise not a tool argument.
       if (
-        file === "overlayTools.ts" &&
+        file === "prototypeTools.ts" &&
         receiver.type === "Identifier" &&
         receiver.name === "iosAgentStatusSchema" &&
         first?.type === "MemberExpression"

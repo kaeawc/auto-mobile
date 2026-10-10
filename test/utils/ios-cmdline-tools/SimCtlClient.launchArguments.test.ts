@@ -89,13 +89,13 @@ test("simctl launch passes SIMCTL_CHILD_ variables over the host environment", a
 
   const result = await client.launchApp("com.example.app", {
     foregroundIfRunning: false,
-    environment: { SIMCTL_CHILD_AUTOMOBILE_OVERLAY_PORT: "8770" },
+    environment: { SIMCTL_CHILD_AUTOMOBILE_PROTOTYPE_PORT: "8770" },
   });
 
   expect(result).toMatchObject({ success: true, pid: 456 });
   expect(calls).toHaveLength(1);
   expect(calls[0]!.args).toEqual(["simctl", "launch", "simulator-udid", "com.example.app"]);
-  expect(calls[0]!.env?.SIMCTL_CHILD_AUTOMOBILE_OVERLAY_PORT).toBe("8770");
+  expect(calls[0]!.env?.SIMCTL_CHILD_AUTOMOBILE_PROTOTYPE_PORT).toBe("8770");
   // The child still gets the host environment (PATH, DEVELOPER_DIR, ...).
   expect(calls[0]!.env?.PATH).toBe(process.env.PATH);
 });

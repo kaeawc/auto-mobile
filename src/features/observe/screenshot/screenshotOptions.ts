@@ -23,12 +23,12 @@ export interface ScreenshotEncodingOptions {
 }
 
 /**
- * Screenshot options an observe threads to its capture: the caller's encoding plus `hideOverlays`,
+ * Screenshot options an observe threads to its capture: the caller's encoding plus `hidePrototypes`,
  * set internally (never from tool input) for a `layer: "app"` observe on a device that can hide its
- * own overlay for the capture (#9305).
+ * own prototype for the capture (#9305).
  */
 export interface ObserveScreenshotOptions extends ScreenshotEncodingOptions {
-  hideOverlays?: boolean;
+  hidePrototypes?: boolean;
 }
 
 export function validateScreenshotOptions(value: unknown): ScreenshotEncodingOptions {

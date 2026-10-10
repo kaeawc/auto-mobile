@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import contract from "../../schemas/prototype-spec-contract.json";
-import { validateOverlaySpec } from "../../src/features/overlay/overlayValidation";
+import { validatePrototypeSpec } from "../../src/features/prototype/prototypeValidation";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { registerPrototypeResources } from "../../src/server/prototypeResources";
 import {
@@ -8,7 +8,7 @@ import {
   renderLimitsTable,
   renderPrototypeGuide,
   searchIcons,
-} from "../../src/features/overlay/prototypeGuide";
+} from "../../src/features/prototype/prototypeGuide";
 
 async function read(uri: string): Promise<string> {
   const direct = ResourceRegistry.getResource(uri);
@@ -75,14 +75,14 @@ describe("automobile:prototype resource", () => {
     );
     expect(blocks).toHaveLength(3);
     const [minimal, list, components] = blocks;
-    expect(validateOverlaySpec(minimal).success).toBe(true);
-    expect(validateOverlaySpec(components)).toMatchObject({ success: true });
+    expect(validatePrototypeSpec(minimal).success).toBe(true);
+    expect(validatePrototypeSpec(components)).toMatchObject({ success: true });
     const wrapped = {
       id: "list",
       window: { placement: { type: "fullscreen" } },
       state: { picked: "" },
       root: list,
     };
-    expect(validateOverlaySpec(wrapped)).toMatchObject({ success: true });
+    expect(validatePrototypeSpec(wrapped)).toMatchObject({ success: true });
   });
 });

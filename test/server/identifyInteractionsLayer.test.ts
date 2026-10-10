@@ -9,15 +9,15 @@ import { FakeNavigationGraphManager } from "../fakes/FakeNavigationGraphManager"
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
-  capturedOverlayHierarchy,
+  capturedPrototypeHierarchy,
   capturedTwoWindowHierarchy,
   observationOf,
-} from "../helpers/overlayWindowCapture";
+} from "../helpers/prototypeWindowCapture";
 
 isolateToolRegistry();
 
 // Captured Recents overview with its floating window relabelled as the CtrlProxy
-// overlay; see test/helpers/overlayWindowCapture.ts. "YouTube" is overlay-only,
+// prototype; see test/helpers/prototypeWindowCapture.ts. "YouTube" is prototype-only,
 // "Screenshot" app-only.
 
 async function identify(result: ObserveResult, args: Record<string, unknown>) {
@@ -57,26 +57,26 @@ describe("identifyInteractions layer (#9305)", () => {
   });
   afterAll(() => setDebugModeEnabled(previousDebugMode));
 
-  test("the schema accepts app and overlay only", () => {
+  test("the schema accepts app and prototype only", () => {
     expect(
       identifyInteractionsSchema.safeParse({ platform: "android", layer: "app" }).success,
     ).toBe(true);
     expect(
-      identifyInteractionsSchema.safeParse({ platform: "android", layer: "overlay" }).success,
+      identifyInteractionsSchema.safeParse({ platform: "android", layer: "prototype" }).success,
     ).toBe(true);
     expect(
       identifyInteractionsSchema.safeParse({ platform: "android", layer: "both" }).success,
     ).toBe(false);
   });
 
-  test("omitted layer identifies overlay and app interactions", async () => {
-    const text = JSON.stringify(await identify(observationOf(capturedOverlayHierarchy()), {}));
+  test("omitted layer identifies prototype and app interactions", async () => {
+    const text = JSON.stringify(await identify(observationOf(capturedPrototypeHierarchy()), {}));
     expect(text).toContain("YouTube");
     expect(text).toContain("Screenshot");
   });
 
-  test('"app" drops overlay interactions and leaves the cached observation intact', async () => {
-    const result = observationOf(capturedOverlayHierarchy());
+  test('"app" drops prototype interactions and leaves the cached observation intact', async () => {
+    const result = observationOf(capturedPrototypeHierarchy());
     const text = JSON.stringify(await identify(result, { layer: "app" }));
 
     expect(text).not.toContain("YouTube");
@@ -84,17 +84,17 @@ describe("identifyInteractions layer (#9305)", () => {
     expect(JSON.stringify(result.viewHierarchy)).toContain("YouTube");
   });
 
-  test('"overlay" keeps overlay interactions only', async () => {
+  test('"prototype" keeps prototype interactions only', async () => {
     const text = JSON.stringify(
-      await identify(observationOf(capturedOverlayHierarchy()), { layer: "overlay" }),
+      await identify(observationOf(capturedPrototypeHierarchy()), { layer: "prototype" }),
     );
     expect(text).toContain("YouTube");
     expect(text).not.toContain("Screenshot");
   });
 
-  test('"overlay" with no overlay showing is an actionable error', async () => {
+  test('"prototype" with no prototype showing is an actionable error', async () => {
     await expect(
-      identify(observationOf(capturedTwoWindowHierarchy()), { layer: "overlay" }),
-    ).rejects.toThrow("no AutoMobile overlay is showing");
+      identify(observationOf(capturedTwoWindowHierarchy()), { layer: "prototype" }),
+    ).rejects.toThrow("no AutoMobile prototype is showing");
   });
 });

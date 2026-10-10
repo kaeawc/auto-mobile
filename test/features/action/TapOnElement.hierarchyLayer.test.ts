@@ -8,15 +8,15 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
-  OVERLAY_CAPTURE,
+  RELABELLED_CAPTURE,
   capturedFloatingCoverHierarchy,
-  capturedOverlayHierarchy,
+  capturedPrototypeHierarchy,
   capturedTwoWindowHierarchy,
   observationOf,
-} from "../../helpers/overlayWindowCapture";
+} from "../../helpers/prototypeWindowCapture";
 
 // Captured Recents overview with its floating window relabelled as the CtrlProxy
-// overlay; see test/helpers/overlayWindowCapture.ts.
+// prototype; see test/helpers/prototypeWindowCapture.ts.
 function createCommand(viewHierarchy: ViewHierarchyResult) {
   const observation = observationOf(viewHierarchy);
   const timer = new FakeTimer();
@@ -40,8 +40,8 @@ function createCommand(viewHierarchy: ViewHierarchyResult) {
   return { command, service, viewHierarchy };
 }
 
-function overlayBounds(hierarchy: ViewHierarchyResult) {
-  return hierarchy.windows!.find((window) => window.id === OVERLAY_CAPTURE.overlayWindowId)!
+function prototypeBounds(hierarchy: ViewHierarchyResult) {
+  return hierarchy.windows!.find((window) => window.id === RELABELLED_CAPTURE.prototypeWindowId)!
     .bounds!;
 }
 
@@ -50,81 +50,81 @@ afterEach(() => {
 });
 
 describe("tapOn layer (#9305)", () => {
-  test("text in both windows taps the overlay by default", async () => {
-    const { command, service, viewHierarchy } = createCommand(capturedOverlayHierarchy());
+  test("text in both windows taps the prototype by default", async () => {
+    const { command, service, viewHierarchy } = createCommand(capturedPrototypeHierarchy());
     const result = await command.execute({ action: "tap", text: "Settings" });
 
     expect(result.success).toBe(true);
     const [tap] = service.getTapHistory();
-    expect(tap.y).toBeGreaterThanOrEqual(overlayBounds(viewHierarchy).top);
+    expect(tap.y).toBeGreaterThanOrEqual(prototypeBounds(viewHierarchy).top);
   });
 
-  test('layer "overlay" taps the overlay\'s match', async () => {
-    const { command, service, viewHierarchy } = createCommand(capturedOverlayHierarchy());
-    const result = await command.execute({ action: "tap", text: "Settings", layer: "overlay" });
+  test('layer "prototype" taps the prototype\'s match', async () => {
+    const { command, service, viewHierarchy } = createCommand(capturedPrototypeHierarchy());
+    const result = await command.execute({ action: "tap", text: "Settings", layer: "prototype" });
 
     expect(result.success).toBe(true);
     const [tap] = service.getTapHistory();
-    expect(tap.y).toBeGreaterThanOrEqual(overlayBounds(viewHierarchy).top);
+    expect(tap.y).toBeGreaterThanOrEqual(prototypeBounds(viewHierarchy).top);
   });
 
-  test('layer "app" taps the app\'s match outside the overlay window', async () => {
-    const { command, service, viewHierarchy } = createCommand(capturedOverlayHierarchy());
+  test('layer "app" taps the app\'s match outside the prototype window', async () => {
+    const { command, service, viewHierarchy } = createCommand(capturedPrototypeHierarchy());
     const result = await command.execute({ action: "tap", text: "Settings", layer: "app" });
 
     expect(result.success).toBe(true);
     const [tap] = service.getTapHistory();
-    expect(tap.y).toBeLessThan(overlayBounds(viewHierarchy).top);
+    expect(tap.y).toBeLessThan(prototypeBounds(viewHierarchy).top);
   });
 
-  test('layer "app" refuses before dispatch when a full-screen overlay covers the match', async () => {
-    const { command, service } = createCommand(capturedOverlayHierarchy({ fullScreen: true }));
+  test('layer "app" refuses before dispatch when a full-screen prototype covers the match', async () => {
+    const { command, service } = createCommand(capturedPrototypeHierarchy({ fullScreen: true }));
     const result = await command.execute({ action: "tap", text: "Settings", layer: "app" });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("an AutoMobile overlay window covers that point");
+    expect(result.error).toContain("an AutoMobile prototype window covers that point");
     expect(service.getTapHistory()).toEqual([]);
   });
 
-  test("default layer refuses an app row a captured floating overlay covers, before dispatch", async () => {
+  test("default layer refuses an app row a captured floating prototype covers, before dispatch", async () => {
     // Device capture: a floating system-layer prototype over the Playground "Elevated" button,
-    // which the device hierarchy keeps under the overlay (own-overlay occlusion exemption).
+    // which the device hierarchy keeps under the prototype (own-prototype occlusion exemption).
     const { command, service } = createCommand(capturedFloatingCoverHierarchy());
     const result = await command.execute({ action: "tap", elementId: "button_elevated" });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("AutoMobile overlay");
+    expect(result.error).toContain("AutoMobile prototype");
     expect(service.getTapHistory()).toEqual([]);
   });
 
-  test("default layer refuses an app-only match under a full-screen overlay, before dispatch", async () => {
-    const { command, service } = createCommand(capturedOverlayHierarchy({ fullScreen: true }));
+  test("default layer refuses an app-only match under a full-screen prototype, before dispatch", async () => {
+    const { command, service } = createCommand(capturedPrototypeHierarchy({ fullScreen: true }));
     const result = await command.execute({ action: "tap", text: "Screenshot" });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("AutoMobile overlay");
+    expect(result.error).toContain("AutoMobile prototype");
     expect(service.getTapHistory()).toEqual([]);
   });
 
-  test('layer "app" cannot reach an overlay-only element', async () => {
-    const { command, service } = createCommand(capturedOverlayHierarchy());
+  test('layer "app" cannot reach a prototype-only element', async () => {
+    const { command, service } = createCommand(capturedPrototypeHierarchy());
     const result = await command.execute({ action: "tap", text: "YouTube", layer: "app" });
 
     expect(result.success).toBe(false);
     expect(service.getTapHistory()).toEqual([]);
   });
 
-  test('layer "overlay" with no overlay showing is an actionable error', async () => {
+  test('layer "prototype" with no prototype showing is an actionable error', async () => {
     const { command, service } = createCommand(capturedTwoWindowHierarchy());
-    const result = await command.execute({ action: "tap", text: "Settings", layer: "overlay" });
+    const result = await command.execute({ action: "tap", text: "Settings", layer: "prototype" });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("no AutoMobile overlay is showing");
+    expect(result.error).toContain("no AutoMobile prototype is showing");
     expect(service.getTapHistory()).toEqual([]);
   });
 
   test("layer cannot be combined with a device-resolved semantic link", async () => {
-    const { command, service } = createCommand(capturedOverlayHierarchy());
+    const { command, service } = createCommand(capturedPrototypeHierarchy());
     const result = await command.execute({
       action: "tap",
       accessibilityLink: "Settings",

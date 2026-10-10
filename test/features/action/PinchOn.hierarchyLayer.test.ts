@@ -12,7 +12,7 @@ import {
   capturedFloatingCoverHierarchy,
   capturedTwoWindowHierarchy,
   observationOf,
-} from "../../helpers/overlayWindowCapture";
+} from "../../helpers/prototypeWindowCapture";
 
 const device: BootedDevice = {
   name: "Android test device",
@@ -24,7 +24,7 @@ const device: BootedDevice = {
 // the Playground Tap screen, whose `button_elevated` [550,1589][996,1715] lies under it and whose
 // scrollable `tap_screen_content` [0,652][1080,2064] is centred outside it. See
 // test/fixtures/android-overlay-window/README.txt.
-const OVERLAY_BOUNDS = { left: 525, top: 1565, right: 1011, bottom: 1723 };
+const PROTOTYPE_BOUNDS = { left: 525, top: 1565, right: 1011, bottom: 1723 };
 
 function createPinch(hierarchy: ViewHierarchyResult) {
   const timer = new FakeTimer();
@@ -57,18 +57,18 @@ afterEach(() => {
 });
 
 describe("pinchOn layer (#9305)", () => {
-  test('"overlay" resolves the container among overlay nodes and pinches inside the overlay', async () => {
+  test('"prototype" resolves the container among prototype nodes and pinches inside the prototype', async () => {
     const { pinchOn, service } = createPinch(capturedFloatingCoverHierarchy());
-    const result = await pinchOn.execute(pinch("coverBox", "overlay"));
+    const result = await pinchOn.execute(pinch("coverBox", "prototype"));
 
     expect(result.error).toBeUndefined();
     const [call] = service.getPinchHistory();
-    expect(call.centerX - call.distanceStart / 2).toBeGreaterThanOrEqual(OVERLAY_BOUNDS.left);
-    expect(call.centerX + call.distanceStart / 2).toBeLessThan(OVERLAY_BOUNDS.right);
-    expect(call.centerY).toBeGreaterThanOrEqual(OVERLAY_BOUNDS.top);
+    expect(call.centerX - call.distanceStart / 2).toBeGreaterThanOrEqual(PROTOTYPE_BOUNDS.left);
+    expect(call.centerX + call.distanceStart / 2).toBeLessThan(PROTOTYPE_BOUNDS.right);
+    expect(call.centerY).toBeGreaterThanOrEqual(PROTOTYPE_BOUNDS.top);
   });
 
-  test('"app" excludes overlay nodes from container resolution', async () => {
+  test('"app" excludes prototype nodes from container resolution', async () => {
     const { pinchOn, service } = createPinch(capturedFloatingCoverHierarchy());
     const result = await pinchOn.execute(pinch("coverBox", "app"));
 
@@ -76,7 +76,7 @@ describe("pinchOn layer (#9305)", () => {
     expect(service.getPinchHistory()).toEqual([]);
   });
 
-  test('"app" refuses before dispatch when the overlay covers a finger start point', async () => {
+  test('"app" refuses before dispatch when the prototype covers a finger start point', async () => {
     const { pinchOn, service } = createPinch(capturedFloatingCoverHierarchy());
     const result = await pinchOn.execute(pinch("button_elevated", "app"));
 
@@ -86,7 +86,7 @@ describe("pinchOn layer (#9305)", () => {
     expect(service.getPinchHistory()).toEqual([]);
   });
 
-  test('"app" pinches an app container whose fingers land outside the overlay', async () => {
+  test('"app" pinches an app container whose fingers land outside the prototype', async () => {
     const { pinchOn, service } = createPinch(capturedFloatingCoverHierarchy());
     const result = await pinchOn.execute(pinch("tap_screen_content", "app"));
 
@@ -94,20 +94,20 @@ describe("pinchOn layer (#9305)", () => {
     expect(service.getPinchHistory()).toHaveLength(1);
   });
 
-  test('"overlay" excludes app nodes from container resolution', async () => {
+  test('"prototype" excludes app nodes from container resolution', async () => {
     const { pinchOn, service } = createPinch(capturedFloatingCoverHierarchy());
-    const result = await pinchOn.execute(pinch("tap_screen_content", "overlay"));
+    const result = await pinchOn.execute(pinch("tap_screen_content", "prototype"));
 
     expect(result.error).toContain("Container element not found for pinchOn");
     expect(service.getPinchHistory()).toEqual([]);
   });
 
-  test('"overlay" with no overlay showing is an actionable error', async () => {
+  test('"prototype" with no prototype showing is an actionable error', async () => {
     const { pinchOn, service } = createPinch(capturedTwoWindowHierarchy());
-    const result = await pinchOn.execute({ direction: "in", layer: "overlay" });
+    const result = await pinchOn.execute({ direction: "in", layer: "prototype" });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("no AutoMobile overlay is showing");
+    expect(result.error).toContain("no AutoMobile prototype is showing");
     expect(service.getPinchHistory()).toEqual([]);
   });
 

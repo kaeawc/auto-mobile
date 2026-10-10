@@ -120,7 +120,7 @@ test/fixtures/android-display/fold-pixel10pf-api36/*.txt text eol=lf
 # Preserve the captured emulator console CRLF bytes in both postures.
 test/fixtures/android-display/fold-pixel10pf-api36/fold-*-hinge-angle0.txt -text
 
-# Shared overlay specs: preserve byte limits and path parity on Windows.
+# Shared prototype specs: preserve byte limits and path parity on Windows.
 test/fixtures/prototype-spec/**/*.json text eol=lf
 schemas/prototype-spec-contract.json text eol=lf
 schemas/prototype-asset-contract.json text eol=lf

@@ -168,7 +168,7 @@ const captureHighlightHierarchy = (
   });
 };
 
-/** Resolve the highlight selector in the app or the AutoMobile overlay only (issue #9305). */
+/** Resolve the highlight selector in the app or the AutoMobile prototype only (issue #9305). */
 const layerScopedSnapshot = (
   snapshot: HierarchySnapshot,
   layer: HighlightArgs["layer"],
@@ -254,7 +254,7 @@ const resolveHighlightShapeFromSelector = async (
   // know the device/observation coordinate space these bounds came from to map
   // them correctly. Always attach source dims on the iOS path so the SDK never
   // falls back to drawing raw daemon coordinates (issue #2682). Android draws its
-  // overlay in observation space, so no source dims are needed there.
+  // prototype in observation space, so no source dims are needed there.
   if (device.platform === "ios") {
     const sourceDimensions = resolveSourceDimensions(viewHierarchy);
     if (sourceDimensions) {

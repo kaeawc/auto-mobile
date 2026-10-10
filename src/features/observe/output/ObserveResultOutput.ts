@@ -147,7 +147,7 @@ export function sanitizeObserveResult(
   reduceAdvisoryOutput(out, cfg.project);
 
   // Full projection (#10715): carry the skeleton's `occluded` signal for rows an application
-  // window or AutoMobile overlay fully covers. Runs before the trim so the clone still mirrors
+  // window or AutoMobile prototype fully covers. Runs before the trim so the clone still mirrors
   // `obs`'s tree node for node.
   if (cfg.project !== "skeleton") {
     markOccludedRowsForFullProjection(out, obs);

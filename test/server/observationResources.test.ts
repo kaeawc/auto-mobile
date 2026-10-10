@@ -720,7 +720,7 @@ describe("unscoped latest observation resources", () => {
     expect(screenshot.blob).toBe(image.toString("base64"));
   });
 
-  describe("readObservationScreenshotBytes (host consumers such as the overlay tool)", () => {
+  describe("readObservationScreenshotBytes (host consumers such as the prototype tool)", () => {
     const uriFor = (deviceId: string, observationId: string) =>
       `automobile:observation/${encodeURIComponent(deviceId)}/${encodeURIComponent(observationId)}/screenshot`;
 

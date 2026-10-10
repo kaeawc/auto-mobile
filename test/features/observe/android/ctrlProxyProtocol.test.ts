@@ -173,11 +173,11 @@ test("Keystore discovery is an optional advertised Android capability", () => {
  * with the Kotlin sealed hierarchy — this is the authoritative device contract the TS union mirrors.
  */
 const KOTLIN_SERIAL_NAMES = [
-  "show_overlay",
-  "dismiss_overlay",
-  "inspect_overlays",
-  "put_overlay_asset",
-  "remove_overlay_asset",
+  "show_prototype",
+  "dismiss_prototype",
+  "inspect_prototypes",
+  "put_prototype_asset",
+  "remove_prototype_asset",
   "request_hierarchy",
   "request_hierarchy_if_stale",
   "set_hierarchy_interval",
@@ -308,75 +308,75 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
     expected: string;
   }
 
-  const overlaySpec = {
+  const prototypeSpec = {
     id: "panel",
     window: { placement: { type: "fullscreen" as const }, opacity: 90 },
     root: { type: "text" as const, text: "Hello" },
   };
   const cases: BuilderCase[] = [
     {
-      builder: "showOverlay",
+      builder: "showPrototype",
       name: "nested typed spec (shared Kotlin literal)",
       actual: serializeCtrlProxyRequest(
-        ctrlProxyRequests.showOverlay({ requestId: "r1", spec: overlaySpec }),
+        ctrlProxyRequests.showPrototype({ requestId: "r1", spec: prototypeSpec }),
       ),
       expected:
-        '{"type":"show_overlay","requestId":"r1","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}}',
+        '{"type":"show_prototype","requestId":"r1","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}}',
     },
     {
-      builder: "showOverlay",
+      builder: "showPrototype",
       name: "explicit displayId (shared Kotlin literal)",
       actual: serializeCtrlProxyRequest(
-        ctrlProxyRequests.showOverlay({ requestId: "r1", spec: overlaySpec, displayId: 2 }),
+        ctrlProxyRequests.showPrototype({ requestId: "r1", spec: prototypeSpec, displayId: 2 }),
       ),
       expected:
-        '{"type":"show_overlay","requestId":"r1","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}},"displayId":2}',
+        '{"type":"show_prototype","requestId":"r1","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}},"displayId":2}',
     },
     {
-      builder: "showOverlay",
+      builder: "showPrototype",
       name: "reset (shared Kotlin literal)",
       actual: serializeCtrlProxyRequest(
-        ctrlProxyRequests.showOverlay({ requestId: "r2", spec: overlaySpec, reset: true }),
+        ctrlProxyRequests.showPrototype({ requestId: "r2", spec: prototypeSpec, reset: true }),
       ),
       expected:
-        '{"type":"show_overlay","requestId":"r2","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}},"reset":true}',
+        '{"type":"show_prototype","requestId":"r2","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}},"reset":true}',
     },
     {
-      builder: "showOverlay",
+      builder: "showPrototype",
       name: "reset false sends nothing",
       actual: serializeCtrlProxyRequest(
-        ctrlProxyRequests.showOverlay({ requestId: "r1", spec: overlaySpec, reset: false }),
+        ctrlProxyRequests.showPrototype({ requestId: "r1", spec: prototypeSpec, reset: false }),
       ),
       expected:
-        '{"type":"show_overlay","requestId":"r1","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}}',
+        '{"type":"show_prototype","requestId":"r1","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}}',
     },
     {
-      builder: "dismissOverlay",
-      name: "one overlay (shared Kotlin literal)",
+      builder: "dismissPrototype",
+      name: "one prototype (shared Kotlin literal)",
       actual: serializeCtrlProxyRequest(
-        ctrlProxyRequests.dismissOverlay({ requestId: "r4", id: "panel" }),
+        ctrlProxyRequests.dismissPrototype({ requestId: "r4", id: "panel" }),
       ),
-      expected: '{"type":"dismiss_overlay","requestId":"r4","id":"panel"}',
+      expected: '{"type":"dismiss_prototype","requestId":"r4","id":"panel"}',
     },
     {
-      builder: "dismissOverlay",
-      name: "all overlays (shared Kotlin literal)",
+      builder: "dismissPrototype",
+      name: "all prototypes (shared Kotlin literal)",
       actual: serializeCtrlProxyRequest(
-        ctrlProxyRequests.dismissOverlay({ requestId: "r5", all: true }),
+        ctrlProxyRequests.dismissPrototype({ requestId: "r5", all: true }),
       ),
-      expected: '{"type":"dismiss_overlay","requestId":"r5","all":true}',
+      expected: '{"type":"dismiss_prototype","requestId":"r5","all":true}',
     },
     {
-      builder: "inspectOverlays",
+      builder: "inspectPrototypes",
       name: "inspect (shared Kotlin literal)",
-      actual: serializeCtrlProxyRequest(ctrlProxyRequests.inspectOverlays({ requestId: "r8" })),
-      expected: '{"type":"inspect_overlays","requestId":"r8"}',
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.inspectPrototypes({ requestId: "r8" })),
+      expected: '{"type":"inspect_prototypes","requestId":"r8"}',
     },
     {
-      builder: "putOverlayAsset",
+      builder: "putPrototypeAsset",
       name: "upload (shared Kotlin literal)",
       actual: serializeCtrlProxyRequest(
-        ctrlProxyRequests.putOverlayAsset({
+        ctrlProxyRequests.putPrototypeAsset({
           requestId: "r6",
           id: "hero",
           mimeType: "image/png",
@@ -384,15 +384,15 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
         }),
       ),
       expected:
-        '{"type":"put_overlay_asset","requestId":"r6","id":"hero","mimeType":"image/png","dataBase64":"iVBORw0KGgo="}',
+        '{"type":"put_prototype_asset","requestId":"r6","id":"hero","mimeType":"image/png","dataBase64":"iVBORw0KGgo="}',
     },
     {
-      builder: "removeOverlayAsset",
+      builder: "removePrototypeAsset",
       name: "removal (shared Kotlin literal)",
       actual: serializeCtrlProxyRequest(
-        ctrlProxyRequests.removeOverlayAsset({ requestId: "r7", id: "hero" }),
+        ctrlProxyRequests.removePrototypeAsset({ requestId: "r7", id: "hero" }),
       ),
-      expected: '{"type":"remove_overlay_asset","requestId":"r7","id":"hero"}',
+      expected: '{"type":"remove_prototype_asset","requestId":"r7","id":"hero"}',
     },
 
     {
@@ -1063,21 +1063,21 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
   });
 });
 
-describe("overlay builders enforce either/or types", () => {
+describe("prototype builders enforce either/or types", () => {
   const spec = {
     id: "panel",
     window: { placement: { type: "fullscreen" as const }, opacity: 90 },
     root: { type: "text" as const, text: "Hello" },
   };
   const invalidBuilders = () => {
-    // @ts-expect-error update_overlay was removed; a same-id show replaces in place
-    ctrlProxyRequests.updateOverlay({ requestId: "r", id: "panel", spec });
+    // @ts-expect-error update_prototype was removed; a same-id show replaces in place
+    ctrlProxyRequests.updatePrototype({ requestId: "r", id: "panel", spec });
     // @ts-expect-error dismiss requires exactly one target
-    ctrlProxyRequests.dismissOverlay({ requestId: "r" });
+    ctrlProxyRequests.dismissPrototype({ requestId: "r" });
     // @ts-expect-error dismiss cannot combine id and all
-    ctrlProxyRequests.dismissOverlay({ requestId: "r", id: "panel", all: true });
+    ctrlProxyRequests.dismissPrototype({ requestId: "r", id: "panel", all: true });
     // @ts-expect-error all must be true
-    ctrlProxyRequests.dismissOverlay({ requestId: "r", all: false });
+    ctrlProxyRequests.dismissPrototype({ requestId: "r", all: false });
   };
   void invalidBuilders;
 });

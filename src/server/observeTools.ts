@@ -4,7 +4,7 @@ import {
   MAX_WAIT_FOR_TIMEOUT_MS,
 } from "../features/observe/waitForTimeout";
 import { publishScreenshotPaths } from "../features/observe/ScreenshotRetention";
-import { iosAgentHidesOverlayForCapture } from "../features/overlay/ios/iosCaptureOverlayHider";
+import { iosAgentHidesPrototypeForCapture } from "../features/prototype/ios/iosCapturePrototypeHider";
 import { readObservationForInteractions } from "./identifyInteractionsObservation";
 import {
   screenshotPathProtection,
@@ -24,7 +24,7 @@ import {
   type ObserveScreenshotOptions,
 } from "../features/observe/screenshot/screenshotOptions";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
-import { SCREENSHOT_HIDE_OVERLAY_CAPABILITY } from "../features/observe/android/ctrlProxyProtocol";
+import { SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY } from "../features/observe/android/ctrlProxyProtocol";
 import { ToolRegistry } from "./toolRegistry";
 import { stripInternalToolParams } from "./internalToolParams";
 import {
@@ -99,7 +99,7 @@ import {
   resolverSelectionStrategySchema,
 } from "./elementSelectorSchemas";
 import {
-  hasOwnOverlay,
+  hasOwnPrototype,
   scopeHierarchyForSelector,
   scopeHierarchyToLayer,
   scopeObserveResultToLayer,
@@ -845,7 +845,7 @@ export type SettledOptions = z.infer<typeof settledSchema>;
 /** waitFor options carrying the (top-level) settled gate, as threaded to {@link waitForObservation}. */
 export type WaitForWithSettled = ObserveWaitForOptions & {
   settled?: SettledOptions;
-  /** Scope element predicates to the app or the AutoMobile overlay (issue #9305). */
+  /** Scope element predicates to the app or the AutoMobile prototype (issue #9305). */
   layer?: HierarchyLayer;
 };
 type ObserveArgs = z.infer<typeof observeSchema>;
@@ -1947,36 +1947,36 @@ interface ObserveToolDependencies {
   > &
     Pick<ObserveScreen, "captureScreenshot">;
   deviceReadAccess?: DeviceObservationAccess;
-  /** Whether the device can hide its own overlay for a capture (#9305); defaults to CtrlProxy's. */
-  hidesOverlayForScreenshot?: (device: BootedDevice) => Promise<boolean>;
+  /** Whether the device can hide its own prototype for a capture (#9305); defaults to CtrlProxy's. */
+  hidesPrototypeForScreenshot?: (device: BootedDevice) => Promise<boolean>;
 }
 
 /**
- * An Android CtrlProxy or a connected iOS overlay agent advertising `screenshot_hide_overlay_v1`
+ * An Android CtrlProxy or a connected iOS prototype agent advertising `screenshot_hide_prototype_v1`
  * (#9305). The iOS agent hides itself around the host's simulator screenshot.
  */
-async function ctrlProxyHidesOverlayForScreenshot(device: BootedDevice): Promise<boolean> {
+async function ctrlProxyHidesPrototypeForScreenshot(device: BootedDevice): Promise<boolean> {
   if (device.platform === "ios") {
-    return iosAgentHidesOverlayForCapture(device.deviceId);
+    return iosAgentHidesPrototypeForCapture(device.deviceId);
   }
   if (device.platform !== "android") {
     return false;
   }
   try {
     return await AndroidCtrlProxyClient.getInstance(device).supportsCommand(
-      SCREENSHOT_HIDE_OVERLAY_CAPABILITY,
+      SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY,
     );
   } catch (error) {
-    // Unknown capability keeps today's capture, which observe reports as including the overlay.
-    logger.debug(`[OBSERVE] Overlay-hiding capability unavailable: ${errorMessage(error)}`);
+    // Unknown capability keeps today's capture, which observe reports as including the prototype.
+    logger.debug(`[OBSERVE] Prototype-hiding capability unavailable: ${errorMessage(error)}`);
     return false;
   }
 }
 
 /**
- * The screenshot options observe captures with: the caller's encoding, plus `hideOverlays` for a
- * `layer: "app"` capture on a device that hides its overlay device-side in the one request (#9305).
- * Device reads never use CtrlProxy for the capture, so they keep the overlay.
+ * The screenshot options observe captures with: the caller's encoding, plus `hidePrototypes` for a
+ * `layer: "app"` capture on a device that hides its prototype device-side in the one request (#9305).
+ * Device reads never use CtrlProxy for the capture, so they keep the prototype.
  */
 async function observeScreenshotOptions(
   args: ObserveArgs,
@@ -1989,9 +1989,9 @@ async function observeScreenshotOptions(
     return args.screenshotOptions;
   }
   const hides = await (
-    dependencies.hidesOverlayForScreenshot ?? ctrlProxyHidesOverlayForScreenshot
+    dependencies.hidesPrototypeForScreenshot ?? ctrlProxyHidesPrototypeForScreenshot
   )(device);
-  return hides ? { ...args.screenshotOptions, hideOverlays: true } : args.screenshotOptions;
+  return hides ? { ...args.screenshotOptions, hidePrototypes: true } : args.screenshotOptions;
 }
 
 function screenForObserve(
@@ -2190,33 +2190,33 @@ async function attachObserveCrop(
 
 /**
  * The observation `observe` serves for `layer` (issue #9305). A plain observe
- * that asks for the overlay while none is showing is an actionable error; a
+ * that asks for the prototype while none is showing is an actionable error; a
  * waitFor observe returns the (empty) scoped capture so its timeout reports the miss.
  */
 function layerScopedObserveResult(
   result: ObserveResult,
   layer: HierarchyLayer | undefined,
   platform: BootedDevice["platform"],
-  requireOverlay: boolean,
+  requirePrototype: boolean,
 ): ObserveResult {
   if (layer === undefined) {
     return result;
   }
-  if (requireOverlay && result.viewHierarchy) {
+  if (requirePrototype && result.viewHierarchy) {
     scopeHierarchyForSelector(result.viewHierarchy, layer);
   }
-  const { screenshotIncludesOverlay: capturedWithoutOverlay, ...scoped } =
+  const { screenshotIncludesPrototype: capturedWithoutPrototype, ...scoped } =
     scopeObserveResultToLayer(result, layer, platform);
-  // A capture taken with the overlay hidden device-side is marked false by the capture itself;
-  // any other `layer: "app"` screenshot still shows the overlay, and observe says so.
-  return layer === "app" && carriesScreenshot(result) && hasOwnOverlay(result.viewHierarchy)
-    ? { ...scoped, screenshotIncludesOverlay: capturedWithoutOverlay !== false }
+  // A capture taken with the prototype hidden device-side is marked false by the capture itself;
+  // any other `layer: "app"` screenshot still shows the prototype, and observe says so.
+  return layer === "app" && carriesScreenshot(result) && hasOwnPrototype(result.viewHierarchy)
+    ? { ...scoped, screenshotIncludesPrototype: capturedWithoutPrototype !== false }
     : scoped;
 }
 
 /**
  * Whether the observation carries a screenshot or crop, so `observe` can say whether a
- * `layer: "app"` image shows the overlay instead of implying an app-only image (issue #9305).
+ * `layer: "app"` image shows the prototype instead of implying an app-only image (issue #9305).
  */
 function carriesScreenshot(result: ObserveResult): boolean {
   return (
@@ -2372,9 +2372,9 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
           ? await navigationGraph.getEdgesFrom(currentScreen)
           : [];
 
-      // Issue #9305: identify interactions on the app or on the overlay only. The cached
+      // Issue #9305: identify interactions on the app or on the prototype only. The cached
       // observation keeps every window; only the copy the analyzer reads is scoped.
-      if (args.layer === "overlay" && cachedResult.viewHierarchy) {
+      if (args.layer === "prototype" && cachedResult.viewHierarchy) {
         scopeHierarchyForSelector(cachedResult.viewHierarchy, args.layer);
       }
       const scoped = scopeObserveResultToLayer(cachedResult, args.layer, device.platform);

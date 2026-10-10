@@ -8,7 +8,7 @@ const NEWLINE = 0x0a;
  * | ------------------------------------------ | ------- | ------------------------------------------------------------------ |
  * | Control socket (`socketServer.ts`)         | 256 MiB | `tools/call` carrying `putAppFile`/fixture `contentBase64`; no tool |
  * |                                            |         | caps it, so it matches the 256 MiB HTTP body cap. Plan YAML and    |
- * |                                            |         | overlay asset bytes are far smaller (overlay assets never cross    |
+ * |                                            |         | prototype asset bytes are far smaller (prototype assets never cross    |
  * |                                            |         | this socket; the daemon sends them to the device).                 |
  * | FailuresStream (`failuresStreamSocket...`) | 8 MiB   | `acknowledge` with `notificationIds`: unbounded by the protocol    |
  * |                                            |         | (polls return at most 500 ids, ~6 KB); 8 MiB holds ~800k ids.      |

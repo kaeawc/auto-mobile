@@ -1,5 +1,5 @@
-import type { OverlayEvent } from "../observe/android/ctrlProxyProtocol";
-import type { OverlayScope } from "../overlay/OverlayStatusStore";
+import type { PrototypeEvent } from "../observe/android/ctrlProxyProtocol";
+import type { PrototypeScope } from "../prototype/PrototypeStatusStore";
 import { logger } from "../../utils/logger";
 import { recordNetworkEvent, type RecordNetworkEventInput } from "../../db/networkEventRepository";
 import { NetworkState } from "../../server/NetworkState";
@@ -28,7 +28,7 @@ export type TelemetryCategory =
   | "layout"
   | "performance"
   | "toolcall"
-  | "overlay";
+  | "prototype";
 
 export interface TelemetryEvent {
   category: TelemetryCategory;
@@ -486,10 +486,10 @@ export class TelemetryRecorder {
     });
   }
 
-  /** Push-only overlay interactions; ownership comes from the event coordinator. */
-  recordOverlayEvent(scope: OverlayScope, event: OverlayEvent): void {
+  /** Push-only prototype interactions; ownership comes from the event coordinator. */
+  recordPrototypeEvent(scope: PrototypeScope, event: PrototypeEvent): void {
     this.pushToSocket({
-      category: "overlay",
+      category: "prototype",
       timestamp: event.timestamp,
       deviceId: scope.deviceId,
       sessionId: scope.sessionUuid ?? null,

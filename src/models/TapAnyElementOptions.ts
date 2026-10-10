@@ -18,6 +18,6 @@ export interface TapAnyElementOptions {
 
   scrollableContainer?: boolean;
 
-  /** Pick the clickable element from the app or the AutoMobile overlay only (issue #9305). */
+  /** Pick the clickable element from the app or the AutoMobile prototype only (issue #9305). */
   layer?: HierarchyLayer;
 }

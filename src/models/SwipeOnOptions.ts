@@ -49,7 +49,7 @@ export interface SwipeOnOptions {
   focusTarget?: boolean;
 
   /**
-   * Scope container, auto-target and lookFor resolution to the app or AutoMobile's overlay, and
+   * Scope container, auto-target and lookFor resolution to the app or AutoMobile's prototype, and
    * refuse a swipe whose start point lies on the other layer (issue #9305).
    */
   layer?: HierarchyLayer;

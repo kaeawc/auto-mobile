@@ -19,13 +19,13 @@ import {
   MALFORMED_MCP_BUDGETS,
 } from "../helpers/mcpArgumentBudgetCases";
 import {
-  DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
-  MAX_OVERLAY_EVENT_TIMEOUT_MS,
-} from "../../src/features/overlay/overlayEventTimeout";
+  DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS,
+  MAX_PROTOTYPE_EVENT_TIMEOUT_MS,
+} from "../../src/features/prototype/prototypeEventTimeout";
 import {
-  DEFAULT_OVERLAY_ASSET_TIMEOUT_MS,
-  MAX_OVERLAY_ASSET_COUNT,
-} from "../../src/features/overlay/overlayAssets";
+  DEFAULT_PROTOTYPE_ASSET_TIMEOUT_MS,
+  MAX_PROTOTYPE_ASSET_COUNT,
+} from "../../src/features/prototype/prototypeAssets";
 import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "../../src/server/observationResourceUris";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
@@ -1511,10 +1511,10 @@ describe("argument budget deadline gaps", () => {
       }
     }
   });
-  describe("overlay awaitEvent", () => {
+  describe("prototype awaitEvent", () => {
     const resolve = (args: unknown, timeoutMs?: number): number =>
       resolveMcpRequestTimeoutMs({
-        id: "overlay-await",
+        id: "prototype-await",
         type: "mcp_request",
         method: "tools/call",
         timeoutMs,
@@ -1523,40 +1523,40 @@ describe("argument budget deadline gaps", () => {
     const headroom = WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS;
     test("the default wait outlives the tool's own default timeout", () => {
       expect(resolve({ action: "awaitEvent", id: "panel" })).toBe(
-        DEFAULT_OVERLAY_EVENT_TIMEOUT_MS + headroom,
+        DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS + headroom,
       );
       expect(resolve({ action: "awaitEvent", id: "panel" })).toBeGreaterThan(
-        DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
+        DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS,
       );
     });
     test("a supplied timeoutMs gets headroom, including the 60 s maximum", () => {
       expect(resolve({ action: "awaitEvent", timeoutMs: 45_000 })).toBe(45_000 + headroom);
-      expect(resolve({ action: "awaitEvent", timeoutMs: MAX_OVERLAY_EVENT_TIMEOUT_MS })).toBe(
-        MAX_OVERLAY_EVENT_TIMEOUT_MS + headroom,
+      expect(resolve({ action: "awaitEvent", timeoutMs: MAX_PROTOTYPE_EVENT_TIMEOUT_MS })).toBe(
+        MAX_PROTOTYPE_EVENT_TIMEOUT_MS + headroom,
       );
       expect(resolve({ action: "awaitEvent", timeoutMs: 10 })).toBe(10 + headroom);
     });
     test("an over-maximum value is bounded by the tool's maximum", () => {
       expect(resolve({ action: "awaitEvent", timeoutMs: 600_000 })).toBe(
-        MAX_OVERLAY_EVENT_TIMEOUT_MS + headroom,
+        MAX_PROTOTYPE_EVENT_TIMEOUT_MS + headroom,
       );
       expect(resolve({ action: "awaitEvent", timeoutMs: Number.MAX_SAFE_INTEGER })).toBe(
-        MAX_OVERLAY_EVENT_TIMEOUT_MS + headroom,
+        MAX_PROTOTYPE_EVENT_TIMEOUT_MS + headroom,
       );
     });
     test("malformed values and arguments use the default wait", () => {
       for (const value of MALFORMED_MCP_BUDGETS) {
         const result = resolve({ action: "awaitEvent", timeoutMs: value });
-        expect(result).toBeLessThanOrEqual(MAX_OVERLAY_EVENT_TIMEOUT_MS + headroom);
+        expect(result).toBeLessThanOrEqual(MAX_PROTOTYPE_EVENT_TIMEOUT_MS + headroom);
         if (value !== Number.MAX_SAFE_INTEGER) {
-          expect(result).toBe(DEFAULT_OVERLAY_EVENT_TIMEOUT_MS + headroom);
+          expect(result).toBe(DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS + headroom);
         }
       }
       for (const args of [null, "wrong", [], undefined, {}]) {
         expect(resolve(args)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
       }
     });
-    test("other overlay actions and a larger request timeout are unchanged", () => {
+    test("other prototype actions and a larger request timeout are unchanged", () => {
       for (const action of [
         "show",
         "dismiss",
@@ -1574,7 +1574,7 @@ describe("argument budget deadline gaps", () => {
     test("show with assets budgets the upload and send twice for the one retry", () => {
       const assets = (count: number) =>
         Array.from({ length: count }, (_, i) => ({ id: `a${i}`, path: `/x/${i}.png` }));
-      const perAsset = DEFAULT_OVERLAY_ASSET_TIMEOUT_MS;
+      const perAsset = DEFAULT_PROTOTYPE_ASSET_TIMEOUT_MS;
       expect(resolve({ action: "show", assets: assets(1) })).toBe(
         2 * (perAsset + 5_000) + headroom,
       );
@@ -1590,7 +1590,7 @@ describe("argument budget deadline gaps", () => {
       }
       // The tool rejects more than the contract maximum, so the budget stops growing there.
       expect(resolve({ action: "show", assets: assets(500) })).toBe(
-        2 * (MAX_OVERLAY_ASSET_COUNT * perAsset + 5_000) + headroom,
+        2 * (MAX_PROTOTYPE_ASSET_COUNT * perAsset + 5_000) + headroom,
       );
     });
     test("observation sources add one capture wait each", () => {
@@ -1602,7 +1602,7 @@ describe("argument budget deadline gaps", () => {
         "junk",
       ];
       expect(resolve({ action: "show", assets })).toBe(
-        2 * (5 * DEFAULT_OVERLAY_ASSET_TIMEOUT_MS + 5_000) +
+        2 * (5 * DEFAULT_PROTOTYPE_ASSET_TIMEOUT_MS + 5_000) +
           2 * OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS +
           headroom,
       );

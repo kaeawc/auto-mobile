@@ -118,10 +118,10 @@ import {
 import { hasAccessibilityAction } from "../utility/elementProperties";
 import { checkAndroidTapHierarchyChange, PRE_RETRY_DELAY_MS } from "./androidGhostTapRetry";
 import {
-  assertAppGestureNotUnderOverlay,
+  assertAppGestureNotUnderPrototype,
   scopeHierarchyForSelector,
 } from "../observe/hierarchyLayer";
-import { ownOverlaySafeGesturePoint } from "../observe/ApplicationWindowCover";
+import { ownPrototypeSafeGesturePoint } from "../observe/ApplicationWindowCover";
 import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import {
   DefaultTalkBackNavigationDriverFactory,
@@ -165,7 +165,7 @@ interface CapturedTapTarget {
   observationDisplay?: ScreenSizeForOffscreenCheckOptions["display"];
   scoped?: boolean;
   talkBackState?: boolean | null;
-  /** The request's `layer`; with none, the tap point must avoid AutoMobile's overlay windows. */
+  /** The request's `layer`; with none, the tap point must avoid AutoMobile's prototype windows. */
   layer?: HierarchyLayer;
   element: Element;
   capture: HierarchySnapshot;
@@ -1027,9 +1027,9 @@ export class TapAnyElement extends BaseVisualChange {
     if (target.layer !== undefined || this.device.platform === "ios") {
       return center;
     }
-    // Default-layer selectors also resolve app rows kept under AutoMobile's own overlay (#10691),
-    // so avoid the overlay as tapOn does; layer "app" refuses later with its own error.
-    const safe = ownOverlaySafeGesturePoint(
+    // Default-layer selectors also resolve app rows kept under AutoMobile's own prototype (#10691),
+    // so avoid the prototype as tapOn does; layer "app" refuses later with its own error.
+    const safe = ownPrototypeSafeGesturePoint(
       target.capture.hierarchy,
       target.element,
       bounds,
@@ -1037,7 +1037,7 @@ export class TapAnyElement extends BaseVisualChange {
     );
     if (!safe) {
       throw new ActionableError(
-        "Target is covered by an AutoMobile overlay window; hide or move the overlay, then retry tapAny.",
+        "Target is covered by an AutoMobile prototype window; hide or move the prototype, then retry tapAny.",
       );
     }
     return safe;
@@ -1746,7 +1746,7 @@ export class TapAnyElement extends BaseVisualChange {
     });
     const tapPoint = this.resolveTapPoint(target);
     // The element resolved in the scoped tree; the touch lands on whatever is on top (#9305).
-    assertAppGestureNotUnderOverlay(target.capture.hierarchy, options.layer, tapPoint, "tap");
+    assertAppGestureNotUnderPrototype(target.capture.hierarchy, options.layer, tapPoint, "tap");
     const action = options.action;
     await this.dispatchTapTarget({
       options,

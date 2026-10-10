@@ -74,7 +74,7 @@ export class OverlayDetector implements OverlayAnalyzer {
     // A window drawn BELOW the container's own window cannot obstruct it: its
     // nodes are under the container on screen, so a touch inside the container
     // lands on the container's window first. Counting them shrank a swipe on a
-    // node inside an AutoMobile overlay window to the few pixels between the
+    // node inside an AutoMobile prototype window to the few pixels between the
     // app buttons underneath it (#10752). `rootGroups` is topmost-first, so
     // every group after the container's is below it. When the container's
     // window is unknown (no windows, or the node did not resolve), every

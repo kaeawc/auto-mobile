@@ -11,7 +11,7 @@ const checksums = {
   ipa: "b".repeat(64),
   videoJar: "c".repeat(64),
   screenCaptureHelper: "d".repeat(64),
-  overlayAgent: "e".repeat(64),
+  prototypeAgent: "e".repeat(64),
   networkFilter: "f".repeat(64),
 };
 const input = { version: "0.0.82", tag: "0.0.82", repository: "kaeawc/auto-mobile", checksums };
@@ -42,11 +42,11 @@ Download automobile-video.jar from the release assets below.
 
 Download screen-capture-helper-macos-universal.zip from the release assets below.
 
-## iOS simulator overlay agent
+## iOS simulator prototype agent
 
-**SHA256 Checksum:** \`${checksums.overlayAgent}\`
+**SHA256 Checksum:** \`${checksums.prototypeAgent}\`
 
-Download AutoMobileOverlayAgent.dylib (universal arm64 + x86_64, ad-hoc signed) from the release assets below.
+Download AutoMobilePrototypeAgent.dylib (universal arm64 + x86_64, ad-hoc signed) from the release assets below.
 
 ## macOS network-filter
 

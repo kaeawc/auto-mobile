@@ -233,20 +233,20 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
     expect(svc.lastCaptureOptions).toEqual({});
   });
 
-  test("passes overlay hiding to the capture and keeps the device's own encoding (#9305)", async () => {
+  test("passes prototype hiding to the capture and keeps the device's own encoding (#9305)", async () => {
     await recorder.capture("observation", new NoOpPerformanceTracker(), undefined, 2, {
-      hideOverlays: true,
+      hidePrototypes: true,
     });
 
-    expect(svc.lastCaptureOptions).toEqual({ displayId: 2, hideOverlays: true });
+    expect(svc.lastCaptureOptions).toEqual({ displayId: 2, hidePrototypes: true });
   });
 
-  test("captureFresh passes overlay hiding to the capture (#9305)", async () => {
+  test("captureFresh passes prototype hiding to the capture (#9305)", async () => {
     await recorder.captureFresh("observation", new NoOpPerformanceTracker(), undefined, undefined, {
-      hideOverlays: true,
+      hidePrototypes: true,
     });
 
-    expect(svc.lastCaptureOptions).toEqual({ hideOverlays: true });
+    expect(svc.lastCaptureOptions).toEqual({ hidePrototypes: true });
   });
 
   test("settled recorder carries writer raster dimensions with the observation path", async () => {
@@ -460,13 +460,13 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
     expect(store.getPath("test-device")).toBe(file);
   });
 
-  test("start() passes overlay hiding to the capture (#9305)", async () => {
+  test("start() passes prototype hiding to the capture (#9305)", async () => {
     recorder.start("observation", new NoOpPerformanceTracker(), undefined, undefined, {
-      hideOverlays: true,
+      hidePrototypes: true,
     });
     await svc.lastCapturePromise();
 
-    expect(svc.lastCaptureOptions).toEqual({ hideOverlays: true });
+    expect(svc.lastCaptureOptions).toEqual({ hidePrototypes: true });
   });
 
   test("start() registers its observation before returning", () => {

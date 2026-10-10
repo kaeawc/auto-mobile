@@ -21,7 +21,7 @@ import { FakeWindow } from "../../../fakes/FakeWindow";
 import {
   capturedFloatingCoverHierarchy,
   observationOf,
-} from "../../../helpers/overlayWindowCapture";
+} from "../../../helpers/prototypeWindowCapture";
 
 // A page inside a pager (#10752). The captured Pixel launcher home has the `smartspace_card_pager`
 // ViewPager (horizontal, no scrollable flag) whose page is `base_template_card_with_date`, inside
@@ -125,7 +125,7 @@ describe("swipeOn container that is a pager page (#10752)", () => {
   });
 
   test("a container with no scrollable ancestor keeps its own bounds", async () => {
-    // The captured floating overlay's `coverBox` has no scrollable ancestor in its window.
+    // The captured floating prototype's `coverBox` has no scrollable ancestor in its window.
     const { action } = harness(capturedFloatingCoverHierarchy(), { width: 1080, height: 2400 });
     const result = await action.execute(
       swipe({ direction: "left", container: { elementId: "coverBox" }, autoTarget: false }),

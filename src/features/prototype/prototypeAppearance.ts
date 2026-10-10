@@ -85,23 +85,28 @@ export function shownAppearance(
 }
 
 /**
+ * The appearance the host remembers for a shown prototype. `deviceDark` is present only while it
+ * came from a device result (a show result, an Android inspect entry or an iOS status): the
+ * `appearance_changed` event carries no such field, so the host never infers it (#11416).
+ */
+export type ShownPrototypeAppearance = Omit<PrototypeAppearance, "deviceDark"> & {
+  deviceDark?: boolean;
+};
+
+/**
  * The cached appearance after an `appearance_changed` event, whose payload is `{mode, source}`.
- * The event does not carry `deviceDark`: a `system` source means the device's own setting is the
- * new mode; any other source came from the prototype itself, so the last reported `deviceDark`
- * stands. With nothing cached and a non-system source there is no `deviceDark` to report, so the
- * result stays undefined. A payload of another shape leaves `previous` as it was.
+ * `mode` and `source` come from the event. The cached `deviceDark` is dropped, never recomputed:
+ * the event does not state the device's own setting, and a mode that stayed pinned while the device
+ * flipped sends no event at all, so any value kept or derived here could be wrong. The next device
+ * result supplies it again. A payload of another shape leaves `previous` as it was.
  */
 export function prototypeAppearanceAfterChange(
-  previous: PrototypeAppearance | undefined,
+  previous: ShownPrototypeAppearance | undefined,
   payload: unknown,
-): PrototypeAppearance | undefined {
+): ShownPrototypeAppearance | undefined {
   const fields = record(payload);
   if (!fields || !isMode(fields.mode) || !isSource(fields.source)) {
     return previous;
   }
-  const { mode, source } = fields;
-  if (source === "system") {
-    return { mode, source, deviceDark: mode === "dark" };
-  }
-  return previous ? { mode, source, deviceDark: previous.deviceDark } : undefined;
+  return { mode: fields.mode, source: fields.source };
 }

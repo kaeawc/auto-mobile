@@ -19,6 +19,7 @@ import {
   FAKE_PROTOTYPE_AGENT_CAPABILITIES,
   FakePrototypeAgentClient,
 } from "../fakes/FakePrototypeAgentClient";
+import { FakePrototypeAssetFileReader } from "../fakes/FakePrototypeAssetFileReader";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -31,6 +32,10 @@ const spec = {
 };
 const darkOverride: PrototypeAppearance = { mode: "dark", source: "override", deviceDark: false };
 const lightSystem: PrototypeAppearance = { mode: "light", source: "system", deviceDark: false };
+const png = Buffer.concat([
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  Buffer.alloc(4),
+]);
 const INSPECT = "prototype_persistence_replay_v1";
 
 function changed(
@@ -73,6 +78,7 @@ describe("prototype appearance on the host (#11223)", () => {
       agentConnections: { get: (deviceId) => (deviceId === ios.deviceId ? agent : undefined) },
       adbFactory: new FakeAdbClientFactory(adb),
       lastRenderedObservation: () => undefined,
+      assetFileReader: new FakePrototypeAssetFileReader().addFile("/img/logo.png", png),
       clock: timer,
       timer,
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
@@ -159,6 +165,49 @@ describe("prototype appearance on the host (#11223)", () => {
       expect(client.getPrototypeHistory()).toEqual([]);
       expect(adb.getExecutedCommands()).toEqual([]);
       expect((await call(android, { action: "status" })).prototypes).toEqual([]);
+    });
+
+    describe.each([
+      ["in-place show", {}],
+      ["reset show", { reset: true }],
+      ["show with assets", { assets: [{ id: "logo", path: "/img/logo.png" }] }],
+    ] as const)("a pinned mode refused on a %s (#11416)", (_name, extra) => {
+      const refusedKeys = (payload: Awaited<ReturnType<typeof show>>) => [
+        payload.success,
+        payload.error?.includes(PROTOTYPE_APPEARANCE_CAPABILITY),
+        payload.uploadedAssets,
+      ];
+
+      test("Android sends no show, asset upload or adb command", async () => {
+        client.setSupportedCommands([]);
+        expect((await show(android)).success).toBe(true);
+        const shows = client.getPrototypeHistory().length;
+        adb.clearHistory();
+
+        const refused = await show(android, { appearance: "dark", ...extra });
+
+        expect(refusedKeys(refused)).toEqual([false, true, undefined]);
+        expect(client.getPrototypeHistory()).toHaveLength(shows);
+        expect(client.getPrototypeAssetHistory()).toEqual([]);
+        expect(adb.getExecutedCommands()).toEqual([]);
+        // The prototype from the first show is still the one status lists.
+        expect((await call(android, { action: "status" })).prototypes?.[0]).toMatchObject({
+          id: spec.id,
+          success: true,
+        });
+      });
+
+      test("iOS sends no agent request", async () => {
+        expect((await show(ios)).success).toBe(true);
+        agent.requests.length = 0;
+        adb.clearHistory();
+
+        const refused = await show(ios, { appearance: "light", ...extra });
+
+        expect(refusedKeys(refused)).toEqual([false, true, undefined]);
+        expect(agent.requests).toEqual([]);
+        expect(adb.getExecutedCommands()).toEqual([]);
+      });
     });
 
     test("iOS forwards a pinned mode to an agent advertising the capability", async () => {
@@ -248,7 +297,7 @@ describe("prototype appearance on the host (#11223)", () => {
     });
 
     test("Android inspect carries each reported prototype's appearance into status", async () => {
-      client.setSupportedCommands([INSPECT]);
+      client.setSupportedCommands([INSPECT, PROTOTYPE_APPEARANCE_CAPABILITY]);
       const entry = { id: "panel", persistent: true, state: {}, pages: {}, lastSequence: 3 };
       client.setInspectReply({
         success: true,
@@ -300,26 +349,53 @@ describe("prototype appearance on the host (#11223)", () => {
         timestamp: 101,
       });
       const status = await call(android, { action: "status" });
-      // A system-sourced change is the device's own setting flipping.
-      expect(status.prototypes?.[0]?.appearance).toEqual({
-        mode: "dark",
-        source: "system",
-        deviceDark: true,
-      });
+      // mode and source come from the event; deviceDark is not in it, so none is reported.
+      expect(status.prototypes?.[0]?.appearance).toEqual({ mode: "dark", source: "system" });
+      expect(status.prototypes?.[0]?.appearance).not.toHaveProperty("deviceDark");
       // lastResult stays the record of what the show itself reported.
       expect(status.lastResult?.appearance).toEqual(lightSystem);
     });
 
-    test("a change the prototype's own state caused keeps the last reported deviceDark", async () => {
+    test("pinned dark on a light device, then a state-driven change: deviceDark is dropped, not kept stale (#11416)", async () => {
+      client.setSupportedCommands([INSPECT, PROTOTYPE_APPEARANCE_CAPABILITY]);
+      client.setPrototypeResult({ success: true, appearance: darkOverride });
+      await show(android, { appearance: "dark" });
+      // The device flips to dark: the pinned mode is unchanged, so no event arrives and the
+      // host still holds what the show reported.
+      expect(
+        (await call(android, { action: "status" })).prototypes?.[0]?.appearance?.deviceDark,
+      ).toBe(false);
+      client.emitPrototypeEvent(changed(1, { mode: "light", source: "authoredBackground" }));
+      const afterEvent = (await call(android, { action: "status" })).prototypes?.[0]?.appearance;
+      expect(afterEvent).toEqual({ mode: "light", source: "authoredBackground" });
+      expect(afterEvent).not.toHaveProperty("deviceDark");
+      // The next device result supplies it again.
+      client.setInspectReply({
+        success: true,
+        prototypes: [
+          {
+            id: "panel",
+            persistent: false,
+            state: {},
+            pages: {},
+            lastSequence: 1,
+            appearance: { mode: "light", source: "authoredBackground", deviceDark: true },
+          },
+        ],
+        droppedEvents: 0,
+      });
+      const inspected = await call(android, { action: "inspect" });
+      expect(inspected.prototypes?.[0]?.appearance?.deviceDark).toBe(true);
+    });
+
+    test("a system change followed by an authored one never reports a synthesised deviceDark (#11416)", async () => {
       client.setPrototypeResult({ success: true, appearance: lightSystem });
       await show(android);
-      client.emitPrototypeEvent(changed(1, { mode: "dark", source: "authoredBackground" }));
-      const status = await call(android, { action: "status" });
-      expect(status.prototypes?.[0]?.appearance).toEqual({
-        mode: "dark",
-        source: "authoredBackground",
-        deviceDark: false,
-      });
+      client.emitPrototypeEvent(changed(1, { mode: "dark", source: "system" }));
+      client.emitPrototypeEvent(changed(2, { mode: "light", source: "roleLuminance" }));
+      const appearance = (await call(android, { action: "status" })).prototypes?.[0]?.appearance;
+      expect(appearance).toEqual({ mode: "light", source: "roleLuminance" });
+      expect(appearance).not.toHaveProperty("deviceDark");
     });
 
     test("a payload outside the contract is still delivered but leaves status as it was", async () => {
@@ -349,10 +425,10 @@ describe("prototype appearance on the host (#11223)", () => {
         name: null,
         payload: { mode: "dark", source: "system" },
       });
+      // The event carries no deviceDark, so the host reports none.
       expect((await call(ios, { action: "status" })).prototypes?.[0]?.appearance).toEqual({
         mode: "dark",
         source: "system",
-        deviceDark: true,
       });
     });
 

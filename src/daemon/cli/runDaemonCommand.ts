@@ -412,7 +412,90 @@ async function runDaemonDiagnosticsCommand(command: string, manager: DaemonManag
   }
 }
 
-async function queryAvailableDevices(manager: DaemonManager): Promise<void> {
+/** `--json`: print a daemon query's result or refusal as one JSON object (#11252). */
+export const DAEMON_JSON_FLAG = "--json";
+
+/**
+ * A daemon query or release that failed, keeping the daemon's typed refusal fields (#11252)
+ * instead of flattening them into a bare "Failed to ...: message".
+ */
+export class DaemonCommandRefusal extends ActionableError {
+  readonly code?: string;
+  readonly nextAction?: string;
+  readonly retryable?: boolean;
+  readonly retryAfterMs?: number;
+  readonly releaseReason?: string;
+  readonly detail: string;
+
+  constructor(context: string, error: unknown) {
+    const field = (name: string): unknown =>
+      error !== null && typeof error === "object" && name in error
+        ? (error as Record<string, unknown>)[name]
+        : undefined;
+    const code = field("code");
+    const nextAction = field("nextAction");
+    const retryable = field("retryable");
+    const retryAfterMs = field("retryAfterMs");
+    const releaseReason = releaseReasonFromError(error);
+    const detail = errorMessage(error);
+    const typedCode =
+      typeof code === "string" || typeof code === "number" ? String(code) : undefined;
+    const typedNextAction = typeof nextAction === "string" ? nextAction : undefined;
+    super(
+      `${context}: ${detail}${releaseReason ? ` (released: ${releaseReason})` : ""}` +
+        `${typedCode ? ` [${typedCode}]` : ""}${typedNextAction ? ` Next: ${typedNextAction}` : ""}`,
+      { cause: error },
+    );
+    this.detail = detail;
+    this.code = typedCode;
+    this.nextAction = typedNextAction;
+    this.retryable = typeof retryable === "boolean" ? retryable : undefined;
+    this.retryAfterMs = typeof retryAfterMs === "number" ? retryAfterMs : undefined;
+    this.releaseReason = releaseReason;
+  }
+}
+
+/** The `--json` object for a failed daemon query; absent refusal fields are omitted. */
+function daemonQueryFailureJson(error: unknown): Record<string, unknown> {
+  if (!(error instanceof DaemonCommandRefusal)) {
+    return { ok: false, error: errorMessage(error) };
+  }
+  const fields: Record<string, unknown> = {
+    code: error.code,
+    nextAction: error.nextAction,
+    retryable: error.retryable,
+    retryAfterMs: error.retryAfterMs,
+    releaseReason: error.releaseReason,
+  };
+  return {
+    ok: false,
+    error: error.detail,
+    ...Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)),
+  };
+}
+
+/** Print a daemon query failure (text on stderr, or one JSON object on stdout) and exit 1. */
+function exitWithDaemonQueryFailure(error: unknown, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(daemonQueryFailureJson(error)));
+  } else if (error instanceof ActionableError) {
+    console.error(`Error: ${error.message}`);
+  } else {
+    console.error(`Unexpected error: ${errorMessage(error)}`);
+  }
+  process.exit(1);
+}
+
+/** Split `--json` out of a command's arguments. */
+function takeJsonFlag(args: string[]): { json: boolean; rest: string[] } {
+  return {
+    json: args.includes(DAEMON_JSON_FLAG),
+    rest: args.filter((arg) => arg !== DAEMON_JSON_FLAG),
+  };
+}
+
+async function queryAvailableDevices(args: string[], manager: DaemonManager): Promise<void> {
+  const { json } = takeJsonFlag(args);
   try {
     // Check if running in daemon process
     const daemonState = manager.getDaemonState();
@@ -442,21 +525,17 @@ async function queryAvailableDevices(manager: DaemonManager): Promise<void> {
         printAvailableDevicesContent(content);
         await client.close();
       } catch (error) {
-        throw new ActionableError(`Failed to query available devices: ${errorMessage(error)}`);
+        throw new DaemonCommandRefusal("Failed to query available devices", error);
       }
     }
     return;
   } catch (error) {
-    if (error instanceof ActionableError) {
-      console.error(`Error: ${error.message}`);
-    } else {
-      console.error(`Unexpected error: ${errorMessage(error)}`);
-    }
-    process.exit(1);
+    exitWithDaemonQueryFailure(error, json);
   }
 }
 
-async function querySessionInfo(args: string[], manager: DaemonManager): Promise<void> {
+async function querySessionInfo(rawArgs: string[], manager: DaemonManager): Promise<void> {
+  const { json, rest: args } = takeJsonFlag(rawArgs);
   try {
     if (args.length === 0) {
       throw new ActionableError("session-info requires a session ID argument");
@@ -490,19 +569,12 @@ async function querySessionInfo(args: string[], manager: DaemonManager): Promise
         console.log(JSON.stringify(result));
         await client.close();
       } catch (error) {
-        throw new ActionableError(
-          `Failed to get session info: ${errorMessage(error)}${releasedSuffix(error)}`,
-        );
+        throw new DaemonCommandRefusal("Failed to get session info", error);
       }
     }
     return;
   } catch (error) {
-    if (error instanceof ActionableError) {
-      console.error(`Error: ${error.message}`);
-    } else {
-      console.error(`Unexpected error: ${errorMessage(error)}`);
-    }
-    process.exit(1);
+    exitWithDaemonQueryFailure(error, json);
   }
 }
 
@@ -511,7 +583,8 @@ async function querySessionInfo(args: string[], manager: DaemonManager): Promise
  * heartbeat, idle-release deadline, holder kind and in-flight executions (#10671). Always asks
  * the daemon over its socket, so the answer is the daemon's own view.
  */
-async function queryActiveSessions(manager: DaemonManager): Promise<void> {
+async function queryActiveSessions(args: string[], manager: DaemonManager): Promise<void> {
+  const { json } = takeJsonFlag(args);
   try {
     const client = manager.createClient();
     try {
@@ -522,19 +595,33 @@ async function queryActiveSessions(manager: DaemonManager): Promise<void> {
       console.log(JSON.stringify(result));
       await client.close();
     } catch (error) {
-      throw new ActionableError(`Failed to query active sessions: ${errorMessage(error)}`);
+      throw new DaemonCommandRefusal("Failed to query active sessions", error);
     }
   } catch (error) {
-    if (error instanceof ActionableError) {
-      console.error(`Error: ${error.message}`);
-    } else {
-      console.error(`Unexpected error: ${errorMessage(error)}`);
-    }
-    process.exit(1);
+    exitWithDaemonQueryFailure(error, json);
   }
 }
 
-async function releaseDaemonSession(args: string[], manager: DaemonManager): Promise<void> {
+async function releaseDaemonSession(rawArgs: string[], manager: DaemonManager): Promise<void> {
+  const { json, rest: args } = takeJsonFlag(rawArgs);
+  const printReleased = (alreadyReleased: boolean, message: string, device?: string) => {
+    if (json) {
+      console.log(
+        JSON.stringify({
+          ok: true,
+          sessionId: args[0],
+          alreadyReleased,
+          message,
+          ...(device !== undefined ? { device } : {}),
+        }),
+      );
+      return;
+    }
+    console.log(message);
+    if (!alreadyReleased && device !== undefined) {
+      console.log(`Device ${device} is now available`);
+    }
+  };
   try {
     if (args.length === 0) {
       throw new ActionableError("release-session requires a session ID argument");
@@ -551,8 +638,7 @@ async function releaseDaemonSession(args: string[], manager: DaemonManager): Pro
       const deviceId = session.assignedDevice;
       await sessionManager.releaseSession(sessionId);
       await pool.releaseDevice(deviceId, sessionId);
-      console.log(`Session ${sessionId} released`);
-      console.log(`Device ${deviceId} is now available`);
+      printReleased(false, `Session ${sessionId} released`, deviceId);
       return;
     }
     {
@@ -581,23 +667,19 @@ async function releaseDaemonSession(args: string[], manager: DaemonManager): Pro
             if (!isReleaseResult(result)) {
               throw new ActionableError("Invalid daemon release-session result");
             }
-            console.log(result.alreadyReleased ? result.message : `Session ${sessionId} released`);
-            if (!result.alreadyReleased && result.device !== undefined) {
-              console.log(`Device ${result.device} is now available`);
-            }
+            printReleased(
+              result.alreadyReleased,
+              result.alreadyReleased ? result.message : `Session ${sessionId} released`,
+              result.device,
+            );
           });
       } catch (error) {
-        throw new ActionableError(`Failed to release session: ${errorMessage(error)}`);
+        throw new DaemonCommandRefusal("Failed to release session", error);
       }
     }
     return;
   } catch (error) {
-    if (error instanceof ActionableError) {
-      console.error(`Error: ${error.message}`);
-    } else {
-      console.error(`Unexpected error: ${errorMessage(error)}`);
-    }
-    process.exit(1);
+    exitWithDaemonQueryFailure(error, json);
   }
 }
 
@@ -767,8 +849,8 @@ const NO_POSITIONAL_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpe
   status: { launchFlags: true },
   health: { launchFlags: true },
   diagnose: { launchFlags: true },
-  "available-devices": { launchFlags: true },
-  "active-sessions": { launchFlags: true },
+  "available-devices": { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
+  "active-sessions": { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
 };
 
 /**
@@ -806,6 +888,9 @@ function printDaemonUsageError(message: string): void {
     console.log("  active-sessions       List held sessions and why each holds its device");
     console.log("  session-info <id>     Get information about a session");
     console.log("  release-session <id>  Release a session and free its device");
+    console.log(
+      "  (available-devices, active-sessions, session-info and release-session accept --json)",
+    );
     console.log(
       "  release-liveness-ownership <id> --liveness-owner-token <token>  Hand off liveness; keep the device",
     );
@@ -881,8 +966,8 @@ export async function runDaemonCommand(
     status: () => runDaemonDiagnosticsCommand(command, manager),
     health: () => runDaemonDiagnosticsCommand(command, manager),
     diagnose: () => runDaemonDiagnosticsCommand(command, manager),
-    "available-devices": () => queryAvailableDevices(manager),
-    "active-sessions": () => queryActiveSessions(manager),
+    "available-devices": () => queryAvailableDevices(args, manager),
+    "active-sessions": () => queryActiveSessions(args, manager),
     "session-info": () => querySessionInfo(args, manager),
     "release-session": () => releaseDaemonSession(args, manager),
     heartbeat: () => recordDaemonHeartbeat(args, manager),

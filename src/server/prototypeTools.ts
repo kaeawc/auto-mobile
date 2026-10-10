@@ -1336,16 +1336,20 @@ async function performMutation(
   // restart. It still validates before replacing, so a refused show leaves the old prototype and its
   // events exactly as an in-place one does; only the caller needs telling.
   const legacy = await legacyInPlaceWarning(prototypeTarget, target, inPlace);
-  const generation = beginShowGeneration(commits, scope, args.action, target);
+  const takenGeneration = beginShowGeneration(commits, scope, args.action, target);
   // Every display lookup and window-option check happens before staging; nothing is re-resolved
   // after dispatch. A refused show must not reset the event epoch of a prototype still on screen.
-  const resolved = await preflightMutation(
-    { inPlace, shownDisplayId: shown?.displayId },
-    prototypeTarget,
-    device,
-    args,
-    dependencies,
-    signal,
+  const { resolved, generation } = await preflightWithGeneration(
+    { commits, scope, target, generation: takenGeneration },
+    () =>
+      preflightMutation(
+        { inPlace, shownDisplayId: shown?.displayId },
+        prototypeTarget,
+        device,
+        args,
+        dependencies,
+        signal,
+      ),
   );
   // The device is sent resolved bounds anchors; host status keeps the authored spec's identity.
   const sendArgs = resolved.spec ? { ...args, spec: resolved.spec } : args;
@@ -1430,6 +1434,39 @@ function retireObservation(
 ): void {
   if (result.success) {
     invalidator.invalidate(device, true);
+  }
+}
+
+/**
+ * A show takes its generation on arrival so concurrent valid shows order by arrival, but a show the
+ * host refuses (or abandons) never reaches the device and so withdraws it: it must not supersede a
+ * valid in-flight show of the same id (#11477).
+ */
+async function preflightWithGeneration(
+  ordering: {
+    commits: PrototypeCommitGenerations;
+    scope: PrototypeScope;
+    target: { id?: string };
+    generation: number | undefined;
+  },
+  preflight: () => Promise<AnchorStage & { displayId?: number }>,
+): Promise<{ resolved: AnchorStage & { displayId?: number }; generation: number | undefined }> {
+  const { commits, scope, target, generation } = ordering;
+  const withdraw = () => {
+    if (generation !== undefined && target.id !== undefined) {
+      commits.withdraw(scope.deviceId, target.id, generation);
+    }
+  };
+  try {
+    const resolved = await preflight();
+    if (resolved.failure) {
+      withdraw();
+      return { resolved, generation: undefined };
+    }
+    return { resolved, generation };
+  } catch (error) {
+    withdraw();
+    throw error;
   }
 }
 

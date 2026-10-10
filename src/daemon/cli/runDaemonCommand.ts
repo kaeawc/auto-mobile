@@ -544,6 +544,18 @@ async function runDaemonDiagnosticsCommand(
   }
 }
 
+/** " (released: <reason>[, idle])", or "" when the daemon gave neither. */
+function releasedLabel(reason: string | undefined, idle: boolean): string {
+  const label = [reason, idle ? "idle" : undefined].filter(Boolean).join(", ");
+  return label ? ` (released: ${label})` : "";
+}
+
+function recordOrUndefined(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 /**
  * A daemon query or release that failed, keeping the daemon's typed refusal fields (#11252)
  * instead of flattening them into a bare "Failed to ...: message".
@@ -570,15 +582,12 @@ export class DaemonCommandRefusal extends ActionableError {
     const retryAfterMs = field("retryAfterMs");
     const releaseReason = releaseReasonFromError(error);
     const idle = field("idle") === true;
-    const details = field("details");
     const detail = errorMessage(error);
-    const releaseLabel = [releaseReason, idle ? "idle" : undefined].filter(Boolean).join(", ");
-    const releaseSuffix = releaseLabel ? ` (released: ${releaseLabel})` : "";
     const typedCode =
       typeof code === "string" || typeof code === "number" ? String(code) : undefined;
     const typedNextAction = typeof nextAction === "string" ? nextAction : undefined;
     super(
-      `${context}: ${detail}${releaseSuffix}` +
+      `${context}: ${detail}${releasedLabel(releaseReason, idle)}` +
         `${typedCode ? ` [${typedCode}]` : ""}${typedNextAction ? ` Next: ${typedNextAction}` : ""}`,
       { cause: error },
     );
@@ -589,10 +598,7 @@ export class DaemonCommandRefusal extends ActionableError {
     this.retryAfterMs = typeof retryAfterMs === "number" ? retryAfterMs : undefined;
     this.releaseReason = releaseReason;
     this.idle = idle ? true : undefined;
-    this.details =
-      details !== null && typeof details === "object" && !Array.isArray(details)
-        ? (details as Record<string, unknown>)
-        : undefined;
+    this.details = recordOrUndefined(field("details"));
   }
 }
 
@@ -845,8 +851,8 @@ function heartbeatFailureMessage(sessionId: string, error: unknown): string {
 /** " (released: <reason>)" when the daemon said why a not-found session is gone (#10730). */
 function releasedSuffix(error: unknown): string {
   const reason = releaseReasonFromError(error);
-  const idle = (error as { idle?: unknown } | null)?.idle === true;
-  return reason ? ` (released: ${reason}${idle ? ", idle" : ""})` : "";
+  const idle = recordOrUndefined(error)?.idle === true;
+  return reason ? releasedLabel(reason, idle) : "";
 }
 
 async function recordDaemonHeartbeat(args: string[], manager: DaemonManager): Promise<void> {

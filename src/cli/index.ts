@@ -52,6 +52,13 @@ function formatIdleMinutes(ms: number): string {
   return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
 }
 
+/** An explicit blank value (`--session-uuid "$UNSET"`) must not fall through to a sessionless call. */
+function requireNonBlankSessionUuid(value: unknown): void {
+  if (typeof value === "string" && value.trim() === "") {
+    throw new ActionableError("--session-uuid requires a non-empty value");
+  }
+}
+
 export function parseCliArgs(args: string[]): {
   toolName: string;
   sessionUuid?: string;
@@ -71,10 +78,7 @@ export function parseCliArgs(args: string[]): {
     if (args.length < 3) {
       throw new ActionableError("--session-uuid requires a value and a tool name");
     }
-    // An explicit empty value (`--session-uuid "$UNSET"`) must not fall through to a sessionless call.
-    if (args[1].trim() === "") {
-      throw new ActionableError("--session-uuid requires a non-empty value");
-    }
+    requireNonBlankSessionUuid(args[1]);
     sessionUuid = args[1];
     toolNameIndex = 2;
   }
@@ -112,9 +116,7 @@ export function parseCliArgs(args: string[]): {
   }
 
   // The trailing form (`observe --session-uuid ""`) names a session just as the leading one does.
-  if (typeof params.sessionUuid === "string" && params.sessionUuid.trim() === "") {
-    throw new ActionableError("--session-uuid requires a non-empty value");
-  }
+  requireNonBlankSessionUuid(params.sessionUuid);
 
   return { toolName, sessionUuid, params };
 }

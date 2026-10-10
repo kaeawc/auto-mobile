@@ -99,6 +99,9 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     }
   }
 
+  const budgetOf = (c: AndroidCtrlProxyClient): ForcedRestartBudget =>
+    (c as unknown as { forcedRestartBudget: ForcedRestartBudget }).forcedRestartBudget;
+
   /** Drive `count` connection failures, each a separate ensureConnected() dial. */
   const driveFailures = async (c: AndroidCtrlProxyClient, count: number): Promise<void> => {
     for (let i = 0; i < count; i++) {
@@ -632,7 +635,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       undefined,
       () => manager,
     );
-    const budget = (client as any).forcedRestartBudget as ForcedRestartBudget;
+    const budget = budgetOf(client!);
     for (let i = 0; i < 5; i++) {
       client.ensureRecoveryStarted();
       expect(await client.awaitRecovery(10_000)).toBe("failed");
@@ -649,7 +652,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
         createInstantFailureWebSocketFactory(timer),
         timer,
       );
-      const budget = (client as any).forcedRestartBudget as ForcedRestartBudget;
+      const budget = budgetOf(client!);
       for (let i = 0; i < 3; i++) {
         budget.recordFailure("service recovery failed", budget.tryBeginAttempt()!);
         timer.advanceTime(600_000);
@@ -690,7 +693,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       );
       AndroidCtrlProxyClient.registerForTesting(client, testDevice.deviceId);
       try {
-        const budget = (client as any).forcedRestartBudget as ForcedRestartBudget;
+        const budget = budgetOf(client!);
         for (let i = 0; i < 3; i++) {
           budget.recordFailure("service recovery failed", budget.tryBeginAttempt()!);
           timer.advanceTime(600_000);

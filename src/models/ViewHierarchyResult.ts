@@ -200,7 +200,9 @@ export type IosHierarchyUnavailableReason =
 export type HierarchyUnavailableReason =
   | IosHierarchyUnavailableReason
   | "device_locked"
-  | "incomplete_capture";
+  | "incomplete_capture"
+  /** Android: automatic CtrlProxy recovery is exhausted or suspended; `unavailableDetail` has the last failure. */
+  | "runner_unavailable";
 
 export type OwnOverlayPlacement = "fullscreen" | "sheet" | "floating";
 

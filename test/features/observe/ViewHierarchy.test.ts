@@ -1966,6 +1966,26 @@ describe("Offscreen Node Filtering", function () {
       expect(result.hierarchy.unavailableReason).toBe("service_recovering");
     });
 
+    test("reports runner_unavailable with the last failure when the restart budget is exhausted (#11246)", async function () {
+      const exhaustedClient = {
+        getAccessibilityHierarchy: async () => null,
+        isConnected: () => false,
+        ensureRecoveryStarted: () => {},
+        awaitRecovery: async () => "not_recovering",
+        isRecoveryInFlight: () => false,
+        getRestartBudgetSnapshot: () => ({
+          state: "exhausted",
+          attempts: 3,
+          lastFailureReason: "service recovery failed",
+        }),
+      } as unknown as AndroidCtrlProxyClient;
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), exhaustedClient);
+      const result = await vh.getViewHierarchy();
+      expect(result.hierarchy.unavailableReason).toBe("runner_unavailable");
+      expect(result.hierarchy.unavailableDetail).toContain("exhausted after 3 attempt(s)");
+      expect(result.hierarchy.unavailableDetail).toContain("last failure: service recovery failed");
+    });
+
     test("bounds Android recovery wait and re-fetch within a 1000ms caller budget", async function () {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();

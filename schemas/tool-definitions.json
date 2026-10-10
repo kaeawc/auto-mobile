@@ -4619,7 +4619,8 @@
                         "unknown",
                         "service_recovering",
                         "device_locked",
-                        "incomplete_capture"
+                        "incomplete_capture",
+                        "runner_unavailable"
                       ]
                     },
                     "unavailableDetail": {
@@ -6194,7 +6195,8 @@
                         "unknown",
                         "service_recovering",
                         "device_locked",
-                        "incomplete_capture"
+                        "incomplete_capture",
+                        "runner_unavailable"
                       ]
                     },
                     "unavailableDetail": {
@@ -10790,7 +10792,8 @@
                       "unknown",
                       "service_recovering",
                       "device_locked",
-                      "incomplete_capture"
+                      "incomplete_capture",
+                      "runner_unavailable"
                     ]
                   },
                   "unavailableDetail": {
@@ -14006,7 +14009,8 @@
                 "unknown",
                 "service_recovering",
                 "device_locked",
-                "incomplete_capture"
+                "incomplete_capture",
+                "runner_unavailable"
               ]
             },
             "unavailableDetail": {
@@ -15972,7 +15976,8 @@
                         "unknown",
                         "service_recovering",
                         "device_locked",
-                        "incomplete_capture"
+                        "incomplete_capture",
+                        "runner_unavailable"
                       ]
                     },
                     "unavailableDetail": {
@@ -17547,7 +17552,8 @@
                         "unknown",
                         "service_recovering",
                         "device_locked",
-                        "incomplete_capture"
+                        "incomplete_capture",
+                        "runner_unavailable"
                       ]
                     },
                     "unavailableDetail": {
@@ -24638,7 +24644,8 @@
                         "unknown",
                         "service_recovering",
                         "device_locked",
-                        "incomplete_capture"
+                        "incomplete_capture",
+                        "runner_unavailable"
                       ]
                     },
                     "unavailableDetail": {
@@ -26213,7 +26220,8 @@
                         "unknown",
                         "service_recovering",
                         "device_locked",
-                        "incomplete_capture"
+                        "incomplete_capture",
+                        "runner_unavailable"
                       ]
                     },
                     "unavailableDetail": {
@@ -32205,7 +32213,8 @@
                         "unknown",
                         "service_recovering",
                         "device_locked",
-                        "incomplete_capture"
+                        "incomplete_capture",
+                        "runner_unavailable"
                       ]
                     },
                     "unavailableDetail": {
@@ -33780,7 +33789,8 @@
                         "unknown",
                         "service_recovering",
                         "device_locked",
-                        "incomplete_capture"
+                        "incomplete_capture",
+                        "runner_unavailable"
                       ]
                     },
                     "unavailableDetail": {
@@ -35949,7 +35959,8 @@
                         "unknown",
                         "service_recovering",
                         "device_locked",
-                        "incomplete_capture"
+                        "incomplete_capture",
+                        "runner_unavailable"
                       ]
                     },
                     "unavailableDetail": {
@@ -37524,7 +37535,8 @@
                         "unknown",
                         "service_recovering",
                         "device_locked",
-                        "incomplete_capture"
+                        "incomplete_capture",
+                        "runner_unavailable"
                       ]
                     },
                     "unavailableDetail": {

@@ -577,6 +577,7 @@ export const freshnessSchema = z
         "service_recovering",
         "device_locked",
         "incomplete_capture",
+        "runner_unavailable",
       ])
       .optional(),
     unavailableDetail: z.string().max(500).optional(),

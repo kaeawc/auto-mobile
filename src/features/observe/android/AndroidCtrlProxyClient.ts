@@ -56,7 +56,10 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/Perfo
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import { exponentialBackoff, fixedBackoff } from "../../../utils/Backoff";
-import { ForcedRestartBudget } from "../../../ctrlProxy/ForcedRestartBudget";
+import {
+  ForcedRestartBudget,
+  type ForcedRestartSnapshot,
+} from "../../../ctrlProxy/ForcedRestartBudget";
 import {
   NavigationGraphManager,
   NavigationEvent,
@@ -1912,7 +1915,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   public static resumeAfterDeviceStart(deviceId: string): void {
     // An explicit startDevice/setup is a fresh start for forced-restart admission (#11246).
-    AndroidCtrlProxyClient.instances.get(deviceId)?.forcedRestartBudget.rearm("explicit device start");
+    AndroidCtrlProxyClient.instances
+      .get(deviceId)
+      ?.forcedRestartBudget.rearm("explicit device start");
     if (AndroidCtrlProxyClient.retiredDeviceIds.delete(deviceId)) {
       AndroidCtrlProxyClient.instances.delete(deviceId);
     }
@@ -2850,6 +2855,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
+  /**
+   * An absent device never exercised the runner, so its attempt is given back instead of burning
+   * a forced-restart slot (#11246); every other unrecovered outcome is a recorded failure.
+   */
+  private settleUnrecoveredAttempt(outcome: string, token: number): void {
+    if (!this.closed && outcome === "unavailable") {
+      this.releasePendingRecoveryStability(token);
+      return;
+    }
+    this.failPendingRecoveryStability(`service recovery ${outcome}`);
+    this.forcedRestartBudget.recordFailure(`service recovery ${outcome}`, token);
+  }
+
   private releasePendingRecoveryStability(token: number): void {
     const pending = this.pendingRecoveryStability;
     if (pending?.token === token) {
@@ -2939,15 +2957,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       stableConnection = replaceStabilityWaiter();
     })
       .then(async (outcome) => {
-        if (!this.closed && outcome === "unavailable") {
-          // The device is absent, so the runner was never exercised: give the attempt back
-          // instead of burning one of the forced-restart slots (#11246).
-          this.releasePendingRecoveryStability(token);
-          return false;
-        }
-        if (this.closed || outcome === "failed") {
-          this.failPendingRecoveryStability(`service recovery ${outcome}`);
-          this.forcedRestartBudget.recordFailure(`service recovery ${outcome}`, token);
+        if (this.closed || outcome === "failed" || outcome === "unavailable") {
+          this.settleUnrecoveredAttempt(outcome, token);
           return false;
         }
         // A repaired service may clear the foreground connection cooldown;
@@ -3045,6 +3056,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (!this.closed && this.autoReconnectEnabled && !this.recoveryPromise) {
       this.triggerServiceRecovery();
     }
+  }
+
+  /** Current forced-restart admission state, for typed observe/action failure reasons. */
+  public getRestartBudgetSnapshot(): ForcedRestartSnapshot {
+    return this.forcedRestartBudget.snapshot();
   }
 
   public isRecoveryInFlight(): boolean {

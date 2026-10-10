@@ -1219,6 +1219,11 @@ export class DevicePool {
   private readonly loggedForeignDeviceOwners = new Map<string, number>();
   /** Devices whose allocation claim this daemon published and has not withdrawn, by claim store. */
   private readonly claimedDeviceIds = new Map<string, ForeignDeviceOwnership>();
+  /** `${platform}:${deviceId}` -> the latest foreign-claim read, shared within its max age. */
+  private readonly foreignClaimSnapshots = new Map<
+    string,
+    { readAt: number; verdict: Promise<{ ownerPid: number | undefined; unreadable: boolean }> }
+  >();
 
   constructor({
     env,
@@ -5747,26 +5752,61 @@ export class DevicePool {
    * device this daemon does not already hold is refused while another live daemon claims it
    * (#10980, owner decision 2026-10-09): two daemons must never drive the same device. Lifecycle
    * tools that stop a device (killDevice, deleteDevice) apply the same check (#11200).
+   *
+   * Sessionless control (#11349) is frequent, so it passes `maxAgeMs`: calls within that window
+   * share one read of the device's ownership, and so at most one relinquish request to its peer,
+   * instead of a status query and a relinquish round trip each. A bind always reads afresh.
    */
   async assertNotClaimedByForeignDaemon(
     deviceId: string,
     platform: Platform,
     remedy?: string,
+    maxAgeMs = 0,
   ): Promise<void> {
     const ownership = this.foreignOwnershipFor(platform);
     if (!ownership || this.devices.get(deviceId)?.sessionId) {
       return;
     }
+    const key = `${platform}:${deviceId}`;
+    const cached = this.foreignClaimSnapshots.get(key);
+    const snapshot =
+      cached && this.timer.now() - cached.readAt < maxAgeMs
+        ? cached
+        : { readAt: this.timer.now(), verdict: this.readForeignClaim(ownership, deviceId) };
+    if (snapshot !== cached) {
+      this.foreignClaimSnapshots.set(key, snapshot);
+      // A failed read is not a verdict: the next call reads again.
+      void snapshot.verdict.catch((error: unknown) => {
+        // The awaiting caller surfaces the error; here it only drops the unusable snapshot.
+        logger.debug(
+          `[DevicePool] foreign-claim read of ${deviceId} failed: ${errorMessage(error)}`,
+        );
+        if (this.foreignClaimSnapshots.get(key) === snapshot) {
+          this.foreignClaimSnapshots.delete(key);
+        }
+      });
+    }
+    const { ownerPid, unreadable } = await snapshot.verdict;
+    if (ownerPid !== undefined || unreadable) {
+      throw new DeviceOwnedByOtherDaemonError(deviceId, ownerPid, remedy);
+    }
+  }
+
+  /** Who else holds `deviceId` right now, after asking an idle lease-only peer to let go. */
+  private async readForeignClaim(
+    ownership: ForeignDeviceOwnership,
+    deviceId: string,
+  ): Promise<{ ownerPid: number | undefined; unreadable: boolean }> {
     await ownership.refresh([deviceId]);
     if (ownership.foreignOwnerPid(deviceId) !== undefined) {
       // A peer that only holds an idle CtrlProxy forwarding lease is asked to give it up before
       // the device is refused; it stays the owner when it declines (#11349).
       await ownership.relinquishIdleLease?.(deviceId);
     }
-    const ownerPid = ownership.foreignOwnerPid(deviceId);
-    if (ownerPid !== undefined || ownership.foreignClaimUnreadable?.(deviceId)) {
-      throw new DeviceOwnedByOtherDaemonError(deviceId, ownerPid, remedy);
-    }
+    return {
+      ownerPid: ownership.foreignOwnerPid(deviceId),
+      unreadable: ownership.foreignClaimUnreadable?.(deviceId) === true,
+    };
   }
 
   /**

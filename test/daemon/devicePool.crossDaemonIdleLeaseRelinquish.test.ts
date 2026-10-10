@@ -17,6 +17,7 @@ import {
   type ForwardLeaseRelinquishReport,
 } from "../../src/features/observe/shared/ctrlProxyForwardLeaseOwnership";
 import type { LockContent } from "../../src/utils/fileLock";
+import { FOREIGN_DAEMON_CLAIM_SNAPSHOT_MAX_AGE_MS } from "../../src/daemon/inputDeviceOwnership";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -81,6 +82,8 @@ interface Peer {
 class PeerSockets implements ForwardLeaseOwnerProbe, ForwardLeaseRelinquishProbe {
   readonly peers = new Map<string, Peer>();
   readonly relinquishRequests: string[] = [];
+  /** Status queries received, as `socket:device`. */
+  readonly statusQueries: string[] = [];
 
   constructor(private readonly files: SharedLockFiles) {}
 
@@ -95,6 +98,7 @@ class PeerSockets implements ForwardLeaseOwnerProbe, ForwardLeaseRelinquishProbe
   }
 
   async query(socketPath: string, deviceId: string): Promise<ForwardLeaseOwnerReport> {
+    this.statusQueries.push(`${socketPath}:${deviceId}`);
     const peer = this.peers.get(socketPath);
     return peer
       ? { kind: "status", status: this.statusOf(peer, deviceId) }
@@ -243,5 +247,79 @@ describe("explicit bind against a peer's idle forwarding lease (#11349)", () => 
     expect(refusal).toMatchObject({ ownerPid: B_PID });
     expect(sockets.relinquishRequests).toHaveLength(1);
     expect(files.files.get(LEASE_PATH)?.pid).toBe(B_PID);
+  });
+
+  // Sessionless control calls are frequent; each fresh read may cost two status queries and a
+  // relinquish round trip to the peer, so calls inside the snapshot window share one.
+  describe("the sessionless-control snapshot", () => {
+    const controlCheck = (pool: DevicePool) =>
+      pool
+        .assertNotClaimedByForeignDaemon(
+          DEVICE_ID,
+          "android",
+          undefined,
+          FOREIGN_DAEMON_CLAIM_SNAPSHOT_MAX_AGE_MS,
+        )
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+    test("calls inside the window make one round trip to the peer, and the next window one more", async () => {
+      const a = await daemon(A_PID, A_SOCKET);
+      const b = await daemon(B_PID, B_SOCKET);
+      b.peer.idleForMs = 5_000;
+      leaseHeldByB();
+
+      // Two concurrent calls, then more spread over the window.
+      const refusals = await Promise.all([controlCheck(a.pool), controlCheck(a.pool)]);
+      for (let i = 0; i < 4; i++) {
+        timer.advanceTime(FOREIGN_DAEMON_CLAIM_SNAPSHOT_MAX_AGE_MS / 5);
+        refusals.push(await controlCheck(a.pool));
+      }
+
+      expect(refusals).toHaveLength(6);
+      for (const refusal of refusals) {
+        expect(refusal).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+        expect(refusal).toMatchObject({ ownerPid: B_PID });
+      }
+      // One read: the status query, one relinquish request, and the re-read after it.
+      expect(sockets.relinquishRequests).toHaveLength(1);
+      expect(sockets.statusQueries).toHaveLength(2);
+
+      timer.advanceTime(FOREIGN_DAEMON_CLAIM_SNAPSHOT_MAX_AGE_MS);
+      expect(await controlCheck(a.pool)).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+      expect(sockets.relinquishRequests).toHaveLength(2);
+      expect(sockets.statusQueries).toHaveLength(4);
+    });
+
+    test("an explicit bind reads afresh inside the window", async () => {
+      const a = await daemon(A_PID, A_SOCKET);
+      const b = await daemon(B_PID, B_SOCKET);
+      b.peer.idleForMs = 5_000;
+      leaseHeldByB();
+      expect(await controlCheck(a.pool)).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+
+      // The peer's idle window passes on its side; its lease is now relinquishable.
+      b.peer.idleForMs = DEFAULT_CTRL_PROXY_FORWARD_LEASE_IDLE_MS + 1_000;
+
+      expect(await bind(a.pool)).toBeUndefined();
+      expect(a.pool.getDevice(DEVICE_ID)?.sessionId).toBe("a-session");
+    });
+
+    test("a read that fails is not kept as the window's verdict", async () => {
+      const a = await daemon(A_PID, A_SOCKET);
+      const b = await daemon(B_PID, B_SOCKET);
+      b.peer.activeExecutions = 1;
+      leaseHeldByB();
+      const query = sockets.query.bind(sockets);
+      sockets.query = async () => {
+        throw new Error("probe exploded");
+      };
+      expect(await controlCheck(a.pool)).toMatchObject({ message: "probe exploded" });
+
+      sockets.query = query;
+      expect(await controlCheck(a.pool)).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+    });
   });
 });

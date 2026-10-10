@@ -232,8 +232,20 @@ export async function assertInputNotOnForeignManagedSlotDevice(input: {
 
 /** The pool's cross-daemon claim check, optional so older daemon-state fakes keep compiling. */
 export interface ForeignDaemonClaimGate {
-  assertNotClaimedByForeignDaemon?(deviceId: string, platform: "android" | "ios"): Promise<void>;
+  assertNotClaimedByForeignDaemon?(
+    deviceId: string,
+    platform: "android" | "ios",
+    remedy?: string,
+    maxAgeMs?: number,
+  ): Promise<void>;
 }
+
+/**
+ * How stale the foreign-claim read may be for a sessionless control call. Like
+ * {@link MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS}: such calls are frequent and each fresh read may
+ * cost a status query and a relinquish round trip to a peer daemon, so calls share one per second.
+ */
+export const FOREIGN_DAEMON_CLAIM_SNAPSHOT_MAX_AGE_MS = 1_000;
 
 /**
  * Control on a device no session of this daemon holds is refused with the typed
@@ -246,5 +258,10 @@ export async function assertControlNotOnForeignDaemonDevice(input: {
   platform: "android" | "ios";
   gate: ForeignDaemonClaimGate;
 }): Promise<void> {
-  await input.gate.assertNotClaimedByForeignDaemon?.(input.deviceId, input.platform);
+  await input.gate.assertNotClaimedByForeignDaemon?.(
+    input.deviceId,
+    input.platform,
+    undefined,
+    FOREIGN_DAEMON_CLAIM_SNAPSHOT_MAX_AGE_MS,
+  );
 }

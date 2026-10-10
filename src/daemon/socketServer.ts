@@ -801,7 +801,12 @@ interface SocketDaemonStateAccess extends DaemonStateAccess {
       deviceId: string,
     ): string | undefined;
     isAutolockSessionOwnedByOtherConnection?(sessionId: string, mcpSessionId?: string): boolean;
-    assertNotClaimedByForeignDaemon?(deviceId: string, platform: "android" | "ios"): Promise<void>;
+    assertNotClaimedByForeignDaemon?(
+      deviceId: string,
+      platform: "android" | "ios",
+      remedy?: string,
+      maxAgeMs?: number,
+    ): Promise<void>;
   };
 }
 

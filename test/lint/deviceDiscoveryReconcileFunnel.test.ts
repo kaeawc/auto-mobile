@@ -192,6 +192,12 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       reason:
         "iOS-only liveness sweep of idle pooled devices; the Android identity reconcile funnel does not apply.",
     },
+    "src/features/bootAdmission/sharedBootAdmissionGates.ts": {
+      calls: 1,
+      reason:
+        "Boot admission capacity sample (#11181): counts adb-listed emulator serials against the " +
+        "booted-emulator limit and reads no pool state or identity.",
+    },
     "src/doctor/checks/android.ts": {
       calls: 1,
       reason: "Diagnostics; reports what adb sees and reads no pool state.",

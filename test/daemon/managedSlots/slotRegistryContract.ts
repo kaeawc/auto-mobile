@@ -704,31 +704,74 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect(await registry.ensureScope(SCOPE_A1)).toMatchObject({ kind: "ready", revived: false });
     });
 
-    test("a scope abandoned through to invalidated still revives; its freed devices stay adoptable", async () => {
+    test("a scope abandoned through to invalidated keeps its slots, reserved for its revival", async () => {
       const key = { scopeKey: await readyScope(), slotIndex: 0 };
       await boundSlot(key, "avd-1");
       await abandon(key.scopeKey);
-      expect((await registry.completeScopeInvalidation(key.scopeKey)).kind).toBe("invalidated");
+      expect(await registry.completeScopeInvalidation(key.scopeKey)).toMatchObject({
+        kind: "invalidated",
+        freedDevices: [],
+      });
+
+      // Still excluded from generic allocation, not in the free pool, not adoptable elsewhere.
+      expect(await registry.listFreeDevices()).toEqual([]);
+      expect(await registry.snapshotManagedDevices()).toEqual([
+        expect.objectContaining({
+          stableDeviceId: "avd-1",
+          holder: "slot",
+          slotIndex: 0,
+          scopeState: "invalidated",
+        }),
+      ]);
+      const other = { scopeKey: await readyScope(SCOPE_B1), slotIndex: 0 };
+      await registry.initSlot(other, INIT);
+      expect(
+        await registry.commitBinding(
+          other,
+          { generation: 0, stableDeviceId: null },
+          readyBinding("avd-1", 1),
+        ),
+      ).toMatchObject({ kind: "device_assigned_elsewhere" });
 
       expect(await registry.ensureScope(SCOPE_A1)).toMatchObject({
         kind: "ready",
         revived: true,
         scope: { state: "valid", invalidatedAtMs: null },
       });
-      await registry.initSlot(key, INIT);
-      expect(
-        await registry.commitBinding(
-          key,
-          { generation: 0, stableDeviceId: null },
-          readyBinding("avd-1", 1),
-        ),
-      ).toMatchObject({
-        kind: "committed",
-        adoptedFreeDevice: { stableDeviceId: "avd-1", fromScopeKey: key.scopeKey },
+      // The same row, binding and generation: nothing is re-created or re-adopted.
+      expect(await registry.getAssignment(key)).toMatchObject({
+        generation: 1,
+        stableDeviceId: "avd-1",
+        state: "ready",
       });
+      expect(await registry.isDeviceAssignedToValidSlot("android", "avd-1")).toBe(true);
     });
 
-    test("an explicit reset of an abandoned scope is permanent", async () => {
+    test("the abandonment clock runs from the last execution release, not the acquisition", async () => {
+      const key = { scopeKey: await readyScope(), slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      const binding = { generation: 1, stableDeviceId: "avd-1" };
+      livePids.add(100);
+      await registry.claimExecution(key, binding, ownerFor(100, "s1"));
+      // A 50-minute execution ends.
+      timer.advanceTime(50 * 60 * 1000);
+      await registry.releaseExecution(key, "s1");
+      livePids.delete(100);
+      expect((await registry.getScope(key.scopeKey))?.lastReleasedAtMs).toBe(timer.now());
+
+      timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS - 1);
+      expect(await registry.findAbandonedScopes()).toEqual([]);
+      expect(await registry.markScopeAbandoned(key.scopeKey)).toMatchObject({
+        kind: "not_abandoned",
+        reason: "recent_acquisition",
+      });
+      timer.advanceTime(1);
+      expect((await registry.findAbandonedScopes()).map((scope) => scope.scopeKey)).toEqual([
+        key.scopeKey,
+      ]);
+    });
+
+    test("an explicit reset of an abandoned scope is permanent and frees its kept slots", async () => {
       const invalidating = await readyScope(SCOPE_A1);
       await abandon(invalidating);
       expect(await registry.beginScopeInvalidation(invalidating, "operator_reset")).toMatchObject({
@@ -738,13 +781,20 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect((await registry.ensureScope(SCOPE_A1)).kind).toBe("scope_invalidated");
 
       const invalidated = await readyScope(SCOPE_B1);
+      const kept = { scopeKey: invalidated, slotIndex: 0 };
+      await boundSlot(kept, "avd-b");
       await abandon(invalidated);
       await registry.completeScopeInvalidation(invalidated);
+      expect(await registry.listAssignments(invalidated)).toHaveLength(1);
       expect(await registry.beginScopeInvalidation(invalidated, "operator_reset")).toMatchObject({
         kind: "already_invalidated",
         scope: { invalidationReason: "operator_reset" },
       });
       expect((await registry.ensureScope(SCOPE_B1)).kind).toBe("scope_invalidated");
+      expect(await registry.listAssignments(invalidated)).toEqual([]);
+      expect((await registry.listFreeDevices()).map((device) => device.stableDeviceId)).toEqual([
+        "avd-b",
+      ]);
     });
 
     test("an abandonment-only re-mark keeps the scope revivable", async () => {
@@ -757,15 +807,22 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect(await registry.ensureScope(SCOPE_A1)).toMatchObject({ kind: "ready", revived: true });
     });
 
-    test("a newer incarnation makes an abandoned one permanently invalid", async () => {
+    test("a newer incarnation makes an abandoned one permanently invalid and frees its slots", async () => {
       const oldKey = await readyScope(SCOPE_A1);
+      await boundSlot({ scopeKey: oldKey, slotIndex: 0 }, "avd-old");
       await abandon(oldKey);
       // Still invalidating: the old incarnation blocks the new one until it settles.
       expect((await registry.ensureScope(SCOPE_A2)).kind).toBe("incarnation_conflict");
       await registry.completeScopeInvalidation(oldKey);
+      expect(await registry.listFreeDevices()).toEqual([]);
 
       const newKey = await readyScope(SCOPE_A2);
       expect((await registry.getScope(oldKey))?.invalidationReason).toBe("incarnation_reset");
+      expect(await registry.listAssignments(oldKey)).toEqual([]);
+      expect(await registry.findDeviceHolder("android", "avd-old")).toMatchObject({
+        kind: "free",
+        device: { fromScopeKey: oldKey },
+      });
       expect((await registry.ensureScope(SCOPE_A1)).kind).toBe("scope_invalidated");
 
       await registry.beginScopeInvalidation(newKey, "operator_reset");

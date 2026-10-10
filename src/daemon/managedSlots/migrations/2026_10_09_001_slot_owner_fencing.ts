@@ -24,8 +24,11 @@ const ASSIGNMENT_COLUMNS_000 = sql.raw(
 // - exec_owner_process_token: the owner's process-generation token, so a reused PID is not live.
 // - state 'settling' + settler_*: a released execution's unsettled work, distinct from a failed
 //   deletion ('cleanup_pending'), with the settling daemon recorded so a restart can recover it.
+// - slot_scopes.last_released_at_ms: the abandonment clock runs from the last execution release,
+//   not only the last acquisition, so a long execution's scope is not abandoned soon after it ends.
 // SQLite cannot alter a CHECK constraint, so slot_assignments is rebuilt.
 export async function up(db: Kysely<unknown>): Promise<void> {
+  await sql`ALTER TABLE slot_scopes ADD COLUMN last_released_at_ms INTEGER`.execute(db);
   await sql`CREATE TABLE slot_assignments_v2 (
     scope_key TEXT NOT NULL REFERENCES slot_scopes (scope_key),
     slot_index INTEGER NOT NULL CHECK (slot_index >= 0),
@@ -60,6 +63,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
+  await sql`ALTER TABLE slot_scopes DROP COLUMN last_released_at_ms`.execute(db);
   await sql`CREATE TABLE slot_assignments_v1 (
     scope_key TEXT NOT NULL REFERENCES slot_scopes (scope_key),
     slot_index INTEGER NOT NULL CHECK (slot_index >= 0),

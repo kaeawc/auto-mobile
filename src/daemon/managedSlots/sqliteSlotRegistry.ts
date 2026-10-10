@@ -16,6 +16,7 @@ import {
   entersFencingState,
   isPermanentInvalidationReason,
   isRevivableScope,
+  lastScopeActivityMs,
   resolveAbandonmentThresholdMs,
   type AbandonmentQuery,
   type BeginScopeInvalidationResult,
@@ -83,6 +84,7 @@ interface SlotScopesTable {
   invalidation_reason: SlotScopeInvalidationReason | null;
   created_at_ms: number;
   last_acquired_at_ms: number;
+  last_released_at_ms: number | null;
   invalidating_at_ms: number | null;
   invalidated_at_ms: number | null;
 }
@@ -137,6 +139,7 @@ function toScope(row: ScopeRow): SlotScopeRecord {
     state: row.state,
     createdAtMs: row.created_at_ms,
     lastAcquiredAtMs: row.last_acquired_at_ms,
+    lastReleasedAtMs: row.last_released_at_ms,
     invalidationReason: row.invalidation_reason,
     invalidatingAtMs: row.invalidating_at_ms,
     invalidatedAtMs: row.invalidated_at_ms,
@@ -336,14 +339,19 @@ export class SqliteSlotRegistry implements SlotRegistry {
           .executeTakeFirstOrThrow();
         return { kind: "ready", scope: toScope(revived), created: false, revived: true };
       }
-      // A newer incarnation supersedes every abandoned one of this namespace for good.
-      await trx
+      // A newer incarnation supersedes every abandoned one of this namespace for good: their kept
+      // slots (all already invalidated, or the conflict above would have refused) are freed.
+      const superseded = await trx
         .updateTable("slot_scopes")
         .set({ invalidation_reason: "incarnation_reset" })
         .where("managed_host_scope", "=", identity.managedHostScope)
         .where("runner_namespace", "=", identity.runnerNamespace)
         .where("invalidation_reason", "=", "abandoned")
+        .returning("scope_key")
         .execute();
+      for (const { scope_key } of superseded) {
+        await this.releaseSlotsToFreePool(trx, scope_key);
+      }
       const row: ScopeRow = {
         scope_key: scopeKey,
         managed_host_scope: identity.managedHostScope,
@@ -353,6 +361,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
         invalidation_reason: null,
         created_at_ms: nowMs,
         last_acquired_at_ms: nowMs,
+        last_released_at_ms: null,
         invalidating_at_ms: null,
         invalidated_at_ms: null,
       };
@@ -561,6 +570,12 @@ export class SqliteSlotRegistry implements SlotRegistry {
         .returningAll()
         .executeTakeFirst();
       if (updated) {
+        // An execution ending is scope activity: the abandonment clock restarts here.
+        await trx
+          .updateTable("slot_scopes")
+          .set({ last_released_at_ms: updated.updated_at_ms })
+          .where("scope_key", "=", key.scopeKey)
+          .execute();
         return { released: true, assignment: toAssignment(updated) };
       }
       return { released: false, assignment: await this.readAssignment(trx, key) };
@@ -672,7 +687,13 @@ export class SqliteSlotRegistry implements SlotRegistry {
         "slot_scopes.state as scope_state",
       ])
       .where("slot_assignments.stable_device_id", "is not", null)
-      .where("slot_scopes.state", "<>", "invalidated")
+      // A revivable (abandoned) scope's kept slots stay reserved for its returning incarnation.
+      .where((eb) =>
+        eb.or([
+          eb("slot_scopes.state", "<>", "invalidated"),
+          eb("slot_scopes.invalidation_reason", "=", "abandoned"),
+        ]),
+      )
       .execute();
     const free = await this.db.selectFrom("slot_free_devices").selectAll().execute();
     return [
@@ -763,34 +784,11 @@ export class SqliteSlotRegistry implements SlotRegistry {
         return { kind: "pending", scope, liveOwners, settling, cleanupPending };
       }
       const nowMs = this.timer.now();
-      const freedDevices = assignments.flatMap((assignment): FreeSlotDeviceRecord[] =>
-        assignment.stableDeviceId === null
+      // An abandoned scope stays revivable: keep its slots until the invalidation is permanent.
+      const freedDevices =
+        scope.invalidationReason === "abandoned"
           ? []
-          : [
-              {
-                platform: assignment.platform,
-                stableDeviceId: assignment.stableDeviceId,
-                specFingerprint: assignment.specFingerprint,
-                fromScopeKey: scopeKey,
-                freedAtMs: nowMs,
-              },
-            ],
-      );
-      await trx.deleteFrom("slot_assignments").where("scope_key", "=", scopeKey).execute();
-      if (freedDevices.length > 0) {
-        await trx
-          .insertInto("slot_free_devices")
-          .values(
-            freedDevices.map((device) => ({
-              platform: device.platform,
-              stable_device_id: device.stableDeviceId,
-              spec_fingerprint: device.specFingerprint,
-              from_scope_key: device.fromScopeKey,
-              freed_at_ms: device.freedAtMs,
-            })),
-          )
-          .execute();
-      }
+          : await this.releaseSlotsToFreePool(trx, scopeKey);
       const invalidated = await trx
         .updateTable("slot_scopes")
         .set({ state: "invalidated", invalidated_at_ms: nowMs })
@@ -809,9 +807,11 @@ export class SqliteSlotRegistry implements SlotRegistry {
         .selectAll()
         .where("state", "=", "valid")
         .where("last_acquired_at_ms", "<=", cutoffMs)
-        .orderBy("last_acquired_at_ms")
         .execute()
-    ).map(toScope);
+    )
+      .map(toScope)
+      .filter((scope) => lastScopeActivityMs(scope) <= cutoffMs)
+      .sort((a, b) => lastScopeActivityMs(a) - lastScopeActivityMs(b));
     const abandoned: SlotScopeRecord[] = [];
     for (const scope of candidates) {
       if (!(await this.hasLiveExecOwner(this.db, scope.scopeKey))) {
@@ -834,7 +834,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
       if (scope.state !== "valid") {
         return { kind: "not_abandoned", scope, reason: "not_valid" };
       }
-      if (scope.lastAcquiredAtMs > this.timer.now() - thresholdMs) {
+      if (lastScopeActivityMs(scope) > this.timer.now() - thresholdMs) {
         return { kind: "not_abandoned", scope, reason: "recent_acquisition" };
       }
       if (await this.hasLiveExecOwner(trx, scopeKey)) {
@@ -921,7 +921,58 @@ export class SqliteSlotRegistry implements SlotRegistry {
     );
   }
 
-  /** An explicit reset of an abandoned scope replaces the revivable reason with the reset's. */
+  /**
+   * Move a scope's bound devices to the free pool and remove its slots. Used when an invalidation
+   * is (or becomes) permanent.
+   */
+  private async releaseSlotsToFreePool(
+    trx: Executor,
+    scopeKey: string,
+  ): Promise<FreeSlotDeviceRecord[]> {
+    const assignments = (
+      await trx
+        .selectFrom("slot_assignments")
+        .selectAll()
+        .where("scope_key", "=", scopeKey)
+        .orderBy("slot_index")
+        .execute()
+    ).map(toAssignment);
+    const nowMs = this.timer.now();
+    const freedDevices = assignments.flatMap((assignment): FreeSlotDeviceRecord[] =>
+      assignment.stableDeviceId === null
+        ? []
+        : [
+            {
+              platform: assignment.platform,
+              stableDeviceId: assignment.stableDeviceId,
+              specFingerprint: assignment.specFingerprint,
+              fromScopeKey: scopeKey,
+              freedAtMs: nowMs,
+            },
+          ],
+    );
+    await trx.deleteFrom("slot_assignments").where("scope_key", "=", scopeKey).execute();
+    if (freedDevices.length > 0) {
+      await trx
+        .insertInto("slot_free_devices")
+        .values(
+          freedDevices.map((device) => ({
+            platform: device.platform,
+            stable_device_id: device.stableDeviceId,
+            spec_fingerprint: device.specFingerprint,
+            from_scope_key: device.fromScopeKey,
+            freed_at_ms: device.freedAtMs,
+          })),
+        )
+        .execute();
+    }
+    return freedDevices;
+  }
+
+  /**
+   * An explicit reset of an abandoned scope replaces the revivable reason with the reset's; when
+   * the scope was already invalidated, its kept slots are freed now.
+   */
   private async makeResetPermanent(
     trx: Executor,
     scope: SlotScopeRecord,
@@ -929,6 +980,9 @@ export class SqliteSlotRegistry implements SlotRegistry {
   ): Promise<SlotScopeRecord> {
     if (!isRevivableScope(scope) || !isPermanentInvalidationReason(reason)) {
       return scope;
+    }
+    if (scope.state === "invalidated") {
+      await this.releaseSlotsToFreePool(trx, scope.scopeKey);
     }
     const row = await trx
       .updateTable("slot_scopes")

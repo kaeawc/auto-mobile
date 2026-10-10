@@ -40,6 +40,8 @@ export interface SlotScopeRecord extends SlotScopeIdentity {
   createdAtMs: number;
   /** Last time {@link SlotRegistry.ensureScope} admitted an acquisition into this scope. */
   lastAcquiredAtMs: number;
+  /** Last time an execution released one of this scope's slots, if any did. */
+  lastReleasedAtMs: number | null;
   invalidationReason: SlotScopeInvalidationReason | null;
   invalidatingAtMs: number | null;
   invalidatedAtMs: number | null;
@@ -140,10 +142,10 @@ export type EnsureScopeResult =
       scope: SlotScopeRecord;
       created: boolean;
       /**
-       * The scope had been abandoned and this acquisition reactivated it. Its remaining slot rows
-       * keep their bindings: surviving devices are reused, and a device the abandonment cleanup
-       * already deleted is recreated by the reconciler. Devices an abandoned scope had already
-       * released to the free pool stay there, adoptable like any free device.
+       * The scope had been abandoned and this acquisition reactivated it. Its slot rows (kept
+       * through the abandonment, even once the scope was invalidated) keep their bindings and
+       * generations: surviving devices are reused, and a device the abandonment cleanup already
+       * deleted is recreated by the reconciler.
        */
       revived: boolean;
     }
@@ -275,8 +277,8 @@ export interface AbandonmentQuery {
 }
 
 /**
- * Owner decision 2026-10-09 (#11172 Q3): a scope with no acquisition and no live owner for one
- * hour is abandoned, and its devices may be deleted.
+ * Owner decision 2026-10-09 (#11172 Q3): a scope with no activity (acquisition or execution
+ * release) and no live owner for one hour is abandoned, and its devices may be deleted.
  */
 export const MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS = 60 * 60 * 1000;
 
@@ -373,10 +375,17 @@ export interface SlotRegistry {
    * invalidating → invalidated once no live owner, no `cleanup_pending` slot and no slot settling
    * under a live settler remains (a dead settler's slot is settled and does not block): bound
    * devices move to the free pool and the scope's slots are removed. Idempotent.
+   *
+   * A scope invalidated only by abandonment is still revivable, so its slots are KEPT (their
+   * devices stay excluded and reserved for the same incarnation); they move to the free pool only
+   * when the invalidation becomes permanent — an explicit reset or a newer incarnation.
    */
   completeScopeInvalidation(scopeKey: string): Promise<CompleteScopeInvalidationResult>;
 
-  /** Valid scopes with no acquisition within the threshold and no live execution owner. */
+  /**
+   * Valid scopes with no activity (acquisition or execution release) within the threshold and no
+   * live execution owner or settler.
+   */
   findAbandonedScopes(query?: AbandonmentQuery): Promise<SlotScopeRecord[]>;
   /**
    * Atomically re-check abandonment and move the scope to `invalidating` with reason `abandoned`,
@@ -452,6 +461,11 @@ export function assertSettlerForState(
     throw new ActionableError("Marking a managed slot settling requires the settling daemon");
   }
   return options.settler;
+}
+
+/** The scope's most recent acquisition or execution release: the abandonment clock's start. */
+export function lastScopeActivityMs(scope: SlotScopeRecord): number {
+  return Math.max(scope.lastAcquiredAtMs, scope.lastReleasedAtMs ?? 0);
 }
 
 export function bindingMatches(

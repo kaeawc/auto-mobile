@@ -6,6 +6,7 @@ import {
   entersFencingState,
   isPermanentInvalidationReason,
   isRevivableScope,
+  lastScopeActivityMs,
   resolveAbandonmentThresholdMs,
   type AbandonmentQuery,
   type BeginScopeInvalidationResult,
@@ -94,6 +95,7 @@ export class FakeSlotRegistry implements SlotRegistry {
     for (const superseded of sameNamespace) {
       if (superseded.invalidationReason === "abandoned") {
         superseded.invalidationReason = "incarnation_reset";
+        this.releaseSlotsToFreePool(superseded.scopeKey);
       }
     }
     const scope: SlotScopeRecord = {
@@ -102,6 +104,7 @@ export class FakeSlotRegistry implements SlotRegistry {
       state: "valid",
       createdAtMs: nowMs,
       lastAcquiredAtMs: nowMs,
+      lastReleasedAtMs: null,
       invalidationReason: null,
       invalidatingAtMs: null,
       invalidatedAtMs: null,
@@ -255,6 +258,10 @@ export class FakeSlotRegistry implements SlotRegistry {
     }
     assignment.execOwner = null;
     assignment.updatedAtMs = this.timer.now();
+    const scope = this.scopes.get(assignment.scopeKey);
+    if (scope) {
+      scope.lastReleasedAtMs = assignment.updatedAtMs;
+    }
     return { released: true, assignment: copy(assignment) };
   }
 
@@ -323,7 +330,12 @@ export class FakeSlotRegistry implements SlotRegistry {
   async snapshotManagedDevices(): Promise<ManagedDeviceEntry[]> {
     const bound = [...this.assignments.values()].flatMap((assignment): ManagedDeviceEntry[] => {
       const scope = this.scopes.get(assignment.scopeKey);
-      if (assignment.stableDeviceId === null || !scope || scope.state === "invalidated") {
+      // A revivable (abandoned) scope's kept slots stay reserved for its returning incarnation.
+      if (
+        assignment.stableDeviceId === null ||
+        !scope ||
+        (scope.state === "invalidated" && scope.invalidationReason !== "abandoned")
+      ) {
         return [];
       }
       return [
@@ -370,6 +382,9 @@ export class FakeSlotRegistry implements SlotRegistry {
     }
     if (isRevivableScope(scope) && isPermanentInvalidationReason(reason)) {
       scope.invalidationReason = reason;
+      if (scope.state === "invalidated") {
+        this.releaseSlotsToFreePool(scopeKey);
+      }
     }
     return scope.state === "invalidating"
       ? { kind: "already_invalidating", scope: { ...scope } }
@@ -409,25 +424,9 @@ export class FakeSlotRegistry implements SlotRegistry {
       };
     }
     const nowMs = this.timer.now();
-    const freedDevices = assignments.flatMap((assignment): FreeSlotDeviceRecord[] =>
-      assignment.stableDeviceId === null
-        ? []
-        : [
-            {
-              platform: assignment.platform,
-              stableDeviceId: assignment.stableDeviceId,
-              specFingerprint: assignment.specFingerprint,
-              fromScopeKey: scopeKey,
-              freedAtMs: nowMs,
-            },
-          ],
-    );
-    for (const assignment of assignments) {
-      this.assignments.delete(slotId(assignment));
-    }
-    for (const device of freedDevices) {
-      this.free.set(deviceId(device.platform, device.stableDeviceId), { ...device });
-    }
+    // An abandoned scope stays revivable: keep its slots until the invalidation is permanent.
+    const freedDevices =
+      scope.invalidationReason === "abandoned" ? [] : this.releaseSlotsToFreePool(scopeKey);
     scope.state = "invalidated";
     scope.invalidatedAtMs = nowMs;
     return { kind: "invalidated", scope: { ...scope }, freedDevices };
@@ -439,10 +438,10 @@ export class FakeSlotRegistry implements SlotRegistry {
       .filter(
         (scope) =>
           scope.state === "valid" &&
-          scope.lastAcquiredAtMs <= cutoffMs &&
+          lastScopeActivityMs(scope) <= cutoffMs &&
           !this.hasLiveExecOwner(scope.scopeKey),
       )
-      .sort((a, b) => a.lastAcquiredAtMs - b.lastAcquiredAtMs)
+      .sort((a, b) => lastScopeActivityMs(a) - lastScopeActivityMs(b))
       .map((scope) => ({ ...scope }));
   }
 
@@ -458,7 +457,7 @@ export class FakeSlotRegistry implements SlotRegistry {
     if (scope.state !== "valid") {
       return { kind: "not_abandoned", scope: { ...scope }, reason: "not_valid" };
     }
-    if (scope.lastAcquiredAtMs > this.timer.now() - thresholdMs) {
+    if (lastScopeActivityMs(scope) > this.timer.now() - thresholdMs) {
       return { kind: "not_abandoned", scope: { ...scope }, reason: "recent_acquisition" };
     }
     if (this.hasLiveExecOwner(scopeKey)) {
@@ -494,6 +493,34 @@ export class FakeSlotRegistry implements SlotRegistry {
       return { kind: "stale_binding", current: copy(current) };
     }
     return current;
+  }
+
+  /** Free a scope's bound devices and remove its slots (a permanent invalidation). */
+  private releaseSlotsToFreePool(scopeKey: string): FreeSlotDeviceRecord[] {
+    const nowMs = this.timer.now();
+    const assignments = [...this.assignments.values()]
+      .filter((assignment) => assignment.scopeKey === scopeKey)
+      .sort((a, b) => a.slotIndex - b.slotIndex);
+    const freedDevices = assignments.flatMap((assignment): FreeSlotDeviceRecord[] =>
+      assignment.stableDeviceId === null
+        ? []
+        : [
+            {
+              platform: assignment.platform,
+              stableDeviceId: assignment.stableDeviceId,
+              specFingerprint: assignment.specFingerprint,
+              fromScopeKey: scopeKey,
+              freedAtMs: nowMs,
+            },
+          ],
+    );
+    for (const assignment of assignments) {
+      this.assignments.delete(slotId(assignment));
+    }
+    for (const device of freedDevices) {
+      this.free.set(deviceId(device.platform, device.stableDeviceId), { ...device });
+    }
+    return freedDevices;
   }
 
   private findBound(

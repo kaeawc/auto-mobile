@@ -71,6 +71,10 @@ export function parseCliArgs(args: string[]): {
     if (args.length < 3) {
       throw new ActionableError("--session-uuid requires a value and a tool name");
     }
+    // An explicit empty value (`--session-uuid "$UNSET"`) must not fall through to a sessionless call.
+    if (args[1].trim() === "") {
+      throw new ActionableError("--session-uuid requires a non-empty value");
+    }
     sessionUuid = args[1];
     toolNameIndex = 2;
   }

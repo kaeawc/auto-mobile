@@ -138,17 +138,21 @@ export class DeviceSettingDefaults {
       abandoned.value = true;
       // The reset is still running and would overwrite the change just made: fence these keys.
       if (sessionId !== null) {
-        for (const fence of this.pendingResetFences.get(deviceId) ?? []) {
-          for (const key of keys) {
-            fence.keys.add(key);
-          }
-          fence.sessionId = sessionId;
-        }
+        this.fenceKeys(deviceId, keys, sessionId);
       }
       logger.warn(
         `Proceeding with a settings change on ${deviceId} before its pending reset finished: ${errorMessage(error)}`,
         error,
       );
+    }
+  }
+
+  private fenceKeys(deviceId: string, keys: readonly DeviceSettingKey[], sessionId: string): void {
+    for (const fence of this.pendingResetFences.get(deviceId) ?? []) {
+      for (const key of keys) {
+        fence.keys.add(key);
+      }
+      fence.sessionId = sessionId;
     }
   }
 

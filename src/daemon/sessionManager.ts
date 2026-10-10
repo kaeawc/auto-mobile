@@ -2455,6 +2455,22 @@ export class SessionManager {
   }
 
   /**
+   * Whether the release of `sessionId` that started at `startedAtMs` (session clock) is still
+   * running and still holds its device, whatever reason it carries now (#11554). The heartbeat
+   * monitor asks this of a release it tracks once that release leaves the lists above: one a
+   * joiner upgraded to a terminal reason is still the same wedged release and stays held to its
+   * stuck deadline, while one that settled or was forced is over.
+   */
+  isReleaseInProgress(sessionId: string, startedAtMs: number): boolean {
+    return Array.from(this.activeReleasePromises).some(
+      (release) =>
+        !release.forced &&
+        release.session.sessionId === sessionId &&
+        release.startedAtMs === startedAtMs,
+    );
+  }
+
+  /**
    * A release forced while it waited to start (#10963): the device may already belong to the next
    * owner, so no teardown may touch it. The force itself persists the fence it raised (#11058).
    */

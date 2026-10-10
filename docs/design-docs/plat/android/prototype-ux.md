@@ -144,16 +144,27 @@ needs `prototype_theme_modes_v1` for them; the host refuses such a spec for an o
   the authored-background inference in the same way a role-named background is, and the search
   continues down the leading chain. A spec whose only backgrounds are pairs or roles follows the
   device setting.
-- **Gradient stops and scrims** accept role names. A role is the scheme's colour unchanged, and
-  scheme roles are opaque: `"scrim": "scrim"` covers the app completely. Author a hex value with
-  alpha (or a pair of them) for a dimming scrim. An omitted `bottomSheet` scrim keeps the themed
-  default (the `scrim` role at 40% alpha).
+- **Gradient stops** accept role names; a role is the scheme's colour unchanged.
+- **Scrims** (`window.placement.scrim` and the `bottomSheet` `scrim`) accept role names with one
+  special case. The `scrim` role, alone or as the side of a pair for the resolved mode, draws the
+  scheme's scrim colour at the default scrim opacity (40%), the same value an omitted `bottomSheet`
+  scrim uses, so `"scrim": "scrim"` dims rather than hides the app. Any other role (`surface`,
+  `primary`, …) draws its scheme colour unchanged, which is opaque unless the theme overrides it
+  with alpha. A hex scrim keeps exactly its authored alpha. A `dialog` authors no scrim; its
+  fixed scrim is the `scrim` role at 32%.
+- **Component colours.** A role name or pair in `style.color` on a `button`, `checkbox`, `switch`,
+  `radioGroup` or `listItem`, and in `style.background` on a `card` or `listItem`, resolves
+  against the theme like any other colour slot. Before `prototype_theme_modes_v1` only a hex value
+  took effect in those slots.
 - **Images.** `image.asset` and a `tabBar`/`bottomNav` item `image` accept
   `{light: assetId, dark: assetId}`. Only the asset for the resolved mode is decoded and drawn;
   both ids are checked at `show` and reported in `missingAssets`, and both stay retained with the
   prototype.
-- **Window metadata.** `prototypeOpaque` counts a pair background or window scrim as solid only
-  when both sides are fully opaque hex colours. A role name is never counted, as before.
+- **Window metadata.** `prototypeOpaque` follows what is drawn. The root background and the window
+  scrim are resolved for every mode the prototype can reach (one mode when `theme.mode` is
+  `light` or `dark` or the backgrounds fix it, both otherwise) and count as solid only when the
+  result is fully opaque in each. An opaque role counts; the `scrim` role in a scrim slot never
+  does.
 
 The mode is resolved when the prototype composes. Re-theming a prototype that is already showing
 when the device setting changes, a per-show appearance override, and reporting the resolved mode

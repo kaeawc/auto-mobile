@@ -151,10 +151,18 @@ internal fun RenderPrototypeButton(
   }
 }
 
+/**
+ * A component's authored `style.color` (hex, role name or `{light, dark}` pair) resolved against
+ * the theme, or null when the node authors none.
+ */
+@Composable
+internal fun prototypeAuthoredForeground(node: PrototypeRenderNode): Color? =
+  prototypeThemedColor(null, node.style.source.color)
+
 /** The authored `style.color` when set, else the enclosing Material component's content color. */
 @Composable
 internal fun prototypeForeground(node: PrototypeRenderNode): Color =
-  prototypeThemedColor(null, node.style.source.color) ?: LocalContentColor.current
+  prototypeAuthoredForeground(node) ?: LocalContentColor.current
 
 /** The node-level semantics already carry the label, so the drawn text adds none of its own. */
 @Composable

@@ -376,7 +376,10 @@ class PrototypeThemeTest {
   fun `sheet handle scrims and placeholders use scheme roles`() {
     for (scheme in listOf(lightColorScheme(), darkColorScheme())) {
       assertEquals(scheme.onSurfaceVariant, prototypeHandleColor(scheme))
-      assertEquals(scheme.scrim.copy(alpha = 0.4f), prototypeSheetScrimFallback(scheme))
+      assertEquals(
+        scheme.scrim.copy(alpha = 0.4f),
+        prototypeSheetScrimFallback(PrototypePalette(scheme, dark = false)),
+      )
       assertEquals(scheme.scrim.copy(alpha = 0.32f), prototypeDialogScrimFallback(scheme))
       assertEquals(scheme.surfaceVariant, prototypePlaceholderColor(scheme))
       assertEquals(scheme.onSurfaceVariant, prototypePlaceholderContentColor(scheme))

@@ -372,8 +372,12 @@ internal data class PrototypeDismissColors(val background: Color, val content: C
 /** The dismiss bar's translucency: quiet, but readable over any prototype. */
 internal const val PROTOTYPE_DISMISS_BAR_ALPHA = 0.6f
 
-/** Fallback scrim alphas, used when the spec authors no scrim colour. */
+/**
+ * The default scrim opacity: what the `scrim` role is drawn at, both for a sheet that authors no
+ * scrim colour and for a scrim slot that names the `scrim` role ([prototypeResolveScrim]).
+ */
 internal const val PROTOTYPE_SHEET_SCRIM_ALPHA = 0.4f
+/** A dialog authors no scrim; its fixed scrim uses the Material dialog opacity. */
 internal const val PROTOTYPE_DIALOG_SCRIM_ALPHA = 0.32f
 
 /** The dismiss bar: `surfaceContainerHigh` at [PROTOTYPE_DISMISS_BAR_ALPHA] over `onSurface`. */
@@ -390,8 +394,8 @@ internal fun prototypeCloseColors(scheme: ColorScheme): PrototypeDismissColors =
 /** The sheet drag handle: the M3 default role. */
 internal fun prototypeHandleColor(scheme: ColorScheme): Color = scheme.onSurfaceVariant
 
-internal fun prototypeSheetScrimFallback(scheme: ColorScheme): Color =
-  scheme.scrim.copy(alpha = PROTOTYPE_SHEET_SCRIM_ALPHA)
+internal fun prototypeSheetScrimFallback(palette: PrototypePalette): Color =
+  checkNotNull(prototypeResolveScrim(palette, null, PrototypeModeValue.Single(SCRIM_ROLE)))
 
 internal fun prototypeDialogScrimFallback(scheme: ColorScheme): Color =
   scheme.scrim.copy(alpha = PROTOTYPE_DIALOG_SCRIM_ALPHA)
@@ -597,6 +601,38 @@ internal fun prototypeResolveColor(
   return parsed ?: prototypeColor(value)
 }
 
+/**
+ * The colour of a scrim slot (`window.placement.scrim`, a `bottomSheet` `scrim`). It resolves like
+ * any colour slot, with one exception: the `scrim` role, alone or as the side of a pair for the
+ * palette's mode, is drawn at the default scrim opacity ([PROTOTYPE_SHEET_SCRIM_ALPHA]), because
+ * the scheme's scrim colour is opaque and a scrim is meant to dim. Any other role keeps its scheme
+ * colour unchanged, and a hex value keeps exactly its authored alpha.
+ */
+internal fun prototypeResolveScrim(
+  palette: PrototypePalette,
+  literal: Color?,
+  spec: PrototypeModeValue?,
+): Color? =
+  if (spec?.let { prototypeModeValue(it, palette.dark) } == SCRIM_ROLE)
+    palette.scheme.scrim.copy(alpha = PROTOTYPE_SHEET_SCRIM_ALPHA)
+  else prototypeResolveColor(palette, literal, spec)
+
+/** [prototypeResolveScrim] against the active prototype theme. */
+@Composable
+internal fun prototypeThemedScrim(literal: Color?, spec: PrototypeModeValue?): Color? =
+  prototypeResolveScrim(prototypePalette(), literal, spec)
+
+/**
+ * Every palette the prototype can resolve to: one per device setting, which is a single palette
+ * when the spec or its backgrounds fix the mode. Device dynamic colour is left out; its roles are
+ * opaque like the baseline ones, so the alpha of any resolved colour is the same.
+ */
+internal fun prototypeReachablePalettes(model: PrototypeRenderModel): List<PrototypePalette> =
+  listOf(false, true)
+    .map { prototypeThemeSpec(model.root, it, model.theme) }
+    .distinct()
+    .map { PrototypePalette(prototypeColorScheme(it), it.dark) }
+
 /** The scheme and resolved mode of the enclosing [PrototypeTheme]. */
 @Composable
 internal fun prototypePalette(): PrototypePalette =
@@ -641,6 +677,7 @@ private fun prototypeDynamicScheme(context: Context, theme: PrototypeThemeSpec):
 
 private const val FULL_CORNER_PERCENT = 50
 private const val DEVICE_COLOR_SOURCE = "device"
+private const val SCRIM_ROLE = "scrim"
 private const val DEGREES = 360f
 private const val TERTIARY_HUE_ROTATION = 60f
 private const val NEUTRAL_SATURATION = 0.06f

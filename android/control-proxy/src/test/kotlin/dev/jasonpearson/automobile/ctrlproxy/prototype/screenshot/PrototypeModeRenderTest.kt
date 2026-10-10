@@ -1,7 +1,12 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import android.app.Application
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.ctrlproxy.prototype.LocalPrototypeImageCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetChangeListener
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetInfo
@@ -10,12 +15,15 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageDecoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeInsetFloor
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSpecContent
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeTheme
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowContent
 import dev.jasonpearson.automobile.ctrlproxy.prototype.mapPrototypeSpec
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeAuthoredForeground
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -37,6 +45,10 @@ class PrototypeModeRenderTest {
     const val BLUE = 0xFF0000FF.toInt()
     const val GREEN = 0xFF00FF00.toInt()
     const val MAGENTA = 0xFFFF00FF.toInt()
+    const val HALF_RED = 0x80FF0000.toInt()
+    // The `scrim` role at the default scrim opacity (0.4 is alpha 0x66).
+    const val DIM_GREEN = 0x6600FF00
+    const val DIM_MAGENTA = 0x66FF00FF
     const val FILL = """"width":"fill","height":"fill""""
     const val PAIR = """{"light":"#FF0000","dark":"#0000FF"}"""
     const val FULLSCREEN = """"window":{"placement":{"type":"fullscreen"}}"""
@@ -131,21 +143,43 @@ class PrototypeModeRenderTest {
     assertEquals(MAGENTA, dark.at(0.5, 0.5))
   }
 
-  private fun sheet(mode: String, scrim: String) =
+  /** Role overrides that differ by mode, so a drawn role names its mode. */
+  private fun roleTheme(mode: String) =
+    """"theme":{"mode":"$mode","colors":{
+      "light":{"scrim":"#00FF00","primary":"#00FF00"},
+      "dark":{"scrim":"#FF00FF","primary":"#FF00FF"}}}"""
+
+  private fun sheet(mode: String, scrim: String?) =
     spec(
-      """{"id":"p",$FULLSCREEN,"state":{"open":true},
-        "theme":{"mode":"$mode","colors":{"light":{"scrim":"#00FF00"},"dark":{"scrim":"#FF00FF"}}},
+      """{"id":"p",$FULLSCREEN,"state":{"open":true},${roleTheme(mode)},
         "root":{"type":"box","style":{$FILL},"children":[
           {"type":"bottomSheet","openWhen":{"key":"open","equals":true},"detents":["half"],
-            "scrim":$scrim,"child":{"type":"spacer"}}]}}""",
+            ${scrim?.let { """"scrim":$it,""" }.orEmpty()}"child":{"type":"spacer"}}]}}""",
     )
 
+  private fun sheetScrim(mode: String, scrim: String?) =
+    renderPrototype("sheet-$mode", sheet(mode, scrim)).at(0.5, 0.1)
+
   @Test
-  fun bottomSheetScrimDrawsPairsAndRolesForTheMode() {
-    assertEquals(RED, renderPrototype("sheet-light", sheet("light", PAIR)).at(0.5, 0.1))
-    assertEquals(BLUE, renderPrototype("sheet-dark", sheet("dark", PAIR)).at(0.5, 0.1))
-    assertEquals(GREEN, renderPrototype("sheet-role-l", sheet("light", "\"scrim\"")).at(0.5, 0.1))
-    assertEquals(MAGENTA, renderPrototype("sheet-role-d", sheet("dark", "\"scrim\"")).at(0.5, 0.1))
+  fun bottomSheetScrimDrawsPairsAndOtherRolesUnchanged() {
+    assertEquals(RED, sheetScrim("light", PAIR))
+    assertEquals(BLUE, sheetScrim("dark", PAIR))
+    assertEquals(GREEN, sheetScrim("light", "\"primary\""))
+    assertEquals(MAGENTA, sheetScrim("dark", "\"primary\""))
+    assertEquals(HALF_RED, sheetScrim("dark", "\"#80FF0000\""))
+  }
+
+  @Test
+  fun bottomSheetScrimRoleDrawsAtTheDefaultScrimOpacity() {
+    assertEquals(DIM_GREEN, sheetScrim("light", "\"scrim\""))
+    assertEquals(DIM_MAGENTA, sheetScrim("dark", "\"scrim\""))
+    assertEquals(
+      "the unauthored default",
+      sheetScrim("dark", null),
+      sheetScrim("dark", "\"scrim\""),
+    )
+    assertEquals(DIM_MAGENTA, sheetScrim("dark", """{"light":"#FF0000","dark":"scrim"}"""))
+    assertEquals(RED, sheetScrim("light", """{"light":"#FF0000","dark":"scrim"}"""))
   }
 
   /** The window scrim is host chrome, drawn by `PrototypeWindowContent` behind the spec. */
@@ -154,8 +188,7 @@ class PrototypeModeRenderTest {
       mapPrototypeSpec(
         spec(
           """{"id":"p","window":{"placement":{"type":"fullscreen","scrim":$scrim}},
-            "theme":{"mode":"$mode","colors":{"dark":{"scrim":"#FF00FF"}}},
-            "root":{"type":"spacer"}}""",
+            ${roleTheme(mode)},"root":{"type":"spacer"}}""",
         ),
       )
     // The controller hands the host the spec's root and theme the same way.
@@ -167,12 +200,99 @@ class PrototypeModeRenderTest {
   }
 
   @Test
-  fun fullscreenScrimDrawsPairsAndRolesForTheMode() {
+  fun fullscreenScrimDrawsPairsAndOtherRolesUnchanged() {
     assertEquals(RED, windowScrim("light", PAIR))
     assertEquals(BLUE, windowScrim("dark", PAIR))
-    assertEquals(MAGENTA, windowScrim("dark", "\"scrim\""))
+    assertEquals(GREEN, windowScrim("light", "\"primary\""))
+    assertEquals(MAGENTA, windowScrim("dark", "\"primary\""))
+    assertEquals(HALF_RED, windowScrim("light", "\"#80FF0000\""))
+  }
+
+  @Test
+  fun fullscreenScrimRoleDrawsAtTheDefaultScrimOpacity() {
+    assertEquals(DIM_GREEN, windowScrim("light", "\"scrim\""))
+    assertEquals(DIM_MAGENTA, windowScrim("dark", "\"scrim\""))
     assertEquals(RED, windowScrim("light", """{"light":"#FF0000","dark":"scrim"}"""))
-    assertEquals(MAGENTA, windowScrim("dark", """{"light":"#FF0000","dark":"scrim"}"""))
+    assertEquals(DIM_MAGENTA, windowScrim("dark", """{"light":"#FF0000","dark":"scrim"}"""))
+  }
+
+  // Role names in component colour slots (#11219): ignored before, resolved against the theme now.
+
+  private fun component(node: String) =
+    mapPrototypeSpec(
+      spec(
+        """{"id":"p",$FULLSCREEN,"state":{"on":false,"pick":"a"},${roleTheme("dark")},
+          "root":{"type":"box","style":{$FILL},"children":[$node]}}""",
+      ),
+    )
+
+  /** The colour a component's `style.color` resolves to inside the spec's theme. */
+  private fun foreground(node: String): Color? {
+    val model = component(node)
+    var color: Color? = null
+    renderComposable("foreground") {
+      PrototypeTheme(model.root, model.theme) {
+        color = prototypeAuthoredForeground(model.root.children.single())
+        // The capture needs a laid-out view; the colour is all this reads.
+        Box(Modifier.size(1.dp))
+      }
+    }
+    return color
+  }
+
+  @Test
+  fun buttonColorRoleResolves() {
+    assertEquals(
+      Color.Magenta,
+      foreground("""{"type":"button","label":"Go","style":{"color":"primary"}}"""),
+    )
+    assertNull(foreground("""{"type":"button","label":"Go"}"""))
+  }
+
+  @Test
+  fun checkboxColorRoleResolves() {
+    assertEquals(
+      Color.Magenta,
+      foreground(
+        """{"type":"checkbox","stateKey":"on","label":"On","style":{"color":"primary"}}""",
+      ),
+    )
+  }
+
+  @Test
+  fun radioGroupColorRoleResolves() {
+    assertEquals(
+      Color.Magenta,
+      foreground(
+        """{"type":"radioGroup","stateKey":"pick","options":[{"value":"a","label":"A"},{"value":"b","label":"B"}],
+          "style":{"color":"primary"}}""",
+      ),
+    )
+  }
+
+  @Test
+  fun listItemColorRoleResolves() {
+    assertEquals(
+      Color.Magenta,
+      foreground("""{"type":"listItem","headline":"Row","style":{"color":"primary"}}"""),
+    )
+  }
+
+  @Test
+  fun cardBackgroundRoleFillsTheCardContainer() {
+    val card = """{"type":"card","style":{$FILL,"background":"primary"},"children":[]}"""
+    assertEquals(MAGENTA, renderComponent(card).at(0.5, 0.5))
+  }
+
+  @Test
+  fun listItemBackgroundRoleShowsThroughItsContainer() {
+    val item = """{"type":"listItem","headline":"Row","style":{$FILL,"background":"primary"}}"""
+    assertEquals(MAGENTA, renderComponent(item).at(0.9, 0.9))
+  }
+
+  private fun renderComponent(node: String): PrototypeScreenshotComparator.Image {
+    val model = component(node)
+    return renderComposable("component") { PrototypeSpecContent(model.root, theme = model.theme) }
   }
 
   /** Records the asset ids the renderer asks for; every asset is unknown, so nothing decodes. */

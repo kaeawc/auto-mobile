@@ -158,51 +158,107 @@ class PrototypeModeValueTest {
     )
   }
 
-  @Test
-  fun `a fullscreen scrim keeps its authored slot and resolves roles and pairs per mode`() {
-    val hex = mapPrototypePlacement(PrototypeFullscreenPlacement("#66000000"))
-    assertEquals(
-      PrototypePlacement.Fullscreen(Color(0x66000000), PrototypeModeValue.Single("#66000000")),
-      hex,
-    )
-    val pair =
-      mapPrototypePlacement(
-        PrototypeFullscreenPlacement(PrototypeModeValue.Modes("#66000000", "scrim")),
-      )
-        as PrototypePlacement.Fullscreen
-    assertNull(pair.scrim)
-    assertEquals(Color(0x66000000), prototypeResolveColor(light, pair.scrim, pair.scrimSpec))
-    assertEquals(dark.scheme.scrim, prototypeResolveColor(dark, pair.scrim, pair.scrimSpec))
+  private val defaultScrimAlpha = 0.4f
 
-    val role =
-      mapPrototypePlacement(PrototypeFullscreenPlacement("primary"))
-        as PrototypePlacement.Fullscreen
-    assertNull(role.scrim)
-    assertEquals(lightPrimary, prototypeResolveColor(light, role.scrim, role.scrimSpec))
-    assertEquals(darkPrimary, prototypeResolveColor(dark, role.scrim, role.scrimSpec))
+  private fun fullscreen(scrim: PrototypeModeValue?) =
+    mapPrototypePlacement(PrototypeFullscreenPlacement(scrim)) as PrototypePlacement.Fullscreen
 
-    val none =
-      mapPrototypePlacement(PrototypeFullscreenPlacement()) as PrototypePlacement.Fullscreen
-    assertNull(prototypeResolveColor(light, none.scrim, none.scrimSpec))
-  }
-
-  @Test
-  fun `a bottom sheet scrim resolves roles and pairs per mode and is absent when not authored`() {
-    fun sheet(scrim: PrototypeModeValue?) =
-      PrototypeBottomSheetNode(
+  private fun sheetScrim(scrim: PrototypeModeValue?) =
+    PrototypeBottomSheetNode(
         child = PrototypeSpacerNode(),
         openWhen = PrototypeSheetCondition("open", true),
         detents = emptyList(),
         scrim = scrim,
       )
-    val pair = sheet(PrototypeModeValue.Modes("#52000000", "primary")).scrim
-    assertEquals(Color(0x52000000), prototypeResolveColor(light, null, pair))
-    assertEquals(darkPrimary, prototypeResolveColor(dark, null, pair))
-    val role = sheet(PrototypeModeValue.Single("scrim")).scrim
+      .scrim
+
+  /** Both scrim positions resolve [scrim] through the one rule; returns light then dark. */
+  private fun scrims(scrim: PrototypeModeValue?): List<Pair<Color?, Color?>> {
+    val window = fullscreen(scrim)
+    val sheet = sheetScrim(scrim)
+    return listOf(
+      prototypeResolveScrim(light, window.scrim, window.scrimSpec) to
+        prototypeResolveScrim(dark, window.scrim, window.scrimSpec),
+      prototypeResolveScrim(light, null, sheet) to prototypeResolveScrim(dark, null, sheet),
+    )
+  }
+
+  @Test
+  fun `a fullscreen scrim keeps its authored slot beside the single hex literal`() {
+    assertEquals(
+      PrototypePlacement.Fullscreen(Color(0x66000000), PrototypeModeValue.Single("#66000000")),
+      mapPrototypePlacement(PrototypeFullscreenPlacement("#66000000")),
+    )
+    assertNull(fullscreen(PrototypeModeValue.Single("scrim")).scrim)
+    assertNull(fullscreen(hexPair).scrim)
+  }
+
+  @Test
+  fun `the default scrim opacity is the sheet's unauthored default`() {
+    assertEquals(defaultScrimAlpha, PROTOTYPE_SHEET_SCRIM_ALPHA)
+    assertEquals(
+      prototypeSheetScrimFallback(light),
+      prototypeResolveScrim(light, null, PrototypeModeValue.Single("scrim")),
+    )
+  }
+
+  @Test
+  fun `the scrim role draws at the default scrim opacity in each scrim position and mode`() {
+    scrims(PrototypeModeValue.Single("scrim")).forEach { (lightScrim, darkScrim) ->
+      assertEquals(light.scheme.scrim.copy(alpha = defaultScrimAlpha), lightScrim)
+      assertEquals(dark.scheme.scrim.copy(alpha = defaultScrimAlpha), darkScrim)
+    }
+  }
+
+  @Test
+  fun `another role used as a scrim keeps its scheme colour unchanged`() {
+    scrims(PrototypeModeValue.Single("primary")).forEach { (lightScrim, darkScrim) ->
+      assertEquals(lightPrimary, lightScrim)
+      assertEquals(darkPrimary, darkScrim)
+    }
+    scrims(rolePair).forEach { (lightScrim, darkScrim) ->
+      assertEquals(lightPrimary, lightScrim)
+      assertEquals(Color.Blue, darkScrim)
+    }
+  }
+
+  @Test
+  fun `a hex scrim keeps exactly its authored alpha`() {
+    scrims(PrototypeModeValue.Single("#52000000")).forEach { (lightScrim, darkScrim) ->
+      assertEquals(Color(0x52000000), lightScrim)
+      assertEquals(Color(0x52000000), darkScrim)
+    }
+    scrims(PrototypeModeValue.Modes("#52000000", "#99FFFFFF")).forEach { (lightScrim, darkScrim) ->
+      assertEquals(Color(0x52000000), lightScrim)
+      assertEquals(Color(0x99FFFFFF), darkScrim)
+    }
+  }
+
+  @Test
+  fun `a scrim pair mixing a role and a hex applies the rule to the side for the mode`() {
+    scrims(PrototypeModeValue.Modes("#66000000", "scrim")).forEach { (lightScrim, darkScrim) ->
+      assertEquals(Color(0x66000000), lightScrim)
+      assertEquals(dark.scheme.scrim.copy(alpha = defaultScrimAlpha), darkScrim)
+    }
+    scrims(PrototypeModeValue.Modes("scrim", "primary")).forEach { (lightScrim, darkScrim) ->
+      assertEquals(light.scheme.scrim.copy(alpha = defaultScrimAlpha), lightScrim)
+      assertEquals(darkPrimary, darkScrim)
+    }
+  }
+
+  @Test
+  fun `an unauthored scrim resolves to none and the scrim role keeps its alpha only in scrims`() {
+    scrims(null).forEach { (lightScrim, darkScrim) ->
+      assertNull(lightScrim)
+      assertNull(darkScrim)
+    }
+    // As a style colour or gradient stop the role is the scheme's opaque colour.
+    val role = PrototypeModeValue.Single("scrim")
     assertEquals(light.scheme.scrim, prototypeResolveColor(light, null, role))
-    assertEquals(dark.scheme.scrim, prototypeResolveColor(dark, null, role))
-    // Null is what selects the themed fallback scrim.
-    assertNull(prototypeResolveColor(light, null, sheet(null).scrim))
+    assertEquals(
+      listOf(dark.scheme.scrim),
+      prototypeGradientStops(listOf(PrototypeGradientStop("scrim")), dark).first,
+    )
   }
 
   @Test
@@ -370,36 +426,71 @@ class PrototypeModeValueTest {
     assertTrue(prototypeThemeSpec(hexChild.root, false).dark)
   }
 
+  private fun opaque(
+    root: PrototypeNode,
+    scrim: PrototypeModeValue? = null,
+    theme: PrototypeSpecTheme? = null,
+  ) =
+    prototypeWindowMetadata(
+        mapPrototypeSpec(
+          PrototypeSpec(
+            "panel",
+            PrototypeWindow(PrototypeFullscreenPlacement(scrim)),
+            root = root,
+            theme = theme,
+          ),
+        ),
+        dismissBarOpaque = true,
+      )
+      .opaque
+
   @Test
-  fun `a pair is opaque only when both sides are opaque hex colours`() {
-    assertTrue(prototypeOpaqueInEveryMode(hexPair))
-    assertTrue(prototypeOpaqueInEveryMode(PrototypeModeValue.Single("#FF000000")))
-    assertFalse(prototypeOpaqueInEveryMode(PrototypeModeValue.Modes("#FFFFFF", "#80000000")))
-    assertFalse(prototypeOpaqueInEveryMode(mixedPair))
-    assertFalse(prototypeOpaqueInEveryMode(PrototypeModeValue.Single("surface")))
-    assertFalse(prototypeOpaqueInEveryMode(null))
+  fun `window metadata counts a root background as it is drawn in every reachable mode`() {
+    assertTrue(opaque(box(hexPair)))
+    assertFalse(opaque(box(PrototypeModeValue.Modes("#FFFFFF", "#80000000"))))
+    // An explicit mode makes only one side reachable.
+    val lightOnly = PrototypeSpecTheme(mode = "light")
+    assertTrue(opaque(box(PrototypeModeValue.Modes("#FFFFFF", "#80000000")), theme = lightOnly))
+    assertTrue(opaque(box(PrototypeModeValue.Single("surface"))))
+    assertTrue(opaque(box(rolePair)))
+    val translucentSurface =
+      PrototypeSpecTheme(colors = PrototypeSpecThemeColors(dark = mapOf("surface" to "#80000000")))
+    assertFalse(opaque(box(PrototypeModeValue.Single("surface")), theme = translucentSurface))
+    assertTrue(
+      opaque(
+        box(PrototypeModeValue.Single("surface")),
+        theme = translucentSurface.copy(mode = "light"),
+      ),
+    )
   }
 
   @Test
-  fun `window metadata counts an opaque pair as a solid root or scrim`() {
-    fun opaque(root: PrototypeNode, scrim: PrototypeModeValue? = null) =
-      prototypeWindowMetadata(
-          mapPrototypeSpec(
-            PrototypeSpec(
-              "panel",
-              PrototypeWindow(PrototypeFullscreenPlacement(scrim)),
-              root = root,
-            ),
-          ),
-          dismissBarOpaque = true,
-        )
-        .opaque
-    assertTrue(opaque(box(hexPair)))
-    assertFalse(opaque(box(PrototypeModeValue.Modes("#FFFFFF", "#80000000"))))
-    assertFalse(opaque(box(rolePair)))
-    assertTrue(opaque(PrototypeSpacerNode(), scrim = hexPair))
+  fun `window metadata counts a scrim as it is drawn in every reachable mode`() {
+    val clear = PrototypeSpacerNode()
+    assertTrue(opaque(clear, scrim = hexPair))
+    assertTrue(opaque(clear, scrim = PrototypeModeValue.Single("#FF000000")))
+    assertFalse(opaque(clear, scrim = PrototypeModeValue.Single("#66000000")))
+    assertFalse(opaque(clear, scrim = null))
+    // The scrim role is drawn at the default scrim opacity, so it never hides the app.
+    assertFalse(opaque(clear, scrim = PrototypeModeValue.Single("scrim")))
+    assertFalse(opaque(clear, scrim = PrototypeModeValue.Modes("#FF000000", "scrim")))
+    assertTrue(
+      opaque(
+        clear,
+        scrim = PrototypeModeValue.Modes("#FF000000", "scrim"),
+        theme = PrototypeSpecTheme(mode = "light"),
+      ),
+    )
+    // Another role is drawn unchanged: opaque unless the theme overrides it with alpha.
+    assertTrue(opaque(clear, scrim = PrototypeModeValue.Single("surface")))
+    assertTrue(opaque(clear, scrim = PrototypeModeValue.Modes("surface", "#FF101010")))
+    assertFalse(opaque(clear, scrim = PrototypeModeValue.Modes("surface", "#80101010")))
     assertFalse(
-      opaque(PrototypeSpacerNode(), scrim = PrototypeModeValue.Modes("#66000000", "scrim")),
+      opaque(
+        clear,
+        scrim = PrototypeModeValue.Single("surface"),
+        theme = PrototypeSpecTheme(colors = PrototypeSpecThemeColors(surface = "#80FFFFFF")),
+      ),
     )
   }
 }

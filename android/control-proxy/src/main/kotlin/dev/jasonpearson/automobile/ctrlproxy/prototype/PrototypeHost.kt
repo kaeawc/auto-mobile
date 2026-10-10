@@ -815,7 +815,7 @@ private fun PrototypeChrome(
           .clipToBounds()
           .alpha(chrome.contentAlpha)
           .background(
-            prototypeThemedColor(fullscreen?.scrim, fullscreen?.scrimSpec) ?: Color.Transparent,
+            prototypeThemedScrim(fullscreen?.scrim, fullscreen?.scrimSpec) ?: Color.Transparent,
           ),
       ) {
         CompositionLocalProvider(

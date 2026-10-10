@@ -382,13 +382,6 @@ internal fun prototypeModeValue(value: PrototypeModeValue, dark: Boolean): Strin
 internal fun prototypeHexColor(value: PrototypeModeValue?): Color? =
   (value as? PrototypeModeValue.Single)?.value?.takeIf { it.startsWith("#") }?.let(::prototypeColor)
 
-/**
- * Whether a colour slot is a fully opaque hex colour in both modes. A role name counts as not
- * opaque: its colour is only known once the theme is resolved.
- */
-internal fun prototypeOpaqueInEveryMode(value: PrototypeModeValue?): Boolean =
-  value != null && value.values.all { it.startsWith("#") && prototypeColor(it).alpha >= 1f }
-
 fun mapPrototypeStyle(style: PrototypeStyle): PrototypeRenderStyle =
   PrototypeRenderStyle(
     style,

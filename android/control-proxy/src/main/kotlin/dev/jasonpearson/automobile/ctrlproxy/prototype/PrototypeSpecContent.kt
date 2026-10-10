@@ -612,8 +612,8 @@ private fun RenderPrototypeSheet(
     Box(
       Modifier.fillMaxSize()
         .background(
-          prototypeThemedColor(null, source.scrim)
-            ?: prototypeSheetScrimFallback(MaterialTheme.colorScheme),
+          prototypeThemedScrim(null, source.scrim)
+            ?: prototypeSheetScrimFallback(prototypePalette()),
         )
         .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) },
     )

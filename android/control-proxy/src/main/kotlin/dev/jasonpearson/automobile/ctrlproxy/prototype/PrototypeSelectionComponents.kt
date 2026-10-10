@@ -121,7 +121,7 @@ internal fun RenderPrototypeListItem(
         Modifier.clickable(role = Role.Button) { interact(PrototypeInteraction.Tap(actions)) }
       else -> Modifier
     }
-  val foreground = prototypeThemedColor(null, node.style.source.color) ?: Color.Unspecified
+  val foreground = prototypeAuthoredForeground(node) ?: Color.Unspecified
   ListItem(
     headlineContent = { Text(source.headline, Modifier.clearAndSetSemantics {}) },
     modifier = target.then(modifier),

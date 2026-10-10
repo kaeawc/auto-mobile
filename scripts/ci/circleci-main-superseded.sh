@@ -75,7 +75,11 @@ fi
 # non-tip commit that touches the group is trusted to be covered by that pipeline's
 # own path filtering; main is squash-merge only, which keeps pushes single-commit.
 for commit in ${commits}; do
-  if git log -1 --format=%B "${commit}" | grep -qiF -- "[skip ci]"; then
+  if ! message="$(git log -1 --format=%B "${commit}")"; then
+    run_job "could not read ${commit} message"
+  fi
+  # Here-string, not a pipe: grep -q exiting early would SIGPIPE git under pipefail.
+  if grep -qiF -- "[skip ci]" <<< "${message}"; then
     echo "circleci-main-superseded: ignoring ${commit} ([skip ci])." >&2
     continue
   fi

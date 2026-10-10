@@ -40,13 +40,61 @@ final class OverlayHostChromeTests: XCTestCase {
         }
     }
 
-    func testDismissBarColorsMatchAndroidsTranslucentThemedBar() {
-        let light = OverlayHostChrome.dismissBarColors(dark: false)
-        XCTAssertEqual(light.background, OverlayRGBA(red: 1, green: 1, blue: 1, alpha: 0x99 / 255))
-        XCTAssertEqual(light.content, OverlayRGBA(rgb: 0x1A1A1A))
-        let dark = OverlayHostChrome.dismissBarColors(dark: true)
-        XCTAssertEqual(dark.background, OverlayRGBA(red: 0, green: 0, blue: 0, alpha: 0x99 / 255))
-        XCTAssertEqual(dark.content, OverlayRGBA(rgb: 0xE6E6E6))
+    func testDismissBarAndChipUseSurfaceContainerHighOverOnSurfaceInBothModes() {
+        for dark in [false, true] {
+            let palette = OverlayPalette.make(theme: nil, systemDark: dark)
+            XCTAssertEqual(palette.dark, dark)
+            let bar = OverlayHostChrome.dismissBarColors(palette: palette)
+            var high = palette.chromeRole("surfaceContainerHigh")
+            high.alpha = OverlayHostChrome.dismissBarAlpha
+            XCTAssertEqual(bar.background, high)
+            XCTAssertEqual(bar.content, palette.chromeRole("onSurface"))
+            XCTAssertLessThan(bar.background.alpha, 1)
+            let chip = OverlayHostChrome.closeChipColors(palette: palette)
+            XCTAssertEqual(chip.fill, palette.chromeRole("surfaceContainerHigh"))
+            XCTAssertEqual(chip.glyph, palette.chromeRole("onSurface"))
+            XCTAssertGreaterThan(abs(chip.fill.luminance - chip.glyph.luminance), 0.3, "dark=\(dark)")
+        }
+    }
+
+    func testDarkChipIsNotTheOldWhiteOnBlackTranslucentFixedPair() {
+        let chip = OverlayHostChrome.closeChipColors(palette: .make(theme: nil, systemDark: true))
+        XCTAssertLessThan(chip.fill.luminance, 0.2)
+        XCTAssertGreaterThan(chip.glyph.luminance, 0.5)
+    }
+
+    func testChromeFollowsExplicitRoleOverrides() throws {
+        let theme = try JSONDecoder().decode(
+            OverlayTheme.self,
+            from: Data(##"{"mode":"dark","colors":{"surfaceContainerHigh":"#102030","onSurface":"#F0E0D0"}}"##.utf8)
+        )
+        let palette = OverlayPalette.make(theme: theme, systemDark: false)
+        XCTAssertEqual(OverlayHostChrome.closeChipColors(palette: palette).fill, OverlayRGBA(hex: "#102030"))
+        XCTAssertEqual(OverlayHostChrome.dismissBarColors(palette: palette).content, OverlayRGBA(hex: "#F0E0D0"))
+    }
+
+    func testFallbackRolesAreThemedAndNilForAnUnthemedSpec() throws {
+        let plain = OverlayPalette.make(theme: nil, systemDark: true)
+        for role in [
+            plain.sheetSurface,
+            plain.sheetHandle,
+            plain.navSelected,
+            plain.navIndicator,
+            plain.navUnselected,
+            plain.placeholderFill,
+            plain.placeholderGlyph,
+        ] {
+            XCTAssertNil(role, "unthemed specs keep the system colours")
+        }
+        let theme = try JSONDecoder().decode(OverlayTheme.self, from: Data(#"{"mode":"dark"}"#.utf8))
+        let palette = OverlayPalette.make(theme: theme, systemDark: false)
+        XCTAssertEqual(palette.sheetSurface, palette.color(role: "surface"))
+        XCTAssertEqual(palette.sheetHandle, palette.color(role: "onSurfaceVariant"))
+        XCTAssertEqual(palette.navSelected, palette.color(role: "onSecondaryContainer"))
+        XCTAssertEqual(palette.navIndicator, palette.color(role: "secondaryContainer"))
+        XCTAssertEqual(palette.navUnselected, palette.color(role: "onSurfaceVariant"))
+        XCTAssertEqual(palette.placeholderFill, palette.color(role: "surfaceVariant"))
+        XCTAssertEqual(palette.placeholderGlyph, palette.color(role: "onSurfaceVariant"))
     }
 
     // MARK: Dialog parts (D3)

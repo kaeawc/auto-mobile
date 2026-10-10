@@ -396,8 +396,11 @@ struct NodeView: View {
             default: resizable.aspectRatio(contentMode: .fit)
             }
         } else {
-            Rectangle().fill(Color.gray.opacity(0.3))
-                .overlay(Image(systemName: "photo").foregroundColor(.secondary))
+            Rectangle().fill(palette.placeholderFill.map { Color($0) } ?? Color.gray.opacity(0.3))
+                .overlay(
+                    Image(systemName: "photo")
+                        .foregroundColor(palette.placeholderGlyph.map { Color($0) } ?? .secondary)
+                )
         }
     }
 
@@ -503,11 +506,22 @@ struct NodeView: View {
                         Text(item.label).font(.caption)
                     }
                     .frame(maxWidth: .infinity, minHeight: 44)
-                    .foregroundColor(index == navSelection ? .accentColor : .secondary)
+                    .foregroundColor(navForeground(selected: index == navSelection))
+                    .background(
+                        Capsule().fill(
+                            index == navSelection ? palette.navIndicator.map { Color($0) } ?? .clear : .clear
+                        )
+                    )
                 }
                 .accessibilityAddTraits(index == navSelection ? .isSelected : [])
             }
         }
+    }
+
+    /// A nav item's colour: the palette's role pair when themed, else the system accent and secondary.
+    private func navForeground(selected: Bool) -> Color {
+        if selected { return palette.navSelected.map { Color($0) } ?? .accentColor }
+        return palette.navUnselected.map { Color($0) } ?? .secondary
     }
 
     /// Opens at its first detent. Dragging between detents and swipe-to-dismiss are not
@@ -518,7 +532,10 @@ struct NodeView: View {
             GeometryReader { proxy in
                 VStack(spacing: 8) {
                     if node.dragHandle ?? true {
-                        Capsule().fill(Color.secondary.opacity(0.5)).frame(width: 36, height: 5).padding(.top, 6)
+                        Capsule().fill(palette.sheetHandle.map { Color($0) } ?? Color.secondary.opacity(0.5)).frame(
+                            width: 36,
+                            height: 5
+                        ).padding(.top, 6)
                     }
                     NodeView(node: child, model: model)
                 }
@@ -526,7 +543,7 @@ struct NodeView: View {
                 .frame(height: node.detents?.first.map { detent in
                     CGFloat(detent.height(in: Double(proxy.size.height)))
                 })
-                .background(Color(UIColor.systemBackground))
+                .background(palette.sheetSurface.map { Color($0) } ?? Color(UIColor.systemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .frame(maxHeight: .infinity, alignment: .bottom)
             }

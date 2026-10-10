@@ -225,7 +225,11 @@ function connect(socket: UnixSocketServer, socketSessionId: string): DaemonMcpPr
       registerTools();
     }
     const forwarded = internals(socket).withSocketSessionAutolockKey(args, socketSessionId, 10000);
-    const result = await fixture.client.callTool({ name, arguments: forwarded });
+    // The first call pays one-time cold-start cost (~0.4 s locally, ~3.5-4.3 s on Windows CI,
+    // which sits on the fixture's 4 s default); the tests carry a 30 s timeout of their own.
+    const result = await fixture.client.callTool({ name, arguments: forwarded }, undefined, {
+      timeout: 20_000,
+    });
     internals(socket).recordBoundMcpClientKey(request, socketSessionId, route, true, result);
     return result;
   };

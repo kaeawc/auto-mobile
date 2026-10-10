@@ -11,12 +11,21 @@ A call that acts on a held device is refused with the typed code
 `device_owned_by_other_session` when it:
 
 - carries no `sessionUuid` (a sessionless call, such as a plain `--cli tapOn`),
-- names a different session than the holder, or
+- names a different session than the holder,
+- is a tool call that names the holder's session while another connected client
+  owns that session (#11344), or
 - is an `input/*` socket frame without the holder's `sessionUuid`
   (see [screen control](screen-control.md)).
 
 A derived `<base>:<label>` session counts as its base session. A device that no
 session holds takes calls from anyone.
+
+A session's owner is the connection that acquired it, or that restored it after
+a reconnect. Ownership is cooperative: no token is needed, but naming a session's
+UUID never takes it over. While the owner is connected, a control call from any
+other connection that names the session is refused, with autolock on or off, and
+that connection is never bound to the session. Once the owner has disconnected
+(a finished `--cli` call, for example) another connection may name the session.
 
 Reads stay allowed on any device, whichever session holds it, and need no
 session (owner decisions 2026-10-09, #10965). Anything that changes visible UI
@@ -188,7 +197,8 @@ releasing.
   The CLI prints the daemon's message and a hint on stderr and exits 1.
 - **MCP:** a connection that acquired a device is bound to it, so its calls route
   to the session without repeating it. A different connection passes `sessionUuid`
-  in the call arguments.
+  in the call arguments; while the acquiring connection is still connected, that
+  works for reads only (see [What is refused](#what-is-refused)).
 - **`scripts/mcp-drive.ts`:** a `getAndroid`/`getApple` step captures the session
   and injects it into later steps; `--session <uuid>` reuses an existing one.
 - **Scripts that run `--cli` calls:** keep the acquiring call's `sessionUuid` and

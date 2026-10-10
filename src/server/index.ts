@@ -65,6 +65,11 @@ import {
   type DeviceLossOutcome,
 } from "./deviceLossOutcome";
 
+import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
+
+const FOREIGN_SESSION_REMEDY =
+  "Acquire a device on this connection (getAndroid, getApple or startDevice), or wait for the owner to release the session.";
+
 // Import the tool registry
 import { ToolRegistry, toolHasOutputSchema } from "./toolRegistry";
 import {
@@ -461,6 +466,35 @@ function extractInternalMcpSessionId(params: unknown): string | undefined {
 
   const value = (params as Record<string, unknown>)[INTERNAL_MCP_SESSION_PARAM];
   return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * #11344: a control call naming a session that another connected client owns is refused with the
+ * typed `device_owned_by_other_session`, with autolock on or off. Ownership is cooperative: no
+ * token is needed, but a session is never driven or taken over by merely naming its UUID. A
+ * caller with no connection identity is left to the device-holder check.
+ */
+function refuseControlOnForeignOwnedSession(
+  toolName: string,
+  sessionUuid: string | undefined,
+  mcpSessionId: string | undefined,
+): void {
+  const daemonState = DaemonState.getInstance();
+  if (!sessionUuid || !mcpSessionId || !daemonState.isInitialized()) {
+    return;
+  }
+  if (!daemonState.getDevicePool().isSessionOwnedByOtherConnection(sessionUuid, mcpSessionId)) {
+    return;
+  }
+  const deviceId = daemonState.getSessionManager().getSession(sessionUuid)?.assignedDevice;
+  throw new InputDeviceOwnedError(
+    toolName,
+    deviceId ?? "unknown",
+    sessionUuid,
+    FOREIGN_SESSION_REMEDY,
+    `${toolName} refused: session ${sessionUuid} is owned by another connected client. ` +
+      FOREIGN_SESSION_REMEDY,
+  );
 }
 
 function extractInternalOneShotCli(params: unknown): boolean {
@@ -1290,6 +1324,17 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       sessionUuid: providedSessionUuid,
     });
 
+    // #11344: a control call never runs on a session another connected client owns. Refused
+    // before the execution starts, so naming the session neither extends nor binds it.
+    if (
+      daemonMode &&
+      tool.requiresDevice &&
+      !isDeviceSessionAcquisitionTool(name) &&
+      tool.isDeviceReadOnlyCall?.(parsedParams) !== true
+    ) {
+      refuseControlOnForeignOwnedSession(name, providedSessionUuid, requestMcpSessionId);
+    }
+
     // #6869: the capabilities this acquisition declares, validated up front.
     const requestedEnableTools = resolveRequestedEnableTools(name, parsedParams);
 
@@ -1365,16 +1410,16 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // The daemon echoes the session it routed an admitted, non-read call to, so a proxy credits
     // exactly that session instead of guessing it from a selector (#10974). Read before the
     // execution ends.
-    // #11235: an explicitly named session another connected client owns by autolock. Naming a
-    // UUID is not proof of ownership (#11164): the call may still run on that session, but this
-    // connection must never bind it for later sessionless calls. Decided before any bind, and
-    // read at bind time so an ownership change during the handler is honored.
+    // #11235, #11344: an explicitly named session another connected client owns, with autolock
+    // on or off. Naming a UUID is not proof of ownership (#11164): a read may still watch that
+    // session, but this connection must never bind it for later sessionless calls. Decided
+    // before any bind, and read at bind time so an ownership change during the handler is honored.
     const foreignOwnedExplicitSessionUuid = (): string | undefined =>
       providedSessionUuid &&
       DaemonState.getInstance().isInitialized() &&
       DaemonState.getInstance()
         .getDevicePool()
-        .isAutolockSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)
+        .isSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)
         ? providedSessionUuid
         : undefined;
     // The proxy learns from the marker not to remember a foreign-owned session it named.

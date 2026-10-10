@@ -6539,8 +6539,12 @@ export class DaemonMcpProxy {
       this.fenceReleasedForwardedSession(forwardedArgs, releaseReason);
       return;
     }
+    // A thrown failure carries no routed-session echo, so it proves nothing about whose session
+    // the call named: it refreshes the lease of the session already bound and never establishes
+    // or switches a binding (#11344). Otherwise one rejected call naming another connection's
+    // session would send this connection's later sessionless calls to that session's device.
     const admittedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
-    if (admittedSessionUuid) {
+    if (admittedSessionUuid && admittedSessionUuid === this.boundSessionUuid) {
       this.updateBoundSessionUuid(admittedSessionUuid);
       this.startBoundSessionHeartbeat();
     }
@@ -6568,7 +6572,9 @@ export class DaemonMcpProxy {
    * without it the session stayed on the 10 s heartbeat policy and the retry
    * after ordinary think-time got `session_ownership_lost` (issue #6870).
    *
-   * An error result may only ESTABLISH a first binding, never SWITCH one: a call
+   * An error result may only ESTABLISH a first binding, never SWITCH one, and only
+   * when the daemon echoed the forwarded session as the one it admitted the call
+   * under (`automobile/routedSessionUuid`, #11344): a call
    * that names some OTHER session and fails leaves the connection on the session
    * it already had, so an unissued UUID cannot steal the binding (issue #2737).
    * executePlan is excluded before checking for a released forwarded session:
@@ -6613,7 +6619,10 @@ export class DaemonMcpProxy {
       !alreadyBound &&
       (this.boundSessionUuid !== undefined ||
         this.terminalBoundSession !== undefined ||
-        !this.mayBindSessionFromErrorResult(name))
+        !this.mayBindSessionFromErrorResult(name) ||
+        // Only the daemon's echo proves the call was admitted under the session it named; a
+        // refusal or a prose error establishes nothing (#11344).
+        routedSessionUuidFromResult(result) !== forwardedSessionUuid)
     ) {
       return;
     }

@@ -1,0 +1,234 @@
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  createProxyMcpServer,
+  livenessHandoverNotificationPayloads,
+  managedEndedPayload,
+} from "../../src/server/proxyServer";
+import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import { DaemonClient } from "../../src/daemon/client";
+import {
+  handleDaemonRequest,
+  type DaemonStateAccess,
+} from "../../src/daemon/daemonRequestHandlers";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { DAEMON_HEARTBEAT_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
+import {
+  livenessHandoverPayload,
+  type LivenessHandover,
+} from "../../src/daemon/proxyLivenessRecovery";
+import { logger } from "../../src/utils/logger";
+import type { Timer } from "../../src/utils/SystemTimer";
+import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
+import { readyManagedSlotsResult } from "../helpers/refusalWireFixtures";
+
+// #11483 item 1 (stdio proxy contract): a MANAGED connection whose execution session the daemon released
+// for a lost heartbeat while the proxy itself was stalled (host sleep, SIGSTOP, a long GC pause).
+// The proxy's stall recovery learns the session is gone and reports it as `proxy_stalled` with
+// `recovery.action: "reacquire_lost_sessions"`, `retryable: true` and "Reacquire the devices with
+// getAndroid or getApple" - the advice #11341/#11471 removed for every other terminal release of a
+// managed session, because a managed connection always refuses getAndroid/getApple. The contract:
+// a managed connection answers a terminally released execution session with
+// `managed_execution_ended` (retryable false, nextAction relaunch_execution), never with advice to
+// acquire a device. The harness mirrors test/daemon/proxyLivenessStalls.test.ts (real session
+// manager and heartbeat handler behind the fake daemon client, a stallable clock) and
+// test/daemon/proxyManagedExecutionHold.test.ts (the managed hold).
+
+const SESSION = "11111111-2222-4333-8444-555555555555";
+const LEASE_MS = 10_000;
+const INTERVAL_MS = 2_000;
+
+class LivenessTimer extends FakeTimer {
+  override advanceTimeAsync(ms: number): Promise<void> {
+    return super.advanceTimeAsync(ms, () => drainUntilQuiescent(this));
+  }
+}
+
+/** A fake timer whose clock a test can push ahead without firing timers: a stalled event loop. */
+class StallableTimer implements Timer {
+  private skewMs = 0;
+  constructor(private readonly base: FakeTimer) {}
+  stall(ms: number): void {
+    this.skewMs += ms;
+  }
+  now(): number {
+    return this.base.now() + this.skewMs;
+  }
+  sleep(ms: number): Promise<void> {
+    return this.base.sleep(ms);
+  }
+  setTimeout(callback: () => void, ms: number): NodeJS.Timeout {
+    return this.base.setTimeout(callback, ms);
+  }
+  clearTimeout(handle: NodeJS.Timeout): void {
+    this.base.clearTimeout(handle);
+  }
+  setInterval(callback: () => void, ms: number): NodeJS.Timeout {
+    return this.base.setInterval(callback, ms);
+  }
+  clearInterval(handle: NodeJS.Timeout): void {
+    this.base.clearInterval(handle);
+  }
+}
+
+const extra = {
+  signal: new AbortController().signal,
+  requestId: 1,
+  sendNotification: async () => {},
+  sendRequest: async () => {
+    throw new Error("Unexpected request");
+  },
+};
+
+let baseTimer: LivenessTimer;
+let timer: StallableTimer;
+let sessionManager: SessionManager;
+let proxy: DaemonMcpProxy;
+let handovers: LivenessHandover[];
+let spies: Array<ReturnType<typeof spyOn>>;
+
+beforeEach(async () => {
+  baseTimer = new LivenessTimer();
+  timer = new StallableTimer(baseTimer);
+  sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+  await sessionManager.createSession(SESSION, "emulator-5554", "android", 60_000, LEASE_MS);
+  await sessionManager.adoptManagedExecutionLivenessPolicy(SESSION, { idleTimeoutMs: 10 * 60_000 });
+  const state: DaemonStateAccess = {
+    isInitialized: () => true,
+    getSessionManager: () => sessionManager,
+    getDevicePool: () => ({
+      refreshDevices: async () => 0,
+      getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
+    }),
+    getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
+  };
+  const daemonManager = new FakeDaemonManager();
+  daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
+  spies = [
+    spyOn(DaemonClient, "isAvailable").mockResolvedValue(true),
+    spyOn(logger, "info").mockImplementation(() => {}),
+    spyOn(logger, "warn").mockImplementation(() => {}),
+    spyOn(logger, "error").mockImplementation(() => {}),
+  ];
+  handovers = [];
+  proxy = new DaemonMcpProxy({
+    clientFactory: () =>
+      new FakeDaemonClient({
+        onCallDaemonMethod: async (method, params) => {
+          if (method !== DAEMON_HEARTBEAT_METHOD) {
+            return undefined;
+          }
+          const response = await handleDaemonRequest(
+            { id: "r", type: "daemon_request", method, params },
+            state,
+          );
+          if (!response.success) {
+            throw Object.assign(new Error(response.error), { code: response.code });
+          }
+          return response.result;
+        },
+      }),
+    daemonManager,
+    autoStartDaemon: false,
+    timer,
+    idGenerator: new FakeIdGenerator(["managed-proxy-token"]),
+    heartbeatTimeoutMs: LEASE_MS,
+    heartbeatIntervalMs: INTERVAL_MS,
+  });
+  proxy.onLivenessHandover((handover) => handovers.push(handover));
+});
+
+afterEach(async () => {
+  await proxy.close();
+  sessionManager.stopCleanupTimer();
+  for (const spy of spies) {
+    spy.mockRestore();
+  }
+});
+
+test("a managed connection answers a session lost during a proxy stall with managed_execution_ended, not proxy_stalled reacquire advice", async () => {
+  const managedSlots = readyManagedSlotsResult(SESSION);
+  const registration = spyOn(Server.prototype, "setRequestHandler");
+  const { server } = createProxyMcpServer({ proxy, managedSlots });
+  const handler = registration.mock.calls.find(([schema]) => schema === CallToolRequestSchema)?.[1];
+  registration.mockRestore();
+  const logged = spyOn(Server.prototype, "sendLoggingMessage").mockResolvedValue(undefined);
+  spies.push(logged);
+  if (!handler) {
+    throw new Error("Missing tools/call handler");
+  }
+
+  try {
+    // The managed slot acquisition holds the execution's session: claimed and heartbeated.
+    await proxy.holdManagedExecutionSession(SESSION);
+    expect(sessionManager.getSession(SESSION)?.livenessOwnerToken).toBeDefined();
+
+    // The proxy stalls past the lease and the suspect grace; the daemon's heartbeat monitor
+    // releases the session terminally meanwhile.
+    timer.stall(LEASE_MS + SUSPECT_GRACE_MS + 5_000);
+    await sessionManager.releaseSession(SESSION, "heartbeat-timeout");
+    await baseTimer.advanceTimeAsync(INTERVAL_MS);
+    await baseTimer.advanceTimeAsync(INTERVAL_MS);
+
+    // Precondition: the proxy's own recovery classified this as a definitive loss.
+    expect(handovers.map((handover) => handover.code)).toEqual(["proxy_stalled"]);
+
+    const result = await handler(
+      { method: "tools/call", params: { name: "tapOn", arguments: { text: "OK" } } },
+      extra,
+    );
+    const text = (result.content[0] as { text: string }).text;
+    const error = JSON.parse(text).error;
+
+    expect(result.isError).toBe(true);
+    expect(error).toMatchObject({
+      code: "managed_execution_ended",
+      retryable: false,
+      nextAction: "relaunch_execution",
+      sessionUuid: SESSION,
+    });
+    expect(text).not.toContain("getAndroid");
+    expect(text).not.toContain("getApple");
+    expect(error).not.toHaveProperty("recovery");
+
+    // The pushed logging notification carries the same answer, not the reacquire advice.
+    expect(logged.mock.calls.map(([params]) => params.data)).toEqual([{ error }]);
+  } finally {
+    await server.close();
+  }
+});
+
+test("a generic connection keeps the proxy_stalled handover for the same loss", () => {
+  const handover: LivenessHandover = {
+    code: "proxy_stalled",
+    sessions: [{ sessionUuid: SESSION, deviceId: "emulator-5554", lastAcknowledgedHeartbeatAt: 0 }],
+    attempts: 1,
+    lastAcknowledgedHeartbeatAt: 0,
+    action: "reacquire_lost_sessions",
+  };
+  const stalled = { ...handover, code: "daemon_stalled" as const };
+  const managedSlots = readyManagedSlotsResult(SESSION);
+
+  expect(livenessHandoverNotificationPayloads(handover)).toEqual([
+    livenessHandoverPayload(handover),
+  ]);
+  // A daemon stall is not a loss: a managed connection keeps its handover too.
+  expect(livenessHandoverNotificationPayloads(stalled, managedSlots)).toEqual([
+    livenessHandoverPayload(stalled),
+  ]);
+  // A session that is not one of the connection's slots keeps the handover.
+  const other = { ...handover.sessions[0], sessionUuid: "99999999-2222-4333-8444-555555555555" };
+  const mixed = { ...handover, sessions: [handover.sessions[0], other] };
+  expect(livenessHandoverNotificationPayloads(mixed, managedSlots)).toEqual([
+    managedEndedPayload(managedSlots, SESSION, "proxy_stalled"),
+    livenessHandoverPayload({ ...handover, sessions: [other] }),
+  ]);
+});

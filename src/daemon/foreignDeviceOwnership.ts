@@ -31,7 +31,10 @@ import {
   type ForwardLeaseOwnerReport,
   type ForwardLeaseRelinquishProbe,
 } from "../features/observe/shared/ctrlProxyForwardLeaseOwnership";
-import { DaemonDeviceLeaseOwnerProbe } from "./deviceLeaseOwnerQuery";
+import {
+  DaemonDeviceLeaseOwnerProbe,
+  DEVICE_LEASE_OWNER_QUERY_TIMEOUT_MS,
+} from "./deviceLeaseOwnerQuery";
 
 /**
  * Whether another live AutoMobile process drives a device this pool can see. Multi-device
@@ -122,6 +125,23 @@ export const DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS = 60_000;
  * hold its devices for as long as its process lives.
  */
 export const DEVICE_OWNER_UNANSWERED_LAPSE_MS = 5 * 60_000;
+
+/**
+ * The longest gap between two unanswered requests that still counts as one run. Ownership is only
+ * probed on demand, so two timeouts far apart say nothing about the time between them: a live
+ * owner that happened to be busy twice must keep its devices. Fifteen probe timeouts, so a prober
+ * that retries every few seconds (allocation waits, readiness retries) stays within it while
+ * unrelated calls minutes apart do not.
+ */
+export const DEVICE_OWNER_UNANSWERED_MAX_SAMPLE_GAP_MS = 15 * DEVICE_LEASE_OWNER_QUERY_TIMEOUT_MS;
+
+/**
+ * The fewest distinct unanswered samples a lapse needs: what it takes to span
+ * {@link DEVICE_OWNER_UNANSWERED_LAPSE_MS} at the widest allowed gap. The gap rule already implies
+ * it on a steady clock; stating it keeps a clock anomaly from lapsing a claim on a few samples.
+ */
+export const DEVICE_OWNER_UNANSWERED_MIN_SAMPLES =
+  Math.ceil(DEVICE_OWNER_UNANSWERED_LAPSE_MS / DEVICE_OWNER_UNANSWERED_MAX_SAMPLE_GAP_MS) + 1;
 
 /** Directory of device allocation claims, one lock per device, under each ADB server's scope. */
 export const DEVICE_ALLOCATION_CLAIM_SUBDIR = "device-allocations";
@@ -323,7 +343,7 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   /** Device -> control socket of an idle holder whose lease was its only foreign ownership. */
   private readonly idleLeaseHolders = new Map<string, string>();
   /** Owner PID -> its current run of unanswered status requests, cleared by any answer. */
-  private readonly unanswered = new Map<number, { since: number; warnedDevices: Set<string> }>();
+  private readonly unanswered = new Map<number, UnansweredRun>();
   private readonly ownerToken = defaultIdGenerator.next();
 
   constructor(
@@ -548,7 +568,8 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
 
   /**
    * Whether owner `pid` has now gone unanswered for {@link DEVICE_OWNER_UNANSWERED_LAPSE_MS}: it
-   * is alive but wedged, and its hold on `deviceId` has lapsed (#11349). Any answer ends the run.
+   * is alive but wedged, and its hold on `deviceId` has lapsed (#11349). Any answer ends the run,
+   * and so does a gap in sampling: the run must be densely observed for the whole window.
    * Warns once per device until the owner answers again.
    */
   private wedgedOwnerLapsed(
@@ -563,10 +584,12 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     }
     // Monotonic where available: a wall-clock step or a host suspend is not unanswered time.
     const now = this.timer.monotonicNow?.() ?? this.timer.now();
-    const streak = this.unanswered.get(pid) ?? { since: now, warnedDevices: new Set<string>() };
-    this.unanswered.set(pid, streak);
+    const streak = this.unansweredRun(pid, now);
     const unansweredForMs = now - streak.since;
-    if (unansweredForMs < DEVICE_OWNER_UNANSWERED_LAPSE_MS) {
+    if (
+      unansweredForMs < DEVICE_OWNER_UNANSWERED_LAPSE_MS ||
+      streak.samples < DEVICE_OWNER_UNANSWERED_MIN_SAMPLES
+    ) {
       return false;
     }
     if (!streak.warnedDevices.has(deviceId)) {
@@ -579,6 +602,34 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     }
     return true;
   }
+
+  /**
+   * Owner `pid`'s run of unanswered requests with this one counted. A sample that follows the
+   * previous one by more than {@link DEVICE_OWNER_UNANSWERED_MAX_SAMPLE_GAP_MS} starts a new run:
+   * nothing was observed in between, so the owner may have answered anyone throughout.
+   */
+  private unansweredRun(pid: number, now: number): UnansweredRun {
+    const previous = this.unanswered.get(pid);
+    if (!previous || now - previous.lastAt > DEVICE_OWNER_UNANSWERED_MAX_SAMPLE_GAP_MS) {
+      const started = { since: now, lastAt: now, samples: 1, warnedDevices: new Set<string>() };
+      this.unanswered.set(pid, started);
+      return started;
+    }
+    if (now > previous.lastAt) {
+      // Requests answered (or not) at the same instant are one observation, not several.
+      previous.samples += 1;
+      previous.lastAt = now;
+    }
+    return previous;
+  }
+}
+
+/** One owner's unbroken, densely sampled run of unanswered status requests. */
+interface UnansweredRun {
+  since: number;
+  lastAt: number;
+  samples: number;
+  warnedDevices: Set<string>;
 }
 
 /** Whether an owner answered that it has no session and no running tool call on the device. */

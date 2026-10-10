@@ -6,6 +6,7 @@ import {
   adbServerScope,
   DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS,
   DEVICE_OWNER_UNANSWERED_LAPSE_MS,
+  DEVICE_OWNER_UNANSWERED_MAX_SAMPLE_GAP_MS,
   deviceAllocationClaimPath,
   ForwardLeaseForeignDeviceOwnership,
   type DeviceOwnershipFileSource,
@@ -227,6 +228,55 @@ describe("ForwardLeaseForeignDeviceOwnership", () => {
         probe.reports.set("/s", noResponse);
         expect(await sweepFor(4 * 60_000)).toBe(FOREIGN_PID);
         expect(lapseWarnings(warn)).toEqual([]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("two isolated timeouts hours apart never lapse a live owner's claim", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const { ownerOf, ownership, timer, files } = wedgedPeer();
+        expect(await ownerOf("d")).toBe(FOREIGN_PID);
+
+        timer.advanceTime(3 * 60 * 60_000);
+
+        expect(await ownerOf("d")).toBe(FOREIGN_PID);
+        expect(await ownership.claim("d")).toBe(false);
+        expect(files.files.get("/claims/d.lock")?.pid).toBe(FOREIGN_PID);
+        expect(lapseWarnings(warn)).toEqual([]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("samples further apart than the maximum gap never add up to a lapse", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const { ownerOf, timer } = wedgedPeer();
+        for (let elapsed = 0; elapsed < 4 * DEVICE_OWNER_UNANSWERED_LAPSE_MS;) {
+          expect(await ownerOf("d")).toBe(FOREIGN_PID);
+          timer.advanceTime(DEVICE_OWNER_UNANSWERED_MAX_SAMPLE_GAP_MS + 1);
+          elapsed += DEVICE_OWNER_UNANSWERED_MAX_SAMPLE_GAP_MS + 1;
+        }
+        expect(lapseWarnings(warn)).toEqual([]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("a dense run interrupted by a sampling gap starts over", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const { sweepFor, timer } = wedgedPeer();
+        expect(await sweepFor(4 * 60_000)).toBe(FOREIGN_PID);
+
+        timer.advanceTime(10 * 60_000);
+
+        // Elapsed time since the first timeout is far past the window, but it was not observed.
+        expect(await sweepFor(4 * 60_000)).toBe(FOREIGN_PID);
+        expect(await sweepFor(60_000)).toBeUndefined();
+        expect(lapseWarnings(warn)).toHaveLength(1);
       } finally {
         warn.mockRestore();
       }

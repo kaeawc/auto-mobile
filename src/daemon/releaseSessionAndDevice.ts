@@ -1,6 +1,7 @@
 import type { SessionReleaseReason } from "./releaseReasons";
+import type { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
 import { logger } from "../utils/logger";
-import { executionTracker } from "../server/executionTracker";
+import { executionTracker, type ExecutionTracker } from "../server/executionTracker";
 
 export interface SessionExecutionCanceller {
   hasActiveSessionUuidExecutions(sessionId: string): boolean;
@@ -19,6 +20,61 @@ export async function cancelAndReleaseSession<T>(
 ): Promise<T> {
   const cancelled = await executions.cancelSessionUuidExecutions(sessionId, reason);
   return release(cancelled);
+}
+
+/** What cutting a released session's calls needs from the execution tracker. */
+export type ReleaseCutExecutions = Pick<
+  ExecutionTracker,
+  "cancelDeviceSessionExecutions" | "cancelDeviceExecutions"
+>;
+
+/** The session a release is about to end, and whose calls it therefore cuts. */
+export interface SessionReleaseCut {
+  sessionId: string;
+  /** The base session of a derived `${base}:${label}` session; absent or equal for any other. */
+  baseSessionId?: string;
+  /** The device the released session holds. */
+  deviceId?: string | null;
+  /** The call whose own lookup triggered the release; that lookup answers it. */
+  excludeExecutionId?: string;
+}
+
+/**
+ * Abort the calls a session release cuts. The one routine for every release that ends a session
+ * for a reason of its own: idle expiry, heartbeat reap, owner disconnect, lapsed-lease admission
+ * (#11400) and the explicit `daemon/releaseSession`.
+ *
+ * - Every call running under the released session, explicit or implicit (autolock), is aborted
+ *   with the typed release, so its caller gets the terminal refusal naming its own session.
+ * - A derived label session's device is driven through its base session. A base call bound to
+ *   that device is cut too, so it cannot keep driving a device that is about to be free, and a
+ *   base call still racing toward the device may no longer bind to it. The base session is still
+ *   live, so these get the plain cancellation, never a refusal naming a session that is not theirs
+ *   (#11386). A base call on any other device is not this release's to cut and keeps running.
+ *
+ * The tracker signals each abort before its first await, so the aborts land before this returns.
+ * Resolves with the number of executions cancelled.
+ */
+export function cancelExecutionsCutBySessionRelease(
+  executions: ReleaseCutExecutions,
+  cut: SessionReleaseCut,
+  cancellation: SessionReleasedDuringCallError,
+): Promise<number> {
+  const { sessionId, baseSessionId, deviceId, excludeExecutionId } = cut;
+  const cancellations = [
+    executions.cancelDeviceSessionExecutions(sessionId, cancellation, { excludeExecutionId }),
+  ];
+  if (baseSessionId !== undefined && baseSessionId !== sessionId && deviceId) {
+    cancellations.push(
+      executions.cancelDeviceExecutions(
+        deviceId,
+        `Session ${sessionId} was released (${cancellation.releaseReason}), so device ` +
+          `${deviceId} is no longer reachable through session ${baseSessionId}`,
+        { onlySessionUuid: baseSessionId, excludeExecutionId },
+      ),
+    );
+  }
+  return Promise.all(cancellations).then((counts) => counts.reduce((sum, n) => sum + n, 0));
 }
 
 export interface SessionReleaseManager {

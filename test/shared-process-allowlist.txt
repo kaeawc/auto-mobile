@@ -526,7 +526,7 @@ test/features/observe/output/diffObserveKeyboardCollapse.test.ts
 test/features/observe/output/diffObserveRealDevice.test.ts
 test/features/observe/output/diffObserveResult.test.ts
 test/features/observe/output/stableIdentityScrollDiff.test.ts
-test/features/observe/ownPrototypeFocus.test.ts
+test/features/observe/ownWindowFocus.test.ts
 test/features/observe/rasterGeometry.test.ts
 test/features/observe/screenshot/ScreenshotFileWriter.test.ts
 test/features/observe/screenshot/observationScreenshotEvidence.test.ts
@@ -746,6 +746,7 @@ test/scripts/androidVideoBaselineGate.test.ts
 test/scripts/batsInstallHoist.test.ts
 test/scripts/batsSerialTags.test.ts
 test/scripts/benchmark-context-thresholds.test.ts
+test/scripts/benchmarkListDevicesFixture.test.ts
 test/scripts/benchmarkSettledScreenshot.test.ts
 test/scripts/benchmarkSettledScreenshotIsolation.test.ts
 test/scripts/benchmarkSettledScreenshotReliability.test.ts

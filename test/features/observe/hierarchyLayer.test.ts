@@ -3,12 +3,12 @@ import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import {
   assertAppGestureNotUnderPrototype,
   hasOwnPrototype,
-  ownPrototypeCoversPoint,
+  ownWindowCoversPoint,
   scopeHierarchyForSelector,
   scopeHierarchyToLayer,
   scopeObserveResultToLayer,
 } from "../../../src/features/observe/hierarchyLayer";
-import { PROTOTYPE_WINDOW_TYPE } from "../../../src/features/observe/ownPrototypeFocus";
+import { PROTOTYPE_WINDOW_TYPE } from "../../../src/features/observe/ownWindowFocus";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
@@ -182,8 +182,8 @@ describe("assertAppGestureNotUnderPrototype (#9305)", () => {
 
   test("a full-screen prototype covers every app point", () => {
     const hierarchy = capturedPrototypeHierarchy({ fullScreen: true });
-    expect(ownPrototypeCoversPoint(hierarchy, { x: 130, y: 578 })).toBe(true);
-    expect(ownPrototypeCoversPoint(capturedTwoWindowHierarchy(), { x: 130, y: 578 })).toBe(false);
+    expect(ownWindowCoversPoint(hierarchy, { x: 130, y: 578 })).toBe(true);
+    expect(ownWindowCoversPoint(capturedTwoWindowHierarchy(), { x: 130, y: 578 })).toBe(false);
   });
 
   test("default and prototype layers never refuse", () => {
@@ -312,5 +312,23 @@ describe("app rows under a floating prototype (#10608/#10544, aovl D6 host half)
       /an AutoMobile prototype window covers that point/,
     );
     expect(elevated(scopeHierarchyForSelector(hierarchy, "prototype"))).toBeNull();
+  });
+});
+
+describe("a highlight window with no prototype (#11346)", () => {
+  const highlightOnly = () => {
+    const hierarchy = capturedTwoWindowHierarchy();
+    hierarchy.windows = [
+      ...hierarchy.windows!,
+      { id: 999, type: 4, isActive: true, packageName: CTRL_PROXY_PACKAGE },
+    ];
+    return hierarchy;
+  };
+
+  test("is not a showing prototype for layer scoping", () => {
+    const hierarchy = highlightOnly();
+    expect(hasOwnPrototype(hierarchy)).toBe(false);
+    expect(scopeHierarchyToLayer(hierarchy, "app")).toBe(hierarchy);
+    expect(() => scopeHierarchyForSelector(hierarchy, "prototype")).toThrow(ActionableError);
   });
 });

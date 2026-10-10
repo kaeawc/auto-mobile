@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import android.app.Application
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -21,6 +22,10 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [34], qualifiers = "w360dp-h640dp-mdpi", application = Application::class)
 class PrototypeSpecContentScreenshotTest {
+
+  private companion object {
+    val OPEN = JsonPrimitive(true)
+  }
 
   // Pending: #11298 changed the image placeholder colours (surfaceVariant instead of LightGray), so
   // this baseline must be re-recorded on Linux from an LFS-enabled plain-git clone.
@@ -179,6 +184,75 @@ class PrototypeSpecContentScreenshotTest {
     prototypeScreenshotTest(
       "theme_device_light",
       validPrototypeFixture("theme-device"),
+      pending = true,
+    )
+
+  // Dark-mode gallery (#11217). The specs carry no theme, so the `+night` device decides; every
+  // case is pending until recorded on Linux from an LFS-enabled plain-git clone.
+
+  /** Every node type on a dark device; the unresolved image assets draw their placeholders. */
+  @Test
+  @Config(qualifiers = "+night")
+  fun fullscreenAllNodesDark() =
+    prototypeScreenshotTest(
+      "fullscreen_all_nodes_dark",
+      validPrototypeFixture("fullscreen-all-nodes"),
+      pending = true,
+    )
+
+  /** A bottom sheet opened over the dark gallery: scrim, surface and drag handle. */
+  @Test
+  @Config(qualifiers = "+night")
+  fun bottomSheetOpenDark() =
+    prototypeScreenshotTest(
+      "bottom_sheet_open_dark",
+      validPrototypeFixture("fullscreen-all-nodes", stateOverrides = mapOf("open" to OPEN)),
+      pending = true,
+    )
+
+  /** The same open bottom sheet on a light device, for the scrim and handle contrast. */
+  @Test
+  @Config(qualifiers = "+notnight")
+  fun bottomSheetOpenLight() =
+    prototypeScreenshotTest(
+      "bottom_sheet_open_light",
+      validPrototypeFixture("fullscreen-all-nodes", stateOverrides = mapOf("open" to OPEN)),
+      pending = true,
+    )
+
+  /** An alarm dialog opened over the dark gallery: scrim and dialog surface. */
+  @Test
+  @Config(qualifiers = "+night")
+  fun dialogOpenDark() =
+    prototypeScreenshotTest(
+      "dialog_open_dark",
+      validPrototypeFixture(
+        "material-app-bar-dialog-pickers",
+        stateOverrides = mapOf("editing" to OPEN),
+      ),
+      pending = true,
+    )
+
+  /** The app bar, dialog and pickers fixture with nothing open, on a dark device. */
+  @Test
+  @Config(qualifiers = "+night")
+  fun materialAppBarDialogPickersDark() =
+    prototypeScreenshotTest(
+      "material_app_bar_dialog_pickers_dark",
+      validPrototypeFixture("material-app-bar-dialog-pickers"),
+      pending = true,
+    )
+
+  /**
+   * A spec with no theme and an authored dark background (`#112233`) on a light device: the
+   * renderer infers dark content colours from the background.
+   */
+  @Test
+  @Config(qualifiers = "+notnight")
+  fun styleWhenInferredDark() =
+    prototypeScreenshotTest(
+      "style_when_inferred_dark",
+      validPrototypeFixture("style-when"),
       pending = true,
     )
 

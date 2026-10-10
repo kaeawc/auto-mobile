@@ -223,7 +223,7 @@ export interface ViewHierarchyWindowInfo {
   packageName?: string;
   /**
    * Placement of CtrlProxy's own prototype window, only on that window and only from an
-   * APK advertising `prototype_window_metadata_v1`. It identifies the window (`ownPrototypeWindows`);
+   * APK advertising `prototype_window_metadata_v1`. It identifies the window (`ownWindows`);
    * placement and opacity do not change tappability, since the prototype is touchable within its
    * bounds whatever it paints (#10715).
    */

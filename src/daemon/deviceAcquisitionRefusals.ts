@@ -1,4 +1,5 @@
 import { ActionableError } from "../models/ActionableError";
+import { InputDeviceOwnedError } from "./inputDeviceOwnership";
 
 /**
  * A device whose previous session is still finishing its release cleanup (restores, recording
@@ -66,16 +67,19 @@ export function freshStartAlreadyBoundError(
   deviceId: string,
   holderSessionId: string,
   holderAwaitingOwner: boolean,
-): ActionableError {
+): InputDeviceOwnedError {
+  // Typed device_owned_by_other_session (#11351): clients branch on the code, not this wording.
+  const refusal = (message: string) =>
+    new InputDeviceOwnedError("startDevice", deviceId, undefined, undefined, message);
   if (holderAwaitingOwner) {
-    return new ActionableError(
+    return refusal(
       `Device '${deviceId}' is reserved for session ${holderSessionId}, which the daemon restored ` +
         "after a restart and is holding for its previous owner to reconnect. If that session is " +
         `yours, pass sessionUuid ${holderSessionId} to reclaim it; otherwise wait for the ` +
         "reservation to lapse or use another device.",
     );
   }
-  return new ActionableError(
+  return refusal(
     `Freshly started device '${deviceId}' was assigned to session ` +
       `${holderSessionId} before its owning session could reserve it.`,
   );

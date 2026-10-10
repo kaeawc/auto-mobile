@@ -12,27 +12,27 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
-  capturedOverlayHierarchy,
+  capturedPrototypeHierarchy,
   capturedTwoWindowHierarchy,
   observationOf,
-} from "../helpers/overlayWindowCapture";
+} from "../helpers/prototypeWindowCapture";
 
 isolateToolRegistry();
 
 // Captured Recents overview with its floating window relabelled as the CtrlProxy
-// overlay; see test/helpers/overlayWindowCapture.ts. "YouTube" is overlay-only.
+// prototype; see test/helpers/prototypeWindowCapture.ts. "YouTube" is prototype-only.
 
 async function observe(
   result: ObserveResult,
   args: Record<string, unknown>,
-  options: { hidesOverlay?: boolean; screen?: FakeObserveScreen } = {},
+  options: { hidesPrototype?: boolean; screen?: FakeObserveScreen } = {},
 ) {
   const screen = options.screen ?? new FakeObserveScreen();
   screen.setObserveResult(result);
   const notify = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockResolvedValue(undefined);
   try {
     registerObserveTools({
-      hidesOverlayForScreenshot: async () => options.hidesOverlay ?? false,
+      hidesPrototypeForScreenshot: async () => options.hidesPrototype ?? false,
       createScreen: () => ({
         execute: screen.execute.bind(screen),
         executeDeviceRead: screen.execute.bind(screen),
@@ -53,19 +53,19 @@ async function observe(
 }
 
 describe("observe layer (#9305)", () => {
-  test("the schema accepts app and overlay only", () => {
+  test("the schema accepts app and prototype only", () => {
     expect(observeSchema.safeParse({ platform: "android", layer: "app" }).success).toBe(true);
-    expect(observeSchema.safeParse({ platform: "android", layer: "overlay" }).success).toBe(true);
+    expect(observeSchema.safeParse({ platform: "android", layer: "prototype" }).success).toBe(true);
     expect(observeSchema.safeParse({ platform: "android", layer: "both" }).success).toBe(false);
   });
 
-  test("omitted layer serves overlay and app nodes", async () => {
-    const response = await observe(observationOf(capturedOverlayHierarchy()), {});
+  test("omitted layer serves prototype and app nodes", async () => {
+    const response = await observe(observationOf(capturedPrototypeHierarchy()), {});
     expect(JSON.stringify(response)).toContain("YouTube");
   });
 
-  test('"app" serves the app without overlay nodes and leaves the observation intact', async () => {
-    const result = observationOf(capturedOverlayHierarchy());
+  test('"app" serves the app without prototype nodes and leaves the observation intact', async () => {
+    const result = observationOf(capturedPrototypeHierarchy());
     const response = await observe(result, { layer: "app" });
 
     expect(JSON.stringify(response)).not.toContain("YouTube");
@@ -73,10 +73,10 @@ describe("observe layer (#9305)", () => {
     expect(JSON.stringify(result.viewHierarchy)).toContain("YouTube");
   });
 
-  test('"overlay" with no overlay showing is an actionable error', async () => {
+  test('"prototype" with no prototype showing is an actionable error', async () => {
     await expect(
-      observe(observationOf(capturedTwoWindowHierarchy()), { layer: "overlay" }),
-    ).rejects.toThrow("no AutoMobile overlay is showing");
+      observe(observationOf(capturedTwoWindowHierarchy()), { layer: "prototype" }),
+    ).rejects.toThrow("no AutoMobile prototype is showing");
   });
 });
 
@@ -86,7 +86,7 @@ describe("observe waitFor with layer (#9305)", () => {
     timer.enableAutoAdvance();
     const screen = new FakeObserveScreen();
     screen.setObserveResult((index) => {
-      const viewHierarchy = capturedOverlayHierarchy();
+      const viewHierarchy = capturedPrototypeHierarchy();
       viewHierarchy.updatedAt = (index + 1) * 10;
       return observationOf(viewHierarchy);
     });
@@ -99,12 +99,12 @@ describe("observe waitFor with layer (#9305)", () => {
     );
   };
 
-  test("an overlay-only element matches by default and for overlay", async () => {
+  test("a prototype-only element matches by default and for prototype", async () => {
     expect((await waitFor(undefined)).matched).toBe(true);
-    expect((await waitFor("overlay")).matched).toBe(true);
+    expect((await waitFor("prototype")).matched).toBe(true);
   });
 
-  test('an overlay-only element never matches for "app"', async () => {
+  test('a prototype-only element never matches for "app"', async () => {
     const outcome = await waitFor("app");
     expect(outcome.matched).toBe(false);
     expect(outcome.awaitTimeout).toBe(true);
@@ -112,14 +112,14 @@ describe("observe waitFor with layer (#9305)", () => {
 
   test.each([
     [undefined, true],
-    ["overlay", true],
+    ["prototype", true],
     ["app", false],
   ] as const)("the DSL appear predicate with layer %p matches=%p", async (layer, matched) => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const screen = new FakeObserveScreen();
     screen.setObserveResult((index) => {
-      const viewHierarchy = capturedOverlayHierarchy();
+      const viewHierarchy = capturedPrototypeHierarchy();
       viewHierarchy.updatedAt = (index + 1) * 10;
       return observationOf(viewHierarchy);
     });
@@ -144,94 +144,94 @@ describe("observe layer screenshot (#9305)", () => {
   const structured = (response: unknown): Record<string, unknown> =>
     (response as { structuredContent: Record<string, unknown> }).structuredContent;
 
-  test('"app" with an overlay showing marks the screenshot as including the overlay', async () => {
-    const response = await observe(withScreenshot(observationOf(capturedOverlayHierarchy())), {
+  test('"app" with a prototype showing marks the screenshot as including the prototype', async () => {
+    const response = await observe(withScreenshot(observationOf(capturedPrototypeHierarchy())), {
       layer: "app",
     });
-    expect(structured(response).screenshotIncludesOverlay).toBe(true);
+    expect(structured(response).screenshotIncludesPrototype).toBe(true);
   });
 
   test.each([
-    ["no layer", observationOf(capturedOverlayHierarchy()), {}],
-    ['"overlay"', observationOf(capturedOverlayHierarchy()), { layer: "overlay" }],
+    ["no layer", observationOf(capturedPrototypeHierarchy()), {}],
+    ['"prototype"', observationOf(capturedPrototypeHierarchy()), { layer: "prototype" }],
     [
-      '"app" with no overlay showing',
+      '"app" with no prototype showing',
       observationOf(capturedTwoWindowHierarchy()),
       { layer: "app" },
     ],
   ] as const)("%s leaves the screenshot unmarked", async (_, result, args) => {
     const response = await observe(withScreenshot(result), args);
-    expect(structured(response).screenshotIncludesOverlay).toBeUndefined();
+    expect(structured(response).screenshotIncludesPrototype).toBeUndefined();
   });
 
   test('"app" without a screenshot leaves the result unmarked', async () => {
-    const response = await observe(observationOf(capturedOverlayHierarchy()), { layer: "app" });
-    expect(structured(response).screenshotIncludesOverlay).toBeUndefined();
+    const response = await observe(observationOf(capturedPrototypeHierarchy()), { layer: "app" });
+    expect(structured(response).screenshotIncludesPrototype).toBeUndefined();
   });
 });
 
-describe("observe layer screenshot with device-side overlay hiding (#9305)", () => {
+describe("observe layer screenshot with device-side prototype hiding (#9305)", () => {
   const structured = (response: unknown): Record<string, unknown> =>
     (response as { structuredContent: Record<string, unknown> }).structuredContent;
 
-  // The capture marks the observation when it is requested with the overlay hidden.
+  // The capture marks the observation when it is requested with the prototype hidden.
   const capturedHidden = (result: ObserveResult): ObserveResult => ({
     ...result,
     screenshotCaptureAttempted: true,
     screenshotPath: "/tmp/observe-layer-hidden.png",
-    screenshotIncludesOverlay: false,
+    screenshotIncludesPrototype: false,
   });
 
-  test('"app" asks the capture to hide the overlay when the device can', async () => {
+  test('"app" asks the capture to hide the prototype when the device can', async () => {
     const screen = new FakeObserveScreen();
     await observe(
-      observationOf(capturedOverlayHierarchy()),
+      observationOf(capturedPrototypeHierarchy()),
       { layer: "app", screenshot: "async" },
-      { hidesOverlay: true, screen },
+      { hidesPrototype: true, screen },
     );
-    expect(screen.getExecuteOptions()[0]?.screenshotOptions).toEqual({ hideOverlays: true });
+    expect(screen.getExecuteOptions()[0]?.screenshotOptions).toEqual({ hidePrototypes: true });
   });
 
   test("keeps the caller's encoding alongside the hide request", async () => {
     const screen = new FakeObserveScreen();
     await observe(
-      observationOf(capturedOverlayHierarchy()),
+      observationOf(capturedPrototypeHierarchy()),
       { layer: "app", screenshot: "settled", screenshotOptions: { format: "jpeg", quality: 70 } },
-      { hidesOverlay: true, screen },
+      { hidesPrototype: true, screen },
     );
     expect(screen.getExecuteOptions()[0]?.screenshotOptions).toEqual({
       format: "jpeg",
       quality: 70,
-      hideOverlays: true,
+      hidePrototypes: true,
     });
   });
 
   test.each([
     ["the device cannot hide", { layer: "app", screenshot: "async" }, false],
     ["no layer", { screenshot: "async" }, true],
-    ['"overlay"', { layer: "overlay", screenshot: "async" }, true],
+    ['"prototype"', { layer: "prototype", screenshot: "async" }, true],
     ['screenshot "none"', { layer: "app", screenshot: "none" }, true],
-  ] as const)("does not ask to hide when %s", async (_, args, hidesOverlay) => {
+  ] as const)("does not ask to hide when %s", async (_, args, hidesPrototype) => {
     const screen = new FakeObserveScreen();
-    await observe(observationOf(capturedOverlayHierarchy()), args, { hidesOverlay, screen });
-    expect(screen.getExecuteOptions()[0]?.screenshotOptions?.hideOverlays).toBeUndefined();
+    await observe(observationOf(capturedPrototypeHierarchy()), args, { hidesPrototype, screen });
+    expect(screen.getExecuteOptions()[0]?.screenshotOptions?.hidePrototypes).toBeUndefined();
   });
 
-  test('"app" reports a screenshot captured with the overlay hidden as excluding it', async () => {
+  test('"app" reports a screenshot captured with the prototype hidden as excluding it', async () => {
     const response = await observe(
-      capturedHidden(observationOf(capturedOverlayHierarchy())),
+      capturedHidden(observationOf(capturedPrototypeHierarchy())),
       { layer: "app" },
-      { hidesOverlay: true },
+      { hidesPrototype: true },
     );
-    expect(structured(response).screenshotIncludesOverlay).toBe(false);
+    expect(structured(response).screenshotIncludesPrototype).toBe(false);
   });
 
-  test('"app" with no overlay showing leaves a hidden capture unmarked', async () => {
+  test('"app" with no prototype showing leaves a hidden capture unmarked', async () => {
     const response = await observe(
       capturedHidden(observationOf(capturedTwoWindowHierarchy())),
       { layer: "app" },
-      { hidesOverlay: true },
+      { hidesPrototype: true },
     );
-    expect(structured(response).screenshotIncludesOverlay).toBeUndefined();
+    expect(structured(response).screenshotIncludesPrototype).toBeUndefined();
   });
 });

@@ -5,11 +5,11 @@ import type { ViewHierarchyNode } from "../../../../src/models/ViewHierarchyResu
 import {
   capturedFloatingCoverHierarchy,
   observationOf,
-} from "../../../helpers/overlayWindowCapture";
+} from "../../../helpers/prototypeWindowCapture";
 
-// project:"full" carries the skeleton's `occluded` signal for rows an AutoMobile overlay window
+// project:"full" carries the skeleton's `occluded` signal for rows an AutoMobile prototype window
 // fully covers (#10715), on the captured floating prototype over the Playground buttons
-// (test/fixtures/android-overlay-window/). button_elevated lies fully under the overlay;
+// (test/fixtures/android-overlay-window/). button_elevated lies fully under the prototype;
 // button_regular only has its right edge under it; button_text is above it.
 
 function fullObservation(): ObserveResult {
@@ -34,7 +34,7 @@ function findNodes(
   ]);
 }
 
-describe("full projection marks rows under an AutoMobile overlay (#10715)", () => {
+describe("full projection marks rows under an AutoMobile prototype (#10715)", () => {
   test("a fully covered row is occluded with its actions removed", () => {
     const out = sanitizeObserveResult(fullObservation(), { project: "full", compact: true });
     const covered = clickableById(out, "button_elevated");

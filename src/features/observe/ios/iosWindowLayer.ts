@@ -3,7 +3,7 @@
  *
  * XCUITest lists an app's `UIWindow`s back to front (ascending window level), and the iOS
  * converter collapses those wrappers, so every node would otherwise share one window rank. An
- * in-app overlay window, an alert window or the keyboard would then rank level with the app's own
+ * in-app prototype window, an alert window or the keyboard would then rank level with the app's own
  * navigation bar and toolbars, and chrome clipping would treat app chrome as covering them.
  *
  * When two or more windows contribute nodes, each top-level node of a window is stamped with its

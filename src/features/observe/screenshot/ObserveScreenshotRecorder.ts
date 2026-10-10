@@ -22,7 +22,7 @@ import { validateCapturedScreenshot } from "./validateCapturedScreenshot";
 import { ActionableError, toActionableError } from "../../../models/ActionableError";
 
 /** Capture-time options for the non-settled captures, which keep the device's own encoding. */
-export type ObserveCaptureOptions = Pick<ObserveScreenshotOptions, "hideOverlays">;
+export type ObserveCaptureOptions = Pick<ObserveScreenshotOptions, "hidePrototypes">;
 
 /**
  * Minimal capability surface needed by the recorder: the standard
@@ -450,7 +450,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
   }
 }
 
-/** The capture request for a non-settled capture: display plus, when set, overlay hiding. */
+/** The capture request for a non-settled capture: display plus, when set, prototype hiding. */
 function captureRequest(displayId?: number, capture?: ObserveCaptureOptions): ScreenshotOptions {
-  return capture?.hideOverlays === true ? { displayId, hideOverlays: true } : { displayId };
+  return capture?.hidePrototypes === true ? { displayId, hidePrototypes: true } : { displayId };
 }

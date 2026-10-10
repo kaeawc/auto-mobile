@@ -159,7 +159,7 @@ function qualifiedId(id: string): { packageName: string; name: string } | undefi
 /**
  * A test tag matches a node's `test-tag` first. When no node carries that tag, it falls back to
  * a node whose `resource-id` is exactly the tag and that has no `test-tag` of its own: Compose
- * with `testTagsAsResourceId` (including the AutoMobile overlay) reports `Modifier.testTag` only
+ * with `testTagsAsResourceId` (including the AutoMobile prototype) reports `Modifier.testTag` only
  * as the bare `resource-id`, since CtrlProxy fills `test-tag` from accessibility extras (#10626).
  * The fallback is exact only (no `pkg:id/` suffix match), so a classic View id matches only
  * when the full id is given.

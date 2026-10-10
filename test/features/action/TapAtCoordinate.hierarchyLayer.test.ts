@@ -3,11 +3,11 @@ import type { BootedDevice, ObserveResult } from "../../../src/models";
 import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 import { createTapAt } from "../../helpers/tapAtCoordinate";
 import {
-  capturedAppLayerOverlayHierarchy,
+  capturedAppLayerPrototypeHierarchy,
   capturedFloatingCoverHierarchy,
   capturedTwoWindowHierarchy,
   observationOf,
-} from "../../helpers/overlayWindowCapture";
+} from "../../helpers/prototypeWindowCapture";
 
 const androidDevice = {
   name: "Android test device",
@@ -33,7 +33,7 @@ function tapAtOver(hierarchy: ViewHierarchyResult) {
 }
 
 describe("tapAt layer (#9305)", () => {
-  test('"app" refuses before dispatch when the captured floating overlay covers the point', async () => {
+  test('"app" refuses before dispatch when the captured floating prototype covers the point', async () => {
     const { tapAt, androidDispatches } = tapAtOver(capturedFloatingCoverHierarchy());
     const result = await tapAt.execute({ ...INSIDE_FLOATING, layer: "app" });
 
@@ -42,8 +42,8 @@ describe("tapAt layer (#9305)", () => {
     expect(androidDispatches).toEqual([]);
   });
 
-  test('"app" refuses a long press under the captured app-layer overlay window too', async () => {
-    const { tapAt, androidDispatches } = tapAtOver(capturedAppLayerOverlayHierarchy());
+  test('"app" refuses a long press under the captured app-layer prototype window too', async () => {
+    const { tapAt, androidDispatches } = tapAtOver(capturedAppLayerPrototypeHierarchy());
     const result = await tapAt.execute({
       ...INSIDE_APP_LAYER,
       action: "longPress",
@@ -55,7 +55,7 @@ describe("tapAt layer (#9305)", () => {
     expect(androidDispatches).toEqual([]);
   });
 
-  test('"app" dispatches a point outside the overlay window', async () => {
+  test('"app" dispatches a point outside the prototype window', async () => {
     const { tapAt, androidDispatches } = tapAtOver(capturedFloatingCoverHierarchy());
     const result = await tapAt.execute({ ...APP_ONLY, layer: "app" });
 
@@ -63,33 +63,33 @@ describe("tapAt layer (#9305)", () => {
     expect(androidDispatches.map(({ x, y }) => ({ x, y }))).toEqual([APP_ONLY]);
   });
 
-  test('"overlay" dispatches a point inside the overlay window', async () => {
+  test('"prototype" dispatches a point inside the prototype window', async () => {
     const { tapAt, androidDispatches } = tapAtOver(capturedFloatingCoverHierarchy());
-    const result = await tapAt.execute({ ...INSIDE_FLOATING, layer: "overlay" });
+    const result = await tapAt.execute({ ...INSIDE_FLOATING, layer: "prototype" });
 
     expect(result.error).toBeUndefined();
     expect(androidDispatches.map(({ x, y }) => ({ x, y }))).toEqual([INSIDE_FLOATING]);
   });
 
-  test('"overlay" refuses a point the overlay does not cover, which would reach the app', async () => {
+  test('"prototype" refuses a point the prototype does not cover, which would reach the app', async () => {
     const { tapAt, androidDispatches } = tapAtOver(capturedFloatingCoverHierarchy());
-    const result = await tapAt.execute({ ...APP_ONLY, layer: "overlay" });
+    const result = await tapAt.execute({ ...APP_ONLY, layer: "prototype" });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("no AutoMobile overlay window covers that point");
+    expect(result.error).toContain("no AutoMobile prototype window covers that point");
     expect(androidDispatches).toEqual([]);
   });
 
-  test('"overlay" with no overlay showing is an actionable error', async () => {
+  test('"prototype" with no prototype showing is an actionable error', async () => {
     const { tapAt, androidDispatches } = tapAtOver(capturedTwoWindowHierarchy());
-    const result = await tapAt.execute({ ...APP_ONLY, layer: "overlay" });
+    const result = await tapAt.execute({ ...APP_ONLY, layer: "prototype" });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("no AutoMobile overlay is showing");
+    expect(result.error).toContain("no AutoMobile prototype is showing");
     expect(androidDispatches).toEqual([]);
   });
 
-  test("omitting layer keeps today's behaviour: the overlay point is dispatched", async () => {
+  test("omitting layer keeps today's behaviour: the prototype point is dispatched", async () => {
     const { tapAt, androidDispatches } = tapAtOver(capturedFloatingCoverHierarchy());
     const result = await tapAt.execute({ ...INSIDE_FLOATING });
 

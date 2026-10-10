@@ -28,25 +28,25 @@ describe("getLaunchObservationPackageNames", () => {
     expect(getLaunchObservationPackageNames(observation)).toEqual(["com.fallback"]);
   });
 
-  describe("while CtrlProxy's own overlay holds window focus (#10000)", () => {
-    const overlayWindows = [
+  describe("while CtrlProxy's own prototype holds window focus (#10000)", () => {
+    const prototypeWindows = [
       { id: 1, type: 1, isFocused: false },
       { id: 2, type: 4, isFocused: true },
     ];
 
-    test("drops the overlay package in favour of the app behind it", () => {
+    test("drops the prototype package in favour of the app behind it", () => {
       const observation = {
         activeWindow: { appId: "com.expected" },
-        viewHierarchy: { packageName: CTRL_PROXY_PACKAGE, windows: overlayWindows },
+        viewHierarchy: { packageName: CTRL_PROXY_PACKAGE, windows: prototypeWindows },
       } as ObserveResult;
 
       expect(getLaunchObservationPackageNames(observation)).toEqual(["com.expected"]);
     });
 
-    test("names the foreground task's package when only the overlay package is reported", () => {
+    test("names the foreground task's package when only the prototype package is reported", () => {
       const observation = {
         activeWindow: { appId: CTRL_PROXY_PACKAGE },
-        viewHierarchy: { packageName: CTRL_PROXY_PACKAGE, windows: overlayWindows },
+        viewHierarchy: { packageName: CTRL_PROXY_PACKAGE, windows: prototypeWindows },
         backStack: {
           currentTaskId: 441,
           tasks: [
@@ -59,16 +59,16 @@ describe("getLaunchObservationPackageNames", () => {
       expect(getLaunchObservationPackageNames(observation)).toEqual(["com.expected"]);
     });
 
-    test("keeps the overlay package when no app behind it can be named", () => {
+    test("keeps the prototype package when no app behind it can be named", () => {
       const observation = {
         activeWindow: { appId: CTRL_PROXY_PACKAGE },
-        viewHierarchy: { packageName: CTRL_PROXY_PACKAGE, windows: overlayWindows },
+        viewHierarchy: { packageName: CTRL_PROXY_PACKAGE, windows: prototypeWindows },
       } as ObserveResult;
 
       expect(getLaunchObservationPackageNames(observation)).toEqual([CTRL_PROXY_PACKAGE]);
     });
 
-    test("a CtrlProxy-labelled capture without an overlay window is still reported as CtrlProxy", () => {
+    test("a CtrlProxy-labelled capture without a prototype window is still reported as CtrlProxy", () => {
       const observation = {
         activeWindow: { appId: CTRL_PROXY_PACKAGE },
         viewHierarchy: {

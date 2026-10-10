@@ -17,7 +17,7 @@ import org.junit.Test
  *
  * What this does NOT prove: JVM tests cannot run ICU. The checker is a hand-written approximation
  * of the known JVM-vs-ICU divergences, not ICU itself, so a pattern it accepts could still fail on
- * a device for a divergence it does not model. Loading the overlay classes on a device (or an
+ * a device for a divergence it does not model. Loading the prototype classes on a device (or an
  * instrumented test) remains the only complete check.
  */
 class IcuRegexCompatibilityTest {
@@ -79,17 +79,18 @@ class IcuRegexCompatibilityTest {
     // vacuously. Rather than an exact count (which breaks whenever a regex is legitimately
     // removed), require the scanner to still see literals in a few files that are known to hold
     // them. If you remove the last regex from one of these files, drop it from this list.
-    // WebSocketServer.kt (malformed-frame type scrub, #9935), OverlayAssetDirectory.kt (asset
-    // file-name guard) and OverlayRenderModel.kt (colour check) build regexes that landed after the
+    // WebSocketServer.kt (malformed-frame type scrub, #9935), PrototypeAssetDirectory.kt (asset
+    // file-name guard) and PrototypeRenderModel.kt (colour check) build regexes that landed after
+    // the
     // first anchors.
     val anchorFiles =
       listOf(
         "LogcatReader.kt",
         "ElementBounds.kt",
-        "OverlaySpecValidator.kt",
+        "PrototypeSpecValidator.kt",
         "WebSocketServer.kt",
-        "OverlayAssetDirectory.kt",
-        "OverlayRenderModel.kt",
+        "PrototypeAssetDirectory.kt",
+        "PrototypeRenderModel.kt",
       )
     anchorFiles.forEach { name ->
       assertTrue(

@@ -55,34 +55,34 @@ import dev.jasonpearson.automobile.ctrlproxy.models.SystemChromeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
-import dev.jasonpearson.automobile.ctrlproxy.overlay.AndroidOverlayDisplays
-import dev.jasonpearson.automobile.ctrlproxy.overlay.BitmapOverlayImageDecoder
-import dev.jasonpearson.automobile.ctrlproxy.overlay.ComposeOverlayFontLoader
-import dev.jasonpearson.automobile.ctrlproxy.overlay.CoroutineOverlayScheduler
-import dev.jasonpearson.automobile.ctrlproxy.overlay.DefaultInteractiveOverlayHost
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetController
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetDirectory
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetStore
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayBase64Decoder
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayController
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayEventSink
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayFontCache
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayForegroundTracker
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayForegroundWindow
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayHiddenCapture
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayImageCache
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayImeInset
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayImeWindow
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayLifecycle
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayResultSink
-import dev.jasonpearson.automobile.ctrlproxy.overlay.imeLiftPx
-import dev.jasonpearson.automobile.ctrlproxy.overlay.isInteractiveOverlayWindow
-import dev.jasonpearson.automobile.ctrlproxy.overlay.overlayForegroundFromWindows
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
 import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDisplays
+import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
+import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoader
+import dev.jasonpearson.automobile.ctrlproxy.prototype.CoroutinePrototypeScheduler
+import dev.jasonpearson.automobile.ctrlproxy.prototype.DefaultPrototypeHost
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetController
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetDirectory
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetStore
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBase64Decoder
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeController
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEventSink
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeFontCache
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeForegroundTracker
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeForegroundWindow
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHiddenCapture
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeInset
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeWindow
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeResultSink
+import dev.jasonpearson.automobile.ctrlproxy.prototype.imeLiftPx
+import dev.jasonpearson.automobile.ctrlproxy.prototype.isPrototypeWindow
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundFromWindows
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.AnrData
 import dev.jasonpearson.automobile.protocol.AnrEvent
@@ -106,8 +106,8 @@ import dev.jasonpearson.automobile.protocol.NavigationEventResponse
 import dev.jasonpearson.automobile.protocol.NetworkEventData
 import dev.jasonpearson.automobile.protocol.NetworkEventResponse
 import dev.jasonpearson.automobile.protocol.NodeSelector
-import dev.jasonpearson.automobile.protocol.OverlaySpec
-import dev.jasonpearson.automobile.protocol.OverlayStatusEntry
+import dev.jasonpearson.automobile.protocol.PrototypeSpec
+import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
@@ -403,8 +403,8 @@ internal data class AccessibilityEventWork(
 
 /**
  * True only for an event from CtrlProxy's own overlay window: an accessibility-overlay window (the
- * highlight overlay or the interactive overlay) or, while an application-layer interactive overlay
- * is up ([appLayerShowing]), a `TYPE_SYSTEM` window, which is how the system reports that layer.
+ * highlight overlay or the prototype) or, while an application-layer prototype is up
+ * ([appLayerShowing]), a `TYPE_SYSTEM` window, which is how the system reports that layer.
  * CtrlProxy's package also owns the CtrlProxy keyboard (`TYPE_INPUT_METHOD`) and `MainActivity`
  * (`TYPE_APPLICATION`), whose events must still advance `frameContext` and refresh the hierarchy,
  * so they are never skipped. Fails open: an unknown window type ([windowType] null) is processed,
@@ -1013,20 +1013,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     ViewHierarchyExtractor(
       recompositionStore,
       workStats,
-      overlaySuspended = {
-        ::overlayController.isInitialized && overlayController.isSuspendedByForeground
+      prototypeSuspended = {
+        ::prototypeController.isInitialized && prototypeController.isSuspendedByForeground
       },
-      ownOverlayMetadata = { windowPackage, title ->
-        // The overlay-type check already ran in the extractor; this confirms the window is ours.
+      ownPrototypeMetadata = { windowPackage, title ->
+        // The prototype-type check already ran in the extractor; this confirms the window is ours.
         if (
-          isInteractiveOverlayWindow(
+          isPrototypeWindow(
             AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
             title,
             windowPackage,
             packageName,
-          ) && ::overlayController.isInitialized
+          ) && ::prototypeController.isInitialized
         )
-          overlayController.windowMetadata()
+          prototypeController.windowMetadata()
         else null
       },
     )
@@ -1085,18 +1085,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       },
     )
   }
-  private lateinit var overlayController: OverlayController
-  // Hides the interactive overlay while another app is in front, restores it on return (#10261).
-  private val overlayForeground by lazy {
-    OverlayForegroundTracker(
-      CoroutineOverlayScheduler(serviceScope),
+  private lateinit var prototypeController: PrototypeController
+  // Hides the prototype while another app is in front, restores it on return (#10261).
+  private val prototypeForeground by lazy {
+    PrototypeForegroundTracker(
+      CoroutinePrototypeScheduler(serviceScope),
       ownPackage = packageName,
       foregroundNow = ::currentForegroundApp,
-      onChanged = { refreshOverlayWindowNow() },
+      onChanged = { refreshPrototypeWindowNow() },
     )
   }
-  private val overlayResultSink =
-    object : OverlayResultSink {
+  private val prototypeResultSink =
+    object : PrototypeResultSink {
       override suspend fun send(requestId: String?, success: Boolean, error: String?) =
         sendWithMissingAssets(requestId, success, error, emptyList())
 
@@ -1107,34 +1107,34 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         missingAssets: List<String>,
       ) {
         if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-          resultBroadcaster.guard(requestId, "overlay_result") {
+          resultBroadcaster.guard(requestId, "prototype_result") {
             webSocketServer.broadcastWithPerf { _ ->
-              overlayResultFrame(requestId, success, error, missingAssets)
+              prototypeResultFrame(requestId, success, error, missingAssets)
             }
           }
         }
       }
 
-      override suspend fun sendOverlayStatus(
+      override suspend fun sendPrototypeStatus(
         requestId: String?,
-        overlays: List<OverlayStatusEntry>,
+        prototypes: List<PrototypeStatusEntry>,
         droppedEvents: Long,
       ) {
         if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-          resultBroadcaster.guard(requestId, "overlay_result") {
+          resultBroadcaster.guard(requestId, "prototype_result") {
             webSocketServer.broadcastWithPerf { _ ->
-              overlayStatusFrame(requestId, overlays, droppedEvents)
+              prototypeStatusFrame(requestId, prototypes, droppedEvents)
             }
           }
         }
       }
     }
-  // Asset bytes live in the cache directory, never in the heap; cleared with the overlay session.
+  // Asset bytes live in the cache directory, never in the heap; cleared with the prototype session.
   // Assets are owned by the observer session that uploaded them, and file deletion runs on IO so a
   // main-thread clear or lookup never touches the disk.
-  private val overlayAssets by lazy {
-    OverlayAssetStore(
-      OverlayAssetDirectory(File(cacheDir, "overlay-assets")),
+  private val prototypeAssets by lazy {
+    PrototypeAssetStore(
+      PrototypeAssetDirectory(File(cacheDir, "prototype-assets")),
       session = {
         if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration() else 0
       },
@@ -1142,22 +1142,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
   // Decoded bitmaps of stored assets, dropped as soon as the store replaces, removes or clears one.
-  private val overlayImages by lazy {
-    OverlayImageCache(overlayAssets, BitmapOverlayImageDecoder()).also { images ->
+  private val prototypeImages by lazy {
+    PrototypeImageCache(prototypeAssets, BitmapPrototypeImageDecoder()).also { images ->
       // The store has one listener slot, so fan a change out to both caches.
-      overlayAssets.setChangeListener { ids ->
+      prototypeAssets.setChangeListener { ids ->
         images.invalidate(ids)
-        overlayFonts.invalidate(ids)
+        prototypeFonts.invalidate(ids)
       }
     }
   }
   // Loaded custom fonts (`fontFamily: {asset}`), dropped when the store changes an asset.
-  private val overlayFonts by lazy { OverlayFontCache(overlayAssets, ComposeOverlayFontLoader()) }
-  private val overlayAssetController by lazy {
-    OverlayAssetController(
-      overlayAssets,
-      overlayResultSink,
-      OverlayBase64Decoder { Base64.decode(it, Base64.DEFAULT) },
+  private val prototypeFonts by lazy {
+    PrototypeFontCache(prototypeAssets, ComposePrototypeFontLoader())
+  }
+  private val prototypeAssetController by lazy {
+    PrototypeAssetController(
+      prototypeAssets,
+      prototypeResultSink,
+      PrototypeBase64Decoder { Base64.decode(it, Base64.DEFAULT) },
     )
   }
   private lateinit var overlayManager: OverlayManager
@@ -1633,7 +1635,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val screenStateReceiver =
     object : BroadcastReceiver() {
       override fun onReceive(context: Context?, intent: Intent?) {
-        refreshOverlayWindow()
+        refreshPrototypeWindow()
         when (intent?.action) {
           Intent.ACTION_SCREEN_ON -> {
             Log.i(TAG, "Screen turned ON, triggering hierarchy extraction")
@@ -1769,8 +1771,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager,
           onTransition = { transition ->
             serviceScope.launch {
-              if (::overlayController.isInitialized) {
-                overlayController.onDisplayTransition(
+              if (::prototypeController.isInitialized) {
+                prototypeController.onDisplayTransition(
                   transition.displayId,
                   removed = transition.change == "removed",
                 )
@@ -1790,63 +1792,63 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       overlayManager =
         OverlayManager(this, viewFactory = { HighlightOverlayView(it, overlayDrawer) })
       overlayDrawer.attachOverlayManager(overlayManager)
-      if (!::overlayController.isInitialized) {
-        val overlayDisplays = AndroidOverlayDisplays(this)
-        overlayController =
-          OverlayController(
-            DefaultInteractiveOverlayHost(
+      if (!::prototypeController.isInitialized) {
+        val prototypeDisplays = AndroidPrototypeDisplays(this)
+        prototypeController =
+          PrototypeController(
+            DefaultPrototypeHost(
               context = this,
-              displayWindows = overlayDisplays,
-              onWindowAttached = { overlayManager.setInteractiveOverlayAttached(true) },
-              onWindowLost = ::refreshOverlayWindow,
-              isBlocked = ::isOverlayBlocked,
-              imeInset = OverlayImeInset { displayId -> overlayImeLiftPx(displayId) },
+              displayWindows = prototypeDisplays,
+              onWindowAttached = { overlayManager.setPrototypeAttached(true) },
+              onWindowLost = ::refreshPrototypeWindow,
+              isBlocked = ::isPrototypeBlocked,
+              imeInset = PrototypeImeInset { displayId -> prototypeImeLiftPx(displayId) },
               backScope = serviceScope,
             ),
-            overlayResultSink,
+            prototypeResultSink,
             onDismissed = {
               withContext(Dispatchers.Main.immediate) {
-                overlayManager.setInteractiveOverlayAttached(false)
+                overlayManager.setPrototypeAttached(false)
               }
             },
             lifecycle =
-              OverlayLifecycle(
-                CoroutineOverlayScheduler(serviceScope),
-                isBlocked = ::isOverlayBlocked,
+              PrototypeLifecycle(
+                CoroutinePrototypeScheduler(serviceScope),
+                isBlocked = ::isPrototypeBlocked,
                 observerSession = {
                   if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration()
                   else 0
                 },
                 clientCount = {
-                  // Unknown (server not up yet) counts as connected: never drop an overlay on a
+                  // Unknown (server not up yet) counts as connected: never drop a prototype on a
                   // guess.
                   if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 1
                 },
               ),
             eventSink =
-              OverlayEventSink { event ->
+              PrototypeEventSink { event ->
                 if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-                  resultBroadcaster.guard(null, "overlay_event") {
-                    webSocketServer.broadcastWithPerf { _ -> overlayEventFrame(event) }
+                  resultBroadcaster.guard(null, "prototype_event") {
+                    webSocketServer.broadcastWithPerf { _ -> prototypeEventFrame(event) }
                   }
                 }
               },
-            displays = overlayDisplays,
-            clearAssets = { overlayAssets.clear() },
-            hasAsset = { overlayAssets.lookup(it) != null },
-            images = overlayImages,
-            // The host grants this appop before showing a window.layer "app" overlay.
+            displays = prototypeDisplays,
+            clearAssets = { prototypeAssets.clear() },
+            hasAsset = { prototypeAssets.lookup(it) != null },
+            images = prototypeImages,
+            // The host grants this appop before showing a window.layer "app" prototype.
             appLayerPermitted = {
               Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Settings.canDrawOverlays(this)
             },
             packageName = packageName,
-            fonts = overlayFonts,
-            foreground = overlayForeground,
+            fonts = prototypeFonts,
+            foreground = prototypeForeground,
           )
         // Service start: drop anything a previous process left in the cache directory.
-        overlayAssets.purgeLeftovers()
+        prototypeAssets.purgeLeftovers()
       }
-      overlayManager.setInteractiveOverlayAttached(overlayController.isShowing)
+      overlayManager.setPrototypeAttached(prototypeController.isShowing)
 
       // Register broadcast receiver for commands
       val commandFilter = IntentFilter().apply { addAction(ACTION_EXTRACT_HIERARCHY) }
@@ -2056,7 +2058,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // Keep inbound blocking work off Ktor's read loops, preserving each connection's wire order.
       try {
         val queuedHandler = queuedMessageHandler()
-        val overlays = overlayController
+        val prototypes = prototypeController
         webSocketServer =
           WebSocketServer(
             port = 8765,
@@ -2067,9 +2069,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               gestureStreamRouter.cancelOwnedBy(client)
             },
             onClientCountChanged = { count, session ->
-              serviceScope.launch { overlays.onClientCountChanged(count, session) }
+              serviceScope.launch { prototypes.onClientCountChanged(count, session) }
             },
-            onClientConnected = { serviceScope.launch { overlays.onClientConnected() } },
+            onClientConnected = { serviceScope.launch { prototypes.onClientConnected() } },
             onPermanentStartFailure = { disableSelf() },
           )
         webSocketLifecycle.replace(webSocketServer)
@@ -2144,10 +2146,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun onUnbind(intent: Intent?): Boolean {
     // Android can reconnect this service in the same process before onDestroy runs.
     webSocketLifecycle.stop()
-    if (::overlayController.isInitialized) {
+    if (::prototypeController.isInitialized) {
       // Dismiss (reason teardown) without terminal destruction: a same-process rebind reuses this
       // controller, and onServiceConnected has early-exit paths that would leave a destroyed one.
-      CoroutineScope(Dispatchers.Main.immediate).launch { overlayController.dismissForUnbind() }
+      CoroutineScope(Dispatchers.Main.immediate).launch { prototypeController.dismissForUnbind() }
     }
     return super.onUnbind(intent)
   }
@@ -2232,10 +2234,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       overlayDrawer.destroy()
     }
 
-    if (::overlayController.isInitialized) {
+    if (::prototypeController.isInitialized) {
       // Independent of serviceScope cancellation below. Main-immediate runs inline when possible;
       // a pending request releases the controller mutex on cancellation, then cleanup resumes.
-      CoroutineScope(Dispatchers.Main.immediate).launch { overlayController.destroy() }
+      CoroutineScope(Dispatchers.Main.immediate).launch { prototypeController.destroy() }
     }
     if (::overlayManager.isInitialized) {
       overlayManager.destroy()
@@ -2382,8 +2384,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun requestScreenshot(requestId: String?, displayId: Int?) =
     broadcastScreenshot(requestId, displayId)
 
-  override fun requestScreenshot(requestId: String?, displayId: Int?, hideOverlays: Boolean) =
-    broadcastScreenshot(requestId, displayId, hideOverlays)
+  override fun requestScreenshot(requestId: String?, displayId: Int?, hidePrototypes: Boolean) =
+    broadcastScreenshot(requestId, displayId, hidePrototypes)
 
   override fun requestDoubleTapCoordinates(
     requestId: String?,
@@ -3203,31 +3205,36 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) =
     handleAddHighlight(requestId, highlightId, shape)
 
-  override fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?, reset: Boolean) {
-    launchRequestScope(requestId) { overlayController.show(requestId, spec, displayId, reset) }
+  override fun showPrototype(
+    requestId: String?,
+    spec: PrototypeSpec,
+    displayId: Int?,
+    reset: Boolean,
+  ) {
+    launchRequestScope(requestId) { prototypeController.show(requestId, spec, displayId, reset) }
   }
 
-  override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) {
-    launchRequestScope(requestId) { overlayController.dismiss(requestId, id, all) }
+  override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {
+    launchRequestScope(requestId) { prototypeController.dismiss(requestId, id, all) }
   }
 
-  override fun inspectOverlays(requestId: String?) {
-    launchRequestScope(requestId) { overlayController.inspect(requestId) }
+  override fun inspectPrototypes(requestId: String?) {
+    launchRequestScope(requestId) { prototypeController.inspect(requestId) }
   }
 
-  override fun putOverlayAsset(
+  override fun putPrototypeAsset(
     requestId: String?,
     id: String,
     mimeType: String,
     dataBase64: String,
   ) {
     launchRequestScope(requestId) {
-      overlayAssetController.put(requestId, id, mimeType, dataBase64)
+      prototypeAssetController.put(requestId, id, mimeType, dataBase64)
     }
   }
 
-  override fun removeOverlayAsset(requestId: String?, id: String) {
-    launchRequestScope(requestId) { overlayAssetController.remove(requestId, id) }
+  override fun removePrototypeAsset(requestId: String?, id: String) {
+    launchRequestScope(requestId) { prototypeAssetController.remove(requestId, id) }
   }
 
   override fun listPreferenceFiles(requestId: String?, packageName: String) =
@@ -3487,66 +3494,66 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  private fun isOverlayBlocked(): Boolean {
+  private fun isPrototypeBlocked(): Boolean {
     val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
     val power = getSystemService(Context.POWER_SERVICE) as? PowerManager
-    // Missing safety services fail closed rather than allowing an overlay over an unknown lock
+    // Missing safety services fail closed rather than allowing a prototype over an unknown lock
     // state.
     return keyguard?.isKeyguardLocked != false ||
       power?.isInteractive != true ||
       // Another app is in front: hidden like a lock, but tracked separately (#10261).
-      overlayForeground.suspended
+      prototypeForeground.suspended
   }
 
   /** The application in front, from the accessibility windows; null when none qualifies. */
   private fun currentForegroundApp(): String? =
     try {
-      overlayForegroundFromWindows(
+      prototypeForegroundFromWindows(
         windows.map {
-          OverlayForegroundWindow(it.type, it.isActive, it.root?.packageName?.toString())
+          PrototypeForegroundWindow(it.type, it.isActive, it.root?.packageName?.toString())
         },
         packageName,
       )
     } catch (error: Exception) {
-      // Unreadable windows leave the overlay unscoped (shown everywhere) rather than hiding it.
-      Log.w(TAG, "Foreground app unavailable for overlay scoping", error)
+      // Unreadable windows leave the prototype unscoped (shown everywhere) rather than hiding it.
+      Log.w(TAG, "Foreground app unavailable for prototype scoping", error)
       null
     }
 
-  /** Feeds a window-state event to overlay foreground scoping, only while an overlay exists. */
-  private fun trackOverlayForeground(event: AccessibilityEvent, eventPackage: String?) {
+  /** Feeds a window-state event to prototype foreground scoping, only while a prototype exists. */
+  private fun trackPrototypeForeground(event: AccessibilityEvent, eventPackage: String?) {
     if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
-    if (!::overlayController.isInitialized) return
-    if (!overlayController.isShowing && !overlayController.isSuspendedByForeground) return
-    overlayForeground.onWindowEvent(eventPackage, ownEventWindowType(event))
+    if (!::prototypeController.isInitialized) return
+    if (!prototypeController.isShowing && !prototypeController.isSuspendedByForeground) return
+    prototypeForeground.onWindowEvent(eventPackage, ownEventWindowType(event))
   }
 
   /** The keyboard's reach up from [displayId]'s bottom edge, from its accessibility window. */
-  private fun overlayImeLiftPx(displayId: Int): Int {
+  private fun prototypeImeLiftPx(displayId: Int): Int {
     val screen = getScreenDimensions(displayId) ?: return 0
     val windows =
       viewHierarchyExtractor.windowsForDisplay(this, displayId).map {
         val bounds = Rect()
         it.getBoundsInScreen(bounds)
-        OverlayImeWindow(it.type, bounds.top, bounds.bottom)
+        PrototypeImeWindow(it.type, bounds.top, bounds.bottom)
       }
     return imeLiftPx(windows, screen.height)
   }
 
-  private suspend fun refreshOverlayWindowNow() {
-    if (::overlayController.isInitialized) overlayController.onConfigurationChanged()
+  private suspend fun refreshPrototypeWindowNow() {
+    if (::prototypeController.isInitialized) prototypeController.onConfigurationChanged()
   }
 
-  private fun refreshOverlayWindow() {
-    if (::overlayController.isInitialized) {
-      val controller = overlayController
+  private fun refreshPrototypeWindow() {
+    if (::prototypeController.isInitialized) {
+      val controller = prototypeController
       serviceScope.launch { controller.onConfigurationChanged() }
     }
   }
 
   override fun onConfigurationChanged(newConfig: Configuration) {
     super.onConfigurationChanged(newConfig)
-    refreshOverlayWindow()
+    refreshPrototypeWindow()
   }
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -3555,14 +3562,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    // Overlay animations must not feed the hierarchy debouncer or navigation tracking. Only the
-    // overlay's OWN accessibility-overlay windows are dropped: this package also owns the CtrlProxy
+    // Prototype animations must not feed the hierarchy debouncer or navigation tracking. Only the
+    // prototype's OWN accessibility-overlay windows are dropped: this package also owns the
+    // CtrlProxy
     // keyboard (input-method window) and MainActivity, whose events must keep advancing
     // frameContext
     // and feeding the hierarchy push. The window type is resolved only for own-package events.
     val eventPackage = event.packageName?.toString()
     val ownWindowType = if (eventPackage == packageName) ownEventWindowType(event) else null
-    val appLayerShowing = ::overlayController.isInitialized && overlayController.isAppLayerShowing
+    val appLayerShowing =
+      ::prototypeController.isInitialized && prototypeController.isAppLayerShowing
     if (shouldSkipOwnOverlayEvent(eventPackage, packageName, ownWindowType, appLayerShowing)) return
     // A window appearing in an app is the cheapest sign its process (re)started; an open storage
     // subscription uses it to re-arm the app-side listener a restart wiped (#10069). A map miss
@@ -3574,12 +3583,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     ) {
       storageSubscriptionManager.onPackageActivity(eventPackage)
     }
-    trackOverlayForeground(event, eventPackage)
+    trackPrototypeForeground(event, eventPackage)
     if (
       event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
         event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
     )
-      refreshOverlayWindow()
+      refreshPrototypeWindow()
 
     try {
       when (event.eventType) {
@@ -8229,7 +8238,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private fun broadcastScreenshot(
     requestId: String?,
     displayId: Int? = null,
-    hideOverlays: Boolean = false,
+    hidePrototypes: Boolean = false,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping screenshot broadcast")
@@ -8242,14 +8251,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     asyncActionRunner.launch(requestId, "screenshot") {
       val contextBeforeCapture = currentFrameContext()
       val targetDisplayId = displayId ?: activeDisplayId()
-      val overlaysHidden: Boolean?
+      val prototypesHidden: Boolean?
       val outcome =
-        if (hideOverlays) {
-          val capture = captureWithOverlayHidden(targetDisplayId)
-          overlaysHidden = capture.overlayExcluded
+        if (hidePrototypes) {
+          val capture = captureWithPrototypeHidden(targetDisplayId)
+          prototypesHidden = capture.prototypeExcluded
           capture.value
         } else {
-          overlaysHidden = null
+          prototypesHidden = null
           takeScreenshotAsync(targetDisplayId)
         }
       val stableContext = contextBeforeCapture.takeIf { it == currentFrameContext() }
@@ -8270,7 +8279,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               screenshotByteLength = screenshot.byteLength,
               screenshotBase64Length = screenshot.base64Length,
               frameContext = stableContext?.toString(),
-              overlaysHidden = overlaysHidden,
+              prototypesHidden = prototypesHidden,
             ),
           )
           Log.d(TAG, "Broadcasted screenshot to ${webSocketServer.getConnectionCount()} clients")
@@ -8289,14 +8298,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   /**
    * Hide-capture-restore in one device-side step (#9305), so a host that gives up mid-request can
-   * never leave the overlay hidden: the host restores in its own finally.
+   * never leave the prototype hidden: the host restores in its own finally.
    */
-  private suspend fun captureWithOverlayHidden(
+  private suspend fun captureWithPrototypeHidden(
     targetDisplayId: Int,
-  ): OverlayHiddenCapture<ScreenshotCaptureOutcome> =
-    if (::overlayController.isInitialized)
-      overlayController.withHiddenForCapture { takeScreenshotAsync(targetDisplayId) }
-    else OverlayHiddenCapture(takeScreenshotAsync(targetDisplayId), overlayExcluded = true)
+  ): PrototypeHiddenCapture<ScreenshotCaptureOutcome> =
+    if (::prototypeController.isInitialized)
+      prototypeController.withHiddenForCapture { takeScreenshotAsync(targetDisplayId) }
+    else PrototypeHiddenCapture(takeScreenshotAsync(targetDisplayId), prototypeExcluded = true)
 
   /** Broadcast navigation event to WebSocket clients using typed protocol */
   private suspend fun broadcastNavigationEvent(

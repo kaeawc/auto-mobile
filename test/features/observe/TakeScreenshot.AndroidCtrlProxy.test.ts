@@ -172,7 +172,7 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
     expect(result.success).toBe(true);
   });
 
-  describe("with the overlay hidden (#9305)", () => {
+  describe("with the prototype hidden (#9305)", () => {
     const pngFixture = () => readFileSync("test/fixtures/screenshots/black-on-white.png");
 
     const capture = async (
@@ -206,20 +206,20 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
       }
     };
 
-    test("captures through CtrlProxy in the requested format and reports the overlay hidden", async () => {
+    test("captures through CtrlProxy in the requested format and reports the prototype hidden", async () => {
       const { result, calls, adbCommands } = await capture(
-        { success: true, data: pngFixture().toString("base64"), overlaysHidden: true },
-        { format: "png", displayId: 1, hideOverlays: true },
+        { success: true, data: pngFixture().toString("base64"), prototypesHidden: true },
+        { format: "png", displayId: 1, hidePrototypes: true },
       );
       expect(result).toMatchObject({
         success: true,
-        overlaysHidden: true,
+        prototypesHidden: true,
         screenshotFormat: "png",
         screenshotMimeType: "image/png",
       });
       expect(result.path).toMatch(/\.png$/);
       expect(readFileSync(result.path!)).toEqual(pngFixture());
-      // displayId and hideOverlays reach the client; nothing goes through ADB screencap.
+      // displayId and hidePrototypes reach the client; nothing goes through ADB screencap.
       expect(calls[0]?.[4]).toBe(1);
       expect(calls[0]?.[5]).toBe(true);
       expect(adbCommands).toHaveLength(0);
@@ -228,12 +228,12 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
     test("keeps the device's own bytes when no format is requested", async () => {
       const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
       const { result } = await capture(
-        { success: true, data: jpeg.toString("base64"), format: "jpeg", overlaysHidden: true },
-        { hideOverlays: true },
+        { success: true, data: jpeg.toString("base64"), format: "jpeg", prototypesHidden: true },
+        { hidePrototypes: true },
       );
       expect(result).toMatchObject({
         success: true,
-        overlaysHidden: true,
+        prototypesHidden: true,
         screenshotFormat: "jpeg",
       });
       expect(result.path).toMatch(/\.jpg$/);
@@ -241,22 +241,22 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
     });
 
     test.each([
-      ["the device could not confirm the hide", { overlaysHidden: false }],
+      ["the device could not confirm the hide", { prototypesHidden: false }],
       ["the device predates the flag", {}],
     ])("fails without an ADB fallback when %s", async (_, reply) => {
       const { result, adbCommands } = await capture(
         { success: true, data: pngFixture().toString("base64"), ...reply },
-        { format: "png", hideOverlays: true },
+        { format: "png", hidePrototypes: true },
       );
       expect(result.success).toBe(false);
-      expect(result.error).toContain("could not confirm its overlay was hidden");
+      expect(result.error).toContain("could not confirm its prototype was hidden");
       expect(adbCommands).toHaveLength(0);
     });
 
     test("a failed CtrlProxy capture fails without an ADB fallback", async () => {
       const { result, adbCommands } = await capture(
         { success: false, error: "rate limited" },
-        { format: "png", hideOverlays: true },
+        { format: "png", hidePrototypes: true },
       );
       expect(result.success).toBe(false);
       expect(result.error).toContain("rate limited");

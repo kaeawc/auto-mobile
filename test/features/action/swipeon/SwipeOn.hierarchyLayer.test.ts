@@ -13,17 +13,17 @@ import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeWindow } from "../../../fakes/FakeWindow";
 import {
-  OVERLAY_CAPTURE,
+  RELABELLED_CAPTURE,
   capturedFloatingCoverHierarchy,
-  capturedOverlayHierarchy,
+  capturedPrototypeHierarchy,
   capturedTwoWindowHierarchy,
   observationOf,
-} from "../../../helpers/overlayWindowCapture";
+} from "../../../helpers/prototypeWindowCapture";
 
 // Device capture: a floating prototype window 170 [525,1565][1011,1723] (node `coverBox`) over
 // the Playground Tap screen, whose scrollable `tap_screen_content` spans [0,652][1080,2064]. See
 // test/fixtures/android-overlay-window/README.txt.
-const OVERLAY_BOUNDS = { left: 525, top: 1565, right: 1011, bottom: 1723 };
+const PROTOTYPE_BOUNDS = { left: 525, top: 1565, right: 1011, bottom: 1723 };
 
 function deviceObservation(
   hierarchy: ViewHierarchyResult,
@@ -62,18 +62,18 @@ function harness(
   return { action, gesture };
 }
 
-const insideOverlay = (point: { x: number; y: number }) =>
-  point.x >= OVERLAY_BOUNDS.left &&
-  point.x < OVERLAY_BOUNDS.right &&
-  point.y >= OVERLAY_BOUNDS.top &&
-  point.y < OVERLAY_BOUNDS.bottom;
+const insidePrototype = (point: { x: number; y: number }) =>
+  point.x >= PROTOTYPE_BOUNDS.left &&
+  point.x < PROTOTYPE_BOUNDS.right &&
+  point.y >= PROTOTYPE_BOUNDS.top &&
+  point.y < PROTOTYPE_BOUNDS.bottom;
 
 const swipe = (options: SwipeOnOptions): SwipeOnOptions => options;
 
 afterEach(() => mock.restore());
 
 describe("swipeOn layer (#9305)", () => {
-  test('"app" excludes overlay nodes from container resolution', async () => {
+  test('"app" excludes prototype nodes from container resolution', async () => {
     const { action, gesture } = harness();
     const result = await action.execute(
       swipe({ direction: "up", container: { elementId: "coverBox" }, layer: "app" }),
@@ -84,7 +84,7 @@ describe("swipeOn layer (#9305)", () => {
     expect(gesture.getSwipeCalls()).toEqual([]);
   });
 
-  test('"app" swipes an app container whose start point is outside the overlay', async () => {
+  test('"app" swipes an app container whose start point is outside the prototype', async () => {
     const { action, gesture } = harness();
     const result = await action.execute(
       swipe({ direction: "up", container: { elementId: "tap_screen_content" }, layer: "app" }),
@@ -92,10 +92,10 @@ describe("swipeOn layer (#9305)", () => {
 
     expect(result.error).toBeUndefined();
     const [call] = gesture.getSwipeCalls();
-    expect(insideOverlay({ x: call.x1, y: call.y1 })).toBe(false);
+    expect(insidePrototype({ x: call.x1, y: call.y1 })).toBe(false);
   });
 
-  test('"app" auto-targets the app scrollable, not an overlay node', async () => {
+  test('"app" auto-targets the app scrollable, not a prototype node', async () => {
     const { action, gesture } = harness();
     const result = await action.execute(swipe({ direction: "up", layer: "app" }));
 
@@ -104,10 +104,10 @@ describe("swipeOn layer (#9305)", () => {
     expect(gesture.getSwipeCalls()).toHaveLength(1);
   });
 
-  test('"app" refuses a screen swipe before dispatch when a full-screen overlay covers its start', async () => {
-    const { action, gesture } = harness(capturedOverlayHierarchy({ fullScreen: true }), {
-      width: OVERLAY_CAPTURE.screen.right,
-      height: OVERLAY_CAPTURE.screen.bottom,
+  test('"app" refuses a screen swipe before dispatch when a full-screen prototype covers its start', async () => {
+    const { action, gesture } = harness(capturedPrototypeHierarchy({ fullScreen: true }), {
+      width: RELABELLED_CAPTURE.screen.right,
+      height: RELABELLED_CAPTURE.screen.bottom,
     });
     const result = await action.execute(
       swipe({ direction: "up", autoTarget: false, layer: "app" }),
@@ -115,42 +115,42 @@ describe("swipeOn layer (#9305)", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Cannot swipe at");
-    expect(result.error).toContain("an AutoMobile overlay window covers that point");
+    expect(result.error).toContain("an AutoMobile prototype window covers that point");
     expect(gesture.getSwipeCalls()).toEqual([]);
   });
 
-  test('"overlay" refuses a screen swipe that starts outside the overlay window', async () => {
+  test('"prototype" refuses a screen swipe that starts outside the prototype window', async () => {
     const { action, gesture } = harness();
-    const result = await action.execute(swipe({ direction: "up", layer: "overlay" }));
+    const result = await action.execute(swipe({ direction: "up", layer: "prototype" }));
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("no AutoMobile overlay window covers that point");
+    expect(result.error).toContain("no AutoMobile prototype window covers that point");
     expect(gesture.getSwipeCalls()).toEqual([]);
   });
 
-  test('"overlay" with no overlay showing is an actionable error', async () => {
+  test('"prototype" with no prototype showing is an actionable error', async () => {
     const { action, gesture } = harness(capturedTwoWindowHierarchy(), {
-      width: OVERLAY_CAPTURE.screen.right,
-      height: OVERLAY_CAPTURE.screen.bottom,
+      width: RELABELLED_CAPTURE.screen.right,
+      height: RELABELLED_CAPTURE.screen.bottom,
     });
-    const result = await action.execute(swipe({ direction: "up", layer: "overlay" }));
+    const result = await action.execute(swipe({ direction: "up", layer: "prototype" }));
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("no AutoMobile overlay is showing");
+    expect(result.error).toContain("no AutoMobile prototype is showing");
     expect(gesture.getSwipeCalls()).toEqual([]);
   });
 
-  test('lookFor with "overlay" finds the overlay node without swiping', async () => {
+  test('lookFor with "prototype" finds the prototype node without swiping', async () => {
     const { action, gesture } = harness();
     const result = await action.execute(
-      swipe({ direction: "up", lookFor: { elementId: "coverBox" }, layer: "overlay" }),
+      swipe({ direction: "up", lookFor: { elementId: "coverBox" }, layer: "prototype" }),
     );
 
     expect(result).toMatchObject({ success: true, found: true, scrollIterations: 0 });
     expect(gesture.getSwipeCalls()).toEqual([]);
   });
 
-  test('lookFor with "app" never matches the overlay node and scrolls the app container', async () => {
+  test('lookFor with "app" never matches the prototype node and scrolls the app container', async () => {
     const { action, gesture } = harness();
     const result = await action.execute(
       swipe({ direction: "up", lookFor: { elementId: "coverBox", maxSwipes: 1 }, layer: "app" }),
@@ -159,10 +159,10 @@ describe("swipeOn layer (#9305)", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('element with id "coverBox" not found after scrolling');
     const [call] = gesture.getSwipeCalls();
-    expect(insideOverlay({ x: call.x1, y: call.y1 })).toBe(false);
+    expect(insidePrototype({ x: call.x1, y: call.y1 })).toBe(false);
   });
 
-  test("lookFor without layer keeps today's behaviour: the overlay node is found", async () => {
+  test("lookFor without layer keeps today's behaviour: the prototype node is found", async () => {
     const { action, gesture } = harness();
     const result = await action.execute(
       swipe({ direction: "up", lookFor: { elementId: "coverBox", maxSwipes: 1 } }),
@@ -172,8 +172,8 @@ describe("swipeOn layer (#9305)", () => {
     expect(gesture.getSwipeCalls()).toEqual([]);
   });
 
-  for (const layer of [undefined, "overlay"] as const) {
-    test(`swipes across a container inside the overlay with layer ${layer ?? "unset"} (#10752)`, async () => {
+  for (const layer of [undefined, "prototype"] as const) {
+    test(`swipes across a container inside the prototype with layer ${layer ?? "unset"} (#10752)`, async () => {
       const { action, gesture } = harness();
       const result = await action.execute(
         swipe({
@@ -186,9 +186,9 @@ describe("swipeOn layer (#9305)", () => {
       expect(result.error).toBeUndefined();
       expect(result.warning ?? "").not.toContain("Swipe area reduced");
       const [call] = gesture.getSwipeCalls();
-      expect(insideOverlay({ x: call.x1, y: call.y1 })).toBe(true);
-      expect(insideOverlay({ x: call.x2, y: call.y2 })).toBe(true);
-      // The app buttons under the overlay used to leave a 7 px safe width.
+      expect(insidePrototype({ x: call.x1, y: call.y1 })).toBe(true);
+      expect(insidePrototype({ x: call.x2, y: call.y2 })).toBe(true);
+      // The app buttons under the prototype used to leave a 7 px safe width.
       expect(call.x1 - call.x2).toBeGreaterThan(200);
     });
   }

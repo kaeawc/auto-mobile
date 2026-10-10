@@ -270,7 +270,7 @@ describe("LaunchApp", () => {
         undefined,
         undefined,
         undefined,
-        { SIMCTL_CHILD_AUTOMOBILE_OVERLAY_PORT: "8770" },
+        { SIMCTL_CHILD_AUTOMOBILE_PROTOTYPE_PORT: "8770" },
       ),
     ).rejects.toThrow("launch environment is supported on iOS simulators only");
     expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
@@ -3392,8 +3392,8 @@ describe("LaunchApp", () => {
       fakeTimer.enableAutoAdvance();
       const harness = createIOSTestHarness({ bundleId: userBundleId });
       const environment = {
-        SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: "/tmp/AutoMobileOverlayAgent.dylib",
-        SIMCTL_CHILD_AUTOMOBILE_OVERLAY_PORT: "8770",
+        SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: "/tmp/AutoMobilePrototypeAgent.dylib",
+        SIMCTL_CHILD_AUTOMOBILE_PROTOTYPE_PORT: "8770",
       };
       try {
         const result = await harness.iosLaunchApp.execute(

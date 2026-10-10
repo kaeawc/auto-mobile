@@ -150,10 +150,10 @@ export interface ViewHierarchyResult {
   /** Structured reasons why this Android snapshot is partial or unavailable. */
   truncationReasons?: string[];
   /**
-   * True only while an AutoMobile overlay exists but is hidden because the app it was shown over
+   * True only while an AutoMobile prototype exists but is hidden because the app it was shown over
    * is not in front (Android, #10261). Absent otherwise and from older APKs.
    */
-  overlaySuspended?: boolean;
+  prototypeSuspended?: boolean;
   /** Present when CtrlProxy is reconnecting and the hierarchy is temporarily unavailable. */
   ctrlProxyReconnect?: CtrlProxyReconnectStatus;
 }
@@ -204,7 +204,7 @@ export type HierarchyUnavailableReason =
   /** Android: automatic CtrlProxy recovery is exhausted or suspended; `unavailableDetail` has the last failure. */
   | "runner_unavailable";
 
-export type OwnOverlayPlacement = "fullscreen" | "sheet" | "floating";
+export type PrototypePlacement = "fullscreen" | "sheet" | "floating";
 
 export interface ViewHierarchyWindowInfo {
   displayId?: number | null;
@@ -222,17 +222,17 @@ export interface ViewHierarchyWindowInfo {
    */
   packageName?: string;
   /**
-   * Placement of CtrlProxy's own interactive overlay window, only on that window and only from an
-   * APK advertising `overlay_window_metadata_v1`. It identifies the window (`ownOverlayWindows`);
-   * placement and opacity do not change tappability, since the overlay is touchable within its
+   * Placement of CtrlProxy's own prototype window, only on that window and only from an
+   * APK advertising `prototype_window_metadata_v1`. It identifies the window (`ownPrototypeWindows`);
+   * placement and opacity do not change tappability, since the prototype is touchable within its
    * bounds whatever it paints (#10715).
    */
-  overlayPlacement?: OwnOverlayPlacement;
+  prototypePlacement?: PrototypePlacement;
   /**
-   * Whether that overlay's rendered surface is fully opaque (window opacity 100 and an opaque
+   * Whether that prototype's rendered surface is fully opaque (window opacity 100 and an opaque
    * root or scrim). Absent when unknown or from an older APK.
    */
-  overlayOpaque?: boolean;
+  prototypeOpaque?: boolean;
   hierarchy?: ViewHierarchyNode;
   /** Per-window truncation attribution; absent from older runners and complete windows. */
   truncationReasons?: string[] | null;

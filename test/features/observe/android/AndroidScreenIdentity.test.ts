@@ -3,7 +3,7 @@ import { deriveAndroidScreenIdentity } from "../../../../src/features/observe/an
 import { deriveSdkNavigationScreenIdentity } from "../../../../src/features/observe/sdkScreenIdentity";
 import type { ObserveResult, ViewHierarchyNode } from "../../../../src/models";
 import playgroundCapture from "../../../fixtures/android-enabled/playground-disabled-control-api36.json";
-import overlayCapture from "../../../fixtures/android-overlay-window/app-layer-overlay-over-playground.raw.json";
+import prototypeCapture from "../../../fixtures/android-overlay-window/app-layer-overlay-over-playground.raw.json";
 import imeCapture from "../../../fixtures/android-ime-window/playground-gboard-api36.json";
 
 const PLAYGROUND = "dev.jasonpearson.automobile.playground";
@@ -90,10 +90,10 @@ describe("deriveAndroidScreenIdentity", () => {
     );
   });
 
-  test("pane titles in AutoMobile's overlay window or the IME window are ignored", () => {
-    const overlay = capture(overlayCapture);
-    firstChild(windowRoot(overlay, 174))["pane-title"] = "Overlay";
-    expect(deriveAndroidScreenIdentity(overlay.viewHierarchy)).toBeUndefined();
+  test("pane titles in AutoMobile's prototype window or the IME window are ignored", () => {
+    const prototype = capture(prototypeCapture);
+    firstChild(windowRoot(prototype, 174))["pane-title"] = "Prototype";
+    expect(deriveAndroidScreenIdentity(prototype.viewHierarchy)).toBeUndefined();
 
     const ime = { viewHierarchy: structuredClone(imeCapture) } as unknown as ObserveResult;
     firstChild(windowRoot(ime, 550))["pane-title"] = "Keyboard";

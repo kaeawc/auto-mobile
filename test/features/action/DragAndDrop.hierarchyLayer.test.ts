@@ -9,16 +9,16 @@ import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
-  OVERLAY_CAPTURE,
+  RELABELLED_CAPTURE,
   capturedFloatingCoverHierarchy,
-  capturedOverlayHierarchy,
+  capturedPrototypeHierarchy,
   capturedTwoWindowHierarchy,
   observationOf,
-} from "../../helpers/overlayWindowCapture";
+} from "../../helpers/prototypeWindowCapture";
 
 // Captured Recents overview with its floating window relabelled as the CtrlProxy
-// overlay; see test/helpers/overlayWindowCapture.ts. "Settings" is in both
-// windows, "YouTube" is overlay-only and "Screenshot" is app-only.
+// prototype; see test/helpers/prototypeWindowCapture.ts. "Settings" is in both
+// windows, "YouTube" is prototype-only and "Screenshot" is app-only.
 function createCommand(viewHierarchy: ViewHierarchyResult) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -38,9 +38,9 @@ function createCommand(viewHierarchy: ViewHierarchyResult) {
   return { command, service };
 }
 
-function overlayTop(hierarchy: ViewHierarchyResult) {
-  return hierarchy.windows!.find((window) => window.id === OVERLAY_CAPTURE.overlayWindowId)!.bounds!
-    .top;
+function prototypeTop(hierarchy: ViewHierarchyResult) {
+  return hierarchy.windows!.find((window) => window.id === RELABELLED_CAPTURE.prototypeWindowId)!
+    .bounds!.top;
 }
 
 const drag = (
@@ -54,46 +54,46 @@ afterEach(() => {
 });
 
 describe("dragAndDrop layer (#9305)", () => {
-  test('"app" resolves both endpoints outside the overlay window', async () => {
-    const hierarchy = capturedOverlayHierarchy();
+  test('"app" resolves both endpoints outside the prototype window', async () => {
+    const hierarchy = capturedPrototypeHierarchy();
     const { command, service } = createCommand(hierarchy);
     const result = await command.execute(drag("Settings", "Screenshot", "app"));
 
     expect(result.error).toBeUndefined();
     const [call] = service.getDragHistory();
-    expect(call.y1).toBeLessThan(overlayTop(hierarchy));
-    expect(call.y2).toBeLessThan(overlayTop(hierarchy));
+    expect(call.y1).toBeLessThan(prototypeTop(hierarchy));
+    expect(call.y2).toBeLessThan(prototypeTop(hierarchy));
   });
 
-  test('"overlay" resolves both endpoints inside the overlay window', async () => {
-    const hierarchy = capturedOverlayHierarchy();
+  test('"prototype" resolves both endpoints inside the prototype window', async () => {
+    const hierarchy = capturedPrototypeHierarchy();
     const { command, service } = createCommand(hierarchy);
-    const result = await command.execute(drag("Settings", "YouTube", "overlay"));
+    const result = await command.execute(drag("Settings", "YouTube", "prototype"));
 
     expect(result.error).toBeUndefined();
     const [call] = service.getDragHistory();
-    expect(call.y1).toBeGreaterThanOrEqual(overlayTop(hierarchy));
-    expect(call.y2).toBeGreaterThanOrEqual(overlayTop(hierarchy));
+    expect(call.y1).toBeGreaterThanOrEqual(prototypeTop(hierarchy));
+    expect(call.y2).toBeGreaterThanOrEqual(prototypeTop(hierarchy));
   });
 
-  test('"overlay" scopes the drop target too: an app-only drop target is not found', async () => {
-    const { command, service } = createCommand(capturedOverlayHierarchy());
-    const result = await command.execute(drag("Settings", "Screenshot", "overlay"));
+  test('"prototype" scopes the drop target too: an app-only drop target is not found', async () => {
+    const { command, service } = createCommand(capturedPrototypeHierarchy());
+    const result = await command.execute(drag("Settings", "Screenshot", "prototype"));
 
     expect(result.success).toBe(false);
     expect(service.getDragHistory()).toEqual([]);
   });
 
-  test('"app" refuses before dispatch when a full-screen overlay covers the endpoint', async () => {
-    const { command, service } = createCommand(capturedOverlayHierarchy({ fullScreen: true }));
+  test('"app" refuses before dispatch when a full-screen prototype covers the endpoint', async () => {
+    const { command, service } = createCommand(capturedPrototypeHierarchy({ fullScreen: true }));
     const result = await command.execute(drag("Settings", "Screenshot", "app"));
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("an AutoMobile overlay window covers that point");
+    expect(result.error).toContain("an AutoMobile prototype window covers that point");
     expect(service.getDragHistory()).toEqual([]);
   });
 
-  test("default layer refuses a drag from an app row a captured floating overlay covers (#10715)", async () => {
+  test("default layer refuses a drag from an app row a captured floating prototype covers (#10715)", async () => {
     // Device capture: a floating system-layer prototype over the Playground "Elevated" button.
     const { command, service } = createCommand(capturedFloatingCoverHierarchy());
     const result = await command.execute({
@@ -102,16 +102,18 @@ describe("dragAndDrop layer (#9305)", () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("dragAndDrop source is covered by an AutoMobile overlay window");
+    expect(result.error).toContain(
+      "dragAndDrop source is covered by an AutoMobile prototype window",
+    );
     expect(service.getDragHistory()).toEqual([]);
   });
 
-  test('"overlay" with no overlay showing is an actionable error', async () => {
+  test('"prototype" with no prototype showing is an actionable error', async () => {
     const { command, service } = createCommand(capturedTwoWindowHierarchy());
-    const result = await command.execute(drag("Settings", "Screenshot", "overlay"));
+    const result = await command.execute(drag("Settings", "Screenshot", "prototype"));
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("no AutoMobile overlay is showing");
+    expect(result.error).toContain("no AutoMobile prototype is showing");
     expect(service.getDragHistory()).toEqual([]);
   });
 });

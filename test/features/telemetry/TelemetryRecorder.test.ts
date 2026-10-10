@@ -1,4 +1,4 @@
-import { event as overlayEvent } from "../../helpers/overlayTestEvent";
+import { event as prototypeEvent } from "../../helpers/prototypeTestEvent";
 import { FakeTelemetryRepository as FakeRepository } from "../../fakes/FakeTelemetryRepository";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
@@ -44,21 +44,21 @@ describe("TelemetryRecorder", () => {
     NetworkState.resetInstance();
   });
 
-  it("pushes overlay telemetry with explicit ownership and no persistence", () => {
+  it("pushes prototype telemetry with explicit ownership and no persistence", () => {
     recorder.setContext("unrelated-device", "unrelated-session");
     repo.shouldThrow = true;
-    const pushed = overlayEvent(7);
-    recorder.recordOverlayEvent(
-      { deviceId: "overlay-device", sessionUuid: "overlay-session" },
+    const pushed = prototypeEvent(7);
+    recorder.recordPrototypeEvent(
+      { deviceId: "prototype-device", sessionUuid: "prototype-session" },
       pushed,
     );
-    recorder.recordOverlayEvent({ deviceId: "overlay-device" }, pushed);
+    recorder.recordPrototypeEvent({ deviceId: "prototype-device" }, pushed);
     expect(pushTarget.pushedEvents).toEqual([
       {
-        category: "overlay",
+        category: "prototype",
         timestamp: 7,
-        deviceId: "overlay-device",
-        sessionId: "overlay-session",
+        deviceId: "prototype-device",
+        sessionId: "prototype-session",
         data: {
           id: "panel",
           sequence: 7,
@@ -69,9 +69,9 @@ describe("TelemetryRecorder", () => {
         },
       },
       {
-        category: "overlay",
+        category: "prototype",
         timestamp: 7,
-        deviceId: "overlay-device",
+        deviceId: "prototype-device",
         sessionId: null,
         data: {
           id: "panel",

@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import {
-  assertAppGestureNotUnderOverlay,
-  hasOwnOverlay,
-  ownOverlayCoversPoint,
+  assertAppGestureNotUnderPrototype,
+  hasOwnPrototype,
+  ownPrototypeCoversPoint,
   scopeHierarchyForSelector,
   scopeHierarchyToLayer,
   scopeObserveResultToLayer,
 } from "../../../src/features/observe/hierarchyLayer";
-import { INTERACTIVE_OVERLAY_WINDOW_TYPE } from "../../../src/features/observe/ownOverlayFocus";
+import { PROTOTYPE_WINDOW_TYPE } from "../../../src/features/observe/ownPrototypeFocus";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
@@ -21,21 +21,21 @@ import {
   getRawViewHierarchy,
 } from "../../../src/utils/viewHierarchySearch";
 import {
-  OVERLAY_CAPTURE,
+  RELABELLED_CAPTURE,
   PROTOTYPE_CAPTURE,
-  capturedAppLayerOverlayHierarchy,
+  capturedAppLayerPrototypeHierarchy,
   capturedFloatingCoverHierarchy,
-  capturedOverlayHierarchy,
+  capturedPrototypeHierarchy,
   capturedTwoWindowHierarchy,
   observationOf,
-} from "../../helpers/overlayWindowCapture";
+} from "../../helpers/prototypeWindowCapture";
 
 // Captured Recents overview with its floating window relabelled as the CtrlProxy
-// overlay; see test/helpers/overlayWindowCapture.ts for what is and is not captured.
-const APP_WINDOW_ID = OVERLAY_CAPTURE.appWindowId;
-const OVERLAY_WINDOW_ID = OVERLAY_CAPTURE.overlayWindowId;
-const LAUNCHER_PACKAGE = OVERLAY_CAPTURE.appPackage;
-const captureWithOverlay = () => capturedOverlayHierarchy();
+// prototype; see test/helpers/prototypeWindowCapture.ts for what is and is not captured.
+const APP_WINDOW_ID = RELABELLED_CAPTURE.appWindowId;
+const PROTOTYPE_WINDOW_ID = RELABELLED_CAPTURE.prototypeWindowId;
+const LAUNCHER_PACKAGE = RELABELLED_CAPTURE.appPackage;
+const captureWithPrototype = () => capturedPrototypeHierarchy();
 const convertedCapture = () => capturedTwoWindowHierarchy();
 
 function windowRoots(
@@ -61,42 +61,42 @@ function selectSettings(hierarchy: ViewHierarchyResult): number | undefined {
 }
 
 describe("scopeHierarchyToLayer (#9305)", () => {
-  test("the relabelled capture is recognized as having the overlay", () => {
-    expect(hasOwnOverlay(captureWithOverlay())).toBe(true);
-    expect(hasOwnOverlay(convertedCapture())).toBe(false);
+  test("the relabelled capture is recognized as having the prototype", () => {
+    expect(hasOwnPrototype(captureWithPrototype())).toBe(true);
+    expect(hasOwnPrototype(convertedCapture())).toBe(false);
   });
 
-  test("omitted layer returns the capture unchanged, overlay included", () => {
-    const hierarchy = captureWithOverlay();
+  test("omitted layer returns the capture unchanged, prototype included", () => {
+    const hierarchy = captureWithPrototype();
     expect(scopeHierarchyToLayer(hierarchy, undefined)).toBe(hierarchy);
-    expect(rootWindowIds(hierarchy)).toContain(OVERLAY_WINDOW_ID);
+    expect(rootWindowIds(hierarchy)).toContain(PROTOTYPE_WINDOW_ID);
   });
 
-  test('"app" removes the overlay window and its nodes and leaves the input untouched', () => {
-    const hierarchy = captureWithOverlay();
+  test('"app" removes the prototype window and its nodes and leaves the input untouched', () => {
+    const hierarchy = captureWithPrototype();
     const before = structuredClone(hierarchy);
     const scoped = scopeHierarchyToLayer(hierarchy, "app");
 
-    expect(rootWindowIds(scoped)).not.toContain(OVERLAY_WINDOW_ID);
+    expect(rootWindowIds(scoped)).not.toContain(PROTOTYPE_WINDOW_ID);
     expect(rootWindowIds(scoped)).toContain(APP_WINDOW_ID);
-    expect(scoped.windows!.map((window) => window.id)).not.toContain(OVERLAY_WINDOW_ID);
+    expect(scoped.windows!.map((window) => window.id)).not.toContain(PROTOTYPE_WINDOW_ID);
     expect(scoped.windows!.some((window) => window.id === APP_WINDOW_ID)).toBe(true);
     expect(structuredClone(hierarchy)).toEqual(before);
   });
 
   test('"app" keeps app node identity so node-identity checks still hold', () => {
-    const hierarchy = captureWithOverlay();
+    const hierarchy = captureWithPrototype();
     const scopedRoots = windowRoots(scopeHierarchyToLayer(hierarchy, "app"));
     expect(scopedRoots).toContain(windowRoot(hierarchy, APP_WINDOW_ID));
   });
 
-  test('"app" never leaves the overlay as the active window or the capture package', () => {
-    const hierarchy = captureWithOverlay();
+  test('"app" never leaves the prototype as the active window or the capture package', () => {
+    const hierarchy = captureWithPrototype();
     hierarchy.packageName = CTRL_PROXY_PACKAGE;
     hierarchy.windows = hierarchy.windows!.map((window) => ({
       ...window,
-      isActive: window.id === OVERLAY_WINDOW_ID,
-      isFocused: window.id === OVERLAY_WINDOW_ID,
+      isActive: window.id === PROTOTYPE_WINDOW_ID,
+      isFocused: window.id === PROTOTYPE_WINDOW_ID,
       ...(window.id === APP_WINDOW_ID ? { packageName: LAUNCHER_PACKAGE } : {}),
     }));
     const scoped = scopeHierarchyToLayer(hierarchy, "app");
@@ -104,91 +104,97 @@ describe("scopeHierarchyToLayer (#9305)", () => {
     expect(scoped.packageName).toBe(LAUNCHER_PACKAGE);
   });
 
-  test('"overlay" keeps only the overlay window and its nodes', () => {
-    const scoped = scopeHierarchyToLayer(captureWithOverlay(), "overlay");
-    expect(rootWindowIds(scoped)).toEqual([OVERLAY_WINDOW_ID]);
-    expect(scoped.windows!.map((window) => window.id)).toEqual([OVERLAY_WINDOW_ID]);
+  test('"prototype" keeps only the prototype window and its nodes', () => {
+    const scoped = scopeHierarchyToLayer(captureWithPrototype(), "prototype");
+    expect(rootWindowIds(scoped)).toEqual([PROTOTYPE_WINDOW_ID]);
+    expect(scoped.windows!.map((window) => window.id)).toEqual([PROTOTYPE_WINDOW_ID]);
   });
 
-  test("a capture without the overlay is unchanged for app and empty for overlay", () => {
+  test("a capture without the prototype is unchanged for app and empty for prototype", () => {
     const hierarchy = convertedCapture();
     expect(scopeHierarchyToLayer(hierarchy, "app")).toBe(hierarchy);
-    expect(rootWindowIds(scopeHierarchyToLayer(hierarchy, "overlay"))).toEqual([]);
+    expect(rootWindowIds(scopeHierarchyToLayer(hierarchy, "prototype"))).toEqual([]);
   });
 
   test("an attached raw capture is scoped the same way", () => {
-    const projected = captureWithOverlay();
-    const raw = captureWithOverlay();
+    const projected = captureWithPrototype();
+    const raw = captureWithPrototype();
     attachRawViewHierarchy(projected, raw);
     const scoped = scopeHierarchyToLayer(projected, "app");
     const scopedRaw = getRawViewHierarchy(scoped)!;
     expect(scopedRaw).not.toBe(raw);
-    expect(rootWindowIds(scopedRaw)).not.toContain(OVERLAY_WINDOW_ID);
+    expect(rootWindowIds(scopedRaw)).not.toContain(PROTOTYPE_WINDOW_ID);
   });
 
   test("repeated scoping of one capture returns the same object", () => {
-    const hierarchy = captureWithOverlay();
+    const hierarchy = captureWithPrototype();
     expect(scopeHierarchyToLayer(hierarchy, "app")).toBe(scopeHierarchyToLayer(hierarchy, "app"));
   });
 });
 
 describe("selector resolution with layer (#9305)", () => {
-  test("text in both windows resolves to the overlay by default and to the app for app", () => {
-    const hierarchy = captureWithOverlay();
-    const overlayTop = windowRoot(hierarchy, OVERLAY_WINDOW_ID).bounds!.top;
+  test("text in both windows resolves to the prototype by default and to the app for app", () => {
+    const hierarchy = captureWithPrototype();
+    const prototypeTop = windowRoot(hierarchy, PROTOTYPE_WINDOW_ID).bounds!.top;
 
     const byDefault = selectSettings(scopeHierarchyForSelector(hierarchy, undefined));
     const forApp = selectSettings(scopeHierarchyForSelector(hierarchy, "app"));
-    const forOverlay = selectSettings(scopeHierarchyForSelector(hierarchy, "overlay"));
+    const forPrototype = selectSettings(scopeHierarchyForSelector(hierarchy, "prototype"));
 
-    expect(byDefault).toBeGreaterThanOrEqual(overlayTop);
-    expect(forOverlay).toBe(byDefault);
+    expect(byDefault).toBeGreaterThanOrEqual(prototypeTop);
+    expect(forPrototype).toBe(byDefault);
     expect(forApp).toBeDefined();
-    expect(forApp!).toBeLessThan(overlayTop);
+    expect(forApp!).toBeLessThan(prototypeTop);
   });
 
-  test('"overlay" with no overlay showing is an actionable error', () => {
-    expect(() => scopeHierarchyForSelector(convertedCapture(), "overlay")).toThrow(ActionableError);
-    expect(() => scopeHierarchyForSelector(convertedCapture(), "overlay")).toThrow(
-      /no AutoMobile overlay is showing/,
+  test('"prototype" with no prototype showing is an actionable error', () => {
+    expect(() => scopeHierarchyForSelector(convertedCapture(), "prototype")).toThrow(
+      ActionableError,
+    );
+    expect(() => scopeHierarchyForSelector(convertedCapture(), "prototype")).toThrow(
+      /no AutoMobile prototype is showing/,
     );
   });
 
-  test('"overlay" while the overlay is suspended says the app is not in front', () => {
-    const suspended = { ...convertedCapture(), overlaySuspended: true };
-    expect(() => scopeHierarchyForSelector(suspended, "overlay")).toThrow(
+  test('"prototype" while the prototype is suspended says the app is not in front', () => {
+    const suspended = { ...convertedCapture(), prototypeSuspended: true };
+    expect(() => scopeHierarchyForSelector(suspended, "prototype")).toThrow(
       /hidden because the app it was shown over is not in front/,
     );
-    expect(() => scopeHierarchyForSelector(convertedCapture(), "overlay")).not.toThrow(
+    expect(() => scopeHierarchyForSelector(convertedCapture(), "prototype")).not.toThrow(
       /not in front/,
     );
   });
 });
 
-describe("assertAppGestureNotUnderOverlay (#9305)", () => {
-  test("refuses an app gesture inside the overlay window and allows one outside it", () => {
-    const hierarchy = captureWithOverlay();
-    const overlay = hierarchy.windows!.find((window) => window.id === OVERLAY_WINDOW_ID)!;
-    const inside = { x: 540, y: overlay.bounds!.bottom - 10 };
-    const outside = { x: 540, y: overlay.bounds!.top - 10 };
+describe("assertAppGestureNotUnderPrototype (#9305)", () => {
+  test("refuses an app gesture inside the prototype window and allows one outside it", () => {
+    const hierarchy = captureWithPrototype();
+    const prototype = hierarchy.windows!.find((window) => window.id === PROTOTYPE_WINDOW_ID)!;
+    const inside = { x: 540, y: prototype.bounds!.bottom - 10 };
+    const outside = { x: 540, y: prototype.bounds!.top - 10 };
 
-    expect(() => assertAppGestureNotUnderOverlay(hierarchy, "app", inside, "tap")).toThrow(
-      /overlay window covers that point/,
+    expect(() => assertAppGestureNotUnderPrototype(hierarchy, "app", inside, "tap")).toThrow(
+      /prototype window covers that point/,
     );
-    expect(() => assertAppGestureNotUnderOverlay(hierarchy, "app", outside, "tap")).not.toThrow();
+    expect(() => assertAppGestureNotUnderPrototype(hierarchy, "app", outside, "tap")).not.toThrow();
   });
 
-  test("a full-screen overlay covers every app point", () => {
-    const hierarchy = capturedOverlayHierarchy({ fullScreen: true });
-    expect(ownOverlayCoversPoint(hierarchy, { x: 130, y: 578 })).toBe(true);
-    expect(ownOverlayCoversPoint(capturedTwoWindowHierarchy(), { x: 130, y: 578 })).toBe(false);
+  test("a full-screen prototype covers every app point", () => {
+    const hierarchy = capturedPrototypeHierarchy({ fullScreen: true });
+    expect(ownPrototypeCoversPoint(hierarchy, { x: 130, y: 578 })).toBe(true);
+    expect(ownPrototypeCoversPoint(capturedTwoWindowHierarchy(), { x: 130, y: 578 })).toBe(false);
   });
 
-  test("default and overlay layers never refuse", () => {
-    const hierarchy = captureWithOverlay();
+  test("default and prototype layers never refuse", () => {
+    const hierarchy = captureWithPrototype();
     const point = { x: 540, y: 2000 };
-    expect(() => assertAppGestureNotUnderOverlay(hierarchy, undefined, point, "tap")).not.toThrow();
-    expect(() => assertAppGestureNotUnderOverlay(hierarchy, "overlay", point, "tap")).not.toThrow();
+    expect(() =>
+      assertAppGestureNotUnderPrototype(hierarchy, undefined, point, "tap"),
+    ).not.toThrow();
+    expect(() =>
+      assertAppGestureNotUnderPrototype(hierarchy, "prototype", point, "tap"),
+    ).not.toThrow();
   });
 });
 
@@ -199,17 +205,17 @@ describe("scopeObserveResultToLayer (#9305)", () => {
       appId: LAUNCHER_PACKAGE,
       activityName: "",
       layoutSeqSum: 0,
-      type: INTERACTIVE_OVERLAY_WINDOW_TYPE,
+      type: PROTOTYPE_WINDOW_TYPE,
     },
   });
 
   test("omitted layer returns the observation itself", () => {
-    const result = observation(captureWithOverlay());
+    const result = observation(captureWithPrototype());
     expect(scopeObserveResultToLayer(result, undefined, "android")).toBe(result);
   });
 
-  test('"app" rebuilds elements without overlay nodes and drops the overlay window type', () => {
-    const result = observation(captureWithOverlay());
+  test('"app" rebuilds elements without prototype nodes and drops the prototype window type', () => {
+    const result = observation(captureWithPrototype());
     const scoped = scopeObserveResultToLayer(result, "app", "android");
     const labels = (elements: ObserveResult["elements"]) =>
       (elements?.clickable ?? []).map((element) => element.text ?? element["content-desc"]);
@@ -220,30 +226,32 @@ describe("scopeObserveResultToLayer (#9305)", () => {
     expect(labels(result.elements)).toEqual(expect.arrayContaining(["YouTube", "Screenshot"]));
     expect(labels(scoped.elements)).not.toContain("YouTube");
     expect(labels(scoped.elements)).toContain("Screenshot");
-    const overlayOnly = labels(scopeObserveResultToLayer(result, "overlay", "android").elements);
-    expect(overlayOnly).toContain("YouTube");
-    expect(overlayOnly).not.toContain("Screenshot");
-    expect(result.viewHierarchy).toEqual(captureWithOverlay());
+    const prototypeOnly = labels(
+      scopeObserveResultToLayer(result, "prototype", "android").elements,
+    );
+    expect(prototypeOnly).toContain("YouTube");
+    expect(prototypeOnly).not.toContain("Screenshot");
+    expect(result.viewHierarchy).toEqual(captureWithPrototype());
   });
 });
 
 describe('app-layer prototype windows (window.layer "app", aovl D4)', () => {
-  // Captured: CtrlProxy's TYPE_APPLICATION_OVERLAY window (a11y TYPE_SYSTEM, no overlay metadata)
+  // Captured: CtrlProxy's TYPE_APPLICATION_OVERLAY window (a11y TYPE_SYSTEM, no prototype metadata)
   // floating over the Playground, beside SystemUI's TYPE_SYSTEM status bar.
   const selectByText = (hierarchy: ViewHierarchyResult, text: string) =>
     new ResolverElementSelector().selectByText(hierarchy, text, { partialMatch: false }).element;
 
-  test("the captured app-layer window is AutoMobile's overlay and the status bar is not", () => {
-    const hierarchy = capturedAppLayerOverlayHierarchy();
-    expect(hasOwnOverlay(hierarchy)).toBe(true);
-    const overlay = scopeHierarchyForSelector(hierarchy, "overlay");
-    expect(rootWindowIds(overlay)).toEqual([PROTOTYPE_CAPTURE.appLayerOverlayWindowId]);
-    expect(selectByText(overlay, "Bump")).toBeDefined();
+  test("the captured app-layer window is AutoMobile's prototype and the status bar is not", () => {
+    const hierarchy = capturedAppLayerPrototypeHierarchy();
+    expect(hasOwnPrototype(hierarchy)).toBe(true);
+    const prototype = scopeHierarchyForSelector(hierarchy, "prototype");
+    expect(rootWindowIds(prototype)).toEqual([PROTOTYPE_CAPTURE.appLayerPrototypeWindowId]);
+    expect(selectByText(prototype, "Bump")).toBeDefined();
   });
 
-  test('"app" excludes the app-layer overlay and keeps the app and status bar', () => {
-    const scoped = scopeHierarchyForSelector(capturedAppLayerOverlayHierarchy(), "app");
-    expect(rootWindowIds(scoped)).not.toContain(PROTOTYPE_CAPTURE.appLayerOverlayWindowId);
+  test('"app" excludes the app-layer prototype and keeps the app and status bar', () => {
+    const scoped = scopeHierarchyForSelector(capturedAppLayerPrototypeHierarchy(), "app");
+    expect(rootWindowIds(scoped)).not.toContain(PROTOTYPE_CAPTURE.appLayerPrototypeWindowId);
     expect(rootWindowIds(scoped)).toEqual(
       expect.arrayContaining([PROTOTYPE_CAPTURE.appWindowId, PROTOTYPE_CAPTURE.statusBarWindowId]),
     );
@@ -251,9 +259,9 @@ describe('app-layer prototype windows (window.layer "app", aovl D4)', () => {
     expect(scoped.packageName).toBe(PROTOTYPE_CAPTURE.appPackage);
   });
 
-  test("CtrlProxy's full-screen highlight window (same type, no nodes) is not an overlay", () => {
+  test("CtrlProxy's full-screen highlight window (same type, no nodes) is not a prototype", () => {
     // Highlight shown with SYSTEM_ALERT_WINDOW granted: TYPE_APPLICATION_OVERLAY, FLAG_NOT_TOUCHABLE.
-    const hierarchy = capturedAppLayerOverlayHierarchy();
+    const hierarchy = capturedAppLayerPrototypeHierarchy();
     const highlight = {
       id: 999,
       type: 3,
@@ -262,31 +270,31 @@ describe('app-layer prototype windows (window.layer "app", aovl D4)', () => {
     };
     hierarchy.windows = [
       ...hierarchy.windows!.filter(
-        (window) => window.id !== PROTOTYPE_CAPTURE.appLayerOverlayWindowId,
+        (window) => window.id !== PROTOTYPE_CAPTURE.appLayerPrototypeWindowId,
       ),
       highlight,
     ];
-    expect(hasOwnOverlay(hierarchy)).toBe(false);
-    expect(() => scopeHierarchyForSelector(hierarchy, "overlay")).toThrow(
-      /no AutoMobile overlay is showing/,
+    expect(hasOwnPrototype(hierarchy)).toBe(false);
+    expect(() => scopeHierarchyForSelector(hierarchy, "prototype")).toThrow(
+      /no AutoMobile prototype is showing/,
     );
     expect(() =>
-      assertAppGestureNotUnderOverlay(hierarchy, "app", { x: 540, y: 2000 }, "tap"),
+      assertAppGestureNotUnderPrototype(hierarchy, "app", { x: 540, y: 2000 }, "tap"),
     ).not.toThrow();
   });
 
-  test('"app" gestures inside the app-layer overlay are refused', () => {
-    const hierarchy = capturedAppLayerOverlayHierarchy();
+  test('"app" gestures inside the app-layer prototype are refused', () => {
+    const hierarchy = capturedAppLayerPrototypeHierarchy();
     const bump = selectByText(hierarchy, "Bump")!;
     const point = { x: bump.bounds.left + 5, y: bump.bounds.top + 5 };
-    expect(() => assertAppGestureNotUnderOverlay(hierarchy, "app", point, "tap")).toThrow(
-      /overlay window covers that point/,
+    expect(() => assertAppGestureNotUnderPrototype(hierarchy, "app", point, "tap")).toThrow(
+      /prototype window covers that point/,
     );
   });
 });
 
 describe("app rows under a floating prototype (#10608/#10544, aovl D6 host half)", () => {
-  // The unfiltered wire capture still holds button_elevated under the floating overlay; the
+  // The unfiltered wire capture still holds button_elevated under the floating prototype; the
   // device's occlusion pass dropped it from the ordinary capture. Once a capture keeps the row,
   // layer "app" must return it and a tap on it must be refused as covered, not "not found".
   const elevated = (hierarchy: ViewHierarchyResult) =>
@@ -300,9 +308,9 @@ describe("app rows under a floating prototype (#10608/#10544, aovl D6 host half)
       x: Math.floor((row!.bounds.left + row!.bounds.right) / 2),
       y: Math.floor((row!.bounds.top + row!.bounds.bottom) / 2),
     };
-    expect(() => assertAppGestureNotUnderOverlay(hierarchy, "app", centre, "tap")).toThrow(
-      /an AutoMobile overlay window covers that point/,
+    expect(() => assertAppGestureNotUnderPrototype(hierarchy, "app", centre, "tap")).toThrow(
+      /an AutoMobile prototype window covers that point/,
     );
-    expect(elevated(scopeHierarchyForSelector(hierarchy, "overlay"))).toBeNull();
+    expect(elevated(scopeHierarchyForSelector(hierarchy, "prototype"))).toBeNull();
   });
 });

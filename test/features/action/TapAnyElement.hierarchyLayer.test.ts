@@ -8,14 +8,14 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
-  OVERLAY_CAPTURE,
-  capturedOverlayHierarchy,
+  RELABELLED_CAPTURE,
+  capturedPrototypeHierarchy,
   capturedTwoWindowHierarchy,
   observationOf,
-} from "../../helpers/overlayWindowCapture";
+} from "../../helpers/prototypeWindowCapture";
 
 // Captured Recents overview with its floating window relabelled as the CtrlProxy
-// overlay; see test/helpers/overlayWindowCapture.ts.
+// prototype; see test/helpers/prototypeWindowCapture.ts.
 function createCommand(viewHierarchy: ViewHierarchyResult) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -34,8 +34,8 @@ function createCommand(viewHierarchy: ViewHierarchyResult) {
   return { command, service };
 }
 
-function overlayBounds(hierarchy: ViewHierarchyResult) {
-  return hierarchy.windows!.find((window) => window.id === OVERLAY_CAPTURE.overlayWindowId)!
+function prototypeBounds(hierarchy: ViewHierarchyResult) {
+  return hierarchy.windows!.find((window) => window.id === RELABELLED_CAPTURE.prototypeWindowId)!
     .bounds!;
 }
 
@@ -44,47 +44,47 @@ afterEach(() => {
 });
 
 describe("tapAny layer (#9305)", () => {
-  test("picks a clickable in the overlay by default and in the app for app", async () => {
-    const hierarchy = capturedOverlayHierarchy();
+  test("picks a clickable in the prototype by default and in the app for app", async () => {
+    const hierarchy = capturedPrototypeHierarchy();
     const byDefault = createCommand(hierarchy);
-    const forApp = createCommand(capturedOverlayHierarchy());
+    const forApp = createCommand(capturedPrototypeHierarchy());
 
     expect((await byDefault.command.execute({ action: "tap" })).success).toBe(true);
     expect((await forApp.command.execute({ action: "tap", layer: "app" })).success).toBe(true);
 
-    const top = overlayBounds(hierarchy).top;
+    const top = prototypeBounds(hierarchy).top;
     expect(byDefault.service.getTapHistory()[0].y).toBeGreaterThanOrEqual(top);
     expect(forApp.service.getTapHistory()[0].y).toBeLessThan(top);
   });
 
-  test('"app" refuses before dispatch when a full-screen overlay covers the pick', async () => {
-    const { command, service } = createCommand(capturedOverlayHierarchy({ fullScreen: true }));
+  test('"app" refuses before dispatch when a full-screen prototype covers the pick', async () => {
+    const { command, service } = createCommand(capturedPrototypeHierarchy({ fullScreen: true }));
     const result = await command.execute({ action: "tap", layer: "app" });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("an AutoMobile overlay window covers that point");
+    expect(result.error).toContain("an AutoMobile prototype window covers that point");
     expect(service.getTapHistory()).toEqual([]);
   });
 
-  test("default layer refuses an app pick a full-screen overlay covers, before dispatch (#10715)", async () => {
-    const { command, service } = createCommand(capturedOverlayHierarchy({ fullScreen: true }));
+  test("default layer refuses an app pick a full-screen prototype covers, before dispatch (#10715)", async () => {
+    const { command, service } = createCommand(capturedPrototypeHierarchy({ fullScreen: true }));
     const result = await command.execute({
       action: "tap",
-      // App-only container: the overview action buttons sit in the app window under the overlay.
+      // App-only container: the overview action buttons sit in the app window under the prototype.
       container: { elementId: "com.google.android.apps.nexuslauncher:id/action_buttons" },
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("covered by an AutoMobile overlay window");
+    expect(result.error).toContain("covered by an AutoMobile prototype window");
     expect(service.getTapHistory()).toEqual([]);
   });
 
-  test('"overlay" with no overlay showing is an actionable error', async () => {
+  test('"prototype" with no prototype showing is an actionable error', async () => {
     const { command, service } = createCommand(capturedTwoWindowHierarchy());
-    const result = await command.execute({ action: "tap", layer: "overlay" });
+    const result = await command.execute({ action: "tap", layer: "prototype" });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("no AutoMobile overlay is showing");
+    expect(result.error).toContain("no AutoMobile prototype is showing");
     expect(service.getTapHistory()).toEqual([]);
   });
 });

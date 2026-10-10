@@ -179,7 +179,7 @@ describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
 
     expect(DeviceSessionManager.getInstance().getExplicitDevicePin()?.deviceId).toBe(DEVICE);
     expect(internals.navigationGraphListenerManagers.has(globalNavigation)).toBe(true);
-    // Device-keyed broadcast listeners (overlay agents and events) skip the marked upgrade (#11206).
+    // Device-keyed broadcast listeners (prototype agents and events) skip the marked upgrade (#11206).
     expect(broadcasts).toEqual(["A:cleanup-expired", "A:device-killed:upgrade"]);
 
     // B's own release is a real one: it clears B's pin.

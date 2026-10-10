@@ -27,9 +27,9 @@ import {
   resolvePinnedVersion,
   resolveRunnerChecksum,
   resolveRunnerChecksumTarget,
-  OVERLAY_AGENT_DYLIB_FILENAME,
-  resolveOverlayAgentChecksum,
-  resolveOverlayAgentUrl,
+  PROTOTYPE_AGENT_DYLIB_FILENAME,
+  resolvePrototypeAgentChecksum,
+  resolvePrototypeAgentUrl,
   resolveNetworkFilterChecksum,
   resolveNetworkFilterUrl,
   resolveScreenCaptureHelperChecksum,
@@ -519,39 +519,39 @@ describe("screen-capture-helper release delivery", function () {
   });
 });
 
-describe("overlay-agent release delivery (#10564)", function () {
+describe("prototype-agent release delivery (#10564)", function () {
   const registry: ReleaseChecksumEntry[] = [
     {
       version: "0.0.46",
       apkSha256: "apk46",
       ipaSha256: "ipa46",
       runnerSha256: "runner46",
-      overlayAgentSha256: "overlay46",
+      prototypeAgentSha256: "prototype46",
     },
     { version: "0.0.45", apkSha256: "apk45", ipaSha256: "ipa45", runnerSha256: "runner45" },
   ];
 
   test("uses the fixed universal simulator dylib asset name", function () {
-    expect(OVERLAY_AGENT_DYLIB_FILENAME).toBe("AutoMobileOverlayAgent.dylib");
+    expect(PROTOTYPE_AGENT_DYLIB_FILENAME).toBe("AutoMobilePrototypeAgent.dylib");
   });
 
   test("builds a version-pinned release URL", function () {
-    expect(resolveOverlayAgentUrl({}, registry)).toBe(
-      `${DEFAULT_ASSET_BASE_URL}/0.0.46/${OVERLAY_AGENT_DYLIB_FILENAME}`,
+    expect(resolvePrototypeAgentUrl({}, registry)).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/0.0.46/${PROTOTYPE_AGENT_DYLIB_FILENAME}`,
     );
-    expect(resolveOverlayAgentUrl({ AUTOMOBILE_VERSION: "0.0.45" }, registry)).toBe(
-      `${DEFAULT_ASSET_BASE_URL}/0.0.45/${OVERLAY_AGENT_DYLIB_FILENAME}`,
+    expect(resolvePrototypeAgentUrl({ AUTOMOBILE_VERSION: "0.0.45" }, registry)).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/0.0.45/${PROTOTYPE_AGENT_DYLIB_FILENAME}`,
     );
   });
 
   test("resolves the matching checksum and leaves pre-delivery releases unverifiable", function () {
-    expect(resolveOverlayAgentChecksum({}, registry)).toBe("overlay46");
-    expect(resolveOverlayAgentChecksum({ AUTOMOBILE_VERSION: "0.0.45" }, registry)).toBe("");
+    expect(resolvePrototypeAgentChecksum({}, registry)).toBe("prototype46");
+    expect(resolvePrototypeAgentChecksum({ AUTOMOBILE_VERSION: "0.0.45" }, registry)).toBe("");
   });
 
-  test("registry overlay-agent checksums are empty or SHA-256 values", function () {
+  test("registry prototype-agent checksums are empty or SHA-256 values", function () {
     for (const entry of RELEASE_CHECKSUM_REGISTRY) {
-      const checksum = entry.overlayAgentSha256 ?? "";
+      const checksum = entry.prototypeAgentSha256 ?? "";
       expect(checksum === "" || /^[a-f0-9]{64}$/.test(checksum)).toBe(true);
     }
   });

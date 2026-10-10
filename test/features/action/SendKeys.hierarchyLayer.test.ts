@@ -25,7 +25,7 @@ describe("sendKeys layer (#9305)", () => {
   test("layer without a selector is rejected before anything is sent", async () => {
     const h = createSendKeysFocusHarness();
     const result = await h.action.execute(commands, undefined, undefined, undefined, undefined, {
-      layer: "overlay",
+      layer: "prototype",
     });
 
     expect(result).toMatchObject({

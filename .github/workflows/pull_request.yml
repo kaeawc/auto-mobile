@@ -507,23 +507,23 @@ jobs:
             echo "should_run=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # Prototype Simulator (overlay agent per-runtime smoke, #10569) runs only when
-      # its own inputs change: the overlay agent, its smoke script and driver, and
+      # Prototype Simulator (prototype agent per-runtime smoke, #10569) runs only when
+      # its own inputs change: the prototype agent, its smoke script and driver, and
       # the TypeScript the driver imports. Moved here from CircleCI (#11011).
-      - name: "Check for overlay agent smoke inputs"
+      - name: "Check for prototype agent smoke inputs"
         id: filter-prototype-simulator
         uses: dorny/paths-filter@v3
         with:
           filters: |
             prototype_simulator:
-              - 'ios/overlay-agent/**'
-              - 'scripts/ios/overlay-agent-*'
+              - 'ios/prototype-agent/**'
+              - 'scripts/ios/prototype-agent-*'
               - 'scripts/ios/run_with_timeout.sh'
-              - 'src/features/overlay/overlaySpec.ts'
-              - 'src/features/overlay/overlayValidation.ts'
-              - 'src/features/overlay/ios/**'
+              - 'src/features/prototype/prototypeSpec.ts'
+              - 'src/features/prototype/prototypeValidation.ts'
+              - 'src/features/prototype/ios/**'
               - 'src/utils/SystemTimer.ts'
-              - 'test/bats/overlay-agent-smoke.bats'
+              - 'test/bats/prototype-agent-smoke.bats'
 
       - name: "Decide if Prototype Simulator should run"
         id: prototype_simulator_should_run
@@ -2829,13 +2829,13 @@ jobs:
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/root-spm-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
-  # "Prototype Simulator": per-runtime smoke test for the iOS overlay agent (#10569),
+  # "Prototype Simulator": per-runtime smoke test for the iOS prototype agent (#10569),
   # moved from CircleCI to the heavy self-hosted lane (#11011). Injection depends
   # on simulator dyld behaviour and each runtime's Swift runtime, so a new Xcode or
   # runtime can break it silently. Each leg creates ONE fresh simulator, uses it
   # serially and deletes it. Advisory: simulator tests must not gate merges, so
   # this check stays OFF the required list.
-  # Run locally on a Mac: bash scripts/ios/overlay-agent-smoke.sh 26
+  # Run locally on a Mac: bash scripts/ios/prototype-agent-smoke.sh 26
   prototype-simulator:
     name: "Prototype Simulator iOS ${{ matrix.ios }}"
     runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac-heavy"]') || 'macos-26' }}
@@ -2898,16 +2898,16 @@ jobs:
 
       # Exit 3 (runtime missing) fails the leg: the runner is expected to ship the
       # runtime, so a vanished runtime is an image change worth seeing.
-      - name: "Run overlay agent smoke test (iOS ${{ matrix.ios }})"
+      - name: "Run prototype agent smoke test (iOS ${{ matrix.ios }})"
         timeout-minutes: 20
-        run: bash scripts/ios/overlay-agent-smoke.sh "${{ matrix.ios }}"
+        run: bash scripts/ios/prototype-agent-smoke.sh "${{ matrix.ios }}"
 
-      - name: "Upload overlay agent smoke artifacts"
+      - name: "Upload prototype agent smoke artifacts"
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: overlay-agent-smoke-ios-${{ matrix.ios }}
-          path: scratch/overlay-agent-smoke/
+          name: prototype-agent-smoke-ios-${{ matrix.ios }}
+          path: scratch/prototype-agent-smoke/
           if-no-files-found: ignore
           retention-days: 7
 

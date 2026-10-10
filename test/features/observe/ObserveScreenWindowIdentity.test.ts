@@ -370,12 +370,12 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.warning).toContain("relaunch the target app");
   });
 
-  describe("CtrlProxy's own focusable overlay holds window focus (#10000)", () => {
+  describe("CtrlProxy's own focusable prototype holds window focus (#10000)", () => {
     const now = 1_700_000_000_000;
     const playground = "dev.jasonpearson.automobile.playground";
     const screenBounds = { left: 0, top: 0, right: 1080, bottom: 2400 };
 
-    function overlayFocusedHierarchy(
+    function prototypeFocusedHierarchy(
       windows: ViewHierarchyWindowInfo[],
       capturedAt: number = now,
     ): ViewHierarchyResult {
@@ -416,14 +416,14 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       return { result, hierarchyReads: viewHierarchy.getCallCount() };
     }
 
-    const focusedOverlayWindows: ViewHierarchyWindowInfo[] = [
+    const focusedPrototypeWindows: ViewHierarchyWindowInfo[] = [
       { id: 1, type: 1, isFocused: false, windowLayer: 10, bounds: screenBounds },
       { id: 2, type: 4, isFocused: true, isActive: true, windowLayer: 20, bounds: screenBounds },
     ];
 
     test("is not a stale wrong-window capture and triggers no recovery re-read", async () => {
       const { result, hierarchyReads } = await observeWith(
-        overlayFocusedHierarchy(focusedOverlayWindows),
+        prototypeFocusedHierarchy(focusedPrototypeWindows),
         playground,
       );
 
@@ -434,19 +434,19 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       expect(hierarchyReads).toBe(1);
     });
 
-    test("names the app behind the overlay as active and keeps the overlay visible", async () => {
+    test("names the app behind the prototype as active and keeps the prototype visible", async () => {
       const { result } = await observeWith(
-        overlayFocusedHierarchy(focusedOverlayWindows),
+        prototypeFocusedHierarchy(focusedPrototypeWindows),
         playground,
       );
 
       expect(result.activeWindow?.appId).toBe(playground);
-      expect(result.activeWindow?.type).toBe("interactive_overlay");
+      expect(result.activeWindow?.type).toBe("prototype");
     });
 
     test("without a device-confirmed foreground the window is left as captured", async () => {
       const { result } = await observeWith(
-        overlayFocusedHierarchy(focusedOverlayWindows),
+        prototypeFocusedHierarchy(focusedPrototypeWindows),
         undefined,
       );
 
@@ -454,11 +454,11 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       expect(result.activeWindow?.type).toBeUndefined();
     });
 
-    test("a stale capture taken while the overlay had focus is not relabelled or exempted", async () => {
-      // Taken a minute ago, while the text-field overlay held focus; the overlay is gone now and
+    test("a stale capture taken while the prototype had focus is not relabelled or exempted", async () => {
+      // Taken a minute ago, while the text-field prototype held focus; the prototype is gone now and
       // the app is in front. The capture's own window list cannot vouch for itself.
       const { result } = await observeWith(
-        overlayFocusedHierarchy(focusedOverlayWindows, now - 60_000),
+        prototypeFocusedHierarchy(focusedPrototypeWindows, now - 60_000),
         playground,
       );
 
@@ -469,8 +469,8 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       expect(hasWrongWindowEvidence(result)).toBe(true);
     });
 
-    test("a capture without a device timestamp cannot date the overlay claim", async () => {
-      const undated = overlayFocusedHierarchy(focusedOverlayWindows);
+    test("a capture without a device timestamp cannot date the prototype claim", async () => {
+      const undated = prototypeFocusedHierarchy(focusedPrototypeWindows);
       delete undated.updatedAt;
       delete undated.receivedAt;
       const { result } = await observeWith(undated, playground);
@@ -479,9 +479,9 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       expect(result.activeWindow?.type).toBeUndefined();
     });
 
-    test("a CtrlProxy-labelled capture with no overlay window is still a wrong-window capture", async () => {
+    test("a CtrlProxy-labelled capture with no prototype window is still a wrong-window capture", async () => {
       const { result } = await observeWith(
-        overlayFocusedHierarchy([
+        prototypeFocusedHierarchy([
           { id: 1, type: 1, isFocused: true, windowLayer: 10, bounds: screenBounds },
         ]),
         playground,
@@ -493,9 +493,9 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       expect(hasWrongWindowEvidence(result)).toBe(true);
     });
 
-    test("the window's own package decides: a focused overlay window reporting CtrlProxy is the overlay", async () => {
+    test("the window's own package decides: a focused prototype window reporting CtrlProxy is the prototype", async () => {
       const { result } = await observeWith(
-        overlayFocusedHierarchy([
+        prototypeFocusedHierarchy([
           { id: 1, type: 1, isFocused: false, packageName: playground, bounds: screenBounds },
           {
             id: 2,
@@ -512,12 +512,12 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       expect(result.freshness?.isFresh).toBe(true);
       expect(hasWrongWindowEvidence(result)).toBe(false);
       expect(result.activeWindow?.appId).toBe(playground);
-      expect(result.activeWindow?.type).toBe("interactive_overlay");
+      expect(result.activeWindow?.type).toBe("prototype");
     });
 
-    test("a focused overlay window reporting another package stays a wrong-window capture even when the capture is labelled CtrlProxy", async () => {
+    test("a focused prototype window reporting another package stays a wrong-window capture even when the capture is labelled CtrlProxy", async () => {
       const { result } = await observeWith(
-        overlayFocusedHierarchy([
+        prototypeFocusedHierarchy([
           {
             id: 2,
             type: 4,
@@ -535,7 +535,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       expect(hasWrongWindowEvidence(result)).toBe(true);
     });
 
-    test("another app's focused overlay window is still a wrong-window capture", async () => {
+    test("another app's focused prototype window is still a wrong-window capture", async () => {
       const hierarchy = createHierarchyForTest({
         ...calendarHierarchy(now),
         windows: [{ id: 2, type: 4, isFocused: true, bounds: screenBounds }],
@@ -2702,7 +2702,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
   });
 
-  function makeOverlayScreen(
+  function makePrototypeScreen(
     viewHierarchy: FakeViewHierarchy,
     fakeAdb: FakeAdbExecutor,
     timer: FakeTimer,
@@ -2733,7 +2733,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
       // dumpsys resumed/focused activity still names the occluded app.
       fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
 
-      const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+      const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
       const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
       // waitFor.activeWindow.appId == <occluded app> must fail closed.
@@ -2767,7 +2767,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
 
-    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
     expect(result.activeWindow?.appId).toBe("com.android.systemui");
@@ -2799,7 +2799,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
       exitCode: 0,
     });
 
-    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
     expect(result.activeWindow?.appId).toBe("com.android.systemui");
@@ -2865,7 +2865,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
       exitCode: 0,
     });
 
-    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
     // The recapture ran (initial capture + one recapture).
@@ -2906,7 +2906,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
       exitCode: 0,
     });
 
-    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
     expect(viewHierarchy.getCallCount()).toBe(2);
@@ -2949,7 +2949,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
       exitCode: 0,
     });
 
-    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
     expect(viewHierarchy.getCallCount()).toBe(2);
@@ -2976,7 +2976,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
 
-    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
     // No recapture on the primary path.
@@ -3194,7 +3194,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
 
-    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
     expect(viewHierarchy.getCallCount()).toBe(2);
@@ -3307,7 +3307,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
       exitCode: 0,
     });
 
-    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
     // Initial capture + first recapture + the bounded re-capture.
@@ -3338,7 +3338,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
       exitCode: 0,
     });
 
-    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
     // The app owns focus — normal attribution, no overlay flag.
@@ -3359,7 +3359,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
 
-    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
     expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
@@ -3391,7 +3391,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
 
-    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
     expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
@@ -3468,7 +3468,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
 
-    const screen = makeOverlayScreen(viewHierarchy, fakeAdb, timer);
+    const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
     expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);

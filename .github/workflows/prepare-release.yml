@@ -178,10 +178,10 @@ jobs:
       APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
       APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
 
-  # Ad-hoc-signed universal iOS simulator overlay agent; needs no secrets.
-  build-candidate-overlay-agent:
+  # Ad-hoc-signed universal iOS simulator prototype agent; needs no secrets.
+  build-candidate-prototype-agent:
     needs: prepare-version
-    uses: ./.github/workflows/build-overlay-agent.yml
+    uses: ./.github/workflows/build-prototype-agent.yml
     with:
       checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
       upload-artifact: true
@@ -240,7 +240,7 @@ jobs:
         build-candidate-control-proxy-apk,
         build-candidate-video-server-jar,
         build-candidate-screen-capture-helper,
-        build-candidate-overlay-agent,
+        build-candidate-prototype-agent,
         build-candidate-network-filter-identity-probe,
       ]
     outputs:
@@ -269,7 +269,7 @@ jobs:
           IOS_CTRL_PROXY_RUNNER_SHA256: ${{ needs.build-candidate-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}
           VIDEO_JAR_SHA256: ${{ needs.build-candidate-video-server-jar.outputs.sha256 }}
           SCREEN_CAPTURE_HELPER_SHA256: ${{ needs.build-candidate-screen-capture-helper.outputs.sha256 }}
-          OVERLAY_AGENT_SHA256: ${{ needs.build-candidate-overlay-agent.outputs.sha256 }}
+          PROTOTYPE_AGENT_SHA256: ${{ needs.build-candidate-prototype-agent.outputs.sha256 }}
           NETWORK_FILTER_SHA256: ${{ needs.build-candidate-network-filter-identity-probe.outputs.sha256 }}
         run: bash scripts/generate-release-constants.sh
 
@@ -344,7 +344,7 @@ jobs:
         build-candidate-control-proxy-apk,
         build-candidate-video-server-jar,
         build-candidate-screen-capture-helper,
-        build-candidate-overlay-agent,
+        build-candidate-prototype-agent,
         build-candidate-network-filter-identity-probe,
         build-candidate-desktop-app-installers,
       ]
@@ -389,10 +389,10 @@ jobs:
           name: screen-capture-helper
           path: /tmp
 
-      - name: "Download overlay-agent"
+      - name: "Download prototype-agent"
         uses: actions/download-artifact@v7
         with:
-          name: overlay-agent
+          name: prototype-agent
           path: /tmp
 
       - name: "Download network-filter"
@@ -428,9 +428,9 @@ jobs:
           bash scripts/ci/verify-artifact-sha256.sh /tmp/control-proxy.ipa ios
           bash scripts/ci/verify-artifact-sha256.sh /tmp/automobile-video.jar videojar
           bash scripts/ci/verify-artifact-sha256.sh /tmp/screen-capture-helper-macos-universal.zip screencapturehelper
-          bash scripts/ci/verify-artifact-sha256.sh /tmp/AutoMobileOverlayAgent.dylib overlayagent
-          # Structural overlay-agent checks (lipo/vtool/codesign) run in the macOS builder
-          # (build-overlay-agent.yml); this Linux job only checks the registry checksum.
+          bash scripts/ci/verify-artifact-sha256.sh /tmp/AutoMobilePrototypeAgent.dylib prototypeagent
+          # Structural prototype-agent checks (lipo/vtool/codesign) run in the macOS builder
+          # (build-prototype-agent.yml); this Linux job only checks the registry checksum.
           bash scripts/ci/verify-artifact-sha256.sh /tmp/automobile-network-filter-macos-universal.zip networkfilter
           bash scripts/ci/verify-release-integrity.sh "$VERSION" /tmp/control-proxy.ipa
           bash scripts/ci/verify-desktop-installer-assets.sh "$VERSION" /tmp/desktop
@@ -482,7 +482,7 @@ jobs:
             --arg tag_sha "$TAG_SHA" \
             --arg prepare_run_id "$PREPARE_RUN_ID" \
             '{tag: $tag, tag_sha: $tag_sha, prepare_run_id: $prepare_run_id,
-              artifacts: ["control-proxy-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "overlay-agent", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]}' \
+              artifacts: ["control-proxy-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "prototype-agent", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]}' \
             > /tmp/release-artifact-provenance.json
 
       - name: Upload release artifact provenance

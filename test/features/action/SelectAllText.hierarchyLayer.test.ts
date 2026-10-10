@@ -12,13 +12,13 @@ import {
   capturedFloatingCoverHierarchy,
   capturedTwoWindowHierarchy,
   observationOf,
-} from "../../helpers/overlayWindowCapture";
+} from "../../helpers/prototypeWindowCapture";
 
 const device: BootedDevice = { name: "Android", platform: "android", deviceId: "emulator-5600" };
 
 /**
- * The floating-overlay device capture with one node marked input-focused. No device capture of a
- * focused prototype text field exists yet, so the overlay's `coverBox` or the app's
+ * The floating-prototype device capture with one node marked input-focused. No device capture of a
+ * focused prototype text field exists yet, so the prototype's `coverBox` or the app's
  * `button_elevated` stands in for the focused field; the windows and tree are as captured.
  */
 function withFocused(hierarchy: ViewHierarchyResult, resourceId: string): ViewHierarchyResult {
@@ -50,21 +50,21 @@ async function selectAll(hierarchy: ViewHierarchyResult, layer?: HierarchyLayer)
 }
 
 describe("selectAllText layer (#9305)", () => {
-  test('"app" refuses before dispatch when the focused field is in the overlay', async () => {
+  test('"app" refuses before dispatch when the focused field is in the prototype', async () => {
     const { result, requests } = await selectAll(
       withFocused(capturedFloatingCoverHierarchy(), "coverBox"),
       "app",
     );
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("the focused text field is in the AutoMobile overlay");
+    expect(result.error).toContain("the focused text field is in the AutoMobile prototype");
     expect(requests).toBe(0);
   });
 
-  test('"overlay" refuses before dispatch when the focused field is in the app', async () => {
+  test('"prototype" refuses before dispatch when the focused field is in the app', async () => {
     const { result, requests } = await selectAll(
       withFocused(capturedFloatingCoverHierarchy(), "button_elevated"),
-      "overlay",
+      "prototype",
     );
 
     expect(result.success).toBe(false);
@@ -73,28 +73,28 @@ describe("selectAllText layer (#9305)", () => {
   });
 
   test("a focused field on the requested layer is selected", async () => {
-    const overlay = await selectAll(
+    const prototype = await selectAll(
       withFocused(capturedFloatingCoverHierarchy(), "coverBox"),
-      "overlay",
+      "prototype",
     );
     const app = await selectAll(
       withFocused(capturedFloatingCoverHierarchy(), "button_elevated"),
       "app",
     );
 
-    expect([overlay.result.success, app.result.success]).toEqual([true, true]);
-    expect(overlay.requests + app.requests).toBe(2);
+    expect([prototype.result.success, app.result.success]).toEqual([true, true]);
+    expect(prototype.requests + app.requests).toBe(2);
   });
 
-  test('"overlay" with no overlay showing is an actionable error', async () => {
-    const { result, requests } = await selectAll(capturedTwoWindowHierarchy(), "overlay");
+  test('"prototype" with no prototype showing is an actionable error', async () => {
+    const { result, requests } = await selectAll(capturedTwoWindowHierarchy(), "prototype");
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("no AutoMobile overlay is showing");
+    expect(result.error).toContain("no AutoMobile prototype is showing");
     expect(requests).toBe(0);
   });
 
-  test("omitting layer keeps today's behaviour: the overlay's focused field is selected", async () => {
+  test("omitting layer keeps today's behaviour: the prototype's focused field is selected", async () => {
     const { result, requests } = await selectAll(
       withFocused(capturedFloatingCoverHierarchy(), "coverBox"),
     );

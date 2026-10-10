@@ -64,6 +64,6 @@ export interface TapOnElementOptions {
   /** Semantic accessibility link inside the element selected by the outer selector. */
   subtext?: TapOnSubtextTarget;
 
-  /** Resolve against the app or the AutoMobile overlay only (issue #9305). */
+  /** Resolve against the app or the AutoMobile prototype only (issue #9305). */
   layer?: HierarchyLayer;
 }

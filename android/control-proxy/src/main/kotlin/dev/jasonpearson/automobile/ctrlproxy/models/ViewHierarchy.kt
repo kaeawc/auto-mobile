@@ -56,10 +56,11 @@ constructor(
   /** Structured reasons why this snapshot is partial or unavailable. */
   val truncationReasons: List<String>? = null,
   /**
-   * True only while an AutoMobile overlay exists but is hidden because its app is not in front, so
-   * a `layer: "overlay"` call can say so instead of "no overlay is showing". Omitted otherwise.
+   * True only while an AutoMobile prototype exists but is hidden because its app is not in front,
+   * so a `layer: "prototype"` call can say so instead of "no prototype is showing". Omitted
+   * otherwise.
    */
-  @EncodeDefault(EncodeDefault.Mode.NEVER) val overlaySuspended: Boolean? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val prototypeSuspended: Boolean? = null,
 )
 
 @Serializable

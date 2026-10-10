@@ -69,7 +69,6 @@ const CLASSIFICATION: Classification = {
         { action: "tapImeKey" },
       ],
     },
-    overlay: PROTOTYPE_ARGS,
     prototype: PROTOTYPE_ARGS,
     sqlQuery: {
       reads: [{ query: "SELECT * FROM t" }],
@@ -215,7 +214,7 @@ function perArgsViolations(
 /** Every tool the server registers, including hidden aliases and gated tools. */
 function registeredTools(): RegisteredTool[] {
   const listed = ToolRegistry.getAllTools({ includeUnavailable: true });
-  const hidden = ["overlay", "startDevice"]
+  const hidden = ["startDevice"]
     .map((name) => ToolRegistry.getTool(name))
     .filter((tool): tool is RegisteredTool => tool !== undefined);
   return [...listed, ...hidden];

@@ -13,11 +13,11 @@ import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/Vie
 import {
   applicationWindowCoverIndex,
   isFullyCoveredByApplicationWindow,
-  ownOverlayNodeSources,
+  ownPrototypeNodeSources,
   type ApplicationWindowCoverIndex,
 } from "../ApplicationWindowCover";
 import { visibleTapBounds } from "../../utility/ElementGeometry";
-import { OVERLAY_LAYOUT_KINDS } from "../ownOverlayFocus";
+import { PROTOTYPE_LAYOUT_KINDS } from "../ownPrototypeFocus";
 import type { Element } from "../../../models/Element";
 import { isFalsy, isTruthy } from "../../../models/Element";
 import {
@@ -184,16 +184,16 @@ export function projectSkeletonElement(element: Element): SkeletonElement | unde
 }
 
 /**
- * Surface `selected` and the state description for AutoMobile's own overlay nodes only (#10446).
+ * Surface `selected` and the state description for AutoMobile's own prototype nodes only (#10446).
  * Whether app rows should report them is an open owner decision, so app output is unchanged.
  */
-function copyOverlayState(
+function copyPrototypeState(
   element: Element,
   row: Pick<SkeletonAccumulator, "selected" | "stateDescription">,
-  overlaySources: ReadonlySet<object>,
+  prototypeSources: ReadonlySet<object>,
 ): void {
   const source = getHierarchyNodeSource(element);
-  if (!source || !overlaySources.has(source)) {
+  if (!source || !prototypeSources.has(source)) {
     return;
   }
   if (isTruthy(element.selected)) {
@@ -218,7 +218,7 @@ interface SkeletonAccumulator {
   bounds: SkeletonElement["bounds"];
   affordances: Set<Affordance>;
   checked?: boolean;
-  /** AutoMobile overlay rows only: the selected tab or option, and the node's state description. */
+  /** AutoMobile prototype rows only: the selected tab or option, and the node's state description. */
   selected?: true;
   stateDescription?: string;
   enabled?: false;
@@ -293,7 +293,7 @@ function newAccumulator(
 function accumulateByIdentity(
   elements: ObserveElements,
   ime: ImeWindow | undefined,
-  overlaySources: ReadonlySet<object>,
+  prototypeSources: ReadonlySet<object>,
 ): SkeletonAccumulator[] {
   const byIdentity = new Map<string, SkeletonAccumulator>();
   const appElements = allElements(elements).filter((element) => !isImeKeycap(element, ime));
@@ -322,7 +322,7 @@ function accumulateByIdentity(
       acc.checked = isTruthy(el.checked);
     }
     copyDisabledState(el, acc);
-    copyOverlayState(el, acc, overlaySources);
+    copyPrototypeState(el, acc, prototypeSources);
     if (acc.testTag === undefined) {
       acc.testTag = nonEmptyString(el["test-tag"]);
     }
@@ -401,7 +401,7 @@ function shouldKeep(acc: SkeletonAccumulator, clickable: SkeletonAccumulator[]):
 function hoistContainerLabels(
   accumulators: SkeletonAccumulator[],
   clickable: SkeletonAccumulator[],
-  overlaySources: ReadonlySet<object>,
+  prototypeSources: ReadonlySet<object>,
 ): void {
   if (clickable.length === 0) {
     return;
@@ -410,28 +410,28 @@ function hoistContainerLabels(
     texts.sort(byReadingOrder);
     const parts = distinctHoistParts(container, texts);
     applyHoistedLabels(container, parts);
-    adoptOverlayIconLabel(container, parts, overlaySources);
+    adoptPrototypeIconLabel(container, parts, prototypeSources);
   }
 }
 
 /**
- * A tappable overlay container (a FAB) is labelled by its node kind ("box"), with its icon name
+ * A tappable prototype container (a FAB) is labelled by its node kind ("box"), with its icon name
  * relegated to `sublabel`. When the icon is the container's only accessible content, the icon name
- * is the label and the kind label goes away. Only overlay rows qualify, so an app control that
+ * is the label and the kind label goes away. Only prototype rows qualify, so an app control that
  * happens to read "box" keeps its own label.
  */
-function adoptOverlayIconLabel(
+function adoptPrototypeIconLabel(
   container: SkeletonAccumulator,
   parts: string[],
-  overlaySources: ReadonlySet<object>,
+  prototypeSources: ReadonlySet<object>,
 ): void {
   const source = container.target && getHierarchyNodeSource(container.target);
   const kind = container.label?.trim();
-  if (!source || !kind || !overlaySources.has(source) || !OVERLAY_LAYOUT_KINDS.has(kind)) {
+  if (!source || !kind || !prototypeSources.has(source) || !PROTOTYPE_LAYOUT_KINDS.has(kind)) {
     return;
   }
   const content = parts.filter(
-    (part) => !OVERLAY_LAYOUT_KINDS.has(part.trim()) && part.trim() !== "icon",
+    (part) => !PROTOTYPE_LAYOUT_KINDS.has(part.trim()) && part.trim() !== "icon",
   );
   if (content.length !== 1 || content.length !== parts.length) {
     return;
@@ -1466,9 +1466,9 @@ function markAppRowsCoveredByIme(
 /**
  * Mark rows that tapOn cannot reach because an application window (dialog, popup) above the
  * row's window covers it, using the same hit test as the tap path (issue #10481). Every
- * node-hosting AutoMobile overlay window above the row joins those covers, opaque, translucent,
- * sheet or floating alike (owner decision 2026-10-08, #10715): the overlay is touchable within its
- * bounds, so a tap there lands in the overlay, and default-layer tapOn refuses the row. A row with
+ * node-hosting AutoMobile prototype window above the row joins those covers, opaque, translucent,
+ * sheet or floating alike (owner decision 2026-10-08, #10715): the prototype is touchable within its
+ * bounds, so a tap there lands in the prototype, and default-layer tapOn refuses the row. A row with
  * an exposed part stays actionable, as tapOn taps that part. Like tapOn, the test runs on the
  * row's bounds clipped to the screen, so an off-screen remainder never counts as exposed.
  */
@@ -1513,12 +1513,12 @@ export function projectSkeleton(
   androidHierarchy?: ViewHierarchyResult,
 ): SkeletonProjectionResult {
   const ime = detectImeWindow(elements);
-  const overlaySources = ownOverlayNodeSources(androidHierarchy);
-  const accumulators = accumulateByIdentity(elements, ime, overlaySources);
+  const prototypeSources = ownPrototypeNodeSources(androidHierarchy);
+  const accumulators = accumulateByIdentity(elements, ime, prototypeSources);
   const clickable = accumulators.filter((acc) => acc.affordances.has("tap"));
   // Hoist descendant text onto labelless/underlabelled clickable rows (issue
   // #5869) before the keep filter suppresses the now-folded text accumulators.
-  hoistContainerLabels(accumulators, clickable, overlaySources);
+  hoistContainerLabels(accumulators, clickable, prototypeSources);
   applyEditableHintFallback(accumulators);
   // …then attribute an owning row's label to the state-carrying containers that
   // hoisting deliberately never folds into (issue #6871).

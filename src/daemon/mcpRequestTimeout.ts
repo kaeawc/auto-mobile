@@ -6,13 +6,13 @@ import {
 import { BARRIER_TIMEOUT_MS } from "../features/action/coordinationTimeout";
 import { DEFAULT_EXPLORE_TIMEOUT_MS } from "../features/navigation/exploreTimeout";
 import {
-  DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
-  MAX_OVERLAY_EVENT_TIMEOUT_MS,
-} from "../features/overlay/overlayEventTimeout";
+  DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS,
+  MAX_PROTOTYPE_EVENT_TIMEOUT_MS,
+} from "../features/prototype/prototypeEventTimeout";
 import {
-  DEFAULT_OVERLAY_ASSET_TIMEOUT_MS,
-  MAX_OVERLAY_ASSET_COUNT,
-} from "../features/overlay/overlayAssets";
+  DEFAULT_PROTOTYPE_ASSET_TIMEOUT_MS,
+  MAX_PROTOTYPE_ASSET_COUNT,
+} from "../features/prototype/prototypeAssets";
 import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "../server/observationResourceUris";
 import {
   DEFAULT_WAIT_FOR_TIMEOUT_MS,
@@ -400,7 +400,7 @@ function resolveFileTransferBudgetMs(args: Record<string, unknown>, pushMs: numb
 }
 
 /** Default device request timeout of a show, mirrored from the prototype tool. */
-const OVERLAY_MUTATION_DEFAULT_TIMEOUT_MS = 5_000;
+const PROTOTYPE_MUTATION_DEFAULT_TIMEOUT_MS = 5_000;
 
 function countObservationAssets(assets: readonly unknown[], count: number): number {
   let observations = 0;
@@ -418,8 +418,8 @@ function countObservationAssets(assets: readonly unknown[], count: number): numb
  * alone. Uploads run one at a time, each with its own transport timeout, before the show
  * request itself. `assetCount` is the number of entries the tool will process (<= its maximum).
  */
-function resolveOverlayStageBudgetMs(args: Record<string, unknown>, assetCount: number): number {
-  const mutationMs = positiveFiniteNumber(args.timeoutMs) ?? OVERLAY_MUTATION_DEFAULT_TIMEOUT_MS;
+function resolvePrototypeStageBudgetMs(args: Record<string, unknown>, assetCount: number): number {
+  const mutationMs = positiveFiniteNumber(args.timeoutMs) ?? PROTOTYPE_MUTATION_DEFAULT_TIMEOUT_MS;
   if (assetCount === 0) {
     return mutationMs;
   }
@@ -427,43 +427,43 @@ function resolveOverlayStageBudgetMs(args: Record<string, unknown>, assetCount: 
   const captureWaitMs =
     countObservationAssets(Array.isArray(args.assets) ? args.assets : [], assetCount) *
     OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS;
-  // The tool re-uploads assets the device reports missing and re-sends the overlay once, so the
+  // The tool re-uploads assets the device reports missing and re-sends the prototype once, so the
   // upload-and-send pair is budgeted twice (the retry uploads at most the same assets).
-  return captureWaitMs + 2 * (assetCount * DEFAULT_OVERLAY_ASSET_TIMEOUT_MS + mutationMs);
+  return captureWaitMs + 2 * (assetCount * DEFAULT_PROTOTYPE_ASSET_TIMEOUT_MS + mutationMs);
 }
 
-function overlayAssetCount(args: Record<string, unknown>): number {
+function prototypeAssetCount(args: Record<string, unknown>): number {
   // Count entries without visiting more than the tool's maximum.
-  return Array.isArray(args.assets) ? Math.min(args.assets.length, MAX_OVERLAY_ASSET_COUNT) : 0;
+  return Array.isArray(args.assets) ? Math.min(args.assets.length, MAX_PROTOTYPE_ASSET_COUNT) : 0;
 }
 
-function resolveOverlayAssetUploadBudgetMs(args: Record<string, unknown>): number {
-  const count = overlayAssetCount(args);
+function resolvePrototypeAssetUploadBudgetMs(args: Record<string, unknown>): number {
+  const count = prototypeAssetCount(args);
   return count === 0
     ? 0
     : resolveArgumentTimeoutBudgetMs(
-        resolveOverlayStageBudgetMs(args, count),
-        DEFAULT_OVERLAY_ASSET_TIMEOUT_MS,
+        resolvePrototypeStageBudgetMs(args, count),
+        DEFAULT_PROTOTYPE_ASSET_TIMEOUT_MS,
         WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
       );
 }
 
-function resolveOverlayAwaitBudgetMs(args: Record<string, unknown>): number {
-  // Only `awaitEvent` waits, and only `show` with `assets` uploads; every other overlay action
+function resolvePrototypeAwaitBudgetMs(args: Record<string, unknown>): number {
+  // Only `awaitEvent` waits, and only `show` with `assets` uploads; every other prototype action
   // keeps the default deadline. The tool's own maximum bounds the wait, so a larger value
   // (rejected by its schema anyway) cannot inflate the deadline past that maximum plus headroom.
   if (args.action === "show") {
-    return resolveOverlayAssetUploadBudgetMs(args);
+    return resolvePrototypeAssetUploadBudgetMs(args);
   }
   if (args.action !== "awaitEvent") {
     return 0;
   }
   return resolveArgumentTimeoutBudgetMs(
     Math.min(
-      positiveFiniteNumber(args.timeoutMs) ?? DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
-      MAX_OVERLAY_EVENT_TIMEOUT_MS,
+      positiveFiniteNumber(args.timeoutMs) ?? DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS,
+      MAX_PROTOTYPE_EVENT_TIMEOUT_MS,
     ),
-    DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
+    DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS,
     WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
   );
 }
@@ -511,8 +511,7 @@ const ARGUMENT_BUDGET_RESOLVERS: ReadonlyMap<string, (args: Record<string, unkno
         ),
     ],
     ["putAppFile", (args) => resolveFileTransferBudgetMs(args, APP_FILE_PUSH_TIMEOUT_MS)],
-    ["prototype", resolveOverlayAwaitBudgetMs],
-    ["overlay", resolveOverlayAwaitBudgetMs],
+    ["prototype", resolvePrototypeAwaitBudgetMs],
   ]);
 
 function resolveArgumentBudgetToolBudgetMs(request: DaemonRequest): number {

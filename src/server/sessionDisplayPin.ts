@@ -132,14 +132,14 @@ interface SessionDisplayPinInput<T = unknown> {
 
 /**
  * Calls that must never receive a session pin. Stop must remain possible after a recording's panel
- * is unplugged. An overlay is bound to the display it was shown on, so only show takes a display (and
+ * is unplugged. A prototype is bound to the display it was shown on, so only show takes a display (and
  * therefore a session pin).
  */
 function pinExempt(name: string, args: Record<string, unknown>): boolean {
   return (
     (name === "rotate" && args.display === undefined) ||
     (name === "videoRecording" && args.action === "stop") ||
-    ((name === "prototype" || name === "overlay") && args.action !== "show")
+    (name === "prototype" && args.action !== "show")
   );
 }
 

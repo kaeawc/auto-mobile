@@ -4986,7 +4986,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     const conversionStart = this.timer.now();
-    // Screen identity follows the app's windows only (#9305): the overlay agent's UIWindow is
+    // Screen identity follows the app's windows only (#9305): the prototype agent's UIWindow is
     // removed, so showing, paging or dismissing a prototype records no navigation.
     const convertedHierarchy = this.convertHierarchyForNavigation(appWindowsOnly(hierarchy));
     const conversionMs = this.timer.now() - conversionStart;

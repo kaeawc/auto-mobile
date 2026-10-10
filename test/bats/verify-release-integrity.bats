@@ -27,15 +27,15 @@ teardown() {
   rm -rf "$TEST_ROOT"
 }
 
-# write_fixtures <manifest_version> <gradle_version_name> <registry_version> <runner_sha> [helper_sha] [overlay_sha] [filter_sha]
+# write_fixtures <manifest_version> <gradle_version_name> <registry_version> <runner_sha> [helper_sha] [prototype_sha] [filter_sha]
 write_fixtures() {
   local ver="$1" gradle="$2" registry="$3" runner="$4" helper="$HELPER_SHA"
   if [ "$#" -ge 5 ]; then
     helper="$5"
   fi
-  local overlay="$HELPER_SHA"
+  local prototype="$HELPER_SHA"
   if [ "$#" -ge 6 ]; then
-    overlay="$6"
+    prototype="$6"
   fi
   local filter="$FILTER_SHA"
   if [ "$#" -ge 7 ]; then
@@ -72,7 +72,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     runnerSha256: "${runner}",
     runnerSha256Target: "${runner_target:-xctest}",
     screenCaptureHelperSha256: "${helper}",
-    overlayAgentSha256: "${overlay}",
+    prototypeAgentSha256: "${prototype}",
     networkFilterSha256: "${filter}",
   },
 ];
@@ -243,18 +243,18 @@ PY
   [[ "$output" == *"registry[0].screenCaptureHelperSha256"* ]]
 }
 
-@test "fails when overlay-agent sha256 is empty" {
+@test "fails when prototype-agent sha256 is empty" {
   write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "$RUNNER_SHA" "$HELPER_SHA" ""
   run_gate "$VERSION"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"registry[0].overlayAgentSha256"* ]]
+  [[ "$output" == *"registry[0].prototypeAgentSha256"* ]]
 }
 
-@test "fails when overlay-agent sha256 is malformed" {
+@test "fails when prototype-agent sha256 is malformed" {
   write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "$RUNNER_SHA" "$HELPER_SHA" "not-a-valid-sha"
   run_gate "$VERSION"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"registry[0].overlayAgentSha256"* ]]
+  [[ "$output" == *"registry[0].prototypeAgentSha256"* ]]
 }
 
 @test "fails when network-filter sha256 is empty" {

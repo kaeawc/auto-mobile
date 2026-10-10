@@ -227,7 +227,7 @@ export const elementSchema = z
       .literal(true)
       .optional()
       .describe(
-        "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+        "Android full projection: an application window or AutoMobile prototype fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
       ),
     class: z.string().optional(),
     package: z.string().optional(),
@@ -897,7 +897,7 @@ const observationScreenshotOutputFields = {
   screenshotImageSize: screenshotRasterFields.imageSize.optional(),
   screenshotPixelsPerNativeUnit: screenshotRasterFields.pixelsPerNativeUnit.optional(),
   screenshotScaleProvenance: screenshotRasterFields.scaleProvenance.optional(),
-  screenshotIncludesOverlay: z.boolean().optional(),
+  screenshotIncludesPrototype: z.boolean().optional(),
   screenshotSettled: z.boolean().optional(),
   screenshotSettledError: z.string().optional(),
   screenshotOrientation: z.enum(["native", "display"]).optional(),
@@ -1213,11 +1213,11 @@ export const skeletonElementSchema = z
     selected: z
       .literal(true)
       .optional()
-      .describe("AutoMobile overlay rows only: the selected tab or option."),
+      .describe("AutoMobile prototype rows only: the selected tab or option."),
     state: z
       .string()
       .optional()
-      .describe("AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3."),
+      .describe("AutoMobile prototype rows only: the node's state description, e.g. Page 1 of 3."),
     enabled: z
       .literal(false)
       .optional()
@@ -1517,7 +1517,7 @@ export const launchAppResultSchema = z
     verified: z.boolean().optional(),
     verifyFailureReason: z.string().optional(),
     observedAppId: z.string().optional(),
-    overlayAgent: z
+    prototypeAgent: z
       .object({
         port: z.number().int(),
         agentVersion: z.string(),

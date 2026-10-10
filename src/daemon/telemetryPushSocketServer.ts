@@ -580,7 +580,7 @@ function defaultIdentityKey(event: TelemetryEvent, data: Record<string, unknown>
   if (id === null) {
     return null;
   }
-  if (event.category === "overlay" && typeof data.sequence === "number") {
+  if (event.category === "prototype" && typeof data.sequence === "number") {
     return JSON.stringify([event.category, event.deviceId, event.sessionId, id, data.sequence]);
   }
   return JSON.stringify([event.category, event.deviceId, event.sessionId, id]);
@@ -595,8 +595,8 @@ function defaultIdentityKey(event: TelemetryEvent, data: Record<string, unknown>
  * never equal an SDK sequence number: crash/anr/nonfatal use the failure
  * `occurrenceId` both paths carry; network uses {@link networkIdentityKey}.
  * Their bare row `id` is namespaced `row` for repeated backfill rows. Other
- * categories retain their existing id fallbacks and serialization; overlay
- * sequences distinguish interactions with the same overlay id. log/os/
+ * categories retain their existing id fallbacks and serialization; prototype
+ * sequences distinguish interactions with the same prototype id. log/os/
  * navigation/storage/layout rows and live inputs carry no id, so have no key.
  */
 export function telemetryEventIdentityKey(event: TelemetryEvent): string | null {

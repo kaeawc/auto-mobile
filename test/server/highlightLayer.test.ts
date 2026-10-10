@@ -5,13 +5,13 @@ import { highlightSchema, registerHighlightTools } from "../../src/server/highli
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
 import {
-  OVERLAY_CAPTURE,
-  capturedOverlayHierarchy,
+  RELABELLED_CAPTURE,
+  capturedPrototypeHierarchy,
   capturedTwoWindowHierarchy,
-} from "../helpers/overlayWindowCapture";
+} from "../helpers/prototypeWindowCapture";
 
 // Captured Recents overview with its floating window relabelled as the CtrlProxy
-// overlay; see test/helpers/overlayWindowCapture.ts.
+// prototype; see test/helpers/prototypeWindowCapture.ts.
 async function highlight(hierarchy: ViewHierarchyResult, args: Record<string, unknown>) {
   const shapes: HighlightShape[] = [];
   registerHighlightTools({
@@ -32,33 +32,33 @@ async function highlight(hierarchy: ViewHierarchyResult, args: Record<string, un
   return { response: JSON.parse(result.content[0].text), shapes };
 }
 
-function overlayTop(hierarchy: ViewHierarchyResult): number {
-  return hierarchy.windows!.find((window) => window.id === OVERLAY_CAPTURE.overlayWindowId)!.bounds!
-    .top;
+function prototypeTop(hierarchy: ViewHierarchyResult): number {
+  return hierarchy.windows!.find((window) => window.id === RELABELLED_CAPTURE.prototypeWindowId)!
+    .bounds!.top;
 }
 
 describe("highlight layer (#9305)", () => {
   afterEach(() => ToolRegistry.clearTools());
 
-  test("text in both windows highlights the overlay by default and the app for app", async () => {
-    const hierarchy = capturedOverlayHierarchy();
+  test("text in both windows highlights the prototype by default and the app for app", async () => {
+    const hierarchy = capturedPrototypeHierarchy();
     const byDefault = await highlight(hierarchy, { text: "Settings" });
     const forApp = await highlight(hierarchy, { text: "Settings", layer: "app" });
 
     expect(byDefault.response.success).toBe(true);
     expect(forApp.response.success).toBe(true);
-    expect(byDefault.shapes[0].bounds.y).toBeGreaterThanOrEqual(overlayTop(hierarchy));
-    expect(forApp.shapes[0].bounds.y).toBeLessThan(overlayTop(hierarchy));
+    expect(byDefault.shapes[0].bounds.y).toBeGreaterThanOrEqual(prototypeTop(hierarchy));
+    expect(forApp.shapes[0].bounds.y).toBeLessThan(prototypeTop(hierarchy));
   });
 
-  test('"overlay" with no overlay showing fails without drawing', async () => {
+  test('"prototype" with no prototype showing fails without drawing', async () => {
     const { response, shapes } = await highlight(capturedTwoWindowHierarchy(), {
       text: "Settings",
-      layer: "overlay",
+      layer: "prototype",
     });
 
     expect(response.success).toBe(false);
-    expect(response.error).toContain("no AutoMobile overlay is showing");
+    expect(response.error).toContain("no AutoMobile prototype is showing");
     expect(shapes).toEqual([]);
   });
 

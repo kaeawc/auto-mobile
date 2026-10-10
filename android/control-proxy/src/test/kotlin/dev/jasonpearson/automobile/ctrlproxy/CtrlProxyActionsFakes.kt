@@ -1,7 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
-import dev.jasonpearson.automobile.protocol.OverlaySpec
+import dev.jasonpearson.automobile.protocol.PrototypeSpec
 
 /**
  * No-op [CtrlProxyActions] base for tests that only care about a couple of actions — subclass and
@@ -153,25 +153,25 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) {}
 
-  override fun showOverlay(
+  override fun showPrototype(
     requestId: String?,
-    spec: OverlaySpec,
+    spec: PrototypeSpec,
     displayId: Int?,
     reset: Boolean,
   ) {}
 
-  override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) {}
+  override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {}
 
-  override fun inspectOverlays(requestId: String?) {}
+  override fun inspectPrototypes(requestId: String?) {}
 
-  override fun putOverlayAsset(
+  override fun putPrototypeAsset(
     requestId: String?,
     id: String,
     mimeType: String,
     dataBase64: String,
   ) {}
 
-  override fun removeOverlayAsset(requestId: String?, id: String) {}
+  override fun removePrototypeAsset(requestId: String?, id: String) {}
 
   override fun listPreferenceFiles(requestId: String?, packageName: String) {}
 
@@ -267,8 +267,8 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override fun requestScreenshot(requestId: String?) = record("requestScreenshot", requestId)
 
-  override fun requestScreenshot(requestId: String?, displayId: Int?, hideOverlays: Boolean) =
-    record("requestScreenshot", requestId, displayId, hideOverlays)
+  override fun requestScreenshot(requestId: String?, displayId: Int?, hidePrototypes: Boolean) =
+    record("requestScreenshot", requestId, displayId, hidePrototypes)
 
   override fun requestSwipe(
     requestId: String?,
@@ -516,23 +516,27 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
   override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) =
     record("addHighlight", requestId, highlightId, shape)
 
-  override fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?, reset: Boolean) =
-    record("showOverlay", requestId, spec, displayId, reset)
+  override fun showPrototype(
+    requestId: String?,
+    spec: PrototypeSpec,
+    displayId: Int?,
+    reset: Boolean,
+  ) = record("showPrototype", requestId, spec, displayId, reset)
 
-  override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) =
-    record("dismissOverlay", requestId, id, all)
+  override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) =
+    record("dismissPrototype", requestId, id, all)
 
-  override fun inspectOverlays(requestId: String?) = record("inspectOverlays", requestId)
+  override fun inspectPrototypes(requestId: String?) = record("inspectPrototypes", requestId)
 
-  override fun putOverlayAsset(
+  override fun putPrototypeAsset(
     requestId: String?,
     id: String,
     mimeType: String,
     dataBase64: String,
-  ) = record("putOverlayAsset", requestId, id, mimeType, dataBase64)
+  ) = record("putPrototypeAsset", requestId, id, mimeType, dataBase64)
 
-  override fun removeOverlayAsset(requestId: String?, id: String) =
-    record("removeOverlayAsset", requestId, id)
+  override fun removePrototypeAsset(requestId: String?, id: String) =
+    record("removePrototypeAsset", requestId, id)
 
   override fun listPreferenceFiles(requestId: String?, packageName: String) =
     record("listPreferenceFiles", requestId, packageName)

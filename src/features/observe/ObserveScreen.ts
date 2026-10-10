@@ -121,7 +121,7 @@ import {
 } from "./observationFreshness";
 import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
-import { INTERACTIVE_OVERLAY_WINDOW_TYPE, isOwnOverlayFocused } from "./ownOverlayFocus";
+import { PROTOTYPE_WINDOW_TYPE, isOwnPrototypeFocused } from "./ownPrototypeFocus";
 import { DefaultElementParser } from "../utility/ElementParser";
 import {
   ALERT_TITLE_RESOURCE_ID,
@@ -338,22 +338,22 @@ function isStatusBarOnlyCandidate(
 /**
  * A focused window that legitimately differs from the resumed activity: a
  * system-UI panel (a window, not an ActivityRecord), or the product's own
- * focusable overlay, which owns focus while the app stays resumed behind it
- * (issue #10000). Neither is a stale wrong-window capture. The overlay case is
+ * focusable prototype, which owns focus while the app stays resumed behind it
+ * (issue #10000). Neither is a stale wrong-window capture. The prototype case is
  * judged from the capture's own windows, so it only counts when the capture is
- * current (`ownOverlayEvidenceCurrent`): a stale capture taken while the overlay
+ * current (`ownPrototypeEvidenceCurrent`): a stale capture taken while the prototype
  * had focus says nothing about the device now.
  */
 function isExpectedFocusDivergence(
   hierarchy: ObserveResult["viewHierarchy"],
   observed: string,
   foreground: string,
-  ownOverlayEvidenceCurrent: boolean,
+  ownPrototypeEvidenceCurrent: boolean,
 ): boolean {
   return (
     SYSTEM_UI_WINDOW_PACKAGES.has(observed) ||
     SYSTEM_UI_WINDOW_PACKAGES.has(foreground) ||
-    (ownOverlayEvidenceCurrent && isOwnOverlayFocused(hierarchy))
+    (ownPrototypeEvidenceCurrent && isOwnPrototypeFocused(hierarchy))
   );
 }
 
@@ -1887,9 +1887,9 @@ export class RealObserveScreen implements ObserveScreen {
       // The hierarchy has completed before any capture starts.
       if (screenshotMode !== "none") {
         const screenshotDisplayId = requestedDisplayId;
-        const capture = overlayCaptureOptions(options?.screenshotOptions);
+        const capture = prototypeCaptureOptions(options?.screenshotOptions);
         result.screenshotCaptureAttempted = true;
-        stampOverlayHidden(result, capture);
+        stampPrototypeHidden(result, capture);
         if (screenshotMode === "settled") {
           result.screenshotOrientation = this.device.platform === "ios" ? "native" : "display";
           await this.captureSettledScreenshot(
@@ -1971,7 +1971,7 @@ export class RealObserveScreen implements ObserveScreen {
         postCaptureForeground,
         signal,
       );
-      await this.attributeFocusedOwnOverlayToForeground(result, foregroundIdentity, minTimestamp);
+      await this.attributeFocusedOwnPrototypeToForeground(result, foregroundIdentity, minTimestamp);
       const windowIdentityMismatch = await this.resolveWindowIdentityMismatch(
         result,
         foregroundIdentity,
@@ -2485,10 +2485,10 @@ export class RealObserveScreen implements ObserveScreen {
     const screenshotObservation = observation ?? this.createBaseResult();
     const displayId = await this.screenshotDisplayId(signal, observation);
     const screenshotMode = resolveScreenshotMode(screenshot);
-    const capture = overlayCaptureOptions(screenshotOptions);
+    const capture = prototypeCaptureOptions(screenshotOptions);
     if (observation) {
       observation.screenshotCaptureAttempted = true;
-      stampOverlayHidden(observation, capture);
+      stampPrototypeHidden(observation, capture);
       if (screenshotMode === "settled") {
         observation.screenshotOrientation = this.device.platform === "ios" ? "native" : "display";
       }
@@ -3822,7 +3822,7 @@ export class RealObserveScreen implements ObserveScreen {
         result.viewHierarchy,
         observed,
         foreground,
-        this.isOwnOverlayEvidenceCurrent(result, minTimestamp),
+        this.isOwnPrototypeEvidenceCurrent(result, minTimestamp),
       )
     ) {
       return undefined;
@@ -3843,16 +3843,16 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   /**
-   * Whether the capture is recent enough for its own "overlay holds focus" claim
+   * Whether the capture is recent enough for its own "prototype holds focus" claim
    * to describe the device now. That claim is read from the very capture being
    * validated, so it cannot vouch for itself: a stale capture taken while a
-   * text-field overlay had focus would otherwise be accepted as fresh and
+   * text-field prototype had focus would otherwise be accepted as fresh and
    * relabelled with whatever app is in front today. The independent evidence is
    * the capture's own device stamp against the request (`minTimestamp`) and the
    * freshness age budget; with no stamp the claim cannot be dated and is not
    * trusted.
    */
-  private isOwnOverlayEvidenceCurrent(result: ObserveResult, minTimestamp: number): boolean {
+  private isOwnPrototypeEvidenceCurrent(result: ObserveResult, minTimestamp: number): boolean {
     const stamp = this.resolveObservationTimestampMs(result);
     if (stamp === undefined || (minTimestamp > 0 && stamp < minTimestamp)) {
       return false;
@@ -3862,13 +3862,13 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   /**
-   * While CtrlProxy's own interactive overlay holds window focus, name the app
-   * behind it as the active app (issue #10000) and keep the overlay's presence
+   * While CtrlProxy's own prototype holds window focus, name the app
+   * behind it as the active app (issue #10000) and keep the prototype's presence
    * visible through `activeWindow.type`. The device-confirmed resumed app is the
    * attribution source; with no ground truth, or a SystemUI surface on top, the
    * window is left as captured.
    */
-  private async attributeFocusedOwnOverlayToForeground(
+  private async attributeFocusedOwnPrototypeToForeground(
     result: ObserveResult,
     foregroundIdentity: Promise<string | undefined>,
     minTimestamp: number,
@@ -3876,8 +3876,8 @@ export class RealObserveScreen implements ObserveScreen {
     const activeWindow = result.activeWindow;
     if (
       activeWindow?.appId !== CTRL_PROXY_PACKAGE ||
-      !isOwnOverlayFocused(result.viewHierarchy) ||
-      !this.isOwnOverlayEvidenceCurrent(result, minTimestamp)
+      !isOwnPrototypeFocused(result.viewHierarchy) ||
+      !this.isOwnPrototypeEvidenceCurrent(result, minTimestamp)
     ) {
       return;
     }
@@ -3892,7 +3892,7 @@ export class RealObserveScreen implements ObserveScreen {
     result.activeWindow = {
       ...activeWindow,
       appId: foreground,
-      type: activeWindow.type ?? INTERACTIVE_OVERLAY_WINDOW_TYPE,
+      type: activeWindow.type ?? PROTOTYPE_WINDOW_TYPE,
     };
   }
 
@@ -4069,25 +4069,25 @@ export class RealObserveScreen implements ObserveScreen {
   }
 }
 
-/** The overlay-hiding part of an observe's screenshot options, for the non-settled captures. */
-function overlayCaptureOptions(
+/** The prototype-hiding part of an observe's screenshot options, for the non-settled captures. */
+function prototypeCaptureOptions(
   options: ObserveScreenshotOptions | undefined,
-): { hideOverlays: true } | undefined {
-  return options?.hideOverlays === true ? { hideOverlays: true } : undefined;
+): { hidePrototypes: true } | undefined {
+  return options?.hidePrototypes === true ? { hidePrototypes: true } : undefined;
 }
 
 /**
- * A capture requested with the overlay hidden either excludes it or produces no image (#9305), so
+ * A capture requested with the prototype hidden either excludes it or produces no image (#9305), so
  * the observation is marked when the capture is requested; observe reports it for `layer: "app"`.
  */
-function stampOverlayHidden(
+function stampPrototypeHidden(
   observation: ObserveResult,
-  capture: { hideOverlays: true } | undefined,
+  capture: { hidePrototypes: true } | undefined,
 ): void {
   if (capture) {
-    observation.screenshotIncludesOverlay = false;
+    observation.screenshotIncludesPrototype = false;
   } else {
     // A new capture without hiding replaces whatever an earlier capture of this object recorded.
-    delete observation.screenshotIncludesOverlay;
+    delete observation.screenshotIncludesPrototype;
   }
 }

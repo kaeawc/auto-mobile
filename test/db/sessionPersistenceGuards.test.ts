@@ -1,13 +1,21 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
-import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
+import {
+  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+  SessionManager,
+  type SessionDeviceAssigner,
+} from "../../src/daemon/sessionManager";
 import {
   DeviceSessionRepository,
   deviceRestartReleaseReason,
+  type DeviceSessionRecord,
+  type MarkReleasedOptions,
+  type UpsertActiveSessionOptions,
 } from "../../src/db/deviceSessionRepository";
-import type { Database } from "../../src/db/types";
+import type { Database, DeviceSessionStatus } from "../../src/db/types";
 import { createTestDatabase } from "./testDbHelper";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const SESSION = "s1";
@@ -44,6 +52,47 @@ class RacingRepository extends DeviceSessionRepository {
     this.beforeUpsert = undefined;
     await peerWrite?.();
     return await super.upsertActiveSession(...args);
+  }
+}
+
+/**
+ * A store whose release write can be parked past the release deadline, and whose plain upserts
+ * (the rewrite of a live row, #11206) land a few turns after they are issued, as a statement
+ * queued behind its retention prune does.
+ */
+class LateReleaseWritePersistence extends FakeDeviceSessionPersistence {
+  park: Promise<void> | undefined;
+  afterReleaseWrite: (() => void) | undefined;
+
+  override async markReleased(
+    sessionUuid: string,
+    status: DeviceSessionStatus,
+    releasedAtMs: number,
+    reason: string,
+    options?: MarkReleasedOptions,
+  ): Promise<void> {
+    await this.park;
+    await super.markReleased(sessionUuid, status, releasedAtMs, reason, options);
+    const hook = this.afterReleaseWrite;
+    this.afterReleaseWrite = undefined;
+    hook?.();
+  }
+
+  override async upsertActiveSession(
+    record: DeviceSessionRecord,
+    nowMs?: number,
+    options: UpsertActiveSessionOptions = {},
+  ): Promise<number> {
+    if (!options.unlessTerminal) {
+      await settleMicrotasks(20);
+    }
+    return await super.upsertActiveSession(record, nowMs, options);
+  }
+}
+
+async function settleMicrotasks(turns: number): Promise<void> {
+  for (let turn = 0; turn < turns; turn++) {
+    await Promise.resolve();
   }
 }
 
@@ -239,6 +288,198 @@ describe("session persistence guards live in the statement, not in a prior read"
       status: "active",
       release_reason: null,
       expires_at_ms: extendedTo,
+    });
+  });
+
+  // sessionManager.ts persistSessionActivity: when the activity write matches no active row the
+  // live session's whole row is re-persisted. A check for a terminal row by a read before that
+  // upsert cannot see a terminal release that lands after the read, so the upsert's own conflict
+  // clause refuses to make a terminally released row active again.
+  describe("re-persisting a live session whose row is not active", () => {
+    const TERMINAL_REASON = "identity-recovery-identity-continuity-lost";
+
+    /** Daemon A's live session, with its row handed off by a peer that judged daemon A dead. */
+    async function liveSessionWithHandedOffRow(): Promise<{
+      manager: SessionManager;
+      releases: Array<{ reason: string; deviceId: string; expiryOrigin: string | undefined }>;
+    }> {
+      const { manager } = daemon("daemon-a");
+      const releases: Array<{
+        reason: string;
+        deviceId: string;
+        expiryOrigin: string | undefined;
+      }> = [];
+      manager.onSessionRelease((_sessionId, deviceId, reason, _snapshot, options) => {
+        releases.push({ reason, deviceId, expiryOrigin: options.expiryOrigin });
+      });
+      await manager.createSession(
+        SESSION,
+        DEVICE,
+        "android",
+        IDLE_WINDOW_MS,
+        undefined,
+        STABLE_DEVICE,
+      );
+      expect(await peer.getSession(SESSION)).toMatchObject({ status: "active" });
+      await peer.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+      timer.advanceTime(1_000);
+      return { manager, releases };
+    }
+
+    /** Daemon A's next tool call refreshes the session, which writes its activity row. */
+    async function refresh(manager: SessionManager): Promise<string> {
+      return await manager.getOrCreateSession(SESSION).then(
+        () => "refreshed",
+        (error: unknown) => (error instanceof Error ? error.name : String(error)),
+      );
+    }
+
+    test("a row handed off for a recoverable reason is made active again", async () => {
+      const { manager, releases } = await liveSessionWithHandedOffRow();
+
+      expect(await refresh(manager)).toBe("refreshed");
+
+      expect(await peer.getSession(SESSION)).toMatchObject({
+        status: "active",
+        release_reason: null,
+        released_at_ms: null,
+        daemon_session_id: "daemon-a",
+      });
+      expect(manager.getSession(SESSION)).not.toBeNull();
+      expect(releases).toEqual([]);
+    });
+
+    test("a terminal release that lands after any earlier read is not revived, and ends the session", async () => {
+      const { manager, releases } = await liveSessionWithHandedOffRow();
+      // The peer's recovery of that row fails for good while daemon A's re-persist is under way.
+      racing.beforeUpsert = async () => {
+        await peer.markReleased(SESSION, "released", timer.now(), TERMINAL_REASON);
+      };
+
+      const outcome = await refresh(manager);
+
+      // The scenario was driven: the re-persist ran (and consumed the peer write).
+      expect(racing.beforeUpsert).toBeUndefined();
+      // The terminal fence stands; the row is not active again.
+      expect(await peer.getSession(SESSION)).toMatchObject({
+        status: "released",
+        release_reason: TERMINAL_REASON,
+      });
+      // "Not applied" is the session having been terminally released: the typed answer, the
+      // session gone from memory, and its device handed back (no caller is there to return it).
+      expect(outcome).toBe("TerminalSessionError");
+      expect(manager.getSession(SESSION)).toBeNull();
+      expect(releases).toEqual([
+        { reason: TERMINAL_REASON, deviceId: DEVICE, expiryOrigin: "lazy-expiry" },
+      ]);
+      // The UUID stays ended for every later call.
+      expect(await refresh(manager)).toBe("TerminalSessionError");
+      expect(await peer.getSession(SESSION)).toMatchObject({ release_reason: TERMINAL_REASON });
+    });
+
+    test("a row already terminal before the activity write ends the session the same way", async () => {
+      const { manager, releases } = await liveSessionWithHandedOffRow();
+      await peer.markReleased(SESSION, "expired", timer.now(), "heartbeat-timeout");
+
+      expect(await refresh(manager)).toBe("TerminalSessionError");
+
+      expect(await peer.getSession(SESSION)).toMatchObject({
+        status: "expired",
+        release_reason: "heartbeat-timeout",
+      });
+      expect(manager.getSession(SESSION)).toBeNull();
+      expect(releases.map((release) => release.reason)).toEqual(["heartbeat-timeout"]);
+    });
+
+    // upsertActiveSession awaits its retention prune before its statement, so no peer is needed
+    // for the terminal release: this daemon's own release of the session can land in that await.
+    test("this daemon's own terminal release landing while the upsert awaits its prune is not revived", async () => {
+      const { manager, releases } = await liveSessionWithHandedOffRow();
+      racing.beforeUpsert = async () => {
+        await manager.releaseSession(SESSION, "explicit-release");
+      };
+
+      const outcome = await refresh(manager);
+
+      expect(racing.beforeUpsert).toBeUndefined();
+      expect(await peer.getSession(SESSION)).toMatchObject({
+        status: "released",
+        release_reason: "explicit-release",
+      });
+      expect(outcome).toBe("TerminalSessionError");
+      expect(manager.getSession(SESSION)).toBeNull();
+      // Released once, by the release that was already under way.
+      expect(releases.map((release) => release.reason)).toEqual(["explicit-release"]);
+    });
+
+    // #11206: a superseded release's terminal write can land late, under a session that lives
+    // on, and is then rewritten live. That row is this daemon's own, not the end of the UUID.
+    test("a late terminal write of this daemon's superseded release does not end the session it left alive", async () => {
+      const store = new LateReleaseWritePersistence();
+      const manager = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+      managers.push(manager);
+      manager.stopCleanupTimer();
+      const releases: string[] = [];
+      manager.onSessionRelease((_sessionId, _deviceId, reason) => releases.push(reason));
+      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      let landReleaseWrite!: () => void;
+      store.park = new Promise<void>((resolve) => {
+        landReleaseWrite = resolve;
+      });
+      let superseded = false;
+      const release = manager.releaseSessionUnlessSuperseded(
+        SESSION,
+        `device-disconnected:${DEVICE}`,
+        () => !superseded,
+      );
+      await settleMicrotasks(100);
+      // The serial is re-observed with a newer identity; the terminal write is still parked.
+      superseded = true;
+      await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+      expect(await release).toEqual({ superseded: true });
+      expect(manager.getSession(SESSION)).not.toBeNull();
+      // A tool call's activity write runs right behind the late terminal write, before the
+      // rewrite of the live row has landed.
+      let outcome = "pending";
+      store.afterReleaseWrite = () => {
+        void refresh(manager).then((result) => {
+          outcome = result;
+        });
+      };
+      store.park = undefined;
+
+      landReleaseWrite();
+      await settleMicrotasks(200);
+
+      // The scenario was driven: the activity write found no active row and was not persisted.
+      expect(outcome).toBe("SessionActivityPersistenceError");
+      // The session the supersede kept is still held, and its row is live again.
+      expect(manager.getSession(SESSION)).not.toBeNull();
+      expect(releases).toEqual([]);
+      expect(await store.getSession?.(SESSION)).toMatchObject({
+        status: "active",
+        release_reason: null,
+      });
+      expect(await refresh(manager)).toBe("refreshed");
+    });
+
+    test("a manager on the fake persistence is refused like one on SQLite", async () => {
+      const fake = new FakeDeviceSessionPersistence();
+      const manager = new SessionManager(timer, fake, () => new FakeDbWriteBarrier());
+      managers.push(manager);
+      manager.stopCleanupTimer();
+      manager.attachDaemonSessionId("daemon-a");
+      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      await fake.markReleased(SESSION, "released", timer.now(), "explicit-release");
+      timer.advanceTime(1_000);
+
+      expect(await refresh(manager)).toBe("TerminalSessionError");
+
+      expect(await fake.getSession?.(SESSION)).toMatchObject({
+        status: "released",
+        release_reason: "explicit-release",
+      });
+      expect(manager.getSession(SESSION)).toBeNull();
     });
   });
 });

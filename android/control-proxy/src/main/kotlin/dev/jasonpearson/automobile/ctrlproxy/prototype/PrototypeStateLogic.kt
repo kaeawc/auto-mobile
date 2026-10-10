@@ -24,8 +24,8 @@ internal fun PrototypeCondition.holds(state: Map<String, PrototypeScalar>): Bool
   val gt = gt
   val lt = lt
   return when {
-    key != null && equals != null -> stored == equals
-    key != null && notEquals != null -> stored != notEquals
+    key != null && equals != null -> stored.sameValue(equals)
+    key != null && notEquals != null -> !stored.sameValue(notEquals)
     gt != null -> number != null && number > gt
     lt != null -> number != null && number < lt
     all != null -> all.all { it.holds(state) }
@@ -34,6 +34,14 @@ internal fun PrototypeCondition.holds(state: Map<String, PrototypeScalar>): Bool
     else -> false
   }
 }
+
+/**
+ * Strict equality as the host's `===` and Swift's `==` see it: same type and same value, where
+ * numbers compare numerically, so `-0` equals `0` (data-class equality tells them apart).
+ */
+private fun PrototypeScalar?.sameValue(other: PrototypeScalar?): Boolean =
+  if (this is PrototypeScalar.Numeric && other is PrototypeScalar.Numeric) value == other.value
+  else this == other
 
 /** The flipped value, or null when the key no longer holds a boolean (the action is a no-op). */
 internal fun PrototypeToggleAction.nextValue(

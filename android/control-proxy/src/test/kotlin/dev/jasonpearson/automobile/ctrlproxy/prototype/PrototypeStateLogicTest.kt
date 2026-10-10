@@ -30,6 +30,18 @@ class PrototypeStateLogicTest {
   }
 
   @Test
+  fun `negative zero equals zero as it does on the host and on iOS`() {
+    val negativeZero = mapOf("n" to PrototypeScalar.Numeric(-0.0))
+    val zero = PrototypeScalar.Numeric(0.0)
+    assertTrue(eq("n", zero).holds(negativeZero))
+    assertFalse(PrototypeCondition("n", notEquals = zero).holds(negativeZero))
+    assertTrue(eq("count", PrototypeScalar.Numeric(-0.0)).holds(state + ("count" to zero)))
+    // Still strict about type: a number never equals its text.
+    assertFalse(eq("n", PrototypeScalar.Text("0")).holds(negativeZero))
+    assertTrue(PrototypeCondition("n", notEquals = PrototypeScalar.Text("0")).holds(negativeZero))
+  }
+
+  @Test
   fun `all any and not compose and nest`() {
     val yes = eq("on", PrototypeScalar.BooleanValue(true))
     val no = eq("on", PrototypeScalar.BooleanValue(false))

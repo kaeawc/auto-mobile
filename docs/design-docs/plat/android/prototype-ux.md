@@ -659,6 +659,8 @@ A condition is exactly one of these forms. `visibleWhen` takes any of them;
 | `{any: [condition, ...]}`  | At least one member holds. One to 16 members.                            |
 | `{not: condition}`         | The member does not hold.                                                |
 
+Numbers compare by value, so a state of `-0` equals `0` on every platform (#11408).
+
 Conditions nest to a depth of 8 (`MAX_PROTOTYPE_CONDITION_DEPTH` in the shared
 contract). `key` takes exactly one comparison, and comparisons need `key`;
 errors point at the offending field (for example `root.visibleWhen.gt`).

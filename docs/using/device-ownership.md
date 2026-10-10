@@ -141,6 +141,12 @@ another session holds is refused with `device_owned_by_other_session` unless the
 call passes `force: true`, which overrides the refusal and logs a warning naming
 the holder. From the CLI: `auto-mobile --cli killDevice --device '{...}' --force true`.
 
+A device another live AutoMobile daemon holds (two daemons sharing one adb server
+or simulator set) is refused the same way, with `device_owned_by_other_daemon`:
+stop it through the daemon that holds it, wait for that daemon to release it, or
+pass `force: true`. While a stop runs, the stopping daemon claims the device, so
+the other daemon cannot bind it mid-kill.
+
 `force` keeps its older meaning too: for a wedged Android emulator it also skips
 the AVD-name comparison. Use it only when the device really should be stopped
 out from under its holder. Deleting a stopped image is not affected, since no

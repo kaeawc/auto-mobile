@@ -26,7 +26,10 @@ import type { Database } from "../../src/db/types";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import type { ForwardLeaseOwnerProbe } from "../../src/features/observe/shared/ctrlProxyForwardLeaseOwnership";
 import type { BootedDevice } from "../../src/models";
-import { assertLifecycleCallerHoldsDevice } from "../../src/server/lifecycleDeviceOwnership";
+import {
+  assertLifecycleCallerHoldsDevice,
+  assertLifecycleTargetNotHeldByOtherDaemon,
+} from "../../src/server/lifecycleDeviceOwnership";
 import { deviceLossCancellationReason } from "../../src/utils/deviceLossCancellationReason";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import type { LockContent } from "../../src/utils/fileLock";
@@ -1004,6 +1007,7 @@ class TwoDaemonWorld {
       async () => {
         const daemonState = DaemonState.getInstance();
         daemonState.initialize(process.manager, process.pool);
+        let foreignCheck: Promise<void>;
         try {
           assertLifecycleCallerHoldsDevice({
             toolName: "killDevice",
@@ -1011,17 +1015,38 @@ class TwoDaemonWorld {
             requester,
             force: false,
           });
+          // Binds this daemon's state before its first await, as the tool handler does.
+          foreignCheck = assertLifecycleTargetNotHeldByOtherDaemon({
+            toolName: "killDevice",
+            device: { deviceId: device.deviceId, platform: "android" },
+            force: false,
+          });
         } finally {
           daemonState.reset();
         }
-        const reservation = await process.pool.reserveDeviceForShutdown(device.deviceId);
+        await foreignCheck;
+        const reservation = await process.pool.reserveDeviceForShutdown(
+          device.deviceId,
+          undefined,
+          undefined,
+          undefined,
+          { toolName: "killDevice", force: false },
+        );
         if (!reservation || process.dead) {
           return;
         }
         try {
           const peer = this.peerOf(process);
           const peerHolder = peer?.pool.getDevice(device.deviceId)?.sessionId;
-          if (peer && peerHolder && peer.manager.hasSession(peerHolder)) {
+          // An assignment whose claim the peer has not published yet is provisional: the claim
+          // this kill published wins it, so the peer rolls the assignment back (#11200).
+          const peerClaim = this.claims.files.get(this.claims.claimPath(device.deviceId));
+          if (
+            peer &&
+            peerHolder &&
+            peer.manager.hasSession(peerHolder) &&
+            peerClaim?.pid === peer.pid
+          ) {
             this.fail(
               "kill-foreign-device",
               `${process.name} killed ${device.deviceId} (requester ${requester.sessionUuid ?? "none"}) ` +

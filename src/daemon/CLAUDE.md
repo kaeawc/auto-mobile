@@ -190,6 +190,10 @@ own refusal. Plain lifecycle tools that stop a running device (`killDevice`, and
 same code through `assertLifecycleCallerHoldsDevice`
 (`src/server/lifecycleDeviceOwnership.ts`); the autolocking MCP connection counts
 as the holder, and the user's `force: true` overrides with a logged warning.
+A device another live daemon holds is refused with `device_owned_by_other_daemon`
+(`assertLifecycleTargetNotHeldByOtherDaemon`), and the stop publishes this daemon's
+allocation claim under its shutdown reservation (reported as an active execution by
+`daemon/deviceLeaseStatus`), so a peer cannot bind the device mid-kill (#11200).
 Acquisition (`getAndroid`, `getApple`, `startDevice` on a running device) is
 guarded by the pool's own owner check instead.
 

@@ -4098,6 +4098,7 @@ describe("killDevice handler", () => {
           clearedIntentionalShutdown++;
         },
         reserveDeviceForShutdown: async () => undefined,
+        assertNotClaimedByForeignDaemon: async () => {},
       } as never,
     );
     const controller = new AbortController();
@@ -5178,6 +5179,7 @@ describe("killDevice handler", () => {
             },
             assertDeviceActionable: () => {},
             reserveDeviceForShutdown: async () => undefined,
+            assertNotClaimedByForeignDaemon: async () => {},
             getDevice: () => null,
           } as never,
         );

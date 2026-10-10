@@ -1407,6 +1407,27 @@ describe("handleDaemonRequest", () => {
     });
   });
 
+  test("reports a device it is stopping as in use, so a peer cannot take its claim (#11200)", async () => {
+    const devicePool = new FakeDevicePool({ total: 1, idle: 1, assigned: 0, error: 0 });
+    const stopping = new Set(["emulator-5600"]);
+    Object.assign(devicePool, {
+      isUnderShutdownReservation: (deviceId: string) => stopping.has(deviceId),
+    });
+    const state = new FakeDaemonState(sessionManager, devicePool);
+    spyOn(sessionManager, "getSessionForDevice").mockReturnValue(null);
+    const status = async () =>
+      (
+        await handleDaemonRequest(
+          buildRequest("daemon/deviceLeaseStatus", { deviceId: "emulator-5600" }),
+          state,
+        )
+      ).result;
+
+    expect(await status()).toMatchObject({ sessionId: null, activeExecutions: 1 });
+    stopping.clear();
+    expect(await status()).toMatchObject({ sessionId: null, activeExecutions: 0 });
+  });
+
   test("reports CtrlProxy requests and idleness that no tool call is bound to (#10497 review)", async () => {
     class ActivityState extends FakeDaemonState {
       getDeviceLeaseActivitySources(): DeviceLeaseActivitySources {

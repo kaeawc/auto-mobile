@@ -24,7 +24,7 @@ describe("cross-daemon ownership regressions", () => {
   // claim is published) reads as unheld, so a sessionless killDevice on the other daemon stops the
   // peer's emulator without `force`, and the peer's session dies as device-disconnected.
   // Seed 6 of the `contention` profile, shrunk. #11200
-  test.todo("a daemon refuses to kill a device its live peer holds", async () => {
+  test("a daemon refuses to kill a device its live peer holds", async () => {
     const result = await runTwoDaemonSteps([
       step("acquire", { client: 1, daemon: 0, device: 2, turns: 3 }),
       step("settle"),

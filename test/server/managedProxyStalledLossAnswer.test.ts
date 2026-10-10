@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
@@ -93,7 +93,7 @@ let handovers: LivenessHandover[];
 let clients: FakeDaemonClient[];
 let spies: Array<ReturnType<typeof spyOn>>;
 
-beforeEach(async () => {
+const setUp = async (): Promise<void> => {
   baseTimer = new LivenessTimer();
   timer = new StallableTimer(baseTimer);
   sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -146,15 +146,35 @@ beforeEach(async () => {
     heartbeatIntervalMs: INTERVAL_MS,
   });
   proxy.onLivenessHandover((handover) => handovers.push(handover));
-});
+};
 
-afterEach(async () => {
+const tearDown = async (): Promise<void> => {
   await proxy.close();
   sessionManager.stopCleanupTimer();
   for (const spy of spies) {
     spy.mockRestore();
   }
+};
+
+// The first stall-loss run pays the proxy server's one-time module, schema and tool-registry cost
+// (over the 100 ms budget on a loaded runner). Pay it once, for both connection kinds, outside the
+// timed tests.
+beforeAll(async () => {
+  for (const managedSlots of [readyManagedSlotsResult(SESSION), undefined]) {
+    await setUp();
+    try {
+      await withStallLoss(managedSlots, async (callTool) => {
+        await callTool("tapOn", { text: "OK" });
+        await callTool("observe", { deviceId: "emulator-5554" });
+      });
+    } finally {
+      await tearDown();
+    }
+  }
 });
+
+beforeEach(setUp);
+afterEach(tearDown);
 
 interface ToolAnswer {
   isError?: boolean;

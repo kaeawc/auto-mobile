@@ -23,9 +23,10 @@ package dev.jasonpearson.automobile.junit
  */
 internal class HeldDeviceWaitingMCPClient(
   private val delegate: AutoMobileAgent.MCPClient,
-  private val backoffDelayMs: (waitsSoFar: Int, waitedMs: Long, retryAfterMs: Long?) -> Long? =
-    { waits, waited, retryAfterMs ->
-      AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(waits, waited, retryAfterMs)
+  private val backoffDelayMs:
+    (waitsSoFar: Int, waitedMs: Long, retryAfterMs: Long?, code: String?) -> Long? =
+    { waits, waited, retryAfterMs, code ->
+      AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(waits, waited, retryAfterMs, code)
     },
   private val sleeper: (Long) -> Unit = { AutoMobilePlanExecutor.deviceOwnedSleeper(it) },
 ) : AutoMobileAgent.MCPClient {
@@ -63,7 +64,8 @@ internal class HeldDeviceWaitingMCPClient(
             )
           else -> throw error
         }
-        val delayMs = backoffDelayMs(waits, waitedMs, verdict.retryAfterMs) ?: throw error
+        val delayMs =
+          backoffDelayMs(waits, waitedMs, verdict.retryAfterMs, verdict.code) ?: throw error
         println(
           "Device is busy for AI recovery; waiting ${delayMs}ms before retrying " +
             "(wait ${waits + 1}): $message",

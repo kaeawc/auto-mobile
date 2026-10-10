@@ -1,3 +1,5 @@
+import { adbOfflineHeldDevices } from "./adbOfflineHeldDevices";
+import { describeInventoryDevice, type AdbOfflineHold } from "./inventoryDeviceDescription";
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { androidTransportIdentityAdbFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
@@ -12,7 +14,6 @@ import {
 } from "../devices/deviceUtils";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import {
-  configuredImageForBootedDevice,
   configuredImagesByStableId,
   type StableConfiguredDeviceImage,
 } from "../utils/configuredDeviceInventory";
@@ -518,17 +519,15 @@ async function getDeviceLockStates(): Promise<ResourceContent> {
 // Convert BootedDevice to BootedDeviceInfo
 function toBootedDeviceInfo(
   device: BootedDevice,
-  poolContext?: PoolDeviceContext,
-  configured?: StableConfiguredDeviceImage,
-  adbOfflineState?: string,
+  poolContext: PoolDeviceContext | undefined,
+  configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
+  extras: { adbOffline?: AdbOfflineHold; transportAvdName?: string } = {},
 ): BootedDeviceInfo {
-  const description = describeDevice({
-    kind: "booted",
-    adbOfflineState,
+  const description = describeInventoryDevice({
     device,
     pooled: poolContext?.pooled,
     unhealthy: poolContext?.poolInfo.unhealthy,
-    configured,
+    configuredImages,
     // Preserve the pool's already-published assignment in the canonical session
     // when the optional session-detail map is unavailable for this observation.
     session:
@@ -537,7 +536,8 @@ function toBootedDeviceInfo(
         ? { sessionId: poolContext.poolInfo.assignedSession }
         : undefined),
     deviceSessionUuid: poolContext?.deviceSessionUuid,
-    ...poolContext?.hold,
+    hold: poolContext?.hold,
+    ...extras,
   });
   const projected = projectBootedDevice(description);
   return {
@@ -596,6 +596,7 @@ interface AdbOfflineHeldInput {
   resolveDeviceSessionUuid: (deviceId: string) => string | null;
   deviceManager: PlatformDeviceManager;
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>;
+  transportAvdName: (deviceId: string) => string | undefined;
 }
 
 /**
@@ -607,50 +608,28 @@ interface AdbOfflineHeldInput {
 async function adbOfflineHeldDeviceDescriptions(
   input: AdbOfflineHeldInput,
 ): Promise<BootedDeviceInfo[]> {
-  const { platform, devicePool, deviceManager } = input;
-  if (platform !== "android" || !devicePool || !deviceManager.getAndroidListedDeviceStates) {
-    return [];
-  }
-  const discoveredIds = new Set(input.discovered.map((device) => device.deviceId));
-  const held = devicePool
-    .getAssignedDevices()
-    .filter((pooled) => pooled.platform === "android" && !discoveredIds.has(pooled.id));
-  if (held.length === 0) {
-    return [];
-  }
-  let states: Map<string, string>;
-  try {
-    states = await deviceManager.getAndroidListedDeviceStates(
-      held.map((pooled) => pooled.id),
-      { signal: getAbortSignal() },
-    );
-  } catch (error) {
-    logger.warn(
-      `[BootedDeviceResources] Offline held-device probe failed: ${errorMessage(error)}`,
-      error,
-    );
-    return [];
-  }
-  return held.flatMap((pooled) => {
-    const adbState = states.get(pooled.id);
-    if (!adbState) {
-      return [];
-    }
-    const device: BootedDevice = { deviceId: pooled.id, name: pooled.name, platform: "android" };
-    return [
-      toBootedDeviceInfo(
-        device,
-        resolvePoolDeviceContext(
-          devicePool,
-          device,
-          input.sessionInfoByDeviceId,
-          input.resolveDeviceSessionUuid,
-        ),
-        input.configuredImages.get(`android:${pooled.avdName ?? pooled.name}`),
-        adbState,
-      ),
-    ];
+  const held = await adbOfflineHeldDevices({
+    platform: input.platform,
+    discovered: input.discovered,
+    devicePool: input.devicePool,
+    deviceManager: input.deviceManager,
   });
+  return held.map(({ device, avdName, adbState }) =>
+    toBootedDeviceInfo(
+      device,
+      resolvePoolDeviceContext(
+        input.devicePool,
+        device,
+        input.sessionInfoByDeviceId,
+        input.resolveDeviceSessionUuid,
+      ),
+      input.configuredImages,
+      {
+        adbOffline: { adbState, avdName },
+        transportAvdName: input.transportAvdName(device.deviceId),
+      },
+    ),
+  );
 }
 
 export async function configuredImagesForBootedPlatform(
@@ -794,12 +773,12 @@ function resolvePoolDeviceContext(
   };
 }
 
-function summarizePoolStatus(
+async function summarizePoolStatus(
   devicePool: DevicePool,
   discoveredDevices: BootedDeviceInfo[],
   succeededPlatforms: Set<Platform>,
   requestedPlatforms: readonly Platform[],
-): PoolStatusSummary {
+): Promise<PoolStatusSummary> {
   let idle = 0;
   let assigned = 0;
   let error = 0;
@@ -824,15 +803,36 @@ function summarizePoolStatus(
 
   // For platforms whose discovery failed/was unavailable, keep the pool's own
   // tracked counts — we cannot confirm which of those entries are phantom.
-  for (const pooled of devicePool.getAllDevices()) {
-    if (requestedPlatforms.includes(pooled.platform) && !succeededPlatforms.has(pooled.platform)) {
-      tally(
-        effectivePoolStatus(
-          pooled.status,
-          poolHoldFor(devicePool, pooled.id),
-          devicePool.getDeviceHealthMarker(pooled.id) !== undefined,
-        ),
+  const fallback = devicePool
+    .getAllDevices()
+    .filter(
+      (pooled) =>
+        requestedPlatforms.includes(pooled.platform) && !succeededPlatforms.has(pooled.platform),
+    );
+  // Whether a managed slot holds an idle device is only known after the ownership refresh the
+  // other inventory surfaces perform. When it fails (slot registry unreadable, never loaded), an
+  // idle tally would report a possibly-held device free: omit it, as available-devices refuses
+  // (#11455). Assigned/error stay exact -- a session or health marker is independent of slots.
+  let ownershipKnown = true;
+  if (fallback.length > 0) {
+    try {
+      await devicePool.refreshInventoryOwnership();
+    } catch (refreshError) {
+      ownershipKnown = false;
+      logger.warn(
+        `[BootedDeviceResources] Managed-slot ownership unknown; omitting idle pool counts: ${errorMessage(refreshError)}`,
+        refreshError,
       );
+    }
+  }
+  for (const pooled of fallback) {
+    const status = effectivePoolStatus(
+      pooled.status,
+      poolHoldFor(devicePool, pooled.id),
+      devicePool.getDeviceHealthMarker(pooled.id) !== undefined,
+    );
+    if (ownershipKnown || status !== "idle") {
+      tally(status);
     }
   }
 
@@ -911,6 +911,12 @@ async function discoverBootedDevicesForPlatform(
     });
     getAbortSignal()?.throwIfAborted();
     const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
+    // The same lookup the listDevices tool applies, so both surfaces name the same stable AVD.
+    const transportAvdName = (device: BootedDevice): string | undefined =>
+      device.platform === "android"
+        ? (devicePool?.getAndroidTransportAvdName(device.deviceId) ??
+          aliases.avdName(device.deviceId))
+        : undefined;
     const discovery = {
       ...rawDiscovery,
       devices:
@@ -944,6 +950,8 @@ async function discoverBootedDevicesForPlatform(
               sessionInfoByDeviceId,
               resolveDeviceSessionUuid,
             ),
+            new Map(),
+            { transportAvdName: transportAvdName(device) },
           ),
           devicePool,
         ),
@@ -969,7 +977,8 @@ async function discoverBootedDevicesForPlatform(
             sessionInfoByDeviceId,
             resolveDeviceSessionUuid,
           ),
-          configuredImageForBootedDevice(device, configuredImages),
+          configuredImages,
+          { transportAvdName: transportAvdName(device) },
         ),
         devicePool,
       ),
@@ -982,6 +991,8 @@ async function discoverBootedDevicesForPlatform(
       resolveDeviceSessionUuid,
       deviceManager,
       configuredImages,
+      transportAvdName: (deviceId) =>
+        devicePool?.getAndroidTransportAvdName(deviceId) ?? aliases.avdName(deviceId),
     });
     // A held AVD re-cold-booting while adb still lists its old serial offline would otherwise
     // appear twice under one stableId (#11132). The held row carries the session and pool status
@@ -1571,7 +1582,7 @@ async function computeBootedDevicesForPlatforms(
   const physicalCount = devices.length - virtualCount;
   const poolStatus =
     daemonContext.poolStatus && daemonContext.devicePool
-      ? summarizePoolStatus(daemonContext.devicePool, devices, succeededPlatforms, platforms)
+      ? await summarizePoolStatus(daemonContext.devicePool, devices, succeededPlatforms, platforms)
       : undefined;
 
   return {

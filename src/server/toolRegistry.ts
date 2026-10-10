@@ -59,7 +59,11 @@ import { MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS } from "../daemon/inputDeviceOwn
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import type { DevicePool } from "../daemon/devicePool";
 import { releaseSessionAndDevice } from "../daemon/releaseSessionAndDevice";
-import { assertInputRequesterHoldsDevice, TOOL_CALL_REMEDY } from "../daemon/inputDeviceOwnership";
+import {
+  assertControlNotOnForeignDaemonDevice,
+  assertInputRequesterHoldsDevice,
+  TOOL_CALL_REMEDY,
+} from "../daemon/inputDeviceOwnership";
 import {
   defaultDeviceObservationAccess,
   sessionlessDeviceReadFor,
@@ -807,8 +811,9 @@ function foreignDeviceRead(
 /**
  * Admit a read under its session without refreshing or claiming it (#10964): the live session, or
  * null when the id names no live device session this daemon can route the read to (never issued,
- * such as an IDE observer session (#10968), or not live) so the read runs sessionless. A terminal
- * or suspect session keeps its typed error. Undefined when there is no daemon session manager.
+ * such as an IDE observer session (#10968), not live, or a row that expired while no daemon ran
+ * (#11361)) so the read runs sessionless. A terminally released or suspect session keeps its
+ * typed error. Undefined when there is no daemon session manager.
  */
 async function admitReadSession(
   sessionUuid: string,
@@ -828,6 +833,19 @@ async function admitReadSession(
     }
     throw error;
   }
+}
+
+/**
+ * The device of the session a read named but was too late to be admitted under (#11361): the
+ * session is past its idle deadline and only earlier work still holds it. Undefined otherwise.
+ */
+function lateReadSessionDevice(
+  sessionUuid: string | undefined,
+  execution: { executionId: string; startTime: number } | undefined,
+): string | undefined {
+  return sessionUuid
+    ? DaemonState.getInstance().getSessionManager().deviceHeldForLateRead(sessionUuid, execution)
+    : undefined;
 }
 
 /** A device another session holds: a live owner, or an autolock holder. */
@@ -1054,11 +1072,23 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       logger.info(
         `[ToolRegistry] ${name}: ${sessionUuid} is not a live device session; reading sessionlessly`,
       );
+      const lateReadDeviceId = providedDeviceId
+        ? undefined
+        : lateReadSessionDevice(sessionUuid, execution);
       sessionUuid = undefined;
       delete args.sessionUuid;
       if (options.sessionlessDeviceRead && providedDeviceId) {
         // The same contract as a sessionless `observe {deviceId}`: no session, no readiness.
         return resolveSessionlessDeviceRead(input, options.sessionlessDeviceRead, providedDeviceId);
+      }
+      if (lateReadDeviceId) {
+        // A read that named a session still held by earlier work past its idle deadline (#11361)
+        // reads that session's device, not whichever device a sessionless call would select.
+        return resolveSessionlessDeviceRead(
+          input,
+          options.sessionlessDeviceRead ?? this.defaultDeviceRead,
+          lateReadDeviceId,
+        );
       }
     }
     // A sessionless read-only call that would land on a held device watches it through the
@@ -2456,7 +2486,9 @@ function assertToolCallerHoldsDevice(
  * Managed slots (#11178), beside the session-holder check: a control call may not act on a device
  * another managed slot holds, idle or not, unless it runs as that slot's execution
  * (`device_assigned_to_managed_slot`); and a managed connection may control only its own slot
- * devices and sessions (`device_outside_managed_slots`). Reads stay open everywhere (Q6).
+ * devices and sessions (`device_outside_managed_slots`). Nor may it act on a device no local session
+ * holds while another daemon claims it (`device_owned_by_other_daemon`, #11349). Reads stay open
+ * everywhere (Q6).
  */
 async function assertManagedSlotControlAccess(input: {
   toolName: string;
@@ -2506,6 +2538,8 @@ async function assertManagedSlotControlAccess(input: {
       requesterSessionUuid,
       maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
     });
+    // A device no local session holds may be another daemon's (#11349).
+    await assertControlNotOnForeignDaemonDevice({ deviceId, platform, gate: pool });
   }
 }
 

@@ -58,6 +58,12 @@ import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "./deviceDisconnectHandler";
 import { DevicePool, type PooledDevice } from "./devicePool";
+import { DeviceOwnedByOtherDaemonError } from "./deviceAcquisitionRefusals";
+import {
+  assertControlNotOnForeignDaemonDevice,
+  assertInputNotOnForeignManagedSlotDevice,
+} from "./inputDeviceOwnership";
+import { DeviceAssignedToManagedSlotError } from "./managedSlots/managedSlotRefusal";
 import {
   OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
   OwnerDisconnectExecutionVeto,
@@ -155,7 +161,10 @@ import {
 import { currentDaemonProcessGenerationToken } from "./processGeneration";
 import { processGenerationRecordFields } from "./processGenerationFields";
 import { executionTracker } from "../server/executionTracker";
-import { createDeviceStateChangeNotifier } from "../server/deviceStateChangeNotifier";
+import {
+  createDeviceStateChangeNotifier,
+  type DeviceStateChangeNotifier,
+} from "../server/deviceStateChangeNotifier";
 import {
   notifyBootedDeviceResourcesUpdated,
   resetBootedDevicesResourceCache,
@@ -426,7 +435,7 @@ function toBootedDevice(pooledDevice: PooledDevice): BootedDevice {
  */
 function createDaemonObservationExecutor(
   requestStart: number,
-  isViewerRead: (pooledDevice: PooledDevice) => boolean,
+  isViewerRead: (pooledDevice: PooledDevice) => boolean | Promise<boolean>,
 ) {
   return createPooledObservationExecutor({
     hostRequestStartMs: requestStart,
@@ -669,6 +678,7 @@ export class Daemon {
   >();
   private unsubscribeAdbMissingDevice: (() => void) | null = null;
   private unsubscribeSessionExecutionEnded: (() => void) | null = null;
+  private readonly deviceStateChangeNotifier: DeviceStateChangeNotifier;
   private options: DaemonOptions;
   private readonly acceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
   private shutdownHandlersRegistered: boolean = false;
@@ -746,6 +756,11 @@ export class Daemon {
     this.idGenerator = idGenerator;
     this.daemonSessionId = this.idGenerator.next();
     this.timer = timer;
+    this.deviceStateChangeNotifier = createDeviceStateChangeNotifier({
+      timer,
+      invalidate: resetBootedDevicesResourceCache,
+      notify: notifyBootedDeviceResourcesUpdated,
+    });
     this.generationStartedAt = this.timer.now();
     this.processStartedAt = processBirthTime();
     this.processGenerationToken = processGenerationToken();
@@ -786,9 +801,13 @@ export class Daemon {
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
     this.sessionManager.attachDaemonSessionId(this.daemonSessionId);
-    // Read when a recovery claims its row, so a peer that started after this daemon is seen.
+    // Read when a recovery claims its row, so a peer that started after this daemon is seen. A
+    // restart incumbent whose pid file this daemon replaced is not listed, so it is added while
+    // it is still live: its rows and its terminal-release journal are not a dead daemon's (#11355).
     this.sessionManager.attachLiveDaemonSessionIds(() =>
-      this.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
+      this.incumbentOwnerGuard.withLiveIncumbent(
+        this.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
+      ),
     );
     this.observerSessionRegistry = new ObserverSessionRegistry(
       this.timer,
@@ -961,22 +980,16 @@ export class Daemon {
       owner: () => this.managedSlotJournalOwner(),
     });
     DaemonState.getInstance().setManagedExecutionReowner(this.managedExecutionReowner);
-    // Interrupted journaled work (#11179) is redriven in the background, but only on a host that
-    // has a slot registry: a daemon that never served a managed slot never creates one.
+    // Interrupted journaled work (#11179) is redriven in the background. The loop starts when this
+    // daemon first opens the registry (#11338), so a fresh host that creates it on its first
+    // acquisition is covered; an existing registry is opened now so leftovers redrive at startup.
     if (process.env.NODE_ENV !== "test" && slotRegistryFileExists()) {
-      void this.openManagedSlotRegistry().then(
-        (registry) => {
-          if (this.managedSlotAcquisition === acquisition && !this.managedSlotRedrive) {
-            this.managedSlotRedrive = acquisition.startJournalRedrive(registry);
-          }
-        },
-        (error: unknown) => {
-          logger.warn(
-            `[Daemon] Managed slot journal redrive not started: ${errorMessage(error)}`,
-            error,
-          );
-        },
-      );
+      void this.openManagedSlotRegistry().catch((error: unknown) => {
+        logger.warn(
+          `[Daemon] Managed slot journal redrive not started: ${errorMessage(error)}`,
+          error,
+        );
+      });
     }
   }
 
@@ -994,7 +1007,13 @@ export class Daemon {
     // Restart-time recovery (#11242): slots a previous daemon left settling are settled once that
     // daemon is gone. Runs once per open, after the open succeeds.
     opening.then(
-      () => void this.managedExecutionRelease?.recoverSettledSlots(),
+      (registry) => {
+        void this.managedExecutionRelease?.recoverSettledSlots();
+        const acquisition = this.managedSlotAcquisition;
+        if (acquisition && !this.managedSlotRedrive && process.env.NODE_ENV !== "test") {
+          this.managedSlotRedrive = acquisition.startJournalRedrive(registry);
+        }
+      },
       // The open failure is logged (and the open forgotten) by the handler below.
       () => undefined,
     );
@@ -1094,11 +1113,7 @@ export class Daemon {
         }
       },
       // Subscribers to the booted-device resources learn of status and holder changes (#11413).
-      onDeviceStateChanged: createDeviceStateChangeNotifier({
-        timer: this.timer,
-        invalidate: resetBootedDevicesResourceCache,
-        notify: notifyBootedDeviceResourcesUpdated,
-      }),
+      onDeviceStateChanged: this.deviceStateChangeNotifier,
       emulatorLossIncidentStore: new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
       ambientExecutionIdReader,
       cancelDeviceSessionExecutions: Object.assign(
@@ -1119,6 +1134,8 @@ export class Daemon {
 
   /** Stop the session sweeps and the tool-call-end subscription that feed session expiry. */
   private stopSessionTimers(): void {
+    // A change in the last debounce window must not notify after the daemon closed (#11413).
+    this.deviceStateChangeNotifier.dispose();
     this.sessionManager.stopCleanupTimer();
     this.observerSessionRegistry.dispose();
     this.unsubscribeSessionExecutionEnded?.();
@@ -2748,7 +2765,7 @@ export class Daemon {
       return runObservationRequestBatch(
         pooledDevices,
         createDaemonObservationExecutor(requestStart, (pooledDevice) =>
-          this.isHeldByAnotherSession(pooledDevice.id, sessionUuid),
+          this.isHeldByAnotherOwner(pooledDevice, sessionUuid),
         ),
         {
           timer: this.timer,
@@ -2782,6 +2799,62 @@ export class Daemon {
     const base = (sessionUuid: string | undefined) =>
       resolveToolSelectionBaseSessionUuid(sessionUuid, this.sessionManager);
     return base(holder) !== base(requesterSessionUuid?.trim() || undefined);
+  }
+
+  /**
+   * Whether anyone but the requester holds the device, for classifying a READ: another local
+   * session, a managed slot (idle or not, unless the requester is the slot's execution), or
+   * another daemon's claim. Such a request is downgraded to the connect-only read, never refused.
+   * An ownership state that cannot be read counts as held: a read must not risk a rebind on a
+   * device that may belong to someone else. The checks reuse the pool's own gates and their
+   * one-second snapshots, so an observation adds no cross-daemon round trip beyond them.
+   */
+  private async isHeldByAnotherOwner(
+    pooledDevice: PooledDevice,
+    requesterSessionUuid?: string,
+  ): Promise<boolean> {
+    const deviceId = pooledDevice.id;
+    if (this.isHeldByAnotherSession(deviceId, requesterSessionUuid)) {
+      return true;
+    }
+    if (this.sessionManager.getSessionForDevice(deviceId) ?? pooledDevice.sessionId) {
+      // The requester's own session holds it; the pool's gates govern others, not the holder.
+      return false;
+    }
+    const platform = pooledDevice.platform;
+    const requester = requesterSessionUuid?.trim() || undefined;
+    try {
+      await assertInputNotOnForeignManagedSlotDevice({
+        action: "observe",
+        deviceId,
+        platform,
+        requesterSessionUuid: requester,
+        sessionManager: this.sessionManager,
+        gate: this.devicePool,
+      });
+      await assertControlNotOnForeignDaemonDevice({
+        deviceId,
+        platform,
+        gate: this.devicePool,
+      });
+      return false;
+    } catch (error) {
+      if (
+        error instanceof DeviceAssignedToManagedSlotError ||
+        error instanceof DeviceOwnedByOtherDaemonError
+      ) {
+        // A slot or another daemon holds the device: an expected verdict, so the read is
+        // downgraded to connect-only rather than refused.
+        logger.debug(`[Daemon] observation of ${deviceId} is read-only: ${errorMessage(error)}`);
+      } else {
+        // Unknown ownership is treated as held; the trace says why the read was downgraded.
+        logger.warn(
+          `[Daemon] ownership of ${deviceId} unreadable; observation is read-only: ${errorMessage(error)}`,
+          error,
+        );
+      }
+      return true;
+    }
   }
 
   /**
@@ -4663,13 +4736,10 @@ export class Daemon {
       // catch: treating it as an empty live set would let this daemon steal a
       // live peer's sessions, which is less safe than refusing startup.
       const liveDaemonSessionIds = new Set(
-        this.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
+        this.incumbentOwnerGuard.withLiveIncumbent(
+          this.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
+        ),
       );
-      const incumbentDaemonSessionId =
-        this.incumbentOwnerGuard.capturedLiveIncumbentDaemonSessionId();
-      if (incumbentDaemonSessionId !== undefined) {
-        liveDaemonSessionIds.add(incumbentDaemonSessionId);
-      }
       this.startupLiveDaemonSessionIds = liveDaemonSessionIds;
       // Clear installed apps cache from previous daemon sessions, keeping a live
       // peer's rows (issue #11158) — hence after the live set is computed.

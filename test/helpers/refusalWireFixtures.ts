@@ -51,6 +51,7 @@ import {
   sessionReleasedDuringCallPayload,
 } from "../../src/server/deviceSessionResult";
 import {
+  managedEndedPayload,
   managedSlotsFailedToolResult,
   noActiveDeviceSessionResult,
 } from "../../src/server/proxyServer";
@@ -70,6 +71,7 @@ import {
   DEFAULT_PROVISION_DEVICE_RETRYABILITY,
   type ProvisionDeviceFailureCode,
 } from "../../src/devices/exactDeviceProvisioning";
+import { AppNotRunningError } from "../../src/models/AppNotRunningError";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { logger } from "../../src/utils/logger";
 
@@ -201,6 +203,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     () => shaped(deviceAssignedToOtherSessionError(DEVICE, "holder-session", SESSION)),
   ],
   [
+    "app_not_running",
+    "AppNotRunningError via shapeToolCallError",
+    () => shaped(new AppNotRunningError("com.example.app", DEVICE)),
+  ],
+  [
     "device_owned_by_other_daemon",
     "DeviceOwnedByOtherDaemonError via shapeToolCallError",
     () => shaped(new DeviceOwnedByOtherDaemonError(DEVICE, 4242)),
@@ -277,6 +284,14 @@ const BUILDERS: readonly FixtureEntry[] = [
       noActiveDeviceSessionResult(
         new DaemonConnectionSessionReleasedError("heartbeat_timeout"),
       ) as RefusalWireResult,
+  ],
+  [
+    "managed_execution_ended",
+    "managedEndedPayload",
+    () =>
+      jsonResult(
+        managedEndedPayload(readyManagedSlotsResult(SESSION), SESSION, "heartbeat_timeout"),
+      ),
   ],
   [
     "session_terminal_release_in_progress",
@@ -436,6 +451,19 @@ export function failedManagedSlotsResult(
     outcome: "failed",
     slots: onSlot ? [slot] : [],
     ...(onSlot ? {} : { failure: slotFailure }),
+  };
+}
+
+/** A ready acquisition whose one slot (index 1, generation 3) holds `sessionUuid`. */
+export function readyManagedSlotsResult(sessionUuid: string): ManagedSlotsResult {
+  const { slots, scope } = failedManagedSlotsResult(capacitySlotFailure(), true);
+  return {
+    contractVersion: 1,
+    scope: { ...scope, scopeKey: "0123abcd" },
+    outcome: "ready",
+    slots: [
+      { ...slots[0], failure: undefined, slotIndex: 1, assignmentGeneration: 3, sessionUuid },
+    ],
   };
 }
 

@@ -624,7 +624,9 @@ finish_unit_shard() {
 run_unit_shards() {
   local shard_mode="$1"
   local changed_ref="${2:-}"
-  local shard_root="$ROOT/scratch/test-ts-${shard_mode}-shards"
+  # AUTOMOBILE_TEST_TS_SCRATCH_DIR relocates the shard scratch tree so the bats
+  # suite can run this lane hermetically (per-test dir) instead of serially.
+  local shard_root="${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}/test-ts-${shard_mode}-shards"
   local file index shard shard_number worker_count rc shard_status report_name
   local lane_start lane_elapsed physical_cores lane_cap="" attempts_note
   local shard_wall_record
@@ -1148,6 +1150,9 @@ case "$mode" in
     # 3.1 GB) on a 444-file sample, and ran faster. Each chunk writes its own
     # lcov/JUnit; they are merged below. The wall-clock budget bounds each
     # shard's whole chunk sequence, not a single chunk.
+    # AUTOMOBILE_TEST_TS_COVERAGE_DIR relocates the coverage tree so the bats suite can drive this
+    # lane hermetically; CI and local runs keep the default "coverage".
+    coverage_root="${AUTOMOBILE_TEST_TS_COVERAGE_DIR:-coverage}"
     coverage_shards="${AUTOMOBILE_COVERAGE_SHARDS:-2}"
     coverage_chunk_files="${AUTOMOBILE_COVERAGE_CHUNK_FILES-50}"
     validate_positive_integer "AUTOMOBILE_COVERAGE_SHARDS" "$coverage_shards"
@@ -1184,8 +1189,8 @@ case "$mode" in
       coverage_prefix+=(--preload "$ROOT/test/setup/fileTimingProbe.ts")
     fi
     if [[ "${TEST_TS_PRINT_CMD:-}" != "1" ]]; then
-      rm -rf coverage
-      mkdir -p coverage/shards
+      rm -rf "$coverage_root"
+      mkdir -p "$coverage_root/shards"
     fi
     coverage_pids=()
     for ((coverage_shard = 1; coverage_shard <= coverage_shards; coverage_shard += 1)); do
@@ -1206,9 +1211,9 @@ case "$mode" in
         continue
       fi
       (
-        export AUTOMOBILE_CHUNK_COVERAGE_ROOT="coverage/shards"
+        export AUTOMOBILE_CHUNK_COVERAGE_ROOT="${coverage_root}/shards"
         if [[ "$runner_os" != "Windows" ]]; then
-          export AUTOMOBILE_TEST_TIMING_LOG="coverage/shards/timing-shard-${coverage_shard}.ndjson"
+          export AUTOMOBILE_TEST_TIMING_LOG="${coverage_root}/shards/timing-shard-${coverage_shard}.ndjson"
           export AUTOMOBILE_WATCHDOG_TIMING_LOG="$AUTOMOBILE_TEST_TIMING_LOG"
           export AUTOMOBILE_WATCHDOG_LABEL="coverage shard ${coverage_shard}/${coverage_shards}"
         fi
@@ -1219,7 +1224,7 @@ case "$mode" in
         else
           "${coverage_chunks[@]}"
         fi
-      ) > "coverage/shards/shard-${coverage_shard}.log" 2>&1 3>&- &
+      ) > "${coverage_root}/shards/shard-${coverage_shard}.log" 2>&1 3>&- &
       coverage_pids+=("$!")
     done
     if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
@@ -1239,31 +1244,31 @@ case "$mode" in
     done
     for ((coverage_shard = 1; coverage_shard <= coverage_shards; coverage_shard += 1)); do
       printf '\n==> TypeScript coverage shard %d/%d\n' "$coverage_shard" "$coverage_shards"
-      command cat "coverage/shards/shard-${coverage_shard}.log"
+      command cat "${coverage_root}/shards/shard-${coverage_shard}.log"
     done
     if [[ "$coverage_status" -ne 0 ]]; then exit "$coverage_status"; fi
     coverage_lcov_files=()
     coverage_junit_files=()
     for ((coverage_shard = 1; coverage_shard <= coverage_shards; coverage_shard += 1)); do
-      coverage_manifest="coverage/shards/shard-${coverage_shard}.chunks"
+      coverage_manifest="${coverage_root}/shards/shard-${coverage_shard}.chunks"
       if [[ ! -f "$coverage_manifest" ]]; then
         echo "FAIL: coverage shard ${coverage_shard}/${coverage_shards} wrote no chunk manifest" >&2
         exit 1
       fi
       coverage_chunk_total="$(< "$coverage_manifest")"
       for ((coverage_chunk = 1; coverage_chunk <= coverage_chunk_total; coverage_chunk += 1)); do
-        coverage_dir="coverage/shards/shard-${coverage_shard}-chunk-${coverage_chunk}"
+        coverage_dir="${coverage_root}/shards/shard-${coverage_shard}-chunk-${coverage_chunk}"
         bash scripts/ci/verify-ts-coverage-output.sh "$coverage_dir"
         coverage_lcov_files+=("${coverage_dir}/lcov.info")
         coverage_junit_files+=("${coverage_dir}.xml")
       done
     done
     if [[ "${#coverage_lcov_files[@]}" -eq 1 ]]; then
-      cp "${coverage_lcov_files[0]}" coverage/lcov.info
-      cp "${coverage_junit_files[0]}" coverage/junit.xml
+      cp "${coverage_lcov_files[0]}" "${coverage_root}/lcov.info"
+      cp "${coverage_junit_files[0]}" "${coverage_root}/junit.xml"
     else
-      bun scripts/lib/merge-lcov.ts coverage/lcov.info "${coverage_lcov_files[@]+"${coverage_lcov_files[@]}"}"
-      bun scripts/lib/merge-junit-reports.ts coverage/junit.xml "${coverage_junit_files[@]+"${coverage_junit_files[@]}"}"
+      bun scripts/lib/merge-lcov.ts "${coverage_root}/lcov.info" "${coverage_lcov_files[@]+"${coverage_lcov_files[@]}"}"
+      bun scripts/lib/merge-junit-reports.ts "${coverage_root}/junit.xml" "${coverage_junit_files[@]+"${coverage_junit_files[@]}"}"
     fi
     ;;
   all)

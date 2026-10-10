@@ -1,0 +1,32 @@
+{
+  "id": "a",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "free": 1
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "button",
+        "label": "Go",
+        "onTap": [
+          {
+            "type": "setState",
+            "key": "free",
+            "value": "now a string"
+          },
+          {
+            "type": "setState",
+            "key": "fresh",
+            "value": true
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -7268,7 +7268,7 @@ export class DevicePool {
               caller,
               existingSession,
               device,
-              childProcess != null,
+              Boolean(childProcess),
             );
             return this.reuseExistingDeviceSession(
               deviceId,

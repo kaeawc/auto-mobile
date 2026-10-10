@@ -1976,7 +1976,7 @@ describe("CtrlProxyManager", function () {
         const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-prefetch-source-"));
         const prefetchedApkPath = path.join(tempDir, "control-proxy.apk");
         await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
-        (AndroidCtrlProxyManager as any).prefetchedApkPath = prefetchedApkPath;
+        Reflect.set(AndroidCtrlProxyManager, "prefetchedApkPath", prefetchedApkPath);
 
         const localFakeAdb = new FakeAdbExecutor();
         localFakeAdb.setCommandResponseSequence(

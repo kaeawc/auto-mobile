@@ -30,7 +30,8 @@ export const UNSETTLED_EXECUTION_DEADLINE_GRACE_MS = 10_000;
 export interface SessionExecutionProbe {
   hasActiveExecutions(sessionId: string): boolean;
   /**
-   * The latest request deadline among the session's in-flight executions, on the veto's clock.
+   * The latest request deadline among the session's in-flight executions, on the veto's clock
+   * (the daemon's session clock, #11162).
    * `Number.POSITIVE_INFINITY` (or no method) when any of them carries no deadline, and
    * undefined when nothing is in flight.
    */
@@ -104,17 +105,24 @@ function hasDeadline(latestDeadlineMs: number | undefined): latestDeadlineMs is 
 /**
  * Stateful form of the policy: remembers when the veto started for each session incarnation
  * (keyed by the session object, so a re-created session starts a fresh window).
+ *
+ * The veto's clock is `now`: the daemon passes its session clock (#11162), so a wall-clock step
+ * neither ends a call's veto early nor stretches it, and the probe's deadlines must be on that same
+ * clock. Absent, the timer's wall clock.
  */
 export class UnsettledExecutionVeto {
   private readonly vetoedSince = new WeakMap<object, number>();
   private readonly probe: SessionExecutionProbe;
+  private readonly now: () => number;
 
   constructor(
     probe: SessionExecutionProbeInput,
-    private readonly timer: Timer,
+    timer: Timer,
     private readonly ceilingMs: number = UNSETTLED_EXECUTION_VETO_CEILING_MS,
+    now?: () => number,
   ) {
     this.probe = toSessionExecutionProbe(probe);
+    this.now = now ?? (() => timer.now());
   }
 
   judge(session: { readonly sessionId: string }): UnsettledExecutionVetoVerdict {
@@ -122,7 +130,7 @@ export class UnsettledExecutionVeto {
       this.vetoedSince.delete(session);
       return { kind: "clear" };
     }
-    const now = this.timer.now();
+    const now = this.now();
     const recorded = this.vetoedSince.get(session);
     const vetoedSince = recorded ?? now;
     if (recorded === undefined) {

@@ -46,7 +46,10 @@ import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "./deviceDisconnectHandler";
 import { DevicePool, type PooledDevice } from "./devicePool";
-import { OwnerDisconnectExecutionVeto } from "./ownerDisconnectRelease";
+import {
+  OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
+  OwnerDisconnectExecutionVeto,
+} from "./ownerDisconnectRelease";
 import type { SessionExecutionProbe } from "./unsettledExecutionVeto";
 import { isDeviceSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./poolConfig";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
@@ -754,6 +757,8 @@ export class Daemon {
     const ownerDisconnectExecutionVeto = new OwnerDisconnectExecutionVeto(
       this.sessionExecutionProbe(),
       this.timer,
+      OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
+      () => this.sessionManager.sessionNow(),
     );
     return DevicePool.create({
       sessionManager: this.sessionManager,
@@ -2864,12 +2869,14 @@ export class Daemon {
 
   /**
    * How the unsettled-execution veto sees a session's in-flight work: whether any runs, and the
-   * latest request deadline among them, which bounds the veto (#10712).
+   * latest request deadline among them, which bounds the veto (#10712). The veto judges on the
+   * session clock, so the deadlines are converted onto it (#11162).
    */
   private sessionExecutionProbe(): SessionExecutionProbe {
     return {
       hasActiveExecutions: (sessionId) => this.hasActiveSessionExecution(sessionId),
-      latestExecutionDeadlineMs: (sessionId) => this.latestSessionExecutionDeadlineMs(sessionId),
+      latestExecutionDeadlineMs: (sessionId) =>
+        this.latestSessionExecutionDeadlineMs(sessionId, { onSessionClock: true }),
     };
   }
 

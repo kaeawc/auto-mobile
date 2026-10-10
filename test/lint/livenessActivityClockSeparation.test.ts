@@ -142,7 +142,13 @@ const EXPIRY_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
  */
 const SESSION_CLOCK_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
   "src/daemon/sessionManager.ts": ["SessionManager.isSessionExpired"],
-  "src/daemon/ownerDisconnectRelease.ts": ["ownerDisconnectReleaseBlocker"],
+  // #11162: the release's deferral is a session-clock instant from the execution veto.
+  "src/daemon/ownerDisconnectRelease.ts": [
+    "ownerDisconnectReleaseBlocker",
+    "OwnerDisconnectRelease.afterAttempt",
+  ],
+  // #11162: the veto's start and bound are judged against session-clock request deadlines.
+  "src/daemon/unsettledExecutionVeto.ts": ["UnsettledExecutionVeto.judge"],
   "src/daemon/devicePool.ts": [
     "DevicePool.recoveryAssignmentError",
     "DevicePool.recoveryNow",

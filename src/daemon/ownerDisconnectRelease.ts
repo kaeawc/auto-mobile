@@ -46,7 +46,10 @@ export const OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS = UNSETTLED_EXECUTION_VE
 
 /** A release the pool deferred because in-flight work vetoed it. */
 export interface OwnerDisconnectReleaseDeferral {
-  /** When the veto stops holding; the release is retried then if no call end re-arms it first. */
+  /**
+   * When the veto stops holding, on the release's clock (the session clock, #11162); the release
+   * is retried then if no call end re-arms it first.
+   */
   deferredUntil: number;
 }
 
@@ -129,8 +132,10 @@ export class OwnerDisconnectExecutionVeto {
     executions: SessionExecutionProbeInput,
     timer: Timer,
     ceilingMs: number = OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
+    /** The veto's clock; the daemon passes its session clock (#11162). */
+    now?: () => number,
   ) {
-    this.veto = new UnsettledExecutionVeto(executions, timer, ceilingMs);
+    this.veto = new UnsettledExecutionVeto(executions, timer, ceilingMs, now);
   }
 
   /**
@@ -317,9 +322,7 @@ export class OwnerDisconnectRelease {
       return;
     }
     pending.deferred = true;
-    const delayMs = pending.rearmRequested
-      ? 0
-      : Math.max(0, deferral.deferredUntil - this.timer.now());
+    const delayMs = pending.rearmRequested ? 0 : Math.max(0, deferral.deferredUntil - this.now());
     pending.rearmRequested = false;
     logger.debug(
       `[OwnerDisconnectRelease] Release of session ${sessionId} was deferred; retrying when its ` +

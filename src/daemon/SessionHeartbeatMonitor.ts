@@ -224,7 +224,13 @@ export class SessionHeartbeatMonitor {
     this.forceStuckRelease = config.forceStuckRelease;
     this.maxCredibleStallMs = config.maxCredibleStallMs ?? MAX_CREDIBLE_DAEMON_STALL_MS;
     this.bunVersionOverride = config.bunVersion;
-    this.executionVeto = new UnsettledExecutionVeto(executions, timer);
+    // Judged on the session clock, like every other watermark here (#11162).
+    this.executionVeto = new UnsettledExecutionVeto(
+      executions,
+      timer,
+      UNSETTLED_EXECUTION_VETO_CEILING_MS,
+      () => this.now(),
+    );
   }
 
   start(): void {

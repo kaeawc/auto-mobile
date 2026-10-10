@@ -80,7 +80,12 @@ import {
 } from "./managedExecutionLiveness";
 import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
 import type { ManagedExecutionRelease } from "./managedSlots/managedExecutionRelease";
-import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
+import {
+  SESSION_OWNERSHIP_LOST_CODE,
+  SessionReleasedDuringCallError,
+} from "./sessionReleasedDuringCall";
+import { isExpiryReleaseReason } from "./releaseReasons";
+import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import type { ManagedConnectionScopes } from "./managedSlots/managedConnectionScope";
 import {
   DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
@@ -237,8 +242,16 @@ export type DaemonMethodResult = {
   releaseReason?: string;
   /** With `releaseReason`: an idle-window release (#10832). */
   idle?: true;
+  /** With a typed refusal `code`: whether retrying the same request can succeed. */
+  retryable?: boolean;
+  /** With a typed refusal `code`: what to do instead of retrying. */
+  nextAction?: typeof ACQUIRE_NEW_SESSION_NEXT_ACTION;
+  /** With a typed refusal `code`: its structured evidence. */
+  details?: Record<string, unknown>;
   code?:
     | typeof DAEMON_SESSION_NOT_FOUND_CODE
+    /** `daemon/registerSession` naming a UUID an idle or heartbeat release ended (#11367). */
+    | typeof SESSION_OWNERSHIP_LOST_CODE
     | typeof DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
     | typeof DAEMON_LIVENESS_OWNER_UNOWNED_CODE
     | typeof DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE
@@ -365,6 +378,40 @@ async function releaseDrainRefusal(
     : undefined;
 }
 
+/**
+ * The terminal refusal for registering a UUID that an idle or heartbeat release ended (#11367), or
+ * undefined when the UUID may register. Such a UUID never comes back, so admitting it as an
+ * observer would let a client heartbeat and re-authenticate streams under a dead session. The
+ * answer is the standard `session_ownership_lost` (not retryable, `acquire_new_session`) with the
+ * release reason and, for an idle-window release, `idle: true`. A never-issued UUID has no
+ * snapshot and still registers as an observer.
+ */
+function terminalSessionRegistrationRefusal(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+): DaemonMethodResult | undefined {
+  const release = manager.getTerminalReleaseSnapshot?.(sessionId);
+  if (!release?.terminal || !isExpiryReleaseReason(release.releaseReason)) {
+    return undefined;
+  }
+  const { releaseReason, ownerPid } = release;
+  return {
+    success: false,
+    code: SESSION_OWNERSHIP_LOST_CODE,
+    retryable: false,
+    nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
+    error:
+      `Session ${sessionId} is terminal after ${releaseReason} and cannot be registered again. ` +
+      "Acquire a new device with getAndroid or getApple, or register a new session UUID to observe.",
+    details: {
+      sessionUuid: sessionId,
+      reason: releaseReason,
+      ...(ownerPid === undefined ? {} : { ownerPid }),
+    },
+    ...releasedSessionNotFoundFields(releaseReason),
+  };
+}
+
 /** A session-clock instant as wall-clock epoch ms, for a report another process reads (#11105). */
 function reportedWallClock(
   manager: { sessionClockToWall?(sessionClockMs: number): number },
@@ -415,6 +462,10 @@ async function handleRegisterSession(
         expiresAtMs: reportedWallClock(manager, session.lastHeartbeat + session.heartbeatTimeoutMs),
       },
     };
+  }
+  const terminal = terminalSessionRegistrationRefusal(manager, sessionId);
+  if (terminal) {
+    return terminal;
   }
   const registry = state.getObserverSessionRegistry?.();
   if (!registry) {

@@ -2855,6 +2855,40 @@ export class SessionManager {
     return this.releaseSnapshotFromPersisted(sessionId, persisted, persisted.release_reason);
   }
 
+  /**
+   * The release a call naming a row past its deadline is refused with (#11361), or undefined when
+   * the row is not one: a session that ran out its idle or recovery window while no daemon was
+   * there to release it is gone for good, so the caller gets the typed terminal refusal (with the
+   * `expired` reason) rather than the untyped "not found" of a never-issued id. Only the answer is
+   * terminal: the row keeps its non-terminal `expired` reason and no in-memory fence is raised,
+   * so a name that may be issued again (a plan's) still can be.
+   */
+  private expiredReleaseFromPersisted(
+    sessionId: string,
+    persisted: DeviceSession,
+  ): SessionReleaseSnapshot | undefined {
+    if (persisted.release_reason && isTerminalReleaseReason(persisted.release_reason)) {
+      return undefined;
+    }
+    if (persisted.release_reason !== "expired" && persisted.expires_at_ms > this.sessionNow()) {
+      return undefined;
+    }
+    return {
+      ...this.releaseSnapshotFromPersisted(sessionId, persisted, "expired"),
+      terminal: true,
+    };
+  }
+
+  /** What a call naming a UUID that cannot be admitted is refused with: expired, or never issued. */
+  private unadmittedSessionError(
+    sessionId: string,
+    persisted: DeviceSession | undefined,
+    neverIssued: UnissuedSessionError,
+  ): Error {
+    const expired = persisted && this.expiredReleaseFromPersisted(sessionId, persisted);
+    return expired ? new TerminalSessionError(sessionId, expired) : neverIssued;
+  }
+
   private releaseSnapshotFromPersisted(
     sessionId: string,
     persisted: DeviceSession,
@@ -3386,7 +3420,7 @@ export class SessionManager {
     if (persisted && this.isReissuablePersistedSession(persisted)) {
       return undefined;
     }
-    throw unissuedSessionError;
+    throw this.unadmittedSessionError(sessionId, persisted, unissuedSessionError);
   }
 
   private async createUnseenSession(
@@ -3417,9 +3451,13 @@ export class SessionManager {
     // pool-less `if (!devicePool)` throw below stays as a secondary safety net.
     if (requireIssuedSession && !this.isReissuablePersistedSession(persisted)) {
       await this.terminalizeExpiredPersistedSession(persisted);
-      throw new UnissuedSessionError(
-        `Session ${sessionId} is not an active daemon session (not found). ` +
-          "Acquire a device with getAndroid or getApple before using its sessionUuid.",
+      throw this.unadmittedSessionError(
+        sessionId,
+        persisted,
+        new UnissuedSessionError(
+          `Session ${sessionId} is not an active daemon session (not found). ` +
+            "Acquire a device with getAndroid or getApple before using its sessionUuid.",
+        ),
       );
     }
     // Need to create new session - assign device from pool

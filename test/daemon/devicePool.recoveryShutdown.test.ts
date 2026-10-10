@@ -2249,9 +2249,12 @@ test("a quiet client loses device-restart recovery two minutes after its last ca
     await advanceSecondsUntil(timer, lastCallEndedAt + RESTART_TEST_IDLE_MS);
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await expect(
-      sessions.getOrCreateSession("session", pool, "android", undefined, true),
-    ).rejects.toThrow("is not an active daemon session");
+    // The lapsed recovery is the typed terminal refusal, not an untyped not-found (#11361).
+    const lapsed = await sessions
+      .getOrCreateSession("session", pool, "android", undefined, true)
+      .catch((error: unknown) => error);
+    expect(lapsed).toBeInstanceOf(TerminalSessionError);
+    expect((lapsed as TerminalSessionError).release.releaseReason).toBe("expired");
     expect(await persistence.getSession?.("session")).toMatchObject({
       status: "expired",
       release_reason: "expired",

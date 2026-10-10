@@ -1081,9 +1081,15 @@ describe("SessionManager", () => {
       };
 
       try {
-        await expect(
-          manager.getOrCreateSession("persisted-session", devicePool, "android", undefined, true),
-        ).rejects.toThrow("not found");
+        // Typed terminal refusal carrying the expired reason, not an untyped not-found (#11361).
+        const error = await manager
+          .getOrCreateSession("persisted-session", devicePool, "android", undefined, true)
+          .catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(TerminalSessionError);
+        expect((error as TerminalSessionError).release).toMatchObject({
+          releaseReason: "expired",
+          terminal: true,
+        });
         expect(assignments).toBe(0);
         expect(persisted).toMatchObject({
           status: "expired",

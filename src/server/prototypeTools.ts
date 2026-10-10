@@ -1050,6 +1050,27 @@ async function runMutation(
   }
 }
 
+/** The first send already reached the device, so a cancelled repair reports the partial result. */
+async function reuploadAfterSend(
+  target: PrototypeTarget,
+  assets: Parameters<typeof uploadPrototypeAssets>[1],
+  signal: AbortSignal | undefined,
+): Promise<Awaited<ReturnType<typeof uploadPrototypeAssets>>> {
+  try {
+    return await uploadPrototypeAssets(prototypeAssetPutClient(target.transport), assets, {
+      signal,
+      action: "resend",
+    });
+  } catch (error) {
+    logger.warn("[prototype] Asset re-upload failed after the show was sent", error);
+    return {
+      success: false,
+      uploaded: [],
+      error: signal?.aborted ? "the request was cancelled" : errorMessage(error),
+    };
+  }
+}
+
 interface MissingAssetRetry {
   result: PrototypeResult;
   repair: MissingAssetRepair;
@@ -1080,10 +1101,7 @@ async function retryMissingAssets(
   if (signal?.aborted) {
     return fail("the request was cancelled");
   }
-  const upload = await uploadPrototypeAssets(prototypeAssetPutClient(target.transport), again, {
-    signal,
-    action: "resend",
-  });
+  const upload = await reuploadAfterSend(target, again, signal);
   if (!upload.success) {
     return fail(upload.error ?? "upload failed");
   }
@@ -1354,72 +1372,84 @@ async function performMutation(
   const takenGeneration = beginShowGeneration(commits, scope, args.action, target);
   // Every display lookup and window-option check happens before staging; nothing is re-resolved
   // after dispatch. A refused show must not reset the event epoch of a prototype still on screen.
-  const ordering = { commits, scope, target, generation: takenGeneration };
-  const { resolved, generation } = await preflightWithGeneration(ordering, () =>
-    preflightMutation(
-      { inPlace, shownDisplayId: shown?.displayId },
-      prototypeTarget,
-      device,
-      args,
-      dependencies,
-      signal,
-    ),
-  );
-  // The device is sent resolved bounds anchors; host status keeps the authored spec's identity.
-  const sendArgs = resolved.spec ? { ...args, spec: resolved.spec } : args;
-  const comparable = await withdrawOnAbort(
-    ordering,
-    signal,
-    comparableForMutation(resolved, inPlace, device, args, dependencies),
-  );
-  // An in-place show names the display it replaces on: if the prototype is dismissed while assets
-  // stage, the runner then shows it fresh there instead of on the default display.
-  const displayId = inPlace ? shown?.displayId : resolved.displayId;
-  const stage = await withdrawOnAbort(
-    ordering,
-    signal,
-    stageUnlessRefused(resolved.failure, prototypeTarget, sendArgs, assetReaders, signal),
-  );
-  // A failed upload ends the call unsent, like a refusal: it must not supersede a valid show.
-  const sentGeneration = stage.failure ? undefined : generation;
-  if (stage.failure) {
-    withdrawGeneration(ordering);
-  }
-  const { result, warning } = await withdrawOnAbort(
-    ordering,
-    undefined,
-    sendPrototype(prototypeTarget, sendArgs, stage, signal, displayId, {
-      superseded: () => isSuperseded(commits, scope, target, sentGeneration),
-      beforeSend: async () => {
-        // Last abort check before the grant, the event epoch and the device send.
-        signal?.throwIfAborted();
-        await appLayerGrant(prototypeTarget, device, args, dependencies, signal)?.();
-        // Last step before dispatch: a refusal, a failed upload, a lost race or a failed grant
-        // must leave the event epoch of a prototype still on screen alone (#11394).
-        startFreshShowEvents(events, scope, source, { target, args, inPlace });
-      },
-    }),
-  );
-  retireObservation(dependencies.cacheInvalidator, device, result);
-  const placed = placedDisplay(args, shown, comparable, result.success);
-  const lastResult = isSuperseded(commits, scope, target, sentGeneration)
-    ? supersededResult(dependencies, { args, target, result, placed })
-    : commitMutation(dependencies, scope, source, {
-        args,
-        target,
-        result,
-        placed,
-        inPlace,
-        previouslyShown,
-      });
-  return {
-    success: result.success,
-    ...(result.error ? { error: result.error } : {}),
-    lastResult,
-    ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
-    ...anchorsOutput(resolved),
-    ...missingAssetsOutput(result, [warning, placed.warning], legacy),
+  const ordering: ShowOrdering = {
+    commits,
+    scope,
+    target,
+    generation: takenGeneration,
+    sent: false,
   };
+  try {
+    const generation = takenGeneration;
+    const resolved = await preflightWithGeneration(ordering, () =>
+      preflightMutation(
+        { inPlace, shownDisplayId: shown?.displayId },
+        prototypeTarget,
+        device,
+        args,
+        dependencies,
+        signal,
+      ),
+    );
+    // The device is sent resolved bounds anchors; host status keeps the authored spec's identity.
+    const sendArgs = resolved.spec ? { ...args, spec: resolved.spec } : args;
+    const comparable = await withdrawOnAbort(
+      ordering,
+      signal,
+      comparableForMutation(resolved, inPlace, device, args, dependencies),
+    );
+    // An in-place show names the display it replaces on: if the prototype is dismissed while assets
+    // stage, the runner then shows it fresh there instead of on the default display.
+    const displayId = inPlace ? shown?.displayId : resolved.displayId;
+    const stage = await withdrawOnAbort(
+      ordering,
+      signal,
+      stageUnlessRefused(resolved.failure, prototypeTarget, sendArgs, assetReaders, signal),
+    );
+    // A failed upload ends the call unsent, like a refusal: it must not supersede a valid show.
+    if (stage.failure) {
+      withdrawGeneration(ordering);
+    }
+    const { result, warning } = await withdrawOnAbort(
+      ordering,
+      undefined,
+      sendPrototype(prototypeTarget, sendArgs, stage, signal, displayId, {
+        superseded: () => isSuperseded(commits, scope, target, generation),
+        beforeSend: async () => {
+          // Last abort check before the grant, the event epoch and the device send.
+          signal?.throwIfAborted();
+          await appLayerGrant(prototypeTarget, device, args, dependencies, signal)?.();
+          // Last step before dispatch: a refusal, a failed upload, a lost race or a failed grant
+          // must leave the event epoch of a prototype still on screen alone (#11394).
+          startFreshShowEvents(events, scope, source, { target, args, inPlace });
+          // From here the show is issued to the device: it may be on screen, so it is never withdrawn.
+          ordering.sent = true;
+        },
+      }),
+    );
+    retireObservation(dependencies.cacheInvalidator, device, result);
+    const placed = placedDisplay(args, shown, comparable, result.success);
+    const lastResult = isSuperseded(commits, scope, target, generation)
+      ? supersededResult(dependencies, { args, target, result, placed })
+      : commitMutation(dependencies, scope, source, {
+          args,
+          target,
+          result,
+          placed,
+          inPlace,
+          previouslyShown,
+        });
+    return {
+      success: result.success,
+      ...(result.error ? { error: result.error } : {}),
+      lastResult,
+      ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
+      ...anchorsOutput(resolved),
+      ...missingAssetsOutput(result, [warning, placed.warning], legacy),
+    };
+  } finally {
+    settleGeneration(ordering);
+  }
 }
 
 /**
@@ -1465,12 +1495,21 @@ interface ShowOrdering {
   scope: PrototypeScope;
   target: { id?: string };
   generation: number | undefined;
+  /** Set once the show is issued to the device: a show that may be on screen is never withdrawn. */
+  sent: boolean;
 }
 
 function withdrawGeneration(ordering: ShowOrdering): void {
+  const { commits, scope, target, generation, sent } = ordering;
+  if (!sent && generation !== undefined && target.id !== undefined) {
+    commits.withdraw(scope.deviceId, target.id, generation);
+  }
+}
+
+function settleGeneration(ordering: ShowOrdering): void {
   const { commits, scope, target, generation } = ordering;
   if (generation !== undefined && target.id !== undefined) {
-    commits.withdraw(scope.deviceId, target.id, generation);
+    commits.settle(scope.deviceId, target.id, generation);
   }
 }
 
@@ -1501,13 +1540,12 @@ async function withdrawOnAbort<T>(
 async function preflightWithGeneration(
   ordering: ShowOrdering,
   preflight: () => Promise<AnchorStage & { displayId?: number }>,
-): Promise<{ resolved: AnchorStage & { displayId?: number }; generation: number | undefined }> {
+): Promise<AnchorStage & { displayId?: number }> {
   const resolved = await withdrawOnAbort(ordering, undefined, preflight());
   if (resolved.failure) {
     withdrawGeneration(ordering);
-    return { resolved, generation: undefined };
   }
-  return { resolved, generation: ordering.generation };
+  return resolved;
 }
 
 function beginShowGeneration(

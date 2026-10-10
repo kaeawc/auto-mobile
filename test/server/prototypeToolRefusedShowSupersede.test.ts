@@ -6,6 +6,7 @@ import type { BootedDevice } from "../../src/models";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
+import { FakePrototypeAssetFileReader } from "../fakes/FakePrototypeAssetFileReader";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -49,6 +50,13 @@ describe("a refused show must not supersede a valid in-flight show of the same i
       adbFactory: new FakeAdbClientFactory(adb),
       lastRenderedObservation: () => undefined,
       clock: timer,
+      assetFileReader: new FakePrototypeAssetFileReader().addFile(
+        "/img/logo.png",
+        Buffer.concat([
+          Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+          Buffer.alloc(4),
+        ]),
+      ),
     });
   });
   afterEach(() => {
@@ -88,6 +96,81 @@ describe("a refused show must not supersede a valid in-flight show of the same i
     // supersedes the older one: the older show must still be sent.
     expect(olderPayload.error).toBeUndefined();
     expect(olderPayload.success).toBe(true);
+    expect(client.getPrototypeHistory()).toHaveLength(1);
+  });
+
+  /** Stalls the first n adb display lookups; releases[i] resumes lookup i. */
+  function stallLookups(count: number): { started: Promise<void>[]; releases: Array<() => void> } {
+    const lookup = adb.executeCommand.bind(adb);
+    const releases: Array<() => void> = [];
+    const notifies: Array<() => void> = [];
+    const started = Array.from(
+      { length: count },
+      (_, index) => new Promise<void>((resolve) => (notifies[index] = resolve)),
+    );
+    let lookups = 0;
+    adb.executeCommand = async (...args) => {
+      const index = lookups++;
+      if (index < count) {
+        await new Promise<void>((resolve) => {
+          releases[index] = resolve;
+          notifies[index]();
+        });
+      }
+      return lookup(...args);
+    };
+    return { started, releases };
+  }
+
+  test("a late refusal does not overwrite a newer valid show's host state", async () => {
+    const { started, releases } = stallLookups(2);
+    const first = call({ action: "show", spec, display: "inner" });
+    await started[0];
+    const refused = call({ action: "show", spec, display: "inner", appearance: "dark" });
+    await started[1];
+    const newest = await call({ action: "show", spec });
+    expect(newest.success).toBe(true);
+    const before = await call({ action: "status" });
+    releases[1]();
+    const refusedPayload = await refused;
+    expect(refusedPayload.success).toBe(false);
+    const after = await call({ action: "status" });
+    expect(after.lastResult).toEqual(before.lastResult);
+    expect(after.prototypes).toEqual(before.prototypes);
+    expect(after.lastResult?.success).toBe(true);
+    releases[0]();
+    const firstPayload = await first;
+    expect(firstPayload.success).toBe(false);
+    expect(firstPayload.error).toContain("newer show");
+    expect(client.getPrototypeHistory()).toHaveLength(1);
+  });
+
+  test("a show already sent is not withdrawn when its asset repair is cancelled", async () => {
+    const { started, releases } = stallLookups(1);
+    const older = call({ action: "show", spec, display: "inner" });
+    await started[0];
+    client.setPrototypeResult({ success: true, missingAssets: ["logo"] });
+    const putAsset = client.requestPutPrototypeAsset.bind(client);
+    let puts = 0;
+    client.requestPutPrototypeAsset = async (asset, options) => {
+      puts += 1;
+      if (puts === 2) {
+        throw new Error("aborted during repair");
+      }
+      return putAsset(asset, options);
+    };
+    const newer = await call({
+      action: "show",
+      spec: { ...spec, root: { type: "image", asset: "logo" } },
+      assets: [{ id: "logo", path: "/img/logo.png" }],
+    });
+    expect(newer.success).toBe(true);
+    expect(puts).toBe(2);
+    expect(client.getPrototypeHistory()).toHaveLength(1);
+    releases[0]();
+    const olderPayload = await older;
+    expect(olderPayload.success).toBe(false);
+    expect(olderPayload.error).toContain("newer show");
     expect(client.getPrototypeHistory()).toHaveLength(1);
   });
 });

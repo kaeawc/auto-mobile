@@ -5,6 +5,7 @@ import type { VideoRecordingConfigInput } from "../models";
 import {
   MANAGED_SLOT_CONFIG_ENV,
   MANAGED_SLOT_CONFIG_FLAG,
+  ManagedSlotConfigError,
   resolveManagedSlotConfig,
 } from "../models/managedSlotConfig";
 import type { PlanExecutionLockScope } from "../utils/ServerConfig";
@@ -544,8 +545,10 @@ function parseManagedSlotConfigOption(
   if (arg === MANAGED_SLOT_CONFIG_FLAG) {
     const value = args[i + 1]?.trim();
     if (!value || (value.startsWith("--") && !value.startsWith("{"))) {
-      log.warn(`${MANAGED_SLOT_CONFIG_FLAG} requires inline JSON or a file path`);
-      return i;
+      throw new ManagedSlotConfigError(
+        "managed_slot_config_invalid",
+        `${MANAGED_SLOT_CONFIG_FLAG} requires inline JSON or a file path`,
+      );
     }
     options.managedSlotConfigValue = value;
     return i + 1;

@@ -228,11 +228,12 @@ export function parseManagedSlotConfigSource(
   let json: unknown;
   try {
     json = JSON.parse(text);
-  } catch (error) {
+  } catch {
+    // The engine's SyntaxError text quotes a snippet of the (possibly secret-bearing) input, and
+    // the same snippet rides on `cause`; report only the source kind (#11208).
     throw new ManagedSlotConfigError(
       "managed_slot_config_invalid",
-      `managed slot config is not valid JSON: ${errorMessage(error)}`,
-      { cause: error },
+      `managed slot config ${trimmed.startsWith("{") ? "inline value" : `file ${trimmed}`} is not valid JSON`,
     );
   }
   return parseManagedSlotConfig(json);

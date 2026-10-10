@@ -296,12 +296,61 @@ private fun Color.hueAndSaturation(): Pair<Float, Float> {
   return sector * 60f to saturation
 }
 
-/** Translucent host dismiss colours for a scheme: quiet, but readable over any prototype. */
+/** Host chrome colours: a background with the content (text, ripple) drawn over it. */
 internal data class OverlayDismissColors(val background: Color, val content: Color)
 
-internal fun overlayDismissColors(dark: Boolean): OverlayDismissColors =
-  if (dark) OverlayDismissColors(Color(0x99000000), Color(0xFFE6E6E6))
-  else OverlayDismissColors(Color(0x99FFFFFF), Color(0xFF1A1A1A))
+/** The dismiss bar's translucency: quiet, but readable over any prototype. */
+internal const val OVERLAY_DISMISS_BAR_ALPHA = 0.6f
+
+/** Fallback scrim alphas, used when the spec authors no scrim colour. */
+internal const val OVERLAY_SHEET_SCRIM_ALPHA = 0.4f
+internal const val OVERLAY_DIALOG_SCRIM_ALPHA = 0.32f
+
+/** The dismiss bar: `surfaceContainerHigh` at [OVERLAY_DISMISS_BAR_ALPHA] over `onSurface`. */
+internal fun overlayDismissColors(scheme: ColorScheme): OverlayDismissColors =
+  OverlayDismissColors(
+    scheme.surfaceContainerHigh.copy(alpha = OVERLAY_DISMISS_BAR_ALPHA),
+    scheme.onSurface,
+  )
+
+/** The persistent Close control: opaque, so authored content cannot show through it. */
+internal fun overlayCloseColors(scheme: ColorScheme): OverlayDismissColors =
+  OverlayDismissColors(scheme.surfaceContainerHigh, scheme.onSurface)
+
+/** The sheet drag handle: the M3 default role. */
+internal fun overlayHandleColor(scheme: ColorScheme): Color = scheme.onSurfaceVariant
+
+internal fun overlaySheetScrimFallback(scheme: ColorScheme): Color =
+  scheme.scrim.copy(alpha = OVERLAY_SHEET_SCRIM_ALPHA)
+
+internal fun overlayDialogScrimFallback(scheme: ColorScheme): Color =
+  scheme.scrim.copy(alpha = OVERLAY_DIALOG_SCRIM_ALPHA)
+
+/** Placeholder box and its glyph, for an image, icon or nav item with nothing to draw. */
+internal fun overlayPlaceholderColor(scheme: ColorScheme): Color = scheme.surfaceVariant
+
+internal fun overlayPlaceholderContentColor(scheme: ColorScheme): Color = scheme.onSurfaceVariant
+
+/**
+ * Host chrome sits outside the spec content, so it needs the spec's theme itself: the resolved
+ * [OverlayTheme] when the request carries the spec, else the baseline scheme for [dark].
+ */
+@Composable
+internal fun OverlayHostTheme(
+  root: OverlayRenderNode?,
+  theme: OverlaySpecTheme?,
+  dark: Boolean,
+  content: @Composable () -> Unit,
+) {
+  if (root != null) OverlayTheme(root, theme, content)
+  else
+    MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
+      CompositionLocalProvider(
+        LocalContentColor provides MaterialTheme.colorScheme.onSurface,
+        content = content,
+      )
+    }
+}
 
 @Composable
 internal fun OverlayTheme(

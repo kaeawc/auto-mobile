@@ -144,6 +144,11 @@ if [[ "$1" == */scripts/lib/runner-calibration.ts ]]; then
     printf '%s\t%s\t25\n' "$4" "${STUB_PROBE_MS:-10}" >> "$3"
     exit 0
   fi
+  if [[ "$2" == measure ]]; then
+    # The timing gate's per-recheck probe: a quiet runner unless a test injects one.
+    printf '%s\n' "${STUB_MEASURE_SLOWDOWN:-1.00}"
+    exit 0
+  fi
   exec "$REAL_BUN" "$@"
 fi
 printf '%s\n' "$*" >> "$BUN_ARGS_FILE"
@@ -1548,6 +1553,122 @@ EOF
     "$BATS_TEST_TMPDIR/timings.recheck.d/summary.txt"
 }
 
+# Contention-aware recheck: the probe is injected through
+# BUN_TEST_TIMING_PROBE_COMMAND, a script that replays PROBE_SEQ (one slowdown
+# per call, two calls per isolated attempt) and then reports a quiet 1.00.
+install_fake_probe() {
+  PROBE_SEQ="$1"
+  PROBE_INDEX="$BATS_TEST_TMPDIR/probe-index"
+  : > "$PROBE_INDEX"
+  cat > "$BATS_TEST_TMPDIR/fake-probe.sh" <<'EOF'
+#!/usr/bin/env bash
+index="$(cat "$PROBE_INDEX")"
+index="${index:-0}"
+read -r -a values <<< "$PROBE_SEQ"
+printf '%s\n' "$((index + 1))" > "$PROBE_INDEX"
+printf '%s\n' "${values[$index]:-1.00}"
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/fake-probe.sh"
+  export PROBE_SEQ PROBE_INDEX
+  export BUN_TEST_TIMING_PROBE_COMMAND="$BATS_TEST_TMPDIR/fake-probe.sh"
+}
+
+@test "timing gate still fails a genuinely slow test on a quiet runner and reports the probe" {
+  seed_outlier_report
+  install_fake_probe ""
+  run_timing_gate_with_recheck_times "0.150 0.150 0.150"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Test exceeded 100ms: suite.slow (median 150.00ms of 3 isolated runs)"* ]]
+  [[ "$output" == *"runner probe slowdown 1.00x after 1 attempt(s) (quiet)"* ]]
+  grep -Fq -- '- Runner probe during re-runs: 1.00x, quiet' "$report_dir/unit-timing-budget-summary.md"
+}
+
+@test "timing gate retries a contended recheck run and keeps the quiet attempt" {
+  seed_outlier_report
+  # Attempt 1 of run 1 is contended and slow (150ms); its retry is quiet and 20ms.
+  install_fake_probe "3.00 3.00"
+  run_timing_gate_with_recheck_times "0.150 0.020 0.020 0.020"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"runner contended (probe 3.00x before, 3.00x after; limit 1.5x); attempt 1 of 3"* ]]
+  [[ "$output" == *"Recheck run 1/3 of "*"runner probe slowdown 1.00x after 2 attempt(s) (quiet)"* ]]
+  [[ "$output" == *"Recheck cleared suite.slow"* ]]
+}
+
+@test "timing gate passes a 20ms test even when every probe reads contended" {
+  seed_outlier_report
+  install_fake_probe "4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00"
+  run_timing_gate_with_recheck_times "0.020 0.020 0.020 0.020 0.020 0.020 0.020 0.020 0.020"
+  [ "$status" -eq 0 ]
+  # An under-budget sample is conclusive however contended the runner was: no retry.
+  [[ "$output" == *"runner probe slowdown 4.00x after 1 attempt(s) (contended)"* ]]
+  [[ "$output" != *"attempt 1 of"* ]]
+  grep -Fq -- '- Runner probe during re-runs: 4.00x, contended' "$report_dir/unit-timing-budget-summary.md"
+}
+
+@test "timing gate keeps the least-contended attempt, not the first or the fastest" {
+  seed_outlier_report
+  # Run 1 attempts: 130ms at 3.0x, 110ms at 2.0x (least contended), 90ms at 4.0x
+  # (fastest, most contended). Runs 2 and 3 are quiet: 110ms and 20ms.
+  install_fake_probe "3.00 3.00 2.00 2.00 4.00 4.00"
+  run_timing_gate_with_recheck_times "0.130 0.110 0.090 0.110 0.020"
+  [ "$status" -eq 1 ]
+  grep -Fq 're-run samples: 110.00ms / 110.00ms / 20.00ms | median: 110.00ms' \
+    "$BATS_TEST_TMPDIR/timings.recheck.d/failures.txt"
+  [[ "$output" == *"runner probe slowdown 2.00x after 3 attempt(s) (contended)"* ]]
+}
+
+@test "timing gate retry is what clears a contended slow first attempt" {
+  seed_outlier_report
+  # Runs 1 and 2 are each 150ms on a contended first attempt and 20ms on the
+  # quiet retry. Without the retry the median would be 150ms and fail.
+  install_fake_probe "3.00 3.00 1.00 1.00 3.00 3.00 1.00 1.00"
+  run_timing_gate_with_recheck_times "0.150 0.020 0.150 0.020 0.020"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Recheck cleared suite.slow"* ]]
+}
+
+@test "timing gate spends no contention retries when the recheck budget is nearly exhausted" {
+  seed_outlier_report
+  install_fake_probe "4.00 4.00 4.00 4.00 4.00 4.00"
+  BUN_TEST_TIMING_FAKE_ELAPSED_SECONDS=599 run_timing_gate_with_recheck_times "0.150 0.150 0.150"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no contention retry"* ]]
+  [[ "$output" == *"runner probe slowdown 4.00x after 1 attempt(s) (contended)"* ]]
+  # Still verified: a median verdict, not "could not verify".
+  [[ "$output" == *"Test exceeded 100ms: suite.slow (median 150.00ms of 3 isolated runs)"* ]]
+  [[ "$output" != *"Could not verify"* ]]
+}
+
+@test "timing gate does not forgive a 150ms test because the probe reads contended" {
+  seed_outlier_report
+  install_fake_probe "4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00"
+  run_timing_gate_with_recheck_times "0.150 0.150 0.150 0.150 0.150 0.150 0.150 0.150 0.150"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Test exceeded 100ms: suite.slow (median 150.00ms of 3 isolated runs)"* ]]
+  [[ "$output" == *"(contended)"* ]]
+}
+
+@test "timing gate bounds contention retries with BUN_TEST_TIMING_CONTENTION_RETRIES=0" {
+  seed_outlier_report
+  install_fake_probe "4.00 4.00 4.00 4.00 4.00 4.00"
+  BUN_TEST_TIMING_CONTENTION_RETRIES=0 run_timing_gate_with_recheck_times "0.150 0.150 0.150"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"runner probe slowdown 4.00x after 1 attempt(s) (contended)"* ]]
+  [[ "$output" == *"attempt 1 of 1."* ]]
+  [[ "$output" != *"attempt 2 of"* ]]
+}
+
+@test "timing gate marks a shard with many over-budget first samples as contended" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  [[ "$output" != *"Runner contended"* ]]
+  rm -f "$STUB_RECHECK_INDEX"
+  BUN_TEST_TIMING_CONTENDED_SHARD_MIN=1 run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Runner contended"*"shard-0: 1 over-budget first samples"* ]]
+  grep -Fq 'Runner contended' "$report_dir/unit-timing-budget-summary.md"
+}
+
 @test "timing gate fails a breaching median even when stdout writes fail" {
   seed_outlier_report
   run_timing_gate_with_recheck_times "0.010 0.150 0.160" closed
@@ -2235,6 +2356,8 @@ printf '%s\n' "$*" > "$STUB_TIMEOUT_ARGS"
 exit 124
 EOF
   chmod +x "$STUB_BIN/timeout"
+  # The stubbed timeout would otherwise also wrap the real probe invocation.
+  install_fake_probe ""
   run env -u AUTOMOBILE_FORCE_PORTABLE_TIMEOUT PATH="$STUB_BIN:$PATH" \
     STUB_TIMEOUT_ARGS="$BATS_TEST_TMPDIR/timeout-args" \
     BUN_TEST_TIMING_BASE_REF=origin/main BUN_TEST_TIMING_REPORT_DIR="$report_dir" \

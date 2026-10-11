@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import type { AcquisitionReceipt } from "../../../src/daemon/acquisitionReceipt";
-import { DevicePool } from "../../../src/daemon/devicePool";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import type { BootedDevice } from "../../../src/models";
-import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
-import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
-import { FakeDeviceManager } from "../../fakes/FakeDeviceManager";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
+import type { AcquisitionReceipt } from "../../src/daemon/acquisitionReceipt";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SESSION_CREATE_WAIT_TIMEOUT_MS, SessionManager } from "../../src/daemon/sessionManager";
+import type { BootedDevice } from "../../src/models";
+import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Hunt (session-rebind-1, cell 5). #11593: a rebind whose answer never reached its client moves
 // the session back to the device it held. The documented exception is a previous device another
@@ -89,6 +89,9 @@ test("an undelivered rebind is moved back once its own old-device restore settle
   );
   // Control: the session moved, and the old device is quarantined only by this rebind's own retry.
   expect(receipt.rebound).toMatchObject({ deviceId: AVD_B, fromDeviceId: AVD_A });
+  expect(restoreAttempts).toBe(0);
+  timer.advanceTime(SESSION_CREATE_WAIT_TIMEOUT_MS);
+  await spin();
   expect(restoreAttempts).toBe(1);
   expect(sessions.hasDeviceCleanupInProgress(AVD_A)).toBe(true);
   expect(sessions.getSessionForDevice(AVD_A)).toBeNull();
@@ -104,6 +107,7 @@ test("an undelivered rebind is moved back once its own old-device restore settle
   await spin();
 
   expect(restoreAttempts).toBe(2);
+  expect(sessions.getKeepScreenAwake("held")).toBeUndefined();
   expect(sessions.hasDeviceCleanupInProgress(AVD_A)).toBe(false);
   // Nobody else took the old device, yet the session its client believes is on it stays moved.
   expect(sessions.getAllSessions().map((session) => session.sessionId)).toEqual(["held"]);

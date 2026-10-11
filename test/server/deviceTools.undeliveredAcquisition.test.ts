@@ -825,9 +825,8 @@ describe.each([
           displayPin: "main",
           deviceReadiness: "automationReady",
         });
-        // An override the session applied. A rebind takes its overrides back off the device it
-        // leaves, so a session that was moved and moved back must not still claim one (the next
-        // call applies it again); a selection cancelled before it moved anything leaves it be.
+        // An override the session applied stays physically in effect through an undone rebind;
+        // delivery owns the old-device restore, so every cancellation point retains its record.
         const keepScreenAwake = { applied: true, method: "svc" as const, svcWasEnabled: false };
         sessions.updateSessionCache(sessionUuid!, { keepScreenAwake });
         const controller = new AbortController();
@@ -847,10 +846,7 @@ describe.each([
         // tool enablement lives with the session id and goes only when the session is released.
         expect(structuredClone(sessions.getSession(sessionUuid!))).toEqual({
           ...before!,
-          cacheData:
-            point === "before the bind"
-              ? { ...before!.cacheData, keepScreenAwake }
-              : before!.cacheData,
+          cacheData: { ...before!.cacheData, keepScreenAwake },
         });
         expect(released).toEqual([]);
         expect(await persistence.getSession!(sessionUuid!)).toMatchObject({

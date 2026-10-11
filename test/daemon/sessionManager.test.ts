@@ -375,10 +375,13 @@ test("a retry during an unpublished same-UUID resume leaves the new row active",
     await expect(
       manager.releaseSession("racing-session", "allocation-rollback"),
     ).resolves.toBeNull();
-    expect(pending.has("racing-session")).toBe(false);
+    // Still pending while the resume is in flight (#11557): a resume that failed would leave the
+    // row to this release. Publishing ends it.
+    expect(pending.has("racing-session")).toBe(true);
     expect((await persistence.getSession?.("racing-session"))?.status).toBe("active");
     finishUpsert.resolve();
     await expect(resume).resolves.toMatchObject({ assignedDevice: "emulator-new" });
+    expect(pending.has("racing-session")).toBe(false);
     expect(await persistence.getSession?.("racing-session")).toMatchObject({
       status: "active",
       release_reason: null,

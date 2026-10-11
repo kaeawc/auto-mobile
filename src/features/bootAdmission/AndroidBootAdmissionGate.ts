@@ -97,13 +97,30 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
       // admitBootNow returns without refusing only after calling `admit`.
       throw new ActionableError(`Boot admission for AVD '${request.avdName}' ended without a slot`);
     }
+    const handedOffSerials = new Set<string>();
+    let released = false;
     return {
-      release: ledgerAdmission.release,
-      handOff: (deviceId) => {
+      release: () => {
+        released = true;
+        ledgerAdmission.release();
+        // A boot that ended before adb ever listed it never held its serial: an emulator
+        // started elsewhere that takes the serial later is not ours.
+        for (const serial of handedOffSerials) {
+          if (!this.listedStartedSerials.has(serial)) {
+            this.startedSerials.delete(serial);
+          }
+        }
+        handedOffSerials.clear();
+      },
+      handOff: (deviceId, processId) => {
+        if (released) {
+          return;
+        }
         if (deviceId !== undefined) {
           this.startedSerials.add(deviceId);
+          handedOffSerials.add(deviceId);
         }
-        ledgerAdmission.handOff(deviceId, deadlineMs);
+        ledgerAdmission.handOff(deviceId, deadlineMs, processId);
       },
     };
   }
@@ -126,8 +143,8 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
   }
 
   /**
-   * A sample inside a ledger window, as `admit` takes it: the window dates the process listing,
-   * so only a boot launched before it is matched to one of the listed processes (#11564).
+   * A sample inside a ledger window, as `admit` takes it: a boot that ends while the sample is
+   * being taken still counts for it (#11465, #11537).
    */
   private async sampleInWindow(options: {
     signal?: AbortSignal;
@@ -209,15 +226,15 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
    *
    * `effective` is the larger of two views of the same load, each complete on its own:
    * the adb listing plus every admitted boot it does not show, and the process table plus
-   * every admitted boot that has no process in it yet. The process table carries no serial,
-   * so a process is matched to an admitted boot by count alone, and only to one launched
-   * before the sample began; any process beyond those is another emulator and is added.
-   * Taking the plain process count instead lost an external emulator adb had not listed
-   * whenever an admitted boot had not spawned yet (#11564).
+   * every admitted boot whose own process is not in it. A boot is matched to a process by the
+   * pid it was handed off with (the launcher this daemon spawned, which becomes the qemu
+   * process or is its parent), never by count: a process nobody admitted is another emulator
+   * and is added. Taking the plain process count instead lost an external emulator adb had not
+   * listed whenever an admitted boot had no process yet (#11564).
    *
-   * "Launched" is the hand-off, the only launch signal an admission carries, so the emulator
-   * client hands off the moment the process exists (`spawnUnderBootAdmission`). A boot whose
-   * process runs but which is not handed off counts twice until it is: fail closed.
+   * A boot handed off without a pid, or sampled without process ids, counts twice while its
+   * process runs unlisted: fail closed. The emulator client hands off with the pid the moment
+   * the process exists (`spawnUnderBootAdmission`).
    */
   private count(
     sample: AndroidCapacitySample,
@@ -229,12 +246,22 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
   } {
     const listed = sample.emulatorSerials.length;
     const processes = sample.emulatorProcessRssBytes?.length ?? 0;
-    const inFlight = this.ledger.inFlight(new Set(sample.emulatorSerials), undefined, window);
-    const withoutListedProcess = inFlight.count - inFlight.launchedBeforeSample;
+    const listedProcessIds = new Set(
+      (sample.emulatorProcessIds ?? []).flatMap((ids) => [ids.pid, ids.ppid]),
+    );
+    const inFlight = this.ledger.inFlight(
+      new Set(sample.emulatorSerials),
+      undefined,
+      window,
+      listedProcessIds,
+    );
     return {
       booted: Math.max(listed, processes),
       inFlight: inFlight.count,
-      effective: Math.max(listed + inFlight.count, processes + withoutListedProcess),
+      effective: Math.max(
+        listed + inFlight.count,
+        processes + inFlight.count - inFlight.withListedProcess,
+      ),
     };
   }
 

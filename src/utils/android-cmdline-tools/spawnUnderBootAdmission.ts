@@ -1,7 +1,8 @@
 import type { BootAdmission } from "../../models/BootAdmission";
 
-/** What holding an admission needs from a spawned device process: its exit. */
+/** What holding an admission needs from a spawned device process: its pid and its exit. */
 export interface ExitingProcess {
+  readonly pid?: number;
   once(event: "exit", listener: () => void): unknown;
 }
 
@@ -19,9 +20,10 @@ export type OnAdmittedSpawn<P extends ExitingProcess> = (
  *
  * The slot is handed off the moment the child process exists, not when the spawn settles: startup
  * validation takes up to 5 s, and for that long a process table shows the emulator while its
- * admission still read as "not launched", so the gate counted one boot twice and refused a
- * parallel cold boot that fit (#11564). The hand-off is repeated when the spawn settles, which
- * supplies the serial if only the settled launch knows it.
+ * admission still read as a boot with no process, so the gate counted one boot twice and refused
+ * a parallel cold boot that fit (#11564). The hand-off carries the child's pid, which is how the
+ * gate tells this boot's process from an emulator started elsewhere. It is repeated when the
+ * spawn settles, which supplies the serial if only the settled launch knows it.
  *
  * The slot is freed, once, when the spawn fails, when it settles without a process (a duplicate of
  * an emulator started elsewhere), or when the process exits, before or after validation.
@@ -38,10 +40,10 @@ export async function spawnUnderBootAdmission<
   try {
     const launch = await spawn((process, reservedDeviceId) => {
       process.once("exit", () => admission.release());
-      admission.handOff(reservedDeviceId ?? fallbackDeviceId);
+      admission.handOff(reservedDeviceId ?? fallbackDeviceId, process.pid);
     });
     if (launch.process) {
-      admission.handOff(launch.reservedDeviceId ?? fallbackDeviceId);
+      admission.handOff(launch.reservedDeviceId ?? fallbackDeviceId, launch.process.pid);
     } else {
       admission.release();
     }

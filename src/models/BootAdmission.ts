@@ -10,9 +10,11 @@ export interface BootAdmission {
    * The device process exists and is booting as `deviceId` (when known). Call it as soon as the
    * process is spawned: until then the gate counts the boot as one with no process yet. The
    * gate keeps counting it until the platform listing shows it, the gate's boot deadline passes,
-   * or {@link release} is called, whichever is first.
+   * or {@link release} is called, whichever is first. `processId` is the pid of the spawned
+   * process: with it the gate recognizes the boot in a process listing instead of counting the
+   * process as one more device.
    */
-  handOff(deviceId: string | undefined): void;
+  handOff(deviceId: string | undefined, processId?: number): void;
 }
 
 /** Takes an admission before a cold boot; rejects at once with `BootCapacityExhaustedError` when the platform is at its limit. */

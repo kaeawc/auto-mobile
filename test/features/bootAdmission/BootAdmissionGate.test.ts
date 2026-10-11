@@ -109,30 +109,50 @@ describe("BootAdmissionLedger", () => {
     expect(ledger.inFlightCount(new Set(["emulator-5554"]), undefined, window)).toBe(0);
   });
 
-  // #11564: only a boot launched before the sample began can be one of the processes it lists.
-  test("splits in-flight boots by whether they were handed off before the sample began", () => {
+  // #11564: a boot is one of the listed processes only when the listing shows its own pid.
+  test("splits in-flight boots by whether the listing shows the process they were handed off with", () => {
     const ledger = new BootAdmissionLedger(new FakeTimer());
-    const before = ledger.admit();
-    before.handOff("emulator-5554", 1_000);
-    const during = ledger.admit();
+    const running = ledger.admit();
+    running.handOff("emulator-5554", 1_000, 501);
+    const launcherOnly = ledger.admit();
+    launcherOnly.handOff("emulator-5556", 1_000, 502);
+    ledger.admit().handOff("emulator-5558", 1_000); // no pid known
     ledger.admit(); // never launched
     const window = ledger.beginSample();
-    during.handOff("emulator-5556", 1_000);
-    // Both leave the ledger inside the window: each keeps what it was when the window opened.
-    before.release();
-    during.release();
+    // Both leave the ledger inside the window and keep the pid they had.
+    running.release();
+    launcherOnly.release();
     window.close();
+    const listedProcessIds = new Set([501, 900]);
 
+    expect(ledger.inFlight(new Set(), undefined, window, listedProcessIds)).toEqual({
+      count: 4,
+      withListedProcess: 1,
+    });
+    expect(
+      ledger.inFlight(new Set(["emulator-5554"]), undefined, window, listedProcessIds),
+    ).toEqual({ count: 3, withListedProcess: 0 });
+    // Without listed process ids no boot is matched to a process.
     expect(ledger.inFlight(new Set(), undefined, window)).toEqual({
-      count: 3,
-      launchedBeforeSample: 1,
+      count: 4,
+      withListedProcess: 0,
     });
-    expect(ledger.inFlight(new Set(["emulator-5554"]), undefined, window)).toEqual({
-      count: 2,
-      launchedBeforeSample: 0,
+  });
+
+  test("a repeated hand-off keeps the process id and serial the first one gave", () => {
+    const ledger = new BootAdmissionLedger(new FakeTimer());
+    const admission = ledger.admit();
+    admission.handOff("emulator-5554", 1_000, 501);
+    admission.handOff(undefined, 1_000);
+
+    expect(ledger.inFlight(new Set(), undefined, undefined, new Set([501]))).toEqual({
+      count: 1,
+      withListedProcess: 1,
     });
-    // Nothing dates a listing taken outside a window, so no boot is matched to a process.
-    expect(ledger.inFlight(new Set())).toEqual({ count: 1, launchedBeforeSample: 0 });
+    expect(ledger.inFlightCount(new Set(["emulator-5554"]))).toBe(0);
+    // Gone from the ledger: a late hand-off does not bring it back.
+    admission.handOff("emulator-5554", 1_000, 501);
+    expect(ledger.inFlightCount(new Set())).toBe(0);
   });
 });
 
@@ -172,6 +192,10 @@ describe("CommandAndroidCapacitySource", () => {
     expect(await source.sample()).toEqual({
       emulatorSerials: ["emulator-5554"],
       emulatorProcessRssBytes: [3145728 * 1024, 2097152 * 1024],
+      emulatorProcessIds: [
+        { pid: 101, ppid: 1 },
+        { pid: 103, ppid: 1 },
+      ],
       host: { totalMemoryBytes: 32 * GIB, cpuCount: 8 },
       errors: [],
     });

@@ -206,14 +206,19 @@ export function assertBootCapacityGranted<D extends { outcome: string }>(
 
 interface LedgerEntry {
   deviceId?: string;
+  /** Pid of the process spawned for the boot, once handed off with one. */
+  processId?: number;
   /** Set once the boot was handed off: the entry ends when the device is visible or this passes. */
   handedOffUntilMs?: number;
 }
 
-/** A ledger entry's handle; `handOff` takes the absolute end of the hand-off window. */
+/**
+ * A ledger entry's handle; `handOff` takes the absolute end of the hand-off window and may be
+ * repeated, a later call adding the device id or process id the earlier one lacked.
+ */
 export interface LedgerAdmission {
   release(): void;
-  handOff(deviceId: string | undefined, untilMs: number): void;
+  handOff(deviceId: string | undefined, untilMs: number, processId?: number): void;
 }
 
 /**
@@ -225,20 +230,10 @@ export interface LedgerSampleWindow {
   close(): void;
 }
 
-/** An entry that left the ledger while a sample window was open. */
-interface EndedEntry extends LedgerEntry {
-  /** The boot was handed off before the window opened (see {@link InFlightBoots}). */
-  launchedBeforeSample: boolean;
-}
-
 class SampleWindow implements LedgerSampleWindow {
-  readonly ended: EndedEntry[] = [];
+  readonly ended: LedgerEntry[] = [];
 
-  constructor(
-    /** Boots already handed off when the sample began: its process listing can show them. */
-    readonly launchedAtOpen: ReadonlySet<symbol>,
-    private readonly onClose: (window: SampleWindow) => void,
-  ) {}
+  constructor(private readonly onClose: (window: SampleWindow) => void) {}
 
   close(): void {
     this.onClose(this);
@@ -249,12 +244,13 @@ class SampleWindow implements LedgerSampleWindow {
 export interface InFlightBoots {
   count: number;
   /**
-   * How many of `count` were handed off (their device process launched) before the sample began,
-   * so a process listing taken by that sample may already include them. A boot handed off later
-   * is not in it: the listing can predate the launch, and whatever process it shows is another
-   * device's (#11564). Zero without a sample window: nothing dates the listing then.
+   * How many of `count` have their own process in the sample's process listing: the boot was
+   * handed off with a process id and the listing shows that process. Any other admitted boot is
+   * not in the listing, whatever it shows: not spawned yet, spawned after the listing was read,
+   * or spawned as a launcher that is not the counted process yet (#11564). Zero when no listed
+   * process ids are given.
    */
-  launchedBeforeSample: number;
+  withListedProcess: number;
 }
 
 /**
@@ -273,11 +269,12 @@ export class BootAdmissionLedger {
     this.entries.set(token, { deviceId });
     return {
       release: () => this.end(token),
-      handOff: (handedOffDeviceId, untilMs) => {
+      handOff: (handedOffDeviceId, untilMs, processId) => {
         const entry = this.entries.get(token);
         if (entry) {
           this.entries.set(token, {
             deviceId: handedOffDeviceId ?? entry.deviceId,
+            processId: processId ?? entry.processId,
             handedOffUntilMs: untilMs,
           });
         }
@@ -298,9 +295,9 @@ export class BootAdmissionLedger {
     this.entries.delete(token);
     // A device a listing showed is running whatever its boot deadline says: an older listing
     // still open counts it until that sample decides, so the window keeps it without a deadline.
-    const kept = listed ? { deviceId: entry.deviceId } : entry;
+    const kept = listed ? { deviceId: entry.deviceId, processId: entry.processId } : entry;
     for (const window of this.openWindows) {
-      window.ended.push({ ...kept, launchedBeforeSample: window.launchedAtOpen.has(token) });
+      window.ended.push(kept);
     }
   }
 
@@ -310,10 +307,7 @@ export class BootAdmissionLedger {
    * in neither the window nor the listing.
    */
   beginSample(): LedgerSampleWindow {
-    const launched = [...this.entries]
-      .filter(([, entry]) => entry.handedOffUntilMs !== undefined)
-      .map(([token]) => token);
-    const window = new SampleWindow(new Set(launched), (closed) => this.openWindows.delete(closed));
+    const window = new SampleWindow((closed) => this.openWindows.delete(closed));
     this.openWindows.add(window);
     return window;
   }
@@ -331,18 +325,22 @@ export class BootAdmissionLedger {
     return this.inFlight(visibleDeviceIds, excludeDeviceId, sampleWindow).count;
   }
 
-  /** {@link inFlightCount}, split by whether the sample's process listing can show the boot. */
+  /**
+   * {@link inFlightCount}, split by whether the sample's process listing shows the boot's own
+   * process. `listedProcessIds` holds every id that identifies a listed device process.
+   */
   inFlight(
     visibleDeviceIds: ReadonlySet<string>,
     excludeDeviceId?: string,
     sampleWindow?: LedgerSampleWindow,
+    listedProcessIds: ReadonlySet<number> = new Set(),
   ): InFlightBoots {
     const now = this.timer.now();
-    const launchedAtOpen =
-      sampleWindow instanceof SampleWindow ? sampleWindow.launchedAtOpen : undefined;
+    const hasListedProcess = (entry: LedgerEntry): boolean =>
+      entry.processId !== undefined && listedProcessIds.has(entry.processId);
     const ended = this.endedDuringSample(sampleWindow, visibleDeviceIds, excludeDeviceId, now);
     let count = ended.length;
-    let launchedBeforeSample = ended.filter((entry) => entry.launchedBeforeSample).length;
+    let withListedProcess = ended.filter(hasListedProcess).length;
     for (const [token, entry] of [...this.entries]) {
       const visible = entry.deviceId !== undefined && visibleDeviceIds.has(entry.deviceId);
       if (entry.handedOffUntilMs !== undefined && (visible || now >= entry.handedOffUntilMs)) {
@@ -353,10 +351,10 @@ export class BootAdmissionLedger {
         (excludeDeviceId === undefined || entry.deviceId !== excludeDeviceId)
       ) {
         count += 1;
-        launchedBeforeSample += launchedAtOpen?.has(token) ? 1 : 0;
+        withListedProcess += hasListedProcess(entry) ? 1 : 0;
       }
     }
-    return { count, launchedBeforeSample };
+    return { count, withListedProcess };
   }
 
   /** Boots that ended while the sample was open and that the sample does not show either. */
@@ -365,7 +363,7 @@ export class BootAdmissionLedger {
     visibleDeviceIds: ReadonlySet<string>,
     excludeDeviceId: string | undefined,
     now: number,
-  ): EndedEntry[] {
+  ): LedgerEntry[] {
     if (!(window instanceof SampleWindow)) {
       return [];
     }

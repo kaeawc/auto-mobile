@@ -32,9 +32,11 @@ import { FakeTimer } from "../../fakes/FakeTimer";
  * it takes a slot no admission accounts for, and it may exit and give the slot back.
  *
  * An admitted Android boot goes through the emulator client's own slot handling
- * (`spawnUnderBootAdmission`): its process exists from the spawn, startup validation ends later,
- * and only then can adb list it. Between spawn and validation the boot is one process and one
- * admission, and must count once.
+ * (`spawnUnderBootAdmission`): the launcher process exists from the spawn, it becomes the qemu
+ * process a moment later, startup validation ends later still, and only then can adb list it.
+ * From the spawn on the boot is one admission and at most one counted process, and must count
+ * once: not twice once its qemu process shows, and not zero times beside an external emulator
+ * while only the launcher runs.
  */
 
 const GIB = 1024 ** 3;
@@ -45,19 +47,22 @@ interface Shape {
   admitters: number;
   /**
    * An emulator nobody admitted starts at any point (Android). Then adb lists it ("lists"), it
-   * exits unlisted ("exits"), or either and an exit after the listing ("any"): the full life
-   * cycle beside two admissions is thousands of orders, so the larger shapes take one half each.
+   * exits unlisted ("exits"), either and an exit after the listing ("any"), or it just keeps
+   * running unlisted ("stays"): the full life cycle beside two admissions is thousands of
+   * orders, so the larger shapes take one part each.
    */
-  external?: "lists" | "exits" | "any";
+  external?: "lists" | "exits" | "any" | "stays";
   /** Leave the reader out to keep a larger shape fast. */
   noReader?: boolean;
   /** A spawned emulator may exit before its startup validation ends, giving its slot back. */
   earlyExit?: boolean;
   /**
-   * Spawn and the end of startup validation as one step, to keep a larger shape fast: with the
-   * slot handed off at spawn, validation changes nothing the gate counts.
+   * Which steps of an emulator's startup the walk takes apart; the rest happen with the spawn.
+   * "launcher": the launcher runs and is handed off before its qemu process shows. "validation":
+   * the qemu process shows at the spawn and startup validation ends later. "all": each on its
+   * own. "none" keeps a larger shape fast.
    */
-  instantStartup?: boolean;
+  startup: "none" | "launcher" | "validation" | "all";
 }
 
 /** Let queued promise continuations run; no timer involved. */
@@ -341,13 +346,14 @@ function androidScenario(shape: Shape): Scenario {
   const timer = new FakeTimer();
   const listed = new Set<string>();
   /** Serials whose qemu process runs: in the process table from spawn, before adb lists them. */
-  const processes = new Set<string>();
+  const processes = new Map<string, number>();
   const listings = new HeldListings<AndroidCapacitySample>();
   const source: AndroidCapacitySource = {
     sample: () =>
       listings.start({
         emulatorSerials: [...listed],
         emulatorProcessRssBytes: [...processes].map(() => 3 * GIB),
+        emulatorProcessIds: [...processes.values()].map((pid) => ({ pid, ppid: 1 })),
         host: { totalMemoryBytes: 64 * GIB, cpuCount: 16 },
         errors: [],
       }),
@@ -359,16 +365,17 @@ function androidScenario(shape: Shape): Scenario {
   const admissions: Array<BootAdmission | undefined> = [];
   /** Spawned emulators whose startup validation is still running. */
   const validating = new Map<number, { child: EventEmitter; settle: (alive: boolean) => void }>();
+  /** The pid of the launcher the client spawns; the launcher becomes the qemu process. */
+  const launcherPid = (index: number): number => 1_000 + index;
   const validated = new Set<number>();
   const serial = (index: number): string => `emulator-${5554 + index * 2}`;
   /** What the emulator client does with an admission from the cold spawn on. */
   const spawn = (index: number, admission: BootAdmission): void => {
-    const child = new EventEmitter();
+    const child = Object.assign(new EventEmitter(), { pid: launcherPid(index) });
     const launch = spawnUnderBootAdmission(admission, undefined, (onSpawn) => {
-      // The qemu process exists from here on; the client reports it before validating startup.
-      processes.add(serial(index));
+      // Only the launcher runs so far: no qemu process. The client reports it at once.
       onSpawn(child, serial(index));
-      return new Promise<{ process: EventEmitter; reservedDeviceId: string }>((resolve, reject) =>
+      return new Promise<{ process: typeof child; reservedDeviceId: string }>((resolve, reject) =>
         validating.set(index, {
           child,
           settle: (alive) =>
@@ -393,10 +400,11 @@ function androidScenario(shape: Shape): Scenario {
     if (!actors.externalRunning) {
       return [];
     }
-    const listable = shape.external !== "exits" && !listed.has(EXTERNAL_SERIAL);
+    const lists = shape.external === "lists" || shape.external === "any";
+    const exits = shape.external === "exits" || shape.external === "any";
     return [
-      ...(listable ? ["externalList"] : []),
-      ...(shape.external === "lists" ? [] : ["externalExit"]),
+      ...(lists && !listed.has(EXTERNAL_SERIAL) ? ["externalList"] : []),
+      ...(exits ? ["externalExit"] : []),
     ];
   };
 
@@ -426,7 +434,18 @@ function androidScenario(shape: Shape): Scenario {
       if (admission) {
         spawn(index, admission);
       }
-      if (shape.instantStartup) {
+      // The steps this shape does not take apart follow at once, in their order.
+      if (shape.startup === "none" || shape.startup === "validation") {
+        actions.qemu(index);
+      }
+      if (shape.startup === "none") {
+        actions.validate(index);
+      }
+    },
+    // The launcher became the qemu process: the process table shows the emulator from here on.
+    qemu: (index) => {
+      processes.set(serial(index), launcherPid(index));
+      if (shape.startup === "launcher") {
         actions.validate(index);
       }
     },
@@ -449,7 +468,7 @@ function androidScenario(shape: Shape): Scenario {
     externalStart: () => {
       externalStarted = true;
       actors.externalRunning = true;
-      processes.add(EXTERNAL_SERIAL);
+      processes.set(EXTERNAL_SERIAL, 2_000);
     },
     externalList: () => {
       listed.add(EXTERNAL_SERIAL);
@@ -486,7 +505,8 @@ function androidScenario(shape: Shape): Scenario {
         if (!validating.has(index)) {
           return [`spawn:${index}`];
         }
-        return [`validate:${index}`, ...(shape.earlyExit ? [`exit:${index}`] : [])];
+        const next = processes.has(serial(index)) ? "validate" : "qemu";
+        return [`${next}:${index}`, ...(shape.earlyExit ? [`exit:${index}`] : [])];
       }),
     ],
     run: async (action) => {
@@ -499,19 +519,23 @@ function androidScenario(shape: Shape): Scenario {
 
 /** Android shapes with the orders each one walks: a changed count means the walk changed. */
 const EXTERNAL_SHAPES: Array<[Shape, number]> = [
-  [{ limit: 1, admitters: 1, external: "any", instantStartup: true }, 1199],
-  [{ limit: 1, admitters: 2, external: "lists", noReader: true }, 498],
-  [{ limit: 1, admitters: 2, external: "exits", noReader: true }, 519],
-  [{ limit: 2, admitters: 2, external: "lists", noReader: true, instantStartup: true }, 1103],
-  [{ limit: 2, admitters: 2, external: "exits", noReader: true, instantStartup: true }, 1193],
+  [{ limit: 1, admitters: 1, external: "any", startup: "none" }, 1199],
+  [{ limit: 1, admitters: 2, external: "lists", noReader: true, startup: "validation" }, 498],
+  [{ limit: 1, admitters: 2, external: "exits", noReader: true, startup: "validation" }, 519],
+  [{ limit: 2, admitters: 2, external: "lists", noReader: true, startup: "none" }, 1103],
+  [{ limit: 2, admitters: 2, external: "exits", noReader: true, startup: "none" }, 1193],
+  // The smallest shape where a launcher that is not a qemu process yet could be taken for the
+  // external emulator's process: both run, and the second admission has to be refused.
+  [{ limit: 2, admitters: 2, external: "stays", noReader: true, startup: "launcher" }, 1137],
 ];
 
 const STARTUP_SHAPES: Array<[Shape, number]> = [
   // The smallest shape with the double count: one boot spawned and still validating, one slot
   // free, and a second admission that has to be granted.
-  [{ limit: 2, admitters: 2, noReader: true }, 126],
-  [{ limit: 2, admitters: 2, noReader: true, earlyExit: true }, 287],
-  [{ limit: 1, admitters: 2, earlyExit: true }, 1056],
+  [{ limit: 2, admitters: 2, noReader: true, startup: "all" }, 462],
+  [{ limit: 2, admitters: 2, noReader: true, earlyExit: true, startup: "validation" }, 287],
+  [{ limit: 2, admitters: 2, noReader: true, earlyExit: true, startup: "launcher" }, 287],
+  [{ limit: 1, admitters: 2, earlyExit: true, startup: "validation" }, 1056],
 ];
 
 function describeShape(shape: Shape): string {
@@ -520,6 +544,7 @@ function describeShape(shape: Shape): string {
     ...(shape.noReader ? [] : ["a reader"]),
     ...(shape.external ? [`an external emulator (${shape.external})`] : []),
     ...(shape.earlyExit ? ["emulators that may exit during startup"] : []),
+    ...(shape.startup === "none" ? [] : [`startup steps (${shape.startup})`]),
   ];
   return `Android: ${parts.join(", ")} against a limit of ${shape.limit}`;
 }
@@ -542,7 +567,7 @@ async function expectEveryOrderHolds(
 describe("boot capacity gates never admit past the limit in any interleaving (#11537)", () => {
   // Three admissions against a limit of two also hold (40,492 iOS and 73,260 Android orders,
   // checked by hand), but take seconds; this shape already contains every failing order found.
-  const shape: Shape = { limit: 1, admitters: 2 };
+  const shape: Shape = { limit: 1, admitters: 2, startup: "validation" };
   for (const [platform, create, orders] of [
     ["iOS", iosScenario, 218],
     ["Android", androidScenario, 648],

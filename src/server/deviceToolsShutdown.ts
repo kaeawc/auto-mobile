@@ -30,6 +30,7 @@ import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheW
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { DeviceShutdownService } from "../devices/deviceShutdownService";
 import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
+import { isIosSimulatorAlreadyStoppedError } from "../utils/ios-cmdline-tools/simulatorStateErrors";
 import {
   DEVICE_ALREADY_STOPPED_ERROR_CODE,
   DEVICE_SHUTDOWN_TIMEOUT_MS,
@@ -67,13 +68,7 @@ function isAlreadyStoppedDeviceError(
     );
   }
   if (platform === "ios") {
-    return (
-      message.includes("already shut down") ||
-      message.includes("already shutdown") ||
-      message.includes("not booted") ||
-      message.includes("invalid device state") ||
-      message.includes("current state: shutdown")
-    );
+    return isIosSimulatorAlreadyStoppedError(error);
   }
   return false;
 }

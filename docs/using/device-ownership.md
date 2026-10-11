@@ -17,14 +17,21 @@ A call that acts on a held device is refused with the typed code
 - is an `input/*` socket frame without the holder's `sessionUuid`
   (see [screen control](screen-control.md)).
 
-A derived `<base>:<label>` session counts as its base session. A device that no
-session holds takes calls from anyone.
+A derived `<base>:<label>` session counts as its base session, for the holder
+check and for the owning connection alike: while the base's owner is connected,
+another connection's control call naming the derived session, or reaching one of
+the owner's devices through a `device` label, is refused (#11542). A device that
+no session holds takes calls from anyone.
 
 A session's owner is the connection that acquired it, or that restored it after
 a reconnect. Ownership is cooperative: no token is needed, but naming a session's
 UUID never takes it over. While the owner is connected, a control call from any
 other connection that names the session is refused, with autolock on or off, and
-that connection is never bound to the session. Once the owner has disconnected
+that connection is never bound to the session. The rule covers control tools
+that take no device routing too (`killDevice`, `deleteDevice`, `exportPlan`,
+`recordSteps` start and stop): the refused call does not run and does not extend the session's
+idle window (#11542). `setToolEnabled` is not refused (see
+[Ownership is cooperative](#ownership-is-cooperative)). Once the owner has disconnected
 (a finished `--cli` call, for example) another connection may name the session.
 
 Reads stay allowed on any device, whichever session holds it, and need no
@@ -223,6 +230,11 @@ MCP connection that owns an autolocked device) may stop it. A booted device
 another session holds is refused with `device_owned_by_other_session` unless the
 call passes `force: true`, which overrides the refusal and logs a warning naming
 the holder. From the CLI: `auto-mobile --cli killDevice --device '{...}' --force true`.
+
+Naming the holder's `sessionUuid` makes a call the holder's only for the
+connection that owns that session, or once that owner has disconnected. From any
+other connection the call is refused, with or without `force` (#11542): to
+force-stop the device, leave `sessionUuid` out.
 
 A device another live AutoMobile daemon holds (two daemons sharing one adb server
 or simulator set) is refused the same way, with `device_owned_by_other_daemon`:

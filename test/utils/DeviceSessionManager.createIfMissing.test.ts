@@ -67,6 +67,8 @@ function makeSimctl(recorder: SimctlRecorder, simulatorImages: DeviceInfo[] = []
       recorder.presentationCalls.push({ udid, generation });
       recorder.presentationSignals.push(signal);
     },
+    // The rollback shuts a created simulator down before deleting it.
+    killSimulator: async () => {},
     deleteSimulator: async (udid: string, options?: { signal?: AbortSignal }) => {
       recorder.deleteCalls?.push(udid);
       recorder.deleteSignalAborted?.push(options?.signal?.aborted ?? false);

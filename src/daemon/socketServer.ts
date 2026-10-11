@@ -5,7 +5,10 @@ import {
   isDeviceControlTargetOwnerValid,
   isDeviceControlRoutingSessionValid,
 } from "./deviceControlSessionValidity";
-import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import {
+  getToolSelectionContext,
+  runWithToolSelectionContext,
+} from "../features/toolSelection/toolSelectionContext";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { createServer, Server as NetServer, Socket } from "node:net";
 import { createHash } from "node:crypto";
@@ -79,6 +82,7 @@ import {
 } from "./socketRequestAdmission";
 import {
   daemonShuttingDownFailure,
+  daemonShuttingDownFrameFields,
   daemonShuttingDownFailureFromToolResult,
   isDaemonShuttingDownToolResult,
 } from "./daemonShutdownOutcome";
@@ -458,6 +462,11 @@ export function mcpRequestFailureDetails(
     ...refusalFrameFields(error),
     ...(error instanceof McpOverloadError ? { overloadFailure: error.failure } : {}),
     ...(error instanceof McpTimeoutError && error.code ? { code: error.code } : {}),
+    // Nothing was dispatched while the request waited in the queue, so a retry is safe; the MCP
+    // result already says so and the frame must agree for direct-socket clients.
+    ...(error instanceof McpTimeoutError && error.code === MCP_QUEUE_TIMEOUT_ERROR_CODE
+      ? { retryable: true }
+      : {}),
     // Keep the daemon MCP server's invalid-params verdict (e.g. a malformed
     // resource URI) so the proxy can return -32602 instead of -32603.
     ...(error instanceof McpError && "code" in error && error.code === JSONRPC_INVALID_PARAMS
@@ -919,6 +928,35 @@ const GESTURE_FRAME_METHODS = {
   move: "input/gestureMove",
   end: "input/gestureEnd",
 } as const;
+
+/** What held the device when a `gestureStart` was admitted (#11541). */
+interface StrokeAdmission {
+  deviceId: string;
+  /** The admitting holder; absent for a start on a device no session held. */
+  holderSessionId?: string;
+  /** The holder's session object: a re-created session with the same id is another holder. */
+  holderIncarnation?: object;
+  /** Aborted when the frame's tracked execution or its owner was cancelled. */
+  signal?: AbortSignal;
+}
+
+/**
+ * The answer to a `gestureStart` whose stroke was lifted because its admission ended before the
+ * ack: whatever aborted the frame (the typed release or ownership refusal), else that the holder
+ * changed.
+ */
+function strokeAdmissionEndedError(method: string, admission: StrokeAdmission): unknown {
+  if (admission.signal?.aborted) {
+    return admission.signal.reason;
+  }
+  return new ActionableError(
+    `${method} on device '${admission.deviceId}' was lifted: ` +
+      (admission.holderSessionId
+        ? `session ${admission.holderSessionId} no longer holds the device`
+        : "a session acquired the device") +
+      " before the stroke's start was acknowledged.",
+  );
+}
 
 /** Timeout for the best-effort cancelling `gestureEnd` issued when a socket owning a gesture closes. */
 const OWNED_GESTURE_CANCEL_TIMEOUT_MS = 5000;
@@ -2263,7 +2301,7 @@ export class UnixSocketServer {
               type: "mcp_response",
               success: false,
               error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-              daemonShuttingDown: daemonShuttingDownFailureFromToolResult(result),
+              ...daemonShuttingDownFrameFields(daemonShuttingDownFailureFromToolResult(result)),
             };
           }
 
@@ -2391,7 +2429,7 @@ export class UnixSocketServer {
       type: "mcp_response",
       success: false,
       error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-      daemonShuttingDown: daemonShuttingDownFailure(),
+      ...daemonShuttingDownFrameFields(daemonShuttingDownFailure()),
     };
   }
 
@@ -6152,6 +6190,7 @@ export class UnixSocketServer {
       socketSessionId,
       method,
     );
+    let startAdmission: StrokeAdmission | undefined;
     const gestureResult = await this.liftingStrokeOnSessionRefusal(
       kind,
       socketSessionId,
@@ -6177,7 +6216,11 @@ export class UnixSocketServer {
               targetDevice,
               defaultAdbClientFactory,
             );
-            return this.forwardGestureFrame(client, kind, args, remainingTimeoutMs);
+            if (kind !== "start") {
+              return this.forwardGestureFrame(client, kind, args, remainingTimeoutMs);
+            }
+            startAdmission = this.captureStrokeAdmission(targetDevice.deviceId, signal);
+            return this.forwardGestureStart(client, args, remainingTimeoutMs, startAdmission);
           },
           this.inputDeviceGate(
             method,
@@ -6193,21 +6236,14 @@ export class UnixSocketServer {
       throw new Error(gestureResult.error ?? `${method} failed on ${args.platform}`);
     }
 
-    // Track ownership so a socket that tears down mid-drag can lift its still-open on-device stroke.
-    // Only an acked start opens the gesture; an end (release OR cancel) closes it. A socket-less
-    // forward (no client session) can't be cancelled on close, so it isn't tracked.
     if (socketSessionId) {
-      if (kind === "start") {
-        // A start acked after its socket closed is cancelled here instead of recorded (#10005).
-        await this.ownedGestures.onStartAcked(
-          socketSessionId,
-          targetDevice,
-          args.gestureId,
-          this.inputTargetOwners.get(targetDevice),
-        );
-      } else if (kind === "end") {
-        this.ownedGestures.onEndAcked(socketSessionId, targetDevice.deviceId, args.gestureId);
-      }
+      await this.trackAckedGestureFrame(
+        kind,
+        socketSessionId,
+        targetDevice,
+        args.gestureId,
+        startAdmission,
+      );
     }
 
     return {
@@ -6219,6 +6255,42 @@ export class UnixSocketServer {
       point: { x: args.x, y: args.y },
       ...(kind === "end" ? { cancel: args.cancel } : {}),
     };
+  }
+
+  /**
+   * Track ownership so a socket that tears down mid-drag can lift its still-open on-device stroke.
+   * Only an acked start opens the gesture; an end (release OR cancel) closes it. A socket-less
+   * forward (no client session) can't be cancelled on close, so it isn't tracked.
+   */
+  private async trackAckedGestureFrame(
+    kind: "start" | "move" | "end",
+    socketSessionId: string,
+    targetDevice: BootedDevice,
+    gestureId: string,
+    startAdmission: StrokeAdmission | undefined,
+  ): Promise<void> {
+    if (kind === "end") {
+      this.ownedGestures.onEndAcked(socketSessionId, targetDevice.deviceId, gestureId);
+      return;
+    }
+    if (kind !== "start") {
+      return;
+    }
+    // A start acked after its socket closed is cancelled here instead of recorded (#10005), and so
+    // is one whose holder left the device since the in-slot check of `forwardGestureStart`
+    // (#11541). Evaluated in the same turn the stroke is recorded, so no release or acquisition
+    // can land between the check and the record.
+    const admissionHolds = !startAdmission || this.strokeAdmissionStillHolds(startAdmission);
+    await this.ownedGestures.onStartAcked(
+      socketSessionId,
+      targetDevice,
+      gestureId,
+      startAdmission?.holderSessionId,
+      admissionHolds,
+    );
+    if (startAdmission && !admissionHolds) {
+      throw strokeAdmissionEndedError(GESTURE_FRAME_METHODS.start, startAdmission);
+    }
   }
 
   /**
@@ -6265,6 +6337,86 @@ export class UnixSocketServer {
       }
       throw error;
     }
+  }
+
+  /**
+   * The holder a `gestureStart` is being sent under, read in the device's slot immediately before
+   * the frame leaves: the session the tracked execution was admitted under and that session's
+   * incarnation (a released session re-created under the same id is a different holder), or no
+   * holder for a start on a device no session held.
+   */
+  private captureStrokeAdmission(deviceId: string, signal?: AbortSignal): StrokeAdmission {
+    const executionId = getToolSelectionContext()?.execution?.executionId;
+    const holderSessionId = executionId
+      ? executionTracker.getAdmittedSessionUse(executionId)
+      : undefined;
+    return {
+      deviceId,
+      ...(holderSessionId !== undefined ? { holderSessionId } : {}),
+      holderIncarnation: this.getDeviceControlSessionIncarnation(holderSessionId),
+      ...(signal ? { signal } : {}),
+    };
+  }
+
+  /**
+   * Whether the device is still held exactly as it was when the start was admitted: the frame was
+   * not aborted (a release that cuts, a session acquiring a free device, a cancel), and the device
+   * has the same holder incarnation, or still none. Synchronous, so a caller that records the
+   * stroke in the same turn cannot be overtaken by a release or an acquisition.
+   */
+  private strokeAdmissionStillHolds(admission: StrokeAdmission): boolean {
+    if (admission.signal?.aborted) {
+      return false;
+    }
+    if (this.getSessionForDevice(admission.deviceId) !== admission.holderSessionId) {
+      return false;
+    }
+    return (
+      this.getDeviceControlSessionIncarnation(admission.holderSessionId) ===
+      admission.holderIncarnation
+    );
+  }
+
+  /**
+   * Send a `gestureStart` from inside the device's slot and, once the runner acks it, check that
+   * its admission still holds. A release that cuts does not wait for the ack and streamed frames
+   * carry no abort to the runner, so the pointer can go down for a holder that has already left:
+   * the release-time lift found no stroke, and recording this one would leave it down on a freed
+   * device (#11541). The same goes for a sessionless start whose device a session acquired
+   * meanwhile (#10829). Such a start is cancelled here, on the runner directly because this call
+   * still occupies the device's slot, so the lift precedes anything queued behind the start, and
+   * the frame answers what ended its admission. A failed cancel is logged and the refusal still
+   * answered. A start the runner did not accept opened nothing and is never cancelled.
+   */
+  private async forwardGestureStart(
+    client: AndroidCtrlProxyClient,
+    args: { gestureId: string; x: number; y: number; cancel: boolean },
+    timeoutMs: number,
+    admission: StrokeAdmission,
+  ) {
+    const started = await this.forwardGestureFrame(client, "start", args, timeoutMs);
+    if (!started.success || this.strokeAdmissionStillHolds(admission)) {
+      return started;
+    }
+    try {
+      await client.requestGestureEnd(args.gestureId, 0, 0, true, OWNED_GESTURE_CANCEL_TIMEOUT_MS);
+    } catch (error) {
+      logger.warn(
+        `Failed to lift gesture ${args.gestureId} on ${admission.deviceId} whose holder left ` +
+          `before its start was acked: ${errorMessage(error)}`,
+      );
+    }
+    throw strokeAdmissionEndedError(GESTURE_FRAME_METHODS.start, admission);
+  }
+
+  /**
+   * A session acquired `deviceId`: lift every stroke that was started on it while no session held
+   * it, at acquisition time, so the cancel is on the device's keyed queue ahead of the new holder's
+   * first call (#10829, #11541). With no frame in flight nothing else would lift the pointer until
+   * the pane sent another frame or its socket closed. Best-effort; never throws.
+   */
+  liftSessionlessStrokesOn(deviceId: string): void {
+    this.trackRequestHandler(this.ownedGestures.cancelAllUnheldOn(deviceId));
   }
 
   /**
@@ -8371,7 +8523,7 @@ export class UnixSocketServer {
       type: "mcp_response",
       success: false,
       error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-      daemonShuttingDown: daemonShuttingDownFailure(pending.admitted),
+      ...daemonShuttingDownFrameFields(daemonShuttingDownFailure(pending.admitted)),
     });
   }
 

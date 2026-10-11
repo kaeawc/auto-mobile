@@ -374,6 +374,7 @@ test/features/action/touchscreenInput.test.ts
 test/features/appearance/AppearanceConfig.property.test.ts
 test/features/bootAdmission/AndroidBootAdmissionGate.test.ts
 test/features/bootAdmission/AndroidCapacitySource.test.ts
+test/features/bootAdmission/bootGateInterleavings.test.ts
 test/features/database/bigIntegerJson.test.ts
 test/features/database/sqlLexer.test.ts
 test/features/debug/VisualHighlight.test.ts

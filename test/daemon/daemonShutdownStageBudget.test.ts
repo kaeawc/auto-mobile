@@ -27,6 +27,7 @@ import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepositor
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
+import { settlesOnMicrotasksAlone } from "../helpers/shutdownStageHarness";
 
 // #11156: the daemon-shutdown notification and socket drain sat behind the
 // pending-device-cleanup (2 s) and forward-release (3 s) drains, after the 5 s
@@ -106,6 +107,25 @@ describe("Daemon shutdown stage budget (#11156)", () => {
       DaemonState.getInstance().reset();
     }
     resetDbWriteBarrier();
+  });
+
+  test("no shutdown stage awaits real I/O: stop() finishes on microtasks alone, with no fake time passing", async () => {
+    // The tests below let fake time run (enableAutoAdvance) to reach stage deadlines. That is
+    // only deterministic while no stage waits on a real file, socket or timer, which a fake
+    // deadline would otherwise race.
+    const timer = new FakeTimer();
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      new FakeDeviceSessionRepository(),
+    );
+
+    expect(await settlesOnMicrotasksAlone(daemon.stop())).toBe(true);
+    expect(timer.now()).toBe(0);
+    expect(warnings).toEqual([]);
+    expect(closeDatabase).toHaveBeenCalledTimes(1);
+    expect(cleanupDaemonFiles).toHaveBeenCalledTimes(1);
   });
 
   test("publishes daemon-shutdown and drains sockets before device cleanup and forward release", async () => {

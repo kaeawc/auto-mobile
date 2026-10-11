@@ -1,0 +1,12 @@
+{
+  "surface": "socket-frame",
+  "name": "session_no_longer_owns_device",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "input/gestureStart on device 'emulator-5554' was lifted: session 11111111-2222-4333-8444-555555555555 no longer holds the device before the stroke's start was acknowledged.",
+    "code": "session_no_longer_owns_device",
+    "retryable": false
+  }
+}

@@ -12,6 +12,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntilQuiescent, settleWithFakeTime } from "../helpers/fakeTimerStepping";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 
 // mt-0083 D2: a two-label plan whose base session holds one device must use another booted device
 // this daemon can see before cold-booting an AVD, must never adopt an emulator another live daemon
@@ -89,15 +90,17 @@ describe("multi-device allocation on a shared host", () => {
   ) => {
     let settled = false;
     const result = runWithAbortSignal(new AbortController().signal, () =>
-      criteria
-        ? pool.assignMultipleDevicesByCriteria(
-            sessionIds.map((sessionId) => ({
-              sessionId,
-              criteria: { platform: "android" as const },
-            })),
-            timeoutMs,
-          )
-        : pool.assignMultipleDevices([...sessionIds], timeoutMs, "android"),
+      asPlanAllocation(sessions, sessionIds[0], sessionIds, () =>
+        criteria
+          ? pool.assignMultipleDevicesByCriteria(
+              sessionIds.map((sessionId) => ({
+                sessionId,
+                criteria: { platform: "android" as const },
+              })),
+              timeoutMs,
+            )
+          : pool.assignMultipleDevices([...sessionIds], timeoutMs, "android"),
+      ),
     ).then(
       (value: unknown) => {
         settled = true;

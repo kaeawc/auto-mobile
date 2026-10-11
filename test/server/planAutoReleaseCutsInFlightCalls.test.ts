@@ -16,6 +16,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 
 // #11490: a plan's auto-release (its base session, and each derived `${base}:${label}` session)
 // must cut every other call still running under the session BEFORE the pool frees the device,
@@ -96,9 +97,11 @@ describe("plan auto-release with other calls in flight (#11490)", () => {
 
   const acquire = async (labels: string[] = ["A"]): Promise<void> => {
     const map = buildDeviceLabelMap(labels, "base");
-    for (const [i, label] of labels.entries()) {
-      await manager.createSession(map[label], devices[i].deviceId, "android");
-    }
+    await asPlanAllocation(manager, "base", Object.values(map), async () => {
+      for (const [i, label] of labels.entries()) {
+        await manager.createSession(map[label], devices[i].deviceId, "android");
+      }
+    });
     if (labels.length > 1) {
       manager.setDeviceLabels("base", map);
     }

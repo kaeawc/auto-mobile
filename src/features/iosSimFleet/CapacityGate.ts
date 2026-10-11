@@ -182,9 +182,17 @@ export class IosSimCapacityGate
    * A warm simulator is not a substitute here: the caller boots its own device.
    */
   async assertCapacityAvailable(): Promise<void> {
-    // A capacity check is not a boot decision: it must not advance the sustained-pressure streak.
-    const report = await this.fleet.collect();
-    assertCapacityGranted({ decision: this.decide(report, undefined, "hint") });
+    // Judged like an admission: a listing begun inside this check's own ledger window, so a boot
+    // that ends while it is open, or after an earlier caller's listing began, still holds its slot
+    // (#11643). Not a boot decision: it must not advance the sustained-pressure streak.
+    const window = this.admittedBoots.beginSample();
+    let report: FleetCostReport;
+    try {
+      report = await this.fleet.collectFresh();
+    } finally {
+      window.close();
+    }
+    assertCapacityGranted({ decision: this.decide(report, undefined, "hint", undefined, window) });
   }
 
   /** Current limit, booted simulators (every Booted one, owned or not) and admitted boots in flight. */

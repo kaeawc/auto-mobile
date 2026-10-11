@@ -57,6 +57,7 @@ test/daemon/daemonHandshake.test.ts
 test/daemon/daemonIsolationPaths.test.ts
 test/daemon/daemonNamespaceMarker.test.ts
 test/daemon/daemonOptionsPropagation.test.ts
+test/daemon/daemonRestartEndToEnd.test.ts
 test/daemon/daemonSocketReachability.test.ts
 test/daemon/daemonStartupFailureTracker.test.ts
 test/daemon/daemonStartupGuard.test.ts
@@ -72,6 +73,7 @@ test/daemon/deviceLeaseActivity.test.ts
 test/daemon/deviceLeaseOwnerQuery.test.ts
 test/daemon/devicePool.allocationDiscoveryOutsideMutex.test.ts
 test/daemon/devicePool.androidStartupLeaseOfflineRecovery.test.ts
+test/daemon/devicePool.androidTransportAliases.control.test.ts
 test/daemon/devicePool.bootCapacityRefusal.test.ts
 test/daemon/devicePool.capturedPredicates.test.ts
 test/daemon/devicePool.crossDaemonExplicitBind.test.ts
@@ -113,6 +115,7 @@ test/daemon/failuresPushSocketServer.test.ts
 test/daemon/fakeDaemonClientContract.test.ts
 test/daemon/findAvailableDaemonPort.test.ts
 test/daemon/forwardLeaseHolders.test.ts
+test/daemon/frameDeviceIdentity.test.ts
 test/daemon/freshStartAlreadyBoundRefusal.test.ts
 test/daemon/gatedToolThroughDaemon.test.ts
 test/daemon/gestureOwnership.test.ts
@@ -182,6 +185,7 @@ test/daemon/processGenerationFields.test.ts
 test/daemon/proxyHeartbeatStateMachine.property.test.ts
 test/daemon/proxyLivenessRecovery.test.ts
 test/daemon/proxyReleaseReasonClassification.test.ts
+test/daemon/proxySignalStopReleasesExecution.test.ts
 test/daemon/recycledProcessGeneration.test.ts
 test/daemon/refusalWireContract.test.ts
 test/daemon/refusedRoutingCallExtendsIdle.test.ts
@@ -412,6 +416,7 @@ test/features/featureFlags/FeatureFlagService.toolListChanged.test.ts
 test/features/featureFlags/persistedOutputReductionOverrides.test.ts
 test/features/featureFlags/toolDefinitionAffectingFlags.drift.test.ts
 test/features/iosSimFleet/IosBootInstrumentation.test.ts
+test/features/iosSimFleet/capacityCheckFreshListing.test.ts
 test/features/iosSimFleet/iosBootCapacityGate.test.ts
 test/features/iosSimFleet/iosSimFleet.test.ts
 test/features/memory/MemoryAudit.characterization.test.ts
@@ -1082,6 +1087,7 @@ test/utils/android-cmdline-tools/AndroidEmulatorClient-architectureCompatibility
 test/utils/android-cmdline-tools/AndroidEmulatorClient-enrichment.characterization.test.ts
 test/utils/android-cmdline-tools/AndroidEmulatorClient-executeCommand.test.ts
 test/utils/android-cmdline-tools/AndroidEmulatorClient-getBootedDevices.test.ts
+test/utils/android-cmdline-tools/AndroidEmulatorClient-heldStateProbeMissingAdb.test.ts
 test/utils/android-cmdline-tools/AndroidEmulatorClient-inventoryEnrichment.test.ts
 test/utils/android-cmdline-tools/AndroidEmulatorClient-killIdentity.test.ts
 test/utils/android-cmdline-tools/AndroidEmulatorClient-offlineRecovery.test.ts

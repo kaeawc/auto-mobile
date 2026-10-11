@@ -87,9 +87,13 @@ interface SystemUiAnrRebootContext {
   signal: AbortSignal | undefined;
   progress: { report: ProgressCallback } | undefined;
   recoveryAutolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined;
+  assertHolder: () => void;
   collectColdBootSettlement: ColdBootSettlementCollector;
   publishReplacementReadinessMarker?: (replacement: BootedDevice) => void;
-  releasePreservedSession: (replacement: PooledDevice) => Promise<void>;
+  releasePreservedSession: (
+    replacement: PooledDevice,
+    preservedSessionId: string | undefined,
+  ) => Promise<void>;
   operations: SystemUiAnrRecoveryOperations;
 }
 
@@ -102,6 +106,7 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
   releaseRecoveryRouteLease?: () => void;
 }> {
   const { boot, devicePool, signal, recoveryAutolockClient, collectColdBootSettlement } = context;
+  context.assertHolder();
   const sourceImage = await resolveSystemUiRecoveryImage(context);
   const releaseReadinessReservation = devicePool
     ? await devicePool.reserveDeviceForReadiness(
@@ -131,6 +136,7 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
       boot.device.deviceId,
       signal,
       recoveryAutolockClient,
+      context.assertHolder,
     );
     // Before dispatch the request still owns cancellation: nothing has been touched yet.
     signal?.throwIfAborted();
@@ -237,7 +243,11 @@ async function restartAndroidForSystemUiAnr(
         adoptedReplacementBoot,
         context.collectColdBootSettlement,
         context.operations,
-        context.releasePreservedSession,
+        {
+          sessionId: handoff?.preservedSessionId,
+          release: async (replacement) =>
+            await context.releasePreservedSession(replacement, handoff?.preservedSessionId),
+        },
       ),
     validatePreservedSession: handoff?.validatePreservedSession,
     releaseRecoveryRouteLease: state.shutdownReservation?.releaseRecoveryRouteLease,
@@ -327,11 +337,17 @@ async function reserveSystemUiAnrShutdown(
   deviceId: string,
   signal: AbortSignal | undefined,
   autolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined,
+  assertHolder: () => void,
 ): Promise<Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>> {
   if (!devicePool) {
     return undefined;
   }
-  const reservation = await devicePool.reserveDeviceForShutdown(deviceId, signal, autolockClient);
+  const reservation = await devicePool.reserveDeviceForShutdown(
+    deviceId,
+    signal,
+    autolockClient,
+    assertHolder,
+  );
   if (reservation) {
     devicePool.markIntentionalShutdown(deviceId);
   }
@@ -508,14 +524,25 @@ async function retireSystemUiAnrReplacement(
   replacementBoot: DeviceBootResult,
   collectColdBootSettlement: ColdBootSettlementCollector,
   operations: SystemUiAnrRecoveryOperations,
-  releasePreservedSession: (replacement: PooledDevice) => Promise<void>,
+  preservedSession: {
+    sessionId: string | undefined;
+    release: (replacement: PooledDevice) => Promise<void>;
+  },
 ): Promise<void> {
+  const currentReplacement = devicePool?.getDevice(replacementBoot.device.deviceId);
+  // Exact binds can also arrive after handoff, while replacement readiness is pending.
+  if (
+    currentReplacement?.sessionId &&
+    currentReplacement.sessionId !== preservedSession.sessionId
+  ) {
+    return;
+  }
   if (replacementBoot.runningBeforeCall) {
     if (
       expectedReplacement &&
       devicePool?.getDevice(expectedReplacement.id) === expectedReplacement
     ) {
-      await releasePreservedSession(expectedReplacement);
+      await preservedSession.release(expectedReplacement);
     }
     collectColdBootSettlement(operations.cancelUnownedColdBoot(replacementBoot));
     return;

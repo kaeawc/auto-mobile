@@ -31,6 +31,11 @@ import {
 } from "./deviceToolsSystemUiAnr";
 import { errorMessage } from "../utils/describeUnknownError";
 import { releaseSessionAndDevice } from "../daemon/releaseSessionAndDevice";
+import {
+  deviceAlreadyAssignedToAnotherSessionError,
+  isSameHolderSession,
+} from "../daemon/inputDeviceOwnership";
+import { lifecycleRequester } from "./lifecycleDeviceOwnership";
 import { deviceLossCancellationReason } from "../utils/deviceLossCancellationReason";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { terminateColdBootProcess } from "../devices/coldBootProcessTermination";
@@ -4420,7 +4425,11 @@ interface StartDeviceRunnerReadinessInput {
 export async function prepareStartDeviceRunnerReadiness(
   input: StartDeviceRunnerReadinessInput,
 ): Promise<SystemUiAnrRecoveryResult & { recovered: boolean }> {
+  // Exact binds can arrive during readiness; capture identities before leaving request context.
   const devicePool = getStartDevicePool(input.daemonState);
+  const initialHolder = captureSystemUiAnrInitialHolder(input, devicePool);
+  // startDeviceSchema strips sessionUuid, so caller identity comes from admitted ambient routing.
+  const requesterSessionUuid = lifecycleRequester(input.args).sessionUuid;
   const recoveryAutolockClient =
     (input.autolockEnabled ?? captureAutolockPolicy(getDeviceToolsDependencies().env)) && devicePool
       ? {
@@ -4433,7 +4442,10 @@ export async function prepareStartDeviceRunnerReadiness(
   const readinessResult = await ensureRunnerReadyWithSystemUiAnrRecovery(
     input.boot,
     createRunnerReadinessAttempt(input),
-    createSystemUiAnrRebooter(input, devicePool, recoveryAutolockClient),
+    createSystemUiAnrRebooter(input, devicePool, recoveryAutolockClient, {
+      initialHolder,
+      requesterSessionUuid,
+    }),
   );
   if (readinessResult.recovered) {
     try {
@@ -4496,15 +4508,41 @@ function createRunnerReadinessAttempt(
   };
 }
 
+function captureSystemUiAnrInitialHolder(
+  input: StartDeviceRunnerReadinessInput,
+  devicePool: DevicePool | undefined,
+): string | undefined {
+  const sessionId = devicePool?.getDevice(input.boot.device.deviceId)?.sessionId;
+  return sessionId && input.daemonState.getSessionManager().getSession(sessionId)
+    ? sessionId
+    : undefined;
+}
+
 function createSystemUiAnrRebooter(
   input: StartDeviceRunnerReadinessInput,
   devicePool: DevicePool | undefined,
   recoveryAutolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined,
+  entitlement: { initialHolder: string | undefined; requesterSessionUuid: string | undefined },
 ): (candidate: DeviceBootResult) => Promise<SystemUiAnrRecoveryResult> {
   return async (candidate) => {
-    const sessionId = devicePool?.getDevice(candidate.device.deviceId)?.sessionId;
     const manager = devicePool ? input.daemonState.getSessionManager() : undefined;
+    const hasOtherHolder = (deviceId: string) => {
+      const holder = liveHolderOtherThanThisRequest(deviceId);
+      return (
+        holder !== undefined &&
+        holder !== entitlement.initialHolder &&
+        !isSameHolderSession(holder, entitlement.requesterSessionUuid, manager)
+      );
+    };
+    const assertHolder = () => {
+      if (hasOtherHolder(candidate.device.deviceId)) {
+        throw deviceAlreadyAssignedToAnotherSessionError(candidate.device.deviceId);
+      }
+    };
+    const sessionId = devicePool?.getDevice(candidate.device.deviceId)?.sessionId;
     const session = sessionId ? manager?.getSession(sessionId) : undefined;
+    // Background retirement runs outside the request's acquisition-receipt context.
+    const mayPreserveSession = Boolean(session) && !hasOtherHolder(candidate.device.deviceId);
     return await rebootAndroidAfterSystemUiAnr({
       boot: candidate,
       args: input.args,
@@ -4516,14 +4554,17 @@ function createSystemUiAnrRebooter(
       signal: input.signal,
       progress: input.progress ? { report: input.progress } : undefined,
       recoveryAutolockClient,
+      assertHolder,
       collectColdBootSettlement: input.collectColdBootSettlement,
       publishReplacementReadinessMarker: (replacement) =>
         input.publishRecoveredReadinessMarker?.(replacement),
-      releasePreservedSession: async (replacement) => {
+      releasePreservedSession: async (replacement, preservedSessionId) => {
         if (
           !devicePool ||
           !manager ||
           !sessionId ||
+          preservedSessionId !== sessionId ||
+          !mayPreserveSession ||
           devicePool.getDevice(replacement.id) !== replacement ||
           replacement.sessionId !== sessionId
         ) {

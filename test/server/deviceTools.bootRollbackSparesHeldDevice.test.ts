@@ -26,6 +26,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 
 isolateToolRegistry();
 
@@ -307,7 +308,10 @@ describe("a failed start does not stop the device it booted once another session
       ).mockRejectedValue(new Error("handoff failed"));
 
       try {
-        const failure = await start({ platform: "android", name: avd.name, sessionUuid: held });
+        // startDevice strips sessionUuid arguments; admitted caller identity is ambient.
+        const failure = await runWithToolSelectionContext({ routingSessionUuid: held }, () =>
+          start({ platform: "android", name: avd.name }),
+        );
         await drain();
 
         expect(failure).toBeInstanceOf(Error);

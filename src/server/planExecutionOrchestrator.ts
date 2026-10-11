@@ -40,7 +40,8 @@ import {
 } from "../daemon/managedSlots/managedConnectionScope";
 import { DeviceOutsideManagedSlotsError } from "../daemon/managedSlots/managedSlotRefusal";
 import type { DevicePool } from "../daemon/devicePool";
-import type { SessionManager } from "../daemon/sessionManager";
+import { PLAN_LABEL_SESSION_SOURCE, type SessionManager } from "../daemon/sessionManager";
+import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import {
   AndroidSegmentedPlanVideoSession,
   ROTATION_STOP_TIMEOUT_MS,
@@ -705,6 +706,12 @@ export class PlanExecutionOrchestrator {
       normalized,
       sessionManager,
     );
+    this.refuseLabelNamingSessionOfItsOwn(
+      sessionUuid,
+      labelToSessionMap,
+      sessionManager,
+      slotDevices,
+    );
 
     // The plan execution is tracked on its base session. Publish its derived
     // label-session ownership before the allocator's first await so heartbeat
@@ -773,6 +780,40 @@ export class PlanExecutionOrchestrator {
     );
 
     return deviceMapping;
+  }
+
+  /**
+   * A plan never takes a session it did not mint as one of its labels (#11602). A live
+   * `${base}:${label}` session that no plan run minted is a session of its own, created under a
+   * caller-chosen id before this base existed: publishing it as a label would hand its device to
+   * the base's owner and refuse its own connection. Refused typed before anything is published
+   * or allocated; the plan runs once that session is released or the label is renamed.
+   */
+  private refuseLabelNamingSessionOfItsOwn(
+    sessionUuid: string,
+    labelToSessionMap: Record<string, string>,
+    sessionManager: SessionManager,
+    slotDevices: Map<string, string> | undefined,
+  ): void {
+    // A managed slot serves its labels with its own live slot sessions and mints nothing.
+    if (slotDevices) {
+      return;
+    }
+    for (const [label, labelSessionUuid] of Object.entries(labelToSessionMap)) {
+      const taken =
+        labelSessionUuid === sessionUuid ? null : sessionManager.peekSession(labelSessionUuid);
+      if (taken && taken.persistenceMetadata?.source !== PLAN_LABEL_SESSION_SOURCE) {
+        throw new InputDeviceOwnedError(
+          "executePlan",
+          taken.assignedDevice,
+          sessionUuid,
+          undefined,
+          `executePlan refused: device label '${label}' would be session ${labelSessionUuid}, ` +
+            "which is already a live session that no plan run created. " +
+            "Release that session or rename the label, then run the plan again.",
+        );
+      }
+    }
   }
 
   /**

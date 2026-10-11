@@ -1,4 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   DefaultAuditRunner,
@@ -367,7 +368,9 @@ describe("DefaultPlanLifecycleManager server-side binding teardown (issue #4611 
 
   test("notifies the release handler for every derived label session it releases", async () => {
     await sessionManager.createSession("base", androidDevice.deviceId, "android");
-    await sessionManager.createSession("base:B", androidDevice.deviceId, "android");
+    await asPlanAllocation(sessionManager, "base", ["base:B"], () =>
+      sessionManager.createSession("base:B", androidDevice.deviceId, "android"),
+    );
     sessionManager.setDeviceLabels("base", buildDeviceLabelMap(["A", "B"], "base"));
 
     const cleanupService = new FakeAppCleanupService();

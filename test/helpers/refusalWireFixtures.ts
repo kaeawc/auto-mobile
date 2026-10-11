@@ -18,6 +18,7 @@ import {
   McpTimeoutError,
 } from "../../src/daemon/McpTimeoutError";
 import {
+  DaemonRestartDeferredError,
   DaemonRestartPendingError,
   daemonRestartPendingToolResult,
 } from "../../src/daemon/daemonRestartAdmission";
@@ -46,10 +47,7 @@ import {
 import { DeviceOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/devices/deviceBootService";
 import { createToolErrorResponse } from "../../src/server/deviceTools";
-import {
-  sessionOwnershipLostPayload,
-  sessionReleasedDuringCallPayload,
-} from "../../src/server/deviceSessionResult";
+import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
 import {
   managedEndedPayload,
   managedSlotsFailedToolResult,
@@ -97,6 +95,10 @@ export const REFUSAL_FIXTURES_DIR = fileURLToPath(
 
 const SESSION = "11111111-2222-4333-8444-555555555555";
 const DEVICE = "emulator-5554";
+
+export function shapedRefusalResult(error: unknown): RefusalWireResult {
+  return shaped(error);
+}
 
 function shaped(error: unknown): RefusalWireResult {
   // shapeToolCallError logs every error it shapes; the fixtures are not failures.
@@ -271,11 +273,8 @@ const BUILDERS: readonly FixtureEntry[] = [
   ]),
   ...CUT_RELEASE_REASONS.map(([name, reason]): FixtureEntry => [
     `session_ownership_lost.released_${name}`,
-    "SessionReleasedDuringCallError via sessionReleasedDuringCallPayload",
-    () =>
-      jsonResult(
-        sessionReleasedDuringCallPayload(new SessionReleasedDuringCallError(SESSION, reason))!,
-      ),
+    "SessionReleasedDuringCallError via shapeToolCallError",
+    () => shaped(new SessionReleasedDuringCallError(SESSION, reason)),
   ]),
   [
     "no_active_device_session",
@@ -378,16 +377,12 @@ const BUILDERS: readonly FixtureEntry[] = [
   [
     "session_recovery_pending",
     "SessionRecoveryAssignmentError via shapeToolCallError",
-    () =>
-      shaped(
-        new SessionRecoveryAssignmentError({
-          sessionUuid: SESSION,
-          platform: "android",
-          deviceId: DEVICE,
-          stableDeviceId: "Pixel_8_API_35",
-          recoveryWindowRemainingMs: 120_000,
-        }),
-      ),
+    () => shaped(recoveryPendingError()),
+  ],
+  [
+    "daemon_restart_deferred",
+    "DaemonRestartDeferredError via shapeToolCallError",
+    () => shaped(new DaemonRestartDeferredError("a device operation is active")),
   ],
   [
     "daemon_restart_pending",
@@ -600,6 +595,17 @@ function socketFrame(error: Error): unknown {
   );
 }
 
+/** A restart target the session can still resume on while its recovery window is open. */
+export function recoveryPendingError(): SessionRecoveryAssignmentError {
+  return new SessionRecoveryAssignmentError({
+    sessionUuid: SESSION,
+    platform: "android",
+    deviceId: DEVICE,
+    stableDeviceId: "Pixel_8_API_35",
+    recoveryWindowRemainingMs: 120_000,
+  });
+}
+
 function boundSessionError(): DeviceOutsideBoundSessionError {
   return new DeviceOutsideBoundSessionError(
     "11111111-1111-4111-8111-111111111111",
@@ -660,6 +666,9 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
     () => terminalAtAdmission("cli-idle-timeout"),
   ],
   ["device_owned_by_other_session", () => new InputDeviceOwnedError("input/tap", DEVICE, "holder")],
+  ["session_recovery_pending", recoveryPendingError],
+  ["daemon_restart_deferred", () => new DaemonRestartDeferredError("a device operation is active")],
+  ["daemon_restart_pending", () => new DaemonRestartPendingError()],
   ["device_outside_bound_session", boundSessionError],
   ["capacity_exhausted.ios", () => bootCapacityRefusal("ios") as Error],
   ["discovery_incomplete.ios", iosInventoryIncomplete],
@@ -749,6 +758,7 @@ export const LITERAL_CLIENT_REACHABLE_CODES: readonly string[] = [
   MCP_OVERLOAD_ERROR_CODE,
   "session_recovery_pending",
   "daemon_restart_pending",
+  "daemon_restart_deferred",
   "viewer_read_only",
   "target_identity_unresolved",
 ];

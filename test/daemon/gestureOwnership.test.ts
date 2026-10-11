@@ -168,4 +168,65 @@ describe("GestureOwnershipRegistry", () => {
     ).toBe(true);
     expect(registry.ownerCount).toBe(0);
   });
+
+  test("a start acked after its admitting holder left the device is cancelled, never recorded", async () => {
+    const { liveSockets, cancels, registry } = createHarness();
+    liveSockets.add("s1");
+
+    expect(await registry.onStartAcked("s1", device, "g1", "holder", false)).toBe("cancelled");
+
+    expect(cancels).toEqual([{ deviceId: "emulator-5554", gestureId: "g1" }]);
+    expect(registry.ownerCount).toBe(0);
+    // Nothing is recorded, so neither the holder's release nor the socket close cancels again.
+    await registry.cancelAllHeldBy("holder");
+    await registry.cancelAllFor("s1");
+    expect(cancels).toHaveLength(1);
+  });
+
+  test("an acquisition lifts the strokes no session held on that device, and only those", async () => {
+    const { liveSockets, cancels, registry } = createHarness();
+    const otherDevice: BootedDevice = { ...device, deviceId: "emulator-5556" };
+    liveSockets.add("s1");
+    liveSockets.add("s2");
+    await registry.onStartAcked("s1", device, "sessionless");
+    await registry.onStartAcked("s2", device, "sessionless-2");
+    await registry.onStartAcked("s1", device, "held", "holder");
+    await registry.onStartAcked("s1", otherDevice, "elsewhere");
+
+    await registry.cancelAllUnheldOn(device.deviceId);
+
+    expect(cancels).toEqual([
+      { deviceId: "emulator-5554", gestureId: "sessionless" },
+      { deviceId: "emulator-5554", gestureId: "sessionless-2" },
+    ]);
+    // Ownership went with the lift: the socket close cancels only what is still open.
+    await registry.cancelAllFor("s2");
+    await registry.cancelAllFor("s1");
+    expect(cancels.slice(2)).toEqual([
+      { deviceId: "emulator-5554", gestureId: "held" },
+      { deviceId: "emulator-5556", gestureId: "elsewhere" },
+    ]);
+  });
+
+  test("an acquisition lift hands every cancel to the device before the first one answers", async () => {
+    const liveSockets = new Set(["s1"]);
+    const requested: string[] = [];
+    const answer = Promise.withResolvers<void>();
+    const registry = new GestureOwnershipRegistry({
+      isSocketLive: (id) => liveSockets.has(id),
+      cancelGesture: (_target, gestureId) => {
+        requested.push(gestureId);
+        return answer.promise;
+      },
+    });
+    await registry.onStartAcked("s1", device, "g1");
+    await registry.onStartAcked("s1", device, "g2");
+
+    const lifted = registry.cancelAllUnheldOn(device.deviceId);
+
+    expect(requested).toEqual(["g1", "g2"]);
+    expect(registry.ownerCount).toBe(0);
+    answer.resolve();
+    await lifted;
+  });
 });

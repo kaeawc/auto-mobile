@@ -1705,11 +1705,12 @@ export async function listVideoRecordings(
 
 export async function getVideoRecordingMetadata(
   recordingId: string,
-  options?: { touch?: boolean; ownerSessionUuid?: string },
+  options?: { touch?: boolean; ownerSessionUuid?: string; ownerBaseSessionUuid?: string },
 ): Promise<VideoRecordingMetadata | null> {
   const { recordingRepository, now } = await getVideoRecordingDependencies();
   const record = await recordingRepository.getRecording(recordingId, {
     ownerSessionUuid: options?.ownerSessionUuid,
+    ownerBaseSessionUuid: options?.ownerBaseSessionUuid,
   });
   if (!record || record.status === "recording") {
     return null;
@@ -1900,6 +1901,19 @@ async function enforceArchiveLimit(
     currentSizeBytes,
     maxSizeBytes,
   };
+}
+
+/**
+ * A recording's device and owner, read without owner scoping and without touching its access
+ * time. Only for deciding whether a requester's connection holds the owner's device (#11533);
+ * the recording itself is then read owner-scoped.
+ */
+export async function getVideoRecordingOwnerRef(
+  recordingId: string,
+): Promise<{ deviceId: string; ownerSessionUuid?: string } | null> {
+  const { recordingRepository } = await getVideoRecordingDependencies();
+  const record = await recordingRepository.getRecording(recordingId);
+  return record ? { deviceId: record.deviceId, ownerSessionUuid: record.ownerSessionUuid } : null;
 }
 
 /** Read a recording's status without touching its archive access time. */

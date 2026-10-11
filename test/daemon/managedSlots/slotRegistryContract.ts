@@ -13,6 +13,7 @@ import {
   type SlotRegistry,
   type SlotScopeIdentity,
 } from "../../../src/daemon/managedSlots/slotRegistry";
+import { MANAGED_EXECUTION_SETTLEMENT_CAP_MS } from "../../../src/daemon/managedSlots/managedExecutionRelease";
 import { SlotScopeReset } from "../../../src/daemon/managedSlots/slotScopeReset";
 import { ManagedExecutionReowner } from "../../../src/daemon/managedSlots/managedExecutionReowner";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -430,7 +431,11 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
 
       function resetter(): SlotScopeReset {
         timer.enableAutoAdvance();
-        return new SlotScopeReset({ registry: async () => registry, timer });
+        return new SlotScopeReset({
+          registry: async () => registry,
+          timer,
+          isExecOwnerLive: (owner) => livePids.has(owner.pid),
+        });
       }
 
       test("commits the release entry, invalidates and frees the device; without --force it stays pending", async () => {
@@ -441,6 +446,13 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
         expect((await reset.reset(request)).outcome).toBe("pending");
         expect((await registry.getAssignment({ scopeKey, slotIndex: 0 }))?.state).toBe("settling");
 
+        // Inside the settlement cap --force is refused with the time remaining (#11539).
+        const early = await reset.reset({ ...request, force: true });
+        expect(early.outcome).toBe("pending");
+        expect(early.scopes[0]?.forceRefusals?.[0]?.reason).toBe("within_settlement_cap");
+        expect(await registry.listFreeDevices()).toEqual([]);
+
+        timer.setCurrentTime(timer.now() + MANAGED_EXECUTION_SETTLEMENT_CAP_MS);
         const forced = await reset.reset({ ...request, force: true });
 
         expect(forced).toMatchObject({

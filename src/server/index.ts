@@ -68,7 +68,12 @@ import {
   type DeviceLossOutcome,
 } from "./deviceLossOutcome";
 
-import { refuseControlOnForeignOwnedSession } from "./foreignOwnedSessionRefusal";
+import {
+  isControlCallOnNamedSession,
+  isSessionOwnedByAnotherConnection,
+  namedSessionAccess,
+  refuseControlOnForeignOwnedSession,
+} from "./foreignOwnedSessionRefusal";
 
 // Import the tool registry
 import { ToolRegistry, toolHasOutputSchema } from "./toolRegistry";
@@ -1296,15 +1301,24 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       sessionUuid: providedSessionUuid,
     });
 
+    // A plain read (inventory, diagnostics, status) names a session only to watch it: it is
+    // admitted read-only (no activity refresh), so neither its start nor its end is use (#11107).
+    const plainReadCall =
+      !tool.requiresDevice &&
+      (isDeviceInventoryTool(name) || tool.isDeviceReadOnlyCall?.(parsedParams) === true);
     // #11344: a control call never runs on a session another connected client owns. Refused
-    // before the execution starts, so naming the session neither extends nor binds it.
-    if (
-      daemonMode &&
-      tool.requiresDevice &&
-      !isDeviceSessionAcquisitionTool(name) &&
-      tool.isDeviceReadOnlyCall?.(parsedParams) !== true
-    ) {
-      refuseControlOnForeignOwnedSession(name, providedSessionUuid, requestMcpSessionId);
+    // before the execution starts, so naming the session neither extends nor binds it. A plain
+    // control tool (killDevice, recordSteps) is admitted on the session it names, so it is judged
+    // like a device call (#11542); nested internal calls are judged by the same predicate (#11555).
+    if (daemonMode && isControlCallOnNamedSession(tool, parsedParams)) {
+      // The session the call names, and the one a `device` label resolves to, which is the one
+      // the call runs on (#11542). The implicit routing session of a call that names none is not
+      // judged: a connection's bound session reaches here unnamed, and whether a binding another
+      // connection merely declares may drive the session is an open owner question (#11555,
+      // pinned in test/daemon/implicitRoutingForeignOwnedSession.test.ts).
+      for (const sessionUuid of new Set([providedSessionUuid, derivedLabelSessionUuid])) {
+        refuseControlOnForeignOwnedSession(name, sessionUuid, requestMcpSessionId, parsedParams);
+      }
     }
 
     // #6869: the capabilities this acquisition declares, validated up front.
@@ -1338,11 +1352,6 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       }
       throw error;
     }
-    // A plain read (inventory, diagnostics, status) names a session only to watch it: it is
-    // admitted read-only (no activity refresh), so neither its start nor its end is use (#11107).
-    const plainReadCall =
-      !tool.requiresDevice &&
-      (isDeviceInventoryTool(name) || tool.isDeviceReadOnlyCall?.(parsedParams) === true);
     if (plainReadCall) {
       executionTracker.markReadOnlySessionAccess(execution.id);
     }
@@ -1525,15 +1534,27 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       ) {
         // Plain tools can strip or ignore sessionUuid themselves. Device-aware
         // tools carry their admitted identity into execution in ToolRegistry.
+        // #11555: naming a session another connected client owns is not use of it, for any
+        // plain tool the owner rule lets through (`setToolEnabled`). Such a call passes the
+        // same refusals as the owner's, but neither its admission nor its end stamps the
+        // session, and while in flight it holds the session no more than a read does.
+        const namesForeignOwnedSession = isSessionOwnedByAnotherConnection(
+          providedSessionUuid,
+          requestMcpSessionId,
+        );
         await DaemonState.getInstance()
           .getSessionManager()
           .admitIssuedSessionForAutomation(
             providedSessionUuid,
             sessionExecutionMetadataOf(execution),
-            plainReadCall ? { access: "read-only" } : undefined,
+            namedSessionAccess(plainReadCall, namesForeignOwnedSession),
           );
-        // Only an admitted call's end is session use (#10824).
-        executionTracker.markSessionAdmitted(execution.id);
+        if (namesForeignOwnedSession) {
+          executionTracker.markReadOnlySessionAccess(execution.id);
+        } else {
+          // Only an admitted call's end is session use (#10824).
+          executionTracker.markSessionAdmitted(execution.id);
+        }
       }
       const runToolHandler = () =>
         runWithToolSelectionContext(

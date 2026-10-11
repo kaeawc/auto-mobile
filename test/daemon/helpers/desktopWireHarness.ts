@@ -437,7 +437,7 @@ export class DesktopWireHarness {
 }
 
 /** src/server/index.ts tool-call catch block, for the errors setActiveDevice can raise. */
-function toolErrorResult(error: unknown, toolName = "setActiveDevice"): unknown {
+export function toolErrorResult(error: unknown, toolName = "setActiveDevice"): unknown {
   if (error instanceof TerminalSessionError) {
     const payload = sessionOwnershipLostPayload({
       message: error.message,

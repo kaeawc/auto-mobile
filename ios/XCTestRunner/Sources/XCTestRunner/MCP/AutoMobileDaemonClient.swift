@@ -243,6 +243,14 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, Sendable {
         guard response["success"] as? Bool ?? false else {
             let message = response["error"] as? String ?? "Daemon returned error"
             PerfTimer.log("sendRequest ERROR: \(message)")
+            // A failed frame that states `retryable` keeps the daemon's verdict: a terminal code is not
+            // retried, a retryable one is (#11544). A frame that omits the flag (older daemons,
+            // `daemon_queue_timeout` today) stays a server error with the blind retry it always had.
+            if response["retryable"] is Bool,
+               let refusal = AutoMobilePlanExecutor.DaemonRefusal.parse(response)
+            {
+                throw MCPClientError.refused(refusal)
+            }
             throw MCPClientError.serverError(message)
         }
         guard let result = response["result"] as? [String: Any] else {

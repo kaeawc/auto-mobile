@@ -93,9 +93,12 @@ describe("daemon command characterization with fake I/O", () => {
       isInitialized: () => true,
       getDevicePool: () => ({
         // The in-daemon path refreshes slot and foreign ownership before reading stats (#11317).
-        getRefreshedStats: async () => {
+        getRefreshedInventory: async () => {
           events.push("stats");
-          return { idle: 1, assigned: 0, error: 0, total: 1 };
+          return {
+            stats: { idle: 1, assigned: 0, error: 0, total: 1 },
+            deviceIds: new Set(["fake"]),
+          };
         },
         getRecoveryPolicy: () => {
           events.push("policy");
@@ -492,6 +495,21 @@ describe("daemon command characterization with fake I/O", () => {
         devices: [{ deviceId: "unknown", platform: "ios" }],
       },
     },
+    {
+      // A partial observation that still has real entries prints as before.
+      content: JSON.stringify({
+        observationComplete: false,
+        poolStatus: { idle: 1, total: 1, assigned: 0, error: 0 },
+        devices: [{ platform: "android", runtime: { deviceId: "emulator-5554" } }],
+      }),
+      expected: {
+        availableDevices: 1,
+        totalDevices: 1,
+        assignedDevices: 0,
+        errorDevices: 0,
+        devices: [{ deviceId: "emulator-5554", platform: "android" }],
+      },
+    },
   ])(
     "available-devices prints resource data before closing: $content",
     async ({ content, expected }) => {
@@ -538,6 +556,14 @@ describe("daemon command characterization with fake I/O", () => {
     {
       name: "no pool status",
       content: JSON.stringify({ totalCount: 0, devices: [], observationComplete: false }),
+    },
+    {
+      name: "an incomplete observation with an empty pool",
+      content: JSON.stringify({
+        observationComplete: false,
+        poolStatus: { idle: 0, total: 0, assigned: 0, error: 0 },
+        devices: [],
+      }),
     },
   ])("available-devices fails instead of printing zeros for $name", async ({ content }) => {
     const out: unknown[] = [];

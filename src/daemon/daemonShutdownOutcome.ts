@@ -24,6 +24,19 @@ export function daemonShuttingDownFailure(
   };
 }
 
+/**
+ * Socket-frame fields for a shutdown refusal: top-level `code`/`retryable`, as
+ * `mcpRequestFailureDetails` emits for other typed refusals, plus the nested object that existing
+ * readers (and `requestMayHaveDispatched`) use.
+ */
+export function daemonShuttingDownFrameFields(failure: DaemonShuttingDownFailure): {
+  code: typeof DAEMON_SHUTTING_DOWN_ERROR_CODE;
+  retryable: true;
+  daemonShuttingDown: DaemonShuttingDownFailure;
+} {
+  return { code: failure.code, retryable: true, daemonShuttingDown: failure };
+}
+
 export function daemonShuttingDownMcpOutcome(
   requestMayHaveDispatched = false,
 ): DaemonShuttingDownMcpOutcome {

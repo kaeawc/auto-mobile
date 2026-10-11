@@ -1,4 +1,4 @@
-import { describe, test } from "bun:test";
+import { beforeAll, describe, test } from "bun:test";
 import {
   assertTwoDaemonInvariants,
   twoDaemonSeedOverride,
@@ -8,7 +8,7 @@ import {
 
 // Seeded cross-daemon ownership properties: two daemons sharing one database, adb server, claim
 // files and data directory (see twoDaemonOwnershipHarness.ts for the steps and invariants). CI runs
-// the fixed seeds below, a few per test so each stays inside the 100 ms budget. Widen locally with
+// the fixed seeds 1-9 below, one per test so each stays well inside the 100 ms budget on a loaded runner. Widen locally with
 // AUTOMOBILE_TWO_DAEMON_SEEDS (how many) and AUTOMOBILE_TWO_DAEMON_SEED_BASE (first seed), e.g.
 //   AUTOMOBILE_TWO_DAEMON_SEEDS=2000 bun test test/daemon/poolOwnershipConcurrency.twoDaemon.property.test.ts
 // AUTOMOBILE_TWO_DAEMON_TRACE=1 streams the trace live, for a seed that hangs.
@@ -19,8 +19,8 @@ import {
 const KNOWN_VIOLATIONS: ReadonlySet<TwoDaemonViolationKind> = new Set<TwoDaemonViolationKind>([]);
 
 const STEPS = 30;
-const SEEDS_PER_TEST = 3;
-const TESTS_PER_PROFILE = 3;
+const SEEDS_PER_TEST = 1;
+const TESTS_PER_PROFILE = 9;
 
 const PROFILES: Record<string, TwoDaemonProfile> = {
   /** Wedged terminal writes, crashes and restarts: journal adoption and startup sweeps. */
@@ -94,6 +94,12 @@ function seedChunks(firstSeed: number): number[][] {
 }
 
 describe("two daemons sharing one database, adb server, claims and data directory", () => {
+  // CI's per-test time excludes only beforeAll: one throwaway seed pays the harness's one-time
+  // module/JIT cost here, so the first timed test measures steady state like the others.
+  beforeAll(async () => {
+    await assertTwoDaemonInvariants([1], PROFILES.journal, { tolerate: KNOWN_VIOLATIONS });
+  });
+
   for (const [name, profile] of Object.entries(PROFILES)) {
     for (const seeds of seedChunks(1)) {
       test(

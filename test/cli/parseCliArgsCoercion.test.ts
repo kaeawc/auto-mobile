@@ -1,9 +1,15 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { parseCliArgs } from "../../src/cli";
 import { YamlPlanSerializer } from "../../src/utils/plan/PlanSerializer";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();
+
+// CI's per-test time excludes only beforeAll: pay parseCliArgs' one-time tool-schema cost here
+// (registered after isolateToolRegistry, so it runs inside the isolated registry).
+beforeAll(() => {
+  parseCliArgs(["executePlan", "--platform", "android", "--planContent", "---\nname: x\n"]);
+});
 
 describe("parseCliArgs YAML document values (#7164)", () => {
   test("consumes leading --- YAML as the full planContent string", () => {

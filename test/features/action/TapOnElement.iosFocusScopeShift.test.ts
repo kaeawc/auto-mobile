@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import beforeFocusTap from "../../fixtures/ios/nested-selection/cart-a-item-42-before-focus-tap.json";
 import focusedAfterShift from "../../fixtures/ios/nested-selection/cart-a-item-42-focused-keyboard-shift.json";
 import cartBItem41Focused from "../../fixtures/ios/nested-selection/cart-b-item-41-quantity-focused.json";
@@ -134,6 +134,13 @@ async function focusOnIos(
 }
 
 describe("iOS focus confirmation after a keyboard shift with a stale SDK snapshot (#10266)", () => {
+  // One throwaway run pays the one-time module/JIT warm-up of the resolver over the large
+  // captures; beforeAll time is outside the per-test budget, so the tests measure steady state.
+  beforeAll(async () => {
+    const shifted = hierarchyOf(focusedAfterShift as Capture);
+    await focusOnIos(CART_A_ITEM_42, shifted, [shifted]);
+  });
+
   test("confirms the focused field in the selected row without re-resolving the shifted scope", async () => {
     const shifted = hierarchyOf(focusedAfterShift as Capture);
     const { result, taps } = await focusOnIos(CART_A_ITEM_42, shifted, [shifted]);

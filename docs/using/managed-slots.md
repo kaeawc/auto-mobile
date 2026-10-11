@@ -289,18 +289,37 @@ The registry tracks each scope as `valid`, `invalidating` or `invalidated`
     [--managed-host-scope host-1] [--wait-ms 10000] [--force]
   ```
 
-  `--force` abandons a slot stuck `settling` (its released work outlived the
-  settlement cap): the slot returns to `ready`, its release journal entry is
-  committed, and the reset proceeds. It never overrides a slot with a live
-  execution owner, which still reports `pending`; the stuck work may keep running.
+  `--force` abandons a slot stuck `settling`: one whose released work outlived the
+  5-minute settlement cap, or whose settling daemon is gone (its work died with
+  it, so the cap is not waited out). The slot returns to `ready`, its release
+  journal entry is committed, and the reset proceeds; work that outlived the cap
+  may keep running after an abandon. `--force` never overrides a slot with a live
+  execution owner, nor a slot still inside the cap whose settling daemon is not
+  provably gone. Each slot it leaves alone is listed in the scope's
+  `forceRefusals` with a typed `reason` and a message saying what to do:
+
+  | `reason`                 | Meaning                                                                                                                                                                                                                      |
+  | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `live_owner`             | An execution this daemon holds is using the slot. Release it first.                                                                                                                                                          |
+  | `owner_liveness_unknown` | The owner record belongs to another running daemon. This daemon cannot tell whether that execution ended there, so it neither cuts the slot nor treats the record as dead. Run the reset through that daemon, or restart it. |
+  | `within_settlement_cap`  | The slot is settling under a daemon not known to be gone. `remainingMs` says when `--force` will apply.                                                                                                                      |
+  | `no_release_entry`       | The slot is `settling` with no open release entry, so `--force` cannot tell whether it is stuck. Restart the settling daemon: startup recovery returns the slot to `ready`.                                                  |
+  | `other_open_journal`     | Unfinished non-release journal work; wait for the redrive.                                                                                                                                                                   |
+  | `abandon_failed`         | The slot changed, or the registry failed, during the abandon; retry.                                                                                                                                                         |
+
+  An owner record whose session has ended in the daemon that wrote it (its clear
+  failed against a busy registry) is not a live owner there: that daemon clears it
+  when the slot settles, re-checking until the settlement cap if the same session
+  id is held again at that moment, and its `--force` does not yield to it.
 
   `--runner-namespace` and `--incarnation` are required; `--managed-host-scope`
   narrows to one host scope; `--wait-ms` is the bounded settle wait (integer 0 to
   60000, default 10000). The command prints the daemon's JSON result and exits
   `0` when every matching scope is invalidated, `2` when a scope is still waiting
   on owners or cleanup (the result lists the live owners, settling and
-  cleanup-pending slots and open journal work; retry later), and `1` when no
-  scope matched or the call failed. It is idempotent and a repeated call resumes
+  cleanup-pending slots and open journal work; stderr also lists each
+  `forceRefusals` entry with its reason, `remainingMs` and message; retry later),
+  and `1` when no scope matched or the call failed. It is idempotent and a repeated call resumes
   where it stopped. It accepts the usual daemon launch options. Like the other
   daemon lifecycle commands, it is refused (`shared_daemon_namespace`) when
   `AUTOMOBILE_DATA_DIR` or the DB dirs are set without

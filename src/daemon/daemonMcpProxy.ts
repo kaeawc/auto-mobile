@@ -3393,13 +3393,8 @@ export class DaemonMcpProxy {
       throw new DaemonUnavailableError("MCP proxy is closing");
     }
     this.throwIfBoundSessionFenced(allowReleasedSession, attemptedSessionUuid);
-    const reconnectRecoverableHandoff = this.hasRecoverableBoundSessionHandoff();
-    if (reconnectRecoverableHandoff) {
-      // The handoff is the binding's own: with calls in flight on the connection it is reclaimed
-      // on that connection instead ({@link connectionCarriesCallsInFlight}).
-      if (!this.connectionCarriesCallsInFlight()) {
-        await this.resetConnectionOnceDrained();
-      }
+    if (this.hasRecoverableBoundSessionHandoff()) {
+      await this.resetConnectionForRecoverableHandoff();
       // doConnect restarts the heartbeat keeper. Clear the marker before that
       // asynchronous tick can enter withRecoverableReconnect and reset the new
       // transport beneath the operation that is reclaiming this UUID.
@@ -3440,16 +3435,7 @@ export class DaemonMcpProxy {
         await this.throwOutcomeWithoutReplay(refusedToolName, error);
       }
 
-      if (this.isSessionAnswerOnSharedConnection(error)) {
-        logger.info(
-          `[DaemonMcpProxy] Asking once more on the same daemon connection, which has tool calls in flight: ${errorMessage(error)}`,
-        );
-      } else {
-        logger.warn(
-          `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${errorMessage(error)}`,
-        );
-        await this.resetConnectionOnceDrained();
-      }
+      await this.resetConnectionForRetry(error);
       signal.throwIfAborted();
       this.throwIfBoundSessionFenced(allowReleasedSession, attemptedSessionUuid);
       await this.ensureConnected();
@@ -3478,6 +3464,37 @@ export class DaemonMcpProxy {
         throw retryError;
       }
     }
+  }
+
+  /**
+   * The latest binding was handed off recoverably (a daemon shutdown or restart, its device's
+   * restart): the next request reclaims it on a fresh connection. With tool calls in flight on
+   * the connection it is reclaimed on that connection instead
+   * ({@link connectionCarriesCallsInFlight}).
+   */
+  private resetConnectionForRecoverableHandoff(): Promise<void> {
+    return this.connectionCarriesCallsInFlight()
+      ? Promise.resolve()
+      : this.resetConnectionOnceDrained();
+  }
+
+  /**
+   * Before the one retry of a request that failed recoverably: replace the connection, unless the
+   * failure is the daemon's answer about one session on a connection with tool calls in flight
+   * ({@link isSessionAnswerOnSharedConnection}), which is asked again where it is. Not `async`:
+   * the reset is awaited as directly as before, since callers' scheduling depends on its turns.
+   */
+  private resetConnectionForRetry(error: unknown): Promise<void> {
+    if (this.isSessionAnswerOnSharedConnection(error)) {
+      logger.info(
+        `[DaemonMcpProxy] Asking once more on the same daemon connection, which has tool calls in flight: ${errorMessage(error)}`,
+      );
+      return Promise.resolve();
+    }
+    logger.warn(
+      `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${errorMessage(error)}`,
+    );
+    return this.resetConnectionOnceDrained();
   }
 
   /**

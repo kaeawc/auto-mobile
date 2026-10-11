@@ -1041,6 +1041,14 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       } else if (name === "executePlan" && declaredDeviceLabels?.includes(deviceLabel)) {
         sessionUuid = baseSessionUuid;
       } else {
+        // The base's end ends its labels (#11640): a step whose base has ended, or is past its
+        // idle deadline, fails with the base's terminal release, not as an unallocated label.
+        const baseEnded = DaemonState.getInstance()
+          .getSessionManager()
+          .terminalAnswerForEndedSession(baseSessionUuid, execution?.executionId);
+        if (baseEnded) {
+          throw baseEnded;
+        }
         throw new ActionableError(
           `Device label '${deviceLabel}' is not allocated. Provide a devices list to executePlan before using device labels.`,
         );

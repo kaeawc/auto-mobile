@@ -1,0 +1,222 @@
+import { describe, expect, test } from "bun:test";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { SESSION_OWNERSHIP_LOST_CODE } from "../../src/daemon/sessionReleasedDuringCall";
+import { TerminalSessionError } from "../../src/daemon/sessionManager";
+import {
+  hasActiveSessionExecution,
+  latestSessionExecutionDeadlineMs,
+  subscribeToolCallEndActivity,
+} from "../../src/daemon/toolCallActivity";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import { executionTracker } from "../../src/server/executionTracker";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
+import {
+  BASE,
+  LABEL_B,
+  createPlanSessionHunt,
+  deviceA,
+  deviceB,
+  deviceC,
+  twoDevicePlan,
+  type PlanRunResult,
+  type PlanSessionHunt,
+} from "../helpers/planSessionHarness";
+
+// #11640, owner decision 2026-10-11: the base's end ends its labels. Reproduced through a real
+// `executePlan` run (registry, orchestrator, session manager, pool and release cascade over fakes):
+// plan steps on label B stamp only the label, so once the plan's own call no longer holds the base
+// past its idle deadline, the base is expired and unscanned while the label is still live.
+
+const OWNER = "conn-owner";
+const STRANGER = "conn-stranger";
+/** The plan call's request deadline, after which it no longer holds its base (plus the grace). */
+const PLAN_DEADLINE_MS = 60_000;
+const DEADLINE_GRACE_MS = 10_000;
+
+interface LongPlan {
+  hunt: PlanSessionHunt;
+  released: Array<[string, string]>;
+  /** Devices the probe step ran on, in order. */
+  ran: string[];
+  /** A control call from `connection` naming `sessionUuid`, as the daemon's tool path runs it. */
+  call(connection: string, sessionUuid: string): Promise<unknown>;
+  /** Runs when the base is expired and unscanned and the label is live, inside the plan's step. */
+  whenBaseOutlived(body: () => Promise<void>): void;
+  run(): Promise<PlanRunResult>;
+}
+
+const longPlanOnItsLabel = (body: (plan: LongPlan) => Promise<void>) => async (): Promise<void> => {
+  const hunt = await createPlanSessionHunt([deviceA, deviceB, deviceC]);
+  const unsubscribe: Array<() => void> = [];
+  try {
+    const { sessionManager, pool } = hunt.daemon();
+    // daemon.ts: a call in flight vetoes its session's idle release until its request deadline.
+    sessionManager.setActiveSessionExecutionChecker((id, query) =>
+      hasActiveSessionExecution(executionTracker, sessionManager, pool, id, query),
+    );
+    sessionManager.setSessionExecutionDeadlineLookup((id, query) =>
+      latestSessionExecutionDeadlineMs(executionTracker, sessionManager, pool, id, {
+        onSessionClock: true,
+        ...query,
+      }),
+    );
+    unsubscribe.push(subscribeToolCallEndActivity(executionTracker, sessionManager, pool));
+    const released: Array<[string, string]> = [];
+    sessionManager.onSessionRelease((id, _deviceId, reason) => {
+      released.push([id, reason]);
+    });
+    await pool.bindOrReuseDeviceSession(
+      BASE,
+      deviceA.deviceId,
+      "ios",
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      OWNER,
+    );
+    sessionManager.setDeviceReadiness(BASE, "automationReady");
+    const baseIdleDeadline = sessionManager.peekSession(BASE)!.expiresAt;
+
+    const ran: string[] = [];
+    let outlived: () => Promise<void> = async () => undefined;
+    let step = 0;
+    hunt.setProbeStep(async (device) => {
+      ran.push(device.deviceId);
+      if (++step === 1) {
+        // Past the plan call's deadline and grace; the next step stamps the label here.
+        hunt.timer.advanceTime(PLAN_DEADLINE_MS + DEADLINE_GRACE_MS);
+      } else if (step === 2) {
+        hunt.timer.advanceTime(baseIdleDeadline - sessionManager.sessionNow() + 1);
+        await outlived();
+      }
+    });
+
+    await body({
+      hunt,
+      released,
+      ran,
+      call: async (connection, sessionUuid) => {
+        const execution = executionTracker.startExecution("huntProbe", connection, sessionUuid);
+        try {
+          return await runWithToolSelectionContext(
+            { execution: { executionId: execution.id, startTime: execution.startTime } },
+            () =>
+              ToolRegistry.getTool("huntProbe")!.handler({
+                sessionUuid,
+                platform: "ios",
+                [INTERNAL_MCP_SESSION_PARAM]: connection,
+              }),
+          );
+        } finally {
+          executionTracker.endExecution(execution.id);
+        }
+      },
+      whenBaseOutlived: (then) => {
+        outlived = then;
+      },
+      run: async () => {
+        const planExecution = executionTracker.startExecution("executePlan", OWNER, BASE);
+        const deadline = hunt.timer.now() + PLAN_DEADLINE_MS;
+        executionTracker.setExecutionDeadline(planExecution.id, () => deadline);
+        try {
+          const response: { structuredContent?: PlanRunResult; content: Array<{ text: string }> } =
+            await runWithToolSelectionContext(
+              {
+                execution: {
+                  executionId: planExecution.id,
+                  startTime: planExecution.startTime,
+                },
+              },
+              () =>
+                ToolRegistry.getTool("executePlan")!.handler({
+                  planContent: twoDevicePlan(["B", "B", "B"]),
+                  startStep: 0,
+                  platform: "ios",
+                  sessionUuid: BASE,
+                  deviceAllocationTimeoutMs: 1_000,
+                  abortStrategy: "immediate",
+                  [INTERNAL_MCP_SESSION_PARAM]: OWNER,
+                }),
+            );
+          return response.structuredContent ?? JSON.parse(response.content[0].text);
+        } finally {
+          executionTracker.endExecution(planExecution.id);
+        }
+      },
+    });
+  } finally {
+    unsubscribe.forEach((end) => end());
+    hunt.tearDown();
+  }
+};
+
+const terminalRefusal = async (attempt: Promise<unknown>): Promise<TerminalSessionError> => {
+  const error: unknown = await attempt.then(
+    () => undefined,
+    (thrown: unknown) => thrown,
+  );
+  if (!(error instanceof TerminalSessionError)) {
+    throw new Error(`expected a terminal refusal, got ${String(error)}`);
+  }
+  return error;
+};
+
+describe("a plan whose base idles out while its steps run on a label", () => {
+  test.each([
+    ["a stranger connection", STRANGER],
+    ["the owner", OWNER],
+  ])(
+    "%s naming the label is refused with the base's end, and base and label end",
+    (_who, connection) =>
+      longPlanOnItsLabel(async (plan) => {
+        const { sessionManager } = plan.hunt.daemon();
+        let refused: TerminalSessionError | undefined;
+        let ranBefore = -1;
+        plan.whenBaseOutlived(async () => {
+          expect(sessionManager.peekSession(BASE)).toBeNull();
+          ranBefore = plan.ran.length;
+          refused = await terminalRefusal(plan.call(connection, LABEL_B));
+          await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+        });
+
+        await plan.run();
+
+        expect(refused?.sessionUuid).toBe(LABEL_B);
+        expect(refused?.release).toMatchObject({ releaseReason: "lazy-expiry", terminal: true });
+        // The refused call never reached the label's device.
+        expect(plan.ran.slice(ranBefore)).toEqual([]);
+        expect(plan.released).toEqual([
+          [BASE, "lazy-expiry"],
+          [LABEL_B, "lazy-expiry"],
+        ]);
+        expect(plan.hunt.poolHolder(deviceB.deviceId)).toBeUndefined();
+      })(),
+  );
+
+  test(
+    "the plan's next step fails typed, naming the base's release reason",
+    longPlanOnItsLabel(async (plan) => {
+      const result = await plan.run();
+      await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+
+      expect(result.success).toBe(false);
+      expect(result.code).toBe(SESSION_OWNERSHIP_LOST_CODE);
+      expect(result.retryable).toBe(false);
+      expect(result.error).toContain("lazy-expiry");
+      expect(result.error).not.toContain("is not allocated");
+      // Two steps ran on the label's device; the third was refused before reaching any device.
+      expect(plan.ran).toEqual([deviceB.deviceId, deviceB.deviceId]);
+      expect(plan.released).toEqual([
+        [BASE, "lazy-expiry"],
+        [LABEL_B, "lazy-expiry"],
+      ]);
+      expect(plan.hunt.poolHolder(deviceA.deviceId)).toBeUndefined();
+      expect(plan.hunt.poolHolder(deviceB.deviceId)).toBeUndefined();
+    }),
+  );
+});

@@ -113,13 +113,14 @@ describe("judging ownership of a label whose base has expired but is not yet sca
     await expectBaseUntouched(w, before);
   });
 
-  test("the label is judged on its own, as it is once the scan has released the base", async () => {
+  test("the label is no live session either: the base's end ends its labels (#11640)", async () => {
     const w = await expiredUnscannedBase();
 
     expect(w.manager.ownershipSessionUuid(LABEL)).toBe(LABEL);
-    expect(await w.manager.claimLivenessOwnership(LABEL, TOKEN)).toBe("claimed");
+    expect(await w.manager.claimLivenessOwnership(LABEL, TOKEN)).toBe("not-found");
     expect(w.manager.peekSession(BASE)).toBeNull();
-    expect(w.manager.peekSession(LABEL)?.sessionId).toBe(LABEL);
+    expect(w.manager.peekSession(LABEL)).toBeNull();
+    expect(await w.manager.getReleasedSessionReason(LABEL)).toBe("lazy-expiry");
     // Every label lookup answers as it does once the base is gone: it publishes no labels.
     expect(w.manager.getDeviceLabels(BASE)).toBeUndefined();
     expect(resolveToolSelectionBaseSessionUuid(LABEL, w.manager)).toBe(LABEL);

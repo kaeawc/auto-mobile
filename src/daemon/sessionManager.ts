@@ -3387,7 +3387,7 @@ export class SessionManager {
    * Get existing session
    */
   getSession(sessionId: string): Session | null {
-    return this.getSessionInternal(sessionId, false);
+    return this.unlessBaseEnded(this.getSessionInternal(sessionId, false));
   }
 
   /**
@@ -3399,7 +3399,7 @@ export class SessionManager {
     sessionId: string,
     execution?: SessionExecutionMetadata,
   ): Session | null {
-    return this.getSessionInternal(sessionId, true, execution);
+    return this.unlessBaseEnded(this.getSessionInternal(sessionId, true, execution));
   }
 
   private getSessionInternal(
@@ -3433,23 +3433,44 @@ export class SessionManager {
       // and removed its assignment. Keep expiry cleanup from creating a second
       // incarnation with the same UUID before teardown completes, without
       // exposing the expired session to callers during that teardown.
-      if (this.releasingSessions.has(session)) {
-        return null;
-      }
-      logger.info(`Session ${sessionId} has expired, releasing`);
-      const releaseReason = this.expiredSessionReleaseReason(session, "lazy-expiry");
-      this.cancelExecutionsOverriddenByExpiry(session, releaseReason, execution?.executionId);
-      const release = this.releaseSession(sessionId, releaseReason, true, undefined, {
-        expiryOrigin: "lazy-expiry",
-      });
-      void this.getBarrier()
-        .trackExisting(release)
-        .catch((error) =>
-          logger.warn(`[SessionManager] Failed to release expired session ${sessionId}: ${error}`),
-        );
+      this.releaseExpiredSessionLazily(session, execution?.executionId);
       return null;
     }
     return session;
+  }
+
+  /** The lazy-expiry release of a session a lookup found past its idle deadline. */
+  private releaseExpiredSessionLazily(session: Session, callerExecutionId?: string): void {
+    if (this.releasingSessions.has(session)) {
+      return;
+    }
+    const sessionId = session.sessionId;
+    logger.info(`Session ${sessionId} has expired, releasing`);
+    const releaseReason = this.expiredSessionReleaseReason(session, "lazy-expiry");
+    this.cancelExecutionsOverriddenByExpiry(session, releaseReason, callerExecutionId);
+    const release = this.releaseSession(sessionId, releaseReason, true, undefined, {
+      expiryOrigin: "lazy-expiry",
+    });
+    void this.getBarrier()
+      .trackExisting(release)
+      .catch((error) =>
+        logger.warn(`[SessionManager] Failed to release expired session ${sessionId}: ${error}`),
+      );
+  }
+
+  /**
+   * Release `sessionId` if it is past its idle deadline, exactly as a lookup naming it does
+   * ({@link getSession}); a live, fenced or already releasing session is left as it is.
+   */
+  private releaseSessionPastIdleDeadline(sessionId: string, callerExecutionId?: string): void {
+    const session = this.sessions.get(sessionId);
+    if (
+      session &&
+      !this.terminalReleaseSnapshots.has(sessionId) &&
+      this.isSessionExpired(session)
+    ) {
+      this.releaseExpiredSessionLazily(session, callerExecutionId);
+    }
   }
 
   /**
@@ -3466,7 +3487,7 @@ export class SessionManager {
     if (this.deviceHeldForLateRead(sessionId, execution) !== undefined) {
       return null;
     }
-    return this.getSessionInternal(sessionId, true, execution, false);
+    return this.unlessBaseEnded(this.getSessionInternal(sessionId, true, execution, false));
   }
 
   /**
@@ -3629,6 +3650,7 @@ export class SessionManager {
       return existing;
     }
 
+    this.refuseLabelOfEndedBase(sessionId, access, execution?.executionId ?? callerExecutionId);
     this.assertTerminalReleaseAdmission(sessionId);
 
     const terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
@@ -4924,8 +4946,11 @@ export class SessionManager {
    * caller can tell a known release from a plain unknown id.
    */
   async getReleasedSessionReason(sessionId: string): Promise<string | undefined> {
-    if (this.sessions.has(sessionId)) {
-      return undefined;
+    const published = this.sessions.get(sessionId);
+    if (published) {
+      // A label whose base has ended is answered with the base's end (#11640), before the
+      // release that follows has recorded it on the label's own row.
+      return this.endedBaseOfLabel(published)?.releaseReason;
     }
     const inMemory = this.terminalReleaseSnapshots.get(sessionId)?.releaseReason;
     if (inMemory) {
@@ -5144,7 +5169,8 @@ export class SessionManager {
     const session =
       allowExpired || this.terminalReleaseSnapshots.has(sessionId)
         ? (this.sessions.get(sessionId) ?? null)
-        : this.getSession(sessionId);
+        : // Not `getSession`: a label whose base has ended is still there to release (#11640).
+          this.getSessionInternal(sessionId, false);
     if (!session) {
       return await this.releaseUnpublishedSession(sessionId, releaseReason, allowExpired);
     }
@@ -9766,7 +9792,127 @@ export class SessionManager {
    * an expired session the scan has not reached is reported gone and is not released here.
    */
   peekSession(sessionId: string): Session | null {
-    return this.getSessionInternal(sessionId, false, undefined, false);
+    return this.unlessBaseEnded(this.getSessionInternal(sessionId, false, undefined, false));
+  }
+
+  /**
+   * How the base of the plan label session `label` has ended, when it has (#11640): the base's
+   * end ends its labels, so a label whose base is released, being released for a terminal reason,
+   * or past its idle deadline and not yet scanned is no longer a live session to anyone. The
+   * reason is the base's recorded one, or the one its expiry would record. A read of state: it
+   * releases, stamps and fences nothing. Undefined for a session no plan run minted, and once the
+   * base's release has handed the label to the release cascade.
+   */
+  private endedBaseOfLabel(
+    label: Session,
+  ): { baseSessionId: string; releaseReason: string } | undefined {
+    if (label.persistenceMetadata?.source !== PLAN_LABEL_SESSION_SOURCE) {
+      return undefined;
+    }
+    // Each hop is a strict prefix of the last, so this ends at the outermost base.
+    for (
+      let baseSessionId = this.getBaseSessionOfDerivedLabel(label.sessionId);
+      baseSessionId !== undefined;
+      baseSessionId = this.getBaseSessionOfDerivedLabel(baseSessionId)
+    ) {
+      const releaseReason = this.sessionEndReason(baseSessionId);
+      if (releaseReason !== undefined) {
+        return { baseSessionId, releaseReason };
+      }
+    }
+    return undefined;
+  }
+
+  /** The terminal reason `sessionId` ended with, or would be released with by a lookup now. */
+  private sessionEndReason(sessionId: string): string | undefined {
+    const fenced = this.terminalReleaseSnapshots.get(sessionId);
+    if (fenced) {
+      return fenced.releaseReason;
+    }
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return undefined;
+    }
+    const inFlight = this.releasePromises.get(sessionId);
+    if (inFlight?.session === session && isTerminalReleaseReason(inFlight.reason.value)) {
+      return inFlight.reason.value;
+    }
+    return this.isSessionExpired(session)
+      ? this.expiredSessionReleaseReason(session, "lazy-expiry")
+      : undefined;
+  }
+
+  /** A looked-up session, unless it is a plan label whose base has ended (#11640). */
+  private unlessBaseEnded(session: Session | null): Session | null {
+    return session && this.endedBaseOfLabel(session) ? null : session;
+  }
+
+  /** The terminal release `session` is answered with before its own release has recorded one. */
+  private terminalReleaseAsOfNow(session: Session, releaseReason: string): SessionReleaseSnapshot {
+    const now = this.sessionNow();
+    return {
+      sessionId: session.sessionId,
+      deviceId: session.assignedDevice,
+      releaseReason,
+      releasedAtMs: now,
+      terminal: true,
+      heartbeat: {
+        lastHeartbeatMs: session.lastHeartbeat,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+        timeoutMs: session.heartbeatTimeoutMs,
+        ageMs: Math.max(0, now - session.lastHeartbeat),
+      },
+    };
+  }
+
+  /**
+   * Refuse a call naming a plan label whose base has ended (#11640) with the terminal answer the
+   * base's own end gives, under the label's id and for the owner and anyone else alike. Judging
+   * is a read; a refused control call then ends the base as a call naming the base would, through
+   * the base's lazy expiry, and the base's release takes its labels with it. A read is not use
+   * and releases nothing.
+   */
+  private refuseLabelOfEndedBase(
+    sessionId: string,
+    access: SessionAccess,
+    callerExecutionId: string | undefined,
+  ): void {
+    const label = this.sessions.get(sessionId);
+    const ended = label && this.endedBaseOfLabel(label);
+    if (!label || !ended) {
+      return;
+    }
+    if (access !== "read-only") {
+      this.releaseSessionPastIdleDeadline(ended.baseSessionId, callerExecutionId);
+    }
+    throw new TerminalSessionError(
+      sessionId,
+      this.terminalReleaseAsOfNow(label, ended.releaseReason),
+    );
+  }
+
+  /**
+   * The terminal answer for a call that needs `sessionId` live when it has ended or is past its
+   * idle deadline (#11640), or undefined while it is live. A plan step routed by a `device` label
+   * asks this about its base once the base publishes no labels, so the plan fails with the base's
+   * release reason rather than "label is not allocated". The step names the base, so a base past
+   * its deadline is released here through its lazy expiry, like any call naming it.
+   */
+  terminalAnswerForEndedSession(
+    sessionId: string,
+    callerExecutionId?: string,
+  ): TerminalSessionError | undefined {
+    const releaseReason = this.sessionEndReason(sessionId);
+    if (releaseReason === undefined) {
+      return undefined;
+    }
+    const fenced = this.terminalReleaseSnapshots.get(sessionId);
+    const session = this.sessions.get(sessionId);
+    if (fenced || !session) {
+      return fenced && new TerminalSessionError(sessionId, fenced);
+    }
+    this.releaseSessionPastIdleDeadline(sessionId, callerExecutionId);
+    return new TerminalSessionError(sessionId, this.terminalReleaseAsOfNow(session, releaseReason));
   }
 
   /**

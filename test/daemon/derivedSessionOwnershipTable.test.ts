@@ -472,7 +472,8 @@ describe("a derived label session is judged and recorded as its base", () => {
 
     expect(releases).toEqual([
       [BASE, OWNER_DISCONNECTED_RELEASE_REASON],
-      [DERIVED, PLAN_AUTO_RELEASE_REASON],
+      // The base's end ends its labels with the base's own reason (#11640).
+      [DERIVED, OWNER_DISCONNECTED_RELEASE_REASON],
     ]);
     expect(w.manager.getSession(DERIVED)).toBeNull();
     expect(w.pool.getDevice(primary.deviceId)?.sessionId).toBeNull();

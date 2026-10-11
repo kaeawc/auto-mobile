@@ -14,7 +14,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
 
 // #11091: releasing a base session releases its derived `${base}:${label}` sessions and frees
-// their devices, whatever released the base.
+// their devices, whatever released the base. #11640: a base that ended for a terminal reason ends
+// its labels with that same reason.
 describe("derived label sessions are released with their base (#11091)", () => {
   let timer: FakeTimer;
   let manager: SessionManager;
@@ -69,18 +70,35 @@ describe("derived label sessions are released with their base (#11091)", () => {
       }
       expect(releases).toEqual([
         ["base", reason],
-        ["base:B", PLAN_AUTO_RELEASE_REASON],
-        ["base:C", PLAN_AUTO_RELEASE_REASON],
+        ["base:B", reason],
+        ["base:C", reason],
       ]);
       expect(freed).toEqual([
         ["device-B", "base:B"],
         ["device-C", "base:C"],
       ]);
+      // Each label is fenced like its base: a later call naming it gets the same terminal answer.
+      expect(manager.getTerminalReleaseSnapshot("base:B")).toMatchObject({
+        releaseReason: reason,
+        terminal: true,
+      });
     },
   );
 
+  test("a base released for a reason that leaves its UUID usable releases its labels as a plan's cleanup does", async () => {
+    await manager.releaseSession("base", "daemon-shutdown");
+    await cascade.settled();
+
+    expect(releases).toEqual([
+      ["base", "daemon-shutdown"],
+      ["base:B", PLAN_AUTO_RELEASE_REASON],
+      ["base:C", PLAN_AUTO_RELEASE_REASON],
+    ]);
+    expect(manager.getTerminalReleaseSnapshot("base:B")).toBeUndefined();
+  });
+
   // #11490: the cascade frees a derived session's device, so it cuts that session's calls first.
-  // The derived UUID is released as `plan-auto-release` (re-issuable), so the cut is plain.
+  // #11640: the label ended with its base, so its call is told so, typed and under its own id.
   test("a call still running under a derived session is cut before its device is freed", async () => {
     const onDerived = tracker.startExecution("input/tap", undefined, "base:B");
     tracker.bindDeviceExecution(onDerived.id, "device-B");
@@ -98,7 +116,10 @@ describe("derived label sessions are released with their base (#11091)", () => {
     await cascade.settled();
 
     expect(abortedWhenFreed).toEqual({ "device-B": true, "device-C": true });
-    expect(sessionReleaseThatCancelledCall(onDerived.cancelReason)).toBeUndefined();
+    expect(sessionReleaseThatCancelledCall(onDerived.cancelReason)).toMatchObject({
+      sessionUuid: "base:B",
+      releaseReason: "explicit-release",
+    });
     expect(elsewhere.abortController.signal.aborted).toBe(false);
   });
 

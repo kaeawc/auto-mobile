@@ -187,11 +187,11 @@ describe("a connection bound to the base session naming its own derived label se
   );
 
   test(
-    "its call naming only the label releases nothing of a base past its idle deadline (#11640)",
+    "its call naming only the label is refused with the end of a base past its idle deadline (#11640)",
     scenario(async () => {
-      const released: string[] = [];
-      manager.onSessionRelease((sessionId) => {
-        released.push(sessionId);
+      const released: Array<[string, string]> = [];
+      manager.onSessionRelease((sessionId, _deviceId, reason) => {
+        released.push([sessionId, reason]);
       });
       const owner = await connection({ sessionId: "http-owner" });
       const idleMs = manager.peekSession(BASE)!.sessionTimeoutMs;
@@ -201,17 +201,26 @@ describe("a connection bound to the base session naming its own derived label se
       timer.advanceTime(idleMs / 2 + 1);
       expect(manager.peekSession(BASE)).toBeNull();
 
-      // Tool selection and the call's own routing both look the label's base up.
-      const result = await tap(owner, { sessionUuid: DERIVED });
-
-      expect(result.isError).not.toBe(true);
+      // Tool selection and the call's own routing both look the label's base up, and release
+      // nothing: the label is simply no live session any more.
+      expect(manager.peekSession(DERIVED)).toBeNull();
       expect(released).toEqual([]);
-      expect(manager.hasSession(BASE)).toBe(true);
-      expect(manager.getReleasingSession(BASE)).toBeNull();
-      // The base's own expiry is untouched: a call that names it is still what releases it.
-      expect(manager.getSession(BASE)).toBeNull();
+      const ranBefore = tools.runs.length;
+
+      // The base's end ends its labels: the owner's own call is refused as a call naming the
+      // ended base would be, and that refused admission is what releases the base.
+      const result = await tap(owner, { sessionUuid: DERIVED });
       await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
-      expect(released).toEqual([BASE]);
+
+      expect(result.isError).toBe(true);
+      expect(wire(result).error).toMatchObject({
+        code: "session_ownership_lost",
+        sessionUuid: DERIVED,
+        reason: "lazy-expiry",
+        nextAction: "acquire_new_session",
+      });
+      expect(tools.runs.length).toBe(ranBefore);
+      expect(released[0]).toEqual([BASE, "lazy-expiry"]);
     }),
   );
 

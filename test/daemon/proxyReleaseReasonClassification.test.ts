@@ -80,6 +80,8 @@ interface Harness {
    * connection reaches its replacement.
    */
   stallAndReplaceDaemon(): void;
+  /** The daemon answers no heartbeat for `pauseMs`, then every one it was asked, in order. */
+  pauseDaemon(pauseMs: number): void;
   /** From now on a call that reaches a released session restores nothing, as a read does. */
   callsRestoreNothing(): void;
   /** Connections the proxy closed itself while the daemon was still answering on them. */
@@ -102,6 +104,7 @@ function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } 
   let proxyClosing = false;
   const closedByDaemon = new Set<FakeDaemonClient>();
   const silent = new Set<FakeDaemonClient>();
+  let pausedUntil = 0;
   const forwarded: Array<{ toolName: string; sessionUuid: unknown }> = [];
   /** What the daemon answers a heartbeat for a session it released (sessionNotFoundResult). */
   const answerDaemonMethod = (
@@ -163,11 +166,15 @@ function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } 
       onCallDaemonMethod: (method, params) =>
         silent.has(created)
           ? new Promise<never>(() => undefined)
-          : options.roundTripMs === undefined
-            ? answerDaemonMethod(method, params, created)
-            : timer
-                .sleep(options.roundTripMs)
-                .then(() => answerDaemonMethod(method, params, created)),
+          : method === "daemon/heartbeat" && timer.now() < pausedUntil
+            ? timer
+                .sleep(pausedUntil - timer.now())
+                .then(() => answerDaemonMethod(method, params, created))
+            : options.roundTripMs === undefined
+              ? answerDaemonMethod(method, params, created)
+              : timer
+                  .sleep(options.roundTripMs)
+                  .then(() => answerDaemonMethod(method, params, created)),
     });
     const close = created.close.bind(created);
     created.close = async () => {
@@ -229,6 +236,9 @@ function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } 
     },
     succeedDaemonOnReset: (sessions) => {
       successorKnowsNone = sessions;
+    },
+    pauseDaemon: (pauseMs) => {
+      pausedUntil = timer.now() + pauseMs;
     },
     stallAndReplaceDaemon: () => {
       silent.add(client);
@@ -806,6 +816,37 @@ describe("a not-found answer is decided alike on every path, for every session (
       await world.close();
     }
   });
+
+  // The window is bounded however its last answer is heard. The daemon pauses for longer than a
+  // heartbeat request is given, so the keeper gives up on the heartbeat whose answer finds the
+  // window expired and liveness recovery asks again. Both answers arrive, in order, and the
+  // second must stop the session as the first would have, not start waiting all over again.
+  test.each([[[SESSION]], [[SESSION, SECOND]]])(
+    "a window that expires while the daemon is paused is not opened again (%j)",
+    async (sessions) => {
+      // Wherever the pause starts around the tick whose answer finds the window expired.
+      for (let pausedAt = WINDOW_TICKS - 4; pausedAt <= WINDOW_TICKS + 1; pausedAt += 1) {
+        const { world, perTick } = await holding(sessions);
+        try {
+          world.callsRestoreNothing();
+          world.release("device-restart:emulator-5554", SESSION);
+          await perTick(pausedAt);
+          // Long enough that the next tick's heartbeat is given up on before its answer comes.
+          world.pauseDaemon(INTERVAL_MS + LEASE_MS / 2 + INTERVAL_MS / 4);
+
+          const sent = await perTick(WINDOW_TICKS);
+
+          const afterwards = sent[SESSION]!.slice(8);
+          expect({ pausedAt, asked: afterwards.filter((count) => count > 0) }).toEqual({
+            pausedAt,
+            asked: [],
+          });
+        } finally {
+          await world.close();
+        }
+      }
+    },
+  );
 
   // The daemon answers the latest binding's heartbeat with a recoverable handoff: it is going
   // away. The proxy asks once more on a fresh connection, which reaches the successor. That

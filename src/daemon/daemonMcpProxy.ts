@@ -1302,8 +1302,9 @@ export class DaemonMcpProxy {
   private readonly recoveryNotFoundOutcomes = new Map<string, NotFoundAnswerOutcome>();
   /**
    * When (injected timer) each session's not-found window opened ({@link decideNotFoundAnswer}),
-   * or `spent` once an answer found it expired. An entry outlives its window, so a later answer
-   * with no reason on the same connection cannot open another.
+   * or `spent` once the session was stopped for an answer that found it expired. An entry
+   * outlives its window, so a later answer with no reason on the same connection cannot open
+   * another.
    * Cleared by a heartbeat acknowledgement, by a call the daemon admitted under the session, or by
    * the session ending here; a call that proves nothing about the session leaves it (#11570).
    */
@@ -6625,9 +6626,6 @@ export class DaemonMcpProxy {
     });
     const released = releaseReason ?? "no reason, from a daemon just connected to";
     if (outcome.kind !== "awaited") {
-      if (outcome.kind === "stopped" && typeof windowSince === "number") {
-        this.notFoundWindows.set(sessionUuid, "spent");
-      }
       return outcome;
     }
     if (outcome.windowSince === windowSince) {
@@ -6688,9 +6686,22 @@ export class DaemonMcpProxy {
       );
     }
     if (outcome.kind !== "ended") {
-      this.notFoundStopped.add(sessionUuid);
+      this.markStoppedForNotFound(sessionUuid);
     }
     this.syncHeartbeatKeeper();
+  }
+
+  /**
+   * `sessionUuid` is no longer heartbeated until a call reaches it. Its window is spent only now
+   * that the session is stopped: an answer nobody acted on (its heartbeat was given up on) leaves
+   * the window expired, so the heartbeat that takes over stops the session too instead of opening
+   * a new window no call asked for.
+   */
+  private markStoppedForNotFound(sessionUuid: string): void {
+    this.notFoundStopped.add(sessionUuid);
+    if (this.notFoundWindows.has(sessionUuid)) {
+      this.notFoundWindows.set(sessionUuid, "spent");
+    }
   }
 
   /**

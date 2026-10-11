@@ -61,6 +61,7 @@ test/daemon/daemonSocketReachability.test.ts
 test/daemon/daemonStartupFailureTracker.test.ts
 test/daemon/daemonStartupGuard.test.ts
 test/daemon/daemonTransportError.test.ts
+test/daemon/derivedLabelLivenessClaim.test.ts
 test/daemon/desktopWireContract.test.ts
 test/daemon/deviceControlTransportFailure.test.ts
 test/daemon/deviceDataStreamSocketServerCharacterization.test.ts
@@ -126,6 +127,7 @@ test/daemon/incumbentOwnerGuard.test.ts
 test/daemon/inputDeviceOwnership.test.ts
 test/daemon/lateRehydrationOwnerToldNotFound.test.ts
 test/daemon/liveDeadlineRegistry.test.ts
+test/daemon/livenessClaimDecision.test.ts
 test/daemon/livenessKeeperSuspectInteractions.test.ts
 test/daemon/livenessOwnerLease.test.ts
 test/daemon/managedExecutionLiveness.test.ts

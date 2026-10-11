@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -82,7 +82,7 @@ describe("a connection bound to the base session naming its own derived label se
         content: [{ type: "text", text: (error as Error).message }],
       }));
 
-  beforeEach(async () => {
+  async function setUp(): Promise<void> {
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     fixtures = [];
@@ -126,9 +126,9 @@ describe("a connection bound to the base session naming its own derived label se
     );
     manager.setDeviceLabels(BASE, buildDeviceLabelMap(["A", "B", "C"], BASE));
     await pool.assignMultipleDevices([DERIVED], 1_000, "android");
-  });
+  }
 
-  afterEach(async () => {
+  async function tearDown(): Promise<void> {
     for (const fixture of fixtures) {
       await fixture.teardown();
     }
@@ -144,102 +144,162 @@ describe("a connection bound to the base session naming its own derived label se
     } else {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
     }
-  });
+  }
 
-  test("its call on the derived session runs on the labelled device", async () => {
-    const owner = await connection({ sessionId: "http-owner" });
-    // The first call binds this connection's server to the base session.
-    expect((await tap(owner, { sessionUuid: BASE })).isError).not.toBe(true);
+  /** One daemon per scenario, built and torn down by the scenario itself. */
+  const scenario = (body: () => Promise<void>) => async (): Promise<void> => {
+    await setUp();
+    try {
+      await body();
+    } finally {
+      await tearDown();
+    }
+  };
 
-    const result = await tap(owner, { sessionUuid: DERIVED });
+  test(
+    "its call on the derived session runs on the labelled device",
+    scenario(async () => {
+      const owner = await connection({ sessionId: "http-owner" });
+      // The first call binds this connection's server to the base session.
+      expect((await tap(owner, { sessionUuid: BASE })).isError).not.toBe(true);
 
-    expect(result.isError).not.toBe(true);
-    expect(tools.runs.map((run) => run.deviceId)).toEqual([primary.deviceId, labelled.deviceId]);
-    // Like any session a connection has run a call on, the label is now one of its own beside
-    // the base: both stay routable, and a session that is neither is still refused.
-    expect((await tap(owner, { sessionUuid: BASE })).isError).not.toBe(true);
-    expect((await tap(owner, { sessionUuid: DERIVED })).isError).not.toBe(true);
-    expect(tools.runs.map((run) => run.deviceId).slice(2)).toEqual([
-      primary.deviceId,
-      labelled.deviceId,
-    ]);
-    expect(errorText(await tap(owner, { sessionUuid: "sess-b" }))).toMatch(BOUND_TO_OTHER_SESSION);
-  });
+      const result = await tap(owner, { sessionUuid: DERIVED });
 
-  test("a name that is not one of the base's published labels is still refused", async () => {
-    const owner = await connection({ sessionId: "http-owner" });
-    await tap(owner, { sessionUuid: BASE });
+      expect(result.isError).not.toBe(true);
+      expect(tools.runs.map((run) => run.deviceId)).toEqual([primary.deviceId, labelled.deviceId]);
+      // Like any session a connection has run a call on, the label is now one of its own beside
+      // the base: both stay routable, and a session that is neither is still refused.
+      expect((await tap(owner, { sessionUuid: BASE })).isError).not.toBe(true);
+      expect((await tap(owner, { sessionUuid: DERIVED })).isError).not.toBe(true);
+      expect(tools.runs.map((run) => run.deviceId).slice(2)).toEqual([
+        primary.deviceId,
+        labelled.deviceId,
+      ]);
+      expect(errorText(await tap(owner, { sessionUuid: "sess-b" }))).toMatch(
+        BOUND_TO_OTHER_SESSION,
+      );
+    }),
+  );
 
-    for (const sessionUuid of [`${BASE}:Z`, "sess-b", `${BASE}:B:nested`]) {
-      const result = await tap(owner, { sessionUuid });
+  test(
+    "a name that is not one of the base's published labels is still refused",
+    scenario(async () => {
+      const owner = await connection({ sessionId: "http-owner" });
+      await tap(owner, { sessionUuid: BASE });
+
+      for (const sessionUuid of [`${BASE}:Z`, "sess-b", `${BASE}:B:nested`]) {
+        const result = await tap(owner, { sessionUuid });
+
+        expect(result.isError).toBe(true);
+        expect(errorText(result)).toMatch(BOUND_TO_OTHER_SESSION);
+      }
+      expect(tools.runs.map((run) => run.deviceId)).toEqual([primary.deviceId]);
+    }),
+  );
+
+  test(
+    "a published label that was never allocated takes no device",
+    scenario(async () => {
+      const owner = await connection({ sessionId: "http-owner" });
+      await tap(owner, { sessionUuid: BASE });
+
+      const result = await tap(owner, { sessionUuid: `${BASE}:C` });
 
       expect(result.isError).toBe(true);
-      expect(errorText(result)).toMatch(BOUND_TO_OTHER_SESSION);
-    }
-    expect(tools.runs.map((run) => run.deviceId)).toEqual([primary.deviceId]);
-  });
+      expect(manager.getSession(`${BASE}:C`)).toBeNull();
+      expect(tools.runs.map((run) => run.deviceId)).toEqual([primary.deviceId]);
+    }),
+  );
 
-  test("a published label that was never allocated takes no device", async () => {
-    const owner = await connection({ sessionId: "http-owner" });
-    await tap(owner, { sessionUuid: BASE });
+  test(
+    "another connection's call on that derived session is refused by the owner rule",
+    scenario(async () => {
+      const owner = await connection({ sessionId: "http-owner" });
+      await tap(owner, { sessionUuid: BASE });
 
-    const result = await tap(owner, { sessionUuid: `${BASE}:C` });
+      // The same server forwards a call that carries another connection's identity.
+      const result = await tap(owner, {
+        sessionUuid: DERIVED,
+        [INTERNAL_MCP_SESSION_PARAM]: OTHER,
+      });
 
-    expect(result.isError).toBe(true);
-    expect(manager.getSession(`${BASE}:C`)).toBeNull();
-    expect(tools.runs.map((run) => run.deviceId)).toEqual([primary.deviceId]);
-  });
+      expect(result.isError).toBe(true);
+      expect(wire(result).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(tools.runs.map((run) => run.deviceId)).toEqual([primary.deviceId]);
+    }),
+  );
 
-  test("another connection's call on that derived session is refused by the owner rule", async () => {
-    const owner = await connection({ sessionId: "http-owner" });
-    await tap(owner, { sessionUuid: BASE });
+  test(
+    "once bound to a label it still reaches the plan's other labels and its base",
+    scenario(async () => {
+      await pool.assignMultipleDevices([`${BASE}:C`], 1_000, "android");
+      const owner = await connection({ sessionId: "http-owner" });
+      await tap(owner, { sessionUuid: BASE });
+      // A successful call moves the connection's binding to the session it named.
+      await tap(owner, { sessionUuid: DERIVED });
 
-    // The same server forwards a call that carries another connection's identity.
-    const result = await tap(owner, { sessionUuid: DERIVED, [INTERNAL_MCP_SESSION_PARAM]: OTHER });
+      const sibling = await tap(owner, { sessionUuid: `${BASE}:C` });
+      const base = await tap(owner, { sessionUuid: BASE });
 
-    expect(result.isError).toBe(true);
-    expect(wire(result).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-    expect(tools.runs.map((run) => run.deviceId)).toEqual([primary.deviceId]);
-  });
+      expect(sibling.isError).not.toBe(true);
+      expect(base.isError).not.toBe(true);
+      expect(tools.runs.map((run) => run.deviceId).slice(2)).toEqual([
+        third.deviceId,
+        primary.deviceId,
+      ]);
+    }),
+  );
 
-  test("once bound to a label it still reaches the plan's other labels and its base", async () => {
-    await pool.assignMultipleDevices([`${BASE}:C`], 1_000, "android");
-    const owner = await connection({ sessionId: "http-owner" });
-    await tap(owner, { sessionUuid: BASE });
-    // A successful call moves the connection's binding to the session it named.
-    await tap(owner, { sessionUuid: DERIVED });
+  test(
+    "a connection that first named a label reaches the label's base, and nothing else",
+    scenario(async () => {
+      const label = await connection({ sessionId: "http-label" });
+      await tap(label, { sessionUuid: DERIVED });
 
-    const sibling = await tap(owner, { sessionUuid: `${BASE}:C` });
-    const base = await tap(owner, { sessionUuid: BASE });
+      const result = await tap(label, { sessionUuid: BASE });
 
-    expect(sibling.isError).not.toBe(true);
-    expect(base.isError).not.toBe(true);
-    expect(tools.runs.map((run) => run.deviceId).slice(2)).toEqual([
-      third.deviceId,
-      primary.deviceId,
-    ]);
-  });
+      expect(result.isError).not.toBe(true);
+      expect(tools.runs.map((run) => run.deviceId)).toEqual([labelled.deviceId, primary.deviceId]);
+      expect(errorText(await tap(label, { sessionUuid: "sess-b" }))).toMatch(
+        BOUND_TO_OTHER_SESSION,
+      );
+    }),
+  );
 
-  test("a connection that first named a label reaches the label's base, and nothing else", async () => {
-    const label = await connection({ sessionId: "http-label" });
-    await tap(label, { sessionUuid: DERIVED });
+  test(
+    "a label published under a label is reached from the outermost base, and reaches it",
+    scenario(async () => {
+      const nested = `${DERIVED}:C`;
+      manager.setDeviceLabels(DERIVED, { B: DERIVED, C: nested });
+      await pool.assignMultipleDevices([nested], 1_000, "android");
+      const owner = await connection({ sessionId: "http-owner" });
+      await tap(owner, { sessionUuid: BASE });
 
-    const result = await tap(label, { sessionUuid: BASE });
+      const down = await tap(owner, { sessionUuid: nested });
+      const up = await tap(owner, { sessionUuid: BASE });
 
-    expect(result.isError).not.toBe(true);
-    expect(tools.runs.map((run) => run.deviceId)).toEqual([labelled.deviceId, primary.deviceId]);
-    expect(errorText(await tap(label, { sessionUuid: "sess-b" }))).toMatch(BOUND_TO_OTHER_SESSION);
-  });
+      expect(down.isError).not.toBe(true);
+      expect(up.isError).not.toBe(true);
+      expect(tools.runs.map((run) => run.deviceId)).toEqual([
+        primary.deviceId,
+        third.deviceId,
+        primary.deviceId,
+      ]);
+    }),
+  );
 
-  test("the proxied route, a loopback server seeded with the derived session, runs", async () => {
-    const loopback = await connection({
-      sessionId: "loopback",
-      initialSessionToolBinding: DERIVED,
-    });
+  test(
+    "the proxied route, a loopback server seeded with the derived session, runs",
+    scenario(async () => {
+      const loopback = await connection({
+        sessionId: "loopback",
+        initialSessionToolBinding: DERIVED,
+      });
 
-    const result = await tap(loopback, { sessionUuid: DERIVED });
+      const result = await tap(loopback, { sessionUuid: DERIVED });
 
-    expect(result.isError).not.toBe(true);
-    expect(tools.runs.map((run) => run.deviceId)).toEqual([labelled.deviceId]);
-  });
+      expect(result.isError).not.toBe(true);
+      expect(tools.runs.map((run) => run.deviceId)).toEqual([labelled.deviceId]);
+    }),
+  );
 });

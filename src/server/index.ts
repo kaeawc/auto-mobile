@@ -399,6 +399,7 @@ import {
 import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { serverConfig } from "../utils/ServerConfig";
 import {
+  resolveOwnershipSessionUuid,
   resolveToolSelectionBaseSessionUuid,
   type ToolSelectionSessionManager,
 } from "../features/toolSelection/selectionSessionResolver";
@@ -1150,11 +1151,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         !(
           DaemonState.getInstance().isInitialized() &&
           DaemonState.getInstance().getSessionManager().getSession(explicitSessionUuid) !== null &&
-          resolveToolSelectionBaseSessionUuid(
+          resolveOwnershipSessionUuid(
             explicitSessionUuid,
             DaemonState.getInstance().getSessionManager(),
           ) ===
-            resolveToolSelectionBaseSessionUuid(
+            resolveOwnershipSessionUuid(
               boundDeviceSessionUuid,
               DaemonState.getInstance().getSessionManager(),
             )

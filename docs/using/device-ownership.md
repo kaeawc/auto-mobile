@@ -26,7 +26,11 @@ base, so it is refused while another connection owns the base, and it never
 takes a label away from the base's owner (#11586). A heartbeat that
 claims liveness ownership of a derived session is judged against the base's
 liveness owner as well: another token cannot claim or adopt a label while the
-base owner's lease is live. The label keeps its own liveness record, so a token
+base owner's lease is live or in its grace, the owner holding the base is never
+refused on its label, and a label's current owner is never refused its own
+re-claim. A refused claim reports the hold it was refused for, the base owner's
+when the label's own owner holds nothing. The label keeps its own liveness
+record, so a token
 claimed on a label proves nothing about its base (#11602). A connection bound to
 the base session, or to one of its labels, may name any live session of that
 plan directly as `sessionUuid`; a name the base has not published, or a label

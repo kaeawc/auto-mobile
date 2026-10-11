@@ -2375,6 +2375,34 @@ export class SessionManager {
   }
 
   /**
+   * The releases in progress that carry a non-terminal reason (a `device-restart:` handoff, a
+   * `plan-auto-release`) and still hold their device (#11554). Heartbeats for a releasing session
+   * are refused, so the heartbeat monitor must not count the time since `startedAtMs` as its
+   * owner's silence; it still holds each one to its stuck deadline (#10963). A release a later
+   * joiner upgraded to a terminal reason, an idle release (see {@link getIdleReleasesInProgress})
+   * and a forced release are not listed.
+   */
+  getNonTerminalReleasesInProgress(): {
+    sessionId: string;
+    startedAtMs: number;
+    session: Session;
+  }[] {
+    return Array.from(this.releasePromises.values())
+      .filter(
+        (release) =>
+          this.activeReleasePromises.has(release) &&
+          !release.forced &&
+          release.expiryOrigin === undefined &&
+          !isTerminalReleaseReason(release.reason.value),
+      )
+      .map((release) => ({
+        sessionId: release.session.sessionId,
+        startedAtMs: release.startedAtMs ?? this.sessionNow(),
+        session: release.session,
+      }));
+  }
+
+  /**
    * A release forced while it waited to start (#10963): the device may already belong to the next
    * owner, so no teardown may touch it. The force itself persists the fence it raised (#11058).
    */

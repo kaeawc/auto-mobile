@@ -1,12 +1,13 @@
 import { logger } from "../utils/logger";
 import { getDefaultSessionHeartbeatTimeoutMs } from "./sessionManager";
 import { SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { SteadyWallClock, defaultTimer, type Timer } from "../utils/SystemTimer";
 
 export const MAX_OBSERVER_SESSIONS = 32;
 export const MAX_OBSERVER_CLIENT_NAME_LENGTH = 128;
 export const MAX_OBSERVER_SESSION_ID_LENGTH = 128;
 
+/** A registered observer as reported: both instants are wall-clock epoch ms. */
 export interface ObserverSession {
   sessionId: string;
   clientName: string;
@@ -53,6 +54,13 @@ export class ObserverSessionRegistry implements ObserverSessionStore {
   private disposed = false;
   private sweepHandle: NodeJS.Timeout | null = null;
   private sweepAtMs = Number.POSITIVE_INFINITY;
+  /**
+   * The steady session clock device-session leases are judged on (#11080), over the same timer:
+   * every stored instant is stamped and judged with it, so a wall-clock step neither expires a
+   * heartbeating observer nor keeps a dead one (#11554). Reported instants are converted back to
+   * the wall clock.
+   */
+  private readonly clock: SteadyWallClock;
 
   constructor(
     private readonly timer: Timer = defaultTimer,
@@ -62,7 +70,9 @@ export class ObserverSessionRegistry implements ObserverSessionStore {
     // Called when an observer is gone for good (explicit release or heartbeat expiry). Not called
     // for "promotion": the same UUID lives on as a device session and keeps its state.
     private readonly onObserverGone?: (sessionId: string) => void,
-  ) {}
+  ) {
+    this.clock = new SteadyWallClock(timer);
+  }
 
   register(sessionId: string, clientName: string): ObserverRegistrationResult {
     this.purgeExpired();
@@ -78,12 +88,16 @@ export class ObserverSessionRegistry implements ObserverSessionStore {
         error: `Observer session limit (${MAX_OBSERVER_SESSIONS}) reached; release a session or wait for heartbeat expiry before retrying`,
       };
     }
-    const lastHeartbeat = this.timer.now();
+    const lastHeartbeat = this.clock.now();
     const expiresAtMs = lastHeartbeat + this.heartbeatTimeoutMs;
     this.sessions.set(sessionId, { sessionId, clientName, lastHeartbeat, expiresAtMs });
     this.scheduleSweep();
     logger.debug(`Registered observer session ${sessionId} (${clientName})`);
-    return { accepted: true, heartbeatTimeoutMs: this.heartbeatTimeoutMs, expiresAtMs };
+    return {
+      accepted: true,
+      heartbeatTimeoutMs: this.heartbeatTimeoutMs,
+      expiresAtMs: this.clock.toWall(expiresAtMs),
+    };
   }
 
   heartbeat(sessionId: string): boolean {
@@ -92,7 +106,7 @@ export class ObserverSessionRegistry implements ObserverSessionStore {
     if (!session) {
       return false;
     }
-    session.lastHeartbeat = this.timer.now();
+    session.lastHeartbeat = this.clock.now();
     session.expiresAtMs = session.lastHeartbeat + this.heartbeatTimeoutMs;
     return true;
   }
@@ -104,7 +118,11 @@ export class ObserverSessionRegistry implements ObserverSessionStore {
 
   list(): ObserverSession[] {
     this.purgeExpired();
-    return Array.from(this.sessions.values(), (session) => ({ ...session }));
+    return Array.from(this.sessions.values(), (session) => ({
+      ...session,
+      lastHeartbeat: this.clock.toWall(session.lastHeartbeat),
+      expiresAtMs: this.clock.toWall(session.expiresAtMs),
+    }));
   }
 
   resolveObserverScope(sessionUuid: string): ObserverScope {
@@ -165,7 +183,7 @@ export class ObserverSessionRegistry implements ObserverSessionStore {
         this.purgeExpired();
         this.scheduleSweep();
       },
-      Math.max(0, nextExpiryMs - this.timer.now()),
+      Math.max(0, nextExpiryMs - this.clock.now()),
     );
     (this.sweepHandle as { unref?: () => void } | null)?.unref?.();
   }
@@ -178,9 +196,9 @@ export class ObserverSessionRegistry implements ObserverSessionStore {
     this.sweepAtMs = Number.POSITIVE_INFINITY;
   }
 
-  /** Expiry uses the injected clock, both on lookup and from the scheduled sweep. */
+  /** Expiry is judged on the steady clock, both on lookup and from the scheduled sweep. */
   private purgeExpired(): void {
-    const now = this.timer.now();
+    const now = this.clock.now();
     for (const session of this.sessions.values()) {
       if (session.expiresAtMs <= now) {
         this.remove(session.sessionId, "heartbeat-timeout");

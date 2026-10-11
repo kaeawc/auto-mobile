@@ -542,6 +542,44 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
+  test("a forced release's fence write that fails past its deadline is retried though the release never settles", async () => {
+    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    // A rebind whose write never lands; the release of the session waits on it and is forced.
+    store.duringPlainUpsert = () => new Promise<void>(() => {});
+    const rebind = manager.rebindSession(SESSION, "emulator-5556", "android");
+    await settleMicrotasks(100);
+    const released = manager.releaseSession(SESSION, "heartbeat-timeout");
+    await settleMicrotasks(100);
+    let failFenceWrite!: () => void;
+    store.park = new Promise<void>((resolve) => {
+      failFenceWrite = resolve;
+    });
+    store.failReleaseWrites = 1;
+
+    expect(manager.forceStuckRelease(SESSION)?.stage).toBe("awaiting-rebind");
+    await settleMicrotasks(100);
+    await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+    await settleMicrotasks();
+    failFenceWrite();
+    store.park = undefined;
+    await settleMicrotasks();
+
+    // The scenario was driven: the fence write failed and the stuck release is still pending.
+    expect(store.failReleaseWrites).toBe(0);
+    expect(manager.getSession(SESSION)).toBeNull();
+    expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
+    expect(await Promise.race([released, rebind, Promise.resolve("pending")])).toBe("pending");
+    expect(timer.getPendingTimeouts()).toContain(TERMINAL_RETRY_DELAY_MS);
+
+    await timer.advanceTimeAsync(TERMINAL_RETRY_DELAY_MS);
+    await settleMicrotasks();
+
+    expect(await store.getSession?.(SESSION)).toMatchObject({
+      status: "expired",
+      release_reason: "heartbeat-timeout",
+    });
+  });
+
   test("shutdown's drain waits out a rebind that then fails, and rewrites the owed live row", async () => {
     await supersededReleaseWithFailingRewrite(1);
     let failRebindWrite!: () => void;

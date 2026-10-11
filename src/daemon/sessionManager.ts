@@ -6087,19 +6087,28 @@ export class SessionManager {
     }
   }
 
-  /** Resolve once the release in flight for the UUID, if any, has ended. Never rejects. */
+  /**
+   * Resolve once the release in flight for the UUID, if any, has ended or was forced: a forced
+   * release has given the session up already and may never settle (#10963). Never rejects.
+   */
   private async waitOutReleaseOf(sessionId: string): Promise<void> {
     const release = this.releasePromises.get(sessionId);
-    if (!release) {
+    if (!release || release.forced) {
       return;
     }
     try {
-      await release.promise;
+      // Without a deadline: only the force's signal ends the wait before the release does.
+      await raceWithDeadline(release.promise, {
+        timer: this.timer,
+        signal: release.forcedAbort?.signal,
+        label: "Session release",
+      });
     } catch (error) {
-      // The release reports its failure to its own caller; only its end matters here.
+      // The release reports its failure to its own caller, and a force is its own announcement:
+      // only the end of the wait matters here.
       logger.debug(
-        `[SessionManager] Release of session ${sessionId} failed while a row write waited on ` +
-          `it: ${errorMessage(error)}`,
+        `[SessionManager] Release of session ${sessionId} failed or was forced while a row ` +
+          `write waited on it: ${errorMessage(error)}`,
       );
     }
   }

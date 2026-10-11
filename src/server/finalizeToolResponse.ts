@@ -740,7 +740,8 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
           Object.assign(diff, windowTruncations ? { windowTruncations } : {});
           const emitFull =
             (hasScreenChangedEffect(payload) && isEmptyObserveDiff(diff)) ||
-            (classifyObservationAction(ctx.name, ctx.args) !== "scroll" &&
+            (servedObservation.skeleton !== undefined &&
+              classifyObservationAction(ctx.name, ctx.args) !== "scroll" &&
               replacedMostActionableNodes(diff));
           observationOut = emitFull ? servedObservation : diff;
           observationDiff = {

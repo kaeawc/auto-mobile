@@ -1,0 +1,6 @@
+[
+  { "filename": "CLAUDE.md" },
+  { "filename": "scripts/lib/runner-calibration.ts" },
+  { "filename": "scripts/validate-bun-test-timings.sh" },
+  { "filename": "test/bats/test-ts.bats" }
+]

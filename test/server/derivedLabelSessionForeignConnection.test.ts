@@ -16,6 +16,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import { RealToolCallPath } from "../helpers/realToolCallPath";
 
 const primary: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
@@ -92,7 +93,9 @@ describe("a derived label session of a base another connection owns", () => {
     const labels = buildDeviceLabelMap(["A", "B"], BASE);
     labelSession = labels.B;
     manager.setDeviceLabels(BASE, labels);
-    await pool.assignMultipleDevices([labelSession], 1_000, "android");
+    await asPlanAllocation(manager, BASE, [labelSession], () =>
+      pool.assignMultipleDevices([labelSession], 1_000, "android"),
+    );
     fixture = new McpTestFixture({ daemonMode: true });
     await fixture.setup();
   });

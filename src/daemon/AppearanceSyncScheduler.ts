@@ -3,7 +3,11 @@ import { DaemonState } from "./daemonState";
 import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import { logger } from "../utils/logger";
-import { getAppearanceConfig, resolveAppearanceMode } from "../server/appearanceManager";
+import {
+  getAppearanceConfig,
+  resolveAppearanceMode,
+  type AppearanceConfig,
+} from "../server/appearanceManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { isAppearanceSyncEnabledFromEnvironment } from "../utils/appearance/appearanceSyncPolicy";
@@ -60,7 +64,7 @@ export interface AppearanceSyncScope {
 export class AppearanceSyncScheduler {
   private intervalHandle: NodeJS.Timeout | null = null;
   private lastAppliedModes = new Map<string, AppliedAppearance>();
-  private readonly inFlightApplies = new Map<string, Promise<void>>();
+  private readonly inFlightApplies = new Map<string, Promise<boolean>>();
   private pending: Promise<void> | null = null;
   private readonly timer: Timer;
   private readonly dependencies: AppearanceSyncDependencies;
@@ -111,7 +115,7 @@ export class AppearanceSyncScheduler {
       }
       const mode = await this.dependencies.resolveMode(config);
       if (!this.stopped) {
-        await this.applyToDevice(device, mode);
+        await this.applyToDevice(device, mode, config);
       }
     } catch (error) {
       logger.warn(`[Appearance] Failed to apply host sync mode to ${device.deviceId}: ${error}`);
@@ -191,14 +195,24 @@ export class AppearanceSyncScheduler {
         if (this.isAlreadyApplied(device, mode)) {
           continue;
         }
-        await this.applyToDevice(device, mode);
+        await this.applyToDevice(device, mode, config);
       } catch (error) {
         logger.warn(`[Appearance] Failed to apply host sync mode to ${device.deviceId}: ${error}`);
       }
     }
   }
 
-  private async applyToDevice(device: AppearanceSyncTarget, mode: AppearanceMode): Promise<void> {
+  /**
+   * Apply `mode` to `device` for the holder and config the caller decided under. The decision can
+   * be seconds old by the time the write is due: a tick waits up to the apply deadline on each
+   * earlier device, and `beforeApply` waits behind the device's pending reset. So the write is
+   * issued only if {@link isStillOwed} says the decision still stands at that moment (#11641).
+   */
+  private async applyToDevice(
+    device: AppearanceSyncTarget,
+    mode: AppearanceMode,
+    config: AppearanceConfig,
+  ): Promise<void> {
     if (!this.isEnabled()) {
       return;
     }
@@ -209,10 +223,7 @@ export class AppearanceSyncScheduler {
     }
 
     let timedOut = false;
-    const beforeApply = this.scope?.beforeApply;
-    const apply = beforeApply
-      ? beforeApply(device).then(() => this.dependencies.apply(device, mode))
-      : this.dependencies.apply(device, mode);
+    const apply = this.applyIfStillOwed(device, mode, config);
     this.inFlightApplies.set(device.deviceId, apply);
     void apply.then(
       () => {
@@ -225,7 +236,7 @@ export class AppearanceSyncScheduler {
         }
       },
     );
-    await raceWithDeadline(apply, {
+    const written = await raceWithDeadline(apply, {
       timer: this.timer,
       timeoutMs: this.dependencies.applyDeadlineMs ?? DEFAULT_APPEARANCE_APPLY_DEADLINE_MS,
       label: `Appearance apply for ${device.deviceId}`,
@@ -233,9 +244,72 @@ export class AppearanceSyncScheduler {
         timedOut = true;
       },
     });
-    if (!this.stopped) {
+    if (written && !this.stopped) {
       this.lastAppliedModes.set(device.deviceId, { mode, incarnation: device.incarnation });
     }
+  }
+
+  /** Resolves true when the device was written, false when the write was no longer owed. */
+  private async applyIfStillOwed(
+    device: AppearanceSyncTarget,
+    mode: AppearanceMode,
+    decidedUnder: AppearanceConfig,
+  ): Promise<boolean> {
+    // beforeApply records the device's defaults for its holder: not for a device that has none.
+    if (this.scope?.beforeApply && !this.skipReason(device)) {
+      await this.scope.beforeApply(device);
+    }
+    if (!(await this.isStillOwed(device, decidedUnder))) {
+      return false;
+    }
+    await this.dependencies.apply(device, mode);
+    return true;
+  }
+
+  /**
+   * Whether the write decided for `device` is still owed right now: the scheduler runs, sync is
+   * not switched off, the session the decision was made for still holds the device, and that
+   * session's config still asks for the same thing. The config read is the only await; the
+   * stopped flag, the kill switch and the holder are read after it, in the same turn as the
+   * caller's write, so nothing can change in between.
+   */
+  private async isStillOwed(
+    device: AppearanceSyncTarget,
+    decidedUnder: AppearanceConfig,
+  ): Promise<boolean> {
+    let reason = this.skipReason(device);
+    if (!reason) {
+      const config = await this.dependencies.getConfig(device.sessionKey);
+      reason =
+        this.skipReason(device) ??
+        (config.syncWithHost && config.defaultMode === decidedUnder.defaultMode
+          ? undefined
+          : "its holder's appearance config changed");
+    }
+    if (reason) {
+      logger.debug(`[Appearance] Skipping ${device.deviceId}: ${reason} before the apply`);
+      return false;
+    }
+    return true;
+  }
+
+  /** Why a decided write must not happen now, read synchronously; undefined when it may. */
+  private skipReason(device: AppearanceSyncTarget): string | undefined {
+    if (this.stopped) {
+      return "the scheduler stopped";
+    }
+    if (!this.isEnabled()) {
+      return "appearance sync was switched off";
+    }
+    return this.isHeldBySameSession(device) ? undefined : "its holder changed";
+  }
+
+  /** The scope's current view: the same session (or the same absence of one) holds the device. */
+  private isHeldBySameSession(device: AppearanceSyncTarget): boolean {
+    const current = (this.scope?.getTargets() ?? this.ownTargets()).find(
+      (target) => target.deviceId === device.deviceId,
+    );
+    return current !== undefined && current.sessionKey === device.sessionKey;
   }
 
   private isAlreadyApplied(device: AppearanceSyncTarget, mode: AppearanceMode): boolean {

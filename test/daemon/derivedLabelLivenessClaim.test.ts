@@ -5,6 +5,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 
 // #11602: liveness claims on a derived label session through the daemon's heartbeat ingress, as
 // a proxy sends them. The decision itself is tabled in livenessClaimDecision.test.ts; these are
@@ -33,7 +34,9 @@ async function daemon(): Promise<Daemon> {
   const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
   manager.stopCleanupTimer();
   await manager.createSession(BASE, "emulator-5554", "android");
-  await manager.createSession(LABEL, "emulator-5556", "android");
+  await asPlanAllocation(manager, BASE, [LABEL], () =>
+    manager.createSession(LABEL, "emulator-5556", "android"),
+  );
   manager.setDeviceLabels(BASE, buildDeviceLabelMap(["A", "B"], BASE));
   const state = {
     isInitialized: () => true,

@@ -39,7 +39,6 @@ import { logger } from "../utils/logger";
 import { truncateBodyText } from "../utils/truncateBodyText";
 import { displayTransitions } from "../features/observe/DisplayTransition";
 import { getObserveCacheStore } from "../features/observe/cache/ObserveCacheRegistry";
-import { resolveOwnershipSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   ANONYMOUS_ACQUISITION_SESSION_SOURCE,
   isAnonymousAcquisitionSession,
@@ -56,6 +55,7 @@ import {
   deviceAlreadyAssignedToAnotherSessionError,
   deviceAssignedToOtherSessionError,
   InputDeviceOwnedError,
+  MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
 } from "./inputDeviceOwnership";
 import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import {
@@ -8595,8 +8595,9 @@ export class DevicePool {
    * session is judging or recording its base. Any other id is its own.
    */
   private ownershipSessionId(sessionId: string): string {
-    // A label session published under another label session resolves to the outermost base.
-    return resolveOwnershipSessionUuid(sessionId, this.sessionManager);
+    // A label session published under another label session resolves to the outermost base. The
+    // lookup judges only: it never releases an expired base.
+    return this.sessionManager.ownershipSessionUuid(sessionId);
   }
 
   /** Whether `mcpSessionId` acquired (or restored as its own) the owner of `sessionId`. */
@@ -8706,6 +8707,42 @@ export class DevicePool {
 
   resolveAndroidCanonicalId(deviceId: string): string {
     return this.androidTransportAliases.canonicalFor(deviceId);
+  }
+
+  /**
+   * Whether the pool would pool or assign this row: false for an Android transport whose identity
+   * the fold could not prove, which may front a handset pooled (and held) under another id.
+   */
+  isAndroidTransportAssignable(device: BootedDevice): boolean {
+    return this.androidTransportAliases.isAssignable(device);
+  }
+
+  androidTransportMayAliasDevice(transport: BootedDevice, heldDeviceId?: string): boolean {
+    return this.androidTransportAliases.mayAliasDevice(transport, heldDeviceId);
+  }
+
+  /** One unknown Android hold for slots not represented by the frame's live session snapshot. */
+  async androidManagedSlotHold(heldDeviceIds: readonly string[]) {
+    if (!this.managedSlotExclusion) {
+      return undefined;
+    }
+    await this.managedSlotExclusion.refresh({
+      maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
+    });
+    const represented = new Set(
+      heldDeviceIds.flatMap((id) => this.managedRefFor(id, "android").stableIds),
+    );
+    const stableId = [...this.managedSlotExclusion.stableIdsFor("android")].find(
+      (id) => !represented.has(id),
+    );
+    return stableId === undefined
+      ? undefined
+      : {
+          entry: this.managedSlotExclusion.holderOf({
+            platform: "android",
+            stableIds: [stableId],
+          }),
+        };
   }
 
   private isPooledAndroidEmulator(deviceId: string): boolean {

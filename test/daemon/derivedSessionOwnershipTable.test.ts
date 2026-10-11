@@ -18,6 +18,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 
 // #11586: a derived `${base}:${label}` session counts as its base wherever connection ownership
 // is judged or recorded. Each ownership operation is run twice on identical worlds, once naming
@@ -75,7 +76,9 @@ async function emptyWorld(devices: BootedDevice[]): Promise<World> {
 async function allocateLabelB(w: World, base: string): Promise<string> {
   const labels = buildDeviceLabelMap(["A", "B"], base);
   w.manager.setDeviceLabels(base, labels);
-  await w.pool.assignMultipleDevices([labels.B], 1_000, "android");
+  await asPlanAllocation(w.manager, base, [labels.B], () =>
+    w.pool.assignMultipleDevices([labels.B], 1_000, "android"),
+  );
   return labels.B;
 }
 
@@ -227,7 +230,8 @@ const OPERATIONS: Record<string, Operation> = {
   },
   "a liveness claim once the base owner's lease and grace have lapsed": async (w, id) => {
     await w.manager.claimLivenessOwnership(BASE, OWNER_TOKEN);
-    w.timer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
+    // An accepted claim is its owner's heartbeat, holding suspect grace; the lapse check is strict (#11646).
+    w.timer.advanceTime(OWNER_DISCONNECT_GRACE_MS + 1);
     return { outcome: await w.manager.claimLivenessOwnership(id, CLAIMANT_TOKEN) };
   },
   "a tokened heartbeat adopting unowned liveness": (w, id) => ({
@@ -362,14 +366,16 @@ describe("a derived label session is judged and recorded as its base", () => {
       ).toBeUndefined();
     });
 
-    test("the base's owner may, and stays the owner", async () => {
+    test("the base's owner is refused too outside its plan's allocation, and stays the owner", async () => {
       const w = await worldWithSpare();
       const idle = idleDevice(w);
 
-      expect(await bind(w.pool, UNMINTED, idle, OWNER)).toBe(UNMINTED);
+      await expect(bind(w.pool, UNMINTED, idle, OWNER)).rejects.toMatchObject({
+        name: "TerminalSessionError",
+      });
 
-      expect(w.pool.isSessionOwnedByOtherConnection(UNMINTED, OTHER)).toBe(true);
-      expect(w.pool.resolveOwnedDeviceSessionForMcpSession(OWNER, idle)).toBe(UNMINTED);
+      expect(w.pool.getDevice(idle)?.sessionId).toBeNull();
+      expect(w.manager.hasSession(UNMINTED)).toBe(false);
       expect(w.pool.isSessionOwnedByOtherConnection(BASE, OWNER)).toBe(false);
     });
   });
@@ -387,7 +393,9 @@ describe("a derived label session is judged and recorded as its base", () => {
     const w = await world(OWNER);
     const nested = `${DERIVED}:C`;
     w.manager.setDeviceLabels(DERIVED, { B: DERIVED, C: nested });
-    await w.manager.createSession(nested, "emulator-5558", "android");
+    await asPlanAllocation(w.manager, DERIVED, [nested], () =>
+      w.manager.createSession(nested, "emulator-5558", "android"),
+    );
     await w.manager.claimLivenessOwnership(BASE, OWNER_TOKEN);
 
     expect(await w.manager.claimLivenessOwnership(nested, CLAIMANT_TOKEN)).toBe("conflict");
@@ -408,7 +416,8 @@ describe("a derived label session is judged and recorded as its base", () => {
     await w.manager.claimLivenessOwnership(BASE, OWNER_TOKEN);
     expect(w.manager.claimUnownedLivenessOwnership(DERIVED, CLAIMANT_TOKEN)).toBe(false);
 
-    w.timer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
+    // An accepted claim is its owner's heartbeat, holding suspect grace; the lapse check is strict (#11646).
+    w.timer.advanceTime(OWNER_DISCONNECT_GRACE_MS + 1);
 
     expect(w.manager.claimUnownedLivenessOwnership(DERIVED, CLAIMANT_TOKEN)).toBe(true);
     expect(w.manager.hasLivenessOwnership(BASE, OWNER_TOKEN)).toBe(true);
@@ -522,7 +531,9 @@ describe("a derived label session is judged and recorded as its base", () => {
     const w = await world(OWNER);
     const nested = `${DERIVED}:C`;
     w.manager.setDeviceLabels(DERIVED, { B: DERIVED, C: nested });
-    await w.manager.createSession(nested, "emulator-5558", "android");
+    await asPlanAllocation(w.manager, DERIVED, [nested], () =>
+      w.manager.createSession(nested, "emulator-5558", "android"),
+    );
 
     expect(w.pool.isSessionOwnedByOtherConnection(nested, OTHER)).toBe(true);
     expect(w.pool.isSessionOwnedByOtherConnection(nested, OWNER)).toBe(false);

@@ -35,11 +35,8 @@ export const DEVICE_SHUTTING_DOWN_CODE = "device_shutting_down";
  */
 export const SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE = "session_terminal_release_in_progress";
 
-/**
- * A kill's terminal-release reservation named a device the session no longer holds (#11166).
- * Not retryable as-is: the device's holder changed, so the caller re-checks before killing.
- */
-export const SESSION_NO_LONGER_OWNS_DEVICE_CODE = "session_no_longer_owns_device";
+// Defined beside its error class, which the input layer throws too (#11351).
+export { SESSION_NO_LONGER_OWNS_DEVICE_CODE } from "./sessionNoLongerOwnsDevice";
 
 /**
  * A kill's terminal-release reservation raced the session's own rebind (#11166). Retryable with a

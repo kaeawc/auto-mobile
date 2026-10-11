@@ -34,8 +34,15 @@ record, so a token
 claimed on a label proves nothing about its base (#11602). A connection bound to
 the base session, or to one of its labels, may name any live session of that
 plan directly as `sessionUuid`; a name the base has not published, or a label
-that is not allocated, is still refused as a different session. A device that no
-session holds takes calls from anyone.
+that is not allocated, is still refused as a different session. A connection
+seeded with the base is judged the same way. A proxy started with
+`--initial-session-uuid <base>` has no label map, so it forwards a
+`<base>:<name>` call for the daemon to judge like any explicitly named session:
+by issued-session admission and the owner rule, not by the proxy's binding.
+None of these judgements holds, extends or releases a session: a base past its
+idle deadline that the scan has not reached yet publishes no labels, and is
+released by the scan or by a call that names it, never by a lookup about its
+label. A device that no session holds takes calls from anyone.
 
 A session's owner is the connection that acquired it, or that restored it after
 a reconnect. Ownership is cooperative: no token is needed, but naming a session's
@@ -71,7 +78,11 @@ read-only `sqlQuery` statement are reads; their other forms, `systemTray`,
 an open read. A read is
 never use, not even the holder's own (#10964): it does not extend the session's
 idle window. Only control calls do, including a holder's calls that name only
-`deviceId`, which run as the holder's session.
+`deviceId`, which run as the holder's session. A control call that is refused
+before it runs is not use either: a call that names a `deviceId` other than its
+session's device (`device_outside_bound_session`), or whose device cannot be
+driven (lost, recovering, shutting down), leaves the idle window where it was
+(#11558).
 
 ## When a session is released
 
@@ -165,6 +176,18 @@ long as the plan run (#11572), whichever reason ended it:
   call of the finished run, or a client naming `<base>:<label>` itself) is
   refused with `session_ownership_lost` and takes no device, where a base
   session released with `plan-auto-release` would be re-issued by name.
+- The rule is applied where a session is created, so it covers every caller
+  (#11602): while `<base>` is live, nothing but its plan's allocation creates a
+  session named `<base>:<anything>`. A `setActiveDevice` or other bind naming
+  one, with or without a connection identity and by the base's own owner too, is
+  refused the same way, holds no device and leaves no fence, whether or not the
+  base published that label.
+- A session id that merely contains `:` is a session of its own when the part
+  before the `:` is not a live session, and it stays one if that prefix is
+  acquired as a session later. A plan never takes such a session as a label: an
+  `executePlan` whose label would be a live session no plan run created is
+  refused with `device_owned_by_other_session` before it publishes or allocates
+  anything. Release that session or rename the label.
 - It is never rehydrated after a daemon restart, whether its row was live,
   released by `daemon-shutdown` or waiting out a `device-restart:<device>`: its
   device is free at once. The `executePlan` the shutdown cut answers with its
@@ -229,6 +252,37 @@ state (`offline`, `authorizing`, `connecting`, `unauthorized`, `recovery`,
 When one handset is reachable over both USB and Wi-Fi, the pool treats the
 endpoints as aliases of one device only when `ro.serialno` and boot identity prove
 it, and two emulators that merely share an AVD name are never merged.
+
+For direct `input/*` and device-mutating `ide/*` frames, an Android transport the
+pool cannot identify (`isAndroidTransportAssignable` is false) is refused only
+while a held Android device could be its alias. Held devices are every
+Android device still in the session holder map, including expired sessions and
+releases in progress until their ownership is removed, plus one unknown hold if
+the fresh managed-slot snapshot contains Android stable ids not represented by
+those sessions. Control frames reuse that snapshot for at most one second.
+
+The pool can positively distinguish the target from a held device only when its
+current folded alias group identifies another canonical device, its proven
+physical serial differs from a held USB serial or physical alias group, or its
+loopback adb port identifies a different emulator console. An emulator proven by
+its current connection's probe is also told apart from a held physical phone
+(a USB serial or physical alias group), without becoming assignable. Matching physical
+serials or alias-group keys still could alias. A loopback port cannot distinguish
+a phone or an unknown device; an unknown managed-slot hold could alias unless
+the target's current folded group identifies another device.
+
+If no held device could alias the transport, the frame is allowed. If every
+possible alias belongs to the requester's own session (including derived label
+sessions), the frame keeps the untyped “no proven identity” refusal. Otherwise
+it fails with `device_owned_by_other_session` and `retryable: false`, naming the
+transport the caller targeted; an unknown managed-slot hold uses
+`device_assigned_to_managed_slot` when its registry entry is available. Address
+the device by its USB serial or `emulator-NNNN` id. Refusal sends nothing and does
+not restart a holder's idle window. A target already held under its very id goes
+through the normal holder check. Identifiable Android targets and iOS targets
+keep their existing behavior; screenshot, hierarchy and observe reads never
+pass this control check. A managed connection still controls only its own slot
+devices, after the identity check and before the existing ownership checks.
 
 ## Daemon restart
 

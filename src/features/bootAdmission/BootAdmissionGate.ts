@@ -251,6 +251,14 @@ export interface InFlightBoots {
    * process ids are given.
    */
   withListedProcess: number;
+  /**
+   * Boots NOT in `count`, because the device listing shows them, whose own process the process
+   * listing does not show: boots in the ledger, or ended while the sample was open. The two
+   * listings are read at different moments, so such a boot spawned after the process listing was
+   * read and the device listing then caught it; the process listing is short by exactly that boot
+   * (#11588). A listed boot handed off without a process id is one of them: it cannot be matched.
+   */
+  listedWithoutProcess: number;
 }
 
 /**
@@ -338,11 +346,18 @@ export class BootAdmissionLedger {
     const now = this.timer.now();
     const hasListedProcess = (entry: LedgerEntry): boolean =>
       entry.processId !== undefined && listedProcessIds.has(entry.processId);
+    const isVisible = (entry: LedgerEntry): boolean =>
+      entry.deviceId !== undefined && visibleDeviceIds.has(entry.deviceId);
     const ended = this.endedDuringSample(sampleWindow, visibleDeviceIds, excludeDeviceId, now);
     let count = ended.length;
     let withListedProcess = ended.filter(hasListedProcess).length;
+    // Read before the loop below ends the listed entries into the open windows, this one included.
+    const known = [...this.windowEnded(sampleWindow), ...this.entries.values()];
+    const listedWithoutProcess = known.filter(
+      (entry) => isVisible(entry) && !hasListedProcess(entry) && entry.deviceId !== excludeDeviceId,
+    ).length;
     for (const [token, entry] of [...this.entries]) {
-      const visible = entry.deviceId !== undefined && visibleDeviceIds.has(entry.deviceId);
+      const visible = isVisible(entry);
       if (entry.handedOffUntilMs !== undefined && (visible || now >= entry.handedOffUntilMs)) {
         // Visible in this listing, but a sample still open may hold an older one without it.
         this.end(token, visible);
@@ -354,7 +369,11 @@ export class BootAdmissionLedger {
         withListedProcess += hasListedProcess(entry) ? 1 : 0;
       }
     }
-    return { count, withListedProcess };
+    return { count, withListedProcess, listedWithoutProcess };
+  }
+
+  private windowEnded(window: LedgerSampleWindow | undefined): readonly LedgerEntry[] {
+    return window instanceof SampleWindow ? window.ended : [];
   }
 
   /** Boots that ended while the sample was open and that the sample does not show either. */
@@ -364,10 +383,7 @@ export class BootAdmissionLedger {
     excludeDeviceId: string | undefined,
     now: number,
   ): LedgerEntry[] {
-    if (!(window instanceof SampleWindow)) {
-      return [];
-    }
-    return window.ended.filter(
+    return this.windowEnded(window).filter(
       (entry) =>
         !(entry.handedOffUntilMs !== undefined && now >= entry.handedOffUntilMs) &&
         !(entry.deviceId !== undefined && visibleDeviceIds.has(entry.deviceId)) &&

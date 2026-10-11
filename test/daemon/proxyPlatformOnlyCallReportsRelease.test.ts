@@ -210,7 +210,7 @@ for (const args of [{ platform: "android" }, { deviceId: ANDROID.deviceId }] as 
   });
 }
 
-test("setActiveDevice keeps its sessionless selection and rebinds", async () => {
+test("setActiveDevice stays sessionless and rebinds platform-only calls to the new default", async () => {
   await acquireBoth();
   const args = { deviceId: ANDROID.deviceId, platform: "android" };
   await proxy.callTool("setActiveDevice", args);
@@ -218,7 +218,7 @@ test("setActiveDevice keeps its sessionless selection and rebinds", async () => 
   expect(forwarded[0]?.args.sessionUuid).toBeUndefined();
   await proxy.callTool("tapOn", { platform: "android" });
   expect(forwarded[1]?.args.platform).toBe("android");
-  expect(forwarded[1]?.args.sessionUuid).toBeUndefined();
+  expect(forwarded[1]?.args.sessionUuid).toBe(ANDROID.sessionUuid);
   await proxy.callTool("tapOn", {});
   expect(forwarded[2]?.args.sessionUuid).toBe(ANDROID.sessionUuid);
 });

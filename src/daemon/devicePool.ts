@@ -938,11 +938,11 @@ export interface DevicePoolDependencies {
   deviceSessionContinuityEnabled?: boolean;
 }
 
-/** A device image's managed-slot identity: the AVD name on Android, the UDID on iOS. */
+/** Managed identity includes the name: iOS creation is excluded before its UDID is recorded. */
 function managedRefForImage(image: DeviceInfo): ManagedDeviceRef {
   return {
     platform: image.platform,
-    stableIds: [image.platform === "android" ? image.name : undefined, image.deviceId],
+    stableIds: [image.name, image.deviceId],
   };
 }
 
@@ -9495,6 +9495,7 @@ export class DevicePool {
       stableIds: [
         device ? this.stableDeviceIdFor(device) : undefined,
         device?.avdName,
+        platform === "ios" ? device?.name : undefined,
         deviceId,
         ...extraStableIds,
       ],

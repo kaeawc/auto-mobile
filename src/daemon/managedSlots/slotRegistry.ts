@@ -737,13 +737,10 @@ export function sameBinding(a: SlotBindingExpectation, b: SlotBindingExpectation
 
 /**
  * The stable id an open journal entry's new device has, or will have: the recorded id once creation
- * returned it, else (Android) the generated AVD name, which is the stable id.
+ * returned it, else the generated name (the AVD identity on Android, a temporary iOS identity).
  */
 export function journalNewStableId(entry: SlotJournalEntry): string | null {
-  return (
-    entry.target.newStableId ??
-    (journalCreationPlatform(entry) === "android" ? entry.target.newName : null)
-  );
+  return entry.target.newStableId ?? entry.target.newName;
 }
 
 /**

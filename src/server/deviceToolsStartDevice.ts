@@ -484,7 +484,8 @@ async function startMatchExclusions(platform: "android" | "ios"): Promise<{
     (await managedSlotPoolGate(initializedDevicePool()).managedSlotStableIds?.(platform)) ??
     new Set<string>();
   if (platform === "ios") {
-    return { excludeDeviceNames: undefined, excludeDeviceIds: unionSets(undefined, managed) };
+    const exclusions = unionSets(undefined, managed);
+    return { excludeDeviceNames: exclusions, excludeDeviceIds: exclusions };
   }
   const recoveryTargets = getStartDevicePool(
     DaemonState.getInstance(),

@@ -16,6 +16,7 @@ import {
   ProvisionDeviceError,
   type ProvisionDeviceFailureCode,
 } from "../../devices/exactDeviceProvisioning";
+import { classifyDisplayCutout } from "../../utils/displayCutout";
 import type { PlatformDeviceManager } from "../../devices/deviceUtils";
 import { assertBootCapacityAvailable } from "../../features/bootAdmission/sharedBootAdmissionGates";
 import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
@@ -38,6 +39,7 @@ import {
   type ManagedSlotInventorySnapshot,
   type ManagedSlotProvisionRequest,
   type ManagedSlotProvisionedDevice,
+  type ManagedSlotResolvedSpec,
 } from "./reconciler";
 import type { LiveExecutionSessions } from "./slotOwnerLiveness";
 import type { SlotPlatform } from "./slotRegistry";
@@ -180,6 +182,51 @@ export interface ManagedSlotProvisionPortDependencies {
 /** The `provisionDevice` path with `readiness: "automation"`. */
 export class ToolManagedSlotProvisioner implements ManagedSlotDeviceProvisioner {
   constructor(private readonly deps: ManagedSlotProvisionPortDependencies) {}
+
+  async readExistingSpec(device: DeviceInfo): Promise<ManagedSlotResolvedSpec | null> {
+    if (device.platform === "ios") {
+      if (device.isAvailable === false || !device.runtime || !device.deviceType) {
+        return null;
+      }
+      return {
+        runtime: device.runtime,
+        deviceType: device.deviceType,
+        displayCutout: classifyDisplayCutout("ios", device.deviceType),
+      };
+    }
+    return this.readExistingAndroidSpec(device.name);
+  }
+
+  private async readExistingAndroidSpec(name: string): Promise<ManagedSlotResolvedSpec | null> {
+    try {
+      const config = await this.deps.androidConfigReader.readConfig(name);
+      if (!config?.systemImagePackage) {
+        return null;
+      }
+      return {
+        runtime: config.systemImagePackage,
+        ...(config.deviceName
+          ? {
+              deviceType: config.deviceName,
+              displayCutout: classifyDisplayCutout("android", config.deviceName),
+            }
+          : {}),
+        configuration: {
+          ...config.hardware,
+          ...(config.ramSizeMb !== undefined ? { memoryMb: config.ramSizeMb } : {}),
+          ...(config.screenWidth !== undefined ? { screenWidth: config.screenWidth } : {}),
+          ...(config.screenHeight !== undefined ? { screenHeight: config.screenHeight } : {}),
+          ...(config.screenDensity !== undefined ? { screenDensity: config.screenDensity } : {}),
+        },
+      };
+    } catch (error) {
+      logger.warn(
+        `[ManagedSlots] cannot resolve AVD config for '${name}': ${errorMessage(error)}`,
+        error,
+      );
+      return null;
+    }
+  }
 
   async provision(request: ManagedSlotProvisionRequest): Promise<ManagedSlotProvisionedDevice> {
     const spec =

@@ -60,8 +60,15 @@ function realIoTurn(): Promise<void> {
 
 // The first scenario pays for module-level one-time costs (database template, Daemon module graph);
 // beforeAll is outside the per-test budget, and the first row would otherwise sit at ~70 ms of 100.
+// Run one full acquire -> tool call -> idle release cycle too: the first acquire alone pays ~14 ms
+// of one-time module work (session setup, tool dispatch, release path) that would otherwise land
+// in whichever row runs first.
 beforeAll(async () => {
-  await (await LivenessScenario.start()).stop();
+  const warm = await LivenessScenario.start();
+  const session = await warm.acquire();
+  await warm.toolCall(session);
+  await warm.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+  await warm.stop();
 });
 
 afterEach(async () => {
@@ -340,7 +347,9 @@ describe("daemon release wiring (#10975)", () => {
     }
   });
 
-  test("a call that never settles holds the session past the idle window; when the veto ceiling lets the expiry through, the call is aborted and the device freed (#10820)", async () => {
+  // One scenario of two halves, split so each half carries its own simulated minutes (the held half
+  // 6 of them, the release half 40): together they were ~30 ms locally, ~100 ms on a loaded runner.
+  test("a call that never settles holds the session past the idle window, answering the caller with a timeout and aborting nothing (#10820)", async () => {
     scenario = await LivenessScenario.start();
     const session = await scenario.acquire();
     // The device command is wedged: it outlives its request deadline and every signal to stop.
@@ -352,11 +361,19 @@ describe("daemon release wiring (#10975)", () => {
     expectHeld(session);
     expect(String(call.failure())).toContain("timed out");
     expect(scenario.abortedCalls).toEqual([]);
+    await call.settle();
+  });
 
-    // Released side: past the ceiling the expiry overrides it and aborts what it overrode.
+  test("when the veto ceiling lets the expiry through, the never-settling call is aborted and the device freed (#10820)", async () => {
+    scenario = await LivenessScenario.start();
+    const session = await scenario.acquire();
+    const startedAt = scenario.timer.now();
+    const call = scenario.startLongCall(session, undefined, { wedged: true });
+
+    // Held until the ceiling; past it the expiry overrides the veto and aborts what it overrode.
     const releasedAt = await scenario.idleWhileHeld(
       session,
-      scenario.timer.now() + UNSETTLED_EXECUTION_VETO_CEILING_MS + 2 * IDLE_WINDOW_MS,
+      startedAt + UNSETTLED_EXECUTION_VETO_CEILING_MS + 2 * IDLE_WINDOW_MS,
       300_000,
     );
     expect(releasedAt).toBeDefined();

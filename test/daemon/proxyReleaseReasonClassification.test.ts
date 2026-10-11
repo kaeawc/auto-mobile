@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import {
@@ -307,6 +307,15 @@ async function sessionlessCallAfter(path: Path, reason: string): Promise<string>
 }
 
 describe("release reasons are classified alike on every path", () => {
+  // The first history through the proxy pays for loading and compiling it; that is not any one
+  // test's time. Every path once, outside the timed tests.
+  beforeAll(async () => {
+    for (const path of ["notification", ...HEARTBEAT_PATHS] as const) {
+      await sessionlessCallAfter(path, "daemon-restart");
+      await sessionlessCallAfter(path, "device-killed");
+    }
+  });
+
   test.each(EVERY_REASON)(
     "%s: a not-found heartbeat fences exactly when the notification does",
     async (reason) => {
@@ -849,42 +858,49 @@ describe("a not-found answer is decided alike on every path, for every session (
   // recovery asks again, on the same connection or (a longer pause) on one it replaced. That
   // connection reaches the same daemon and the same handoff: the session is stopped as it would
   // have been, never waited for all over again, also when the daemon pauses at every expiry.
-  test.each([
-    ["the latest binding", [SESSION], "device-restart:emulator-5554"],
-    ["a held session", [SESSION, SECOND], "device-restart:emulator-5554"],
-    ["the latest binding", [SESSION], ""],
-    ["a held session", [SESSION, SECOND], ""],
-  ] as const)(
-    "a window that expires while the daemon is paused is not opened again: %s, %p %p",
-    async (_which, sessions, reason) => {
-      const budget = WINDOW_TICKS + 12;
-      for (const pauseMs of [3_250, 5_000, 7_000]) {
-        for (let pausedAt = WINDOW_TICKS - 4; pausedAt <= WINDOW_TICKS + 1; pausedAt += 1) {
-          const { world, perTick } = await holding(sessions);
-          try {
-            world.callsRestoreNothing();
-            world.release(reason, SESSION);
-            if (reason === "") {
-              world.release("", SECOND);
-              world.replaceDaemon();
-            }
-            const before = world.heartbeats(SESSION);
-            await perTick(pausedAt);
-            world.pauseDaemon(pauseMs);
-            await perTick(WINDOW_TICKS);
-            // And again where a second window would run out, were there one.
-            world.pauseDaemon(pauseMs);
-            await perTick(WINDOW_TICKS);
+  // Recorded once: who is paused, under which handoff, for how long, and from which tick around
+  // the one whose answer finds the window expired. One test replays each case.
+  const PAUSE_CASES = (
+    [
+      ["the latest binding", [SESSION], "device-restart:emulator-5554"],
+      ["a held session", [SESSION, SECOND], "device-restart:emulator-5554"],
+      ["the latest binding", [SESSION], ""],
+      ["a held session", [SESSION, SECOND], ""],
+    ] as const
+  ).flatMap(([which, sessions, reason]) =>
+    [3_250, 5_000, 7_000].flatMap((pauseMs) =>
+      [-4, -3, -2, -1, 0, 1].map(
+        (offset) => [which, reason, pauseMs, WINDOW_TICKS + offset, sessions] as const,
+      ),
+    ),
+  );
 
-            expect({
-              pauseMs,
-              pausedAt,
-              asked: world.heartbeats(SESSION) - before <= budget,
-            }).toEqual({ pauseMs, pausedAt, asked: true });
-          } finally {
-            await world.close();
-          }
+  test("the pause sweep replays every recorded case", () => {
+    expect(PAUSE_CASES).toHaveLength(4 * 3 * 6);
+  });
+
+  test.each(PAUSE_CASES)(
+    "a window that expires while the daemon is paused is not opened again: %s, %p, paused %d ms at tick %d",
+    async (_which, reason, pauseMs, pausedAt, sessions) => {
+      const { world, perTick } = await holding(sessions);
+      try {
+        world.callsRestoreNothing();
+        world.release(reason, SESSION);
+        if (reason === "") {
+          world.release("", SECOND);
+          world.replaceDaemon();
         }
+        const before = world.heartbeats(SESSION);
+        await perTick(pausedAt);
+        world.pauseDaemon(pauseMs);
+        await perTick(WINDOW_TICKS);
+        // And again where a second window would run out, were there one.
+        world.pauseDaemon(pauseMs);
+        await perTick(WINDOW_TICKS);
+
+        expect(world.heartbeats(SESSION) - before).toBeLessThanOrEqual(WINDOW_TICKS + 12);
+      } finally {
+        await world.close();
       }
     },
   );

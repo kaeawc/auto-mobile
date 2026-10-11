@@ -11,6 +11,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 
 // #11091: releasing a base session releases its derived `${base}:${label}` sessions and frees
 // their devices, whatever released the base.
@@ -46,8 +47,10 @@ describe("derived label sessions are released with their base (#11091)", () => {
     );
     const map = buildDeviceLabelMap(["A", "B", "C"], "base");
     await manager.createSession("base", "device-A", "android");
-    await manager.createSession("base:B", "device-B", "android");
-    await manager.createSession("base:C", "device-C", "android");
+    await asPlanAllocation(manager, "base", ["base:B", "base:C"], async () => {
+      await manager.createSession("base:B", "device-B", "android");
+      await manager.createSession("base:C", "device-C", "android");
+    });
     manager.setDeviceLabels("base", map);
   });
 

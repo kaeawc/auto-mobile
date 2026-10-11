@@ -230,6 +230,17 @@ async function stopOwnedRecordingsWithinCap(
 }
 
 /**
+ * The longest {@link stopOwnedRecordingsWithinCap} runs: the stop is capped, then force-stopped
+ * recordings are marked incomplete within a grace.
+ */
+function finalizeSettlesWithinMs(
+  deps: Pick<RecordingSessionCleanupDeps, "finalizeCapMs">,
+  deviceId: string,
+): number {
+  return deps.finalizeCapMs(deviceId) + INCOMPLETE_MARK_GRACE_MS;
+}
+
+/**
  * A session acquiring a device stops and finalizes the owner-less (sessionless) recordings on it
  * (#10961), so they cannot keep capturing the new owner's session or block its own recording
  * start. Returns the callback to run where acquisition cancels sessionless executions
@@ -249,6 +260,9 @@ export function createOwnerlessRecordingAcquisitionCleanup(
     manager.registerAcquisitionDeviceCleanup(
       deviceId,
       stopOwnedRecordingsWithinCap(deps, undefined, deviceId),
+      // The same capped stop as a release's, so the same bound: if the holder releases before
+      // it settles, a refused bind must advertise the time left, not the 1 s default (#11616).
+      finalizeSettlesWithinMs(deps, deviceId),
     );
   };
 }
@@ -275,9 +289,8 @@ export function registerRecordingSessionCleanup(
     manager.registerPendingDeviceCleanup(
       deviceId,
       stopOwnedRecordingsWithinCap(deps, sessionId, deviceId),
-      // The stop is capped, then force-stopped recordings are marked incomplete within a grace;
-      // a refused bind must advertise that, not the 1 s default (#11360).
-      deps.finalizeCapMs(deviceId) + INCOMPLETE_MARK_GRACE_MS,
+      // A refused bind must advertise the stop's bound, not the 1 s default (#11360).
+      finalizeSettlesWithinMs(deps, deviceId),
     );
   };
   // A terminal upgrade of a finished release would stop the device's next owner's recording (#10825).

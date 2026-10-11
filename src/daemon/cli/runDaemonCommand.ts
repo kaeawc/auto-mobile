@@ -363,12 +363,35 @@ function discoveryIncompleteRefusal(message: string): ActionableError {
   });
 }
 
+/** Why a booted-devices resource with a pool status still has no known device count, if so. */
+function unknownPoolCountReason(data: {
+  observationComplete?: boolean;
+  poolStatus?: { countUnknown?: { platforms?: string[] } };
+  devices?: unknown[];
+}): string | undefined {
+  const countUnknown = data.poolStatus?.countUnknown;
+  if (countUnknown) {
+    // A pooled device's own discovery source did not complete, so whether it is still there is
+    // unknown: the same refusal pool stats and `daemon/availableDevices` give (#11643).
+    const platforms = countUnknown.platforms?.join(", ") || "a pooled platform";
+    return `Device discovery for ${platforms} did not complete, so the pooled device count is unknown`;
+  }
+  if (data.observationComplete === false && (data.devices?.length ?? 0) === 0) {
+    // A discovery source that exists on this host failed and the pool has nothing to fall back
+    // on: zeros here would read as "0 devices" when the count is actually unknown. Tooling that
+    // is not installed (a single-platform host) leaves the observation complete (#11605).
+    return "The booted-devices resource reports incomplete discovery and the pool has no devices, so the count is unknown";
+  }
+  return undefined;
+}
+
 /**
  * Render the booted-devices resource as `available-devices` output. A resource with no usable pool
  * status (no text, unparseable text, an error object, or no `poolStatus`) is an unknown, so it
- * fails rather than printing zeros that read as "0 devices". So does an incomplete observation
- * (`observationComplete: false`) with no device entries; a partial one with entries still prints
- * (the JSON has no field that could carry the incompleteness).
+ * fails rather than printing zeros that read as "0 devices". So does a pool status marked
+ * `countUnknown` (a pooled device's own discovery source did not complete), and an incomplete
+ * observation (`observationComplete: false`) with no device entries. A partial observation whose
+ * failed source no pooled device depends on still prints: its counts are exact.
  */
 function printAvailableDevicesContent(content: string | undefined): void {
   let data: {
@@ -380,6 +403,7 @@ function printAvailableDevicesContent(content: string | undefined): void {
       error: number;
       total: number;
       recoveryPolicy?: { onLoss: boolean; maxAttempts: number };
+      countUnknown?: { platforms?: string[] };
     };
     devices?: Array<{
       platform: string;
@@ -403,13 +427,10 @@ function printAvailableDevicesContent(content: string | undefined): void {
         "(discovery_incomplete); retry once the daemon finishes discovery.",
     );
   }
-  if (data.observationComplete === false && (data.devices?.length ?? 0) === 0) {
-    // A discovery source that exists on this host failed and the pool has nothing to fall back
-    // on: zeros here would read as "0 devices" when the count is actually unknown. Tooling that
-    // is not installed (a single-platform host) leaves the observation complete (#11605).
+  const unknownCount = unknownPoolCountReason(data);
+  if (unknownCount) {
     throw discoveryIncompleteRefusal(
-      "The booted-devices resource reports incomplete discovery and the pool has no devices, so the count is " +
-        "unknown (discovery_incomplete); retry once the daemon finishes discovery.",
+      `${unknownCount} (discovery_incomplete); retry once the daemon finishes discovery.`,
     );
   }
   console.log(

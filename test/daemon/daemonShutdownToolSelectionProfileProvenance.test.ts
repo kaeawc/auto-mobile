@@ -10,6 +10,7 @@ import {
 import { logger } from "../../src/utils/logger";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { fakeDaemonShutdownIo } from "../helpers/daemonShutdownIoFakes";
 
 /**
  * A fake store whose `insert` hangs on a manually-released gate, modeling a
@@ -82,9 +83,16 @@ class DelayedToolSelectionProfileProvenanceStore implements ToolSelectionProfile
  *      guarantee end to end.
  */
 describe("Daemon shutdown drains an in-flight tool-selection-profile provenance write (issue #6225)", () => {
-  beforeEach(() => resetDbWriteBarrier());
+  let restoreShutdownIo: () => void = () => {};
+  // No stage of daemon.stop() may await real I/O under the FakeTimer: the recording repository,
+  // the database close, the log flush and the pid/socket file removal are fakes.
+  beforeEach(async () => {
+    resetDbWriteBarrier();
+    restoreShutdownIo = await fakeDaemonShutdownIo();
+  });
 
   afterEach(() => {
+    restoreShutdownIo();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }

@@ -1,12 +1,19 @@
 import { homedir } from "node:os";
 import path from "node:path";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { defaultAppearanceSyncDependencies } from "../../src/daemon/AppearanceSyncScheduler";
 import {
   DEFAULT_SOCKET_PATH,
   LOCK_FILE_PATH,
   PID_FILE_PATH,
   SOCKET_PATH,
 } from "../../src/daemon/constants";
+import { DefaultDeviceSettingsAccess } from "../../src/features/utility/DeviceSettingDefaults";
+import type { BootedDevice } from "../../src/models";
+import { resolveAppearanceMode } from "../../src/server/appearanceManager";
+import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
+import { applyAppearanceToDevice } from "../../src/utils/deviceAppearance";
+import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor";
 import { resolveAutoMobileBaseDir } from "../../src/utils/tempDir";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
@@ -15,7 +22,12 @@ import {
   ProcessTimer,
   assertNotHostDaemonPath,
 } from "./inMemoryDaemonWire";
-import { KEEPER_INTERVAL_MS, LivenessScenario } from "./livenessScenarioHarness";
+import {
+  IDLE_WINDOW_MS,
+  KEEPER_INTERVAL_MS,
+  LivenessScenario,
+  RELEASE_SLACK_MS,
+} from "./livenessScenarioHarness";
 import { warmedTests } from "./warmedTests";
 
 // #11441: the liveness harness starts a real `Daemon` through `Daemon.startOn()`. These pin what
@@ -58,6 +70,50 @@ describe("the liveness harness never reaches the host's daemon", () => {
       );
       const daemon = scenario.daemon.daemon;
       expect(() => daemon.stop()).toThrow("Daemon.stop() would touch the host");
+    },
+  );
+
+  // The daemon syncs a device to the host's appearance when a session is created on it, and
+  // records the device's display settings before a session changes them. Unstubbed, both ran
+  // `defaults`/`gsettings` and `adb -s <device id>` on the machine running the unit tests.
+  scenarioTest(
+    "acquiring, using and releasing a device runs no host command and no adb command; appearance and device settings answer at the harness",
+    async () => {
+      const hostCommands = spyOn(
+        DefaultHostCommandExecutor.prototype,
+        "executeCommand",
+      ).mockRejectedValue(new Error("a scenario ran a host command"));
+      const adbCommands = spyOn(AdbClient.prototype, "executeCommand").mockRejectedValue(
+        new Error("a scenario ran adb"),
+      );
+      const device = { deviceId: "emulator-5554", name: "emulator-5554", platform: "android" };
+      try {
+        scenario = await LivenessScenario.start();
+        const session = await scenario.acquire();
+        await scenario.toolCall(session);
+        // The ends the daemon's own sync and settings recorder reach, called as they call them.
+        await defaultAppearanceSyncDependencies.apply(device as BootedDevice, "dark");
+        expect(await defaultAppearanceSyncDependencies.resolveMode()).toBe("light");
+        expect(
+          await new DefaultDeviceSettingsAccess().read(device as BootedDevice, ["nightMode"]),
+        ).toEqual({});
+        expect(await scenario.appearanceSet(session, "dark")).toMatchObject({
+          response: { success: true },
+        });
+        await scenario.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+
+        expect(scenario.appearanceApplies).toContain("emulator-5554:dark");
+        expect(hostCommands).not.toHaveBeenCalled();
+        expect(adbCommands).not.toHaveBeenCalled();
+
+        await scenario.stop();
+        scenario = undefined;
+        expect(defaultAppearanceSyncDependencies.apply).toBe(applyAppearanceToDevice);
+        expect(defaultAppearanceSyncDependencies.resolveMode).toBe(resolveAppearanceMode);
+      } finally {
+        hostCommands.mockRestore();
+        adbCommands.mockRestore();
+      }
     },
   );
 });

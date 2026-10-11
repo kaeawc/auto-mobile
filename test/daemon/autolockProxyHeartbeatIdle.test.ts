@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import {
   AUTOLOCK_WINDOW_MS,
   KEEPER_INTERVAL_MS,
@@ -17,6 +17,17 @@ const IDLE_REASONS = ["cleanup-expired", "lazy-expiry"];
 
 describe("autolock idle release with a heartbeating stdio proxy (#10658)", () => {
   let scenario: LivenessScenario;
+
+  // The first scenario pays the module-level one-time costs (database template, Daemon module
+  // graph, the first autolock acquire, tool dispatch and release path): ~35 of the first row's
+  // ~43 ms. beforeAll is outside the per-test budget, as in the liveness scenario matrix.
+  beforeAll(async () => {
+    const warm = await LivenessScenario.start({ autolock: true });
+    const session = await warm.acquire();
+    await warm.toolCall(session);
+    await warm.idleUntilReleased(session, AUTOLOCK_WINDOW_MS + 2 * RELEASE_SLACK_MS);
+    await warm.stop();
+  });
 
   afterEach(async () => {
     await scenario.stop();

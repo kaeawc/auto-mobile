@@ -44,7 +44,12 @@ import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { MultiPlatformDeviceManager } from "../devices/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
-import { SessionManager, type ActiveSessionExecutionQuery, type Session } from "./sessionManager";
+import {
+  SessionManager,
+  type ActiveSessionExecutionQuery,
+  type RehydrationSummary,
+  type Session,
+} from "./sessionManager";
 import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
 import {
   hasActiveSessionExecution,
@@ -298,7 +303,11 @@ import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
-import { createDaemonTerminalReleaseJournal } from "./terminalReleaseJournal";
+import {
+  createDaemonTerminalReleaseJournal,
+  type DaemonTerminalReleaseJournalOptions,
+  type TerminalReleaseJournal,
+} from "./terminalReleaseJournal";
 import { EmulatorLossIncidentRepository } from "../db/emulatorLossIncidentRepository";
 import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
@@ -524,6 +533,36 @@ export type DaemonProcessBirthTimeProvider = () => number;
 export type DaemonProcessGenerationTokenProvider = () => string | undefined;
 
 /**
+ * The steps of `Daemon.start()` that touch the machine: the process's working directory and
+ * signal handlers, the PID file, the data directory, listening sockets, and the monitors that
+ * probe devices. `start()` runs the process's own; `Daemon.startOn()` runs a caller's, so a test
+ * harness starts a daemon through the same sequence with nothing reaching the host (#11441).
+ * Each step sits where `start()` has always run it.
+ */
+export interface DaemonStartHost {
+  /** Logging, the stable working directory and the shutdown handlers. */
+  enterProcess(): void;
+  /** Name this daemon's control socket in the CtrlProxy forwarding leases it takes (#10497). */
+  publishForwardLeaseOwner(): void;
+  /** Publish the owned database path in the PID file before the database opens (#2871). */
+  writeEarlyOwnerRecord(): Promise<void>;
+  /** This daemon's terminal-release journal, with dead daemons' intents adopted (#10959). */
+  openTerminalReleaseJournal(
+    owner: Pick<DaemonTerminalReleaseJournalOptions, "daemonSessionId" | "liveDaemonSessionIds">,
+  ): TerminalReleaseJournal;
+  /** The AVD provenance warm-up, port selection and the HTTP MCP listener. */
+  startHttpIngress(): Promise<void>;
+  /** Drop per-session appearance rows no rehydrated or recoverable session owns (#10976). */
+  sweepStaleAppearanceConfigs(rehydration: RehydrationSummary): Promise<void>;
+  /** Create the control socket server over this daemon's state and start accepting clients. */
+  bindControlSocket(): Promise<UnixSocketServer>;
+  /** Auxiliary sockets, device monitors, the PID file and the health check. */
+  startServicesAfterSocketBind(): Promise<void>;
+  /** Navigation retention, forwarding-lease idle release, the orphan watchdog and slot reclaim. */
+  startMaintenanceMonitors(): void;
+}
+
+/**
  * Captures a wall-clock approximation of this OS process's birth time, rather
  * than the later point at which daemon bootstrap constructs its generation.
  * `process.uptime()` is rooted at process creation, so it remains comparable to
@@ -590,6 +629,8 @@ export class Daemon {
   private httpServer: HttpServer | null = null;
   private httpServerClosePromise: Promise<void> | null = null;
   private socketServer: UnixSocketServer | null = null;
+  /** The machine-touching start steps; `startOn()` replaces the process's own. */
+  private startHost: DaemonStartHost = this.processStartHost();
   private readonly startupCompletion: Promise<void>;
   private resolveStartupCompletion!: () => void;
   private rejectStartupCompletion!: (reason: unknown) => void;
@@ -1440,6 +1481,17 @@ export class Daemon {
    * Start the daemon
    */
   async start(): Promise<void> {
+    await this.startOn(this.processStartHost());
+  }
+
+  /**
+   * `start()` with the steps that touch the machine supplied by `host` (#11441). The rest of the
+   * start sequence runs here in its own order: the tool-call-end subscription, database bring-up,
+   * journal adoption, device discovery, session rehydration and the heartbeat monitor. A test
+   * harness passes in-memory steps, so its daemon is wired by this code and not by a copy of it.
+   */
+  async startOn(host: DaemonStartHost): Promise<void> {
+    this.startHost = host;
     try {
       await this.startUntilReady();
       this.resolveStartupCompletion();
@@ -1491,7 +1543,33 @@ export class Daemon {
     }
   }
 
-  private async startThroughSocketBind(): Promise<void> {
+  /** The process's own {@link DaemonStartHost}: the steps `start()` has always run. */
+  private processStartHost(): DaemonStartHost {
+    return {
+      enterProcess: () => this.enterDaemonProcess(),
+      publishForwardLeaseOwner: () => {
+        // Record our socket in every CtrlProxy forwarding lease we take, so another
+        // AutoMobile process can ask whether we still use the device (#10497).
+        setCtrlProxyForwardLeaseOwnerSocketPath(SOCKET_PATH);
+      },
+      writeEarlyOwnerRecord: () => this.writeEarlyOwnerRecord(),
+      openTerminalReleaseJournal: (owner) => createDaemonTerminalReleaseJournal(owner),
+      startHttpIngress: () => this.startHttpIngress(),
+      sweepStaleAppearanceConfigs: async (rehydration) => {
+        await sweepStaleAppearanceConfigs(rehydration, this.sessionManager, {
+          liveDaemonSessionIds: this.startupLiveDaemonSessionIds,
+          ownDaemonSessionId: this.daemonSessionId,
+          getPersistedSession: (sessionUuid) =>
+            this.deviceSessionRepository.getSession(sessionUuid),
+        });
+      },
+      bindControlSocket: () => this.bindControlSocket(),
+      startServicesAfterSocketBind: () => this.startServicesAfterSocketBind(),
+      startMaintenanceMonitors: () => this.startMaintenanceMonitors(),
+    };
+  }
+
+  private enterDaemonProcess(): void {
     // Mirror structured daemon logs to stdout/stderr capture as well. The
     // primary stable log is `<configured log dir>/daemon.log` (defaulting to
     // `<auto-mobile data dir>/logs/daemon.log`); the daemon manager also
@@ -1505,12 +1583,14 @@ export class Daemon {
 
     logger.info("Starting AutoMobile daemon...");
     this.setupShutdownHandlers();
+  }
+
+  private async startThroughSocketBind(): Promise<void> {
+    this.startHost.enterProcess();
     // Subscribe here, not in the constructor: only a started daemon is ever stopped, so a
     // constructed-but-never-started daemon must not leave a listener on the global tracker (#10712).
     this.subscribeToolCallEndActivity();
-    // Record our socket in every CtrlProxy forwarding lease we take, so another
-    // AutoMobile process can ask whether we still use the device (#10497).
-    setCtrlProxyForwardLeaseOwnerSocketPath(SOCKET_PATH);
+    this.startHost.publishForwardLeaseOwner();
 
     // Publish the owned DB path in the PID file BEFORE opening the DB so the
     // direct-mode DB-ownership guard can tell a same-file collision from an
@@ -1531,7 +1611,7 @@ export class Daemon {
     try {
       await startupBenchmark.runPhase("daemonDatabaseInitialization", () =>
         runStartupPrologue({
-          writeEarlyOwnerRecord: () => this.writeEarlyOwnerRecord(),
+          writeEarlyOwnerRecord: () => this.startHost.writeEarlyOwnerRecord(),
           initializeDatabase: () => this.initializeDatabase(),
         }),
       );
@@ -1539,32 +1619,13 @@ export class Daemon {
       // Adopt terminal releases a crashed predecessor never persisted (#10959) before any
       // listener can admit a session; startup rehydration writes their rows.
       this.sessionManager.attachTerminalReleaseJournal(
-        createDaemonTerminalReleaseJournal({
+        this.startHost.openTerminalReleaseJournal({
           daemonSessionId: this.daemonSessionId,
           liveDaemonSessionIds: this.startupLiveDaemonSessionIds,
         }),
       );
 
-      this.warmAndroidAvdProvenanceCache();
-      // iOS device-type profiles are memoized per SimCtlClient and populated inline
-      // during its simulator inventory; there is no process-wide profile cache to warm.
-
-      // Find an available port. In strict-port mode (issue #6260, restart's
-      // atomic guard) we deliberately skip findAvailablePort()'s probe-then-
-      // release preflight and its in-range port fallback: that preflight releases
-      // its probe socket before this process actually binds, leaving a window
-      // for a competitor to claim the canonical port and for the fallback to
-      // paper over it with a "successful" restart on the wrong port. Leaving
-      // `this.port` as the requested port makes the real `listen()` call below
-      // (in startHttpServer) the single atomic bind-or-fail attempt.
-      if (!this.strictPort) {
-        this.port = await this.findAvailablePort(this.port);
-      }
-
-      // Start HTTP MCP server
-      startupBenchmark.startPhase("httpServerStart");
-      await this.startHttpServer();
-      startupBenchmark.endPhase("httpServerStart");
+      await this.startHost.startHttpIngress();
 
       // Initialize device pool BEFORE starting socket server
       // This ensures clients connecting via socket will see initialized device pool
@@ -1579,12 +1640,7 @@ export class Daemon {
           this.sessionManager.rehydratePersistedSessions(this.devicePool),
         );
         await this.reownRehydratedManagedExecutions(rehydration.rehydrated);
-        await sweepStaleAppearanceConfigs(rehydration, this.sessionManager, {
-          liveDaemonSessionIds: this.startupLiveDaemonSessionIds,
-          ownDaemonSessionId: this.daemonSessionId,
-          getPersistedSession: (sessionUuid) =>
-            this.deviceSessionRepository.getSession(sessionUuid),
-        });
+        await this.startHost.sweepStaleAppearanceConfigs(rehydration);
       } catch (error) {
         logger.warn(`[Daemon] Session rehydration failed; continuing startup: ${error}`);
       }
@@ -1593,45 +1649,7 @@ export class Daemon {
       await startupBenchmark.runPhase("iosServices", () => this.initializeIosServices());
 
       // Start Unix socket server AFTER device pool is ready
-      logger.info(`Daemon host: "${this.host}", port: ${this.port}`);
-      logger.info(`MCP_STREAMABLE_PATH: "${MCP_STREAMABLE_PATH}"`);
-      const mcpEndpoint = `http://${this.host}:${this.port}${MCP_STREAMABLE_PATH}`;
-      logger.info(`Creating UnixSocketServer with endpoint: "${mcpEndpoint}"`);
-      this.socketServer = new UnixSocketServer(
-        SOCKET_PATH,
-        mcpEndpoint,
-        undefined,
-        undefined,
-        FeatureFlagService.getInstance(),
-        {
-          identityStartedAt: this.generationStartedAt,
-          processGenerationToken: this.processGenerationToken,
-          startupOptions: this.options,
-          onRepublishIdentity: () => this.republishIdentity(),
-          startupCompletion: this.startupCompletion,
-          pidFilePath: PID_FILE_PATH,
-          sockets: getDaemonSocketPathsByName(),
-          dbPath: getDatabasePath(),
-          processStartedAt: this.processStartedAt,
-          onRestartAccepted: () => {
-            setImmediate(() => process.kill(process.pid, "SIGTERM"));
-          },
-          liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
-          acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
-        },
-        this.idGenerator,
-        // A hand-launched daemon (no startup lock) must refuse to unlink a live
-        // sibling's socket; only a manager-launched, lock-protected daemon may
-        // reclaim it (issue #6232). The owner-liveness check reads the CAPTURED
-        // incumbent snapshot, not the PID file we already overwrote above, so an
-        // inconclusive probe still sees the live sibling.
-        {
-          ownerLiveness: this.incumbentOwnerGuard.asSocketOwnerLiveness(),
-        },
-      );
-      logger.info("Starting Unix socket server...");
-      startupBenchmark.startPhase("socketServerStart");
-      await this.socketServer.start();
+      this.socketServer = await this.startHost.bindControlSocket();
       // We now hold the socket bind. Only past this point may this process's exit /
       // shutdown cleanup delete the shared socket/PID files: before it, the early
       // owner record (issue #2871) makes the `expectedPid` self-check pass even
@@ -1653,7 +1671,74 @@ export class Daemon {
     logger.info("Unix socket server started");
   }
 
-  private async startAfterSocketBind(): Promise<void> {
+  private async startHttpIngress(): Promise<void> {
+    this.warmAndroidAvdProvenanceCache();
+    // iOS device-type profiles are memoized per SimCtlClient and populated inline
+    // during its simulator inventory; there is no process-wide profile cache to warm.
+
+    // Find an available port. In strict-port mode (issue #6260, restart's
+    // atomic guard) we deliberately skip findAvailablePort()'s probe-then-
+    // release preflight and its in-range port fallback: that preflight releases
+    // its probe socket before this process actually binds, leaving a window
+    // for a competitor to claim the canonical port and for the fallback to
+    // paper over it with a "successful" restart on the wrong port. Leaving
+    // `this.port` as the requested port makes the real `listen()` call below
+    // (in startHttpServer) the single atomic bind-or-fail attempt.
+    if (!this.strictPort) {
+      this.port = await this.findAvailablePort(this.port);
+    }
+
+    // Start HTTP MCP server
+    startupBenchmark.startPhase("httpServerStart");
+    await this.startHttpServer();
+    startupBenchmark.endPhase("httpServerStart");
+  }
+
+  /** Create the control socket server over this daemon's state and bind it. */
+  private async bindControlSocket(): Promise<UnixSocketServer> {
+    logger.info(`Daemon host: "${this.host}", port: ${this.port}`);
+    logger.info(`MCP_STREAMABLE_PATH: "${MCP_STREAMABLE_PATH}"`);
+    const mcpEndpoint = `http://${this.host}:${this.port}${MCP_STREAMABLE_PATH}`;
+    logger.info(`Creating UnixSocketServer with endpoint: "${mcpEndpoint}"`);
+    this.socketServer = new UnixSocketServer(
+      SOCKET_PATH,
+      mcpEndpoint,
+      undefined,
+      undefined,
+      FeatureFlagService.getInstance(),
+      {
+        identityStartedAt: this.generationStartedAt,
+        processGenerationToken: this.processGenerationToken,
+        startupOptions: this.options,
+        onRepublishIdentity: () => this.republishIdentity(),
+        startupCompletion: this.startupCompletion,
+        pidFilePath: PID_FILE_PATH,
+        sockets: getDaemonSocketPathsByName(),
+        dbPath: getDatabasePath(),
+        processStartedAt: this.processStartedAt,
+        onRestartAccepted: () => {
+          setImmediate(() => process.kill(process.pid, "SIGTERM"));
+        },
+        liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
+        acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
+      },
+      this.idGenerator,
+      // A hand-launched daemon (no startup lock) must refuse to unlink a live
+      // sibling's socket; only a manager-launched, lock-protected daemon may
+      // reclaim it (issue #6232). The owner-liveness check reads the CAPTURED
+      // incumbent snapshot, not the PID file we already overwrote above, so an
+      // inconclusive probe still sees the live sibling.
+      {
+        ownerLiveness: this.incumbentOwnerGuard.asSocketOwnerLiveness(),
+      },
+    );
+    logger.info("Starting Unix socket server...");
+    startupBenchmark.startPhase("socketServerStart");
+    await this.socketServer.start();
+    return this.socketServer;
+  }
+
+  private async startServicesAfterSocketBind(): Promise<void> {
     startupBenchmark.startPhase("auxiliarySocketServerStart");
     await this.startAuxiliarySocket("video-recording", startVideoRecordingSocketServer);
     await this.startAuxiliarySocket("test-recording", startTestRecordingSocketServer);
@@ -1697,11 +1782,19 @@ export class Daemon {
 
     // Start health check timer (every 30 seconds)
     this.startHealthCheckTimer();
-    this.startHeartbeatMonitor();
+  }
+
+  private startMaintenanceMonitors(): void {
     this.startNavigationRetentionMonitor();
     this.startForwardLeaseIdleReleaser();
     this.startPrivateDaemonOrphanWatchdog();
     this.startManagedSlotReclaimer();
+  }
+
+  private async startAfterSocketBind(): Promise<void> {
+    await this.startHost.startServicesAfterSocketBind();
+    this.startHeartbeatMonitor();
+    this.startHost.startMaintenanceMonitors();
 
     startupBenchmark.emit("daemon", {
       host: this.host,

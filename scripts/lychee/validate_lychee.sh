@@ -282,6 +282,14 @@ build_site() {
         --config-file "$PROJECT_ROOT/mkdocs.yml" --site-dir "$SITE_STAGE/built" ) || BUILD_STATUS=1
 }
 
+# Links to this repository's own blob/main and tree/main paths are excluded from
+# lychee's network pass (.lycherc.toml: github.com 504s on them) and resolved
+# against the checked-out tree here instead.
+print_status "Pass 0/2: own-repo blob/main and tree/main links (offline, against the tree)"
+own_status=0
+"$SCRIPT_DIR/check_own_repo_links.sh" || own_status=$?
+record_status "$own_status"
+
 print_status "Pass 1/2: source files (docs/, root *.md, .github/CONTRIBUTING.md)"
 run_lychee_pass "docs/" ./*.md ".github/CONTRIBUTING.md"
 

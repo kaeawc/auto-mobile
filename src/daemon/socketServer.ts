@@ -82,6 +82,7 @@ import {
 } from "./socketRequestAdmission";
 import {
   daemonShuttingDownFailure,
+  daemonShuttingDownFrameFields,
   daemonShuttingDownFailureFromToolResult,
   isDaemonShuttingDownToolResult,
 } from "./daemonShutdownOutcome";
@@ -461,6 +462,11 @@ export function mcpRequestFailureDetails(
     ...refusalFrameFields(error),
     ...(error instanceof McpOverloadError ? { overloadFailure: error.failure } : {}),
     ...(error instanceof McpTimeoutError && error.code ? { code: error.code } : {}),
+    // Nothing was dispatched while the request waited in the queue, so a retry is safe; the MCP
+    // result already says so and the frame must agree for direct-socket clients.
+    ...(error instanceof McpTimeoutError && error.code === MCP_QUEUE_TIMEOUT_ERROR_CODE
+      ? { retryable: true }
+      : {}),
     // Keep the daemon MCP server's invalid-params verdict (e.g. a malformed
     // resource URI) so the proxy can return -32602 instead of -32603.
     ...(error instanceof McpError && "code" in error && error.code === JSONRPC_INVALID_PARAMS
@@ -2295,7 +2301,7 @@ export class UnixSocketServer {
               type: "mcp_response",
               success: false,
               error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-              daemonShuttingDown: daemonShuttingDownFailureFromToolResult(result),
+              ...daemonShuttingDownFrameFields(daemonShuttingDownFailureFromToolResult(result)),
             };
           }
 
@@ -2423,7 +2429,7 @@ export class UnixSocketServer {
       type: "mcp_response",
       success: false,
       error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-      daemonShuttingDown: daemonShuttingDownFailure(),
+      ...daemonShuttingDownFrameFields(daemonShuttingDownFailure()),
     };
   }
 
@@ -8517,7 +8523,7 @@ export class UnixSocketServer {
       type: "mcp_response",
       success: false,
       error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-      daemonShuttingDown: daemonShuttingDownFailure(pending.admitted),
+      ...daemonShuttingDownFrameFields(daemonShuttingDownFailure(pending.admitted)),
     });
   }
 

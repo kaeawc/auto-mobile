@@ -29,7 +29,7 @@ Node TypeScript MCP server providing Android Debug Bridge (ADB) capabilities thr
 - Ktfmt normalizes `runCatching{}.getOrNull()` to `runCatching {}.getOrNull()` once; write the spaced form and do not mistake that first rewrite for a non-idempotent formatter.
 - Before adding a helper, parser, or dependency, search `src/`, `scripts/lib/`, `package.json`, and the runtime standard library. Prefer the standard library, then an existing direct dependency, then an existing repository helper, then a small tested helper. Do not parse JSON, YAML, XML, or TypeScript with line regexes when a structured parser or typed module contract exists. For new packages, state which built-in and installed alternatives were checked. Preserve injected interfaces/FakeTimer seams where tests need deterministic control.
 - Always use interfaces & fakes & FakeTimer to decouple implementations and keep tests extremely fast and non-flaky
-- Unit tests should pass in 100ms or less. Do not assume that a failing test can be allowed to fail. CI enforces this per test from the JUnit reporter's time (which excludes `beforeAll`); a test over budget is re-run in isolation and only its MEDIAN is failed, so a genuine breach must be fixed in the test, never by raising `BUN_TEST_MAX_MS`.
+- Unit tests should pass in 100ms or less. Do not assume that a failing test can be allowed to fail. CI enforces this per test from the JUnit reporter's time (which excludes `beforeAll`); a test over budget is re-run in isolation and only its MEDIAN is failed, so a genuine breach must be fixed in the test, never by raising `BUN_TEST_MAX_MS`. The isolated re-runs run serially after all shards, each bracketed by a calibration probe (`runner-calibration.ts measure`); a run whose probe reads above `BUN_TEST_TIMING_CONTENTION_SLOWDOWN` (1.5x) AND whose sample is over budget is retried up to `BUN_TEST_TIMING_CONTENTION_RETRIES` (2) times, only while the remaining recheck budget still covers one attempt for every run left to verify, and the least-contended attempt is kept (an under-budget sample is conclusive and never retried). Samples are never scaled, so a slow test still fails on a contended runner; the summary reports the probe slowdown beside each verdict and flags any shard with `BUN_TEST_TIMING_CONTENDED_SHARD_MIN` (10) over-budget first samples as "Runner contended".
 - One canonical primitive per concern: UUIDs come from `IdGenerator`, randomness from `Random` (`pick`/`next`), backoff from `Backoff`. Inject these (interface + fake) rather than spawning a new `randomUUID()`/`Math.random()` path.
 - Prefer narrow interfaces that expose exactly what consumers need (YAGNI); grow the interface when the second consumer arrives, not ahead of need.
 - Unit tests must never resolve the real file-backed `getDatabase()`. Under `bun test`, `NODE_ENV=test` arms a guard that throws when a test resolves the default `~/.auto-mobile` DB (issue #3067). Inject an in-memory DB via `createTestDatabase()`, or use a helper: `test/helpers/navigationTestHarness.ts` (in-memory `NavigationGraphManager` singleton + telemetry spy), `test/db/inMemorySingletonDatabase.ts` (`:memory:` singleton for identity checks), or `test/helpers/tempFileDatabase.ts` (temp-dir file DB for real `getInstance`/`getInstanceForSession` semantics). Resolve `getDatabase()` lazily (a getter), never in a field initializer, so construction alone can't trip the guard. The test preload (`test/setup/testPreload.ts`) is for suite-wide telemetry neutralization, not DB guard arming.
@@ -119,7 +119,13 @@ bun test <file>        # Run specific test file (no cache)
 Before pushing Node/TypeScript changes, run `bash scripts/prepush-node.sh`.
 Use `bash scripts/prepush-node.sh --changed` for the faster affected-unit-test
 loop; formatting, typecheck, and lint intentionally remain full repository
-gates. `oxlint`'s actual exit code is authoritative: Error-level rules such as
+gates. It also runs the tool-free TypeScript subset of CI Fast Validation
+(`scripts/all_fast_validate_checks.sh --only ...`, ~10 s, including the offline
+lychee pass when `lychee` is installed), the `test/lint/` suites (including the
+Windows path-separator assertion guard), and, on Linux or with `--timing`, the
+100 ms unit budget. Shell, Kotlin, Swift, docs-syntax, bats and Windows/macOS
+matrix lanes are not covered: use `scripts/prepush-shell.sh` and the platform
+gates, and expect CI to be the only Windows run. `oxlint`'s actual exit code is authoritative: Error-level rules such as
 `eqeqeq` are enforced directly by oxlint, not its warning-only ratchet, and
 diffing warnings does not satisfy the gate. Before asking for a merge, fetch
 `origin/main`, confirm the branch contains it, and re-run local gates.

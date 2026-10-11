@@ -42,7 +42,7 @@ import { defaultMockLocationClearRegistry } from "../features/utility/MockLocati
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
-import { MultiPlatformDeviceManager } from "../devices/deviceUtils";
+import { MultiPlatformDeviceManager, type BootedDeviceDiscovery } from "../devices/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
 import {
   SessionManager,
@@ -188,6 +188,7 @@ import {
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
   DaemonHandoffInterruptionError,
 } from "./daemonHandoffInterruption";
+import { transitionalHeldSimulators } from "../server/adbOfflineHeldDevices";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import { announceSessionRelease } from "./announceSessionRelease";
 import { clearSessionAppearanceConfig } from "../server/appearanceManager";
@@ -341,11 +342,13 @@ import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerServ
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import {
   evaluateDeviceDisconnects,
+  isTransitionalAdbState,
   OFFLINE_DEVICE_DISCONNECT_BUDGET_MS,
   pruneStaleOfflineRecoveryAttempts,
   recordingCandidateIncarnations,
   selectImmediateDisconnectCandidates,
   selectOfflineRecoveryCandidates,
+  selectTransitionalDeviceIds,
   type OfflineEpisode,
   type DisconnectCandidateIncarnation,
 } from "./disconnectMonitor";
@@ -718,8 +721,9 @@ export class Daemon {
   // a later episode for the same serial gets a fresh attempt.
   private offlineRecoveryAttemptedDeviceIds: Set<string> = new Set();
   private offlineRecoveryAttemptedIncarnations = new Map<string, number | string>();
-  // Start of each candidate's current ADB `offline` episode (#11090): offline
-  // sweeps run against OFFLINE_DEVICE_DISCONNECT_BUDGET_MS, not the miss count.
+  // Start of each candidate's current transitional-state episode (#11090, #11592):
+  // adb offline/unauthorized and simctl Booting/Shutting Down sweeps run against
+  // OFFLINE_DEVICE_DISCONNECT_BUDGET_MS, not the miss count.
   private offlineEpisodes = new Map<string, OfflineEpisode>();
   private stoppingRecordings: Set<string> = new Set();
   private observerSessionRegistry: ObserverSessionRegistry;
@@ -3707,7 +3711,7 @@ export class Daemon {
           const missingByDevice = new Map<string, string[]>();
           const { candidateDeviceIds, candidatePlatforms, candidateIncarnations } =
             this.collectDisconnectCandidates(activeRecordings);
-          const { offlineDeviceIds, listedNonDeviceIds } = await this.probeListedAndroidStates(
+          const listed = await this.probeListedAndroidStates(
             deviceManager,
             planActive,
             candidateDeviceIds,
@@ -3717,7 +3721,7 @@ export class Daemon {
           if (!planActive) {
             const { dispatchTargets, offlineRecoveryTargets } = this.prepareOfflineRecovery(
               candidateDeviceIds,
-              offlineDeviceIds,
+              listed.offlineDeviceIds,
               candidateIncarnations,
             );
             if (dispatchTargets.length > 0) {
@@ -3751,14 +3755,14 @@ export class Daemon {
             candidateIncarnations,
             deviceDisconnectMissIncarnations: this.deviceDisconnectMissIncarnations,
             forceDisconnectedDeviceIds: this.forceDisconnectedDeviceIds,
-            offlineDeviceIds,
+            transitionalDeviceIds: this.transitionalCandidateIds(discovery, listed),
             offlineEpisodes: this.offlineEpisodes,
             nowMs: this.timer.monotonicNow?.() ?? this.timer.now(),
             immediateDisconnectDeviceIds: selectImmediateDisconnectCandidates(
               candidateDeviceIds,
               candidatePlatforms,
               bootedDeviceIds,
-              listedNonDeviceIds,
+              listed.listedNonDeviceIds,
               transportRestarts,
             ),
           });
@@ -3770,7 +3774,7 @@ export class Daemon {
             return;
           }
 
-          this.logDisconnectMisses(disconnectResult, planActive, offlineDeviceIds, bootedDeviceIds);
+          this.logDisconnectMisses(disconnectResult, planActive, bootedDeviceIds);
 
           // Keep absence evidence current, but leave allocation's pool/session
           // state untouched. Two inactive ticks can confirm continued absence;
@@ -3894,8 +3898,9 @@ export class Daemon {
    * candidates already missing from that list, so a fully-healthy sweep never
    * pays for this extra `devices -l` probe (#7536). Every non-`device` row
    * counts as still attached for the immediate physical-device path; only
-   * `offline` drives reconnect and the offline budget (#11090). Both sets are
-   * undefined when the probe is skipped (plan active) or fails.
+   * `offline` drives reconnect (#11090), and the transitional rows (`offline`,
+   * `unauthorized`) are held under the budget (#11592). Every set is undefined
+   * when the probe is skipped (plan active) or fails.
    */
   private async probeListedAndroidStates(
     deviceManager: Pick<MultiPlatformDeviceManager, "getAndroidListedDeviceStates">,
@@ -3903,7 +3908,11 @@ export class Daemon {
     candidateDeviceIds: Set<string>,
     bootedDeviceIds: Set<string>,
     candidatePlatforms: Map<string, "android" | "ios">,
-  ): Promise<{ offlineDeviceIds?: Set<string>; listedNonDeviceIds?: Set<string> }> {
+  ): Promise<{
+    offlineDeviceIds?: Set<string>;
+    transitionalAdbDeviceIds?: Set<string>;
+    listedNonDeviceIds?: Set<string>;
+  }> {
     if (planActive) {
       return {};
     }
@@ -3929,6 +3938,9 @@ export class Daemon {
         offlineDeviceIds: new Set(
           candidateStates.filter(([, state]) => state === "offline").map(([id]) => id),
         ),
+        transitionalAdbDeviceIds: new Set(
+          candidateStates.filter(([, state]) => isTransitionalAdbState(state)).map(([id]) => id),
+        ),
       };
     } catch (error) {
       if (!(error instanceof AndroidOfflineProbeError)) {
@@ -3940,6 +3952,28 @@ export class Daemon {
       );
       return {};
     }
+  }
+
+  /**
+   * One rule for both platforms (#11592): a held device the platform still
+   * lists mid-transition (adb `offline`/`unauthorized`, simctl `Booting`/
+   * `Shutting Down`) is held under the budget instead of counting misses. The
+   * simulator half reads the sweep's own listing and the same held-device
+   * filter the inventory surfaces use, so an unheld pooled simulator keeps the
+   * three-miss rule and the surfaces agree with what the monitor keeps.
+   */
+  private transitionalCandidateIds(
+    discovery: Pick<BootedDeviceDiscovery, "devices" | "transitionalSimulators">,
+    listed: { transitionalAdbDeviceIds?: ReadonlySet<string> },
+  ): Set<string> {
+    return selectTransitionalDeviceIds(
+      listed.transitionalAdbDeviceIds,
+      transitionalHeldSimulators({
+        transitional: discovery.transitionalSimulators,
+        discovered: discovery.devices,
+        devicePool: this.devicePool,
+      }).map(({ device }) => device.deviceId),
+    );
   }
 
   /**
@@ -4094,10 +4128,9 @@ export class Daemon {
   private logDisconnectMisses(
     disconnectResult: ReturnType<typeof evaluateDeviceDisconnects>,
     planActive: boolean,
-    offlineDeviceIds: Set<string> | undefined,
     bootedDeviceIds: Set<string>,
   ): void {
-    for (const { deviceId, misses: evaluatedMisses } of disconnectResult.missed) {
+    for (const { deviceId, misses: evaluatedMisses, budgetExhausted } of disconnectResult.missed) {
       const misses = planActive
         ? Math.min(evaluatedMisses, PLAN_DEVICE_DISCONNECT_MISS_CAP)
         : evaluatedMisses;
@@ -4105,7 +4138,7 @@ export class Daemon {
         // Also lower pre-plan misses so a plan-driven restart gets the same grace.
         this.deviceDisconnectMisses.set(deviceId, misses);
       }
-      const missState = offlineDeviceIds?.has(deviceId) ? "offline" : "absent";
+      const missState = budgetExhausted ? "transitional, budget exhausted" : "absent";
       const message = `[DisconnectMonitor] Device ${deviceId} not in booted list (${missState}, miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`;
       if (planActive && evaluatedMisses > PLAN_DEVICE_DISCONNECT_MISS_CAP) {
         logger.debug(message);
@@ -4113,9 +4146,9 @@ export class Daemon {
         logger.info(message);
       }
     }
-    for (const { deviceId, offlineForMs } of disconnectResult.offline) {
+    for (const { deviceId, transitionalForMs } of disconnectResult.transitional) {
       logger.info(
-        `[DisconnectMonitor] Device ${deviceId} ADB-offline for ${Math.round(offlineForMs / 1000)}s (budget ${OFFLINE_DEVICE_DISCONNECT_BUDGET_MS / 1000}s); keeping session`,
+        `[DisconnectMonitor] Device ${deviceId} listed in a transitional state for ${Math.round(transitionalForMs / 1000)}s (budget ${OFFLINE_DEVICE_DISCONNECT_BUDGET_MS / 1000}s); keeping session`,
       );
     }
   }

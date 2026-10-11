@@ -23,6 +23,13 @@ export interface AndroidCapacitySample {
    * instead of) the adb listing. Undefined when the process table was unreadable.
    */
   emulatorProcessRssBytes?: number[];
+  /**
+   * The pid and parent pid of each of those processes, in the same order. A boot the gate
+   * admitted is matched to its own process by the pid of the launcher this daemon spawned: the
+   * launcher becomes the qemu process or is its parent. Absent when the source cannot tell,
+   * and then no admitted boot is matched to a process.
+   */
+  emulatorProcessIds?: Array<{ pid: number; ppid: number }>;
   host: CapacityHostResources;
   errors: string[];
   /**
@@ -89,7 +96,8 @@ export class CommandAndroidCapacitySource implements AndroidCapacitySource {
     ]);
     return {
       emulatorSerials: serials.value ?? [],
-      emulatorProcessRssBytes: processes.value,
+      emulatorProcessRssBytes: processes.value?.map((row) => row.rssBytes),
+      emulatorProcessIds: processes.value?.map((row) => ({ pid: row.pid, ppid: row.ppid })),
       host: { totalMemoryBytes: this.os.totalMemoryBytes(), cpuCount: this.os.cpuCount() },
       errors: [serials.error, processes.error].filter(
         (error): error is string => error !== undefined,
@@ -110,13 +118,13 @@ export class CommandAndroidCapacitySource implements AndroidCapacitySource {
 
   private async readEmulatorProcesses(
     signal?: AbortSignal,
-  ): Promise<{ value?: number[]; error?: string }> {
+  ): Promise<{ value?: HostProcessRow[]; error?: string }> {
     try {
       const rows = await readHostProcessTable(this.executor, {
         signal,
         timeoutMs: this.readTimeoutMs,
       });
-      return { value: rows.filter(isEmulatorQemuProcess).map((row) => row.rssBytes) };
+      return { value: rows.filter(isEmulatorQemuProcess) };
     } catch (error) {
       signal?.throwIfAborted();
       // Optional signal: `ps` is absent on Windows, and the adb listing still counts emulators.

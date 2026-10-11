@@ -166,7 +166,11 @@ acquisitions as anonymous (#11096):
 - Booted-device discovery that did not complete (adb or simctl failed, or a
   running emulator's AVD identity has not resolved) is refused with the retryable
   code `discovery_incomplete` instead of booting or adopting a device blind. Retry
-  the acquisition.
+  the acquisition. `setActiveDevice` answers it for a device it cannot find only
+  when the discovery that could have listed that device failed, and names that
+  platform: an iOS UDID while simctl failed is iOS discovery, and an id whose
+  shape names no platform takes whichever discovery failed. If only the other
+  platform's discovery failed, the device is reported as not found (#11586).
 
 ## A device that drops off
 

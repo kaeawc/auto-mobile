@@ -8,8 +8,17 @@ import { DisplayPinNeedsSessionError } from "../models/PinnedDisplayError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { DeviceSessionManager, type DeviceReadyOptions } from "../devices/DeviceSessionManager";
 import { logger } from "../utils/logger";
-import { AndroidBootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
-import { deviceListRefreshFailureMessage } from "../daemon/devicePoolRefresh";
+import {
+  AndroidBootedDeviceDiscoveryIncompleteError,
+  BootedDeviceDiscoveryIncompleteError,
+} from "../models/BootedDeviceDiscoveryIncompleteError";
+import {
+  deviceListRefreshFailureMessage,
+  type DevicePoolRefreshResult,
+} from "../daemon/devicePoolRefresh";
+import { discoverySourceFor, type DiscoverySource } from "../utils/discoverySource";
+import { isIosUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import {
   registerDirectSessionDevice,
@@ -94,17 +103,70 @@ function refuseForeignOwnedSession(args: HandlerArgs): void {
   }
 }
 
-async function requestedPoolDevice(pool: DevicePool, deviceId: string): Promise<PooledDevice> {
+/**
+ * The discovery sources that could have listed `deviceId`. The requested platform decides when
+ * given; otherwise the id's shape does: an iOS UDID is listed only by its iOS source, an adb
+ * emulator serial or transport address only by adb. Any other id could be either platform's.
+ */
+function sourcesThatCouldList(deviceId: string, platform: Platform | undefined): DiscoverySource[] {
+  if (platform !== undefined) {
+    return [discoverySourceFor(platform, deviceId)];
+  }
+  if (isIosUdid(deviceId)) {
+    return [discoverySourceFor("ios", deviceId)];
+  }
+  if (isAndroidEmulatorSerial(deviceId) || isAndroidTransportAddressSerial(deviceId)) {
+    return ["android"];
+  }
+  return ["android", "ios-simulator", "ios-physical"];
+}
+
+/**
+ * The typed retryable refusal for a refresh that could not have seen `deviceId` (#11511), by the
+ * platform whose discovery failed (#11586). Undefined when every source that could have listed
+ * the device completed: a failure of an unrelated platform's discovery does not make the device's
+ * absence unknown, so it is simply not found.
+ */
+function discoveryIncompleteFor(
+  outcome: DevicePoolRefreshResult,
+  deviceId: string,
+  platform: Platform | undefined,
+): BootedDeviceDiscoveryIncompleteError | undefined {
+  const sources = sourcesThatCouldList(deviceId, platform);
+  const failedSources = outcome.failedSources;
+  let source: DiscoverySource | undefined;
+  let reason: string | undefined;
+  if (failedSources) {
+    source = sources.find((candidate) => failedSources[candidate] !== undefined);
+    reason = source ? failedSources[source]?.message : undefined;
+  } else {
+    // The refresh threw before its cause was attributed to a source, so it may have hidden any.
+    source = sources[0];
+    reason = outcome.failure;
+  }
+  if (source === undefined || reason === undefined) {
+    return undefined;
+  }
+  const message = deviceListRefreshFailureMessage(reason);
+  return source === "android"
+    ? new AndroidBootedDeviceDiscoveryIncompleteError(failedSources?.[source], message)
+    : new BootedDeviceDiscoveryIncompleteError("ios", failedSources?.[source], message);
+}
+
+async function requestedPoolDevice(
+  pool: DevicePool,
+  deviceId: string,
+  platform: Platform | undefined,
+): Promise<PooledDevice> {
   let device = pool.getDevice(deviceId);
   if (!device) {
     const outcome = await pool.refreshDevicesWithOutcome();
     device = pool.getDevice(deviceId);
-    if (!device && outcome.failure !== undefined) {
-      // Same typed retryable refusal startDevice/getAndroid answer for incomplete discovery (#11511).
-      throw new AndroidBootedDeviceDiscoveryIncompleteError(
-        undefined,
-        deviceListRefreshFailureMessage(outcome.failure),
-      );
+    const discoveryIncomplete = device
+      ? undefined
+      : discoveryIncompleteFor(outcome, deviceId, platform);
+    if (discoveryIncomplete) {
+      throw discoveryIncomplete;
     }
   }
   if (!device) {
@@ -170,7 +232,7 @@ async function selectSessionDevice(input: {
   const { args, dependencies } = input;
   const sessions = DaemonState.getInstance().getSessionManager();
   const pool = DaemonState.getInstance().getDevicePool();
-  const device = await requestedPoolDevice(pool, args.deviceId);
+  const device = await requestedPoolDevice(pool, args.deviceId, args.platform);
   const hadDisplayPin = sessions.getDisplayPin(args.sessionUuid) !== undefined;
   const displayPin =
     args.display === undefined

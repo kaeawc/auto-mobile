@@ -4,7 +4,11 @@ import type { BootedDevice, Platform } from "../../src/models";
 import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../../src/devices/deviceUtils";
 import type { PooledDevice } from "../../src/daemon/devicePool";
 import { DeviceCriteriaMatcher } from "../../src/daemon/DeviceCriteriaMatcher";
-import { DevicePoolRefresh, type DevicePoolRefreshPort } from "../../src/daemon/devicePoolRefresh";
+import {
+  DevicePoolRefresh,
+  discoveryRefreshOutcome,
+  type DevicePoolRefreshPort,
+} from "../../src/daemon/devicePoolRefresh";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { recoveryCoordinatorHarness } from "../helpers/recoveryCoordinatorHarness";
 
@@ -141,14 +145,43 @@ describe("DevicePoolRefresh", () => {
       discoveryErrors,
     };
     h.setDiscovery(discovery);
+    // Still no `failure`: the failed source is named beside it for callers that ask (#11586).
     expect(await h.refresh.refreshDevicesInternal(false)).toEqual({
       addedCount: 1,
       completeness: { succeededPlatforms: discovery.succeededPlatforms },
+      failedSources: { "ios-simulator": { code: "failed", message: "simctl unavailable" } },
     });
     expect(discovery.discoveryErrors).toBe(discoveryErrors);
     expect(discovery.discoveryErrors).toEqual({
       ios: { code: "failed", message: "simctl unavailable" },
     });
+  });
+
+  test("names each failed source, and never tooling that is only unavailable (#11586)", () => {
+    const outcome = discoveryRefreshOutcome(
+      {
+        devices: [],
+        succeededPlatforms: new Set<Platform>(),
+        discoveryErrors: {
+          android: { code: "timeout", message: "adb devices timed out" },
+          ios: { code: "unavailable", message: "iOS booted-device discovery is unavailable." },
+        },
+        sourceErrors: { "ios-physical": { code: "failed", message: "devicectl failed" } },
+      },
+      0,
+    );
+
+    expect(outcome).toEqual({
+      addedCount: 0,
+      failure: "adb devices timed out",
+      failedSources: {
+        android: { code: "timeout", message: "adb devices timed out" },
+        "ios-physical": { code: "failed", message: "devicectl failed" },
+      },
+    });
+    expect(
+      discoveryRefreshOutcome({ devices: [], succeededPlatforms: new Set<Platform>() }, 0),
+    ).toEqual({ addedCount: 0 });
   });
 
   test("adds a discovery result and tracks it before notifying readiness", async () => {

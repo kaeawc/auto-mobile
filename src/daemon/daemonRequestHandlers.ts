@@ -158,6 +158,7 @@ export interface DaemonStateAccess {
     /** Why a session this daemon released was released; undefined for a never-issued UUID. */
     getReleasedSessionReason?(sessionId: string): Promise<string | undefined>;
     recordHeartbeat?(sessionId: string): void;
+    creditOwnerHeartbeatDuringRelease?(sessionId: string, ownerToken: string): void;
     /** Claim the token permitted to refresh this session's liveness. */
     claimLivenessOwnership?(sessionId: string, ownerToken: string): Promise<LivenessClaimOutcome>;
     releaseLivenessOwnership?(
@@ -809,6 +810,9 @@ async function handleHeartbeat(
   const manager = state.getSessionManager();
   const session = manager.getSession(sessionId);
   if (!session || isSessionReleasing(manager, sessionId, session)) {
+    if (typeof heartbeatParams?.livenessOwnerToken === "string") {
+      manager.creditOwnerHeartbeatDuringRelease?.(sessionId, heartbeatParams.livenessOwnerToken);
+    }
     if (
       typeof sessionId === "string" &&
       state.getObserverSessionRegistry?.()?.heartbeat(sessionId)

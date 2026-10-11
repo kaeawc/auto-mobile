@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import type { SlotKey } from "../../../src/daemon/managedSlots/slotRegistry";
+import { executionTracker } from "../../../src/server/executionTracker";
 import { ManagedRestartScenario, SCOPE, type ManagedExecution } from "./managedRestartScenario";
 
 // A managed slot execution across a daemon restart, end to end (#11642 item 1). See
@@ -21,6 +22,7 @@ import { ManagedRestartScenario, SCOPE, type ManagedExecution } from "./managedR
 const DEVICE = "emulator-5554";
 const AVD = `Pixel_${DEVICE}`;
 const BOOT_2 = { ...SCOPE, runnerIncarnation: "boot-2" };
+const activeExecutionsAtFileStart = executionTracker.getActiveExecutionCount();
 
 let s: ManagedRestartScenario;
 let key: SlotKey;
@@ -41,10 +43,9 @@ function failureCode(execution: ManagedExecution): string | undefined {
   return execution.result.failure?.code ?? execution.result.slots[0]?.failure?.code;
 }
 
-/** The execution's tool call, left in flight at the device boundary until the daemon stops it. */
+/** The execution's tool call, left in flight until cancellation or scenario teardown. */
 function callInFlight(execution: ManagedExecution, wedged = false): void {
-  const gates = Reflect.get(s.scenario, "gates") as Map<string, unknown>;
-  gates.set(execution.sessionUuid!, { opened: new Promise<void>(() => {}), wedged });
+  s.holdCall(execution.sessionUuid!, wedged);
   void execution
     .callTool(
       {
@@ -64,12 +65,17 @@ function callInFlight(execution: ManagedExecution, wedged = false): void {
 /** Run one scenario before the enclosing describe's tests and hand them what it recorded. */
 function observed<T>(run: () => Promise<T>): () => T {
   let seen: T | undefined;
+  let activeExecutionsAfterStop: number | undefined;
   beforeAll(async () => {
     try {
       seen = await run();
     } finally {
       await s?.stop();
+      activeExecutionsAfterStop = executionTracker.getActiveExecutionCount();
     }
+  });
+  test("teardown restores the process-wide execution count", () => {
+    expect(activeExecutionsAfterStop).toBe(activeExecutionsAtFileStart);
   });
   return () => {
     if (seen === undefined) {

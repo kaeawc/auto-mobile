@@ -130,6 +130,7 @@ export class ManagedRestartScenario {
   afterProvisionBind: ((sessionUuid: string) => Promise<void>) | undefined;
   private readonly spies: Array<ReturnType<typeof spyOn>> = [];
   private readonly executions: ManagedExecution[] = [];
+  private readonly openCallGates: Array<() => void> = [];
   private exclusion!: ManagedSlotExclusion;
   private restoreExclusion: (() => void) | undefined;
   private restoreTrackerTimer: (() => void) | undefined;
@@ -514,6 +515,18 @@ export class ManagedRestartScenario {
     return answer.ok ? "ok" : (answer.code ?? answer.text);
   }
 
+  /** Hold a session's device call until cancellation, or only teardown when wedged. */
+  holdCall(sessionUuid: string, wedged = false): void {
+    const gate = Promise.withResolvers<void>();
+    const gates = Reflect.get(this.scenario, "gates") as Map<
+      string,
+      { opened: Promise<void>; wedged: boolean }
+    >;
+    gates.set(sessionUuid, { opened: gate.promise, wedged });
+    // Keep every resolver, including a gate replaced by a later call on the same session.
+    this.openCallGates.push(gate.resolve);
+  }
+
   /** The first daemon ends; its PID is gone, and so is everything its process held in memory. */
   async endDaemon(kind: ShutdownKind): Promise<void> {
     await this.restart.end(kind);
@@ -598,6 +611,39 @@ export class ManagedRestartScenario {
 
   async stop(): Promise<void> {
     // Open calls and proxies may wait on timers: end them with the clock running.
+    for (const open of this.openCallGates.splice(0)) {
+      open();
+    }
+    // Let dispatched calls reach their bodies, then await the daemon-side execution ends. A
+    // proxy may already have answered a timeout while its wedged body is still running.
+    let drainFailure: Error | undefined;
+    try {
+      await settleIo();
+      const drained = await this.during(
+        Promise.all(
+          this.executions.map((execution) =>
+            execution.sessionUuid
+              ? executionTracker.waitForDeviceSessionExecutionsToEnd(execution.sessionUuid, 20_000)
+              : Promise.resolve(true),
+          ),
+        ),
+        30_000,
+        500,
+      );
+      const remaining = drained.filter((ended) => !ended).length;
+      if (remaining > 0) {
+        drainFailure = new Error(
+          `ManagedRestartScenario: tool executions did not end during teardown (${remaining})`,
+        );
+      }
+    } catch (error) {
+      drainFailure = new Error(
+        "ManagedRestartScenario: tool executions did not end during teardown",
+        {
+          cause: error,
+        },
+      );
+    }
     const gates = Reflect.get(this.scenario, "gates") as Map<string, unknown>;
     gates.clear();
     for (const execution of this.executions.splice(0)) {
@@ -613,6 +659,9 @@ export class ManagedRestartScenario {
     await this.shared?.close();
     for (const spy of this.spies.splice(0)) {
       spy.mockRestore();
+    }
+    if (drainFailure) {
+      throw drainFailure;
     }
   }
 }

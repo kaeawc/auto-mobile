@@ -110,6 +110,22 @@ import { FakeTimer } from "../fakes/FakeTimer";
 //       and the held sessions are heartbeated there within a lease of the daemon's close, whether
 //       that connection reaches a successor or the same daemon (a restart that was called off).
 //
+// A CALL IN FLIGHT ON A SIBLING (the third property below, #11656): the proxy holds several
+// sessions on its one connection and a control call on one of them is admitted by the daemon and
+// not answered yet, while the events of the first table happen to the OTHER sessions.
+//
+// | event, while a sibling's call is in flight    | effect                                              |
+// | --------------------------------------------- | --------------------------------------------------- |
+// | heartbeat answered not-found that would be    | asked again on the SAME connection: the answer is   |
+// |   asked again on a fresh connection           |   decided as the second ask's, with no reset        |
+// | recoverable handoff announced for the latest  | reclaimed on the same connection: no reset          |
+// |   binding                                     |                                                     |
+// | anything else in the first table              | as there: it is about that session only             |
+//
+//   I8  nothing that happens to one session closes the connection under a call in flight on
+//       another: the call is sent once, gets the daemon's own answer, and every session the proxy
+//       must heartbeat is still heartbeated on every tick meanwhile (I3).
+//
 // "keeper runs" is observed as the keeper's interval being scheduled: it is, exactly while some
 // session the proxy must heartbeat exists.
 //
@@ -273,6 +289,21 @@ interface SessionModel {
   maybeRehydratingSince?: number;
 }
 
+/** What marks the one call a history keeps in flight (I8). */
+const IN_FLIGHT_TEXT = "Upload";
+
+interface InFlightCall {
+  sessionUuid: string;
+  /** Resolved when the daemon answers it. */
+  answer: PromiseWithResolvers<void>;
+  /** The connection the daemon admitted it on. */
+  client?: FakeDaemonClient;
+  /** How often it reached the daemon. */
+  sent: number;
+  /** What its caller was answered, once it was. */
+  outcome?: string;
+}
+
 /** A daemon the proxy talks to, with the model of what the proxy must do about each session. */
 class World {
   readonly timer = new FakeTimer();
@@ -334,6 +365,8 @@ class World {
    */
   private disturbed = false;
   rejectNextCall = false;
+  /** I8: the control call the daemon admitted and has not answered yet. */
+  private inFlight: InFlightCall | undefined;
   private nextBirth: Birth = "lives";
   private reachable = true;
   private commandsApplied = 0;
@@ -379,9 +412,17 @@ class World {
           .then(() => this.answerHeartbeat(sessionUuid, askedDuring));
       },
       onCallTool: (name, params) => {
-        if (typeof params.sessionUuid === "string") {
-          this.answerCall(name, params.sessionUuid);
+        if (typeof params.sessionUuid !== "string") {
+          return undefined;
         }
+        this.answerCall(name, params.sessionUuid);
+        const inFlight = this.inFlight;
+        if (inFlight === undefined || params.text !== IN_FLIGHT_TEXT) {
+          return undefined;
+        }
+        inFlight.sent += 1;
+        inFlight.client = created;
+        return inFlight.answer.promise;
       },
       toolResultFor: (name, params) =>
         name === "getAndroid"
@@ -402,6 +443,12 @@ class World {
     const close = created.close.bind(created);
     created.close = async () => {
       if (!this.closed && this.reachable && this.client === created && created.isConnected()) {
+        if (this.inFlight?.client === created && this.inFlight.outcome === undefined) {
+          // I8, whatever the model knows about what the proxy holds.
+          this.violations.push(
+            `the connection was closed under the call in flight on ${this.inFlight.sessionUuid}`,
+          );
+        }
         this.ownResets += this.handoffAnnounced ? 0 : 1;
         this.handoffAnnounced = false;
         this.ownReset = this.askAgain ?? "other";
@@ -728,6 +775,52 @@ class World {
     }
   }
 
+  /** A control call on `sessionUuid` that the daemon admits and does not answer yet. */
+  async startCallInFlight(sessionUuid: string): Promise<void> {
+    const inFlight: InFlightCall = { sessionUuid, answer: Promise.withResolvers<void>(), sent: 0 };
+    this.inFlight = inFlight;
+    void this.proxy.callTool("tapOn", { sessionUuid, text: IN_FLIGHT_TEXT }).then(
+      () => {
+        inFlight.outcome = "answered";
+      },
+      (error: unknown) => {
+        inFlight.outcome =
+          error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      },
+    );
+    await this.settle();
+  }
+
+  /** The daemon answers the call in flight. I8: its caller gets that answer, for a call sent once. */
+  async finishCallInFlight(): Promise<void> {
+    const inFlight = this.inFlight;
+    if (inFlight === undefined) {
+      return;
+    }
+    const cutShort = inFlight.outcome;
+    inFlight.answer.resolve();
+    await this.settle();
+    this.inFlight = undefined;
+    if (cutShort !== undefined) {
+      this.violations.push(
+        `the call in flight on ${inFlight.sessionUuid} was answered before the daemon answered it: ${cutShort}`,
+      );
+    } else if (inFlight.outcome !== "answered" || inFlight.sent !== 1) {
+      this.violations.push(
+        `the call in flight on ${inFlight.sessionUuid} was sent ${inFlight.sent} time(s) and answered: ${inFlight.outcome}`,
+      );
+    }
+    // Whether the answered call moved the latest binding depends on what happened meanwhile.
+    this.latestCertain &&= this.latest === inFlight.sessionUuid;
+    this.latest = this.latest === inFlight.sessionUuid ? inFlight.sessionUuid : undefined;
+  }
+
+  /** The session a command aimed at `index` is about, never the one with the call in flight. */
+  siblingAt(index: number): string | undefined {
+    const siblings = [...this.sessions.keys()].filter((id) => id !== this.inFlight?.sessionUuid);
+    return siblings.length === 0 ? undefined : siblings[index % siblings.length];
+  }
+
   async restartDaemon(gapMs: number): Promise<void> {
     for (const session of this.sessions.values()) {
       if (session.daemon === "live") {
@@ -896,7 +989,8 @@ class World {
     } else if (step.kind === "pause") {
       this.pause(step.pauseMs);
     } else {
-      const sessionUuid = this.sessionAt(step.target);
+      const sessionUuid =
+        this.inFlight === undefined ? this.sessionAt(step.target) : this.siblingAt(step.target);
       if (sessionUuid === undefined) {
         return;
       }
@@ -925,6 +1019,136 @@ async function violationsOf(history: readonly Command[]): Promise<string[]> {
   }
   return world.violations;
 }
+
+const TICK_COMMAND: Command = { kind: "tick" };
+
+/** Several sessions on one connection, a control call in flight on one of them (I8). */
+interface SiblingCase {
+  /** Sessions acquired first; the last one is the latest binding. */
+  sessions: 2 | 3;
+  /** Which of them the call is in flight on. */
+  callOn: number;
+  /** What happens to the others meanwhile. */
+  during: Command[];
+}
+
+/** What may happen to a session while its sibling's call is in flight: the first table's events. */
+const siblingCommand: fc.Arbitrary<Command> = fc.oneof(
+  {
+    weight: 3,
+    arbitrary: fc.record({
+      kind: fc.constant("release" as const),
+      target,
+      gone: fc.constant<Gone>("recoverable"),
+      notify: fc.boolean(),
+    }),
+  },
+  {
+    weight: 3,
+    arbitrary: fc.record({
+      kind: fc.constant("release" as const),
+      target,
+      gone: fc.constant<Gone>("unknown"),
+      notify: fc.constant(false),
+    }),
+  },
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      kind: fc.constant("release" as const),
+      target,
+      gone: fc.constant<Gone>("terminal"),
+      notify: fc.boolean(),
+      reason: fc.constantFrom(...ENDING_REASONS),
+    }),
+  },
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      kind: fc.constant("call" as const),
+      target,
+      rejected: fc.boolean(),
+      read: fc.boolean(),
+    }),
+  },
+  { weight: 1, arbitrary: fc.constant<Command>({ kind: "acquire", birth: "lives" }) },
+  { weight: 5, arbitrary: fc.constant<Command>({ kind: "tick" }) },
+);
+
+const siblingCase: fc.Arbitrary<SiblingCase> = fc.record({
+  sessions: fc.constantFrom<2 | 3>(2, 2, 3),
+  callOn: fc.nat({ max: 2 }),
+  during: fc.array(siblingCommand, { minLength: 1, maxLength: 6 }),
+});
+
+async function siblingViolationsOf(sibling: SiblingCase): Promise<string[]> {
+  const world = new World();
+  try {
+    for (let acquired = 0; acquired < sibling.sessions; acquired += 1) {
+      await world.apply({ kind: "acquire", birth: "lives" });
+    }
+    // Every session is acknowledged on the connection before anything happens to one.
+    await world.apply({ kind: "tick" });
+    await world.startCallInFlight(world.sessionAt(sibling.callOn)!);
+    for (const step of sibling.during) {
+      await world.apply(step);
+      if (world.violations.length > 0) {
+        break;
+      }
+    }
+    await world.finishCallInFlight();
+    if (world.violations.length === 0) {
+      await world.apply({ kind: "tick" });
+    }
+  } finally {
+    await world.close();
+  }
+  return world.violations;
+}
+
+const SIBLING_REGRESSIONS: ReadonlyArray<readonly [string, SiblingCase]> = [
+  [
+    "the latest binding's announced device-restart handoff leaves a held session's call in flight (#11656)",
+    {
+      sessions: 2,
+      callOn: 0,
+      during: [{ kind: "release", target: 0, gone: "recoverable", notify: true }, TICK_COMMAND],
+    },
+  ],
+  [
+    "the latest binding's handoff learned from its heartbeat is asked again on the same connection (#11656)",
+    {
+      sessions: 2,
+      callOn: 0,
+      during: [
+        { kind: "release", target: 0, gone: "recoverable", notify: false },
+        TICK_COMMAND,
+        TICK_COMMAND,
+      ],
+    },
+  ],
+  [
+    "the latest binding's bare not-found is asked again on the same connection (#11656)",
+    {
+      sessions: 2,
+      callOn: 0,
+      during: [{ kind: "release", target: 0, gone: "unknown", notify: false }, TICK_COMMAND],
+    },
+  ],
+  [
+    "a held session's handoff leaves the call in flight on the latest binding (#11656)",
+    {
+      sessions: 3,
+      callOn: 2,
+      during: [
+        { kind: "release", target: 0, gone: "recoverable", notify: true },
+        TICK_COMMAND,
+        { kind: "release", target: 1, gone: "unknown", notify: false },
+        TICK_COMMAND,
+      ],
+    },
+  ],
+];
 
 /** How the daemon answers one call that is in flight when it starts shutting down. */
 type DrainAnswer = "result" | "shutting-down" | "close";
@@ -1698,6 +1922,41 @@ describe("proxy heartbeat state machine (property-based)", () => {
   test("the shards replay every generated case", () => {
     // `fc.assert` counts the explicit `examples` inside `numRuns`.
     expect(generated).toHaveLength(RUN_OPTIONS.numRuns);
+  });
+});
+
+describe("a call in flight on a sibling session (property-based)", () => {
+  const SIBLING_RUN_OPTIONS = { seed: 11_656, numRuns: 60 } as const;
+  const SHARDS = 12;
+  const generated: SiblingCase[] = [];
+  beforeAll(() => {
+    fc.assert(
+      fc.property(siblingCase, (sibling) => {
+        generated.push(sibling);
+      }),
+      { ...SIBLING_RUN_OPTIONS, examples: SIBLING_REGRESSIONS.map(([, sibling]) => [sibling]) },
+    );
+  });
+
+  test.each(SIBLING_REGRESSIONS)("%s", async (_name, sibling) => {
+    expect(await siblingViolationsOf(sibling)).toEqual([]);
+  });
+
+  test.each(Array.from({ length: SHARDS }, (_, shard) => shard))(
+    "I8: what happens to one session never closes the connection under another's call (shard %d)",
+    async (shard) => {
+      const size = Math.ceil(generated.length / SHARDS);
+      for (const sibling of generated.slice(shard * size, (shard + 1) * size)) {
+        const violations = await siblingViolationsOf(sibling);
+        if (violations.length > 0) {
+          throw new Error(`${violations.join("; ")} for ${JSON.stringify(sibling)}`);
+        }
+      }
+    },
+  );
+
+  test("the shards replay every generated case", () => {
+    expect(generated).toHaveLength(SIBLING_RUN_OPTIONS.numRuns);
   });
 });
 

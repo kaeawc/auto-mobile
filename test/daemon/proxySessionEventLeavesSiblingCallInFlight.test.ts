@@ -1,5 +1,13 @@
 import { afterEach, beforeAll, expect, test } from "bun:test";
+import type { DaemonClientLike } from "../../src/daemon/client";
+import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import { deviceRestartReleaseReason } from "../../src/db/deviceSessionRepository";
+import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { FakeTimer } from "../fakes/FakeTimer";
 import {
   KEEPER_INTERVAL_MS,
   LivenessScenario,
@@ -35,10 +43,15 @@ type Role = "sibling" | "binding";
 
 let scenario: LivenessScenario;
 
-// The first scenario pays the one-time module and tool-registry cost; keep it out of the tests.
+// A throwaway scenario pays the one-time cost of loading the modules and the tool registry and of
+// first running a call, a keeper tick and a release. Every test still builds its own scenario.
 beforeAll(async () => {
   scenario = await LivenessScenario.start({ devices: [SIBLING_DEVICE, BINDING_DEVICE] });
-  await scenario.acquire(SIBLING_DEVICE);
+  const sessionId = await scenario.acquire(SIBLING_DEVICE);
+  const call = scenario.startLongCall(sessionId);
+  await scenario.idle(KEEPER_INTERVAL_MS);
+  await call.settle();
+  await scenario.daemonMethod("daemon/releaseSession", { sessionId });
   await scenario.stop();
 });
 
@@ -211,4 +224,52 @@ test("the binding's device-restart handoff leaves the control call on the held s
 
   // The other device restarted, not this one: the sibling's call runs to its result.
   expect(outcome).toEqual(SIBLING_CALL_UNDISTURBED);
+});
+
+// The daemon in the scenarios above makes a tool call wait for its session's release, so this one
+// answer is scripted: a control call answered a bare not-found for its own session.
+test("a control call answered not-found for its own session is not sent again and closes nothing", async () => {
+  const held = Promise.withResolvers<void>();
+  const client = new FakeDaemonClient({
+    onCallTool: (_name, params) => {
+      if (params.sessionUuid === "sibling") {
+        return held.promise;
+      }
+      throw Object.assign(new Error(`Session not found: ${params.sessionUuid}`), {
+        code: DAEMON_SESSION_NOT_FOUND_CODE,
+      });
+    },
+  });
+  const daemonManager = new FakeDaemonManager();
+  daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
+  const proxy = new DaemonMcpProxy({
+    clientFactory: (): DaemonClientLike => client,
+    daemonAvailabilityProbe: async () => true,
+    daemonManager,
+    autoStartDaemon: false,
+    timer: new FakeTimer(),
+    idGenerator: new FakeIdGenerator(),
+  });
+  const nameOf = (error: unknown) => (error instanceof Error ? error.name : String(error));
+
+  const siblingCall = proxy.callTool("tapOn", { sessionUuid: "sibling", text: "Upload" });
+  const answered = await proxy
+    .callTool("tapOn", { sessionUuid: "gone", text: "Continue" })
+    .then(() => "result", nameOf);
+  const connectedMeanwhile = client.isConnected();
+  held.resolve();
+  const sibling = await siblingCall.then(() => "result", nameOf);
+  await proxy.close();
+
+  expect({
+    answered,
+    connectedMeanwhile,
+    sibling,
+    sent: client.callToolCalls.map((call) => call.params.sessionUuid),
+  }).toEqual({
+    answered: "DaemonToolOutcomeUnknownError",
+    connectedMeanwhile: true,
+    sibling: "result",
+    sent: ["sibling", "gone"],
+  });
 });

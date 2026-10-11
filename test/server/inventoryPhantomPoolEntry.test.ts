@@ -153,10 +153,9 @@ describe("a pooled device that discovery no longer lists", () => {
     expect(await pool.getRefreshedStats()).toMatchObject({ total: 1, idle: 0, assigned: 1 });
   });
 
-  test("a held simulator mid-transition that discovery does not list is absent from the counts too", async () => {
-    // Booting / Shutting Down simulators are not in the booted listing, so listDevices and the
-    // resource omit them (open: showing them as held needs a simulator-state source); the counts
-    // must at least agree with those surfaces rather than call it assigned.
+  test("a held simulator that simctl no longer lists at all is absent from the counts", async () => {
+    // A simulator in Booting / Shutting Down is listed with its state and counted assigned
+    // (#11573, inventorySurfaceParity); one simctl does not report is shut down, a phantom.
     const sim: BootedDevice = { platform: "ios", name: "iPhone 17", deviceId: "SIM-HELD" };
     const { pool, manager } = await poolOf([]);
     manager.setBootedDevices("ios", [sim]);

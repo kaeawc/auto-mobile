@@ -10,6 +10,8 @@ export class FakeAndroidCapacitySource implements AndroidCapacitySource {
   emulatorSerials: string[] = [];
   /** Undefined models an unreadable process table. */
   emulatorProcessRssBytes: number[] | undefined = [];
+  /** Pids of those processes, in order; undefined models a source that cannot tell. */
+  emulatorProcessPids: number[] | undefined;
   host = { totalMemoryBytes: 64 * GIB, cpuCount: 16 };
   /** Set to model a failed adb listing (`emulatorSerials` is then ignored). */
   serialListingError: string | undefined;
@@ -26,6 +28,9 @@ export class FakeAndroidCapacitySource implements AndroidCapacitySource {
       emulatorProcessRssBytes: this.emulatorProcessRssBytes
         ? [...this.emulatorProcessRssBytes]
         : undefined,
+      ...(this.emulatorProcessRssBytes && this.emulatorProcessPids
+        ? { emulatorProcessIds: this.emulatorProcessPids.map((pid) => ({ pid, ppid: 1 })) }
+        : {}),
       host: { ...this.host },
       errors: [
         ...(listingFailed ? [`adb: ${this.serialListingError}`] : []),

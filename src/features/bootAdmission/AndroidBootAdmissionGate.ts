@@ -97,32 +97,64 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
       // admitBootNow returns without refusing only after calling `admit`.
       throw new ActionableError(`Boot admission for AVD '${request.avdName}' ended without a slot`);
     }
+    const handedOffSerials = new Set<string>();
+    let released = false;
     return {
-      release: ledgerAdmission.release,
-      handOff: (deviceId) => {
+      release: () => {
+        released = true;
+        ledgerAdmission.release();
+        // A boot that ended before adb ever listed it never held its serial: an emulator
+        // started elsewhere that takes the serial later is not ours.
+        for (const serial of handedOffSerials) {
+          if (!this.listedStartedSerials.has(serial)) {
+            this.startedSerials.delete(serial);
+          }
+        }
+        handedOffSerials.clear();
+      },
+      handOff: (deviceId, processId) => {
+        if (released) {
+          return;
+        }
         if (deviceId !== undefined) {
           this.startedSerials.add(deviceId);
+          handedOffSerials.add(deviceId);
         }
-        ledgerAdmission.handOff(deviceId, deadlineMs);
+        ledgerAdmission.handOff(deviceId, deadlineMs, processId);
       },
     };
   }
 
   /** Refuses with `capacity_exhausted` when a cold boot would be refused now; admits nothing. */
   async assertCapacityAvailable(options: { signal?: AbortSignal } = {}): Promise<void> {
-    const sample = await this.sampleKnownCount(options);
-    assertBootCapacityGranted({ decision: this.decide(sample) }, "android", "emulator");
+    const { sample, window } = await this.sampleInWindow(options);
+    assertBootCapacityGranted({ decision: this.decide(sample, window) }, "android", "emulator");
   }
 
   /** Current limit, booted emulators (every running one, owned or not) and admitted boots in flight. */
   async describeCapacity(options: { signal?: AbortSignal } = {}): Promise<BootCapacitySnapshot> {
-    const sample = await this.sampleKnownCount(options);
-    const counts = this.count(sample);
+    const { sample, window } = await this.sampleInWindow(options);
+    const counts = this.count(sample, window);
     return {
       limit: this.limitsFor(sample).maxBooted,
       booted: counts.booted,
       inFlight: counts.inFlight,
     };
+  }
+
+  /**
+   * A sample inside a ledger window, as `admit` takes it: a boot that ends while the sample is
+   * being taken still counts for it (#11465, #11537).
+   */
+  private async sampleInWindow(options: {
+    signal?: AbortSignal;
+  }): Promise<{ sample: AndroidCapacitySample; window: LedgerSampleWindow }> {
+    const window = this.ledger.beginSample();
+    try {
+      return { sample: await this.sampleKnownCount(options), window };
+    } finally {
+      window.close();
+    }
   }
 
   /**
@@ -191,8 +223,18 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
   /**
    * `booted` is the larger of the adb listing (any adb state) and the qemu
    * process count: a booting emulator has a process before adb lists it at all.
-   * `effective` adds admitted boots adb does not list yet, but never counts
-   * one twice when its qemu process is already in the process count.
+   *
+   * `effective` is the larger of two views of the same load, each complete on its own:
+   * the adb listing plus every admitted boot it does not show, and the process table plus
+   * every admitted boot whose own process is not in it. A boot is matched to a process by the
+   * pid it was handed off with (the launcher this daemon spawned, which becomes the qemu
+   * process or is its parent), never by count: a process nobody admitted is another emulator
+   * and is added. Taking the plain process count instead lost an external emulator adb had not
+   * listed whenever an admitted boot had no process yet (#11564).
+   *
+   * A boot handed off without a pid, or sampled without process ids, counts twice while its
+   * process runs unlisted: fail closed. The emulator client hands off with the pid the moment
+   * the process exists (`spawnUnderBootAdmission`).
    */
   private count(
     sample: AndroidCapacitySample,
@@ -204,11 +246,22 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
   } {
     const listed = sample.emulatorSerials.length;
     const processes = sample.emulatorProcessRssBytes?.length ?? 0;
-    const inFlight = this.ledger.inFlightCount(new Set(sample.emulatorSerials), undefined, window);
+    const listedProcessIds = new Set(
+      (sample.emulatorProcessIds ?? []).flatMap((ids) => [ids.pid, ids.ppid]),
+    );
+    const inFlight = this.ledger.inFlight(
+      new Set(sample.emulatorSerials),
+      undefined,
+      window,
+      listedProcessIds,
+    );
     return {
       booted: Math.max(listed, processes),
-      inFlight,
-      effective: Math.max(listed + inFlight, processes),
+      inFlight: inFlight.count,
+      effective: Math.max(
+        listed + inFlight.count,
+        processes + inFlight.count - inFlight.withListedProcess,
+      ),
     };
   }
 

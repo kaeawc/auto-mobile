@@ -350,6 +350,18 @@ code (owner decision 2026-10-09, #10982): `device_cleanup_in_progress` while the
 device is still being released (#10960), and `device_owned_by_other_daemon` when
 another daemon holds it. Clients may wait and retry.
 
+Each refusal carries a `retryAfterMs` hint. For `device_cleanup_in_progress` it
+is the time the cleanup can still take (#11360): the rest of a release's bounded
+teardown, or the rest of a recording finalize's cap (120 s plus a 5 s grace),
+whether that finalize started at its session's release or when a session
+acquired a device with an owner-less recording on it (#11616). Cleanup with no
+cap of its own advertises a 1 s polling hint. `device_shutting_down` always
+advertises 2 s: a shutdown reservation is held across several separately bounded
+steps (stop, wait for the device to disappear, restart handoff) and records no
+deadline of its own, so there is no remaining time to report. The test runners
+wait `max(30 s, min(waited + retryAfterMs, 150 s))` in total, so a hint without a
+bound gets their 30 s floor, which is one shutdown step's own timeout.
+
 A session UUID whose device is being killed is refused with
 `session_terminal_release_in_progress`, `retryable: false` and `nextAction:
 "acquire_new_session"` (#11189, #11231): the UUID ends with that release, so

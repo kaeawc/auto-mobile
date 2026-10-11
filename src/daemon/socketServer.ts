@@ -177,7 +177,7 @@ import {
   AndroidBootedDeviceDiscoveryIncompleteError,
   BootedDeviceDiscoveryIncompleteError,
 } from "../models/BootedDeviceDiscoveryIncompleteError";
-import { didSourceSucceedForDevice } from "../utils/discoverySource";
+import { expectingPooledSources, isDeviceSourceIncomplete } from "../utils/discoverySource";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { PressButton } from "../features/action/PressButton";
@@ -5699,10 +5699,16 @@ export class UnixSocketServer {
     serial: string,
   ): Promise<BootedDevice[]> {
     const manager = PlatformDeviceManagerFactory.getInstance();
-    const discovery = await manager.getBootedDevicesDetailed(platform);
+    const discovery = expectingPooledSources(
+      await manager.getBootedDevicesDetailed(platform),
+      this.daemonState?.isInitialized()
+        ? this.daemonState.getDevicePool().getAllDevices?.()
+        : undefined,
+    );
     if (
       !discovery.devices.map((device) => device.deviceId).includes(serial) &&
-      !didSourceSucceedForDevice(discovery, platform, serial)
+      // Tooling that is not installed on this host is not an unknown: no retry can list the serial (#11605).
+      isDeviceSourceIncomplete(discovery, platform, serial)
     ) {
       const discoveryError = discovery.discoveryErrors?.[platform];
       throw platform === "android"

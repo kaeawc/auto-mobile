@@ -2,7 +2,10 @@ import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import type { AppearanceMode } from "../../src/models";
 import type { AppearanceConfig } from "../../src/server/appearanceManager";
-import { AppearanceSyncScheduler } from "../../src/daemon/AppearanceSyncScheduler";
+import {
+  AppearanceSyncScheduler,
+  defaultAppearanceSyncDependencies,
+} from "../../src/daemon/AppearanceSyncScheduler";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "../../src/daemon/PassiveWorkPolicy";
 import { logger } from "../../src/utils/logger";
@@ -419,5 +422,31 @@ describe("AppearanceSyncScheduler resilience", () => {
     await tick;
     expect(applied).toEqual(["emulator-5554"]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+});
+
+describe("the default appearance sync boundary", () => {
+  test("a scheduler built without dependencies reads the shared defaults at each use, so a replaced end is the one it reaches", async () => {
+    const original = { ...defaultAppearanceSyncDependencies };
+    const applied: string[] = [];
+    const scheduler = new AppearanceSyncScheduler(new FakeTimer());
+    try {
+      // Replaced after the scheduler was built, as a harness around a running daemon does.
+      Object.assign(defaultAppearanceSyncDependencies, {
+        isEnabled: () => true,
+        getConfig: async () => ({ syncWithHost: true }) as AppearanceConfig,
+        resolveMode: async () => "dark" as const,
+        apply: async (device: BootedDevice, mode: AppearanceMode) => {
+          applied.push(`${device.deviceId}:${mode}`);
+        },
+      });
+
+      await scheduler.syncDevice(makeTarget(1));
+
+      expect(applied).toEqual(["emulator-5554:dark"]);
+    } finally {
+      Object.assign(defaultAppearanceSyncDependencies, original);
+    }
+    expect(defaultAppearanceSyncDependencies.apply).toBe(original.apply);
   });
 });

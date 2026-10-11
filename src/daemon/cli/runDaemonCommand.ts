@@ -355,6 +355,14 @@ const formatPoolStats = (
     ...(devices ? { devices } : {}),
   });
 
+/** The typed, retryable refusal every `available-devices` path gives for an unknown count. */
+function discoveryIncompleteRefusal(message: string): ActionableError {
+  return Object.assign(new ActionableError(message), {
+    code: "discovery_incomplete",
+    retryable: true,
+  });
+}
+
 /**
  * Render the booted-devices resource as `available-devices` output. A resource with no usable pool
  * status (no text, unparseable text, an error object, or no `poolStatus`) is an unknown, so it
@@ -390,15 +398,16 @@ function printAvailableDevicesContent(content: string | undefined): void {
     throw new ActionableError(`The booted-devices resource reported an error: ${data.error}`);
   }
   if (!data?.poolStatus) {
-    throw new ActionableError(
+    throw discoveryIncompleteRefusal(
       "The booted-devices resource carried no pool status, so the device count is unknown " +
         "(discovery_incomplete); retry once the daemon finishes discovery.",
     );
   }
   if (data.observationComplete === false && (data.devices?.length ?? 0) === 0) {
-    // Every discovery source failed and the pool has nothing to fall back on: zeros here would
-    // read as "0 devices" when the count is actually unknown.
-    throw new ActionableError(
+    // A discovery source that exists on this host failed and the pool has nothing to fall back
+    // on: zeros here would read as "0 devices" when the count is actually unknown. Tooling that
+    // is not installed (a single-platform host) leaves the observation complete (#11605).
+    throw discoveryIncompleteRefusal(
       "The booted-devices resource reports incomplete discovery and the pool has no devices, so the count is " +
         "unknown (discovery_incomplete); retry once the daemon finishes discovery.",
     );
@@ -731,7 +740,10 @@ async function queryAvailableDevices(args: string[], manager: DaemonManager): Pr
     if (daemonState.isInitialized()) {
       // Running inside daemon process
       const pool = daemonState.getDevicePool();
-      const { stats, deviceIds } = await pool.getRefreshedInventory();
+      // An unknown count keeps its typed refusal (code, retryable), as the socket branch does.
+      const { stats, deviceIds } = await pool.getRefreshedInventory().catch((error: unknown) => {
+        throw new DaemonCommandRefusal("Failed to query available devices", error);
+      });
       console.log(
         formatPoolStats(
           stats,

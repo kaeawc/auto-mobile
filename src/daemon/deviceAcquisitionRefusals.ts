@@ -28,6 +28,9 @@ export const DEVICE_OWNED_BY_OTHER_DAEMON_CODE = "device_owned_by_other_daemon";
  */
 export const DEVICE_SHUTTING_DOWN_CODE = "device_shutting_down";
 
+/** adb still lists the transport, but it has not returned online within the bind budget. */
+export const DEVICE_OFFLINE_CODE = "device_offline";
+
 /**
  * The session UUID is under a kill's terminal release reservation (#11146), so it cannot be bound,
  * rebound or reserved again. Unlike `device_shutting_down` it is NOT retryable: the UUID ends with
@@ -115,6 +118,23 @@ export class DeviceCleanupInProgressError extends RetryableDeviceAcquisitionErro
         "after the cleanup finishes.",
     );
     this.name = "DeviceCleanupInProgressError";
+  }
+}
+
+export class DeviceTransportOfflineError extends RetryableDeviceAcquisitionError {
+  constructor(
+    deviceId: string,
+    readonly state: string,
+  ) {
+    super(
+      DEVICE_OFFLINE_CODE,
+      deviceId,
+      DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
+      `Device '${deviceId}' is still attached but adb lists it as ${state} ` +
+        `(code ${DEVICE_OFFLINE_CODE}); it was not bound. Retry in about ` +
+        `${DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS}ms.`,
+    );
+    this.name = "DeviceTransportOfflineError";
   }
 }
 

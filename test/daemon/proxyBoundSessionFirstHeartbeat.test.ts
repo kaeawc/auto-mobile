@@ -1,5 +1,8 @@
 import { describe, expect, test, spyOn, beforeEach, afterEach } from "bun:test";
-import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import {
+  DaemonMcpProxy,
+  RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
+} from "../../src/daemon/daemonMcpProxy";
 import {
   DaemonClient,
   DaemonUnavailableError,
@@ -1373,16 +1376,71 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     }
   });
 
+  // #11570: with no release reason the answer says nothing final. It is the session's first on a
+  // connection that was just made, which is also what a restarted daemon answers until it has
+  // rehydrated the session. The owner keeps heartbeating for the recovery window and the binding
+  // is not fenced: the daemon, not the proxy, answers the next call.
+  test("waits out the recovery window when the first heartbeat is answered not-found with no reason", async () => {
+    const heartbeatIntervalMs = 1_000;
+    let heartbeats = 0;
+    const fakeClient = new FakeDaemonClient({
+      onCallDaemonMethod: (method) => {
+        if (method === "daemon/heartbeat") {
+          heartbeats += 1;
+          throw new Error("Session not found: " + BOUND_SESSION);
+        }
+      },
+    });
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: BOUND_SESSION,
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+      heartbeatIntervalMs,
+      heartbeatTimeoutMs: 4 * heartbeatIntervalMs,
+    });
+
+    const pendingBefore = timer.getPendingIntervalCount();
+    try {
+      await proxy.ensureConnected();
+
+      // Not fenced: the keeper runs, asking once a tick on the connection it has.
+      expect(timer.getPendingIntervalCount()).toBe(pendingBefore + 1);
+      expect(heartbeats).toBe(1);
+      await timer.advanceTimeAsync(3 * heartbeatIntervalMs);
+      expect(heartbeats).toBe(4);
+
+      // The window is bounded: once it has passed the keeper stops, and the binding stays.
+      await timer.advanceTimeAsync(RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS);
+      const asked = heartbeats;
+      await timer.advanceTimeAsync(3 * heartbeatIntervalMs);
+      expect(heartbeats).toBe(asked);
+      expect(asked).toBeLessThanOrEqual(
+        RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS / heartbeatIntervalMs + 2,
+      );
+      expect(timer.getPendingIntervalCount()).toBe(pendingBefore);
+      await proxy.callTool("observe", { deviceId: "device-a" });
+      expect(fakeClient.callToolCalls.map((call) => call.toolName)).toEqual(["observe"]);
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
   // AC3 (terminal fencing intact): if the first heartbeat comes back
-  // "Session not found" — the bound session was reaped before it arrived — the
-  // binding is terminally fenced rather than silently proceeding, and no keeper
-  // interval is left running.
-  test("fences the binding when the first heartbeat reports the session is gone", async () => {
+  // "Session not found" with the release that ended the session — it was reaped
+  // before the heartbeat arrived — the binding is terminally fenced rather than
+  // silently proceeding, and no keeper interval is left running.
+  test("fences the binding when the first heartbeat names the release that ended the session", async () => {
     // Deliberately do NOT create the session, so the daemon reports it missing.
     const fakeClient = new FakeDaemonClient({
       onCallDaemonMethod: (method) => {
         if (method === "daemon/heartbeat") {
-          throw new Error("Session not found: " + BOUND_SESSION);
+          throw Object.assign(new Error("Session not found: " + BOUND_SESSION), {
+            releaseReason: "missing-first-heartbeat",
+          });
         }
       },
     });
@@ -1401,8 +1459,11 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
       await proxy.ensureConnected();
 
       expect(timer.getPendingIntervalCount()).toBe(pendingBefore);
-      // The next operation surfaces the terminal ownership loss.
-      await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toThrow();
+      // The next operation surfaces the terminal ownership loss, under the daemon's reason.
+      await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toThrow(
+        "missing-first-heartbeat",
+      );
+      expect(fakeClient.callToolCalls).toEqual([]);
     } finally {
       isAvailableSpy.mockRestore();
       await proxy.close();

@@ -7,6 +7,7 @@ import { DefaultProcessSupervisor } from "../../utils/ProcessSupervisor";
 import { exponentialBackoff } from "../../utils/Backoff";
 import { runDetachedFromPerf, trackAmbient } from "../../utils/PerfContext";
 import { logger } from "../../utils/logger";
+import { readEnvPositiveInteger } from "../../utils/envNumbers";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
@@ -43,6 +44,8 @@ export interface RemoteIosTunnelRunner {
     pid?: number;
   }): Promise<{ success: boolean; error?: string; data?: { running: boolean } }>;
 }
+const DEFAULT_IPROXY_START_TIMEOUT_MS = 5000;
+
 interface TunnelOptions {
   processExecutor: HostProcessExecutor;
   timer: Timer;
@@ -56,6 +59,8 @@ interface TunnelOptions {
   isStopping(): boolean;
   isSimulator(): boolean;
   restart(): Promise<void>;
+  /** The environment the start timeout is read from; defaults to `process.env`. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /** Sole owner of the physical iOS USB tunnel. Runner/port allocation policy stays with the manager. */
@@ -371,18 +376,12 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
   }
 
   public getStartTimeoutMs(): number {
-    const envValue =
-      process.env.AUTOMOBILE_IPROXY_START_TIMEOUT_MS ??
-      process.env.AUTO_MOBILE_IPROXY_START_TIMEOUT_MS;
-    if (!envValue) {
-      return 5000;
-    }
-    const parsed = Number.parseInt(envValue, 10);
-    if (Number.isNaN(parsed) || parsed <= 0) {
-      logger.warn(`[IOSCtrlProxy] Invalid iproxy timeout '${envValue}', using default ${5000}ms`);
-      return 5000;
-    }
-    return parsed;
+    return readEnvPositiveInteger(
+      "AUTOMOBILE_IPROXY_START_TIMEOUT_MS",
+      "AUTO_MOBILE_IPROXY_START_TIMEOUT_MS",
+      { fallback: DEFAULT_IPROXY_START_TIMEOUT_MS },
+      this.options.env,
+    );
   }
 
   public async isAlive(): Promise<boolean> {

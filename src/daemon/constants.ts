@@ -231,15 +231,15 @@ export const DAEMON_LAUNCH_LOG_PATH_ENV = "AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH";
  * Set to 120s to accommodate long-running operations like device cold boot (26-60s+).
  * Configurable via AUTOMOBILE_DAEMON_TIMEOUT_MS environment variable.
  */
-const connectionTimeoutOverride =
-  process.env.AUTOMOBILE_DAEMON_TIMEOUT_MS ?? process.env.AUTO_MOBILE_DAEMON_TIMEOUT_MS;
-const parsedConnectionTimeout = connectionTimeoutOverride
-  ? Number.parseInt(connectionTimeoutOverride, 10)
-  : NaN;
-export const CONNECTION_TIMEOUT_MS =
-  Number.isFinite(parsedConnectionTimeout) && parsedConnectionTimeout > 0
-    ? parsedConnectionTimeout
-    : 120000;
+export function resolveConnectionTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  return readEnvPositiveInteger(
+    "AUTOMOBILE_DAEMON_TIMEOUT_MS",
+    "AUTO_MOBILE_DAEMON_TIMEOUT_MS",
+    { fallback: 120000 },
+    env,
+  );
+}
+export const CONNECTION_TIMEOUT_MS = resolveConnectionTimeoutMs();
 
 /**
  * Daemon startup timeout in milliseconds
@@ -247,18 +247,20 @@ export const CONNECTION_TIMEOUT_MS =
  * devices and initializes iOS services, so the default allows normal
  * multi-simulator bring-up while remaining bounded.
  */
-const startupTimeoutOverride =
-  process.env.AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS ??
-  process.env.AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS;
-const parsedStartupTimeout = startupTimeoutOverride
-  ? Number.parseInt(startupTimeoutOverride, 10)
-  : NaN;
 // Node and Bun clamp timer delays above this value to 1ms.
 const MAX_DAEMON_STARTUP_TIMEOUT_MS = 2_147_483_647;
-export const DAEMON_STARTUP_TIMEOUT_MS =
-  Number.isFinite(parsedStartupTimeout) && parsedStartupTimeout > 0
-    ? Math.min(parsedStartupTimeout, MAX_DAEMON_STARTUP_TIMEOUT_MS)
-    : 30000;
+export function resolveDaemonStartupTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  return Math.min(
+    readEnvPositiveInteger(
+      "AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS",
+      "AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS",
+      { fallback: 30000 },
+      env,
+    ),
+    MAX_DAEMON_STARTUP_TIMEOUT_MS,
+  );
+}
+export const DAEMON_STARTUP_TIMEOUT_MS = resolveDaemonStartupTimeoutMs();
 
 /**
  * Reachability budget for an already-live daemon during start (milliseconds).
@@ -286,22 +288,22 @@ export const DAEMON_STARTUP_TIMEOUT_MS =
  * is always deliverable, and scaling with the timeout keeps that headroom
  * meaningful when the startup budget is itself lowered.
  */
-const existingDaemonReachabilityOverride =
-  process.env.AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS ??
-  process.env.AUTO_MOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS;
-const parsedExistingDaemonReachability = existingDaemonReachabilityOverride
-  ? Number.parseInt(existingDaemonReachabilityOverride, 10)
-  : NaN;
-const maxExistingDaemonReachabilityMs = Math.max(
-  1,
-  Math.floor((DAEMON_STARTUP_TIMEOUT_MS * 2) / 3),
-);
-export const DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS = Math.min(
-  Number.isFinite(parsedExistingDaemonReachability) && parsedExistingDaemonReachability > 0
-    ? parsedExistingDaemonReachability
-    : 10000,
-  maxExistingDaemonReachabilityMs,
-);
+export function resolveExistingDaemonReachabilityTimeoutMs(
+  startupTimeoutMs: number,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  return Math.min(
+    readEnvPositiveInteger(
+      "AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS",
+      "AUTO_MOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS",
+      { fallback: 10000 },
+      env,
+    ),
+    Math.max(1, Math.floor((startupTimeoutMs * 2) / 3)),
+  );
+}
+export const DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS =
+  resolveExistingDaemonReachabilityTimeoutMs(DAEMON_STARTUP_TIMEOUT_MS);
 
 /**
  * Daemon shutdown timeout in milliseconds

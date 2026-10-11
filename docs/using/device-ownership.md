@@ -329,13 +329,12 @@ releasing.
   `scripts/android/navigation-graph-sdk-event-integration.sh`).
 
 If an agent holds two sessions and its default session ends, its next control
-call without `sessionUuid` is refused with `session_ownership_lost`,
+call without `sessionUuid` is refused with `no_active_device_session`,
 `nextAction: "acquire_new_session"` and the release reason. The default is the
 session its calls without `sessionUuid` go to. Calls that pass the other
 session's `sessionUuid` keep working throughout and do not change the default.
 To continue without naming it each time, call `setActiveDevice` for the surviving
-device or acquire a new session with `getAndroid` or `getApple`. Read-only tools
-are never refused for lack of a session.
+device or acquire a new session with `getAndroid` or `getApple`.
 
 ## Stopping a held device: `killDevice` and `deleteDevice`
 

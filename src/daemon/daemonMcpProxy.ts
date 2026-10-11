@@ -7337,7 +7337,14 @@ export class DaemonMcpProxy {
       (rememberedSessionUuid === this.boundSessionUuid || this.toolAcceptsSessionUuid(name))
     ) {
       this.rememberSessionDevice(rememberedSessionUuid, forwardedArgs.deviceId);
-      if (this.terminalBoundSession && !selectsDefault) {
+      this.bindRememberedSession(rememberedSessionUuid, selectsDefault);
+    }
+  }
+
+  /** A remembered session preserves a released binding until an explicit selection replaces it. */
+  private bindRememberedSession(sessionUuid: string, selectsDefault: boolean): void {
+    if (this.terminalBoundSession) {
+      if (!selectsDefault) {
         // The binding was released and the agent has not chosen another (#11656): a call naming
         // a session this proxy still holds ran on it and changes nothing else. The fence stays,
         // so the release is reported to the next sessionless control call, in whatever order the
@@ -7345,19 +7352,18 @@ export class DaemonMcpProxy {
         return;
       }
       if (
-        this.terminalBoundSession &&
-        rememberedSessionUuid !== this.terminalBoundSession.sessionUuid &&
-        this.ownedDeviceSessions.has(rememberedSessionUuid)
+        sessionUuid !== this.terminalBoundSession.sessionUuid &&
+        this.ownedDeviceSessions.has(sessionUuid)
       ) {
         // setActiveDevice chose a session this proxy still holds: that is the new binding.
         this.terminalBoundSession = undefined;
       }
-      if (this.keepsBindingFor(rememberedSessionUuid, selectsDefault)) {
-        return;
-      }
-      this.updateBoundSessionUuid(rememberedSessionUuid);
-      this.startBoundSessionHeartbeat();
     }
+    if (this.keepsBindingFor(sessionUuid, selectsDefault)) {
+      return;
+    }
+    this.updateBoundSessionUuid(sessionUuid);
+    this.startBoundSessionHeartbeat();
   }
 
   /**

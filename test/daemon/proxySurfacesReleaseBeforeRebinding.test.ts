@@ -225,7 +225,7 @@ test("once the release was reported, naming the sibling still binds nothing: ses
   });
 });
 
-test("setActiveDevice for the surviving session is what binds it: sessionless control calls then go there", async () => {
+test("control: setActiveDevice for the surviving session is what binds it: sessionless control calls then go there", async () => {
   await acquireBoth();
   releaseIos();
   const reported = await sessionlessTap();
@@ -239,7 +239,7 @@ test("setActiveDevice for the surviving session is what binds it: sessionless co
   });
 });
 
-test("a new acquisition binds its session: sessionless control calls then go there", async () => {
+test("control: a new acquisition binds its session: sessionless control calls then go there", async () => {
   await acquireBoth();
   releaseIos();
   await tapAndroidByName();

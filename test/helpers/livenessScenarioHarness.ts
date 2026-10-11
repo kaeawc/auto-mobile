@@ -112,10 +112,8 @@ export const RELEASE_SLACK_MS = SUSPECT_GRACE_MS + SCAN_MS + KEEPER_INTERVAL_MS;
 export const JUNIT_HEARTBEAT_MS = 1_000;
 export const AUTOLOCK_WINDOW_MS = 60_000;
 
-/** The clock step a slow daemon start is waited out in. */
-const SLOW_START_STEP_MS = 1_000;
-/** Microtask turns for a starting daemon to reach its next wait: about four times the ~250 measured. */
-const SLOW_START_TURNS = 1_024;
+/** Microtask turns for a starting daemon to reach its next wait: ten times the ~400 measured. */
+const SLOW_START_TURNS = 4_096;
 /** Microtask turns per fake-timer event so a keeper round trip settles before the next tick. */
 const TURNS_PER_EVENT = 32;
 const CONNECTION = "scenario-connection";
@@ -1283,12 +1281,10 @@ export class LivenessScenario {
     const starting = this.createDaemonSide(startupMs).then((side) => {
       started = side;
     });
-    // The start reaches its slow step a few turns in; step the clock until it is through.
-    const giveUpAt = this.timer.now() + startupMs + SLOW_START_STEP_MS * 10;
-    while (!started && this.timer.now() < giveUpAt) {
-      await drainMicrotasks(SLOW_START_TURNS);
-      await this.idle(SLOW_START_STEP_MS);
-    }
+    // Let the start reach its slow step before the clock moves, wait the step out, then let the
+    // rest of the start run: the socket opens exactly `startupMs` after the restart.
+    await drainMicrotasks(SLOW_START_TURNS);
+    await this.idle(startupMs);
     await Promise.race([starting, drainMicrotasks(SLOW_START_TURNS)]);
     if (!started) {
       throw new Error("LivenessScenario: the slow start never finished");

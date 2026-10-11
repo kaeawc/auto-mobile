@@ -601,7 +601,9 @@ describe("owner exits or goes silent", () => {
     expect(releasedAt).toBeLessThanOrEqual(silentSince + NO_HEARTBEAT_BUDGET_MS);
     expect(scenario.releaseOf(session)?.reason).toBe("heartbeat-timeout");
     expectFreed();
+    // The read itself is never refused: it is answered, not failed, by the release.
     await read.settle();
+    expect(read.failure()).toBeUndefined();
   });
 });
 

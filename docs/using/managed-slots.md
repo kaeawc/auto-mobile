@@ -192,6 +192,16 @@ connection used for tools and resources:
    `reusable_for_this_slot`. If work outlived the budget the slot is marked
    `settling` before its owner is cleared, so the next acquisition waits
    (retryable `slot_settling`) until the work ends or the settler is found dead.
+   The slot registry is shared by every daemon on the host and can be busy, so no
+   registry step of the drain is assumed to have happened (#11616). A step that
+   fails is retried with backoff (250 ms doubling to 5 s) until the 5-minute
+   settlement cap, then every 30 s until it lands or the daemon stops. If the
+   `settling` mark itself cannot be written, the slot keeps its owner record and
+   the daemon keeps treating that owner as live for as long as the released work
+   runs, so the slot is never handed to the next execution under running work;
+   `reset-slot-scope --force` reports such a slot as `live_owner`. An explicit
+   release whose slot lookup fails is rejected before anything is cancelled or
+   released.
    A release clears the execution owner only; the assignment, generation and spec
    are kept, whatever the release reason (explicit, heartbeat loss, idle).
 5. **Reuse.** A new proxy with the same scoped slot and a matching spec reuses

@@ -23,13 +23,23 @@ import type { SessionReleaseReason } from "../releaseReasons";
  *   restarted daemon runs that recovery when it opens the registry. A failed device
  *   deletion is a different state (`cleanup_pending`) that only the journal redrive resolves.
  *
+ * The host-wide registry is shared by several daemons and reports contention as a thrown busy
+ * error, so no registry step of the drain is taken on faith (#11616). A step that throws is either
+ * retried with the injected backoff (up to the settlement cap, then at the slow re-check cadence
+ * until it lands or this daemon closes) or fails closed: the step after it never runs as if it had
+ * succeeded. In particular a `settling` mark that could not be written keeps the slot's owner
+ * record, and this daemon keeps reading that record as live ({@link ManagedExecutionOwnerHolds})
+ * for as long as the released work runs, so the slot is never claimable under it.
+ *
  * The same slot bookkeeping runs for a managed session released any other way (heartbeat loss, idle
  * window, forced stuck release): the assignment is always kept.
  */
 
+import { type BackoffPolicy, exponentialBackoff } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { DefaultRetryExecutor, type RetryExecutor } from "../../utils/retry/RetryExecutor";
 import type { Timer } from "../../utils/SystemTimer";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../managedExecutionLiveness";
 import {
@@ -37,7 +47,11 @@ import {
   releaseSessionAndDevice,
   type SessionReleasePool,
 } from "../releaseSessionAndDevice";
-import { currentSlotOwnerProcess, defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
+import {
+  currentSlotOwnerProcess,
+  defaultSlotExecOwnerLiveness,
+  inFlightSlotReservations,
+} from "./slotOwnerLiveness";
 import type { SlotJournalInFlight } from "./slotJournal";
 import type {
   SlotAssignmentRecord,
@@ -161,10 +175,29 @@ export const MANAGED_EXECUTION_SETTLEMENT_POLL_MS = 250;
 export const MANAGED_EXECUTION_SETTLEMENT_CAP_MS = 5 * 60 * 1000;
 /** How often the watcher re-checks work that outlived the cap. */
 export const MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS = 30 * 1000;
+/**
+ * How a registry step of the drain that threw (a busy host-wide registry) is retried until the
+ * settlement cap; past the cap it is re-tried every {@link MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS}.
+ */
+export const MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF: BackoffPolicy = exponentialBackoff({
+  initialDelayMs: 250,
+  maxDelayMs: 5_000,
+});
 /** Released sessions remembered so a repeated release can still name its slots. */
 const RECENT_RELEASE_LIMIT = 256;
 
 const RELEASE_REASON = "managed-execution-release";
+
+/**
+ * Session ids whose owner records this daemon must keep reading as live although the session is
+ * gone: the released work still runs and its slot's `settling` mark has not been written yet
+ * (#11616). The daemon's owner liveness (`withLiveExecutionSessions`) reads the same set as its
+ * in-flight reservations, so the registry refuses a claim of such a slot.
+ */
+export interface ManagedExecutionOwnerHolds {
+  add(sessionId: string): void;
+  delete(sessionId: string): void;
+}
 
 export interface ManagedExecutionReleaseOptions {
   registry: () => Promise<ManagedExecutionSlotRegistry>;
@@ -185,6 +218,13 @@ export interface ManagedExecutionReleaseOptions {
    * start identity, under which a record this daemon wrote always reads live and is never cleared.
    */
   isExecOwnerLive?: SlotExecOwnerLiveness;
+  /** Backoff between retries of a registry step that threw. Default: 250 ms doubling to 5 s. */
+  registryRetryBackoff?: BackoffPolicy;
+  /**
+   * Where the drain records the released sessions whose owner records must still read live.
+   * Default: the process-wide set the daemon's owner liveness reads.
+   */
+  ownerHolds?: ManagedExecutionOwnerHolds;
 }
 
 interface MarkedSlot {
@@ -193,6 +233,12 @@ interface MarkedSlot {
   stableDeviceId: string | null;
   /** The release journal entry recording the mark, when journaling is on. */
   journalEntryId?: number;
+}
+
+/** The `settling` marks of one release: the slots fenced, and the ones whose mark threw (owed). */
+interface SettlingMarks {
+  marked: MarkedSlot[];
+  owed: SlotAssignmentRecord[];
 }
 
 export class ManagedExecutionRelease {
@@ -206,8 +252,15 @@ export class ManagedExecutionRelease {
   private readonly recentSlots = new Map<string, SlotKey[]>();
   private readonly background = new Set<Promise<void>>();
   private closed = false;
+  /** Aborted on close: ends a retry's wait at once and stops it before its next registry call. */
+  private readonly closing = new AbortController();
   private settler: SlotProcessIdentity | undefined;
   private readonly isExecOwnerLive: SlotExecOwnerLiveness;
+  private readonly registryRetryBackoff: BackoffPolicy;
+  private readonly registryRetry: RetryExecutor;
+  private readonly ownerHolds: ManagedExecutionOwnerHolds;
+  /** Holders per session id, so one drain's release never drops another's hold. */
+  private readonly ownerHoldCounts = new Map<string, number>();
 
   constructor(private readonly options: ManagedExecutionReleaseOptions) {
     this.isExecOwnerLive = options.isExecOwnerLive ?? defaultSlotExecOwnerLiveness;
@@ -217,6 +270,10 @@ export class ManagedExecutionRelease {
     this.settlementCapMs = options.settlementCapMs ?? MANAGED_EXECUTION_SETTLEMENT_CAP_MS;
     this.settlementSlowPollMs =
       options.settlementSlowPollMs ?? MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS;
+    this.registryRetryBackoff =
+      options.registryRetryBackoff ?? MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF;
+    this.registryRetry = new DefaultRetryExecutor(options.timer);
+    this.ownerHolds = options.ownerHolds ?? inFlightSlotReservations;
   }
 
   /**
@@ -285,9 +342,13 @@ export class ManagedExecutionRelease {
     }
   }
 
-  /** Stop the settlement watchers (daemon shutdown). Slots they guard stay `settling`. */
+  /**
+   * Stop the settlement watchers and every pending registry retry (daemon shutdown): no registry
+   * step is started after this. Slots they guard stay `settling`, for the next daemon's recovery.
+   */
   close(): void {
     this.closed = true;
+    this.closing.abort();
   }
 
   private async drainAndRelease(sessionId: string): Promise<ManagedExecutionReleaseResult> {
@@ -300,13 +361,29 @@ export class ManagedExecutionRelease {
     }
     this.rememberSlots(sessionId, held);
     const device = sessions.deviceOf(sessionId);
+    // Until this drain has fenced or settled its slots, the owner record reads live even after
+    // the session is gone: a mark that throws must not leave the slot claimable (#11616).
+    const releaseHold = this.holdOwner(sessionId);
+    try {
+      return await this.drainHeldSlots(registry, sessionId, held, live, device);
+    } finally {
+      releaseHold();
+    }
+  }
 
+  private async drainHeldSlots(
+    registry: ManagedExecutionSlotRegistry,
+    sessionId: string,
+    held: readonly SlotAssignmentRecord[],
+    live: boolean,
+    device: string | null,
+  ): Promise<ManagedExecutionReleaseResult> {
     const { cancellationRequested, drained } = await this.cancelAndDrain(sessionId);
     const slotFailures: ManagedExecutionSlotFailure[] = [];
-    const marked: MarkedSlot[] = [];
+    const marks: SettlingMarks = { marked: [], owed: [] };
     if (!drained) {
       // Protect the slots before anything else lets go: unsettled work may still drive the device.
-      marked.push(...(await this.markSettling(registry, held, slotFailures)));
+      await this.markSettling(registry, held, slotFailures, marks);
     }
 
     const release = live
@@ -317,11 +394,17 @@ export class ManagedExecutionRelease {
     // A slot marked before the release stays reported pending; its watcher confirms settlement.
     const settled = drained && release.releaseSettled && this.isSettled(sessionId, releasedDevice);
     if (!settled && drained) {
-      marked.push(...(await this.markSettling(registry, held, slotFailures)));
+      await this.markSettling(registry, held, slotFailures, marks);
     }
-    const slots = await this.releaseOwnership(registry, sessionId, held, slotFailures);
-    if (marked.length > 0) {
-      this.track(this.settleLater(registry, sessionId, releasedDevice, marked));
+    const slots = await this.releaseOwnership(registry, sessionId, held, slotFailures, marks.owed);
+    if (marks.marked.length > 0) {
+      this.track(this.settleLater(registry, sessionId, releasedDevice, marks.marked));
+    }
+    if (marks.owed.length > 0) {
+      const releaseOwedHold = this.holdOwner(sessionId);
+      this.track(
+        this.settleOwedMarks(registry, sessionId, releasedDevice, marks.owed, releaseOwedHold),
+      );
     }
     return {
       sessionId,
@@ -428,34 +511,66 @@ export class ManagedExecutionRelease {
     sessionId: string,
     deviceId: string,
   ): Promise<void> {
-    const registry = await this.options.registry();
-    const held = await registry.findExecutionAssignments(sessionId);
-    if (held.length === 0) {
-      return;
-    }
-    this.rememberSlots(sessionId, held);
-    const slotFailures: ManagedExecutionSlotFailure[] = [];
-    const marked = this.isSettled(sessionId, deviceId)
-      ? []
-      : await this.markSettling(registry, held, slotFailures);
-    await this.releaseOwnership(registry, sessionId, held, slotFailures);
-    for (const failure of slotFailures) {
-      logger.warn(
-        `[ManagedExecutionRelease] Slot ${failure.scopeKey}/${failure.slotIndex} bookkeeping ` +
-          `after the release of ${sessionId} failed: ${failure.error}`,
+    // The session is already gone, so only this hold keeps its slots from being claimed while
+    // its work still runs and the registry cannot be read or marked yet (#11616).
+    const releaseHold = this.holdOwner(sessionId);
+    try {
+      // A lookup that throws is retried while the work is unsettled. Once it has settled there
+      // is nothing left to fence, and the dead owner record it leaves pins nothing (#11339).
+      const found = await this.retryRegistryStep(
+        `Finding the slots of released session ${sessionId}`,
+        this.options.timer.now() + this.settlementCapMs,
+        async () => {
+          const registry = await this.options.registry();
+          return { registry, held: await registry.findExecutionAssignments(sessionId) };
+        },
+        () => this.isSettled(sessionId, deviceId),
       );
-    }
-    if (marked.length > 0) {
-      await this.settleLater(registry, sessionId, deviceId, marked);
+      if (!found.done || found.value.held.length === 0) {
+        return;
+      }
+      const { registry, held } = found.value;
+      this.rememberSlots(sessionId, held);
+      const slotFailures: ManagedExecutionSlotFailure[] = [];
+      const marks: SettlingMarks = { marked: [], owed: [] };
+      if (!this.isSettled(sessionId, deviceId)) {
+        await this.markSettling(registry, held, slotFailures, marks);
+      }
+      await this.releaseOwnership(registry, sessionId, held, slotFailures, marks.owed);
+      for (const failure of slotFailures) {
+        logger.warn(
+          `[ManagedExecutionRelease] Slot ${failure.scopeKey}/${failure.slotIndex} bookkeeping ` +
+            `after the release of ${sessionId} failed: ${failure.error}`,
+        );
+      }
+      const owedHold = marks.owed.length > 0 ? this.holdOwner(sessionId) : undefined;
+      // Every slot is fenced or has its own hold now. The watcher must read a leftover owner
+      // record as what it is (dead), or it would wait out the cap on this very hold.
+      releaseHold();
+      await Promise.all([
+        marks.marked.length > 0
+          ? this.settleLater(registry, sessionId, deviceId, marks.marked)
+          : undefined,
+        owedHold
+          ? this.settleOwedMarks(registry, sessionId, deviceId, marks.owed, owedHold)
+          : undefined,
+      ]);
+    } finally {
+      releaseHold();
     }
   }
 
-  /** Mark each held slot `settling` (with this daemon as settler) under its current binding. */
+  /**
+   * Mark each held slot `settling` (with this daemon as settler) under its current binding, adding
+   * to `marks`. A mark that throws is owed: its slot keeps its owner record, which
+   * {@link settleOwedMarks} fences or clears later.
+   */
   private async markSettling(
     registry: ManagedExecutionSlotRegistry,
     held: readonly SlotAssignmentRecord[],
     failures: ManagedExecutionSlotFailure[],
-  ): Promise<MarkedSlot[]> {
+    marks: SettlingMarks,
+  ): Promise<void> {
     const results = await Promise.allSettled(
       held.map(async (assignment): Promise<MarkedSlot | null> => {
         const key = slotKeyOf(assignment);
@@ -482,13 +597,80 @@ export class ManagedExecutionRelease {
         };
       }),
     );
-    return results.flatMap((result, index) => {
+    results.forEach((result, index) => {
       if (result.status === "rejected") {
-        failures.push({ ...slotKeyOf(held[index]), error: errorMessage(result.reason) });
-        return [];
+        failures.push({
+          ...slotKeyOf(held[index]),
+          error:
+            `could not mark settling: ${errorMessage(result.reason)}; the slot keeps its ` +
+            "owner record and the mark is retried",
+        });
+        marks.owed.push(held[index]);
+      } else if (result.value) {
+        marks.marked.push(result.value);
       }
-      return result.value ? [result.value] : [];
     });
+  }
+
+  /**
+   * Finish the slots whose `settling` mark threw (#11616). Their owner records were kept and read
+   * live under `releaseHold`, so none was claimable meanwhile. The mark is retried until it lands
+   * or the released work settles (nothing is left to fence); only then is ownership cleared and
+   * the hold released. A slot marked late gets the usual settlement watcher.
+   */
+  private async settleOwedMarks(
+    registry: ManagedExecutionSlotRegistry,
+    sessionId: string,
+    deviceId: string | null,
+    owed: readonly SlotAssignmentRecord[],
+    releaseHold: () => void,
+  ): Promise<void> {
+    const marks: SettlingMarks = { marked: [], owed: [...owed] };
+    const settled = (): boolean => this.isSettled(sessionId, deviceId);
+    try {
+      await this.retryRegistryStep(
+        `Marking the slots of released session ${sessionId} settling`,
+        this.options.timer.now() + this.settlementCapMs,
+        async () => {
+          if (settled()) {
+            return;
+          }
+          const failures: ManagedExecutionSlotFailure[] = [];
+          const retried = marks.owed;
+          marks.owed = [];
+          await this.markSettling(registry, retried, failures, marks);
+          if (marks.owed.length > 0) {
+            throw new Error(failures.map((failure) => failure.error).join("; "));
+          }
+          for (const failure of failures) {
+            logger.warn(
+              `[ManagedExecutionRelease] Slot ${failure.scopeKey}/${failure.slotIndex} of ` +
+                `released session ${sessionId}: ${failure.error}`,
+            );
+          }
+        },
+        settled,
+      );
+      if (this.closed) {
+        // The records stay; they die with this process, and so does any work still running.
+        return;
+      }
+      // Every owed slot is now fenced `settling`, or its work has settled: let go of the owner.
+      const failures: ManagedExecutionSlotFailure[] = [];
+      await this.releaseOwnership(registry, sessionId, owed, failures, []);
+      for (const failure of failures) {
+        logger.warn(
+          `[ManagedExecutionRelease] Clearing the owner of slot ${failure.scopeKey}/` +
+            `${failure.slotIndex} for released session ${sessionId} failed; the dead record ` +
+            `pins nothing (#11339): ${failure.error}`,
+        );
+      }
+    } finally {
+      releaseHold();
+    }
+    if (marks.marked.length > 0) {
+      await this.settleLater(registry, sessionId, deviceId, marks.marked);
+    }
   }
 
   /**
@@ -544,15 +726,25 @@ export class ManagedExecutionRelease {
     return null;
   }
 
-  /** Clear this session's execution ownership of every held slot; one failure never stops the rest. */
+  /**
+   * Clear this session's execution ownership of every held slot; one failure never stops the
+   * rest. A slot whose `settling` mark is owed keeps its owner (reported as not released): the
+   * fence comes first. A clear that throws leaves a record that is dead by liveness once the
+   * drain's hold ends, which pins nothing (#11339) and which the settlement watcher clears.
+   */
   private async releaseOwnership(
     registry: ManagedExecutionSlotRegistry,
     sessionId: string,
     held: readonly SlotAssignmentRecord[],
     failures: ManagedExecutionSlotFailure[],
+    owed: readonly SlotAssignmentRecord[],
   ): Promise<ManagedExecutionSlotEvidence[]> {
     const results = await Promise.allSettled(
-      held.map((assignment) => registry.releaseExecution(slotKeyOf(assignment), sessionId)),
+      held.map(async (assignment) =>
+        owed.includes(assignment)
+          ? { released: false, assignment }
+          : registry.releaseExecution(slotKeyOf(assignment), sessionId),
+      ),
     );
     return results.flatMap((result, index) => {
       if (result.status === "rejected") {
@@ -614,7 +806,9 @@ export class ManagedExecutionRelease {
     const { timer } = this.options;
     let held = [...marked];
     for (;;) {
-      const outcomes = await Promise.all(held.map((slot) => this.restoreReady(registry, slot)));
+      const outcomes = await Promise.all(
+        held.map((slot) => this.restoreReady(registry, slot, deadline)),
+      );
       held = held.filter((_slot, index) => outcomes[index] === "owner_live");
       if (held.length === 0 || this.closed) {
         return;
@@ -633,41 +827,111 @@ export class ManagedExecutionRelease {
     }
   }
 
-  /** Resolves to `owner_live` when a live owner record kept the slot `settling`: check again. */
+  /**
+   * Resolves to `owner_live` when a live owner record kept the slot `settling`: check again. A
+   * registry read or write that throws is retried, never taken as done (#11616): the released
+   * work has settled, so nothing else returns this slot to `ready` while this daemon lives (the
+   * redrive leaves a live settler's entry alone and `--force` refuses inside the cap).
+   */
   private async restoreReady(
     registry: ManagedExecutionSlotRegistry,
     slot: MarkedSlot,
+    deadline: number,
   ): Promise<"done" | "owner_live"> {
-    try {
-      const current = await registry.getAssignment(slot.key);
-      const atMark =
-        current !== null &&
-        current.state === "settling" &&
-        current.generation === slot.generation &&
-        current.stableDeviceId === slot.stableDeviceId;
-      if (!atMark) {
-        await this.closeSupersededEntry(registry, slot, current);
-        return "done";
-      }
-      if (!(await this.clearLeftoverOwner(registry, slot, current.execOwner))) {
-        // Still this watcher's to settle: the entry stays open and guarded in flight.
-        return "owner_live";
-      }
-      const updated = await this.restoreSlotState(registry, slot);
-      if (updated.kind !== "updated" && updated.kind !== "advanced") {
-        logger.warn(
-          `[ManagedExecutionRelease] Slot ${slot.key.scopeKey}/${slot.key.slotIndex} settled but ` +
-            `could not return to ready: ${updated.kind}`,
-        );
-      }
-    } catch (error) {
+    const restored = await this.retryRegistryStep(
+      `Returning settled slot ${slot.key.scopeKey}/${slot.key.slotIndex} to ready`,
+      deadline,
+      () => this.restoreReadyOnce(registry, slot),
+    );
+    // Not done only when this daemon is closing: the slot stays `settling` for the next daemon.
+    return restored.done ? restored.value : "done";
+  }
+
+  /** One attempt at {@link restoreReady}; throws when the registry does. */
+  private async restoreReadyOnce(
+    registry: ManagedExecutionSlotRegistry,
+    slot: MarkedSlot,
+  ): Promise<"done" | "owner_live"> {
+    const current = await registry.getAssignment(slot.key);
+    const atMark =
+      current !== null &&
+      current.state === "settling" &&
+      current.generation === slot.generation &&
+      current.stableDeviceId === slot.stableDeviceId;
+    if (!atMark) {
+      await this.closeSupersededEntry(registry, slot, current);
+      return "done";
+    }
+    if (!(await this.clearLeftoverOwner(registry, slot, current.execOwner))) {
+      // Still this watcher's to settle: the entry stays open and guarded in flight.
+      return "owner_live";
+    }
+    const updated = await this.restoreSlotState(registry, slot);
+    if (updated.kind !== "updated" && updated.kind !== "advanced") {
       logger.warn(
-        `[ManagedExecutionRelease] Returning slot ${slot.key.scopeKey}/${slot.key.slotIndex} to ` +
-          `ready failed; it stays settling: ${errorMessage(error)}`,
-        error,
+        `[ManagedExecutionRelease] Slot ${slot.key.scopeKey}/${slot.key.slotIndex} settled but ` +
+          `could not return to ready: ${updated.kind}`,
       );
     }
     return "done";
+  }
+
+  /**
+   * Run one registry step of the drain, retrying while it throws (#11616). Retries follow the
+   * injected backoff until `deadline` (the settlement cap) and the slow re-check cadence after
+   * it, so a busy registry is never hammered and the step still lands whenever the registry
+   * recovers. It stops, without a further registry call, when this daemon closes or when
+   * `stopWhen` says the step is no longer needed; `done: false` then tells the caller the step
+   * did NOT happen, so it must not go on as if it had.
+   */
+  private async retryRegistryStep<T>(
+    what: string,
+    deadline: number,
+    step: () => Promise<T>,
+    stopWhen?: () => boolean,
+  ): Promise<{ done: true; value: T } | { done: false }> {
+    const { timer } = this.options;
+    let warnedPastCap = false;
+    const result = await this.registryRetry.execute(step, {
+      maxAttempts: Number.MAX_SAFE_INTEGER,
+      signal: this.closing.signal,
+      shouldRetry: () => !(stopWhen?.() ?? false),
+      delays: (attempt) =>
+        timer.now() >= deadline
+          ? this.settlementSlowPollMs
+          : this.registryRetryBackoff.delayForAttempt(attempt),
+      onRetry: (error, attempt, delayMs) => {
+        if (attempt === 1) {
+          logger.warn(
+            `[ManagedExecutionRelease] ${what} failed; retrying in ${delayMs}ms: ${error.message}`,
+            error,
+          );
+        }
+        if (timer.now() >= deadline && !warnedPastCap) {
+          warnedPastCap = true;
+          logger.warn(
+            `[ManagedExecutionRelease] ${what} has kept failing past the ` +
+              `${this.settlementCapMs}ms settlement cap; it is retried every ` +
+              `${this.settlementSlowPollMs}ms until the registry recovers. ` +
+              "`reset-slot-scope --force` or a daemon restart also recovers the slot: " +
+              error.message,
+            error,
+          );
+        }
+      },
+      expectedFailure: { reason: "the drain reports why it stopped retrying a registry step" },
+    });
+    if (result.success) {
+      return { done: true, value: result.value as T };
+    }
+    if (!this.closed) {
+      logger.warn(
+        `[ManagedExecutionRelease] ${what} failed and is no longer needed, so it is not ` +
+          `retried: ${errorMessage(result.error)}`,
+        result.error,
+      );
+    }
+    return { done: false };
   }
 
   /**
@@ -708,16 +972,15 @@ export class ManagedExecutionRelease {
     if (!journal || slot.journalEntryId === undefined) {
       return registry.updateSlotState(slot.key, binding, "ready");
     }
-    try {
-      return await registry.advanceSlotJournal(slot.journalEntryId, {
-        owner: this.settlerIdentity(),
-        expectedPhase: "intent",
-        phase: "committed",
-        assignment: { kind: "state", expected: binding, state: "ready" },
-      });
-    } finally {
-      journal.inFlight.delete(slot.journalEntryId);
-    }
+    // A throw keeps the entry guarded in flight: the watcher retries it (#11616).
+    const advanced = await registry.advanceSlotJournal(slot.journalEntryId, {
+      owner: this.settlerIdentity(),
+      expectedPhase: "intent",
+      phase: "committed",
+      assignment: { kind: "state", expected: binding, state: "ready" },
+    });
+    journal.inFlight.delete(slot.journalEntryId);
+    return advanced;
   }
 
   /**
@@ -740,15 +1003,39 @@ export class ManagedExecutionRelease {
       !current ||
       current.generation !== slot.generation ||
       current.stableDeviceId !== slot.stableDeviceId;
-    try {
-      await registry.advanceSlotJournal(slot.journalEntryId, {
-        owner: this.settlerIdentity(),
-        expectedPhase: "intent",
-        phase: rebound ? "rolled_back" : "committed",
-      });
-    } finally {
-      journal.inFlight.delete(slot.journalEntryId);
+    // A throw keeps the entry guarded in flight: the watcher retries it (#11616).
+    await registry.advanceSlotJournal(slot.journalEntryId, {
+      owner: this.settlerIdentity(),
+      expectedPhase: "intent",
+      phase: rebound ? "rolled_back" : "committed",
+    });
+    journal.inFlight.delete(slot.journalEntryId);
+  }
+
+  /**
+   * Keep `sessionId`'s owner records reading live until the returned release runs (idempotent).
+   * Counted, so overlapping holders of one session id never drop each other's hold.
+   */
+  private holdOwner(sessionId: string): () => void {
+    const holders = this.ownerHoldCounts.get(sessionId) ?? 0;
+    this.ownerHoldCounts.set(sessionId, holders + 1);
+    if (holders === 0) {
+      this.ownerHolds.add(sessionId);
     }
+    let released = false;
+    return () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      const remaining = (this.ownerHoldCounts.get(sessionId) ?? 1) - 1;
+      if (remaining > 0) {
+        this.ownerHoldCounts.set(sessionId, remaining);
+        return;
+      }
+      this.ownerHoldCounts.delete(sessionId);
+      this.ownerHolds.delete(sessionId);
+    };
   }
 
   private settlerIdentity(): SlotProcessIdentity {

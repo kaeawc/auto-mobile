@@ -110,7 +110,13 @@ export class ManagedExecutionScenario {
     const scenario = new ManagedExecutionScenario();
     scenario.installSeams();
     scenario.livePids.add(scenario.pid);
-    scenario.restart = await RestartScenario.start(options);
+    try {
+      scenario.restart = await RestartScenario.start(options);
+    } catch (error) {
+      // The file shares its test process: never leave the module seams behind a failed start.
+      scenario.restoreSeams();
+      throw error;
+    }
     scenario.installExclusion();
     // The process-wide execution tracker bounds the drain's wait for in-flight work on its own
     // clock: put it on the scenario clock, so the 500 ms drain budget passes when the scenario's does.
@@ -421,12 +427,19 @@ export class ManagedExecutionScenario {
 
   async stop(): Promise<void> {
     // Open calls and proxies may wait on timers: end them with the clock running.
-    const gates = Reflect.get(this.scenario, "gates") as Map<string, unknown>;
-    gates.clear();
-    await this.during(this.restart.stop(), 60_000, 500).catch(() => undefined);
-    this.restoreExclusion?.();
-    this.restoreTrackerTimer?.();
-    await this.shared?.close();
+    try {
+      const gates = Reflect.get(this.scenario, "gates") as Map<string, unknown>;
+      gates.clear();
+      await this.during(this.restart.stop(), 60_000, 500).catch(() => undefined);
+      this.restoreExclusion?.();
+      await this.shared?.close();
+    } finally {
+      this.restoreTrackerTimer?.();
+      this.restoreSeams();
+    }
+  }
+
+  private restoreSeams(): void {
     for (const spy of this.spies.splice(0)) {
       spy.mockRestore();
     }

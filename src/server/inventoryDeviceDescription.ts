@@ -1,4 +1,5 @@
 import type { BootedDevice } from "../models";
+import type { TransitionalSimulatorState } from "../models/TransitionalSimulator";
 import type { PooledDevice } from "../daemon/devicePool";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
 import {
@@ -17,6 +18,24 @@ export interface AdbOfflineHold {
   avdName: string;
 }
 
+/** A held iOS simulator `simctl` lists `Booting` or `Shutting Down` (#11573). */
+export interface SimulatorTransitionHold {
+  simulatorState: TransitionalSimulatorState;
+}
+
+/** A held device its platform still lists in a transitional state, keyed by device id. */
+export type TransitionalHold = AdbOfflineHold | SimulatorTransitionHold;
+
+/** Split a {@link TransitionalHold} into the two description inputs it can supply. */
+export function transitionalHoldInputs(
+  hold: TransitionalHold | undefined,
+): Pick<InventoryDeviceInput, "adbOffline" | "simulatorState"> {
+  if (!hold) {
+    return {};
+  }
+  return "adbState" in hold ? { adbOffline: hold } : { simulatorState: hold.simulatorState };
+}
+
 export interface InventoryDeviceInput {
   device: BootedDevice;
   pooled?: PooledDevice;
@@ -33,6 +52,8 @@ export interface InventoryDeviceInput {
   poolStatus?: BootedInput["poolStatus"];
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>;
   adbOffline?: AdbOfflineHold;
+  /** `simctl` lists this held simulator `Booting` or `Shutting Down` (#11573). */
+  simulatorState?: TransitionalSimulatorState;
   /** The AVD name the Android transport-alias fold resolved for this serial, when it did. */
   transportAvdName?: string;
 }
@@ -52,6 +73,7 @@ export function describeInventoryDevice(input: InventoryDeviceInput) {
   const description = describeDevice({
     kind: "booted",
     adbOfflineState: input.adbOffline?.adbState,
+    simulatorState: input.simulatorState,
     device: input.device,
     pooled: input.pooled,
     unhealthy: input.unhealthy,

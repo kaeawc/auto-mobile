@@ -1,5 +1,9 @@
-import { adbOfflineHeldDevices } from "./adbOfflineHeldDevices";
-import { describeInventoryDevice, type AdbOfflineHold } from "./inventoryDeviceDescription";
+import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
+import {
+  describeInventoryDevice,
+  type AdbOfflineHold,
+  type SimulatorTransitionHold,
+} from "./inventoryDeviceDescription";
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { androidTransportIdentityAdbFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
@@ -61,7 +65,14 @@ import {
   type IosRunnerCommandRequirements,
 } from "../features/observe/ios/iosRunnerFeatureCommands";
 import { resolveApkChecksum, resolveIpaChecksum } from "../constants/release";
-import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
+import {
+  type DiscoverySource,
+  discoverySourceOutcome,
+  expectingPooledSources,
+  incompleteDiscoverySources,
+  notApplicableDiscoverySources,
+  sourcesForPlatform,
+} from "../utils/discoverySource";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
   AndroidAvdProvenanceCache,
@@ -264,7 +275,27 @@ export interface BootedDevicesResourceContent {
 
 interface PlatformObservation {
   observationComplete: boolean;
+  /**
+   * The tooling behind this observation is not installed on this host (no adb, not macOS, no
+   * Xcode, no devicectl), so "no devices" is exact and retrying cannot change it (#11605).
+   */
+  notApplicable?: true;
   discoveryError?: DeviceDiscoveryError;
+}
+
+/** One source's observation: complete unless the source exists on this host and did not finish. */
+function sourceObservation(
+  discovery: BootedDeviceDiscovery,
+  source: DiscoverySource,
+): PlatformObservation {
+  const outcome = discoverySourceOutcome(discovery, source);
+  return {
+    observationComplete: outcome !== "incomplete",
+    ...(outcome === "not_applicable" ? { notApplicable: true as const } : {}),
+    ...(outcome === "incomplete" && discovery.sourceErrors?.[source]
+      ? { discoveryError: discovery.sourceErrors[source] }
+      : {}),
+  };
 }
 
 type PoolDeviceStatus = "idle" | "assigned" | "error";
@@ -428,13 +459,36 @@ function bootedDiscoveryError(
   discovery: BootedDeviceDiscovery,
   platform: Platform,
 ): DeviceDiscoveryError {
+  // Prefer a real failure: an `unavailable` error is tooling this host does not have, and explains
+  // an incomplete sweep only when a pooled device depends on that tooling.
+  const errors = [
+    discovery.discoveryErrors?.[platform],
+    platform === "ios" ? discovery.sourceErrors?.["ios-physical"] : undefined,
+  ].filter((error) => error !== undefined);
   return (
-    discovery.discoveryErrors?.[platform] ??
-    (platform === "ios" ? discovery.sourceErrors?.["ios-physical"] : undefined) ?? {
+    errors.find((error) => error.code !== "unavailable") ??
+    errors[0] ?? {
       code: "failed",
       message: `${platform === "android" ? "Android" : "iOS"} booted-device discovery did not complete.`,
     }
   );
+}
+
+/** A platform's observation: complete unless one of its sources exists here and did not finish. */
+function platformObservation(
+  discovery: BootedDeviceDiscovery,
+  platform: Platform,
+): PlatformObservation {
+  if (incompleteDiscoverySources(discovery, [platform]).length > 0) {
+    return {
+      observationComplete: false,
+      discoveryError: bootedDiscoveryError(discovery, platform),
+    };
+  }
+  const noneApply =
+    notApplicableDiscoverySources(discovery, [platform]).length ===
+    sourcesForPlatform(platform).length;
+  return { observationComplete: true, ...(noneApply ? { notApplicable: true as const } : {}) };
 }
 
 /**
@@ -448,9 +502,11 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
   const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
   for (const platform of ["android", "ios"] as Platform[]) {
     try {
-      const discovery =
-        await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
       const pool = readDaemonDeviceContext().devicePool;
+      const discovery = expectingPooledSources(
+        await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform),
+        pool?.getAllDevices(),
+      );
       const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
       const normalized =
         platform === "android"
@@ -459,11 +515,7 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
             : aliases.fold(discovery.devices, await aliases.prepare(discovery.devices), new Set())
           : discovery.devices;
       devices.push(...normalized);
-      const complete = sourcesForPlatform(platform).every(
-        (source) =>
-          discovery.succeededSources?.has(source) ?? discovery.succeededPlatforms.has(platform),
-      );
-      if (complete) {
+      if (incompleteDiscoverySources(discovery, [platform]).length === 0) {
         succeededPlatforms.add(platform);
       } else {
         discoveryErrors[platform] = bootedDiscoveryError(discovery, platform);
@@ -520,7 +572,11 @@ function toBootedDeviceInfo(
   device: BootedDevice,
   poolContext: PoolDeviceContext | undefined,
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
-  extras: { adbOffline?: AdbOfflineHold; transportAvdName?: string } = {},
+  extras: {
+    adbOffline?: AdbOfflineHold;
+    simulatorState?: SimulatorTransitionHold["simulatorState"];
+    transportAvdName?: string;
+  } = {},
 ): BootedDeviceInfo {
   const description = describeInventoryDevice({
     device,
@@ -593,6 +649,8 @@ interface AdbOfflineHeldInput {
   deviceManager: PlatformDeviceManager;
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>;
   transportAvdName: (deviceId: string) => string | undefined;
+  /** Receives the failure when the held-device state probe cannot answer (#11573). */
+  onProbeFailure: (failure: DeviceDiscoveryError) => void;
 }
 
 /**
@@ -609,6 +667,7 @@ async function adbOfflineHeldDeviceDescriptions(
     discovered: input.discovered,
     devicePool: input.devicePool,
     deviceManager: input.deviceManager,
+    onProbeFailure: input.onProbeFailure,
   });
   return held.map(({ device, avdName, adbState }) =>
     toBootedDeviceInfo(
@@ -624,6 +683,34 @@ async function adbOfflineHeldDeviceDescriptions(
         adbOffline: { adbState, avdName },
         transportAvdName: input.transportAvdName(device.deviceId),
       },
+    ),
+  );
+}
+
+/** Held simulators `simctl` lists Booting / Shutting Down, described like any booted row (#11573). */
+function transitionalSimulatorDescriptions(input: {
+  discovery: BootedDeviceDiscovery;
+  devicePool: DevicePool | null;
+  sessionsById: Map<string, Session> | null;
+  resolveDeviceSessionUuid: (deviceId: string) => string | null;
+  configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>;
+}): BootedDeviceInfo[] {
+  const { discovery, devicePool } = input;
+  return transitionalHeldSimulators({
+    transitional: discovery.transitionalSimulators,
+    discovered: discovery.devices,
+    devicePool,
+  }).map(({ device, simulatorState }) =>
+    toBootedDeviceInfo(
+      device,
+      resolvePoolDeviceContext(
+        devicePool,
+        device,
+        input.sessionsById,
+        input.resolveDeviceSessionUuid,
+      ),
+      input.configuredImages,
+      { simulatorState },
     ),
   );
 }
@@ -870,6 +957,41 @@ interface PlatformDiscoveryResult {
   sourceObservations: Partial<Record<DiscoverySource, PlatformObservation>>;
 }
 
+/** The platform's observation: complete only when discovery and the held-device probe both were. */
+function platformDiscoveryResult(input: {
+  platform: Platform;
+  devices: BootedDeviceInfo[];
+  discovery: BootedDeviceDiscovery;
+  heldProbeFailure: DeviceDiscoveryError | undefined;
+}): PlatformDiscoveryResult {
+  const { platform, devices, discovery, heldProbeFailure } = input;
+  // Discovery completeness is the one classifier's (#11605): tooling that is not installed is not
+  // applicable, never incomplete. A failed held-device probe is an installed tool that failed, so
+  // it makes every source of the platform unknown whatever discovery said.
+  const discoveryComplete = incompleteDiscoverySources(discovery, [platform]).length === 0;
+  const complete = discoveryComplete && heldProbeFailure === undefined;
+  const observed = (source: DiscoverySource): PlatformObservation => {
+    const observation = sourceObservation(discovery, source);
+    return heldProbeFailure === undefined
+      ? observation
+      : {
+          observationComplete: false,
+          ...(observation.discoveryError ? { discoveryError: observation.discoveryError } : {}),
+        };
+  };
+  return {
+    devices,
+    succeededPlatforms: complete ? new Set([platform]) : new Set(),
+    sourceObservations: Object.fromEntries(
+      sourcesForPlatform(platform).map((source) => [source, observed(source)]),
+    ),
+    observation:
+      discoveryComplete && heldProbeFailure !== undefined
+        ? { observationComplete: false, discoveryError: heldProbeFailure }
+        : platformObservation(discovery, platform),
+  };
+}
+
 async function discoverBootedDevicesForPlatform(
   platform: Platform,
   devicePool: DevicePool | null,
@@ -883,10 +1005,13 @@ async function discoverBootedDevicesForPlatform(
   const { resolveDeviceSessionUuid, timer } = options;
   try {
     const deviceManager = PlatformDeviceManagerFactory.getInstance();
-    const rawDiscovery = await deviceManager.getBootedDevicesDetailed(platform, {
-      coalesceInventoryEnrichment: true,
-      signal: getAbortSignal(),
-    });
+    const rawDiscovery = expectingPooledSources(
+      await deviceManager.getBootedDevicesDetailed(platform, {
+        coalesceInventoryEnrichment: true,
+        signal: getAbortSignal(),
+      }),
+      devicePool?.getAllDevices(),
+    );
     getAbortSignal()?.throwIfAborted();
     const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
     // The same lookup the listDevices tool applies, so both surfaces name the same stable AVD.
@@ -937,9 +1062,8 @@ async function discoverBootedDevicesForPlatform(
       timer,
     );
     getAbortSignal()?.throwIfAborted();
-    const complete = discovery.succeededSources
-      ? sourcesForPlatform(platform).every((source) => discovery.succeededSources!.has(source))
-      : discovery.succeededPlatforms.has(platform);
+    // A held device discovery misses and the state probe cannot place is unknown, not absent.
+    let heldProbeFailure: DeviceDiscoveryError | undefined;
     const devices = discovery.devices.map((device) =>
       withIdentityQuarantineMarker(
         toBootedDeviceInfo(
@@ -961,6 +1085,17 @@ async function discoverBootedDevicesForPlatform(
       configuredImages,
       transportAvdName: (deviceId) =>
         devicePool?.getAndroidTransportAvdName(deviceId) ?? aliases.avdName(deviceId),
+      onProbeFailure: (failure) => {
+        heldProbeFailure = failure;
+      },
+    });
+    // Held simulators `simctl` lists Booting / Shutting Down are not booted either (#11573).
+    const transitionalSimulators = transitionalSimulatorDescriptions({
+      discovery,
+      devicePool,
+      sessionsById,
+      resolveDeviceSessionUuid,
+      configuredImages,
     });
     // A held AVD re-cold-booting while adb still lists its old serial offline would otherwise
     // appear twice under one stableId (#11132). The held row carries the session and pool status
@@ -971,32 +1106,9 @@ async function discoverBootedDevicesForPlatform(
         (device) => !heldStableIds.has(device.identity.stableId),
       ),
       ...offlineHeld,
+      ...transitionalSimulators,
     );
-    return {
-      devices,
-      succeededPlatforms: complete ? new Set([platform]) : new Set(),
-      sourceObservations: Object.fromEntries(
-        sourcesForPlatform(platform).map((source) => [
-          source,
-          {
-            observationComplete: discovery.succeededSources
-              ? discovery.succeededSources.has(source)
-              : discovery.succeededPlatforms.has(platform),
-            ...(!(
-              discovery.succeededSources?.has(source) ?? discovery.succeededPlatforms.has(platform)
-            ) && discovery.sourceErrors?.[source]
-              ? { discoveryError: discovery.sourceErrors[source] }
-              : {}),
-          },
-        ]),
-      ),
-      observation: complete
-        ? { observationComplete: true }
-        : {
-            observationComplete: false,
-            discoveryError: bootedDiscoveryError(discovery, platform),
-          },
-    };
+    return platformDiscoveryResult({ platform, devices, discovery, heldProbeFailure });
   } catch (error) {
     const platformName = platform === "android" ? "Android" : "iOS";
     logger.warn(`[BootedDeviceResources] Failed to get booted ${platformName} devices: ${error}`);
@@ -1101,7 +1213,9 @@ function isProbeableDevice(device: BootedDeviceInfo): boolean {
     device.runtime.deviceId !== null &&
     device.identityUnresolved !== true &&
     // adb lists it offline (#11118): every probe would just time out against it.
-    device.runtime.connection === undefined
+    device.runtime.connection === undefined &&
+    // A simulator mid-transition has no service to probe (#11573).
+    device.runtime.simulatorState === undefined
   );
 }
 
@@ -1483,17 +1597,14 @@ async function computeBootedDevicesForPlatforms(
           onDiscovery: (known, snapshot) => {
             devices.push(...known);
             pending.delete("discovery");
-            const complete = sourcesForPlatform(platform).every(
-              (source) =>
-                snapshot.succeededSources?.has(source) ?? snapshot.succeededPlatforms.has(platform),
-            );
+            const complete = incompleteDiscoverySources(snapshot, [platform]).length === 0;
             platformObservations[platform] = { observationComplete: complete };
             if (complete) {
               succeededPlatforms.add(platform);
             }
             for (const source of sourcesForPlatform(platform)) {
               sourceObservations[source] = {
-                observationComplete: snapshot.succeededSources?.has(source) ?? complete,
+                observationComplete: discoverySourceOutcome(snapshot, source) !== "incomplete",
               };
             }
           },

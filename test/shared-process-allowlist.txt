@@ -102,12 +102,14 @@ test/daemon/deviceSessionResolver.test.ts
 test/daemon/deviceShutdownReservations.test.ts
 test/daemon/directModeStartup.test.ts
 test/daemon/disconnectMonitor-physicalImmediate.test.ts
+test/daemon/disconnectMonitor-transitionalSimulator.test.ts
 test/daemon/emulatorLossIncident.test.ts
 test/daemon/emulatorLossIncidentLedger.test.ts
 test/daemon/executionOwnerWatch.test.ts
 test/daemon/explicitReleaseCutCall.test.ts
 test/daemon/explicitReleaseOfUnrecoveredRestartRow.test.ts
 test/daemon/failuresPushSocketServer.test.ts
+test/daemon/fakeDaemonClientContract.test.ts
 test/daemon/findAvailableDaemonPort.test.ts
 test/daemon/forwardLeaseHolders.test.ts
 test/daemon/freshStartAlreadyBoundRefusal.test.ts
@@ -116,6 +118,7 @@ test/daemon/gestureOwnership.test.ts
 test/daemon/getApplePreparationTimeout.property.test.ts
 test/daemon/heartbeatExpiryPersistence.test.ts
 test/daemon/heartbeatReapUpgradesNonTerminalRelease.test.ts
+test/daemon/heldSessionsLateRehydration.test.ts
 test/daemon/hierarchyStreamDiff.property.test.ts
 test/daemon/hierarchyStreamDiff.test.ts
 test/daemon/idleDeviceReaper.test.ts
@@ -189,7 +192,9 @@ test/daemon/sessionHeartbeatExecutionVetoCeiling.test.ts
 test/daemon/sessionHoldDiagnostics.test.ts
 test/daemon/sessionInfoWallClock.test.ts
 test/daemon/sessionManager.displayPin.test.ts
+test/daemon/sessionManager.supersededRowReassertRetry.test.ts
 test/daemon/sessionSuspectGrace.test.ts
+test/daemon/shuttingDownFrameTypedFields.test.ts
 test/daemon/socketPaths.test.ts
 test/daemon/socketRegistryCoverage.test.ts
 test/daemon/socketRequestAdmission.test.ts
@@ -698,6 +703,7 @@ test/helpers/captureStageBaseline.test.ts
 test/helpers/captureStageTimeline.test.ts
 test/helpers/fastCheckConfig.test.ts
 test/helpers/iosVideoRecordingSessionCleanup.test.ts
+test/helpers/livenessScenarioHarness.test.ts
 test/helpers/sessionOwnershipHeartbeat.test.ts
 test/helpers/warmedTests.test.ts
 test/helpers/webrtcDeviceCaptureHelpers.test.ts
@@ -1191,6 +1197,7 @@ test/utils/ios-cmdline-tools/simctl-client.listApps.test.ts
 test/utils/ios-cmdline-tools/simctl-client.runtimeResolution.test.ts
 test/utils/ios-cmdline-tools/simctl-client.uninstallBound.test.ts
 test/utils/ios-cmdline-tools/simctl.bootedCacheObservedAt.test.ts
+test/utils/ios-cmdline-tools/simctl.transitionalListing.test.ts
 test/utils/ios-cmdline-tools/simctlVersion.test.ts
 test/utils/iosCtrlProxyOverride.test.ts
 test/utils/iosSimulatorContinuity.test.ts

@@ -55,6 +55,7 @@ import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
 import {
   deviceAlreadyAssignedToAnotherSessionError,
   deviceAssignedToOtherSessionError,
+  InputDeviceOwnedError,
 } from "./inputDeviceOwnership";
 import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import {
@@ -70,7 +71,7 @@ import {
   waitForDeviceReadyOrCancel,
 } from "../devices/deviceUtils";
 import { BootedDeviceDiscoveryIncompleteError } from "../devices/deviceBootService";
-import { adbOfflineHeldDevices } from "../server/adbOfflineHeldDevices";
+import { adbOfflineHeldDevices, transitionalHeldSimulators } from "../server/adbOfflineHeldDevices";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -109,6 +110,9 @@ import {
 } from "../devices/deviceIdentityEvidence";
 import {
   didSourceSucceedForDevice,
+  expectingPooledSources,
+  incompleteDiscoverySources,
+  isDeviceSourceIncomplete,
   discoverySourceFor,
   type DiscoveryCompleteness,
 } from "../utils/discoverySource";
@@ -5898,27 +5902,29 @@ export class DevicePool {
 
   /**
    * The pooled device ids the booted-devices resource and listDevices would list: what discovery
-   * reports now plus held Android devices adb still lists offline. A pooled entry outside this set
+   * reports now plus held Android devices adb still lists offline and held simulators `simctl` lists
+   * Booting / Shutting Down (#11573). A pooled entry outside this set
    * is a phantom (shut down since the last refresh) and must not be counted (#11568). Only
    * platforms with pooled entries are read, through the manager's own discovery path (adb's
    * device-list cache applies), so a stats read adds one listing per such platform and no
    * unbounded per-device call. An incomplete
    * listing throws {@link BootedDeviceDiscoveryIncompleteError}: the count is unknown, never the
-   * stale pool tally and never zero.
+   * stale pool tally and never zero. A source whose tooling is not installed on this host is not
+   * incomplete (#11605) -- unless a pooled device depends on it, which proves the tooling existed.
    */
   private async readLiveInventoryDeviceIds(): Promise<Set<string>> {
     const live = new Set<string>();
+    const read = new Map<Platform, BootedDeviceDiscovery>();
     for (const platform of ["android", "ios"] as const) {
       if (this.getDevicesByPlatform(platform).length === 0) {
         continue;
       }
-      const discovery = await this.deviceManager.getBootedDevicesDetailed(platform, {
-        signal: getAbortSignal(),
-      });
+      const discovery = await this.readInventoryDiscovery(platform);
+      read.set(platform, discovery);
       // Only a pooled device whose own discovery source failed is unknown; a failure of a source
       // none of them depends on (devicectl for a simulator-only pool) leaves the answer exact.
-      const unknown = this.getDevicesByPlatform(platform).some(
-        (pooled) => !didSourceSucceedForDevice(discovery, platform, pooled.id),
+      const unknown = this.getDevicesByPlatform(platform).some((pooled) =>
+        isDeviceSourceIncomplete(discovery, platform, pooled.id),
       );
       if (unknown) {
         throw new BootedDeviceDiscoveryIncompleteError(
@@ -5936,12 +5942,51 @@ export class DevicePool {
         discovered: devices,
         devicePool: this,
         deviceManager: this.deviceManager,
+        // A held device discovery misses and the probe cannot place is unknown, never zero.
+        onProbeFailure: "throw",
       });
       for (const held of offlineHeld) {
         live.add(held.device.deviceId);
       }
+      for (const held of transitionalHeldSimulators({
+        transitional: discovery.transitionalSimulators,
+        discovered: devices,
+        devicePool: this,
+      })) {
+        live.add(held.device.deviceId);
+      }
+    }
+    if (live.size === 0) {
+      await this.assertEmptyInventoryIsKnown(read);
     }
     return live;
+  }
+
+  private async readInventoryDiscovery(platform: Platform): Promise<BootedDeviceDiscovery> {
+    return expectingPooledSources(
+      await this.deviceManager.getBootedDevicesDetailed(platform, { signal: getAbortSignal() }),
+      this.getAllDevices(),
+    );
+  }
+
+  /**
+   * "No devices" is only an answer when every source that exists on this host completed, as on
+   * the booted-devices resource. With nothing live to count, a platform the caller skipped (no
+   * pooled entries) may be empty because its discovery failed, so read it: a failed source makes
+   * the count unknown, a source that is not installed leaves it a true zero (#11605).
+   */
+  private async assertEmptyInventoryIsKnown(
+    read: ReadonlyMap<Platform, BootedDeviceDiscovery>,
+  ): Promise<void> {
+    for (const platform of ["android", "ios"] as const) {
+      const discovery = read.get(platform) ?? (await this.readInventoryDiscovery(platform));
+      if (incompleteDiscoverySources(discovery, [platform]).length > 0) {
+        throw new BootedDeviceDiscoveryIncompleteError(
+          platform,
+          discovery.discoveryErrors?.[platform] ?? discovery.sourceErrors?.["ios-physical"],
+        );
+      }
+    }
   }
 
   /** Re-read which idle Android devices other daemons drive, for this allocation pass. */
@@ -7968,6 +8013,22 @@ export class DevicePool {
   ): Promise<void> {
     const deviceId = device.id;
     const { allowSessionRebind, expectedExistingSessionDeviceId } = options;
+    // A connection may not mint or rebind a label session of a base another connection owns
+    // (#11586): the bind records its caller as the owner, and a label's owner is its base's.
+    if (
+      caller.mcpSessionId !== undefined &&
+      this.ownershipSessionId(sessionId) !== sessionId &&
+      this.hasConnectedMcpSessionOwner(sessionId, caller.mcpSessionId)
+    ) {
+      throw new InputDeviceOwnedError(
+        "Device acquisition",
+        deviceId,
+        sessionId,
+        undefined,
+        `Session ${sessionId} is a device label of a session another connected client owns, ` +
+          `so device '${deviceId}' cannot be bound to it. Acquire the device under your own session.`,
+      );
+    }
     const assignmentSnapshot = this.snapshotSessionAssignment(device);
     const previousSession = this.sessionManager.getSession(sessionId);
     this.assertExpectedRecoverySession(
@@ -8426,7 +8487,7 @@ export class DevicePool {
       return false;
     }
     if (
-      !this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId)?.has(session.sessionId) ||
+      !this.hasAcquiredDeviceSession(mcpSessionId, session.sessionId) ||
       !this.isSessionAssignmentCurrent(device, session) ||
       !this.sessionManager.isAdmittedForAutomation(session)
     ) {
@@ -8471,15 +8532,46 @@ export class DevicePool {
       `[DevicePool] MCP connection ${mcpSessionId} closed while binding session ${sessionId}; not recording it as owner`,
     );
     if (!this.hasConnectedMcpSessionOwner(sessionId)) {
-      this.ownerDisconnectRelease.ownerDisconnected(sessionId, mcpSessionId);
+      this.ownerDisconnectRelease.ownerDisconnected(
+        this.ownershipSessionId(sessionId),
+        mcpSessionId,
+      );
     }
     return false;
   }
 
-  private recordMcpSessionOwnership(mcpSessionId: string | undefined, sessionId: string): void {
+  /**
+   * The session whose owning connection speaks for `sessionId` (#11586). A derived
+   * `${base}:${label}` session records no owner of its own and counts as its base (#11542), so
+   * every read and write of connection ownership keys on this id: judging or recording a derived
+   * session is judging or recording its base. Any other id is its own.
+   */
+  private ownershipSessionId(sessionId: string): string {
+    // A label session published under another label session resolves to the outermost base. Each
+    // hop is a strict prefix of the last, so this ends.
+    for (let current = sessionId; ;) {
+      const base = resolveToolSelectionBaseSessionUuid(current, this.sessionManager) ?? current;
+      if (base === current) {
+        return current;
+      }
+      current = base;
+    }
+  }
+
+  /** Whether `mcpSessionId` acquired (or restored as its own) the owner of `sessionId`. */
+  private hasAcquiredDeviceSession(mcpSessionId: string, sessionId: string): boolean {
+    const acquired = this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId);
+    return acquired !== undefined && acquired.has(this.ownershipSessionId(sessionId));
+  }
+
+  private recordMcpSessionOwnership(
+    mcpSessionId: string | undefined,
+    namedSessionId: string,
+  ): void {
     if (!mcpSessionId) {
       return;
     }
+    const sessionId = this.ownershipSessionId(namedSessionId);
     this.ownerDisconnectRelease.cancel(sessionId);
     // One owning connection per session (#11107): recording ownership moves it off any other
     // connection, so the previous owner's disconnect can no longer be suppressed by a duplicate.
@@ -8675,13 +8767,16 @@ export class DevicePool {
     mcpSessionId: string | undefined,
     deviceId: string,
   ): string | undefined {
-    const acquired = mcpSessionId ? this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId) : null;
-    const device = acquired ? this.devices.get(deviceId) : undefined;
+    const device =
+      mcpSessionId && this.mcpSessionAcquiredDeviceSessions.has(mcpSessionId)
+        ? this.devices.get(deviceId)
+        : undefined;
     const session = device?.sessionId ? this.sessionManager.getSession(device.sessionId) : null;
     if (
+      !mcpSessionId ||
       !device ||
       !session ||
-      !acquired?.has(session.sessionId) ||
+      !this.hasAcquiredDeviceSession(mcpSessionId, session.sessionId) ||
       !this.isSessionAssignmentCurrent(device, session) ||
       !this.sessionManager.isAdmittedForAutomation(session)
     ) {
@@ -8758,7 +8853,13 @@ export class DevicePool {
           this.isSessionAssignmentCurrent(device, session) &&
           this.sessionManager.isAdmittedForAutomation(session)
         ) {
-          if (!this.mayRestoreMcpSessionOwnership(session, mcpSessionId, livenessOwnerToken)) {
+          // A derived label session is restored as its base (#11586): the base's owner and
+          // liveness token decide, and the base is what the connection comes to own.
+          const ownerSession = this.liveOwnershipSession(session);
+          if (!ownerSession) {
+            continue;
+          }
+          if (!this.mayRestoreMcpSessionOwnership(ownerSession, mcpSessionId, livenessOwnerToken)) {
             // One refused session must not stop the rest from restoring: the caller decides
             // whether the refusal matters to the call it is routing.
             refused.push({ sessionId, deviceId: device.id, reason: "owned-by-other-connection" });
@@ -8773,9 +8874,30 @@ export class DevicePool {
   }
 
   /**
+   * The live session that carries the connection ownership of `session`: itself, or for a derived
+   * label session its base when that is live under the same rule the restore applies to a named
+   * session. Undefined when the base is not, so naming a label restores nothing its base would not.
+   */
+  private liveOwnershipSession(session: Session): Session | undefined {
+    const ownerSessionId = this.ownershipSessionId(session.sessionId);
+    if (ownerSessionId === session.sessionId) {
+      return session;
+    }
+    const ownerSession = this.sessionManager.getSession(ownerSessionId);
+    const ownerDevice = ownerSession ? this.devices.get(ownerSession.assignedDevice) : undefined;
+    return ownerSession &&
+      ownerDevice &&
+      this.isSessionAssignmentCurrent(ownerDevice, ownerSession) &&
+      this.sessionManager.isAdmittedForAutomation(ownerSession)
+      ? ownerSession
+      : undefined;
+  }
+
+  /**
    * Whether a reconnecting client may restore ownership of a live session (#11107): it proves the
    * session's liveness owner token, or no other connected MCP client owns the session. Naming a
-   * session UUID is not proof of ownership.
+   * session UUID is not proof of ownership. Callers pass the session that carries the ownership
+   * ({@link liveOwnershipSession}), never a derived label session.
    */
   private mayRestoreMcpSessionOwnership(
     session: Session,
@@ -8817,32 +8939,33 @@ export class DevicePool {
    * Whether a still-connected MCP client other than `mcpSessionId` owns the live session
    * `sessionId` (#11344): it acquired or restored it, or routes to it by autolock. The general
    * rule {@link mayRestoreMcpSessionOwnership} applies, with autolock on or off. A derived
-   * `${base}:${label}` session records no owner of its own, so it counts as its base (#11542).
+   * `${base}:${label}` session records no owner of its own, so it counts as its base (#11542):
+   * every branch below judges {@link ownershipSessionId}.
    */
   isSessionOwnedByOtherConnection(sessionId: string, mcpSessionId?: string): boolean {
     if (mcpSessionId !== undefined) {
       if (this.sessionManager.getSession(sessionId) === null) {
         return false;
       }
-      const baseSessionId = resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager);
-      return (
-        this.hasConnectedMcpSessionOwner(sessionId, mcpSessionId) ||
-        (baseSessionId !== undefined &&
-          baseSessionId !== sessionId &&
-          this.hasConnectedMcpSessionOwner(baseSessionId, mcpSessionId))
-      );
+      return this.hasConnectedMcpSessionOwner(sessionId, mcpSessionId);
     }
     // A caller with no connection identity cannot be told apart from the owner of an ordinary
     // session, so only a live autolock, which is owned by connection, is foreign to it (#11235).
-    if (!this.autolockManager.hasMcpSessionOwner(sessionId)) {
+    const ownerSessionId = this.ownershipSessionId(sessionId);
+    if (!this.autolockManager.hasMcpSessionOwner(ownerSessionId)) {
       return false;
     }
-    const session = this.sessionManager.getSession(sessionId);
+    const session = this.sessionManager.getSession(ownerSessionId);
     const device = session ? this.devices.get(session.assignedDevice) : undefined;
-    return device?.autolockSessionId === sessionId;
+    return device?.autolockSessionId === ownerSessionId;
   }
 
-  private hasConnectedMcpSessionOwner(sessionId: string, exceptMcpSessionId?: string): boolean {
+  /** Whether a connected MCP client other than `exceptMcpSessionId` owns `namedSessionId`. */
+  private hasConnectedMcpSessionOwner(
+    namedSessionId: string,
+    exceptMcpSessionId?: string,
+  ): boolean {
+    const sessionId = this.ownershipSessionId(namedSessionId);
     for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredDeviceSessions) {
       if (mcpSessionId !== exceptMcpSessionId && acquired.has(sessionId)) {
         return true;
@@ -8877,6 +9000,10 @@ export class DevicePool {
       });
   }
 
+  /**
+   * Forget the owner of a released session. Exact id on purpose: releasing a derived label session
+   * must not clear the ownership its base carries for it (#11586).
+   */
   private clearMcpSessionOwnership(sessionId: string): void {
     this.ownerDisconnectRelease.cancel(sessionId);
     for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredDeviceSessions) {

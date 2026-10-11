@@ -567,7 +567,8 @@ export class ManagedExecutionRelease {
   /**
    * Return each marked slot to `ready` once the session's work and the device's teardown settle.
    * Only a slot still at the marked binding, still `settling` and without a live owner is
-   * touched, so a newer binding or execution is never disturbed.
+   * touched, so a newer binding or execution is never disturbed. A slot whose owner record is
+   * live at that moment is re-checked until the owner goes or the settlement cap passes (#11545).
    */
   private async settleLater(
     registry: ManagedExecutionSlotRegistry,
@@ -594,24 +595,63 @@ export class ManagedExecutionRelease {
       // this process, so this watcher alone settles them once it ends.
       await timer.sleep(pastCap ? this.settlementSlowPollMs : this.settlementPollMs);
     }
-    await Promise.all(marked.map((slot) => this.restoreReady(registry, slot)));
+    await this.restoreOnceUnowned(registry, marked, deadline);
   }
 
+  /**
+   * Restore every settled slot, re-checking the ones a live owner record still holds (#11545).
+   * The record is the released session's own (see {@link clearLeftoverOwner}); when this daemon
+   * holds that session id again it reads live, and the slot can only return to `ready` after that
+   * session ends. A one-shot check would leave it `settling` for the daemon's lifetime, so the
+   * check repeats at the fast cadence. It is bounded by the same cap as the release itself: past
+   * it the slot stays `settling`, where `reset-slot-scope --force` applies once the owner is gone.
+   */
+  private async restoreOnceUnowned(
+    registry: ManagedExecutionSlotRegistry,
+    marked: readonly MarkedSlot[],
+    deadline: number,
+  ): Promise<void> {
+    const { timer } = this.options;
+    let held = [...marked];
+    for (;;) {
+      const outcomes = await Promise.all(held.map((slot) => this.restoreReady(registry, slot)));
+      held = held.filter((_slot, index) => outcomes[index] === "owner_live");
+      if (held.length === 0 || this.closed) {
+        return;
+      }
+      if (timer.now() >= deadline) {
+        const slots = held.map((slot) => `${slot.key.scopeKey}/${slot.key.slotIndex}`).join(", ");
+        logger.warn(
+          `[ManagedExecutionRelease] A live execution still holds the owner record of settled ` +
+            `slot(s) ${slots} past the ${this.settlementCapMs}ms settlement cap; they stay ` +
+            "settling. Once that execution ends, `reset-slot-scope --force` or a daemon restart " +
+            "returns them to ready (#11545)",
+        );
+        return;
+      }
+      await timer.sleep(this.settlementPollMs);
+    }
+  }
+
+  /** Resolves to `owner_live` when a live owner record kept the slot `settling`: check again. */
   private async restoreReady(
     registry: ManagedExecutionSlotRegistry,
     slot: MarkedSlot,
-  ): Promise<void> {
+  ): Promise<"done" | "owner_live"> {
     try {
       const current = await registry.getAssignment(slot.key);
-      if (
-        !current ||
-        current.state !== "settling" ||
-        current.generation !== slot.generation ||
-        current.stableDeviceId !== slot.stableDeviceId ||
-        !(await this.clearLeftoverOwner(registry, slot, current.execOwner))
-      ) {
+      const atMark =
+        current !== null &&
+        current.state === "settling" &&
+        current.generation === slot.generation &&
+        current.stableDeviceId === slot.stableDeviceId;
+      if (!atMark) {
         await this.closeSupersededEntry(registry, slot, current);
-        return;
+        return "done";
+      }
+      if (!(await this.clearLeftoverOwner(registry, slot, current.execOwner))) {
+        // Still this watcher's to settle: the entry stays open and guarded in flight.
+        return "owner_live";
       }
       const updated = await this.restoreSlotState(registry, slot);
       if (updated.kind !== "updated" && updated.kind !== "advanced") {
@@ -627,6 +667,7 @@ export class ManagedExecutionRelease {
         error,
       );
     }
+    return "done";
   }
 
   /**
@@ -683,6 +724,7 @@ export class ManagedExecutionRelease {
    * The slot moved on before settlement: close its release entry (rolled back when the binding
    * changed, committed when something else already restored it). A slot with a live execution
    * owner keeps its entry open for redrive; a dead owner record holds nothing open (#11545).
+   * A slot still `settling` at its mark never comes here: {@link restoreOnceUnowned} re-checks it.
    */
   private async closeSupersededEntry(
     registry: ManagedExecutionSlotRegistry,

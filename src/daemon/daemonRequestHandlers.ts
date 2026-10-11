@@ -1,4 +1,5 @@
 import { toActionableError } from "../models/ActionableError";
+import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import type { ManagedSlotInputGate } from "./inputDeviceOwnership";
 import { isSessionReleasing } from "./sessionReleaseState";
 import { logger } from "../utils/logger";
@@ -272,7 +273,9 @@ export type DaemonMethodResult = {
     | ManagedSlotConfigErrorCode
     /** `daemon/registerSession` managed-connection refusals (#11178). */
     | typeof DEVICE_OUTSIDE_MANAGED_SLOTS_CODE
-    | typeof DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE;
+    | typeof DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE
+    /** A device-count read while a discovery source that exists has not completed (#11605). */
+    | BootedDeviceDiscoveryIncompleteError["code"];
 };
 
 /** Device-session listing entry; a quarantined UUID cannot be subscribed to until identity resolves. */
@@ -1119,7 +1122,7 @@ async function refreshedPoolStats(
   pool: ReturnType<DaemonStateAccess["getDevicePool"]>,
 ): Promise<
   | { ok: true; stats: DevicePoolStats; deviceIds?: ReadonlySet<string> }
-  | { ok: false; error: string }
+  | { ok: false; refusal: Pick<DaemonMethodResult, "success" | "error" | "code" | "retryable"> }
 > {
   try {
     if (pool.getRefreshedInventory) {
@@ -1134,7 +1137,14 @@ async function refreshedPoolStats(
     logger.warn(`[Daemon] Could not refresh device ownership: ${errorMessage(error)}`, error);
     return {
       ok: false,
-      error: `Could not determine which devices are available: ${errorMessage(error)}. Resolve the cause and retry.`,
+      refusal: {
+        success: false,
+        error: `Could not determine which devices are available: ${errorMessage(error)}. Resolve the cause and retry.`,
+        // The count is unknown, not zero: keep the typed, retryable refusal on the wire (#11605).
+        ...(error instanceof BootedDeviceDiscoveryIncompleteError
+          ? { code: error.code, retryable: error.retryable }
+          : {}),
+      },
     };
   }
 }
@@ -1155,7 +1165,7 @@ async function handleRefreshDevices(
   }
   const refreshed = await refreshedPoolStats(pool);
   if (!refreshed.ok) {
-    return { success: false, error: refreshed.error };
+    return refreshed.refusal;
   }
   const stats = refreshed.stats;
   return {
@@ -1176,7 +1186,7 @@ async function handleAvailableDevices(
   const pool = state.getDevicePool();
   const refreshed = await refreshedPoolStats(pool);
   if (!refreshed.ok) {
-    return { success: false, error: refreshed.error };
+    return refreshed.refusal;
   }
   const stats = refreshed.stats;
   const recoveryPolicy = pool.getRecoveryPolicy?.();

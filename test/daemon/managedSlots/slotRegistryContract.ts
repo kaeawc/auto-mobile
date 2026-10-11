@@ -431,7 +431,11 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
 
       function resetter(): SlotScopeReset {
         timer.enableAutoAdvance();
-        return new SlotScopeReset({ registry: async () => registry, timer });
+        return new SlotScopeReset({
+          registry: async () => registry,
+          timer,
+          isExecOwnerLive: (owner) => livePids.has(owner.pid),
+        });
       }
 
       test("commits the release entry, invalidates and frees the device; without --force it stays pending", async () => {

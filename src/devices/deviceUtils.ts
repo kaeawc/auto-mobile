@@ -1,4 +1,7 @@
-import { AdbCommandTimeoutError } from "../utils/android-cmdline-tools/AdbClient";
+import {
+  AdbCommandTimeoutError,
+  AdbUnavailableError,
+} from "../utils/android-cmdline-tools/AdbClient";
 import { createDefaultIosBootInstrumentation } from "../features/iosSimFleet/defaultIosBootInstrumentation";
 import { getSharedBootAdmissionGates } from "../features/bootAdmission/sharedBootAdmissionGates";
 import type { BootAdmission } from "../models/BootAdmission";
@@ -9,10 +12,11 @@ import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecu
 export type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { DeviceInfo, ActionableError, SomePlatform, BootedDevice, Platform } from "../models";
 import { toActionableError } from "../models/ActionableError";
+import type { TransitionalSimulator } from "../models/TransitionalSimulator";
 import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { SimCtlClient, SimctlUnavailableError } from "../utils/ios-cmdline-tools/SimCtlClient";
 import {
   getSharedDevicectlDeviceLister,
   type IosPhysicalDeviceLister,
@@ -98,6 +102,28 @@ export interface BootedDeviceDiscovery {
   sourceErrors?: Partial<Record<DiscoverySource, DeviceDiscoveryError>>;
   /** Platform-specific typed failures for incomplete observations. */
   discoveryErrors?: Partial<Record<Platform, DeviceDiscoveryError>>;
+  /**
+   * Simulators `simctl` reports `Booting` or `Shutting Down`. They are not in `devices` (not
+   * booted), but a session holding one must still see it on every inventory surface (#11573).
+   * Present only when the simulator source completed; absent means unknown, not none.
+   */
+  transitionalSimulators?: TransitionalSimulator[];
+}
+
+/**
+ * A missing adb binary (ENOENT, surfaced by the adb client as `AdbUnavailableError`) is not a
+ * failed sweep: Android does not apply to this host, so it is `unavailable` (#11605).
+ */
+function androidDiscoveryErrorCode(error: unknown): DeviceDiscoveryErrorCode {
+  if (error instanceof AdbCommandTimeoutError) {
+    return "timeout";
+  }
+  return error instanceof AdbUnavailableError ? "unavailable" : "failed";
+}
+
+/** xcrun/simctl not installed is not a failed sweep: simulators do not apply to this host (#11605). */
+function simulatorDiscoveryErrorCode(error: unknown): DeviceDiscoveryErrorCode {
+  return error instanceof SimctlUnavailableError ? "unavailable" : "failed";
 }
 
 /** The iOS sources that completed, from one sweep's per-source outcome. */
@@ -734,6 +760,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     const freshDeviceIds = new Set<string>();
     const sourceErrors: Partial<Record<DiscoverySource, DeviceDiscoveryError>> = {};
     const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
+    const transitional: { simulators?: TransitionalSimulator[] } = {};
 
     const [android, ios] = await Promise.all([
       platform === "android" || platform === "either"
@@ -756,6 +783,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     }
 
     if (ios) {
+      transitional.simulators = ios.transitionalSimulators;
       this.appendIosBootedDiscovery(ios, {
         devices,
         succeededPlatforms,
@@ -773,6 +801,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       freshDeviceIds,
       discoveryErrors,
       ...(Object.keys(sourceErrors).length > 0 ? { sourceErrors } : {}),
+      ...(transitional.simulators ? { transitionalSimulators: transitional.simulators } : {}),
     };
   }
 
@@ -977,7 +1006,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       return {
         devices: [],
         error: {
-          code: error instanceof AdbCommandTimeoutError ? "timeout" : "failed",
+          code: androidDiscoveryErrorCode(error),
           message: `Android booted-device discovery failed: ${errorMessage(error)}`,
           ...(error instanceof AdbCommandTimeoutError
             ? { retryable: true, retryAfterMs: 1_000 }
@@ -1028,10 +1057,32 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     return physical;
   }
 
+  /** One checked simctl read; `transitional` is absent for a client that cannot report it. */
+  private readSimulatorListing(
+    options: BootedDeviceDiscoveryOptions,
+    signal: AbortSignal | undefined,
+  ): Promise<
+    | { simulators: BootedDevice[]; transitional: TransitionalSimulator[] | undefined }
+    | { error: unknown }
+  > {
+    const listingOptions = { bypassCache: options.bypassIosDeviceListCache };
+    const listing = this.simctl.getSimulatorListingChecked
+      ? this.simctl.getSimulatorListingChecked(undefined, signal, listingOptions)
+      : this.simctl
+          .getBootedSimulatorsChecked(undefined, signal, listingOptions)
+          .then((booted) => ({ booted, transitional: undefined }));
+    return listing.then(
+      ({ booted, transitional }) => ({ simulators: booted, transitional }),
+      (error: unknown) => ({ error }),
+    );
+  }
+
   private async discoverBootedIosDevices(options: BootedDeviceDiscoveryOptions): Promise<{
     devices: BootedDevice[];
     simulatorsSucceeded: boolean;
     physicalSucceeded: boolean;
+    /** Simulators `simctl` lists Booting / Shutting Down; set only when simctl completed. */
+    transitionalSimulators?: TransitionalSimulator[];
     /** Ids observed by this sweep, excluding devicectl's retained replay. */
     freshDeviceIds: Set<string>;
     error?: DeviceDiscoveryError;
@@ -1064,14 +1115,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       : this.discoverPhysicalIosDevices(signal);
     // An abort rejects the physical race too; the await below surfaces it.
     physicalPromise.catch(() => undefined);
-    const simulatorOutcome = await this.simctl
-      .getBootedSimulatorsChecked(undefined, signal, {
-        bypassCache: options.bypassIosDeviceListCache,
-      })
-      .then(
-        (simulators) => ({ simulators }),
-        (error: unknown) => ({ error }),
-      );
+    const simulatorOutcome = await this.readSimulatorListing(options, signal);
     const physical = await physicalPromise;
     const freshPhysicalIds = physical.complete
       ? physical.devices.map((device) => device.deviceId)
@@ -1085,6 +1129,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         devices: mergeIosDevices(simulators, physical.devices),
         simulatorsSucceeded: true,
         physicalSucceeded: physical.complete,
+        transitionalSimulators: simulatorOutcome.transitional,
         ...(physicalError ? { physicalError } : {}),
         freshDeviceIds: new Set([
           ...simulators.map((device) => device.deviceId),
@@ -1106,7 +1151,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       ...(physicalError ? { physicalError } : {}),
       freshDeviceIds: new Set(freshPhysicalIds),
       error: {
-        code: "failed",
+        code: simulatorDiscoveryErrorCode(error),
         message: `iOS booted-device discovery failed: ${errorMessage(error)}`,
       },
     };

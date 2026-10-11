@@ -16,6 +16,7 @@ import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../mod
 import { toActionableError } from "../../models/ActionableError";
 import { EmulatorLaunchCancelledError } from "../../models/EmulatorLaunchCancelledError";
 import type { AdmitColdBoot, BootAdmission } from "../../models/BootAdmission";
+import { spawnUnderBootAdmission, type OnAdmittedSpawn } from "./spawnUnderBootAdmission";
 import { AdbClientFactory, unadmittedAdbClientFactory } from "./AdbClientFactory";
 import { AdbClient } from "./AdbClient";
 import {
@@ -2992,9 +2993,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   }
 
   /**
-   * Holds a boot admission (#11181) across the spawn: freed when the spawn fails or
-   * finds a duplicate, handed off to the reserved serial when an emulator starts,
-   * and freed early if that emulator exits before adb lists it.
+   * Holds a boot admission (#11181) across the spawn: handed off to the reserved serial the
+   * moment the emulator process exists, freed when the spawn fails or finds a duplicate, and
+   * freed early if that emulator exits before adb lists it.
    */
   private async spawnWithBootAdmission(
     avdName: string,
@@ -3007,19 +3008,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       return await this.spawnAdmittedEmulator(avdName, perf, args, options);
     }
     options.onAdmitted?.(admission);
-    try {
-      const launch = await this.spawnAdmittedEmulator(avdName, perf, args, options);
-      if (launch.process) {
-        launch.process.once("exit", () => admission.release());
-        admission.handOff(launch.reservedDeviceId ?? options.expectedDeviceId);
-      } else {
-        admission.release();
-      }
-      return launch;
-    } catch (error) {
-      admission.release();
-      throw error;
-    }
+    return await spawnUnderBootAdmission(admission, options.expectedDeviceId, (onAdmittedSpawn) =>
+      this.spawnAdmittedEmulator(avdName, perf, args, options, onAdmittedSpawn),
+    );
   }
 
   private async spawnAdmittedEmulator(
@@ -3027,6 +3018,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
     args: string[],
     options: EmulatorProcessOptions,
+    onAdmittedSpawn?: OnAdmittedSpawn<ChildProcess>,
   ): Promise<EmulatorProcessLaunch & { reservedDeviceId?: string }> {
     const {
       onSpawn,
@@ -3057,7 +3049,11 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       perf,
       args,
       reservedEmulator,
-      onSpawn,
+      // The capacity slot is handed off before the launch owner can act on the child.
+      onSpawn: (spawned) => {
+        onAdmittedSpawn?.(spawned, reservedEmulator?.deviceId);
+        onSpawn?.(spawned);
+      },
     });
     // The spawn resolves without a process only when the emulator exited as a duplicate of one
     // started outside this process.

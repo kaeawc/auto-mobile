@@ -70,3 +70,30 @@ test("setActiveDevice with incomplete Android discovery is the typed retryable d
     refresh.mockRestore();
   }
 });
+
+test("a refresh that threw is typed by the platform the requested id belongs to (#11586)", async () => {
+  const refresh = spyOn(pool, "refreshDevicesWithOutcome").mockResolvedValue({
+    addedCount: 0,
+    failure: "tracking persistence unavailable",
+  });
+  try {
+    const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+    const select = (deviceId: string) =>
+      handler({ deviceId, sessionUuid: "one" }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+
+    expect(await select("0F1E2D3C-4B5A-4978-8695-A4B3C2D1E0F9")).toMatchObject({
+      code: "discovery_incomplete",
+      platform: "ios",
+      retryable: true,
+    });
+    expect(await select("emulator-5556")).toMatchObject({
+      code: "discovery_incomplete",
+      platform: "android",
+    });
+  } finally {
+    refresh.mockRestore();
+  }
+});

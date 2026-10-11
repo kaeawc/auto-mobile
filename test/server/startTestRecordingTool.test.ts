@@ -1,5 +1,29 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import * as toolExecutionContext from "../../src/server/toolExecutionContext";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { RealToolCallPath } from "../helpers/realToolCallPath";
+import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
+import type { BootedDevice } from "../../src/models";
 import { registerPlanTools } from "../../src/server/planTools";
 import * as realTestRecordingManager from "../../src/server/testRecordingManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -146,5 +170,134 @@ describe("startTestRecording tool", () => {
     expect(payload.success).toBe(false);
     expect(payload.error).toContain("Recording already active on device emulator-5554");
     expect(payload.error).toContain("emulator-5556");
+  });
+});
+
+describe("startTestRecording ToolRegistry admission (#11665)", () => {
+  const held: BootedDevice = { deviceId: "emulator-5554", name: "Held", platform: "android" };
+  const other: BootedDevice = { deviceId: "emulator-5556", name: "Other", platform: "android" };
+  const slot: BootedDevice = { deviceId: "slot-iphone", name: "Slot", platform: "ios" };
+  let manager: SessionManager;
+  let tools: RealToolCallPath;
+  let readiness: ReturnType<
+    typeof spyOn<typeof toolExecutionContext, "createToolExecutionContext">
+  >;
+  let start: ReturnType<typeof spyOn<typeof realTestRecordingManager, "startTestRecording">>;
+
+  beforeAll(async () => {
+    const timer = new FakeTimer();
+    manager = new SessionManager(
+      timer,
+      new FakeDeviceSessionPersistence(),
+      () => new FakeDbWriteBarrier(),
+    );
+    manager.stopCleanupTimer();
+    const discovery = new FakeDeviceUtils();
+    discovery.setBootedDevices("android", [held, other]);
+    discovery.setBootedDevices("ios", [slot]);
+    const registry = new FakeSlotRegistry(timer);
+    await assignManagedSlotDevice(registry, "ios", slot.deviceId);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(manager, "recording-tool-start", {
+        timer,
+        deviceManager: discovery,
+        managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, timer),
+      }),
+    );
+    await pool.initializeWithDevices([held, other, slot]);
+    DaemonState.getInstance().initialize(manager, pool);
+    await pool.bindOrReuseDeviceSession(
+      "holder",
+      held.deviceId,
+      "android",
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      "acquiring-connection",
+    );
+    await manager.createSession("stranger", other.deviceId, "android");
+    manager.setDeviceReadiness("holder", "automationReady");
+    tools = new RealToolCallPath([held, other, slot]).install();
+    tools.setBody((input) => input.handler(input.device, input.args, input.progress, input.signal));
+    // Fake the readiness boundary after the real registry's ownership and session admission.
+    readiness = spyOn(toolExecutionContext, "createToolExecutionContext").mockImplementation(
+      async (sessionId) => ({
+        sessionId,
+        deviceId: held.deviceId,
+        devicePlatform: held.platform,
+      }),
+    );
+    start = spyOn(realTestRecordingManager, "startTestRecording").mockResolvedValue({
+      recordingId: "fake-recording",
+      startedAt: "2024-01-01T00:00:00.000Z",
+      deviceId: held.deviceId,
+      platform: held.platform,
+    });
+    registerPlanTools();
+  });
+
+  beforeEach(() => {
+    readiness.mockClear();
+    start.mockClear();
+    tools.runs.length = 0;
+  });
+
+  afterAll(() => {
+    start.mockRestore();
+    readiness.mockRestore();
+    tools.uninstall();
+    DaemonState.getInstance().reset();
+    manager.stopCleanupTimer();
+  });
+
+  for (const sessionUuid of ["stranger", undefined]) {
+    test(`${sessionUuid ?? "sessionless"} is refused before readiness or recording setup`, async () => {
+      await expect(
+        tools.call("startTestRecording", { deviceId: held.deviceId, sessionUuid }),
+      ).rejects.toMatchObject({
+        code: "device_owned_by_other_session",
+        deviceId: held.deviceId,
+        retryable: false,
+      });
+      expect(readiness).not.toHaveBeenCalled();
+      expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);
+      expect(start).not.toHaveBeenCalled();
+      expect(tools.runs).toEqual([]);
+    });
+  }
+
+  test("the holder's start works and calls the fake readiness once", async () => {
+    const response = await tools.call("startTestRecording", {
+      deviceId: held.deviceId,
+      sessionUuid: "holder",
+    });
+    expect(JSON.stringify(response)).toContain("fake-recording");
+    expect(readiness).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0]?.[4]).toBe("holder");
+  });
+
+  test("the acquiring MCP connection's deviceId-only start works as the holder", async () => {
+    const response = await tools.call("startTestRecording", {
+      deviceId: held.deviceId,
+      __mcpSessionId: "acquiring-connection",
+    });
+    expect(JSON.stringify(response)).toContain("fake-recording");
+    expect(readiness).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0]?.[4]).toBe("holder");
+  });
+
+  test("an idle managed-slot device keeps its existing refusal before readiness", async () => {
+    await expect(
+      tools.call("startTestRecording", { deviceId: slot.deviceId }),
+    ).rejects.toMatchObject({ code: "device_assigned_to_managed_slot" });
+    expect(readiness).not.toHaveBeenCalled();
+    expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);
+    expect(start).not.toHaveBeenCalled();
   });
 });

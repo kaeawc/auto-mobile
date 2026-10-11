@@ -3,7 +3,11 @@ import { platform } from "node:os";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
-import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "./sessionLivenessWindows";
+import { readEnvPositiveInteger } from "../utils/envNumbers";
+import {
+  DEFAULT_SESSION_IDLE_TIMEOUT_MS,
+  MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS,
+} from "./sessionLivenessWindows";
 export { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 
 /**
@@ -644,13 +648,21 @@ export const DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS = DEFAULT_SESSION_IDLE_TIMEOUT_
  */
 export const MAX_CLI_SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 
-/** The configured {@link DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS}, env-overridable. */
+/**
+ * The configured {@link DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS}, env-overridable. The value is a
+ * plain millisecond count (digits only, #11612): `"2m"` is not 2 ms, it is ignored with a warning
+ * naming the variable. Like a managed-slot config it may lengthen the 2-minute window but never
+ * shorten it, so a typo cannot make every CLI session idle-release at the next scan.
+ */
 export function getCliSessionIdleTimeoutMs(): number {
-  const rawValue =
-    process.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS ??
-    process.env.AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS;
-  const parsed = rawValue ? Number.parseInt(rawValue, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS;
+  return readEnvPositiveInteger(
+    "AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS",
+    "AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS",
+    {
+      fallback: DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
+      min: MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS,
+    },
+  );
 }
 
 /**

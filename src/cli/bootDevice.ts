@@ -6,21 +6,34 @@ import { DefaultDeviceMatcher } from "../utils/deviceMatcher";
 import { createDefaultDeviceProvisioner } from "../devices/deviceProvisioning";
 import { MultiPlatformDeviceManager } from "../devices/deviceUtils";
 import { createCiIosBootConfiguration } from "../devices/deviceBootRecovery";
+import { parseBooleanFlagValue, readValueOperand, splitFlagToken } from "../utils/flagTokens";
 
-function readValue(args: string[], index: number, flag: string): string {
-  const value = args[index + 1];
-  if (!value || value.startsWith("--")) {
+/** The value of the flag at `args[index]` (`--flag value` or `--flag=value`) and extra tokens used. */
+function readValue(
+  args: string[],
+  index: number,
+  flag: string,
+): { value: string; consumed: number } {
+  const operand = readValueOperand(args, index);
+  if (!operand.value) {
     throw new ActionableError(`${flag} requires a value.`);
   }
-  return value;
+  return { value: operand.value, consumed: operand.last - index };
+}
+
+function readBoolean(arg: string, flag: string): boolean {
+  const enabled = parseBooleanFlagValue(splitFlagToken(arg).inlineValue);
+  if (enabled === undefined) {
+    throw new ActionableError(`${flag} must be true or false.`);
+  }
+  return enabled;
 }
 
 /** Parse the narrow daemon-free boot command. It intentionally has no session or CtrlProxy options. */
 export function parseBootDeviceArgs(args: string[]): DeviceBootRequest {
   const request: Partial<DeviceBootRequest> = { preferRunning: true };
   for (let index = 0; index < args.length; index++) {
-    const arg = args[index];
-    index += applyBootDeviceArgument(request, args, index, arg);
+    index += applyBootDeviceArgument(request, args, index, splitFlagToken(args[index]).flag);
   }
   if (request.platform !== "android" && request.platform !== "ios") {
     throw new ActionableError("--platform must be android or ios.");
@@ -43,23 +56,25 @@ function applyBootDeviceArgument(
   };
   const field = valueFields[flag];
   if (field) {
-    (request as Record<string, unknown>)[field] = readValue(args, index, flag);
-    return 1;
+    const { value, consumed } = readValue(args, index, flag);
+    (request as Record<string, unknown>)[field] = value;
+    return consumed;
   }
   if (flag === "--timeout-ms") {
-    const parsed = Number(readValue(args, index, flag));
+    const { value, consumed } = readValue(args, index, flag);
+    const parsed = Number(value);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       throw new ActionableError("--timeout-ms must be a positive number.");
     }
     request.timeoutMs = parsed;
-    return 1;
+    return consumed;
   }
   if (flag === "--create-if-missing") {
-    request.createIfMissing = true;
+    request.createIfMissing = readBoolean(args[index], flag);
     return 0;
   }
   if (flag === "--no-prefer-running") {
-    request.preferRunning = false;
+    request.preferRunning = !readBoolean(args[index], flag);
     return 0;
   }
   throw new ActionableError(`Unknown boot-device argument: ${flag}`);

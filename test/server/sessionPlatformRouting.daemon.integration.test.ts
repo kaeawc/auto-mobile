@@ -427,13 +427,75 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     } finally {
       await pinned.close();
     }
-    // Releasing the default must not fence a different, still-owned session.
+    // Releasing the default fences control unless it names a surviving session or its
+    // known, uniquely held device; platform alone never bypasses the fence (#11723).
     await proxy.callTool("setActiveDevice", { deviceId: devices[1].deviceId, platform: "ios" });
     await manager.releaseSession(apple, "heartbeat-timeout");
     await pool.releaseDevice(devices[1].deviceId, apple);
     client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, apple, "heartbeat-timeout");
-    // The connection now holds no iOS session: the selector falls through to ordinary
-    // discovery instead of reporting a false ambiguity (#11167), and never reaches the Android one.
+    const receivedBeforeFence = received.length;
+    const forwardedBeforeFence = client.callToolCalls.length;
+    const scansBeforeFence = deviceSessionManager.getDetectConnectedPlatformsCallCount();
+    const readinessBeforeFence = deviceSessionManager.getEnsureDeviceReadyCallCount();
+    const refusedIos = await proxy
+      .callTool("routingProbe", { platform: "ios", keepScreenAwake: false })
+      .catch((error: unknown) => error);
+    expect(refusedIos).toBeInstanceOf(DaemonConnectionSessionReleasedError);
+    expect(refusedIos).toMatchObject({ reason: "heartbeat-timeout" });
+    expect(received.length).toBe(receivedBeforeFence);
+    expect(client.callToolCalls.length).toBe(forwardedBeforeFence);
+    expect(deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(scansBeforeFence);
+    expect(deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(readinessBeforeFence);
+    await expect(proxy.callTool("routingProbe", {})).rejects.toBeInstanceOf(
+      DaemonConnectionSessionReleasedError,
+    );
+    await expect(proxy.callTool("routingProbe", { sessionUuid: apple })).rejects.toBeInstanceOf(
+      DaemonBoundSessionExpiredError,
+    );
+    await expect(
+      proxy.callTool("routingProbe", { platform: "android", keepScreenAwake: false }),
+    ).rejects.toBeInstanceOf(DaemonConnectionSessionReleasedError);
+    expect(received.length).toBe(receivedBeforeFence);
+    expect(client.callToolCalls.length).toBe(forwardedBeforeFence);
+    const namedSurvivor = await proxy.callTool("routingProbe", {
+      sessionUuid: android,
+      keepScreenAwake: false,
+    });
+    expect(namedSurvivor.isError).toBeFalsy();
+    expect(routedSessionUuidFromResult(namedSurvivor)).toBe(android);
+    expect(received.slice(receivedBeforeFence)).toEqual([devices[0].deviceId]);
+    // setActiveDevice records devices[0] as the sole survivor's device, so deviceId names Android.
+    const deviceSurvivor = await proxy.callTool("routingProbe", {
+      deviceId: devices[0].deviceId,
+      keepScreenAwake: false,
+    });
+    expect(deviceSurvivor.isError).toBeFalsy();
+    expect(routedSessionUuidFromResult(deviceSurvivor)).toBe(android);
+    expect(client.callToolCalls.at(-1)?.params.sessionUuid).toBe(android);
+
+    expect(received.slice(receivedBeforeFence)).toEqual([devices[0].deviceId, devices[0].deviceId]);
+    // Named survivor calls leave the release fence in place. Only setActiveDevice or
+    // an acquisition replaces the default (#11656).
+    await expect(proxy.callTool("routingProbe", {})).rejects.toBeInstanceOf(
+      DaemonConnectionSessionReleasedError,
+    );
+    await expect(
+      proxy.callTool("routingProbe", { sessionUuid: apple, keepScreenAwake: false }),
+    ).rejects.toBeInstanceOf(DaemonBoundSessionExpiredError);
+    expect(received.slice(receivedBeforeFence)).toEqual([devices[0].deviceId, devices[0].deviceId]);
+    expect(manager.getSession(apple)).toBeNull();
+    await proxy.callTool("setActiveDevice", { deviceId: devices[2].deviceId, platform: "android" });
+    await proxy.callTool("routingProbe", { keepScreenAwake: false });
+    expect(received.at(-1)).toBe(devices[2].deviceId);
+    const staleResult = await proxy.callTool("routingProbe", {
+      sessionUuid: apple,
+      keepScreenAwake: false,
+    });
+    expect(staleResult.isError).toBe(true);
+    expect(received.slice(-2)).toEqual([devices[0].deviceId, devices[2].deviceId]);
+    expect(manager.getSession(apple)).toBeNull();
+    // With the fence lifted and no held iOS session, platform falls through to ordinary
+    // discovery without false ambiguity (#11167), and never reaches the Android default.
     const receivedBeforeIos = received.length;
     const scansBeforeIos = deviceSessionManager.getDetectConnectedPlatformsCallCount();
     const readinessBeforeIos = deviceSessionManager.getEnsureDeviceReadyCallCount();
@@ -447,33 +509,6 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     expect(deviceSessionManager.getLastEnsureDeviceReadyPlatform()).toBe("ios");
     expect(received.slice(receivedBeforeIos)).toEqual([devices[1].deviceId]);
     expect(received.slice(receivedBeforeIos)).not.toContain(devices[0].deviceId);
-    // setActiveDevice made the iOS session this connection's binding, so its release fences
-    // sessionless control calls and calls naming it, even after selector calls or calls naming
-    // a surviving session succeed. Only setActiveDevice or an acquisition lifts the fence (#11656).
-    await expect(proxy.callTool("routingProbe", {})).rejects.toThrow();
-    await expect(proxy.callTool("routingProbe", { sessionUuid: apple })).rejects.toThrow();
-    await proxy.callTool("routingProbe", { platform: "android", keepScreenAwake: false });
-    await proxy.callTool("routingProbe", { sessionUuid: android, keepScreenAwake: false });
-
-    expect(received.slice(-2)).toEqual([devices[0].deviceId, devices[0].deviceId]);
-    await expect(proxy.callTool("routingProbe", {})).rejects.toBeInstanceOf(
-      DaemonConnectionSessionReleasedError,
-    );
-    await expect(
-      proxy.callTool("routingProbe", { sessionUuid: apple, keepScreenAwake: false }),
-    ).rejects.toBeInstanceOf(DaemonBoundSessionExpiredError);
-    expect(received.slice(-2)).toEqual([devices[0].deviceId, devices[0].deviceId]);
-    expect(manager.getSession(apple)).toBeNull();
-    await proxy.callTool("setActiveDevice", { deviceId: devices[2].deviceId, platform: "android" });
-    await proxy.callTool("routingProbe", { keepScreenAwake: false });
-    expect(received.at(-1)).toBe(devices[2].deviceId);
-    const staleResult = await proxy.callTool("routingProbe", {
-      sessionUuid: apple,
-      keepScreenAwake: false,
-    });
-    expect(staleResult.isError).toBe(true);
-    expect(received.slice(-2)).toEqual([devices[0].deviceId, devices[2].deviceId]);
-    expect(manager.getSession(apple)).toBeNull();
     const fakeDeviceManager = new FakeDeviceManager();
     const fakeAvdManager = new FakeAvdManager();
     setDeviceToolsDependencies({

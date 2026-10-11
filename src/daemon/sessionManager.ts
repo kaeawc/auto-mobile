@@ -39,6 +39,7 @@ import { requestAcquisitionReceipt } from "./acquisitionReceipt";
 import { defaultTimer, SteadyWallClock, Timer } from "../utils/SystemTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { logger } from "../utils/logger";
+import { readEnvPositiveInteger } from "../utils/envNumbers";
 import { BootedDevice, Platform } from "../models";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import {
@@ -94,6 +95,7 @@ import {
   suspectGraceMsFor,
   type LivenessLeaseState,
   type LivenessOwnerHold,
+  type LivenessOwnerLeaseSnapshot,
 } from "./livenessOwnerLease";
 import { isReleaseVetoedByExecutions } from "./unsettledExecutionVeto";
 import {
@@ -120,6 +122,7 @@ import {
   isTerminalReleaseReason,
   outranksReleaseReason,
   releasedRowStatus,
+  shouldJudgeOwnerLeaseForRelease,
   type SessionReleaseReason,
 } from "./releaseReasons";
 import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
@@ -754,6 +757,8 @@ export class DaemonSessionCreationRejectedError extends ActionableError {
 
 /** Idle expiry has no caller to return the device; its diagnostic may name a heartbeat timeout. */
 export interface SessionReleaseOptions {
+  /** Device-restart release persistence, including a retry after a failed write. */
+  releasePersisted?: Promise<void>;
   expiryOrigin?: "lazy-expiry" | "cleanup-expired";
   /** Set by the expiry handler when it owns the ordered device return after release. */
   deviceReleaseManaged?: boolean;
@@ -883,6 +888,10 @@ interface PendingSessionRelease {
 
 interface SessionReleaseOperation extends PendingSessionRelease {
   session: Session;
+  /** Suspect before the handoff: the owner's existing grace still runs across teardown (#11691). */
+  judgeSuspectOwnerAtCommit?: boolean;
+  /** Owner proof received during this release; never advances session activity or idle clocks. */
+  ownerHeartbeatDuringRelease?: number;
   /** When the release started; bounds the retry hint for a bind it refuses (#10960). */
   startedAtMs?: number;
   /** Set for an idle release the manager started itself (#11481): see `getIdleReleasesInProgress`. */
@@ -1341,13 +1350,11 @@ function releaseSuperseded(shouldCommit: ReleaseCommitFence | undefined): boolea
 export const PLAN_AUTO_RELEASE_REASON = "plan-auto-release" satisfies SessionReleaseReason;
 
 export function getDefaultSessionHeartbeatTimeoutMs(): number {
-  const rawValue =
-    process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS ??
-    process.env.AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS;
-  const parsed = rawValue ? Number.parseInt(rawValue, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
+  return readEnvPositiveInteger(
+    "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+    "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+    { fallback: SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS },
+  );
 }
 
 /**
@@ -1371,7 +1378,7 @@ const LEGACY_DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 /** Default grace before a never-heartbeated default-policy session is reaped. */
 export const DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS = 5_000;
 // Give a restarted emulator the same three-minute cold-boot allowance as device readiness.
-const DEVICE_RESTART_RECOVERY_WINDOW_MS = DEFAULT_DEVICE_READY_TIMEOUT_MS;
+export const DEVICE_RESTART_RECOVERY_WINDOW_MS = DEFAULT_DEVICE_READY_TIMEOUT_MS;
 
 function isDeviceRestartReleasedRow(
   persisted: DeviceSession,
@@ -1408,11 +1415,11 @@ function restartRecoveryDeadlineFromPersisted(
  * reader to conclude the daemon reaped early (issue #5689).
  */
 export function getDefaultPreFirstHeartbeatGraceMs(): number {
-  const rawValue =
-    process.env.AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS ??
-    process.env.AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS;
-  const parsed = rawValue ? Number.parseInt(rawValue, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS;
+  return readEnvPositiveInteger(
+    "AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
+    "AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
+    { fallback: DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS },
+  );
 }
 
 export class SessionManager {
@@ -1427,6 +1434,10 @@ export class SessionManager {
   /** The clock every session timestamp is stamped and judged with (#11080); see {@link sessionNow}. */
   private readonly sessionClock: SteadyWallClock;
   private releaseCallbacks: SessionReleaseCallback[] = [];
+  private readonly restartReleasePersistence = new WeakMap<
+    SessionReleaseSnapshot,
+    PromiseWithResolvers<void>
+  >();
   // Base session → its derived `${base}:${label}` sessions (#11091), outside the base's cache so
   // it survives the base's removal. Consumed by takeDerivedLabelSessions.
   private readonly derivedLabelSessionsByBase = new Map<string, Set<string>>();
@@ -1596,6 +1607,9 @@ export class SessionManager {
    * {@link readPersistedSession}. In memory only: a daemon restart falls back to the row.
    */
   private readonly restartRecoveryActivityAt: Map<string, number> = new Map();
+  private readonly restartRecoveryActivityCallbacks: Array<
+    (sessionId: string, atMs: number) => void
+  > = [];
   /**
    * UUIDs whose live row this daemon is about to rewrite over a terminal row its own superseded
    * release wrote or may still write (#11206), counted per pending rewrite. While one is pending,
@@ -3148,6 +3162,11 @@ export class SessionManager {
     };
   }
 
+  /** Allow the pool to re-arm its idle hold when an admitted call records recovery activity. */
+  onRestartRecoveryActivity(callback: (sessionId: string, atMs: number) => void): void {
+    this.restartRecoveryActivityCallbacks.push(callback);
+  }
+
   /**
    * A control call started, joined or ended against a session waiting out a device restart.
    *
@@ -3161,6 +3180,13 @@ export class SessionManager {
       this.sessionNow(),
     );
     this.restartRecoveryActivityAt.set(sessionId, activityAt);
+    for (const callback of this.restartRecoveryActivityCallbacks) {
+      try {
+        callback(sessionId, activityAt);
+      } catch (error) {
+        logger.warn(`[SessionManager] Restart activity callback failed for ${sessionId}: ${error}`);
+      }
+    }
     void this.getBarrier()
       .track(async () => {
         await this.deviceSessionRepository.recordRestartRecoveryActivity?.(sessionId, activityAt);
@@ -3190,6 +3216,31 @@ export class SessionManager {
     }
     const deadline = restartRecoveryDeadlineFromPersisted(persisted);
     return deadline !== undefined && this.sessionNow() < deadline;
+  }
+
+  /** Recheck a pool hold at its idle deadline; active recovery calls retain the cold-boot window. */
+  async expireRestartRecoveryReservation(sessionId: string): Promise<number | undefined> {
+    const persisted = await this.readPersistedSession(sessionId);
+    if (!persisted || !isDeviceRestartReleasedRow(persisted)) {
+      return undefined;
+    }
+    const callerInFlight =
+      this.isSessionBeingRecreated(sessionId) || this.activeSessionExecutionChecker(sessionId);
+    const deadline = restartRecoveryDeadlineFromPersisted(persisted, callerInFlight)!;
+    if (this.sessionNow() < deadline) {
+      return deadline;
+    }
+    if (!callerInFlight) {
+      const current = await this.terminalizeExpiredPersistedSession(persisted);
+      // The conditional expiry write may lose to activity extending the same row.
+      if (current && isDeviceRestartReleasedRow(current)) {
+        const extendedDeadline = restartRecoveryDeadlineFromPersisted(current)!;
+        if (this.sessionNow() < extendedDeadline) {
+          return extendedDeadline;
+        }
+      }
+    }
+    return undefined;
   }
 
   private async getPersistedTerminalRelease(
@@ -3285,6 +3336,17 @@ export class SessionManager {
       },
     );
     const current = await this.readPersistedSession(persisted.session_uuid);
+    if (
+      !this.terminalReleaseSnapshots.has(persisted.session_uuid) &&
+      current?.release_reason === "expired" &&
+      current.stable_identity_generation === persisted.stable_identity_generation
+    ) {
+      const snapshot = this.expiredReleaseFromPersisted(persisted.session_uuid, current);
+      if (snapshot) {
+        this.terminalReleaseSnapshots.set(persisted.session_uuid, snapshot);
+        this.notifySessionRelease(snapshot, { upgradeOnly: true });
+      }
+    }
     if (!this.isReissuablePersistedSession(current)) {
       this.restartRecoveryActivityAt.delete(persisted.session_uuid);
     }
@@ -4964,7 +5026,53 @@ export class SessionManager {
     }
     // Through the recovered-intent overlay so a pending intent reads as released (#11077).
     const persisted = await this.readPersistedSession(sessionId);
-    return persisted?.release_reason ?? undefined;
+    if (!persisted) {
+      return undefined;
+    }
+    // A row past its deadline is answered as admission answers it (#11361): `expired`, whatever
+    // handoff reason (or none) it still stores, so a heartbeat or session-info client is not told
+    // a session is resumable when a call naming it is refused for good.
+    return (
+      this.expiredReleaseOfUnheldRow(sessionId, persisted)?.releaseReason ??
+      persisted.release_reason ??
+      undefined
+    );
+  }
+
+  /**
+   * {@link expiredReleaseFromPersisted} for a wire that answers outside admission: undefined while
+   * this daemon is still creating, recovering or releasing the UUID. A caller in flight keeps a
+   * device-restart recovery past the row's idle deadline, and a release in teardown has not
+   * written its reason yet, so the row's deadline alone does not say the session has ended.
+   */
+  private expiredReleaseOfUnheldRow(
+    sessionId: string,
+    persisted: DeviceSession,
+  ): SessionReleaseSnapshot | undefined {
+    if (
+      this.sessions.has(sessionId) ||
+      this.pendingSessionAssignments.has(sessionId) ||
+      this.pendingSessionCreations.has(sessionId) ||
+      this.pendingPersistedRecoveries.has(sessionId) ||
+      this.releasePromises.has(sessionId)
+    ) {
+      return undefined;
+    }
+    return this.expiredReleaseFromPersisted(sessionId, persisted);
+  }
+
+  /**
+   * The release of a session whose row ran out its idle or recovery window with no daemon holding
+   * it (#11361), for a wire that answers from a snapshot; undefined for a live, terminally
+   * released, still-recoverable, in-recovery or never-issued UUID. Reads only: the row is left as
+   * it is.
+   */
+  async getExpiredReleaseSnapshot(sessionId: string): Promise<SessionReleaseSnapshot | undefined> {
+    if (this.sessions.has(sessionId) || this.terminalReleaseSnapshots.has(sessionId)) {
+      return undefined;
+    }
+    const persisted = await this.readPersistedSession(sessionId);
+    return persisted && this.expiredReleaseOfUnheldRow(sessionId, persisted);
   }
 
   getTerminalReleaseSnapshot(sessionId: string): SessionReleaseSnapshot | undefined {
@@ -5190,10 +5298,12 @@ export class SessionManager {
     this.releasingSessions.add(session);
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
     const reason = this.createReleaseReasonState(sessionId, releaseReason);
+    const judgeSuspectOwnerAtCommit = this.judgeOwnerLeaseForRelease(session, reason, "start");
     const release: SessionReleaseOperation = {
       session,
       promise: Promise.resolve(null),
       reason,
+      judgeSuspectOwnerAtCommit,
       startedAtMs: this.sessionNow(),
       expiryOrigin: options.expiryOrigin,
       forcedAbort: new AbortController(),
@@ -5692,6 +5802,7 @@ export class SessionManager {
         return this.abandonSupersededRelease(sessionId, deviceId, pendingCleanup);
       }
       const releasedAtMs = this.sessionNow();
+      this.judgeOwnerLeaseForRelease(session, reason, "commit", operation);
       const releaseReason = reason.value;
       const terminalFenceHeldBefore = this.terminalReleaseSnapshots.has(sessionId);
       let releaseSnapshot: SessionReleaseSnapshot = {
@@ -6874,6 +6985,12 @@ export class SessionManager {
     snapshot: SessionReleaseSnapshot,
     options: SessionReleaseOptions = {},
   ): void {
+    if (isDeviceRestartReleaseReason(snapshot.releaseReason)) {
+      const persistence =
+        this.restartReleasePersistence.get(snapshot) ?? Promise.withResolvers<void>();
+      this.restartReleasePersistence.set(snapshot, persistence);
+      options = { ...options, releasePersisted: persistence.promise };
+    }
     for (const callback of this.releaseCallbacks) {
       try {
         callback(snapshot.sessionId, snapshot.deviceId, snapshot.releaseReason, snapshot, options);
@@ -6999,6 +7116,7 @@ export class SessionManager {
       this.pendingNonTerminalReleaseSnapshots.delete(snapshot.sessionId);
     }
     this.forgetSupersededRowUnder(snapshot);
+    this.restartReleasePersistence.get(snapshot)?.resolve();
   }
 
   private forgetSupersededRowUnder(release: SessionReleaseSnapshot): void {
@@ -10146,6 +10264,85 @@ export class SessionManager {
       suspectGraceMsFor(session) > 0 &&
       livenessLeaseState(sessionJudgedLeaseSnapshot(session, this.sessionNow())).phase === "lapsed"
     );
+  }
+
+  /**
+   * Credit only the releasing session's owner, within its still-running lease and grace. Socket
+   * heartbeats remain refused; this proof is private to the suspect handoff's commit judgement.
+   */
+  creditOwnerHeartbeatDuringRelease(sessionId: string, ownerToken: string): void {
+    const session = this.getReleasingSession(sessionId);
+    const operation = this.releasePromises.get(sessionId);
+    if (
+      !session ||
+      operation?.session !== session ||
+      operation.forced ||
+      operation.judgeSuspectOwnerAtCommit !== true ||
+      !shouldJudgeOwnerLeaseForRelease(operation.reason.value) ||
+      ownerToken.length === 0 ||
+      session.livenessOwnerToken !== ownerToken
+    ) {
+      return;
+    }
+    const snapshot = this.releaseOwnerLeaseSnapshot(session, operation);
+    if (snapshot && livenessLeaseState(snapshot).phase !== "lapsed") {
+      operation.ownerHeartbeatDuringRelease = snapshot.now;
+    }
+  }
+
+  /**
+   * Judge on the later of the session's own lease, a heartbeated same-token base's lease, and
+   * release-local owner proof; keep the session's policy and clocks unchanged (#11707).
+   */
+  private releaseOwnerLeaseSnapshot(
+    session: Session,
+    operation?: SessionReleaseOperation,
+  ): LivenessOwnerLeaseSnapshot | undefined {
+    if (!judgesOwnerHeartbeats(session) || suspectGraceMsFor(session) === 0) {
+      return undefined;
+    }
+    const snapshot = sessionJudgedLeaseSnapshot(session, this.sessionNow());
+    const base = this.livenessBaseSession(session);
+    if (
+      base &&
+      judgesOwnerHeartbeats(base) &&
+      base.livenessOwnerToken !== undefined &&
+      base.livenessOwnerToken === session.livenessOwnerToken
+    ) {
+      snapshot.lastHeartbeat = Math.max(
+        snapshot.lastHeartbeat,
+        sessionJudgedLeaseSnapshot(base, snapshot.now).lastHeartbeat,
+      );
+    }
+    snapshot.lastHeartbeat = Math.max(
+      snapshot.lastHeartbeat,
+      operation?.ownerHeartbeatDuringRelease ?? Number.NEGATIVE_INFINITY,
+    );
+    return snapshot;
+  }
+
+  /** Judge pre-handoff silence for plan cleanup and device restart only. */
+  private judgeOwnerLeaseForRelease(
+    session: Session,
+    reason: ReleaseReasonState,
+    stage: "start" | "commit",
+    operation?: SessionReleaseOperation,
+  ): boolean {
+    if (
+      (stage === "commit" && operation?.judgeSuspectOwnerAtCommit !== true) ||
+      !shouldJudgeOwnerLeaseForRelease(reason.value)
+    ) {
+      return false;
+    }
+    const snapshot = this.releaseOwnerLeaseSnapshot(session, operation);
+    if (!snapshot) {
+      return false;
+    }
+    const { phase } = livenessLeaseState(snapshot);
+    if (phase === "lapsed") {
+      this.upgradeReleaseReason(reason, "heartbeat-timeout");
+    }
+    return phase === "suspect";
   }
 
   /**

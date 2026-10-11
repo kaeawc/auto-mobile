@@ -5,6 +5,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
   registerRecordingSessionCleanup,
+  type RecordingAcquisitionDeps,
   type RecordingSessionCleanupDeps,
 } from "../../src/server/recordingSessionCleanup";
 import { logger } from "../../src/utils/logger";
@@ -21,11 +22,9 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 // `max(30 s, min(waited + retryAfterMs, 150 s))` (`deviceOwnedBudgetMs` in
 // AutoMobilePlanExecutor.kt, `effectiveBudgetMs` in AutoMobilePlanExecutor+DaemonRefusal.swift).
 //
-// The same capped finalize runs at release (#11360) and as ACQUISITION cleanup (#10961, #11041):
-// a session that acquires a device stops the owner-less recordings on it, through the same
-// `stopOwnedRecordingsWithinCap` (120 s cap). #11616: the acquisition registration carried no
-// cap, so once that holder released, the next acquirer's refusal carried the 1 s default and a
-// runner budgeted 30 s while the daemon was still legitimately finalizing for up to two minutes.
+// #11665 replaces acquisition-time stops (#10961) with adoption by the holder, then a capped
+// finalize at release. Preserve #11616's intent: the next acquirer's hint must carry the real
+// finalize bound, never the 1 s default. Adoption persistence itself remains uncapped.
 
 const DEVICE = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
 const FINALIZE_CAP_MS = 120_000;
@@ -41,8 +40,9 @@ function runnerBudgetMs(waitedMs: number, retryAfterMs: number): number {
 }
 
 /** One recording per owner on the device whose stop never returns (a wedged capture backend). */
-class WedgedRecordings implements RecordingSessionCleanupDeps {
+class WedgedRecordings implements RecordingSessionCleanupDeps, RecordingAcquisitionDeps {
   readonly active = new Map<string, string | undefined>();
+  adoptionPersistence: Promise<void> | undefined;
 
   constructor(readonly timer: FakeTimer) {}
 
@@ -62,7 +62,24 @@ class WedgedRecordings implements RecordingSessionCleanupDeps {
   isTestRecordingOwnedBy(): boolean {
     return false;
   }
+  ownedTestRecordingId(): string | undefined {
+    return undefined;
+  }
   async stopTestRecording(): Promise<void> {}
+  adoptVideoRecordings(_deviceId: string, sessionId: string): Promise<void> | undefined {
+    let adopted = false;
+    for (const [recordingId, owner] of this.active) {
+      if (owner === undefined) {
+        this.active.set(recordingId, sessionId);
+        adopted = true;
+      }
+    }
+    return adopted ? this.adoptionPersistence : undefined;
+  }
+  adoptSegmentedRecordings(): void {}
+  adoptTestRecording(): boolean {
+    return false;
+  }
   activeRecordingIdsForOwner(sessionId: string | undefined): string[] {
     return [...this.active].filter(([, owner]) => owner === sessionId).map(([id]) => id);
   }
@@ -133,40 +150,47 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
     expect(runnerBudgetMs(0, refusal.retryAfterMs)).toBeGreaterThanOrEqual(FINALIZE_CAP_MS);
   });
 
-  test("the owner-less finalize started on acquisition advertises its remaining cap too", async () => {
-    const stopOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(manager, recordings);
+  test("an adopted owner-less recording advertises the full finalize cap at release", async () => {
+    registerRecordingSessionCleanup(manager, recordings);
+    const adoptOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(
+      manager,
+      recordings,
+    );
     // A sessionless recording is capturing the device when a session acquires it.
     recordings.active.set("rec-ownerless", undefined);
     await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
-    stopOwnerlessRecordings(DEVICE.deviceId);
+    adoptOwnerlessRecordings(DEVICE.deviceId, "holder");
+    expect(recordings.active.has("rec-ownerless")).toBe(true);
+    expect(recordings.active.get("rec-ownerless")).toBe("holder");
     // The holder's own reuse is not refused (#11041).
     expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
 
-    // The holder is done 5 s later; the wedged stop is 115 s short of its cap.
+    // Adoption keeps capturing; the finalize starts only when the holder releases 5 s later.
     timer.advanceTime(5_000);
     await releaseHolder();
     expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(true);
 
     const refusal = await refusedBind();
-    // The daemon finalizes for up to 115 s more, so the hint must say so; a runner that trusts
-    // it must not give up before the cap.
-    const remainingCapMs = FINALIZE_CAP_MS - 5_000;
-    expect(refusal.retryAfterMs).toBeGreaterThanOrEqual(remainingCapMs);
-    expect(runnerBudgetMs(0, refusal.retryAfterMs)).toBeGreaterThanOrEqual(remainingCapMs);
+    expect(refusal.retryAfterMs).toBeGreaterThanOrEqual(FINALIZE_CAP_MS);
+    expect(runnerBudgetMs(0, refusal.retryAfterMs)).toBeGreaterThanOrEqual(FINALIZE_CAP_MS);
   });
 
-  test("the acquisition hint is the time remaining: cap plus grace, less the time already run", async () => {
-    const stopOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(manager, recordings);
+  test("the adopted recording's hint subtracts only time spent finalizing after release", async () => {
+    registerRecordingSessionCleanup(manager, recordings);
+    const adoptOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(
+      manager,
+      recordings,
+    );
     recordings.active.set("rec-ownerless", undefined);
     await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
-    stopOwnerlessRecordings(DEVICE.deviceId);
+    adoptOwnerlessRecordings(DEVICE.deviceId, "holder");
     timer.advanceTime(5_000);
     await releaseHolder();
 
     timer.advanceTime(60_000);
 
-    // 120 s cap + 5 s incomplete-mark grace, 65 s in; never more than the finalize can still take.
-    expect((await refusedBind()).retryAfterMs).toBe(60_000);
+    // 120 s cap + 5 s incomplete-mark grace, less 60 s since release; acquisition time is excluded.
+    expect((await refusedBind()).retryAfterMs).toBe(65_000);
   });
 
   test("an acquisition cleanup with no cap of its own keeps the default polling hint", async () => {
@@ -174,6 +198,47 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
     manager.registerAcquisitionDeviceCleanup(DEVICE.deviceId, new Promise<void>(() => {}));
     await releaseHolder();
 
+    expect((await refusedBind()).retryAfterMs).toBe(1_000);
+  });
+
+  test("an acquisition hook for a session other than the holder adopts nothing", async () => {
+    const adoptOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(
+      manager,
+      recordings,
+    );
+    recordings.active.set("rec-ownerless", undefined);
+    recordings.adoptionPersistence = new Promise<void>(() => {});
+    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    const registerCleanup = spyOn(manager, "registerAcquisitionDeviceCleanup");
+    try {
+      adoptOwnerlessRecordings(DEVICE.deviceId, "other-session");
+
+      expect(recordings.active.has("rec-ownerless")).toBe(true);
+      expect(recordings.active.get("rec-ownerless")).toBeUndefined();
+      expect(registerCleanup).not.toHaveBeenCalled();
+      expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
+    } finally {
+      registerCleanup.mockRestore();
+    }
+  });
+
+  test("unsettled adoption persistence alone keeps the default hint after release", async () => {
+    registerRecordingSessionCleanup(manager, recordings);
+    const adoptOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(
+      manager,
+      recordings,
+    );
+    recordings.active.set("rec-ownerless", undefined);
+    recordings.adoptionPersistence = new Promise<void>(() => {});
+    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    adoptOwnerlessRecordings(DEVICE.deviceId, "holder");
+    expect(recordings.active.get("rec-ownerless")).toBe("holder");
+    expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
+    recordings.active.delete("rec-ownerless");
+
+    await releaseHolder();
+
+    expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(true);
     expect((await refusedBind()).retryAfterMs).toBe(1_000);
   });
 });

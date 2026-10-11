@@ -756,6 +756,8 @@ export class DaemonSessionCreationRejectedError extends ActionableError {
 
 /** Idle expiry has no caller to return the device; its diagnostic may name a heartbeat timeout. */
 export interface SessionReleaseOptions {
+  /** Device-restart release persistence, including a retry after a failed write. */
+  releasePersisted?: Promise<void>;
   expiryOrigin?: "lazy-expiry" | "cleanup-expired";
   /** Set by the expiry handler when it owns the ordered device return after release. */
   deviceReleaseManaged?: boolean;
@@ -1377,7 +1379,7 @@ const LEGACY_DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 /** Default grace before a never-heartbeated default-policy session is reaped. */
 export const DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS = 5_000;
 // Give a restarted emulator the same three-minute cold-boot allowance as device readiness.
-const DEVICE_RESTART_RECOVERY_WINDOW_MS = DEFAULT_DEVICE_READY_TIMEOUT_MS;
+export const DEVICE_RESTART_RECOVERY_WINDOW_MS = DEFAULT_DEVICE_READY_TIMEOUT_MS;
 
 function isDeviceRestartReleasedRow(
   persisted: DeviceSession,
@@ -1433,6 +1435,10 @@ export class SessionManager {
   /** The clock every session timestamp is stamped and judged with (#11080); see {@link sessionNow}. */
   private readonly sessionClock: SteadyWallClock;
   private releaseCallbacks: SessionReleaseCallback[] = [];
+  private readonly restartReleasePersistence = new WeakMap<
+    SessionReleaseSnapshot,
+    PromiseWithResolvers<void>
+  >();
   // Base session → its derived `${base}:${label}` sessions (#11091), outside the base's cache so
   // it survives the base's removal. Consumed by takeDerivedLabelSessions.
   private readonly derivedLabelSessionsByBase = new Map<string, Set<string>>();
@@ -1602,6 +1608,9 @@ export class SessionManager {
    * {@link readPersistedSession}. In memory only: a daemon restart falls back to the row.
    */
   private readonly restartRecoveryActivityAt: Map<string, number> = new Map();
+  private readonly restartRecoveryActivityCallbacks: Array<
+    (sessionId: string, atMs: number) => void
+  > = [];
   /**
    * UUIDs whose live row this daemon is about to rewrite over a terminal row its own superseded
    * release wrote or may still write (#11206), counted per pending rewrite. While one is pending,
@@ -3154,6 +3163,11 @@ export class SessionManager {
     };
   }
 
+  /** Allow the pool to re-arm its idle hold when an admitted call records recovery activity. */
+  onRestartRecoveryActivity(callback: (sessionId: string, atMs: number) => void): void {
+    this.restartRecoveryActivityCallbacks.push(callback);
+  }
+
   /**
    * A control call started, joined or ended against a session waiting out a device restart.
    *
@@ -3167,6 +3181,13 @@ export class SessionManager {
       this.sessionNow(),
     );
     this.restartRecoveryActivityAt.set(sessionId, activityAt);
+    for (const callback of this.restartRecoveryActivityCallbacks) {
+      try {
+        callback(sessionId, activityAt);
+      } catch (error) {
+        logger.warn(`[SessionManager] Restart activity callback failed for ${sessionId}: ${error}`);
+      }
+    }
     void this.getBarrier()
       .track(async () => {
         await this.deviceSessionRepository.recordRestartRecoveryActivity?.(sessionId, activityAt);
@@ -3196,6 +3217,31 @@ export class SessionManager {
     }
     const deadline = restartRecoveryDeadlineFromPersisted(persisted);
     return deadline !== undefined && this.sessionNow() < deadline;
+  }
+
+  /** Recheck a pool hold at its idle deadline; active recovery calls retain the cold-boot window. */
+  async expireRestartRecoveryReservation(sessionId: string): Promise<number | undefined> {
+    const persisted = await this.readPersistedSession(sessionId);
+    if (!persisted || !isDeviceRestartReleasedRow(persisted)) {
+      return undefined;
+    }
+    const callerInFlight =
+      this.isSessionBeingRecreated(sessionId) || this.activeSessionExecutionChecker(sessionId);
+    const deadline = restartRecoveryDeadlineFromPersisted(persisted, callerInFlight)!;
+    if (this.sessionNow() < deadline) {
+      return deadline;
+    }
+    if (!callerInFlight) {
+      const current = await this.terminalizeExpiredPersistedSession(persisted);
+      // The conditional expiry write may lose to activity extending the same row.
+      if (current && isDeviceRestartReleasedRow(current)) {
+        const extendedDeadline = restartRecoveryDeadlineFromPersisted(current)!;
+        if (this.sessionNow() < extendedDeadline) {
+          return extendedDeadline;
+        }
+      }
+    }
+    return undefined;
   }
 
   private async getPersistedTerminalRelease(
@@ -3291,6 +3337,17 @@ export class SessionManager {
       },
     );
     const current = await this.readPersistedSession(persisted.session_uuid);
+    if (
+      !this.terminalReleaseSnapshots.has(persisted.session_uuid) &&
+      current?.release_reason === "expired" &&
+      current.stable_identity_generation === persisted.stable_identity_generation
+    ) {
+      const snapshot = this.expiredReleaseFromPersisted(persisted.session_uuid, current);
+      if (snapshot) {
+        this.terminalReleaseSnapshots.set(persisted.session_uuid, snapshot);
+        this.notifySessionRelease(snapshot, { upgradeOnly: true });
+      }
+    }
     if (!this.isReissuablePersistedSession(current)) {
       this.restartRecoveryActivityAt.delete(persisted.session_uuid);
     }
@@ -6883,6 +6940,12 @@ export class SessionManager {
     snapshot: SessionReleaseSnapshot,
     options: SessionReleaseOptions = {},
   ): void {
+    if (isDeviceRestartReleaseReason(snapshot.releaseReason)) {
+      const persistence =
+        this.restartReleasePersistence.get(snapshot) ?? Promise.withResolvers<void>();
+      this.restartReleasePersistence.set(snapshot, persistence);
+      options = { ...options, releasePersisted: persistence.promise };
+    }
     for (const callback of this.releaseCallbacks) {
       try {
         callback(snapshot.sessionId, snapshot.deviceId, snapshot.releaseReason, snapshot, options);
@@ -7008,6 +7071,7 @@ export class SessionManager {
       this.pendingNonTerminalReleaseSnapshots.delete(snapshot.sessionId);
     }
     this.forgetSupersededRowUnder(snapshot);
+    this.restartReleasePersistence.get(snapshot)?.resolve();
   }
 
   private forgetSupersededRowUnder(release: SessionReleaseSnapshot): void {

@@ -66,15 +66,21 @@ const IOS_POST_LEASE_RECHECK_TIMEOUT_MS = 5_000;
 /** A boot deadline failure, kept distinct from platform command failures. */
 export class DeviceBootTimeoutError extends ActionableError {
   readonly code = "timeout";
+  /** A purely time-based failure, retryable like provisionDevice's `timeout` (#11548). */
+  readonly retryable = true;
 
   constructor(
     readonly operation: string,
     readonly phase: string,
     readonly elapsedMs: number,
     readonly budgetMs: number,
+    /** The device being booted, when it was known at the time of the timeout. */
+    readonly device?: string,
   ) {
     super(
-      `${operation} timeout exhausted while ${phase}; remainingBudgetMs=0; elapsedMs=${elapsedMs}; budgetMs=${budgetMs}; origin=DeviceBootService`,
+      `${operation} timeout exhausted while ${phase}; ` +
+        (device ? `device=${device}; ` : "") +
+        `remainingBudgetMs=0; elapsedMs=${elapsedMs}; budgetMs=${budgetMs}; origin=DeviceBootService`,
     );
   }
 }
@@ -432,6 +438,8 @@ interface BootDeadlineContext {
   operationName: string;
   startedAtMs: number;
   deadlineMs: number;
+  /** Name of the device being booted, once resolved; named by a timeout error (#11548). */
+  deviceLabel?: string;
   signal?: AbortSignal;
   lifecycleLease?: VirtualDeviceLifecycleLease;
   ownsLifecycleLease: boolean;
@@ -1356,6 +1364,7 @@ export class DeviceBootService {
     provisioned: boolean,
     adoptRunningAfterLease = false,
   ): Promise<DeviceBootResult> {
+    context.deviceLabel = image.deviceId ? `${image.name} (${image.deviceId})` : image.name;
     assertAndroidImageRunningStateKnown(image);
     if (image.platform === "ios" && !image.deviceId) {
       throw new ActionableError("iOS simulator deviceId (UDID) is required to start a simulator.");
@@ -1756,6 +1765,7 @@ export class DeviceBootService {
       phase,
       this.timer.now() - context.startedAtMs,
       Math.max(0, context.deadlineMs - context.startedAtMs),
+      context.deviceLabel ?? context.request.name ?? context.request.deviceId,
     );
   }
 }

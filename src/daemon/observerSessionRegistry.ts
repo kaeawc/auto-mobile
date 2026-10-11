@@ -1,6 +1,12 @@
 import { logger } from "../utils/logger";
 import { getDefaultSessionHeartbeatTimeoutMs } from "./sessionManager";
 import { SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
+import {
+  forgivenLeaseStart,
+  leaseRunningAt,
+  type StallForgivingLeases,
+  type StallGap,
+} from "./stallForgiveness";
 import { SteadyWallClock, defaultTimer, type Timer } from "../utils/SystemTimer";
 
 export const MAX_OBSERVER_SESSIONS = 32;
@@ -49,7 +55,7 @@ export function observerMaySeeDeviceOwner(ownerSessionId: string | null): boolea
 }
 
 /** Separate from device sessions and persistence; never used by device-tool admission. */
-export class ObserverSessionRegistry implements ObserverSessionStore {
+export class ObserverSessionRegistry implements ObserverSessionStore, StallForgivingLeases {
   private readonly sessions = new Map<string, ObserverSession>();
   private disposed = false;
   private sweepHandle: NodeJS.Timeout | null = null;
@@ -61,6 +67,11 @@ export class ObserverSessionRegistry implements ObserverSessionStore {
    * the wall clock.
    */
   private readonly clock: SteadyWallClock;
+  /**
+   * The heartbeat monitor's stall and host-sleep detector, run before every expiry judgement so
+   * which timer fires first after a gap does not decide whether an observer survives it (#11554).
+   */
+  private stallProbe: (() => void) | undefined;
 
   constructor(
     private readonly timer: Timer = defaultTimer,
@@ -141,6 +152,40 @@ export class ObserverSessionRegistry implements ObserverSessionStore {
     );
   }
 
+  setStallProbe(probe: (() => void) | undefined): void {
+    this.stallProbe = probe;
+  }
+
+  /**
+   * Do not hold the daemon's own stall, or the host's sleep, against an observer (#11554): the
+   * forgiveness device sessions get (`SessionManager.forgiveDaemonStall`, which hands the gap on),
+   * by the same arithmetic. The steady clock counts host sleep, and on darwin a forward wall-clock
+   * step, as elapsed time, and a stalled daemon hears no heartbeat, so without this an observer
+   * that heartbeated moments before the gap was expired the instant the daemon ran again.
+   *
+   * Every observer whose budget was still running when the gap began has its expiry moved forward
+   * by the gap, never past a full budget from now: it keeps the budget it had left, and one that
+   * stays silent is still expired within one budget of the resume. Unlike a session owner an
+   * observer has no separate lease and grace, so "still running" is judged on the whole budget.
+   */
+  forgiveStall({ lostMs, sleptMs, gapAgeMs }: StallGap): number {
+    const resumedAt = this.clock.now();
+    let forgiven = 0;
+    for (const session of this.sessions.values()) {
+      if (
+        gapAgeMs !== undefined &&
+        !leaseRunningAt(session.lastHeartbeat, this.heartbeatTimeoutMs, resumedAt - gapAgeMs)
+      ) {
+        continue;
+      }
+      const leaseStart = session.expiresAtMs - this.heartbeatTimeoutMs;
+      session.expiresAtMs =
+        forgivenLeaseStart(leaseStart, resumedAt, lostMs + sleptMs) + this.heartbeatTimeoutMs;
+      forgiven++;
+    }
+    return forgiven;
+  }
+
   dispose(): void {
     this.disposed = true;
     this.sessions.clear();
@@ -196,8 +241,12 @@ export class ObserverSessionRegistry implements ObserverSessionStore {
     this.sweepAtMs = Number.POSITIVE_INFINITY;
   }
 
-  /** Expiry is judged on the steady clock, both on lookup and from the scheduled sweep. */
+  /**
+   * Expiry is judged on the steady clock, both on lookup and from the scheduled sweep, after any
+   * stall or host sleep the monitor has not yet noticed is forgiven.
+   */
   private purgeExpired(): void {
+    this.stallProbe?.();
     const now = this.clock.now();
     for (const session of this.sessions.values()) {
       if (session.expiresAtMs <= now) {

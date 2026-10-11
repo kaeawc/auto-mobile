@@ -61,6 +61,7 @@ test/daemon/daemonSocketReachability.test.ts
 test/daemon/daemonStartupFailureTracker.test.ts
 test/daemon/daemonStartupGuard.test.ts
 test/daemon/daemonTransportError.test.ts
+test/daemon/derivedLabelLivenessClaim.test.ts
 test/daemon/desktopWireContract.test.ts
 test/daemon/deviceControlTransportFailure.test.ts
 test/daemon/deviceDataStreamSocketServerCharacterization.test.ts
@@ -124,8 +125,10 @@ test/daemon/hierarchyStreamDiff.test.ts
 test/daemon/idleDeviceReaper.test.ts
 test/daemon/incumbentOwnerGuard.test.ts
 test/daemon/inputDeviceOwnership.test.ts
+test/daemon/inputHolderChangedTypedRefusal.test.ts
 test/daemon/lateRehydrationOwnerToldNotFound.test.ts
 test/daemon/liveDeadlineRegistry.test.ts
+test/daemon/livenessClaimDecision.test.ts
 test/daemon/livenessKeeperSuspectInteractions.test.ts
 test/daemon/livenessOwnerLease.test.ts
 test/daemon/managedExecutionLiveness.test.ts
@@ -154,12 +157,14 @@ test/daemon/managedSlots/slotsUnresolvedEmulatorIdentityGate.test.ts
 test/daemon/managedSlots/sqliteSlotRegistry.test.ts
 test/daemon/managerOutputReductionArgs.test.ts
 test/daemon/observationRequestBatch.test.ts
+test/daemon/observerLeaseSleepForgiveness.test.ts
 test/daemon/observerLeaseWallClockStep.test.ts
 test/daemon/observerSessionRegistry.test.ts
 test/daemon/observerSessionRequestHandlers.test.ts
 test/daemon/outboundWriteGuard.test.ts
 test/daemon/ownerConflictLeash.test.ts
 test/daemon/ownerDisconnectReleaseRearm.test.ts
+test/daemon/ownershipLookupReleasesNothing.test.ts
 test/daemon/passiveWorkPolicy.test.ts
 test/daemon/perSourceIosLiveness.test.ts
 test/daemon/performancePushSocketServer.test.ts
@@ -220,6 +225,7 @@ test/daemon/telemetryBackfillBounds.test.ts
 test/daemon/telemetryIdentityTimelineBuckets.test.ts
 test/daemon/testRecordingSocketServerAuth.test.ts
 test/daemon/tokenOwnedSessionsLastUsedAt.test.ts
+test/daemon/toolCallActivityLatestDeadline.test.ts
 test/daemon/unsettledExecutionVeto.test.ts
 test/daemon/unsettledExecutionVetoWallClockStep.test.ts
 test/daemon/videoRecordingSocketServerAuth.test.ts
@@ -608,6 +614,7 @@ test/features/prototype/prototypeIcons.test.ts
 test/features/prototype/prototypeMissingAssets.test.ts
 test/features/prototype/prototypeNodeContractParity.test.ts
 test/features/prototype/prototypeRepeat.test.ts
+test/features/prototype/prototypeScrimRole.test.ts
 test/features/prototype/prototypeSelectionControls.test.ts
 test/features/prototype/prototypeSetStateBinding.test.ts
 test/features/prototype/prototypeThemeModes.test.ts
@@ -703,7 +710,6 @@ test/helpers/captureStageBaseline.test.ts
 test/helpers/captureStageTimeline.test.ts
 test/helpers/fastCheckConfig.test.ts
 test/helpers/iosVideoRecordingSessionCleanup.test.ts
-test/helpers/livenessScenarioHarness.test.ts
 test/helpers/sessionOwnershipHeartbeat.test.ts
 test/helpers/warmedTests.test.ts
 test/helpers/webrtcDeviceCaptureHelpers.test.ts
@@ -730,6 +736,7 @@ test/lint/livenessActivityClockSeparation.test.ts
 test/lint/noCaughtErrorInterpolationRule.test.ts
 test/lint/noInlineErrorNormalizeRule.test.ts
 test/lint/noLegacyAutomobilePath.test.ts
+test/lint/pathSeparatorAssertions.test.ts
 test/lint/processSafety.test.ts
 test/lint/rawSelectorFieldReadRule.test.ts
 test/lint/registrationTeardownGuard.test.ts
@@ -799,6 +806,9 @@ test/scripts/benchmarkThresholds.test.ts
 test/scripts/buildReleaseNotes.test.ts
 test/scripts/checkUtilsImportDirection.test.ts
 test/scripts/ciLfsSkipSmudgePolicy.test.ts
+test/scripts/ciTimeToGreenArgs.test.ts
+test/scripts/ciTimeToGreenFetch.test.ts
+test/scripts/ciTimeToGreenReport.test.ts
 test/scripts/circleciMacosMigrationPolicy.test.ts
 test/scripts/clockSemanticsReport.test.ts
 test/scripts/copyDbRuntimeFiles.test.ts
@@ -832,6 +842,7 @@ test/scripts/optimizeSourcemap.test.ts
 test/scripts/optimizedSourcemapRuntime.test.ts
 test/scripts/oxfmtWorkflow.test.ts
 test/scripts/packedRuntimeAssets.test.ts
+test/scripts/prPathClassification.test.ts
 test/scripts/pullRequestAutoChoreWorkflow.test.ts
 test/scripts/readReleaseRegistry.test.ts
 test/scripts/runnerCalibration.test.ts
@@ -938,6 +949,7 @@ test/server/observeWaitForMultiPanel.test.ts
 test/server/performanceMonitorSessionCleanup.test.ts
 test/server/ping.test.ts
 test/server/planHealthSummary.test.ts
+test/server/planLabelNeverTakesSessionOfItsOwn.test.ts
 test/server/planOrchestratorVideoRecorderInjection.test.ts
 test/server/platform/PlatformClient.test.ts
 test/server/prompts/list.test.ts
@@ -1027,6 +1039,8 @@ test/setup/gitVersionProbe.test.ts
 test/setup/preloadDoesNotLoadCtrlProxyClients.test.ts
 test/setup/testDirectories.test.ts
 test/shutdownCleanup.test.ts
+test/shutdownLateOutcomes.test.ts
+test/stdioShutdownStages.test.ts
 test/utils/ArchiveExtractor.test.ts
 test/utils/Backoff.property.test.ts
 test/utils/Backoff.test.ts

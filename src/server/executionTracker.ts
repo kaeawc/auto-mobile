@@ -167,6 +167,15 @@ function isReadExecution(execution: ActiveExecution): boolean {
   );
 }
 
+/**
+ * An execution's request deadline, unbounded when it has none. On the session clock a finite wall
+ * deadline moves by the offset it was stamped under; infinity stays infinite.
+ */
+function executionDeadlineMs(execution: ActiveExecution, onSessionClock?: boolean): number {
+  const wallDeadline = execution.readDeadlineMs?.() ?? Number.POSITIVE_INFINITY;
+  return onSessionClock ? wallDeadline + (execution.sessionClockOffsetMs ?? 0) : wallDeadline;
+}
+
 /** Whether `query` leaves this execution out by id or as a read ({@link ActiveExecutionQuery}). */
 function isExcludedByQuery(
   executionId: string,
@@ -449,21 +458,23 @@ export class ExecutionTracker {
     sessionUuid: string,
     options: { onSessionClock?: boolean; excludeReads?: boolean } = {},
   ): number | undefined {
-    const executionIds = new Set([
-      ...(this.sessionUuidExecutions.get(sessionUuid) ?? []),
-      ...(this.autolockSessionExecutions.get(sessionUuid) ?? []),
-      ...this.unresolvedAutolockExecutionIds(sessionUuid),
-    ]);
-    const deadlines = [...executionIds].flatMap((executionId) => {
-      const execution = this.executions.get(executionId);
-      if (!execution || (options.excludeReads && isReadExecution(execution))) {
-        return [];
+    // Every lookup of a session past its idle deadline asks this (several per heartbeat and per
+    // monitor scan while a call vetoes the release), so it reads each running execution once and
+    // builds no collection.
+    const explicit = this.sessionUuidExecutions.get(sessionUuid);
+    const autolock = this.autolockSessionExecutions.get(sessionUuid);
+    let latest: number | undefined;
+    for (const execution of this.executions.values()) {
+      const runsUnderSession =
+        execution.provisionalAutolockSessionUuid === sessionUuid ||
+        explicit?.has(execution.id) ||
+        autolock?.has(execution.id);
+      if (runsUnderSession && !(options.excludeReads && isReadExecution(execution))) {
+        const deadline = executionDeadlineMs(execution, options.onSessionClock);
+        latest = latest === undefined ? deadline : Math.max(latest, deadline);
       }
-      const deadline = execution.readDeadlineMs?.() ?? Number.POSITIVE_INFINITY;
-      // Infinity stays infinite; a finite wall deadline moves by the offset it was stamped under.
-      return [options.onSessionClock ? deadline + (execution.sessionClockOffsetMs ?? 0) : deadline];
-    });
-    return deadlines.length === 0 ? undefined : Math.max(...deadlines);
+    }
+    return latest;
   }
 
   /**

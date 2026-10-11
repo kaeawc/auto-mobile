@@ -35,11 +35,8 @@ export const DEVICE_SHUTTING_DOWN_CODE = "device_shutting_down";
  */
 export const SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE = "session_terminal_release_in_progress";
 
-/**
- * A kill's terminal-release reservation named a device the session no longer holds (#11166).
- * Not retryable as-is: the device's holder changed, so the caller re-checks before killing.
- */
-export const SESSION_NO_LONGER_OWNS_DEVICE_CODE = "session_no_longer_owns_device";
+// Defined beside its error class, which the input layer throws too (#11351).
+export { SESSION_NO_LONGER_OWNS_DEVICE_CODE } from "./sessionNoLongerOwnsDevice";
 
 /**
  * A kill's terminal-release reservation raced the session's own rebind (#11166). Retryable with a
@@ -162,7 +159,12 @@ export class DeviceOwnedByOtherDaemonError extends RetryableDeviceAcquisitionErr
   }
 }
 
-/** Retry hint for a device under shutdown: a kill normally finishes within a few seconds. */
+/**
+ * Retry hint for a device under shutdown: a kill normally finishes within a few seconds. It is a
+ * polling interval, not a remaining time like `device_cleanup_in_progress` carries (#11616): a
+ * shutdown reservation spans several separately bounded steps and records no deadline, so the
+ * refusal has no bound to report and the runners' 30 s floor (one shutdown step's timeout) applies.
+ */
 export const DEVICE_SHUTTING_DOWN_RETRY_AFTER_MS = 2_000;
 
 export class DeviceShuttingDownError extends RetryableDeviceAcquisitionError {

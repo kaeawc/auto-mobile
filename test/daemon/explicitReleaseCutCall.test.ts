@@ -6,6 +6,7 @@ import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 
 // `--daemon release-session S` (daemon/releaseSession) while a control call is in flight on S.
 // #11381/#11384 made every idle, heartbeat and owner-disconnect release cancel the calls it cuts
@@ -145,7 +146,9 @@ describe("explicit release of a session with a call in flight", () => {
   test("releasing a derived label session cuts the base call on its device with a plain cancellation, and no other base call", async () => {
     const DERIVED = `${SESSION}:B`;
     const DERIVED_DEVICE = "emulator-5556";
-    await manager.createSession(DERIVED, DERIVED_DEVICE, "android");
+    await asPlanAllocation(manager, SESSION, [DERIVED], () =>
+      manager.createSession(DERIVED, DERIVED_DEVICE, "android"),
+    );
     manager.setDeviceLabels(SESSION, { A: SESSION, B: DERIVED });
     const baseOnOwnDevice = tracker.startExecution("tapOn", undefined, SESSION);
     tracker.bindDeviceExecution(baseOnOwnDevice.id, DEVICE);

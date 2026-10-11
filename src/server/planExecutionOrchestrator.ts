@@ -33,7 +33,7 @@ import {
 } from "./deviceLabelMapping";
 import { importPlanFromYaml, executePlan } from "../utils/planUtils";
 import { DaemonState } from "../daemon/daemonState";
-import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
+import { DAEMON_SHUTTING_DOWN_ERROR_CODE, INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import {
   managedConnectionPlanLabelRefusal,
   slotDeviceFailsLabelCriteria,
@@ -254,6 +254,29 @@ export function planRefusalFields(
   Record<string, unknown> {
   const fields = typedRefusalFields(error);
   return fields ? { ...refusalPayloadEvidence(error, fields.details ?? {}), ...fields } : {};
+}
+
+/**
+ * The typed outcome of a plan that daemon shutdown cut (#11572): the shutdown aborts the plan's
+ * call and releases its sessions, and the plan still answers with its own result, so that result
+ * carries `daemon_shutting_down` and `retryable: true` like every call the shutdown answers itself.
+ * The caller runs the plan again against the restarted daemon; its derived label sessions are
+ * minted by that run. Steps may already have run, as `executedSteps` reports.
+ */
+export function planShutdownInterruptionFields(
+  signal: AbortSignal | undefined,
+  planSucceeded = false,
+): Pick<ExecutePlanResult, "code" | "retryable"> {
+  const daemonState = DaemonState.getInstance();
+  if (
+    planSucceeded ||
+    !signal?.aborted ||
+    !daemonState.isInitialized() ||
+    daemonState.getSessionManager().isAcceptingSessionCreations()
+  ) {
+    return {};
+  }
+  return { code: DAEMON_SHUTTING_DOWN_ERROR_CODE, retryable: true };
 }
 
 /**
@@ -504,6 +527,7 @@ export class PlanExecutionOrchestrator {
         totalSteps: result.totalSteps,
         failedStep: result.failedStep,
         error: result.failedStep ? result.failedStep.error : undefined,
+        ...planShutdownInterruptionFields(this.signal, result.success),
         platform: this.device.platform,
         deviceId: this.device.deviceId,
         deviceMapping,
@@ -547,6 +571,7 @@ export class PlanExecutionOrchestrator {
         totalSteps: 0,
         error: `${error}`,
         ...planRefusalFields(error),
+        ...planShutdownInterruptionFields(this.signal),
         platform: this.device.platform,
         deviceId: this.device.deviceId,
         ...healthSummaryField(failureHealth),
@@ -701,17 +726,26 @@ export class PlanExecutionOrchestrator {
       throw error;
     };
 
-    const allocation = Promise.resolve().then(
-      () =>
-        slotDevices ??
-        this.requestDeviceAllocation(
-          devicePool,
-          normalized,
-          effectiveLabels,
-          labelToSessionMap,
-          sessionIds,
-        ),
-    );
+    // A derived label session lives only as long as its plan run (#11572): this run's allocation
+    // may mint each label again, however the previous run's label session ended. A managed slot
+    // serves its labels with live slot sessions and mints nothing.
+    const allocation = Promise.resolve().then(() => {
+      if (slotDevices) {
+        return slotDevices;
+      }
+      const closeLabelMints = sessionManager.openPlanLabelMints(sessionUuid, labelToSessionMap);
+      return Promise.resolve()
+        .then(() =>
+          this.requestDeviceAllocation(
+            devicePool,
+            normalized,
+            effectiveLabels,
+            labelToSessionMap,
+            sessionIds,
+          ),
+        )
+        .finally(closeLabelMints);
+    });
 
     const sessionToDeviceMap = await allocation.catch((error) => {
       return restorePreviousDeviceLabels(error);

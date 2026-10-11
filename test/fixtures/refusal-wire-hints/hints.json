@@ -1,0 +1,123 @@
+{
+  "description": "How the Android and iOS runners treat a daemon retryAfterMs hint (#11544); both read this table and must give the same answer. usableHints: a wire hint becomes the hint the runner uses (null = absent): zero and negative count as absent, anything above the 150000 ms finalize cap is clamped to it. backoffSteps: the next wait for a refusal, given the waits already taken and the ms already waited, as (waits, waitedMs, hint, code) -> delayMs, null once the budget is spent; the default 30000 ms budget applies, and a finalize code's hint bounds the total wait instead of lengthening a step.",
+  "usableHints": [
+    { "name": "absent", "wire": null, "usable": null },
+    { "name": "positive", "wire": 5000, "usable": 5000 },
+    { "name": "at the cap", "wire": 150000, "usable": 150000 },
+    { "name": "above the cap", "wire": 600000, "usable": 150000 },
+    { "name": "near the integer maximum", "wire": 9223372036854775807, "usable": 150000 },
+    { "name": "fractional", "wire": 1500.5, "usable": null },
+    { "name": "boolean", "wire": true, "usable": null },
+    { "name": "string", "wire": "5000", "usable": null },
+    { "name": "beyond the integer range", "wire": 99999999999999999999, "usable": null },
+    { "name": "zero", "wire": 0, "usable": null },
+    { "name": "negative", "wire": -1, "usable": null },
+    { "name": "most negative", "wire": -9223372036854775808, "usable": null }
+  ],
+  "backoffSteps": [
+    {
+      "name": "finalize hint near the integer maximum is clamped, not wrapped",
+      "waits": 0,
+      "waitedMs": 0,
+      "code": "device_cleanup_in_progress",
+      "retryAfterMs": 9223372036854775807,
+      "delayMs": 500
+    },
+    {
+      "name": "finalize hint near the integer maximum after a long wait",
+      "waits": 8,
+      "waitedMs": 100000,
+      "code": "device_shutting_down",
+      "retryAfterMs": 9223372036854775807,
+      "delayMs": 4000
+    },
+    {
+      "name": "finalize hint near the integer maximum stops at the 150 s cap",
+      "waits": 8,
+      "waitedMs": 150000,
+      "code": "device_cleanup_in_progress",
+      "retryAfterMs": 9223372036854775807,
+      "delayMs": null
+    },
+    {
+      "name": "finalize hint of zero is absent: 30 s budget remains",
+      "waits": 8,
+      "waitedMs": 29900,
+      "code": "device_cleanup_in_progress",
+      "retryAfterMs": 0,
+      "delayMs": 100
+    },
+    {
+      "name": "finalize hint of zero is absent: 30 s budget is spent",
+      "waits": 8,
+      "waitedMs": 30000,
+      "code": "device_cleanup_in_progress",
+      "retryAfterMs": 0,
+      "delayMs": null
+    },
+    {
+      "name": "finalize negative hint is absent: 30 s budget remains",
+      "waits": 8,
+      "waitedMs": 29900,
+      "code": "device_shutting_down",
+      "retryAfterMs": -5000,
+      "delayMs": 100
+    },
+    {
+      "name": "finalize negative hint is absent: 30 s budget is spent",
+      "waits": 8,
+      "waitedMs": 30000,
+      "code": "device_shutting_down",
+      "retryAfterMs": -5000,
+      "delayMs": null
+    },
+    {
+      "name": "finalize negative hint near the integer minimum is absent",
+      "waits": 0,
+      "waitedMs": 29800,
+      "code": "device_cleanup_in_progress",
+      "retryAfterMs": -9223372036854775808,
+      "delayMs": 200
+    },
+    {
+      "name": "finalize hint is the time left, so it extends the budget",
+      "waits": 8,
+      "waitedMs": 100000,
+      "code": "device_cleanup_in_progress",
+      "retryAfterMs": 1000,
+      "delayMs": 1000
+    },
+    {
+      "name": "other code with a huge hint is clamped then bounded by the budget",
+      "waits": 0,
+      "waitedMs": 0,
+      "code": "device_owned_by_other_session",
+      "retryAfterMs": 9223372036854775807,
+      "delayMs": 30000
+    },
+    {
+      "name": "other code with a zero hint uses the ordinary backoff",
+      "waits": 0,
+      "waitedMs": 0,
+      "code": "capacity_exhausted",
+      "retryAfterMs": 0,
+      "delayMs": 500
+    },
+    {
+      "name": "other code with a negative hint uses the ordinary backoff",
+      "waits": 2,
+      "waitedMs": 1500,
+      "code": "capacity_exhausted",
+      "retryAfterMs": -1,
+      "delayMs": 2000
+    },
+    {
+      "name": "other code with a hint lengthens the step",
+      "waits": 0,
+      "waitedMs": 0,
+      "code": "capacity_exhausted",
+      "retryAfterMs": 3000,
+      "delayMs": 3000
+    }
+  ]
+}

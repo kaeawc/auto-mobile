@@ -378,6 +378,98 @@ describe("videoRecording tool segmentation branch", () => {
     });
   });
 
+  describe("a finalized recording is reachable by the owners the active path accepts (#11533)", () => {
+    const stopArgs = (recordingId: string, extra: Record<string, unknown>) => ({
+      action: "stop" as const,
+      recordingId,
+      ...extra,
+    });
+    const finalizeSingle = async (owner: string) => {
+      const active = await startVideoRecording({ device: androidDevice, ownerSessionUuid: owner });
+      await fsPromises.writeFile(active.outputPath, "video-bytes");
+      await stopVideoRecordingUnattended(active.recordingId);
+      return active.recordingId;
+    };
+    const idsOf = (response: Record<string, unknown>) =>
+      (response.recordings as Array<{ recordingId: string }>).map((r) => r.recordingId);
+
+    test("the base session and a sibling label session read a derived session's finalized single recording; nobody else", async () => {
+      setRecordingRequesterResolverForTesting({
+        baseSessionUuid: (uuid) => uuid.split(":")[0],
+        connectionOwnsDeviceSession: () => false,
+      });
+      const recordingId = await finalizeSingle("plan-base:pixel");
+      const stopsBefore = fakeBackend.stopCalls.length;
+
+      for (const requester of ["plan-base", "plan-base:pixel", "plan-base:tablet"]) {
+        const response = parse(
+          await handler()(androidDevice, stopArgs(recordingId, { sessionUuid: requester })),
+        );
+        expect(idsOf(response)).toEqual([recordingId]);
+        expect(response.alreadyStopped).toBe(true);
+      }
+      for (const requester of ["other-base", "other-base:pixel", "plan-base2"]) {
+        await expect(
+          handler()(androidDevice, stopArgs(recordingId, { sessionUuid: requester })),
+        ).rejects.toThrow("Failed to stop video recording");
+      }
+      expect(fakeBackend.stopCalls.length).toBe(stopsBefore);
+    });
+
+    test("a proxy-bound requester whose connection holds the owner's device session reads it; another connection does not", async () => {
+      const seen: Array<[string, string, string]> = [];
+      setRecordingRequesterResolverForTesting({
+        baseSessionUuid: (uuid) => uuid.split(":")[0],
+        connectionOwnsDeviceSession: (mcp, deviceId, ownerBase) => {
+          seen.push([mcp, deviceId, ownerBase]);
+          return mcp === "mcp-owner";
+        },
+      });
+      const recordingId = await finalizeSingle("plan-base:pixel");
+
+      const response = parse(
+        await handler()(
+          androidDevice,
+          stopArgs(recordingId, { sessionUuid: "proxy-session", __mcpSessionId: "mcp-owner" }),
+        ),
+      );
+      expect(idsOf(response)).toEqual([recordingId]);
+      expect(seen[0]).toEqual(["mcp-owner", androidDevice.deviceId, "plan-base"]);
+      await expect(
+        handler()(
+          androidDevice,
+          stopArgs(recordingId, { sessionUuid: "proxy-session", __mcpSessionId: "mcp-other" }),
+        ),
+      ).rejects.toThrow("Failed to stop video recording");
+    });
+
+    test("the base session reads a derived session's finalized segmented recording; another base does not", async () => {
+      setRecordingRequesterResolverForTesting({
+        baseSessionUuid: (uuid) => uuid.split(":")[0],
+        connectionOwnsDeviceSession: () => false,
+      });
+      const start = parse(
+        await handler()(androidDevice, {
+          action: "start",
+          platform: "android",
+          maxDuration: 181,
+          sessionUuid: "plan-base:pixel",
+        }),
+      );
+      const handle = idsOf(start)[0];
+      await stopSegmentedVideoRecordingsForOwner("plan-base:pixel", androidDevice.deviceId);
+
+      const response = parse(
+        await handler()(androidDevice, stopArgs(handle, { sessionUuid: "plan-base" })),
+      );
+      expect(response.segmented).toBe(true);
+      expect(idsOf(response)[0]).toBe(handle);
+      await expect(
+        handler()(androidDevice, stopArgs(handle, { sessionUuid: "other-base:pixel" })),
+      ).rejects.toThrow("Failed to stop video recording");
+    });
+  });
+
   describe("stop by id requires the active recording's owner (#11130)", () => {
     test("a foreign session cannot stop another session's active single recording", async () => {
       const active = await startVideoRecording({

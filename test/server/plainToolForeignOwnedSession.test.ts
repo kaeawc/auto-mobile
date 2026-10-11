@@ -197,6 +197,8 @@ describe("a plain control tool naming a session another connection owns", () => 
     });
 
     expect(wire(named).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    // The remedy names the way to force-stop the device (#11555).
+    expect(JSON.stringify(named.content)).toContain("leave sessionUuid out");
     expect(manager.killed).toEqual([]);
 
     await call({ device: held, force: true, [INTERNAL_MCP_SESSION_PARAM]: OTHER });

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { clipIosChromeBounds } from "../../../src/features/action/swipeon/iosChromeInsets";
@@ -58,6 +58,12 @@ async function tapOn(observation: ObserveResult, text: string) {
   const result = await tap.execute({ text, action: "tap", searchUntil: { duration: 200 } });
   return { result, points };
 }
+
+// One throwaway run pays the one-time module/JIT warm-up of the resolver over the large
+// captures; beforeAll time is outside the per-test budget, so the tests measure steady state.
+beforeAll(async () => {
+  await tapOn(discoverTab, "Discover");
+});
 
 describe("iPad floating tab bar inside the navigation bar frame (#10635)", () => {
   test("tapOn a tab item taps its centre instead of refusing it as covered", async () => {

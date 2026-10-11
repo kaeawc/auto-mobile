@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -162,7 +162,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
     expect(sessionManager.getSessionForDevice(DEVICE)).toBeNull();
   }
 
-  beforeEach(async () => {
+  async function setUp(): Promise<void> {
     strokes = [];
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -216,9 +216,9 @@ describe("an open input stroke vs. a release of its holder session", () => {
       timer,
     );
     monitor.start();
-  });
+  }
 
-  afterEach(async () => {
+  async function tearDown(): Promise<void> {
     await monitor?.stop();
     monitor = undefined;
     // Closing the socket lifts whatever stroke it still owns; let that reach the fake device
@@ -231,7 +231,25 @@ describe("an open input stroke vs. a release of its holder session", () => {
     spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
     PlatformDeviceManagerFactory.reset();
     sessionManager.stopCleanupTimer();
+  }
+
+  // CI's per-test time excludes only beforeAll: the first run through the daemon request path
+  // (JIT, lazy module state) is paid here once, with the same reap-then-refuse sequence the
+  // tests drive, instead of inside the first timed test.
+  beforeAll(async () => {
+    await setUp();
+    try {
+      sessionManager.onSessionRelease((sessionId) => void internals.liftStrokesHeldBy(sessionId));
+      await reapHolderWithStrokeOpen();
+      await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", IDLE_MS);
+      await sendGesture("Move");
+    } finally {
+      await tearDown();
+    }
   });
+
+  beforeEach(setUp);
+  afterEach(tearDown);
 
   test("releasing the holder lifts its open stroke before the device has a new owner", async () => {
     // The server's session-release subscription, which `start()` wires to the broadcaster.

@@ -32,6 +32,7 @@ import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import { formatToolParamError } from "./toolParamError";
 import { type DeviceCreationGate } from "../devices/deviceCreationGate";
+import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import { DaemonState } from "../daemon/daemonState";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { isUnresolvedAndroidEmulatorName } from "../devices/deviceIdentityEvidence";
@@ -105,6 +106,7 @@ import {
   RecordProvisionDeviceLifecycle,
   reserveStableDeviceLifecycle,
   rethrowDeviceLifecycleReservationFailure,
+  bindUndoneIfUndelivered,
   runOperationWithinDeadline,
   runProvisionDeviceWithinDeadline,
   StableDeviceTarget,
@@ -131,6 +133,7 @@ type ProvisioningHooks = {
       verifiedAndroidAvdIdentity?: DeviceInfo;
       achievedReadiness?: DeviceReadinessLevel;
       collectCancellationSettlement?: (settlement: Promise<void>) => void;
+      receipt?: AcquisitionReceipt;
     },
   ) => Promise<string>;
   ensureCtrlProxyReady: (request: RunnerReadinessRequest) => Promise<void>;
@@ -1662,12 +1665,53 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
     };
   }
 
+  /**
+   * Bind the provisioned device's session under the request deadline. A request cancelled while
+   * the bind finishes gets no session id, so what the bind minted is released again (#11565).
+   */
+  async function bindProvisionedDeviceSession(
+    args: ProvisionDeviceArgs,
+    boot: DeviceBootResult,
+    sourceImage: DeviceInfo,
+    binding: {
+      timer: DeviceToolsDependencies["timer"];
+      totalDeadlineMs: number;
+      signal: AbortSignal;
+      readinessReservation: DeviceReadinessReservation | undefined;
+      settlementState: ProvisionSettlementState;
+    },
+  ): Promise<string> {
+    const { readinessReservation, settlementState } = binding;
+    return await runProvisionDeviceWithinDeadline(
+      binding.timer,
+      binding.totalDeadlineMs,
+      binding.signal,
+      "binding the device session",
+      bindUndoneIfUndelivered(async (receipt) =>
+        bindBootedDeviceSession(
+          boot.device,
+          provisionSessionArgs(args),
+          sourceImage,
+          boot.processHandle,
+          // Our own stable-name readiness reservation must not deny our
+          // own bind when the pooled incarnation changed during readiness.
+          provisionSessionBindingOptions(args, readinessReservation, settlementState, receipt),
+        ),
+      ),
+      (settlement) => {
+        settlementState.bindingSettlements.push(settlement);
+      },
+    );
+  }
+
   function provisionSessionBindingOptions(
     args: ProvisionDeviceArgs,
     readinessReservation: DeviceReadinessReservation | undefined,
     settlementState: ProvisionSettlementState,
+    receipt: AcquisitionReceipt,
   ) {
     return {
+      receipt,
       readinessReservationOwners: readinessReservation
         ? new Set([readinessReservation.owner])
         : undefined,
@@ -1864,25 +1908,13 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
           operationSignal.throwIfAborted();
           validatePooledDeviceMapping(boot!.device, requestedIdentity);
           publishWarmDeviceReady(boot!.source, boot!.device.deviceId);
-          return await runProvisionDeviceWithinDeadline(
-            deps.timer,
+          return await bindProvisionedDeviceSession(args, boot!, provisioned.device, {
+            timer: deps.timer,
             totalDeadlineMs,
-            operationSignal,
-            "binding the device session",
-            async () =>
-              await bindBootedDeviceSession(
-                boot!.device,
-                provisionSessionArgs(args),
-                provisioned.device,
-                boot!.processHandle,
-                // Our own stable-name readiness reservation must not deny our
-                // own bind when the pooled incarnation changed during readiness.
-                provisionSessionBindingOptions(args, readinessReservation, settlementState),
-              ),
-            (settlement) => {
-              settlementState.bindingSettlements.push(settlement);
-            },
-          );
+            signal: operationSignal,
+            readinessReservation,
+            settlementState,
+          });
         },
       );
       ownershipTransferred = true;

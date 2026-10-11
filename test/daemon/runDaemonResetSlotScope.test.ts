@@ -141,6 +141,77 @@ describe("reset-slot-scope daemon command", () => {
     ]);
   });
 
+  test("a refused --force exits 2 and says on stderr why each slot was left alone (#11545)", async () => {
+    const result = {
+      outcome: "pending",
+      retryable: true,
+      waitedMs: 0,
+      scopes: [
+        {
+          scopeKey: "scope-1",
+          outcome: "pending",
+          freedDevices: [],
+          forceRefusals: [
+            {
+              slotIndex: 0,
+              reason: "within_settlement_cap",
+              remainingMs: 123_000,
+              message: "Slot scope-1/0 is still settling; retry --force in 123000ms.",
+            },
+            {
+              slotIndex: 2,
+              reason: "owner_liveness_unknown",
+              message: "Slot scope-1/2 is owned by another running daemon.",
+            },
+          ],
+        },
+        { scopeKey: "scope-2", outcome: "invalidated", freedDevices: [] },
+      ],
+    };
+
+    const { output } = await run(
+      ["--runner-namespace", "ns", "--incarnation", "boot-1", "--force"],
+      result,
+    );
+
+    expect(output).toEqual([
+      ["stdout", JSON.stringify(result)],
+      [
+        "stderr",
+        "Scope is still settling (live owners or pending cleanup); acquisitions stay blocked. Retry the command.",
+      ],
+      ["stderr", "--force left 2 slot(s) alone:"],
+      [
+        "stderr",
+        "  scope-1 slot 0 [within_settlement_cap, remainingMs=123000]: Slot scope-1/0 is still settling; retry --force in 123000ms.",
+      ],
+      [
+        "stderr",
+        "  scope-1 slot 2 [owner_liveness_unknown]: Slot scope-1/2 is owned by another running daemon.",
+      ],
+      ["exit", 2],
+    ]);
+  });
+
+  test("a malformed refusal list never breaks the exit-2 report", async () => {
+    const { output } = await run(["--runner-namespace", "ns", "--incarnation", "boot-1"], {
+      outcome: "pending",
+      scopes: [
+        null,
+        { scopeKey: "scope-1", forceRefusals: [null, { slotIndex: "x" }] },
+        { forceRefusals: 3 },
+      ],
+    });
+
+    expect(output.slice(1)).toEqual([
+      [
+        "stderr",
+        "Scope is still settling (live owners or pending cleanup); acquisitions stay blocked. Retry the command.",
+      ],
+      ["exit", 2],
+    ]);
+  });
+
   test("an unknown scope exits 1", async () => {
     const { output } = await run(["--runner-namespace", "ns", "--incarnation", "boot-9"], {
       outcome: "not_found",

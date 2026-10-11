@@ -184,13 +184,51 @@ export function parseResetSlotScopeCommandArgs(args: string[]): ResetSlotScopeCo
 /** Socket budget for the reset RPC: its settle wait plus room for the registry work. */
 const RESET_SLOT_SCOPE_CALL_MARGIN_MS = 5_000;
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+/**
+ * The stderr lines saying why `--force` left each slot alone (#11545): one per `forceRefusals`
+ * entry of the reset result, with its typed reason, the time remaining when the daemon gave one,
+ * and its message. The result crossed the daemon socket, so it is read defensively: anything that
+ * is not a well-formed refusal is skipped (the full result is still on stdout).
+ */
+export function resetSlotScopeForceRefusalLines(result: unknown): string[] {
+  const scopes = isObject(result) && Array.isArray(result.scopes) ? result.scopes : [];
+  const lines = scopes.flatMap((scope: unknown): string[] => {
+    if (!isObject(scope) || !Array.isArray(scope.forceRefusals)) {
+      return [];
+    }
+    const scopeKey = typeof scope.scopeKey === "string" ? scope.scopeKey : "(unknown scope)";
+    return scope.forceRefusals.flatMap((refusal: unknown): string[] => {
+      if (
+        !isObject(refusal) ||
+        typeof refusal.slotIndex !== "number" ||
+        typeof refusal.reason !== "string" ||
+        typeof refusal.message !== "string"
+      ) {
+        return [];
+      }
+      const remaining =
+        typeof refusal.remainingMs === "number" ? `, remainingMs=${refusal.remainingMs}` : "";
+      return [
+        `  ${scopeKey} slot ${refusal.slotIndex} [${refusal.reason}${remaining}]: ${refusal.message}`,
+      ];
+    });
+  });
+  return lines.length === 0 ? [] : [`--force left ${lines.length} slot(s) alone:`, ...lines];
+}
+
 /**
  * `--daemon reset-slot-scope`: invalidate one runner incarnation's managed slot scope (#11174).
  * Prints the daemon's JSON result; exits 2 when the scope is still waiting on owners or cleanup
- * (retry later) and 1 when no scope matched or the call failed.
+ * (retry later), naming on stderr every slot `--force` left alone and why, and 1 when no scope
+ * matched or the call failed.
  */
 async function resetSlotScope(args: string[], manager: DaemonManager): Promise<void> {
   let outcome: unknown;
+  let refusalLines: string[] = [];
   try {
     const request = parseResetSlotScopeCommandArgs(args);
     const client = manager.createClient();
@@ -210,6 +248,7 @@ async function resetSlotScope(args: string[], manager: DaemonManager): Promise<v
       result !== null && typeof result === "object" && "outcome" in result
         ? result.outcome
         : undefined;
+    refusalLines = resetSlotScopeForceRefusalLines(result);
   } catch (error) {
     if (error instanceof ActionableError) {
       console.error(`Error: ${error.message}`);
@@ -222,6 +261,9 @@ async function resetSlotScope(args: string[], manager: DaemonManager): Promise<v
     console.error(
       "Scope is still settling (live owners or pending cleanup); acquisitions stay blocked. Retry the command.",
     );
+    for (const line of refusalLines) {
+      console.error(line);
+    }
     process.exit(2);
   }
   if (outcome === "not_found") {
@@ -316,11 +358,14 @@ const formatPoolStats = (
 /**
  * Render the booted-devices resource as `available-devices` output. A resource with no usable pool
  * status (no text, unparseable text, an error object, or no `poolStatus`) is an unknown, so it
- * fails rather than printing zeros that read as "0 devices".
+ * fails rather than printing zeros that read as "0 devices". So does an incomplete observation
+ * (`observationComplete: false`) with no device entries; a partial one with entries still prints
+ * (the JSON has no field that could carry the incompleteness).
  */
 function printAvailableDevicesContent(content: string | undefined): void {
   let data: {
     error?: unknown;
+    observationComplete?: boolean;
     poolStatus?: {
       idle: number;
       assigned: number;
@@ -348,6 +393,14 @@ function printAvailableDevicesContent(content: string | undefined): void {
     throw new ActionableError(
       "The booted-devices resource carried no pool status, so the device count is unknown " +
         "(discovery_incomplete); retry once the daemon finishes discovery.",
+    );
+  }
+  if (data.observationComplete === false && (data.devices?.length ?? 0) === 0) {
+    // Every discovery source failed and the pool has nothing to fall back on: zeros here would
+    // read as "0 devices" when the count is actually unknown.
+    throw new ActionableError(
+      "The booted-devices resource reports incomplete discovery and the pool has no devices, so the count is " +
+        "unknown (discovery_incomplete); retry once the daemon finishes discovery.",
     );
   }
   console.log(
@@ -678,15 +731,19 @@ async function queryAvailableDevices(args: string[], manager: DaemonManager): Pr
     if (daemonState.isInitialized()) {
       // Running inside daemon process
       const pool = daemonState.getDevicePool();
+      const { stats, deviceIds } = await pool.getRefreshedInventory();
       console.log(
         formatPoolStats(
-          await pool.getRefreshedStats(),
+          stats,
           pool.getRecoveryPolicy(),
-          pool.getAllDevices().map((device) => ({
-            deviceId: device.id,
-            platform: device.platform,
-            recoveryEligibility: pool.getRecoveryEligibility(device.id),
-          })),
+          pool
+            .getAllDevices()
+            .filter((device) => deviceIds.has(device.id))
+            .map((device) => ({
+              deviceId: device.id,
+              platform: device.platform,
+              recoveryEligibility: pool.getRecoveryEligibility(device.id),
+            })),
         ),
       );
       return;

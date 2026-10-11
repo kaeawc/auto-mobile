@@ -374,6 +374,10 @@ public final class AutoMobilePlanExecutor: Sendable {
             )
         } catch is CancellationError {
             throw CancellationError()
+        } catch let MCPClientError.refused(refusal) {
+            try Task.checkCancellation()
+            PerfTimer.log("executeAttempt ERROR: daemon refused - \(refusal.code ?? "untyped")")
+            throw ExecutorError.refused(tool: "daemon", refusal)
         } catch let error as MCPClientError {
             try Task.checkCancellation()
             PerfTimer.log("executeAttempt ERROR: MCPClientError - \(error.description)")

@@ -201,6 +201,11 @@ export interface DaemonStateAccess {
     getStats(): DevicePoolStats;
     /** {@link getStats} after refreshing slot and foreign-daemon ownership (#11305). */
     getRefreshedStats?(): Promise<DevicePoolStats>;
+    /** {@link getRefreshedStats} plus the live device ids it counted (#11568). */
+    getRefreshedInventory?(): Promise<{
+      stats: DevicePoolStats;
+      deviceIds: ReadonlySet<string>;
+    }>;
     releaseDevice(deviceId: string, expectedSessionId: string): Promise<void>;
     getAllDevices?(): PooledDevice[];
     /** The pooled device, whose `sessionId` is set as soon as a session is assigned it. */
@@ -1112,8 +1117,15 @@ function livenessOwnershipFailure(
  */
 async function refreshedPoolStats(
   pool: ReturnType<DaemonStateAccess["getDevicePool"]>,
-): Promise<{ ok: true; stats: DevicePoolStats } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; stats: DevicePoolStats; deviceIds?: ReadonlySet<string> }
+  | { ok: false; error: string }
+> {
   try {
+    if (pool.getRefreshedInventory) {
+      const { stats, deviceIds } = await pool.getRefreshedInventory();
+      return { ok: true, stats, deviceIds };
+    }
     return {
       ok: true,
       stats: pool.getRefreshedStats ? await pool.getRefreshedStats() : pool.getStats(),
@@ -1168,14 +1180,18 @@ async function handleAvailableDevices(
   }
   const stats = refreshed.stats;
   const recoveryPolicy = pool.getRecoveryPolicy?.();
-  const devices = pool.getAllDevices?.().map((device) => ({
-    deviceId: device.id,
-    platform: device.platform,
-    recoveryEligibility: pool.getRecoveryEligibility?.(device.id),
-    ...(pool.getDeviceHealthMarker?.(device.id)
-      ? { unhealthy: pool.getDeviceHealthMarker(device.id) }
-      : {}),
-  }));
+  // List only the devices the counts cover, so a phantom entry is neither counted nor listed.
+  const devices = pool
+    .getAllDevices?.()
+    .filter((device) => !refreshed.deviceIds || refreshed.deviceIds.has(device.id))
+    .map((device) => ({
+      deviceId: device.id,
+      platform: device.platform,
+      recoveryEligibility: pool.getRecoveryEligibility?.(device.id),
+      ...(pool.getDeviceHealthMarker?.(device.id)
+        ? { unhealthy: pool.getDeviceHealthMarker(device.id) }
+        : {}),
+    }));
   return {
     success: true,
     result: {

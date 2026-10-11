@@ -1,5 +1,6 @@
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { ActionableError, toActionableError } from "../models";
+import type { DeviceInfo } from "../models";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
@@ -236,6 +237,28 @@ async function reserveStartStableDeviceLifecycle(
   );
 }
 
+/**
+ * A name is a selector, and simulator display names are not unique: like the boot's own match it
+ * skips the simulators managed slots hold (#11174, #11565). When only those match, the pick stays
+ * managed and the caller refuses it as it refuses an explicit UDID.
+ */
+async function matchIosSimulatorSkippingManaged(
+  criteria: DeviceMatchCriteria,
+  simulators: DeviceInfo[],
+  deviceMatcher: DeviceMatcher,
+): Promise<DeviceInfo | null> {
+  const managed =
+    (await managedSlotPoolGate(initializedDevicePool()).managedSlotStableIds?.("ios")) ??
+    new Set<string>();
+  const free = simulators.filter((device) => !managed.has(device.deviceId ?? ""));
+  return (
+    deviceMatcher.matchDeviceImage(criteria, free, DEVICE_POOL_MATCHING) ??
+    (free.length < simulators.length
+      ? deviceMatcher.matchDeviceImage(criteria, simulators, DEVICE_POOL_MATCHING)
+      : null)
+  );
+}
+
 async function resolveStartStableDeviceLifecycleTarget(
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
@@ -289,10 +312,10 @@ async function resolveStartStableDeviceLifecycleTarget(
     requires: args.requires,
     screenSize: args.screenSize,
   };
-  const match = deviceMatcher.matchDeviceImage(
+  const match = await matchIosSimulatorSkippingManaged(
     criteria,
     discovery.devices.filter((device) => device.platform === "ios" && device.deviceId),
-    DEVICE_POOL_MATCHING,
+    deviceMatcher,
   );
   if (!match?.deviceId) {
     // This legacy name is a creation criterion when create-if-missing is

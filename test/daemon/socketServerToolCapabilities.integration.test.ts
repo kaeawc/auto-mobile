@@ -66,7 +66,10 @@ describe("UnixSocketServer exact-tool selection enforcement", () => {
       setEnabled: async () => {},
     };
     PlatformDeviceManagerFactory.setInstance({
-      getBootedDevices: async () => [device],
+      getBootedDevicesDetailed: async () => ({
+        devices: [device],
+        succeededPlatforms: new Set([device.platform]),
+      }),
     } as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
     getInstanceCalls = 0;
     AndroidCtrlProxyClient.getInstance = mock(() => {

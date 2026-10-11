@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   runCliCommand,
   setDaemonProxyFactoryForTesting,
@@ -47,6 +47,18 @@ describe("CLI daemon tool errors (#10179)", () => {
       exitSpy.mockRestore();
     }
   };
+
+  // CI's per-test time excludes only beforeAll: pay the first runCliCommand's one-time cost
+  // (tool registry, argument parsing, error formatting) here, not in the first timed test.
+  beforeAll(async () => {
+    const warmDir = isolateCliDataDir();
+    try {
+      await failWith(new Error("MCP error -32603: Unknown tool: listDevices"));
+    } finally {
+      resetDaemonProxyFactoryForTesting();
+      warmDir.restore();
+    }
+  });
 
   test("a gated tool surfaces the gate reason with no restart hint", async () => {
     const reason = "Unknown tool: listDevices. --debug is disabled; start the daemon with --debug";

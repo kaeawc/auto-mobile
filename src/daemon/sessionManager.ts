@@ -72,7 +72,7 @@ import {
 import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import { Mutex } from "async-mutex";
 import { errorMessage } from "../utils/describeUnknownError";
-import { effectiveLastToolActivity } from "./sessionClocks";
+import { effectiveLastToolActivity, sessionIdleDeadline } from "./sessionClocks";
 import { onSessionClock } from "./sessionClockPersistence";
 import {
   isLivenessOwnerLeaseLive,
@@ -865,6 +865,18 @@ interface TerminalReleaseRetry {
   shutdownAttempted?: boolean;
 }
 
+/** A live row's rewrite over its superseded release's terminal row that failed (#11557). */
+interface OwedSupersededRowReassert {
+  /** The incarnation the rewrite is owed to; a session revived under the UUID owes nothing. */
+  session: Session;
+  /** Reasons of the superseded releases whose terminal row the rewrite may replace. */
+  reasons: Set<string>;
+  /** Failed attempts so far, the first write included. */
+  attempt: number;
+  /** The armed retry; absent while a retry runs and once the retries are exhausted. */
+  handle?: NodeJS.Timeout;
+}
+
 interface PendingSessionRelease {
   promise: Promise<string | null>;
   reason: ReleaseReasonState;
@@ -1262,6 +1274,16 @@ export const DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF: BackoffPolicy = exponential
   initialDelayMs: 1_000,
   maxDelayMs: 30_000,
 });
+/**
+ * Retries of a live row's rewrite over its superseded release's terminal row (#11557): one failed
+ * write (a busy database) must not leave the live session behind a terminal row. Bounded; after
+ * the last one the rewrite stays owed and the session's next activity write issues it again.
+ */
+export const SUPERSEDED_ROW_REASSERT_RETRY_ATTEMPTS = 5;
+export const DEFAULT_SUPERSEDED_ROW_REASSERT_BACKOFF: BackoffPolicy = exponentialBackoff({
+  initialDelayMs: 250,
+  maxDelayMs: 5_000,
+});
 const MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS = 256;
 export const SESSION_REHYDRATION_DEADLINE_MS = 15_000;
 /** Persisted rows recovered at once during startup rehydration (#11114). */
@@ -1564,6 +1586,13 @@ export class SessionManager {
    * a terminal row under the live session is that release's, not the end of the UUID (#11498).
    */
   private readonly pendingSupersededRowReasserts: Map<string, number> = new Map();
+  /**
+   * Rewrites of {@link pendingSupersededRowReasserts} that failed and are still owed (#11557):
+   * retried with {@link supersededRowReassertBackoff}, then by the session's activity writes.
+   * While one is owed, its release's terminal row under the live session is not the UUID's end.
+   */
+  private readonly owedSupersededRowReasserts: Map<string, OwedSupersededRowReassert> = new Map();
+  private supersededRowReassertBackoff: BackoffPolicy = DEFAULT_SUPERSEDED_ROW_REASSERT_BACKOFF;
   /** Releases received before an assignment has published its session. */
   private readonly pendingSessionReleases: Map<string, PendingSessionRelease> = new Map();
   /** Rebinds that a release must await before it can remove the live binding. */
@@ -1622,6 +1651,11 @@ export class SessionManager {
   /** Retry delays for terminal release writes that failed after their deadline (#10959). */
   setTerminalReleaseRetryBackoff(backoff: BackoffPolicy): void {
     this.terminalReleaseRetryBackoff = backoff;
+  }
+
+  /** Retry delays for a live row's rewrite over its superseded release's terminal row (#11557). */
+  setSupersededRowReassertBackoff(backoff: BackoffPolicy): void {
+    this.supersededRowReassertBackoff = backoff;
   }
 
   /** Attach the owning daemon's id; every later active-row write is stamped with it (#11114). */
@@ -2389,6 +2423,34 @@ export class SessionManager {
       .map((release) => ({
         sessionId: release.session.sessionId,
         startedAtMs: release.startedAtMs ?? this.sessionNow(),
+      }));
+  }
+
+  /**
+   * The releases in progress that carry a non-terminal reason (a `device-restart:` handoff, a
+   * `plan-auto-release`) and still hold their device (#11554). Heartbeats for a releasing session
+   * are refused, so the heartbeat monitor must not count the time since `startedAtMs` as its
+   * owner's silence; it still holds each one to its stuck deadline (#10963). A release a later
+   * joiner upgraded to a terminal reason, an idle release (see {@link getIdleReleasesInProgress})
+   * and a forced release are not listed.
+   */
+  getNonTerminalReleasesInProgress(): {
+    sessionId: string;
+    startedAtMs: number;
+    session: Session;
+  }[] {
+    return Array.from(this.releasePromises.values())
+      .filter(
+        (release) =>
+          this.activeReleasePromises.has(release) &&
+          !release.forced &&
+          release.expiryOrigin === undefined &&
+          !isTerminalReleaseReason(release.reason.value),
+      )
+      .map((release) => ({
+        sessionId: release.session.sessionId,
+        startedAtMs: release.startedAtMs ?? this.sessionNow(),
+        session: release.session,
       }));
   }
 
@@ -5323,6 +5385,8 @@ export class SessionManager {
       // Shutdown does not wait out a retry's backoff: write every unconfirmed terminal row now,
       // before the database closes (#10959).
       ...this.retryPendingTerminalReleasesNow(),
+      // Nor a live row's owed rewrite: left terminal, the next daemon would not rehydrate it.
+      ...this.retryOwedSupersededRowReassertsNow(),
       ...additionalReleases,
     ];
     try {
@@ -5869,7 +5933,7 @@ export class SessionManager {
       liftTerminalFence,
     );
     if (liftTerminalFence && releaseSnapshot.terminal) {
-      await this.reassertSupersededLiveRow(session);
+      await this.reassertSupersededLiveRow(session, [releaseSnapshot.releaseReason]);
     }
     return null;
   }
@@ -5877,14 +5941,15 @@ export class SessionManager {
   /**
    * A superseded release lifted its terminal fence, but its terminal row may have landed (#11206).
    * Nothing else rewrites a terminal row, so re-upsert the live row, as a rebind does, while this
-   * incarnation still holds the UUID unfenced.
+   * incarnation still holds the UUID unfenced. A failed write stays owed and is retried (#11557).
+   * Resolves true when the live row was written.
    */
-  private async reassertSupersededLiveRow(session: Session): Promise<void> {
-    if (
-      this.sessions.get(session.sessionId) !== session ||
-      this.terminalReleaseSnapshots.has(session.sessionId)
-    ) {
-      return;
+  private async reassertSupersededLiveRow(
+    session: Session,
+    supersededReasons: readonly string[],
+  ): Promise<boolean> {
+    if (!this.isCurrentSession(session)) {
+      return false;
     }
     const settle = this.expectSupersededRowReassert(session.sessionId);
     try {
@@ -5895,9 +5960,192 @@ export class SessionManager {
           `superseded release: ${errorMessage(error)}`,
         error,
       );
+      // Owed before the in-flight count ends, so an activity write always sees one of the two.
+      // A session that ended during the write is owed nothing, nor is one revived under its UUID.
+      if (this.sessions.get(session.sessionId) === session) {
+        this.oweSupersededRowReassert(session, supersededReasons);
+      }
+      return false;
     } finally {
       settle();
     }
+    this.settleOwedSupersededRowReassert(session);
+    await this.restoreTerminalRowAfterReassert(session);
+    return true;
+  }
+
+  /**
+   * A release of the session raised its terminal fence while the rewrite was in flight, so the
+   * rewrite may have landed over that release's terminal row: write the terminal row again.
+   */
+  private async restoreTerminalRowAfterReassert(session: Session): Promise<void> {
+    const fence = this.terminalReleaseSnapshots.get(session.sessionId);
+    if (!fence) {
+      return;
+    }
+    try {
+      await this.persistSessionRelease(fence);
+    } catch (error) {
+      logger.warn(
+        `[SessionManager] Failed to re-persist the terminal release of session ` +
+          `${session.sessionId} after a live-row rewrite: ${errorMessage(error)}`,
+        error,
+      );
+      return;
+    }
+    // That release was superseded in turn, and its own rewrite may have landed before this row.
+    await this.reassertSupersededLiveRow(session, [fence.releaseReason]);
+  }
+
+  /** Record a failed rewrite as owed and arm its next retry, while any are left (#11557). */
+  private oweSupersededRowReassert(session: Session, supersededReasons: readonly string[]): void {
+    const sessionId = session.sessionId;
+    const owed = this.owedSupersededRowReasserts.get(sessionId);
+    const previous = owed?.session === session ? owed : undefined;
+    if (owed?.handle !== undefined) {
+      this.timer.clearTimeout(owed.handle);
+    }
+    const entry: OwedSupersededRowReassert = {
+      session,
+      reasons: new Set([...(previous?.reasons ?? []), ...supersededReasons]),
+      attempt: (previous?.attempt ?? 0) + 1,
+    };
+    this.owedSupersededRowReasserts.set(sessionId, entry);
+    this.armSupersededRowReassertRetry(entry);
+  }
+
+  private armSupersededRowReassertRetry(entry: OwedSupersededRowReassert): void {
+    // A timer armed during shutdown's drain would outlive the database (#11058).
+    if (entry.attempt > SUPERSEDED_ROW_REASSERT_RETRY_ATTEMPTS || this.releaseDrainStarted) {
+      logger.warn(
+        `[SessionManager] The live row of session ${entry.session.sessionId} is still not ` +
+          `re-persisted after ${entry.attempt} attempt(s); its next activity write retries it`,
+      );
+      return;
+    }
+    entry.handle = this.timer.setTimeout(() => {
+      entry.handle = undefined;
+      this.trackReleaseDrainWrite(this.retryOwedSupersededRowReassert(entry).then(() => {}));
+    }, this.supersededRowReassertBackoff.delayForAttempt(entry.attempt));
+    (entry.handle as { unref?: () => void }).unref?.();
+  }
+
+  /**
+   * Issue an owed rewrite again; resolves true when the live row was written. The entry is dropped
+   * when the session ended, was revived as another incarnation or is fenced, and when the row
+   * holds a terminal release that is not the superseded one: that row is the UUID's end, which
+   * the session's next activity write acts on (#11498). Never rejects.
+   */
+  private async retryOwedSupersededRowReassert(entry: OwedSupersededRowReassert): Promise<boolean> {
+    const { session } = entry;
+    const sessionId = session.sessionId;
+    const isOwed = (): boolean => this.owedSupersededRowReasserts.get(sessionId) === entry;
+    if (!isOwed()) {
+      return false;
+    }
+    if (!this.isCurrentSession(session)) {
+      this.dropOwedSupersededRowReassert(entry);
+      return false;
+    }
+    let persistedRelease: SessionReleaseSnapshot | undefined;
+    try {
+      persistedRelease = await this.getPersistedTerminalRelease(sessionId);
+    } catch (error) {
+      logger.warn(
+        `[SessionManager] Failed to read the row of live session ${sessionId} before ` +
+          `re-persisting it: ${errorMessage(error)}`,
+        error,
+      );
+      this.deferOwedSupersededRowReassert(entry);
+      return false;
+    }
+    if (!isOwed()) {
+      return false;
+    }
+    if (!this.isCurrentSession(session)) {
+      this.dropOwedSupersededRowReassert(entry);
+      return false;
+    }
+    if (persistedRelease && !entry.reasons.has(persistedRelease.releaseReason)) {
+      this.dropOwedSupersededRowReassert(entry);
+      return false;
+    }
+    if (
+      this.releasingSessions.has(session) ||
+      this.pendingSessionRebinds.get(sessionId)?.session === session
+    ) {
+      // A release is under way: it removes the session (and this entry) unless it is superseded.
+      // Or a rebind is: its row carries the new binding, which this session does not hold yet.
+      this.deferOwedSupersededRowReassert(entry);
+      return false;
+    }
+    return await this.reassertSupersededLiveRow(session, [...entry.reasons]);
+  }
+
+  /** An attempt that could not issue its write counts as a failed one. */
+  private deferOwedSupersededRowReassert(entry: OwedSupersededRowReassert): void {
+    if (
+      this.owedSupersededRowReasserts.get(entry.session.sessionId) !== entry ||
+      entry.handle !== undefined
+    ) {
+      return;
+    }
+    entry.attempt++;
+    this.armSupersededRowReassertRetry(entry);
+  }
+
+  private dropOwedSupersededRowReassert(entry: OwedSupersededRowReassert): void {
+    if (entry.handle !== undefined) {
+      this.timer.clearTimeout(entry.handle);
+      entry.handle = undefined;
+    }
+    if (this.owedSupersededRowReasserts.get(entry.session.sessionId) === entry) {
+      this.owedSupersededRowReasserts.delete(entry.session.sessionId);
+    }
+  }
+
+  /** The live row was written, or the session ended: nothing is owed to this incarnation. */
+  private settleOwedSupersededRowReassert(session: Session): void {
+    const owed = this.owedSupersededRowReasserts.get(session.sessionId);
+    if (owed?.session === session) {
+      this.dropOwedSupersededRowReassert(owed);
+    }
+  }
+
+  /**
+   * Whether `persistedRelease`, found under the live `session`, is the terminal row of its own
+   * superseded release with the rewrite still owed (#11557), rather than the end of the UUID.
+   */
+  private isSupersededRowReassertOwed(
+    session: Session,
+    persistedRelease: SessionReleaseSnapshot,
+  ): boolean {
+    const owed = this.owedSupersededRowReasserts.get(session.sessionId);
+    return owed?.session === session && owed.reasons.has(persistedRelease.releaseReason);
+  }
+
+  /**
+   * An activity write was refused against a terminal row while the session's rewrite is owed with
+   * no retry armed (the retries are exhausted): issue the rewrite now. True when it landed; the
+   * row then carries this activity.
+   */
+  private async reassertOwedLiveRowForActivity(session: Session): Promise<boolean> {
+    const owed = this.owedSupersededRowReasserts.get(session.sessionId);
+    if (owed?.session !== session || owed.handle !== undefined) {
+      return false;
+    }
+    return await this.retryOwedSupersededRowReassert(owed);
+  }
+
+  /** Issue every owed rewrite now, skipping its backoff, and return the writes (shutdown). */
+  private retryOwedSupersededRowReassertsNow(): Promise<void>[] {
+    return Array.from(this.owedSupersededRowReasserts.values(), async (entry) => {
+      if (entry.handle !== undefined) {
+        this.timer.clearTimeout(entry.handle);
+        entry.handle = undefined;
+      }
+      await this.retryOwedSupersededRowReassert(entry);
+    });
   }
 
   /** Count a pending rewrite of `sessionId`'s live row; the returned function ends it, once. */
@@ -6190,7 +6438,7 @@ export class SessionManager {
           // A superseded release lifted its fence while this write was parked (#11206).
           const live = this.sessions.get(snapshot.sessionId);
           if (snapshot.terminal && live) {
-            await this.reassertSupersededLiveRow(live);
+            await this.reassertSupersededLiveRow(live, [snapshot.releaseReason]);
           }
         },
         (error: unknown) => {
@@ -9343,7 +9591,7 @@ export class SessionManager {
     }
     // The idle deadline is exactly the idle window after the last control call: the suspect
     // grace (#10051) belongs to the heartbeat lease only, never to idleness (#11107).
-    if (this.sessionNow() <= session.expiresAt) {
+    if (this.sessionNow() <= sessionIdleDeadline(session)) {
       return false;
     }
     return !isReleaseVetoedByExecutions({
@@ -9365,7 +9613,7 @@ export class SessionManager {
     latestDeadlineMs: number | undefined;
   } {
     return {
-      vetoedSince: session.expiresAt,
+      vetoedSince: sessionIdleDeadline(session),
       latestDeadlineMs: this.sessionExecutionDeadlineLookup(session.sessionId),
     };
   }
@@ -9461,20 +9709,24 @@ export class SessionManager {
     if (execution === undefined) {
       return this.isSessionExpired(session);
     }
-    if (this.sessionNow() <= session.expiresAt) {
+    // The deadline the scan releases on and the client is told (#11558): a `cli-idle` session's
+    // moves with the daemon's own stall, which its `expiresAt` does not record.
+    const idleDeadline = sessionIdleDeadline(session);
+    if (this.sessionNow() <= idleDeadline) {
       return false;
     }
-    return execution.sessionClockStartTime > session.expiresAt;
+    return execution.sessionClockStartTime > idleDeadline;
   }
 
   private isLateExecutionWhileEarlierWorkIsActive(
     session: Session,
     execution: SessionClockExecution | undefined,
   ): boolean {
+    const idleDeadline = sessionIdleDeadline(session);
     return (
       execution !== undefined &&
-      this.sessionNow() > session.expiresAt &&
-      execution.sessionClockStartTime > session.expiresAt &&
+      this.sessionNow() > idleDeadline &&
+      execution.sessionClockStartTime > idleDeadline &&
       this.activeSessionExecutionChecker(session.sessionId, {
         excludeExecutionId: execution.executionId,
       })
@@ -9494,6 +9746,8 @@ export class SessionManager {
       this.deviceSessionMap.delete(session.assignedDevice);
     }
     this.sessions.delete(sessionId);
+    // The session ended: its row is no longer rewritten live, and no retry timer outlives it.
+    this.settleOwedSupersededRowReassert(session);
     this.sessionDeviceMap.delete(sessionId);
     this.networkConditionGeneration.delete(sessionId);
     this.networkConditionMutationQueues.delete(sessionId);
@@ -9585,6 +9839,12 @@ export class SessionManager {
       this.rehydrationFollowUpTimer = null;
     }
     for (const entry of this.pendingTerminalReleaseRetries.values()) {
+      if (entry.handle !== undefined) {
+        this.timer.clearTimeout(entry.handle);
+        entry.handle = undefined;
+      }
+    }
+    for (const entry of this.owedSupersededRowReasserts.values()) {
       if (entry.handle !== undefined) {
         this.timer.clearTimeout(entry.handle);
         entry.handle = undefined;
@@ -9842,6 +10102,9 @@ export class SessionManager {
       if (!(error instanceof DeviceSessionTerminallyReleasedError)) {
         throw error;
       }
+      if (await this.reassertOwedLiveRowForActivity(session)) {
+        return;
+      }
       throw await this.endSessionTerminallyReleasedInRow(session);
     }
   }
@@ -9862,9 +10125,14 @@ export class SessionManager {
       return new DeviceSessionNotActiveError(sessionId);
     }
     const persistedRelease = await this.getPersistedTerminalRelease(sessionId);
-    if (!persistedRelease || this.pendingSupersededRowReasserts.has(sessionId)) {
+    if (
+      !persistedRelease ||
+      this.pendingSupersededRowReasserts.has(sessionId) ||
+      this.isSupersededRowReassertOwed(session, persistedRelease)
+    ) {
       // The refused row is gone or unreadable (pruned, or a store without lookup), or is being
-      // rewritten live: there is no release to adopt, and the activity still did not persist.
+      // rewritten live, or that rewrite failed and is still owed (#11557): there is no release to
+      // adopt, and the activity still did not persist.
       return new DeviceSessionNotActiveError(sessionId);
     }
     const releaseReason = persistedRelease.releaseReason;

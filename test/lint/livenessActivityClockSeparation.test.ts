@@ -127,6 +127,8 @@ const EXPIRY_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
     "SessionManager.isSessionExpiredForNewExecution",
   ],
   "src/daemon/sessionHoldDiagnostics.ts": ["idleReleaseAt", "vetoedIdleReleaseAt"],
+  // #11558: the one idle deadline the scan, a late call's admission and `idleReleaseAt` share.
+  "src/daemon/sessionClocks.ts": ["sessionIdleDeadline", "effectiveLastToolActivity"],
   "src/daemon/daemonMcpProxy.ts": [
     "DaemonMcpProxy.evictAbandonedHeldSessions",
     // The replay-lease TTL (#10656): a heartbeat ack must not keep a dead binding replayable.
@@ -1238,7 +1240,11 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
             readsActivity = true;
           }
           // The stall-forgiven tool-activity clock (#10835) reads only activity clocks.
-          if (ts.isIdentifier(inner) && inner.text === "effectiveLastToolActivity") {
+          // So does the shared idle deadline built on it (#11558), guarded by rule 5 above.
+          if (
+            ts.isIdentifier(inner) &&
+            (inner.text === "effectiveLastToolActivity" || inner.text === "sessionIdleDeadline")
+          ) {
             readsActivity = true;
           }
           if (

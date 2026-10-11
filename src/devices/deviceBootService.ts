@@ -66,15 +66,21 @@ const IOS_POST_LEASE_RECHECK_TIMEOUT_MS = 5_000;
 /** A boot deadline failure, kept distinct from platform command failures. */
 export class DeviceBootTimeoutError extends ActionableError {
   readonly code = "timeout";
+  /** A purely time-based failure, retryable like provisionDevice's `timeout` (#11548). */
+  readonly retryable = true;
 
   constructor(
     readonly operation: string,
     readonly phase: string,
     readonly elapsedMs: number,
     readonly budgetMs: number,
+    /** The device being booted, when it was known at the time of the timeout. */
+    readonly device?: string,
   ) {
     super(
-      `${operation} timeout exhausted while ${phase}; remainingBudgetMs=0; elapsedMs=${elapsedMs}; budgetMs=${budgetMs}; origin=DeviceBootService`,
+      `${operation} timeout exhausted while ${phase}; ` +
+        (device ? `device=${device}; ` : "") +
+        `remainingBudgetMs=0; elapsedMs=${elapsedMs}; budgetMs=${budgetMs}; origin=DeviceBootService`,
     );
   }
 }
@@ -289,6 +295,9 @@ function trackInFlightAndroidColdBootIfNeeded(
     : undefined;
 }
 
+/** Whether a boot re-checks for an already-running device after its lifecycle lease settles. */
+type AdoptAfterLease = "always" | "if-queued" | "never";
+
 function findBootedDeviceMatchingImage(
   image: DeviceInfo,
   booted: readonly BootedDevice[],
@@ -432,6 +441,8 @@ interface BootDeadlineContext {
   operationName: string;
   startedAtMs: number;
   deadlineMs: number;
+  /** Name of the device being booted, once resolved; named by a timeout error (#11548). */
+  deviceLabel?: string;
   signal?: AbortSignal;
   lifecycleLease?: VirtualDeviceLifecycleLease;
   ownsLifecycleLease: boolean;
@@ -936,25 +947,31 @@ export class DeviceBootService {
   }
 
   /**
-   * Whether bootImage should re-check for a now-running device once its
+   * When bootImage should re-check for a now-running device once its
    * lifecycle lease settles. Explicit cold-boot intent is never turned into
-   * adoption (#7197). Android only does so behind an in-flight cold boot; iOS
-   * has no marker, because a sibling boot of the same UDID holds the stable
-   * lease this call is about to queue on, so its re-check always applies (#9902).
+   * adoption (#7197). iOS has no marker, because a sibling boot of the same UDID
+   * holds the stable lease this call is about to queue on, so its re-check always
+   * applies (#9902). Android always re-checks behind an in-flight cold boot. That
+   * marker is read before the lease wait, though, and a sibling queued on the same
+   * lease has not claimed it yet, so an Android start that had to wait for the
+   * lease re-checks too instead of cold-booting an AVD that is now running (#11565).
    */
-  private shouldAdoptAfterLease(
+  private adoptAfterLeasePolicy(
     context: BootDeadlineContext,
     image: DeviceInfo,
     preferRunning: boolean | undefined,
     hasInFlightColdBoot: boolean,
-  ): boolean {
+  ): AdoptAfterLease {
     // The daemon's externally managed lease is held through its later
     // reservation/session handoff, which tolerates this shared-cold-boot
     // re-check via throwIfFreshStartAlreadyBound in deviceTools.
     const holdsLease =
       context.ownsLifecycleLease || this.dependencies.allowExternalLeaseAdoptionRecheck === true;
     const explicitColdBoot = preferRunning === false && !image.isRunning;
-    return holdsLease && !explicitColdBoot && (image.platform === "ios" || hasInFlightColdBoot);
+    if (!holdsLease || explicitColdBoot) {
+      return "never";
+    }
+    return image.platform === "ios" || hasInFlightColdBoot ? "always" : "if-queued";
   }
 
   private async bootMatchedImage(
@@ -978,7 +995,7 @@ export class DeviceBootService {
         context,
         progress,
         false,
-        this.shouldAdoptAfterLease(context, image, preferRunning, false),
+        this.adoptAfterLeasePolicy(context, image, preferRunning, false),
       );
     }
     const booted = await this.discoverBootedDevices(
@@ -1002,7 +1019,7 @@ export class DeviceBootService {
       image.platform === "android" &&
       hasInFlightAndroidColdBoot(this.lifecycleCoordinator, image.name);
     const explicitlyRequestedColdBoot = preferRunning === false && !image.isRunning;
-    const adoptAfterLease = this.shouldAdoptAfterLease(
+    const adoptAfterLease = this.adoptAfterLeasePolicy(
       context,
       image,
       preferRunning,
@@ -1354,20 +1371,28 @@ export class DeviceBootService {
     context: BootDeadlineContext,
     progress: DeviceBootProgress | undefined,
     provisioned: boolean,
-    adoptRunningAfterLease = false,
+    adoptAfterLease: AdoptAfterLease = "never",
   ): Promise<DeviceBootResult> {
+    context.deviceLabel = image.deviceId ? `${image.name} (${image.deviceId})` : image.name;
     assertAndroidImageRunningStateKnown(image);
     if (image.platform === "ios" && !image.deviceId) {
       throw new ActionableError("iOS simulator deviceId (UDID) is required to start a simulator.");
     }
+    // The lease asks for revalidation exactly when another owner held the identity first.
+    let queuedBehindLease = false;
     await this.bindLifecycleIdentity(
       context,
       {
         platform: image.platform,
         stableId: image.platform === "android" ? image.name : image.deviceId!,
       },
-      async () => await this.revalidateImageIdentity(image, context),
+      async () => {
+        queuedBehindLease = true;
+        return await this.revalidateImageIdentity(image, context);
+      },
     );
+    const adoptRunningAfterLease =
+      adoptAfterLease === "always" || (adoptAfterLease === "if-queued" && queuedBehindLease);
     if (adoptRunningAfterLease) {
       const adopted = await this.adoptRunningImageAfterLease(image, context, progress);
       if (adopted) {
@@ -1756,6 +1781,7 @@ export class DeviceBootService {
       phase,
       this.timer.now() - context.startedAtMs,
       Math.max(0, context.deadlineMs - context.startedAtMs),
+      context.deviceLabel ?? context.request.name ?? context.request.deviceId,
     );
   }
 }

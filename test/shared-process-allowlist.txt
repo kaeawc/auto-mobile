@@ -42,6 +42,7 @@ test/daemon/canonicalPixels.test.ts
 test/daemon/childProcessCleanup.test.ts
 test/daemon/cliIdleDaemonStallForgiveness.test.ts
 test/daemon/cliIdleReadInFlightReportedDeadline.test.ts
+test/daemon/cliIdleStallLateControlCall.test.ts
 test/daemon/clientNonFiniteEncoding.test.ts
 test/daemon/clientOptionsSchema.test.ts
 test/daemon/clientRequestIdGenerator.test.ts
@@ -114,6 +115,7 @@ test/daemon/gatedToolThroughDaemon.test.ts
 test/daemon/gestureOwnership.test.ts
 test/daemon/getApplePreparationTimeout.property.test.ts
 test/daemon/heartbeatExpiryPersistence.test.ts
+test/daemon/heartbeatReapUpgradesNonTerminalRelease.test.ts
 test/daemon/hierarchyStreamDiff.property.test.ts
 test/daemon/hierarchyStreamDiff.test.ts
 test/daemon/idleDeviceReaper.test.ts
@@ -149,6 +151,7 @@ test/daemon/managedSlots/slotsUnresolvedEmulatorIdentityGate.test.ts
 test/daemon/managedSlots/sqliteSlotRegistry.test.ts
 test/daemon/managerOutputReductionArgs.test.ts
 test/daemon/observationRequestBatch.test.ts
+test/daemon/observerLeaseWallClockStep.test.ts
 test/daemon/observerSessionRegistry.test.ts
 test/daemon/observerSessionRequestHandlers.test.ts
 test/daemon/outboundWriteGuard.test.ts
@@ -240,6 +243,7 @@ test/devices/DisplayInventoryProvider.test.ts
 test/devices/androidDeviceReboot.test.ts
 test/devices/ciIosBootRecovery.test.ts
 test/devices/deviceBootRecovery.test.ts
+test/devices/deviceBootTimeout.test.ts
 test/devices/deviceIdentityEvidence.test.ts
 test/devices/deviceShutdownService.test.ts
 test/devices/physicalIosDeviceResolution.test.ts
@@ -877,6 +881,7 @@ test/server/deviceSessionResultOwnership.test.ts
 test/server/deviceStateChangeNotifier.test.ts
 test/server/deviceTools.listDevicesCapacitySchema.test.ts
 test/server/deviceTools.listDevicesOwnership.test.ts
+test/server/deviceTools.runOperationWithinDeadline.test.ts
 test/server/deviceTools.screenSize.test.ts
 test/server/deviceToolsShutdown.offlineHold.test.ts
 test/server/downloadsFixtureContract.test.ts

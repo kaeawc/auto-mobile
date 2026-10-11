@@ -47,6 +47,14 @@ enum JSONValue: Codable, Equatable {
         }
     }
 
+    /// A string, number or boolean: the only state values the contract allows.
+    var isScalar: Bool {
+        switch self {
+        case .string, .bool, .number: true
+        case .null, .array, .object: false
+        }
+    }
+
     /// Nil, rather than a trap, for a value outside `Int`'s range.
     var intValue: Int? {
         if case let .number(value) = self { return Int(exactly: value.rounded(.towardZero)) }
@@ -89,6 +97,15 @@ struct PrototypeSpec: Decodable {
         id = try container.decode(String.self, forKey: .id)
         window = try container.decode(WindowSpec.self, forKey: .window)
         state = try container.decodeIfPresent([String: JSONValue].self, forKey: .state)
+        // Android's `PrototypeScalarSerializer` and the host schema accept only string, number and
+        // boolean state values, so a null, array or object fails the show everywhere.
+        if let offending = state?.first(where: { !$0.value.isScalar })?.key {
+            throw DecodingError.dataCorruptedError(
+                forKey: .state,
+                in: container,
+                debugDescription: "State value for \"\(offending)\" must be a string, number or boolean"
+            )
+        }
         theme = try container.decodeIfPresent(PrototypeTheme.self, forKey: .theme)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         let raw = try container.decode(JSONValue.self, forKey: .root)
@@ -166,7 +183,7 @@ struct Offset: Decodable {
     let y: Double
 }
 
-enum Dimension: Decodable {
+enum Dimension: Decodable, Equatable {
     case fill
     case wrap
     case points(Double)
@@ -248,6 +265,16 @@ enum FontFamily: Decodable, Equatable {
 struct Style: Decodable {
     let width: Dimension?
     let height: Dimension?
+    /// A `row`/`column` child's share of the main-axis space left after its unweighted siblings
+    /// (ignored elsewhere). Positive.
+    let weight: Double?
+    /// Nonnegative dp bounds that clamp `width`/`height`, `fill` and `{dp}` included.
+    let minWidth: Double?
+    let maxWidth: Double?
+    let minHeight: Double?
+    let maxHeight: Double?
+    /// Positive width / height, applied after the size bounds.
+    let aspectRatio: Double?
     let padding: Padding?
     let background: PrototypeModeValue?
     /// Painted over `background` and under the content, inside the corner shape.
@@ -283,6 +310,12 @@ struct Style: Decodable {
         Style(
             width: prototype.width ?? width,
             height: prototype.height ?? height,
+            weight: prototype.weight ?? weight,
+            minWidth: prototype.minWidth ?? minWidth,
+            maxWidth: prototype.maxWidth ?? maxWidth,
+            minHeight: prototype.minHeight ?? minHeight,
+            maxHeight: prototype.maxHeight ?? maxHeight,
+            aspectRatio: prototype.aspectRatio ?? aspectRatio,
             padding: prototype.padding ?? padding,
             background: prototype.background ?? background,
             gradient: prototype.gradient ?? gradient,

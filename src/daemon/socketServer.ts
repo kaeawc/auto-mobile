@@ -9,7 +9,7 @@ import {
   getToolSelectionContext,
   runWithToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
-import { runWithAbortSignal } from "../utils/AbortContext";
+import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { createServer, Server as NetServer, Socket } from "node:net";
 import { createHash } from "node:crypto";
 import { unlink } from "node:fs/promises";
@@ -123,6 +123,7 @@ import { InputText, type AppendKeyEventValidator } from "../features/action/Inpu
 import { imeActionFailedAfterTextEntered } from "../features/action/imeActionFailedAfterTextEntered";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { DaemonState } from "./daemonState";
+import { canonicalizeToolCallDeviceIds, toolCallNamesDeviceId } from "./toolCallDeviceIdentity";
 import { isDeviceInventoryTool } from "./daemonMcpProxy";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
 import { deviceIncarnationToken } from "../utils/deviceIncarnation";
@@ -1360,10 +1361,7 @@ export class UnixSocketServer {
    * Start the Unix socket server
    */
   async start(): Promise<void> {
-    this.closing = false;
-    this.acceptingRequests = true;
-    this.serverClosePromise = null;
-    this.lifecycleGeneration += 1;
+    this.beginAccepting();
     // Owner-only (0o700) socket directory so the control socket is not
     // world-traversable. On macOS socket-file permission bits are not reliably
     // enforced on connect(), so the containing directory's mode is the primary
@@ -1398,35 +1396,7 @@ export class UnixSocketServer {
         await this.reclaimExistingSocketBeforeBind();
       }
 
-      this.server = createServer((socket) => {
-        this.handleConnection(socket);
-      });
-
-      // Fan list-changed events out to subscribed socket clients (issue #3223).
-      // Subscribed here (not in the daemon) so a socket-server recreation during
-      // recovery re-wires itself; close() unsubscribes symmetrically.
-      this.listChangedUnsubscribe?.();
-      this.listChangedUnsubscribe = ListChangedBroadcaster.subscribe((kind) => {
-        this.broadcastListChanged(kind);
-      });
-
-      this.resourceUpdatedUnsubscribe?.();
-      this.resourceUpdatedUnsubscribe = ResourceUpdatedBroadcaster.subscribe((resolveTargets) => {
-        this.broadcastResourceUpdated(resolveTargets);
-      });
-
-      // Fan session-release events out to subscribed proxy clients (issue #4610),
-      // so a proxy clears its remembered binding on a real release instead of the
-      // replay-TTL guess. Subscribed here (not in the daemon) for the same
-      // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
-      this.sessionReleaseUnsubscribe?.();
-      this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
-        (sessionId, reason, snapshot, extras) => {
-          this.clearBoundMcpClientsForReleasedSession(sessionId);
-          void this.liftStrokesHeldBy(sessionId);
-          this.broadcastSessionReleased(sessionId, reason, snapshot, extras?.recordingIds);
-        },
-      );
+      this.server = createServer(this.connectionHandlerWithFanOut());
 
       await new Promise<void>((resolve, reject) => {
         this.server!.listen(this.socketPath, () => {
@@ -1449,6 +1419,53 @@ export class UnixSocketServer {
       // the reachability probe alone protects the live socket from later binders.
       this.socketReclaimLock.release();
     }
+  }
+
+  /**
+   * `start()` without the socket file (#11441): the same accept state, broadcast fan-out and
+   * connection handler, with the caller handing each connection to the returned handler instead
+   * of a bound listener. For an in-process harness; nothing touches the file system.
+   */
+  startDetached(): (socket: Socket) => void {
+    this.beginAccepting();
+    return this.connectionHandlerWithFanOut();
+  }
+
+  private beginAccepting(): void {
+    this.closing = false;
+    this.acceptingRequests = true;
+    this.serverClosePromise = null;
+    this.lifecycleGeneration += 1;
+  }
+
+  /** Subscribe the broadcast fan-out and return the handler every accepted connection goes to. */
+  private connectionHandlerWithFanOut(): (socket: Socket) => void {
+    // Fan list-changed events out to subscribed socket clients (issue #3223).
+    // Subscribed here (not in the daemon) so a socket-server recreation during
+    // recovery re-wires itself; close() unsubscribes symmetrically.
+    this.listChangedUnsubscribe?.();
+    this.listChangedUnsubscribe = ListChangedBroadcaster.subscribe((kind) => {
+      this.broadcastListChanged(kind);
+    });
+
+    this.resourceUpdatedUnsubscribe?.();
+    this.resourceUpdatedUnsubscribe = ResourceUpdatedBroadcaster.subscribe((resolveTargets) => {
+      this.broadcastResourceUpdated(resolveTargets);
+    });
+
+    // Fan session-release events out to subscribed proxy clients (issue #4610),
+    // so a proxy clears its remembered binding on a real release instead of the
+    // replay-TTL guess. Subscribed here (not in the daemon) for the same
+    // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
+    this.sessionReleaseUnsubscribe?.();
+    this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
+      (sessionId, reason, snapshot, extras) => {
+        this.clearBoundMcpClientsForReleasedSession(sessionId);
+        void this.liftStrokesHeldBy(sessionId);
+        this.broadcastSessionReleased(sessionId, reason, snapshot, extras?.recordingIds);
+      },
+    );
+    return (socket) => this.handleConnection(socket);
   }
 
   /**
@@ -1779,6 +1796,28 @@ export class UnixSocketServer {
       },
       deviceId,
     );
+  }
+
+  /**
+   * A `tools/call` with the device ids it names as the pool's canonical ids (#11618), before the
+   * admission lane, the forward key, the read lane, recovery pinning or the forward itself reads
+   * them: a handset named by its other transport id must serialize, route and be judged as the one
+   * pooled device it is. Cached fold only; the same request when nothing changes. Older socket-state
+   * fakes carry no pool, or none with a fold: their ids pass through as sent.
+   */
+  private withCanonicalToolCallDeviceIds(request: DaemonRequest): DaemonRequest {
+    const args: unknown = request.params?.arguments;
+    if (
+      request.method !== "tools/call" ||
+      !toolCallNamesDeviceId(args) ||
+      !this.daemonState.isInitialized?.()
+    ) {
+      return request;
+    }
+    const canonical = canonicalizeToolCallDeviceIds(this.daemonState.getDevicePool?.(), args);
+    return canonical === args
+      ? request
+      : { ...request, params: { ...request.params, arguments: canonical } };
   }
 
   private frameDeviceId(request: DaemonRequest): string | undefined {
@@ -2176,6 +2215,7 @@ export class UnixSocketServer {
     if (handshakeError) {
       return handshakeError;
     }
+    request = this.withCanonicalToolCallDeviceIds(request);
 
     // Notification opt-in is per-socket-session state owned here, not by the
     // daemon request handlers — answer immediately without queueing (issue #3223).
@@ -5176,8 +5216,8 @@ export class UnixSocketServer {
   }
 
   /**
-   * `input/*` frames get the same owner fence as forwarded MCP calls: a signal that aborts on
-   * socket close and on `daemon/cancelRequest`, and a budget that runs from receipt (#10006).
+   * Input and device-mutating IDE frames share the owner fence of forwarded MCP calls: socket
+   * close and `daemon/cancelRequest` abort them (#10006, #11667). Input also has a budget from receipt.
    * Other local requests run unfenced, as before.
    */
   private async runLocalSocketRequest(
@@ -5188,7 +5228,7 @@ export class UnixSocketServer {
     receivedAtMs: number,
     onOwnerSignal: (signal: AbortSignal) => void,
   ): Promise<unknown> {
-    if (!request.method.startsWith("input/")) {
+    if (!request.method.startsWith("input/") && !IDE_DEVICE_MUTATION_METHODS.has(request.method)) {
       return await this.handleLocalSocketRequest(request, sessionId);
     }
     const owner = this.mcpRequestSignal(sessionId, ownerSocket, cancelSignal);
@@ -5242,19 +5282,23 @@ export class UnixSocketServer {
     if (request.method === "input/gestureEnd") {
       return await this.handleInputGesture(request, "end", socketSessionId, input);
     }
-    return await this.dispatchIdeSocketRequest(request, socketSessionId);
+    return await this.dispatchIdeSocketRequest(request, socketSessionId, signal);
   }
 
   /** A route that mutates a device runs as one tracked control call (#11486); the rest run bare. */
   private async dispatchIdeSocketRequest(
     request: DaemonRequest,
     socketSessionId?: string,
+    signal?: AbortSignal,
   ): Promise<any | undefined> {
     if (!IDE_DEVICE_MUTATION_METHODS.has(request.method)) {
       return await this.handleIdeSocketRequest(request, socketSessionId);
     }
-    return await this.runTrackedIdeMutation(socketSessionId, (call) =>
-      this.handleIdeSocketRequest(request, socketSessionId, call),
+    signal?.throwIfAborted();
+    return await this.runTrackedIdeMutation(
+      socketSessionId,
+      (call) => this.handleIdeSocketRequest(request, socketSessionId, call),
+      signal,
     );
   }
 
@@ -5428,6 +5472,7 @@ export class UnixSocketServer {
         );
         ideMutation?.dispatching();
 
+        getAbortSignal()?.throwIfAborted();
         if (args.platform === "android") {
           AndroidCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
           const manager = AndroidCtrlProxyManager.getInstance(targetDevice);
@@ -5719,6 +5764,7 @@ export class UnixSocketServer {
   private async runTrackedIdeMutation<T>(
     socketSessionId: string | undefined,
     run: (call: IdeMutationCall) => Promise<T>,
+    ownerSignal?: AbortSignal,
   ): Promise<T> {
     const abort = new AbortController();
     let tracked: ActiveExecution | undefined;
@@ -5750,7 +5796,9 @@ export class UnixSocketServer {
       },
     };
     try {
-      return await runWithAbortSignal(abort.signal, () => run(call));
+      const signal = ownerSignal ? AbortSignal.any([ownerSignal, abort.signal]) : abort.signal;
+      signal.throwIfAborted();
+      return await runWithAbortSignal(signal, () => run(call));
     } catch (error) {
       throw sessionReleaseThatCancelledCall(cutByRelease?.cancelReason) ?? error;
     } finally {
@@ -5772,6 +5820,7 @@ export class UnixSocketServer {
     platform: "android" | "ios",
     serial: string,
   ): Promise<BootedDevice[]> {
+    getAbortSignal()?.throwIfAborted();
     const manager = PlatformDeviceManagerFactory.getInstance();
     const discovery = expectingPooledSources(
       await manager.getBootedDevicesDetailed(platform),
@@ -5789,6 +5838,7 @@ export class UnixSocketServer {
         ? new AndroidBootedDeviceDiscoveryIncompleteError(discoveryError)
         : new BootedDeviceDiscoveryIncompleteError(platform, discoveryError);
     }
+    getAbortSignal()?.throwIfAborted();
     return discovery.devices;
   }
 
@@ -5893,6 +5943,7 @@ export class UnixSocketServer {
       throw new Error(`Device not found: ${deviceId}`);
     }
     await this.assertIdeMutationOwnership(request, targetDevice, action, false, ideMutation);
+    getAbortSignal()?.throwIfAborted();
     const client =
       platform === "ios"
         ? IOSCtrlProxyClient.getInstance(targetDevice)
@@ -5921,6 +5972,7 @@ export class UnixSocketServer {
     resolution: PreferenceStoreResolution | undefined;
   }> {
     if (platform !== "android") {
+      getAbortSignal()?.throwIfAborted();
       const resolution = (await viaSdk()) || undefined;
       return { usedDirectFileFallback: false, resolution };
     }
@@ -5930,10 +5982,14 @@ export class UnixSocketServer {
       fileName,
       () => this.adbClientFactory.create(device),
       async () => {
+        getAbortSignal()?.throwIfAborted();
         resolution = (await viaSdk()) || undefined;
       },
       // The ide/* params carry no userId, so an ambiguous-user error cannot say "pass userId".
-      (adb) => viaDirectFile(adb).catch(rethrowForRouteWithoutUserId),
+      (adb) => {
+        getAbortSignal()?.throwIfAborted();
+        return viaDirectFile(adb).catch(rethrowForRouteWithoutUserId);
+      },
     );
     return { ...result, resolution };
   }
@@ -6587,6 +6643,15 @@ export class UnixSocketServer {
    */
   liftSessionlessStrokesOn(deviceId: string): void {
     this.trackRequestHandler(this.ownedGestures.cancelAllUnheldOn(deviceId));
+  }
+
+  /** Queue the old device's holder strokes before rebind makes it available (#11667). */
+  liftStrokesHeldByOn(sessionId: string, deviceId: string): void {
+    // Forced same-serial rebinds also notify unbound; the holder kept this device.
+    if (this.getSessionForDevice(deviceId) === sessionId) {
+      return;
+    }
+    this.trackRequestHandler(this.ownedGestures.cancelAllHeldByOn(sessionId, deviceId));
   }
 
   /**

@@ -108,6 +108,9 @@ export const SHARED_PROCESS_EXCLUSIONS: Readonly<Record<string, string>> = {
   "test/features/action/BaseVisualChange.uiStability.test.ts":
     "reads the module-level pending window resolution for device-123; failed after " +
     "ClearAppData in a shared random order (seed 8)",
+  "test/daemon/restartEndToEnd.test.ts":
+    "its helpers (restartScenarioHarness, hostCommandGuard) spy on the database module and the " +
+    "logger and replace node:child_process and Bun.spawn launchers for the whole file",
 };
 
 export const ALLOWLIST_PATH = "test/shared-process-allowlist.txt";

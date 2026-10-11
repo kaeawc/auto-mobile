@@ -1372,6 +1372,7 @@ export class Daemon {
     // A rebind keeps the session live, but its navigation state was collected on
     // the old device and must not follow it to the new one.
     this.sessionManager.onSessionDeviceUnbound((sessionId, deviceId) => {
+      this.socketServer?.liftStrokesHeldByOn(sessionId, deviceId);
       DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
       const previousNavigationManager = NavigationGraphManager.getInstanceForSession(sessionId);
       NavigationGraphManager.resetSession(sessionId);

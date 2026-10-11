@@ -112,7 +112,9 @@ extension AutoMobilePlanExecutor {
         static let initialDelayMs = 500
         static let maxDelayMs = 4000
         static let defaultBudgetMs = 30000
-        /// Android's `DEVICE_FINALIZE_WAIT_CAP_MS`: bounds a runaway finalize hint (#11360).
+        /// Android's `DEVICE_FINALIZE_WAIT_CAP_MS`: bounds a runaway finalize hint (#11360). It is the
+        /// `finalizeWait.waitBudgetMs` of `test/fixtures/refusal-wire-hints/hints.json`, shared with
+        /// the MCP proxy.
         static let finalizeWaitCapMs = 150_000
         /// Android's `FINALIZE_WAIT_CODES`: refusals whose `retryAfterMs` is the daemon's real
         /// finalize time, not a polling hint.

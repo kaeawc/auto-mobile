@@ -856,12 +856,19 @@ function resolvePoolDeviceContext(
  * `getRefreshedStats`, `daemon/availableDevices` and the in-daemon CLI give for the same state
  * (#11643). A source whose tooling is not installed observed completely (#11605), so it never
  * makes a count unknown unless a pooled device depends on it.
+ *
+ * This read is bounded by the resource budget and the pool's own read is not, so the summary may
+ * be `countUnknown` where the pool, asked later, answers a number -- also when a step of this read
+ * fails after the listing (the rows cannot be built, though the pool's count needs none of them).
+ * It never answers a different number: anything this read did not finish is unknown.
  */
 function summarizePoolStatus(
   devicePool: DevicePool,
   discoveredDevices: BootedDeviceInfo[],
   sourceObservations: Partial<Record<DiscoverySource, PlatformObservation>>,
   requestedPlatforms: readonly Platform[],
+  /** Platforms whose whole read (listing, then held-device placement) returned within the budget. */
+  finishedPlatforms: ReadonlySet<Platform>,
 ): PoolStatusSummary {
   let idle = 0;
   let assigned = 0;
@@ -881,21 +888,29 @@ function summarizePoolStatus(
   // status was read after the ownership refresh every inventory surface performs.
   const listed = new Set<string>();
   for (const device of discoveredDevices) {
-    tally(device.runtime.poolStatus ?? undefined);
-    if (device.runtime.deviceId) {
-      listed.add(device.runtime.deviceId);
+    const deviceId = device.runtime.deviceId;
+    // A row that withholds its pool context (identity quarantine: #6863) still names a serial the
+    // pool holds and counts by id, so the count is the pool's own bucket for it (#11643).
+    tally(
+      device.runtime.poolStatus ?? (deviceId ? devicePool.poolBucket(deviceId) : null) ?? undefined,
+    );
+    if (deviceId) {
+      listed.add(deviceId);
     }
   }
 
   // The pool rule (readLiveInventoryDeviceIds): any pooled device whose own source did not
-  // complete makes the count unknown, whether or not a stale listing still shows it.
+  // complete makes the count unknown, whether or not a stale listing still shows it. So does a
+  // platform whose read did not finish: its held offline and transitional devices, which the pool
+  // counts, are placed after the listing and may be missing from these rows.
   const unknown = devicePool
     .getAllDevices()
     .filter(
       (pooled) =>
         requestedPlatforms.includes(pooled.platform) &&
-        sourceObservations[discoverySourceFor(pooled.platform, pooled.id)]?.observationComplete !==
-          true,
+        (!finishedPlatforms.has(pooled.platform) ||
+          sourceObservations[discoverySourceFor(pooled.platform, pooled.id)]
+            ?.observationComplete !== true),
     );
   for (const pooled of unknown) {
     // Whether an unlisted, unverified entry is free is unknown (it may be gone, or slot-held:
@@ -1589,6 +1604,7 @@ async function computeBootedDevicesForPlatforms(
 
   const platformObservations: Partial<Record<Platform, PlatformObservation>> = {};
   const sourceObservations: Partial<Record<DiscoverySource, PlatformObservation>> = {};
+  const finishedPlatforms = new Set<Platform>();
 
   const controller = new AbortController();
   const pending = new Set<string>(["discovery", "configuredImages"]);
@@ -1620,6 +1636,7 @@ async function computeBootedDevicesForPlatforms(
       devices.splice(0, devices.length, ...otherPlatforms, ...discovery.devices);
       platformObservations[platform] = discovery.observation;
       Object.assign(sourceObservations, discovery.sourceObservations);
+      finishedPlatforms.add(platform);
     }
     pending.clear();
     const probes = [
@@ -1663,7 +1680,13 @@ async function computeBootedDevicesForPlatforms(
   const physicalCount = devices.length - virtualCount;
   const poolStatus =
     daemonContext.poolStatus && daemonContext.devicePool
-      ? summarizePoolStatus(daemonContext.devicePool, devices, sourceObservations, platforms)
+      ? summarizePoolStatus(
+          daemonContext.devicePool,
+          devices,
+          sourceObservations,
+          platforms,
+          finishedPlatforms,
+        )
       : undefined;
 
   return {

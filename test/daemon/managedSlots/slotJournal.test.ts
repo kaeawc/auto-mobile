@@ -18,6 +18,7 @@ import type {
   SlotRegistry,
 } from "../../../src/daemon/managedSlots/slotRegistry";
 import type { ExactDeviceSpecification } from "../../../src/devices/exactDeviceProvisioning";
+import { RegistryManagedSlotExclusion } from "../../../src/daemon/managedSlots/managedSlotExclusion";
 import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
@@ -263,10 +264,29 @@ describe("managed slot journal redrive", () => {
       provisioner.beforeReturn = crash.hang;
       void daemon("daemon-1").reconcile(request());
       await crash.reached;
-      provisioner.beforeReturn = undefined;
       const createdByDaemon1 = inventory.devices.find((device) => device.runtime === IOS_18)!;
 
-      const result = expectReady(await restart().reconcile(request()));
+      const restarted = restart();
+      const [entry] = await registry.listOpenSlotJournal(key);
+      expect(entry).toMatchObject({
+        phase: "creating",
+        target: { newName: createdByDaemon1.name, newStableId: null },
+      });
+      const exclusion = new RegistryManagedSlotExclusion(async () => registry, timer);
+      const ref = {
+        platform: "ios" as const,
+        stableIds: [createdByDaemon1.deviceId, createdByDaemon1.name],
+      };
+      await exclusion.refresh();
+      expect(exclusion.holderOf(ref)).toMatchObject({ stableDeviceId: createdByDaemon1.name });
+      provisioner.beforeReturn = async () => {
+        await exclusion.refresh();
+        expect(exclusion.holderOf(ref)).toBeDefined();
+      };
+
+      const result = expectReady(await restarted.reconcile(request()));
+      await exclusion.refresh();
+      expect(exclusion.holderOf(ref)).toMatchObject({ stableDeviceId: createdByDaemon1.deviceId });
 
       expect(result.disposition).toBe("reused");
       expect(result.device.stableId).toBe(createdByDaemon1.deviceId!);

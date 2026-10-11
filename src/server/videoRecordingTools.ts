@@ -517,6 +517,8 @@ export interface RecordingRequesterResolver {
     deviceId: string,
     ownerBaseSessionUuid: string,
   ): boolean;
+  /** Whether a live session holds `deviceId`. A device no session holds takes calls from anyone. */
+  isDeviceHeld(deviceId: string): boolean;
 }
 
 const daemonRecordingRequesterResolver: RecordingRequesterResolver = {
@@ -536,6 +538,12 @@ const daemonRecordingRequesterResolver: RecordingRequesterResolver = {
       .resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId);
     return held !== undefined && this.baseSessionUuid(held) === ownerBaseSessionUuid;
   },
+  isDeviceHeld(deviceId) {
+    return (
+      DaemonState.getInstance().isInitialized() &&
+      DaemonState.getInstance().getSessionManager().getSessionForDevice(deviceId) !== null
+    );
+  },
 };
 
 let recordingRequesterResolver: RecordingRequesterResolver = daemonRecordingRequesterResolver;
@@ -553,9 +561,13 @@ function mcpSessionIdOf(args: VideoRecordingArgs): string | undefined {
 
 /**
  * An active recording another session started is not the caller's to stop (#11130): a stop by id
- * needs no device, so without this any live session holding a recordingId could end a capture on a
- * device it does not hold. Ownerless recordings and unscoped (sessionless) callers stay open, the
- * same visibility rule the finalized lookups use.
+ * needs no device, so without this any caller holding a recordingId could end a capture on a
+ * device it does not hold. The recording's owner (its base session counts) and the connection
+ * that acquired the owner's device session may stop it.
+ *
+ * A caller with no session is judged like any sessionless control call (#11647,
+ * docs/using/device-ownership.md): refused while a session holds the recording's device, open on
+ * a device no session holds. An ownerless recording stays stoppable by anyone.
  */
 function assertActiveRecordingOwner(input: {
   recordingId: string;
@@ -566,14 +578,14 @@ function assertActiveRecordingOwner(input: {
 }): void {
   const { recordingId, deviceId, recordingOwner, requesterSessionUuid, requesterMcpSessionId } =
     input;
-  if (!recordingOwner || requesterSessionUuid === undefined) {
-    return;
-  }
-  if (recordingOwner === requesterSessionUuid) {
+  if (!recordingOwner || recordingOwner === requesterSessionUuid) {
     return;
   }
   const ownerBase = recordingRequesterResolver.baseSessionUuid(recordingOwner);
-  if (recordingRequesterResolver.baseSessionUuid(requesterSessionUuid) === ownerBase) {
+  if (
+    requesterSessionUuid !== undefined &&
+    recordingRequesterResolver.baseSessionUuid(requesterSessionUuid) === ownerBase
+  ) {
     return;
   }
   if (
@@ -584,6 +596,9 @@ function assertActiveRecordingOwner(input: {
       ownerBase,
     )
   ) {
+    return;
+  }
+  if (requesterSessionUuid === undefined && !recordingRequesterResolver.isDeviceHeld(deviceId)) {
     return;
   }
   throw new InputDeviceOwnedError(
@@ -650,7 +665,9 @@ function stopResultEntry(
 /**
  * Whether a requester may reach a finalized recording of `owner` on `deviceId`: the same owners
  * `assertActiveRecordingOwner` accepts (#11533), so a recording stays reachable after the stop that
- * finalized it. A sessionless requester or an ownerless recording is unscoped, as before.
+ * finalized it. A sessionless requester or an ownerless recording is unscoped, as before: fetching
+ * a finalized artifact stops nothing, so it keeps that rule where the active stop no longer does
+ * (#11647).
  */
 function finalizedOwnerVisible(
   owner: string | undefined,

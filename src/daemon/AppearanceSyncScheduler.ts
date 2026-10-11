@@ -1,13 +1,9 @@
-import type { AppearanceMode, BootedDevice } from "../models";
+import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../models";
 import { DaemonState } from "./daemonState";
 import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import { logger } from "../utils/logger";
-import {
-  getAppearanceConfig,
-  resolveAppearanceMode,
-  type AppearanceConfig,
-} from "../server/appearanceManager";
+import { getAppearanceConfig, resolveAppearanceMode } from "../server/appearanceManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { isAppearanceSyncEnabledFromEnvironment } from "../utils/appearance/appearanceSyncPolicy";

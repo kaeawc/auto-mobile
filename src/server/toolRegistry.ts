@@ -827,7 +827,9 @@ async function isSessionlessReadTargetHeld(
       error instanceof DeviceOwnedByOtherDaemonError
     ) {
       // A slot or another daemon holds the device: an expected verdict, so the read watches it.
-      logger.debug(`[ToolRegistry] ${toolName} on ${deviceId} is read-only: ${errorMessage(error)}`);
+      logger.debug(
+        `[ToolRegistry] ${toolName} on ${deviceId} is read-only: ${errorMessage(error)}`,
+      );
     } else {
       logger.warn(
         `[ToolRegistry] ownership of ${deviceId} unreadable; ${toolName} is read-only: ${errorMessage(error)}`,

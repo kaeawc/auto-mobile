@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { AppearanceMode } from "../../src/models";
-import type { AppearanceConfig } from "../../src/server/appearanceManager";
+import type { AppearanceConfig, AppearanceMode } from "../../src/models";
 import {
   AppearanceSyncScheduler,
   type AppearanceSyncTarget,

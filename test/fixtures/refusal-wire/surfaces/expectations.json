@@ -267,6 +267,44 @@
           "reason": "cli-idle-timeout"
         }
       }
+    },
+    "socket-frame.session_recovery_pending": {
+      "expected": "retry",
+      "fields": {
+        "code": "session_recovery_pending",
+        "retryable": true,
+        "acquireNewSession": false,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "platform": "android",
+          "deviceId": "emulator-5554",
+          "stableDeviceId": "Pixel_8_API_35",
+          "recoveryWindowRemainingMs": 120000,
+          "code": "session_recovery_pending",
+          "retryable": true,
+          "recovery": {
+            "action": "acquire_replacement_session",
+            "tools": ["getAndroid", "getApple"]
+          }
+        }
+      }
+    },
+    "socket-frame.daemon_restart_deferred": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_restart_deferred",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 1000
+      }
+    },
+    "socket-frame.daemon_restart_pending": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_restart_pending",
+        "retryable": true,
+        "acquireNewSession": false
+      }
     }
   }
 }

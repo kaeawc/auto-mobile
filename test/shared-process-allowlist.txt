@@ -115,6 +115,7 @@ test/daemon/gatedToolThroughDaemon.test.ts
 test/daemon/gestureOwnership.test.ts
 test/daemon/getApplePreparationTimeout.property.test.ts
 test/daemon/heartbeatExpiryPersistence.test.ts
+test/daemon/heartbeatReapUpgradesNonTerminalRelease.test.ts
 test/daemon/hierarchyStreamDiff.property.test.ts
 test/daemon/hierarchyStreamDiff.test.ts
 test/daemon/idleDeviceReaper.test.ts
@@ -150,6 +151,7 @@ test/daemon/managedSlots/slotsUnresolvedEmulatorIdentityGate.test.ts
 test/daemon/managedSlots/sqliteSlotRegistry.test.ts
 test/daemon/managerOutputReductionArgs.test.ts
 test/daemon/observationRequestBatch.test.ts
+test/daemon/observerLeaseWallClockStep.test.ts
 test/daemon/observerSessionRegistry.test.ts
 test/daemon/observerSessionRequestHandlers.test.ts
 test/daemon/outboundWriteGuard.test.ts
@@ -241,6 +243,7 @@ test/devices/DisplayInventoryProvider.test.ts
 test/devices/androidDeviceReboot.test.ts
 test/devices/ciIosBootRecovery.test.ts
 test/devices/deviceBootRecovery.test.ts
+test/devices/deviceBootTimeout.test.ts
 test/devices/deviceIdentityEvidence.test.ts
 test/devices/deviceShutdownService.test.ts
 test/devices/physicalIosDeviceResolution.test.ts
@@ -374,6 +377,7 @@ test/features/action/touchscreenInput.test.ts
 test/features/appearance/AppearanceConfig.property.test.ts
 test/features/bootAdmission/AndroidBootAdmissionGate.test.ts
 test/features/bootAdmission/AndroidCapacitySource.test.ts
+test/features/bootAdmission/bootGateInterleavings.test.ts
 test/features/database/bigIntegerJson.test.ts
 test/features/database/sqlLexer.test.ts
 test/features/debug/VisualHighlight.test.ts

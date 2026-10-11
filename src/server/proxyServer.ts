@@ -21,6 +21,7 @@ import {
   type DaemonMcpProxyConfig,
 } from "../daemon/daemonMcpProxy";
 import { DaemonShuttingDownError } from "../daemon/client";
+import { daemonRestartDeferredPayload } from "../daemon/daemonRestartAdmission";
 import { McpOverloadError, McpTimeoutError } from "../daemon/McpTimeoutError";
 import { DaemonDisconnectError } from "../daemon/DaemonDisconnectError";
 import { ActionableError, toActionableError } from "../models";
@@ -280,17 +281,27 @@ function daemonShuttingDownResult(hasOutputSchema: boolean, requestMayHaveDispat
   );
 }
 
+/**
+ * A `resources/read` the daemon could not serve because it is shutting down or its restart was
+ * deferred. Reads are never refused, but these may fail; the error says so typed and retryable
+ * (the envelope of the matching tool result) rather than passing for a missing resource.
+ */
+function retryableResourceReadError(error: unknown): McpError | undefined {
+  if (error instanceof DaemonShuttingDownError) {
+    const payload = daemonShuttingDownMcpOutcome(error.requestMayHaveDispatched);
+    return new McpError(-32603, JSON.stringify(payload), payload);
+  }
+  if (error instanceof DaemonRestartDeferredError) {
+    const payload = daemonRestartDeferredPayload(error);
+    return new McpError(-32603, JSON.stringify(payload), payload);
+  }
+  return undefined;
+}
+
 export function daemonRestartDeferredResult(
   error: DaemonRestartDeferredError,
 ): CallToolResult & { structuredContent: Record<string, unknown> } {
-  const payload = {
-    error: {
-      code: error.code,
-      message: error.message,
-      retryable: error.retryable,
-      retryAfterMs: error.retryAfterMs,
-    },
-  };
+  const payload = daemonRestartDeferredPayload(error);
   return {
     content: [{ type: "text", text: JSON.stringify(payload) }],
     structuredContent: payload,
@@ -608,6 +619,11 @@ function registerProxyResourceHandlers(
       }
       if (error instanceof McpOverloadError) {
         throw mcpOverloadError(error);
+      }
+      const retryable = retryableResourceReadError(error);
+      if (retryable) {
+        logger.warn(`[ProxyServer] Resource read refused, retryable: ${uri} - ${error}`);
+        throw retryable;
       }
       const invalidParams = forwardedInvalidParamsError(error);
       if (invalidParams) {

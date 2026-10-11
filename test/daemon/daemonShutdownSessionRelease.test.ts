@@ -27,6 +27,7 @@ import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingReposit
 
 interface DaemonSocketServerInternals {
   socketServer: {
+    liftSessionlessStrokesOn(deviceId: string): void;
     quiesce(): Promise<void>;
     drainSessionReleaseNotifications(): Promise<void>;
     close(): Promise<void>;
@@ -811,6 +812,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       events.push(`release:${sessionId}:${reason}`);
     });
     (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      liftSessionlessStrokesOn: () => {},
       quiesce: async () => {
         events.push("socket:quiesce");
       },
@@ -869,6 +871,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       (error: unknown) => error,
     );
     (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      liftSessionlessStrokesOn: () => {},
       quiesce: async () => {
         continueAcquisition.resolve();
         await Promise.resolve();
@@ -917,6 +920,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       events.push(`release:${sessionId}:${reason}`);
     });
     (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      liftSessionlessStrokesOn: () => {},
       quiesce: async () => {},
       drainSessionReleaseNotifications: async () => {
         events.push("socket:drain-releases");
@@ -1011,6 +1015,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       events.push(`release:${sessionId}:${reason}`);
     });
     (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      liftSessionlessStrokesOn: () => {},
       quiesce: async () => {},
       drainSessionReleaseNotifications: async () => {
         events.push("socket:drain-releases");
@@ -1085,6 +1090,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     });
     let ordinaryRelease: Promise<string | null> | undefined;
     (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      liftSessionlessStrokesOn: () => {},
       quiesce: async () => {
         ordinaryRelease = sessionManager.releaseSession("upgraded-release", "explicit-release");
         await persistenceStarted.promise;

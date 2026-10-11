@@ -1,5 +1,9 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { ProcessLifecycleHandlers, runAllCleanupOperations } from "../src/processLifecycle";
+import {
+  ProcessLifecycleHandlers,
+  runAllCleanupOperations,
+  type StdioWriteErrorSource,
+} from "../src/processLifecycle";
 import { FakeTimer } from "./fakes/FakeTimer";
 import { DAEMON_SHUTDOWN_TIMEOUT_MS } from "../src/daemon/constants";
 import { FakeProcess } from "./fakes/FakeProcess";
@@ -31,6 +35,38 @@ class FakeStdin {
   }
 }
 
+class FakeWritableErrorSource implements StdioWriteErrorSource {
+  readonly listeners: Array<(error: Error) => void> = [];
+  writeCalls = 0;
+  unhandledErrorReports = 0;
+
+  constructor(private readonly fakeProcess: FakeProcess) {}
+
+  on(_event: "error", listener: (error: Error) => void): this {
+    this.listeners.push(listener);
+    return this;
+  }
+
+  emit(error: Error): void {
+    if (this.listeners.length === 0) {
+      // Bound fatal-handler re-entry so the unguarded regression cannot spin forever.
+      if (this.unhandledErrorReports < 4) {
+        this.unhandledErrorReports++;
+        this.fakeProcess.emit("uncaughtException", error);
+      }
+      return;
+    }
+    for (const listener of this.listeners) {
+      listener(error);
+    }
+  }
+
+  write(): void {
+    this.writeCalls++;
+    this.emit(Object.assign(new Error("broken pipe"), { code: "EPIPE" }));
+  }
+}
+
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -44,6 +80,164 @@ async function flushUntilExit(fakeProcess: FakeProcess): Promise<void> {
     await Promise.resolve();
   }
 }
+
+describe("stdio write errors (#11710)", () => {
+  test.each(["EPIPE", "EIO"])("stdout %s shuts down once and exits cleanly", async (code) => {
+    const fakeProcess = new FakeProcess();
+    const stdout = new FakeWritableErrorSource(fakeProcess);
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, new FakeTimer());
+    const reasons: string[] = [];
+    const fatalEvents: string[] = [];
+    lifecycle.install();
+    lifecycle.installStdoutShutdownHandler(stdout);
+    lifecycle.setShutdownHandler((reason) => {
+      reasons.push(reason);
+    });
+    lifecycle.setFatalProcessHandler((event) => {
+      fatalEvents.push(event.type);
+    });
+
+    const error = Object.assign(new Error("stdout write failed"), { code });
+    stdout.emit(error);
+    stdout.emit(error);
+    await flushUntilExit(fakeProcess);
+
+    expect(reasons).toEqual(["stdout"]);
+    expect(fakeProcess.exitCodes).toEqual([0]);
+    expect(fatalEvents).toEqual([]);
+    expect(stdout.unhandledErrorReports).toBe(0);
+  });
+
+  test("stdout error leaves an in-progress stdin shutdown in charge", async () => {
+    const fakeProcess = new FakeProcess();
+    const stdin = new FakeStdin();
+    const stdout = new FakeWritableErrorSource(fakeProcess);
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, new FakeTimer());
+    const reasons: string[] = [];
+    let finishShutdown!: () => void;
+    lifecycle.installStdinShutdownHandlers(stdin);
+    lifecycle.installStdoutShutdownHandler(stdout);
+    lifecycle.setShutdownHandler((reason) => {
+      reasons.push(reason);
+      return new Promise<void>((resolve) => {
+        finishShutdown = resolve;
+      });
+    });
+
+    stdin.emit("end");
+    await flushMicrotasks();
+    stdout.emit(Object.assign(new Error("broken pipe"), { code: "EPIPE" }));
+    await flushMicrotasks();
+
+    expect(reasons).toEqual(["stdin"]);
+    expect(fakeProcess.exitCodes).toEqual([]);
+    finishShutdown();
+    await flushUntilExit(fakeProcess);
+    expect(reasons).toEqual(["stdin"]);
+    expect(fakeProcess.exitCodes).toEqual([0]);
+  });
+
+  test("SIGTERM does not restart an in-progress stdout shutdown", async () => {
+    const fakeProcess = new FakeProcess();
+    const stdout = new FakeWritableErrorSource(fakeProcess);
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, new FakeTimer());
+    const reasons: string[] = [];
+    let finishShutdown!: () => void;
+    lifecycle.install();
+    lifecycle.installStdoutShutdownHandler(stdout);
+    lifecycle.setShutdownHandler((reason) => {
+      reasons.push(reason);
+      return new Promise<void>((resolve) => {
+        finishShutdown = resolve;
+      });
+    });
+
+    stdout.emit(Object.assign(new Error("broken pipe"), { code: "EPIPE" }));
+    await flushMicrotasks();
+    fakeProcess.emit("SIGTERM");
+    await flushMicrotasks();
+
+    expect(reasons).toEqual(["stdout"]);
+    expect(fakeProcess.exitCodes).toEqual([]);
+    finishShutdown();
+    await flushUntilExit(fakeProcess);
+    expect(reasons).toEqual(["stdout"]);
+    expect(fakeProcess.exitCodes).toEqual([0]);
+  });
+
+  test("installs each stdout shutdown listener only once", () => {
+    const fakeProcess = new FakeProcess();
+    const stdout = new FakeWritableErrorSource(fakeProcess);
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, new FakeTimer());
+
+    lifecycle.installStdoutShutdownHandler(stdout);
+    lifecycle.installStdoutShutdownHandler(stdout);
+
+    expect(stdout.listeners).toHaveLength(1);
+  });
+
+  test("installs each stderr error guard only once", () => {
+    const fakeProcess = new FakeProcess();
+    const stderr = new FakeWritableErrorSource(fakeProcess);
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, new FakeTimer());
+
+    lifecycle.installStderrErrorGuard(stderr);
+    lifecycle.installStderrErrorGuard(stderr);
+
+    expect(stderr.listeners).toHaveLength(1);
+  });
+
+  test("stderr errors cause no shutdown, fatal handling, exit, or stderr write", async () => {
+    const fakeProcess = new FakeProcess();
+    const stderr = new FakeWritableErrorSource(fakeProcess);
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, new FakeTimer());
+    const reasons: string[] = [];
+    const fatalEvents: string[] = [];
+    lifecycle.install();
+    lifecycle.installStderrErrorGuard(stderr);
+    lifecycle.setShutdownHandler((reason) => {
+      reasons.push(reason);
+    });
+    lifecycle.setFatalProcessHandler((event) => {
+      fatalEvents.push(event.type);
+    });
+
+    stderr.emit(Object.assign(new Error("broken pipe"), { code: "EPIPE" }));
+    stderr.emit(new Error("other stderr write failure"));
+    await flushMicrotasks();
+
+    expect(reasons).toEqual([]);
+    expect(fatalEvents).toEqual([]);
+    expect(fakeProcess.exitCodes).toEqual([]);
+    expect(stderr.writeCalls).toBe(0);
+    expect(stderr.unhandledErrorReports).toBe(0);
+  });
+
+  test("stderr guard prevents the fatal logger from re-entering on a broken pipe", async () => {
+    for (const guarded of [false, true]) {
+      const fakeProcess = new FakeProcess();
+      const stderr = new FakeWritableErrorSource(fakeProcess);
+      const lifecycle = new ProcessLifecycleHandlers(fakeProcess, new FakeTimer());
+      const fatalEvents: string[] = [];
+      lifecycle.install();
+      if (guarded) {
+        lifecycle.installStderrErrorGuard(stderr);
+      }
+      lifecycle.setFatalProcessHandler((event) => {
+        fatalEvents.push(event.type);
+        stderr.write();
+      });
+
+      fakeProcess.emit("uncaughtException", new Error("notification write failed"));
+      await flushMicrotasks();
+
+      expect(fatalEvents).toEqual(Array(guarded ? 1 : 5).fill("uncaughtException"));
+      expect(stderr.writeCalls).toBe(guarded ? 1 : 5);
+      expect(stderr.unhandledErrorReports).toBe(guarded ? 0 : 4);
+      expect(fakeProcess.exitCodes).toEqual([]);
+    }
+  });
+});
 
 describe("process lifecycle handlers", () => {
   test("installs each process listener only once", () => {

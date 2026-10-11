@@ -285,6 +285,8 @@ export class ManagedExecutionRelease {
   private readonly ownerHolds: ManagedExecutionOwnerHolds;
   /** Holders per session id, so one drain's release never drops another's hold. */
   private readonly ownerHoldCounts = new Map<string, number>();
+  /** Failed owner clears being retried, one per slot and session ({@link retryOwnerClear}). */
+  private readonly ownerClearRetries = new Set<string>();
 
   constructor(private readonly options: ManagedExecutionReleaseOptions) {
     this.isExecOwnerLive = options.isExecOwnerLive ?? defaultSlotExecOwnerLiveness;
@@ -842,7 +844,7 @@ export class ManagedExecutionRelease {
         this.warn(
           `[ManagedExecutionRelease] Clearing the owner of slot ${failure.scopeKey}/` +
             `${failure.slotIndex} for released session ${sessionId} failed; the dead record ` +
-            `pins nothing in this daemon (#11339): ${failure.error}`,
+            `pins nothing in this daemon (#11339) and the clear is retried: ${failure.error}`,
         );
       }
     } finally {
@@ -908,7 +910,9 @@ export class ManagedExecutionRelease {
    * Clear this session's execution ownership of every held slot; one failure never stops the
    * rest. A slot whose `settling` mark is owed keeps its owner (reported as not released): the
    * fence comes first. A clear that throws leaves a record that is dead by liveness once the
-   * drain's hold ends, which pins nothing in this daemon (#11339) and which the settlement watcher clears.
+   * drain's hold ends, which pins nothing in this daemon (#11339). It still names this running
+   * process, which every other daemon on the host reads as live, so the clear is retried until it
+   * lands ({@link retryOwnerClear}, #11545).
    */
   private async releaseOwnership(
     registry: ManagedExecutionSlotRegistry,
@@ -927,6 +931,7 @@ export class ManagedExecutionRelease {
     return results.flatMap((result, index) => {
       if (result.status === "rejected") {
         failures.push({ ...slotKeyOf(held[index]), error: errorMessage(result.reason) });
+        this.track(this.retryOwnerClear(registry, slotKeyOf(held[index]), sessionId));
         return [toEvidence(held[index], false)];
       }
       const current = result.value.assignment ?? held[index];
@@ -1147,12 +1152,84 @@ export class ManagedExecutionRelease {
     } catch (error) {
       this.warn(
         `[ManagedExecutionRelease] Retrying the owner clear of slot ${slot.key.scopeKey}/` +
-          `${slot.key.slotIndex} for ended session ${owner.sessionUuid} failed; the dead record ` +
-          `stays and the slot still returns to ready: ${errorMessage(error)}`,
+          `${slot.key.slotIndex} for ended session ${owner.sessionUuid} failed; the slot still ` +
+          `returns to ready and the clear is retried: ${errorMessage(error)}`,
         error,
       );
+      this.track(this.retryOwnerClear(registry, slot.key, owner.sessionUuid));
     }
     return true;
+  }
+
+  /**
+   * Retry an owner clear that threw until it lands (#11545). The record it left names this
+   * running process: this daemon reads it dead by its ended session, but every other daemon on
+   * the host reads it live by process and answers `slot_in_use` for as long as this one runs, so
+   * one busy write would pin the slot to them. The first retry waits one poll (the registry was
+   * busy a moment ago); a registry step that throws is retried like every other step of the
+   * drain, past the settlement cap at the slow cadence, and stops when this daemon closes.
+   *
+   * Only the ended session's own dead record is cleared. A record that is gone or names another
+   * session ends the retry. One that reads live (this daemon holds the session id again, or a
+   * drain still holds it) is re-checked at the fast cadence until the settlement cap and then
+   * left to that holder, whose own release clears it.
+   */
+  private async retryOwnerClear(
+    registry: ManagedExecutionSlotRegistry,
+    key: SlotKey,
+    sessionId: string,
+  ): Promise<void> {
+    const id = `${key.scopeKey}/${key.slotIndex}/${sessionId}`;
+    if (this.closed || this.ownerClearRetries.has(id)) {
+      return;
+    }
+    this.ownerClearRetries.add(id);
+    const { timer } = this.options;
+    const deadline = timer.now() + this.settlementCapMs;
+    try {
+      for (;;) {
+        await timer.sleep(this.settlementPollMs);
+        if (this.closed) {
+          return;
+        }
+        const cleared = await this.retryRegistryStep(
+          `Clearing the owner of slot ${key.scopeKey}/${key.slotIndex} for ended session ${sessionId}`,
+          deadline,
+          () => this.clearEndedOwnerOnce(registry, key, sessionId),
+        );
+        if (
+          !cleared.done ||
+          cleared.value === "done" ||
+          timer.now() + this.settlementPollMs > deadline
+        ) {
+          return;
+        }
+      }
+    } finally {
+      this.ownerClearRetries.delete(id);
+    }
+  }
+
+  /**
+   * One attempt of {@link retryOwnerClear}; throws when the registry does. Nothing is awaited
+   * between the liveness check and the clear, so a session this daemon comes to hold again is
+   * either seen live here or claims the slot after the clear was issued.
+   */
+  private async clearEndedOwnerOnce(
+    registry: ManagedExecutionSlotRegistry,
+    key: SlotKey,
+    sessionId: string,
+  ): Promise<"done" | "owner_live"> {
+    const owner = (await registry.getAssignment(key))?.execOwner ?? null;
+    // Closed during the read: no write follows; the record dies with this process.
+    if (owner === null || owner.sessionUuid !== sessionId || this.closed) {
+      return "done";
+    }
+    if (this.options.sessions.isSessionLive(sessionId) || this.isExecOwnerLive(owner)) {
+      return "owner_live";
+    }
+    await registry.releaseExecution(key, sessionId);
+    return "done";
   }
 
   /** Return a settled slot to `ready`, closing its release journal entry in the same transaction. */

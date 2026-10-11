@@ -196,9 +196,12 @@ connection used for tools and resources:
    registry step of the drain is assumed to have happened (#11616). A failed
    slot lookup, `settling` mark or return to `ready` is retried with backoff
    (250 ms doubling to 5 s) until the 5-minute settlement cap, then every 30 s
-   until it lands or the daemon stops. A failed owner clear is not retried on its
-   own: the record it leaves belongs to an ended session, pins nothing, and is
-   cleared when the slot returns to `ready` or is next claimed. If the
+   until it lands or the daemon stops. A failed owner clear is retried the
+   same way: the record it leaves belongs to an ended session and pins nothing
+   in the draining daemon, but it names that daemon's running process, so other
+   daemons on the host answer `slot_in_use` for it until the retry lands. The
+   retry clears only that ended session's record; one a live execution holds
+   again is left to that execution's own release. If the
    `settling` mark itself cannot be written, the slot keeps its owner record and
    the daemon keeps treating that owner as live for as long as the released work
    runs, so the slot is never handed to the next execution under running work;
@@ -220,8 +223,8 @@ connection used for tools and resources:
    a session released by heartbeat loss has not), only the draining daemon
    itself refuses the slot. And an owner record whose clear failed, which the
    draining daemon itself reads as dead, still names that daemon's process:
-   other daemons on the host answer `slot_in_use` for it until the draining
-   daemon next claims the slot or exits.
+   other daemons on the host answer `slot_in_use` for it until the clear's
+   retry lands, the draining daemon next claims the slot, or it exits.
    A release clears the execution owner only; the assignment, generation and spec
    are kept, whatever the release reason (explicit, heartbeat loss, idle).
 5. **Reuse.** A new proxy with the same scoped slot and a matching spec reuses

@@ -241,16 +241,28 @@ describe.each(REGISTRIES)(
       expect(await registry.listOpenSlotJournal(key)).toEqual([]);
     });
 
-    test("returns to ready even when the retried owner clear fails again", async () => {
+    test("returns to ready even while the retried owner clear keeps failing", async () => {
       await releaseWithFailedOwnerClear();
-      busy.failReleases = 1;
+      // Busy for every clear before the slot is back to ready: the watcher's and the retries'.
+      const release = registry.releaseExecution.bind(registry);
+      let readyWithRecord = false;
+      registry.releaseExecution = async (slot, sessionUuid) => {
+        const current = await registry.getAssignment(slot);
+        if (current?.state === "ready") {
+          readyWithRecord ||= current.execOwner?.sessionUuid === S1;
+          return release(slot, sessionUuid);
+        }
+        throw new Error("SQLITE_BUSY: database is locked");
+      };
 
       work.active.delete(S1);
       await drain.whenIdle();
 
-      // The dead record stays, and pins nothing: the next execution claims the ready slot (#11339).
+      // The dead record did not keep the slot settling (#11339); the retry cleared it afterwards,
+      // so no other daemon reads the slot as in use either.
+      expect(readyWithRecord).toBe(true);
       const restored = await registry.getAssignment(key);
-      expect(restored).toMatchObject({ state: "ready", execOwner: { sessionUuid: S1 } });
+      expect(restored).toMatchObject({ state: "ready", execOwner: null });
       expect(await registry.listOpenSlotJournal(key)).toEqual([]);
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining("Retrying the owner clear"),
@@ -343,7 +355,8 @@ describe.each(REGISTRIES)(
 
         // Bounded: the watcher ended on its own, at the fast cadence, no later than the cap.
         expect(polls.length).toBeGreaterThanOrEqual(2);
-        expect(polls.length).toBeLessThanOrEqual(CAP_MS / POLL_MS + 1);
+        // Two bounded loops poll: the watcher's re-check and the retry of the failed owner clear.
+        expect(polls.length).toBeLessThanOrEqual(2 * (CAP_MS / POLL_MS + 1));
         expect(polls.every((ms) => ms === POLL_MS)).toBe(true);
         expect(timer.now() - start).toBeLessThanOrEqual(CAP_MS + POLL_MS);
         expect(await registry.getAssignment(key)).toMatchObject({

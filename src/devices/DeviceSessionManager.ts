@@ -403,6 +403,11 @@ export type ResolvedDeviceIdentity = Pick<BootedDevice, "deviceId" | "name" | "o
 
 export interface DeviceReadyOptions {
   sessionId?: string;
+  /**
+   * What the caller will do with the device. A `read` gets only the readiness reading needs: no
+   * current-device pin, no appearance or settings write (#11641). Defaults to `control`.
+   */
+  intent?: "read" | "control";
   skipCtrlProxyDownload?: boolean;
   signal?: AbortSignal;
   /** Reuses device discovery already started by the current target resolution. */
@@ -892,15 +897,17 @@ export class DeviceSessionManager implements DeviceSessionManager {
     // A cancelled call (e.g. another session acquired the device, #10905) stops before each
     // device-mutating step: the current-device pin and the settings writes.
     options?.signal?.throwIfAborted();
-    this.setCurrentDevice(selectedDevice, resolvedPlatform);
-    if (deviceSource !== "current") {
-      await applyAppearanceOnConnect(
-        selectedDevice,
-        this.appearanceOnConnectDependencies,
-        resolveAppearanceSessionKey(options?.sessionId),
-      );
-      options?.signal?.throwIfAborted();
-      await disableStylusHandwriting(selectedDevice, this.adbFactory);
+    if (options?.intent !== "read") {
+      this.setCurrentDevice(selectedDevice, resolvedPlatform);
+      if (deviceSource !== "current") {
+        await applyAppearanceOnConnect(
+          selectedDevice,
+          this.appearanceOnConnectDependencies,
+          resolveAppearanceSessionKey(options?.sessionId),
+        );
+        options?.signal?.throwIfAborted();
+        await disableStylusHandwriting(selectedDevice, this.adbFactory);
+      }
     }
     logger.info(`[DeviceSessionManager] Using ${deviceSource} device: ${selectedDevice.deviceId}`);
     return selectedDevice;

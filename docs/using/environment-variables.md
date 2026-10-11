@@ -556,9 +556,9 @@ restarted proxy can win a session whose previous owner has gone.
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                                            | Use and accepted values                                                                    | Default     |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------- |
-| `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS`, `AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` | CLI idle leash; positive base-10 integer milliseconds. Daemon adoption clamps to one hour. | `120000` ms |
+| Variable                                                                            | Use and accepted values                                                                                                                                                                                                     | Default     |
+| ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS`, `AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` | CLI idle leash; positive base-10 integer milliseconds (digits only; `2m` or `1e5` is ignored with a warning), at least `120000`: a smaller value is ignored, never shortens the window. Daemon adoption clamps to one hour. | `120000` ms |
 
 </div>
 

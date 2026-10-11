@@ -13,6 +13,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlinx.serialization.json.longOrNull
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -128,13 +129,34 @@ class RefusalWireContractTest {
     }
   }
 
-  private fun hintRows(key: String): List<JsonObject> =
+  @Test
+  fun `the finalize wait cap and codes are the ones shared with the proxy and XCTestRunner`() {
+    val finalizeWait = hintsTable().getValue("finalizeWait").jsonObject
+    val waitBudgetMs = finalizeWait.getValue("waitBudgetMs").jsonPrimitive.long
+    val codes = finalizeWait.getValue("codes").jsonArray.map { it.jsonPrimitive.content }.toSet()
+    assertEquals(waitBudgetMs, AutoMobilePlanExecutor.DEVICE_FINALIZE_WAIT_CAP_MS)
+    assertEquals(codes, AutoMobilePlanExecutor.FINALIZE_WAIT_CODES)
+    for (code in codes) {
+      // A hint far past the cap still stops the wait exactly at the shared budget.
+      assertEquals(
+        code,
+        1L,
+        AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(8, waitBudgetMs - 1, Long.MAX_VALUE, code),
+      )
+      assertNull(
+        code,
+        AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(8, waitBudgetMs, Long.MAX_VALUE, code),
+      )
+    }
+  }
+
+  private fun hintsTable(): JsonObject =
     json
       .parseToJsonElement(File(File(dir.parentFile, "refusal-wire-hints"), "hints.json").readText())
       .jsonObject
-      .getValue(key)
-      .jsonArray
-      .map { it.jsonObject }
+
+  private fun hintRows(key: String): List<JsonObject> =
+    hintsTable().getValue(key).jsonArray.map { it.jsonObject }
 
   private fun JsonObject.name(): String = getValue("name").jsonPrimitive.content
 

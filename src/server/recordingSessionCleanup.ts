@@ -4,16 +4,19 @@ import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
+  adoptOwnerlessTestRecording,
   isTestRecordingOwnedBy,
   ownedTestRecordingId,
   stopTestRecording,
 } from "./testRecordingManager";
 import {
+  adoptOwnerlessSegmentedVideoRecordings,
   hasSegmentedVideoRecordingsForOwner,
   segmentedVideoRecordingHandlesForOwner,
   stopSegmentedVideoRecordingsForOwner,
 } from "./videoRecordingTools";
 import {
+  adoptOwnerlessActiveVideoRecordings,
   listActiveVideoRecordingIdsForOwner,
   listActiveVideoRecordings,
   listOwnedActiveVideoRecordingIds,
@@ -53,7 +56,8 @@ export interface RecordingSessionCleanupDeps {
   >;
   stopVideoRecording(recordingId: string): Promise<void>;
   isTestRecordingOwnedBy(sessionId: string | undefined, deviceId: string): boolean;
-  stopTestRecording(): Promise<void>;
+  stopTestRecording(recordingId?: string): Promise<void>;
+  ownedTestRecordingId(sessionId: string | undefined, deviceId: string): string | undefined;
   /** Ids of the recordings a session owns on the device, from memory only (no DB read). */
   activeRecordingIdsForOwner(sessionId: string | undefined, deviceId: string): string[];
   /** Deadline clock for the finalize cap; a FakeTimer in tests. */
@@ -75,6 +79,7 @@ export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
     await stopVideoRecordingUnattended(recordingId);
   },
   isTestRecordingOwnedBy,
+  ownedTestRecordingId,
   activeRecordingIdsForOwner: (sessionId, deviceId) => {
     // One id, not a string to spread: spreading it would split the id into characters.
     const testRecordingId = ownedTestRecordingId(sessionId, deviceId);
@@ -84,8 +89,8 @@ export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
       ...(testRecordingId === undefined ? [] : [testRecordingId]),
     ];
   },
-  stopTestRecording: async () => {
-    await stopTestRecording();
+  stopTestRecording: async (recordingId) => {
+    await stopTestRecording(recordingId);
   },
   timer: defaultTimer,
   finalizeCapMs: defaultFinalizeCapMs,
@@ -130,6 +135,7 @@ async function stopOwnedRecordings(
   sessionId: string | undefined,
   deviceId: string,
   stopping: Set<string>,
+  testRecordingId: string | undefined,
 ): Promise<void> {
   // `stopping` starts as every recording the owner has; a stage that finished drops the ids that
   // are no longer active, so only what is still stopping is force-stopped at the cap (#11041).
@@ -172,11 +178,11 @@ async function stopOwnedRecordings(
       }
     },
   );
-  if (deps.isTestRecordingOwnedBy(sessionId, deviceId)) {
+  if (testRecordingId !== undefined && deps.isTestRecordingOwnedBy(sessionId, deviceId)) {
     await attempt(
       `stop test recording of released session ${sessionId ?? "(owner-less)"} on ${deviceId}`,
       async () => {
-        await deps.stopTestRecording();
+        await deps.stopTestRecording(testRecordingId);
         pruneFinalized();
         // The plan is retained by recording id for the owning session (#10958).
         logger.info(
@@ -199,14 +205,18 @@ async function stopOwnedRecordingsWithinCap(
   // Every recording the owner has, up front: single-file, segmented and the test recording, so
   // the cap force-stops all of them rather than only the one mid-stop (#11041).
   const stopping = new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId));
+  const testRecordingId = deps.ownedTestRecordingId(sessionId, deviceId);
   const capMs = deps.finalizeCapMs(deviceId);
   try {
-    await raceWithDeadline(stopOwnedRecordings(deps, sessionId, deviceId, stopping), {
-      timer: deps.timer,
-      timeoutMs: capMs,
-      label: `finalize recordings of released session ${sessionId ?? "(owner-less)"}`,
-      timeoutError: () => new FinalizeCapExceeded(),
-    });
+    await raceWithDeadline(
+      stopOwnedRecordings(deps, sessionId, deviceId, stopping, testRecordingId),
+      {
+        timer: deps.timer,
+        timeoutMs: capMs,
+        label: `finalize recordings of released session ${sessionId ?? "(owner-less)"}`,
+        timeoutError: () => new FinalizeCapExceeded(),
+      },
+    );
   } catch (error) {
     if (!(error instanceof FinalizeCapExceeded)) {
       throw error;
@@ -215,19 +225,40 @@ async function stopOwnedRecordingsWithinCap(
       `[recording] Finalizing recordings of released session ${sessionId ?? "(owner-less)"} on ${deviceId} exceeded ${capMs}ms; ` +
         `force-stopping ${[...stopping].join(", ") || "none"} and marking incomplete`,
     );
+    // The video incomplete handler cannot stop a test recorder. Start this independently
+    // of the wedged stage, by its captured owner id, so it cannot stop a replacement recorder.
     await Promise.all(
       [...stopping].map((recordingId) =>
-        attempt(`mark recording ${recordingId} incomplete`, () =>
-          raceWithDeadline(() => deps.markVideoRecordingIncomplete(recordingId), {
-            timer: deps.timer,
-            timeoutMs: INCOMPLETE_MARK_GRACE_MS,
-            label: `mark recording ${recordingId} incomplete`,
-          }),
+        attempt(`force-stop recording ${recordingId}`, () =>
+          raceWithDeadline(
+            () =>
+              recordingId === testRecordingId
+                ? deps.stopTestRecording(recordingId)
+                : deps.markVideoRecordingIncomplete(recordingId),
+            {
+              timer: deps.timer,
+              timeoutMs: INCOMPLETE_MARK_GRACE_MS,
+              label: `force-stop recording ${recordingId}`,
+            },
+          ),
         ),
       ),
     );
   }
 }
+
+/** Recording acquisition operations; each claims ownership before yielding. */
+export interface RecordingAcquisitionDeps {
+  adoptVideoRecordings(deviceId: string, sessionId: string): Promise<void> | undefined;
+  adoptSegmentedRecordings(deviceId: string, sessionId: string): void;
+  adoptTestRecording(deviceId: string, sessionId: string): boolean;
+}
+
+const defaultRecordingAcquisitionDeps: RecordingAcquisitionDeps = {
+  adoptVideoRecordings: adoptOwnerlessActiveVideoRecordings,
+  adoptSegmentedRecordings: adoptOwnerlessSegmentedVideoRecordings,
+  adoptTestRecording: adoptOwnerlessTestRecording,
+};
 
 /**
  * The longest {@link stopOwnedRecordingsWithinCap} runs: the stop is capped, then force-stopped
@@ -241,28 +272,31 @@ function finalizeSettlesWithinMs(
 }
 
 /**
- * A session acquiring a device stops and finalizes the owner-less (sessionless) recordings on it
- * (#10961), so they cannot keep capturing the new owner's session or block its own recording
- * start. Returns the callback to run where acquisition cancels sessionless executions
- * (#10829); the stop is capped as in {@link RECORDING_FINALIZE_CAP_MS}. It is tracked as
- * acquisition cleanup, not pending device cleanup (#11041): the acquiring holder's own
- * setActiveDevice/startDevice must not be refused, but if the holder releases before the stop
- * settles, the device stays quarantined for the next acquirer.
+ * The successful acquiring holder adopts live ownerless recordings (#11665), replacing
+ * acquisition-time stops (#10961). Keep the existing hook and exported name. Ownership is
+ * claimed synchronously; persistence is tracked as acquisition cleanup so a release cannot
+ * hand the device onward before it settles. A stale/losing acquisition cannot adopt.
  */
 export function createOwnerlessRecordingAcquisitionCleanup(
-  manager: Pick<SessionManager, "registerAcquisitionDeviceCleanup">,
-  deps: RecordingSessionCleanupDeps = defaultRecordingSessionCleanupDeps,
-): (deviceId: string) => void {
-  return (deviceId) => {
-    if (!deps.hasRecordingsToStop(undefined, deviceId)) {
+  manager: Pick<SessionManager, "registerAcquisitionDeviceCleanup" | "getSessionForDevice">,
+  deps: RecordingAcquisitionDeps = defaultRecordingAcquisitionDeps,
+): (deviceId: string, sessionId: string) => void {
+  return (deviceId, sessionId) => {
+    if (manager.getSessionForDevice(deviceId) !== sessionId) {
+      return;
+    }
+    deps.adoptSegmentedRecordings(deviceId, sessionId);
+    deps.adoptTestRecording(deviceId, sessionId);
+    const persistence = deps.adoptVideoRecordings(deviceId, sessionId);
+    if (!persistence) {
       return;
     }
     manager.registerAcquisitionDeviceCleanup(
       deviceId,
-      stopOwnedRecordingsWithinCap(deps, undefined, deviceId),
-      // The same capped stop as a release's, so the same bound: if the holder releases before
-      // it settles, a refused bind must advertise the time left, not the 1 s default (#11616).
-      finalizeSettlesWithinMs(deps, deviceId),
+      attempt(
+        `persist adopted recording ownership for session ${sessionId} on ${deviceId}`,
+        () => persistence,
+      ),
     );
   };
 }

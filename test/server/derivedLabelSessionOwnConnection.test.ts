@@ -15,6 +15,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import { RealToolCallPath } from "../helpers/realToolCallPath";
@@ -45,6 +46,7 @@ function errorText(result: { content?: unknown }): string {
 }
 
 describe("a connection bound to the base session naming its own derived label session", () => {
+  let timer: FakeTimer;
   let manager: SessionManager;
   let pool: DevicePool;
   let tools: RealToolCallPath;
@@ -92,7 +94,7 @@ describe("a connection bound to the base session naming its own derived label se
       spyOn(logger, "warn").mockImplementation(() => {}),
       spyOn(logger, "error").mockImplementation(() => {}),
     ];
-    const timer = new FakeTimer();
+    timer = new FakeTimer();
     manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), () => {
       return new FakeDbWriteBarrier();
     });
@@ -181,6 +183,46 @@ describe("a connection bound to the base session naming its own derived label se
       expect(errorText(await tap(owner, { sessionUuid: "sess-b" }))).toMatch(
         BOUND_TO_OTHER_SESSION,
       );
+    }),
+  );
+
+  test(
+    "its call naming only the label is refused with the end of a base past its idle deadline (#11640)",
+    scenario(async () => {
+      const released: Array<[string, string]> = [];
+      manager.onSessionRelease((sessionId, _deviceId, reason) => {
+        released.push([sessionId, reason]);
+      });
+      const owner = await connection({ sessionId: "http-owner" });
+      // The connection's first call binds it to the base and starts the base's idle window.
+      await tap(owner, { sessionUuid: BASE });
+      const idleMs = manager.peekSession(BASE)!.sessionTimeoutMs;
+      // The label is used half way through the base's idle window, so only the base runs out.
+      timer.advanceTime(idleMs / 2);
+      expect((await tap(owner, { sessionUuid: DERIVED })).isError).not.toBe(true);
+      timer.advanceTime(idleMs / 2 + 1);
+      expect(manager.peekSession(BASE)).toBeNull();
+
+      // Tool selection and the call's own routing both look the label's base up, and release
+      // nothing: the label is simply no live session any more.
+      expect(manager.peekSession(DERIVED)).toBeNull();
+      expect(released).toEqual([]);
+      const ranBefore = tools.runs.length;
+
+      // The base's end ends its labels: the owner's own call is refused as a call naming the
+      // ended base would be, and that refused admission is what releases the base.
+      const result = await tap(owner, { sessionUuid: DERIVED });
+      await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+
+      expect(result.isError).toBe(true);
+      expect(wire(result).error).toMatchObject({
+        code: "session_ownership_lost",
+        sessionUuid: DERIVED,
+        reason: "lazy-expiry",
+        nextAction: "acquire_new_session",
+      });
+      expect(tools.runs.length).toBe(ranBefore);
+      expect(released[0]).toEqual([BASE, "lazy-expiry"]);
     }),
   );
 

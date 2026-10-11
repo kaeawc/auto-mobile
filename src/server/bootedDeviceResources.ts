@@ -67,6 +67,7 @@ import {
 import { resolveApkChecksum, resolveIpaChecksum } from "../constants/release";
 import {
   type DiscoverySource,
+  discoverySourceFor,
   discoverySourceOutcome,
   expectingPooledSources,
   incompleteDiscoverySources,
@@ -307,6 +308,12 @@ interface PoolStatusSummary {
   error: number;
   total: number;
   recoveryPolicy: DeviceRecoveryPolicy;
+  /**
+   * Present when a pooled device's own discovery source did not complete: whether that device
+   * is still there is unknown, so the counts cover verified devices only and are not the pool's
+   * size. `available-devices` refuses with this code instead of printing them (#11643).
+   */
+  countUnknown?: { code: "discovery_incomplete"; platforms: Platform[] };
 }
 
 interface PoolDeviceInfo {
@@ -842,12 +849,27 @@ function resolvePoolDeviceContext(
   };
 }
 
-async function summarizePoolStatus(
+/**
+ * Pool counts over the devices this read verified. A pooled entry the read does not list is a
+ * phantom (shut down) when its own discovery source completed, and unknown when that source did
+ * not: unknown entries are never counted idle and mark the summary `countUnknown`, the answer
+ * `getRefreshedStats`, `daemon/availableDevices` and the in-daemon CLI give for the same state
+ * (#11643). A source whose tooling is not installed observed completely (#11605), so it never
+ * makes a count unknown unless a pooled device depends on it.
+ *
+ * This read is bounded by the resource budget and the pool's own read is not, so the summary may
+ * be `countUnknown` where the pool, asked later, answers a number -- also when a step of this read
+ * fails after the listing (the rows cannot be built, though the pool's count needs none of them).
+ * It never answers a different number: anything this read did not finish is unknown.
+ */
+function summarizePoolStatus(
   devicePool: DevicePool,
   discoveredDevices: BootedDeviceInfo[],
-  succeededPlatforms: Set<Platform>,
+  sourceObservations: Partial<Record<DiscoverySource, PlatformObservation>>,
   requestedPlatforms: readonly Platform[],
-): Promise<PoolStatusSummary> {
+  /** Platforms whose whole read (listing, then held-device placement) returned within the budget. */
+  finishedPlatforms: ReadonlySet<Platform>,
+): PoolStatusSummary {
   let idle = 0;
   let assigned = 0;
   let error = 0;
@@ -862,41 +884,39 @@ async function summarizePoolStatus(
     }
   };
 
-  // For successfully-discovered platforms, count from the live booted list so
-  // phantom (shut-down) pool entries are excluded.
+  // Count from the listed devices so phantom (shut-down) pool entries are excluded. Their pool
+  // status was read after the ownership refresh every inventory surface performs.
+  const listed = new Set<string>();
   for (const device of discoveredDevices) {
-    if (succeededPlatforms.has(device.platform)) {
-      tally(device.runtime.poolStatus ?? undefined);
+    const deviceId = device.runtime.deviceId;
+    // A row that withholds its pool context (identity quarantine: #6863) still names a serial the
+    // pool holds and counts by id, so the count is the pool's own bucket for it (#11643).
+    tally(
+      device.runtime.poolStatus ?? (deviceId ? devicePool.poolBucket(deviceId) : null) ?? undefined,
+    );
+    if (deviceId) {
+      listed.add(deviceId);
     }
   }
 
-  // For platforms whose discovery failed/was unavailable, keep the pool's own
-  // tracked counts — we cannot confirm which of those entries are phantom.
-  const fallback = devicePool
+  // The pool rule (readLiveInventoryDeviceIds): any pooled device whose own source did not
+  // complete makes the count unknown, whether or not a stale listing still shows it. So does a
+  // platform whose read did not finish: its held offline and transitional devices, which the pool
+  // counts, are placed after the listing and may be missing from these rows.
+  const unknown = devicePool
     .getAllDevices()
     .filter(
       (pooled) =>
-        requestedPlatforms.includes(pooled.platform) && !succeededPlatforms.has(pooled.platform),
+        requestedPlatforms.includes(pooled.platform) &&
+        (!finishedPlatforms.has(pooled.platform) ||
+          sourceObservations[discoverySourceFor(pooled.platform, pooled.id)]
+            ?.observationComplete !== true),
     );
-  // Whether a managed slot holds an idle device is only known after the ownership refresh the
-  // other inventory surfaces perform. When it fails (slot registry unreadable, never loaded), an
-  // idle tally would report a possibly-held device free: omit it, as available-devices refuses
-  // (#11455). Assigned/error stay exact -- a session or health marker is independent of slots.
-  let ownershipKnown = true;
-  if (fallback.length > 0) {
-    try {
-      await devicePool.refreshInventoryOwnership();
-    } catch (refreshError) {
-      ownershipKnown = false;
-      logger.warn(
-        `[BootedDeviceResources] Managed-slot ownership unknown; omitting idle pool counts: ${errorMessage(refreshError)}`,
-        refreshError,
-      );
-    }
-  }
-  for (const pooled of fallback) {
+  for (const pooled of unknown) {
+    // Whether an unlisted, unverified entry is free is unknown (it may be gone, or slot-held:
+    // #11455), so it is never tallied idle. Assigned/error are the pool's own facts and stay.
     const status = devicePool.poolBucket(pooled.id) ?? "idle";
-    if (ownershipKnown || status !== "idle") {
+    if (!listed.has(pooled.id) && status !== "idle") {
       tally(status);
     }
   }
@@ -908,6 +928,14 @@ async function summarizePoolStatus(
     error,
     total: idle + assigned + error,
     recoveryPolicy: devicePool.getRecoveryPolicy(),
+    ...(unknown.length > 0
+      ? {
+          countUnknown: {
+            code: "discovery_incomplete" as const,
+            platforms: [...new Set(unknown.map((pooled) => pooled.platform))],
+          },
+        }
+      : {}),
   };
 }
 
@@ -952,7 +980,6 @@ async function getBootedDevicesByPlatform(
 
 interface PlatformDiscoveryResult {
   devices: BootedDeviceInfo[];
-  succeededPlatforms: Set<Platform>;
   observation: PlatformObservation;
   sourceObservations: Partial<Record<DiscoverySource, PlatformObservation>>;
 }
@@ -969,7 +996,6 @@ function platformDiscoveryResult(input: {
   // applicable, never incomplete. A failed held-device probe is an installed tool that failed, so
   // it makes every source of the platform unknown whatever discovery said.
   const discoveryComplete = incompleteDiscoverySources(discovery, [platform]).length === 0;
-  const complete = discoveryComplete && heldProbeFailure === undefined;
   const observed = (source: DiscoverySource): PlatformObservation => {
     const observation = sourceObservation(discovery, source);
     return heldProbeFailure === undefined
@@ -981,7 +1007,6 @@ function platformDiscoveryResult(input: {
   };
   return {
     devices,
-    succeededPlatforms: complete ? new Set([platform]) : new Set(),
     sourceObservations: Object.fromEntries(
       sourcesForPlatform(platform).map((source) => [source, observed(source)]),
     ),
@@ -1114,7 +1139,6 @@ async function discoverBootedDevicesForPlatform(
     logger.warn(`[BootedDeviceResources] Failed to get booted ${platformName} devices: ${error}`);
     return {
       devices: [],
-      succeededPlatforms: new Set(),
       sourceObservations: Object.fromEntries(
         sourcesForPlatform(platform).map((source) => [source, { observationComplete: false }]),
       ),
@@ -1578,9 +1602,9 @@ async function computeBootedDevicesForPlatforms(
   const devices: BootedDeviceInfo[] = [];
   const daemonContext = readDaemonDeviceContext();
 
-  const succeededPlatforms = new Set<Platform>();
   const platformObservations: Partial<Record<Platform, PlatformObservation>> = {};
   const sourceObservations: Partial<Record<DiscoverySource, PlatformObservation>> = {};
+  const finishedPlatforms = new Set<Platform>();
 
   const controller = new AbortController();
   const pending = new Set<string>(["discovery", "configuredImages"]);
@@ -1599,9 +1623,6 @@ async function computeBootedDevicesForPlatforms(
             pending.delete("discovery");
             const complete = incompleteDiscoverySources(snapshot, [platform]).length === 0;
             platformObservations[platform] = { observationComplete: complete };
-            if (complete) {
-              succeededPlatforms.add(platform);
-            }
             for (const source of sourcesForPlatform(platform)) {
               sourceObservations[source] = {
                 observationComplete: discoverySourceOutcome(snapshot, source) !== "incomplete",
@@ -1615,9 +1636,7 @@ async function computeBootedDevicesForPlatforms(
       devices.splice(0, devices.length, ...otherPlatforms, ...discovery.devices);
       platformObservations[platform] = discovery.observation;
       Object.assign(sourceObservations, discovery.sourceObservations);
-      for (const discoveredPlatform of discovery.succeededPlatforms) {
-        succeededPlatforms.add(discoveredPlatform);
-      }
+      finishedPlatforms.add(platform);
     }
     pending.clear();
     const probes = [
@@ -1661,7 +1680,13 @@ async function computeBootedDevicesForPlatforms(
   const physicalCount = devices.length - virtualCount;
   const poolStatus =
     daemonContext.poolStatus && daemonContext.devicePool
-      ? await summarizePoolStatus(daemonContext.devicePool, devices, succeededPlatforms, platforms)
+      ? summarizePoolStatus(
+          daemonContext.devicePool,
+          devices,
+          sourceObservations,
+          platforms,
+          finishedPlatforms,
+        )
       : undefined;
 
   return {

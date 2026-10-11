@@ -106,23 +106,35 @@ async function loadBundle(options: CliOptions): Promise<Bundle> {
   const repo = await resolveRepo(options);
   const api = new BudgetedGhApi(ghCli, options.maxApiCalls);
   const cacheDir = options.cacheDir ?? mkdtempSync(join(tmpdir(), "ci-time-to-green-"));
-  const requiredChecks = await fetchRequiredChecks(api, repo);
-  if (requiredChecks.length === 0) {
-    throw new GhApiError(`no active required_status_checks ruleset found for ${repo}`);
+  console.error(`cache: ${cacheDir} (rerun with --cache-dir ${cacheDir} to resume)`);
+  let bundle: Bundle;
+  try {
+    const requiredChecks = await fetchRequiredChecks(api, repo);
+    if (requiredChecks.length === 0) {
+      throw new GhApiError(`no active required_status_checks ruleset found for ${repo}`);
+    }
+    bundle = await fetchBundle(
+      api,
+      fileCache(cacheDir),
+      {
+        repo,
+        sinceMs: options.sinceMs,
+        untilMs: options.untilMs,
+        prRunsOnly: options.prRunsOnly,
+        concurrency: options.concurrency,
+        classify,
+      },
+      requiredChecks,
+    );
+  } catch (error) {
+    if (error instanceof FetchStoppedError) {
+      throw new FetchStoppedError(
+        error.reason,
+        `${error.message} (cache: ${cacheDir}; rerun with the same --cache-dir ${cacheDir})`,
+      );
+    }
+    throw error;
   }
-  const bundle = await fetchBundle(
-    api,
-    fileCache(cacheDir),
-    {
-      repo,
-      sinceMs: options.sinceMs,
-      untilMs: options.untilMs,
-      prRunsOnly: options.prRunsOnly,
-      concurrency: options.concurrency,
-      classify,
-    },
-    requiredChecks,
-  );
   console.error(`fetched with ${api.calls} API calls (cache: ${cacheDir})`);
   if (options.saveBundle) {
     mkdirSync(dirname(options.saveBundle), { recursive: true });

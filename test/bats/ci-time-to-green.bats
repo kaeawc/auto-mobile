@@ -137,6 +137,25 @@ teardown() {
   [[ "$output" == *"budget"* ]]
 }
 
+@test "a stopped run without --cache-dir prints the cache directory to resume from" {
+  run bun "$SCRIPT" --since 3d --repo kaeawc/auto-mobile --max-api-calls 3
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"cache: "* ]]
+  [[ "$output" == *"--cache-dir"* ]]
+}
+
+@test "a rate limit without --cache-dir prints the cache directory to resume from" {
+  GH_STUB_MODE=ratelimit run bun "$SCRIPT" --since 3d --repo kaeawc/auto-mobile
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"cache: "* ]]
+}
+
+@test "a large --max-api-calls needs --allow-large-api-budget" {
+  run bun "$SCRIPT" --since 3d --repo kaeawc/auto-mobile --max-api-calls 4000
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--allow-large-api-budget"* ]]
+}
+
 @test "an API failure exits 3" {
   cat > "$TEST_ROOT/bin/gh" << 'STUB'
 #!/usr/bin/env bash

@@ -39,8 +39,15 @@ describe("parseCliArgs", () => {
     const options = parse([]);
     expect(options.untilMs).toBe(NOW);
     expect(options.sinceMs).toBe(NOW - 7 * 86_400_000);
-    expect(options.maxApiCalls).toBe(4000);
+    expect(options.maxApiCalls).toBe(500);
     expect(options.json).toBe(false);
+  });
+
+  test("a call budget above 1000 needs --allow-large-api-budget and says why", () => {
+    expect(parse(["--max-api-calls", "1000"]).maxApiCalls).toBe(1000);
+    expect(() => parse(["--max-api-calls", "1001"])).toThrow("--allow-large-api-budget");
+    expect(() => parse(["--max-api-calls", "1001"])).toThrow("5,000");
+    expect(parse(["--max-api-calls", "4000", "--allow-large-api-budget"]).maxApiCalls).toBe(4000);
   });
 
   test("--since is relative to --until when --until is given", () => {

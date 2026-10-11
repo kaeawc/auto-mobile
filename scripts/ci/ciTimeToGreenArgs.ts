@@ -32,6 +32,8 @@ export interface CliOptions {
   workflowFile: string | null;
 }
 
+const LARGE_API_BUDGET = 1000;
+
 export const USAGE = `Usage: bun scripts/ci/ci-time-to-green.ts [options]
 
 Reports PR time-to-green, first-attempt pass rate and peak runner concurrency for a window.
@@ -43,7 +45,11 @@ Read-only: GET requests through \`gh api\` only.
   --json               Emit JSON instead of Markdown
   --repo OWNER/REPO    Repository (default: gh's current repository)
   --cache-dir DIR      Resumable cache; must be under the repo's scratch/ or the system temp dir
-  --max-api-calls N    Stop (exit 4) after N API calls; rerun with the same --cache-dir (default: 4000)
+  --max-api-calls N    Stop (exit 4) after N API calls; rerun with the same --cache-dir (default: 500;
+                       above ${LARGE_API_BUDGET} needs --allow-large-api-budget)
+  --allow-large-api-budget
+                       Permit --max-api-calls above ${LARGE_API_BUDGET}. The 5,000 req/h GitHub quota is
+                       shared by every agent and the merge queue; spending it starves them
   --concurrency N      Parallel API calls (default: 6)
   --pr-runs-only       Skip non-pull_request runs; concurrency then covers PR runs only
   --from-bundle PATH   Aggregate a saved bundle; no network access
@@ -112,6 +118,7 @@ export function parseCliArgs(
         repo: { type: "string" },
         "cache-dir": { type: "string" },
         "max-api-calls": { type: "string" },
+        "allow-large-api-budget": { type: "boolean" },
         concurrency: { type: "string" },
         "pr-runs-only": { type: "boolean" },
         "from-bundle": { type: "string" },
@@ -135,6 +142,12 @@ export function parseCliArgs(
   if (values["from-bundle"] !== undefined && values["save-bundle"] !== undefined) {
     throw new UsageError("--from-bundle and --save-bundle are mutually exclusive");
   }
+  const maxApiCalls = positiveInt("--max-api-calls", values["max-api-calls"] ?? "500");
+  if (maxApiCalls > LARGE_API_BUDGET && values["allow-large-api-budget"] !== true) {
+    throw new UsageError(
+      `--max-api-calls ${maxApiCalls} exceeds ${LARGE_API_BUDGET}: the 5,000 req/h GitHub quota is shared by every agent and the merge queue. Pass --allow-large-api-budget to confirm.`,
+    );
+  }
   const cacheDir = values["cache-dir"];
   const saveBundle = values["save-bundle"];
   return {
@@ -145,7 +158,7 @@ export function parseCliArgs(
     prType: (prType as PrType | undefined) ?? null,
     json: values.json === true,
     cacheDir: cacheDir === undefined ? null : assertSafeOutputPath(cacheDir, repoRoot, tmpDir),
-    maxApiCalls: positiveInt("--max-api-calls", values["max-api-calls"] ?? "4000"),
+    maxApiCalls,
     concurrency: positiveInt("--concurrency", values.concurrency ?? "6"),
     prRunsOnly: values["pr-runs-only"] === true,
     fromBundle: values["from-bundle"] ?? null,

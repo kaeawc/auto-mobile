@@ -14,6 +14,7 @@ import {
   SCAN_MS,
 } from "../helpers/livenessScenarioHarness";
 import { forbidHostCommands } from "../helpers/hostCommandGuard";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import {
   DEVICE_A,
   DEVICE_B,
@@ -387,7 +388,9 @@ describe("cell 7: a plan ends while a label's device is transitional (plan auto-
     // The plan run: a control call in flight on the base keeps its label sessions.
     const plan = scenario.startLongCall(base);
     manager.setDeviceLabels(base, buildDeviceLabelMap(["A", "B"], base));
-    await pool.bindOrReuseDeviceSession(label, DEVICE_B, "android");
+    await asPlanAllocation(manager, base, [label], () =>
+      pool.bindOrReuseDeviceSession(label, DEVICE_B, "android"),
+    );
     serverConfig.setPlanExecutionActive(true);
     await scenario.idle(DISCONNECT_POLL_MS);
     listing.set(DEVICE_B, "offline");

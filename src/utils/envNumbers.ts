@@ -5,9 +5,7 @@ export interface EnvNumberLogger {
   warn(message: string): void;
 }
 
-export interface EnvPositiveIntegerSpec {
-  /** Env var names in priority order; the first one that is set decides. */
-  names: readonly string[];
+export interface EnvPositiveIntegerOptions {
   /** The value used when the variable is unset, empty, malformed or below `min`. */
   fallback: number;
   /** Smallest accepted value; a smaller one is a typo or a hazard, not a preference. */
@@ -24,29 +22,36 @@ const warned = new Set<string>();
  * value, once per distinct pair. An unset or empty variable is the default without a warning.
  */
 export function readEnvPositiveInteger(
-  spec: EnvPositiveIntegerSpec,
+  primaryName: string,
+  legacyName: string,
+  options: EnvPositiveIntegerOptions,
   env: NodeJS.ProcessEnv = process.env,
   log: EnvNumberLogger = logger,
 ): number {
-  return readOptionalEnvPositiveInteger(spec, env, log) ?? spec.fallback;
+  return (
+    readOptionalEnvPositiveInteger(primaryName, legacyName, options, env, log) ?? options.fallback
+  );
 }
 
 /** Like {@link readEnvPositiveInteger}, but the caller owns the default: undefined when unusable. */
 export function readOptionalEnvPositiveInteger(
-  spec: Omit<EnvPositiveIntegerSpec, "fallback"> & { fallback?: number },
+  primaryName: string,
+  legacyName: string,
+  options: Partial<EnvPositiveIntegerOptions> = {},
   env: NodeJS.ProcessEnv = process.env,
   log: EnvNumberLogger = logger,
 ): number | undefined {
-  const name = spec.names.find((candidate) => env[candidate] !== undefined);
-  const raw = name === undefined ? "" : (env[name] ?? "").trim();
-  if (name === undefined || raw === "") {
+  // The primary name decides whenever it is set, even to an unusable value.
+  const name = env[primaryName] !== undefined ? primaryName : legacyName;
+  const raw = (env[primaryName] ?? env[legacyName] ?? "").trim();
+  if (raw === "") {
     return undefined;
   }
   const parsed = parseStrictPositiveInteger(raw);
-  if (parsed !== undefined && parsed >= (spec.min ?? 1)) {
+  if (parsed !== undefined && parsed >= (options.min ?? 1)) {
     return parsed;
   }
-  warnOnce(log, name, raw, spec);
+  warnOnce(log, name, raw, options);
   return undefined;
 }
 
@@ -60,16 +65,16 @@ function warnOnce(
   log: EnvNumberLogger,
   name: string,
   raw: string,
-  spec: Omit<EnvPositiveIntegerSpec, "fallback"> & { fallback?: number },
+  options: Partial<EnvPositiveIntegerOptions>,
 ): void {
   const key = `${name}=${raw}`;
   if (warned.has(key)) {
     return;
   }
   warned.add(key);
-  const floor = spec.min !== undefined ? ` of at least ${spec.min}` : "";
+  const floor = options.min !== undefined ? ` of at least ${options.min}` : "";
   log.warn(
     `Ignoring ${name}=${JSON.stringify(raw)}: expected a plain integer${floor}; ` +
-      `using the default${spec.fallback === undefined ? "" : ` ${spec.fallback}`}`,
+      `using the default${options.fallback === undefined ? "" : ` ${options.fallback}`}`,
   );
 }

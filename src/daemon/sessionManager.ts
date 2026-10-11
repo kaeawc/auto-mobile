@@ -1343,10 +1343,11 @@ function releaseSuperseded(shouldCommit: ReleaseCommitFence | undefined): boolea
 export const PLAN_AUTO_RELEASE_REASON = "plan-auto-release" satisfies SessionReleaseReason;
 
 export function getDefaultSessionHeartbeatTimeoutMs(): number {
-  return readEnvPositiveInteger({
-    names: ["AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS", "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS"],
-    fallback: SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS,
-  });
+  return readEnvPositiveInteger(
+    "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+    "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+    { fallback: SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS },
+  );
 }
 
 /**
@@ -1407,13 +1408,11 @@ function restartRecoveryDeadlineFromPersisted(
  * reader to conclude the daemon reaped early (issue #5689).
  */
 export function getDefaultPreFirstHeartbeatGraceMs(): number {
-  return readEnvPositiveInteger({
-    names: [
-      "AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
-      "AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
-    ],
-    fallback: DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS,
-  });
+  return readEnvPositiveInteger(
+    "AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
+    "AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
+    { fallback: DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS },
+  );
 }
 
 export class SessionManager {

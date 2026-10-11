@@ -72,10 +72,9 @@ export const LEGACY_SESSION_IDLE_TIMEOUT_ENV = "AUTO_MOBILE_SESSION_IDLE_TIMEOUT
  */
 export function getSessionIdleTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   return readEnvPositiveInteger(
-    {
-      names: [SESSION_IDLE_TIMEOUT_ENV, LEGACY_SESSION_IDLE_TIMEOUT_ENV],
-      fallback: DEFAULT_SESSION_IDLE_TIMEOUT_MS,
-    },
+    SESSION_IDLE_TIMEOUT_ENV,
+    LEGACY_SESSION_IDLE_TIMEOUT_ENV,
+    { fallback: DEFAULT_SESSION_IDLE_TIMEOUT_MS },
     env,
   );
 }

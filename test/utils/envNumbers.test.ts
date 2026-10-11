@@ -1,13 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import { readEnvPositiveInteger } from "../../src/utils/envNumbers";
 
-const spec = { names: ["PRIMARY_MS", "LEGACY_MS"], fallback: 7000 };
+const options = { fallback: 7000 };
 
 function read(env: NodeJS.ProcessEnv, overrides: { min?: number } = {}) {
   const warnings: string[] = [];
-  const value = readEnvPositiveInteger({ ...spec, ...overrides }, env, {
-    warn: (message) => warnings.push(message),
-  });
+  const value = readEnvPositiveInteger(
+    "PRIMARY_MS",
+    "LEGACY_MS",
+    { ...options, ...overrides },
+    env,
+    {
+      warn: (message) => warnings.push(message),
+    },
+  );
   return { value, warnings };
 }
 

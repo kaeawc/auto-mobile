@@ -655,11 +655,14 @@ export const MAX_CLI_SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
  * shorten it, so a typo cannot make every CLI session idle-release at the next scan.
  */
 export function getCliSessionIdleTimeoutMs(): number {
-  return readEnvPositiveInteger({
-    names: ["AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS", "AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS"],
-    fallback: DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
-    min: MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS,
-  });
+  return readEnvPositiveInteger(
+    "AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS",
+    "AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS",
+    {
+      fallback: DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
+      min: MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS,
+    },
+  );
 }
 
 /**

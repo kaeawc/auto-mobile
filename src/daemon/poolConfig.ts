@@ -159,8 +159,7 @@ export function isDevicePoolAutolockEnabled(env: Environment = process.env): boo
 export function getDevicePoolTimeoutMs(): number {
   // The variable is in seconds; a unit suffix ("2m") is ignored with a warning, not read as 2.
   return (
-    readEnvPositiveInteger({
-      names: ["AUTOMOBILE_DEVICE_POOL_TIMEOUT", "AUTO_MOBILE_DEVICE_POOL_TIMEOUT"],
+    readEnvPositiveInteger("AUTOMOBILE_DEVICE_POOL_TIMEOUT", "AUTO_MOBILE_DEVICE_POOL_TIMEOUT", {
       fallback: 60,
     }) * 1000
   );

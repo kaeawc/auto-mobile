@@ -166,7 +166,7 @@ export const STUCK_REAP_WARN_MS =
 const DEFAULT_INITIAL_GRACE_MS = 20_000;
 
 function readPositiveMsEnv(primaryName: string, legacyName: string): number | undefined {
-  return readOptionalEnvPositiveInteger({ names: [primaryName, legacyName] });
+  return readOptionalEnvPositiveInteger(primaryName, legacyName);
 }
 
 /**

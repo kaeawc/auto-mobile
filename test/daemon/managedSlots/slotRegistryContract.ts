@@ -161,6 +161,45 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       });
     });
 
+    test("actual device metadata survives a ready-state update independently of the creation fingerprint", async () => {
+      const key = { scopeKey: await readyScope(), slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      const resolvedSpec = {
+        runtime: "system-images;android-35;google_apis;arm64-v8a",
+        deviceType: "pixel_tablet",
+        displayCutout: "none",
+        configuration: { memoryMb: 3072, screenWidth: 800, screenHeight: 1280 },
+      };
+      const committed = await registry.commitBinding(
+        key,
+        { generation: 1, stableDeviceId: "avd-1" },
+        {
+          ...readyBinding("avd-1", 2),
+          requestedSpec: { runtime: resolvedSpec.runtime },
+          resolvedSpec,
+          specFingerprint: "creation-default-fingerprint",
+        },
+      );
+      expect(committed.kind).toBe("committed");
+      const updated = await registry.updateSlotState(
+        key,
+        { generation: 2, stableDeviceId: "avd-1" },
+        "ready",
+      );
+      expect(updated).toMatchObject({
+        kind: "updated",
+        assignment: {
+          generation: 2,
+          resolvedSpec,
+          specFingerprint: "creation-default-fingerprint",
+        },
+      });
+      expect(await registry.getAssignment(key)).toMatchObject({
+        resolvedSpec,
+        specFingerprint: "creation-default-fingerprint",
+      });
+    });
+
     test("a stale compare-and-set loses and reports the current binding", async () => {
       const key = { scopeKey: await readyScope(), slotIndex: 0 };
       await registry.initSlot(key, INIT);

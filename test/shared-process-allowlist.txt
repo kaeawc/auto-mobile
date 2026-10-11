@@ -153,6 +153,7 @@ test/daemon/managedSlots/managedSlotLateRehydrationReown.test.ts
 test/daemon/managedSlots/managedSlotReconcilerPorts.test.ts
 test/daemon/managedSlots/poolManagedSlotDeviceStopper.test.ts
 test/daemon/managedSlots/reconciler.test.ts
+test/daemon/managedSlots/resolvedExistingSpec.test.ts
 test/daemon/managedSlots/slotJournal.test.ts
 test/daemon/managedSlots/slotOwnerLiveness.test.ts
 test/daemon/managedSlots/slotRegistryMigrations.test.ts
@@ -162,6 +163,7 @@ test/daemon/managedSlots/slotsPlatformChangeSqliteJournal.test.ts
 test/daemon/managedSlots/slotsRegistryAbsentThenUnreadable.test.ts
 test/daemon/managedSlots/slotsUnresolvedEmulatorIdentityGate.test.ts
 test/daemon/managedSlots/sqliteSlotRegistry.test.ts
+test/daemon/managedSlots/widenedSpecReportsCreationDefaultModel.test.ts
 test/daemon/managerOutputReductionArgs.test.ts
 test/daemon/observationRequestBatch.test.ts
 test/daemon/observerLeaseSleepForgiveness.test.ts

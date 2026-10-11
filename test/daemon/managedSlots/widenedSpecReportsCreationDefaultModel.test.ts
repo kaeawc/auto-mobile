@@ -1,24 +1,24 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import {
   DefaultManagedSpecMatcher,
   DefaultManagedSpecResolver,
   ManagedSlotReconciler,
   type ManagedSlotReconcileResult,
   type ManagedSlotRequestedSpec,
-} from "../../../../src/daemon/managedSlots/reconciler";
-import type { SlotRegistry } from "../../../../src/daemon/managedSlots/slotRegistry";
-import { openSqliteSlotRegistry } from "../../../../src/daemon/managedSlots/sqliteSlotRegistry";
-import type { ExactIosRuntimeCatalog } from "../../../../src/devices/exactDeviceProvisioning";
-import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
-import { FakeSlotRegistry } from "../../../fakes/FakeSlotRegistry";
-import { FakeTimer } from "../../../fakes/FakeTimer";
+} from "../../../src/daemon/managedSlots/reconciler";
+import type { SlotRegistry } from "../../../src/daemon/managedSlots/slotRegistry";
+import { openSqliteSlotRegistry } from "../../../src/daemon/managedSlots/sqliteSlotRegistry";
+import type { ExactIosRuntimeCatalog } from "../../../src/devices/exactDeviceProvisioning";
+import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
+import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   FakeCapacity,
   FakeClaims,
   FakeDeleter,
   FakeInventory,
   FakeProvisioner,
-} from "../fixtures/reconcilerFakes";
+} from "./fixtures/reconcilerFakes";
 
 /**
  * Hunt (managed slots 4, 2026-10-11), cell "a spec that widens between incarnations".
@@ -74,6 +74,12 @@ const REGISTRIES: Array<[string, (timer: FakeTimer) => Promise<SlotRegistry>]> =
   ],
 ];
 
+beforeAll(async () => {
+  // Warm only SQLite initialization; every scenario still runs entirely inside its test.
+  const registry = await openSqliteSlotRegistry({ dbPath: ":memory:", timer: new FakeTimer() });
+  await registry.close();
+});
+
 describe.each(REGISTRIES)("a slot whose spec widens to any model (%s)", (_name, open) => {
   async function widen() {
     const timer = new FakeTimer();
@@ -118,9 +124,10 @@ describe.each(REGISTRIES)("a slot whose spec widens to any model (%s)", (_name, 
     // Execution 1 pins the model; execution 2 asks for "iOS 18, any model".
     const exact = await acquire({ runtime: IOS_18, deviceType: IPHONE_15 });
     const widened = await acquire({ runtime: IOS_18 });
+    const repeated = await acquire({ runtime: IOS_18 });
     const listed = inventory.devices.find((device) => device.deviceId === widened.device.stableId);
     await registry.close();
-    return { exact, widened, listed };
+    return { exact, widened, repeated, listed };
   }
 
   test("reuses the iPhone 15 and reports its actual model as the resolved spec", async () => {
@@ -145,5 +152,14 @@ describe.each(REGISTRIES)("a slot whose spec widens to any model (%s)", (_name, 
       runtime: IOS_18,
       deviceType: IPHONE_15,
     });
+  });
+
+  test("a repeated widened spec retains the repaired configuration and generation", async () => {
+    const { widened, repeated } = await widen();
+    expect(repeated.disposition).toBe("reused");
+    expect(repeated.resolvedSpec.deviceType).toBe(IPHONE_15);
+    expect(repeated.assignment.resolvedSpec).toEqual(widened.assignment.resolvedSpec);
+    expect(repeated.assignment.generation).toBe(widened.assignment.generation);
+    expect(repeated.specFingerprint).toEqual(widened.specFingerprint);
   });
 });

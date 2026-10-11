@@ -125,6 +125,7 @@ test/daemon/hierarchyStreamDiff.test.ts
 test/daemon/idleDeviceReaper.test.ts
 test/daemon/incumbentOwnerGuard.test.ts
 test/daemon/inputDeviceOwnership.test.ts
+test/daemon/inputHolderChangedTypedRefusal.test.ts
 test/daemon/lateRehydrationOwnerToldNotFound.test.ts
 test/daemon/liveDeadlineRegistry.test.ts
 test/daemon/livenessClaimDecision.test.ts
@@ -183,6 +184,7 @@ test/daemon/proxyLivenessRecovery.test.ts
 test/daemon/proxyReleaseReasonClassification.test.ts
 test/daemon/recycledProcessGeneration.test.ts
 test/daemon/refusalWireContract.test.ts
+test/daemon/refusedRoutingCallExtendsIdle.test.ts
 test/daemon/registerSessionManagedConnection.test.ts
 test/daemon/rehydratedLegacyLivenessDefaults.test.ts
 test/daemon/rehydrationIdleOrigin.test.ts
@@ -735,6 +737,7 @@ test/lint/livenessActivityClockSeparation.test.ts
 test/lint/noCaughtErrorInterpolationRule.test.ts
 test/lint/noInlineErrorNormalizeRule.test.ts
 test/lint/noLegacyAutomobilePath.test.ts
+test/lint/pathSeparatorAssertions.test.ts
 test/lint/processSafety.test.ts
 test/lint/rawSelectorFieldReadRule.test.ts
 test/lint/registrationTeardownGuard.test.ts

@@ -102,6 +102,7 @@ test/daemon/deviceSessionResolver.test.ts
 test/daemon/deviceShutdownReservations.test.ts
 test/daemon/directModeStartup.test.ts
 test/daemon/disconnectMonitor-physicalImmediate.test.ts
+test/daemon/disconnectMonitor-transitionalSimulator.test.ts
 test/daemon/emulatorLossIncident.test.ts
 test/daemon/emulatorLossIncidentLedger.test.ts
 test/daemon/executionOwnerWatch.test.ts

@@ -34,7 +34,12 @@ describe("SlotScopeReset", () => {
     timer.enableAutoAdvance();
     livePids = new Set();
     registry = new FakeSlotRegistry(timer, (owner) => livePids.has(owner.pid));
-    reset = new SlotScopeReset({ registry: async () => registry, timer });
+    // The daemon's wiring: the reset judges owners and settlers by the registry's own predicate.
+    reset = new SlotScopeReset({
+      registry: async () => registry,
+      timer,
+      isExecOwnerLive: (owner) => livePids.has(owner.pid),
+    });
   });
 
   test("invalidates only the named scope and frees its devices; repeating is idempotent", async () => {

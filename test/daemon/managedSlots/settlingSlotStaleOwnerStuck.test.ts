@@ -264,19 +264,119 @@ describe.each(REGISTRIES)(
       expect(next.kind).toBe("claimed");
     });
 
-    test("a leftover owner that is live again is never cleared and keeps the slot settling", async () => {
-      await releaseWithFailedOwnerClear();
-      // The same session is held by this daemon again before the work settles.
-      sessions.live.set(S1, DEVICE);
+    describe("a leftover owner that is live again when the work settles", () => {
+      const CAP_MS = 2_000;
+      const POLL_MS = 250;
 
-      work.active.delete(S1);
-      await drain.whenIdle();
+      /** The released work settles while this daemon holds the same session id again. */
+      async function settleWhileHeldAgain(): Promise<void> {
+        drain.close();
+        drain = new ManagedExecutionRelease({
+          registry: async () => registry,
+          journal: { inFlight },
+          settler: SETTLER,
+          work,
+          sessions,
+          timer,
+          isExecOwnerLive: liveness,
+          settlementCapMs: CAP_MS,
+          settlementPollMs: POLL_MS,
+        });
+        await releaseWithFailedOwnerClear();
+        sessions.live.set(S1, DEVICE);
+        work.active.delete(S1);
+      }
 
-      expect(await registry.getAssignment(key)).toMatchObject({
-        state: "settling",
-        execOwner: { sessionUuid: S1 },
+      test("is never cleared while live; the slot returns to ready once that session ends", async () => {
+        await settleWhileHeldAgain();
+        const [entry] = await registry.listOpenSlotJournal(key);
+        expect(inFlight.has(entry!.id)).toBe(true);
+        let whileHeld: unknown;
+        timer.setTimeout(() => {
+          void registry.getAssignment(key).then((slot) => (whileHeld = slot));
+        }, 2 * POLL_MS);
+        // The session ends without a registry clear (heartbeat loss): the record is now dead.
+        timer.setTimeout(() => sessions.live.delete(S1), 4 * POLL_MS);
+
+        await drain.whenIdle();
+
+        expect(whileHeld).toMatchObject({ state: "settling", execOwner: { sessionUuid: S1 } });
+        expect(await registry.getAssignment(key)).toMatchObject({
+          state: "ready",
+          execOwner: null,
+          settler: null,
+        });
+        expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+        expect(inFlight.has(entry!.id)).toBe(false);
       });
-      expect(await registry.listOpenSlotJournal(key)).toHaveLength(1);
+
+      test("the slot returns to ready when that session's own release clears the owner", async () => {
+        await settleWhileHeldAgain();
+        let secondRelease: Promise<unknown> | undefined;
+        timer.setTimeout(() => {
+          secondRelease = drain.releaseExecution(S1);
+        }, 2 * POLL_MS);
+
+        await drain.whenIdle();
+        await secondRelease;
+
+        expect(secondRelease).toBeDefined();
+        expect(await registry.getAssignment(key)).toMatchObject({
+          state: "ready",
+          execOwner: null,
+        });
+        expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+      });
+
+      test("re-checks only until the settlement cap, then leaves the slot settling for --force", async () => {
+        await settleWhileHeldAgain();
+        const start = timer.now();
+        const polls: number[] = [];
+        const originalSleep = timer.sleep.bind(timer);
+        const sleep = spyOn(timer, "sleep").mockImplementation((ms: number) => {
+          polls.push(ms);
+          return originalSleep(ms);
+        });
+
+        await drain.whenIdle();
+        sleep.mockRestore();
+
+        // Bounded: the watcher ended on its own, at the fast cadence, no later than the cap.
+        expect(polls.length).toBeGreaterThanOrEqual(2);
+        expect(polls.length).toBeLessThanOrEqual(CAP_MS / POLL_MS + 1);
+        expect(polls.every((ms) => ms === POLL_MS)).toBe(true);
+        expect(timer.now() - start).toBeLessThanOrEqual(CAP_MS + POLL_MS);
+        expect(await registry.getAssignment(key)).toMatchObject({
+          state: "settling",
+          execOwner: { sessionUuid: S1 },
+        });
+        expect(await registry.listOpenSlotJournal(key)).toHaveLength(1);
+        expect(
+          warn.mock.calls.filter(([message]) =>
+            String(message).includes("still holds the owner record"),
+          ),
+        ).toHaveLength(1);
+
+        // The operator path stays open: once the session ends, --force past the cap resets it.
+        sessions.live.delete(S1);
+        timer.setCurrentTime(timer.now() + MANAGED_EXECUTION_SETTLEMENT_CAP_MS);
+        expect((await newReset().reset(RESET)).outcome).toBe("invalidated");
+      });
+
+      test("close stops the re-check; the slot stays settling", async () => {
+        await settleWhileHeldAgain();
+        const start = timer.now();
+        timer.setTimeout(() => drain.close(), 2 * POLL_MS);
+
+        await drain.whenIdle();
+
+        expect(timer.now() - start).toBeLessThan(CAP_MS);
+        expect(await registry.getAssignment(key)).toMatchObject({
+          state: "settling",
+          execOwner: { sessionUuid: S1 },
+        });
+        expect(await registry.listOpenSlotJournal(key)).toHaveLength(1);
+      });
     });
 
     test("reset-slot-scope --force past the cap overrides it: the leftover owner is not a live execution", async () => {

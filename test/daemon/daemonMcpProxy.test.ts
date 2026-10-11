@@ -2973,8 +2973,8 @@ describe("DaemonMcpProxy", () => {
             }
             expect(completed).toBe(true);
             const error = await attempt;
-            expect(error).toBeInstanceOf(DaemonToolOutcomeUnknownError);
-            expect(error).toMatchObject({ cause: shutdownError });
+            // The daemon's own typed answer reaches the caller, and the call is not sent again.
+            expect(error).toBe(shutdownError);
             expect(quiescedClient.callToolCalls).toEqual([{ toolName, params: {} }]);
             expect(quiescedClient.closeCallCount).toBe(1);
             expect(freshClient.callToolCalls).toEqual([]);
@@ -3474,7 +3474,7 @@ describe("DaemonMcpProxy", () => {
   });
 
   describe("resource operations", () => {
-    test("readResource forwards the caller's signal unchanged", async () => {
+    test("readResource forwards a signal that follows the caller's, and the proxy's close", async () => {
       const fakeClient = new FakeDaemonClient();
       const proxy = new DaemonMcpProxy({
         timer: new FakeTimer(),
@@ -3487,9 +3487,21 @@ describe("DaemonMcpProxy", () => {
       const controller = new AbortController();
       try {
         await proxy.readResource("automobile:devices/booted", { signal: controller.signal });
-        expect(fakeClient.readResourceSignals).toEqual([controller.signal]);
-        expect(fakeClient.readResourceSignals[0]).toBe(controller.signal);
-        expect(fakeClient.readResourceParams).toEqual([{ sessionUuid: "session-a" }]);
+        await proxy.readResource("automobile:devices/booted");
+        const [withCallerSignal, withoutCallerSignal] = fakeClient.readResourceSignals;
+        expect(fakeClient.readResourceSignals).toHaveLength(2);
+        expect(fakeClient.readResourceParams[0]).toEqual({ sessionUuid: "session-a" });
+        expect(withCallerSignal?.aborted).toBe(false);
+
+        // The caller's abort reaches the daemon client with the caller's own reason.
+        const reason = new Error("caller cancelled the read");
+        controller.abort(reason);
+        expect(withCallerSignal?.reason).toBe(reason);
+        expect(withoutCallerSignal?.aborted).toBe(false);
+
+        // The proxy's close cancels a read whose caller never aborts (#11642).
+        await proxy.close();
+        expect(withoutCallerSignal?.reason).toBeInstanceOf(DaemonUnavailableError);
       } finally {
         await proxy.close();
       }
@@ -3630,7 +3642,7 @@ describe("DaemonMcpProxy", () => {
 
         expect(result).toEqual(expectedResult);
         expect(fakeClient.readResourceCalls).toContain("automobile:devices/booted");
-        expect(fakeClient.readResourceSignals).toEqual([undefined]);
+        expect(fakeClient.readResourceSignals.map((signal) => signal?.aborted)).toEqual([false]);
         expect(fakeClient.readResourceParams).toEqual([{ sessionUuid: "session-a" }]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -5481,6 +5493,39 @@ describe("DaemonMcpProxy", () => {
               sessionUuid: "session-a",
             },
           },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a bound connection forwards a label name of its own session for the daemon to judge (#11602)", async () => {
+      const fakeClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "session-a",
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("tapAt", { sessionUuid: "session-a:B", x: 1, y: 1 });
+        // Only `${bound}:${label}` is the daemon's question: a lookalike is still another session.
+        for (const sessionUuid of ["session-ab", "session-a2:B", "other:session-a:B"]) {
+          await expect(proxy.callTool("tapAt", { sessionUuid, x: 1, y: 1 })).rejects.toThrow(
+            "MCP connection is bound to device session session-a",
+          );
+        }
+        await proxy.callTool("tapAt", { x: 2, y: 2 });
+
+        // The label call targets its own session and leaves the connection's binding where it was.
+        expect(fakeClient.callToolCalls.map((call) => call.params)).toEqual([
+          { sessionUuid: "session-a:B", x: 1, y: 1 },
+          { sessionUuid: "session-a", x: 2, y: 2 },
         ]);
       } finally {
         isAvailableSpy.mockRestore();

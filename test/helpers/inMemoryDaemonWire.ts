@@ -14,7 +14,6 @@ import {
 } from "../../src/daemon/constants";
 import { UnixSocketServer, type McpClientFactory } from "../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 import { resolveAutoMobileBaseDir } from "../../src/utils/tempDir";
 import type { IdGenerator } from "../../src/utils/IdGenerator";
 import type { Timer } from "../../src/utils/SystemTimer";
@@ -27,12 +26,11 @@ import type { Timer } from "../../src/utils/SystemTimer";
 // `daemonResponseError`). Nothing listens: each connection is a pair of in-process socket ends.
 // Faked: the kernel socket, and the loopback MCP HTTP hop behind the server (`mcpClientFactory`).
 //
-// The server's `start()` cannot run without binding a socket file, so `attach()` does what
-// liveness needs of it besides binding: accept requests, and fan session releases out to
-// subscribed clients (the subscription body is `start()`'s own, call for call). Not replicated:
-// `start()`'s list-changed and resource-updated fan-out, so a client here is never pushed
-// `tools/list_changed` or a resource update; and the server is built with no feature-flag
-// service and no startup identity options.
+// The server is opened by `UnixSocketServer.startDetached()`: `start()` minus the socket file, so
+// the accept state and the release, list-changed and resource-updated fan-out are the server's
+// own wiring. A scenario fails when the accept state, the release push, the list-changed push or
+// the resource-updated push is cut (test/daemon/livenessMutants.md lists the rows). The server
+// is built with no feature-flag service and no startup identity options.
 
 /** A socket path no process can bind: the in-memory server is never started on it. */
 export const IN_MEMORY_SOCKET_PATH = "in-memory://liveness-scenario/control.sock";
@@ -186,19 +184,13 @@ class SocketEnd extends EventEmitter {
 /** The client's end of a connection to the in-memory control socket. */
 export type InMemoryClientSocket = Pick<SocketEnd, "destroyed" | "write" | "destroy" | "on">;
 
-interface SocketServerInternals {
+/** What a killed process takes with it. Teardown only, never wiring. */
+interface SocketServerTeardown {
   acceptingRequests: boolean;
   closing: boolean;
+  listChangedUnsubscribe: (() => void) | null;
+  resourceUpdatedUnsubscribe: (() => void) | null;
   sessionReleaseUnsubscribe: (() => void) | null;
-  handleConnection(socket: Socket): void;
-  clearBoundMcpClientsForReleasedSession(sessionId: string): void;
-  liftStrokesHeldBy(sessionId: string): Promise<void>;
-  broadcastSessionReleased(
-    sessionId: string,
-    reason?: string,
-    release?: unknown,
-    recordingIds?: string[],
-  ): void;
 }
 
 /** The ids of the connections the server accepts next, in order. */
@@ -214,6 +206,8 @@ export class InMemoryControlSocket {
   private constructor(
     readonly server: UnixSocketServer,
     private readonly connectionIds: ConnectionIdQueue,
+    /** The handler the server's own start gives every accepted connection. */
+    private readonly accept: (socket: Socket) => void,
   ) {}
 
   /**
@@ -236,16 +230,7 @@ export class InMemoryControlSocket {
       deps.connectionIds,
     );
     server.mcpClientFactory = deps.loopback;
-    const internals = server as unknown as SocketServerInternals;
-    internals.acceptingRequests = true;
-    internals.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
-      (sessionId, reason, snapshot, extras) => {
-        internals.clearBoundMcpClientsForReleasedSession(sessionId);
-        void internals.liftStrokesHeldBy(sessionId);
-        internals.broadcastSessionReleased(sessionId, reason, snapshot, extras?.recordingIds);
-      },
-    );
-    return new InMemoryControlSocket(server, deps.connectionIds);
+    return new InMemoryControlSocket(server, deps.connectionIds, server.startDetached());
   }
 
   /** A client connects; the server knows the connection as `connectionId`. */
@@ -260,20 +245,24 @@ export class InMemoryControlSocket {
     this.daemonEnds.add(daemonEnd);
     daemonEnd.on("close", () => this.daemonEnds.delete(daemonEnd));
     this.connectionIds.enqueue(connectionId);
-    (this.server as unknown as SocketServerInternals).handleConnection(
-      daemonEnd as unknown as Socket,
-    );
+    this.accept(daemonEnd as unknown as Socket);
     return clientEnd;
   }
 
   /** The daemon process is gone: every connection drops and nothing is accepted or pushed. */
   kill(): void {
     this.open = false;
-    const internals = this.server as unknown as SocketServerInternals;
+    const internals = this.server as unknown as SocketServerTeardown;
     internals.acceptingRequests = false;
     internals.closing = true;
-    internals.sessionReleaseUnsubscribe?.();
-    internals.sessionReleaseUnsubscribe = null;
+    for (const fanOut of [
+      "listChangedUnsubscribe",
+      "resourceUpdatedUnsubscribe",
+      "sessionReleaseUnsubscribe",
+    ] as const) {
+      internals[fanOut]?.();
+      internals[fanOut] = null;
+    }
     for (const end of Array.from(this.daemonEnds)) {
       end.destroy();
     }

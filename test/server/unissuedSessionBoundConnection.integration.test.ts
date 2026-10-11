@@ -1,5 +1,6 @@
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import { afterEach, beforeEach, describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -307,7 +308,9 @@ describe("unissued sessionUuid on a bound connection (#6069)", () => {
       const ownSession = await pool.autolockDevice("emulator-5554", "android", "forwarded-conn-1");
       expect(ownSession).toBeDefined();
       const secondSession = `${ownSession}:B`;
-      await sessionManager.createSession(secondSession, "emulator-5556", "android");
+      await asPlanAllocation(sessionManager, ownSession!, [secondSession], () =>
+        sessionManager.createSession(secondSession, "emulator-5556", "android"),
+      );
       sessionManager.setDeviceLabels(ownSession!, { A: ownSession!, B: secondSession });
       for (const device of ["A", "B"]) {
         const result = await client.request(

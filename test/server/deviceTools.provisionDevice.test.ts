@@ -6,6 +6,7 @@ import {
   DeviceCleanupInProgressError,
   DeviceOwnedByOtherDaemonError,
   DeviceShuttingDownError,
+  DeviceTransportOfflineError,
   DEVICE_SHUTTING_DOWN_RETRY_AFTER_MS,
   SessionCreationTimeoutError,
 } from "../../src/daemon/deviceAcquisitionRefusals";
@@ -57,6 +58,7 @@ import {
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 import type { BootedDevice, SomePlatform } from "../../src/models";
+import { ActionableError } from "../../src/models/ActionableError";
 import type {
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
@@ -4475,6 +4477,45 @@ describe("provisionDevice handler", () => {
       });
     },
   );
+
+  test.each([
+    [new DeviceTransportOfflineError("emulator-5554", "offline"), "device_offline", true],
+    [new ActionableError("device unavailable"), "platform_command_failed", false],
+  ] as const)("bind refusal %# maps to %s with retryable=%s", async (refusal, code, retryable) => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      isolatedPoolDependencies(sessionManager, "daemon", {
+        timer,
+        env: autolockEnv,
+        deviceManager,
+      }),
+    );
+    const bind = spyOn(pool, "bindOrReuseDeviceSession").mockRejectedValue(refusal);
+    try {
+      deviceManager.setBootedDevices("android", [
+        { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+      ]);
+      await pool.initializeWithDevices([
+        { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+      ]);
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+      setDeviceToolsDependencies({ timer, ensureCtrlProxyReady: async () => {} });
+      const response = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+      expect(bind).toHaveBeenCalled();
+      expect(response).toMatchObject({
+        error: {
+          code,
+          retryable,
+          ...(retryable ? { deviceId: "emulator-5554", retryAfterMs: 1000 } : {}),
+        },
+      });
+    } finally {
+      bind.mockRestore();
+      sessionManager.stopCleanupTimer();
+    }
+  });
 
   // #11065: a repeated call re-runs readiness instead of replaying a stored failure.
   test("preserves missing-device diagnostics and re-runs readiness on a repeated call", async () => {

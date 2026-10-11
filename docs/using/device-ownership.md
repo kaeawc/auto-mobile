@@ -23,8 +23,30 @@ another connection's control call naming the derived session, or reaching one of
 the owner's devices through a `device` label, is refused (#11542). The same holds
 wherever ownership is recorded: restoring a derived session is restoring its
 base, so it is refused while another connection owns the base, and it never
-takes a label away from the base's owner (#11586). A device that no session
-holds takes calls from anyone.
+takes a label away from the base's owner (#11586). A heartbeat that
+claims liveness ownership of a derived session is judged against the base's
+liveness owner as well: another token cannot claim or adopt a label while the
+base owner's lease is live or in its grace, the owner holding the base is never
+refused on its label, and a label's current owner is never refused its own
+re-claim. A refused claim reports the hold it was refused for, the base owner's
+when the label's own owner holds nothing. The label keeps its own liveness
+record, so a token
+claimed on a label proves nothing about its base (#11602). A connection bound to
+the base session, or to one of its labels, may name any live session of that
+plan directly as `sessionUuid`; a name the base has not published, or a label
+that is not allocated, is still refused as a different session. A connection
+seeded with the base is judged the same way. A proxy started with
+`--initial-session-uuid <base>` has no label map, so it forwards a
+`<base>:<name>` call for the daemon to judge like any explicitly named session:
+by issued-session admission and the owner rule, not by the proxy's binding.
+None of these judgements holds, extends or releases a session, and neither does
+any other lookup that goes from a label to its base, the one a device tool call
+naming only `<base>:<name>` makes to route itself and pick its tools included
+(#11640). A base past its idle deadline that the scan has not reached yet
+publishes no labels, and is released by the scan or by a call that names it,
+never by a lookup about its label. The base's end ends its labels (#11640): see
+[Plan label sessions](#plan-label-sessions). A device that no session holds
+takes calls from anyone.
 
 A session's owner is the connection that acquired it, or that restored it after
 a reconnect. Ownership is cooperative: no token is needed, but naming a session's
@@ -60,7 +82,11 @@ read-only `sqlQuery` statement are reads; their other forms, `systemTray`,
 an open read. A read is
 never use, not even the holder's own (#10964): it does not extend the session's
 idle window. Only control calls do, including a holder's calls that name only
-`deviceId`, which run as the holder's session.
+`deviceId`, which run as the holder's session. A control call that is refused
+before it runs is not use either: a call that names a `deviceId` other than its
+session's device (`device_outside_bound_session`), or whose device cannot be
+driven (lost, recovering, shutting down), leaves the idle window where it was
+(#11558).
 
 ## When a session is released
 
@@ -154,6 +180,18 @@ long as the plan run (#11572), whichever reason ended it:
   call of the finished run, or a client naming `<base>:<label>` itself) is
   refused with `session_ownership_lost` and takes no device, where a base
   session released with `plan-auto-release` would be re-issued by name.
+- The rule is applied where a session is created, so it covers every caller
+  (#11602): while `<base>` is live, nothing but its plan's allocation creates a
+  session named `<base>:<anything>`. A `setActiveDevice` or other bind naming
+  one, with or without a connection identity and by the base's own owner too, is
+  refused the same way, holds no device and leaves no fence, whether or not the
+  base published that label.
+- A session id that merely contains `:` is a session of its own when the part
+  before the `:` is not a live session, and it stays one if that prefix is
+  acquired as a session later. A plan never takes such a session as a label: an
+  `executePlan` whose label would be a live session no plan run created is
+  refused with `device_owned_by_other_session` before it publishes or allocates
+  anything. Release that session or rename the label.
 - It is never rehydrated after a daemon restart, whether its row was live,
   released by `daemon-shutdown` or waiting out a `device-restart:<device>`: its
   device is free at once. The `executePlan` the shutdown cut answers with its
@@ -164,6 +202,63 @@ long as the plan run (#11572), whichever reason ended it:
   any other.
 
 The daemon recognizes these rows by `device_sessions.source = 'plan-label'`.
+
+#### The base's end ends its labels
+
+A label session is usable only while its base is live (#11640). Once the base
+has ended for a terminal reason, is being released for one, or is past its idle
+deadline and not yet scanned, its labels admit no control or liveness request,
+even from the base's owner, whatever the label's own idle window says. Holder
+lookups still see the label until its own release starts:
+its device stays held until the release cascade frees it.
+
+- A control call naming the label (a tool call, an `input/*` frame for its
+  device, a plan step) is refused with `session_ownership_lost`, `retryable:
+  false` and `nextAction: "acquire_new_session"`, carrying the label's id and
+  the base's release reason: the recorded one, or the one its expiry is about to
+  record (`lazy-expiry`, or `heartbeat-timeout` when the owner's lease lapsed).
+  A heartbeat or liveness claim for the label is answered "session not found"
+  with that same reason, and claims nothing.
+- A read naming the label is never refused. It is answered without a session,
+  as a read on any session past its idle deadline is.
+- Deciding this releases nothing: it is a read of the base's state, and a
+  lookup about a label still never releases its base. A refused control call is
+  not a lookup. It names a session of the ended plan, so it ends the base the
+  way a call naming the base does, through the base's lazy expiry, and the
+  base's release takes every label with it at once rather than at the next
+  scan. A refused read releases nothing and leaves that to the scan.
+- A base whose owner's heartbeat lease lapsed and that the monitor has not
+  scanned yet answers a control call on its label as it answers one on itself:
+  the base is released with `heartbeat-timeout` and the call gets that terminal
+  refusal, unless a control call still in flight keeps the base, in which case
+  the call gets the retryable `daemon_session_suspect` naming the base.
+- Ending the base ends every live label with the base's own reason (explicit
+  release, idle expiry, heartbeat lapse, owner disconnect, device loss): each
+  label's release is announced under the label's id with that reason, a call
+  still running under the label is cut with `session_ownership_lost` naming the
+  label, and its device is freed once. A base released for a reason that leaves
+  its UUID usable (`plan-auto-release`, a `daemon-shutdown` or
+  `device-restart:<device>` handoff) releases its labels with
+  `plan-auto-release`, as before.
+- A plan whose step is refused because its base ended fails with that end, not
+  with "label is not allocated": the `executePlan` result has `success: false`,
+  `code: "session_ownership_lost"`, `retryable: false`, `nextAction:
+  "acquire_new_session"` and `details.reason` set to the base's release reason,
+  and its failed step's error names that reason. An unrelated step failure keeps
+  its own error without those terminal fields. Building the result releases
+  nothing.
+
+How long a plan can run on its labels: a step on a label restarts only the
+label's idle window, never the base's. The base's idle window is restarted by
+the start and the end of the `executePlan` call, by each step that runs on the
+plan's primary device, and by any other control call naming the base. What
+keeps the base through a long run of label-only steps is the `executePlan` call
+itself: a call in flight holds its session past the idle deadline until the
+call's request deadline plus 10 seconds (30 minutes past the idle deadline for a
+call with no deadline). So a plan runs on its labels for as long as its own
+request deadline allows (at least 600 seconds for `executePlan`, at most 1800),
+and its base idles out only if the plan is still running after that deadline
+with no step on the primary device in the last idle window.
 
 When two releases of one session race, a terminal reason replaces a
 non-terminal one, and any other terminal reason replaces an idle one, so the
@@ -219,6 +314,63 @@ When one handset is reachable over both USB and Wi-Fi, the pool treats the
 endpoints as aliases of one device only when `ro.serialno` and boot identity prove
 it, and two emulators that merely share an AVD name are never merged.
 
+For direct `input/*` and device-mutating `ide/*` frames, an Android transport the
+pool cannot identify (`isAndroidTransportAssignable` is false) is refused only
+while a held Android device could be its alias. Held devices are every
+Android device still in the session holder map, including expired sessions and
+releases in progress until their ownership is removed, plus one unknown hold if
+the fresh managed-slot snapshot contains Android stable ids not represented by
+those sessions. Control frames reuse that snapshot for at most one second.
+
+The pool can positively distinguish the target from a held device only when its
+current folded alias group identifies another canonical device, its proven
+physical serial differs from a held USB serial or physical alias group, or its
+loopback adb port identifies a different emulator console. An emulator proven by
+its current connection's probe is also told apart from a held physical phone
+(a USB serial or physical alias group), without becoming assignable. Matching physical
+serials or alias-group keys still could alias. A loopback port cannot distinguish
+a phone or an unknown device; an unknown managed-slot hold could alias unless
+the target's current folded group identifies another device.
+
+If no held device could alias the transport, the frame is allowed. If every
+possible alias belongs to the requester's own session (including derived label
+sessions), the frame keeps the untyped “no proven identity” refusal. Otherwise
+it fails with `device_owned_by_other_session` and `retryable: false`, naming the
+transport the caller targeted; an unknown managed-slot hold uses
+`device_assigned_to_managed_slot` when its registry entry is available. Address
+the device by its USB serial or `emulator-NNNN` id. Refusal sends nothing and does
+not restart a holder's idle window. A target already held under its very id goes
+through the normal holder check. Identifiable Android targets and iOS targets
+keep their existing behavior; screenshot, hierarchy and observe reads never
+pass this control check. A managed connection still controls only its own slot
+devices, after the identity check and before the existing ownership checks.
+
+A tool call may name such a device by either endpoint (#11618). The `deviceId` is
+resolved to the pool's one id for the device before any ownership, managed-slot
+or routing check, so a call naming the Wi-Fi id of a held handset is refused or
+admitted exactly as one naming its USB serial, runs on the same per-device queue,
+and the tool sees the pool's id. The same holds for an emulator's loopback adb
+address (`localhost:5555` for `emulator-5554`), and for every tool that takes a
+device id on every path: `setActiveDevice`, `killDevice`'s `device.deviceId`, a
+`getAndroid`, `getApple` or `startDevice` `deviceId`, plan steps, and a client
+that calls the daemon's MCP endpoint directly. A wireless id a control call names
+before the pool has seen it is identified first (one adb probe, not repeated per
+call); reads use only what the pool already knows.
+
+A failed `adb devices` listing is never read as "no such device". If the listing
+fails while the pool tracks an Android device, a control call naming a wireless
+or TCP address the pool has not seen is refused with the retryable
+`discovery_incomplete`: the address may be a second route to a device a session
+holds. Nothing is sent and the refusal is not use; the next call asks adb again.
+The holder is not affected: a call naming the device by the id `listDevices`
+reports never depends on that listing, and reads still answer. A machine whose
+pool tracks no Android device is refused nothing.
+
+An Android transport the pool cannot identify at all (a wireless phone
+reporting a generic serial, an emulator on a non-loopback `adb connect` address)
+is not an alias of anything: if no session holds it, tool calls on it are allowed
+as before.
+
 ## Daemon restart
 
 The restarted daemon stamps itself as owner of every session it rehydrates (#11114),
@@ -235,6 +387,17 @@ takes the device. A session lost to identity loss at restart is answered as
 recorded first in a crash-safe sidecar (`terminal-release-intents.jsonl` in the
 daemon data directory, `src/daemon/terminalReleaseJournal.ts`), and the restarted
 daemon finishes it before rehydrating, so a released UUID is never revived.
+
+A device-restart handoff reserves the recorded platform and stable device identity for
+its session throughout the recovery window, even while the device is absent and no
+call is waiting. Other sessions' selectors skip it and binding by id is refused;
+reads remain available. The hold ends on successful recovery, any terminal session
+release, the three-minute window ending, or daemon shutdown. An idle expiry inside the
+window ends the hold without another call; tool activity extends that deadline, and a
+call in flight retains the hold through the recovery window. Intentional stops end
+the hold. Concurrent daemon-restart and device-restart holds end independently. Managed slots still
+win, and the reservation does not extend the owner's heartbeat lease. A wiped or
+re-imaged device returning under the same AVD name or UDID remains an identity gap.
 
 ## Planned: device state between owners
 
@@ -256,12 +419,26 @@ releasing.
   (`getAndroid`, `getApple`, `startDevice`) changes the session a connection's
   untargeted calls run on. An explicit `sessionUuid` targets that one call: the
   next call without one still runs on the default (#11347). A connection that has
-  no default yet adopts the first session it names.
+  no default yet adopts the first session it names. A call passing only `platform`
+  matching the default session's device runs on the default when no other session
+  the connection still holds has that platform or an unknown platform. `deviceId`
+  names the target device; a `platform` other than the default's does not use the
+  default.
 - **`scripts/mcp-drive.ts`:** a `getAndroid`/`getApple` step captures the session
   and injects it into later steps; `--session <uuid>` reuses an existing one.
 - **Scripts that run `--cli` calls:** keep the acquiring call's `sessionUuid` and
   pass `--session-uuid` on every later call (see
   `scripts/android/navigation-graph-sdk-event-integration.sh`).
+
+If an agent holds two sessions and its default session ends, a control call
+that passes the surviving session's `sessionUuid` or `deviceId` runs on that
+session and does not change the default. A control call with only `platform`,
+a `deviceId` that no surviving session holds (or that the proxy cannot match to
+exactly one surviving session), or no selector is refused with
+`no_active_device_session`, `nextAction: "acquire_new_session"` and the release
+reason. To continue without naming the surviving session or its device each
+time, call `setActiveDevice` for that device or acquire a new session with
+`getAndroid` or `getApple`.
 
 ## Stopping a held device: `killDevice` and `deleteDevice`
 
@@ -308,8 +485,12 @@ Owner decisions 2026-10-09 (#10982):
 - No read counts as activity, not even the owner's own (#10964).
 - Anything that changes visible UI, or starts a device-side process, is control.
 - Viewer streaming is a read.
-- A read on a free device may run full readiness. A read on a held device is
-  connect-only.
+- A sessionless read on a free device verifies it is reachable and may install,
+  enable or connect CtrlProxy or the iOS runner because reading needs it
+  (owner decision 2026-10-11, #11641). It skips appearance sync, preference/settings
+  writes and selecting or pinning the current device. A later control call still
+  performs those steps. A sessionless read on a held device runs no readiness,
+  pinning or settings work at all; it uses the read-only path.
 - Reads run in their own lane (#10969).
 - A holder's calls that name only a `deviceId` are credited to the MCP connection
   that owns the held session, and admitted as that session. Other connections
@@ -328,9 +509,19 @@ Owner decisions 2026-10-09 (#10982):
 
 - A recording stops and finalizes when its session is released, capped at about
   120 seconds (#10957). This also covers an idle release (#10826).
-- A recording with no owner stops when a session acquires the device (#10961).
 - Recording artifacts stay fetchable by id (#10958).
 - Hiding a desktop or IDE window during a recording does not release the device.
+
+A video start from the connection holding a device belongs to that holding session,
+even when the call omits `sessionUuid`. Starting a test recording on an unheld device
+is refused with `no_active_device_session`; acquire a session on that device first.
+
+An active recording with no owner keeps running when a session acquires its device:
+the acquiring holder adopts it (owner decision 2026-10-11, #11665, replacing #10961).
+Until acquisition it remains stoppable sessionless; afterwards only the holder or
+the connection that acquired its session may stop it. This includes segmented video
+and test recordings. Release finalizes adopted recordings within the existing cap,
+announces their recording ids, and keeps their artifacts fetchable by id (#10958).
 
 ## Retryable acquisition refusals
 
@@ -338,6 +529,23 @@ An acquisition the daemon cannot grant yet is refused with a typed, retryable
 code (owner decision 2026-10-09, #10982): `device_cleanup_in_progress` while the
 device is still being released (#10960), and `device_owned_by_other_daemon` when
 another daemon holds it. Clients may wait and retry.
+
+An exact Android acquisition also waits up to 5 s when adb still lists its
+transport as `offline` or `unauthorized` (#11713). If it stays transitional,
+`device_offline` carries `retryable: true`, `deviceId`, and a 1 s `retryAfterMs`
+hint. The refusal is retryable, and any existing pool entry is left untouched.
+
+Each refusal carries a `retryAfterMs` hint. For `device_cleanup_in_progress` it
+is the time the cleanup can still take (#11360): the rest of a release's bounded
+teardown, or the rest of a recording finalize's cap (120 s plus a 5 s grace),
+whether that finalize started at its session's release or when a session
+acquired a device with an owner-less recording on it (#11616). Cleanup with no
+cap of its own advertises a 1 s polling hint. `device_shutting_down` always
+advertises 2 s: a shutdown reservation is held across several separately bounded
+steps (stop, wait for the device to disappear, restart handoff) and records no
+deadline of its own, so there is no remaining time to report. The test runners
+wait `max(30 s, min(waited + retryAfterMs, 150 s))` in total, so a hint without a
+bound gets their 30 s floor, which is one shutdown step's own timeout.
 
 A session UUID whose device is being killed is refused with
 `session_terminal_release_in_progress`, `retryable: false` and `nextAction:

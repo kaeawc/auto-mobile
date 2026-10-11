@@ -14,6 +14,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
 
 import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -219,5 +220,46 @@ describe("createIfMissing rollback after System UI recovery", () => {
     expect(readinessAttempts).toBe(2);
     expect(fakeProvisioner.requests).toEqual([]);
     expect(fakeDeviceUtils.getExecutedOperations().join("\n")).not.toContain("destroyDevice");
+  });
+
+  it("keeps the AVD it created once another session selected it while its runner was prepared", async () => {
+    fakeGate.setAllowed(true);
+    const created = {
+      platform: "android" as const,
+      name: "AutoMobile-android-34-abcd1234",
+      deviceType: "system-images;android-34;google_apis;arm64-v8a",
+      runtime: "android-34",
+    };
+    const createdDeviceId = `mock-${created.name}`;
+    setDeviceToolsDependencies({
+      deviceProvisionerFactory: () => ({
+        provision: async (_criteria, _signal, identityHooks) => {
+          await identityHooks?.reserveBeforeCreate(created);
+          fakeDeviceUtils.setDeviceImages("android", [
+            { name: created.name, platform: "android", isRunning: false },
+          ]);
+          await identityHooks?.bindAfterCreate(created);
+          return created;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        // The readiness reservation admits an exact bind by another session (#11651).
+        const select = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+        await select({ deviceId: createdDeviceId, sessionUuid: "other-session" });
+        throw new Error("automation runner did not become ready");
+      },
+    });
+    await useFakeTeardown("android");
+
+    await expect(callStartDevice({ platform: "android", createIfMissing: true })).rejects.toThrow(
+      /automation runner did not become ready/,
+    );
+
+    // Stopping or deleting it would be lifecycle on the other session's device.
+    expect(sessionManager.getSession("other-session")?.assignedDevice).toBe(createdDeviceId);
+    const operations = fakeDeviceUtils.getExecutedOperations().join("\n");
+    expect(operations).not.toContain("destroyDevice");
+    expect(operations).not.toContain("killDevice");
+    expect(await fakeDeviceUtils.listDeviceImages("android")).toHaveLength(1);
   });
 });

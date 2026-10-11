@@ -6,6 +6,11 @@ import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/
 import type { BootedDevice, DeviceInfo, ExecResult } from "../../../src/models";
 import type { AdmitColdBoot } from "../../../src/models/BootAdmission";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
+import {
+  ANDROID_MAX_BOOTED_ENV,
+  AndroidBootAdmissionGate,
+} from "../../../src/features/bootAdmission/AndroidBootAdmissionGate";
+import { FakeAndroidCapacitySource } from "../../fakes/FakeAndroidCapacitySource";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -246,5 +251,133 @@ describe("AndroidEmulatorClient boot admission (#11181)", () => {
     ).rejects.toThrow();
 
     expect(events).toEqual(["admit", "release"]);
+  });
+});
+
+// #11593: what a cancelled launch leaves in the REAL gate and ledger, at a limit of one emulator.
+describe("AndroidEmulatorClient cancelled launches against the real boot admission gate", () => {
+  const realGate = (): {
+    gate: AndroidBootAdmissionGate;
+    source: FakeAndroidCapacitySource;
+    admitColdBoot: AdmitColdBoot;
+    releases: () => number;
+    handedOffSerial: () => string | undefined;
+  } => {
+    const source = new FakeAndroidCapacitySource();
+    const gate = new AndroidBootAdmissionGate(source, new FakeTimer(), {
+      env: { [ANDROID_MAX_BOOTED_ENV]: "1" },
+    });
+    let releaseCalls = 0;
+    let serial: string | undefined;
+    return {
+      gate,
+      source,
+      releases: () => releaseCalls,
+      handedOffSerial: () => serial,
+      admitColdBoot: async () => {
+        const admission = await gate.admit({ avdName: AVD, timeoutMs: 120_000 });
+        return {
+          handOff: (deviceId) => {
+            serial = deviceId;
+            admission.handOff(deviceId);
+          },
+          release: () => {
+            releaseCalls++;
+            admission.release();
+          },
+        };
+      },
+    };
+  };
+
+  /** Whether a second caller's cold boot is admitted now; its slot is handed back at once. */
+  const secondBootAdmitted = async (gate: AndroidBootAdmissionGate): Promise<boolean> => {
+    try {
+      (await gate.admit({ avdName: "second", timeoutMs: 120_000 })).release();
+      return true;
+    } catch (error) {
+      if (error instanceof BootCapacityExhaustedError) {
+        return false;
+      }
+      throw error;
+    }
+  };
+
+  test("cancelled between the admission and the spawn: the slot is freed once and a second boot fits", async () => {
+    const { gate, admitColdBoot, releases } = realGate();
+    const controller = new AbortController();
+    const client = createClient(() => {
+      throw new Error("must not spawn");
+    });
+
+    await expect(
+      client.launchEmulator({
+        avdName: AVD,
+        signal: controller.signal,
+        admitColdBoot: async () => {
+          const admission = await admitColdBoot();
+          controller.abort();
+          return admission;
+        },
+      }),
+    ).rejects.toThrow();
+
+    expect(await gate.describeCapacity()).toMatchObject({ booted: 0, inFlight: 0 });
+    expect(await secondBootAdmitted(gate)).toBe(true);
+    // However many layers reported the cancellation, a second caller's slot is not freed by it.
+    expect(releases()).toBeGreaterThanOrEqual(1);
+    const second = await gate.admit({ avdName: "second", timeoutMs: 120_000 });
+    expect(await secondBootAdmitted(gate)).toBe(false);
+    second.release();
+  });
+
+  test("stopped between the spawn and adb listing it: counted until the process exits, then freed once", async () => {
+    const { gate, source, admitColdBoot } = realGate();
+    // No process table: only the admission itself can count a boot adb does not list yet.
+    source.emulatorProcessRssBytes = undefined;
+    source.serialListingError = undefined;
+    const { spawn, child } = spawnReportingStartup([]);
+    const client = createClient(spawn);
+
+    const launch = await client.launchEmulator({ avdName: AVD, admitColdBoot });
+    expect(launch.outcome).toBe("launched");
+
+    expect(await gate.describeCapacity()).toMatchObject({ booted: 0, inFlight: 1 });
+    expect(await secondBootAdmitted(gate)).toBe(false);
+
+    // The undo signals the emulator; until it is gone it keeps its slot.
+    child.kill();
+    expect(await secondBootAdmitted(gate)).toBe(false);
+    child.emit("exit", 0, "SIGTERM");
+
+    expect(await gate.describeCapacity()).toMatchObject({ booted: 0, inFlight: 0 });
+    const second = await gate.admit({ avdName: "second", timeoutMs: 120_000 });
+    // A second exit report from the stopped emulator frees nothing of the second caller's.
+    child.emit("exit", 0, "SIGTERM");
+    expect(await gate.describeCapacity()).toMatchObject({ inFlight: 1 });
+    expect(await secondBootAdmitted(gate)).toBe(false);
+    second.release();
+  });
+
+  test("an emulator the stop could not kill, listed by adb, holds its slot through the listing alone", async () => {
+    const { gate, source, admitColdBoot, handedOffSerial } = realGate();
+    const { spawn, child } = spawnReportingStartup([]);
+    const client = createClient(spawn);
+    const launch = await client.launchEmulator({ avdName: AVD, admitColdBoot });
+    expect(launch.outcome).toBe("launched");
+    source.emulatorSerials = [handedOffSerial()!];
+    source.emulatorProcessRssBytes = [1024 ** 3];
+
+    child.kill();
+
+    expect(await gate.describeCapacity()).toMatchObject({ booted: 1, inFlight: 0 });
+    expect(await secondBootAdmitted(gate)).toBe(false);
+
+    source.emulatorSerials = [];
+    source.emulatorProcessRssBytes = [];
+    child.emit("exit", 0, "SIGKILL");
+
+    expect(await gate.describeCapacity()).toMatchObject({ booted: 0, inFlight: 0 });
+    expect(await secondBootAdmitted(gate)).toBe(true);
   });
 });

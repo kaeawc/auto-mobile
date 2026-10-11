@@ -115,6 +115,14 @@ export type ManagedSlotRequestedSpec =
   | WithOptionalDeviceType<AndroidDeviceSpecification>
   | WithOptionalDeviceType<IosDeviceSpecification>;
 
+/** Known device metadata; an Android AVD may have no configured hardware profile. */
+export interface ManagedSlotResolvedSpec {
+  runtime: string;
+  deviceType?: string;
+  displayCutout?: ResolvedExactDeviceSpecification["displayCutout"];
+  configuration?: AndroidDeviceSpecification["configuration"];
+}
+
 /**
  * The Android hardware profile created for a spec that omits `deviceType` (a current Pixel with a
  * known cutout class). Override per resolver.
@@ -199,12 +207,18 @@ export interface ManagedSlotProvisionedDevice {
   lifecycle?: unknown;
 }
 
+/** Reads an existing device without applying the creation resolver's defaults. */
+export interface ManagedSlotExistingSpecReader {
+  /** The device's own metadata; null for unreadable config/runtime or an unknown iOS model. */
+  readExistingSpec(device: DeviceInfo): Promise<ManagedSlotResolvedSpec | null>;
+}
+
 /**
  * The `provisionDevice` path with `readiness: "automation"`: exact matching, creation, boot,
  * session bind and its own rollback of partial creations (#11125, #11182). Throws
  * `ProvisionDeviceError` or `BootCapacityExhaustedError` on failure.
  */
-export interface ManagedSlotDeviceProvisioner {
+export interface ManagedSlotDeviceProvisioner extends ManagedSlotExistingSpecReader {
   provision(request: ManagedSlotProvisionRequest): Promise<ManagedSlotProvisionedDevice>;
   /** Release a session this reconciler obtained but could not publish. */
   releaseSession(sessionUuid: string): Promise<void>;
@@ -440,7 +454,7 @@ export type ManagedSlotReconcileResult =
       device: ManagedSlotDeviceIdentity;
       sessionUuid: string;
       requestedSpec: ManagedSlotRequestedSpec;
-      resolvedSpec: ResolvedExactDeviceSpecification;
+      resolvedSpec: ManagedSlotResolvedSpec;
       specFingerprint: ManagedSlotSpecFingerprint;
       readiness: { mode: string; status: string };
       lifecycle?: unknown;
@@ -958,7 +972,7 @@ function expectationOf(assignment: SlotAssignmentRecord): SlotBindingExpectation
 
 interface ReconcileContext {
   request: ManagedSlotReconcileRequest;
-  resolvedSpec: ResolvedExactDeviceSpecification;
+  resolvedSpec: ManagedSlotResolvedSpec;
   fingerprint: ManagedSlotSpecFingerprint;
   evidence: ManagedSlotReconcileEvidence;
 }
@@ -1363,6 +1377,7 @@ export class ManagedSlotReconciler {
     device: DeviceInfo,
     reservation: string | undefined,
   ): Promise<ReadyResult> {
+    context = { ...context, resolvedSpec: await this.existingSpec(device) };
     // The slot's own device is excluded from every other caller and the registry records no live
     // execution, so any session on it is an earlier execution's leftover, unless this daemon still
     // holds it as a live execution (#11275), which refuses with slot_in_use instead.
@@ -1372,7 +1387,12 @@ export class ManagedSlotReconciler {
     const unchanged =
       assignment.state === "ready" &&
       assignment.specFingerprint === fingerprint &&
-      stableStringify(assignment.requestedSpec) === stableStringify(context.request.requestedSpec);
+      stableStringify(assignment.requestedSpec) ===
+        stableStringify(context.request.requestedSpec) &&
+      this.resolvedIdentityMatches(assignment.resolvedSpec, context.resolvedSpec);
+    // Repair an older binding's creation-default metadata once; subsequent identical requests
+    // retain the generation. A full AVD config read adds detail beyond the resolver's fields,
+    // without changing the binding. The fingerprint still describes the resolver's creation choice.
     // An unchanged ready binding is only re-verified; a new spec or a not-yet-ready binding is
     // recorded as a new generation of the same device.
     const committed = unchanged
@@ -1395,6 +1415,15 @@ export class ManagedSlotReconciler {
       committed.assignment,
       provisioned,
       reservation,
+    );
+  }
+
+  private resolvedIdentityMatches(stored: unknown, actual: ManagedSlotResolvedSpec): boolean {
+    if (stored === null || typeof stored !== "object") {
+      return false;
+    }
+    return (["runtime", "deviceType", "displayCutout"] as const).every(
+      (key) => Reflect.get(stored, key) === actual[key],
     );
   }
 
@@ -1515,6 +1544,7 @@ export class ManagedSlotReconciler {
     device: DeviceInfo,
     source: "free_pool" | "orphan",
   ): Promise<ReadyResult> {
+    context = { ...context, resolvedSpec: await this.existingSpec(device) };
     const { request } = context;
     const stableId = deviceStableId(device)!;
     // Commit first: the CAS atomically takes the device out of the free pool and reserves it,
@@ -1550,6 +1580,19 @@ export class ManagedSlotReconciler {
       throw new ReconcileAbort(claimFailure(ready, "adoption"));
     }
     return await this.claimAndReady(context, "adopted", ready.assignment, provisioned, undefined);
+  }
+
+  private async existingSpec(device: DeviceInfo): Promise<ManagedSlotResolvedSpec> {
+    const spec = await this.deps.provisioner.readExistingSpec(device);
+    if (!spec) {
+      throw new ReconcileAbort(
+        failure(
+          "discovery_incomplete",
+          `The configuration of device '${device.name}' could not be read.`,
+        ),
+      );
+    }
+    return spec;
   }
 
   /**

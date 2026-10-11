@@ -1588,7 +1588,13 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     }
     let states: AdbDeviceState[];
     try {
-      states = (await this.adbFactory.create(null).getDeviceStates?.(options)) ?? [];
+      // The candidates are devices this host held, so adb existed: an executable that has since
+      // vanished (replaced mid-upgrade) is a probe that could not ask, never "listed nowhere"
+      // (#11643). Callers with no candidates return above and never reach a missing adb.
+      states =
+        (await this.adbFactory
+          .create(null)
+          .getDeviceStates?.({ ...options, throwOnMissingAdb: true })) ?? [];
     } catch (error) {
       throw new AndroidOfflineProbeError(`Device-state probe failed: ${errorMessage(error)}`, {
         cause: error,
@@ -4002,6 +4008,8 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       const states = await adb.getDeviceStates({
         timeoutMs: options.timeoutMs,
         signal: options.signal,
+        // A vanished adb cannot say the serial is gone either (#11643).
+        throwOnMissingAdb: true,
       });
       return states.find((state) => state.deviceId === device.deviceId)?.state;
     } catch (error) {

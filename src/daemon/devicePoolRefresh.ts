@@ -11,6 +11,8 @@ import type {
 import type { Timer } from "../utils/SystemTimer";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import {
+  expectingPooledSources,
+  incompleteDiscoverySources,
   didSourceSucceedForDevice,
   type DiscoveryCompleteness,
   type DiscoverySource,
@@ -24,9 +26,10 @@ export interface DevicePoolRefreshResult {
   completeness?: DiscoveryCompleteness;
   failure?: string;
   /**
-   * The sources whose sweep failed, each with its error (#11586). Tooling that is merely
-   * unavailable on this host is not a failure. A `failure` with no `failedSources` is a refresh
-   * that threw before its cause could be attributed to a source.
+   * The sources whose sweep failed, each with its error (#11586). Tooling that is not installed
+   * on this host is not a failure, unless a pooled device depends on it (#11605). A `failure`
+   * with no `failedSources` is a refresh that threw before its cause could be attributed to a
+   * source.
    */
   failedSources?: Partial<Record<DiscoverySource, DeviceDiscoveryError>>;
 }
@@ -35,19 +38,21 @@ export interface DevicePoolRefreshResult {
 export function discoveryRefreshOutcome(
   discovery: BootedDeviceDiscovery,
   addedCount: number,
+  /** The pool's devices: a source one of them depends on is never "not installed" (#11605). */
+  pooled?: Iterable<{ platform: Platform; id: string }>,
 ): DevicePoolRefreshResult {
-  const androidError = discovery.discoveryErrors?.android;
-  const failedSources = failedDiscoverySources(discovery);
+  const failedSources = failedDiscoverySources(expectingPooledSources(discovery, pooled));
   return {
     addedCount,
-    ...(androidError && androidError.code !== "unavailable"
-      ? { failure: androidError.message }
-      : {}),
+    ...(failedSources.android ? { failure: failedSources.android.message } : {}),
     ...(Object.keys(failedSources).length > 0 ? { failedSources } : {}),
   };
 }
 
-/** The platform errors name each platform's own listing: adb, and simctl for iOS. */
+/**
+ * The sources the one inventory classifier calls incomplete and that reported why. The platform
+ * errors name each platform's own listing: adb, and simctl for iOS.
+ */
 function failedDiscoverySources(
   discovery: BootedDeviceDiscovery,
 ): Partial<Record<DiscoverySource, DeviceDiscoveryError>> {
@@ -57,9 +62,9 @@ function failedDiscoverySources(
     ...discovery.sourceErrors,
   };
   const failed: Partial<Record<DiscoverySource, DeviceDiscoveryError>> = {};
-  for (const source of ["android", "ios-simulator", "ios-physical"] as const) {
+  for (const source of incompleteDiscoverySources(discovery, ["android", "ios"])) {
     const error = errors[source];
-    if (error && error.code !== "unavailable") {
+    if (error) {
       failed[source] = error;
     }
   }
@@ -289,7 +294,7 @@ export class DevicePoolRefresh {
       }
 
       return {
-        ...discoveryRefreshOutcome(discovery, addedCount),
+        ...discoveryRefreshOutcome(discovery, addedCount, this.pool.getDevices().values()),
         completeness: this.currentRefreshCompleteness(discovery, refreshGeneration),
       };
     } catch (error) {

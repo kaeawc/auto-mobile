@@ -40,7 +40,10 @@ import {
 } from "../daemon/managedSlots/managedConnectionScope";
 import { DeviceOutsideManagedSlotsError } from "../daemon/managedSlots/managedSlotRefusal";
 import type { DevicePool } from "../daemon/devicePool";
-import type { SessionManager } from "../daemon/sessionManager";
+import { PLAN_LABEL_SESSION_SOURCE, type SessionManager } from "../daemon/sessionManager";
+import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
+import { SESSION_OWNERSHIP_LOST_CODE } from "../daemon/sessionReleasedDuringCall";
+import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import {
   AndroidSegmentedPlanVideoSession,
   ROTATION_STOP_TIMEOUT_MS,
@@ -277,6 +280,49 @@ export function planShutdownInterruptionFields(
     return {};
   }
   return { code: DAEMON_SHUTTING_DOWN_ERROR_CODE, retryable: true };
+}
+
+/**
+ * The typed outcome of a failed plan whose base session ended while it ran (#11640): the base's
+ * end ends its labels, so the plan's next step is refused with the base's terminal release and
+ * the result says so in fields, `session_ownership_lost` with the base's release reason, instead
+ * of leaving the caller to parse the failed step's message. A plan's steps on a label do not keep
+ * its base alive; the plan's own call does, until that call's request deadline.
+ */
+export function planBaseEndFields(
+  baseSessionUuid: string | undefined,
+  planSucceeded: boolean,
+  failedStep?: PlanExecutionResult["failedStep"],
+): Pick<ExecutePlanResult, "code" | "retryable" | "nextAction" | "details"> {
+  const daemonState = DaemonState.getInstance();
+  if (planSucceeded || !baseSessionUuid || !failedStep || !daemonState.isInitialized()) {
+    return {};
+  }
+  const manager = daemonState.getSessionManager();
+  const ended = manager.peekTerminalAnswerForEndedSession(baseSessionUuid);
+  if (!ended) {
+    return {};
+  }
+  // The executor retains only the failed step's string, not its thrown error. Match the exact
+  // terminal answer, never infer causality from the base merely having expired (#11640).
+  const labelEnd = failedStep.device
+    ? manager.peekTerminalAnswerForEndedSession(`${baseSessionUuid}:${failedStep.device}`)
+    : undefined;
+  if (
+    failedStep.error !== String(ended) &&
+    !(
+      labelEnd?.release.releaseReason === ended.release.releaseReason &&
+      failedStep.error === String(labelEnd)
+    )
+  ) {
+    return {};
+  }
+  return {
+    code: SESSION_OWNERSHIP_LOST_CODE,
+    retryable: false,
+    nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
+    details: { sessionUuid: ended.sessionUuid, reason: ended.release.releaseReason },
+  };
 }
 
 /**
@@ -527,6 +573,7 @@ export class PlanExecutionOrchestrator {
         totalSteps: result.totalSteps,
         failedStep: result.failedStep,
         error: result.failedStep ? result.failedStep.error : undefined,
+        ...planBaseEndFields(this.request.sessionUuid, result.success, result.failedStep),
         ...planShutdownInterruptionFields(this.signal, result.success),
         platform: this.device.platform,
         deviceId: this.device.deviceId,
@@ -705,6 +752,12 @@ export class PlanExecutionOrchestrator {
       normalized,
       sessionManager,
     );
+    this.refuseLabelNamingSessionOfItsOwn(
+      sessionUuid,
+      labelToSessionMap,
+      sessionManager,
+      slotDevices,
+    );
 
     // The plan execution is tracked on its base session. Publish its derived
     // label-session ownership before the allocator's first await so heartbeat
@@ -773,6 +826,40 @@ export class PlanExecutionOrchestrator {
     );
 
     return deviceMapping;
+  }
+
+  /**
+   * A plan never takes a session it did not mint as one of its labels (#11602). A live
+   * `${base}:${label}` session that no plan run minted is a session of its own, created under a
+   * caller-chosen id before this base existed: publishing it as a label would hand its device to
+   * the base's owner and refuse its own connection. Refused typed before anything is published
+   * or allocated; the plan runs once that session is released or the label is renamed.
+   */
+  private refuseLabelNamingSessionOfItsOwn(
+    sessionUuid: string,
+    labelToSessionMap: Record<string, string>,
+    sessionManager: SessionManager,
+    slotDevices: Map<string, string> | undefined,
+  ): void {
+    // A managed slot serves its labels with its own live slot sessions and mints nothing.
+    if (slotDevices) {
+      return;
+    }
+    for (const [label, labelSessionUuid] of Object.entries(labelToSessionMap)) {
+      const taken =
+        labelSessionUuid === sessionUuid ? null : sessionManager.peekSession(labelSessionUuid);
+      if (taken && taken.persistenceMetadata?.source !== PLAN_LABEL_SESSION_SOURCE) {
+        throw new InputDeviceOwnedError(
+          "executePlan",
+          taken.assignedDevice,
+          sessionUuid,
+          undefined,
+          `executePlan refused: device label '${label}' would be session ${labelSessionUuid}, ` +
+            "which is already a live session that no plan run created. " +
+            "Release that session or rename the label, then run the plan again.",
+        );
+      }
+    }
   }
 
   /**

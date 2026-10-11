@@ -5,7 +5,8 @@ import { DeviceAlreadyRunningError } from "../../src/models/DeviceAlreadyRunning
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
-import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
+import { AdbClient, AdbUnavailableError } from "../../src/utils/android-cmdline-tools/AdbClient";
+import { discoverySourceOutcome } from "../../src/utils/discoverySource";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import type { VirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type {
@@ -1883,5 +1884,165 @@ describe("MultiPlatformDeviceManager Android offline recovery delegation (#7536)
     await manager.recoverAndroidOfflineDevices();
 
     expect(called).toBe(true);
+  });
+});
+
+// #11605: "not installed" is read from the error the tool invocation itself gives, never guessed
+// from the host platform. Only that typed `unavailable` makes a source not applicable; a tool that
+// exists and fails stays `failed` (the answer is unknown).
+describe("discovery classifies tooling that is not installed apart from a failed sweep", () => {
+  const sim: BootedDevice = {
+    name: "iPhone 16",
+    platform: "ios",
+    deviceId: "1B2C3D4E-5F60-4718-8293-A1B2C3D4E5F6",
+  };
+
+  function manager(seams: {
+    adb?: () => Promise<BootedDevice[]>;
+    simctl?: SimCtlClient;
+    devicectl?: IosPhysicalDeviceLister;
+  }): MultiPlatformDeviceManager {
+    return new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      seams.simctl ??
+        ({
+          isAvailable: async () => true,
+          getBootedSimulatorsChecked: async () => [sim],
+        } as unknown as SimCtlClient),
+      createFakeAndroidEmulator({ getBootedDevicesChecked: seams.adb ?? (async () => []) }),
+      undefined,
+      undefined,
+      seams.devicectl ?? { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+    );
+  }
+
+  /** A real simctl client over an `xcrun` that fails the way the given spawn error does. */
+  const simctlFailing = (message: string): SimCtlClient =>
+    new SimCtlClient(null, async () => {
+      throw new Error(message);
+    });
+
+  const outcomes = async (deviceManager: MultiPlatformDeviceManager) => {
+    const discovery = await deviceManager.getBootedDevicesDetailed("either");
+    return Object.fromEntries(
+      (["android", "ios-simulator", "ios-physical"] as const).map((source) => [
+        source,
+        discoverySourceOutcome(discovery, source),
+      ]),
+    );
+  };
+
+  test.each([
+    {
+      name: "no adb binary (iOS-only host)",
+      seams: () => ({
+        adb: async () => {
+          throw new AdbUnavailableError("ADB executable is unavailable: spawn adb ENOENT");
+        },
+      }),
+      expected: {
+        android: "not_applicable",
+        "ios-simulator": "complete",
+        "ios-physical": "complete",
+      },
+    },
+    {
+      name: "adb installed but its server errors",
+      seams: () => ({
+        adb: async () => {
+          throw new Error("adb devices -l exited 1: cannot connect to daemon");
+        },
+      }),
+      expected: { android: "incomplete", "ios-simulator": "complete", "ios-physical": "complete" },
+    },
+    {
+      name: "no Xcode: xcrun is not on PATH and devicectl is not found",
+      seams: () => ({
+        simctl: simctlFailing("spawn xcrun ENOENT"),
+        devicectl: {
+          listConnectedDevices: async () => ({
+            devices: [],
+            complete: false as const,
+            error: { code: "unavailable" as const, message: "xcrun/devicectl not found" },
+          }),
+        },
+      }),
+      expected: {
+        android: "complete",
+        "ios-simulator": "not_applicable",
+        "ios-physical": "not_applicable",
+      },
+    },
+    {
+      name: "simctl installed but failing",
+      seams: () => ({
+        simctl: simctlFailing("simctl list exited 1: CoreSimulatorService is down"),
+      }),
+      expected: { android: "complete", "ios-simulator": "incomplete", "ios-physical": "complete" },
+    },
+    {
+      name: "devicectl missing beside a working simctl",
+      seams: () => ({
+        devicectl: {
+          listConnectedDevices: async () => ({
+            devices: [],
+            complete: false as const,
+            error: { code: "unavailable" as const, message: "xcrun/devicectl not found" },
+          }),
+        },
+      }),
+      expected: {
+        android: "complete",
+        "ios-simulator": "complete",
+        "ios-physical": "not_applicable",
+      },
+    },
+    {
+      name: "devicectl installed but failing",
+      seams: () => ({
+        devicectl: {
+          listConnectedDevices: async () => ({
+            devices: [],
+            complete: false as const,
+            error: { code: "failed" as const, message: "devicectl exited 1" },
+          }),
+        },
+      }),
+      expected: { android: "complete", "ios-simulator": "complete", "ios-physical": "incomplete" },
+    },
+  ])("$name", async ({ seams, expected }) => {
+    await withProcessPlatform("darwin", async () => {
+      expect(await outcomes(manager(seams()))).toEqual(expected);
+    });
+  });
+
+  test("off macOS with no simctl, both iOS sources are not applicable", async () => {
+    await withProcessPlatform("linux", async () => {
+      const deviceManager = manager({
+        simctl: { isAvailable: async () => false } as unknown as SimCtlClient,
+      });
+      expect(await outcomes(deviceManager)).toEqual({
+        android: "complete",
+        "ios-simulator": "not_applicable",
+        "ios-physical": "not_applicable",
+      });
+    });
+  });
+
+  test("a producer without per-source reporting classifies by its platform error", () => {
+    const legacy = (code: "unavailable" | "failed") => ({
+      succeededPlatforms: new Set<"android" | "ios">(["android"]),
+      discoveryErrors: { ios: { code } },
+    });
+    expect(discoverySourceOutcome(legacy("unavailable"), "ios-physical")).toBe("not_applicable");
+    expect(discoverySourceOutcome(legacy("failed"), "ios-simulator")).toBe("incomplete");
+    expect(discoverySourceOutcome(legacy("failed"), "android")).toBe("complete");
+    // No error at all (a source that was not asked) is unknown, never "not installed".
+    expect(
+      discoverySourceOutcome(
+        { succeededPlatforms: new Set(), succeededSources: new Set() },
+        "android",
+      ),
+    ).toBe("incomplete");
   });
 });

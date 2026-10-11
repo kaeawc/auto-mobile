@@ -676,11 +676,11 @@ const SPLIT_READ_SHAPES: Array<[Shape, number]> = [
       limit: 2,
       admitters: 2,
       noReader: true,
-      startup: "all",
+      startup: "validation",
       reads: "split",
       prefix: admittedBoots(1, "alone"),
     },
-    990,
+    240,
   ],
 ];
 

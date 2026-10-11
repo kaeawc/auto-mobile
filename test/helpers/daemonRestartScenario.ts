@@ -1,21 +1,21 @@
 import { spyOn } from "bun:test";
-import { Daemon } from "../../../src/daemon/daemon";
-import * as databaseModule from "../../../src/db";
+import { Daemon } from "../../src/daemon/daemon";
+import * as databaseModule from "../../src/db";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../../src/server/videoRecordingManager";
-import { logger } from "../../../src/utils/logger";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { FakeVideoRecordingRepository } from "../../fakes/FakeVideoRecordingRepository";
-import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
+} from "../../src/server/videoRecordingManager";
+import { logger } from "../../src/utils/logger";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
+import { drainMicrotasks } from "./fakeTimerStepping";
 import {
   LivenessScenario,
   ToolCallRefused,
   type LivenessScenarioOptions,
-} from "../../helpers/livenessScenarioHarness";
+} from "./livenessScenarioHarness";
 
-// One daemon restarting with work in flight, end to end (hunt lane restart-end-to-end-1).
+// One daemon restarting with work in flight, end to end.
 //
 // Built on LivenessScenario: a real `Daemon` started through `Daemon.startOn()` over a real
 // `DeviceSessionRepository` on the in-memory SQLite test database, the real control socket and the

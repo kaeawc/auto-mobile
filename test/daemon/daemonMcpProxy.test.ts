@@ -2973,8 +2973,8 @@ describe("DaemonMcpProxy", () => {
             }
             expect(completed).toBe(true);
             const error = await attempt;
-            expect(error).toBeInstanceOf(DaemonToolOutcomeUnknownError);
-            expect(error).toMatchObject({ cause: shutdownError });
+            // The daemon's own typed answer reaches the caller, and the call is not sent again.
+            expect(error).toBe(shutdownError);
             expect(quiescedClient.callToolCalls).toEqual([{ toolName, params: {} }]);
             expect(quiescedClient.closeCallCount).toBe(1);
             expect(freshClient.callToolCalls).toEqual([]);

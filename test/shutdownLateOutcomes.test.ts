@@ -431,6 +431,90 @@ describe("daemon exit code by when a shutdown stage settles (#11601)", () => {
     expect(database.closes).toBe(1);
   });
 
+  test("an abandoned database-free stage whose late write is refused is named, counted and fails the run", async () => {
+    const timer = new FakeTimer();
+    const database = new FakeShutdownDatabase();
+    const warnings: string[] = [];
+    const reports: string[] = [];
+    const tail = createShutdownDatabaseTail({
+      closeDatabase: () => database.close(),
+      drainWrites: () => database.drain(),
+      refusedAccessCount: () => database.refusals,
+      warn: (message) => warnings.push(message),
+    });
+
+    const failures = await settle(
+      timer,
+      runShutdownCleanupStages(
+        [
+          {
+            // Declared database-free, so it does not keep the database open — and is wrong.
+            name: "encoder",
+            budgetMs: 50,
+            mayWriteDatabase: false,
+            run: async () => {
+              await timer.sleep(120);
+              database.write();
+            },
+          },
+          { name: "database", budgetMs: 50, run: (stage) => tail.close(stage) },
+          { name: "late settle", budgetMs: 200, run: (stage) => tail.lateSettle(stage) },
+        ],
+        (message) => reports.push(message),
+        { timer },
+      ),
+    );
+
+    expect(database.closes).toBe(1);
+    expect(failures).toEqual(["database used after close"]);
+    expect(reports.at(-1)).toBe(
+      "Shutdown cleanup stage encoder failed after being abandoned at its deadline",
+    );
+    expect(warnings).toEqual([
+      "Refused 1 database access(es) issued after the shutdown database close; abandoned shutdown stage(s) running since the close: encoder",
+    ]);
+  });
+
+  test("a write refused with no abandoned stage running is counted against in-flight work", async () => {
+    const timer = new FakeTimer();
+    const database = new FakeShutdownDatabase();
+    const warnings: string[] = [];
+    const closed = Promise.withResolvers<void>();
+    // A tool call no stage owns: its next write lands just after the close.
+    const toolCall = closed.promise.then(() => database.write());
+    const toolCallOutcome = toolCall.then(
+      () => "stored",
+      () => "refused",
+    );
+    const tail = createShutdownDatabaseTail({
+      closeDatabase: async () => {
+        await database.close();
+        closed.resolve();
+      },
+      drainWrites: () => database.drain(),
+      refusedAccessCount: () => database.refusals,
+      warn: (message) => warnings.push(message),
+    });
+
+    const failures = await settle(
+      timer,
+      runShutdownCleanupStages(
+        [
+          { name: "database", budgetMs: 50, run: (stage) => tail.close(stage) },
+          { name: "late settle", budgetMs: 50, run: (stage) => tail.lateSettle(stage) },
+        ],
+        () => {},
+        { timer },
+      ),
+    );
+
+    expect(await toolCallOutcome).toBe("refused");
+    expect(failures).toEqual([]);
+    expect(warnings).toEqual([
+      "Refused 1 database access(es) issued after the shutdown database close; no abandoned shutdown stage was running (an in-flight request or a late timer callback)",
+    ]);
+  });
+
   test("a standing reason to keep the database open is honoured and said once", async () => {
     const timer = new FakeTimer();
     const database = new FakeShutdownDatabase();

@@ -1,5 +1,14 @@
 import { errorMessage } from "../utils/describeUnknownError";
-import { Kysely, sql } from "kysely";
+import {
+  Kysely,
+  SqliteAdapter,
+  SqliteIntrospector,
+  SqliteQueryCompiler,
+  sql,
+  type DatabaseConnection,
+  type Dialect,
+  type Driver,
+} from "kysely";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
@@ -466,6 +475,13 @@ function createApplicationDatabase(dbPath: string): Kysely<DatabaseSchema> {
  * Creates the database file and directory if they don't exist.
  */
 export function getDatabase(): Kysely<DatabaseSchema> {
+  if (shutdownClosure) {
+    // Never the lazy open below: it would start migrations on a second connection and leave a
+    // fresh handle (on Windows, a file lock) behind a process that is exiting.
+    shutdownClosure.refusingDb ??= new Kysely<DatabaseSchema>({ dialect: refusingDialect });
+    return shutdownClosure.refusingDb;
+  }
+
   if (!dbInstance) {
     const dbPath = resolveDbPath();
     ensureDatabaseDirectory(dbPath);
@@ -478,6 +494,10 @@ export function getDatabase(): Kysely<DatabaseSchema> {
 }
 
 export async function ensureMigrations(): Promise<void> {
+  if (shutdownClosure) {
+    throw refuseAccessAfterShutdownClose();
+  }
+
   if (lifecycle.migrationsRun) {
     return;
   }
@@ -639,10 +659,105 @@ export async function awaitPromiseBounded(
 }
 
 /**
- * Close the database connection.
- * Call this during graceful shutdown.
+ * A query, transaction or migration wait that reached the database after graceful shutdown had
+ * closed it. The work is refused: nothing is written and the database is not reopened.
  */
-export async function closeDatabase(): Promise<void> {
+export class DatabaseClosedForShutdownError extends ActionableError {}
+
+/** Refusals logged in full (with the caller's stack) before only the count keeps growing. */
+const SHUTDOWN_CLOSE_REFUSAL_LOG_LIMIT = 5;
+
+/**
+ * Set by `closeDatabase({ forShutdown: true })` and by nothing else. While it is set,
+ * {@link getDatabase} hands out a database that refuses every query instead of lazily reopening
+ * the real one. Deliberately NOT part of {@link resetDbLifecycleState}: that reset runs on every
+ * close, and this state must survive the shutdown close it belongs to.
+ */
+let shutdownClosure: { refusals: number; refusingDb: Kysely<DatabaseSchema> | null } | null = null;
+
+function refuseAccessAfterShutdownClose(): DatabaseClosedForShutdownError {
+  const error = new DatabaseClosedForShutdownError(
+    "The database was closed for shutdown; refusing to reopen it for a late query. " +
+      "The work that issued this query outlived the shutdown and its write was not stored.",
+  );
+  if (!shutdownClosure) {
+    // An ordinary close lifted the closure after this caller got the refusing database.
+    return error;
+  }
+  shutdownClosure.refusals += 1;
+  if (shutdownClosure.refusals <= SHUTDOWN_CLOSE_REFUSAL_LOG_LIMIT) {
+    // The error's stack names the late caller: an in-flight tool call, an abandoned shutdown
+    // stage's continuation, or a timer callback that fired after the close.
+    logger.warn(
+      `[Database] Refused database access #${shutdownClosure.refusals} after the shutdown close`,
+      error,
+    );
+  }
+  return error;
+}
+
+/**
+ * How many database accesses were refused since graceful shutdown closed the database (0 when
+ * it has not). The shutdown sequence reports it next to the abandoned stages still running.
+ */
+export function refusedDatabaseAccessCountAfterShutdownClose(): number {
+  return shutdownClosure?.refusals ?? 0;
+}
+
+const refusedConnection: DatabaseConnection = {
+  executeQuery: async () => {
+    throw refuseAccessAfterShutdownClose();
+  },
+  streamQuery: () => {
+    throw refuseAccessAfterShutdownClose();
+  },
+};
+
+/** Opens nothing: every query, and every transaction at its BEGIN, is refused and counted. */
+const refusingDriver: Driver = {
+  init: async () => {},
+  acquireConnection: async () => refusedConnection,
+  beginTransaction: async () => {
+    throw refuseAccessAfterShutdownClose();
+  },
+  commitTransaction: async () => {},
+  rollbackTransaction: async () => {},
+  releaseConnection: async () => {},
+  destroy: async () => {},
+};
+
+const refusingDialect: Dialect = {
+  createDriver: () => refusingDriver,
+  createQueryCompiler: () => new SqliteQueryCompiler(),
+  createAdapter: () => new SqliteAdapter(),
+  createIntrospector: (db) => new SqliteIntrospector(db),
+};
+
+export interface CloseDatabaseOptions {
+  /**
+   * True only from the graceful-shutdown database stage. The database then stays closed for the
+   * rest of the process's life: work that outlived the shutdown (an in-flight tool call, an
+   * abandoned stage's late continuation, a timer callback) gets a
+   * {@link DatabaseClosedForShutdownError} from its query instead of a silently reopened
+   * connection. An ordinary close (the default) lifts that state again, which is what a
+   * same-process reopen — a test, a restart — relies on.
+   */
+  forShutdown?: boolean;
+}
+
+/**
+ * Close the database connection. An ordinary close leaves the module ready to reopen lazily
+ * like a cold start; the shutdown close (`forShutdown`) does not.
+ */
+export async function closeDatabase(options: CloseDatabaseOptions = {}): Promise<void> {
+  if (options.forShutdown) {
+    // Set before the first await: a caller that runs while the connection is being destroyed
+    // must not find the instance gone and open a new one.
+    shutdownClosure ??= { refusals: 0, refusingDb: null };
+  } else {
+    shutdownClosure = null;
+  }
+
   if (dbInstance) {
     await dbInstance.destroy();
     dbInstance = null;

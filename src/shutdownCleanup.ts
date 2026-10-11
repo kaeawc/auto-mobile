@@ -220,6 +220,12 @@ export interface ShutdownDatabaseTailOptions {
   drainWrites(timeoutMs: number): Promise<void>;
   /** A reason the database must stay open whatever the stages did (omit for none). */
   keepOpenReason?(): string | undefined;
+  /**
+   * Database accesses refused since the close (omit when the close does not refuse late work).
+   * Work that outlived the shutdown gets a refusal rather than a reopened connection; the late
+   * settle stage reports how many there were.
+   */
+  refusedAccessCount?(): number | Promise<number>;
   warn(message: string): void;
 }
 
@@ -266,6 +272,38 @@ export function createShutdownDatabaseTail(
     }
     await options.closeDatabase();
   };
+  const settleLate = async (stage: ShutdownCleanupStageContext): Promise<void> => {
+    // A straggler that finished just after the database stage deferred the close leaves
+    // nothing to wait for, and the close still owed.
+    if (stage.unsettledStages().length === 0 && !closeDeferred) {
+      return;
+    }
+    const allowanceMs = closeDeferred ? DEFERRED_DATABASE_CLOSE_ALLOWANCE_MS : 0;
+    await stage.waitForUnsettledStages(
+      Math.max(0, boundWithinStage(stage, Number.POSITIVE_INFINITY) - allowanceMs),
+    );
+    if (!closeDeferred || stage.unsettledDatabaseWriters().length > 0) {
+      return;
+    }
+    // The stragglers that kept the database open have finished: drain what they queued and
+    // close it, as the database stage would have.
+    await options.drainWrites(boundWithinStage(stage, Number.POSITIVE_INFINITY));
+    await closeUnlessStillWriting(stage);
+  };
+  // The close refuses late work rather than let it reopen the database. Each refusal is logged
+  // where it happens; this names the abandoned stages that were running while they were counted.
+  const warnOfRefusedAccesses = async (stragglers: readonly string[]): Promise<void> => {
+    const refused = (await options.refusedAccessCount?.()) ?? 0;
+    if (refused === 0) {
+      return;
+    }
+    options.warn(
+      `Refused ${refused} database access(es) issued after the shutdown database close; ` +
+        (stragglers.length > 0
+          ? `abandoned shutdown stage(s) running since the close: ${stragglers.join(", ")}`
+          : "no abandoned shutdown stage was running (an in-flight request or a late timer callback)"),
+    );
+  };
   return {
     settle: async (stage) => {
       const waitMs = boundWithinStage(stage, Number.POSITIVE_INFINITY);
@@ -277,22 +315,13 @@ export function createShutdownDatabaseTail(
     },
     close: closeUnlessStillWriting,
     lateSettle: async (stage) => {
-      // A straggler that finished just after the database stage deferred the close leaves
-      // nothing to wait for, and the close still owed.
-      if (stage.unsettledStages().length === 0 && !closeDeferred) {
-        return;
+      // Named before the wait: a straggler whose late write is refused has settled by the end.
+      const stragglers = stage.unsettledStages();
+      try {
+        await settleLate(stage);
+      } finally {
+        await warnOfRefusedAccesses(stragglers);
       }
-      const allowanceMs = closeDeferred ? DEFERRED_DATABASE_CLOSE_ALLOWANCE_MS : 0;
-      await stage.waitForUnsettledStages(
-        Math.max(0, boundWithinStage(stage, Number.POSITIVE_INFINITY) - allowanceMs),
-      );
-      if (!closeDeferred || stage.unsettledDatabaseWriters().length > 0) {
-        return;
-      }
-      // The stragglers that kept the database open have finished: drain what they queued and
-      // close it, as the database stage would have.
-      await options.drainWrites(boundWithinStage(stage, Number.POSITIVE_INFINITY));
-      await closeUnlessStillWriting(stage);
     },
   };
 }
@@ -487,6 +516,8 @@ export interface StdioShutdownDependencies {
   /** Bounded wait for a cold-start migration still running (direct mode only). */
   settleMigrations(timeoutMs: number): Promise<void>;
   closeDatabase(): Promise<void>;
+  /** Database accesses the close refused afterwards (direct mode only; omit for none). */
+  refusedDatabaseAccessCount?(): Promise<number>;
   closeLogger: StdioCleanup;
   warn(message: string): void;
 }
@@ -521,6 +552,11 @@ export function createStdioShutdownStages(
   const databaseTail = createShutdownDatabaseTail({
     closeDatabase: () => dependencies.closeDatabase(),
     drainWrites: (timeoutMs) => dependencies.drainDatabaseWrites(timeoutMs),
+    // Proxy mode never loads the database modules, so it has nothing to count.
+    refusedAccessCount: async () =>
+      dependencies.directModeActive()
+        ? ((await dependencies.refusedDatabaseAccessCount?.()) ?? 0)
+        : 0,
     warn: (message) => dependencies.warn(message),
   });
   const closing = "its connections closing";

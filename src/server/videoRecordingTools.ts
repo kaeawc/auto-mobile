@@ -45,6 +45,7 @@ import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { DaemonState } from "../daemon/daemonState";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
+import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { type StoppedSegment, writeSegmentManifest } from "./segmentManifest";
 
 const DEFAULT_MAX_DURATION_SECONDS = 30;
@@ -591,6 +592,11 @@ export interface RecordingRequesterResolver {
   assertFanoutTargetAllowed?(device: BootedDevice, requester: LifecycleRequester): Promise<void>;
   /** Holder identity, when available, for the connection-ownership seam. Never sent to clients. */
   holdingSessionUuid?(deviceId: string): string | undefined;
+  /** Session acquired by this connection on this device, for recording ownership at start. */
+  resolveOwnedDeviceSessionForMcpSession?(
+    mcpSessionId: string,
+    deviceId: string,
+  ): string | undefined;
 }
 
 const daemonRecordingRequesterResolver: RecordingRequesterResolver = {
@@ -625,6 +631,12 @@ const daemonRecordingRequesterResolver: RecordingRequesterResolver = {
       .resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId);
     return held !== undefined && this.baseSessionUuid(held) === ownerBaseSessionUuid;
   },
+  resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId) {
+    const daemon = DaemonState.getInstance();
+    return daemon.isInitialized()
+      ? daemon.getDevicePool().resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId)
+      : undefined;
+  },
   isDeviceHeld(deviceId) {
     return (
       DaemonState.getInstance().isInitialized() &&
@@ -643,7 +655,32 @@ export function setRecordingRequesterResolverForTesting(
 
 function mcpSessionIdOf(args: VideoRecordingArgs): string | undefined {
   const value: unknown = Reflect.get(args, INTERNAL_MCP_SESSION_PARAM);
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+  return typeof value === "string" && value.length > 0
+    ? value
+    : getToolSelectionContext()?.callerMcpSessionId;
+}
+
+function recordingStartOwner(args: VideoRecordingArgs, deviceId: string): string | undefined {
+  const connection = mcpSessionIdOf(args);
+  if (!connection) {
+    return args.sessionUuid;
+  }
+  const resolved = recordingRequesterResolver.resolveOwnedDeviceSessionForMcpSession?.(
+    connection,
+    deviceId,
+  );
+  if (resolved) {
+    return resolved;
+  }
+  const holder = recordingRequesterResolver.holdingSessionUuid?.(deviceId);
+  return holder &&
+    recordingRequesterResolver.connectionOwnsDeviceSession(
+      connection,
+      deviceId,
+      recordingRequesterResolver.baseSessionUuid(holder),
+    )
+    ? holder
+    : args.sessionUuid;
 }
 
 /**
@@ -939,6 +976,7 @@ async function startDeviceRecordings(
       continue;
     }
     try {
+      const ownerSessionUuid = recordingStartOwner(args, target.deviceId);
       // Android `screenrecord` is hard-capped at 180s. For longer Android
       // recordings, transparently produce ordered segments (<outputName>,
       // <outputName>-seg1, ...) via a timer-driven segmented session.
@@ -950,7 +988,7 @@ async function startDeviceRecordings(
           configOverrides: buildConfigOverrides(args),
           highlights: args.highlights,
           display: args.display,
-          ownerSessionUuid: args.sessionUuid,
+          ownerSessionUuid,
           timer: segmentedSessions.timer,
           maxDurationSeconds,
           startupAbortSignal: signal,
@@ -1000,7 +1038,7 @@ async function startDeviceRecordings(
         outputName: args.outputName,
         maxDurationSeconds: args.maxDuration,
         highlights: args.highlights,
-        ownerSessionUuid: args.sessionUuid,
+        ownerSessionUuid,
         abortSignal: signal,
         display: args.display,
       });
@@ -1100,7 +1138,9 @@ export function createVideoStopResponse(output: {
       failures.length > 0
         ? `Failed to stop video recordings: ${failures.map((failure) => failure.error).join("; ")}`
         : "Failed to stop video recordings.";
-    throw new ActionableError(message);
+    throw new ActionableError(
+      skipped.length > 0 ? `${message} skipped: ${JSON.stringify(skipped)}` : message,
+    );
   }
 
   return createJSONToolResponse({

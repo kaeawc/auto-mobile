@@ -497,6 +497,10 @@ Owner decisions 2026-10-09 (#10982):
 - Recording artifacts stay fetchable by id (#10958).
 - Hiding a desktop or IDE window during a recording does not release the device.
 
+A video start from the connection holding a device belongs to that holding session,
+even when the call omits `sessionUuid`. Starting a test recording on an unheld device
+is refused with `no_active_device_session`; acquire a session on that device first.
+
 An active recording with no owner keeps running when a session acquires its device:
 the acquiring holder adopts it (owner decision 2026-10-11, #11665, replacing #10961).
 Until acquisition it remains stoppable sessionless; afterwards only the holder or

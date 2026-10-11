@@ -44,6 +44,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 
 isolateToolRegistry();
 const device: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "SlotDevice" };
@@ -127,6 +128,9 @@ describe("ownerless recording acquisition adoption", () => {
       isDeviceHeld: (id) => manager.getSessionForDevice(id) !== null,
       connectionOwnsDeviceSession: (connection, id, owner) =>
         connection === connectionOwner && manager.getSessionForDevice(id) === owner,
+      holdingSessionUuid: (id) => manager.getSessionForDevice(id) ?? undefined,
+      resolveOwnedDeviceSessionForMcpSession: (connection, id) =>
+        connection === connectionOwner ? (manager.getSessionForDevice(id) ?? undefined) : undefined,
     });
     const detector = new FakeDeviceSessionManager();
     detector.setConnectedDevices([device, free]);
@@ -314,6 +318,115 @@ describe("ownerless recording acquisition adoption", () => {
     expect(await listActiveVideoRecordings()).toEqual([]);
     expect(acquisitions).toEqual([]);
   });
+
+  test("a nested bare start resolves the real pool's acquiring connection for every held target", async () => {
+    const connection = "nested-connection";
+    const owner = await pool.bindOrReuseDeviceSession(
+      "holder",
+      device.deviceId,
+      "android",
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      connection,
+    );
+    const otherOwner = await pool.bindOrReuseDeviceSession(
+      "second-holder",
+      free.deviceId,
+      "android",
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      connection,
+    );
+    setRecordingRequesterResolverForTesting({
+      baseSessionUuid: (id) => id,
+      isDeviceHeld: (id) => manager.getSessionForDevice(id) !== null,
+      holdingSessionUuid: (id) => manager.getSessionForDevice(id) ?? undefined,
+      connectionOwnsDeviceSession: (requester, id, holder) =>
+        pool.resolveOwnedDeviceSessionForMcpSession(requester, id) === holder,
+      resolveOwnedDeviceSessionForMcpSession: (requester, id) =>
+        pool.resolveOwnedDeviceSessionForMcpSession(requester, id),
+    });
+    const response = await runWithToolSelectionContext({ callerMcpSessionId: connection }, () =>
+      handler()(free, { action: "start", maxDuration: 300 }),
+    );
+    expect(JSON.parse(response.content[0].text).count).toBe(2);
+    expect(listActiveVideoRecordingIdsForOwner(owner, device.deviceId)).toHaveLength(1);
+    expect(hasSegmentedVideoRecordingsForOwner(owner, device.deviceId)).toBe(true);
+    expect(listActiveVideoRecordingIdsForOwner(undefined, device.deviceId)).toEqual([]);
+    expect(listActiveVideoRecordingIdsForOwner(otherOwner, free.deviceId)).toHaveLength(1);
+    expect(hasSegmentedVideoRecordingsForOwner(otherOwner, free.deviceId)).toBe(true);
+    expect(listActiveVideoRecordingIdsForOwner(owner, free.deviceId)).toEqual([]);
+    expect(listActiveVideoRecordingIdsForOwner(undefined, free.deviceId)).toEqual([]);
+  });
+
+  for (const maxDuration of [60, 300]) {
+    for (const resolved of [device, free]) {
+      test(`holder connection bare ${maxDuration > 180 ? "segmented" : "plain"} start owns its ${resolved === device ? "registry" : "fan-out"} target through release`, async () => {
+        await manager.createSession("holder", device.deviceId, "android");
+        connectionOwner = "acquiring-connection";
+        const response = await handler()(resolved, {
+          action: "start",
+          maxDuration,
+          __mcpSessionId: connectionOwner,
+        });
+        const started = JSON.parse(response.content[0].text);
+        const recordingId: string = started.recordings.find(
+          (record: { deviceId: string }) => record.deviceId === device.deviceId,
+        ).recordingId;
+        expect(started.count).toBe(2);
+        expect((await repository.getRecording(recordingId))?.ownerSessionUuid).toBe("holder");
+        expect(listActiveVideoRecordingIdsForOwner(undefined, device.deviceId)).toEqual([]);
+        if (maxDuration > 180) {
+          expect(hasSegmentedVideoRecordingsForOwner("holder", device.deviceId)).toBe(true);
+          expect(hasSegmentedVideoRecordingsForOwner(undefined, device.deviceId)).toBe(false);
+        }
+        for (const sessionUuid of ["stranger", undefined]) {
+          await expect(
+            handler()(device, { action: "stop", recordingId, sessionUuid }),
+          ).rejects.toMatchObject({ code: "device_owned_by_other_session" });
+        }
+        expect(backend.stopCalls).toEqual([]);
+        const announced: string[][] = [];
+        manager.onSessionRelease((id, _deviceId, reason, snapshot) => {
+          announceSessionRelease(
+            {
+              takeRecordingIds: takeRecordingIdsFinalizedByRelease,
+              emit: (_session, _reason, _snapshot, extras) => {
+                announced.push(extras?.recordingIds ?? []);
+              },
+            },
+            { fallbacks: null, announced: null },
+            id,
+            reason,
+            snapshot,
+          );
+        });
+        await manager.releaseSession("holder");
+        await manager.drainPendingDeviceCleanups(1_000);
+        expect(announced).toEqual([[recordingId]]);
+        expect(backend.stopCalls.map((call) => call.recordingId)).toEqual([recordingId]);
+        expect((await repository.getRecording(recordingId))?.status).toBe("completed");
+        expect(await listActiveVideoRecordings({ deviceId: device.deviceId })).toEqual([]);
+        expect(hasSegmentedVideoRecordingsForOwner("holder", device.deviceId)).toBe(false);
+        await manager.createSession("next", device.deviceId, "android");
+        expect(listActiveVideoRecordingIdsForOwner("next", device.deviceId)).toEqual([]);
+        expect(hasSegmentedVideoRecordingsForOwner("next", device.deviceId)).toBe(false);
+        expect((await repository.getRecording(recordingId))?.ownerSessionUuid).toBe("holder");
+        // The same fan-out still creates an ownerless capture on the unheld device.
+        expect(listActiveVideoRecordingIdsForOwner(undefined, free.deviceId)).toHaveLength(1);
+      });
+    }
+  }
 
   test("between holder publication and adoption, existing sessionless fan-out admission refuses a start", async () => {
     const adopt = createOwnerlessRecordingAcquisitionCleanup(manager);

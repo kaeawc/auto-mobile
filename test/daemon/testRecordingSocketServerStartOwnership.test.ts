@@ -17,6 +17,7 @@ import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { noActiveDeviceSessionPayload } from "../../src/server/proxyServer";
 
 class TestableServer extends TestRecordingSocketServer {
   invoke(request: TestRecordingCommand) {
@@ -29,6 +30,7 @@ describe("test recording start holder admission (#11665)", () => {
   const iphone: BootedDevice = { deviceId: "physical-iphone", name: "iPhone", platform: "ios" };
   const otherDevice: BootedDevice = { deviceId: "other-iphone", name: "Other", platform: "ios" };
   let manager: SessionManager;
+  let pool: DevicePool;
   let timer: FakeTimer;
   let readyCalls: number;
   let selectionCalls: number;
@@ -45,7 +47,7 @@ describe("test recording start holder admission (#11665)", () => {
     const discovery = new FakeDeviceUtils();
     discovery.setBootedDevices("android", [device]);
     discovery.setBootedDevices("ios", [iphone, otherDevice]);
-    const pool = new DevicePool(
+    pool = new DevicePool(
       createDevicePoolDependencies(manager, "recording-start", { timer, deviceManager: discovery }),
     );
     await pool.initializeWithDevices([device, iphone, otherDevice]);
@@ -113,6 +115,87 @@ describe("test recording start holder admission (#11665)", () => {
     expect(readyCalls).toBe(0);
   });
 
+  for (const sessionUuid of ["stranger", "unknown-session", undefined]) {
+    for (const deviceId of [device.deviceId, undefined]) {
+      test(`${sessionUuid ?? "sessionless"} gets the acquire-session refusal on an unheld ${deviceId ? "explicit" : "selected"} device with no setup`, async () => {
+        await manager.releaseSession("holder");
+        const response = await server.invoke({ command: "start", deviceId, sessionUuid });
+        const { error } = noActiveDeviceSessionPayload({
+          message:
+            `testRecording start refused: no session of yours holds device '${device.deviceId}'. ` +
+            "Call getAndroid or getApple to acquire a session on it first.",
+          reason: "device_not_held",
+        });
+        expect(response).toEqual({
+          success: false,
+          ...error,
+          error: error.message,
+        });
+        expect(response).toMatchObject({
+          code: "no_active_device_session",
+          retryable: false,
+          nextAction: "acquire_new_session",
+          recovery: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
+        });
+        expect(readyCalls).toBe(0);
+        expect(getTestRecordingStatus(timer)).toBeNull();
+      });
+    }
+  }
+
+  test("an unheld managed-slot target keeps its slot refusal before any setup", async () => {
+    await manager.releaseSession("holder");
+    let slotCalls = 0;
+    const gatedServer = new TestableServer(
+      undefined,
+      timer,
+      new SessionScopedStreamAuthenticator(() => manager, "testRecording", {}),
+      { assertDeviceActionable: () => {} },
+      {
+        selectDevice: async () => device,
+        readyDevice: async (selected) => {
+          readyCalls++;
+          return selected;
+        },
+      },
+      async () => {
+        slotCalls++;
+        throw new Error("device_assigned_to_managed_slot");
+      },
+    );
+    await expect(
+      gatedServer.invoke({ command: "start", deviceId: device.deviceId }),
+    ).rejects.toThrow("device_assigned_to_managed_slot");
+    expect(slotCalls).toBe(1);
+    expect(readyCalls).toBe(0);
+    expect(getTestRecordingStatus(timer)).toBeNull();
+  });
+
+  test("a holder released during the slot gate is refused before setup", async () => {
+    const gatedServer = new TestableServer(
+      undefined,
+      timer,
+      new SessionScopedStreamAuthenticator(() => manager, "testRecording", {}),
+      { assertDeviceActionable: () => {} },
+      {
+        selectDevice: async () => device,
+        readyDevice: async (selected) => {
+          readyCalls++;
+          return selected;
+        },
+      },
+      async () => {
+        await manager.releaseSession("holder");
+      },
+    );
+    expect(await gatedServer.invoke({ command: "start", sessionUuid: "holder" })).toMatchObject({
+      success: false,
+      code: "no_active_device_session",
+    });
+    expect(readyCalls).toBe(0);
+    expect(getTestRecordingStatus(timer)).toBeNull();
+  });
+
   test("ownership is rechecked after the managed-slot gate before setup", async () => {
     let owner = "holder";
     const ownership = spyOn(manager, "getSessionForDevice").mockImplementation(() => owner);
@@ -169,6 +252,44 @@ describe("test recording start holder admission (#11665)", () => {
     });
     expect(response).toMatchObject({ success: true, recordingId: active.recordingId });
     expect(selectionCalls).toBe(1);
+    expect(readyCalls).toBe(1);
+  });
+
+  test("the acquiring connection starts under the session it acquired", async () => {
+    await manager.releaseSession("holder");
+    const acquired = await pool.bindOrReuseDeviceSession(
+      "connection-holder",
+      device.deviceId,
+      "android",
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      "acquiring-connection",
+    );
+    expect(
+      pool.resolveOwnedDeviceSessionForMcpSession("acquiring-connection", device.deviceId),
+    ).toBe(acquired);
+    const active = await startTestRecording(
+      device,
+      timer,
+      new CountingIdGenerator(),
+      () => ({
+        start: async () => {},
+        stop: async () => ({ steps: [{ tool: "tapOn", params: { text: "OK" } }], stepCount: 1 }),
+        stepCount: 1,
+      }),
+      acquired,
+    );
+    const response = await server.invoke({
+      command: "start",
+      deviceId: device.deviceId,
+      sessionUuid: acquired,
+    });
+    expect(response).toMatchObject({ success: true, recordingId: active.recordingId });
     expect(readyCalls).toBe(1);
   });
 });

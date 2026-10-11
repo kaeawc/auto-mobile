@@ -153,7 +153,15 @@ describe("sessionless videoRecording fan-out reaches a device another session ho
 
   test("an empty admitted target remains an error when another target is skipped", async () => {
     await expect(handler()(freeDevice, { action: "stop" })).rejects.toThrow(
-      "Failed to stop video recordings: No active video recording found for device.",
+      "Failed to stop video recordings: No active video recording found for device. skipped: " +
+        JSON.stringify([
+          {
+            deviceId: heldDevice.deviceId,
+            platform: "android",
+            code: "device_owned_by_other_session",
+            reason: "Device is held by another session.",
+          },
+        ]),
     );
     expect(backend.stopCalls).toEqual([]);
   });
@@ -204,6 +212,12 @@ describe("sessionless videoRecording fan-out reaches a device another session ho
     });
     expect(started.skipped).toBeUndefined();
     expect(started.count).toBe(2);
+    expect(
+      (await listActiveVideoRecordings({ deviceId: heldDevice.deviceId }))[0].ownerSessionUuid,
+    ).toBe(HOLDER);
+    expect(
+      (await listActiveVideoRecordings({ deviceId: freeDevice.deviceId }))[0].ownerSessionUuid,
+    ).toBeUndefined();
     for (const record of started.recordings) {
       await fsPromises.writeFile(record.outputPath, "video");
     }

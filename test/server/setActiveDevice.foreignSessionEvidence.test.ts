@@ -1,30 +1,29 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { DaemonState } from "../../../src/daemon/daemonState";
-import { DevicePool } from "../../../src/daemon/devicePool";
-import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import {
   DEVICE_OWNED_BY_OTHER_SESSION_CODE,
   type InputDeviceOwnedError,
-} from "../../../src/daemon/inputDeviceOwnership";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import type { BootedDevice } from "../../../src/models";
-import { refuseControlOnForeignOwnedSession } from "../../../src/server/foreignOwnedSessionRefusal";
-import { logger } from "../../../src/utils/logger";
-import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
-import { RealToolCallPath } from "../../helpers/realToolCallPath";
+} from "../../src/daemon/inputDeviceOwnership";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import type { BootedDevice } from "../../src/models";
+import { refuseControlOnForeignOwnedSession } from "../../src/server/foreignOwnedSessionRefusal";
+import { logger } from "../../src/utils/logger";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { RealToolCallPath } from "../helpers/realToolCallPath";
 
 /**
  * A control call that names a session another connected client owns is refused with
  * `device_owned_by_other_session`, and the refusal's wire evidence is "the held device"
  * (`InputDeviceOwnedError.toPayload`): the device the named session holds. Every tool gets that
- * from `refuseControlOnForeignOwnedSession`. `setActiveDevice` refuses the same request in its own
- * handler and fills the evidence with the device the caller ASKED for, so a refusal about
- * session S comes back naming a free device as held and saying it "is already assigned to
- * session S". A client that reads `deviceId` (or the message) to learn what is taken skips a
+ * from `refuseControlOnForeignOwnedSession`, and `setActiveDevice`, which refuses in its own
+ * handler, calls it too (#11647): a refusal about session S never names the free device the caller
+ * asked for as held, so a client that reads `deviceId` to learn what is taken does not skip a
  * device nobody holds.
  */
 describe("setActiveDevice naming a session another connection owns", () => {
@@ -123,8 +122,6 @@ describe("setActiveDevice naming a session another connection owns", () => {
     // The free device is held by nobody, before and after the refused call.
     expect(pool.getDevice(free.deviceId)?.sessionId ?? null).toBeNull();
     expect(manager.getSessionForDevice(free.deviceId)).toBeNull();
-    // Actual: deviceId 'emulator-5556' and "Device 'emulator-5556' is already assigned to
-    // session sess-a".
     expect(error?.message).not.toContain(`Device '${free.deviceId}' is already assigned`);
     expect(error?.toPayload()).toEqual(reference?.toPayload());
   });

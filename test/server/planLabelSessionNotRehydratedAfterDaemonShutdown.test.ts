@@ -53,6 +53,8 @@ describe("daemon shutdown while a multi-device plan runs", () => {
 
   /** daemon.ts `releaseActiveSessionsForShutdown`: cancel and release every known session. */
   const shutDown = ({ sessionManager, pool }: HuntDaemon): void => {
+    // daemon.ts `quiesceProvisioningIngress` fences session creation before the releases.
+    sessionManager.stopAcceptingSessionCreations();
     for (const sessionId of sessionManager.getAllKnownSessionIds()) {
       const deviceId = sessionManager.getSession(sessionId)?.assignedDevice ?? null;
       void cancelAndReleaseSession(sessionId, "daemon-shutdown", () =>
@@ -82,7 +84,12 @@ describe("daemon shutdown while a multi-device plan runs", () => {
         { execution: { executionId: execution.id, startTime: execution.startTime } },
         () => hunt.runPlan(twoDevicePlan(["B", "A"]), execution.abortController.signal),
       );
-      expect(result.success).toBe(false);
+      // The plan answers for itself, and tells its caller the daemon went away: run it again.
+      expect([result.success, result.code, result.retryable]).toEqual([
+        false,
+        "daemon_shutting_down",
+        true,
+      ]);
     } finally {
       executionTracker.endExecution(execution.id);
       hunt.setProbeStep(async () => undefined);
@@ -121,6 +128,13 @@ describe("daemon shutdown while a multi-device plan runs", () => {
       await expect(sessionManager.getOrCreateSession(LABEL_B, pool, "ios")).rejects.toBeInstanceOf(
         TerminalSessionError,
       );
+      // Nor while a new plan run has published its labels and not yet allocated them: the row
+      // is the previous run's, not a handoff of this one.
+      sessionManager.setDeviceLabels(BASE, { A: BASE, B: LABEL_B });
+      expect(sessionManager.getBaseSessionOfDerivedLabel(LABEL_B)).toBe(BASE);
+      await expect(
+        sessionManager.getOrCreateSession(LABEL_B, pool, "ios", undefined, true),
+      ).rejects.toBeInstanceOf(TerminalSessionError);
       expect(hunt.poolHolder(labelDevice)).toBeUndefined();
       expect((await hunt.persistence.getSession(LABEL_B))?.release_reason).toBe(rowReason);
     },

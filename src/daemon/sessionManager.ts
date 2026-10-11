@@ -1414,6 +1414,11 @@ export class SessionManager {
    * (#11572). See {@link openPlanLabelMints}.
    */
   private readonly planLabelMints = new Map<string, number>();
+  /**
+   * Derived label sessions a plan run in this daemon minted, until their base is released
+   * (#11572). Only these may be recovered by name, after a device restart during their run.
+   */
+  private readonly runningPlanLabelSessions = new Set<string>();
   private createdCallbacks: SessionCreatedCallback[] = [];
   private deviceUnboundCallbacks: SessionDeviceUnboundCallback[] = [];
   private readonly deviceOwnershipCallbacks = new Set<
@@ -2733,6 +2738,11 @@ export class SessionManager {
     this.acceptingSessionCreations = false;
   }
 
+  /** False once daemon shutdown has fenced session creation; it never becomes true again. */
+  isAcceptingSessionCreations(): boolean {
+    return this.acceptingSessionCreations;
+  }
+
   /**
    * Race one of a creation's waits against {@link SESSION_CREATE_WAIT_TIMEOUT_MS} (#10963). On
    * timeout the caller gets a typed retryable error and `onTimeout` runs; the wait itself is not
@@ -2843,6 +2853,9 @@ export class SessionManager {
       session.clientName = observerClientName;
     }
     this.observerSessions?.release(session.sessionId, "promotion");
+    if (session.persistenceMetadata?.source === PLAN_LABEL_SESSION_SOURCE) {
+      this.runningPlanLabelSessions.add(session.sessionId);
+    }
     this.sessions.set(session.sessionId, session);
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
     this.deviceSessionMap.set(session.assignedDevice, session.sessionId);
@@ -8528,7 +8541,7 @@ export class SessionManager {
    * `plan-auto-release` or `daemon-shutdown` row would be re-issued by name as a session of its
    * own, holding a device with no plan, label map or base. The answer is terminal; no fence is
    * raised and the row is left as it is, so the next plan run can mint the name. While the plan
-   * that published the label is still running, a row waiting out a recoverable handoff (a device
+   * run that minted the label is still running, a row waiting out a recoverable handoff (a device
    * restart) is recovered as before.
    */
   private refusePlanLabelSessionOutsideItsRun(
@@ -8540,7 +8553,9 @@ export class SessionManager {
     }
     const recoverable =
       !persisted.release_reason || isRecoverableDaemonReleaseReason(persisted.release_reason);
-    if (recoverable && this.getBaseSessionOfDerivedLabel(sessionId) !== undefined) {
+    // A row this daemon did not mint under a still-running plan is a previous run's, whatever its
+    // reason (a restarted daemon finds the old `daemon-shutdown` row): not a handoff to recover.
+    if (recoverable && this.runningPlanLabelSessions.has(sessionId)) {
       return;
     }
     throw new TerminalSessionError(sessionId, {
@@ -8575,6 +8590,8 @@ export class SessionManager {
   takeDerivedLabelSessions(baseSessionId: string): string[] {
     const derived = this.derivedLabelSessionsByBase.get(baseSessionId);
     this.derivedLabelSessionsByBase.delete(baseSessionId);
+    // The base is being released: its plan run, and with it every label session's, is over.
+    derived?.forEach((labelSession) => this.runningPlanLabelSessions.delete(labelSession));
     return derived ? [...derived] : [];
   }
 

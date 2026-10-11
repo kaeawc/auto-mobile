@@ -2,6 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:te
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { TerminalSessionError } from "../../src/daemon/sessionManager";
+import { deviceRestartReleaseReason } from "../../src/db/deviceSessionRepository";
 import { deviceLossCancellationReason } from "../../src/utils/deviceLossCancellationReason";
 import {
   BASE,
@@ -132,6 +133,35 @@ describe("a plan re-run after a label device was lost mid-plan", () => {
     const rerun = await hunt.runPlan(twoDevicePlan(["B"]));
     expect(rerun.error).toBeUndefined();
     expect(rerun.success).toBe(true);
+  });
+
+  test("a label session whose device restarts mid-plan is recovered by name, until the plan ends", async () => {
+    let recovered: string | undefined;
+    hunt.setProbeStep(async (device) => {
+      const { sessionManager, pool } = hunt.daemon();
+      const reason = deviceRestartReleaseReason(device.deviceId);
+      await releaseSessionAndDevice(sessionManager, pool, device.deviceId, LABEL_B, reason);
+      // The plan's next call on label B, with the device back: the same session, as for any
+      // session waiting out a device restart.
+      recovered = (await sessionManager.getOrCreateSession(LABEL_B, pool, "ios", undefined, true))
+        .assignedDevice;
+      expect(recovered).toBe(device.deviceId);
+      // The device restarts again, and the plan ends before any call brings the session back.
+      await releaseSessionAndDevice(sessionManager, pool, device.deviceId, LABEL_B, reason);
+    });
+    await hunt.runPlan(twoDevicePlan(["B"]));
+    hunt.setProbeStep(async () => undefined);
+    expect(recovered).toBeDefined();
+
+    const { sessionManager, pool } = hunt.daemon();
+    expect((await hunt.persistence.getSession(LABEL_B))?.release_reason).toBe(
+      deviceRestartReleaseReason(recovered ?? ""),
+    );
+    // The plan is over: the handoff row is no longer recovered by name.
+    await expect(
+      sessionManager.getOrCreateSession(LABEL_B, pool, "ios", undefined, true),
+    ).rejects.toBeInstanceOf(TerminalSessionError);
+    expect(hunt.poolHolder(recovered ?? "")).toBeUndefined();
   });
 
   test("a label mint is open only for the allocation of the plan run that asked for it", async () => {

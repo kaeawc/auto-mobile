@@ -144,10 +144,12 @@ long as the plan run (#11572), whichever reason ended it:
   session released with `plan-auto-release` would be re-issued by name.
 - It is never rehydrated after a daemon restart, whether its row was live,
   released by `daemon-shutdown` or waiting out a `device-restart:<device>`: its
-  device is free at once, and the plan's caller gets `daemon_shutting_down`
-  (`retryable: true`) for the interrupted `executePlan` and runs the plan again.
-  While the plan is still running in the same daemon, a label session waiting
-  out a device restart is recovered like any other.
+  device is free at once. The `executePlan` the shutdown cut answers with its
+  own result, `success: false` with `code: "daemon_shutting_down"` and
+  `retryable: true` (steps may already have run, as `executedSteps` reports),
+  and the caller runs the plan again. While the plan is still running in the
+  same daemon, a label session waiting out a device restart is recovered like
+  any other.
 
 The daemon recognizes these rows by `device_sessions.source = 'plan-label'`.
 

@@ -2,10 +2,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:te
 import {
   cancelAndReleaseSession,
   releaseSessionAndDevice,
-} from "../../../src/daemon/releaseSessionAndDevice";
-import { SessionHeartbeatMonitor } from "../../../src/daemon/SessionHeartbeatMonitor";
-import { runWithToolSelectionContext } from "../../../src/features/toolSelection/toolSelectionContext";
-import { executionTracker } from "../../../src/server/executionTracker";
+} from "../../src/daemon/releaseSessionAndDevice";
+import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import { executionTracker } from "../../src/server/executionTracker";
 import {
   BASE,
   LABEL_B,
@@ -15,7 +15,7 @@ import {
   twoDevicePlan,
   type HuntDaemon,
   type PlanSessionHunt,
-} from "./planSessionHuntHarness";
+} from "../helpers/planSessionHarness";
 
 // Hunt 2026-10-10 (plan sessions). A daemon shutdown while a multi-device plan runs releases
 // every known session with `daemon-shutdown` (daemon.ts `releaseActiveSessionsForShutdown`),

@@ -438,6 +438,14 @@ export interface Session {
  */
 export const ANONYMOUS_ACQUISITION_SESSION_SOURCE = "anonymous-acquisition";
 
+/**
+ * `device_sessions.source` of a derived `<base>:<label>` session a multi-device plan run minted
+ * (#11572). Its lifetime is that plan run: the row is never rehydrated after a daemon restart, a
+ * call naming it outside its run is refused as terminal, and only a later plan run's allocation
+ * may mint the name again. It is persisted, so a daemon restart keeps the rule.
+ */
+export const PLAN_LABEL_SESSION_SOURCE = "plan-label";
+
 /** Whether an anonymous acquisition (no MCP connection id) created this session (#11071). */
 export function isAnonymousAcquisitionSession(session: Session): boolean {
   return session.persistenceMetadata?.source === ANONYMOUS_ACQUISITION_SESSION_SOURCE;
@@ -1401,6 +1409,11 @@ export class SessionManager {
   // Base session → its derived `${base}:${label}` sessions (#11091), outside the base's cache so
   // it survives the base's removal. Consumed by takeDerivedLabelSessions.
   private readonly derivedLabelSessionsByBase = new Map<string, Set<string>>();
+  /**
+   * Derived label sessions a plan run's allocation may mint right now, counted per open run
+   * (#11572). See {@link openPlanLabelMints}.
+   */
+  private readonly planLabelMints = new Map<string, number>();
   private createdCallbacks: SessionCreatedCallback[] = [];
   private deviceUnboundCallbacks: SessionDeviceUnboundCallback[] = [];
   private readonly deviceOwnershipCallbacks = new Set<
@@ -2615,6 +2628,7 @@ export class SessionManager {
       throw new DaemonSessionCreationRejectedError(sessionId);
     }
     this.assertTerminalReleaseAdmission(sessionId, this.sessions.get(sessionId));
+    this.liftPlanLabelFenceForMint(sessionId);
     let terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
     if (terminalRelease) {
       throw new TerminalSessionError(sessionId, terminalRelease);
@@ -2629,6 +2643,8 @@ export class SessionManager {
     if (activeReleases.length > 0) {
       await this.withinCreateDeadline(sessionId, assignedDevice, Promise.all(activeReleases));
       this.assertTerminalReleaseAdmission(sessionId, this.sessions.get(sessionId));
+      // The release just awaited ended the label's previous run, not this one.
+      this.liftPlanLabelFenceForMint(sessionId);
       terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
       if (terminalRelease) {
         throw new TerminalSessionError(sessionId, terminalRelease);
@@ -2642,6 +2658,7 @@ export class SessionManager {
 
     const now = this.sessionNow();
     const persistedRecovery = this.pendingPersistedRecoveries.get(sessionId);
+    const creatorSource = this.creatorSourceForCreation(sessionId, persistenceSource);
     const liveness = sessionCreationLiveness(
       timeoutMs,
       heartbeatTimeoutMs,
@@ -2661,10 +2678,10 @@ export class SessionManager {
       lastHeartbeat: now,
       ...liveness,
       ownership: initialOwnership,
-      ...(persistenceSource
+      ...(creatorSource
         ? {
             persistenceMetadata: {
-              source: persistenceSource,
+              source: creatorSource,
               autolockEnabled: false,
               mcpSessionId: null,
               daemonSessionId: null,
@@ -2797,7 +2814,10 @@ export class SessionManager {
     creation?: PendingSessionCreation,
     claimedRow?: RecoverableRowIncarnation,
   ): Promise<Session> {
-    const persistedTerminalRelease = await this.getPersistedTerminalRelease(session.sessionId);
+    // A plan run minting its label writes over the row its previous run left, terminal or not.
+    const persistedTerminalRelease = this.planLabelMints.has(session.sessionId)
+      ? undefined
+      : await this.getPersistedTerminalRelease(session.sessionId);
     if (persistedTerminalRelease) {
       this.terminalReleaseSnapshots.set(session.sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(session.sessionId, persistedTerminalRelease);
@@ -3714,6 +3734,7 @@ export class SessionManager {
     shared: SharedSessionAssignment,
   ): Promise<Session> {
     let persisted = await this.readPersistedSession(sessionId);
+    this.refusePlanLabelSessionOutsideItsRun(sessionId, persisted);
     const persistedTerminalRelease = persisted
       ? this.terminalReleaseFromPersisted(sessionId, persisted)
       : undefined;
@@ -8438,6 +8459,94 @@ export class SessionManager {
       }
     }
     this.updateSessionCache(sessionId, { deviceLabels: labels });
+  }
+
+  /**
+   * A plan run is about to allocate the derived `${base}:${label}` sessions in `labels` (#11572).
+   * A derived label session lives only as long as its plan run, so however the previous run's
+   * session ended (device lost or killed, daemon shutdown, the plan's own release), this run's
+   * allocation may mint the name again: {@link createSession} lifts the fence the previous run
+   * left and writes over its row. Nothing else may. A call that merely names the label session
+   * while it is not live (a late call of the old run, a stray client) is still refused as terminal
+   * by {@link getOrCreateSession}. The caller invokes the returned function when its allocation
+   * settles.
+   */
+  openPlanLabelMints(baseSessionId: string, labels: DeviceLabelMap): () => void {
+    const derived = [...new Set(Object.values(labels))].filter(
+      (labelSession) => labelSession !== baseSessionId,
+    );
+    for (const labelSession of derived) {
+      this.planLabelMints.set(labelSession, (this.planLabelMints.get(labelSession) ?? 0) + 1);
+    }
+    let open = true;
+    return () => {
+      if (!open) {
+        return;
+      }
+      open = false;
+      for (const labelSession of derived) {
+        const remaining = (this.planLabelMints.get(labelSession) ?? 1) - 1;
+        if (remaining > 0) {
+          this.planLabelMints.set(labelSession, remaining);
+        } else {
+          this.planLabelMints.delete(labelSession);
+        }
+      }
+    };
+  }
+
+  /** The persisted creator of a session being created: a plan run's label mint marks its row. */
+  private creatorSourceForCreation(
+    sessionId: string,
+    persistenceSource: string | undefined,
+  ): string | undefined {
+    return this.planLabelMints.has(sessionId) ? PLAN_LABEL_SESSION_SOURCE : persistenceSource;
+  }
+
+  /**
+   * Lift the terminal fence a derived label session's previous plan run left, for the run that is
+   * minting it now (#11572). The pending terminal row write and its journal intent go with it, as
+   * when a release is superseded: they belong to the incarnation that ended.
+   */
+  private liftPlanLabelFenceForMint(sessionId: string): void {
+    if (!this.planLabelMints.has(sessionId) || this.sessions.has(sessionId)) {
+      return;
+    }
+    if (this.terminalReleaseSnapshots.delete(sessionId)) {
+      this.terminalReleaseReasonStates.delete(sessionId);
+      this.terminalReleaseJournal.resolve(sessionId);
+    }
+  }
+
+  /**
+   * Refuse a call naming a derived label session that is not live and whose plan run is over
+   * (#11572): the row a plan run minted, with no plan in this daemon publishing it. Without this a
+   * `plan-auto-release` or `daemon-shutdown` row would be re-issued by name as a session of its
+   * own, holding a device with no plan, label map or base. The answer is terminal; no fence is
+   * raised and the row is left as it is, so the next plan run can mint the name. While the plan
+   * that published the label is still running, a row waiting out a recoverable handoff (a device
+   * restart) is recovered as before.
+   */
+  private refusePlanLabelSessionOutsideItsRun(
+    sessionId: string,
+    persisted: DeviceSession | undefined,
+  ): void {
+    if (persisted?.source !== PLAN_LABEL_SESSION_SOURCE) {
+      return;
+    }
+    const recoverable =
+      !persisted.release_reason || isRecoverableDaemonReleaseReason(persisted.release_reason);
+    if (recoverable && this.getBaseSessionOfDerivedLabel(sessionId) !== undefined) {
+      return;
+    }
+    throw new TerminalSessionError(sessionId, {
+      ...this.releaseSnapshotFromPersisted(
+        sessionId,
+        persisted,
+        persisted.release_reason ?? PLAN_AUTO_RELEASE_REASON,
+      ),
+      terminal: true,
+    });
   }
 
   /**

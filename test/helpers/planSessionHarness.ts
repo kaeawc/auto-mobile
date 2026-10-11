@@ -1,20 +1,20 @@
 import { spyOn } from "bun:test";
 import { z } from "zod/v4";
-import { DaemonState } from "../../../src/daemon/daemonState";
-import { registerDerivedLabelSessionReleaseCascade } from "../../../src/daemon/derivedLabelSessionReleaseCascade";
-import { DevicePool } from "../../../src/daemon/devicePool";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import type { BootedDevice } from "../../../src/models";
-import { registerPlanTools } from "../../../src/server/planTools";
-import { ToolRegistry } from "../../../src/server/toolRegistry";
-import * as videoRecordingManager from "../../../src/server/videoRecordingManager";
-import { FakeDeviceSessionManager } from "../../fakes/FakeDeviceSessionManager";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
-import { FakeDisplayInventoryProvider } from "../../fakes/FakeDisplayInventoryProvider";
-import { FakePlanVideoRecorder } from "../../fakes/FakePlanVideoRecorder";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { registerDerivedLabelSessionReleaseCascade } from "../../src/daemon/derivedLabelSessionReleaseCascade";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import type { BootedDevice } from "../../src/models";
+import { registerPlanTools } from "../../src/server/planTools";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import * as videoRecordingManager from "../../src/server/videoRecordingManager";
+import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
+import { FakePlanVideoRecorder } from "../fakes/FakePlanVideoRecorder";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { createDevicePoolDependencies } from "./devicePoolDependencies";
 
 /**
  * Harness for the plan-session hunt (2026-10-10): the real `executePlan` tool (registry wrapper,

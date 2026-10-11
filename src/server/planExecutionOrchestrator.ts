@@ -701,17 +701,26 @@ export class PlanExecutionOrchestrator {
       throw error;
     };
 
-    const allocation = Promise.resolve().then(
-      () =>
-        slotDevices ??
-        this.requestDeviceAllocation(
-          devicePool,
-          normalized,
-          effectiveLabels,
-          labelToSessionMap,
-          sessionIds,
-        ),
-    );
+    // A derived label session lives only as long as its plan run (#11572): this run's allocation
+    // may mint each label again, however the previous run's label session ended. A managed slot
+    // serves its labels with live slot sessions and mints nothing.
+    const allocation = Promise.resolve().then(() => {
+      if (slotDevices) {
+        return slotDevices;
+      }
+      const closeLabelMints = sessionManager.openPlanLabelMints(sessionUuid, labelToSessionMap);
+      return Promise.resolve()
+        .then(() =>
+          this.requestDeviceAllocation(
+            devicePool,
+            normalized,
+            effectiveLabels,
+            labelToSessionMap,
+            sessionIds,
+          ),
+        )
+        .finally(closeLabelMints);
+    });
 
     const sessionToDeviceMap = await allocation.catch((error) => {
       return restorePreviousDeviceLabels(error);

@@ -33,6 +33,7 @@ test/daemon/anonymousAcquisitionSessionSource.test.ts
 test/daemon/appearanceConfigPerSession.test.ts
 test/daemon/appearanceSocketServer.test.ts
 test/daemon/appearanceSocketServerCharacterization.test.ts
+test/daemon/appearanceSyncHolderRecheck.test.ts
 test/daemon/appearanceSyncOff.test.ts
 test/daemon/appearanceSyncSettingDefaults.test.ts
 test/daemon/autolockProxyHeartbeatIdle.test.ts
@@ -232,6 +233,7 @@ test/daemon/swipeOnCancelThroughDaemon.test.ts
 test/daemon/telemetryBackfillBounds.test.ts
 test/daemon/telemetryIdentityTimelineBuckets.test.ts
 test/daemon/testRecordingSocketServerAuth.test.ts
+test/daemon/testRecordingSocketServerReadinessSession.test.ts
 test/daemon/tokenOwnedSessionsLastUsedAt.test.ts
 test/daemon/toolCallActivityLatestDeadline.test.ts
 test/daemon/unsettledExecutionVeto.test.ts

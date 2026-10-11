@@ -51,6 +51,8 @@ import {
 } from "../daemon/managedSlots/managedConnectionScope";
 import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
 import { MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS } from "../daemon/inputDeviceOwnership";
+import { DeviceAssignedToManagedSlotError } from "../daemon/managedSlots/managedSlotRefusal";
+import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import type { DevicePool } from "../daemon/devicePool";
 import { releasePlanSessionAndDevice } from "../daemon/releaseSessionAndDevice";
@@ -783,9 +785,59 @@ function multipleDevicesError(
   );
 }
 
-/** {@link isDeviceHeld}, false outside daemon mode where no session can hold a device. */
-function isDeviceHeldInDaemon(deviceId: string): boolean {
-  return DaemonState.getInstance().isInitialized() && isDeviceHeld(deviceId);
+/**
+ * Whether a sessionless READ's target is someone else's (#11641): a local session or autolock
+ * holder, a managed slot (idle or not), or a device another daemon claims. Such a read watches the
+ * device through the read-only path and is never refused; readiness (the current-device pin,
+ * appearance and settings writes) is the holder's alone. The slot and foreign-daemon verdicts are
+ * the pool gates a control call is refused by, with their one-second snapshots. An ownership state
+ * that cannot be read counts as held: a read must not risk writing to someone else's device.
+ * False outside daemon mode, where nothing can hold a device.
+ */
+async function isSessionlessReadTargetHeld(
+  toolName: string,
+  deviceId: string,
+  requestedPlatform: unknown,
+): Promise<boolean> {
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return false;
+  }
+  if (isDeviceHeld(deviceId)) {
+    return true;
+  }
+  const pool = daemonState.getDevicePool();
+  try {
+    for (const platform of managedSlotPlatformsFor(
+      pool.getDevice(deviceId)?.platform,
+      requestedPlatform,
+    )) {
+      await managedSlotPoolGate(pool).assertNotAssignedToManagedSlot?.({
+        action: toolName,
+        deviceId,
+        platform,
+        maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
+      });
+      await assertControlNotOnForeignDaemonDevice({ deviceId, platform, gate: pool });
+    }
+    return false;
+  } catch (error) {
+    if (
+      error instanceof DeviceAssignedToManagedSlotError ||
+      error instanceof DeviceOwnedByOtherDaemonError
+    ) {
+      // A slot or another daemon holds the device: an expected verdict, so the read watches it.
+      logger.debug(
+        `[ToolRegistry] ${toolName} on ${deviceId} is read-only: ${errorMessage(error)}`,
+      );
+    } else {
+      logger.warn(
+        `[ToolRegistry] ownership of ${deviceId} unreadable; ${toolName} is read-only: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    return true;
+  }
 }
 
 /**
@@ -1268,9 +1320,15 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         }
         // A sessionless read that would land on a held device (its explicit deviceId, or the device
         // readiness would select) watches it through the read-only path: no readiness, pin or
-        // settings work on the holder's device (#10830, #10970). This is the only such check; the
-        // holder checks before it exempt reads.
-        if (readOnly && !sessionUuid && readinessTarget && isDeviceHeldInDaemon(readinessTarget)) {
+        // settings work on the holder's device (#10830, #10970). The holder may also be a managed
+        // slot or another daemon (#11641). This is the only such check; the holder checks before
+        // it exempt reads.
+        if (
+          readOnly &&
+          !sessionUuid &&
+          readinessTarget &&
+          (await isSessionlessReadTargetHeld(name, readinessTarget, args.platform))
+        ) {
           return resolveSessionlessDeviceRead(
             input,
             options.sessionlessDeviceRead ?? this.defaultDeviceRead,
@@ -1292,6 +1350,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         );
         device = await deviceSessionManager.ensureDeviceReady(platform, providedDeviceId, {
           sessionId: sessionUuid,
+          intent: readOnly && !sessionUuid ? "read" : undefined,
           skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
           readiness:
             typeof options.deviceReadiness === "function"

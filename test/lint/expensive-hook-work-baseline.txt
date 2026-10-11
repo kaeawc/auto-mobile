@@ -93,8 +93,6 @@ test/server/androidSegmentedPlanManifestComposition.test.ts	temp-dir
 test/server/derivedLabelSessionForeignConnection.test.ts	heavy-harness
 test/server/derivedLabelSessionRestoreOwnership.test.ts	heavy-harness
 test/server/deviceLabelMapping.test.ts	heavy-harness
-test/server/deviceSnapshotJournalSweep.test.ts	recursive-rm
-test/server/deviceSnapshotJournalSweep.test.ts	temp-dir
 test/server/deviceTools.acquisitionWaitDeadlines.test.ts	heavy-harness
 test/server/deviceTools.androidStartupLease.test.ts	heavy-harness
 test/server/deviceTools.cancelDuringCrossDaemonClaim.test.ts	heavy-harness

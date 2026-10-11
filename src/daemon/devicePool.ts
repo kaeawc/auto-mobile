@@ -712,6 +712,8 @@ export interface TargetDeviceDiscoverySnapshot {
 
 export interface TargetDeviceDiscoveryOptions {
   deviceId: string;
+  sessionId?: string;
+  readinessReservationOwners?: ReadonlySet<symbol>;
   sourceImage?: DeviceInfo;
   unavailableMessage: string;
   platform: Platform;
@@ -7912,6 +7914,8 @@ export class DevicePool {
     const heldBefore = this.devices.get(deviceId)?.sessionId ?? null;
     const boundSessionId = await this.withTargetDeviceDiscovery({
       deviceId,
+      sessionId,
+      readinessReservationOwners,
       sourceImage: verifiedAndroidAvdIdentity ?? sourceImage,
       unavailableMessage: `Device '${deviceId}' is not available in the device pool.`,
       platform,
@@ -8273,9 +8277,25 @@ export class DevicePool {
     }
   }
 
+  /** Leave foreign ownership refusals to the operation instead of waiting on transport. */
+  private hasForeignTargetDeviceHolder(
+    device: PooledDevice | undefined,
+    sessionId: string | undefined,
+    readinessReservationOwners: ReadonlySet<symbol> | undefined,
+  ): boolean {
+    return (
+      device !== undefined &&
+      ((device.sessionId !== null && device.sessionId !== sessionId) ||
+        this.hasReadinessNameReservation(device, readinessReservationOwners) ||
+        this.isReservedForOtherRehydration(device, sessionId))
+    );
+  }
+
   /** Snapshot first, then serialize assertions and claim; replacements retry unlocked. */
   private async withTargetDeviceDiscovery({
     deviceId,
+    sessionId,
+    readinessReservationOwners,
     sourceImage,
     unavailableMessage,
     platform,
@@ -8323,6 +8343,7 @@ export class DevicePool {
           shutdownReserved,
           shutdownMarker !== undefined,
           this.recoveringAndroidDeviceIds.has(deviceId),
+          this.hasForeignTargetDeviceHolder(capturedEntry, sessionId, readinessReservationOwners),
         ].some(Boolean);
         if (
           !skipTransportWait &&

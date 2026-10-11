@@ -5,6 +5,7 @@ import {
   DeviceTransportOfflineError,
 } from "../../src/daemon/deviceAcquisitionRefusals";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { logger } from "../../src/utils/logger";
@@ -215,7 +216,7 @@ describe("exact Android binding during transitional adb presence", () => {
     }
   });
 
-  test("another session's rehydration reservation still refuses after transport recovery", async () => {
+  test("another session's rehydration reservation refuses immediately without probing", async () => {
     const h = await setup(true);
     await h.pool.reserveDevicesForRehydration([
       {
@@ -228,43 +229,195 @@ describe("exact Android binding during transitional adb presence", () => {
         },
       },
     ]);
-    h.timer.setTimeout(() => {
-      h.manager.bootedDevices = [device];
-      h.manager.androidListedDeviceStates.set(device.deviceId, "device");
-    }, 100);
+    const probe = spyOn(h.manager, "getAndroidListedDeviceStates");
     try {
-      const error = await settleByFakeEvents(h.timer, track(h.bind()).result, {
+      const pending = track(h.bind());
+      await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
         description: "rehydration-reserved bind",
       });
-      expect(error).toMatchObject({ code: "device_owned_by_other_session" });
-      expect(String(error)).toContain("rehydrating-owner");
+      expect(pending.settled()).toBe(true);
+      const error = await pending.result;
+      expect(error).toBeInstanceOf(InputDeviceOwnedError);
+      expect(error).toMatchObject({
+        code: "device_owned_by_other_session",
+        retryable: false,
+        deviceId: device.deviceId,
+        message: `Device '${device.deviceId}' is already assigned to session rehydrating-owner`,
+      });
+      expect(probe).not.toHaveBeenCalled();
+      expect(h.timer.now()).toBe(0);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
       h.unchanged();
     } finally {
+      probe.mockRestore();
       h.pool.releaseRehydrationReservation("rehydrating-owner");
     }
   });
 
-  test("recovery readiness reservation preserves absence refusal after the transport wait", async () => {
+  test("another caller's readiness name reservation refuses immediately without probing", async () => {
     const h = await setup(true);
+    // A readiness caller reserved this AVD before it moved to the binding serial.
+    const reservedDevice = { ...device, deviceId: "emulator-5558" };
+    await h.pool.addDevice(reservedDevice, image);
     const release = await h.pool.reserveDeviceForReadiness(
-      device.deviceId,
-      device,
+      reservedDevice.deviceId,
+      reservedDevice,
       device.name,
       image.name,
     );
-    h.timer.setTimeout(() => {
-      h.manager.androidListedDeviceStates.clear();
-    }, 100);
+    const probe = spyOn(h.manager, "getAndroidListedDeviceStates");
     try {
-      const error = await settleByFakeEvents(h.timer, track(h.bind()).result, {
-        description: "recovery-readiness bind",
+      const pending = track(h.bind());
+      await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
+        description: "foreign-readiness bind",
       });
+      expect(pending.settled()).toBe(true);
+      const error = await pending.result;
       expect(error).toBeInstanceOf(ActionableError);
-      expect(String(error)).toContain("not available in the device pool");
+      expect(error).toHaveProperty(
+        "message",
+        `Device '${device.deviceId}' is not available in the device pool.`,
+      );
+      expect(error).not.toHaveProperty("code");
       expect(error).not.toHaveProperty("retryable");
+      expect(probe).not.toHaveBeenCalled();
+      expect(h.timer.now()).toBe(0);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
       h.unchanged();
     } finally {
+      probe.mockRestore();
       await release();
+    }
+  });
+
+  test("another session's pooled holder preserves immediate absence without probing", async () => {
+    const h = await setup(true);
+    h.manager.bootedDevices = [device];
+    h.manager.androidListedDeviceStates.clear();
+    await h.bind();
+    h.manager.bootedDevices = [];
+    h.manager.androidListedDeviceStates.set(device.deviceId, "offline");
+    const entryBefore = { ...h.entry };
+    const probe = spyOn(h.manager, "getAndroidListedDeviceStates");
+    try {
+      const pending = track(
+        h.pool.bindOrReuseDeviceSession("other-session", device.deviceId, "android", image),
+      );
+      await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
+        description: "foreign-holder bind",
+      });
+      expect(pending.settled()).toBe(true);
+      const error = await pending.result;
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(error).toHaveProperty(
+        "message",
+        `Device '${device.deviceId}' is not available in the device pool. It may have been shut down or disconnected.`,
+      );
+      expect(error).not.toHaveProperty("code");
+      expect(error).not.toHaveProperty("retryable");
+      expect(probe).not.toHaveBeenCalled();
+      expect(h.timer.now()).toBe(0);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
+      expect(h.pool.getDevice(device.deviceId)).toBe(h.entry);
+      expect(h.entry).toEqual(entryBefore);
+      expect(h.entry?.sessionId).toBe("owner");
+      h.noLossSideEffects();
+    } finally {
+      probe.mockRestore();
+    }
+  });
+
+  for (const autolock of [false, true]) {
+    test(`${autolock ? "autolock" : "explicit bind"}: own readiness name reservation still waits then binds`, async () => {
+      const h = await setup(true);
+      const reservedDevice = { ...device, deviceId: "emulator-5558" };
+      await h.pool.addDevice(reservedDevice, image);
+      const release = await h.pool.reserveDeviceForReadiness(
+        reservedDevice.deviceId,
+        reservedDevice,
+        device.name,
+        image.name,
+      );
+      const owners = new Set([release.owner]);
+      const probe = spyOn(h.manager, "getAndroidListedDeviceStates");
+      try {
+        const pending = track(
+          autolock
+            ? h.pool.autolockDevice(
+                device.deviceId,
+                "android",
+                "client",
+                image,
+                undefined,
+                device,
+                owners,
+              )
+            : h.pool.bindOrReuseDeviceSession(
+                "owner",
+                device.deviceId,
+                "android",
+                image,
+                undefined,
+                device,
+                false,
+                owners,
+              ),
+        );
+        await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
+          description: "own-readiness name bind wait",
+        });
+        expect(pending.settled()).toBe(false);
+        expect(probe).toHaveBeenCalledTimes(1);
+        h.unchanged();
+        h.manager.bootedDevices = [device];
+        h.manager.androidListedDeviceStates.set(device.deviceId, "device");
+        h.timer.advanceTime(100);
+        const sessionId = await pending.result;
+        expect(sessionId).toEqual(autolock ? expect.any(String) : "owner");
+        expect(h.timer.now()).toBe(100);
+        expect(h.pool.getDevice(device.deviceId)).toBe(h.entry);
+        expect(h.entry?.sessionId).toBe(sessionId);
+        h.noLossSideEffects();
+      } finally {
+        probe.mockRestore();
+        await release();
+      }
+    });
+  }
+
+  test("own rehydration reservation still waits then binds", async () => {
+    const h = await setup(true);
+    await h.pool.reserveDevicesForRehydration([
+      {
+        sessionId: "owner",
+        target: {
+          platform: "android",
+          stableDeviceId: device.name,
+          deviceId: device.deviceId,
+          androidEmulator: true,
+        },
+      },
+    ]);
+    const probe = spyOn(h.manager, "getAndroidListedDeviceStates");
+    try {
+      const pending = track(h.bind());
+      await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
+        description: "own-rehydration bind wait",
+      });
+      expect(pending.settled()).toBe(false);
+      expect(probe).toHaveBeenCalledTimes(1);
+      h.unchanged();
+      h.manager.bootedDevices = [device];
+      h.manager.androidListedDeviceStates.set(device.deviceId, "device");
+      h.timer.advanceTime(100);
+      expect(await pending.result).toBe("owner");
+      expect(h.timer.now()).toBe(100);
+      expect(h.pool.getDevice(device.deviceId)).toBe(h.entry);
+      expect(h.entry?.sessionId).toBe("owner");
+      h.noLossSideEffects();
+    } finally {
+      probe.mockRestore();
+      h.pool.releaseRehydrationReservation("owner");
     }
   });
 

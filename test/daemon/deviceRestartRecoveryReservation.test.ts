@@ -20,7 +20,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { drainMicrotasks, settleByFakeEvents } from "../helpers/fakeTimerStepping";
+import { drainMicrotasks, drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 
 const SIM: BootedDevice = { deviceId: "restart-sim", name: "restart-sim", platform: "ios" };
 const SPARE: BootedDevice = { deviceId: "spare-sim", name: "spare-sim", platform: "ios" };
@@ -46,6 +46,7 @@ describe("device restart reserves the entire recovery window", () => {
   let notifications: number;
   let managed: boolean;
   let refreshFails: boolean;
+  let fixtureInitialized: boolean;
   const slots: ManagedSlotExclusion = {
     refresh: async () => {
       if (refreshFails) {
@@ -66,7 +67,7 @@ describe("device restart reserves the entire recovery window", () => {
         : undefined,
     stableIdsFor: () => new Set(managed ? [SIM.deviceId] : []),
   };
-  beforeEach(() => {
+  beforeEach(async () => {
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
     persistence = new FakeDeviceSessionPersistence();
@@ -76,6 +77,8 @@ describe("device restart reserves the entire recovery window", () => {
     managed = false;
     refreshFails = false;
     notifications = 0;
+    fixtureInitialized = false;
+    await setup();
   });
   afterEach(() => {
     pool?.releaseDeviceClaimsForShutdown();
@@ -83,6 +86,17 @@ describe("device restart reserves the entire recovery window", () => {
     timer.reset();
   });
   async function setup(devices: BootedDevice[] = [SIM], withSlots = false) {
+    if (fixtureInitialized) {
+      if (!withSlots && devices.length === 1 && devices[0] === SIM) {
+        return;
+      }
+      pool.releaseDeviceClaimsForShutdown();
+      sessions.stopCleanupTimer();
+      persistence = new FakeDeviceSessionPersistence();
+      sessions = new SessionManager(timer, persistence);
+      sessions.stopCleanupTimer();
+      manager = new FakeDeviceManager();
+    }
     manager.bootedDevices = devices;
     pool = new DevicePool(
       createDevicePoolDependencies(sessions, "restart-reservation", {
@@ -109,6 +123,18 @@ describe("device restart reserves the entire recovery window", () => {
       undefined,
       devices[0],
     );
+    fixtureInitialized = true;
+  }
+  async function keepIdlePastRecovery() {
+    const session = sessions.getSession(HOLDER)!;
+    session.expiresAt = timer.now() + 600_000;
+    const row = (await persistence.getSession(HOLDER))!;
+    row.expires_at_ms = session.expiresAt;
+    row.session_timeout_ms = 600_000;
+  }
+  async function advance(ms: number) {
+    timer.advanceTime(ms);
+    await drainMicrotasks(40);
   }
   async function handoff(device: BootedDevice = SIM) {
     await internals.releaseDisconnectedRecoverySessionWithRetry(
@@ -224,10 +250,11 @@ describe("device restart reserves the entire recovery window", () => {
   }
   test("expiry at exactly the recovery deadline frees the device once", async () => {
     await setup();
+    await keepIdlePastRecovery();
     await handoff();
-    timer.advanceTime(179_999);
+    await advance(179_999);
     expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
-    timer.advanceTime(1);
+    await advance(1);
     expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
     expect(notifications).toBe(1);
     pool.releaseRehydrationReservation(HOLDER);
@@ -239,15 +266,228 @@ describe("device restart reserves the entire recovery window", () => {
     await handoff();
     const row = await persistence.getSession(HOLDER);
     expect(row?.expires_at_ms).toBe(timer.now() + 120_000);
-    timer.advanceTime(120_000);
-    // No recovery was started during the hold. Admission now terminalizes the expired row.
-    await expect(
-      sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true),
-    ).rejects.toMatchObject({ release: { releaseReason: "expired" } });
+    let expiryNotices = 0;
+    sessions.onSessionRelease((_id, _device, reason) => {
+      if (reason === "expired") {
+        expiryNotices++;
+      }
+    });
+    await advance(120_000);
     expect((await persistence.getSession(HOLDER))?.release_reason).toBe("expired");
     expect(internals.rehydrationReservations.size).toBe(0);
     expect(pool.getDevice(SIM.deviceId)?.sessionId).toBeNull();
     expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+    expect(notifications).toBe(1);
+    expect(expiryNotices).toBe(1);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(
+        sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true),
+      ).rejects.toMatchObject({
+        release: { releaseReason: "expired" },
+      });
+    }
+    await advance(60_000);
+    expect(expiryNotices).toBe(1);
+    expect(notifications).toBe(1);
+  });
+  test("tool activity during recovery extends the idle hold", async () => {
+    await setup();
+    await handoff();
+    // An already admitted call ends after loss; the existing recovery-activity seam credits it.
+    await absent();
+    const waiting = sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true, {
+      requestDeadlineMs: timer.now() + 30_000,
+    });
+    const outcome = waiting.catch((error: unknown) => error);
+    await drainMicrotasks(40);
+    await advance(30_000);
+    await outcome;
+    await advance(80_000);
+    sessions.recordToolCallEnded(HOLDER);
+    await advance(10_000);
+    expect(internals.rehydrationReservations.has(HOLDER)).toBe(true);
+    await returned();
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+    await advance(59_999);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+    await advance(1);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+    expect(notifications).toBe(1);
+  });
+  test("an in-flight recovery call retains the hold past idle expiry until 180 seconds", async () => {
+    await setup();
+    await handoff();
+    let inFlight = true;
+    sessions.setActiveSessionExecutionChecker(() => inFlight);
+    await advance(120_000);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+    expect((await persistence.getSession(HOLDER))?.release_reason).toStartWith("device-restart:");
+    await advance(59_999);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+    await advance(1);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+    expect(notifications).toBe(1);
+    inFlight = false;
+  });
+  for (const daemonFirst of [true, false]) {
+    test(`overlapping holds end independently, daemon first: ${daemonFirst}`, async () => {
+      await setup();
+      const reserveDaemon = () =>
+        pool.reserveDevicesForRehydration([
+          {
+            sessionId: HOLDER,
+            target: { platform: "ios", stableDeviceId: SIM.deviceId, deviceId: SIM.deviceId },
+          },
+        ]);
+      if (daemonFirst) {
+        await reserveDaemon();
+      }
+      await handoff();
+      if (!daemonFirst) {
+        await reserveDaemon();
+      }
+      pool.releaseRehydrationReservation(HOLDER);
+      pool.releaseRehydrationReservation(HOLDER);
+      expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+      expect(notifications).toBe(0);
+      await sessions.releaseSession(HOLDER, "heartbeat-timeout");
+      expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+      expect(notifications).toBe(1);
+      await sessions.releaseSession(HOLDER, "heartbeat-timeout");
+      await advance(180_000);
+      expect(notifications).toBe(1);
+    });
+  }
+  test("resuming the handoff leaves the daemon batch's hold intact", async () => {
+    await setup();
+    await handoff();
+    await pool.reserveDevicesForRehydration([
+      {
+        sessionId: HOLDER,
+        target: { platform: "ios", stableDeviceId: SIM.deviceId, deviceId: SIM.deviceId },
+      },
+    ]);
+    await sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true);
+    expect(internals.rehydrationReservations.has(HOLDER)).toBe(true);
+    expect(notifications).toBe(0);
+    pool.releaseRehydrationReservation(HOLDER);
+    pool.releaseRehydrationReservation(HOLDER);
+    expect(notifications).toBe(1);
+  });
+  test("a stalled idle-expiry read cannot extend the cold-boot hold", async () => {
+    await setup();
+    await handoff();
+    const read = persistence.getSession.bind(persistence);
+    const gate = Promise.withResolvers<void>();
+    persistence.getSession = async (sessionId) => {
+      await gate.promise;
+      return read(sessionId);
+    };
+    await advance(120_000);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+    await advance(60_000);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+    expect(notifications).toBe(1);
+    gate.resolve();
+    await drainMicrotasks(40);
+    persistence.getSession = read;
+    expect(notifications).toBe(1);
+  });
+  test("a call ending after idle expiry re-arms its extended idle deadline", async () => {
+    await setup();
+    const session = sessions.getSession(HOLDER)!;
+    session.sessionTimeoutMs = 10_000;
+    session.expiresAt = timer.now() + 10_000;
+    const row = (await persistence.getSession(HOLDER))!;
+    row.session_timeout_ms = 10_000;
+    row.expires_at_ms = session.expiresAt;
+    await handoff();
+    // Register activity through the real recovery call, then keep an admitted call in flight.
+    await absent();
+    const waiting = sessions
+      .getOrCreateSession(HOLDER, pool, "ios", undefined, true, {
+        requestDeadlineMs: timer.now() + 2_000,
+      })
+      .catch((error: unknown) => error);
+    await drainMicrotasks(40);
+    await advance(1_000);
+    await waiting;
+    let inFlight = true;
+    sessions.setActiveSessionExecutionChecker(() => inFlight);
+    await advance(10_000);
+    expect(internals.rehydrationReservations.has(HOLDER)).toBe(true);
+    inFlight = false;
+    sessions.recordToolCallEnded(HOLDER);
+    await returned();
+    await advance(9_999);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+    await advance(1);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+    expect((await persistence.getSession(HOLDER))?.release_reason).toBe("expired");
+    expect(notifications).toBe(1);
+  });
+  test("the handoff timer leaves a longer daemon batch hold intact", async () => {
+    await setup();
+    await keepIdlePastRecovery();
+    await handoff();
+    await pool.reserveDevicesForRehydration([
+      {
+        sessionId: HOLDER,
+        target: { platform: "ios", stableDeviceId: SIM.deviceId, deviceId: SIM.deviceId },
+      },
+    ]);
+    await advance(180_000);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+    expect(notifications).toBe(0);
+    pool.releaseRehydrationReservation(HOLDER);
+    pool.releaseRehydrationReservation(HOLDER);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+    expect(notifications).toBe(1);
+  });
+  for (const reason of ["device-killed", "explicit-release", "heartbeat-timeout"] as const) {
+    test(`${reason} immediately ends both overlapping holds exactly once`, async () => {
+      await setup();
+      await handoff();
+      await pool.reserveDevicesForRehydration([
+        {
+          sessionId: HOLDER,
+          target: { platform: "ios", stableDeviceId: SIM.deviceId, deviceId: SIM.deviceId },
+        },
+      ]);
+      await sessions.releaseSession(HOLDER, reason);
+      expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+      expect(internals.rehydrationReservations.size).toBe(0);
+      expect(notifications).toBe(1);
+      await sessions.releaseSession(HOLDER, reason);
+      await advance(180_000);
+      expect(notifications).toBe(1);
+    });
+  }
+  for (const reason of ["device-killed", "explicit-release"] as const) {
+    test(`holder ${reason} before loss creates no handoff`, async () => {
+      await setup();
+      const device = pool.getDevice(SIM.deviceId)!;
+      await sessions.releaseSession(HOLDER, reason);
+      await pool.retireDeviceForShutdown(device);
+      expect(internals.rehydrationReservations.size).toBe(0);
+      expect(notifications).toBe(0);
+      await returned();
+      expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+      await expect(
+        pool.bindOrReuseDeviceSession("newcomer", SIM.deviceId, "ios", undefined, undefined, SIM),
+      ).resolves.toBe("newcomer");
+    });
+  }
+  test("an intentional stop drops an existing recovery hold immediately", async () => {
+    await setup();
+    await handoff();
+    pool.markIntentionalShutdown(SIM.deviceId);
+    expect(internals.rehydrationReservations.has(HOLDER)).toBe(false);
+    await sessions.releaseSession(HOLDER, "explicit-release");
+    // The platform shutdown marker is a separate fence until the stop completes.
+    pool.clearIntentionalShutdown(SIM.deviceId);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+    await advance(180_000);
     expect(notifications).toBe(1);
   });
   test("expiry leaves the existing terminal target-absent answer unchanged", async () => {
@@ -287,14 +527,16 @@ describe("device restart reserves the entire recovery window", () => {
   });
   test("a second handoff refreshes its own hold, without duplicating it", async () => {
     await setup();
+    await keepIdlePastRecovery();
     await handoff();
     timer.advanceTime(1_000);
     await sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true);
+    await keepIdlePastRecovery();
     await handoff();
-    timer.advanceTime(179_000);
+    await advance(179_000);
     expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
     expect(internals.rehydrationReservations.size).toBe(1);
-    timer.advanceTime(1_000);
+    await advance(1_000);
     expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
     expect(notifications).toBe(1);
   });
@@ -343,6 +585,79 @@ describe("device restart reserves the entire recovery window", () => {
     );
     expect(internals.rehydrationReservations.has(HOLDER)).toBe(true);
   });
+  for (const probe of [
+    { name: "past idle deadline with a call in flight", idleOffsetMs: -1, inFlight: true },
+    {
+      name: "idle deadline 300 ms away with no call in flight",
+      idleOffsetMs: 300,
+      inFlight: false,
+    },
+  ]) {
+    test(`release persistence retry retains the hold: ${probe.name}`, async () => {
+      const session = sessions.getSession(HOLDER)!;
+      session.expiresAt = timer.now() + probe.idleOffsetMs;
+      const row = (await persistence.getSession(HOLDER))!;
+      row.expires_at_ms = session.expiresAt;
+      let inFlight = probe.inFlight;
+      sessions.setActiveSessionExecutionChecker(() => inFlight);
+      let releaseAttempts = 0;
+      let expiryNotices = 0;
+      let admissions = 0;
+      sessions.onSessionCreated(() => admissions++);
+      sessions.onSessionRelease((_id, _device, reason) => {
+        if (reason === "expired") {
+          expiryNotices++;
+        }
+      });
+      const markReleased = persistence.markReleased.bind(persistence);
+      persistence.markReleased = async (...args) => {
+        if (args[3].startsWith("device-restart:")) {
+          releaseAttempts++;
+          if (releaseAttempts === 1) {
+            throw new Error("transient restart release failure");
+          }
+        }
+        await markReleased(...args);
+      };
+      const releasing = handoff();
+      await drainUntil(() => timer.getPendingSleepCount() === 1, {
+        description: "restart release retry backoff",
+      });
+      expect(releaseAttempts).toBe(1);
+      notifications = 0;
+      const beforePersistenceMs = Math.max(1, probe.idleOffsetMs + 1);
+      await advance(beforePersistenceMs);
+      expect(internals.rehydrationReservations.has(HOLDER)).toBe(true);
+      expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+      expect(row).toMatchObject({ status: "active", release_reason: null, released_at_ms: null });
+      expect(notifications).toBe(0);
+      expect(expiryNotices).toBe(0);
+
+      await advance(1_000 - beforePersistenceMs);
+      await releasing;
+      expect(releaseAttempts).toBe(2);
+      expect(row).toMatchObject({
+        status: "released",
+        release_reason: `device-restart:${SIM.name}`,
+        released_at_ms: 1_000,
+      });
+      expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+      expect(notifications).toBe(0);
+      expect(expiryNotices).toBe(0);
+      // Persistence arms the already-past idle deadline for the next timer turn.
+      inFlight = false;
+      await advance(0);
+      expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+      expect(row.release_reason).toBe("expired");
+      expect(notifications).toBe(1);
+      expect(expiryNotices).toBe(1);
+      expect(admissions).toBe(0);
+      await advance(DEVICE_RESTART_RECOVERY_WINDOW_MS);
+      expect(notifications).toBe(1);
+      expect(expiryNotices).toBe(1);
+      expect(admissions).toBe(0);
+    });
+  }
   test("reserved restarting Android capacity is counted exactly once", async () => {
     const android: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
     await setup([android]);

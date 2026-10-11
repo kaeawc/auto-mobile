@@ -1,6 +1,6 @@
 import { drainUntil, drainUntilQuiescent, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { expect, spyOn, test } from "bun:test";
+import { beforeAll, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -3770,9 +3770,21 @@ test("failed-release retry flight excludes overlapping expiry releases", async (
   assertNoRecoveryReservationsRemain(pool, "session");
 });
 
+type IntentionalStopFixture = Awaited<ReturnType<typeof setup>> & {
+  manager: RearmableShutdownManager;
+};
+let cancelledRecoveryFixture: IntentionalStopFixture;
+let resetStopFixture: IntentionalStopFixture;
+beforeAll(async () => {
+  // Independent bound holders; the timed tests still perform the real cancellation and rebinding.
+  const cancelledManager = new RearmableShutdownManager(original.deviceId);
+  const resetManager = new RearmableShutdownManager(original.deviceId);
+  cancelledRecoveryFixture = { ...(await setup(cancelledManager)), manager: cancelledManager };
+  resetStopFixture = { ...(await setup(resetManager)), manager: resetManager };
+});
+
 test("a cancelled Android recovery does not spend the crash-loop budget (#7545)", async () => {
-  const manager = new RearmableShutdownManager(original.deviceId);
-  const { timer, sessions, pool, captured } = await setup(manager);
+  const { timer, sessions, pool, captured, persistence, manager } = cancelledRecoveryFixture;
   try {
     pool.markIntentionalShutdown(captured.id);
     const firstKill = manager.nextKillAccepted();
@@ -3789,15 +3801,15 @@ test("a cancelled Android recovery does not spend the crash-loop budget (#7545)"
     expect(manager.startedDevices).toHaveLength(0);
     expect(sessions.getSession("session")).toBeNull();
 
-    // The cancelled attempt intentionally holds the AVD for its old session's recovery.
-    // End that handoff through terminal release before another session can bind it.
-    await sessions.releaseSession("session", "explicit-release");
+    // The holder stopped this device; cancellation must not create a recovery handoff.
+    expect((await persistence.getSession?.("session"))?.release_reason).toBe("explicit-release");
 
     // Re-provision the AVD and bind a fresh session, then simulate a
     // genuine loss. maxAttempts is 1, so this only recovers if the
     // cancelled attempt above did not spend the budget.
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
+    expect(pool.genericAvailability(original.deviceId)).toBe("free");
     await pool.bindOrReuseDeviceSession(
       "session-2",
       original.deviceId,
@@ -3821,6 +3833,43 @@ test("a cancelled Android recovery does not spend the crash-loop budget (#7545)"
     await expect(secondRecovery).resolves.toBe("recovered");
     expect(manager.startedDevices).toHaveLength(1);
   } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("holder stop during detached ADB-reset recovery leaves no restart handoff", async () => {
+  const { timer, sessions, pool, captured, persistence, manager } = resetStopFixture;
+  const detached = await pool.detachAdbServerResetCohort([captured]);
+  try {
+    pool.markIntentionalShutdown(original.deviceId);
+    const kill = manager.nextKillAccepted();
+    const recovery = pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
+      original.deviceId,
+      detached.devices[0],
+    );
+    await kill;
+    manager.bootedDevices = [];
+    timer.advanceTime(1_000);
+    await expect(recovery).resolves.toBe(false);
+    expect((await persistence.getSession?.("session"))?.release_reason).toBe("explicit-release");
+    expect(sessions.getSession("session")).toBeNull();
+    await pool.releaseAdbServerResetCohortReservations(detached.devices);
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    expect(pool.genericAvailability(original.deviceId)).toBe("free");
+    await expect(
+      pool.bindOrReuseDeviceSession(
+        "session-2",
+        original.deviceId,
+        "android",
+        image,
+        undefined,
+        original,
+      ),
+    ).resolves.toBe("session-2");
+  } finally {
+    await pool.releaseAdbServerResetCohortReservations(detached.devices);
+    pool.releaseDeviceClaimsForShutdown();
     sessions.stopCleanupTimer();
   }
 });

@@ -1196,6 +1196,7 @@ test/utils/ios-cmdline-tools/simctl-client.listApps.test.ts
 test/utils/ios-cmdline-tools/simctl-client.runtimeResolution.test.ts
 test/utils/ios-cmdline-tools/simctl-client.uninstallBound.test.ts
 test/utils/ios-cmdline-tools/simctl.bootedCacheObservedAt.test.ts
+test/utils/ios-cmdline-tools/simctl.transitionalListing.test.ts
 test/utils/ios-cmdline-tools/simctlVersion.test.ts
 test/utils/iosCtrlProxyOverride.test.ts
 test/utils/iosSimulatorContinuity.test.ts

@@ -1,5 +1,9 @@
-import { adbOfflineHeldDevices } from "./adbOfflineHeldDevices";
-import { describeInventoryDevice, type AdbOfflineHold } from "./inventoryDeviceDescription";
+import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
+import {
+  describeInventoryDevice,
+  type AdbOfflineHold,
+  type SimulatorTransitionHold,
+} from "./inventoryDeviceDescription";
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { androidTransportIdentityAdbFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
@@ -520,7 +524,11 @@ function toBootedDeviceInfo(
   device: BootedDevice,
   poolContext: PoolDeviceContext | undefined,
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
-  extras: { adbOffline?: AdbOfflineHold; transportAvdName?: string } = {},
+  extras: {
+    adbOffline?: AdbOfflineHold;
+    simulatorState?: SimulatorTransitionHold["simulatorState"];
+    transportAvdName?: string;
+  } = {},
 ): BootedDeviceInfo {
   const description = describeInventoryDevice({
     device,
@@ -962,6 +970,19 @@ async function discoverBootedDevicesForPlatform(
       transportAvdName: (deviceId) =>
         devicePool?.getAndroidTransportAvdName(deviceId) ?? aliases.avdName(deviceId),
     });
+    // Held simulators `simctl` lists Booting / Shutting Down are not booted either (#11573).
+    const transitionalSimulators = transitionalHeldSimulators({
+      transitional: discovery.transitionalSimulators,
+      discovered: discovery.devices,
+      devicePool,
+    }).map(({ device, simulatorState }) =>
+      toBootedDeviceInfo(
+        device,
+        resolvePoolDeviceContext(devicePool, device, sessionsById, resolveDeviceSessionUuid),
+        configuredImages,
+        { simulatorState },
+      ),
+    );
     // A held AVD re-cold-booting while adb still lists its old serial offline would otherwise
     // appear twice under one stableId (#11132). The held row carries the session and pool status
     // the serial-less cold-boot row lacks, so the cold-boot row is the one dropped.
@@ -971,6 +992,7 @@ async function discoverBootedDevicesForPlatform(
         (device) => !heldStableIds.has(device.identity.stableId),
       ),
       ...offlineHeld,
+      ...transitionalSimulators,
     );
     return {
       devices,
@@ -1101,7 +1123,9 @@ function isProbeableDevice(device: BootedDeviceInfo): boolean {
     device.runtime.deviceId !== null &&
     device.identityUnresolved !== true &&
     // adb lists it offline (#11118): every probe would just time out against it.
-    device.runtime.connection === undefined
+    device.runtime.connection === undefined &&
+    // A simulator mid-transition has no service to probe (#11573).
+    device.runtime.simulatorState === undefined
   );
 }
 

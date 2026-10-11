@@ -57,6 +57,7 @@ test/daemon/daemonHandshake.test.ts
 test/daemon/daemonIsolationPaths.test.ts
 test/daemon/daemonNamespaceMarker.test.ts
 test/daemon/daemonOptionsPropagation.test.ts
+test/daemon/daemonRestartEndToEnd.test.ts
 test/daemon/daemonSocketReachability.test.ts
 test/daemon/daemonStartupFailureTracker.test.ts
 test/daemon/daemonStartupGuard.test.ts

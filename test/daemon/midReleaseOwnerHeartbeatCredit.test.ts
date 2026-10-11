@@ -436,6 +436,84 @@ describe("owner heartbeats refused during a non-terminal release (#11691)", () =
     },
   );
 
+  test("a stale label keeps plan auto-release recoverable while its same-token base owner is live", async () => {
+    const labelId = `${SESSION}:B`;
+    const label = await asPlanAllocation(manager, SESSION, [labelId], () =>
+      manager.createSession(labelId, "fake-label-device", "android"),
+    );
+    manager.setDeviceLabels(SESSION, buildDeviceLabelMap(["A", "B"], SESSION));
+    expect(await manager.claimLivenessOwnership(labelId, OWNER)).toBe("claimed");
+    for (let elapsed = 0; elapsed < 12_000; elapsed += 2_000) {
+      await advance(2_000);
+      expect((await heartbeat()).success).toBe(true);
+    }
+    expect(timer.now()).toBe(12_000);
+    expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("live");
+    expect(manager.getSessionLeaseState(labelId)?.phase).toBe("lapsed");
+    expect(label.lastOwnerHeartbeat).toBe(0);
+    const lastHeartbeat = label.lastHeartbeat;
+    const row = structuredClone(await persistence.getSession!(labelId));
+    expect(await manager.releaseSession(labelId, "plan-auto-release")).toBe(label.assignedDevice);
+    expect(await persistence.getSession!(labelId)).toEqual({
+      ...row,
+      status: "released",
+      released_at_ms: 12_000,
+      release_reason: "plan-auto-release",
+      liveness_owner_token: null,
+    });
+    expect(await manager.getReleasedSessionReason(labelId)).toBe("plan-auto-release");
+    expect(manager.getTerminalReleaseSnapshot(labelId)).toBeUndefined();
+    expect(label.lastOwnerHeartbeat).toBe(0);
+    expect(label.lastHeartbeat).toBe(lastHeartbeat);
+  });
+
+  test("a stale label expires when its same-token base owner is silent too", async () => {
+    const labelId = `${SESSION}:B`;
+    const label = await asPlanAllocation(manager, SESSION, [labelId], () =>
+      manager.createSession(labelId, "fake-label-device", "android"),
+    );
+    manager.setDeviceLabels(SESSION, buildDeviceLabelMap(["A", "B"], SESSION));
+    expect(await manager.claimLivenessOwnership(labelId, OWNER)).toBe("claimed");
+    await advance(12_000);
+    expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("lapsed");
+    expect(manager.getSessionLeaseState(labelId)?.phase).toBe("lapsed");
+    expect(await manager.releaseSession(labelId, "plan-auto-release")).toBe(label.assignedDevice);
+    expect(await persistence.getSession!(labelId)).toMatchObject({
+      status: "expired",
+      release_reason: "heartbeat-timeout",
+    });
+    expect(await manager.getReleasedSessionReason(labelId)).toBe("heartbeat-timeout");
+    expect(manager.getTerminalReleaseSnapshot(labelId)?.releaseReason).toBe("heartbeat-timeout");
+  });
+
+  test("a live base with another owner token cannot rescue a stale label", async () => {
+    const labelId = `${SESSION}:B`;
+    const label = await asPlanAllocation(manager, SESSION, [labelId], () =>
+      manager.createSession(labelId, "fake-label-device", "android"),
+    );
+    manager.setDeviceLabels(SESSION, buildDeviceLabelMap(["A", "B"], SESSION));
+    expect(await manager.claimLivenessOwnership(labelId, "foreign-owner")).toBe("conflict");
+    // Once the base's lease lapses, a different token may legitimately claim the label.
+    await advance(9_000);
+    expect(await manager.claimLivenessOwnership(labelId, "foreign-owner")).toBe("claimed");
+    expect((await heartbeat()).success).toBe(true);
+    for (let elapsed = 0; elapsed < 12_000; elapsed += 2_000) {
+      await advance(2_000);
+      expect((await heartbeat()).success).toBe(true);
+    }
+    expect(session.livenessOwnerToken).toBe(OWNER);
+    expect(label.livenessOwnerToken).toBe("foreign-owner");
+    expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("live");
+    expect(manager.getSessionLeaseState(labelId)?.phase).toBe("lapsed");
+    expect(await manager.releaseSession(labelId, "plan-auto-release")).toBe(label.assignedDevice);
+    expect(await persistence.getSession!(labelId)).toMatchObject({
+      status: "expired",
+      release_reason: "heartbeat-timeout",
+    });
+    expect(await manager.getReleasedSessionReason(labelId)).toBe("heartbeat-timeout");
+    expect(manager.getTerminalReleaseSnapshot(labelId)?.releaseReason).toBe("heartbeat-timeout");
+  });
+
   test("a live label keeps plan auto-release recoverable while its base's restart freezes the base lease", async () => {
     const labelId = `${SESSION}:B`;
     const label = await asPlanAllocation(manager, SESSION, [labelId], () =>

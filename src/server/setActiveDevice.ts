@@ -100,6 +100,24 @@ function refuseForeignOwnedSession(args: HandlerArgs): void {
   // the connection of the call that started it.
   const callerMcpSessionId = args.__mcpSessionId ?? getToolSelectionContext()?.callerMcpSessionId;
   refuseControlOnForeignOwnedSession("setActiveDevice", args.sessionUuid, callerMcpSessionId);
+  // #11235: a caller with no connection identity is not judged above, but a live autolock session
+  // is owned by connection, so it is foreign to that caller too.
+  const daemonState = DaemonState.getInstance();
+  if (
+    callerMcpSessionId === undefined &&
+    args.sessionUuid &&
+    daemonState.isInitialized() &&
+    daemonState.getDevicePool().isSessionOwnedByOtherConnection(args.sessionUuid)
+  ) {
+    const sessionDevice = daemonState
+      .getSessionManager()
+      .getSession(args.sessionUuid)?.assignedDevice;
+    throw deviceAssignedToOtherSessionError(
+      sessionDevice ?? args.deviceId,
+      args.sessionUuid,
+      undefined,
+    );
+  }
 }
 
 /**

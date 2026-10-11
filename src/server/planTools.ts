@@ -17,13 +17,19 @@ import {
   assertLifecycleCallerHoldsDevice,
   assertLifecycleCallerNotOnForeignManagedSlot,
   lifecycleRequester,
+  type LifecycleRequester,
 } from "./lifecycleDeviceOwnership";
+import { DaemonState } from "../daemon/daemonState";
+import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { startMcpRecording, stopMcpRecording, getMcpRecordingStatus } from "./mcpRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
 import { PlanExecutionOrchestrator, PlanExecutionRequest } from "./planExecutionOrchestrator";
 import { failedPlanSessionHoldable, planLifecycleSessionUuid } from "./deviceLabelMapping";
 import type { ExecutePlanResult } from "../models/ExecutePlanResult";
-import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import {
+  getToolSelectionContext,
+  runWithToolSelectionContext,
+} from "../features/toolSelection/toolSelectionContext";
 import { planCallerContext } from "./planCallerIdentity";
 import {
   INTERNAL_MCP_SESSION_PARAM,
@@ -364,16 +370,17 @@ const exportPlanResultSchema = z.object({
  * is exported only by its holder, and a managed slot's device only by that slot's execution.
  * An unheld device's recording (owned or not) stays exportable by anyone, as on the socket.
  *
- * Returns the recording to stop. The holder check runs after the last await, in the same tick the
- * caller starts the stop in. Throws the typed `device_owned_by_other_session` /
- * `device_assigned_to_managed_slot` refusal, which the caller must not swallow.
+ * Returns the recording to stop. The holder check runs after this function's last await, against
+ * the recording it returns; the caller stops that recording by id. Throws the typed
+ * `device_owned_by_other_session` / `device_assigned_to_managed_slot` refusal, which the caller
+ * must not swallow.
  */
 async function activeRecordingForExport(params: object): Promise<TestRecordingStatus | null> {
   const seen = getTestRecordingStatus();
   if (!seen) {
     return null;
   }
-  const requester = lifecycleRequester(params);
+  const requester = exportRequester(params, seen.deviceId);
   await assertLifecycleCallerNotOnForeignManagedSlot({
     toolName: "exportPlan",
     device: seen,
@@ -383,14 +390,47 @@ async function activeRecordingForExport(params: object): Promise<TestRecordingSt
   if (!status) {
     return null;
   }
-  assertLifecycleCallerHoldsDevice({
-    toolName: "exportPlan",
-    device: status,
-    requester,
-    // A recording has no forced stop: only the holder exports it.
-    force: false,
-  });
+  const holder = exportRequester(params, status.deviceId);
+  try {
+    assertLifecycleCallerHoldsDevice({
+      toolName: "exportPlan",
+      device: status,
+      requester: holder,
+      // A recording has no forced stop: only the holder exports it.
+      force: false,
+    });
+  } catch (error) {
+    if (error instanceof InputDeviceOwnedError) {
+      // Same typed refusal, without the lifecycle remedy's offer of `force`.
+      throw new InputDeviceOwnedError(
+        "exportPlan",
+        error.deviceId,
+        holder.sessionUuid,
+        EXPORT_PLAN_REMEDY,
+      );
+    }
+    throw error;
+  }
   return status;
+}
+
+const EXPORT_PLAN_REMEDY =
+  "call exportPlan with the holding session's sessionUuid, or wait for the holder to release the device.";
+
+/**
+ * Who is exporting. The connection that acquired the session holding the recording's device is
+ * that session, whether the call named it, another of its sessions, or none (as a deviceId-only
+ * device call is, #10994).
+ */
+function exportRequester(params: object, deviceId: string): LifecycleRequester {
+  const requester = lifecycleRequester(params);
+  const daemonState = DaemonState.getInstance();
+  const mcpSessionId = requester.mcpSessionId ?? getToolSelectionContext()?.callerMcpSessionId;
+  const held =
+    mcpSessionId && daemonState.isInitialized()
+      ? daemonState.getDevicePool().resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId)
+      : undefined;
+  return held ? { ...requester, sessionUuid: held } : requester;
 }
 
 // Export plan tool handler

@@ -125,4 +125,21 @@ describe("setActiveDevice naming a session another connection owns", () => {
     expect(error?.message).not.toContain(`Device '${free.deviceId}' is already assigned`);
     expect(error?.toPayload()).toEqual(reference?.toPayload());
   });
+
+  test("a caller with no connection identity cannot move a live autolock session (#11235)", async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    await pool.releaseDevice(held.deviceId, SESSION);
+    const autolocked = await pool.autolockDevice(held.deviceId, "android", OWNER);
+    expect(autolocked).toBeDefined();
+
+    const error = await refusal(() =>
+      tools.call("setActiveDevice", { deviceId: free.deviceId, sessionUuid: autolocked }),
+    );
+
+    expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    // The evidence is the device the session holds; the free target stays free.
+    expect(error?.toPayload()).toMatchObject({ deviceId: held.deviceId });
+    expect(manager.getSessionForDevice(held.deviceId)).toBe(autolocked!);
+    expect(manager.getSessionForDevice(free.deviceId)).toBeNull();
+  });
 });

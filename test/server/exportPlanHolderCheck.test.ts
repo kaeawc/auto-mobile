@@ -201,14 +201,21 @@ describe("exportPlan from a connection that does not hold the recording's device
     expect(getTestRecordingStatus()).toBeNull();
   });
 
-  test("a sessionless call is refused on a held device even from the holder's connection", async () => {
-    // docs/using/device-ownership.md: a sessionless control call on a held device is refused.
+  test("the connection that acquired the holding session exports without naming it", async () => {
     const result = await exportPlan(OWNER);
 
+    expect(result.isError).not.toBe(true);
+    expect(recorderStops).toBe(1);
+    expect(JSON.stringify(result)).toContain(recordingId);
+  });
+
+  test("a call with no session and no connection identity is refused, and is not offered force", async () => {
+    const result = await fixture!.client.callTool({ name: "exportPlan", arguments: {} });
+
     expect(recorderStops).toBe(0);
-    expect(getTestRecordingStatus()?.recordingId).toBe(recordingId);
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result)).toContain(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    expect(JSON.stringify(result)).not.toContain("force");
   });
 
   test("a recording on a device no session holds stays exportable by any caller", async () => {

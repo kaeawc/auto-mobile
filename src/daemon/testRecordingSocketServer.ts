@@ -22,6 +22,7 @@ import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/de
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
 import { assertInputNotOnForeignManagedSlotDevice } from "./inputDeviceOwnership";
 import { DaemonState } from "./daemonState";
+import { testRecordingStartOwnershipRefusal } from "./testRecordingStartAdmission";
 
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
 const TEST_RECORDING_PURPOSE = "to start a test recording";
@@ -213,6 +214,12 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
 
     switch (command) {
       case "start": {
+        if (request.deviceId !== undefined) {
+          const refusal = testRecordingStartOwnershipRefusal(request.deviceId, request.sessionUuid);
+          if (refusal) {
+            return refusal;
+          }
+        }
         // Authorize before touching device state: an unauthenticated or
         // cross-session caller cannot start a recording on another session's
         // device (issue #4752).
@@ -234,6 +241,10 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
         const platform = ensurePlatform(request.platform);
         const selected = await this.deviceResolution.selectDevice(request.deviceId, platform);
         this.admissionGate.assertDeviceActionable(selected.deviceId, TEST_RECORDING_PURPOSE);
+        const refusal = testRecordingStartOwnershipRefusal(selected.deviceId, request.sessionUuid);
+        if (refusal) {
+          return refusal;
+        }
         authorizeResolvedDevice(this.authenticator, {
           sessionUuid: request.sessionUuid,
           deviceId: selected.deviceId,
@@ -245,6 +256,13 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
           device: selected,
           requesterSessionUuid: request.sessionUuid,
         });
+        const postSlotRefusal = testRecordingStartOwnershipRefusal(
+          selected.deviceId,
+          request.sessionUuid,
+        );
+        if (postSlotRefusal) {
+          return postSlotRefusal;
+        }
         const device = await this.deviceResolution.readyDevice(selected, request.sessionUuid);
         const result = await startTestRecording(
           device,

@@ -29,7 +29,8 @@ export interface PrototypeLastResult {
   /**
    * The light or dark mode the prototype is drawn in, as last reported by the device: a show
    * result, an `inspect`, or an `appearance_changed` event since (which updates `mode` and `source`
-   * and drops `deviceDark` until the next device result). Absent on a dismiss, a failed show, and
+   * and drops `deviceDark` until the next device result). The tool's host-local `status` action
+   * strips `deviceDark` from this anyway (#11416). Absent on a dismiss, a failed show, and
    * whenever the device lacks `prototype_appearance_v1`.
    */
   appearance?: ShownPrototypeAppearance;

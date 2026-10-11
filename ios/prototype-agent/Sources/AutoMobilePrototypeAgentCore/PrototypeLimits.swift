@@ -10,6 +10,9 @@ enum PrototypeLimits {
     static let maxNodes = 2000
     static let maxDepth = 24
     static let maxRepeatItems = 128
+    /// `MAX_PROTOTYPE_SPEC_BYTES`: the UTF-8 size of the whole spec, current state included. Android
+    /// re-checks it on every state write; see `PrototypeStateValidator.specBytes`.
+    static let maxSpecBytes = 1_048_576
 
     /// Throws the first limit the tree breaks. `repeat` templates count once per instance, in the
     /// same traversal order and path spelling as the Android guard (`root.repeat[1].children[0]`).

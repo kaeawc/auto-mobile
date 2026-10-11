@@ -102,6 +102,7 @@ test/daemon/deviceSessionResolver.test.ts
 test/daemon/deviceShutdownReservations.test.ts
 test/daemon/directModeStartup.test.ts
 test/daemon/disconnectMonitor-physicalImmediate.test.ts
+test/daemon/disconnectMonitor-transitionalSimulator.test.ts
 test/daemon/emulatorLossIncident.test.ts
 test/daemon/emulatorLossIncidentLedger.test.ts
 test/daemon/executionOwnerWatch.test.ts
@@ -1200,6 +1201,7 @@ test/utils/ios-cmdline-tools/simctl-client.listApps.test.ts
 test/utils/ios-cmdline-tools/simctl-client.runtimeResolution.test.ts
 test/utils/ios-cmdline-tools/simctl-client.uninstallBound.test.ts
 test/utils/ios-cmdline-tools/simctl.bootedCacheObservedAt.test.ts
+test/utils/ios-cmdline-tools/simctl.transitionalListing.test.ts
 test/utils/ios-cmdline-tools/simctlVersion.test.ts
 test/utils/iosCtrlProxyOverride.test.ts
 test/utils/iosSimulatorContinuity.test.ts

@@ -14,7 +14,10 @@ import Foundation
 /// same Android functions and cost nothing.
 enum PrototypeStateValidator {
     /// The first rule `root` breaks when it holds `state`, or nil when the state is valid.
-    static func rejection(root: PrototypeNode, state: [String: JSONValue]) -> String? {
+    /// `nonStateBytes` is the size of the shown spec outside its `state` (`PrototypeSession` measures it
+    /// at show); the spec byte cap is checked first, as Android's `validate` does.
+    static func rejection(root: PrototypeNode, state: [String: JSONValue], nonStateBytes: Int = 0) -> String? {
+        if nonStateBytes + stateBytes(state) > PrototypeLimits.maxSpecBytes { return "Spec byte limit exceeded" }
         var nodes: [PrototypeNode] = []
         var actions: [PrototypeAction] = []
         collect(root, nodes: &nodes, actions: &actions)
@@ -31,6 +34,20 @@ enum PrototypeStateValidator {
             if let message = stateActionError(action, state) { return message }
         }
         return nil
+    }
+
+    // MARK: Spec size
+
+    /// The UTF-8 size of `state` as JSON. Android caps the re-encoded whole spec, but the agent keeps
+    /// no raw spec bytes, so the cap is applied as `nonStateBytes` (measured once at show from the
+    /// request's own spec) plus this. Swift's encoder and kotlinx differ by a few bytes (number
+    /// spelling, default fields), so a state within a few bytes of the cap can differ per platform.
+    static func stateBytes(_ state: [String: JSONValue]) -> Int {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        // A state that cannot be encoded (a non-finite number) cannot be sent back to the host either, so it counts as
+        // over the cap.
+        return (try? encoder.encode(JSONValue.object(state)).count) ?? PrototypeLimits.maxSpecBytes + 1
     }
 
     // MARK: Traversal

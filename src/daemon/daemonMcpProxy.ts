@@ -1273,7 +1273,9 @@ export function mergeDaemonOptions(
  */
 /**
  * Longest a bind waits out a `device_cleanup_in_progress` refusal: the recording-finalize cap
- * (about 120 s, #10957) plus slack for the restores around it.
+ * (about 120 s, #10957) plus slack for the restores around it. Shared with the JUnit runner and
+ * XCTestRunner through `finalizeWait.waitBudgetMs` in `test/fixtures/refusal-wire-hints/hints.json`
+ * (#11360): change them together.
  */
 export const DEVICE_CLEANUP_WAIT_BUDGET_MS = 150_000;
 
@@ -1472,6 +1474,8 @@ export class DaemonMcpProxy {
   private readonly livenessHandoverListeners = new Set<(handover: LivenessHandover) => void>();
   /** Tool calls currently awaiting an answer on each daemon connection. */
   private readonly toolCallsInFlight = new WeakMap<DaemonClientLike, number>();
+  /** Resolved when the last tool call in flight on a draining connection settles. */
+  private readonly toolCallsSettled = new WeakMap<DaemonClientLike, PromiseWithResolvers<void>>();
   /**
    * Tool calls forwarded under each session UUID that have not finished yet. A session with a call
    * in flight is in use, so neither the replay lease of the latest binding nor a held session's
@@ -1551,6 +1555,12 @@ export class DaemonMcpProxy {
   private managedSlotsResult: ManagedSlotsResult | undefined;
   /** Aborts an in-flight managed slot acquisition when the proxy closes (EOF, SIGTERM, owner loss). */
   private managedSlotsAcquisitionAbort: AbortController | undefined;
+  /**
+   * Aborts every tool call and resource read this proxy has in flight when it closes (#11642).
+   * Each one's daemon request is cancelled on its own socket (`daemon/cancelRequest`), so nothing
+   * of this proxy's is left ahead of the managed execution release in the socket's queue.
+   */
+  private readonly closeAbort = new AbortController();
   // Once the daemon confirms this transport's bound session is gone, preserve
   // that terminal identity instead of clearing it and allowing the same UUID to
   // acquire another device. `fromResultMint` records the binding's provenance at
@@ -3385,7 +3395,7 @@ export class DaemonMcpProxy {
     this.throwIfBoundSessionFenced(allowReleasedSession, attemptedSessionUuid);
     const reconnectRecoverableHandoff = this.hasRecoverableBoundSessionHandoff();
     if (reconnectRecoverableHandoff) {
-      await this.resetConnection();
+      await this.resetConnectionOnceDrained();
       // doConnect restarts the heartbeat keeper. Clear the marker before that
       // asynchronous tick can enter withRecoverableReconnect and reset the new
       // transport beneath the operation that is reclaiming this UUID.
@@ -3422,16 +3432,14 @@ export class DaemonMcpProxy {
         nonIdempotentToolName,
       );
       if (refusedToolName !== undefined) {
-        // The tool may have reached the daemon and run. Reset the dead transport
-        // for the next call, but never re-run this one (issue #6382).
-        await this.resetConnection();
-        throw new DaemonToolOutcomeUnknownError(refusedToolName, error);
+        // The tool may have reached the daemon and run: never re-run it (issue #6382).
+        await this.throwOutcomeWithoutReplay(refusedToolName, error);
       }
 
       logger.warn(
         `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${errorMessage(error)}`,
       );
-      await this.resetConnection();
+      await this.resetConnectionOnceDrained();
       signal.throwIfAborted();
       this.throwIfBoundSessionFenced(allowReleasedSession, attemptedSessionUuid);
       await this.ensureConnected();
@@ -3481,8 +3489,76 @@ export class DaemonMcpProxy {
     if (refusedToolName === undefined) {
       return;
     }
-    await this.resetConnection();
-    throw new DaemonToolOutcomeUnknownError(refusedToolName, retryError);
+    await this.throwOutcomeWithoutReplay(refusedToolName, retryError);
+  }
+
+  /**
+   * End a non-idempotent tool call that may have run, without sending it again (issue #6382).
+   * The daemon's own typed `daemon_shutting_down` answer reaches the caller as it was given:
+   * typed and retryable, with `requestMayHaveDispatched`, so the caller decides whether to repeat
+   * the step. Any other failure says only that the transport died, so the outcome is unknown and
+   * the dead connection is replaced for the next call.
+   */
+  private async throwOutcomeWithoutReplay(toolName: string, error: unknown): Promise<never> {
+    if (!(error instanceof DaemonShuttingDownError)) {
+      await this.resetConnection();
+      throw new DaemonToolOutcomeUnknownError(toolName, error);
+    }
+    this.waitForDaemonShutdownDisconnect();
+    if (this.drainingToolCalls() === undefined) {
+      await this.resetConnection();
+    }
+    throw error;
+  }
+
+  /**
+   * The wait a connection-wide reset owes the tool calls still in flight on a connection whose
+   * daemon is shutting down; undefined when there is nothing to wait for. A shutdown refusal or a
+   * `daemon-shutdown` handoff seen by one request (a keeper heartbeat, a sibling call) says
+   * nothing about the others: the daemon answers each of them, with its result or with its own
+   * `daemon_shutting_down`, before it closes the socket. Closing the one shared socket first
+   * would fail them here, as outcome-unknown, for steps the daemon was about to answer.
+   *
+   * The wait ends when the last of those calls settles, when the daemon closes the connection, or
+   * when the shutdown barrier gives up on a daemon that never closes ({@link
+   * waitForDaemonShutdownDisconnect}, which then detaches the connection itself). While it lasts
+   * the connection is not reusable, so nothing new is sent on it: every new request waits for
+   * the successor connection in {@link ensureConnected}.
+   */
+  private drainingToolCalls(): Promise<void> | undefined {
+    const client = this.client;
+    const barrier = this.daemonShutdownDisconnect;
+    if (!client || !barrier || (this.toolCallsInFlight.get(client) ?? 0) === 0) {
+      return undefined;
+    }
+    let settled = this.toolCallsSettled.get(client);
+    if (!settled) {
+      settled = Promise.withResolvers<void>();
+      this.toolCallsSettled.set(client, settled);
+    }
+    // Whichever comes first: the barrier never rejects, and resolving twice is a no-op.
+    const drained = Promise.withResolvers<void>();
+    void barrier.then(drained.resolve);
+    void settled.promise.then(drained.resolve);
+    return drained.promise;
+  }
+
+  /**
+   * {@link resetConnection}, after the tool calls in flight on a draining connection have their
+   * answers ({@link drainingToolCalls}). A connection that was replaced while this waited is
+   * someone else's: it is left alone.
+   */
+  private async resetConnectionOnceDrained(): Promise<void> {
+    const draining = this.drainingToolCalls();
+    if (draining === undefined) {
+      await this.resetConnection();
+      return;
+    }
+    const drainedClient = this.client;
+    await draining;
+    if (this.client === drainedClient && !this.closing) {
+      await this.resetConnection();
+    }
   }
 
   /**
@@ -4047,8 +4123,9 @@ export class DaemonMcpProxy {
     args: Record<string, unknown>,
     progressToken?: string | number,
     onProgress?: DaemonProxyProgressCallback,
-    signal?: AbortSignal,
+    callerSignal?: AbortSignal,
   ): Promise<any> {
+    const signal = this.untilClosed(callerSignal);
     let first = await this.forwardToolCall(name, args, progressToken, onProgress, signal, true);
     if (isDeviceBindingTool(name)) {
       first = await this.waitOutDeviceCleanup(first, name, args, progressToken, onProgress, signal);
@@ -5745,7 +5822,13 @@ export class DaemonMcpProxy {
         }
       });
     } catch (error) {
-      if (attemptedClient && error instanceof DaemonUnavailableError) {
+      if (error instanceof DaemonShuttingDownError) {
+        // The daemon answered, so the socket works: it is draining, not dead, and the tool calls
+        // in flight on it still get their answers ({@link drainingToolCalls}).
+        if (attemptedClient !== null && attemptedClient === this.client) {
+          this.waitForDaemonShutdownDisconnect();
+        }
+      } else if (attemptedClient && error instanceof DaemonUnavailableError) {
         this.deadSocketClients.add(attemptedClient);
       }
       return this.classifyRecoveryAttemptError(sessionUuid, attemptNumber, error, attemptedClient);
@@ -5785,11 +5868,14 @@ export class DaemonMcpProxy {
    * promise back, not a wrapper, so tracking adds no scheduling turns to the forwarding path.
    */
   private trackToolCallInFlight<T>(client: DaemonClientLike, send: () => Promise<T>): Promise<T> {
-    const settle = () =>
-      this.toolCallsInFlight.set(
-        client,
-        Math.max(0, (this.toolCallsInFlight.get(client) ?? 1) - 1),
-      );
+    const settle = () => {
+      const remaining = Math.max(0, (this.toolCallsInFlight.get(client) ?? 1) - 1);
+      this.toolCallsInFlight.set(client, remaining);
+      if (remaining === 0) {
+        this.toolCallsSettled.get(client)?.resolve();
+        this.toolCallsSettled.delete(client);
+      }
+    };
     this.toolCallsInFlight.set(client, (this.toolCallsInFlight.get(client) ?? 0) + 1);
     let forwarded: Promise<T>;
     try {
@@ -7661,8 +7747,12 @@ export class DaemonMcpProxy {
   /**
    * Read a resource from the daemon
    */
-  async readResource(uri: string, { signal }: { signal?: AbortSignal } = {}): Promise<any> {
-    signal?.throwIfAborted();
+  async readResource(
+    uri: string,
+    { signal: callerSignal }: { signal?: AbortSignal } = {},
+  ): Promise<any> {
+    const signal = this.untilClosed(callerSignal);
+    signal.throwIfAborted();
     await this.waitForLivenessRecovery(signal);
     this.throwIfResourceSessionHandedOver(uri);
     signal?.throwIfAborted();
@@ -7721,12 +7811,26 @@ export class DaemonMcpProxy {
     return this.connected;
   }
 
+  /** The caller's signal, also aborted (with a typed `DaemonUnavailableError`) by {@link close}. */
+  private untilClosed(signal: AbortSignal | undefined): AbortSignal {
+    return signal ? AbortSignal.any([signal, this.closeAbort.signal]) : this.closeAbort.signal;
+  }
+
   /**
-   * Close the connection to daemon
+   * Close the connection to daemon.
+   *
+   * A process stopped by a signal closes the proxy with the MCP server still open, so nothing has
+   * cancelled the calls in flight (stdin EOF aborts them first). They are cancelled here, before the
+   * managed execution release: the daemon admits `daemon/releaseExecution` in arrival order on this
+   * proxy's socket, behind any call still running there, and the release would otherwise time out
+   * unadmitted and leave the session to the owner-disconnect release (#11642). Each caller is
+   * answered with a typed `DaemonUnavailableError`, never left waiting.
    */
   async close(): Promise<void> {
     this.closing = true;
-    this.managedSlotsAcquisitionAbort?.abort(new DaemonUnavailableError("MCP proxy is closing"));
+    const closingError = new DaemonUnavailableError("MCP proxy is closing");
+    this.managedSlotsAcquisitionAbort?.abort(closingError);
+    this.closeAbort.abort(closingError);
     this.connected = false;
     this.livenessRecovery.stop();
     // Not awaited: a probe round waiting on a frozen daemon must not hold up close; `closing`

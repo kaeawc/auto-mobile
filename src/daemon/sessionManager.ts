@@ -35,6 +35,7 @@ import {
   type LivenessOwnerView,
 } from "./livenessClaimDecision";
 import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
+import { requestAcquisitionReceipt } from "./acquisitionReceipt";
 import { defaultTimer, SteadyWallClock, Timer } from "../utils/SystemTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { logger } from "../utils/logger";
@@ -359,6 +360,14 @@ export interface SessionCacheData {
    * instead of silently skipping setup on the `existingSession` fast path.
    */
   deviceReadiness?: DeviceReadinessLevel;
+}
+
+/** Ownership retained in the device reverse map, regardless of expiry or release admission. */
+export interface HeldDeviceSession {
+  deviceId: string;
+  sessionId: string;
+  platform: string;
+  stableDeviceId?: string;
 }
 
 /**
@@ -2957,10 +2966,10 @@ export class SessionManager {
       throw new TerminalSessionError(session.sessionId, persistedTerminalRelease);
     }
     this.assertCreationNotAbandoned(session, creation);
-    await this.rejectCreationAfterShutdownFence(session);
+    await this.rejectCreationAfterShutdownFence(session, false);
     await this.persistCreatedSession(session, claimedRow);
     await this.retireCreationIfAbandoned(session, creation);
-    await this.rejectCreationAfterShutdownFence(session);
+    await this.rejectCreationAfterShutdownFence(session, true);
     this.assertTerminalReleaseAdmission(session.sessionId, session);
     const terminalRelease = this.terminalReleaseSnapshots.get(session.sessionId);
     if (terminalRelease) {
@@ -3046,10 +3055,17 @@ export class SessionManager {
     );
   }
 
-  private async rejectCreationAfterShutdownFence(session: Session): Promise<void> {
+  private async rejectCreationAfterShutdownFence(
+    session: Session,
+    rowWritten: boolean,
+  ): Promise<void> {
     const cancellation = getAbortSignal();
     if (this.acceptingSessionCreations && !cancellation?.aborted) {
       return;
+    }
+    // Still accepting creations past the return above: the request itself was cancelled.
+    if (cancellation && this.acceptingSessionCreations) {
+      await this.rollBackCancelledClientChosenCreation(session, rowWritten, cancellation);
     }
     const releasedAtMs = this.sessionNow();
     const snapshot: SessionReleaseSnapshot = {
@@ -3071,6 +3087,45 @@ export class SessionManager {
       cancellation.throwIfAborted();
     }
     throw new DaemonSessionCreationRejectedError(session.sessionId, snapshot);
+  }
+
+  /**
+   * A mint cancelled under an id its client chose (#11593). The client knows the id although the
+   * call never answered and names it again on its retry, so the id is not retired: nothing is
+   * fenced, and the active row this mint already wrote is released as a plain allocation
+   * rollback, which a later creation replaces. A release write that fails stays pending and is
+   * retried; the retry creation's own upsert supersedes it. Rethrows the cancellation; returns
+   * only for a session whose id this request's client did not choose.
+   */
+  private async rollBackCancelledClientChosenCreation(
+    session: Session,
+    rowWritten: boolean,
+    cancellation: AbortSignal,
+  ): Promise<void> {
+    if (requestAcquisitionReceipt()?.clientChosenSessionId !== session.sessionId) {
+      return;
+    }
+    if (!rowWritten) {
+      cancellation.throwIfAborted();
+      return;
+    }
+    const releasedAtMs = this.sessionNow();
+    const snapshot: SessionReleaseSnapshot = {
+      sessionId: session.sessionId,
+      deviceId: session.assignedDevice,
+      releaseReason: "allocation-rollback",
+      releasedAtMs,
+      terminal: false,
+      heartbeat: {
+        lastHeartbeatMs: session.lastHeartbeat,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+        timeoutMs: session.heartbeatTimeoutMs,
+        ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
+      },
+    };
+    this.captureReleaseRowGeneration(snapshot, this.persistedRowGenerations.get(session));
+    await this.persistSessionRelease(snapshot);
+    cancellation.throwIfAborted();
   }
 
   /** The persisted row, with tool activity during a device-restart recovery applied to its expiry. */
@@ -4948,6 +5003,23 @@ export class SessionManager {
    */
   getSessionForDevice(deviceId: string): string | null {
     return this.deviceSessionMap.get(deviceId) ?? null;
+  }
+
+  /** The same holders as getSessionForDevice, including expired and releasing sessions. */
+  getHeldDeviceSessions(): readonly HeldDeviceSession[] {
+    return [...this.deviceSessionMap].flatMap(([deviceId, sessionId]) => {
+      const session = this.sessions.get(sessionId) ?? this.releasePromises.get(sessionId)?.session;
+      return session
+        ? [
+            {
+              deviceId,
+              sessionId,
+              platform: session.platform,
+              stableDeviceId: session.stableDeviceId,
+            },
+          ]
+        : [];
+    });
   }
 
   /** Map membership, including fenced releases and any newer same-UUID incarnation. */

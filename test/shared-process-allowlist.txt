@@ -240,6 +240,7 @@ test/devices/DisplayInventoryProvider.test.ts
 test/devices/androidDeviceReboot.test.ts
 test/devices/ciIosBootRecovery.test.ts
 test/devices/deviceBootRecovery.test.ts
+test/devices/deviceBootTimeout.test.ts
 test/devices/deviceIdentityEvidence.test.ts
 test/devices/deviceShutdownService.test.ts
 test/devices/physicalIosDeviceResolution.test.ts
@@ -373,6 +374,7 @@ test/features/action/touchscreenInput.test.ts
 test/features/appearance/AppearanceConfig.property.test.ts
 test/features/bootAdmission/AndroidBootAdmissionGate.test.ts
 test/features/bootAdmission/AndroidCapacitySource.test.ts
+test/features/bootAdmission/bootGateInterleavings.test.ts
 test/features/database/bigIntegerJson.test.ts
 test/features/database/sqlLexer.test.ts
 test/features/debug/VisualHighlight.test.ts

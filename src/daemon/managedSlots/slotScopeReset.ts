@@ -17,6 +17,7 @@
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { Timer } from "../../utils/SystemTimer";
+import { MANAGED_EXECUTION_SETTLEMENT_CAP_MS } from "./managedExecutionRelease";
 import type {
   CompleteScopeInvalidationResult,
   SlotAssignmentRecord,
@@ -66,6 +67,22 @@ export interface SlotScopeResetPendingJournal {
   phase: SlotJournalEntry["phase"];
 }
 
+/** Why `--force` left a `settling` slot alone (#11539). */
+export type SlotScopeResetForceRefusalReason =
+  | "within_settlement_cap"
+  | "no_release_entry"
+  | "other_open_journal"
+  | "abandon_failed";
+
+export interface SlotScopeResetForceRefusal {
+  slotIndex: number;
+  reason: SlotScopeResetForceRefusalReason;
+  /** Time until the slot outlives the settlement cap; set for `within_settlement_cap`. */
+  remainingMs?: number;
+  /** What happened and what the operator should do. */
+  message: string;
+}
+
 export interface SlotScopeResetScopeResult {
   scopeKey: string;
   managedHostScope: string;
@@ -83,6 +100,8 @@ export interface SlotScopeResetScopeResult {
     /** Unfinished journaled work (#11179) on the scope's slots. */
     openJournal: SlotScopeResetPendingJournal[];
   };
+  /** Slots `--force` declined to abandon, and why; present only when `pending` after a forced reset. */
+  forceRefusals?: SlotScopeResetForceRefusal[];
 }
 
 export interface SlotScopeResetResult {
@@ -102,7 +121,8 @@ export interface SlotScopeResetRequest extends SlotScopeQuery {
   /**
    * Operator override (#11336): a slot stuck `settling` after its released work outlived the
    * settlement cap is returned to `ready` (its release journal entry committed) so the reset can
-   * proceed. It overrides "settling", never "in use": a slot with an execution owner still blocks.
+   * proceed. It overrides "stuck settling", never "settling normally" and never "in use": a slot
+   * still inside the cap, or with an execution owner, still blocks (#11539).
    */
   force?: boolean;
 }
@@ -116,13 +136,17 @@ export interface SlotScopeResetOptions {
   registryExists?: () => boolean;
   timer: Pick<Timer, "now" | "sleep">;
   pollMs?: number;
+  /** Age of a release after which its settlement counts as stuck. Default: the watcher's cap. */
+  settlementCapMs?: number;
 }
 
 export class SlotScopeReset {
   private readonly pollMs: number;
+  private readonly settlementCapMs: number;
 
   constructor(private readonly options: SlotScopeResetOptions) {
     this.pollMs = options.pollMs ?? SLOT_SCOPE_RESET_POLL_MS;
+    this.settlementCapMs = options.settlementCapMs ?? MANAGED_EXECUTION_SETTLEMENT_CAP_MS;
   }
 
   /** The operator reset: every scope of `(namespace, incarnation)`, optionally one host scope. */
@@ -183,9 +207,7 @@ export class SlotScopeReset {
     };
     // Idempotent: blocks acquisitions now, and turns an abandoned (revivable) scope permanent.
     await registry.beginScopeInvalidation(scope.scopeKey, reason);
-    if (force) {
-      await this.abandonSettlement(registry, scope);
-    }
+    const forceRefusals = force ? await this.abandonSettlement(registry, scope) : [];
     for (;;) {
       const completed = await registry.completeScopeInvalidation(scope.scopeKey);
       if (completed.kind === "invalidated") {
@@ -211,34 +233,69 @@ export class SlotScopeReset {
           : { liveOwners: [], settling: [], cleanupPending: [], openJournal: [] };
       const remainingMs = deadlineMs - this.options.timer.now();
       if (remainingMs <= 0) {
-        return { ...base, outcome: "pending", freedDevices: [], pending: waitingOn };
+        return {
+          ...base,
+          outcome: "pending",
+          freedDevices: [],
+          pending: waitingOn,
+          ...(forceRefusals.length > 0 ? { forceRefusals } : {}),
+        };
       }
       await this.options.timer.sleep(Math.min(this.pollMs, remainingMs));
     }
   }
 
   /**
-   * Return each unowned `settling` slot of the scope to `ready`, committing its release journal
-   * entry in the same transaction (the existing journal API, never by hand). A slot with an
-   * execution owner, with no open release entry, or with other open journal work is left for the
-   * normal wait.
+   * Return each unowned `settling` slot of the scope that is provably stuck to `ready`, committing
+   * its release journal entry in the same transaction (the existing journal API, never by hand).
+   * Stuck means the release outlived the settlement cap, the watcher's own "past cap" state
+   * (#11539). A slot with an execution owner is left for the normal wait; every other slot left
+   * alone is returned as a typed refusal saying why and what to do.
    */
   private async abandonSettlement(
     registry: SlotScopeResetRegistry,
     scope: SlotScopeRecord,
-  ): Promise<void> {
+  ): Promise<SlotScopeResetForceRefusal[]> {
     const slots = (await registry.listAssignments(scope.scopeKey)).filter(
       (slot) => slot.state === "settling" && slot.execOwner === null,
     );
+    const refusals: SlotScopeResetForceRefusal[] = [];
     for (const slot of slots) {
       const key = { scopeKey: slot.scopeKey, slotIndex: slot.slotIndex };
+      const label = `${key.scopeKey}/${key.slotIndex}`;
       try {
         const open = await registry.listOpenSlotJournal(key);
+        const release = open.find((entry) => entry.kind === "release");
         if (open.some((entry) => entry.kind !== "release")) {
+          refusals.push({
+            slotIndex: key.slotIndex,
+            reason: "other_open_journal",
+            message:
+              `Slot ${label} has unfinished non-release journal work; --force does not abandon it. ` +
+              "Wait for the redrive to finish, then retry.",
+          });
           continue;
         }
-        const release = open.find((entry) => entry.kind === "release");
         if (!release) {
+          refusals.push({
+            slotIndex: key.slotIndex,
+            reason: "no_release_entry",
+            message:
+              `Slot ${label} is settling but has no open release journal entry, so --force cannot ` +
+              "tell whether it is stuck. Wait for its settler to return it to ready, or inspect it.",
+          });
+          continue;
+        }
+        const remainingMs = release.createdAtMs + this.settlementCapMs - this.options.timer.now();
+        if (remainingMs > 0) {
+          refusals.push({
+            slotIndex: key.slotIndex,
+            reason: "within_settlement_cap",
+            remainingMs,
+            message:
+              `Slot ${label} is still settling normally and its released work may be running. ` +
+              `Wait, or retry --force in ${remainingMs}ms once it outlives the settlement cap.`,
+          });
           continue;
         }
         const result = await registry.advanceSlotJournal(release.id, {
@@ -247,19 +304,32 @@ export class SlotScopeReset {
           phase: "committed",
           assignment: { kind: "state", expected: release.binding, state: "ready" },
         });
-        logger.warn(
-          result.kind === "advanced"
-            ? `[SlotScopeReset] --force abandoned the settlement of slot ${key.scopeKey}/${key.slotIndex}; ` +
-                "its released work may still be running (#11336)"
-            : `[SlotScopeReset] --force could not abandon slot ${key.scopeKey}/${key.slotIndex}: ${result.kind}`,
-        );
+        if (result.kind === "advanced") {
+          logger.warn(
+            `[SlotScopeReset] --force abandoned the settlement of slot ${label}, stuck past the ` +
+              `${this.settlementCapMs}ms cap; its released work may still be running (#11336)`,
+          );
+        } else {
+          logger.warn(`[SlotScopeReset] --force could not abandon slot ${label}: ${result.kind}`);
+          refusals.push({
+            slotIndex: key.slotIndex,
+            reason: "abandon_failed",
+            message: `Slot ${label} changed while --force abandoned it (${result.kind}); retry.`,
+          });
+        }
       } catch (error) {
         logger.warn(
-          `[SlotScopeReset] --force could not abandon slot ${key.scopeKey}/${key.slotIndex}: ${errorMessage(error)}`,
+          `[SlotScopeReset] --force could not abandon slot ${label}: ${errorMessage(error)}`,
           error,
         );
+        refusals.push({
+          slotIndex: key.slotIndex,
+          reason: "abandon_failed",
+          message: `Slot ${label} could not be abandoned: ${errorMessage(error)}. Retry.`,
+        });
       }
     }
+    return refusals;
   }
 }
 

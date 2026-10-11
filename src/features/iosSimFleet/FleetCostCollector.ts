@@ -34,6 +34,12 @@ export function occupyingUdids(report: FleetCostReport, excludeUdid?: string): s
 /** Narrow consumer-facing seam: anything that can produce a fleet cost report. */
 export interface FleetCostSource {
   collect(options?: FleetReadOptions): Promise<FleetCostReport>;
+  /**
+   * A report whose listing starts no earlier than this call. Callers that opened a ledger sample
+   * window just before calling share one run, but never one that began before their window: it
+   * could predate a boot released in between.
+   */
+  collectFresh(options?: FleetReadOptions): Promise<FleetCostReport>;
 }
 
 /**
@@ -43,6 +49,8 @@ export interface FleetCostSource {
  */
 export class IosSimFleetCostCollector implements FleetCostSource {
   private inFlight: Promise<FleetCostReport> | null = null;
+  /** A fresh run that has not started its listing yet; callers arriving before it joins it. */
+  private pendingFresh: Promise<FleetCostReport> | null = null;
 
   constructor(
     private readonly source: FleetHostSource,
@@ -54,6 +62,23 @@ export class IosSimFleetCostCollector implements FleetCostSource {
     if (this.inFlight) {
       return this.inFlight;
     }
+    return this.startRun(options);
+  }
+
+  collectFresh(options: FleetReadOptions = {}): Promise<FleetCostReport> {
+    if (this.pendingFresh) {
+      return this.pendingFresh;
+    }
+    // Start on a microtask so every caller whose window opened in this turn shares the run.
+    const batch = Promise.resolve().then(() => {
+      this.pendingFresh = null;
+      return this.startRun(options);
+    });
+    this.pendingFresh = batch;
+    return batch;
+  }
+
+  private startRun(options: FleetReadOptions): Promise<FleetCostReport> {
     const run = this.collectOnce(options).finally(() => {
       if (this.inFlight === run) {
         this.inFlight = null;

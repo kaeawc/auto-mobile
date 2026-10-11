@@ -11,7 +11,7 @@
 #
 # Environment:
 #   CIRCLECI_TOKEN         CircleCI API token (optional; empty means skip)
-#   NIGHTLY_WINDOW_HOURS   how far back a nightly pipeline counts (default 36)
+#   NIGHTLY_WINDOW_HOURS   how far back a nightly pipeline counts (default 20: under a day, so yesterday's nightly never counts)
 #   NIGHTLY_MAX_PAGES      pipeline-list pages to scan, 20 pipelines each (default 5)
 #   ALERT_NOW_EPOCH        current time in epoch seconds (default: now); a test seam
 #   ALERT_GH               gh binary (default gh); a test seam
@@ -27,7 +27,7 @@ label="circleci-nightly-macos"
 title="CircleCI nightly macOS jobs are failing"
 workflow_name="nightly-macos"
 red_statuses='["failed","infrastructure_fail","timedout","terminated-unknown","unauthorized"]'
-window_hours="${NIGHTLY_WINDOW_HOURS:-36}"
+window_hours="${NIGHTLY_WINDOW_HOURS:-20}"
 
 if [[ -z "${CIRCLECI_TOKEN:-}" ]]; then
   echo "circleci nightly report: CIRCLECI_TOKEN is not configured; skipping."
@@ -124,7 +124,11 @@ while IFS=$'\t' read -r name job_status job_number pipeline_number workflow_id; 
     line="${line}
   Job: ${job_url}
   Artifacts (${job_url}/artifacts):"
-    artifacts="$(cc "${project}/${job_number}/artifacts" | jq -r '[.items[]?.path] | unique | .[:15][]')"
+    # A pruned job (404) must not abort the report: list it with no artifacts instead.
+    artifacts_status=0
+    artifacts_json="$(cc "${project}/${job_number}/artifacts")" || artifacts_status=$?
+    [[ "${artifacts_status}" -eq 0 ]] || artifacts_json='{"items":[]}'
+    artifacts="$(jq -r '[.items[]?.path] | unique | .[:15][]' <<< "${artifacts_json}")"
     if [[ -n "${artifacts}" ]]; then
       while IFS= read -r path; do
         line="${line}

@@ -1801,15 +1801,41 @@ export function buildTapOnResultMessage(
   selectedElement: TapOnSelectedElement | undefined,
   searchSummary: string | undefined,
   activatedSubtext?: { text: string; occurrence: number },
+  selectorLabel?: string,
 ): string {
-  const details = buildTapOnResultDetails(selectedElement, searchSummary, activatedSubtext);
+  const details = buildTapOnResultDetails(
+    selectedElement,
+    searchSummary,
+    activatedSubtext,
+    selectorLabel,
+  );
   return details.length > 0 ? `Tapped on element (${details.join("; ")})` : "Tapped on element";
+}
+
+/**
+ * The label a caller can recognise the tapped element by: the selected node's
+ * own text, else the originally matched node's text / content description (the
+ * match is often promoted to a clickable row that carries no text of its own),
+ * else the text the selector searched for (#11638).
+ */
+function selectedElementLabel(
+  selectedElement: TapOnSelectedElement | undefined,
+  selectorLabel: string | undefined,
+): string {
+  const matched = selectedElement?.matchedElement;
+  return (
+    selectedElement?.text ||
+    matched?.text ||
+    matched?.["content-desc"] ||
+    (selectorLabel ?? "")
+  );
 }
 
 function buildTapOnResultDetails(
   selectedElement: TapOnSelectedElement | undefined,
   searchSummary: string | undefined,
   activatedSubtext?: { text: string; occurrence: number },
+  selectorLabel?: string,
 ): string[] {
   const details: string[] = [];
   if (selectedElement) {
@@ -1823,8 +1849,9 @@ function buildTapOnResultDetails(
     if (selectedElement.testTag) {
       identity.push(`testTag=${selectedElement.testTag}`);
     }
-    if (selectedElement.text) {
-      identity.push(`text=${JSON.stringify(selectedElement.text)}`);
+    const label = selectedElementLabel(selectedElement, selectorLabel);
+    if (label) {
+      identity.push(`text=${JSON.stringify(label)}`);
     }
     details.push(`matched ${identity.length > 0 ? identity.join(" ") : "element"}`);
     const count = selectedElement.totalMatches;
@@ -2196,8 +2223,9 @@ function buildTapOnSuccessMessage(
   result: TapOnElementResult,
   searchSummary: string | undefined,
   ensureChecked: boolean | undefined,
+  selectorLabel: string | undefined,
 ): string {
-  const label = tapOnElementLabel(result);
+  const label = tapOnElementLabel(result, selectorLabel);
   if (result.skipped === "already-checked") {
     const state = ensureChecked ? "checked" : "unchecked";
     return `${label} already ${state}, no tap${searchSummary ? ` (${searchSummary})` : ""}`;
@@ -2209,15 +2237,23 @@ function buildTapOnSuccessMessage(
       result.selectedElement,
       searchSummary,
       result.activatedSubtext,
+      selectorLabel,
     );
     return `${label} was ${beforeState}, tapped, now ${afterState} (verified)${details.length > 0 ? `; ${details.join("; ")}` : ""}`;
   }
-  return buildTapOnResultMessage(result.selectedElement, searchSummary, result.activatedSubtext);
+  return buildTapOnResultMessage(
+    result.selectedElement,
+    searchSummary,
+    result.activatedSubtext,
+    selectorLabel,
+  );
 }
 
-function tapOnElementLabel(result: TapOnElementResult): string {
+function tapOnElementLabel(result: TapOnElementResult, selectorLabel: string | undefined): string {
+  // Name the thing the caller asked for before a resource id, which generic
+  // widgets share across rows (`...:id/switchWidget`) (#11638).
   return (
-    result.selectedElement?.text ||
+    selectedElementLabel(result.selectedElement, selectorLabel) ||
     result.selectedElement?.resourceId ||
     result.selectedElement?.testTag ||
     result.element.text ||
@@ -2269,7 +2305,12 @@ export async function tapOnHandler(
   // non-empty fallback (#4183 P4). The failure keeps the search summary so the
   // user still sees how long the selector was looked for before it missed.
   const message = result.success
-    ? `${buildTapOnSuccessMessage(result, searchSummary, args.ensureChecked)}${
+    ? `${buildTapOnSuccessMessage(
+        result,
+        searchSummary,
+        args.ensureChecked,
+        args.selector.text ?? args.selector.textAny?.[0],
+      )}${
         result.warnings?.length ? `. Warning: ${result.warnings.join("; ")}` : ""
       }`
     : `Failed to tap: ${result.error || "unknown error"}${searchSummary ? ` (${searchSummary})` : ""}`;

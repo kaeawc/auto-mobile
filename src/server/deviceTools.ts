@@ -1018,17 +1018,15 @@ export function listDevicePayloads(
     const pooled = devicePool?.describesPooledRuntime(device)
       ? (devicePool.getDevice(device.deviceId) ?? undefined)
       : undefined;
-    const session = pooled?.sessionId
-      ? (sessions.get(pooled.sessionId) ?? { sessionId: pooled.sessionId })
-      : undefined;
     const description = describeInventoryDevice({
       device,
       pooled,
       unhealthy: pooled ? devicePool?.getDeviceHealthMarker(device.deviceId) : undefined,
       configuredImages,
-      session,
+      sessionsById: sessions,
       deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
       hold: pooled ? poolHoldFor(devicePool, device.deviceId) : undefined,
+      poolStatus: pooled ? devicePool?.poolBucket(device.deviceId) : undefined,
       adbOffline: adbOfflineHolds.get(device.deviceId),
       transportAvdName: transportAvdNameForDevice(device.deviceId),
     });

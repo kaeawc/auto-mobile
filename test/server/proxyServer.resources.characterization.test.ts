@@ -221,6 +221,41 @@ test("resource handlers preserve response envelopes and forward the read signal"
   }
 });
 
+test.each([
+  [new DaemonShuttingDownError(), "daemon_shutting_down", undefined],
+  [new DaemonShuttingDownError(true), "daemon_shutting_down", undefined],
+  [new DaemonRestartDeferredError("version mismatch"), "daemon_restart_deferred", 1000],
+] as const)(
+  "resources/read maps %s to a typed retryable error, not a missing resource",
+  async (failure, code, retryAfterMs) => {
+    const { server, proxy, registrations } = createHarness();
+    const read = spyOn(proxy, "readResource").mockRejectedValue(failure);
+    try {
+      const handler = registrations.find(([schema]) => schema === ReadResourceRequestSchema)?.[1];
+      if (!handler) {
+        throw new Error("Missing handler");
+      }
+      const error = await Promise.resolve(
+        handler({ method: "resources/read", params: { uri: "automobile:test" } }, extra),
+      ).then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(McpError);
+      const data = (error as McpError).data as { error: Record<string, unknown> };
+      expect(data.error.code).toBe(code);
+      expect(data.error.retryable).toBe(true);
+      expect(data.error.retryAfterMs).toBe(retryAfterMs);
+      expect((error as McpError).message).not.toContain("Failed to read resource");
+      expect((error as McpError).message).toContain(code);
+    } finally {
+      read.mockRestore();
+      await server.close();
+      await proxy.close();
+    }
+  },
+);
+
 test("missing resource URI rejects before forwarding", async () => {
   const { server, proxy, registrations } = createHarness();
   const read = spyOn(proxy, "readResource");

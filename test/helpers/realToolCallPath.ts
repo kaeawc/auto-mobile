@@ -7,6 +7,7 @@ import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
 import type { DeviceObservationAccess } from "../../src/server/deviceObservationAccess";
 import { executionTracker } from "../../src/server/executionTracker";
+import { combineRequestAbortSignals } from "../../src/utils/AbortContext";
 import { withAdmittedSessionEcho } from "../../src/server/routedSessionEcho";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -47,6 +48,11 @@ export class RealToolCallPath {
   readonly deviceSessionManager = new FakeDeviceSessionManager();
   /** Tool bodies that reached the device boundary, in order. */
   readonly runs: DeviceToolRun[] = [];
+  /**
+   * Executions the daemon cancelled while they were in flight (the expiry canceller, a release
+   * that cuts its calls), in order. A request the transport gave up on is not one of these.
+   */
+  readonly cancelledExecutions: Array<{ name: string; sessionUuid: string | undefined }> = [];
   /** Writes a socket `ide/*` frame sent to the device through CtrlProxy (the device boundary). */
   readonly ctrlProxyWrites: string[] = [];
   /** Devices the read-only (watcher) path resolved from the booted list (#10830). */
@@ -162,14 +168,25 @@ export class RealToolCallPath {
    * One `tools/call` as the daemon's tool-call entry runs it: a tracked execution under the
    * call's `sessionUuid`, the registered handler, and the execution's end. Resolves with the
    * handler's result or rejects with what it threw, as the MCP server's catch block receives it.
+   * `requestSignal` is the MCP request's own signal: the entry hands the handler that and the
+   * execution's signal combined, so a request the transport gave up on stops its handler.
    */
-  async call(name: string, args: Record<string, unknown>): Promise<unknown> {
+  async call(
+    name: string,
+    args: Record<string, unknown>,
+    requestSignal?: AbortSignal,
+  ): Promise<unknown> {
     const tool = ToolRegistry.getTool(name);
     if (!tool) {
       throw new Error(`RealToolCallPath: tool ${name} is not registered`);
     }
     const sessionUuid = typeof args.sessionUuid === "string" ? args.sessionUuid : undefined;
     const execution = executionTracker.startExecution(name, undefined, sessionUuid);
+    execution.abortController.signal.addEventListener(
+      "abort",
+      () => this.cancelledExecutions.push({ name, sessionUuid }),
+      { once: true },
+    );
     try {
       const result = await tool.handler(
         {
@@ -178,7 +195,7 @@ export class RealToolCallPath {
           [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
         },
         undefined,
-        execution.abortController.signal,
+        combineRequestAbortSignals(execution.abortController.signal, requestSignal),
       );
       // The daemon's tool-call entry echoes the session the call was admitted under (#10974).
       return withAdmittedSessionEcho(result, execution.id);

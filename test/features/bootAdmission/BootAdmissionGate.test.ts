@@ -74,6 +74,40 @@ describe("BootAdmissionLedger", () => {
     timer.advanceTime(1_000);
     expect(ledger.inFlightCount(new Set())).toBe(0);
   });
+
+  // #11537: a window used to keep only the boots in flight when it opened.
+  test("an open sample window keeps every boot that ends inside it, whenever it was admitted", () => {
+    const ledger = new BootAdmissionLedger(new FakeTimer());
+    const window = ledger.beginSample();
+    ledger.admit("SIM-A").release();
+    ledger.admit().handOff("emulator-5554", 1_000);
+    // Another listing shows the handed-off emulator: it leaves the ledger, not the window.
+    expect(ledger.inFlightCount(new Set(["emulator-5554"]))).toBe(0);
+    window.close();
+    ledger.admit("SIM-C").release(); // ended after the sample returned: not this window's
+
+    expect(ledger.inFlightCount(new Set(), undefined, window)).toBe(2);
+    // A boot the sample's own listing shows, or the boot's own target, takes no second slot.
+    expect(ledger.inFlightCount(new Set(["SIM-A"]), undefined, window)).toBe(1);
+    expect(ledger.inFlightCount(new Set(), "SIM-A", window)).toBe(1);
+    expect(ledger.inFlightCount(new Set())).toBe(0);
+  });
+
+  // The boot deadline bounds how long an UNLISTED boot is trusted; a listed emulator is running.
+  test("a handed-off boot a listing showed outlives its boot deadline in an older open sample", () => {
+    const timer = new FakeTimer();
+    const ledger = new BootAdmissionLedger(timer);
+    ledger.admit().handOff("emulator-5554", 1_000);
+    ledger.admit().handOff("emulator-5556", 1_000);
+    const window = ledger.beginSample();
+    expect(ledger.inFlightCount(new Set(["emulator-5554"]))).toBe(1);
+    timer.advanceTime(1_000);
+    window.close();
+
+    // 5554 was seen listed; 5556 never was and its deadline passed, as for any unlisted boot.
+    expect(ledger.inFlightCount(new Set(), undefined, window)).toBe(1);
+    expect(ledger.inFlightCount(new Set(["emulator-5554"]), undefined, window)).toBe(0);
+  });
 });
 
 describe("CommandAndroidCapacitySource", () => {

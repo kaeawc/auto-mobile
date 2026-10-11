@@ -1,4 +1,9 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
+import {
+  handleDaemonRequest,
+  type DaemonStateAccess,
+} from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
@@ -28,6 +33,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Inventory contract: every inventory surface describes the same device the same way. The
@@ -360,5 +366,266 @@ describe("listDevices tool and booted resource describe a device identically", (
       ),
     });
     expect(withoutLifecycle(toolView)).toEqual(withoutLifecycle(resourceView));
+  });
+});
+
+// Transitional-state rows (#11573). One rule for both platforms: a held device that the platform
+// still lists in a transitional state is shown, with that state, and counted as assigned, never
+// idle; an unknown count is refused, never zero. Every surface below reads the same pool.
+
+const simulator: BootedDevice = {
+  platform: "ios",
+  name: "iPhone 17",
+  deviceId: "SIM-HELD-0001",
+};
+
+interface SurfaceReads {
+  tool: Entry[];
+  resource: Entry[];
+  resourcePool: { idle: number; assigned: number; error: number } | undefined;
+  resourceComplete: boolean;
+  toolComplete: boolean | undefined;
+  daemon: { success: boolean; result?: Record<string, unknown>; error?: string };
+  cli: { stdout: string[]; exits: unknown[] };
+  stats: { total: number; idle: number; assigned: number } | { error: string };
+}
+
+interface TransitionalScenario {
+  name: string;
+  platform: "android" | "ios";
+  device: BootedDevice;
+  /** Whether a session holds the device. */
+  held: boolean;
+  /** Configure the fake manager so the platform reports the device in a transitional state. */
+  transition(manager: FakeDeviceUtils): void;
+  /** Row fields every row surface must carry; `null` means no row is published at all. */
+  row: {
+    lifecycle?: string;
+    simulatorState?: string;
+    connection?: { state: string; adbState: string };
+    poolStatus: string;
+  } | null;
+  /** Expected counts, or `unknown` when the count must be refused as discovery_incomplete. */
+  counts: { total: number; idle: number; assigned: number } | "unknown";
+}
+
+const transitionalScenarios: TransitionalScenario[] = [
+  {
+    name: "held iOS simulator that is Booting",
+    platform: "ios",
+    device: simulator,
+    held: true,
+    transition: (manager) => {
+      manager.setBootedDevices("ios", []);
+      manager.setTransitionalSimulators([{ device: simulator, state: "Booting" }]);
+    },
+    row: { lifecycle: "booting", simulatorState: "Booting", poolStatus: "assigned" },
+    counts: { total: 1, idle: 0, assigned: 1 },
+  },
+  {
+    name: "held iOS simulator that is Shutting Down",
+    platform: "ios",
+    device: simulator,
+    held: true,
+    transition: (manager) => {
+      manager.setBootedDevices("ios", []);
+      manager.setTransitionalSimulators([{ device: simulator, state: "Shutting Down" }]);
+    },
+    row: { lifecycle: "shutting-down", simulatorState: "Shutting Down", poolStatus: "assigned" },
+    counts: { total: 1, idle: 0, assigned: 1 },
+  },
+  {
+    name: "pooled but unheld iOS simulator that is Booting stays unlisted and uncounted",
+    platform: "ios",
+    device: simulator,
+    held: false,
+    transition: (manager) => {
+      manager.setBootedDevices("ios", []);
+      manager.setTransitionalSimulators([{ device: simulator, state: "Booting" }]);
+    },
+    row: null,
+    counts: { total: 0, idle: 0, assigned: 0 },
+  },
+  {
+    name: "held Android device adb lists unauthorized",
+    platform: "android",
+    device: android,
+    held: true,
+    transition: (manager) => {
+      manager.setBootedDevices("android", []);
+      (manager as PlatformDeviceManager).getAndroidListedDeviceStates = async (ids) =>
+        new Map([...ids].map((id) => [id, "unauthorized"]));
+    },
+    row: {
+      connection: { state: "offline", adbState: "unauthorized" },
+      poolStatus: "assigned",
+    },
+    counts: { total: 1, idle: 0, assigned: 1 },
+  },
+  {
+    name: "held Android device discovery misses and the state probe throws",
+    platform: "android",
+    device: android,
+    held: true,
+    transition: (manager) => {
+      manager.setBootedDevices("android", []);
+      (manager as PlatformDeviceManager).getAndroidListedDeviceStates = async () => {
+        throw new Error("adb devices -l timed out");
+      };
+    },
+    row: null,
+    counts: "unknown",
+  },
+];
+
+async function readSurfaces(
+  scenario: TransitionalScenario,
+  built: { pool: DevicePool; sessions: SessionManager; timer: FakeTimer },
+): Promise<SurfaceReads> {
+  const { pool, sessions, timer } = built;
+  const resource = await getBootedDevicesForPlatforms([scenario.platform], timer);
+  const response = await ToolRegistry.getTool("listDevices")!.handler({
+    platform: scenario.platform,
+  });
+  const tool = JSON.parse(response.content?.[0]?.text ?? "{}") as {
+    devices: Entry[];
+    discovery?: { complete?: boolean };
+  };
+  const state: DaemonStateAccess = {
+    isInitialized: () => true,
+    getSessionManager: () => sessions as never,
+    getDevicePool: () => pool,
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
+  };
+  const daemon = await handleDaemonRequest(
+    { id: "r", type: "daemon_request", method: "daemon/availableDevices", params: {} },
+    state,
+  );
+  const stdout: string[] = [];
+  const exits: unknown[] = [];
+  const log = spyOn(console, "log").mockImplementation((text) => {
+    stdout.push(String(text));
+  });
+  const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+  const exit = spyOn(process, "exit").mockImplementation((code) => {
+    exits.push(code);
+    throw new Error("exit");
+  });
+  try {
+    await runDaemonCommand("available-devices", [], {}, SafeDaemonManager).catch(() => {});
+  } finally {
+    exit.mockRestore();
+    errorSpy.mockRestore();
+    log.mockRestore();
+  }
+  const stats = await pool.getRefreshedStats().then(
+    (value) => ({ total: value.total, idle: value.idle, assigned: value.assigned }),
+    (error: unknown) => ({ error: String((error as { code?: string }).code ?? error) }),
+  );
+  return {
+    tool: tool.devices,
+    resource: resource.devices as unknown as Entry[],
+    resourcePool: resource.poolStatus,
+    resourceComplete: resource.observationComplete,
+    toolComplete: tool.discovery?.complete,
+    daemon: daemon as SurfaceReads["daemon"],
+    cli: { stdout, exits },
+    stats,
+  };
+}
+
+describe("a held device in a transitional platform state is one row and one count on every surface", () => {
+  let sessions: SessionManager | undefined;
+
+  beforeAll(() => {
+    if (!ToolRegistry.getTool("listDevices")) {
+      registerDeviceTools();
+    }
+  });
+
+  afterEach(() => {
+    DaemonState.getInstance().reset();
+    sessions?.stopCleanupTimer();
+    resetBootedDevicesResourceCache();
+    setDeviceManager(null);
+  });
+
+  afterAll(() => {
+    resetDeviceToolsDependencies();
+  });
+
+  test.each(transitionalScenarios)("$name", async (scenario) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = new FakeDeviceUtils();
+    manager.setBootedDevices("android", []);
+    manager.setBootedDevices("ios", []);
+    sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = poolFor({ timer, sessions, manager });
+    manager.setBootedDevices(scenario.platform, [scenario.device]);
+    await pool.initializeWithDevices([scenario.device]);
+    if (scenario.held) {
+      await pool.bindOrReuseDeviceSession(
+        "session-held",
+        scenario.device.deviceId,
+        scenario.platform,
+      );
+    }
+    scenario.transition(manager);
+    DaemonState.getInstance().initialize(sessions, pool);
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => manager,
+      avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
+    });
+    setDeviceManager(manager);
+
+    const reads = await readSurfaces(scenario, { pool, sessions, timer });
+
+    const rowOf = (rows: Entry[]) =>
+      rows.find((candidate) => candidate.runtime.deviceId === scenario.device.deviceId);
+    for (const [surface, rows] of Object.entries({ tool: reads.tool, resource: reads.resource })) {
+      const row = rowOf(rows);
+      if (scenario.row === null) {
+        expect({ surface, row }).toEqual({ surface, row: undefined });
+        continue;
+      }
+      expect({ surface, present: row !== undefined }).toEqual({ surface, present: true });
+      expect(row!.runtime.poolStatus).toBe(scenario.row.poolStatus);
+      expect((row!.runtime.session as { sessionUuid: string }).sessionUuid).toBe("session-held");
+      expect(row!.runtime.readiness).toEqual({ state: "not_ready" });
+      if (scenario.row.lifecycle) {
+        expect(row!.runtime.lifecycle).toEqual({ state: scenario.row.lifecycle, known: true });
+      }
+      expect(row!.runtime.simulatorState).toBe(scenario.row.simulatorState);
+      expect(row!.runtime.connection).toEqual(scenario.row.connection);
+    }
+
+    if (scenario.counts === "unknown") {
+      // A count that cannot be established is refused on every counting surface, never zero.
+      expect(reads.stats).toEqual({ error: "discovery_incomplete" });
+      expect(reads.daemon.success).toBe(false);
+      expect(String(reads.daemon.error)).toContain("discovery_incomplete");
+      expect(reads.cli.exits).toEqual([1]);
+      // The row surfaces say the same thing: the platform observation is incomplete, so their
+      // zeroed counts are not an answer.
+      expect(reads.resourceComplete).toBe(false);
+      expect(reads.toolComplete).toBe(false);
+      return;
+    }
+    expect(reads.resourceComplete).toBe(true);
+    expect(reads.toolComplete).toBe(true);
+    const { total, idle, assigned } = scenario.counts;
+    expect(reads.stats).toEqual({ total, idle, assigned });
+    expect(reads.daemon.result).toMatchObject({
+      totalDevices: total,
+      availableDevices: idle,
+      assignedDevices: assigned,
+    });
+    expect(reads.resourcePool).toMatchObject({ idle, assigned });
+    expect(JSON.parse(reads.cli.stdout.join("\n"))).toMatchObject({
+      totalDevices: total,
+      availableDevices: idle,
+      assignedDevices: assigned,
+    });
   });
 });

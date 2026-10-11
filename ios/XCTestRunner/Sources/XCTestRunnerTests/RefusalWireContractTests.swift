@@ -24,6 +24,91 @@ final class RefusalWireContractTests: XCTestCase {
         let codes: [String: Row]
     }
 
+    /// A failed socket frame (`mcpRequestFailureDetails`) carries the typed fields at the top level,
+    /// not in a tool result (#11544): the runner must classify it as the surfaces table says.
+    func testEveryFailedSocketFrameIsClassifiedAsTheSurfacesExpectationsSay() throws {
+        let surfaces = fixtureDirectory.appendingPathComponent("surfaces")
+        let table = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: surfaces.appendingPathComponent("expectations.json")))
+                as? [String: Any]
+        )
+        let rows = try XCTUnwrap(table["fixtures"] as? [String: [String: Any]])
+        var checked = 0
+        for (stem, row) in rows where stem.hasPrefix("socket-frame.") {
+            let root = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(contentsOf: surfaces.appendingPathComponent("\(stem).json")))
+                    as? [String: Any]
+            )
+            let frame = try XCTUnwrap(root["payload"] as? [String: Any], stem)
+            let fields = try XCTUnwrap(row["fields"] as? [String: Any], stem)
+            let refusal = try XCTUnwrap(
+                AutoMobilePlanExecutor.DaemonRefusal.parse(frame), "\(stem) did not decode as a refusal"
+            )
+            XCTAssertEqual(refusal.code, fields["code"] as? String, "\(stem): code")
+            XCTAssertEqual(refusal.retryable, fields["retryable"] as? Bool, "\(stem): retryable")
+            XCTAssertEqual(refusal.acquiresNewSession, fields["acquireNewSession"] as? Bool, "\(stem): nextAction")
+            XCTAssertEqual(refusal.retryAfterMs, (fields["retryAfterMs"] as? NSNumber)?.intValue, "\(stem): hint")
+            XCTAssertEqual(refusal.disposition.rawValue, row["expected"] as? String, stem)
+            checked += 1
+        }
+        XCTAssertGreaterThan(checked, 0, "socket-frame rows were not found")
+    }
+
+    private func hintRows(_ key: String) throws -> [[String: Any]] {
+        let file = fixtureDirectory.deletingLastPathComponent()
+            .appendingPathComponent("refusal-wire-hints/hints.json")
+        let table = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any]
+        )
+        return try XCTUnwrap(table[key] as? [[String: Any]])
+    }
+
+    func testARetryAfterHintIsUsableAsTheSharedHintsTableSays() throws {
+        for row in try hintRows("usableHints") {
+            let name = row["name"] as? String ?? ""
+            let expected = (row["usable"] as? NSNumber)?.intValue
+            XCTAssertEqual(
+                AutoMobilePlanExecutor.DeviceWaitBackoff.usableHintMs(wire: row["wire"]), expected, name
+            )
+            let frame: [String: Any] = ["success": false, "error": "x", "code": "c", "retryAfterMs": row["wire"] as Any]
+            XCTAssertEqual(
+                AutoMobilePlanExecutor.DaemonRefusal.parse(frame)?.retryAfterMs, expected, "\(name) via parse"
+            )
+        }
+    }
+
+    func testTheNextDeviceWaitIsTheSharedHintsTableAnswerAndNeverOverflows() throws {
+        for row in try hintRows("backoffSteps") {
+            let name = row["name"] as? String ?? ""
+            var backoff = AutoMobilePlanExecutor.DeviceWaitBackoff(
+                waits: (row["waits"] as? NSNumber)?.intValue ?? 0,
+                waitedMs: (row["waitedMs"] as? NSNumber)?.intValue ?? 0
+            )
+            // The wire value reaches the backoff the way production hands it over: through parse.
+            let frame: [String: Any] = [
+                "success": false, "error": "x", "code": row["code"] as Any,
+                "retryAfterMs": row["retryAfterMs"] as Any,
+            ]
+            let refusal = try XCTUnwrap(AutoMobilePlanExecutor.DaemonRefusal.parse(frame), name)
+            XCTAssertEqual(
+                backoff.nextDelayMs(retryAfterMs: refusal.retryAfterMs, code: refusal.code),
+                (row["delayMs"] as? NSNumber)?.intValue,
+                name
+            )
+            // A raw Int hint (no parse) must clamp the same way.
+            var raw = AutoMobilePlanExecutor.DeviceWaitBackoff(
+                waits: (row["waits"] as? NSNumber)?.intValue ?? 0,
+                waitedMs: (row["waitedMs"] as? NSNumber)?.intValue ?? 0
+            )
+            let rawHint = (row["retryAfterMs"] as? NSNumber)?.intValue
+            XCTAssertEqual(
+                raw.nextDelayMs(retryAfterMs: rawHint, code: row["code"] as? String),
+                (row["delayMs"] as? NSNumber)?.intValue,
+                "\(name) raw"
+            )
+        }
+    }
+
     private var fixtureDirectory: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // XCTestRunnerTests

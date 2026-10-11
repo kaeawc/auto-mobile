@@ -7756,6 +7756,10 @@
                     },
                     "required": ["state", "adbState"],
                     "additionalProperties": false
+                  },
+                  "simulatorState": {
+                    "type": "string",
+                    "enum": ["Booting", "Shutting Down"]
                   }
                 },
                 "required": [
@@ -8456,6 +8460,10 @@
                     },
                     "required": ["state", "adbState"],
                     "additionalProperties": false
+                  },
+                  "simulatorState": {
+                    "type": "string",
+                    "enum": ["Booting", "Shutting Down"]
                   }
                 },
                 "required": [
@@ -23178,6 +23186,10 @@
                   },
                   "required": ["state", "adbState"],
                   "additionalProperties": false
+                },
+                "simulatorState": {
+                  "type": "string",
+                  "enum": ["Booting", "Shutting Down"]
                 }
               },
               "required": [

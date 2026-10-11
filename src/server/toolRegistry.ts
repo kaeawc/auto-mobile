@@ -129,8 +129,10 @@ import {
   runWithToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
 import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
-import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
-import { refuseControlOnForeignOwnedSession } from "./foreignOwnedSessionRefusal";
+import {
+  isControlCallOnNamedSession,
+  refuseControlOnForeignOwnedSession,
+} from "./foreignOwnedSessionRefusal";
 import { nonBlankSessionUuid } from "./planCallerIdentity";
 import { deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
 import { getAbortSignal, isClientCancelled, runWithAbortSignal } from "../utils/AbortContext";
@@ -2496,9 +2498,11 @@ async function assertManagedSlotControlAccess(input: {
  * that connection gets at the MCP ingress (#11344), before any bind, device move or input. A
  * plan's own session or the ambient routing session that actually replaced the named one was
  * judged when the enclosing call was admitted, so the check is skipped only when the session the
- * call runs on differs from the one it named; a blank plan session replaces nothing. Reads and
- * acquisitions are never refused. A call with no originating connection (daemon housekeeping, a
- * direct-mode server) carries no identity and is left to the device-holder check.
+ * call runs on differs from the one it named; a blank plan session replaces nothing. Which calls
+ * are judged is the ingress's own predicate (#11555), so a plain control tool (killDevice,
+ * deleteDevice) is judged like a device call and reads and acquisitions are never refused. A call
+ * with no originating connection (daemon housekeeping, a direct-mode server) carries no identity
+ * and is left to the device-holder check.
  */
 function refuseInternalControlOnForeignOwnedSession(
   tool: RegisteredTool,
@@ -2510,13 +2514,16 @@ function refuseInternalControlOnForeignOwnedSession(
     !callerMcpSessionId ||
     namedSessionUuid === undefined ||
     invocation.routingSessionUuid !== namedSessionUuid ||
-    !tool.requiresDevice ||
-    isDeviceSessionAcquisitionTool(tool.name) ||
-    tool.isDeviceReadOnlyCall?.(invocation.args) === true
+    !isControlCallOnNamedSession(tool, invocation.args)
   ) {
     return;
   }
-  refuseControlOnForeignOwnedSession(tool.name, namedSessionUuid, callerMcpSessionId);
+  refuseControlOnForeignOwnedSession(
+    tool.name,
+    namedSessionUuid,
+    callerMcpSessionId,
+    invocation.args,
+  );
 }
 
 /**

@@ -17,6 +17,7 @@ import { getDevicePoolTimeoutMs, type Environment } from "./poolConfig";
 import { freshStartAlreadyBoundError } from "./deviceAcquisitionRefusals";
 import type { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import type { Session, SessionExecutionMetadata, SessionManager } from "./sessionManager";
+import { receiptOrNew, type AcquisitionReceipt } from "./acquisitionReceipt";
 
 /**
  * Result of attaching an autolock session to an MCP session (#11129). `attached-not-persisted`
@@ -61,6 +62,8 @@ interface AutolockAcquisitionOptions {
   verifiedAndroidAvdIdentity?: DeviceInfo;
   achievedReadiness: DeviceReadinessLevel;
   collectCancellationSettlement?: (settlement: Promise<void>) => void;
+  /** Records the session this acquisition minted (never a reused one) once it is committed. */
+  receipt: AcquisitionReceipt;
 }
 
 export interface DeviceAutolockPoolPort {
@@ -115,12 +118,17 @@ export interface DeviceAutolockPoolPort {
     platform: Platform,
     sourceImage?: DeviceInfo,
   ): Promise<void>;
-  /** Publish this daemon's claim, rolling a fresh acquisition back when another daemon won. */
+  /**
+   * Publish this daemon's claim, rolling a fresh acquisition back when another daemon won.
+   * `createdSession` is the session this acquisition minted; it is released again when the
+   * publish itself fails (#11565).
+   */
   claimAcquiredDevice(
     sessionId: string,
     deviceId: string,
     heldBefore: string | null,
     platform: Platform,
+    createdSession?: Session,
   ): Promise<void>;
 }
 
@@ -173,7 +181,7 @@ export class DeviceAutolockManager {
       verifiedAndroidAvdIdentity?: DeviceInfo,
       achievedReadiness?: DeviceReadinessLevel,
       collectCancellationSettlement?: (settlement: Promise<void>) => void,
-      policy?: { autolockEnabled?: boolean },
+      policy?: { autolockEnabled?: boolean; receipt?: AcquisitionReceipt },
     ]
   ): Promise<string | undefined> {
     if (!(policy.autolockEnabled ?? captureAutolockPolicy(this.env))) {
@@ -188,6 +196,7 @@ export class DeviceAutolockManager {
       verifiedAndroidAvdIdentity ?? sourceImage,
     );
     const heldBefore = this.pool.getDevice(deviceId)?.sessionId ?? null;
+    const receipt = receiptOrNew(policy.receipt);
     const sessionId = await this.pool.withTargetDeviceDiscovery({
       deviceId,
       sourceImage: verifiedAndroidAvdIdentity ?? sourceImage,
@@ -206,10 +215,17 @@ export class DeviceAutolockManager {
           verifiedAndroidAvdIdentity,
           achievedReadiness,
           collectCancellationSettlement,
+          receipt,
         }),
     });
     if (sessionId) {
-      await this.pool.claimAcquiredDevice(sessionId, deviceId, heldBefore, platform);
+      await this.pool.claimAcquiredDevice(
+        sessionId,
+        deviceId,
+        heldBefore,
+        platform,
+        receipt.minted?.session,
+      );
     }
     return sessionId;
   }
@@ -226,6 +242,7 @@ export class DeviceAutolockManager {
     verifiedAndroidAvdIdentity,
     achievedReadiness,
     collectCancellationSettlement,
+    receipt,
   }: AutolockAcquisitionOptions): Promise<string | undefined> {
     throwIfRequestAborted();
     const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
@@ -353,6 +370,7 @@ export class DeviceAutolockManager {
       owner,
       collectCancellationSettlement,
     );
+    receipt.minted = { session, deviceId };
     this.noteStateChanged(device);
 
     logger.info(

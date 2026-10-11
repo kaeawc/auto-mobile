@@ -109,6 +109,20 @@ screenshots and video recording all see the prototype the same way they see app 
 - **Structural limits are re-checked.** The agent does not validate a spec, but it refuses one
   whose expanded tree passes the node (2000), depth (24) or `repeat` item (128) limit of
   `schemas/prototype-spec-contract.json` before expanding it (#11049).
+- **Every state write is validated.** A tap, a control's own write, text-field typing and
+  `setStates` all go through one validator (`PrototypeStateValidator`) with Android's binding
+  rules, and a rejected interaction changes nothing and emits nothing (#11408, #11551, #11562).
+  A rejected edit also redraws the text field so it shows the accepted text again. Android
+  versions each field's text (`textEpochs`) to drop edits typed against replaced text; the iOS
+  field binds the live state on the main actor, so there is no in-flight stale edit to drop.
+- **Spec byte cap (difference from Android).** Android re-encodes the whole spec, state
+  included, after each write and rejects one over `MAX_PROTOTYPE_SPEC_BYTES` (1 MiB of UTF-8).
+  The agent keeps no raw spec bytes, so it measures the shown spec's size outside `state` once,
+  from the `show_prototype` request's own `spec` (re-serialized, so whitespace is not counted),
+  and adds the candidate state's JSON size to it on each write. A rejection (`Spec byte limit
+  exceeded`) is therefore the same up to a few bytes of encoder difference (number spelling,
+  default fields Kotlin re-emits). A session built without a request (unit tests) counts the
+  state alone.
 
 ## Entry point: `launchApp { prototype: true }`
 

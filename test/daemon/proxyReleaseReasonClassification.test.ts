@@ -29,6 +29,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 const INTERVAL_MS = 1_000;
 const LEASE_MS = 4_000;
 const SESSION = "classified-session";
+/** What the acquisitions after the first mint, in order. */
+const LATER_SESSIONS = ["second-session", "third-session"] as const;
 
 /** Every reason a daemon may record, each family with an id, plus one this build does not know. */
 const EVERY_REASON: readonly string[] = [
@@ -53,8 +55,11 @@ const HEARTBEAT_PATHS: readonly Path[] = [
 interface Harness {
   timer: FakeTimer;
   proxy: DaemonMcpProxy;
-  /** The daemon answers the session's heartbeats not-found with this reason ("" for none) from now on. */
-  release(reason: string): void;
+  /**
+   * The daemon answers the session's heartbeats not-found with this reason ("" for none) from now
+   * on, or acknowledges them again (`undefined`).
+   */
+  release(reason: string | undefined, sessionUuid?: string): void;
   notify(reason: string): void;
   restartDaemon(): Promise<void>;
   /** The daemon is replaced at once: the old connection closes and the next one is answered. */
@@ -62,32 +67,40 @@ interface Harness {
   /** Connections the proxy closed itself while the daemon was still answering on them. */
   connectionResets(): number;
   forwardedCalls(): Array<{ toolName: string; sessionUuid: unknown }>;
-  heartbeats(): number;
+  heartbeats(sessionUuid?: string): number;
   close(): Promise<void>;
 }
 
 function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } = {}): Harness {
   const timer = new FakeTimer();
-  let releasedAs: string | undefined;
+  const releasedAs = new Map<string, string>();
+  const heartbeats = new Map<string, number>();
+  const minted: string[] = [];
   let reachable = true;
-  let heartbeats = 0;
   let connectionResets = 0;
   let proxyClosing = false;
   const closedByDaemon = new Set<FakeDaemonClient>();
   const forwarded: Array<{ toolName: string; sessionUuid: unknown }> = [];
   /** What the daemon answers a heartbeat for a session it released (sessionNotFoundResult). */
   const answerDaemonMethod = (method: string, params: Record<string, unknown>): void => {
-    if (method !== "daemon/heartbeat" || params.sessionId !== SESSION) {
+    const sessionUuid = params.sessionId;
+    if (method !== "daemon/heartbeat" || typeof sessionUuid !== "string") {
       return;
     }
-    heartbeats += 1;
-    if (releasedAs !== undefined) {
-      throw Object.assign(new Error(`Session not found: ${SESSION}`), {
+    heartbeats.set(sessionUuid, (heartbeats.get(sessionUuid) ?? 0) + 1);
+    const reason = releasedAs.get(sessionUuid);
+    if (reason !== undefined) {
+      throw Object.assign(new Error(`Session not found: ${sessionUuid}`), {
         code: DAEMON_SESSION_NOT_FOUND_CODE,
         // A session the daemon holds no release record for is a plain not-found.
-        ...(releasedAs === "" ? {} : { releaseReason: releasedAs }),
+        ...(reason === "" ? {} : { releaseReason: reason }),
       });
     }
+  };
+  const mintSession = (): string => {
+    const sessionUuid = minted.length === 0 ? SESSION : LATER_SESSIONS[minted.length - 1]!;
+    minted.push(sessionUuid);
+    return sessionUuid;
   };
   const newClient = (): FakeDaemonClient => {
     const created = new FakeDaemonClient({
@@ -97,18 +110,19 @@ function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } 
               content: [
                 {
                   type: "text",
-                  text: JSON.stringify({ runtime: { session: { sessionUuid: SESSION } } }),
+                  text: JSON.stringify({ runtime: { session: { sessionUuid: mintSession() } } }),
                 },
               ],
             }
           : undefined,
       onCallTool: (toolName, params) => {
         forwarded.push({ toolName, sessionUuid: params.sessionUuid });
-        const handsBack = releasedAs === "" || isRecoverableDaemonReleaseReason(releasedAs ?? "-");
-        if (params.sessionUuid === SESSION && handsBack) {
+        const named = typeof params.sessionUuid === "string" ? params.sessionUuid : "";
+        const reason = releasedAs.get(named);
+        if (reason === "" || isRecoverableDaemonReleaseReason(reason ?? "-")) {
           // The daemon hands a session it can recover back to the call that reaches it, and
           // answers its heartbeats again.
-          releasedAs = undefined;
+          releasedAs.delete(named);
         }
       },
       // Answered in the caller's turn unless a round trip is asked for: the table below pins the
@@ -144,8 +158,12 @@ function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } 
   return {
     timer,
     proxy,
-    release: (reason) => {
-      releasedAs = reason;
+    release: (reason, sessionUuid = SESSION) => {
+      if (reason === undefined) {
+        releasedAs.delete(sessionUuid);
+      } else {
+        releasedAs.set(sessionUuid, reason);
+      }
     },
     notify: (reason) =>
       client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, SESSION, reason),
@@ -173,7 +191,7 @@ function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } 
       await timer.resolvePromise(proxy.close(), 1);
     },
     forwardedCalls: () => forwarded.filter((call) => call.toolName !== "getAndroid"),
-    heartbeats: () => heartbeats,
+    heartbeats: (sessionUuid = SESSION) => heartbeats.get(sessionUuid) ?? 0,
   };
 }
 
@@ -404,5 +422,202 @@ describe("release reasons are classified alike on every path", () => {
     } finally {
       await world.close();
     }
+  });
+});
+
+// #11557: the proxy holds every session it acquired, not only the latest. A daemon that restarted
+// answers the first heartbeat of each of them on the new connection the same way, so each is
+// decided the same way: a session the daemon has not rehydrated yet is heartbeated through the
+// window, whichever acquisition minted it, and one that ended is dropped alone.
+describe("every held session is re-established on a new connection as the latest is", () => {
+  const [SECOND, THIRD] = LATER_SESSIONS;
+  const WINDOW_TICKS = RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS / INTERVAL_MS;
+
+  interface Held {
+    world: Harness;
+    /** Heartbeats each session got on each of the next `ticks` keeper ticks. */
+    perTick(ticks: number): Promise<Record<string, number[]>>;
+  }
+
+  /** A proxy holding `sessions` (the last one is its latest binding), heartbeated once. */
+  async function holding(sessions: readonly string[]): Promise<Held> {
+    const world = harness({ livenessOwnerToken: "stable-owner-token", roundTripMs: 5 });
+    for (let acquired = 0; acquired < sessions.length; acquired += 1) {
+      await world.timer.resolvePromise(world.proxy.callTool("getAndroid", {}), 1);
+    }
+    await world.timer.advanceTimeAsync(INTERVAL_MS + 10);
+    return {
+      world,
+      perTick: async (ticks) => {
+        const sent: Record<string, number[]> = Object.fromEntries(sessions.map((id) => [id, []]));
+        for (let tick = 0; tick < ticks; tick += 1) {
+          const before = sessions.map((id) => world.heartbeats(id));
+          await world.timer.advanceTimeAsync(INTERVAL_MS);
+          sessions.forEach((id, index) => sent[id]!.push(world.heartbeats(id) - before[index]!));
+        }
+        return sent;
+      },
+    };
+  }
+
+  test("a restarted daemon that knows none of them yet is heartbeated for each, once a tick for the window", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND]);
+    try {
+      world.release("", SESSION);
+      world.release("", SECOND);
+      world.replaceDaemon();
+
+      const sent = await perTick(WINDOW_TICKS + 4);
+
+      expect(world.connectionResets()).toBe(0);
+      // The held session is asked on exactly the ticks the latest binding is.
+      expect(sent[SESSION]).toEqual(sent[SECOND]!);
+      expect(Math.max(...sent[SESSION]!)).toBe(1);
+      const asked = sent[SESSION]!.filter((count) => count === 1).length;
+      expect(asked).toBeGreaterThanOrEqual(WINDOW_TICKS);
+      expect(asked).toBeLessThanOrEqual(WINDOW_TICKS + 2);
+      expect(sent[SESSION]!.slice(-2)).toEqual([0, 0]);
+      // Nothing left to wait for: the keeper stops.
+      expect(world.timer.getPendingIntervalCount()).toBe(0);
+    } finally {
+      await world.close();
+    }
+  });
+
+  test("a held session the daemon rehydrates inside the window is held from then on", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND]);
+    try {
+      world.release("", SESSION);
+      world.release("", SECOND);
+      world.replaceDaemon();
+      await perTick(5);
+      // The daemon rehydrated both and found their owner's heartbeats waiting.
+      world.release(undefined, SESSION);
+      world.release(undefined, SECOND);
+
+      const sent = await perTick(WINDOW_TICKS + 4);
+
+      expect(sent[SESSION]).toEqual(sent[SESSION]!.map(() => 1));
+      expect(sent[SECOND]).toEqual(sent[SECOND]!.map(() => 1));
+      expect(world.connectionResets()).toBe(0);
+    } finally {
+      await world.close();
+    }
+  });
+
+  test("mixed answers: one ended, one not rehydrated yet, one live; each is decided alone", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND, THIRD]);
+    try {
+      world.release("device-killed", SESSION);
+      world.release("", SECOND);
+      world.replaceDaemon();
+
+      const sent = await perTick(6);
+
+      // The ended one is asked once and dropped; the connection its siblings use is kept.
+      expect(sent[SESSION]).toEqual([1, 0, 0, 0, 0, 0]);
+      expect(sent[SECOND]).toEqual([1, 1, 1, 1, 1, 1]);
+      expect(sent[THIRD]).toEqual([1, 1, 1, 1, 1, 1]);
+      expect(world.connectionResets()).toBe(0);
+    } finally {
+      await world.close();
+    }
+  });
+
+  test("a held session that ends for good inside the window is dropped then, and only it", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND, THIRD]);
+    try {
+      for (const sessionUuid of [SESSION, SECOND, THIRD]) {
+        world.release("", sessionUuid);
+      }
+      world.replaceDaemon();
+      await perTick(4);
+      // The daemon rehydrated it and released it for good: no owner returned in time.
+      world.release("rehydration-owner-timeout", SESSION);
+
+      const sent = await perTick(4);
+
+      expect(sent[SESSION]).toEqual([1, 0, 0, 0]);
+      expect(sent[SECOND]).toEqual([1, 1, 1, 1]);
+      expect(sent[THIRD]).toEqual([1, 1, 1, 1]);
+      expect(world.connectionResets()).toBe(0);
+    } finally {
+      await world.close();
+    }
+  });
+
+  test("the latest binding ending for good on the new connection leaves the held ones waited for", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND]);
+    try {
+      world.release("", SESSION);
+      world.release("device-killed", SECOND);
+      world.replaceDaemon();
+
+      const sent = await perTick(4);
+
+      expect(sent[SESSION]).toEqual([1, 1, 1, 1]);
+      expect(sent[SECOND]).toEqual([1, 0, 0, 0]);
+      expect(world.connectionResets()).toBe(0);
+      // Terminal for that session only: its call is refused here, never forwarded.
+      await expect(world.proxy.callTool("observe", {})).rejects.toThrow("device-killed");
+      expect(world.forwardedCalls()).toEqual([]);
+    } finally {
+      await world.close();
+    }
+  });
+
+  test("a held session answered not-found with no reason on a connection that had answered is still dropped at once", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND]);
+    try {
+      world.release("", SESSION);
+
+      const sent = await perTick(4);
+
+      expect(sent[SESSION]).toEqual([1, 0, 0, 0]);
+      expect(sent[SECOND]).toEqual([1, 1, 1, 1]);
+      expect(world.connectionResets()).toBe(0);
+    } finally {
+      await world.close();
+    }
+  });
+
+  // The latest binding's not-found on a connection that had answered is asked once more on a
+  // fresh one. That connection is the proxy's own doing, to the daemon it was already talking to:
+  // it re-establishes nothing, so the held session is not waited for either.
+  test("the connection made to ask the latest binding's not-found again opens no window for a held session", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND]);
+    try {
+      world.release("", SESSION);
+      world.release("", SECOND);
+
+      const sent = await perTick(5);
+
+      expect(world.connectionResets()).toBe(1);
+      const total = (counts: number[]) => counts.reduce((sum, count) => sum + count, 0);
+      // The latest binding: asked, and asked again on the fresh connection.
+      expect(total(sent[SECOND]!)).toBe(2);
+      expect(sent[SECOND]!.slice(-3)).toEqual([0, 0, 0]);
+      // The held session: its one answer, and at most the heartbeat the reset cut short.
+      expect(total(sent[SESSION]!)).toBeLessThanOrEqual(2);
+      expect(sent[SESSION]!.slice(-3)).toEqual([0, 0, 0]);
+      expect(world.timer.getPendingIntervalCount()).toBe(0);
+    } finally {
+      await world.close();
+    }
+  });
+
+  test("closing inside the window leaves no timer behind", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND]);
+    world.release("", SESSION);
+    world.release("", SECOND);
+    world.replaceDaemon();
+    await perTick(3);
+
+    await world.close();
+
+    expect(world.timer.getPendingIntervalCount()).toBe(0);
+    const before = [world.heartbeats(SESSION), world.heartbeats(SECOND)];
+    await world.timer.advanceTimeAsync(RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS);
+    expect([world.heartbeats(SESSION), world.heartbeats(SECOND)]).toEqual(before);
   });
 });

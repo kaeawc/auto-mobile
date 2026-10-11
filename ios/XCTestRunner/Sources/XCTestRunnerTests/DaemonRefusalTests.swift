@@ -257,6 +257,53 @@ final class DaemonRefusalTests: XCTestCase {
         XCTAssertTrue(scheduler.delays.isEmpty)
     }
 
+    /// #11544: a typed failed frame reaches the executor as `MCPClientError.refused`; only a retryable
+    /// one is retried, a terminal code is not, and an untyped failure keeps the blind retry.
+    func testFailedFramesAreRetriedOnlyWhenTheirTypedRetryableFlagSays() async throws {
+        func frame(_ code: String?, retryable: Bool) -> MCPClientError {
+            .refused(Refusal(code: code, message: "m", retryable: retryable, nextAction: nil, retryAfterMs: nil))
+        }
+        let cases: [(String, MCPClientError, Int)] = [
+            ("daemon_queue_timeout", frame("daemon_queue_timeout", retryable: true), 2),
+            ("daemon_shutting_down", frame("daemon_shutting_down", retryable: true), 2),
+            ("daemon_restart_pending", frame("daemon_restart_pending", retryable: true), 2),
+            ("session_recovery_pending", frame("session_recovery_pending", retryable: true), 2),
+            ("daemon_session_suspect", frame("daemon_session_suspect", retryable: true), 2),
+            ("device_outside_bound_session", frame("device_outside_bound_session", retryable: false), 1),
+            ("some_terminal_code", frame("some_terminal_code", retryable: false), 1),
+            ("untyped", .serverError("daemon request timeout"), 2),
+        ]
+        for (name, error, calls) in cases {
+            let client = RefusalMCPClient()
+            client.executePlanErrors = [error, error, error]
+            let executor = makeExecutor(client: client, scheduler: RecordingScheduler(), retryCount: 1)
+
+            do {
+                _ = try await executor.execute(sessionUuid: "first")
+                XCTFail("\(name): expected the failure to throw")
+            } catch {}
+            XCTAssertEqual(client.executePlanSessions.count, calls, name)
+        }
+    }
+
+    func testAFailedFrameForAHeldDeviceIsWaitedOutWithoutSpendingARetry() async throws {
+        let client = RefusalMCPClient()
+        client.executePlanErrors = [
+            .refused(Refusal(
+                code: "device_owned_by_other_session", message: "held", retryable: false, nextAction: nil,
+                retryAfterMs: nil
+            )),
+        ]
+        client.executePlanReplies = [successPayload]
+        let scheduler = RecordingScheduler()
+        let executor = makeExecutor(client: client, scheduler: scheduler, retryCount: 0)
+
+        let result = try await executor.execute(sessionUuid: "first")
+
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(scheduler.delays, [0.5])
+    }
+
     func testNonRetryableTypedRefusalIsNotRetried() async throws {
         let client = RefusalMCPClient()
         client.executePlanReplies = [
@@ -359,6 +406,8 @@ private final class RecordingScheduler: DeadlineScheduler, @unchecked Sendable {
 private final class RefusalMCPClient: AutoMobileMCPClient, @unchecked Sendable {
     var setToolEnabledReplies: [String] = []
     var executePlanReplies: [String] = []
+    /// Failures thrown (in order) before any reply is served, as a failed daemon frame is.
+    var executePlanErrors: [MCPClientError] = []
     private(set) var setToolEnabledSessions: [String] = []
     private(set) var executePlanSessions: [String] = []
 
@@ -373,6 +422,7 @@ private final class RefusalMCPClient: AutoMobileMCPClient, @unchecked Sendable {
             return MCPToolResponse(text: reply)
         case "executePlan":
             executePlanSessions.append(session)
+            if !executePlanErrors.isEmpty { throw executePlanErrors.removeFirst() }
             return MCPToolResponse(text: executePlanReplies.removeFirst())
         default:
             return MCPToolResponse(text: "{}")

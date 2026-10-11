@@ -130,6 +130,19 @@ describe("a session another connection owns is not controlled by naming it (#113
       expect(error?.message).toContain(`session ${SESSION} is owned by another connected client`);
     });
 
+    test("carrying force is told to leave sessionUuid out; any other call is not (#11555)", async () => {
+      const forced = await refusal(() =>
+        refuseControlOnForeignOwnedSession("killDevice", SESSION, OTHER, { force: true }),
+      );
+      const plain = await refusal(() =>
+        refuseControlOnForeignOwnedSession("killDevice", SESSION, OTHER, { force: false }),
+      );
+
+      expect(forced?.message).toContain(`session ${SESSION} is owned by another connected client`);
+      expect(forced?.message).toContain("leave sessionUuid out");
+      expect(plain?.message).not.toContain("force");
+    });
+
     test("from the owner, from a caller with no identity, or naming no session is admitted", () => {
       expect(() => refuseControlOnForeignOwnedSession("tapOn", SESSION, OWNER)).not.toThrow();
       expect(() => refuseControlOnForeignOwnedSession("tapOn", SESSION, undefined)).not.toThrow();

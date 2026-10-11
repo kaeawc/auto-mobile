@@ -3136,6 +3136,113 @@ describe("DeviceBootService", () => {
     });
   });
 
+  describe("Android re-check after waiting for the AVD's lifecycle lease (#11565)", () => {
+    // The booted emulator reports the serial the image resolves to.
+    const avd: DeviceInfo = { ...image, deviceId: "emulator-5554" };
+    const stableAvd = { kind: "stable", platform: "android", stableId: avd.name } as const;
+
+    /** `startDevice` refuses a running AVD exactly like `DeviceUtils.startDevice` does. */
+    function setup() {
+      const devices = new FakeDeviceUtils();
+      const timer = new FakeTimer();
+      const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+      const matcher = new FakeDeviceMatcher();
+      matcher.setImageResult(avd);
+      devices.setDeviceImages("android", [avd]);
+      devices.setBootedDevices("android", []);
+      const sweepsBeforeStart: number[] = [];
+      const originalStartDevice = devices.startDevice.bind(devices);
+      devices.startDevice = async (device, timeoutMs) => {
+        sweepsBeforeStart.push(devices.getBootedDevicesDetailedCalls().length);
+        if (await devices.isDeviceImageRunning(device)) {
+          throw new DeviceAlreadyRunningError(
+            `android device '${device.name}' is already running`,
+            "android",
+            device.deviceId,
+          );
+        }
+        return await originalStartDevice(device, timeoutMs);
+      };
+      const boot = (request: Partial<DeviceBootRequest> = {}) =>
+        service(devices, matcher, undefined, timer, lifecycleCoordinator).boot({
+          platform: "android",
+          ...request,
+        });
+      /** Another operation holds the AVD's stable key, as a kill does until the emulator exits. */
+      const holdAvd = () =>
+        lifecycleCoordinator.reserve(stableAvd, { operation: "shutdown", deadlineMs: 600_000 });
+      return { devices, lifecycleCoordinator, boot, holdAvd, sweepsBeforeStart };
+    }
+
+    async function flushMicrotasks(): Promise<void> {
+      for (let attempt = 0; attempt < 60; attempt++) {
+        await Promise.resolve();
+      }
+    }
+
+    it("adopts the AVD a sibling booted while both were queued on its lease", async () => {
+      const test = setup();
+      const holder = await test.holdAvd();
+      const first = test.boot();
+      await flushMicrotasks();
+      const second = test.boot({ formFactor: "phone" });
+      await flushMicrotasks();
+      expect(test.sweepsBeforeStart).toEqual([]);
+
+      holder.release();
+      const [winner, adopter] = await Promise.all([first, second]);
+
+      expect(winner.source).toBe("cold-boot");
+      expect(adopter.source).toBe("booted");
+      expect(adopter.device.deviceId).toBe(winner.device.deviceId);
+      expect(adopter.sourceImage).toEqual(avd);
+      expect(test.sweepsBeforeStart.length).toBe(1);
+      expect(test.lifecycleCoordinator.isReserved(stableAvd)).toBe(false);
+    });
+
+    it("still cold-boots after the wait when nothing booted the AVD meanwhile", async () => {
+      const test = setup();
+      const holder = await test.holdAvd();
+      const queued = test.boot();
+      await flushMicrotasks();
+
+      holder.release();
+
+      expect((await queued).source).toBe("cold-boot");
+    });
+
+    it("an explicit cold boot is not turned into adoption by the wait", async () => {
+      const test = setup();
+      const holder = await test.holdAvd();
+      const first = test.boot();
+      await flushMicrotasks();
+      const second = test.boot({ formFactor: "phone", preferRunning: false });
+      await flushMicrotasks();
+
+      holder.release();
+      const [winner, refused] = await Promise.allSettled([first, second]);
+
+      expect(winner.status).toBe("fulfilled");
+      expect(refused.status).toBe("rejected");
+      expect((refused as PromiseRejectedResult).reason).toBeInstanceOf(DeviceAlreadyRunningError);
+    });
+
+    it("a start that never waited for the lease adds no discovery sweep", async () => {
+      const queued = setup();
+      const holder = await queued.holdAvd();
+      const waited = queued.boot();
+      await flushMicrotasks();
+      holder.release();
+      await waited;
+      const unqueued = setup();
+
+      await unqueued.boot();
+
+      expect(unqueued.sweepsBeforeStart.length).toBe(1);
+      expect(queued.sweepsBeforeStart).toEqual([unqueued.sweepsBeforeStart[0] + 1]);
+    });
+  });
+
   describe("bare external abort phase labeling (#5394)", () => {
     // "listing device images" and "waiting for device boot readiness" both
     // default `awaitAbortSettlement` to true, so the fake operation below

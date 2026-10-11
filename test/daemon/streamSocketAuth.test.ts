@@ -9,6 +9,7 @@ import {
 } from "../../src/daemon/streamSocketAuth";
 import { releasingSessionHarness } from "../helpers/releasingSessionHarness";
 import { ActionableError } from "../../src/models";
+import { PLAN_LABEL_SESSION_SOURCE } from "../../src/daemon/sessionManager";
 
 function sessionManager(
   overrides: Partial<StreamAuthSessionManager> = {},
@@ -44,6 +45,35 @@ describe("SessionScopedStreamAuthenticator", () => {
 
   test("accepts a live session with no device", () => {
     expect(() => authenticator(sessionManager()).authorize({ sessionUuid: "live" })).not.toThrow();
+  });
+
+  test("judges plan labels with peekSession while ordinary sessions use getSession alone", () => {
+    const lookups: string[] = [];
+    const auth = authenticator(
+      sessionManager({
+        getSession: (id) => {
+          lookups.push(`get:${id}`);
+          return id === "base:phone"
+            ? { persistenceMetadata: { source: PLAN_LABEL_SESSION_SOURCE } }
+            : {};
+        },
+        peekSession: (id) => {
+          lookups.push(`peek:${id}`);
+          return null;
+        },
+      }),
+    );
+    expect(() => auth.authorize({ sessionUuid: "base:phone" })).toThrow(
+      /not an active daemon session/,
+    );
+    expect(() => auth.authorize({ sessionUuid: "live" })).not.toThrow();
+    expect(lookups).toEqual(["get:base:phone", "peek:base:phone", "get:live"]);
+    lookups.length = 0;
+    expect(auth.resolveSubscriptionIdentity({ sessionUuid: "base:phone" }).sessionExists).toBe(
+      false,
+    );
+    expect(auth.resolveSubscriptionIdentity({ sessionUuid: "live" }).sessionExists).toBe(true);
+    expect(lookups).toEqual(["get:base:phone", "peek:base:phone", "get:live"]);
   });
 
   test("fails closed when the session registry is unavailable", () => {

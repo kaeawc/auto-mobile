@@ -947,6 +947,15 @@ function adoptHolderConnectionSession(args: Record<string, unknown>): void {
 class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   private readonly defaultDeviceRead: SessionlessDeviceRead;
 
+  private refuseEndedPlanBase(sessionUuid: string, executionId?: string): void {
+    const ended = DaemonState.getInstance()
+      .getSessionManager()
+      .terminalAnswerForEndedSession(sessionUuid, executionId);
+    if (ended) {
+      throw ended;
+    }
+  }
+
   constructor(
     private readonly logger: Logger = logger,
     private readonly displayInventory: DisplayInventoryProvider = defaultDisplayInventoryProvider,
@@ -1041,6 +1050,9 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       } else if (name === "executePlan" && declaredDeviceLabels?.includes(deviceLabel)) {
         sessionUuid = baseSessionUuid;
       } else {
+        // The base's end ends its labels (#11640): a step whose base has ended, or is past its
+        // idle deadline, fails with the base's terminal release, not as an unallocated label.
+        this.refuseEndedPlanBase(baseSessionUuid, execution?.executionId);
         throw new ActionableError(
           `Device label '${deviceLabel}' is not allocated. Provide a devices list to executePlan before using device labels.`,
         );

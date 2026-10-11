@@ -199,6 +199,7 @@ export class DeviceAutolockManager {
     const receipt = receiptOrNew(policy.receipt);
     const sessionId = await this.pool.withTargetDeviceDiscovery({
       deviceId,
+      readinessReservationOwners,
       sourceImage: verifiedAndroidAvdIdentity ?? sourceImage,
       unavailableMessage: this.unavailableMessage(deviceId),
       platform,

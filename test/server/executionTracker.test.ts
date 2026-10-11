@@ -809,4 +809,42 @@ describe("ExecutionTracker session execution deadlines (#10712)", () => {
     tracker.setExecutionDeadline(execution.id, () => 7_000);
     expect(tracker.getLatestSessionExecutionDeadlineMs("autolock")).toBe(7_000);
   });
+
+  test("reads each execution once, whichever memberships list it, and no other session's", () => {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["a", "b", "c"]));
+    const reads: string[] = [];
+    const deadline = (name: string, value: number) => () => {
+      reads.push(name);
+      return value;
+    };
+    // Listed under "s" twice: explicitly, and as the autolock session its routing resolved to.
+    const both = tracker.startExecution("tapOn", "mcp-session", "s");
+    tracker.setResolvedAutolockSessionUuid(both.id, "s");
+    tracker.setExecutionDeadline(both.id, deadline("both", 5_000));
+    const autolockOnly = tracker.startExecution("tapOn", "mcp-session");
+    tracker.setResolvedAutolockSessionUuid(autolockOnly.id, "s");
+    tracker.setExecutionDeadline(autolockOnly.id, deadline("autolock", 8_000));
+    const foreign = tracker.startExecution("tapOn", undefined, "other");
+    tracker.setExecutionDeadline(foreign.id, deadline("foreign", 99_000));
+
+    expect(tracker.getLatestSessionExecutionDeadlineMs("s")).toBe(8_000);
+    expect(reads.toSorted()).toEqual(["autolock", "both"]);
+  });
+
+  test("moves a finite deadline by the offset it was stamped under on the session clock", () => {
+    let offset = 250;
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["a", "b"]));
+    tracker.setSessionClockOffsetProvider(() => offset);
+    const stamped = tracker.startExecution("tapOn", undefined, "s");
+    tracker.setExecutionDeadline(stamped.id, () => 5_000);
+    offset = 900;
+
+    expect(tracker.getLatestSessionExecutionDeadlineMs("s")).toBe(5_000);
+    expect(tracker.getLatestSessionExecutionDeadlineMs("s", { onSessionClock: true })).toBe(5_250);
+    // An execution without a deadline stays unbounded on either clock.
+    tracker.startExecution("tapOn", undefined, "s");
+    expect(tracker.getLatestSessionExecutionDeadlineMs("s", { onSessionClock: true })).toBe(
+      Number.POSITIVE_INFINITY,
+    );
+  });
 });

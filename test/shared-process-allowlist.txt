@@ -416,6 +416,7 @@ test/features/featureFlags/FeatureFlagService.toolListChanged.test.ts
 test/features/featureFlags/persistedOutputReductionOverrides.test.ts
 test/features/featureFlags/toolDefinitionAffectingFlags.drift.test.ts
 test/features/iosSimFleet/IosBootInstrumentation.test.ts
+test/features/iosSimFleet/capacityCheckFreshListing.test.ts
 test/features/iosSimFleet/iosBootCapacityGate.test.ts
 test/features/iosSimFleet/iosSimFleet.test.ts
 test/features/memory/MemoryAudit.characterization.test.ts
@@ -1086,6 +1087,7 @@ test/utils/android-cmdline-tools/AndroidEmulatorClient-architectureCompatibility
 test/utils/android-cmdline-tools/AndroidEmulatorClient-enrichment.characterization.test.ts
 test/utils/android-cmdline-tools/AndroidEmulatorClient-executeCommand.test.ts
 test/utils/android-cmdline-tools/AndroidEmulatorClient-getBootedDevices.test.ts
+test/utils/android-cmdline-tools/AndroidEmulatorClient-heldStateProbeMissingAdb.test.ts
 test/utils/android-cmdline-tools/AndroidEmulatorClient-inventoryEnrichment.test.ts
 test/utils/android-cmdline-tools/AndroidEmulatorClient-killIdentity.test.ts
 test/utils/android-cmdline-tools/AndroidEmulatorClient-offlineRecovery.test.ts

@@ -729,10 +729,12 @@ test/lint/livenessActivityClockSeparation.test.ts
 test/lint/noCaughtErrorInterpolationRule.test.ts
 test/lint/noInlineErrorNormalizeRule.test.ts
 test/lint/noLegacyAutomobilePath.test.ts
+test/lint/posixPathLiteralExpectations.test.ts
 test/lint/processSafety.test.ts
 test/lint/rawSelectorFieldReadRule.test.ts
 test/lint/registrationTeardownGuard.test.ts
 test/lint/screenControlDocsParams.test.ts
+test/lint/sessionClockOffsetProviderSingleRead.test.ts
 test/lint/shortUnitTestTimeout.test.ts
 test/lint/simctlDevicectlBoundary.test.ts
 test/lint/sortedListingBoundary.test.ts

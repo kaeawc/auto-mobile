@@ -28,9 +28,9 @@ import type { Timer } from "../../src/utils/SystemTimer";
 //
 // The server is opened by `UnixSocketServer.startDetached()`: `start()` minus the socket file, so
 // the accept state and the release, list-changed and resource-updated fan-out are the server's
-// own wiring. A scenario fails when the accept state, the release push or the list-changed push
-// is cut; no scenario subscribes to a resource, so the resource-updated fan-out is wired but
-// unasserted. The server is built with no feature-flag service and no startup identity options.
+// own wiring. A scenario fails when the accept state, the release push, the list-changed push or
+// the resource-updated push is cut (test/daemon/livenessMutants.md lists the rows). The server
+// is built with no feature-flag service and no startup identity options.
 
 /** A socket path no process can bind: the in-memory server is never started on it. */
 export const IN_MEMORY_SOCKET_PATH = "in-memory://liveness-scenario/control.sock";

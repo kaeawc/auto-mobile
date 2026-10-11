@@ -171,6 +171,32 @@ describe("the harness's control socket is opened by the socket server's own star
   );
 });
 
+describe("the harness's daemon runs every host step of the start sequence", () => {
+  // The steps that touch the machine do nothing here, so a start that skipped one would fail no
+  // scenario: this pins that `Daemon.start()` still asks its host for each, and in which order.
+  // The services (aux sockets, the PID file's full identity) and the maintenance monitors come
+  // only after the control socket is bound, for a restarted daemon as for the first.
+  scenarioTest(
+    "each daemon process asks its host for every step once, the services and monitors after the socket bind",
+    async () => {
+      scenario = await LivenessScenario.start();
+      await scenario.daemonRestart();
+      const steps = [
+        "enterProcess",
+        "publishForwardLeaseOwner",
+        "writeEarlyOwnerRecord",
+        "openTerminalReleaseJournal",
+        "startHttpIngress",
+        "sweepStaleAppearanceConfigs",
+        "bindControlSocket",
+        "startServicesAfterSocketBind",
+        "startMaintenanceMonitors",
+      ];
+      expect(scenario.hostStartSteps).toEqual([steps, steps]);
+    },
+  );
+});
+
 describe("a harness daemon is a process", () => {
   test("a killed process's timers, intervals and sleeps never fire; the shared clock runs on", async () => {
     const clock = new FakeTimer();

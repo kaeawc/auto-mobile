@@ -237,7 +237,10 @@ export class SlotScopeReset {
     };
     // Idempotent: blocks acquisitions now, and turns an abandoned (revivable) scope permanent.
     await registry.beginScopeInvalidation(scope.scopeKey, reason);
-    const forceRefusals = force ? await this.abandonSettlement(registry, scope) : [];
+    let forceRefusals = force ? await this.abandonSettlement(registry, scope) : [];
+    // `--force` judges each slot again once the settle wait is over (#11616): a verdict taken
+    // before the wait is stale by then (the cap may have passed, the settler may have exited).
+    let forceRejudged = !force;
     for (;;) {
       const completed = await registry.completeScopeInvalidation(scope.scopeKey);
       if (completed.kind === "invalidated") {
@@ -262,6 +265,12 @@ export class SlotScopeReset {
           ? pendingEvidence(completed)
           : { liveOwners: [], settling: [], cleanupPending: [], openJournal: [] };
       const remainingMs = deadlineMs - this.options.timer.now();
+      if (remainingMs <= 0 && !forceRejudged) {
+        forceRejudged = true;
+        forceRefusals = await this.abandonSettlement(registry, scope);
+        // One more completion pass: a slot abandoned just now no longer holds the scope.
+        continue;
+      }
       if (remainingMs <= 0) {
         return {
           ...base,

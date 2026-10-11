@@ -305,17 +305,21 @@ The registry tracks each scope as `valid`, `invalidating` or `invalidated`
   journal entry is committed, and the reset proceeds; work that outlived the cap
   may keep running after an abandon. `--force` never overrides a slot with a live
   execution owner, nor a slot still inside the cap whose settling daemon is not
-  provably gone. Each slot it leaves alone is listed in the scope's
-  `forceRefusals` with a typed `reason` and a message saying what to do:
+  provably gone. Slots are judged when the command starts and again when its
+  settle wait ends, so a slot that outlives the cap, or whose settling daemon
+  exits, during the wait is abandoned by the same call, and the refusals in the
+  answer describe the moment it answers (#11616). Each slot it leaves alone is
+  listed in the scope's `forceRefusals` with a typed `reason` and a message
+  saying what to do:
 
-  | `reason`                 | Meaning                                                                                                                                                                                                                      |
-  | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | `live_owner`             | An execution this daemon holds is using the slot. Release it first.                                                                                                                                                          |
-  | `owner_liveness_unknown` | The owner record belongs to another running daemon. This daemon cannot tell whether that execution ended there, so it neither cuts the slot nor treats the record as dead. Run the reset through that daemon, or restart it. |
-  | `within_settlement_cap`  | The slot is settling under a daemon not known to be gone. `remainingMs` says when `--force` will apply.                                                                                                                      |
-  | `no_release_entry`       | The slot is `settling` with no open release entry, so `--force` cannot tell whether it is stuck. Restart the settling daemon: startup recovery returns the slot to `ready`.                                                  |
-  | `other_open_journal`     | Unfinished non-release journal work; wait for the redrive.                                                                                                                                                                   |
-  | `abandon_failed`         | The slot changed, or the registry failed, during the abandon; retry.                                                                                                                                                         |
+  | `reason`                 | Meaning                                                                                                                                                                                                                                 |
+  | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `live_owner`             | An execution this daemon holds is using the slot: release it first. Also a released execution whose work is still running while its `settling` mark could not be written yet (#11616); it clears when that work ends or the mark lands. |
+  | `owner_liveness_unknown` | The owner record belongs to another running daemon. This daemon cannot tell whether that execution ended there, so it neither cuts the slot nor treats the record as dead. Run the reset through that daemon, or restart it.            |
+  | `within_settlement_cap`  | The slot is settling under a daemon not known to be gone. `remainingMs`, measured when the command answers, says when `--force` will apply.                                                                                             |
+  | `no_release_entry`       | The slot is `settling` with no open release entry, so `--force` cannot tell whether it is stuck. Restart the settling daemon: startup recovery returns the slot to `ready`.                                                             |
+  | `other_open_journal`     | Unfinished non-release journal work; wait for the redrive.                                                                                                                                                                              |
+  | `abandon_failed`         | The slot changed, or the registry failed, during the abandon; retry.                                                                                                                                                                    |
 
   An owner record whose session has ended in the daemon that wrote it (its clear
   failed against a busy registry) is not a live owner there: that daemon clears it

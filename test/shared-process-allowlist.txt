@@ -163,6 +163,7 @@ test/daemon/observerSessionRequestHandlers.test.ts
 test/daemon/outboundWriteGuard.test.ts
 test/daemon/ownerConflictLeash.test.ts
 test/daemon/ownerDisconnectReleaseRearm.test.ts
+test/daemon/ownershipLookupReleasesNothing.test.ts
 test/daemon/passiveWorkPolicy.test.ts
 test/daemon/perSourceIosLiveness.test.ts
 test/daemon/performancePushSocketServer.test.ts
@@ -946,6 +947,7 @@ test/server/observeWaitForMultiPanel.test.ts
 test/server/performanceMonitorSessionCleanup.test.ts
 test/server/ping.test.ts
 test/server/planHealthSummary.test.ts
+test/server/planLabelNeverTakesSessionOfItsOwn.test.ts
 test/server/planOrchestratorVideoRecorderInjection.test.ts
 test/server/platform/PlatformClient.test.ts
 test/server/prompts/list.test.ts

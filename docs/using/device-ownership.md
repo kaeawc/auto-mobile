@@ -35,8 +35,10 @@ claimed on a label proves nothing about its base (#11602). A connection bound to
 the base session, or to one of its labels, may name any live session of that
 plan directly as `sessionUuid`; a name the base has not published, or a label
 that is not allocated, is still refused as a different session. A connection
-seeded with the base (`--initial-session-uuid <base>`) is judged the same way: its
-proxy forwards a `<base>:<label>` name and the daemon answers from the label map.
+seeded with the base is judged the same way. A proxy started with
+`--initial-session-uuid <base>` has no label map, so it forwards a
+`<base>:<name>` call for the daemon to judge like any explicitly named session:
+by issued-session admission and the owner rule, not by the proxy's binding.
 None of these judgements holds, extends or releases a session: a base past its
 idle deadline that the scan has not reached yet publishes no labels, and is
 released by the scan or by a call that names it, never by a lookup about its

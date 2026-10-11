@@ -1,3 +1,4 @@
+import { readEnvPositiveInteger } from "../utils/envNumbers";
 /**
  * The device-session release windows, in one place (owner decision 2026-10-08).
  *
@@ -52,6 +53,14 @@ export const PROXY_HEARTBEAT_INTERVAL_MS = 2_000;
  */
 export const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 
+/**
+ * Floor for an idle window a configuration source (a managed-slot config, the CLI idle env)
+ * sets: it may lengthen the 2-minute window but never shorten it, so a typo cannot release a
+ * device early. The `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` knob stays below it on purpose: tests
+ * and live idle checks shorten that one.
+ */
+export const MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS = DEFAULT_SESSION_IDLE_TIMEOUT_MS;
+
 /** Env override for {@link DEFAULT_SESSION_IDLE_TIMEOUT_MS} (#10671). */
 export const SESSION_IDLE_TIMEOUT_ENV = "AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS";
 /** Legacy-prefixed alias of {@link SESSION_IDLE_TIMEOUT_ENV}. */
@@ -62,7 +71,11 @@ export const LEGACY_SESSION_IDLE_TIMEOUT_ENV = "AUTO_MOBILE_SESSION_IDLE_TIMEOUT
  * ignored in favour of the default, matching the other session timing knobs.
  */
 export function getSessionIdleTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  const rawValue = env[SESSION_IDLE_TIMEOUT_ENV] ?? env[LEGACY_SESSION_IDLE_TIMEOUT_ENV];
-  const parsed = rawValue && /^\d+$/.test(rawValue.trim()) ? Number(rawValue.trim()) : NaN;
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_SESSION_IDLE_TIMEOUT_MS;
+  return readEnvPositiveInteger(
+    {
+      names: [SESSION_IDLE_TIMEOUT_ENV, LEGACY_SESSION_IDLE_TIMEOUT_ENV],
+      fallback: DEFAULT_SESSION_IDLE_TIMEOUT_MS,
+    },
+    env,
+  );
 }

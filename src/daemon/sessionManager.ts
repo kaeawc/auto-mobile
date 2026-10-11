@@ -31,6 +31,7 @@ import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { defaultTimer, SteadyWallClock, Timer } from "../utils/SystemTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { logger } from "../utils/logger";
+import { readEnvPositiveInteger } from "../utils/envNumbers";
 import { BootedDevice, Platform } from "../models";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import {
@@ -1342,13 +1343,10 @@ function releaseSuperseded(shouldCommit: ReleaseCommitFence | undefined): boolea
 export const PLAN_AUTO_RELEASE_REASON = "plan-auto-release" satisfies SessionReleaseReason;
 
 export function getDefaultSessionHeartbeatTimeoutMs(): number {
-  const rawValue =
-    process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS ??
-    process.env.AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS;
-  const parsed = rawValue ? Number.parseInt(rawValue, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
+  return readEnvPositiveInteger({
+    names: ["AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS", "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS"],
+    fallback: SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS,
+  });
 }
 
 /**
@@ -1409,11 +1407,13 @@ function restartRecoveryDeadlineFromPersisted(
  * reader to conclude the daemon reaped early (issue #5689).
  */
 export function getDefaultPreFirstHeartbeatGraceMs(): number {
-  const rawValue =
-    process.env.AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS ??
-    process.env.AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS;
-  const parsed = rawValue ? Number.parseInt(rawValue, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS;
+  return readEnvPositiveInteger({
+    names: [
+      "AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
+      "AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
+    ],
+    fallback: DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS,
+  });
 }
 
 export class SessionManager {

@@ -1,3 +1,4 @@
+import { readEnvPositiveInteger } from "../utils/envNumbers";
 import type { MatchingStrategy } from "../models/DeviceMatchCriteria";
 
 export const DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS = 2;
@@ -156,8 +157,11 @@ export function isDevicePoolAutolockEnabled(env: Environment = process.env): boo
  * occurs within this duration. Default: 60 seconds.
  */
 export function getDevicePoolTimeoutMs(): number {
-  const override =
-    process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT ?? process.env.AUTO_MOBILE_DEVICE_POOL_TIMEOUT;
-  const parsed = override ? Number.parseInt(override, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed * 1000 : 60_000;
+  // The variable is in seconds; a unit suffix ("2m") is ignored with a warning, not read as 2.
+  return (
+    readEnvPositiveInteger({
+      names: ["AUTOMOBILE_DEVICE_POOL_TIMEOUT", "AUTO_MOBILE_DEVICE_POOL_TIMEOUT"],
+      fallback: 60,
+    }) * 1000
+  );
 }

@@ -1133,6 +1133,7 @@ test/utils/deviceTeardownService.test.ts
 test/utils/disableStylusHandwriting.test.ts
 test/utils/displayCutout.test.ts
 test/utils/envBootstrap.test.ts
+test/utils/envNumbers.test.ts
 test/utils/escapeRegExp.test.ts
 test/utils/eventAllMarkers.property.test.ts
 test/utils/eventAllMarkers.test.ts

@@ -134,3 +134,62 @@ requires_yq() {
 @test "install-fast-validation-deps.sh installs lychee" {
   grep -Fq 'install_lychee.sh' "scripts/ci/install-fast-validation-deps.sh"
 }
+
+# --- own-repo blob/main + tree/main links are verified offline, not fetched ---
+
+OWN_LINKS="scripts/lychee/check_own_repo_links.sh"
+OWN_P="https://github.com/kaeawc/auto-mobile"
+
+own_repo_fixture() {
+  mkdir -p "$BATS_TEST_TMPDIR/repo/src/dir" "$BATS_TEST_TMPDIR/repo/docs"
+  printf 'one\ntwo\nthree\n' >"$BATS_TEST_TMPDIR/repo/src/a.txt"
+}
+
+@test "own-repo links: existing file, directory and in-range line anchor pass" {
+  own_repo_fixture
+  printf '[f](%s/blob/main/src/a.txt) [d](%s/tree/main/src/dir) [l](%s/blob/main/src/a.txt#L2-L3)\n' "$OWN_P" "$OWN_P" "$OWN_P" >"$BATS_TEST_TMPDIR/repo/docs/ok.md"
+  OWN_REPO_ROOT="$BATS_TEST_TMPDIR/repo" run "$OWN_LINKS" "$BATS_TEST_TMPDIR/repo/docs/ok.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"checked offline: 3, dead: 0"* ]]
+}
+
+@test "own-repo links: a dead file link fails" {
+  own_repo_fixture
+  printf '[x](%s/blob/main/src/gone.txt).\n' "$OWN_P" >"$BATS_TEST_TMPDIR/repo/docs/dead.md"
+  OWN_REPO_ROOT="$BATS_TEST_TMPDIR/repo" run "$OWN_LINKS" "$BATS_TEST_TMPDIR/repo/docs/dead.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"[DEAD]"*"src/gone.txt"*"file not found"* ]]
+}
+
+@test "own-repo links: a tree link to a file and a blob link to a directory fail" {
+  own_repo_fixture
+  printf '[a](%s/tree/main/src/a.txt)\n[b](%s/blob/main/src/dir)\n' "$OWN_P" "$OWN_P" >"$BATS_TEST_TMPDIR/repo/docs/kind.md"
+  OWN_REPO_ROOT="$BATS_TEST_TMPDIR/repo" run "$OWN_LINKS" "$BATS_TEST_TMPDIR/repo/docs/kind.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"dead: 2"* ]]
+}
+
+@test "own-repo links: a line anchor past EOF fails" {
+  own_repo_fixture
+  printf '[x](%s/blob/main/src/a.txt#L4)\n' "$OWN_P" >"$BATS_TEST_TMPDIR/repo/docs/eof.md"
+  OWN_REPO_ROOT="$BATS_TEST_TMPDIR/repo" run "$OWN_LINKS" "$BATS_TEST_TMPDIR/repo/docs/eof.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"past EOF (3 lines)"* ]]
+}
+
+@test "own-repo links: .lycherc.toml excludes the shape and validate_lychee.sh runs the script" {
+  requires_yq
+  run yq -p toml -oy '.exclude[] | select(test("kaeawc/auto-mobile/") and test("blob"))' "$CONFIG"
+  [ "$status" -eq 0 ]
+  [[ "$OWN_P/blob/main/a/b.kt#L3" =~ $output ]]
+  [[ "$OWN_P/tree/main/a" =~ $output ]]
+  [[ ! "https://github.com/other/repo/blob/main/a" =~ $output ]]
+  grep -Fq 'check_own_repo_links.sh' "$SCRIPT"
+}
+
+@test "504 Gateway Timeout is accepted for external links" {
+  requires_yq
+  run yq -p toml -oy '.accept[] | select(. == "504")' "$CONFIG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "504" ]
+}

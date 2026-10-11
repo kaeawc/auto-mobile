@@ -1,26 +1,14 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { AndroidCtrlProxyManager } from "../../../../../src/ctrlProxy/CtrlProxyManager";
-import { AndroidCtrlProxyClient } from "../../../../../src/features/observe/android";
-import type { BootedDevice } from "../../../../../src/models";
-import { runWithAbortSignal } from "../../../../../src/utils/AbortContext";
-import { FakeAdbClientFactory } from "../../../../fakes/FakeAdbClientFactory";
-import { FakeAdbExecutor } from "../../../../fakes/FakeAdbExecutor";
-import { FakeTimer } from "../../../../fakes/FakeTimer";
-import { FakeWebSocket, WebSocketState } from "../../../../fakes/FakeWebSocket";
+import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyManager";
+import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
+import type { BootedDevice } from "../../../../src/models";
+import { runWithAbortSignal } from "../../../../src/utils/AbortContext";
+import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
+import { FakeTimer } from "../../../fakes/FakeTimer";
+import { FakeWebSocket, WebSocketState } from "../../../fakes/FakeWebSocket";
 
-/**
- * Hunt (socket-frames-4): a storage mutation whose call was cut before the write left the host.
- *
- * A mutating `ide/*` frame (and the `setKeyValue` family of tools) is a control call on the
- * holder's session: a release that lands while it runs cancels its execution, and
- * `runTrackedIdeMutation` runs the route's device work under that signal so the frame answers
- * `session_ownership_lost` (#11486). The device work is `CtrlProxyStorage.setPreference` /
- * `removePreference` / `clearPreferenceStore`, which await the device connection and then send,
- * and never read the call's abort signal. So a write cut while its connection was still being
- * (re)established is sent to a device the session no longer holds, after the caller was refused.
- * Only the adb legs of these routes (the direct-file fallback, `ide/updateService`) read the
- * ambient signal; the SDK write, the common path, does not.
- */
+/** #11667: a storage call cut while connecting must never send its device write. */
 
 const device: BootedDevice = {
   deviceId: "hunt-storage-device",
@@ -31,9 +19,12 @@ const device: BootedDevice = {
 
 class CapturingWebSocket extends FakeWebSocket {
   readonly sentTypes: string[] = [];
+  readonly sentRequests: Array<{ type: string; requestId: string }> = [];
   send(data: unknown): void {
     try {
-      this.sentTypes.push((JSON.parse(String(data)) as { type: string }).type);
+      const request = JSON.parse(String(data)) as { type: string; requestId: string };
+      this.sentTypes.push(request.type);
+      this.sentRequests.push(request);
     } catch {
       // Non-JSON control frame: not a device request.
     }
@@ -71,6 +62,7 @@ describe("a storage write whose call was cancelled before it was sent", () => {
       await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     }
     socket.sentTypes.length = 0;
+    socket.sentRequests.length = 0;
   });
 
   /** Run `write` under a call signal that is cancelled before the write's first await settles. */
@@ -98,4 +90,42 @@ describe("a storage write whose call was cancelled before it was sent", () => {
 
     expect(socket.sentTypes).toEqual([]);
   });
+
+  test("removePreference of a cancelled call is not sent to the device", async () => {
+    await writeUnderCutCall(() => client.removePreference("com.example", "prefs", "key"));
+    expect(socket.sentTypes).toEqual([]);
+  });
+
+  for (const method of ["setPreference", "removePreference", "clearPreferenceStore"] as const) {
+    test(`${method} with no call signal is still sent and succeeds`, async () => {
+      try {
+        const pending =
+          method === "setPreference"
+            ? client.setPreference("com.example", "prefs", "k", "v", "STRING")
+            : method === "removePreference"
+              ? client.removePreference("com.example", "prefs", "k")
+              : client.clearPreferenceStore("com.example", "prefs");
+        for (let i = 0; i < 20; i++) {
+          await Promise.resolve();
+        }
+        const type =
+          method === "setPreference"
+            ? "set_preference"
+            : method === "removePreference"
+              ? "remove_preference"
+              : "clear_preferences";
+        expect(socket.sentTypes).toEqual([type]);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: `${type}_result`,
+            requestId: socket.sentRequests[0].requestId,
+            success: true,
+          }),
+        );
+        await pending;
+      } finally {
+        await client.close();
+      }
+    });
+  }
 });

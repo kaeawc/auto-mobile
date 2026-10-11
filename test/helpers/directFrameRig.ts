@@ -1,24 +1,30 @@
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { spyOn } from "bun:test";
-import type { DaemonStateAccess } from "../../../src/daemon/daemonRequestHandlers";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import { UnixSocketServer } from "../../../src/daemon/socketServer";
+import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { UnixSocketServer } from "../../src/daemon/socketServer";
 import {
   hasActiveSessionExecution,
   subscribeToolCallEndActivity,
-} from "../../../src/daemon/toolCallActivity";
-import type { DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
-import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import type { BootedDevice } from "../../../src/models";
-import { executionTracker } from "../../../src/server/executionTracker";
-import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { createFakeDaemonState, createFakeDeviceManager } from "../helpers/inputSocketHarness";
+} from "../../src/daemon/toolCallActivity";
+import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
+import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import type { BootedDevice } from "../../src/models";
+import { executionTracker } from "../../src/server/executionTracker";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "./fakeTimerStepping";
+import {
+  createFakeDaemonState,
+  createFakeDeviceManager,
+} from "../daemon/helpers/inputSocketHarness";
 
 /**
- * Rig for the direct-socket-frame hunt (hunt/socket-frames-4).
+ * Rig for direct socket frame ownership and cancellation regressions (#11667).
  *
  * Real: `UnixSocketServer`'s connection handler (framing, the per-socket admission queue, the
  * `input/*` and `ide/*` routes, gesture ownership), `SessionManager`, and the process execution
@@ -64,11 +70,17 @@ interface Internals {
   acceptingRequests: boolean;
   handleConnection(socket: Socket): void;
   activeRequestHandlers: Set<Promise<void>>;
+  mcpForwardTails: Map<string, Promise<void>>;
   liftStrokesHeldBy(releasedSessionId: string): Promise<void>;
   liftSessionlessStrokesOn(deviceId: string): void;
 }
 
 export interface DeviceClientFake {
+  onRead?: () => void;
+  ownershipGate?: () => Promise<void>;
+  updateService?: () => Promise<void>;
+  onDeviceCall?: (deviceId: string, method: string) => void;
+  requestGestureEnd?: () => Promise<{ success: boolean }>;
   requestGestureStart?: (gestureId: string) => Promise<{ success: boolean; error?: string }>;
   setPreference?: (...args: unknown[]) => Promise<void>;
   clearPreferenceStore?: (...args: unknown[]) => Promise<void>;
@@ -80,6 +92,7 @@ export interface DirectFrameRig {
   sessionManager: SessionManager;
   /** What reached a device, in order: `<deviceId>:<start|move|end|cancel|...>`. */
   deviceCalls: string[];
+  isDeviceWorkQueued(deviceId: string): boolean;
   connect(): FakeSocket;
   settle(): Promise<void>;
   /** Send one frame and wait for the server to go quiet; resolves with its answer, if any. */
@@ -114,7 +127,10 @@ export function createDirectFrameRig(
     },
   } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
   spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation((device) => {
-    const called = (what: string) => deviceCalls.push(`${device.deviceId}:${what}`);
+    const called = (what: string) => {
+      deviceCalls.push(`${device.deviceId}:${what}`);
+      client.onDeviceCall?.(device.deviceId, what);
+    };
     return {
       getScreenScaleMetadata: () => null,
       requestGestureStart: async (gestureId: string) => {
@@ -127,7 +143,7 @@ export function createDirectFrameRig(
       },
       requestGestureEnd: async (_id: string, _x: number, _y: number, cancel?: boolean) => {
         called(cancel === true ? "cancel" : "end");
-        return { success: true };
+        return (await client.requestGestureEnd?.()) ?? { success: true };
       },
       setPreference: async (...args: unknown[]) => {
         called("setPreference");
@@ -143,7 +159,25 @@ export function createDirectFrameRig(
     } as unknown as AndroidCtrlProxyClient;
   });
 
-  const fakePool = createFakeDaemonState().getDevicePool();
+  const updateServiceSpy = client.updateService
+    ? spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
+        (device) =>
+          ({
+            ensureCompatibleVersion: async () => {
+              deviceCalls.push(`${device.deviceId}:updateService`);
+              await client.updateService?.();
+              return { status: "compatible" };
+            },
+          }) as unknown as AndroidCtrlProxyManager,
+      )
+    : undefined;
+
+  const fakePool = {
+    ...createFakeDaemonState().getDevicePool(),
+    assertNotClaimedByForeignDaemon: async () => {
+      await client.ownershipGate?.();
+    },
+  };
   const server = new UnixSocketServer(
     "unused",
     "http://localhost:0/mcp",
@@ -153,7 +187,12 @@ export function createDirectFrameRig(
       getDevicePool: () => fakePool,
     } as unknown as DaemonStateAccess,
     new FakeTimer(),
-    null,
+    {
+      listFlags: async () => {
+        client.onRead?.();
+        return [];
+      },
+    } as unknown as FeatureFlagService,
     // The storage tools are enabled, so an `ide/*` storage frame reaches its ownership gate.
     { sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} } },
   );
@@ -164,19 +203,24 @@ export function createDirectFrameRig(
     executionTracker.cancelSessionlessDeviceUse(deviceId);
     internals.liftSessionlessStrokesOn(deviceId);
   });
+  // daemon.ts: queue holder strokes on the old device synchronously at unbind.
+  sessionManager.onSessionDeviceUnbound((sessionId, deviceId) =>
+    server.liftStrokesHeldByOn(sessionId, deviceId),
+  );
   // socketServer.start(): a released session's strokes are lifted.
   sessionManager.onSessionRelease((sessionId) => void internals.liftStrokesHeldBy(sessionId));
 
   async function settle(): Promise<void> {
-    for (let i = 0; i < 6; i++) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
+    // Negative assertions include queued no-ops and deliberately pending calls; drain their
+    // await chains without depending on real event-loop scheduling.
+    await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
   }
 
   return {
     sessionManager,
     deviceCalls,
     settle,
+    isDeviceWorkQueued: (deviceId) => internals.mcpForwardTails.has(`device:${deviceId}`),
     connect() {
       const socket = new FakeSocket();
       sockets.push(socket);
@@ -195,6 +239,7 @@ export function createDirectFrameRig(
       await settle();
       await Promise.allSettled([...internals.activeRequestHandlers]);
       unsubscribeActivity();
+      updateServiceSpy?.mockRestore();
       spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
       PlatformDeviceManagerFactory.reset();
       sessionManager.stopCleanupTimer();

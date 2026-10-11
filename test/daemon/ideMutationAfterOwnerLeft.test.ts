@@ -1,25 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { DaemonRequest } from "../../../src/daemon/types";
+import type { DaemonRequest } from "../../src/daemon/types";
 import {
   android,
   createDirectFrameRig,
   gestureFrame,
   type DirectFrameRig,
   type FakeSocket,
-} from "./directFrameHuntRig";
+} from "../helpers/directFrameRig";
 
-/**
- * Hunt (socket-frames-4): a device-mutating `ide/*` frame whose sender left before it reached the
- * device: the socket closed while the frame waited in its admission queue, or the client
- * cancelled it (`daemon/cancelRequest`) while its device was still being resolved.
- *
- * An `input/*` frame in either state is never dispatched (#10006): its handler runs under the
- * socket's owner signal, which both the close and the cancel abort. A mutating `ide/*` frame is a
- * tracked control call like input (#11486), but `runLocalSocketRequest` runs it without that
- * signal, and the per-socket queue drops a waiting entry only on `daemon/cancelRequest`. So the
- * queued `ide/clearKeyValueFile` of a client that is gone still wipes the app's store once the
- * frame ahead of it finishes, and a cancelled one, already answered as abandoned, still runs.
- */
+/** #11667: device-mutating IDE frames obey socket close and request cancellation like input. */
 
 const DEVICE = "emulator-5554";
 
@@ -44,14 +33,28 @@ describe("a device-mutating ide/* frame whose sender left before it reached the 
   /** The device is busy with the first write until this resolves. */
   let firstWrite: PromiseWithResolvers<void>;
   /** When set, device discovery does not answer until it resolves. */
+  let ownershipGate: PromiseWithResolvers<void> | undefined;
+  let reads = 0;
+  let discoveries = 0;
   let discovery: PromiseWithResolvers<void> | undefined;
 
   beforeEach(async () => {
     firstWrite = Promise.withResolvers<void>();
     discovery = undefined;
+    ownershipGate = undefined;
+    reads = 0;
+    discoveries = 0;
     rig = createDirectFrameRig([android(DEVICE)], {
       setPreference: () => firstWrite.promise,
-      discovery: async () => discovery?.promise,
+      discovery: async () => {
+        discoveries++;
+        await discovery?.promise;
+      },
+      ownershipGate: async () => ownershipGate?.promise,
+      updateService: async () => {},
+      onRead: () => {
+        reads++;
+      },
     });
     pane = rig.connect();
     // In flight on the device: every later frame on this socket waits behind it.
@@ -64,6 +67,8 @@ describe("a device-mutating ide/* frame whose sender left before it reached the 
 
   afterEach(async () => {
     firstWrite.resolve();
+    discovery?.resolve();
+    ownershipGate?.resolve();
     await rig.dispose();
   });
 
@@ -146,4 +151,84 @@ describe("a device-mutating ide/* frame whose sender left before it reached the 
 
     expect(rig.deviceCalls).toEqual([`${DEVICE}:setPreference`]);
   });
+
+  for (const method of ["ide/removeKeyValue", "ide/updateService"]) {
+    test(`${method} queued on a closed socket sends nothing and does not resolve a device`, async () => {
+      const before = discoveries;
+      await rig.request(pane, storageFrame("cut", method, { key: "k" }));
+      pane.destroy();
+      await finishFirstWrite();
+      expect(rig.deviceCalls).toEqual([`${DEVICE}:setPreference`]);
+      expect(discoveries).toBe(before);
+    });
+
+    test(`${method} cancelled during resolution sends nothing`, async () => {
+      await finishFirstWrite();
+      discovery = Promise.withResolvers<void>();
+      await rig.request(pane, storageFrame("cut", method, { key: "k" }));
+      expect(await rig.request(pane, cancel("cut"))).toMatchObject({ result: { cancelled: true } });
+      expect(pane.answer("cut")).toMatchObject({ success: false });
+      discovery.resolve();
+      await rig.settle();
+      expect(rig.deviceCalls).toEqual([`${DEVICE}:setPreference`]);
+    });
+  }
+
+  test("a read-only IDE frame queued on a closed socket still runs", async () => {
+    await rig.request(pane, storageFrame("read", "ide/listFeatureFlags", {}));
+    pane.destroy();
+    await finishFirstWrite();
+    expect(reads).toBe(1);
+    expect(rig.deviceCalls).toEqual([`${DEVICE}:setPreference`]);
+  });
+
+  test("uncancelled IDE mutations still write", async () => {
+    await finishFirstWrite();
+    for (const method of [
+      "ide/setKeyValue",
+      "ide/removeKeyValue",
+      "ide/clearKeyValueFile",
+      "ide/updateService",
+    ]) {
+      expect(
+        await rig.request(
+          pane,
+          storageFrame(method, method, {
+            key: "k",
+            value: "v",
+            type: "STRING",
+          }),
+        ),
+      ).toMatchObject({ success: true });
+    }
+    expect(rig.deviceCalls).toEqual([
+      `${DEVICE}:setPreference`,
+      `${DEVICE}:setPreference`,
+      `${DEVICE}:removePreference`,
+      `${DEVICE}:clearPreferenceStore`,
+      `${DEVICE}:updateService`,
+    ]);
+  });
+
+  for (const method of [
+    "ide/setKeyValue",
+    "ide/removeKeyValue",
+    "ide/clearKeyValueFile",
+    "ide/updateService",
+  ]) {
+    test(`${method} cancelled during its ownership gate sends nothing`, async () => {
+      await finishFirstWrite();
+      ownershipGate = Promise.withResolvers<void>();
+      await rig.request(
+        pane,
+        storageFrame("cut-gate", method, { key: "k", value: "v", type: "STRING" }),
+      );
+      expect(await rig.request(pane, cancel("cut-gate"))).toMatchObject({
+        result: { cancelled: true },
+      });
+      ownershipGate.resolve();
+      await rig.settle();
+      expect(rig.deviceCalls).toEqual([`${DEVICE}:setPreference`]);
+    });
+  }
 });

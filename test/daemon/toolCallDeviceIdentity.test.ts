@@ -52,9 +52,14 @@ function fakePool(options: { folded: boolean; provable?: boolean }) {
 function scanOf(devices: BootedDevice[]) {
   const scan = {
     calls: 0,
+    /** Device ids of each listing handed to the discovery funnel, after the fold. */
+    reconciled: [] as string[][],
     list: async () => {
       scan.calls++;
       return devices;
+    },
+    reconcile: async (rows: readonly BootedDevice[]) => {
+      scan.reconciled.push(rows.map((row) => row.deviceId));
     },
   };
   return scan;
@@ -123,7 +128,14 @@ describe("canonicalControlCallDeviceId", () => {
     deviceId: string,
     scan: ReturnType<typeof scanOf>,
     now = 0,
-  ) => canonicalControlCallDeviceId({ pool, deviceId, listConnectedDevices: scan.list, now });
+  ) =>
+    canonicalControlCallDeviceId({
+      pool,
+      deviceId,
+      listRawAndroidDevices: scan.list,
+      reconcileDiscovery: scan.reconcile,
+      now,
+    });
 
   test.each([
     ["a folded alias", WIRELESS, USB],
@@ -147,6 +159,8 @@ describe("canonicalControlCallDeviceId", () => {
 
     expect(await resolve(pool, WIRELESS, scan)).toBe(USB);
     expect(pool.probes).toBe(1);
+    // The listing reaches the discovery funnel as pooled canonical rows, after the fold.
+    expect(scan.reconciled).toEqual([[USB]]);
 
     // Folded now: the next call is answered from the cache.
     expect(await resolve(pool, WIRELESS, scan)).toBe(USB);

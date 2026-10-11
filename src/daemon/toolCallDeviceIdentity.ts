@@ -73,8 +73,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export interface ControlCallDeviceIdentityInput {
   pool: ToolCallDeviceIdentityPool | undefined;
   deviceId: string;
-  /** The call's own connected-device scan (Android rows are used; others are ignored). */
-  listConnectedDevices: () => Promise<readonly BootedDevice[]>;
+  /**
+   * A fresh `adb devices` listing as RAW rows: each transport under its own serial, carrying its
+   * own adb transport id. Never rows already mapped onto pooled ids (a readiness scan): a mapped
+   * alias row is named like the canonical device but carries the alias's connection, and folding
+   * it would record that connection as the canonical serial's and misroute the holder's dispatch.
+   */
+  listRawAndroidDevices: () => Promise<readonly BootedDevice[]>;
+  /**
+   * The discovery funnel (`reconcileDiscoveryObservation`): handed the listing as pooled canonical
+   * rows once it is folded, before the id is returned and any pool state is read for it.
+   */
+  reconcileDiscovery: (devices: readonly BootedDevice[]) => Promise<void>;
   /** The caller's clock, for {@link UNPROVEN_TRANSPORT_PROBE_RETRY_MS}. */
   now: number;
 }
@@ -122,10 +132,12 @@ async function foldFirstSeenTransport(
   input: ControlCallDeviceIdentityInput,
 ): Promise<string> {
   const { deviceId, now } = input;
-  const android = (await input.listConnectedDevices()).filter(
+  const android = (await input.listRawAndroidDevices()).filter(
     (device) => device.platform === "android",
   );
-  const folded = (await canonicalizeFrameDiscovery(pool, "android", android, deviceId)).deviceId;
+  const canonical = await canonicalizeFrameDiscovery(pool, "android", android, deviceId);
+  await input.reconcileDiscovery(canonical.devices);
+  const folded = canonical.deviceId;
   if (folded !== undefined && folded !== deviceId) {
     memo.delete(deviceId);
     return folded;

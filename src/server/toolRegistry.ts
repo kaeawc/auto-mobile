@@ -45,6 +45,8 @@ import { logger, type Logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { UnissuedSessionError, type Session, type SessionManager } from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
+import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
+import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import {
   assertToolTargetIdentityProven,
   canonicalControlCallDeviceId,
@@ -885,12 +887,19 @@ function canonicalizeCallDeviceId(input: ExecutionTargetInput): Promise<void> | 
     pool,
     deviceId: args.deviceId,
     now: (input.timer ?? defaultTimer).now(),
-    listConnectedDevices: async () =>
+    // RAW adb rows, as the pool's own refresh folds them. The session manager's scan is already
+    // mapped onto pooled ids and would record an alias's connection under the canonical serial.
+    listRawAndroidDevices: async () =>
       (
-        await input.deviceSessionManager.detectConnectedPlatformsWithStatus(input.signal, {
-          platform: "android",
+        await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed("android", {
+          signal: input.signal,
+          bypassAndroidDeviceListCache: true,
         })
       ).devices,
+    reconcileDiscovery: (devices) =>
+      reconcileDiscoveryObservation(devices, "tools/call:first-seen-transport", {
+        signal: input.signal,
+      }),
   });
   if (typeof resolved === "string") {
     args.deviceId = resolved;

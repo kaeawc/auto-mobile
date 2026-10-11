@@ -12,6 +12,7 @@ import type { BootedDevice } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { withAndroidTransportId } from "../../src/utils/androidSerial";
 import { createExecResult } from "../../src/utils/execResult";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -63,6 +64,8 @@ interface Harness {
   pool: DevicePool;
   tools: RealToolCallPath;
   adbFactory: FakeAdbClientFactory;
+  /** Raw `adb devices` listings the ingress asked for (the first-sighting probe's scan). */
+  rawScans(): number;
   /** Devices the read probe's body ran on. */
   reads: string[];
   /** Discovery starts listing `rows`, as when wireless debugging is switched on. */
@@ -99,6 +102,8 @@ async function harness(options: HarnessOptions): Promise<Harness> {
     adb.setCommandResponse("getprop ro.boot.qemu.avd_name", createExecResult(options.avd, ""));
   }
   const adbFactory = new FakeAdbClientFactory(adb);
+  // The ingress lists raw adb rows through the process-wide device manager, as the daemon does.
+  PlatformDeviceManagerFactory.setInstance(discovery);
   const sessions = new SessionManager(
     timer,
     new FakeDeviceSessionPersistence(),
@@ -123,6 +128,13 @@ async function harness(options: HarnessOptions): Promise<Harness> {
   await pool.refreshDevices();
   DaemonState.getInstance().initialize(sessions, pool, new DeviceSessionRegistry(timer));
   const tools = new RealToolCallPath([...options.pooledRows, ...(options.iosRows ?? [])]).install();
+  // The real session manager's scan is already mapped onto pooled ids by the pool (#11133).
+  const readinessScan = (rows: BootedDevice[]) =>
+    tools.deviceSessionManager.setConnectedDevices([
+      ...pool.mapAndroidReadinessDiscovery(rows),
+      ...(options.iosRows ?? []),
+    ]);
+  readinessScan(options.pooledRows);
   const reads: string[] = [];
   ToolRegistry.registerDeviceAware(
     "controlProbe",
@@ -141,6 +153,7 @@ async function harness(options: HarnessOptions): Promise<Harness> {
     { deviceReadOnly: true },
   );
   cleanups.push(() => {
+    PlatformDeviceManagerFactory.setInstance(null);
     tools.uninstall();
     DaemonState.getInstance().reset();
     sessions.stopCleanupTimer();
@@ -173,10 +186,11 @@ async function harness(options: HarnessOptions): Promise<Harness> {
     pool,
     tools,
     adbFactory,
+    rawScans: () => discovery.getBootedDevicesDetailedCalls().length,
     reads,
     connect(rows) {
       discovery.setBootedDevices("android", rows);
-      tools.deviceSessionManager.setConnectedDevices(rows);
+      readinessScan(rows);
     },
     outcome: (name, args) =>
       tools.call(name, args).then(describeOutcome, (error: unknown) => describeOutcome(error)),
@@ -422,12 +436,38 @@ describe("a transport the pool has not folded yet (#11618)", () => {
     const h = await phone();
     const probes = h.adbFactory.getCallCount();
     const scans = h.tools.deviceSessionManager.getDetectConnectedPlatformsCallCount();
+    const rawScans = h.rawScans();
 
     await h.outcome("controlProbe", { platform: "android", deviceId: WIRELESS });
     await h.outcome("controlProbe", { sessionUuid: HOLDER, deviceId: WIRELESS });
+    await h.outcome("controlProbe", { sessionUuid: HOLDER, deviceId: USB });
 
     expect(h.adbFactory.getCallCount()).toBe(probes);
     expect(h.tools.deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(scans);
+    expect(h.rawScans()).toBe(rawScans);
+  });
+
+  test("a refused first-sighting call leaves the holder's dispatch route where it was", async () => {
+    const TCP = "192.168.1.20:5555";
+    const h = await harness({ pooledRows: [booted(USB), booted(TCP)], held: USB });
+    expect(h.pool.getAndroidTransportAliases(USB)).toEqual([TCP]);
+    // The same phone also appears under its mDNS id; adb lists the USB row first.
+    const rows = [booted(USB), booted(TCP), booted(WIRELESS)];
+    h.connect(rows);
+    const rawScans = h.rawScans();
+
+    const outcome = await h.outcome("controlProbe", { platform: "android", deviceId: WIRELESS });
+
+    expect(outcome).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    // The fold is fed one fresh RAW listing, not the readiness scan's pool-mapped rows.
+    expect(h.rawScans()).toBe(rawScans + 1);
+    expect(h.pool.getAndroidTransportAliases(USB).toSorted()).toEqual([TCP, WIRELESS].toSorted());
+    // The next readiness scan re-routes a group from its live rows: USB is live, so it stays.
+    h.pool.mapAndroidReadinessDiscovery(rows);
+    expect(h.pool.getAndroidTransportRouting().resolveTransport(USB)).toBe(USB);
+    // And when Wi-Fi drops with the cable still attached, dispatch is still on USB.
+    h.pool.mapAndroidReadinessDiscovery([booted(USB)]);
+    expect(h.pool.getAndroidTransportRouting().resolveTransport(USB)).toBe(USB);
   });
 });
 

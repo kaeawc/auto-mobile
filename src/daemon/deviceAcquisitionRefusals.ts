@@ -162,7 +162,12 @@ export class DeviceOwnedByOtherDaemonError extends RetryableDeviceAcquisitionErr
   }
 }
 
-/** Retry hint for a device under shutdown: a kill normally finishes within a few seconds. */
+/**
+ * Retry hint for a device under shutdown: a kill normally finishes within a few seconds. It is a
+ * polling interval, not a remaining time like `device_cleanup_in_progress` carries (#11616): a
+ * shutdown reservation spans several separately bounded steps and records no deadline, so the
+ * refusal has no bound to report and the runners' 30 s floor (one shutdown step's timeout) applies.
+ */
 export const DEVICE_SHUTTING_DOWN_RETRY_AFTER_MS = 2_000;
 
 export class DeviceShuttingDownError extends RetryableDeviceAcquisitionError {

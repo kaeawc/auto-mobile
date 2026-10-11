@@ -181,9 +181,11 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 # Codex specific
 
 - GitHub interactions use the GitHub CLI (`gh`).
-- Only required checks have roll-up gates (`IDE Plugin`, `iOS Build`,
-  `Shell Tests`); a red advisory job does not by itself prove a required lane
-  failed. Run `bash scripts/ci/classify-failure.sh <run-id>`
+- The `green-main` ruleset requires 22 status checks (list them with
+  `gh api repos/kaeawc/auto-mobile/rulesets` and `rulesets/<id>`); the roll-up
+  gates (`IDE Plugin`, `iOS Build`, `Shell Tests`) are only stable names over
+  matrix or skipped jobs, and a red advisory (non-ruleset) job does not by itself
+  prove a required lane failed. Run `bash scripts/ci/classify-failure.sh <run-id>`
   before rerunning or changing code; it identifies the specific upstream lane
   and consults `scripts/ci/known-flakes.txt`. For integration-test or runtime-graph input changes, run
   `bash scripts/prepush-integration.sh` before pushing. See `ci-failure-triage`.

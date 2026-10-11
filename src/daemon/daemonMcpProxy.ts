@@ -7336,14 +7336,22 @@ export class DaemonMcpProxy {
       rememberedSessionUuid &&
       (rememberedSessionUuid === this.boundSessionUuid || this.toolAcceptsSessionUuid(name))
     ) {
+      this.rememberSessionDevice(rememberedSessionUuid, forwardedArgs.deviceId);
+      if (this.terminalBoundSession && !selectsDefault) {
+        // The binding was released and the agent has not chosen another (#11656): a call naming
+        // a session this proxy still holds ran on it and changes nothing else. The fence stays,
+        // so the release is reported to the next sessionless control call, in whatever order the
+        // release and this call's completion arrived, and nothing sessionless reaches a sibling.
+        return;
+      }
       if (
         this.terminalBoundSession &&
         rememberedSessionUuid !== this.terminalBoundSession.sessionUuid &&
         this.ownedDeviceSessions.has(rememberedSessionUuid)
       ) {
+        // setActiveDevice chose a session this proxy still holds: that is the new binding.
         this.terminalBoundSession = undefined;
       }
-      this.rememberSessionDevice(rememberedSessionUuid, forwardedArgs.deviceId);
       if (this.keepsBindingFor(rememberedSessionUuid, selectsDefault)) {
         return;
       }
@@ -7355,7 +7363,9 @@ export class DaemonMcpProxy {
   /**
    * An explicit `sessionUuid` other than the connection's binding targets that one call (#11347):
    * the binding, and with it every later sessionless call, stays where setActiveDevice or an
-   * acquisition put it. A connection with no binding still adopts the first session it names.
+   * acquisition put it. A connection that never had a binding still adopts the first session it
+   * names; one whose binding was released does not (the fence in {@link rememberSessionUuid}
+   * answers first), so a named call never moves a binding nor replaces a released one (#11656).
    */
   private keepsBindingFor(sessionUuid: string, selectsDefault: boolean): boolean {
     if (this.keepsStartupBindingFor(sessionUuid)) {

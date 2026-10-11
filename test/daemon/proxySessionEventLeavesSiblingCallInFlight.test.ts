@@ -39,6 +39,9 @@ import {
 const SIBLING_DEVICE = "emulator-5554";
 const BINDING_DEVICE = "emulator-5556";
 
+/** A control tool, as the scenario's long call is. */
+const CONTROL_TOOL = "homeScreen";
+
 type Role = "sibling" | "binding";
 
 let scenario: LivenessScenario;
@@ -176,6 +179,24 @@ test("the binding's explicit release in flight leaves the control call on the he
 
   // Nobody released the sibling: its session is still held, so its call runs to its result.
   expect(outcome).toEqual(SIBLING_CALL_UNDISTURBED);
+});
+
+test("the binding's explicit release during the sibling's call is still reported: a later sessionless control call drives nothing", async () => {
+  const outcome = await oneSessionGoesWhileTheOtherIsDriven(
+    { callOn: "sibling", gone: "binding" },
+    explicitReleaseInFlightAcrossATick,
+  );
+  // The agent's next call names no session: it was going to the device that was just released.
+  const next = await scenario.proxy.callTool(CONTROL_TOOL, {}).then(
+    () => "forwarded",
+    (error: unknown) => (error instanceof Error ? error.name : String(error)),
+  );
+
+  expect({ ...outcome, next, drove: driven() }).toEqual({
+    ...SIBLING_CALL_UNDISTURBED,
+    // Told its session is gone (#11656), never sent to the sibling's device.
+    next: "DaemonConnectionSessionReleasedError",
+  });
 });
 
 test("both sessions are heartbeated on every tick while the sibling's call outlasts the handoff", async () => {

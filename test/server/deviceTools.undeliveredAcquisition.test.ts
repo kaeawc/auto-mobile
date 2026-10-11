@@ -41,6 +41,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { RealBootGatesOverFakeFleet } from "../helpers/realBootGatesOverFakeFleet";
 
 isolateToolRegistry();
 
@@ -101,12 +102,21 @@ class RecordingBootHandle extends EventEmitter {
     super();
   }
 
+  /** A device that ignores every signal: it keeps running until `exit` is called. */
+  ignoresSignals = false;
+
   kill(): boolean {
     this.killed = true;
+    if (!this.ignoresSignals) {
+      this.exit();
+    }
+    return true;
+  }
+
+  exit(): void {
     this.onKill();
     this.exitCode = 0;
     queueMicrotask(() => this.emit("exit", 0, null));
-    return true;
   }
 }
 
@@ -209,6 +219,7 @@ describe.each([
   let pool: DevicePool;
   let ownership: ClaimOwnership;
   let bootHandle: RecordingBootHandle;
+  let gates: RealBootGatesOverFakeFleet;
   /** Device lifecycle leases reserved and not yet released. */
   let heldLeases: Set<object>;
   /** Runs where the request is to be cancelled; each hook is cleared once it fires. */
@@ -235,6 +246,8 @@ describe.each([
     });
     devices.setMockChildProcess(avd.name, bootHandle as unknown as ChildProcess);
     devices.setMockChildProcess(simulator.name, bootHandle as unknown as ChildProcess);
+    // Every boot below is admitted through the real gates, at a limit of one device a platform.
+    gates = new RealBootGatesOverFakeFleet(devices, timer, 1);
     ownership = new ClaimOwnership();
     const idGenerator = new CountingIdGenerator("undelivered");
     const env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: autolock };
@@ -410,15 +423,115 @@ describe.each([
       expect(pool.getDevice(deviceId)?.sessionId ?? null).toBeNull();
       expect([...ownership.held]).toEqual([]);
       expect(heldLeases.size).toBe(0);
+      const platform = deviceId === AVD_SERIAL ? "android" : "ios";
       if (origin === "already running") {
         expect(bootHandle.killed).toBe(false);
         expect(devices.wasMethodCalled("killDevice")).toBe(false);
         expect(pool.getDevice(deviceId)?.status).toBe("idle");
-      } else {
-        expect(bootHandle.killed).toBe(true);
+        // No boot, no admission; the running device still holds the platform's one slot.
+        expect(gates.admissions).toEqual([]);
+        expect(await gates.capacity(platform)).toEqual({ booted: 1, inFlight: 0 });
+        expect(await gates.admitsOneMoreBoot(platform)).toBe(false);
+        return;
       }
+      expect(bootHandle.killed).toBe(true);
+      await expectBootSlotFreedExactlyOnce(platform);
     },
   );
+
+  /**
+   * The one boot the undone call made took one admission and let it go once; the slot is free at
+   * once, and nothing that arrives late from that boot frees the slot a second caller then takes.
+   */
+  const expectBootSlotFreedExactlyOnce = async (platform: "android" | "ios"): Promise<void> => {
+    expect(gates.admissions.map((admission) => [admission.platform, admission.releaseCalls])).toEqual(
+      [[platform, 1]],
+    );
+    expect(await gates.capacity(platform)).toEqual({ booted: 0, inFlight: 0 });
+    const second = await gates.holdOneMoreBoot(platform);
+    expect(second).toBeDefined();
+    gates.admissions[0].release();
+    bootHandle.emit("exit", 0, null);
+    expect(await gates.capacity(platform)).toEqual({ booted: 0, inFlight: 1 });
+    expect(await gates.admitsOneMoreBoot(platform)).toBe(false);
+    second!.release();
+    expect(await gates.admitsOneMoreBoot(platform)).toBe(true);
+  };
+
+  describe("boot capacity when the undo cannot stop the device", () => {
+    const BOOTING_TOOLS = ACQUIRING_TOOLS.filter(({ tool }) => tool !== "provisionDevice");
+
+    /** Cancel `tool` after its bind, with a device that ignores the undo's signals. */
+    const undoAgainstDeviceThatWillNotStop = async (
+      tool: string,
+      args: Record<string, unknown>,
+    ): Promise<void> => {
+      bootHandle.ignoresSignals = true;
+      const controller = new AbortController();
+      afterBind = () => controller.abort(new Error("client cancelled"));
+      // The undo waits out its SIGTERM and SIGKILL graces before the call fails.
+      const delivered = deliveredSession(tool, args, controller.signal);
+      await drain();
+      expect(await delivered).toBeUndefined();
+      await drain();
+      expect(bootHandle.killed).toBe(true);
+      expect(sessions.getAllSessions()).toEqual([]);
+    };
+
+    test.each(BOOTING_TOOLS)(
+      "$tool $args: a device still running after the stop timed out is still counted, and frees its slot once when it exits",
+      async ({ tool, args, deviceId }) => {
+        const platform = deviceId === AVD_SERIAL ? "android" : "ios";
+        await undoAgainstDeviceThatWillNotStop(tool, args);
+
+        // Still listed: it holds the platform's one slot, through the listing and not twice.
+        expect(await gates.capacity(platform)).toEqual({ booted: 1, inFlight: 0 });
+        expect(await gates.admitsOneMoreBoot(platform)).toBe(false);
+
+        bootHandle.exit();
+        await drain();
+
+        await expectBootSlotFreedExactlyOnce(platform);
+      },
+    );
+
+    test("an emulator that will not stop and that adb no longer lists is counted by its process", async () => {
+      await undoAgainstDeviceThatWillNotStop("startDevice", { platform: "android", name: avd.name });
+      devices.setBootedDevices("android", []);
+
+      expect(await gates.capacity("android")).toMatchObject({ booted: 1 });
+      expect(await gates.admitsOneMoreBoot("android")).toBe(false);
+    });
+
+    test("with no process table either, its admission still holds the slot until the process exits", async () => {
+      // Cancelled before adb ever listed the emulator, so no listing has ended its admission.
+      bootHandle.ignoresSignals = true;
+      gates.processTableReadable = false;
+      const controller = new AbortController();
+      beforeBind = () => {
+        devices.setBootedDevices("android", []);
+        controller.abort(new Error("client cancelled"));
+      };
+      expect(
+        await deliveredSession(
+          "startDevice",
+          { platform: "android", name: avd.name },
+          controller.signal,
+        ),
+      ).toBeUndefined();
+      await drain();
+      devices.setBootedDevices("android", []);
+
+      expect(bootHandle.killed).toBe(true);
+      expect(await gates.capacity("android")).toEqual({ booted: 0, inFlight: 1 });
+      expect(await gates.admitsOneMoreBoot("android")).toBe(false);
+
+      bootHandle.exit();
+      await drain();
+
+      await expectBootSlotFreedExactlyOnce("android");
+    });
+  });
 
   test.each(ACQUIRING_TOOLS)(
     "control: an uncancelled $tool $args keeps its session, its claim and the device it booted",

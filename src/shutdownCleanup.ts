@@ -146,11 +146,13 @@ export const DAEMON_SHUTDOWN_BUDGET_RESERVE_MS = 500;
 
 /**
  * The stdio server's shutdown stages (proxy mode and `--no-proxy` direct mode share one handler).
- * It has no control socket, session repository or managed slots, so the table is shorter and
- * sums well under the same process limit. Its two long shares are the ones that can wait on a
+ * It has no control socket, session repository or managed slots, so the table is shorter, and
+ * it sums to the same total as the daemon's. Its two long shares are the ones that can wait on a
  * device: recording finalization with the iOS CtrlProxy children (direct mode), and the proxy's
- * close, which hands its managed execution's sessions back to the daemon. Keys are in execution
- * order.
+ * close, which hands its managed execution's sessions back to the daemon. What the shorter stage
+ * list leaves over goes to the settle stage, so a teardown that outlives its own share (a long
+ * recording finalize) still has until the same point as a daemon stage to finish cleanly. Keys
+ * are in execution order.
  */
 export const STDIO_SHUTDOWN_STAGES = {
   "direct-mode capture and iOS CtrlProxy children": writesDatabase(2_000),
@@ -163,7 +165,7 @@ export const STDIO_SHUTDOWN_STAGES = {
   "appearance sync scheduler": writesDatabase(25),
   "prefetched Android CtrlProxy APK": writesDatabase(50),
   "stdio proxy": writesDatabase(2_000),
-  "abandoned stage settle": writesDatabase(100),
+  "abandoned stage settle": writesDatabase(2_955),
   "database write drain": writesDatabase(200),
   "in-flight migrations": writesDatabase(200),
   database: writesDatabase(300),

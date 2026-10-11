@@ -162,38 +162,43 @@ describe("stdio shutdown in direct mode (#11601)", () => {
     ]);
     expect(outcome).toEqual({
       exitCode: 1,
-      // The late settle stage's deadline (5,520 ms) less the margins it keeps for the close.
-      exitedAtMs: 5_370,
+      // The late settle stage's deadline (8,375 ms) less the margins it keeps for the close.
+      exitedAtMs: 8_225,
       warnings: [
         `Shutdown cleanup stage ${stage} timed out after 2000ms waiting on recording stop/finalize and iOS CtrlProxy child exit; continuing shutdown`,
-        `Shutdown stage(s) still running 2745ms after being abandoned: ${stage}`,
+        `Shutdown stage(s) still running 5600ms after being abandoned: ${stage}`,
         `Skipping database close because abandoned shutdown stage(s) are still running: ${stage}`,
       ],
     });
     expect(outcome.exitedAtMs).toBeLessThan(PROCESS_SHUTDOWN_TIMEOUT_MS);
   });
 
-  test("a capture teardown that finishes after its deadline is a clean shutdown and the database closes after its last write", async () => {
-    const timer = new FakeTimer();
-    const server = fakeStdioServer("direct", {
-      cleanupChildProcesses: async () => {
-        await timer.sleep(3_000);
-        server.database.write();
-      },
-    });
+  // 7 s is a long recording finalize: the settle stage holds what the short stage list leaves
+  // over, so it still ends as a clean shutdown rather than being cut off mid-finalize.
+  test.each([3_000, 7_000])(
+    "a capture teardown that finishes after its deadline, at %d ms, is a clean shutdown and the database closes after its last write",
+    async (finishesAtMs) => {
+      const timer = new FakeTimer();
+      const server = fakeStdioServer("direct", {
+        cleanupChildProcesses: async () => {
+          await timer.sleep(finishesAtMs);
+          server.database.write();
+        },
+      });
 
-    const outcome = await shutDown(server, timer);
+      const outcome = await shutDown(server, timer);
 
-    expect(outcome.exitCode).toBe(0);
-    expect(outcome.exitedAtMs).toBe(3_000);
-    expect(outcome.warnings).toHaveLength(1);
-    expect(server.calls.slice(-4)).toEqual([
-      "drainDatabaseWrites",
-      "settleMigrations",
-      "closeDatabase",
-      "closeLogger",
-    ]);
-  });
+      expect(outcome.exitCode).toBe(0);
+      expect(outcome.exitedAtMs).toBe(finishesAtMs);
+      expect(outcome.warnings).toHaveLength(1);
+      expect(server.calls.slice(-4)).toEqual([
+        "drainDatabaseWrites",
+        "settleMigrations",
+        "closeDatabase",
+        "closeLogger",
+      ]);
+    },
+  );
 
   test("a capture teardown that fails after its deadline fails the shutdown and is reported by name", async () => {
     const timer = new FakeTimer();

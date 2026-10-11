@@ -1,31 +1,31 @@
-import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
-import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { FakeVideoCaptureBackend } from "../../fakes/FakeVideoCaptureBackend";
-import { FakeHighlightClient } from "../../fakes/FakeHighlightClient";
-import { FakeVideoRecordingRepository } from "../../fakes/FakeVideoRecordingRepository";
-import { FakeVideoRecordingConfigRepository } from "../../fakes/FakeVideoRecordingConfigRepository";
-import { FakeDeviceSessionManager } from "../../fakes/FakeDeviceSessionManager";
-import { VideoRecorderService } from "../../../src/features/video";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
+import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
+import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
+import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
+import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { VideoRecorderService } from "../../src/features/video";
 import {
   registerVideoRecordingTools,
   resetSegmentedSessions,
   setRecordingRequesterResolverForTesting,
   setVideoRecordingDeviceDetectorForTesting,
-} from "../../../src/server/videoRecordingTools";
-import { ToolRegistry } from "../../../src/server/toolRegistry";
+} from "../../src/server/videoRecordingTools";
+import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   listActiveVideoRecordings,
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
   startVideoRecording,
-} from "../../../src/server/videoRecordingManager";
-import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../../src/daemon/inputDeviceOwnership";
-import type { BootedDevice } from "../../../src/models";
+} from "../../src/server/videoRecordingManager";
+import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
+import type { BootedDevice } from "../../src/models";
 
 isolateToolRegistry();
 
@@ -36,15 +36,17 @@ const HOLDER = "holder-session";
  * `videoRecording` is control (docs/using/device-ownership.md), and a call that acts on a held
  * device is refused with `device_owned_by_other_session` when it "carries no sessionUuid". A stop
  * by id resolves no device (`shouldEnsureDevice` is false for it), so ToolRegistry's holder check
- * has nothing to judge, and the handler's own owner check (`assertActiveRecordingOwner`, #11130)
- * returns early for a requester with no session. The result: a call naming another session is
- * refused, while the same call with the `sessionUuid` simply left out stops the holder's capture
- * on the holder's device and is handed its file.
+ * has nothing to judge: the handler's own owner check (`assertActiveRecordingOwner`, #11130)
+ * applies that rule to a requester with no session (#11647). Leaving `sessionUuid` out is refused
+ * like naming another session; the owner's connection, an ownerless recording, and a device no
+ * session holds stay open.
  */
 describe("videoRecording stop by id from a caller with no session", () => {
   let timer: FakeTimer;
   let backend: FakeVideoCaptureBackend;
   let archiveRoot: string;
+  let deviceHeld: boolean;
+  let owningConnection: string | undefined;
 
   const handler = () => ToolRegistry.getTool("videoRecording")!.deviceAwareHandler!;
   const outcome = (args: Record<string, unknown>) =>
@@ -59,7 +61,9 @@ describe("videoRecording stop by id from a caller with no session", () => {
     if (!ToolRegistry.getTool("videoRecording")) {
       registerVideoRecordingTools();
     }
-    archiveRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-hunt-vstop-"));
+    archiveRoot = await fsPromises.mkdtemp(
+      path.join(os.tmpdir(), "auto-mobile-sessionless-vstop-"),
+    );
   });
 
   beforeEach(async () => {
@@ -84,8 +88,12 @@ describe("videoRecording stop by id from a caller with no session", () => {
     });
     setRecordingRequesterResolverForTesting({
       baseSessionUuid: (uuid) => uuid.split(":")[0],
-      connectionOwnsDeviceSession: () => false,
+      connectionOwnsDeviceSession: (mcpSessionId, deviceId, ownerBase) =>
+        mcpSessionId === owningConnection && deviceId === device.deviceId && ownerBase === HOLDER,
+      isDeviceHeld: () => deviceHeld,
     });
+    deviceHeld = true;
+    owningConnection = undefined;
   });
 
   afterEach(() => {
@@ -120,12 +128,65 @@ describe("videoRecording stop by id from a caller with no session", () => {
 
     const { error, response } = await outcome({ action: "stop", recordingId: active.recordingId });
 
-    // Actual: the holder's capture is stopped and its file is returned to the sessionless caller.
     expect(backend.stopCalls.length).toBe(stopsBefore);
     expect((await listActiveVideoRecordings()).map((record) => record.recordingId)).toEqual([
       active.recordingId,
     ]);
     expect(response).toBeUndefined();
     expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+  });
+
+  test("a sessionless segmented stop by handle is refused and the session keeps recording", async () => {
+    const started = await outcome({ action: "start", maxDuration: 181, sessionUuid: HOLDER });
+    const handle = JSON.parse(started.response!.content[0].text).recordings[0].recordingId;
+    const stopsBefore = backend.stopCalls.length;
+
+    const { error } = await outcome({ action: "stop", recordingId: handle });
+
+    expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    expect(backend.stopCalls.length).toBe(stopsBefore);
+  });
+
+  test("the connection that acquired the owner's device session stops it without a sessionUuid", async () => {
+    owningConnection = "mcp-owner";
+    const active = await startVideoRecording({ device, ownerSessionUuid: HOLDER });
+    await fsPromises.writeFile(active.outputPath, "video-bytes");
+
+    const refused = await outcome({
+      action: "stop",
+      recordingId: active.recordingId,
+      __mcpSessionId: "mcp-stranger",
+    });
+    expect(refused.error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+
+    const { error, response } = await outcome({
+      action: "stop",
+      recordingId: active.recordingId,
+      __mcpSessionId: "mcp-owner",
+    });
+    expect(error).toBeUndefined();
+    expect(response).toBeDefined();
+    expect(await listActiveVideoRecordings()).toEqual([]);
+  });
+
+  test("an ownerless recording stays stoppable without a sessionUuid", async () => {
+    const active = await startVideoRecording({ device });
+    await fsPromises.writeFile(active.outputPath, "video-bytes");
+
+    const { error } = await outcome({ action: "stop", recordingId: active.recordingId });
+
+    expect(error).toBeUndefined();
+    expect(await listActiveVideoRecordings()).toEqual([]);
+  });
+
+  test("an owned recording on a device no session holds stays stoppable without a sessionUuid", async () => {
+    deviceHeld = false;
+    const active = await startVideoRecording({ device, ownerSessionUuid: HOLDER });
+    await fsPromises.writeFile(active.outputPath, "video-bytes");
+
+    const { error } = await outcome({ action: "stop", recordingId: active.recordingId });
+
+    expect(error).toBeUndefined();
+    expect(await listActiveVideoRecordings()).toEqual([]);
   });
 });

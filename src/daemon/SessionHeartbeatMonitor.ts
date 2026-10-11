@@ -1,4 +1,5 @@
 import { Timer, defaultTimer, monotonicClockSemanticsDrift } from "../utils/SystemTimer";
+import { readOptionalEnvPositiveInteger } from "../utils/envNumbers";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
@@ -172,12 +173,7 @@ export const STUCK_REAP_WARN_MS =
 const DEFAULT_INITIAL_GRACE_MS = 20_000;
 
 function readPositiveMsEnv(primaryName: string, legacyName: string): number | undefined {
-  const rawValue = process.env[primaryName] ?? process.env[legacyName];
-  if (!rawValue) {
-    return undefined;
-  }
-  const parsed = Number.parseInt(rawValue, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  return readOptionalEnvPositiveInteger(primaryName, legacyName);
 }
 
 /**

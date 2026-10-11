@@ -20,8 +20,11 @@ A call that acts on a held device is refused with the typed code
 A derived `<base>:<label>` session counts as its base session, for the holder
 check and for the owning connection alike: while the base's owner is connected,
 another connection's control call naming the derived session, or reaching one of
-the owner's devices through a `device` label, is refused (#11542). A device that
-no session holds takes calls from anyone.
+the owner's devices through a `device` label, is refused (#11542). The same holds
+wherever ownership is recorded: restoring a derived session is restoring its
+base, so it is refused while another connection owns the base, and it never
+takes a label away from the base's owner (#11586). A device that no session
+holds takes calls from anyone.
 
 A session's owner is the connection that acquired it, or that restored it after
 a reconnect. Ownership is cooperative: no token is needed, but naming a session's

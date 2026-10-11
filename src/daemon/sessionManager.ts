@@ -874,6 +874,8 @@ interface PendingSessionRelease {
 
 interface SessionReleaseOperation extends PendingSessionRelease {
   session: Session;
+  /** Suspect before the handoff: the owner's existing grace still runs across teardown (#11691). */
+  judgeSuspectOwnerAtCommit?: boolean;
   /** When the release started; bounds the retry hint for a bind it refuses (#10960). */
   startedAtMs?: number;
   /** Set for an idle release the manager started itself (#11481): see `getIdleReleasesInProgress`. */
@@ -5086,10 +5088,12 @@ export class SessionManager {
     this.releasingSessions.add(session);
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
     const reason = this.createReleaseReasonState(sessionId, releaseReason);
+    const judgeSuspectOwnerAtCommit = this.judgeOwnerLeaseForRelease(session, reason, "start");
     const release: SessionReleaseOperation = {
       session,
       promise: Promise.resolve(null),
       reason,
+      judgeSuspectOwnerAtCommit,
       startedAtMs: this.sessionNow(),
       expiryOrigin: options.expiryOrigin,
       forcedAbort: new AbortController(),
@@ -5588,6 +5592,7 @@ export class SessionManager {
         return this.abandonSupersededRelease(sessionId, deviceId, pendingCleanup);
       }
       const releasedAtMs = this.sessionNow();
+      this.judgeOwnerLeaseForRelease(session, reason, "commit", operation);
       const releaseReason = reason.value;
       const terminalFenceHeldBefore = this.terminalReleaseSnapshots.has(sessionId);
       let releaseSnapshot: SessionReleaseSnapshot = {
@@ -9870,6 +9875,28 @@ export class SessionManager {
       suspectGraceMsFor(session) > 0 &&
       livenessLeaseState(sessionJudgedLeaseSnapshot(session, this.sessionNow())).phase === "lapsed"
     );
+  }
+
+  /** Judge pre-handoff silence only; a live owner's refused release-time heartbeats do not lapse. */
+  private judgeOwnerLeaseForRelease(
+    session: Session,
+    reason: ReleaseReasonState,
+    stage: "start" | "commit",
+    operation?: SessionReleaseOperation,
+  ): boolean {
+    if (
+      (stage === "commit" && operation?.judgeSuspectOwnerAtCommit !== true) ||
+      isTerminalReleaseReason(reason.value) ||
+      !judgesOwnerHeartbeats(session) ||
+      suspectGraceMsFor(session) === 0
+    ) {
+      return false;
+    }
+    const { phase } = livenessLeaseState(sessionJudgedLeaseSnapshot(session, this.sessionNow()));
+    if (phase === "lapsed") {
+      this.upgradeReleaseReason(reason, "heartbeat-timeout");
+    }
+    return phase === "suspect";
   }
 
   /**

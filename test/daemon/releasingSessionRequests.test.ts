@@ -520,7 +520,9 @@ describe("requests during device session release", () => {
               return error;
             },
           );
-          expect(await h.request("daemon/heartbeat")).toEqual(notFound);
+          expect(await h.request("daemon/heartbeat")).toEqual(
+            phase === "A" ? notFound : { ...notFound, releaseReason: "explicit-release" },
+          );
           if (phase === "A") {
             expect(settled).toBe(false);
           }

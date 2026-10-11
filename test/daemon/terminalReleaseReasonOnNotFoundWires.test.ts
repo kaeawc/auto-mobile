@@ -14,7 +14,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTimer } from "../fakes/FakeTimer";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
 
-// After an idle or heartbeat release every wire answers with the same terminal reason; none
+// After a terminal release every wire answers with the same terminal reason; none
 // answers as if the UUID had never been issued (#10730, #10832, #11646). The real SessionManager,
 // SessionHeartbeatMonitor and daemon request handlers run over an in-memory persistence fake and a
 // FakeTimer: nothing here starts a process, opens a socket or touches a device.
@@ -208,11 +208,23 @@ describe("not-found answers for a session whose terminal release is still writin
   });
 });
 
-describe("a release that is not a timer release, while it is still writing its row", () => {
-  // An explicit release stays as test/daemon/releasingSessionPaths.test.ts pins it, and a device
-  // loss may still be overruled by a newer observation: neither is named before it has finished.
-  for (const reason of ["explicit-release", "device-killed"] as const) {
-    test(`${reason}: heartbeat reply and session-info stay a plain not-found until it finishes`, async () => {
+const bare = { success: false, error: `Session not found: ${SESSION}`, code: NOT_FOUND };
+
+/** Poll both daemon wires at each write boundary; exact equality also checks for no idle key. */
+async function expectNotFoundWires(r: Rig, expected: DaemonMethodResult): Promise<void> {
+  expect(await heartbeat(r)).toEqual(expected);
+  expect(await r.request("daemon/sessionInfo", { sessionId: SESSION })).toEqual(expected);
+}
+
+describe("a terminal non-device-loss release while it is still writing its row", () => {
+  for (const reason of [
+    "explicit-release",
+    "owner-disconnected",
+    "device-killed",
+    "session-creation-cancelled",
+    "identity-recovery-runtime-mismatch",
+  ] as const) {
+    test(`${reason}: heartbeat and session-info name the same reason before and after completion`, async () => {
       rig = await setUpRig(120_000);
       const r = rig;
       expect((await heartbeat(r)).success).toBe(true);
@@ -221,15 +233,163 @@ describe("a release that is not a timer release, while it is still writing its r
       await settle();
       expect(r.manager.getTerminalReleaseSnapshot(SESSION)?.releaseReason).toBe(reason);
 
-      const bare = { success: false, error: `Session not found: ${SESSION}`, code: NOT_FOUND };
-      expect(await heartbeat(r)).toEqual(bare);
-      expect(await r.request("daemon/sessionInfo", { sessionId: SESSION })).toEqual(bare);
-
+      const expected = { ...bare, releaseReason: reason };
+      await expectNotFoundWires(r, expected);
       gate.open();
       await release;
-      expect(await heartbeat(r)).toEqual({ ...bare, releaseReason: reason });
+      await expectNotFoundWires(r, expected);
+      expect((await r.persistence.getSession?.(SESSION))?.release_reason).toBe(reason);
     });
   }
+});
+
+describe("joined terminal releases never lose their named reason during row writes", () => {
+  for (const [first, joining, finalReason, initiallyIdle] of [
+    ["cleanup-expired", "explicit-release", "explicit-release", true],
+    ["lazy-expiry", "explicit-release", "explicit-release", true],
+    ["cli-idle-timeout", "explicit-release", "explicit-release", true],
+    ["cleanup-expired", "owner-disconnected", "owner-disconnected", true],
+    ["explicit-release", "cleanup-expired", "explicit-release", false],
+    ["heartbeat-timeout", "explicit-release", "heartbeat-timeout", false],
+    ["explicit-release", "heartbeat-timeout", "explicit-release", false],
+    ["missing-first-heartbeat", "explicit-release", "missing-first-heartbeat", false],
+    ["explicit-release", "missing-first-heartbeat", "explicit-release", false],
+    ["explicit-release", "device-killed", "device-killed", false],
+    ["device-killed", "explicit-release", "device-killed", false],
+  ] as const) {
+    test(`${first} then ${joining}: names ${finalReason} without a bare interval`, async () => {
+      rig = await setUpRig(120_000);
+      const r = rig;
+      const firstWrite = writeGate();
+      const secondWrite = writeGate();
+      let writes = 0;
+      const write = r.persistence.markReleased.bind(r.persistence);
+      r.persistence.markReleased = async (...args) => {
+        const gate = writes++ === 0 ? firstWrite : secondWrite;
+        await gate.wait;
+        await write(...args);
+      };
+      const release = r.manager.releaseSession(SESSION, first);
+      await settle();
+      expect(writes).toBe(1);
+      await expectNotFoundWires(r, {
+        ...bare,
+        releaseReason: first,
+        ...(initiallyIdle ? { idle: true } : {}),
+      });
+
+      const joined = r.manager.releaseSession(SESSION, joining);
+      const expected = { ...bare, releaseReason: finalReason };
+      // The first snapshot still holds the starting reason. The live operation knows the join.
+      expect(r.manager.getTerminalReleaseSnapshot(SESSION)?.releaseReason).toBe(first);
+      await expectNotFoundWires(r, expected);
+      firstWrite.open();
+      await settle();
+      expect((await r.persistence.getSession?.(SESSION))?.release_reason).toBe(first);
+      expect(writes).toBe(first === finalReason ? 1 : 2);
+      await expectNotFoundWires(r, expected);
+      secondWrite.open();
+      await Promise.all([release, joined]);
+      await expectNotFoundWires(r, expected);
+      expect((await r.persistence.getSession?.(SESSION))?.release_reason).toBe(finalReason);
+    });
+  }
+});
+
+describe("device loss and commit-fenced releases stay bare while writing their row", () => {
+  for (const commitFenced of [false, true]) {
+    test(`${commitFenced ? "commit-fenced" : "plain"} device loss stays bare until completion`, async () => {
+      rig = await setUpRig(120_000);
+      const r = rig;
+      const reason = "device-disconnected:emulator-5554";
+      const gate = gateReleaseWrite(r);
+      const release = commitFenced
+        ? r.manager.releaseSessionUnlessSuperseded(SESSION, reason, () => true)
+        : r.manager.releaseSession(SESSION, reason);
+      await settle();
+      expect(r.manager.getTerminalReleaseSnapshot(SESSION)?.releaseReason).toBe(reason);
+      // A newer observation can supersede a device-loss release and the session can survive.
+      await expectNotFoundWires(r, bare);
+      gate.open();
+      await release;
+      await expectNotFoundWires(r, { ...bare, releaseReason: reason });
+    });
+  }
+
+  test("device-killed joining a commit-fenced device loss stays bare until completion", async () => {
+    rig = await setUpRig(120_000);
+    const r = rig;
+    const gate = gateReleaseWrite(r);
+    const release = r.manager.releaseSessionUnlessSuperseded(
+      SESSION,
+      "device-disconnected:emulator-5554",
+      () => true,
+    );
+    await settle();
+    await expectNotFoundWires(r, bare);
+    const joined = r.manager.releaseSession(SESSION, "device-killed");
+    await expectNotFoundWires(r, bare);
+    gate.open();
+    await Promise.all([release, joined]);
+    await expectNotFoundWires(r, { ...bare, releaseReason: "device-killed" });
+    expect((await r.persistence.getSession?.(SESSION))?.release_reason).toBe("device-killed");
+  });
+
+  test("a commit fence superseded after the terminal fence never names the surviving session", async () => {
+    rig = await setUpRig(120_000);
+    const r = rig;
+    const session = r.manager.getSession(SESSION);
+    const gate = gateReleaseWrite(r);
+    let shouldCommit = true;
+    const release = r.manager.releaseSessionUnlessSuperseded(
+      SESSION,
+      "device-disconnected:emulator-5554",
+      () => shouldCommit,
+    );
+    await settle();
+    expect(r.manager.getTerminalReleaseSnapshot(SESSION)).toBeDefined();
+    await expectNotFoundWires(r, bare);
+    shouldCommit = false;
+    const joined = r.manager.releaseSession(SESSION, "device-killed");
+    await expectNotFoundWires(r, bare);
+    gate.open();
+    expect(await release).toEqual({ superseded: true });
+    await joined;
+    expect(r.manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+    expect(r.manager.getSession(SESSION)).toBe(session);
+    expect(await r.manager.getReleasedSessionReason(SESSION)).toBeUndefined();
+    expect((await r.persistence.getSession?.(SESSION))?.status).toBe("active");
+    expect((await heartbeat(r)).success).toBe(true);
+    expect((await r.request("daemon/sessionInfo", { sessionId: SESSION })).success).toBe(true);
+  });
+});
+
+describe("terminal snapshot fallback without an in-flight operation", () => {
+  for (const reason of ["explicit-release", "device-disconnected:emulator-5554"] as const) {
+    test(`a failed ${reason} write leaves ${reason === "explicit-release" ? "a named" : "a bare"} fence`, async () => {
+      rig = await setUpRig(120_000);
+      const r = rig;
+      r.persistence.failure = "release";
+      await expect(r.manager.releaseSession(SESSION, reason)).rejects.toThrow(
+        "persist release failed",
+      );
+      expect(r.manager.getTerminalReleaseSnapshot(SESSION)?.releaseReason).toBe(reason);
+      expect(r.manager.getReleasingSession(SESSION)).toBeNull();
+      await expectNotFoundWires(
+        r,
+        reason === "explicit-release" ? { ...bare, releaseReason: reason } : bare,
+      );
+    });
+  }
+
+  test("a never-issued UUID stays plain not-found", async () => {
+    rig = await setUpRig(120_000);
+    const sessionId = "00000000-0000-4000-8000-000000000099";
+    const expected = { success: false, error: `Session not found: ${sessionId}`, code: NOT_FOUND };
+    for (const method of ["daemon/heartbeat", "daemon/sessionInfo"]) {
+      expect(await rig.request(method, { sessionId })).toEqual(expected);
+    }
+  });
 });
 
 describe("a claiming heartbeat whose ownership write yields across an idle release", () => {

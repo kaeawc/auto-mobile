@@ -40,6 +40,7 @@ import { defaultTimer, SteadyWallClock, Timer } from "../utils/SystemTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { logger } from "../utils/logger";
 import { readEnvPositiveInteger } from "../utils/envNumbers";
+import { isDeviceLossCancellationReason } from "../utils/deviceLossCancellationReason";
 import { BootedDevice, Platform } from "../models";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import {
@@ -892,6 +893,7 @@ interface SessionReleaseOperation extends PendingSessionRelease {
   judgeSuspectOwnerAtCommit?: boolean;
   /** Owner proof received during this release; never advances session activity or idle clocks. */
   ownerHeartbeatDuringRelease?: number;
+  commitFenced?: boolean;
   /** When the release started; bounds the retry hint for a bind it refuses (#10960). */
   startedAtMs?: number;
   /** Set for an idle release the manager started itself (#11481): see `getIdleReleasesInProgress`. */
@@ -5013,23 +5015,31 @@ export class SessionManager {
    * the persisted `release_reason`. Undefined for a live session or a UUID it never issued, so a
    * caller can tell a known release from a plain unknown id.
    *
-   * A session an idle or heartbeat release has fenced is answered with that reason while the
-   * release is still writing its row (#11646): a tool call is already refused with it, and the only
-   * releases a commit fence can still overrule are device losses, which no timer reason joins as
-   * the fence's reason. Any other release still holding the session (an explicit
-   * release, a device loss a newer observation may still overrule, a handoff) has no own answer
-   * yet; a plan label whose base has ended is otherwise answered with the base's reason.
+   * A fenced terminal non-device-loss release is named while it writes its row (#11646), using
+   * the operation's live reason so a join is visible before its snapshot upgrades. Only
+   * commit-fenced releases can be abandoned after the terminal fence is raised; those are never
+   * named, even if a join upgrades their reason. Teardown before the fence stays unanswered.
+   * A plan label whose base has ended is otherwise answered with the base's reason.
    */
   async getReleasedSessionReason(sessionId: string): Promise<string | undefined> {
     const published = this.sessions.get(sessionId);
     const inMemory = this.terminalReleaseSnapshots.get(sessionId)?.releaseReason;
     if (published) {
-      if (inMemory !== undefined && isExpiryReleaseReason(inMemory)) {
-        return inMemory;
-      }
+      const inFlightReason = (): string | undefined => {
+        const operation = this.releasePromises.get(sessionId);
+        const current = operation?.session === published ? operation : undefined;
+        const reason = current?.reason.value ?? inMemory;
+        return inMemory !== undefined &&
+          !current?.commitFenced &&
+          reason !== undefined &&
+          isTerminalReleaseReason(reason) &&
+          !isDeviceLossCancellationReason(reason)
+          ? reason
+          : undefined;
+      };
       // A label whose base has ended is answered with the base's end (#11640), before the
       // release that follows has recorded it on the label's own row.
-      return this.endedBaseOfLabel(published)?.releaseReason;
+      return inFlightReason() ?? this.endedBaseOfLabel(published)?.releaseReason;
     }
     if (inMemory) {
       return inMemory;
@@ -5311,6 +5321,7 @@ export class SessionManager {
     const judgeSuspectOwnerAtCommit = this.judgeOwnerLeaseForRelease(session, reason, "start");
     const release: SessionReleaseOperation = {
       session,
+      commitFenced: shouldCommit !== undefined,
       promise: Promise.resolve(null),
       reason,
       judgeSuspectOwnerAtCommit,

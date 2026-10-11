@@ -6,7 +6,12 @@ import {
   type SomePlatform,
 } from "../models";
 import type { BootedDeviceDiscovery } from "../devices/deviceUtils";
-import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
+import {
+  type DiscoverySource,
+  incompleteDiscoverySources,
+  notApplicableDiscoverySources,
+  sourcesForPlatform,
+} from "../utils/discoverySource";
 import {
   createConfiguredInventoryContract,
   projectConfiguredDeviceInventory,
@@ -63,17 +68,23 @@ function listingDiscoveryObservation(
   discoveryErrors: BootedDeviceDiscovery["discoveryErrors"],
   sourceErrors: BootedDeviceDiscovery["sourceErrors"],
 ) {
-  const failedPlatforms = requestedPlatforms.filter((p) => !succeededPlatforms.has(p));
-  const failedSources = succeededSources
-    ? requestedPlatforms
-        .flatMap((p) => sourcesForPlatform(p))
-        .filter((source) => !succeededSources!.has(source))
-    : undefined;
+  // One classifier for every inventory surface (#11605): a source whose tooling is not installed
+  // on this host is not a failure, so it is neither a failed source nor a failed platform.
+  const evidence = { succeededPlatforms, succeededSources, discoveryErrors, sourceErrors };
+  const incompleteSources = incompleteDiscoverySources(evidence, requestedPlatforms);
+  const notApplicableSources = notApplicableDiscoverySources(evidence, requestedPlatforms);
+  const failedPlatforms = requestedPlatforms.filter(
+    (p) =>
+      !succeededPlatforms.has(p) &&
+      sourcesForPlatform(p).some((source) => incompleteSources.includes(source)),
+  );
+  const failedSources = succeededSources ? incompleteSources : undefined;
   return {
-    complete: failedSources ? failedSources.length === 0 : failedPlatforms.length === 0,
+    complete: incompleteSources.length === 0,
     failedPlatforms,
     ...(sourceErrors && Object.keys(sourceErrors).length > 0 ? { sourceErrors } : {}),
     ...(failedSources && failedSources.length > 0 ? { failedSources } : {}),
+    ...(notApplicableSources.length > 0 ? { notApplicableSources } : {}),
     ...(discoveryErrors && Object.keys(discoveryErrors).length > 0
       ? { errors: discoveryErrors }
       : {}),

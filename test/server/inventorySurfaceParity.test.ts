@@ -1,9 +1,12 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { DaemonState } from "../../src/daemon/daemonState";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
+import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
+import { DaemonState, type DaemonStateLike } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -16,11 +19,16 @@ import {
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
+import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import type { DiscoverySource } from "../../src/utils/discoverySource";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 import { createExecResult } from "../../src/utils/execResult";
 import { FakeDeviceHealthMarkers } from "../fakes/FakeDeviceHealthMarkers";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -360,5 +368,263 @@ describe("listDevices tool and booted resource describe a device identically", (
       ),
     });
     expect(withoutLifecycle(toolView)).toEqual(withoutLifecycle(resourceView));
+  });
+});
+
+// Inventory contract (#11605): one rule on every surface. A discovery source whose tooling is not
+// installed on this host is NOT APPLICABLE: it never makes an observation incomplete, is never
+// retryable, and its device count is a true zero. A source that exists and failed is INCOMPLETE:
+// the answer is unknown (`discovery_incomplete`, retryable), never zero. A single-platform machine
+// is a fully supported configuration.
+
+const simulator: BootedDevice = {
+  platform: "ios",
+  name: "iPhone 17",
+  deviceId: "11111111-2222-3333-4444-555555555555",
+};
+const ABSENT = {
+  android: "emulator-5999",
+  "ios-simulator": "99999999-2222-3333-4444-555555555555",
+  "ios-physical": "00008110-001A2B3C4D5E6F78",
+} as const;
+const ALL_SOURCES: DiscoverySource[] = ["android", "ios-simulator", "ios-physical"];
+
+interface Host {
+  host: string;
+  notInstalled: DiscoverySource[];
+  failing: DiscoverySource[];
+}
+
+const hosts: Host[] = [
+  { host: "both platforms installed", notInstalled: [], failing: [] },
+  { host: "Android-only", notInstalled: ["ios-simulator", "ios-physical"], failing: [] },
+  { host: "iOS-only", notInstalled: ["android"], failing: [] },
+  { host: "devicectl missing", notInstalled: ["ios-physical"], failing: [] },
+  { host: "adb installed but failing", notInstalled: [], failing: ["android"] },
+  { host: "simctl installed but failing", notInstalled: [], failing: ["ios-simulator"] },
+  { host: "everything failing", notInstalled: [], failing: ALL_SOURCES },
+];
+
+const hostCells = hosts.flatMap((host) =>
+  (["nothing booted", "one device booted"] as const).map((booted) => ({ ...host, booted })),
+);
+
+const unexpectedRemoteCall = (): never => {
+  throw new Error("Unexpected daemon operation");
+};
+const remoteState: DaemonStateLike = {
+  isInitialized: () => false,
+  getSessionManager: unexpectedRemoteCall,
+  getDevicePool: unexpectedRemoteCall,
+  getDeviceSessionRegistry: unexpectedRemoteCall,
+};
+
+/** Run `--daemon available-devices` and reduce it to the count it printed, or its refusal code. */
+async function availableDevicesCli(
+  args: string[],
+  state: DaemonStateLike,
+  resourceText: string,
+): Promise<unknown> {
+  const stdout: string[] = [];
+  const exits: unknown[] = [];
+  class Client extends FakeDaemonClient {
+    override async connect() {}
+    override async readResource() {
+      return { contents: [{ uri: "automobile:devices/booted", text: resourceText }] } as never;
+    }
+    override async close() {}
+  }
+  class Manager extends SafeDaemonManager {
+    override getDaemonState() {
+      return state;
+    }
+    override createClient() {
+      return new Client();
+    }
+  }
+  const log = spyOn(console, "log").mockImplementation((text) => {
+    stdout.push(String(text));
+  });
+  const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+  const exit = spyOn(process, "exit").mockImplementation((code) => {
+    exits.push(code);
+    throw new Error("exit");
+  });
+  try {
+    await runDaemonCommand("available-devices", args, {}, Manager).catch(() => {});
+  } finally {
+    exit.mockRestore();
+    errorSpy.mockRestore();
+    log.mockRestore();
+  }
+  if (exits.length === 0) {
+    return JSON.parse(stdout[0] ?? "{}").availableDevices;
+  }
+  // A refusal exits 1; `--json` carries the typed code on stdout, text mode prints nothing there.
+  return {
+    exit: exits[0],
+    ...(args.includes("--json") ? { code: JSON.parse(stdout[0] ?? "{}").code } : { stdout }),
+  };
+}
+
+describe("every inventory surface gives one answer per discovery-source outcome (#11605)", () => {
+  let sessions: SessionManager | undefined;
+
+  beforeAll(() => {
+    if (!ToolRegistry.getTool("listDevices")) {
+      registerDeviceTools();
+    }
+  });
+
+  afterEach(() => {
+    DaemonState.getInstance().reset();
+    sessions?.stopCleanupTimer();
+    resetBootedDevicesResourceCache();
+    setDeviceManager(null);
+    PlatformDeviceManagerFactory.setInstance(null);
+  });
+
+  afterAll(() => {
+    resetDeviceToolsDependencies();
+  });
+
+  test.each(hostCells)("$host, $booted", async ({ notInstalled, failing, booted }) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = new FakeDeviceUtils();
+    // The booted device sits on a source that works on this host; when every source fails it is a
+    // pooled emulator the daemon saw before the failure began.
+    const usable = (source: DiscoverySource) =>
+      !notInstalled.includes(source) && !failing.includes(source);
+    const device =
+      booted === "nothing booted"
+        ? undefined
+        : usable("android") || !usable("ios-simulator")
+          ? android
+          : simulator;
+    manager.setBootedDevices("android", device?.platform === "android" ? [device] : []);
+    manager.setBootedDevices("ios", device?.platform === "ios" ? [device] : []);
+    const activeSessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    sessions = activeSessions;
+    const pool = poolFor({ timer, sessions: activeSessions, manager });
+    await pool.initializeWithDevices(device ? [device] : []);
+    manager.notInstalledSources = new Set(notInstalled);
+    manager.failedSources = new Set(failing);
+    DaemonState.getInstance().initialize(activeSessions, pool);
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => manager,
+      avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
+    });
+    setDeviceManager(manager);
+    PlatformDeviceManagerFactory.setInstance(manager);
+
+    const resource = await getBootedDevicesForPlatforms(["android", "ios"], timer);
+    const resourceText = JSON.stringify(resource);
+    const listed = JSON.parse(
+      (await ToolRegistry.getTool("listDevices")!.handler({})).content?.[0]?.text ?? "{}",
+    );
+    const codeOf = (error: unknown) => (error as { code?: string }).code ?? "untyped";
+    const daemonState = DaemonState.getInstance();
+    const daemonResponse = await handleDaemonRequest(
+      { id: "r", type: "daemon_request", method: "daemon/availableDevices", params: {} },
+      {
+        isInitialized: () => true,
+        getSessionManager: () => activeSessions as never,
+        getDevicePool: () => pool,
+        getDeviceSessionRegistry: () => ({ list: () => [] }),
+      },
+    );
+    const ideLookup = (
+      UnixSocketServer.prototype as unknown as {
+        listBootedDevicesForIdeAction(p: "android" | "ios", serial: string): Promise<unknown>;
+      }
+    ).listBootedDevicesForIdeAction;
+    const select = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+
+    const answers = {
+      resource: {
+        observationComplete: resource.observationComplete,
+        devices: resource.devices.length,
+        notApplicable: ALL_SOURCES.filter(
+          (source) => resource.sourceObservations[source]?.notApplicable === true,
+        ),
+        incomplete: ALL_SOURCES.filter(
+          (source) => resource.sourceObservations[source]?.observationComplete === false,
+        ),
+      },
+      listDevices: {
+        complete: listed.discovery.complete,
+        devices: listed.devices.length,
+        notApplicable: listed.discovery.notApplicableSources ?? [],
+        incomplete: listed.discovery.failedSources ?? [],
+      },
+      getRefreshedStats: await pool.getRefreshedStats().then((stats) => stats.idle, codeOf),
+      getRefreshedInventory: await pool
+        .getRefreshedInventory()
+        .then((inventory) => inventory.deviceIds.size, codeOf),
+      daemonAvailableDevices: daemonResponse.success
+        ? (daemonResponse.result as { availableDevices: number }).availableDevices
+        : { code: daemonResponse.code, retryable: daemonResponse.retryable },
+      cliStdio: await availableDevicesCli([], remoteState, resourceText),
+      cliStdioJson: await availableDevicesCli(["--json"], remoteState, resourceText),
+      cliInDaemon: await availableDevicesCli([], daemonState, resourceText),
+      cliInDaemonJson: await availableDevicesCli(["--json"], daemonState, resourceText),
+      // An absent serial is only an unknown when the source that would list it exists and failed.
+      ideRefusesAbsentSerialOf: (
+        await Promise.all(
+          ALL_SOURCES.map((source) =>
+            ideLookup.call({}, source === "android" ? "android" : "ios", ABSENT[source]).then(
+              () => [],
+              (error: unknown) => [`${source}:${codeOf(error)}`],
+            ),
+          ),
+        )
+      ).flat(),
+      // setActiveDevice types its refresh refusal by the Android source only (#11586 refines the
+      // attribution); tooling that is not installed must never make it retryable.
+      setActiveDevice: await select({ deviceId: ABSENT.android, sessionUuid: "selection" }).then(
+        () => "selected",
+        (error: unknown) =>
+          (error as { retryable?: boolean }).retryable === true ? codeOf(error) : "not found",
+      ),
+      // Reads never hold, bind or boot.
+      heldAfterReads: pool.getStats().assigned,
+      sessionsAfterReads: activeSessions.getAllSessions().length,
+      boots: manager.getExecutedOperations().filter((op) => op.startsWith("startDevice")),
+    };
+
+    const complete = failing.length === 0;
+    const count = !device ? (complete ? 0 : "unknown") : failing.length === 3 ? "unknown" : 1;
+    const listedDevices = device && failing.length < 3 ? 1 : 0;
+    const refusal = { exit: 1, code: "discovery_incomplete" };
+    const cli = (json: boolean) =>
+      count === "unknown" ? (json ? refusal : { exit: 1, stdout: [] }) : count;
+    expect(answers).toEqual({
+      resource: {
+        observationComplete: complete,
+        devices: listedDevices,
+        notApplicable: notInstalled,
+        incomplete: failing,
+      },
+      listDevices: {
+        complete,
+        devices: listedDevices,
+        notApplicable: notInstalled,
+        incomplete: failing,
+      },
+      getRefreshedStats: count === "unknown" ? "discovery_incomplete" : count,
+      getRefreshedInventory: count === "unknown" ? "discovery_incomplete" : count,
+      daemonAvailableDevices:
+        count === "unknown" ? { code: "discovery_incomplete", retryable: true } : count,
+      cliStdio: cli(false),
+      cliStdioJson: cli(true),
+      cliInDaemon: cli(false),
+      cliInDaemonJson: cli(true),
+      ideRefusesAbsentSerialOf: failing.map((source) => `${source}:discovery_incomplete`),
+      setActiveDevice: failing.includes("android") ? "discovery_incomplete" : "not found",
+      heldAfterReads: 0,
+      sessionsAfterReads: 0,
+      boots: [],
+    });
   });
 });

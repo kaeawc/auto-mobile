@@ -76,3 +76,79 @@ export function didSourceSucceedForDevice(
   }
   return completeness.succeededPlatforms.has(platform);
 }
+
+/**
+ * What one discovery source says about this host this sweep (#11605):
+ * - `complete`: it ran and listed its devices (possibly none);
+ * - `not_applicable`: its tooling is not installed or does not exist on this host (no adb binary,
+ *   not macOS, no Xcode/simctl, no devicectl). Its device count is a true zero, it never makes an
+ *   observation incomplete, and retrying cannot change it;
+ * - `incomplete`: it exists and failed, timed out, or was not asked. The answer is unknown.
+ */
+export type DiscoverySourceOutcome = "complete" | "not_applicable" | "incomplete";
+
+/** The parts of a discovery result the per-source classifier reads. */
+export interface DiscoverySourceEvidence extends DiscoveryCompleteness {
+  sourceErrors?: Partial<Record<DiscoverySource, { code: string }>>;
+  discoveryErrors?: Partial<Record<Platform, { code: string }>>;
+}
+
+/**
+ * The one classifier every inventory surface asks. "Not installed" is read from the typed
+ * `unavailable` error the producer derived from the tool invocation itself (ENOENT / the tool's
+ * own "not found" report), never guessed from the host platform here. A source with no error of
+ * its own inherits its platform's error: without Xcode neither iOS source ran.
+ */
+export function discoverySourceOutcome(
+  discovery: DiscoverySourceEvidence,
+  source: DiscoverySource,
+): DiscoverySourceOutcome {
+  const platform: Platform = source === "android" ? "android" : "ios";
+  const succeeded = discovery.succeededSources
+    ? discovery.succeededSources.has(source)
+    : discovery.succeededPlatforms.has(platform);
+  if (succeeded) {
+    return "complete";
+  }
+  const error = discovery.sourceErrors?.[source] ?? discovery.discoveryErrors?.[platform];
+  return error?.code === "unavailable" ? "not_applicable" : "incomplete";
+}
+
+function sourcesWithOutcome(
+  discovery: DiscoverySourceEvidence,
+  platforms: readonly Platform[],
+  outcome: DiscoverySourceOutcome,
+): DiscoverySource[] {
+  return platforms
+    .flatMap((platform) => sourcesForPlatform(platform))
+    .filter((source) => discoverySourceOutcome(discovery, source) === outcome);
+}
+
+/** The requested platforms' sources whose answer is unknown; none means the observation is complete. */
+export function incompleteDiscoverySources(
+  discovery: DiscoverySourceEvidence,
+  platforms: readonly Platform[],
+): DiscoverySource[] {
+  return sourcesWithOutcome(discovery, platforms, "incomplete");
+}
+
+/** The requested platforms' sources whose tooling this host does not have. */
+export function notApplicableDiscoverySources(
+  discovery: DiscoverySourceEvidence,
+  platforms: readonly Platform[],
+): DiscoverySource[] {
+  return sourcesWithOutcome(discovery, platforms, "not_applicable");
+}
+
+/**
+ * True when this device's absence is unknown rather than proven: the source that would have
+ * listed it exists on this host and did not complete. A source that is not installed cannot list
+ * the device on any retry, so its silence is not an unknown.
+ */
+export function isDeviceSourceIncomplete(
+  discovery: DiscoverySourceEvidence,
+  platform: Platform,
+  deviceId: string | undefined,
+): boolean {
+  return discoverySourceOutcome(discovery, discoverySourceFor(platform, deviceId)) === "incomplete";
+}

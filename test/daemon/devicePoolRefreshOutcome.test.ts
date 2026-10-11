@@ -15,7 +15,10 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
-import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
+import {
+  type AdbClient,
+  AdbUnavailableError,
+} from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { logger } from "../../src/utils/logger";
@@ -344,7 +347,7 @@ describe("daemon/refreshDevices outcome", () => {
 });
 
 describe("Android discovery failure refresh outcome", () => {
-  function setup(failure?: string) {
+  function setup(failure?: string | Error) {
     const timer = new FakeTimer();
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const iosDevice: BootedDevice = { deviceId: "SIM-FRESH", name: "iPhone", platform: "ios" };
@@ -358,7 +361,7 @@ describe("Android discovery failure refresh outcome", () => {
       createFakeAndroidEmulator({
         getBootedDevicesChecked: async () => {
           if (failure) {
-            throw new Error(failure);
+            throw failure instanceof Error ? failure : new Error(failure);
           }
           return [];
         },
@@ -385,6 +388,25 @@ describe("Android discovery failure refresh outcome", () => {
     ).rejects.toMatchObject({
       message: `Could not refresh device list: ${("Android booted-device discovery failed: " + "x".repeat(300)).slice(0, 256)}. Resolve the cause and retry.`,
     });
+  });
+
+  test("a host with no adb binary answers an absent iOS device as not found, never retryable (#11605)", async () => {
+    const { pool } = setup(
+      new AdbUnavailableError("ADB executable is unavailable: spawn adb ENOENT"),
+    );
+    const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+    const refusal = await handler({
+      deviceId: "99999999-2222-3333-4444-555555555555",
+      sessionUuid: "selection",
+    }).catch((error: unknown) => error as { message: string; code?: string; retryable?: boolean });
+    expect(refusal).toMatchObject({
+      message: "Device '99999999-2222-3333-4444-555555555555' not found in device pool",
+    });
+    expect({ code: refusal?.code, retryable: refusal?.retryable }).toEqual({
+      code: undefined,
+      retryable: undefined,
+    });
+    expect((await pool.refreshDevicesWithOutcome()).failure).toBeUndefined();
   });
 
   test("working adb with an absent device preserves the exact selection error", async () => {

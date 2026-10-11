@@ -109,6 +109,8 @@ import {
 } from "../devices/deviceIdentityEvidence";
 import {
   didSourceSucceedForDevice,
+  incompleteDiscoverySources,
+  isDeviceSourceIncomplete,
   discoverySourceFor,
   type DiscoveryCompleteness,
 } from "../utils/discoverySource";
@@ -5904,21 +5906,22 @@ export class DevicePool {
    * device-list cache applies), so a stats read adds one listing per such platform and no
    * unbounded per-device call. An incomplete
    * listing throws {@link BootedDeviceDiscoveryIncompleteError}: the count is unknown, never the
-   * stale pool tally and never zero.
+   * stale pool tally and never zero. A source whose tooling is not installed on this host is not
+   * incomplete: it lists nothing, so its pooled entries are simply not live (#11605).
    */
   private async readLiveInventoryDeviceIds(): Promise<Set<string>> {
     const live = new Set<string>();
+    const read = new Map<Platform, BootedDeviceDiscovery>();
     for (const platform of ["android", "ios"] as const) {
       if (this.getDevicesByPlatform(platform).length === 0) {
         continue;
       }
-      const discovery = await this.deviceManager.getBootedDevicesDetailed(platform, {
-        signal: getAbortSignal(),
-      });
+      const discovery = await this.readInventoryDiscovery(platform);
+      read.set(platform, discovery);
       // Only a pooled device whose own discovery source failed is unknown; a failure of a source
       // none of them depends on (devicectl for a simulator-only pool) leaves the answer exact.
-      const unknown = this.getDevicesByPlatform(platform).some(
-        (pooled) => !didSourceSucceedForDevice(discovery, platform, pooled.id),
+      const unknown = this.getDevicesByPlatform(platform).some((pooled) =>
+        isDeviceSourceIncomplete(discovery, platform, pooled.id),
       );
       if (unknown) {
         throw new BootedDeviceDiscoveryIncompleteError(
@@ -5941,7 +5944,34 @@ export class DevicePool {
         live.add(held.device.deviceId);
       }
     }
+    if (live.size === 0) {
+      await this.assertEmptyInventoryIsKnown(read);
+    }
     return live;
+  }
+
+  private readInventoryDiscovery(platform: Platform): Promise<BootedDeviceDiscovery> {
+    return this.deviceManager.getBootedDevicesDetailed(platform, { signal: getAbortSignal() });
+  }
+
+  /**
+   * "No devices" is only an answer when every source that exists on this host completed, as on
+   * the booted-devices resource. With nothing live to count, a platform the caller skipped (no
+   * pooled entries) may be empty because its discovery failed, so read it: a failed source makes
+   * the count unknown, a source that is not installed leaves it a true zero (#11605).
+   */
+  private async assertEmptyInventoryIsKnown(
+    read: ReadonlyMap<Platform, BootedDeviceDiscovery>,
+  ): Promise<void> {
+    for (const platform of ["android", "ios"] as const) {
+      const discovery = read.get(platform) ?? (await this.readInventoryDiscovery(platform));
+      if (incompleteDiscoverySources(discovery, [platform]).length > 0) {
+        throw new BootedDeviceDiscoveryIncompleteError(
+          platform,
+          discovery.discoveryErrors?.[platform] ?? discovery.sourceErrors?.["ios-physical"],
+        );
+      }
+    }
   }
 
   /** Re-read which idle Android devices other daemons drive, for this allocation pass. */

@@ -61,7 +61,13 @@ import {
   type IosRunnerCommandRequirements,
 } from "../features/observe/ios/iosRunnerFeatureCommands";
 import { resolveApkChecksum, resolveIpaChecksum } from "../constants/release";
-import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
+import {
+  type DiscoverySource,
+  discoverySourceOutcome,
+  incompleteDiscoverySources,
+  notApplicableDiscoverySources,
+  sourcesForPlatform,
+} from "../utils/discoverySource";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
   AndroidAvdProvenanceCache,
@@ -264,7 +270,27 @@ export interface BootedDevicesResourceContent {
 
 interface PlatformObservation {
   observationComplete: boolean;
+  /**
+   * The tooling behind this observation is not installed on this host (no adb, not macOS, no
+   * Xcode, no devicectl), so "no devices" is exact and retrying cannot change it (#11605).
+   */
+  notApplicable?: true;
   discoveryError?: DeviceDiscoveryError;
+}
+
+/** One source's observation: complete unless the source exists on this host and did not finish. */
+function sourceObservation(
+  discovery: BootedDeviceDiscovery,
+  source: DiscoverySource,
+): PlatformObservation {
+  const outcome = discoverySourceOutcome(discovery, source);
+  return {
+    observationComplete: outcome !== "incomplete",
+    ...(outcome === "not_applicable" ? { notApplicable: true as const } : {}),
+    ...(outcome === "incomplete" && discovery.sourceErrors?.[source]
+      ? { discoveryError: discovery.sourceErrors[source] }
+      : {}),
+  };
 }
 
 type PoolDeviceStatus = "idle" | "assigned" | "error";
@@ -428,9 +454,12 @@ function bootedDiscoveryError(
   discovery: BootedDeviceDiscovery,
   platform: Platform,
 ): DeviceDiscoveryError {
+  // An `unavailable` error is tooling this host does not have, never why a sweep is incomplete.
   return (
-    discovery.discoveryErrors?.[platform] ??
-    (platform === "ios" ? discovery.sourceErrors?.["ios-physical"] : undefined) ?? {
+    [
+      discovery.discoveryErrors?.[platform],
+      platform === "ios" ? discovery.sourceErrors?.["ios-physical"] : undefined,
+    ].find((error) => error !== undefined && error.code !== "unavailable") ?? {
       code: "failed",
       message: `${platform === "android" ? "Android" : "iOS"} booted-device discovery did not complete.`,
     }
@@ -459,11 +488,7 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
             : aliases.fold(discovery.devices, await aliases.prepare(discovery.devices), new Set())
           : discovery.devices;
       devices.push(...normalized);
-      const complete = sourcesForPlatform(platform).every(
-        (source) =>
-          discovery.succeededSources?.has(source) ?? discovery.succeededPlatforms.has(platform),
-      );
-      if (complete) {
+      if (incompleteDiscoverySources(discovery, [platform]).length === 0) {
         succeededPlatforms.add(platform);
       } else {
         discoveryErrors[platform] = bootedDiscoveryError(discovery, platform);
@@ -937,9 +962,7 @@ async function discoverBootedDevicesForPlatform(
       timer,
     );
     getAbortSignal()?.throwIfAborted();
-    const complete = discovery.succeededSources
-      ? sourcesForPlatform(platform).every((source) => discovery.succeededSources!.has(source))
-      : discovery.succeededPlatforms.has(platform);
+    const complete = incompleteDiscoverySources(discovery, [platform]).length === 0;
     const devices = discovery.devices.map((device) =>
       withIdentityQuarantineMarker(
         toBootedDeviceInfo(
@@ -978,20 +1001,17 @@ async function discoverBootedDevicesForPlatform(
       sourceObservations: Object.fromEntries(
         sourcesForPlatform(platform).map((source) => [
           source,
-          {
-            observationComplete: discovery.succeededSources
-              ? discovery.succeededSources.has(source)
-              : discovery.succeededPlatforms.has(platform),
-            ...(!(
-              discovery.succeededSources?.has(source) ?? discovery.succeededPlatforms.has(platform)
-            ) && discovery.sourceErrors?.[source]
-              ? { discoveryError: discovery.sourceErrors[source] }
-              : {}),
-          },
+          sourceObservation(discovery, source),
         ]),
       ),
       observation: complete
-        ? { observationComplete: true }
+        ? {
+            observationComplete: true,
+            ...(notApplicableDiscoverySources(discovery, [platform]).length ===
+            sourcesForPlatform(platform).length
+              ? { notApplicable: true as const }
+              : {}),
+          }
         : {
             observationComplete: false,
             discoveryError: bootedDiscoveryError(discovery, platform),
@@ -1483,17 +1503,14 @@ async function computeBootedDevicesForPlatforms(
           onDiscovery: (known, snapshot) => {
             devices.push(...known);
             pending.delete("discovery");
-            const complete = sourcesForPlatform(platform).every(
-              (source) =>
-                snapshot.succeededSources?.has(source) ?? snapshot.succeededPlatforms.has(platform),
-            );
+            const complete = incompleteDiscoverySources(snapshot, [platform]).length === 0;
             platformObservations[platform] = { observationComplete: complete };
             if (complete) {
               succeededPlatforms.add(platform);
             }
             for (const source of sourcesForPlatform(platform)) {
               sourceObservations[source] = {
-                observationComplete: snapshot.succeededSources?.has(source) ?? complete,
+                observationComplete: discoverySourceOutcome(snapshot, source) !== "incomplete",
               };
             }
           },

@@ -3060,13 +3060,9 @@ export class SessionManager {
     if (this.acceptingSessionCreations && !cancellation?.aborted) {
       return;
     }
-    if (
-      cancellation?.aborted &&
-      this.acceptingSessionCreations &&
-      requestAcquisitionReceipt()?.clientChosenSessionId === session.sessionId
-    ) {
-      await this.rollBackCancelledClientChosenCreation(session, rowWritten);
-      cancellation.throwIfAborted();
+    // Still accepting creations past the return above: the request itself was cancelled.
+    if (cancellation && this.acceptingSessionCreations) {
+      await this.rollBackCancelledClientChosenCreation(session, rowWritten, cancellation);
     }
     const releasedAtMs = this.sessionNow();
     const snapshot: SessionReleaseSnapshot = {
@@ -3095,13 +3091,19 @@ export class SessionManager {
    * call never answered and names it again on its retry, so the id is not retired: nothing is
    * fenced, and the active row this mint already wrote is released as a plain allocation
    * rollback, which a later creation replaces. A release write that fails stays pending and is
-   * retried; the retry creation's own upsert supersedes it.
+   * retried; the retry creation's own upsert supersedes it. Rethrows the cancellation; returns
+   * only for a session whose id this request's client did not choose.
    */
   private async rollBackCancelledClientChosenCreation(
     session: Session,
     rowWritten: boolean,
+    cancellation: AbortSignal,
   ): Promise<void> {
+    if (requestAcquisitionReceipt()?.clientChosenSessionId !== session.sessionId) {
+      return;
+    }
     if (!rowWritten) {
+      cancellation.throwIfAborted();
       return;
     }
     const releasedAtMs = this.sessionNow();
@@ -3120,6 +3122,7 @@ export class SessionManager {
     };
     this.captureReleaseRowGeneration(snapshot, this.persistedRowGenerations.get(session));
     await this.persistSessionRelease(snapshot);
+    cancellation.throwIfAborted();
   }
 
   /** The persisted row, with tool activity during a device-restart recovery applied to its expiry. */

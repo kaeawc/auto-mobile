@@ -30,9 +30,9 @@ export interface AcquisitionReceipt {
   };
   /**
    * The existing session this call moved to `deviceId`, and the device it held before.
-   * `cacheData` is what the session cached for that device (display pin, readiness, the
-   * originals its overrides restore) when the move began: a rebind discards it, so moving the
-   * session back puts it back.
+   * `cacheData` is what the session cached for that device when the move began. A rebind discards
+   * it, so moving the session back puts back the part that still describes the device (display
+   * pin, readiness, observation baselines) and not the overrides the rebind already restored.
    */
   rebound?: {
     readonly session: Session;

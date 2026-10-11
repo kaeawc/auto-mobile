@@ -27,7 +27,7 @@ import {
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
-import { combineRequestAbortSignals } from "../../src/utils/AbortContext";
+import { combineRequestAbortSignals, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
 import { classifyDisplayCutout } from "../../src/utils/displayCutout";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
@@ -444,9 +444,9 @@ describe.each([
    * once, and nothing that arrives late from that boot frees the slot a second caller then takes.
    */
   const expectBootSlotFreedExactlyOnce = async (platform: "android" | "ios"): Promise<void> => {
-    expect(gates.admissions.map((admission) => [admission.platform, admission.releaseCalls])).toEqual(
-      [[platform, 1]],
-    );
+    expect(
+      gates.admissions.map((admission) => [admission.platform, admission.releaseCalls]),
+    ).toEqual([[platform, 1]]);
     expect(await gates.capacity(platform)).toEqual({ booted: 0, inFlight: 0 });
     const second = await gates.holdOneMoreBoot(platform);
     expect(second).toBeDefined();
@@ -496,7 +496,10 @@ describe.each([
     );
 
     test("an emulator that will not stop and that adb no longer lists is counted by its process", async () => {
-      await undoAgainstDeviceThatWillNotStop("startDevice", { platform: "android", name: avd.name });
+      await undoAgainstDeviceThatWillNotStop("startDevice", {
+        platform: "android",
+        name: avd.name,
+      });
       devices.setBootedDevices("android", []);
 
       expect(await gates.capacity("android")).toMatchObject({ booted: 1 });
@@ -758,8 +761,9 @@ describe.each([
 
   describe("setActiveDevice", () => {
     const resumed: string[] = [];
-    const setActiveDevice = (args: Record<string, unknown>, signal: AbortSignal) =>
-      createSetActiveDeviceHandler({
+    // Run as the daemon runs a tool: the request's signal is ambient, so the mint sees the cancel.
+    const setActiveDevice = (args: Record<string, unknown>, signal: AbortSignal) => {
+      const handler = createSetActiveDeviceHandler({
         displayInventory: new FakeDisplayInventoryProvider({
           panels: [
             { key: "inside", role: "inner", sizePx: { width: 200, height: 200 } },
@@ -773,10 +777,14 @@ describe.each([
           beforeBind = undefined;
           cancel?.();
         },
-      })({ ...args, __mcpSessionId: "mcp-client" } as never, undefined, signal).then(
+      });
+      return runWithAbortSignal(signal, async () => {
+        await handler({ ...args, __mcpSessionId: "mcp-client" } as never, undefined, signal);
+      }).then(
         () => true,
         () => false,
       );
+    };
 
     /** The rebind's last step: readiness is recorded once the pool has moved the session. */
     const cancelAfterRebind = (cancel: () => void): void => {
@@ -817,6 +825,11 @@ describe.each([
           displayPin: "main",
           deviceReadiness: "automationReady",
         });
+        // An override the session applied. A rebind takes its overrides back off the device it
+        // leaves, so a session that was moved and moved back must not still claim one (the next
+        // call applies it again); a selection cancelled before it moved anything leaves it be.
+        const keepScreenAwake = { applied: true, method: "svc" as const, svcWasEnabled: false };
+        sessions.updateSessionCache(sessionUuid!, { keepScreenAwake });
         const controller = new AbortController();
         const reachCancelPoint = cancelSelectionAt(point, () =>
           controller.abort(new Error("client cancelled")),
@@ -832,7 +845,13 @@ describe.each([
 
         // Device, display pin, cache, liveness and idle clock: the session is what it was. Its
         // tool enablement lives with the session id and goes only when the session is released.
-        expect(structuredClone(sessions.getSession(sessionUuid!))).toEqual(before);
+        expect(structuredClone(sessions.getSession(sessionUuid!))).toEqual({
+          ...before!,
+          cacheData:
+            point === "before the bind"
+              ? { ...before!.cacheData, keepScreenAwake }
+              : before!.cacheData,
+        });
         expect(released).toEqual([]);
         expect(await persistence.getSession!(sessionUuid!)).toMatchObject({
           device_id: rowBefore!.device_id,

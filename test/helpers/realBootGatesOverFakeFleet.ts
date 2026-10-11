@@ -34,12 +34,15 @@ export interface ObservedAdmission {
 
 /**
  * The REAL boot admission gates and ledgers (#11181) over a fake fleet: every boot
- * `devices.startDevice` performs is admitted exactly as the launchers admit it. An Android cold
- * boot holds its admission across the spawn, hands it off to its serial once the emulator
- * process exists and releases it when that process exits or the spawn fails
- * (`AndroidEmulatorClient.spawnWithBootAdmission`); an iOS boot runs under the real
- * `FleetBootInstrumentation`, which releases when the boot call returns. Capacity is sampled
- * from the fake fleet's own listing, so a device that is still listed is still counted.
+ * `devices.startDevice` performs is admitted by the production gate. An iOS boot runs under the
+ * real `FleetBootInstrumentation`, which releases when the boot call returns. The Android
+ * launcher is faked here, so its hold/hand-off/release wiring below is this helper's own copy of
+ * `AndroidEmulatorClient.spawnWithBootAdmission` (admission held across the spawn, handed off to
+ * the serial once the emulator process exists, released when that process exits or the spawn
+ * fails): `releaseCalls` on an Android admission counts what the callers under test triggered
+ * through that copy, and the launcher's own wiring is pinned in
+ * `AndroidEmulatorClient-bootAdmission.test.ts`. Capacity is sampled from the fake fleet's own
+ * listing, so a device that is still listed is still counted.
  */
 export class RealBootGatesOverFakeFleet {
   readonly admissions: ObservedAdmission[] = [];

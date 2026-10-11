@@ -764,7 +764,7 @@ test/lint/livenessActivityClockSeparation.test.ts
 test/lint/noCaughtErrorInterpolationRule.test.ts
 test/lint/noInlineErrorNormalizeRule.test.ts
 test/lint/noLegacyAutomobilePath.test.ts
-test/lint/noRawProcessEnvNumberParse.test.ts
+test/lint/noRawEnvNumberParseRule.test.ts
 test/lint/pathSeparatorAssertions.test.ts
 test/lint/processSafety.test.ts
 test/lint/rawSelectorFieldReadRule.test.ts

@@ -8,6 +8,11 @@
 # It then dismisses the prototype, and always shuts down and deletes the simulator it created. Only
 # that one UDID is ever touched, serially.
 #
+# The agent dismisses the shown prototype when its last host connection closes, and every driver
+# command is its own short connection, so the script keeps one `hold` connection open from before
+# the show until after the dismiss checks (#11626). Without it the prototype is already gone when
+# the next command asks for its status.
+#
 # Taps are headless through the agent's simulate_tap test hook (the app is launched with
 # AUTOMOBILE_PROTOTYPE_AGENT_TEST_HOOKS=1; production launches never set it): the script taps the
 # demo's `like-button` twice and asserts the host receives prototype_event "liked" with an
@@ -28,6 +33,7 @@
 #   PROTOTYPE_SMOKE_BOOT_TIMEOUT       seconds for bootstatus (default 600)
 #   PROTOTYPE_SMOKE_CONNECT_ATTEMPTS   agent status polls after launch (default 20)
 #   PROTOTYPE_SMOKE_SETTLE_SECONDS     pause before each screenshot and between polls (default 2)
+#   PROTOTYPE_SMOKE_HOLD_TIMEOUT       seconds to wait for the held host connection (default 30)
 #
 # Exit codes: 0 pass; 1 check failed; 2 usage; 3 no matching runtime installed (skip, not a fail).
 set -euo pipefail
@@ -53,6 +59,7 @@ bundle_id="com.apple.Preferences"
 boot_timeout="${PROTOTYPE_SMOKE_BOOT_TIMEOUT:-600}"
 attempts="${PROTOTYPE_SMOKE_CONNECT_ATTEMPTS:-20}"
 settle="${PROTOTYPE_SMOKE_SETTLE_SECONDS:-2}"
+hold_timeout="${PROTOTYPE_SMOKE_HOLD_TIMEOUT:-30}"
 build_script="${PROTOTYPE_SMOKE_BUILD_SCRIPT:-${script_dir}/prototype-agent-build.sh}"
 read -r -a driver <<< "${PROTOTYPE_SMOKE_DRIVER:-bun ${script_dir}/prototype-agent-demo.ts}"
 
@@ -96,9 +103,27 @@ if [[ -z ${device_type} ]]; then
 fi
 
 udid=""
+hold_pid=""
+hold_dir=""
+
+# Ends the held host connection, if one is open. Only the driver process this script started.
+release_hold() {
+  if [[ -n ${hold_pid} ]]; then
+    # Best effort: the driver exits by itself when the agent goes away.
+    kill "${hold_pid}" > /dev/null 2>&1 || true
+    wait "${hold_pid}" > /dev/null 2>&1 || true
+    hold_pid=""
+  fi
+  if [[ -n ${hold_dir} ]]; then
+    rm -rf -- "${hold_dir}"
+    hold_dir=""
+  fi
+}
+
 cleanup() {
   local status=$?
   trap - EXIT
+  release_hold
   if [[ -n ${udid} ]]; then
     # Best effort: the simulator may already be shut down, and cleanup must not mask the result.
     xcrun simctl shutdown "${udid}" > /dev/null 2>&1 || echo "prototype-agent-smoke: shutdown skipped (not booted?)"
@@ -173,6 +198,19 @@ keep_reply "${log_dir}/status-initial.json"
 [[ "$(jq -r '.type' "${log_dir}/status-initial.json")" == prototype_result ]] || fail "unexpected status reply"
 [[ "$(jq -r '.status.shown' "${log_dir}/status-initial.json")" == false ]] || fail "prototype shown before show_prototype"
 
+echo "== hold a host connection open"
+# A FIFO, not a poll: the read returns the moment the driver reports it is connected, ends at once
+# if the driver exits first, and is bounded by the timeout if the driver hangs.
+hold_dir="$(mktemp -d)"
+mkfifo "${hold_dir}/ready"
+"${driver[@]}" hold > "${hold_dir}/ready" 2> "${log_dir}/hold.err" &
+hold_pid=$!
+hold_ready=""
+read -r -t "${hold_timeout}" hold_ready < "${hold_dir}/ready" || true
+if ! hold_type="$(jq -r '.type? // empty' <<< "${hold_ready}" 2> /dev/null)" || [[ ${hold_type} != host_hold ]]; then
+  fail "host connection hold did not start (${hold_ready:-no output}; $(tail -n 1 "${log_dir}/hold.err"))"
+fi
+
 echo "== show the demo prototype"
 "${driver[@]}" floating > "${log_dir}/show.json"
 keep_reply "${log_dir}/show.json"
@@ -216,5 +254,6 @@ xcrun simctl io "${udid}" screenshot "${dismissed}"
 if cmp -s "${shown}" "${dismissed}"; then
   fail "screenshot after dismiss equals the shown screenshot"
 fi
+release_hold
 
 echo "prototype-agent-smoke: PASS on iOS ${runtime_version}"

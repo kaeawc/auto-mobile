@@ -30,8 +30,17 @@ other connection that names the session is refused, with autolock on or off, and
 that connection is never bound to the session. The rule covers control tools
 that take no device routing too (`killDevice`, `deleteDevice`, `exportPlan`,
 `recordSteps` start and stop): the refused call does not run and does not extend the session's
-idle window (#11542). `setToolEnabled` is not refused (see
-[Ownership is cooperative](#ownership-is-cooperative)). Once the owner has disconnected
+idle window (#11542). A plan step, or a tool another tool calls, is judged by the
+same rule as a direct call from the connection that started it (#11469, #11555).
+`setToolEnabled` is not refused (see
+[Ownership is cooperative](#ownership-is-cooperative)), but naming a session is
+never use of it: while the owner is connected, no call from another connection
+extends the session's idle window, counts as its liveness, or binds that
+connection to it (#11555). The rule judges the session a call names. A proxy
+started with `--initial-session-uuid` declares that session as its own binding
+and its calls then name none, so they are not judged by this rule; its claim is
+governed by liveness ownership instead (see
+[environment variables](environment-variables.md)). Once the owner has disconnected
 (a finished `--cli` call, for example) another connection may name the session.
 
 Reads stay allowed on any device, whichever session holds it, and need no
@@ -258,7 +267,8 @@ the holder. From the CLI: `auto-mobile --cli killDevice --device '{...}' --force
 Naming the holder's `sessionUuid` makes a call the holder's only for the
 connection that owns that session, or once that owner has disconnected. From any
 other connection the call is refused, with or without `force` (#11542): to
-force-stop the device, leave `sessionUuid` out.
+force-stop the device, leave `sessionUuid` out. The refusal of a call that
+carried `force: true` says so (#11555).
 
 A device another live AutoMobile daemon holds (two daemons sharing one adb server
 or simulator set) is refused the same way, with `device_owned_by_other_daemon`:

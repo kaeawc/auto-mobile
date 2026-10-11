@@ -1,5 +1,7 @@
 import {
   mintedSession,
+  requestAcquisitionReceipt,
+  runWithAcquisitionReceipt,
   type AcquisitionReceipt,
   type DeferredRebindCleanup,
 } from "./acquisitionReceipt";
@@ -8284,14 +8286,14 @@ export class DevicePool {
           }
 
           if (existingSession) {
-            throw deviceAssignedToOtherSessionError(deviceId, device.sessionId, sessionId);
+            this.assertRetainedRebindOwner(existingSession, sessionId, deviceId);
+          } else {
+            // Looking up an expired owner may itself start its release.
+            this.assertDeviceCleanupComplete(deviceId);
+            device.sessionId = null;
+            device.status = "idle";
+            this.notifyDeviceStateChanged(device);
           }
-
-          // Looking up an expired owner may itself start its release.
-          this.assertDeviceCleanupComplete(deviceId);
-          device.sessionId = null;
-          device.status = "idle";
-          this.notifyDeviceStateChanged(device);
         }
 
         await this.assignDeviceToBoundSession(device, sessionId, platform, caller, options);
@@ -8308,6 +8310,21 @@ export class DevicePool {
       );
     }
     return boundSessionId;
+  }
+
+  /** Only the cancelled receipt may re-hold its stale pool assignment without idling it. */
+  private assertRetainedRebindOwner(session: Session, sessionId: string, deviceId: string): void {
+    const undo = requestAcquisitionReceipt();
+    const holder = this.sessionManager.getSessionForDevice(deviceId);
+    if (
+      session.sessionId !== sessionId ||
+      undo?.rebound?.session !== session ||
+      undo.rebound.fromDeviceId !== deviceId ||
+      !undo.deferredRebindCleanup?.retained ||
+      (holder !== null && holder !== sessionId)
+    ) {
+      throw deviceAssignedToOtherSessionError(deviceId, holder ?? session.sessionId, sessionId);
+    }
   }
 
   /** Called under the assignment mutex every readiness reservation takes, before bind side effects. */
@@ -8501,46 +8518,47 @@ export class DevicePool {
   ): Promise<void> {
     const { session, deviceId, fromDeviceId } = rebound;
     const { sessionId } = session;
-    const current = this.sessionManager.getSession(sessionId);
-    if (current !== session || current.assignedDevice !== deviceId) {
-      cleanup?.commit();
-      logger.info(
-        `[DevicePool] Not restoring cancelled rebind of session ${sessionId}: it no longer holds ${deviceId}`,
-      );
-      return;
-    }
-    logger.info(
-      `[DevicePool] Rebind of session ${sessionId} to ${deviceId} was cancelled before it was delivered; moving it back to ${fromDeviceId}`,
-    );
-    let retainedOverrides: boolean;
+    let outcome: "rebound" | "failed" = "failed";
     try {
-      retainedOverrides = await this.cancelAndSettleRebindCleanup(fromDeviceId, sessionId, cleanup);
-      await this.bindOrReuseDeviceSession(
-        sessionId,
+      const current = this.sessionManager.getSession(sessionId);
+      if (current !== session || current.assignedDevice !== deviceId) {
+        cleanup?.commit();
+        logger.info(
+          `[DevicePool] Not restoring cancelled rebind of session ${sessionId}: it no longer holds ${deviceId}`,
+        );
+        return;
+      }
+      logger.info(
+        `[DevicePool] Rebind of session ${sessionId} to ${deviceId} was cancelled before it was delivered; moving it back to ${fromDeviceId}`,
+      );
+      const retainedOverrides = await this.cancelAndSettleRebindCleanup(
         fromDeviceId,
-        rebound.fromPlatform,
-        undefined,
-        undefined,
-        undefined,
-        true,
+        sessionId,
+        cleanup,
       );
-    } catch (error) {
-      logger.warn(
-        `[DevicePool] Session ${sessionId} stays on ${deviceId}: its previous device ${fromDeviceId} could not take it back: ${errorMessage(error)}`,
-        error,
+      await runWithAcquisitionReceipt({ rebound, deferredRebindCleanup: cleanup }, () =>
+        this.bindOrReuseDeviceSession(
+          sessionId,
+          fromDeviceId,
+          rebound.fromPlatform,
+          undefined,
+          undefined,
+          undefined,
+          true,
+        ),
       );
-      return;
-    }
-    // Moving back was a rebind too, and a rebind keeps only the session's routing cache. The
-    // session is on the device that cache described again, so it gets back what still describes
-    // that device: its display pin, readiness and observation baselines. When undo cancelled
-    // deferred cleanup, all six overrides are still applied and their records come back too.
-    // If the bound already started restores, omit those records to keep the cache honest.
-    // Label routing is session-level, so whatever it is now stays.
-    if (
-      this.sessionManager.getSession(sessionId) === session &&
-      session.assignedDevice === fromDeviceId
-    ) {
+      // Moving back was a rebind too, and a rebind keeps only the session's routing cache. The
+      // session is on the device that cache described again, so it gets back what still describes
+      // that device: its display pin, readiness and observation baselines. When undo cancelled
+      // deferred cleanup, all six overrides are still applied and their records come back too.
+      // If the bound already started restores, omit those records to keep the cache honest.
+      // Label routing is session-level, so whatever it is now stays.
+      if (
+        this.sessionManager.getSession(sessionId) !== session ||
+        session.assignedDevice !== fromDeviceId
+      ) {
+        return;
+      }
       const restored: SessionCacheData = {
         ...rebound.cacheData,
         ...(session.cacheData.deviceLabels === undefined
@@ -8554,6 +8572,14 @@ export class DevicePool {
       }
       session.cacheData = restored;
       cleanup?.resumeRetainedState();
+      outcome = "rebound";
+    } catch (error) {
+      logger.warn(
+        `[DevicePool] Session ${sessionId} stays on ${deviceId}: its previous device ${fromDeviceId} could not take it back: ${errorMessage(error)}`,
+        error,
+      );
+    } finally {
+      cleanup?.finish(outcome);
     }
   }
 
@@ -8572,10 +8598,13 @@ export class DevicePool {
       return false;
     }
     const retained = cleanup.cancel();
-    // Join quarantine bookkeeping outside the assignment mutex: its release callback must
-    // return A to idle before binding it back. The existing finalize wait bounds this join.
-    const pending = this.sessionManager.getPendingDeviceCleanup(deviceId);
-    await raceWithDeadline(Promise.all([cleanup.settled, pending]), {
+    // Keep a cancelled receipt's gate closed, joining only unrelated work. Started restores
+    // still join the full quarantine bookkeeping outside the assignment mutex, boundedly.
+    const pending = this.sessionManager.getPendingDeviceCleanup(
+      deviceId,
+      retained ? cleanup.settled : undefined,
+    );
+    await raceWithDeadline(Promise.all(retained ? [pending] : [cleanup.settled, pending]), {
       timer: this.timer,
       timeoutMs: CREATE_SESSION_RELEASE_WAIT_MS,
       label: "Undelivered rebind cleanup",

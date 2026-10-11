@@ -547,8 +547,9 @@ An undelivered `setActiveDevice` rebind moves its existing session back to the d
 it held (#11593, #11689). Keep-awake, biometric enrollment, network condition, clock,
 rotation and screen-reader restores are deferred until delivery; undo cancels them and
 retains their cache records. Network TTL deadlines and iOS per-app lease renewal survive
-undo. The old device stays quarantined from publication until cancelled cleanup or all
-delivered restores settle, so another session cannot acquire it before it is clean.
+undo. The old device stays quarantined until undo holds it again or all delivered
+restores settle. If undo cannot bind back, it restores the old device before releasing
+quarantine and leaves the session and its replacement-device overrides on the replacement.
 
 Deferral uses the existing 40-second session creation/release-finalization wait. An
 orphaned receipt starts restores at that bound; a later rebind, session release, device

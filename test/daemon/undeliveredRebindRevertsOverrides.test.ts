@@ -34,6 +34,7 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
   let restoredBiometrics: string[];
   let restoredSettings: Array<{ slot: string; deviceId: string; state: unknown }>;
   let keepAwakeGate: Promise<void> | undefined;
+  let biometricGate: Promise<void> | undefined;
   let resets: string[];
   let renewals: string[];
 
@@ -43,6 +44,7 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
     restoredBiometrics = [];
     restoredSettings = [];
     keepAwakeGate = undefined;
+    biometricGate = undefined;
     resets = [];
     renewals = [];
     sessions = new SessionManager(
@@ -58,6 +60,7 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
       (device) => ({
         restore: async () => {
           restoredBiometrics.push(device.deviceId);
+          await biometricGate;
         },
       }),
       {
@@ -490,5 +493,172 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
     expect(restoredBiometrics).toEqual([]);
     expect(pool.getDevice(SIM_A)).toMatchObject({ sessionId: "held", status: "busy" });
     expect(pool.getDevice(AVD_B)).toMatchObject({ sessionId: null, status: "idle" });
+  });
+
+  describe.each(["android", "ios"] as const)("%s undo quarantine", (platform) => {
+    const from = platform === "android" ? AVD_A : SIM_A;
+    const to = platform === "android" ? AVD_B : SIM_B;
+    const overrides: SessionCacheData =
+      platform === "android"
+        ? androidOverrides
+        : {
+            biometricEnrollment: { initialEnrollment: "not_enrolled" },
+            screenReader: { platform: "ios", previousEnabled: false },
+          };
+    const prepared = async () => {
+      const pool = await poolWith([
+        { deviceId: from, name: "a", platform },
+        { deviceId: to, name: "b", platform },
+      ]);
+      await pool.bindOrReuseDeviceSession("held", from, platform);
+      sessions.updateSessionCache("held", structuredClone(overrides));
+      return { pool, receipt: await bind(pool, to) };
+    };
+
+    for (const yields of [0, 1, 3, 6, 10]) {
+      test(`unawaited undo excludes a competing bind after ${yields} microtasks`, async () => {
+        const { pool, receipt } = await prepared();
+        const undo = pool.releaseUndeliveredAcquisition(receipt);
+        for (let turn = 0; turn < yields; turn++) {
+          await Promise.resolve();
+        }
+        await expect(pool.bindOrReuseDeviceSession("other", from, platform)).rejects.toThrow();
+        await undo;
+        await settled(receipt);
+        expect(sessions.getSession("held")).toMatchObject({
+          assignedDevice: from,
+          cacheData: overrides,
+        });
+        expect(pool.getDevice(from)).toMatchObject({ sessionId: "held", status: "busy" });
+        expect(restoredKeepAwake).toEqual([]);
+        expect(restoredBiometrics).toEqual([]);
+        expect(restoredSettings).toEqual([]);
+        expect(sessions.hasDeviceCleanupInProgress(from)).toBe(false);
+      });
+    }
+
+    test("failed bind-back restores A once before releasing quarantine and preserves B's overrides", async () => {
+      const { pool, receipt } = await prepared();
+      const replacement = structuredClone(overrides);
+      replacement.screenReader = { platform, previousEnabled: true };
+      sessions.updateSessionCache("held", replacement);
+      const reservation = await pool.reserveDeviceForShutdown(from);
+      expect(reservation).toBeDefined();
+      const gate = Promise.withResolvers<void>();
+      if (platform === "android") {
+        keepAwakeGate = gate.promise;
+      } else {
+        biometricGate = gate.promise;
+      }
+      const undo = pool.releaseUndeliveredAcquisition(receipt);
+      await spin();
+      await undo;
+      expect(sessions.hasDeviceCleanupInProgress(from)).toBe(true);
+      expect(pool.getDevice(from)).toMatchObject({ sessionId: "held", status: "busy" });
+      expect(restoredSettings).toEqual([]);
+      reservation!.release();
+      await expect(pool.bindOrReuseDeviceSession("other", from, platform)).rejects.toThrow();
+      gate.resolve();
+      await settled(receipt);
+      commitAcquisition(receipt);
+      receipt.deferredRebindCleanup!.finish("failed");
+      receipt.deferredRebindCleanup!.finish("failed");
+      expect(sessions.getSession("held")).toMatchObject({
+        assignedDevice: to,
+        cacheData: replacement,
+      });
+      if (platform === "android") {
+        expectAndroidRestoredOnce();
+      } else {
+        expect(restoredBiometrics).toEqual([from]);
+        expect(restoredSettings).toEqual([
+          { slot: "screenReader", deviceId: from, state: overrides.screenReader },
+        ]);
+      }
+      expect(sessions.hasDeviceCleanupInProgress(from)).toBe(false);
+      await pool.bindOrReuseDeviceSession("other", from, platform);
+      expect(pool.getDevice(from)).toMatchObject({ sessionId: "other", status: "busy" });
+    });
+
+    test("a bounded join timeout restores cancelled overrides without opening the other cleanup's gate", async () => {
+      const { pool, receipt } = await prepared();
+      const otherCleanup = Promise.withResolvers<void>();
+      sessions.registerPendingDeviceCleanup(from, otherCleanup.promise);
+      const undo = pool.releaseUndeliveredAcquisition(receipt);
+      await spin();
+      expect(receipt.deferredRebindCleanup!.retained).toBe(true);
+      expect(restoredKeepAwake).toEqual([]);
+      expect(restoredBiometrics).toEqual([]);
+      expect(restoredSettings).toEqual([]);
+      timer.advanceTime(SESSION_CREATE_WAIT_TIMEOUT_MS);
+      await undo;
+      await settled(receipt);
+      expect(sessions.getSession("held")!.assignedDevice).toBe(to);
+      if (platform === "android") {
+        expectAndroidRestoredOnce();
+      } else {
+        expect(restoredBiometrics).toEqual([from]);
+        expect(restoredSettings).toEqual([
+          { slot: "screenReader", deviceId: from, state: overrides.screenReader },
+        ]);
+      }
+      expect(sessions.hasDeviceCleanupInProgress(from)).toBe(true);
+      await expect(pool.bindOrReuseDeviceSession("other", from, platform)).rejects.toThrow();
+      otherCleanup.resolve();
+      await spin();
+      expect(sessions.hasDeviceCleanupInProgress(from)).toBe(false);
+      await pool.bindOrReuseDeviceSession("other", from, platform);
+    });
+
+    test("an intervening holder receives no restores and the gate settles", async () => {
+      const { pool, receipt } = await prepared();
+      await sessions.createSession("other", from, platform);
+      await pool.releaseUndeliveredAcquisition(receipt);
+      await settled(receipt);
+      expect(sessions.getSession("held")!.assignedDevice).toBe(to);
+      expect(sessions.getSessionForDevice(from)).toBe("other");
+      expect(restoredKeepAwake).toEqual([]);
+      expect(restoredBiometrics).toEqual([]);
+      expect(restoredSettings).toEqual([]);
+      expect(sessions.hasDeviceCleanupInProgress(from)).toBe(false);
+    });
+
+    test("a holder appearing after cancellation receives no restore writes", async () => {
+      const { pool, receipt } = await prepared();
+      const otherCleanup = Promise.withResolvers<void>();
+      sessions.registerPendingDeviceCleanup(from, otherCleanup.promise);
+      const undo = pool.releaseUndeliveredAcquisition(receipt);
+      await spin();
+      expect(receipt.deferredRebindCleanup!.retained).toBe(true);
+      await sessions.createSession("other", from, platform);
+      otherCleanup.resolve();
+      await undo;
+      await settled(receipt);
+      expect(sessions.getSession("held")!.assignedDevice).toBe(to);
+      expect(sessions.getSessionForDevice(from)).toBe("other");
+      expect(restoredKeepAwake).toEqual([]);
+      expect(restoredBiometrics).toEqual([]);
+      expect(restoredSettings).toEqual([]);
+      expect(sessions.hasDeviceCleanupInProgress(from)).toBe(false);
+    });
+
+    test("a cancelled receipt's early exit still settles cleanup for its old snapshot", async () => {
+      const { pool, receipt } = await prepared();
+      expect(receipt.deferredRebindCleanup!.cancel()).toBe(true);
+      await sessions.rebindSession("held", "replacement", platform);
+      await pool.releaseUndeliveredAcquisition(receipt);
+      await settled(receipt);
+      expect(sessions.getSession("held")!.assignedDevice).toBe("replacement");
+      if (platform === "android") {
+        expectAndroidRestoredOnce();
+      } else {
+        expect(restoredBiometrics).toEqual([from]);
+        expect(restoredSettings).toEqual([
+          { slot: "screenReader", deviceId: from, state: overrides.screenReader },
+        ]);
+      }
+      expect(sessions.hasDeviceCleanupInProgress(from)).toBe(false);
+      await pool.bindOrReuseDeviceSession("other", from, platform);
+    });
   });
 });

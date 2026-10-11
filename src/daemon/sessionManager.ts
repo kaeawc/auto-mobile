@@ -1555,6 +1555,8 @@ export class SessionManager {
    * late setup or keep-awake restore.
    */
   private readonly pendingDeviceCleanups: Map<string, Promise<void>> = new Map();
+  /** Individual promises let an undo join every cleanup except the gate it still owns. */
+  private readonly pendingDeviceCleanupWork = new Map<string, Set<Promise<unknown>>>();
   /** The latest cap-bounded settle time of each device's pending cleanup, when one was given. */
   private readonly pendingDeviceCleanupSettlesBy: Map<string, number> = new Map();
   /**
@@ -2367,7 +2369,13 @@ export class SessionManager {
   }
 
   /** Return outstanding post-release device work, if the device must stay quarantined. */
-  getPendingDeviceCleanup(deviceId: string): Promise<void> | null {
+  getPendingDeviceCleanup(deviceId: string, ownGate?: Promise<void>): Promise<void> | null {
+    if (ownGate) {
+      const work = Array.from(this.pendingDeviceCleanupWork.get(deviceId) ?? []).filter(
+        (cleanup) => cleanup !== ownGate,
+      );
+      return work.length > 0 ? Promise.allSettled(work).then(() => undefined) : null;
+    }
     return this.pendingDeviceCleanups.get(deviceId) ?? null;
   }
 
@@ -2486,8 +2494,13 @@ export class SessionManager {
 
   /** Release owns the device until both bounded teardown and any overflow work settle. */
   hasDeviceCleanupInProgress(deviceId: string): boolean {
+    const receipt = requestAcquisitionReceipt();
+    const ownGate =
+      receipt?.rebound?.fromDeviceId === deviceId && receipt.deferredRebindCleanup?.retained
+        ? receipt.deferredRebindCleanup?.settled
+        : undefined;
     return (
-      this.pendingDeviceCleanups.has(deviceId) ||
+      this.getPendingDeviceCleanup(deviceId, ownGate) !== null ||
       (this.acquisitionDeviceCleanups.has(deviceId) &&
         this.getSessionForDevice(deviceId) === null) ||
       Array.from(this.activeReleasePromises).some(
@@ -4990,7 +5003,7 @@ export class SessionManager {
     lease: IosAppNetworkRule | undefined,
   ): DeferredRebindCleanup {
     const gate = Promise.withResolvers<void>();
-    let state: "deferred" | "started" | "cancelled" = "deferred";
+    let state: "deferred" | "started" | "cancelled" | "rebound" = "deferred";
     const incarnation = this.deviceHealth?.incarnation(oldView.assignedDevice);
     const mayRestore = () => {
       const holder = this.getSessionForDevice(oldView.assignedDevice);
@@ -5006,44 +5019,60 @@ export class SessionManager {
       this.iosAppNetworkLeases.stop(leaseKey);
       this.deferredRebindCleanups.delete(cleanup);
     };
+    const start = (failedUndo = false) => {
+      if (state !== "deferred" && !(failedUndo && state === "cancelled")) {
+        return;
+      }
+      state = "started";
+      finish();
+      // Quarantine was registered before publication. Check ownership again before any write;
+      // a forcibly replaced holder must never receive this session's restores.
+      if (!mayRestore()) {
+        logger.warn(
+          `Not restoring rebound device ${oldView.assignedDevice}: runtime changed or reassigned`,
+        );
+        gate.resolve();
+        return;
+      }
+      void runOutsideRequestContext(async () => {
+        const pending = await this.restoreRebindOverrides(oldView, mayRestore);
+        await Promise.allSettled(pending);
+      }).then(gate.resolve, (error: unknown) => {
+        logger.warn(
+          `Deferred rebind cleanup failed on ${oldView.assignedDevice}: ${errorMessage(error)}`,
+          error,
+        );
+        gate.resolve();
+      });
+    };
     const cleanup: DeferredRebindCleanup = {
       settled: gate.promise,
-      commit: () => {
-        if (state !== "deferred") {
-          return;
-        }
-        state = "started";
-        finish();
-        // Quarantine was registered before publication. Check ownership again before any write;
-        // a forcibly replaced holder must never receive this session's restores.
-        if (!mayRestore()) {
-          logger.warn(
-            `Not restoring rebound device ${oldView.assignedDevice}: runtime changed or reassigned`,
-          );
-          gate.resolve();
-          return;
-        }
-        void runOutsideRequestContext(async () => {
-          const pending = await this.restoreRebindOverrides(oldView, mayRestore);
-          await Promise.allSettled(pending);
-        }).then(gate.resolve, (error: unknown) => {
-          logger.warn(
-            `Deferred rebind cleanup failed on ${oldView.assignedDevice}: ${errorMessage(error)}`,
-            error,
-          );
-          gate.resolve();
-        });
+      get retained() {
+        return state === "cancelled";
       },
+      commit: () => start(),
       cancel: () => {
-        if (state === "started") {
+        if (state === "started" || state === "rebound") {
           return false;
         }
         if (state === "deferred") {
           state = "cancelled";
           finish();
-          gate.resolve();
         }
         return true;
+      },
+      finish: (outcome) => {
+        if (state === "cancelled") {
+          if (outcome === "rebound") {
+            state = "rebound";
+            gate.resolve();
+          } else {
+            // Only failed undo may restart cancelled restores, using the same old-device view.
+            start(true);
+          }
+        } else if (state === "deferred") {
+          cleanup.commit();
+        }
       },
       resumeRetainedState: () => {
         if (state === "cancelled") {
@@ -9218,6 +9247,18 @@ export class SessionManager {
   }
 
   private trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<unknown>[]): void {
+    const work = this.pendingDeviceCleanupWork.get(deviceId) ?? new Set<Promise<unknown>>();
+    this.pendingDeviceCleanupWork.set(deviceId, work);
+    for (const promise of cleanups) {
+      work.add(promise);
+      const remove = () => {
+        work.delete(promise);
+        if (work.size === 0 && this.pendingDeviceCleanupWork.get(deviceId) === work) {
+          this.pendingDeviceCleanupWork.delete(deviceId);
+        }
+      };
+      void promise.then(remove, remove);
+    }
     const previous = this.pendingDeviceCleanups.get(deviceId);
     const cleanup = Promise.allSettled(previous ? [previous, ...cleanups] : cleanups).then(
       () => undefined,

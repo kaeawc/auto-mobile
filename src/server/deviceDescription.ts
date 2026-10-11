@@ -29,6 +29,7 @@ import { classifyPoolStatus, type PoolStatusBucket } from "../daemon/devicePool"
 import type { GenericAvailability, PooledDevice } from "../daemon/devicePool";
 import type { Session } from "../daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../models";
+import type { TransitionalSimulatorState } from "../models/TransitionalSimulator";
 import type { ExactProvisionedDevice } from "../devices/exactDeviceProvisioning";
 import type { StableConfiguredDeviceImage } from "../utils/configuredDeviceInventory";
 
@@ -61,6 +62,8 @@ export type DeviceDescriptionInput =
       orientation?: "portrait" | "landscape";
       /** adb lists the device in this non-`device` state (#11118). */
       adbOfflineState?: string;
+      /** `simctl` lists the held simulator `Booting` or `Shutting Down` (#11573). */
+      simulatorState?: TransitionalSimulatorState;
       /** The pool refuses generic allocation of this device: a managed slot or another daemon holds it. */
       heldBy?: DeviceHeldBy;
       /** A readiness, shutdown or recovery reservation keeps allocation off this idle device. */
@@ -122,6 +125,7 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
     orientation: input.orientation,
     configured: input.kind === "booted" ? input.configured : undefined,
     adbOfflineState: input.kind === "booted" ? input.adbOfflineState : undefined,
+    simulatorState: input.kind === "booted" ? input.simulatorState : undefined,
     heldBy: input.kind === "booted" ? input.heldBy : undefined,
     reserved: input.kind === "booted" ? input.reserved : undefined,
     poolBucket: input.kind === "booted" ? input.poolStatus : undefined,
@@ -179,6 +183,7 @@ interface BootedDescriptionOptions {
   orientation?: "portrait" | "landscape";
   configured?: StableConfiguredDeviceImage;
   adbOfflineState?: string;
+  simulatorState?: TransitionalSimulatorState;
   heldBy?: DeviceHeldBy;
   reserved?: boolean;
   /** A health marker keeps allocation off the device, so it is not `idle` (#11387). */
@@ -200,6 +205,7 @@ function describeBooted({
   orientation,
   configured,
   adbOfflineState,
+  simulatorState,
   heldBy,
   reserved,
   unhealthy,
@@ -236,9 +242,19 @@ function describeBooted({
       deviceId: device.deviceId,
       connectionId: pooled ? `${device.deviceId}#${pooled.incarnation}` : device.deviceId,
       deviceSessionUuid: deviceSessionUuid ?? null,
-      lifecycle: { state: "booted", known: true },
+      lifecycle: {
+        state: simulatorState
+          ? simulatorState === "Booting"
+            ? "booting"
+            : "shutting-down"
+          : "booted",
+        known: true,
+      },
       readiness: {
-        state: adbOfflineState ? "not_ready" : readinessFromServiceStatus(serviceStatus),
+        state:
+          adbOfflineState || simulatorState
+            ? "not_ready"
+            : readinessFromServiceStatus(serviceStatus),
       },
       poolStatus:
         poolBucket !== undefined
@@ -255,6 +271,7 @@ function describeBooted({
       locked,
       orientation: orientation ?? null,
       ...(adbOfflineState ? { connection: { state: "offline", adbState: adbOfflineState } } : {}),
+      ...(simulatorState ? { simulatorState } : {}),
     },
   };
 }
@@ -493,6 +510,7 @@ export const deviceDescriptionSchema = z
           .object({ state: z.literal("offline"), adbState: z.string() })
           .strict()
           .optional(),
+        simulatorState: z.enum(["Booting", "Shutting Down"]).optional(),
       })
       .strict(),
     display: z

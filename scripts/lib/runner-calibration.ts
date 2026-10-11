@@ -182,6 +182,7 @@ export function positiveNumberFromEnv(value: string | undefined, fallback: numbe
 
 const USAGE =
   "Usage: bun scripts/lib/runner-calibration.ts probe <out.tsv> <label>\n" +
+  "       bun scripts/lib/runner-calibration.ts measure\n" +
   "       bun scripts/lib/runner-calibration.ts slowdown <report-dir>\n" +
   "       bun scripts/lib/runner-calibration.ts shard-slowdowns <report-dir>";
 
@@ -203,6 +204,21 @@ async function main(args: string[]): Promise<void> {
       `runner calibration: ${label} took ${result.elapsedMs.toFixed(1)}ms ` +
         `(baseline ${baselineMs}ms, slowdown ${slowdownFactor(result.elapsedMs, baselineMs).toFixed(2)}x, checksum ${result.checksum})`,
     );
+    return;
+  }
+  if (mode === "measure") {
+    // One probe, slowdown only on stdout: the timing gate's recheck brackets each
+    // isolated run with it to tell a contended runner from a slow test.
+    const baselineMs = positiveNumberFromEnv(
+      process.env.AUTOMOBILE_RUNNER_CALIBRATION_BASELINE_MS,
+      DEFAULT_BASELINE_MS,
+    );
+    const result = await runCalibrationProbe(realClock, realScheduler, {
+      turns: DEFAULT_EVENT_LOOP_TURNS,
+      iterations: DEFAULT_ARITHMETIC_ITERATIONS,
+      repetitions: DEFAULT_REPETITIONS,
+    });
+    console.log(slowdownFactor(result.elapsedMs, baselineMs).toFixed(2));
     return;
   }
   if (mode === "slowdown" && target) {

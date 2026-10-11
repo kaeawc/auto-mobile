@@ -214,6 +214,56 @@ describe("physical device in a transitional adb state (#11090)", () => {
   });
 });
 
+describe("adb transitional states share the offline budget (#11592)", () => {
+  const unauthorizedRow = PHONE_TRANSITIONAL_ROWS.find(([state]) => state === "unauthorized")![1];
+  const recoveryRow = PHONE_TRANSITIONAL_ROWS.find(([state]) => state === "recovery")![1];
+
+  test("a phone unauthorized for 30 s then back to device keeps its session without a reconnect", async () => {
+    const h = offlineMonitorHarness(PHONE, PHONE_DEVICE_ROW);
+    try {
+      await h.sweepFor(POLL_MS);
+      h.list(unauthorizedRow);
+      await h.sweepFor(30_000);
+      expect(h.cleanedUp).toEqual([]);
+      expect(h.daemon.deviceDisconnectMisses.has(PHONE)).toBe(false);
+      expect(h.reconnects()).toBe(0);
+
+      h.list(PHONE_DEVICE_ROW);
+      await h.sweepFor(POLL_MS);
+      expect(h.cleanedUp).toEqual([]);
+      expect(h.daemon.offlineEpisodes.size).toBe(0);
+    } finally {
+      await h.monitor.stop();
+    }
+  });
+
+  test("a phone unauthorized beyond the budget is released", async () => {
+    const h = offlineMonitorHarness(PHONE, PHONE_DEVICE_ROW);
+    try {
+      h.list(unauthorizedRow);
+      await h.sweepFor(OFFLINE_DEVICE_DISCONNECT_BUDGET_MS);
+      expect(h.cleanedUp).toEqual([]);
+      await h.monitor.run();
+      expect(h.cleanedUp).toEqual([PHONE]);
+    } finally {
+      await h.monitor.stop();
+    }
+  });
+
+  test("a phone in recovery is not transitional and keeps the three-miss rule", async () => {
+    const h = offlineMonitorHarness(PHONE, PHONE_DEVICE_ROW);
+    try {
+      h.list(recoveryRow);
+      await h.sweepFor(2 * POLL_MS);
+      expect(h.cleanedUp).toEqual([]);
+      await h.monitor.run();
+      expect(h.cleanedUp).toEqual([PHONE]);
+    } finally {
+      await h.monitor.stop();
+    }
+  });
+});
+
 describe("evaluateDeviceDisconnects offline episodes", () => {
   const platforms = new Map<string, Platform>([[EMULATOR, "android"]]);
   const evaluate = (
@@ -229,7 +279,7 @@ describe("evaluateDeviceDisconnects offline episodes", () => {
       candidateDeviceIds: new Set([EMULATOR]),
       succeededPlatforms: new Set(["android"]),
       candidatePlatforms: platforms,
-      offlineDeviceIds: new Set(offline ? [EMULATOR] : []),
+      transitionalDeviceIds: new Set(offline ? [EMULATOR] : []),
       offlineEpisodes: episodes,
       nowMs,
     });
@@ -239,7 +289,7 @@ describe("evaluateDeviceDisconnects offline episodes", () => {
     const episodes = new Map<string, OfflineEpisode>();
     const result = evaluate(misses, episodes, 0, true);
     expect(result.disconnected).toEqual([]);
-    expect(result.offline).toEqual([{ deviceId: EMULATOR, offlineForMs: 0 }]);
+    expect(result.transitional).toEqual([{ deviceId: EMULATOR, transitionalForMs: 0 }]);
     expect(misses.get(EMULATOR)).toBe(2);
     expect(evaluate(misses, episodes, POLL_MS, false).disconnected).toEqual([EMULATOR]);
   });

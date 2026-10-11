@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess } from "child_process";
 import { EventEmitter } from "node:events";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -13,6 +13,7 @@ import { setDeviceManager } from "../../src/server/bootedDeviceResources";
 import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
@@ -266,4 +267,45 @@ describe("a failed start does not stop the device it booted once another session
       expect(await gates.admitsOneMoreBoot(platform)).toBe(true);
     },
   );
+
+  // A System UI ANR replacement reuses the serial of the emulator it replaces. While its handoff
+  // is unfinished the pool entry on that serial still names the session being recovered: that
+  // holder is not a holder of the replacement, which a failed recovery must still stop.
+  test("android: a failed System UI ANR recovery still stops its replacement emulator", async () => {
+    const started = await ToolRegistry.getTool("startDevice")!.handler({
+      platform: "android",
+      name: avd.name,
+      __mcpSessionId: "client-a",
+    });
+    const held = pool.getDevice(AVD_SERIAL)?.sessionId;
+    expect(started.isError).not.toBe(true);
+    expect(held).toBeString();
+    const replacement = new RecordingBootHandle(() => devices.setBootedDevices("android", []));
+    const killDevice = devices.killDevice.bind(devices);
+    devices.killDevice = async (device) => {
+      await killDevice(device);
+      devices.setBootedDevices("android", []);
+      bootHandle.kill();
+      await Promise.resolve();
+      devices.setMockChildProcess(avd.name, replacement as unknown as ChildProcess);
+    };
+    duringReadiness = async () => {
+      throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+    };
+    const handoff = spyOn(
+      DevicePool.prototype as unknown as { cancelOldDeviceWorkForSystemUiAnr(): Promise<void> },
+      "cancelOldDeviceWorkForSystemUiAnr",
+    ).mockRejectedValue(new Error("handoff failed"));
+
+    try {
+      const failure = await start({ platform: "android", name: avd.name, sessionUuid: held });
+      await drain();
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(handoff).toHaveBeenCalled();
+      expect(replacement.killed).toBe(true);
+    } finally {
+      handoff.mockRestore();
+    }
+  });
 });

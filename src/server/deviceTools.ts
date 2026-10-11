@@ -4107,6 +4107,18 @@ export function cancelUnownedColdBoot(
     );
     return undefined;
   }
+  return stopUnownedColdBoot(boot);
+}
+
+/**
+ * `cancelUnownedColdBoot` without the other-holder check. System UI ANR recovery uses it for its
+ * replacement boot: the replacement reuses the serial of the device it replaces, whose pool entry
+ * still names the session being recovered, so that holder says nothing about the replacement.
+ */
+function stopUnownedColdBoot(boot: DeviceBootResult | undefined): Promise<void> | undefined {
+  if (boot?.source !== "cold-boot" || !boot.processHandle) {
+    return undefined;
+  }
   const daemonState = DaemonState.getInstance();
   const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
   if (devicePool?.hasStartedDeviceProcess(boot.device.deviceId, boot.processHandle)) {
@@ -4468,7 +4480,7 @@ function createSystemUiAnrRebooter(
         runWithinShutdownDeadline,
         waitForDeviceShutdown,
         shouldClearIntentionalShutdownAfterFailure,
-        cancelUnownedColdBoot,
+        cancelUnownedColdBoot: stopUnownedColdBoot,
         isUnknownAndroidRuntimeName,
       },
     });

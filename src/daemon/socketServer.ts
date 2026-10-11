@@ -1360,10 +1360,7 @@ export class UnixSocketServer {
    * Start the Unix socket server
    */
   async start(): Promise<void> {
-    this.closing = false;
-    this.acceptingRequests = true;
-    this.serverClosePromise = null;
-    this.lifecycleGeneration += 1;
+    this.beginAccepting();
     // Owner-only (0o700) socket directory so the control socket is not
     // world-traversable. On macOS socket-file permission bits are not reliably
     // enforced on connect(), so the containing directory's mode is the primary
@@ -1398,35 +1395,7 @@ export class UnixSocketServer {
         await this.reclaimExistingSocketBeforeBind();
       }
 
-      this.server = createServer((socket) => {
-        this.handleConnection(socket);
-      });
-
-      // Fan list-changed events out to subscribed socket clients (issue #3223).
-      // Subscribed here (not in the daemon) so a socket-server recreation during
-      // recovery re-wires itself; close() unsubscribes symmetrically.
-      this.listChangedUnsubscribe?.();
-      this.listChangedUnsubscribe = ListChangedBroadcaster.subscribe((kind) => {
-        this.broadcastListChanged(kind);
-      });
-
-      this.resourceUpdatedUnsubscribe?.();
-      this.resourceUpdatedUnsubscribe = ResourceUpdatedBroadcaster.subscribe((resolveTargets) => {
-        this.broadcastResourceUpdated(resolveTargets);
-      });
-
-      // Fan session-release events out to subscribed proxy clients (issue #4610),
-      // so a proxy clears its remembered binding on a real release instead of the
-      // replay-TTL guess. Subscribed here (not in the daemon) for the same
-      // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
-      this.sessionReleaseUnsubscribe?.();
-      this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
-        (sessionId, reason, snapshot, extras) => {
-          this.clearBoundMcpClientsForReleasedSession(sessionId);
-          void this.liftStrokesHeldBy(sessionId);
-          this.broadcastSessionReleased(sessionId, reason, snapshot, extras?.recordingIds);
-        },
-      );
+      this.server = createServer(this.connectionHandlerWithFanOut());
 
       await new Promise<void>((resolve, reject) => {
         this.server!.listen(this.socketPath, () => {
@@ -1449,6 +1418,53 @@ export class UnixSocketServer {
       // the reachability probe alone protects the live socket from later binders.
       this.socketReclaimLock.release();
     }
+  }
+
+  /**
+   * `start()` without the socket file (#11441): the same accept state, broadcast fan-out and
+   * connection handler, with the caller handing each connection to the returned handler instead
+   * of a bound listener. For an in-process harness; nothing touches the file system.
+   */
+  startDetached(): (socket: Socket) => void {
+    this.beginAccepting();
+    return this.connectionHandlerWithFanOut();
+  }
+
+  private beginAccepting(): void {
+    this.closing = false;
+    this.acceptingRequests = true;
+    this.serverClosePromise = null;
+    this.lifecycleGeneration += 1;
+  }
+
+  /** Subscribe the broadcast fan-out and return the handler every accepted connection goes to. */
+  private connectionHandlerWithFanOut(): (socket: Socket) => void {
+    // Fan list-changed events out to subscribed socket clients (issue #3223).
+    // Subscribed here (not in the daemon) so a socket-server recreation during
+    // recovery re-wires itself; close() unsubscribes symmetrically.
+    this.listChangedUnsubscribe?.();
+    this.listChangedUnsubscribe = ListChangedBroadcaster.subscribe((kind) => {
+      this.broadcastListChanged(kind);
+    });
+
+    this.resourceUpdatedUnsubscribe?.();
+    this.resourceUpdatedUnsubscribe = ResourceUpdatedBroadcaster.subscribe((resolveTargets) => {
+      this.broadcastResourceUpdated(resolveTargets);
+    });
+
+    // Fan session-release events out to subscribed proxy clients (issue #4610),
+    // so a proxy clears its remembered binding on a real release instead of the
+    // replay-TTL guess. Subscribed here (not in the daemon) for the same
+    // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
+    this.sessionReleaseUnsubscribe?.();
+    this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
+      (sessionId, reason, snapshot, extras) => {
+        this.clearBoundMcpClientsForReleasedSession(sessionId);
+        void this.liftStrokesHeldBy(sessionId);
+        this.broadcastSessionReleased(sessionId, reason, snapshot, extras?.recordingIds);
+      },
+    );
+    return (socket) => this.handleConnection(socket);
   }
 
   /**

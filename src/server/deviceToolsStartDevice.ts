@@ -9,7 +9,7 @@ import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import { DaemonState } from "../daemon/daemonState";
 import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
-import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
+import { requestAcquisitionReceipt, type AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
 import { DeviceBootService, type DeviceBootResult } from "../devices/deviceBootService";
 import { IOSCtrlProxyClient } from "../features/observe/ios/IOSCtrlProxyClient";
@@ -60,6 +60,7 @@ import {
   reserveInitialDeviceForReadiness,
   resolveRunnerReadinessTimeoutMs,
   bindUndoneIfUndelivered,
+  rollBackUndeliveredBoot,
   runOperationWithinDeadline,
   setAcquisitionStage,
   startDeviceSchema,
@@ -251,6 +252,36 @@ async function rollbackCreatedDeviceAfterBoot(
   await rollback(createdImage, failure);
 }
 
+/**
+ * Record the device this acquisition booted or created on its request's receipt. Ownership has
+ * passed to the bound session, so the failure rollbacks above no longer apply; a request that
+ * turns out undelivered after this point is undone through the receipt instead (#11593).
+ */
+function recordStartedDevice(boot: DeviceBootResult, options: BootPreparationOptions): void {
+  const receipt = requestAcquisitionReceipt();
+  if (!receipt) {
+    return;
+  }
+  const { lifecycleLease, rollbackCreatedDevice } = options;
+  const createdImage = boot.provisioned ? boot.sourceImage : undefined;
+  const { identity } = lifecycleLease;
+  receipt.started = {
+    rollBack: async (reason) =>
+      await rollBackUndeliveredBoot(
+        boot,
+        identity,
+        createdImage && rollbackCreatedDevice
+          ? async (rollbackLease) => {
+              const cleanup = await rollbackCreatedDevice(createdImage, reason, {
+                lifecycleLease: rollbackLease,
+              });
+              logCreatedDeviceRollback(createdImage, reason, cleanup);
+            }
+          : undefined,
+      ),
+  };
+}
+
 const bootAndPrepareDevice = async (
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
@@ -412,6 +443,7 @@ const bootAndPrepareDevice = async (
     });
   });
   state.ownershipTransferred = true;
+  recordStartedDevice(state.boot, options);
 
   refreshResourcesAfterCommittedBoot(state.boot, deps);
   return buildBootedResponse(state.boot.device, state.boot.source, perf, sessionId, {
@@ -628,29 +660,32 @@ async function bindPreparedDevice(
                 requestedIdentity,
                 "binding the device session",
               ),
-            bindUndoneIfUndelivered(async (receipt) => {
-              return await bindBootedDeviceSession(
-                state.boot!.device,
-                args,
-                state.boot!.sourceImage && !readinessResult.preservedSessionId
-                  ? preparation.sourceImage
-                  : undefined,
-                // Recovery already registered this process and its output tail.
-                readinessResult.preservedSessionId ? undefined : state.boot!.processHandle,
-                {
-                  readinessReservationOwners: new Set(
-                    releaseReadinessReservations.map((reservation) => reservation.owner),
-                  ),
-                  verifiedAndroidAvdIdentity: verifiedWarmAndroidAvdIdentity,
-                  autolockEnabled,
-                  achievedReadiness: "automationReady",
-                  collectCancellationSettlement: (settlement) => {
-                    state.bindingSettlements.push(settlement);
+            bindUndoneIfUndelivered(
+              async (receipt) => {
+                return await bindBootedDeviceSession(
+                  state.boot!.device,
+                  args,
+                  state.boot!.sourceImage && !readinessResult.preservedSessionId
+                    ? preparation.sourceImage
+                    : undefined,
+                  // Recovery already registered this process and its output tail.
+                  readinessResult.preservedSessionId ? undefined : state.boot!.processHandle,
+                  {
+                    readinessReservationOwners: new Set(
+                      releaseReadinessReservations.map((reservation) => reservation.owner),
+                    ),
+                    verifiedAndroidAvdIdentity: verifiedWarmAndroidAvdIdentity,
+                    autolockEnabled,
+                    achievedReadiness: "automationReady",
+                    collectCancellationSettlement: (settlement) => {
+                      state.bindingSettlements.push(settlement);
+                    },
+                    receipt,
                   },
-                  receipt,
-                },
-              );
-            }),
+                );
+              },
+              () => state.boot,
+            ),
             (settlement) => {
               state.bindingSettlements.push(settlement);
             },

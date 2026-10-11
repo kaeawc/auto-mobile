@@ -72,6 +72,8 @@ export interface DeviceClientFake {
   requestGestureStart?: (gestureId: string) => Promise<{ success: boolean; error?: string }>;
   setPreference?: (...args: unknown[]) => Promise<void>;
   clearPreferenceStore?: (...args: unknown[]) => Promise<void>;
+  /** Awaited by every device discovery before it answers. */
+  discovery?: () => Promise<void>;
 }
 
 export interface DirectFrameRig {
@@ -102,7 +104,15 @@ export function createDirectFrameRig(
   );
   const unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
 
-  PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager(devices));
+  const discovered = createFakeDeviceManager(devices);
+  PlatformDeviceManagerFactory.setInstance({
+    getBootedDevicesDetailed: async (
+      ...args: Parameters<typeof discovered.getBootedDevicesDetailed>
+    ) => {
+      await client.discovery?.();
+      return discovered.getBootedDevicesDetailed(...args);
+    },
+  } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
   spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation((device) => {
     const called = (what: string) => deviceCalls.push(`${device.deviceId}:${what}`);
     return {

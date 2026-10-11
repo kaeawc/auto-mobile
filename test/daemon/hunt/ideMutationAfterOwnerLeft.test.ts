@@ -9,14 +9,16 @@ import {
 } from "./directFrameHuntRig";
 
 /**
- * Hunt (socket-frames-4): a device-mutating `ide/*` frame still waiting in its socket's admission
- * queue when the socket closes.
+ * Hunt (socket-frames-4): a device-mutating `ide/*` frame whose sender left before it reached the
+ * device: the socket closed while the frame waited in its admission queue, or the client
+ * cancelled it (`daemon/cancelRequest`) while its device was still being resolved.
  *
- * An `input/*` frame whose socket closed while it sat in the queue is never dispatched (#10006):
- * its handler runs under the socket's owner signal. A mutating `ide/*` frame is a tracked control
- * call like input (#11486), but it is run without the owner signal, and the per-socket queue only
- * drops a waiting entry on `daemon/cancelRequest`. So once the frame ahead of it finishes, the
- * queued `ide/clearKeyValueFile` of a client that is gone still wipes the app's store.
+ * An `input/*` frame in either state is never dispatched (#10006): its handler runs under the
+ * socket's owner signal, which both the close and the cancel abort. A mutating `ide/*` frame is a
+ * tracked control call like input (#11486), but `runLocalSocketRequest` runs it without that
+ * signal, and the per-socket queue drops a waiting entry only on `daemon/cancelRequest`. So the
+ * queued `ide/clearKeyValueFile` of a client that is gone still wipes the app's store once the
+ * frame ahead of it finishes, and a cancelled one, already answered as abandoned, still runs.
  */
 
 const DEVICE = "emulator-5554";
@@ -36,15 +38,21 @@ function storageFrame(id: string, method: string, extra: Record<string, unknown>
   };
 }
 
-describe("a queued device-mutating ide/* frame whose socket closed", () => {
+describe("a device-mutating ide/* frame whose sender left before it reached the device", () => {
   let rig: DirectFrameRig;
   let pane: FakeSocket;
   /** The device is busy with the first write until this resolves. */
   let firstWrite: PromiseWithResolvers<void>;
+  /** When set, device discovery does not answer until it resolves. */
+  let discovery: PromiseWithResolvers<void> | undefined;
 
   beforeEach(async () => {
     firstWrite = Promise.withResolvers<void>();
-    rig = createDirectFrameRig([android(DEVICE)], { setPreference: () => firstWrite.promise });
+    discovery = undefined;
+    rig = createDirectFrameRig([android(DEVICE)], {
+      setPreference: () => firstWrite.promise,
+      discovery: async () => discovery?.promise,
+    });
     pane = rig.connect();
     // In flight on the device: every later frame on this socket waits behind it.
     await rig.request(
@@ -89,6 +97,41 @@ describe("a queued device-mutating ide/* frame whose socket closed", () => {
     await rig.request(pane, storageFrame("clear", "ide/clearKeyValueFile", {}));
     pane.destroy();
     await finishFirstWrite();
+
+    expect(rig.deviceCalls).toEqual([`${DEVICE}:setPreference`]);
+  });
+
+  const cancel = (requestId: string): DaemonRequest => ({
+    id: `cancel-${requestId}`,
+    type: "daemon_request",
+    method: "daemon/cancelRequest",
+    params: { requestId },
+  });
+
+  test("control: an input/gestureStart cancelled while its device was resolved is not sent", async () => {
+    await finishFirstWrite();
+    discovery = Promise.withResolvers<void>();
+    await rig.request(pane, gestureFrame("Start", DEVICE));
+    expect(await rig.request(pane, cancel(`gesture-Start-${DEVICE}`))).toMatchObject({
+      result: { cancelled: true },
+    });
+    discovery.resolve();
+    await rig.settle();
+
+    expect(rig.deviceCalls).toEqual([`${DEVICE}:setPreference`]);
+  });
+
+  test("an ide/clearKeyValueFile cancelled while its device was resolved is not run", async () => {
+    await finishFirstWrite();
+    discovery = Promise.withResolvers<void>();
+    await rig.request(pane, storageFrame("clear", "ide/clearKeyValueFile", {}));
+    expect(await rig.request(pane, cancel("clear"))).toMatchObject({
+      result: { cancelled: true },
+    });
+    // The client was told its request was abandoned.
+    expect(pane.answer("clear")).toMatchObject({ success: false });
+    discovery.resolve();
+    await rig.settle();
 
     expect(rig.deviceCalls).toEqual([`${DEVICE}:setPreference`]);
   });

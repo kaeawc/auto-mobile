@@ -741,6 +741,110 @@ describe.each(REGISTRIES)(
       expect(await registry.getAssignment(key)).toMatchObject({ state: "ready" });
     });
 
+    // #11545: a failed owner clear leaves a record naming this RUNNING daemon. This daemon reads
+    // it dead by its ended session, but every other daemon on the host reads it live by process
+    // and answered `slot_in_use` until this daemon exited: one busy write pinned the slot.
+    describe("a failed owner clear is retried until it lands", () => {
+      test("a clean release whose clear was busy once: another daemon claims the slot after the retry", async () => {
+        busy.calls.releaseExecution = 1;
+        const result = await drain.releaseExecution(S1);
+        expect(result).toMatchObject({ outcome: "reusable_for_this_slot" });
+        expect(result.slotFailures).toHaveLength(1);
+        expect(await registry.getAssignment(key)).toMatchObject({
+          state: "ready",
+          execOwner: { sessionUuid: S1, pid: DAEMON_PID },
+        });
+
+        await drain.whenIdle();
+
+        expect(await registry.getAssignment(key)).toMatchObject({
+          state: "ready",
+          execOwner: null,
+        });
+        expect((await claimAs(OTHER_DAEMON_PID)).kind).toBe("claimed");
+      });
+
+      test("a clear that stays busy past the cap still lands at the slow cadence", async () => {
+        const capped = newDrain({ settlementCapMs: CAP_MS, settlementSlowPollMs: SLOW_POLL_MS });
+        busy.untilMs.releaseExecution = timer.now() + CAP_MS + SLOW_POLL_MS;
+        await capped.releaseExecution(S1);
+
+        await timer.sleep(CAP_MS);
+        expect((await claimAs(OTHER_DAEMON_PID)).kind).toBe("slot_in_use");
+        await capped.whenIdle();
+
+        expect(await registry.getAssignment(key)).toMatchObject({
+          state: "ready",
+          execOwner: null,
+        });
+      });
+
+      test("a session released by the session manager whose clear was busy is retried too", async () => {
+        busy.calls.releaseExecution = 2;
+        sessions.live.delete(S1);
+        drain.onSessionReleased({
+          sessionId: S1,
+          deviceId: DEVICE,
+          livenessPolicy: MANAGED_EXECUTION_LIVENESS_POLICY,
+        });
+
+        await drain.whenIdle();
+
+        expect(await registry.getAssignment(key)).toMatchObject({
+          state: "ready",
+          execOwner: null,
+        });
+      });
+
+      test("the retry never clears the record of an execution that holds the session id again", async () => {
+        busy.calls.releaseExecution = 1;
+        await drain.releaseExecution(S1);
+        // The same session id is live in this daemon again before the retry runs.
+        sessions.live.set(S1, DEVICE);
+        const releases = spyOn(registry, "releaseExecution");
+
+        await timer.sleep(CAP_MS);
+
+        expect(releases).not.toHaveBeenCalled();
+        expect(await registry.getAssignment(key)).toMatchObject({
+          execOwner: { sessionUuid: S1 },
+        });
+        releases.mockRestore();
+        // It ends through its own release, which clears the record; the retry has nothing to do.
+        expect((await drain.releaseExecution(S1)).slotFailures).toEqual([]);
+        await drain.whenIdle();
+        expect(await registry.getAssignment(key)).toMatchObject({ execOwner: null });
+      });
+
+      test("the retry leaves a newer execution's record alone", async () => {
+        busy.calls.releaseExecution = 1;
+        await drain.releaseExecution(S1);
+        // This daemon reads the leftover record dead, so its next execution claims the slot.
+        expect((await claimForNextExecution()).kind).toBe("claimed");
+
+        await drain.whenIdle();
+
+        expect(await registry.getAssignment(key)).toMatchObject({
+          execOwner: { sessionUuid: `${S2}-${DAEMON_PID}` },
+        });
+      });
+
+      test("closing the drain stops the retry without another registry call", async () => {
+        busy.untilMs.releaseExecution = timer.now() + CAP_MS;
+        await drain.releaseExecution(S1);
+        const reads = spyOn(registry, "getAssignment");
+        const releases = spyOn(registry, "releaseExecution");
+
+        drain.close();
+        await drain.whenIdle();
+
+        expect(reads).not.toHaveBeenCalled();
+        expect(releases).not.toHaveBeenCalled();
+        reads.mockRestore();
+        releases.mockRestore();
+      });
+    });
+
     const NEVER_ENDING = OWNERS.flatMap(([owner, ownerPid]) =>
       HOLD_STEPS.filter((step) => step !== "claimExecution" || ownerPid !== DAEMON_PID).map(
         (step) => ({ owner, ownerPid, step }),

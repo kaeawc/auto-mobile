@@ -381,8 +381,12 @@ Owner decisions 2026-10-09 (#10982):
 - No read counts as activity, not even the owner's own (#10964).
 - Anything that changes visible UI, or starts a device-side process, is control.
 - Viewer streaming is a read.
-- A read on a free device may run full readiness. A read on a held device is
-  connect-only.
+- A sessionless read on a free device verifies it is reachable and may install,
+  enable or connect CtrlProxy or the iOS runner because reading needs it
+  (owner decision 2026-10-11, #11641). It skips appearance sync, preference/settings
+  writes and selecting or pinning the current device. A later control call still
+  performs those steps. A sessionless read on a held device runs no readiness,
+  pinning or settings work at all; it uses the read-only path.
 - Reads run in their own lane (#10969).
 - A holder's calls that name only a `deviceId` are credited to the MCP connection
   that owns the held session, and admitted as that session. Other connections

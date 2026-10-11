@@ -5012,15 +5012,24 @@ export class SessionManager {
    * Why this daemon released a session it issued (#10730), from the in-memory terminal snapshot or
    * the persisted `release_reason`. Undefined for a live session or a UUID it never issued, so a
    * caller can tell a known release from a plain unknown id.
+   *
+   * A session an idle or heartbeat release has fenced is answered with that reason while the
+   * release is still writing its row (#11646): a tool call is already refused with it, and no
+   * later event un-ends a timer release. Any other release still holding the session (an explicit
+   * release, a device loss a newer observation may still overrule, a handoff) has no own answer
+   * yet; a plan label whose base has ended is otherwise answered with the base's reason.
    */
   async getReleasedSessionReason(sessionId: string): Promise<string | undefined> {
     const published = this.sessions.get(sessionId);
+    const inMemory = this.terminalReleaseSnapshots.get(sessionId)?.releaseReason;
     if (published) {
+      if (inMemory !== undefined && isExpiryReleaseReason(inMemory)) {
+        return inMemory;
+      }
       // A label whose base has ended is answered with the base's end (#11640), before the
       // release that follows has recorded it on the label's own row.
       return this.endedBaseOfLabel(published)?.releaseReason;
     }
-    const inMemory = this.terminalReleaseSnapshots.get(sessionId)?.releaseReason;
     if (inMemory) {
       return inMemory;
     }

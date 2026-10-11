@@ -363,7 +363,8 @@ describe("requests during device session release", () => {
     );
     persistence.finishRelease.resolve();
     await release;
-    expect(response).toEqual(notFound);
+    // Named while the row is still being written, as the refused tool call is (#11646).
+    expect(response).toEqual({ ...notFound, releaseReason: "heartbeat-timeout" });
     expect(liveness(session)).toEqual(before);
     expect(persistence.activityWrites).toBe(writes);
   });

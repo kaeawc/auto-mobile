@@ -186,7 +186,11 @@ connection used for tools and resources:
    `slot_in_use` and the scope is never treated as abandoned.
 4. **Drain and release.** When the execution ends (stdin EOF, cancellation or
    owner loss) the proxy releases its sessions with a bounded wait
-   (`MANAGED_EXECUTION_RELEASE_TIMEOUT_MS`, 1.5 s). The daemon cancels the
+   (`MANAGED_EXECUTION_RELEASE_TIMEOUT_MS`, 1.5 s). A closing proxy first
+   cancels its own tool calls and resource reads still in flight (a process
+   stopped by a signal closes with them open), because the daemon admits the
+   release in arrival order on the proxy's connection; their callers get a
+   "MCP proxy is closing" error. The daemon cancels the
    session's in-flight work, waits about 500 ms for it, then releases the session
    (about 700 ms budget). If everything settled, the slot is
    `reusable_for_this_slot`. If work outlived the budget the slot is marked

@@ -1553,6 +1553,12 @@ export class DaemonMcpProxy {
   private managedSlotsResult: ManagedSlotsResult | undefined;
   /** Aborts an in-flight managed slot acquisition when the proxy closes (EOF, SIGTERM, owner loss). */
   private managedSlotsAcquisitionAbort: AbortController | undefined;
+  /**
+   * Aborts every tool call and resource read this proxy has in flight when it closes (#11642).
+   * Each one's daemon request is cancelled on its own socket (`daemon/cancelRequest`), so nothing
+   * of this proxy's is left ahead of the managed execution release in the socket's queue.
+   */
+  private readonly closeAbort = new AbortController();
   // Once the daemon confirms this transport's bound session is gone, preserve
   // that terminal identity instead of clearing it and allowing the same UUID to
   // acquire another device. `fromResultMint` records the binding's provenance at
@@ -4115,8 +4121,9 @@ export class DaemonMcpProxy {
     args: Record<string, unknown>,
     progressToken?: string | number,
     onProgress?: DaemonProxyProgressCallback,
-    signal?: AbortSignal,
+    callerSignal?: AbortSignal,
   ): Promise<any> {
+    const signal = this.untilClosed(callerSignal);
     let first = await this.forwardToolCall(name, args, progressToken, onProgress, signal, true);
     if (isDeviceBindingTool(name)) {
       first = await this.waitOutDeviceCleanup(first, name, args, progressToken, onProgress, signal);
@@ -7738,8 +7745,12 @@ export class DaemonMcpProxy {
   /**
    * Read a resource from the daemon
    */
-  async readResource(uri: string, { signal }: { signal?: AbortSignal } = {}): Promise<any> {
-    signal?.throwIfAborted();
+  async readResource(
+    uri: string,
+    { signal: callerSignal }: { signal?: AbortSignal } = {},
+  ): Promise<any> {
+    const signal = this.untilClosed(callerSignal);
+    signal.throwIfAborted();
     await this.waitForLivenessRecovery(signal);
     this.throwIfResourceSessionHandedOver(uri);
     signal?.throwIfAborted();
@@ -7798,12 +7809,26 @@ export class DaemonMcpProxy {
     return this.connected;
   }
 
+  /** The caller's signal, also aborted (with a typed `DaemonUnavailableError`) by {@link close}. */
+  private untilClosed(signal: AbortSignal | undefined): AbortSignal {
+    return signal ? AbortSignal.any([signal, this.closeAbort.signal]) : this.closeAbort.signal;
+  }
+
   /**
-   * Close the connection to daemon
+   * Close the connection to daemon.
+   *
+   * A process stopped by a signal closes the proxy with the MCP server still open, so nothing has
+   * cancelled the calls in flight (stdin EOF aborts them first). They are cancelled here, before the
+   * managed execution release: the daemon admits `daemon/releaseExecution` in arrival order on this
+   * proxy's socket, behind any call still running there, and the release would otherwise time out
+   * unadmitted and leave the session to the owner-disconnect release (#11642). Each caller is
+   * answered with a typed `DaemonUnavailableError`, never left waiting.
    */
   async close(): Promise<void> {
     this.closing = true;
-    this.managedSlotsAcquisitionAbort?.abort(new DaemonUnavailableError("MCP proxy is closing"));
+    const closingError = new DaemonUnavailableError("MCP proxy is closing");
+    this.managedSlotsAcquisitionAbort?.abort(closingError);
+    this.closeAbort.abort(closingError);
     this.connected = false;
     this.livenessRecovery.stop();
     // Not awaited: a probe round waiting on a frozen daemon must not hold up close; `closing`

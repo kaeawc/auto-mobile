@@ -1,37 +1,37 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
-import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import {
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
-} from "../../../src/server/deviceTools";
-import { setDeviceManager } from "../../../src/server/bootedDeviceResources";
-import { clearDirectSessionDevices } from "../../../src/server/directSessionDeviceRegistry";
-import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { DaemonState } from "../../../src/daemon/daemonState";
-import { DevicePool } from "../../../src/daemon/devicePool";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import type { BootedDevice, DeviceInfo } from "../../../src/models";
-import { AndroidAvdProvenanceCache } from "../../../src/utils/AndroidAvdProvenanceCache";
-import { DefaultDeviceMatcher } from "../../../src/utils/deviceMatcher";
-import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
-import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
-import { FakeTimer } from "../../fakes/FakeTimer";
+} from "../../src/server/deviceTools";
+import { setDeviceManager } from "../../src/server/bootedDeviceResources";
+import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import type { BootedDevice, DeviceInfo } from "../../src/models";
+import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
+import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 isolateToolRegistry();
 
 /**
- * HUNT (provisioning-6): #11648 makes a selector startDevice prefer an idle match over a device
- * another session holds, but "held" is read from the pool's session binding at selection time. A
+ * #11648 makes a selector startDevice prefer an idle match over a device another session holds. A
  * start that has selected a device and is still preparing it (readiness reservation taken, session
- * not bound yet) leaves that device looking idle, so a second selector start arriving in that
- * window picks the same device, prepares it a second time, loses the bind and is refused
- * `device_owned_by_other_session` — with another idle device satisfying the spec right beside it.
+ * not bound yet) has no session on it yet, so the preference also has to read the reservation
+ * (#11651): otherwise a second selector start arriving in that window picks the same device, loses
+ * the bind and is refused `device_owned_by_other_session` with another idle device satisfying the
+ * spec right beside it. With no other match the second start still gets that typed refusal.
  */
-describe("hunt: two selector starts racing while the first is still preparing its device", () => {
+describe("two selector starts racing while the first is still preparing its device", () => {
   const env: Record<string, string | undefined> = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
   let restoreEnv: (() => void) | undefined;
   let sessionManager: SessionManager | undefined;
@@ -116,7 +116,7 @@ describe("hunt: two selector starts racing while the first is still preparing it
     expect(pool.getDevice(firstDeviceId)?.sessionId).toBeNull();
 
     const second = startDevice({ platform, __mcpSessionId: "client-b" }).catch(
-      (error: unknown) => ({ refused: error instanceof Error ? error.message : String(error) }),
+      (error: unknown) => ({ refused: (error as { code?: string }).code ?? String(error) }),
     );
     // Let the second start run as far as it can before the first one finishes.
     for (let turn = 0; turn < 200; turn++) {
@@ -187,5 +187,23 @@ describe("hunt: two selector starts racing while the first is still preparing it
     expect(loser.refused).toBeUndefined();
     expect(pool.getDevice(otherDeviceId)?.sessionId).toBe(loser.runtime.session.sessionUuid);
     expect(readinessDeviceIds).toEqual([firstDeviceId, otherDeviceId]);
+  });
+
+  test("the device being prepared is the only match: the second start is refused, typed", async () => {
+    const only: BootedDevice = {
+      name: "iPhone 15",
+      platform: "ios",
+      deviceId: "11111111-1111-4111-8111-111111111111",
+      osVersion: "17.2",
+      iosVersion: "17.2",
+      formFactor: "phone",
+    };
+    const { pool, firstDeviceId, winner, loser } = await race(
+      [only],
+      [{ ...only, isRunning: true }],
+    );
+
+    expect(pool.getDevice(firstDeviceId)?.sessionId).toBe(winner.runtime.session.sessionUuid);
+    expect(loser.refused).toBe("device_owned_by_other_session");
   });
 });

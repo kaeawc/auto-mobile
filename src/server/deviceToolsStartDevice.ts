@@ -497,10 +497,11 @@ async function startMatchExclusions(platform: "android" | "ios"): Promise<{
 
 /**
  * Booted devices of the requested platform that a session this caller could not reuse holds
- * (#11648). A selector-based start takes one only when no other booted device satisfies its spec,
- * so an idle match is never passed over for a refusal. The owner test mirrors the pool bind's: an
- * identified connection reuses a session it acquired (or routes to by autolock), an anonymous
- * caller one an anonymous acquisition created.
+ * (#11648), or that another request is still preparing and will bind (#11651). A selector-based
+ * start takes one only when no other booted device satisfies its spec, so an idle match is never
+ * passed over for a refusal. The owner test mirrors the pool bind's: an identified connection
+ * reuses a session it acquired (or routes to by autolock), an anonymous caller one an anonymous
+ * acquisition created.
  */
 function devicesHeldByOtherSessions(args: StartDeviceArgs): ReadonlySet<string> | undefined {
   const daemonState = DaemonState.getInstance();
@@ -521,13 +522,16 @@ function devicesHeldByOtherSessions(args: StartDeviceArgs): ReadonlySet<string> 
         holderSessionId
     );
   };
+  // This runs before the request reserves anything itself, so every readiness reservation it
+  // sees belongs to another request.
   const held = pool
     .getAllDevices()
     .filter(
       (device) =>
         device.platform === args.platform &&
-        device.sessionId !== null &&
-        !callerMayReuse(device.id, device.sessionId),
+        (device.sessionId === null
+          ? pool.isReservedForReadiness(device.id)
+          : !callerMayReuse(device.id, device.sessionId)),
     )
     .map((device) => device.id);
   return held.length > 0 ? new Set(held) : undefined;

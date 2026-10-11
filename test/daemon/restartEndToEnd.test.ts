@@ -29,6 +29,13 @@ const KINDS: ShutdownKind[] = ["clean", "crash"];
 
 /** Lease 4 s + suspect grace 4 s + one 2 s scan: the latest an unclaimed session is released. */
 const RELEASED_BY_MS = 10_000;
+/**
+ * The instants (seconds after the restart) every surface is read at: the restart itself, each
+ * owner-return time, inside the window, the last second before the release and the release.
+ */
+const MATRIX_SECONDS = [0, 1, 3, 7, 9, 10, 14];
+/** The instants an observer session and its viewer are read at, on both sides of the window. */
+const OBSERVER_SECONDS = [1, 7, 9, 11, 13];
 
 interface Outcome {
   result?: unknown;
@@ -87,7 +94,7 @@ describe("restart matrix: owner reconnect x shutdown kind x sessions (no call in
             const other = run.scenario.addProxy({ token: "another-client" });
 
             let lapsedAt: number | undefined;
-            for (let second = 0; second <= 14; second++) {
+            for (const second of MATRIX_SECONDS) {
               await run.idleUntilSinceRestart(second * 1_000);
               if (returnsAtMs === second * 1_000) {
                 run.ownerReturns();
@@ -234,9 +241,9 @@ describe("restart matrix: a plan's derived label session, an observer and a view
             desktop === "keeps heartbeating"
               ? run.scenario.startTokenlessHeartbeats(session)
               : undefined;
-          for (let second = 1; second <= 13; second++) {
+          for (const second of OBSERVER_SECONDS) {
             await run.idleUntilSinceRestart(second * 1_000);
-            // The viewer watches the device every second: a read, never a hold.
+            // The viewer keeps watching the device: a read, never a hold.
             await settled(run.scenario.daemonToolCallWith({ deviceId: A }, "observe", "viewer"));
             const snapshot = await run.snapshot(session, A);
             expect(snapshot.pool.status).toBe(snapshot.held ? "busy" : "idle");

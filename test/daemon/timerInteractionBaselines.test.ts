@@ -89,12 +89,15 @@ async function expectEndedEverywhere(sessionId: string, reasons: readonly string
 /**
  * Advance `ms` a second at a time with the event loop fully drained in between. A re-bind is one
  * long promise chain with no timer in it: under a coarse step the fake clock runs seconds ahead
- * of it, which no real event loop does (microtasks drain before the next timer fires).
+ * of it, which no real event loop does (microtasks drain before the next timer fires). Stops as
+ * soon as `done` holds, so the scenario is not ticked past the answer it waits for.
  */
-async function settleBetweenSteps(ms: number): Promise<void> {
-  for (let elapsed = 0; elapsed < ms; elapsed += 1_000) {
+async function settleBetweenSteps(ms: number, done: () => boolean): Promise<void> {
+  for (let elapsed = 0; elapsed < ms && !done(); elapsed += 1_000) {
     await drainMicrotasks(QUIET_TURNS);
-    await scenario.idle(1_000);
+    if (!done()) {
+      await scenario.idle(1_000);
+    }
   }
   await drainMicrotasks(QUIET_TURNS);
 }
@@ -222,37 +225,62 @@ describe("cell 2: a held device in a transitional platform state (T3 x T1)", () 
 });
 
 describe("cell 3: a device-restart handoff whose device stays away (T3 x restart recovery)", () => {
-  test("the device is transitional for 45 s after the handoff: the owner's call waits and re-binds when it is back", async () => {
+  const HANDOFF_REASON = `device-restart:Pixel_${DEVICE_A}`;
+
+  /** A held device absent for three whole sweeps: its session is handed off recoverably. */
+  async function handOff() {
     scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B] });
     const listing = startDisconnectMonitor(scenario);
     const session = await scenario.acquire();
     await scenario.toolCall(session);
-
-    // Three absent sweeps: the recoverable handoff, once, and the device held by nobody.
     listing.set(DEVICE_A, "absent");
-    await scenario.idle(4 * DISCONNECT_POLL_MS);
-    const handoff = releasesOf(scenario, session);
-    expect(handoff.map((release) => release.reason)).toEqual([`device-restart:Pixel_${DEVICE_A}`]);
-    expect(await persistedRow(scenario, session)).toMatchObject({
-      status: "released",
-      reason: `device-restart:Pixel_${DEVICE_A}`,
-    });
-    expect(scenario.poolState(DEVICE_A)).toMatchObject({ status: "missing", sessionId: null });
-    expect(scenario.daemon.manager.getAllSessions()).toEqual([]);
+    await scenario.idle(3 * DISCONNECT_POLL_MS);
+    expect(releasesOf(scenario, session)).toEqual([]);
+    await scenario.idle(DISCONNECT_POLL_MS);
+    expect(releasesOf(scenario, session).map((release) => release.reason)).toEqual([
+      HANDOFF_REASON,
+    ]);
+    return { listing, session };
+  }
 
-    // The owner names the session while the device is still restarting: neither refused nor bound.
-    listing.set(DEVICE_A, "offline");
+  /** The owner names the handed-off session; the answer is read without awaiting it. */
+  function ownerNames(session: string): () => unknown {
     let verdict: unknown = "pending";
     void mcpVerdict(scenario, session).then((answer) => {
       verdict = answer;
     });
+    return () => verdict;
+  }
+
+  test("three absent sweeps hand the session off once, recoverably, and nobody holds the device", async () => {
+    const { session } = await handOff();
+
+    expect(await persistedRow(scenario, session)).toMatchObject({
+      status: "released",
+      reason: HANDOFF_REASON,
+    });
+    expect(scenario.poolState(DEVICE_A)).toMatchObject({ status: "missing", sessionId: null });
+    expect(scenario.daemon.manager.getAllSessions()).toEqual([]);
+    // Later sweeps announce nothing more.
+    await scenario.idle(2 * DISCONNECT_POLL_MS);
+    expect(releasesOf(scenario, session)).toHaveLength(1);
+  });
+
+  test("the device is transitional for 45 s after the handoff: the owner's call waits and re-binds when it is back", async () => {
+    const { listing, session } = await handOff();
+
+    // The owner names the session while the device is still restarting: neither refused nor bound.
+    listing.set(DEVICE_A, "offline");
+    const verdict = ownerNames(session);
     await scenario.idle(45_000);
-    expect(verdict).toBe("pending");
+    expect(verdict()).toBe("pending");
     expect(scenario.poolState(DEVICE_A).sessionId).toBeNull();
 
     listing.set(DEVICE_A, "device");
-    await settleBetweenSteps(20_000);
-    expect(verdict).toEqual({ ok: true });
+    const backAt = scenario.timer.now();
+    await settleBetweenSteps(20_000, () => verdict() !== "pending");
+    expect(verdict()).toEqual({ ok: true });
+    expect(scenario.timer.now() - backAt).toBeLessThanOrEqual(20_000);
     expect(scenario.poolState(DEVICE_A)).toMatchObject({ status: "busy", sessionId: session });
     expect(await persistedRow(scenario, session)).toMatchObject({ status: "active", reason: null });
     expect(releasesOf(scenario, session)).toHaveLength(1);

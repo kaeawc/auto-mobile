@@ -1,6 +1,7 @@
 import { spyOn } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import * as databaseModule from "../../src/db";
+import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
@@ -23,10 +24,16 @@ import {
 // one FakeTimer. This file adds the two things that harness leaves out:
 // - a CLEAN shutdown: the first daemon's real `Daemon.stop()` runs (shutdown release with the
 //   `daemon-shutdown` reason, the release broadcast, the control socket's drain and close). Only
-//   the three stages that reach the host are replaced: the database close, the logger close and
-//   the PID/socket file cleanup.
+//   the four stages that reach the host are replaced: the managed adb server stop, the database
+//   close, the logger close and the PID/socket file cleanup.
 // - an owner that is away: the stdio proxy's dials to the successor are refused until the scenario
 //   lets it back, so "the owner reconnects N seconds after the restart" is a step of the scenario.
+
+/**
+ * Microtask turns `Daemon.stop()` is given before the scenario clock moves, so a chain with no
+ * timer in it (the shutdown release and its persistence) finishes at the instant it started.
+ */
+const STOP_QUIET_TURNS = 2_000;
 
 interface ScenarioInternals {
   createDaemonSide(): Promise<LivenessScenario["daemon"]>;
@@ -105,10 +112,17 @@ export class RestartScenario {
     // stop() closes the listener first (quiesce): no new connection reaches this daemon, while
     // the connections it already has stay open until the socket server closes them.
     Reflect.set(side.socket, "connect", () => undefined);
-    // The three host-touching stages of stop(): everything else is the production sequence.
+    // The four host-touching stages of stop(): everything else is the production sequence.
     Reflect.set(daemon, "cleanupDaemonFilesForShutdown", async () => {});
+    // `adb kill-server` when the host's environment opts into a managed adb server.
+    Reflect.set(daemon, "stopManagedAdbServer", async () => {});
     this.shutdownSpies.push(
-      spyOn(databaseModule, "closeDatabase").mockResolvedValue(undefined),
+      // The real close ends by cold-starting the process-wide write barrier that stop() has just
+      // drained; without that the barrier stays latched and every later durable write in this
+      // process is refused.
+      spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {
+        resetDbWriteBarrier();
+      }),
       spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined),
     );
     await setVideoRecordingManagerDependencies({
@@ -130,9 +144,12 @@ export class RestartScenario {
         failure = error;
       },
     );
+    // stop() is promise chains and scenario-clock waits only: no real event-loop turn is given,
+    // so nothing here depends on the host's speed.
     for (let step = 0; step < 400 && !settled; step++) {
-      await drainMicrotasks(64);
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      for (let turn = 0; turn < STOP_QUIET_TURNS && !settled; turn++) {
+        await Promise.resolve();
+      }
       if (!settled) {
         await this.scenario.idle(stepMs);
       }
@@ -175,8 +192,8 @@ export class RestartScenario {
 
   /** Advance to `ms` after the successor's start. */
   async idleUntilSinceRestart(ms: number): Promise<void> {
-    while (this.sinceRestart < ms) {
-      await this.idle(Math.min(500, ms - this.sinceRestart));
+    if (this.sinceRestart < ms) {
+      await this.idle(ms - this.sinceRestart);
     }
   }
 
@@ -238,26 +255,39 @@ export class RestartScenario {
     }
     resetVideoRecordingManagerDependencies();
     await this.scenario.stop();
+    // A stop() that failed before its database stage leaves the barrier draining.
+    resetDbWriteBarrier();
   }
 }
 
 /**
- * One-time warm-up for a restart suite's `beforeAll`: a full clean restart (shutdown, successor,
- * the owner's first control call) so module initialization is not charged to the first test.
+ * One-time warm-up for a restart suite's `beforeAll`, so that module initialization and first-use
+ * compilation are not charged to whichever test runs first: one clean restart whose owner returns
+ * and one crash whose owner does not, each with a second client asking for the held device.
  */
 export async function warmUpRestartScenario(): Promise<void> {
-  const run = await RestartScenario.start();
-  try {
-    const session = await run.scenario.acquire("emulator-5554");
-    await run.idle(1_000);
-    run.ownerAway();
-    await run.end("clean");
-    await run.startSuccessor();
-    run.ownerReturns();
-    await run.ownerControlCall(session);
-    await run.snapshot(session, "emulator-5554");
-    await run.availableDevices();
-  } finally {
-    await run.stop();
+  const device = "emulator-5554";
+  for (const kind of ["clean", "crash"] as const) {
+    const run = await RestartScenario.start({ devices: [device, "emulator-5556"] });
+    try {
+      const session = await run.scenario.acquire(device);
+      await run.idle(1_000);
+      run.ownerAway();
+      await run.end(kind);
+      await run.startSuccessor();
+      const other = run.scenario.addProxy({ token: "warm-up-client" });
+      const ask = () => other.callTool("getAndroid", { deviceId: device }).catch(() => undefined);
+      await ask();
+      if (kind === "crash") {
+        await run.idleUntilSinceRestart(11_000);
+      }
+      run.ownerReturns();
+      await run.ownerControlCall(session);
+      await run.snapshot(session, device);
+      await run.availableDevices();
+      await ask();
+    } finally {
+      await run.stop();
+    }
   }
 }

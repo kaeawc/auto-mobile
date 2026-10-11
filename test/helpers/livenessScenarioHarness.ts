@@ -15,7 +15,10 @@ import {
   getCliSessionIdleTimeoutMs,
 } from "../../src/daemon/constants";
 import { Daemon, type DaemonStartHost } from "../../src/daemon/daemon";
-import type { AppearanceSyncTarget } from "../../src/daemon/AppearanceSyncScheduler";
+import {
+  defaultAppearanceSyncDependencies,
+  type AppearanceSyncTarget,
+} from "../../src/daemon/AppearanceSyncScheduler";
 import { IncumbentOwnerGuard } from "../../src/daemon/incumbentOwnerGuard";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
@@ -41,6 +44,7 @@ import {
   SessionManager,
   getDefaultSessionHeartbeatTimeoutMs,
 } from "../../src/daemon/sessionManager";
+import { DefaultDeviceSettingsAccess } from "../../src/features/utility/DeviceSettingDefaults";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";
@@ -67,7 +71,7 @@ import {
   type InMemoryClientSocket,
   type WireEnvelope,
 } from "./inMemoryDaemonWire";
-import { drainMicrotasks } from "./fakeTimerStepping";
+import { drainMicrotasks, drainUntil } from "./fakeTimerStepping";
 import { RealToolCallPath, type DeviceToolRun } from "./realToolCallPath";
 
 // Two-sided liveness scenario harness (#10667, umbrella #10655).
@@ -91,7 +95,8 @@ import { RealToolCallPath, type DeviceToolRun } from "./realToolCallPath";
 // Faked: the kernel socket (in-process socket ends), the loopback MCP HTTP hop behind the socket
 // server (its tool-call entry is RealToolCallPath plus the entry's error shaping), device
 // acquisition's device work, the tool body's device work, device discovery and readiness, the
-// recording operations, the data directory (an in-memory file system), and the clock (FakeTimer).
+// recording operations, host appearance sync's host and device ends, the data directory (an
+// in-memory file system), and the clock (FakeTimer).
 // Nothing here reaches the host: the start steps that would (working directory, signal handlers,
 // PID file, HTTP and socket listeners, device monitors) are this file's no-op `DaemonStartHost`,
 // and every path handed to production code passes `assertNotHostDaemonPath`.
@@ -376,6 +381,12 @@ export class LivenessScenario {
   /** Recordings force-stopped at the finalize cap and marked incomplete, in order. */
   readonly incompleteRecordings: string[] = [];
   /**
+   * Appearance modes the daemon's own host sync applied, as `<device>:<mode>` in order: the sync
+   * it starts for the device of each session it creates. The host lookup and the device command
+   * are stubbed at their boundary and report here.
+   */
+  readonly appearanceApplies: string[] = [];
+  /**
    * The daemon stops answering heartbeats (a wedged event loop on the wire): each frame hangs
    * until the end of the scenario, except that the first is accepted `lateAckDelayMs` after it
    * was sent when that is set (#10973, a late ack). Clear it to answer again.
@@ -395,6 +406,7 @@ export class LivenessScenario {
   private readonly gates = new Map<string, { opened: Promise<void>; wedged: boolean }>();
   private unsubscribeReleaseBroadcast: (() => void) | undefined;
   private restoreRecordingDeps: (() => void) | undefined;
+  private restoreAppearanceDeps: (() => void) | undefined;
   private minted: string | undefined;
   private mintCount = 0;
   private daemonCount = 0;
@@ -429,6 +441,10 @@ export class LivenessScenario {
       spyOn(DaemonClient, "isAvailable").mockResolvedValue(true),
       spyOn(logger, "warn").mockImplementation(() => {}),
       spyOn(logger, "info").mockImplementation(() => {}),
+      // The daemon records a device's display settings before a session changes them (#11145),
+      // reading them over adb. The device reports nothing here, as a host without it would.
+      spyOn(DefaultDeviceSettingsAccess.prototype, "read").mockResolvedValue({}),
+      spyOn(DefaultDeviceSettingsAccess.prototype, "write").mockResolvedValue([]),
     );
     for (const key of AUTOLOCK_ENV_KEYS) {
       this.savedEnv.set(key, process.env[key]);
@@ -445,6 +461,7 @@ export class LivenessScenario {
     // The real Daemon builds its pool with the process-wide device manager: serve the fake.
     PlatformDeviceManagerFactory.setInstance(this.discovery);
     this.stubRecordingDevice();
+    this.stubAppearanceSync();
     this.tools = new RealToolCallPath(this.deviceIds.map((id) => this.device(id))).install();
     // A long call stays in flight at the device boundary until the scenario settles it.
     this.tools.setBody(async (input) => {
@@ -489,6 +506,27 @@ export class LivenessScenario {
     deps.listActiveVideoRecordings = async () => [];
     deps.isTestRecordingOwnedBy = () => false;
     this.restoreRecordingDeps = () => Object.assign(deps, original);
+  }
+
+  /**
+   * The daemon syncs a device to the host's appearance when a session is created on it. Left
+   * alone that reads the config store, runs `defaults`/`gsettings` on the host and then `adb`
+   * against the device id, which on a machine with that emulator attached is a real device. The
+   * decision to sync stays the daemon's; its three ends answer here instead.
+   */
+  private stubAppearanceSync(): void {
+    const deps = defaultAppearanceSyncDependencies;
+    const original = { ...deps };
+    deps.getConfig = async () => ({
+      syncWithHost: true,
+      defaultMode: "light",
+      applyOnConnect: true,
+    });
+    deps.resolveMode = async () => "light";
+    deps.apply = async (device, mode) => {
+      this.appearanceApplies.push(`${device.deviceId}:${mode}`);
+    };
+    this.restoreAppearanceDeps = () => Object.assign(deps, original);
   }
 
   /**
@@ -973,9 +1011,11 @@ export class LivenessScenario {
     });
     server.handleConnection(socket as unknown as Socket);
     socket.emit("data", Buffer.from(`${JSON.stringify({ id: "frame", type, method, params })}\n`));
-    for (let turn = 0; turn < 4; turn++) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
+    // The handler is in-process and never waits on the real event loop, so its answer is a
+    // bounded number of microtask turns away; a real turn's cost grows with the runner's load.
+    await drainUntil(() => responses.some((frame) => frame.id === "frame"), {
+      description: `the response to socketFrame ${method}`,
+    });
     await Promise.all([...server.activeRequestHandlers]);
     socket.destroy();
     const response = responses.find((frame) => frame.id === "frame");
@@ -1296,6 +1336,7 @@ export class LivenessScenario {
     this.tools.uninstall();
     PlatformDeviceManagerFactory.reset();
     this.restoreRecordingDeps?.();
+    this.restoreAppearanceDeps?.();
     this.unsubscribeReleaseBroadcast?.();
     DaemonState.getInstance().reset();
     for (const spy of this.spies.splice(0)) {

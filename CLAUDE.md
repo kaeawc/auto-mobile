@@ -119,7 +119,13 @@ bun test <file>        # Run specific test file (no cache)
 Before pushing Node/TypeScript changes, run `bash scripts/prepush-node.sh`.
 Use `bash scripts/prepush-node.sh --changed` for the faster affected-unit-test
 loop; formatting, typecheck, and lint intentionally remain full repository
-gates. `oxlint`'s actual exit code is authoritative: Error-level rules such as
+gates. It also runs the tool-free TypeScript subset of CI Fast Validation
+(`scripts/all_fast_validate_checks.sh --only ...`, ~10 s, including the offline
+lychee pass when `lychee` is installed), the `test/lint/` suites (including the
+Windows path-separator assertion guard), and, on Linux or with `--timing`, the
+100 ms unit budget. Shell, Kotlin, Swift, docs-syntax, bats and Windows/macOS
+matrix lanes are not covered: use `scripts/prepush-shell.sh` and the platform
+gates, and expect CI to be the only Windows run. `oxlint`'s actual exit code is authoritative: Error-level rules such as
 `eqeqeq` are enforced directly by oxlint, not its warning-only ratchet, and
 diffing warnings does not satisfy the gate. Before asking for a merge, fetch
 `origin/main`, confirm the branch contains it, and re-run local gates.

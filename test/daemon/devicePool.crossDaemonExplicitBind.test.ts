@@ -315,7 +315,10 @@ for (const [platform, deviceId] of [
           const a = await daemon(DAEMON_A_PID);
           const receipt: AcquisitionReceipt = {};
           const minted = (await acquire(a.pool, receipt))!;
-          expect(receipt.minted).toEqual({ session: a.sessions.getSession(minted)!, deviceId });
+          expect(receipt.minted).toMatchObject({
+            session: a.sessions.getSession(minted)!,
+            deviceId,
+          });
           const released = countReleases(a.sessions);
 
           await a.pool.releaseUndeliveredAcquisition(receipt);

@@ -154,6 +154,7 @@ test/daemon/managedSlots/slotsUnresolvedEmulatorIdentityGate.test.ts
 test/daemon/managedSlots/sqliteSlotRegistry.test.ts
 test/daemon/managerOutputReductionArgs.test.ts
 test/daemon/observationRequestBatch.test.ts
+test/daemon/observerLeaseSleepForgiveness.test.ts
 test/daemon/observerLeaseWallClockStep.test.ts
 test/daemon/observerSessionRegistry.test.ts
 test/daemon/observerSessionRequestHandlers.test.ts
@@ -220,6 +221,7 @@ test/daemon/telemetryBackfillBounds.test.ts
 test/daemon/telemetryIdentityTimelineBuckets.test.ts
 test/daemon/testRecordingSocketServerAuth.test.ts
 test/daemon/tokenOwnedSessionsLastUsedAt.test.ts
+test/daemon/toolCallActivityLatestDeadline.test.ts
 test/daemon/unsettledExecutionVeto.test.ts
 test/daemon/unsettledExecutionVetoWallClockStep.test.ts
 test/daemon/videoRecordingSocketServerAuth.test.ts
@@ -703,7 +705,6 @@ test/helpers/captureStageBaseline.test.ts
 test/helpers/captureStageTimeline.test.ts
 test/helpers/fastCheckConfig.test.ts
 test/helpers/iosVideoRecordingSessionCleanup.test.ts
-test/helpers/livenessScenarioHarness.test.ts
 test/helpers/sessionOwnershipHeartbeat.test.ts
 test/helpers/warmedTests.test.ts
 test/helpers/webrtcDeviceCaptureHelpers.test.ts

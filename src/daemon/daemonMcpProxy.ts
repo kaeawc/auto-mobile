@@ -4632,6 +4632,17 @@ export class DaemonMcpProxy {
     );
   }
 
+  /**
+   * A session this proxy holds under its own token (#10990) is routable beside the startup
+   * binding. So is a `${bound}:${label}` name (#11602): whether it is a live label of the bound
+   * session's plan is the daemon's to judge, which alone knows the label map.
+   */
+  private routableBesideStartupBinding(sessionUuid: string): boolean {
+    return (
+      this.otherHeldSessions.has(sessionUuid) || sessionUuid.startsWith(`${this.boundSessionUuid}:`)
+    );
+  }
+
   private withBoundSessionUuid(
     args: Record<string, unknown>,
     usesDeviceSelector = false,
@@ -4658,8 +4669,7 @@ export class DaemonMcpProxy {
     if (
       explicitSessionUuid &&
       this.initialSessionBindingConfigured &&
-      // A session this proxy holds under its own token (#10990) is routable beside the startup binding.
-      !this.otherHeldSessions.has(explicitSessionUuid)
+      !this.routableBesideStartupBinding(explicitSessionUuid)
     ) {
       throw new Error(
         `MCP connection is bound to device session ${this.boundSessionUuid}; ` +

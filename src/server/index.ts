@@ -684,12 +684,26 @@ export function registerMcpTools(daemonMode: boolean): void {
   validateConfiguredToolSelectionDefaults(new Set(ToolRegistry.getConfigurableToolNames()));
 }
 
+/**
+ * Whether `sessionUuid` is a live session of the plan `boundSessionUuid` belongs to (#11602). The
+ * one answer for a connection's seeded binding ({@link SessionToolBinding}) and for the binding
+ * its calls recorded, read without holding, extending or releasing either session.
+ */
+function namesLiveSessionOfBoundPlan(sessionUuid: string, boundSessionUuid: string): boolean {
+  const daemonState = DaemonState.getInstance();
+  return (
+    daemonState.isInitialized() &&
+    daemonState.getSessionManager().isLiveSessionOfSamePlan(sessionUuid, boundSessionUuid)
+  );
+}
+
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   const sessionToolBinding = new SessionToolBinding(
     options.sessionContext?.initialSessionToolBinding,
     options.sessionContext?.initialToolSelectionProfile,
     undefined,
     options.sessionContext?.initialReleasedSession,
+    namesLiveSessionOfBoundPlan,
   );
   // Plan execution lock with per-session scope to prevent interference during executePlan
   // Each test thread gets its own sessionUuid, enabling parallel execution on different devices
@@ -1142,7 +1156,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         boundDeviceSessionUuid &&
         explicitSessionUuid &&
         explicitSessionUuid !== boundDeviceSessionUuid &&
-        !sessionToolBinding.ownsSession(sessionId, explicitSessionUuid)
+        !sessionToolBinding.ownsSession(sessionId, explicitSessionUuid) &&
+        // #11602: a derived `${base}:${label}` session counts as its base, so a connection bound
+        // to the base or to one of its labels may name any live session of that plan. It is no
+        // second device: the session is already allocated. Whose base it is stays the owner
+        // rule's question below.
+        !namesLiveSessionOfBoundPlan(explicitSessionUuid, boundDeviceSessionUuid)
       ) {
         throw new ActionableError(
           `MCP connection is bound to device session ${boundDeviceSessionUuid}; ` +

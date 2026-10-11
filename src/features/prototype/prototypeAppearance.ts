@@ -110,3 +110,19 @@ export function prototypeAppearanceAfterChange(
   }
   return { mode: fields.mode, source: fields.source };
 }
+
+/**
+ * `entry` without the cached `deviceDark`. The device's own setting can change while a pinned or
+ * authored mode stays put, and then no event arrives, so a host-local read cannot vouch for a value
+ * remembered from an earlier device answer: it reports `mode` and `source` and leaves `deviceDark`
+ * to the device's own answers (a show result, an `inspect`) (#11416).
+ */
+export function withoutCachedDeviceDark<T extends { appearance?: ShownPrototypeAppearance }>(
+  entry: T,
+): T {
+  if (entry.appearance?.deviceDark === undefined) {
+    return entry;
+  }
+  const { mode, source } = entry.appearance;
+  return { ...entry, appearance: { mode, source } };
+}

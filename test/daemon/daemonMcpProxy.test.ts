@@ -5488,6 +5488,39 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("a bound connection forwards a label name of its own session for the daemon to judge (#11602)", async () => {
+      const fakeClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "session-a",
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("tapAt", { sessionUuid: "session-a:B", x: 1, y: 1 });
+        // Only `${bound}:${label}` is the daemon's question: a lookalike is still another session.
+        for (const sessionUuid of ["session-ab", "session-a2:B", "other:session-a:B"]) {
+          await expect(proxy.callTool("tapAt", { sessionUuid, x: 1, y: 1 })).rejects.toThrow(
+            "MCP connection is bound to device session session-a",
+          );
+        }
+        await proxy.callTool("tapAt", { x: 2, y: 2 });
+
+        // The label call targets its own session and leaves the connection's binding where it was.
+        expect(fakeClient.callToolCalls.map((call) => call.params)).toEqual([
+          { sessionUuid: "session-a:B", x: 1, y: 1 },
+          { sessionUuid: "session-a", x: 2, y: 2 },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("a release during an admitted-then-rejected in-flight call is not undone by the refresh", async () => {
       let callCount = 0;
       const fakeClient: FakeDaemonClient = new FakeDaemonClient({

@@ -79,7 +79,7 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
   "src/daemon/sessionManager.ts": [
     "SessionManager.recordHeartbeat",
     "SessionManager.claimLivenessOwnership",
-    "SessionManager.claimLivenessOwnershipForSession",
+    "SessionManager.takeLivenessOwnership",
     "SessionManager.persistNewLivenessOwnershipClaim",
     "SessionManager.claimUnownedLivenessOwnership",
     "SessionManager.releaseLivenessOwnership",

@@ -1,4 +1,4 @@
-import type { AcquisitionReceipt } from "./acquisitionReceipt";
+import { mintedSession, type AcquisitionReceipt } from "./acquisitionReceipt";
 import type { SessionReleaseReason } from "./releaseReasons";
 import type { Environment } from "./poolConfig";
 import {
@@ -39,7 +39,6 @@ import { logger } from "../utils/logger";
 import { truncateBodyText } from "../utils/truncateBodyText";
 import { displayTransitions } from "../features/observe/DisplayTransition";
 import { getObserveCacheStore } from "../features/observe/cache/ObserveCacheRegistry";
-import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   ANONYMOUS_ACQUISITION_SESSION_SOURCE,
   isAnonymousAcquisitionSession,
@@ -110,6 +109,9 @@ import {
 } from "../devices/deviceIdentityEvidence";
 import {
   didSourceSucceedForDevice,
+  expectingPooledSources,
+  incompleteDiscoverySources,
+  isDeviceSourceIncomplete,
   discoverySourceFor,
   type DiscoveryCompleteness,
 } from "../utils/discoverySource";
@@ -5906,21 +5908,22 @@ export class DevicePool {
    * device-list cache applies), so a stats read adds one listing per such platform and no
    * unbounded per-device call. An incomplete
    * listing throws {@link BootedDeviceDiscoveryIncompleteError}: the count is unknown, never the
-   * stale pool tally and never zero.
+   * stale pool tally and never zero. A source whose tooling is not installed on this host is not
+   * incomplete (#11605) -- unless a pooled device depends on it, which proves the tooling existed.
    */
   private async readLiveInventoryDeviceIds(): Promise<Set<string>> {
     const live = new Set<string>();
+    const read = new Map<Platform, BootedDeviceDiscovery>();
     for (const platform of ["android", "ios"] as const) {
       if (this.getDevicesByPlatform(platform).length === 0) {
         continue;
       }
-      const discovery = await this.deviceManager.getBootedDevicesDetailed(platform, {
-        signal: getAbortSignal(),
-      });
+      const discovery = await this.readInventoryDiscovery(platform);
+      read.set(platform, discovery);
       // Only a pooled device whose own discovery source failed is unknown; a failure of a source
       // none of them depends on (devicectl for a simulator-only pool) leaves the answer exact.
-      const unknown = this.getDevicesByPlatform(platform).some(
-        (pooled) => !didSourceSucceedForDevice(discovery, platform, pooled.id),
+      const unknown = this.getDevicesByPlatform(platform).some((pooled) =>
+        isDeviceSourceIncomplete(discovery, platform, pooled.id),
       );
       if (unknown) {
         throw new BootedDeviceDiscoveryIncompleteError(
@@ -5952,7 +5955,37 @@ export class DevicePool {
         live.add(held.device.deviceId);
       }
     }
+    if (live.size === 0) {
+      await this.assertEmptyInventoryIsKnown(read);
+    }
     return live;
+  }
+
+  private async readInventoryDiscovery(platform: Platform): Promise<BootedDeviceDiscovery> {
+    return expectingPooledSources(
+      await this.deviceManager.getBootedDevicesDetailed(platform, { signal: getAbortSignal() }),
+      this.getAllDevices(),
+    );
+  }
+
+  /**
+   * "No devices" is only an answer when every source that exists on this host completed, as on
+   * the booted-devices resource. With nothing live to count, a platform the caller skipped (no
+   * pooled entries) may be empty because its discovery failed, so read it: a failed source makes
+   * the count unknown, a source that is not installed leaves it a true zero (#11605).
+   */
+  private async assertEmptyInventoryIsKnown(
+    read: ReadonlyMap<Platform, BootedDeviceDiscovery>,
+  ): Promise<void> {
+    for (const platform of ["android", "ios"] as const) {
+      const discovery = read.get(platform) ?? (await this.readInventoryDiscovery(platform));
+      if (incompleteDiscoverySources(discovery, [platform]).length > 0) {
+        throw new BootedDeviceDiscoveryIncompleteError(
+          platform,
+          discovery.discoveryErrors?.[platform] ?? discovery.sourceErrors?.["ios-physical"],
+        );
+      }
+    }
   }
 
   /** Re-read which idle Android devices other daemons drive, for this allocation pass. */
@@ -7997,6 +8030,7 @@ export class DevicePool {
     }
     const assignmentSnapshot = this.snapshotSessionAssignment(device);
     const previousSession = this.sessionManager.getSession(sessionId);
+    const previousDeviceId = previousSession?.assignedDevice;
     this.assertExpectedRecoverySession(
       previousSession,
       sessionId,
@@ -8029,9 +8063,12 @@ export class DevicePool {
         },
       ),
     );
-    // A rebind keeps an id the client supplied, and a restored session predates this call.
+    // A rebind keeps an id the client supplied, and a restored session predates this call. A
+    // session moved off another device is recorded with where it was (#11593).
     if (!allowSessionRebind && previousSession === null) {
-      options.receipt.minted = { session, deviceId };
+      options.receipt.minted = mintedSession(session, deviceId);
+    } else if (previousDeviceId && previousDeviceId !== deviceId) {
+      options.receipt.rebound = { session, deviceId, fromDeviceId: previousDeviceId };
     }
     this.recordBindOwnership(caller.mcpSessionId, sessionId);
     this.notifyDeviceStateChanged(device);
@@ -8092,10 +8129,15 @@ export class DevicePool {
    * timed out while the bind was still finishing (typically publishing its cross-daemon claim), so
    * no client holds the session id. Only the session the acquisition minted is released, for good,
    * and only while it still holds the device; the claim goes with the device. A session that was
-   * reused, has been replaced, or was already released is left alone (#11565).
+   * reused, has been replaced, or was already released is left alone (#11565). A session the call
+   * moved from another device is moved back there, and one minted under an id its client chose is
+   * rolled back without retiring that id, which the client will name again (#11593).
    */
   async releaseUndeliveredAcquisition(receipt: AcquisitionReceipt): Promise<void> {
-    const minted = receipt.minted;
+    const { minted, rebound } = receipt;
+    if (rebound) {
+      await this.restoreUndeliveredRebind(rebound);
+    }
     if (!minted) {
       return;
     }
@@ -8105,8 +8147,47 @@ export class DevicePool {
     );
     await this.rollbackAssignments(
       new Map([[session.sessionId, { deviceId, session }]]),
-      "session-creation-cancelled",
+      minted.clientSuppliedId ? "allocation-rollback" : "session-creation-cancelled",
     );
+  }
+
+  /**
+   * Move a session back to the device it held before a rebind whose result never reached its
+   * caller. The session is only moved while it is still the one the rebind produced, on the device
+   * the rebind put it on. When its previous device cannot take it back (another session acquired
+   * it meanwhile) the session stays whole on the new device rather than bound to neither.
+   */
+  private async restoreUndeliveredRebind(
+    rebound: NonNullable<AcquisitionReceipt["rebound"]>,
+  ): Promise<void> {
+    const { session, deviceId, fromDeviceId } = rebound;
+    const { sessionId } = session;
+    const current = this.sessionManager.getSession(sessionId);
+    if (current !== session || current.assignedDevice !== deviceId) {
+      logger.info(
+        `[DevicePool] Not restoring cancelled rebind of session ${sessionId}: it no longer holds ${deviceId}`,
+      );
+      return;
+    }
+    logger.info(
+      `[DevicePool] Rebind of session ${sessionId} to ${deviceId} was cancelled before it was delivered; moving it back to ${fromDeviceId}`,
+    );
+    try {
+      await this.bindOrReuseDeviceSession(
+        sessionId,
+        fromDeviceId,
+        session.platform,
+        undefined,
+        undefined,
+        undefined,
+        true,
+      );
+    } catch (error) {
+      logger.warn(
+        `[DevicePool] Session ${sessionId} stays on ${deviceId}: its previous device ${fromDeviceId} could not take it back: ${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   private assertExpectedRecoverySession(
@@ -8513,15 +8594,9 @@ export class DevicePool {
    * session is judging or recording its base. Any other id is its own.
    */
   private ownershipSessionId(sessionId: string): string {
-    // A label session published under another label session resolves to the outermost base. Each
-    // hop is a strict prefix of the last, so this ends.
-    for (let current = sessionId; ;) {
-      const base = resolveToolSelectionBaseSessionUuid(current, this.sessionManager) ?? current;
-      if (base === current) {
-        return current;
-      }
-      current = base;
-    }
+    // A label session published under another label session resolves to the outermost base. The
+    // lookup judges only: it never releases an expired base.
+    return this.sessionManager.ownershipSessionUuid(sessionId);
   }
 
   /** Whether `mcpSessionId` acquired (or restored as its own) the owner of `sessionId`. */

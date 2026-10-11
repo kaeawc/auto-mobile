@@ -57,6 +57,12 @@ session: a command for it without `sessionUuid`, or naming a different session,
 fails with `code` `device_owned_by_other_session`. A device no session holds
 takes input from any client.
 
+A command whose session left the device (rebound or released) between being
+accepted and reaching the device fails with `code`
+`session_no_longer_owns_device` and `retryable: false`; nothing was sent. A
+`gestureStart` on an unheld device that a session acquires before the start is
+acknowledged is lifted and fails with `device_owned_by_other_session`.
+
 The same rule applies to tool calls; see [Device ownership](device-ownership.md).
 
 In the table, `?` marks optional parameters.

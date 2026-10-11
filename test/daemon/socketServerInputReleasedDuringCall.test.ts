@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
@@ -93,7 +93,7 @@ describe("input/* cut by a session release (#11381)", () => {
     return socket.responses.find((frame) => frame.id === "tap");
   }
 
-  beforeEach(() => {
+  function setUp(): void {
     tapEntered = Promise.withResolvers<void>();
     tapOutcome = Promise.withResolvers<{ success: boolean }>();
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
@@ -119,13 +119,33 @@ describe("input/* cut by a session release (#11381)", () => {
     internals.acceptingRequests = true;
     socket = new FakeSocket();
     internals.handleConnection(socket as unknown as Socket);
-  });
+  }
 
-  afterEach(() => {
+  function tearDown(): void {
     spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
     PlatformDeviceManagerFactory.reset();
     socket.destroy();
+  }
+
+  // CI's per-test time excludes only beforeAll: the first run through the daemon request path
+  // (JIT, lazy module state) is paid here once, with the same release-then-fail sequence the
+  // first test drives, instead of inside that timed test.
+  beforeAll(async () => {
+    setUp();
+    try {
+      await startTap();
+      await executionTracker.cancelSessionUuidExecutions(
+        OWNER,
+        new SessionReleasedDuringCallError(OWNER, "cleanup-expired"),
+      );
+      await failTapAndCollectResponse();
+    } finally {
+      tearDown();
+    }
   });
+
+  beforeEach(setUp);
+  afterEach(tearDown);
 
   test("the failure frame carries the typed terminal refusal", async () => {
     await startTap();

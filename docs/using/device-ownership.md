@@ -23,8 +23,19 @@ another connection's control call naming the derived session, or reaching one of
 the owner's devices through a `device` label, is refused (#11542). The same holds
 wherever ownership is recorded: restoring a derived session is restoring its
 base, so it is refused while another connection owns the base, and it never
-takes a label away from the base's owner (#11586). A device that no session
-holds takes calls from anyone.
+takes a label away from the base's owner (#11586). A heartbeat that
+claims liveness ownership of a derived session is judged against the base's
+liveness owner as well: another token cannot claim or adopt a label while the
+base owner's lease is live or in its grace, the owner holding the base is never
+refused on its label, and a label's current owner is never refused its own
+re-claim. A refused claim reports the hold it was refused for, the base owner's
+when the label's own owner holds nothing. The label keeps its own liveness
+record, so a token
+claimed on a label proves nothing about its base (#11602). A connection bound to
+the base session, or to one of its labels, may name any live session of that
+plan directly as `sessionUuid`; a name the base has not published, or a label
+that is not allocated, is still refused as a different session. A device that no
+session holds takes calls from anyone.
 
 A session's owner is the connection that acquired it, or that restored it after
 a reconnect. Ownership is cooperative: no token is needed, but naming a session's
@@ -338,6 +349,18 @@ An acquisition the daemon cannot grant yet is refused with a typed, retryable
 code (owner decision 2026-10-09, #10982): `device_cleanup_in_progress` while the
 device is still being released (#10960), and `device_owned_by_other_daemon` when
 another daemon holds it. Clients may wait and retry.
+
+Each refusal carries a `retryAfterMs` hint. For `device_cleanup_in_progress` it
+is the time the cleanup can still take (#11360): the rest of a release's bounded
+teardown, or the rest of a recording finalize's cap (120 s plus a 5 s grace),
+whether that finalize started at its session's release or when a session
+acquired a device with an owner-less recording on it (#11616). Cleanup with no
+cap of its own advertises a 1 s polling hint. `device_shutting_down` always
+advertises 2 s: a shutdown reservation is held across several separately bounded
+steps (stop, wait for the device to disappear, restart handoff) and records no
+deadline of its own, so there is no remaining time to report. The test runners
+wait `max(30 s, min(waited + retryAfterMs, 150 s))` in total, so a hint without a
+bound gets their 30 s floor, which is one shutdown step's own timeout.
 
 A session UUID whose device is being killed is refused with
 `session_terminal_release_in_progress`, `retryable: false` and `nextAction:

@@ -11,10 +11,14 @@ read-only unless the user also asks to fix a confirmed cause.
 1. Run `bash scripts/ci/classify-failure.sh <run-id>` first. It lists each
    failed/cancelled job, failed step, check-run annotations, and a matching
    `scripts/ci/known-flakes.txt` verdict.
-2. `pull_request.yml` keeps roll-up gates only for required checks (`IDE Plugin`,
-   `iOS Build`, `Shell Tests`); every other job reports directly, so read the
-   failing job itself. Advisory lanes (simulator, emulator, device-capture) are
-   non-required and never block a merge. The Linux unit run and its 100 ms
+2. The `green-main` ruleset requires 22 status checks; it is the authoritative
+   list (`gh api repos/kaeawc/auto-mobile/rulesets`, then
+   `rulesets/<id>` and its `required_status_checks` rule). The roll-up gates
+   (`IDE Plugin`, `iOS Build`, `Shell Tests`) only give a required context a
+   stable name over matrix or conditionally skipped jobs; the other required
+   checks are ordinary jobs that report directly, so read the failing job
+   itself. Advisory means not in the ruleset (simulator, emulator,
+   device-capture lanes): it never blocks a merge. The Linux unit run and its 100 ms
    budget step live in the required `Node TypeScript Build and Test
    (ubuntu-latest)` job (#10893), so a budget breach there blocks; classify it
    before rerunning (a loaded-runner overage is `RERUN-DONT-FIX`). Runs from

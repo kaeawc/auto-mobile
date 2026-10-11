@@ -1,4 +1,4 @@
-import type { AcquisitionReceipt } from "./acquisitionReceipt";
+import { mintedSession, type AcquisitionReceipt } from "./acquisitionReceipt";
 import type { SessionReleaseReason } from "./releaseReasons";
 import type { Environment } from "./poolConfig";
 import {
@@ -39,7 +39,7 @@ import { logger } from "../utils/logger";
 import { truncateBodyText } from "../utils/truncateBodyText";
 import { displayTransitions } from "../features/observe/DisplayTransition";
 import { getObserveCacheStore } from "../features/observe/cache/ObserveCacheRegistry";
-import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
+import { resolveOwnershipSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   ANONYMOUS_ACQUISITION_SESSION_SOURCE,
   isAnonymousAcquisitionSession,
@@ -8031,6 +8031,7 @@ export class DevicePool {
     }
     const assignmentSnapshot = this.snapshotSessionAssignment(device);
     const previousSession = this.sessionManager.getSession(sessionId);
+    const previousDeviceId = previousSession?.assignedDevice;
     this.assertExpectedRecoverySession(
       previousSession,
       sessionId,
@@ -8063,9 +8064,12 @@ export class DevicePool {
         },
       ),
     );
-    // A rebind keeps an id the client supplied, and a restored session predates this call.
+    // A rebind keeps an id the client supplied, and a restored session predates this call. A
+    // session moved off another device is recorded with where it was (#11593).
     if (!allowSessionRebind && previousSession === null) {
-      options.receipt.minted = { session, deviceId };
+      options.receipt.minted = mintedSession(session, deviceId);
+    } else if (previousDeviceId && previousDeviceId !== deviceId) {
+      options.receipt.rebound = { session, deviceId, fromDeviceId: previousDeviceId };
     }
     this.recordBindOwnership(caller.mcpSessionId, sessionId);
     this.notifyDeviceStateChanged(device);
@@ -8126,10 +8130,15 @@ export class DevicePool {
    * timed out while the bind was still finishing (typically publishing its cross-daemon claim), so
    * no client holds the session id. Only the session the acquisition minted is released, for good,
    * and only while it still holds the device; the claim goes with the device. A session that was
-   * reused, has been replaced, or was already released is left alone (#11565).
+   * reused, has been replaced, or was already released is left alone (#11565). A session the call
+   * moved from another device is moved back there, and one minted under an id its client chose is
+   * rolled back without retiring that id, which the client will name again (#11593).
    */
   async releaseUndeliveredAcquisition(receipt: AcquisitionReceipt): Promise<void> {
-    const minted = receipt.minted;
+    const { minted, rebound } = receipt;
+    if (rebound) {
+      await this.restoreUndeliveredRebind(rebound);
+    }
     if (!minted) {
       return;
     }
@@ -8139,8 +8148,47 @@ export class DevicePool {
     );
     await this.rollbackAssignments(
       new Map([[session.sessionId, { deviceId, session }]]),
-      "session-creation-cancelled",
+      minted.clientSuppliedId ? "allocation-rollback" : "session-creation-cancelled",
     );
+  }
+
+  /**
+   * Move a session back to the device it held before a rebind whose result never reached its
+   * caller. The session is only moved while it is still the one the rebind produced, on the device
+   * the rebind put it on. When its previous device cannot take it back (another session acquired
+   * it meanwhile) the session stays whole on the new device rather than bound to neither.
+   */
+  private async restoreUndeliveredRebind(
+    rebound: NonNullable<AcquisitionReceipt["rebound"]>,
+  ): Promise<void> {
+    const { session, deviceId, fromDeviceId } = rebound;
+    const { sessionId } = session;
+    const current = this.sessionManager.getSession(sessionId);
+    if (current !== session || current.assignedDevice !== deviceId) {
+      logger.info(
+        `[DevicePool] Not restoring cancelled rebind of session ${sessionId}: it no longer holds ${deviceId}`,
+      );
+      return;
+    }
+    logger.info(
+      `[DevicePool] Rebind of session ${sessionId} to ${deviceId} was cancelled before it was delivered; moving it back to ${fromDeviceId}`,
+    );
+    try {
+      await this.bindOrReuseDeviceSession(
+        sessionId,
+        fromDeviceId,
+        session.platform,
+        undefined,
+        undefined,
+        undefined,
+        true,
+      );
+    } catch (error) {
+      logger.warn(
+        `[DevicePool] Session ${sessionId} stays on ${deviceId}: its previous device ${fromDeviceId} could not take it back: ${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   private assertExpectedRecoverySession(
@@ -8547,15 +8595,8 @@ export class DevicePool {
    * session is judging or recording its base. Any other id is its own.
    */
   private ownershipSessionId(sessionId: string): string {
-    // A label session published under another label session resolves to the outermost base. Each
-    // hop is a strict prefix of the last, so this ends.
-    for (let current = sessionId; ;) {
-      const base = resolveToolSelectionBaseSessionUuid(current, this.sessionManager) ?? current;
-      if (base === current) {
-        return current;
-      }
-      current = base;
-    }
+    // A label session published under another label session resolves to the outermost base.
+    return resolveOwnershipSessionUuid(sessionId, this.sessionManager);
   }
 
   /** Whether `mcpSessionId` acquired (or restored as its own) the owner of `sessionId`. */

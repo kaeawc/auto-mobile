@@ -43,8 +43,8 @@ interface Rig {
   request(method: string, params: Record<string, unknown>): Promise<DaemonMethodResult>;
   /** Move the clock forward by `ms` without running a scan. */
   advance(ms: number): void;
-  /** One on-time monitor scan `SCAN_MS` later; does not wait for the releases it starts. */
-  scanOnTime(): Promise<void>;
+  /** One monitor scan `afterMs` later (on time by default); does not wait for its releases. */
+  scanOnTime(afterMs?: number): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -60,6 +60,7 @@ function gateOwnershipWrite(persistence: FakeDeviceSessionPersistence): {
   open(): void;
   fail(error: Error): void;
 } {
+  let gated = true;
   let open!: () => void;
   let fail!: (error: Error) => void;
   const wait = new Promise<void>((resolve, reject) => {
@@ -68,10 +69,19 @@ function gateOwnershipWrite(persistence: FakeDeviceSessionPersistence): {
   });
   const write = persistence.recordLivenessOwnership.bind(persistence);
   persistence.recordLivenessOwnership = async (sessionUuid, ownerToken) => {
-    await wait;
+    // Only writes started while the gate is closed wait on it; a retry after it goes straight in.
+    if (gated) {
+      await wait;
+    }
     await write(sessionUuid, ownerToken);
   };
-  return { open, fail };
+  const settleWith = <A extends unknown[]>(settle: (...args: A) => void) => {
+    return (...args: A) => {
+      gated = false;
+      settle(...args);
+    };
+  };
+  return { open: settleWith(open), fail: settleWith(fail) };
 }
 
 async function setUpRig(ownership?: "awaiting-owner"): Promise<Rig> {
@@ -114,8 +124,8 @@ async function setUpRig(ownership?: "awaiting-owner"): Promise<Rig> {
     request: (method, params) =>
       handleDaemonRequest({ id: method, type: "daemon_request", method, params }, state),
     advance,
-    scanOnTime: async () => {
-      advance(SCAN_MS);
+    scanOnTime: async (afterMs = SCAN_MS) => {
+      advance(afterMs);
       void monitor.tick().catch(() => undefined);
       await settle();
     },
@@ -295,6 +305,7 @@ describe("a returning owner's re-claim of a rehydrated session while its write i
 
     gate.open();
     expect((await reclaim).success).toBe(true);
+    expect(r.manager.getSession(SESSION)?.awaitingOwnerSince).toBeUndefined();
   });
 
   test("a re-claim whose write fails leaves the session awaiting its owner on the original window", async () => {
@@ -344,5 +355,25 @@ describe("a returning owner's re-claim of a rehydrated session while its write i
     expect(r.reaped).toEqual([]);
     await r.scanOnTime();
     expect(r.reaped).toEqual(["heartbeat-timeout"]);
+  });
+
+  test("a daemon stall while the re-claim write is pending is still forgiven when the write fails", async () => {
+    const r = (rig = await setUpRig("awaiting-owner"));
+    const gate = gateOwnershipWrite(r.persistence);
+    r.advance(1_000);
+    const reclaim = claimingHeartbeat(r);
+    await settle();
+    await r.scanOnTime();
+    // The daemon stalls for 20 s; the late scan forgives the stall on the owner window too.
+    await r.scanOnTime(20_000);
+
+    gate.fail(new Error("database is locked"));
+    expect((await reclaim.catch(() => ({ success: false }))).success).toBe(false);
+    expect(r.manager.getSession(SESSION)?.ownership).toBe("awaiting-owner");
+
+    // The undone claim returns to the forgiven window, so the owner's retry still finds it.
+    await r.scanOnTime();
+    expect(r.reaped).toEqual([]);
+    expect((await claimingHeartbeat(r)).success).toBe(true);
   });
 });

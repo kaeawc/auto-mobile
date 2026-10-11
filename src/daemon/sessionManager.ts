@@ -9516,7 +9516,7 @@ export class SessionManager {
     },
     processedClaims: Set<string>,
   ): Promise<void> {
-    const forgetClaimantHeartbeat = this.markAcceptedClaimantHeartbeating(session);
+    const settleClaimantHeartbeat = this.markAcceptedClaimantHeartbeating(session);
     try {
       if (this.deviceSessionRepository.recordLivenessOwnership) {
         await this.deviceSessionRepository.recordLivenessOwnership(session.sessionId, ownerToken);
@@ -9527,9 +9527,10 @@ export class SessionManager {
       processedClaims.delete(ownerToken);
       session.livenessOwnerToken = previous.previousOwnerToken;
       session.lastOwnerHeartbeat = previous.previousOwnerHeartbeat;
-      forgetClaimantHeartbeat();
+      settleClaimantHeartbeat("undo");
       throw error;
     }
+    settleClaimantHeartbeat("keep");
   }
 
   /**
@@ -9541,24 +9542,29 @@ export class SessionManager {
    * (#11079); the lease itself was stamped with the takeover, and is what the session is judged
    * on from here. Called only for an accepted claim, so a refused one changes nothing.
    *
-   * Returns the undo for a claim whose write fails: the session is again as unheard and as
-   * unclaimed as the claim found it. A heartbeat or tool call recorded while the write was
-   * pending moved the activity generation and stands on its own, so the undo leaves it alone.
+   * Returns how the claim settles. "undo", for a claim whose write fails, leaves the session as
+   * unheard and as unclaimed as the claim found it; a heartbeat or tool call recorded while the
+   * write was pending moved the activity generation and stands on its own, so the undo leaves it
+   * alone. A rehydrated session's owner window (`awaitingOwnerSince`) stays in place while the
+   * write is pending, so the daemon's stall forgiveness keeps moving it and an undone claim
+   * returns to the forgiven window, not the one the claim found; it is dropped once the
+   * promotion stands.
    */
-  private markAcceptedClaimantHeartbeating(session: Session): () => void {
-    const { hasReceivedHeartbeat, ownership, awaitingOwnerSince, activityGeneration } = session;
+  private markAcceptedClaimantHeartbeating(session: Session): (outcome: "keep" | "undo") => void {
+    const { hasReceivedHeartbeat, ownership, activityGeneration } = session;
     session.hasReceivedHeartbeat = true;
     if (ownership === "awaiting-owner") {
       session.ownership = "owned";
-      session.awaitingOwnerSince = undefined;
     }
-    return () => {
-      if (session.activityGeneration !== activityGeneration) {
+    return (outcome) => {
+      if (outcome === "undo" && session.activityGeneration === activityGeneration) {
+        session.hasReceivedHeartbeat = hasReceivedHeartbeat;
+        session.ownership = ownership;
         return;
       }
-      session.hasReceivedHeartbeat = hasReceivedHeartbeat;
-      session.ownership = ownership;
-      session.awaitingOwnerSince = awaitingOwnerSince;
+      if (ownership === "awaiting-owner" && session.ownership === "owned") {
+        session.awaitingOwnerSince = undefined;
+      }
     };
   }
 

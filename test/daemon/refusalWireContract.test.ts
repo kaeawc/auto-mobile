@@ -9,8 +9,17 @@ import * as boundSessionRefusal from "../../src/server/deviceOutsideBoundSession
 import * as daemonTypes from "../../src/daemon/types";
 import type { ManagedSlotsResult } from "../../src/models/managedSlotsResult";
 import { DEFAULT_PROVISION_DEVICE_RETRYABILITY } from "../../src/devices/exactDeviceProvisioning";
+import { planRefusalFields } from "../../src/server/planExecutionOrchestrator";
+import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
+import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
+import {
+  DaemonRestartDeferredError,
+  DaemonRestartPendingError,
+} from "../../src/daemon/daemonRestartAdmission";
 import {
   MANAGED_SLOT_FIXTURE_PREFIX,
+  recoveryPendingError,
+  shapedRefusalResult,
   PROVISION_DEVICE_FIXTURE_PREFIX,
   buildRefusalSurfaceFixtures,
   type RefusalSurfaceFixture,
@@ -311,6 +320,81 @@ describe("refusal wire contract", () => {
         expect(actual, code).not.toBe(row.expected);
       }
     }
+  });
+
+  describe("one class, three wires", () => {
+    // The MCP result, the socket failure frame and the executePlan result of a thrown error must
+    // agree on the class's `code` and `retryable` (#11544); the owner contracts pin the values.
+    const SESSION = "11111111-2222-4333-8444-555555555555";
+    const classes: readonly (readonly [
+      string,
+      () => Error,
+      string,
+      boolean,
+      string | undefined,
+    ])[] = [
+      [
+        "idle release cut a call",
+        () => new SessionReleasedDuringCallError(SESSION, "cli-idle-timeout"),
+        "session_ownership_lost",
+        false,
+        "acquire_new_session",
+      ],
+      [
+        "heartbeat release cut a call",
+        () => new SessionReleasedDuringCallError(SESSION, "heartbeat-timeout"),
+        "session_ownership_lost",
+        false,
+        "acquire_new_session",
+      ],
+      [
+        "restart deferred",
+        () => new DaemonRestartDeferredError("a device operation is active"),
+        "daemon_restart_deferred",
+        true,
+        undefined,
+      ],
+      [
+        "restart pending",
+        () => new DaemonRestartPendingError(),
+        "daemon_restart_pending",
+        true,
+        undefined,
+      ],
+      [
+        "session recovery pending",
+        recoveryPendingError,
+        "session_recovery_pending",
+        true,
+        undefined,
+      ],
+    ];
+
+    test.each(classes)("%s", (_name, build, code, retryable, nextAction) => {
+      const error = build();
+      const mcp = readFields(JSON.parse(shapedRefusalResult(error).content[0].text) as WirePayload);
+      const frame = mcpRequestFailureDetails(error, undefined);
+      const plan = planRefusalFields(error);
+      expect([mcp.code, mcp.retryable]).toEqual([code, retryable]);
+      expect(mcp.acquireNewSession).toBe(nextAction === "acquire_new_session");
+      expect([frame.code, frame.retryable, frame.nextAction]).toEqual([
+        code,
+        retryable,
+        nextAction,
+      ]);
+      expect([plan.code, plan.retryable, plan.nextAction]).toEqual([code, retryable, nextAction]);
+    });
+
+    test("session_recovery_pending keeps its nested details for current readers", () => {
+      const error = recoveryPendingError();
+      expect(mcpRequestFailureDetails(error, undefined).details).toMatchObject({
+        code: "session_recovery_pending",
+        retryable: true,
+        sessionUuid: SESSION,
+        recoveryWindowRemainingMs: 120_000,
+      });
+      expect(planRefusalFields(error).details).toMatchObject({ code: "session_recovery_pending" });
+    });
   });
 
   describe("surfaces that carry a refusal but are not a tool result", () => {

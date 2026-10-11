@@ -147,13 +147,16 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
     await shutdownAndroidForSystemUiAnr(context, shutdown);
     shutdownWasConfirmed = true;
 
-    replacementBoot = await bootSystemUiAnrReplacement(
-      bootService,
-      args,
-      sourceImage,
-      totalDeadlineMs,
-      signal,
-      progress,
+    replacementBoot = carryCreatedByCall(
+      await bootSystemUiAnrReplacement(
+        bootService,
+        args,
+        sourceImage,
+        totalDeadlineMs,
+        signal,
+        progress,
+      ),
+      boot,
     );
     const adoptedReplacementBoot = replacementBoot;
     assertSystemUiAnrReplacementIdentity(adoptedReplacementBoot, sourceImage);
@@ -296,6 +299,19 @@ async function bootSystemUiAnrReplacement(
     progress,
   );
   return { ...replacement, sourceImage };
+}
+
+/**
+ * The replacement reboots the same AVD, which the original boot may have created for this very
+ * call. The replacement booted an existing image, so its own `provisioned` is false; carry the
+ * original's, or a later bind failure could neither delete that AVD nor attribute it to this call
+ * (#11548). An AVD that pre-existed stays false: the original is false then too.
+ */
+function carryCreatedByCall(
+  replacement: DeviceBootResult,
+  original: DeviceBootResult,
+): DeviceBootResult {
+  return { ...replacement, provisioned: original.provisioned || replacement.provisioned };
 }
 
 function assertSystemUiAnrReplacementIdentity(

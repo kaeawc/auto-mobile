@@ -117,6 +117,27 @@ export class DaemonRestartPendingError extends DaemonUnavailableError {
   }
 }
 
+/** The typed, retryable `daemon_restart_pending` envelope a refused call is answered with. */
+export function daemonRestartPendingPayload(error: DaemonRestartPendingError): {
+  error: { code: string; message: string; retryable: boolean };
+} {
+  return { error: { code: error.code, message: error.message, retryable: error.retryable } };
+}
+
+/** The typed, retryable `daemon_restart_deferred` envelope; the MCP result of a deferred restart. */
+export function daemonRestartDeferredPayload(error: DaemonRestartDeferredError): {
+  error: { code: string; message: string; retryable: boolean; retryAfterMs: number };
+} {
+  return {
+    error: {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+      retryAfterMs: error.retryAfterMs,
+    },
+  };
+}
+
 /**
  * The tool result a call gets when it starts during an accepted daemon restart: the typed,
  * retryable `daemon_restart_pending` envelope, in both text and structured content.
@@ -126,9 +147,7 @@ export function daemonRestartPendingToolResult(error: DaemonRestartPendingError)
   structuredContent: Record<string, unknown>;
   isError: true;
 } {
-  const pending = {
-    error: { code: error.code, message: error.message, retryable: error.retryable },
-  };
+  const pending = daemonRestartPendingPayload(error);
   return {
     content: [{ type: "text", text: JSON.stringify(pending) }],
     structuredContent: pending,

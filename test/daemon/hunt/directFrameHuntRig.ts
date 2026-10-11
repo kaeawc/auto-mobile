@@ -143,6 +143,9 @@ export function createDirectFrameRig(
       getDevicePool: () => fakePool,
     } as unknown as DaemonStateAccess,
     new FakeTimer(),
+    null,
+    // The storage tools are enabled, so an `ide/*` storage frame reaches its ownership gate.
+    { sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} } },
   );
   const internals = server as unknown as Internals;
   internals.acceptingRequests = true;

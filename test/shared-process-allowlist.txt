@@ -186,6 +186,7 @@ test/daemon/processGenerationFields.test.ts
 test/daemon/proxyHeartbeatStateMachine.property.test.ts
 test/daemon/proxyLivenessRecovery.test.ts
 test/daemon/proxyReleaseReasonClassification.test.ts
+test/daemon/proxySessionEventLeavesSiblingCallInFlight.test.ts
 test/daemon/proxySignalStopReleasesExecution.test.ts
 test/daemon/recycledProcessGeneration.test.ts
 test/daemon/refusalWireContract.test.ts

@@ -1530,6 +1530,8 @@ export class SessionManager {
    * blocks the live holder, but counts as cleanup once the device has no owner again.
    */
   private readonly acquisitionDeviceCleanups: Map<string, Promise<void>> = new Map();
+  /** When each device's capped acquisition cleanups settle at the latest (#11616). */
+  private readonly acquisitionDeviceCleanupSettlesBy: Map<string, number> = new Map();
   /**
    * Active per-condition network TTLs (issue #6085 item 2), keyed by session id.
    * When a session degrades the network with an `expiresInSeconds`, a timer resets
@@ -2359,7 +2361,8 @@ export class SessionManager {
   /**
    * How long a bind refused by {@link hasDeviceCleanupInProgress} should wait before retrying
    * (#10960): the remaining time of the cleanup's cap or of the in-flight release's bounded
-   * teardown and persist phases, or a default polling hint when nothing bounds it.
+   * teardown and persist phases, or a default polling hint when nothing bounds it. An acquisition
+   * cleanup counts once it quarantines the device, that is once its holder is gone (#11616).
    */
   getDeviceCleanupRetryAfterMs(deviceId: string): number {
     const now = this.sessionNow();
@@ -2377,6 +2380,13 @@ export class SessionManager {
     if (cleanupBound !== undefined) {
       bounds.push(cleanupBound);
     }
+    const acquisitionBound =
+      this.acquisitionDeviceCleanups.has(deviceId) && this.getSessionForDevice(deviceId) === null
+        ? this.acquisitionDeviceCleanupSettlesBy.get(deviceId)
+        : undefined;
+    if (acquisitionBound !== undefined) {
+      bounds.push(acquisitionBound);
+    }
     const remaining = Math.max(0, ...bounds.map((bound) => bound - now));
     return remaining > 0 ? remaining : DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
   }
@@ -2387,7 +2397,17 @@ export class SessionManager {
    * {@link hasDeviceCleanupInProgress} true (the holder's own reuse must not be refused); if the
    * holder releases first, the still-running work quarantines the device for the next acquirer.
    */
-  registerAcquisitionDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
+  registerAcquisitionDeviceCleanup(
+    deviceId: string,
+    cleanup: Promise<unknown>,
+    /** The cleanup's own cap, when it has one: it bounds the retry hint a refused bind gets. */
+    capMs?: number,
+  ): void {
+    if (capMs !== undefined) {
+      const settlesBy = this.sessionNow() + capMs;
+      const previous = this.acquisitionDeviceCleanupSettlesBy.get(deviceId) ?? 0;
+      this.acquisitionDeviceCleanupSettlesBy.set(deviceId, Math.max(previous, settlesBy));
+    }
     const tracked = Promise.allSettled([cleanup]).then(() => undefined);
     const previous = this.acquisitionDeviceCleanups.get(deviceId);
     const combined = previous
@@ -2397,6 +2417,7 @@ export class SessionManager {
     void combined.then(() => {
       if (this.acquisitionDeviceCleanups.get(deviceId) === combined) {
         this.acquisitionDeviceCleanups.delete(deviceId);
+        this.acquisitionDeviceCleanupSettlesBy.delete(deviceId);
       }
     });
   }

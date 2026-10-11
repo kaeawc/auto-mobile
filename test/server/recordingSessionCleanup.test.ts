@@ -18,7 +18,7 @@ class FakeSessionManager implements CleanupManager {
   releaseCallbacks: ReleaseCallback[] = [];
   unboundCallbacks: UnboundCallback[] = [];
   pendingCleanups: Array<{ deviceId: string; cleanup: Promise<unknown>; capMs?: number }> = [];
-  acquisitionCleanups: Array<{ deviceId: string; cleanup: Promise<unknown> }> = [];
+  acquisitionCleanups: Array<{ deviceId: string; cleanup: Promise<unknown>; capMs?: number }> = [];
 
   onSessionRelease(callback: ReleaseCallback): void {
     this.releaseCallbacks.push(callback);
@@ -30,8 +30,12 @@ class FakeSessionManager implements CleanupManager {
     this.pendingCleanups.push({ deviceId, cleanup, capMs });
   }
 
-  registerAcquisitionDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
-    this.acquisitionCleanups.push({ deviceId, cleanup });
+  registerAcquisitionDeviceCleanup(
+    deviceId: string,
+    cleanup: Promise<unknown>,
+    capMs?: number,
+  ): void {
+    this.acquisitionCleanups.push({ deviceId, cleanup, capMs });
   }
 
   release(sessionId: string, deviceId: string, upgradeOnly = false): void {
@@ -388,6 +392,8 @@ describe("registerRecordingSessionCleanup", () => {
       // Tracked as acquisition cleanup so the holder's own reuse is not refused (#11041).
       expect(manager.pendingCleanups).toHaveLength(0);
       expect(manager.acquisitionCleanups.map((entry) => entry.deviceId)).toEqual(["SIM-1"]);
+      // The same bound as the release-time finalize: cap plus the incomplete-mark grace (#11616).
+      expect(manager.acquisitionCleanups.map((entry) => entry.capMs)).toEqual([125_000]);
       recordings.start("SIM-1", "session-b");
     });
 

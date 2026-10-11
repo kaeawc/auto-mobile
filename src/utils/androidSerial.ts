@@ -73,10 +73,18 @@ interface TransportGroup {
   transportIds: Map<string, string | undefined>;
 }
 
+type KeyedTransportGroup = [string, TransportGroup];
+
+interface TransportProbe {
+  identity?: TransportIdentity;
+  provenEmulator?: boolean;
+}
+
 interface ConnectionEvidence {
   transportId?: string;
-  identity: Promise<TransportIdentity | undefined>;
+  probe: Promise<TransportProbe>;
   provenIdentity?: TransportIdentity;
+  provenEmulator?: boolean;
 }
 
 /** Only a loopback adb port identifies a local emulator's console slot. */
@@ -106,7 +114,7 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
     );
   }
 
-  private async readIdentity(device: BootedDevice): Promise<TransportIdentity | undefined> {
+  private async readIdentity(device: BootedDevice): Promise<TransportProbe> {
     try {
       const adb = this.adbFactory.create(device);
       const property = async (name: string) =>
@@ -121,11 +129,14 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
           ? device.deviceId
           : loopbackConsoleSerial(device.deviceId);
         // Never merge two emulator instances merely because they share an AVD name.
-        return avdName && consoleSerial ? { key: consoleSerial, avdName } : undefined;
+        return {
+          identity: avdName && consoleSerial ? { key: consoleSerial, avdName } : undefined,
+          provenEmulator: true,
+        };
       }
       // Generic factory serials cannot prove that two endpoints reach one handset.
       if (!serial || ["unknown", "0123456789abcdef"].includes(serial.toLowerCase())) {
-        return undefined;
+        return {};
       }
       const bootId = (
         await adb.execute(["shell", "cat", "/proc/sys/kernel/random/boot_id"], {
@@ -133,15 +144,17 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
           timeoutMs: 2000,
         })
       ).stdout.trim();
-      return bootId
-        ? { key: `physical:${JSON.stringify([serial, bootId])}`, physicalSerial: serial }
-        : undefined;
+      return {
+        identity: bootId
+          ? { key: `physical:${JSON.stringify([serial, bootId])}`, physicalSerial: serial }
+          : undefined,
+      };
     } catch (error) {
       logger.warn(
         `Android transport identity unavailable for ${device.deviceId}: ${errorMessage(error)}`,
         error,
       );
-      return undefined;
+      return {};
     }
   }
 
@@ -189,14 +202,20 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
   ): Promise<TransportIdentity | undefined> {
     const transportId = transportIdFor(device);
     let connection = this.connections.get(device.deviceId);
-    if (!connection || connection.transportId !== transportId) {
-      connection = { transportId, identity: this.readIdentity(device) };
+    if (
+      !connection ||
+      connection.transportId !== transportId ||
+      (connection.provenEmulator && !connection.provenIdentity)
+    ) {
+      // Retry unresolved identity on the next refresh while retaining successful qemu evidence.
+      connection = { transportId, probe: this.readIdentity(device) };
       this.connections.set(device.deviceId, connection);
     }
-    const identity = await connection.identity;
+    const { identity, provenEmulator } = await connection.probe;
+    connection.provenEmulator = provenEmulator;
     // Share an in-flight probe, but retry missing evidence on the next refresh.
     // An older failure must not evict evidence for a replacement transport_id.
-    if (!identity && this.connections.get(device.deviceId) === connection) {
+    if (!identity && !provenEmulator && this.connections.get(device.deviceId) === connection) {
       this.connections.delete(device.deviceId);
     }
     if (!identity || this.contradictsEmulatorPeer(identity, devices)) {
@@ -431,19 +450,113 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
     return this.routes.get(deviceId) ?? deviceId;
   }
 
+  /** False only with positive evidence of a different device; undefined held id means unknown. */
+  mayAliasDevice(transport: BootedDevice, heldDeviceId?: string): boolean {
+    const serial = transport.deviceId;
+    const identity = this.currentProvenIdentity(transport);
+    const target = this.currentGroup(transport);
+    const held = this.groupFor(heldDeviceId);
+    if (this.sharesHeldIdentity(serial, identity, target, heldDeviceId, held)) {
+      return true;
+    }
+    if (this.hasFoldedIdentity(target, serial) && target[1].canonical !== heldDeviceId) {
+      return false;
+    }
+    if (heldDeviceId === undefined) {
+      return true;
+    }
+    if (
+      this.hasPhysicalOrEmulatorProof(transport) &&
+      (held?.[1].physicalSerial !== undefined || isPhysicalAndroidUsbSerial(heldDeviceId))
+    ) {
+      return false;
+    }
+    const console = loopbackConsoleSerial(serial);
+    const heldConsole = this.heldConsoleSerial(heldDeviceId, held);
+    return !(console && heldConsole && console !== heldConsole);
+  }
+
+  /** Rules 2 and 4 apply only after ruling out a shared held identity. */
+  private hasPhysicalOrEmulatorProof(transport: BootedDevice): boolean {
+    const connection = this.currentConnection(transport);
+    return Boolean(connection?.provenIdentity?.physicalSerial || connection?.provenEmulator);
+  }
+
+  private currentProvenIdentity(transport: BootedDevice): TransportIdentity | undefined {
+    return this.currentConnection(transport)?.provenIdentity;
+  }
+
+  private currentConnection(transport: BootedDevice): ConnectionEvidence | undefined {
+    const currentConnection = this.connections.get(transport.deviceId);
+    return currentConnection?.transportId === transportIdFor(transport)
+      ? currentConnection
+      : undefined;
+  }
+
+  private currentGroup(transport: BootedDevice): KeyedTransportGroup | undefined {
+    const serial = transport.deviceId;
+    return [...this.groups.entries()].find(
+      ([, group]) =>
+        group.serials.has(serial) &&
+        group.transportIds.get(serial) === transportIdFor(transport) &&
+        this.hasCurrentTransport(group, serial),
+    );
+  }
+
+  private groupFor(serial: string | undefined): KeyedTransportGroup | undefined {
+    return [...this.groups.entries()].find(
+      ([, group]) =>
+        group.canonical === serial ||
+        (serial !== undefined &&
+          group.serials.has(serial) &&
+          this.hasCurrentTransport(group, serial)),
+    );
+  }
+
+  private sharesHeldIdentity(
+    serial: string,
+    identity: TransportIdentity | undefined,
+    target: KeyedTransportGroup | undefined,
+    heldDeviceId: string | undefined,
+    held: KeyedTransportGroup | undefined,
+  ): boolean {
+    // Same physical serial or fold key is never evidence that two devices differ.
+    const physical = identity?.physicalSerial;
+    return (
+      heldDeviceId === serial ||
+      (target !== undefined && target[0] === held?.[0]) ||
+      (identity !== undefined && identity.key === held?.[0]) ||
+      (physical !== undefined && [heldDeviceId, held?.[1].physicalSerial].includes(physical))
+    );
+  }
+
+  private hasFoldedIdentity(
+    target: KeyedTransportGroup | undefined,
+    serial: string,
+  ): target is KeyedTransportGroup {
+    // Singleton groups for unproven rows are bookkeeping, not folded identity proof.
+    return (
+      target !== undefined &&
+      !this.unproven.has(serial) &&
+      Boolean(target[1].physicalSerial ?? target[1].avdName)
+    );
+  }
+
+  private heldConsoleSerial(heldDeviceId: string, held: KeyedTransportGroup | undefined) {
+    return isAndroidEmulatorSerial(heldDeviceId)
+      ? heldDeviceId
+      : held?.[1].avdName && isAndroidEmulatorSerial(held[0])
+        ? held[0]
+        : undefined;
+  }
+
   /**
    * The pooled canonical id a known alias serial belongs to, else the serial itself. An alias maps
    * only with current transport evidence, like {@link mapDiscovery}: an additive fold can keep a
    * stale `ip:port` alias that another phone now answers on (#11164).
    */
   canonicalFor(serial: string): string {
-    return (
-      [...this.groups.values()].find(
-        (group) =>
-          group.canonical === serial ||
-          (group.serials.has(serial) && this.hasCurrentTransport(group, serial)),
-      )?.canonical ?? serial
-    );
+    return this.groupFor(serial)?.[1].canonical ?? serial;
   }
 
   /** Whether the latest probed connection for `serial` is the one `group` folded. */

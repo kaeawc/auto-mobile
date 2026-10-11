@@ -7,6 +7,8 @@ import type { SessionToolSelectionService } from "./SessionToolSelectionService"
 import type { ProgressCallback } from "../../server/toolRegistry";
 
 export type ToolSelectionContext = {
+  /** A device-aware wrapper already owns this execution's session resolution (#11680). */
+  deviceAwareDispatch?: true;
   /**
    * The call runs on the read-only device path: set at MCP ingress when observe's raw arguments
    * explicitly name a device, and by ToolRegistry for a sessionless read-only call on a device

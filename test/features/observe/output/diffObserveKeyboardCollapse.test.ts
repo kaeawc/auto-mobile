@@ -217,6 +217,8 @@ describe("diffObserveResult — Android keyboard collapse is unchanged (#9980)",
     const diff = diffObserveResult(before, after, COLLAPSE);
     expect(diff.added).toEqual([]);
     expect(diff.removed).toEqual([]);
-    expect(diff.changed).toHaveLength(41);
+    // 41 raw entries; two are bounds-only relayouts of nodes with no affordance, which the
+    // skeleton projection omits (#11637).
+    expect(diff.changed).toHaveLength(39);
   });
 });

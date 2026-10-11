@@ -39,7 +39,6 @@ import { logger } from "../utils/logger";
 import { truncateBodyText } from "../utils/truncateBodyText";
 import { displayTransitions } from "../features/observe/DisplayTransition";
 import { getObserveCacheStore } from "../features/observe/cache/ObserveCacheRegistry";
-import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   ANONYMOUS_ACQUISITION_SESSION_SOURCE,
   isAnonymousAcquisitionSession,
@@ -49,6 +48,7 @@ import {
   SessionRecoveryIdentityLossError,
   type RehydrationDeviceReservation,
   type Session,
+  type SessionCacheData,
   type SessionRecoveryTarget,
 } from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
@@ -56,6 +56,7 @@ import {
   deviceAlreadyAssignedToAnotherSessionError,
   deviceAssignedToOtherSessionError,
   InputDeviceOwnedError,
+  MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
 } from "./inputDeviceOwnership";
 import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import {
@@ -673,6 +674,19 @@ export interface ShutdownIdentityReservation {
 }
 
 const ALLOCATION_SNAPSHOT_STALE_RETRIES = 3;
+
+/**
+ * The session overrides `SessionManager`'s rebind restores on the device the session leaves. A
+ * session moved back to that device (an undone rebind) no longer has them applied there.
+ */
+const OVERRIDES_A_REBIND_RESTORES = [
+  "keepScreenAwake",
+  "biometricEnrollment",
+  "networkCondition",
+  "clock",
+  "rotation",
+  "screenReader",
+] as const satisfies ReadonlyArray<keyof SessionCacheData>;
 
 /** Bound on the adb state read that decides a recovery reservation's lift (#10074). */
 const ANDROID_OFFLINE_PROBE_TIMEOUT_MS = 10_000;
@@ -8032,6 +8046,8 @@ export class DevicePool {
     const assignmentSnapshot = this.snapshotSessionAssignment(device);
     const previousSession = this.sessionManager.getSession(sessionId);
     const previousDeviceId = previousSession?.assignedDevice;
+    // Copied before the rebind: it replaces the session's cache and its restores edit the old one.
+    const previousCacheData = previousSession ? { ...previousSession.cacheData } : undefined;
     this.assertExpectedRecoverySession(
       previousSession,
       sessionId,
@@ -8064,12 +8080,20 @@ export class DevicePool {
         },
       ),
     );
-    // A rebind keeps an id the client supplied, and a restored session predates this call. A
-    // session moved off another device is recorded with where it was (#11593).
-    if (!allowSessionRebind && previousSession === null) {
-      options.receipt.minted = mintedSession(session, deviceId);
-    } else if (previousDeviceId && previousDeviceId !== deviceId) {
-      options.receipt.rebound = { session, deviceId, fromDeviceId: previousDeviceId };
+    // A restored session predates this call. A session minted under the id its client chose is
+    // recorded as such here, at the commit, so a failure of anything after it (the claim publish
+    // included) takes it back without retiring the id. A session moved off another device is
+    // recorded with where it was (#11593).
+    const clientChosen = options.receipt.clientChosenSessionId === sessionId;
+    if (previousSession === null && (!allowSessionRebind || clientChosen)) {
+      options.receipt.minted = mintedSession(session, deviceId, clientChosen);
+    } else if (previousDeviceId && previousDeviceId !== deviceId && previousCacheData) {
+      options.receipt.rebound = {
+        session,
+        deviceId,
+        fromDeviceId: previousDeviceId,
+        cacheData: previousCacheData,
+      };
     }
     this.recordBindOwnership(caller.mcpSessionId, sessionId);
     this.notifyDeviceStateChanged(device);
@@ -8188,6 +8212,29 @@ export class DevicePool {
         `[DevicePool] Session ${sessionId} stays on ${deviceId}: its previous device ${fromDeviceId} could not take it back: ${errorMessage(error)}`,
         error,
       );
+      return;
+    }
+    // Moving back was a rebind too, and a rebind keeps only the session's routing cache. The
+    // session is on the device that cache described again, so it gets back what still describes
+    // that device: its display pin, its readiness, its observation baselines. The overrides do
+    // not come back: the rebind restored each of them on the device (keep-awake, biometrics,
+    // network, clock, rotation, screen reader), so a cache saying they are applied would stop
+    // the next call from applying them again. Label routing is session-level and survives a
+    // rebind, so whatever it is now stays.
+    if (
+      this.sessionManager.getSession(sessionId) === session &&
+      session.assignedDevice === fromDeviceId
+    ) {
+      const restored: SessionCacheData = {
+        ...rebound.cacheData,
+        ...(session.cacheData.deviceLabels === undefined
+          ? {}
+          : { deviceLabels: session.cacheData.deviceLabels }),
+      };
+      for (const override of OVERRIDES_A_REBIND_RESTORES) {
+        delete restored[override];
+      }
+      session.cacheData = restored;
     }
   }
 
@@ -8595,15 +8642,9 @@ export class DevicePool {
    * session is judging or recording its base. Any other id is its own.
    */
   private ownershipSessionId(sessionId: string): string {
-    // A label session published under another label session resolves to the outermost base. Each
-    // hop is a strict prefix of the last, so this ends.
-    for (let current = sessionId; ;) {
-      const base = resolveToolSelectionBaseSessionUuid(current, this.sessionManager) ?? current;
-      if (base === current) {
-        return current;
-      }
-      current = base;
-    }
+    // A label session published under another label session resolves to the outermost base. The
+    // lookup judges only: it never releases an expired base.
+    return this.sessionManager.ownershipSessionUuid(sessionId);
   }
 
   /** Whether `mcpSessionId` acquired (or restored as its own) the owner of `sessionId`. */
@@ -8713,6 +8754,42 @@ export class DevicePool {
 
   resolveAndroidCanonicalId(deviceId: string): string {
     return this.androidTransportAliases.canonicalFor(deviceId);
+  }
+
+  /**
+   * Whether the pool would pool or assign this row: false for an Android transport whose identity
+   * the fold could not prove, which may front a handset pooled (and held) under another id.
+   */
+  isAndroidTransportAssignable(device: BootedDevice): boolean {
+    return this.androidTransportAliases.isAssignable(device);
+  }
+
+  androidTransportMayAliasDevice(transport: BootedDevice, heldDeviceId?: string): boolean {
+    return this.androidTransportAliases.mayAliasDevice(transport, heldDeviceId);
+  }
+
+  /** One unknown Android hold for slots not represented by the frame's live session snapshot. */
+  async androidManagedSlotHold(heldDeviceIds: readonly string[]) {
+    if (!this.managedSlotExclusion) {
+      return undefined;
+    }
+    await this.managedSlotExclusion.refresh({
+      maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
+    });
+    const represented = new Set(
+      heldDeviceIds.flatMap((id) => this.managedRefFor(id, "android").stableIds),
+    );
+    const stableId = [...this.managedSlotExclusion.stableIdsFor("android")].find(
+      (id) => !represented.has(id),
+    );
+    return stableId === undefined
+      ? undefined
+      : {
+          entry: this.managedSlotExclusion.holderOf({
+            platform: "android",
+            stableIds: [stableId],
+          }),
+        };
   }
 
   private isPooledAndroidEmulator(deviceId: string): boolean {

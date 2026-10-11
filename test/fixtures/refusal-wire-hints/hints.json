@@ -1,5 +1,9 @@
 {
-  "description": "How the Android and iOS runners treat a daemon retryAfterMs hint (#11544); both read this table and must give the same answer. usableHints: a wire hint becomes the hint the runner uses (null = absent): zero and negative count as absent, anything above the 150000 ms finalize cap is clamped to it. backoffSteps: the next wait for a refusal, given the waits already taken and the ms already waited, as (waits, waitedMs, hint, code) -> delayMs, null once the budget is spent; the default 30000 ms budget applies, and a finalize code's hint bounds the total wait instead of lengthening a step.",
+  "description": "How the Android and iOS runners treat a daemon retryAfterMs hint (#11544); both read this table and must give the same answer. usableHints: a wire hint becomes the hint the runner uses (null = absent): zero and negative count as absent, anything above the 150000 ms finalize cap is clamped to it. backoffSteps: the next wait for a refusal, given the waits already taken and the ms already waited, as (waits, waitedMs, hint, code) -> delayMs, null once the budget is spent; the default 30000 ms budget applies, and a finalize code's hint bounds the total wait instead of lengthening a step. finalizeWait: the codes whose retryAfterMs bounds the total wait (device_cleanup_in_progress carries the finalize time still remaining, device_shutting_down a polling hint), and the longest any client (MCP proxy, JUnit runner, XCTestRunner) waits one out (#11360); each client's own constant must equal waitBudgetMs, and the daemon's bounded cleanups never advertise more.",
+  "finalizeWait": {
+    "codes": ["device_cleanup_in_progress", "device_shutting_down"],
+    "waitBudgetMs": 150000
+  },
   "usableHints": [
     { "name": "absent", "wire": null, "usable": null },
     { "name": "positive", "wire": 5000, "usable": 5000 },

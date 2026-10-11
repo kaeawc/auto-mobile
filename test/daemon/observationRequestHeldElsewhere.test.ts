@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
 import type { OnObservationRequestedCallback } from "../../src/daemon/deviceDataStreamSocketServer";
 import { DeviceAssignedToManagedSlotError } from "../../src/daemon/managedSlots/managedSlotRefusal";
@@ -141,6 +142,9 @@ async function observeAs(options: {
     deviceRead.mockRestore();
     sessionObserve.mockRestore();
     daemon.getSessionManager().stopCleanupTimer();
+    // `new Daemon` publishes this fake-laden manager and pool on the process-wide DaemonState;
+    // leaving it initialized breaks every later file that reads the session manager (#11614).
+    DaemonState.getInstance().reset();
   }
 }
 

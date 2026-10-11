@@ -1124,6 +1124,9 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       logger.info(`[ToolRegistry] Entering session-based device assignment for ${sessionUuid}`);
       const sessionManager = DaemonState.getInstance().getSessionManager();
       const devicePool = DaemonState.getInstance().getDevicePool();
+      if (!readSession) {
+        refuseControlCallBeforeAdmission(name, providedDeviceId, sessionUuid);
+      }
       // A terminal ID keeps its durable TerminalSessionError. Only an ID that
       // was live during daemon restart can reach context creation without a
       // live session; never-issued IDs are rejected before assignment.
@@ -2395,6 +2398,31 @@ function assertSessionDeviceRouting(
 }
 
 /**
+ * The refusals a control call can be answered with before it is admitted to the session it
+ * names (#11558): its `deviceId` is not the session's device, or the session's device cannot be
+ * driven now (lost, recovering from an ADB reset, shutting down, identity unresolved). Admission
+ * is use: it restarts the session's idle window, and an admitted call's end restarts it again.
+ * A call refused here drives nothing, so it must move neither, or a client repeating a stale
+ * `deviceId` holds its device for ever. Both checks run again after admission, where they judge
+ * the session the call was actually admitted on.
+ */
+function refuseControlCallBeforeAdmission(
+  toolName: string,
+  providedDeviceId: string | undefined,
+  sessionUuid: string,
+): void {
+  const session = DaemonState.getInstance().getSessionManager().getSession(sessionUuid);
+  assertSessionDeviceRouting(
+    toolName,
+    providedDeviceId,
+    sessionUuid,
+    session?.assignedDevice,
+    session?.platform,
+  );
+  DaemonState.getInstance().getDevicePool().assertSessionReadyForAutomation(sessionUuid);
+}
+
+/**
  * Device ownership for tool calls (#10698, #10730), matching `input/*`: a device another live
  * session holds runs device-aware tools only for its holder (a derived `${base}:${label}` session
  * counts as its base). Sessionless calls are refused on a held device; unheld devices stay open.
@@ -2908,7 +2936,7 @@ export class ToolRegistryClass {
         });
         signal?.throwIfAborted();
         sessionUuid = resolvedTarget.sessionUuid;
-        if (selectionContext?.execution && !sessionUuid) {
+        if (selectionContext?.execution && !selectionContext.deviceAwareDispatch && !sessionUuid) {
           executionTracker.setResolvedAutolockSessionUuid(
             selectionContext.execution.executionId,
             undefined,
@@ -2919,6 +2947,7 @@ export class ToolRegistryClass {
           // Bind the ROUTING session, not the selection profile, so
           // nested calls re-inject the correct derived routing UUID.
           {
+            deviceAwareDispatch: true,
             routingSessionUuid: resolvedTarget.sessionUuid,
             toolSelectionProfileUuid: selectionContext?.toolSelectionProfileUuid,
             // Handlers read this to stay on their read-only path (observe, snapshotOf).

@@ -279,6 +279,69 @@ describe("CommandAndroidCapacitySource", () => {
     });
   });
 
+  // #11588: an emulator adb lists has a process, so a table read after the listing shows it.
+  test("reads the process table only after the adb listing has ended", async () => {
+    const reads: string[] = [];
+    let endAdb: (serials: string[]) => void = () => undefined;
+    const executor = new FakeHostCommandExecutor();
+    executor.executeCommand = async () => {
+      reads.push("ps");
+      return {
+        stdout: PS,
+        stderr: "",
+        toString: () => PS,
+        trim: () => PS.trim(),
+        includes: () => false,
+      };
+    };
+    const source = new CommandAndroidCapacitySource(
+      () => {
+        reads.push("adb started");
+        return new Promise<string[]>((resolve) => {
+          endAdb = (serials) => {
+            reads.push("adb ended");
+            resolve(serials);
+          };
+        });
+      },
+      executor,
+      { totalMemoryBytes: () => 32 * GIB, cpuCount: () => 8 },
+    );
+
+    const sample = source.sample();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(reads).toEqual(["adb started"]);
+    endAdb(["emulator-5554"]);
+
+    expect((await sample).emulatorProcessIds).toEqual([{ pid: QEMU_PID, ppid: DAEMON_PID }]);
+    expect(reads).toEqual(["adb started", "adb ended", "ps"]);
+  });
+
+  test("still reads the process table when the adb listing failed", async () => {
+    const executor = new FakeHostCommandExecutor();
+    executor.setCommandResponse("ps", {
+      stdout: PS,
+      stderr: "",
+      toString: () => PS,
+      trim: () => PS.trim(),
+      includes: (value: string) => PS.includes(value),
+    });
+    const source = new CommandAndroidCapacitySource(
+      async () => {
+        throw new Error("adb unavailable");
+      },
+      executor,
+      { totalMemoryBytes: () => 32 * GIB, cpuCount: () => 8 },
+    );
+
+    const sample = await source.sample();
+
+    expect(sample.serialListingFailed).toBe(true);
+    expect(sample.emulatorProcessIds).toEqual([{ pid: QEMU_PID, ppid: DAEMON_PID }]);
+    expect(sample.errors).toEqual(["adb: adb unavailable"]);
+  });
+
   test("reports unreadable sources as errors instead of an empty fleet", async () => {
     const executor = new FakeHostCommandExecutor();
     executor.executeCommand = async () => {

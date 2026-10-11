@@ -232,12 +232,15 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
    * count instead lost an external emulator adb had not listed whenever an admitted boot had no
    * process yet (#11564).
    *
-   * The two listings are read at different moments, in no fixed order, so the process view also
-   * adds a boot adb DOES list when the table lacks its process: the table was read before the
-   * boot spawned and adb after it was listed. Leaving it out counted that boot once in each view
-   * beside an external emulator only the table shows, and admitted past the limit (#11588). With
-   * it, each view is at least the emulators it could see plus every boot it could not, whichever
-   * read came first, so neither read has to wait for the other and no re-read is needed.
+   * The two listings are read at different moments, so the process view also adds a boot adb
+   * DOES list when the table lacks its process: the table was read before the boot spawned and
+   * adb after it was listed. Leaving it out counted that boot once in each view beside an
+   * external emulator only the table shows, and admitted past the limit (#11588). With it the
+   * count covers every boot this gate admitted whichever read came first.
+   *
+   * Emulators nobody admitted cannot be matched that way, so for them the order of the reads
+   * matters and the source fixes it: `CommandAndroidCapacitySource` reads adb first, which makes
+   * the later process table show every running emulator the listing shows.
    *
    * A boot handed off without a pid, or sampled without process ids, counts twice while its
    * process runs, up to and including the decision that first sees it listed: fail closed. The

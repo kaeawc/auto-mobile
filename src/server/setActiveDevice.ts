@@ -104,7 +104,7 @@ function refuseForeignOwnedSession(args: HandlerArgs): void {
   // is owned by connection, so it is foreign to that caller too.
   const daemonState = DaemonState.getInstance();
   if (
-    callerMcpSessionId === undefined &&
+    !callerMcpSessionId &&
     args.sessionUuid &&
     daemonState.isInitialized() &&
     daemonState.getDevicePool().isSessionOwnedByOtherConnection(args.sessionUuid)
@@ -113,7 +113,7 @@ function refuseForeignOwnedSession(args: HandlerArgs): void {
       .getSessionManager()
       .getSession(args.sessionUuid)?.assignedDevice;
     throw deviceAssignedToOtherSessionError(
-      sessionDevice ?? args.deviceId,
+      sessionDevice ?? "unknown",
       args.sessionUuid,
       undefined,
     );

@@ -26,9 +26,24 @@ afterEach(async () => {
   await scenario.stop();
 });
 
+/** The typed code of an `isError` tool result, as the proxy's MCP client receives a refusal. */
+const errorResultCode = (result: unknown): string | undefined => {
+  if (typeof result !== "object" || result === null || Reflect.get(result, "isError") !== true) {
+    return undefined;
+  }
+  const content: unknown = Reflect.get(result, "content");
+  const first: unknown = Array.isArray(content) ? content[0] : undefined;
+  const text: unknown = typeof first === "object" && first !== null && Reflect.get(first, "text");
+  const payload: unknown = typeof text === "string" ? JSON.parse(text) : undefined;
+  const code: unknown =
+    typeof payload === "object" && payload !== null ? Reflect.get(payload, "code") : undefined;
+  return typeof code === "string" ? code : "untyped-error";
+};
+
+/** How the call was answered: the refusal's code (thrown, or on the error result), or admitted. */
 const refusalCode = (call: Promise<unknown>): Promise<string | undefined> =>
   call.then(
-    () => "admitted",
+    (result) => errorResultCode(result) ?? "admitted",
     (error: { code?: string }) => error.code,
   );
 

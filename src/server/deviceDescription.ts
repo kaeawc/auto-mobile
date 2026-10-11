@@ -25,7 +25,7 @@ export type {
 export { projectConfiguredImage } from "../models/deviceDescription";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
 import { z } from "zod/v4";
-import { classifyPoolStatus } from "../daemon/devicePool";
+import { classifyPoolStatus, type PoolStatusBucket } from "../daemon/devicePool";
 import type { GenericAvailability, PooledDevice } from "../daemon/devicePool";
 import type { Session } from "../daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../models";
@@ -65,6 +65,8 @@ export type DeviceDescriptionInput =
       heldBy?: DeviceHeldBy;
       /** A readiness, shutdown or recovery reservation keeps allocation off this idle device. */
       reserved?: boolean;
+      /** The pool's own bucket for this device (`DevicePool.poolBucket`); wins over any local derivation. */
+      poolStatus?: PoolStatusBucket | null;
     }
   | {
       kind: "provisioned";
@@ -122,6 +124,7 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
     adbOfflineState: input.kind === "booted" ? input.adbOfflineState : undefined,
     heldBy: input.kind === "booted" ? input.heldBy : undefined,
     reserved: input.kind === "booted" ? input.reserved : undefined,
+    poolBucket: input.kind === "booted" ? input.poolStatus : undefined,
     unhealthy: input.unhealthy !== undefined,
   });
   return input.unhealthy ? { ...description, unhealthy: input.unhealthy } : description;
@@ -180,6 +183,8 @@ interface BootedDescriptionOptions {
   reserved?: boolean;
   /** A health marker keeps allocation off the device, so it is not `idle` (#11387). */
   unhealthy?: boolean;
+  /** The pool's bucket for the device; when present it is the only status authority. */
+  poolBucket?: PoolStatusBucket | null;
 }
 
 // oxlint-disable-next-line complexity -- one exhaustive canonical booted projection preserves precedence.
@@ -198,6 +203,7 @@ function describeBooted({
   heldBy,
   reserved,
   unhealthy,
+  poolBucket,
 }: BootedDescriptionOptions): DeviceDescription {
   const merged = mergeRuntimeFacts(device, admittedImage, admittedImageAuthoritative);
   // A cold-boot adapter can report a temporary non-emulator transport id even
@@ -234,7 +240,10 @@ function describeBooted({
       readiness: {
         state: adbOfflineState ? "not_ready" : readinessFromServiceStatus(serviceStatus),
       },
-      poolStatus: poolStatus(pooled, Boolean(heldBy ?? reserved) || unhealthy === true),
+      poolStatus:
+        poolBucket !== undefined
+          ? poolBucket
+          : poolStatus(pooled, Boolean(heldBy ?? reserved) || unhealthy === true),
       ...(heldBy ? { heldBy } : {}),
       session: session
         ? {

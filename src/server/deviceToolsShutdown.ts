@@ -2,6 +2,7 @@ import { deviceLossCancellationReason } from "../daemon/emulatorLossIncident";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { ActionableError, type BootedDevice, type SomePlatform } from "../models";
+import { DeviceShutdownTimeoutError } from "../models/DeviceShutdownTimeoutError";
 import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
 import { fixedBackoff } from "../utils/Backoff";
@@ -29,6 +30,7 @@ import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheW
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { DeviceShutdownService } from "../devices/deviceShutdownService";
 import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
+import { isIosSimulatorAlreadyStoppedError } from "../utils/ios-cmdline-tools/simulatorStateErrors";
 import {
   DEVICE_ALREADY_STOPPED_ERROR_CODE,
   DEVICE_SHUTDOWN_TIMEOUT_MS,
@@ -66,13 +68,7 @@ function isAlreadyStoppedDeviceError(
     );
   }
   if (platform === "ios") {
-    return (
-      message.includes("already shut down") ||
-      message.includes("already shutdown") ||
-      message.includes("not booted") ||
-      message.includes("invalid device state") ||
-      message.includes("current state: shutdown")
-    );
+    return isIosSimulatorAlreadyStoppedError(error);
   }
   return false;
 }
@@ -313,7 +309,7 @@ export function shutdownTimeoutError(
   // prefix is load-bearing: `isShutdownTimeoutError` classifies on it.
   phase = "to disappear",
 ): ActionableError {
-  return new ActionableError(
+  return new DeviceShutdownTimeoutError(
     `Timed out waiting for ${device.platform} device '${device.name}' (${device.deviceId}) ` +
       `${phase} after ${timeoutMs}ms: ${detail}. ` +
       "Verify the platform shutdown state and retry.",

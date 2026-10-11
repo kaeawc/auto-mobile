@@ -87,13 +87,24 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     // Only the two platform-specific booted devices exist; discovery is scoped
     // by the platform the handler asks for.
     PlatformDeviceManagerFactory.setInstance({
-      getBootedDevicesDetailed: async () => ({
-        devices: simctlSweepFails ? [] : [iosDevice],
-        succeededPlatforms: new Set(simctlSweepFails ? [] : ["ios"]),
-        discoveryErrors: simctlSweepFails
-          ? { ios: { code: "failed", message: "simctl exploded" } }
-          : {},
-      }),
+      getBootedDevicesDetailed: async (platform: "android" | "ios" | "either") => {
+        const iosFails = simctlSweepFails && platform !== "android";
+        const succeeded: ("android" | "ios")[] = [];
+        const devices: BootedDevice[] = [];
+        if (platform !== "ios") {
+          succeeded.push("android");
+          devices.push(androidDevice);
+        }
+        if (platform !== "android" && !iosFails) {
+          succeeded.push("ios");
+          devices.push(iosDevice);
+        }
+        return {
+          devices,
+          succeededPlatforms: new Set(succeeded),
+          discoveryErrors: iosFails ? { ios: { code: "failed", message: "simctl exploded" } } : {},
+        };
+      },
       getBootedDevices: async (platform: "android" | "ios" | "either") =>
         platform === "ios"
           ? [iosDevice]

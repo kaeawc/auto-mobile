@@ -123,6 +123,34 @@ describe("testRecordingManager retained plan (#10958)", () => {
     expect(getStoppedTestRecording(recordingId, "session-b")).toBeUndefined();
     expect(getStoppedTestRecording(recordingId, undefined)).toBeUndefined();
   });
+
+  test("a derived owner's retained plan is fetchable by its base and sibling sessions, never another base (#11533)", async () => {
+    const timer = new FakeTimer();
+    const recorder = new FakeRecorder();
+    const pending = startTestRecording(
+      device,
+      timer,
+      new CountingIdGenerator("recording"),
+      () => recorder,
+      "plan-base:pixel",
+    );
+    await Promise.resolve();
+    recorder.startGate.resolve();
+    const { recordingId } = await pending;
+    recorder.steps.push(capturedStep);
+    const stopped = await stopTestRecording(undefined, "owned", timer);
+
+    const base = (uuid: string) => uuid.split(":")[0];
+    expect(getStoppedTestRecording(recordingId, "plan-base", base)).toEqual(stopped);
+    expect(getStoppedTestRecording(recordingId, "plan-base:tablet", base)).toEqual(stopped);
+    expect(getStoppedTestRecording(recordingId, "plan-base:pixel", base)).toEqual(stopped);
+    expect(getStoppedTestRecording(recordingId, "other-base", base)).toBeUndefined();
+    expect(getStoppedTestRecording(recordingId, "other-base:pixel", base)).toBeUndefined();
+    expect(getStoppedTestRecording(recordingId, "plan-base2", base)).toBeUndefined();
+    expect(getStoppedTestRecording(recordingId, undefined, base)).toBeUndefined();
+    // Without a resolver the base session still matches by the derived-id prefix.
+    expect(getStoppedTestRecording(recordingId, "plan-base")).toEqual(stopped);
+  });
 });
 
 describe("testRecordingManager startup reservation", () => {

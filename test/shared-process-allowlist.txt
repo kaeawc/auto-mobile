@@ -42,6 +42,7 @@ test/daemon/canonicalPixels.test.ts
 test/daemon/childProcessCleanup.test.ts
 test/daemon/cliIdleDaemonStallForgiveness.test.ts
 test/daemon/cliIdleReadInFlightReportedDeadline.test.ts
+test/daemon/cliIdleStallLateControlCall.test.ts
 test/daemon/clientNonFiniteEncoding.test.ts
 test/daemon/clientOptionsSchema.test.ts
 test/daemon/clientRequestIdGenerator.test.ts
@@ -114,6 +115,7 @@ test/daemon/gatedToolThroughDaemon.test.ts
 test/daemon/gestureOwnership.test.ts
 test/daemon/getApplePreparationTimeout.property.test.ts
 test/daemon/heartbeatExpiryPersistence.test.ts
+test/daemon/heartbeatReapUpgradesNonTerminalRelease.test.ts
 test/daemon/hierarchyStreamDiff.property.test.ts
 test/daemon/hierarchyStreamDiff.test.ts
 test/daemon/idleDeviceReaper.test.ts
@@ -149,6 +151,7 @@ test/daemon/managedSlots/slotsUnresolvedEmulatorIdentityGate.test.ts
 test/daemon/managedSlots/sqliteSlotRegistry.test.ts
 test/daemon/managerOutputReductionArgs.test.ts
 test/daemon/observationRequestBatch.test.ts
+test/daemon/observerLeaseWallClockStep.test.ts
 test/daemon/observerSessionRegistry.test.ts
 test/daemon/observerSessionRequestHandlers.test.ts
 test/daemon/outboundWriteGuard.test.ts
@@ -240,6 +243,7 @@ test/devices/DisplayInventoryProvider.test.ts
 test/devices/androidDeviceReboot.test.ts
 test/devices/ciIosBootRecovery.test.ts
 test/devices/deviceBootRecovery.test.ts
+test/devices/deviceBootTimeout.test.ts
 test/devices/deviceIdentityEvidence.test.ts
 test/devices/deviceShutdownService.test.ts
 test/devices/physicalIosDeviceResolution.test.ts
@@ -373,6 +377,7 @@ test/features/action/touchscreenInput.test.ts
 test/features/appearance/AppearanceConfig.property.test.ts
 test/features/bootAdmission/AndroidBootAdmissionGate.test.ts
 test/features/bootAdmission/AndroidCapacitySource.test.ts
+test/features/bootAdmission/bootGateInterleavings.test.ts
 test/features/database/bigIntegerJson.test.ts
 test/features/database/sqlLexer.test.ts
 test/features/debug/VisualHighlight.test.ts
@@ -802,6 +807,7 @@ test/scripts/ffmpegInstallHoist.test.ts
 test/scripts/generateMdmProfile.test.ts
 test/scripts/gradleTaskRunAction.test.ts
 test/scripts/installerStartupDiagnostics.test.ts
+test/scripts/integrationSafeTier.test.ts
 test/scripts/iosIntegrationWorkflowChangeGuard.test.ts
 test/scripts/iosSimulatorProductBootLifecycle.test.ts
 test/scripts/ipaInstallFanOut.test.ts
@@ -850,6 +856,7 @@ test/server/TopLevelUnionFlattener.test.ts
 test/server/TopLevelUnionFlattenerCharacterization.test.ts
 test/server/accessibilityFocusTools.test.ts
 test/server/androidSegmentedPlanVideoSessionFinalizeWithoutDevice.test.ts
+test/server/androidStartLifecycleDiscoveryTyped.test.ts
 test/server/appFileContract.property.test.ts
 test/server/appFileContract.test.ts
 test/server/appFileResources.test.ts
@@ -924,6 +931,7 @@ test/server/observeWaitForMultiPanel.test.ts
 test/server/performanceMonitorSessionCleanup.test.ts
 test/server/ping.test.ts
 test/server/planHealthSummary.test.ts
+test/server/planOrchestratorVideoRecorderInjection.test.ts
 test/server/platform/PlatformClient.test.ts
 test/server/prompts/list.test.ts
 test/server/prototypeDisplay.test.ts

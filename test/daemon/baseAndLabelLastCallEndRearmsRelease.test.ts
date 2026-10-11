@@ -34,7 +34,7 @@ interface DaemonToolCallEndWiring {
   stopSessionTimers(): void;
 }
 
-describe("the last base or label call end retries the base owner's release (#11381)", () => {
+describe("base call ends retry deferred release and all orders finish with nothing waiting (#11381)", () => {
   let restoreHermeticServer: () => void;
   let fixture: McpTestFixture;
   let timer: FakeTimer;
@@ -164,12 +164,15 @@ describe("the last base or label call end retries the base owner's release (#113
     { name: "base only", order: [BASE] },
     { name: "base then label", order: [BASE, DERIVED] },
     { name: "label then base", order: [DERIVED, BASE] },
-  ])("$name: the final end releases both sessions without advancing time", async ({ order }) => {
+  ])("$name: nothing is left waiting once the last call has ended", async ({ order }) => {
     const closedAt = await endCallsAfterDisconnect(order);
     await settle(0);
 
-    // Ownership is recorded on the base, and label ends also notify it. Pin only the final
-    // outcome: whether either call holds either session before the last end is an owner decision.
+    // The deferred owner-disconnect release is pending under the base id. In the three rows
+    // with a base call, that call's end retries the release at once. The "label only" row holds
+    // without the end event because a label call does not defer the base today. It is kept only
+    // so all four orders end with nothing waiting. Whether a label call should defer the base
+    // is an owner decision.
     expect(timer.now()).toBe(closedAt + OWNER_DISCONNECT_GRACE_MS);
     expect(releases.filter(({ sessionId }) => sessionId === BASE)).toEqual([
       { sessionId: BASE, reason: OWNER_DISCONNECTED_RELEASE_REASON },

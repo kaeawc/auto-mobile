@@ -73,5 +73,13 @@ describe("auto-mobile/no-raw-env-number-parse", () => {
       0,
     );
     expect(count("const holder = { v: process.env.X }; Number(holder.v)")).toBe(0);
+    expect(count("Number(String(process.env.X))")).toBe(0);
+    expect(count("[process.env.X].map(Number)")).toBe(0);
+    expect(count("function f(e: Readonly<NodeJS.ProcessEnv>) { return Number(e.X); }")).toBe(0);
+  });
+
+  test("known false positive: any identifier named env or member named .env is treated as the environment", () => {
+    expect(count("const env = { n: '5' }; Number(env.n)")).toBe(1);
+    expect(count("const o = { env: { n: 3 } }; Number(o.env.n)")).toBe(1);
   });
 });

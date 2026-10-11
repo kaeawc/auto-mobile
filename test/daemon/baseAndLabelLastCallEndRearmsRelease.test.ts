@@ -20,6 +20,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 
 const PRIMARY: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
 const LABELLED: BootedDevice = { name: "Pixel B", deviceId: "emulator-5556", platform: "android" };
@@ -97,7 +98,10 @@ describe("base call ends retry deferred release and all orders finish with nothi
       OWNER,
     );
     manager.setDeviceLabels(BASE, buildDeviceLabelMap(["A", "B"], BASE));
-    await pool.assignMultipleDevices([DERIVED], 1_000, "android");
+    // A label session is minted only by its base's plan allocation (#11602).
+    await asPlanAllocation(manager, BASE, [DERIVED], () =>
+      pool.assignMultipleDevices([DERIVED], 1_000, "android"),
+    );
     entered = new Map([BASE, DERIVED].map((id) => [id, Promise.withResolvers<void>()]));
     outcomes = new Map(
       [BASE, DERIVED].map((id) => [id, Promise.withResolvers<{ success: true }>()]),

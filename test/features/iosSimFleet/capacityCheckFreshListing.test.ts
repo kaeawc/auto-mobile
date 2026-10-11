@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { IosSimCapacityGate } from "../../../../src/features/iosSimFleet/CapacityGate";
-import { InMemoryBootDurationHistory } from "../../../../src/features/iosSimFleet/BootDurationHistory";
-import { IosSimFleetCostCollector } from "../../../../src/features/iosSimFleet/FleetCostCollector";
+import { IosSimCapacityGate } from "../../../src/features/iosSimFleet/CapacityGate";
+import { InMemoryBootDurationHistory } from "../../../src/features/iosSimFleet/BootDurationHistory";
+import { IosSimFleetCostCollector } from "../../../src/features/iosSimFleet/FleetCostCollector";
 import type {
   HostSnapshot,
   SimulatorInventoryEntry,
-} from "../../../../src/features/iosSimFleet/types";
-import type { FleetHostSource } from "../../../../src/features/iosSimFleet/FleetHostSource";
-import { BootCapacityExhaustedError } from "../../../../src/models/BootCapacityExhaustedError";
-import { FakeTimer } from "../../../fakes/FakeTimer";
+} from "../../../src/features/iosSimFleet/types";
+import type { FleetHostSource } from "../../../src/features/iosSimFleet/FleetHostSource";
+import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 const GIB = 1024 ** 3;
 const A = "AAAAAAAA-0000-0000-0000-000000000001";
@@ -66,12 +66,12 @@ async function outcome(check: Promise<void>): Promise<unknown> {
 
 /**
  * `assertCapacityAvailable` is the check callers run BEFORE a side effect they would have to undo
- * (a managed-slot replacement deleting the slot's device, creating a simulator). The Android gate
- * takes it inside a ledger sample window; the iOS gate decides on a plain `collect()` with no
- * window, so a boot that finishes while the listing is open is in neither the ledger nor the
- * listing and the check passes at the limit.
+ * (a managed-slot replacement deleting the slot's device, creating a simulator). Like an admission
+ * and the Android check, it must decide on a listing begun inside its own ledger sample window: a
+ * boot that finishes while a listing is open is otherwise in neither the ledger nor the listing,
+ * and the check passes at the limit (#11643).
  */
-describe("hunt: iOS read-only capacity check against a listing older than a finished boot", () => {
+describe("iOS read-only capacity check judges on a listing taken inside its own ledger window", () => {
   test("a boot that finishes while the check's own listing is open still holds its slot", async () => {
     const source = new ScriptedSource();
     const gate = build(source);

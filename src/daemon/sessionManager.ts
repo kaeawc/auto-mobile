@@ -9977,16 +9977,15 @@ export class SessionManager {
     }
   }
 
-  /** Labels follow their base's lease; release-local proof renews only this judgement (#11691). */
+  /** Judge the session's own lease, renewed only here by release-local owner proof (#11691). */
   private releaseOwnerLeaseSnapshot(
     session: Session,
     operation?: SessionReleaseOperation,
   ): LivenessOwnerLeaseSnapshot | undefined {
-    const ownerSession = this.livenessBaseSession(session) ?? session;
-    if (!judgesOwnerHeartbeats(ownerSession) || suspectGraceMsFor(ownerSession) === 0) {
+    if (!judgesOwnerHeartbeats(session) || suspectGraceMsFor(session) === 0) {
       return undefined;
     }
-    const snapshot = sessionJudgedLeaseSnapshot(ownerSession, this.sessionNow());
+    const snapshot = sessionJudgedLeaseSnapshot(session, this.sessionNow());
     snapshot.lastHeartbeat = Math.max(
       snapshot.lastHeartbeat,
       operation?.ownerHeartbeatDuringRelease ?? Number.NEGATIVE_INFINITY,

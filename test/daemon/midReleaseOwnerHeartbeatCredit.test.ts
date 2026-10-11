@@ -15,7 +15,7 @@ import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
 
 const SESSION = "mid-release-owner";
@@ -436,53 +436,53 @@ describe("owner heartbeats refused during a non-terminal release (#11691)", () =
     },
   );
 
-  test("a claimed label never directly heartbeated is released using its live base owner's lease", async () => {
+  test("a live label keeps plan auto-release recoverable while its base's restart freezes the base lease", async () => {
     const labelId = `${SESSION}:B`;
     const label = await asPlanAllocation(manager, SESSION, [labelId], () =>
       manager.createSession(labelId, "fake-label-device", "android"),
     );
     manager.setDeviceLabels(SESSION, buildDeviceLabelMap(["A", "B"], SESSION));
     expect(await manager.claimLivenessOwnership(labelId, OWNER)).toBe("claimed");
-    expect(label.hasReceivedHeartbeat).toBe(true);
-    expect(label.lastOwnerHeartbeat).toBe(0);
-    for (let elapsed = 0; elapsed < 12_000; elapsed += 2_000) {
-      await advance(2_000);
-      manager.recordHeartbeat(SESSION);
+    manager.recordHeartbeat(labelId);
+    await advance(2_000);
+    expect((await heartbeat()).success).toBe(true);
+    manager.recordHeartbeat(labelId);
+    restoreMs = 14_000;
+    expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("live");
+    const baseRelease = manager.releaseSession(SESSION, REASONS[0]);
+    await drainUntil(() => timer.wasSleepCalled(14_000), { description: "base clock teardown" });
+    try {
+      for (let elapsed = 0; elapsed < 10_000; elapsed += 2_000) {
+        await advance(2_000);
+        expect((await heartbeat()).code).toBe("daemon_session_not_found");
+        expect(
+          await handleDaemonRequest(
+            {
+              id: "label-heartbeat",
+              type: "daemon_request",
+              method: "daemon/heartbeat",
+              params: { sessionId: labelId, livenessOwnerToken: OWNER },
+            },
+            state,
+          ),
+        ).toMatchObject({ success: true });
+      }
+      expect(timer.now()).toBe(12_000);
+      expect(manager.getReleasingSession(SESSION)).toBe(session);
+      expect(session.lastOwnerHeartbeat).toBe(2_000);
+      expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("lapsed");
+      expect(label.lastOwnerHeartbeat).toBe(12_000);
+      expect(manager.getSessionLeaseState(labelId)?.phase).toBe("live");
+      expect(await manager.releaseSession(labelId, "plan-auto-release")).toBe(label.assignedDevice);
+      expect(await persistence.getSession!(labelId)).toMatchObject({
+        status: "released",
+        release_reason: "plan-auto-release",
+      });
+      expect(await manager.getReleasedSessionReason(labelId)).toBe("plan-auto-release");
+      expect(manager.getTerminalReleaseSnapshot(labelId)).toBeUndefined();
+    } finally {
+      await advance(4_000);
+      expect(await baseRelease).toBe(DEVICE);
     }
-    expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("live");
-    expect(manager.getSessionLeaseState(labelId)?.phase).toBe("lapsed");
-    expect(await manager.releaseSession(labelId, "plan-auto-release")).toBe(label.assignedDevice);
-    expect(await persistence.getSession!(labelId)).toMatchObject({
-      status: "released",
-      release_reason: "plan-auto-release",
-    });
-    expect(manager.getTerminalReleaseSnapshot(labelId)).toBeUndefined();
-    expect(manager.getSession(SESSION)).toBe(session);
-  });
-
-  test("a suspect label release follows its base's fresh heartbeat at commit", async () => {
-    const labelId = `${SESSION}:B`;
-    const label = await asPlanAllocation(manager, SESSION, [labelId], () =>
-      manager.createSession(labelId, "fake-label-device", "android"),
-    );
-    manager.setDeviceLabels(SESSION, buildDeviceLabelMap(["A", "B"], SESSION));
-    expect(await manager.claimLivenessOwnership(labelId, OWNER)).toBe("claimed");
-    manager.setClock(label, { initialAutomaticTime: 1, clockChangedByUs: true, rootedByUs: true });
-    await advance(4_001);
-    const release = manager.releaseSession(labelId, "plan-auto-release");
-    await drainMicrotasks(100);
-    await advance(1_000);
-    manager.recordHeartbeat(SESSION);
-    await advance(2_000);
-    manager.recordHeartbeat(SESSION);
-    await advance(2_000);
-    expect(await release).toBe(label.assignedDevice);
-    expect(manager.getTerminalReleaseSnapshot(labelId)).toBeUndefined();
-    expect(await persistence.getSession!(labelId)).toMatchObject({
-      status: "released",
-      release_reason: "plan-auto-release",
-    });
-    expect(label.lastOwnerHeartbeat).toBe(0);
-    expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("live");
   });
 });

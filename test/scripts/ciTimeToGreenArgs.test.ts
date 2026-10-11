@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
 import {
   UsageError,
   assertSafeOutputPath,
@@ -24,10 +25,11 @@ describe("parseWhen", () => {
 
 describe("assertSafeOutputPath", () => {
   test("allows paths under <repo>/scratch and the temp dir only", () => {
+    // The function returns path.resolve(...) output: drive-prefixed and backslashed on win32.
     expect(assertSafeOutputPath("/repo/scratch/x/cache", "/repo", "/tmp")).toBe(
-      "/repo/scratch/x/cache",
+      resolve("/repo/scratch/x/cache"),
     );
-    expect(assertSafeOutputPath("/tmp/abc", "/repo", "/tmp")).toBe("/tmp/abc");
+    expect(assertSafeOutputPath("/tmp/abc", "/repo", "/tmp")).toBe(resolve("/tmp/abc"));
     expect(() => assertSafeOutputPath("/repo/src", "/repo", "/tmp")).toThrow(UsageError);
     expect(() => assertSafeOutputPath("/repo/scratch/../src", "/repo", "/tmp")).toThrow(UsageError);
     expect(() => assertSafeOutputPath("/tmp", "/repo", "/tmp")).toThrow(UsageError);

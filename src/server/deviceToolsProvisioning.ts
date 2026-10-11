@@ -32,7 +32,8 @@ import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import { formatToolParamError } from "./toolParamError";
 import { type DeviceCreationGate } from "../devices/deviceCreationGate";
-import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
+import { requestAcquisitionReceipt, type AcquisitionReceipt } from "../daemon/acquisitionReceipt";
+import { acquireUndoneIfUndelivered, undoUndeliveredAcquisition } from "./undeliveredAcquisition";
 import { DaemonState } from "../daemon/daemonState";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { isUnresolvedAndroidEmulatorName } from "../devices/deviceIdentityEvidence";
@@ -107,6 +108,7 @@ import {
   reserveStableDeviceLifecycle,
   rethrowDeviceLifecycleReservationFailure,
   bindUndoneIfUndelivered,
+  rollBackUndeliveredBoot,
   runOperationWithinDeadline,
   runProvisionDeviceWithinDeadline,
   StableDeviceTarget,
@@ -171,7 +173,19 @@ type ProvisionRollbackTarget =
   | { kind: "absent" }
   | { kind: "unresolved" };
 
+/** The response a cancelled provisionDevice request already built, so it is built only once. */
+type ProvisionCancellation = { response?: ProvisionDeviceToolResponse };
+
+type ProvisionDeviceToolResponse =
+  | ReturnType<typeof createProvisionDeviceResponse>
+  | ReturnType<typeof createToolErrorResponse>;
+
 type ProvisionBootOptions = {
+  /** Deletes the device this request created, for a request undone after it bound (#11593). */
+  deleteCreatedIfUndelivered?: (
+    lifecycleLease: VirtualDeviceLifecycleLease,
+    reason: unknown,
+  ) => Promise<void>;
   provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>;
   perf: ReturnType<typeof createPerformanceTracker>;
   totalDeadlineMs: number;
@@ -291,25 +305,94 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
     // device or is refused by session ownership; nothing is replayed.
     const controller = new AbortController();
     const lifecycleEvidence: ActiveProvisionDeviceRequest["lifecycleEvidence"] = {};
-    const promise = executeProvisionDevice(args, controller.signal, lifecycleEvidence);
-    const request: ActiveProvisionDeviceRequest = { promise, controller, lifecycleEvidence };
-    activeProvisionDeviceRequests.add(request);
-    const retire = (): void => {
-      activeProvisionDeviceRequests.delete(request);
-    };
-    void promise.then(retire, retire);
-    return await awaitProvisionDeviceRequest(args, request, signal);
+    const cancellation: ProvisionCancellation = {};
+    let request: ActiveProvisionDeviceRequest | undefined;
+    // The lifecycle starts inside the request's receipt scope, so its bind and boot record there.
+    return await acquireUndoneIfUndelivered<ProvisionDeviceToolResponse>(
+      signal,
+      async (receipt) => {
+        const promise = executeProvisionDevice(args, controller.signal, lifecycleEvidence);
+        const started: ActiveProvisionDeviceRequest = { promise, controller, lifecycleEvidence };
+        request = started;
+        activeProvisionDeviceRequests.add(started);
+        const retire = (): void => {
+          activeProvisionDeviceRequests.delete(started);
+        };
+        void promise.then(retire, retire);
+        return await awaitProvisionDeviceRequest(args, started, signal, { receipt, cancellation });
+      },
+      // A cancel that lands after the lifecycle bound its session is answered like one that
+      // lands before; a lifecycle that already failed keeps its own answer.
+      async (reason, response) =>
+        cancellation.response ??
+        (response.isError === true
+          ? response
+          : await cancelledProvisionDeviceResponse(args, request!, reason, {
+              receipt: {},
+              cancellation,
+            })),
+    );
   };
 
   function describeProvisionRequest(args: ProvisionDeviceArgs): string {
     return `${args.device.platform} '${args.device.name}'`;
   }
 
+  /**
+   * Answer a request its caller cancelled. The lifecycle is cancelled with it; one that had
+   * already bound its session is undone through the request's receipt before the evidence is
+   * read, so the response reports what the cancelled call left behind (#11593).
+   */
+  async function cancelledProvisionDeviceResponse(
+    args: ProvisionDeviceArgs,
+    request: ActiveProvisionDeviceRequest,
+    error: unknown,
+    { receipt, cancellation }: { receipt: AcquisitionReceipt; cancellation: ProvisionCancellation },
+  ): Promise<ProvisionDeviceToolResponse> {
+    cancelProvisionDeviceRequest(request, error);
+    const settled = await waitForProvisionDeviceSettlement(
+      request.promise,
+      getDeviceToolsDependencies().timer,
+      PROVISION_DEVICE_SETTLEMENT_WAIT_MS,
+    );
+    if (!settled) {
+      logger.warn(
+        `[DeviceTools] provisionDevice ${describeProvisionRequest(args)} caller cancellation stopped waiting for its lifecycle to settle.`,
+      );
+    }
+    await undoUndeliveredAcquisition(receipt, error);
+    // The caller went away, which is not a provisioning failure: report it
+    // with a code of its own. The lifecycle is cancelled with its caller.
+    logger.warn(
+      `[DeviceTools] provisionDevice ${describeProvisionRequest(args)} caller cancelled the request: ` +
+        `${errorMessage(error)}`,
+      error,
+    );
+    const cancelledResponse = createToolErrorResponse(
+      "request_cancelled",
+      "provisionDevice request was cancelled by the caller; its provisioning work was cancelled too.",
+      {
+        recovery: provisionDeviceRecovery("caller_cancellation", request, {
+          settled,
+          retryAfterMs: PROVISION_DEVICE_SETTLEMENT_WAIT_MS,
+        }),
+      },
+    );
+    // The daemon answered the abandoned request already; hand it this result so that reply
+    // can carry the typed envelope and recovery evidence.
+    if (args.__mcpLiveDeadlineKey) {
+      provisionCancellationOutcomes.publish(args.__mcpLiveDeadlineKey, cancelledResponse);
+    }
+    cancellation.response = cancelledResponse;
+    return cancelledResponse;
+  }
+
   async function awaitProvisionDeviceRequest(
     args: ProvisionDeviceArgs,
     request: ActiveProvisionDeviceRequest,
     signal: AbortSignal | undefined,
-  ) {
+    undo: { receipt: AcquisitionReceipt; cancellation: ProvisionCancellation },
+  ): Promise<ProvisionDeviceToolResponse> {
     try {
       const result = await waitForProvisionDeviceRequest(request.promise, signal);
       return createProvisionDeviceResponse(result);
@@ -335,40 +418,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
         );
       }
       if (isProvisionDeviceCallerAbort(error, signal)) {
-        cancelProvisionDeviceRequest(request, error);
-        const settled = await waitForProvisionDeviceSettlement(
-          request.promise,
-          getDeviceToolsDependencies().timer,
-          PROVISION_DEVICE_SETTLEMENT_WAIT_MS,
-        );
-        if (!settled) {
-          logger.warn(
-            `[DeviceTools] provisionDevice ${describeProvisionRequest(args)} caller cancellation stopped waiting for its lifecycle to settle.`,
-          );
-        }
-        // The caller went away, which is not a provisioning failure: report it
-        // with a code of its own. The lifecycle is cancelled with its caller.
-        logger.warn(
-          `[DeviceTools] provisionDevice ${describeProvisionRequest(args)} caller cancelled the request: ` +
-            `${errorMessage(error)}`,
-          error,
-        );
-        const cancelledResponse = createToolErrorResponse(
-          "request_cancelled",
-          "provisionDevice request was cancelled by the caller; its provisioning work was cancelled too.",
-          {
-            recovery: provisionDeviceRecovery("caller_cancellation", request, {
-              settled,
-              retryAfterMs: PROVISION_DEVICE_SETTLEMENT_WAIT_MS,
-            }),
-          },
-        );
-        // The daemon answered the abandoned request already; hand it this result so that reply
-        // can carry the typed envelope and recovery evidence.
-        if (args.__mcpLiveDeadlineKey) {
-          provisionCancellationOutcomes.publish(args.__mcpLiveDeadlineKey, cancelledResponse);
-        }
-        return cancelledResponse;
+        return await cancelledProvisionDeviceResponse(args, request, error, undo);
       }
       logger.warn(
         `[DeviceTools] provisionDevice ${describeProvisionRequest(args)} failed: ${errorMessage(error)}`,
@@ -1497,6 +1547,15 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
           lifecycleLease: bootLifecycleLease,
           signal: signal,
           settlementState: settlementState,
+          deleteCreatedIfUndelivered: provisionedDevice.created
+            ? async (rollbackLease, reason) =>
+                await deleteUndeliveredCreatedDevice(args, provisionedDevice.device, {
+                  lifecycleLease: rollbackLease,
+                  reason,
+                  recordLifecycle,
+                  observedRuntimeDevice,
+                })
+            : undefined,
           onBooted: (device) => {
             observedRuntimeDevice = device;
             recordLifecycle({
@@ -1687,16 +1746,18 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       binding.totalDeadlineMs,
       binding.signal,
       "binding the device session",
-      bindUndoneIfUndelivered(async (receipt) =>
-        bindBootedDeviceSession(
-          boot.device,
-          provisionSessionArgs(args),
-          sourceImage,
-          boot.processHandle,
-          // Our own stable-name readiness reservation must not deny our
-          // own bind when the pooled incarnation changed during readiness.
-          provisionSessionBindingOptions(args, readinessReservation, settlementState, receipt),
-        ),
+      bindUndoneIfUndelivered(
+        async (receipt) =>
+          bindBootedDeviceSession(
+            boot.device,
+            provisionSessionArgs(args),
+            sourceImage,
+            boot.processHandle,
+            // Our own stable-name readiness reservation must not deny our
+            // own bind when the pooled incarnation changed during readiness.
+            provisionSessionBindingOptions(args, readinessReservation, settlementState, receipt),
+          ),
+        () => boot,
       ),
       (settlement) => {
         settlementState.bindingSettlements.push(settlement);
@@ -1792,6 +1853,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       signal,
       settlementState,
       onBooted,
+      deleteCreatedIfUndelivered,
     }: ProvisionBootOptions,
   ): Promise<ProvisionBootResult> {
     const requestedIdentity = `platform=${args.device.platform} name=${args.device.name}`;
@@ -1918,6 +1980,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
         },
       );
       ownershipTransferred = true;
+      recordProvisionedDeviceStarted(boot, lifecycleLease, deleteCreatedIfUndelivered);
       return {
         device: boot.device,
         sessionId,
@@ -1933,6 +1996,77 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
     } finally {
       settlementState.readinessReservation = readinessReservation;
     }
+  }
+
+  /**
+   * Record what this request booted or created on its receipt. Ownership has passed to the bound
+   * session, so the failed-lifecycle rollback no longer applies; a request that turns out
+   * undelivered after this point is undone through the receipt instead (#11593).
+   */
+  function recordProvisionedDeviceStarted(
+    boot: DeviceBootResult,
+    lifecycleLease: VirtualDeviceLifecycleLease,
+    deleteCreatedIfUndelivered: ProvisionBootOptions["deleteCreatedIfUndelivered"],
+  ): void {
+    const receipt = requestAcquisitionReceipt();
+    if (!receipt) {
+      return;
+    }
+    const { identity } = lifecycleLease;
+    receipt.started = {
+      rollBack: async (reason) =>
+        await rollBackUndeliveredBoot(
+          boot,
+          identity,
+          deleteCreatedIfUndelivered
+            ? async (rollbackLease) => await deleteCreatedIfUndelivered(rollbackLease, reason)
+            : undefined,
+        ),
+    };
+  }
+
+  /**
+   * Delete the device a cancelled request created, through the failed-provision cleanup, and
+   * record the outcome as the request's lifecycle so its cancellation evidence reports it.
+   */
+  async function deleteUndeliveredCreatedDevice(
+    args: ProvisionDeviceArgs,
+    createdDevice: DeviceInfo,
+    {
+      lifecycleLease,
+      reason,
+      recordLifecycle,
+      observedRuntimeDevice,
+    }: {
+      lifecycleLease: VirtualDeviceLifecycleLease;
+      reason: unknown;
+      recordLifecycle: RecordProvisionDeviceLifecycle;
+      observedRuntimeDevice: BootedDevice | undefined;
+    },
+  ): Promise<void> {
+    const provisionFailure = toProvisionDeviceError(args, reason);
+    const lifecycleDevice = provisionDeviceLifecycleIdentity(
+      args,
+      createdDevice,
+      observedRuntimeDevice,
+    );
+    recordLifecycle({
+      state: "cleanup_in_progress",
+      phase: "cleanup",
+      device: lifecycleDevice,
+      reason: provisionDeviceLifecycleReason(provisionFailure),
+      cleanup: { status: "in_progress", reason: "provisioning_failure" },
+    });
+    const rollback = await cleanupFailedProvisionDevice(
+      getDeviceToolsDependencies(),
+      createdDevice,
+      provisionFailure,
+      { lifecycleLease, recordLifecycle, lifecycleDevice },
+    );
+    logger.info(
+      `[DeviceTools] provisionDevice rollback of created ${createdDevice.platform} device ` +
+        `'${createdDevice.name}' after a cancelled request: ${rollback.cleanup.status}`,
+    );
   }
 
   function releaseProvisionReadiness(

@@ -1117,7 +1117,17 @@ test("omitted display preserves main's routing order without accessing the inven
   });
   const bind = spyOn(pool, "bindOrReuseDeviceSession").mockImplementation(async (...args) => {
     steps.push("bind");
-    expect(args).toEqual(["one", "other", "android", undefined, undefined, undefined, true]);
+    // The trailing receipt records the move for a cancelled call's undo (#11593).
+    expect(args.slice(0, 7)).toEqual([
+      "one",
+      "other",
+      "android",
+      undefined,
+      undefined,
+      undefined,
+      true,
+    ]);
+    expect(args.slice(7)).toEqual([undefined, undefined, undefined, undefined, undefined, {}]);
     return "one";
   });
   const readiness = spyOn(sessions, "setDeviceReadiness").mockImplementation(() => {

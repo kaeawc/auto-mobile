@@ -25,7 +25,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // | gone with no reason, told by the first heartbeat    | runs         | exactly once | forwarded         |
 // |   answered on a connection that was just made (a    |              | a tick       |                   |
 // |   restarted daemon that has not rehydrated it yet), |              |              |                   |
-// |   within the same window (#11529)                   |              |              |                   |
+// |   within the same window, for the latest binding    |              |              |                   |
+// |   (#11529) and every session held besides it        |              |              |                   |
+// |   (#11557)                                          |              |              |                   |
 // | gone with no reason otherwise, or past the window,  | for others   | none needed  | forwarded, and    |
 // |   told by a not-found heartbeat                     |              |              | success re-arms   |
 // | gone with any reason that is not recoverable        | for others   | never again  | refused locally   |
@@ -48,9 +50,6 @@ const TERMINAL_REASON = "device-killed";
  */
 const ENDING_REASONS = [TERMINAL_REASON, "plan-auto-release", "reason-from-a-newer-daemon"];
 const RECOVERABLE_REASON = "device-restart:emulator-5554";
-/** Stands in for the proxy's latest binding when the history leaves it in doubt. */
-const UNCERTAIN = "a session the model cannot name";
-
 /** `terminal`: released for any reason that is not recoverable, which ends the binding. */
 type Gone = "terminal" | "recoverable" | "unknown";
 
@@ -148,8 +147,8 @@ interface SessionModel {
    */
   rehydrating?: boolean;
   /**
-   * The same answer, when the history leaves the proxy's latest binding in doubt: the proxy may or
-   * may not be heartbeating it for the window that started then.
+   * The same answer, when the history leaves it in doubt whether the proxy held the session when
+   * it connected: the proxy may or may not be heartbeating it for the window that started then.
    */
   maybeRehydratingSince?: number;
 }
@@ -168,10 +167,20 @@ class World {
   /** False once a rejected call left it open which session the proxy's latest binding is. */
   private latestCertain = true;
   /**
-   * The session whose next heartbeat answer is the first on a connection the proxy just made to
-   * re-establish ownership of it: its latest binding, when it still heartbeats it.
+   * Sessions the proxy holds beyond doubt: bound by an acquisition or an answered call, and not
+   * told gone since. The latest binding and the ones held besides it alike.
    */
-  private reestablishing: string | undefined;
+  private readonly held = new Set<string>();
+  /**
+   * The sessions whose next heartbeat answer is the first on a connection the proxy just made
+   * while it held them: that heartbeat re-establishes ownership of each (#11529, #11557).
+   */
+  private readonly reestablishing = new Set<string>();
+  /**
+   * The proxy just connected and re-establishes what it holds. A session outside `held` may be
+   * one of them: the history leaves that in doubt.
+   */
+  private reestablishes = false;
   /** Sessions the daemon answered a heartbeat for on the current connection. */
   private readonly answeredOnConnection = new Set<string>();
   /**
@@ -229,21 +238,23 @@ class World {
     return created;
   }
 
-  /** The proxy connected: the keeper's next heartbeat for its latest binding re-establishes ownership. */
+  /**
+   * The proxy connected: the keeper's next heartbeat for each session it holds re-establishes
+   * ownership of that session.
+   */
   private connectionEstablished(): void {
     this.answeredOnConnection.clear();
-    this.reestablishing = undefined;
+    this.reestablishing.clear();
+    this.reestablishes = !this.afterUnreachableGap;
     if (this.afterUnreachableGap) {
       this.afterUnreachableGap = false;
       return;
     }
-    if (!this.latestCertain) {
-      this.reestablishing = UNCERTAIN;
-      return;
-    }
-    const latest = this.latest === undefined ? undefined : this.sessions.get(this.latest);
-    if (latest !== undefined && !latest.told && latest.daemon !== "terminal") {
-      this.reestablishing = this.latest;
+    for (const sessionUuid of this.held) {
+      const session = this.sessions.get(sessionUuid)!;
+      if (!session.told && session.daemon !== "terminal") {
+        this.reestablishing.add(sessionUuid);
+      }
     }
   }
 
@@ -275,10 +286,7 @@ class World {
     session.heartbeats += 1;
     const first = !this.answeredOnConnection.has(sessionUuid);
     this.answeredOnConnection.add(sessionUuid);
-    const reestablishes = this.reestablishing === sessionUuid;
-    if (reestablishes) {
-      this.reestablishing = undefined;
-    }
+    const reestablishes = this.reestablishing.delete(sessionUuid);
     if (session.heartbeats === 1 && this.nextBirth === "released" && this.latest === sessionUuid) {
       // The heartbeat itself is acknowledged; the release reaches the proxy during it.
       this.release(sessionUuid, "terminal", true);
@@ -295,7 +303,7 @@ class World {
     }
     if (session.daemon === "unknown" && reestablishes) {
       session.rehydrating = true;
-    } else if (session.daemon === "unknown" && first && this.reestablishing === UNCERTAIN) {
+    } else if (session.daemon === "unknown" && first && this.reestablishes) {
       session.maybeRehydratingSince ??= this.timer.now();
     }
     // A recoverable handoff is not "told gone" until its recovery window has passed: its owner
@@ -305,6 +313,9 @@ class World {
       session.daemon === "recoverable" ||
       (session.daemon === "unknown" && session.rehydrating === true);
     session.told = !awaited || this.recoveryWindowPassed(session);
+    if (session.told) {
+      this.held.delete(sessionUuid);
+    }
     throw Object.assign(new Error(`Session not found: ${sessionUuid}`), {
       code: DAEMON_SESSION_NOT_FOUND_CODE,
       ...(session.daemon === "terminal" ? { releaseReason: session.endedAs } : {}),
@@ -340,6 +351,8 @@ class World {
   private learnDead(sessionUuid: string): void {
     const session = this.sessions.get(sessionUuid)!;
     session.told = true;
+    this.held.delete(sessionUuid);
+    this.reestablishing.delete(sessionUuid);
     if (session.deadSince === -1) {
       session.deadSince = this.commandsApplied;
     }
@@ -355,6 +368,7 @@ class World {
     this.latestCertain = true;
     this.fenced = undefined;
     this.mustBeat.add(sessionUuid);
+    this.held.add(sessionUuid);
     this.reholdPreviousBinding();
   }
 
@@ -659,6 +673,38 @@ const REGRESSIONS: ReadonlyArray<readonly [string, readonly Command[]]> = [
         { length: RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS / INTERVAL_MS + 3 },
         () => TICK,
       ),
+    ],
+  ],
+  [
+    "#11557.2 a restarted daemon that has rehydrated none of the held sessions is heartbeated for each until the window passes",
+    [
+      ACQUIRE,
+      ACQUIRE,
+      ACQUIRE,
+      TICK,
+      { kind: "daemon-restart", gapMs: 0 },
+      ...Array.from(
+        { length: RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS / INTERVAL_MS + 3 },
+        () => TICK,
+      ),
+    ],
+  ],
+  [
+    "#11557.2 a held session ends for good while its siblings are waited for after a restart",
+    [
+      ACQUIRE,
+      ACQUIRE,
+      ACQUIRE,
+      TICK,
+      { kind: "daemon-restart", gapMs: 0 },
+      TICK,
+      { kind: "release", target: 0, gone: "terminal", notify: false },
+      TICK,
+      { kind: "release", target: 2, gone: "terminal", notify: true },
+      TICK,
+      TICK,
+      { kind: "call", target: 1, rejected: false },
+      TICK,
     ],
   ],
   [

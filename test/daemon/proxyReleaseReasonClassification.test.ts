@@ -771,6 +771,33 @@ describe("a not-found answer is decided alike on every path, for every session (
     }
   });
 
+  // The fence is the latest binding's alone. It lands while the call that reconnects is still
+  // establishing the connection; that call names another session, which the daemon still holds.
+  test("a call naming a live held session is not refused for the latest binding fenced while it reconnects", async () => {
+    const { world } = await holding([SESSION, SECOND]);
+    try {
+      world.release("device-killed", SECOND);
+      world.replaceDaemon();
+
+      const outcome = await world.timer
+        .resolvePromise(world.proxy.callTool("tapOn", { sessionUuid: SESSION, text: "Go" }), 1)
+        .then(
+          () => "answered",
+          (error: unknown) => error,
+        );
+
+      expect(outcome).toBe("answered");
+      expect(world.forwardedCalls()).toEqual([{ toolName: "tapOn", sessionUuid: SESSION }]);
+      // The session that ended is no longer heartbeated; the one the call named still is.
+      const before = [world.heartbeats(SESSION), world.heartbeats(SECOND)];
+      await world.timer.advanceTimeAsync(3 * INTERVAL_MS);
+      expect(world.heartbeats(SESSION)).toBe(before[0]! + 3);
+      expect(world.heartbeats(SECOND)).toBe(before[1]!);
+    } finally {
+      await world.close();
+    }
+  });
+
   // A held session the daemon answered not-found for with no reason is dropped, not fenced: the
   // daemon may hand it back to a call. Once a call was admitted under it and used it, the proxy
   // owns a live session again and must heartbeat it, or the daemon releases it for silence.

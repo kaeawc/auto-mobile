@@ -4980,8 +4980,22 @@ export class DaemonMcpProxy {
     return true;
   }
 
+  /**
+   * Refuse an operation because the latest binding is fenced. A fence is that session's alone
+   * (#11570): an operation naming another session this proxy still owns goes on, as it would
+   * had the fence been there when the operation started ({@link canUseSurvivingSession}), instead
+   * of being refused under the fenced session's reason because the fence landed while it waited
+   * for the connection.
+   */
   private throwIfBoundSessionFenced(allowReleasedSession = false, namedSessionUuid?: string): void {
-    if (this.terminalBoundSession && !allowReleasedSession) {
+    if (
+      this.terminalBoundSession &&
+      !allowReleasedSession &&
+      !(
+        namedSessionUuid !== undefined &&
+        this.canUseSurvivingSession({ sessionUuid: namedSessionUuid }, false)
+      )
+    ) {
       throw this.boundSessionExpiredError(namedSessionUuid);
     }
   }

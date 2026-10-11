@@ -7,6 +7,9 @@ setup() {
   ORIG_PATH="$PATH"
   export PATH="${MOCK_BIN}:${PATH}"
   export ADB_LOG_FILE="${MOCK_BIN}/adb.log"
+  # The script writes boot-device.log under this dir; its default is shared scratch/ in the repo, so
+  # concurrent bats runs of this file (the parallel pass) clobbered each other's boot output.
+  export AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${MOCK_BIN}/diagnostics"
   # The post-boot settle has its own tests below; other tests skip it.
   export AUTOMOBILE_POST_BOOT_SETTLE_SECONDS=0
   cat > "${MOCK_BIN}/adb" <<'MOCK'
@@ -61,7 +64,7 @@ MOCK
 
   run bash "$SCRIPT"
 
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 0 ] || { echo "status=$status output=$output" >&2; return 1; }
   if grep -Eq 'wm dismiss-keyguard|input keyevent 82' "$ADB_LOG_FILE"; then
     echo "already-unlocked boot sent an unnecessary dismissal command" >&2
     return 1
@@ -256,7 +259,16 @@ printf '%s\n' "$*" >> "$ADB_LOG_FILE"
 bump() { local n=0; [[ -f "$STATE_DIR/$1" ]] && n="$(<"$STATE_DIR/$1")"; n=$((n + 1)); printf '%s' "$n" > "$STATE_DIR/$1"; printf '%s' "$n"; }
 case "$*" in
   *"dumpsys window windows")
-    if (( $(bump dialog-checks) <= DIALOG_SHOWN_CHECKS )); then
+    checks="$(bump dialog-checks)"
+    if (( checks > DIALOG_SHOWN_CHECKS && DIALOG_SHOWN_CHECKS < 10 )); then
+      # The dialog only goes away because the (backgrounded) broadcast was delivered; wait for it
+      # so a loaded runner cannot let the script kill the broadcast before adb logs it.
+      for ((i = 0; i < 500; i++)); do
+        [[ -f "$STATE_DIR/broadcast" ]] && break
+        sleep 0.01
+      done
+    fi
+    if (( checks <= DIALOG_SHOWN_CHECKS )); then
       printf '  Window #6 Window{854b6c9 u0 Application Not Responding: %s}:\n' "$DIALOG_PROCESS"
       printf '    mSurfaceControl=Surface(name=Application Not Responding: %s)/@0x712fbef\n' "$DIALOG_PROCESS"
     fi

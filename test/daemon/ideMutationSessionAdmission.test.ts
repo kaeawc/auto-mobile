@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -124,7 +124,7 @@ describe("mutating ide/* frames against a session that may not take a control ca
       sessionUuid: SESSION,
     });
 
-  beforeEach(async () => {
+  async function setUp(): Promise<void> {
     writes = [];
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -179,15 +179,31 @@ describe("mutating ide/* frames against a session that may not take a control ca
     internals.acceptingRequests = true;
     socket = new FakeSocket();
     internals.handleConnection(socket as unknown as Socket);
-  });
+  }
 
-  afterEach(() => {
+  function tearDown(): void {
     spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
     spyOn(AndroidCtrlProxyManager, "getInstance").mockRestore();
     PlatformDeviceManagerFactory.reset();
     socket.destroy();
     sessionManager.stopCleanupTimer();
+  }
+
+  // CI's per-test time excludes only beforeAll: pay the first pass through the ide/* request
+  // path (JIT, lazy module state) here, once, rather than inside the first timed test.
+  beforeAll(async () => {
+    await setUp();
+    try {
+      await setKeyValue();
+      timer.advanceTime(LEASE_MS + 1);
+      await setKeyValue();
+    } finally {
+      tearDown();
+    }
   });
+
+  beforeEach(setUp);
+  afterEach(tearDown);
 
   test("control: a live holder's ide/setKeyValue is written", async () => {
     const response = await setKeyValue();

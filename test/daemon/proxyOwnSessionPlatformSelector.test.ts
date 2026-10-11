@@ -6,6 +6,7 @@ import {
 import { DaemonClient } from "../../src/daemon/client";
 import {
   DAEMON_BOUND_SESSION_PARAM,
+  DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_VERSION,
 } from "../../src/daemon/constants";
@@ -16,6 +17,7 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 
 interface AcquiredDevice {
   sessionUuid: string;
@@ -37,11 +39,13 @@ const IOS: AcquiredDevice = {
 describe("#11714: an unambiguous platform-only call uses its connection's default session", () => {
   let proxy: DaemonMcpProxy;
   let client: FakeDaemonClient;
+  let timer: FakeTimer;
   let acquisitions: AcquiredDevice[];
   let forwarded: Array<{ name: string; params: Record<string, unknown> }>;
   let spies: Array<ReturnType<typeof spyOn>>;
 
   beforeEach(() => {
+    timer = new FakeTimer();
     acquisitions = [];
     forwarded = [];
     spies = [
@@ -86,8 +90,10 @@ describe("#11714: an unambiguous platform-only call uses its connection's defaul
       clientFactory: () => client,
       daemonManager,
       autoStartDaemon: false,
-      timer: new FakeTimer(),
+      timer,
       idGenerator: new FakeIdGenerator(),
+      heartbeatIntervalMs: 2_000,
+      heartbeatTimeoutMs: 10_000,
     });
   });
 
@@ -260,5 +266,83 @@ describe("#11714: an unambiguous platform-only call uses its connection's defaul
     await acquire("getAndroid", { ...ANDROID, platform: undefined });
     await acquire("getAndroid", ANDROID);
     await expectDefaultRoute(ANDROID);
+  });
+
+  test("A: replay-lease expiry then reacquisition injects the new android default", async () => {
+    await acquire("getAndroid", ANDROID);
+    // Model missed keeper ticks so the call itself discovers replay-lease expiry.
+    timer.setCurrentTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS + 1);
+    const before = forwarded.length;
+    await expect(proxy.callTool("homeScreen", {})).rejects.toMatchObject({
+      name: "DaemonConnectionSessionReleasedError",
+      reason: "replay-lease-expired",
+    });
+    expect(forwarded.length).toBe(before);
+
+    const second = { ...ANDROID, sessionUuid: "second-android", deviceId: "emulator-5556" };
+    await acquire("getAndroid", second);
+    await proxy.callTool("homeScreen", { platform: "android" });
+    expect(lastParams()).toMatchObject({
+      sessionUuid: second.sessionUuid,
+      [DAEMON_BOUND_SESSION_PARAM]: second.sessionUuid,
+      platform: "android",
+    });
+    expect(lastParams()).not.toHaveProperty(DAEMON_OWNED_SESSIONS_PARAM);
+  });
+
+  test("B: idle eviction of held android keeps the ios platform default injected", async () => {
+    await acquire("getAndroid", ANDROID);
+    await acquire("getApple", IOS);
+    await expectDefaultRoute(IOS);
+    const advance = (ms: number): Promise<void> =>
+      timer.advanceTimeAsync(ms, () => drainMicrotasks(32));
+    await advance(DAEMON_BOUND_SESSION_REPLAY_TTL_MS / 2);
+    await proxy.callTool("homeScreen", {});
+    await advance(DAEMON_BOUND_SESSION_REPLAY_TTL_MS / 2);
+
+    const before = client.callDaemonMethodCalls.length;
+    await advance(2_000);
+    expect(
+      client.callDaemonMethodCalls
+        .slice(before)
+        .filter((call) => call.method === "daemon/heartbeat")
+        .map((call) => call.params.sessionId),
+    ).toEqual([IOS.sessionUuid]);
+    await proxy.callTool("homeScreen", { platform: "ios" });
+    expect(lastParams()).toMatchObject({
+      sessionUuid: IOS.sessionUuid,
+      [DAEMON_BOUND_SESSION_PARAM]: IOS.sessionUuid,
+      platform: "ios",
+    });
+    expect(lastParams()).not.toHaveProperty(DAEMON_OWNED_SESSIONS_PARAM);
+  });
+
+  test("C PIN: notified release then reacquisition injects the new android default", async () => {
+    await acquire("getAndroid", ANDROID);
+    client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, ANDROID.sessionUuid, "idle");
+    const second = { ...ANDROID, sessionUuid: "second-android", deviceId: "emulator-5556" };
+    await acquire("getAndroid", second);
+    await expectDefaultRoute(second);
+  });
+
+  test("D PIN: an expired replay lease refuses a matching platform like untargeted control", async () => {
+    await acquire("getAndroid", ANDROID);
+    // The matching platform call must discover expiry, rather than bypass the replay fence.
+    timer.setCurrentTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS + 1);
+    const before = forwarded.length;
+    const refusals: unknown[] = [];
+    for (const args of [{ platform: "android" }, {}]) {
+      let refusal: unknown;
+      try {
+        await proxy.callTool("homeScreen", args);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toBeInstanceOf(DaemonConnectionSessionReleasedError);
+      expect(refusal).toMatchObject({ reason: "replay-lease-expired" });
+      refusals.push(refusal);
+    }
+    expect(refusals[0]).toEqual(refusals[1]);
+    expect(forwarded.length).toBe(before);
   });
 });

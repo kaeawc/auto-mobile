@@ -4780,7 +4780,7 @@ export class DaemonMcpProxy {
     );
   }
 
-  /** A matching platform alone is untargeted only when no other owned session could match. */
+  /** A matching platform alone is untargeted only when no other still-held session could match. */
   private platformSelectorTargetsBoundSession(
     name: string,
     args: Record<string, unknown>,
@@ -4798,7 +4798,7 @@ export class DaemonMcpProxy {
     ) {
       return false;
     }
-    return ![...this.ownedDeviceSessions].some(
+    return ![...this.otherHeldSessions.keys()].some(
       (sessionUuid) =>
         sessionUuid !== bound &&
         (this.sessionPlatforms.get(sessionUuid) === undefined ||

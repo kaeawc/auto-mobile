@@ -731,6 +731,7 @@ test/lint/livenessActivityClockSeparation.test.ts
 test/lint/noCaughtErrorInterpolationRule.test.ts
 test/lint/noInlineErrorNormalizeRule.test.ts
 test/lint/noLegacyAutomobilePath.test.ts
+test/lint/pathSeparatorAssertions.test.ts
 test/lint/processSafety.test.ts
 test/lint/rawSelectorFieldReadRule.test.ts
 test/lint/registrationTeardownGuard.test.ts
@@ -1032,7 +1033,6 @@ test/setup/gitVersionProbe.test.ts
 test/setup/preloadDoesNotLoadCtrlProxyClients.test.ts
 test/setup/testDirectories.test.ts
 test/shutdownCleanup.test.ts
-test/shutdownLateOutcomes.test.ts
 test/stdioShutdownStages.test.ts
 test/utils/ArchiveExtractor.test.ts
 test/utils/Backoff.property.test.ts

@@ -1,6 +1,7 @@
 import type { Timer } from "./utils/SystemTimer";
 import { writeEmergencyLog } from "./utils/loggingConfig";
 import { raceWithDeadline } from "./utils/raceWithDeadline";
+import { errorMessage } from "./utils/describeUnknownError";
 
 /** What a running stage may ask about the shutdown it is part of. */
 export interface ShutdownCleanupStageContext {
@@ -320,7 +321,21 @@ export function createShutdownDatabaseTail(
       try {
         await settleLate(stage);
       } finally {
-        await warnOfRefusedAccesses(stragglers);
+        try {
+          await warnOfRefusedAccesses(stragglers);
+        } catch (error) {
+          try {
+            options.warn(
+              `Failed to report database accesses refused after shutdown: ${errorMessage(error)}`,
+            );
+          } catch (reportError) {
+            // Best-effort reporting must preserve the settle outcome even if its reporter fails.
+            writeEmergencyLog(
+              "Reporting refused database accesses after shutdown failed",
+              reportError,
+            );
+          }
+        }
       }
     },
   };

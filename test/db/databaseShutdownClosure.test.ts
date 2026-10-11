@@ -87,6 +87,97 @@ describe("no database reopen after the shutdown close (#11601)", () => {
     expect(warn.mock.calls[0]?.[1]).toBe(error);
   });
 
+  test("a captured never-queried instance refuses a write after the shutdown close", async () => {
+    const captured = getDatabase();
+    await closeDatabase({ forShutdown: true });
+    runMigrations.mockClear();
+
+    const error = await rejection(sql`create table late_write (x integer)`.execute(captured));
+
+    expect(error).toBeInstanceOf(DatabaseClosedForShutdownError);
+    expect(refusedDatabaseAccessCountAfterShutdownClose()).toBe(1);
+    expect(warn).toHaveBeenCalledWith(
+      "[Database] Refused database access #1 after the shutdown close",
+      error,
+    );
+    expect(runMigrations).not.toHaveBeenCalled();
+    expect(getMigrationsPromiseForTest()).toBeNull();
+  });
+
+  test("a captured never-queried instance stays retired after an ordinary close and reopen", async () => {
+    const captured = getDatabase();
+    await closeDatabase();
+    const fresh = getDatabase();
+
+    const error = await rejection(sql`create table late_write (x integer)`.execute(captured));
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("Cannot use a closed database");
+    await sql`create table reopened (x integer)`.execute(fresh);
+    await sql`insert into reopened values (1)`.execute(fresh);
+    expect((await sql<{ x: number }>`select x from reopened`.execute(fresh)).rows).toEqual([
+      { x: 1 },
+    ]);
+    expect(refusedDatabaseAccessCountAfterShutdownClose()).toBe(0);
+  });
+
+  test.each([false, true])(
+    "a captured queried instance rejects after close (forShutdown=%p)",
+    async (forShutdown) => {
+      const captured = getDatabase();
+      await sql`create table kept (x integer)`.execute(captured);
+      await closeDatabase({ forShutdown });
+
+      expect(await rejection(sql`insert into kept values (1)`.execute(captured))).toBeInstanceOf(
+        Error,
+      );
+    },
+  );
+
+  test.each([false, true])(
+    "a captured never-queried instance refuses a transaction after close (forShutdown=%p)",
+    async (forShutdown) => {
+      const captured = getDatabase();
+      await closeDatabase({ forShutdown });
+      let bodyRan = false;
+
+      const error = await rejection(
+        captured.transaction().execute(async () => {
+          bodyRan = true;
+        }),
+      );
+
+      expect(error).toBeInstanceOf(Error);
+      if (forShutdown) {
+        expect(error).toBeInstanceOf(DatabaseClosedForShutdownError);
+        expect(refusedDatabaseAccessCountAfterShutdownClose()).toBe(1);
+      } else {
+        expect((error as Error).message).toContain("Cannot use a closed database");
+      }
+      expect(bodyRan).toBe(false);
+    },
+  );
+
+  test("a retired initialized instance counts shutdown refusals for writes and transactions", async () => {
+    const captured = getDatabase();
+    await sql`create table kept (x integer)`.execute(captured);
+    await closeDatabase({ forShutdown: true });
+
+    expect(await rejection(sql`insert into kept values (1)`.execute(captured))).toBeInstanceOf(
+      DatabaseClosedForShutdownError,
+    );
+    let bodyRan = false;
+    expect(
+      await rejection(
+        captured.transaction().execute(async () => {
+          bodyRan = true;
+        }),
+      ),
+    ).toBeInstanceOf(DatabaseClosedForShutdownError);
+    expect(bodyRan).toBe(false);
+    expect(refusedDatabaseAccessCountAfterShutdownClose()).toBe(2);
+  });
+
   test("a timer callback that fires after the close is refused too, and each refusal is counted", async () => {
     const timer = new FakeTimer();
     const outcomes: Array<Promise<unknown>> = [];

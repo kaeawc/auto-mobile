@@ -467,7 +467,64 @@ function ensureDatabaseDirectory(dbPath: string): void {
 }
 
 function createApplicationDatabase(dbPath: string): Kysely<DatabaseSchema> {
-  return createSqliteKysely<DatabaseSchema>(dbPath, waitForMigrationsBeforeQuery);
+  let retired = false;
+  const assertActive = (): void => {
+    if (!retired) {
+      return;
+    }
+    if (shutdownClosure) {
+      throw refuseAccessAfterShutdownClose();
+    }
+    throw new Error("Cannot use a closed database");
+  };
+  const sqliteDialect = new BunSqliteDialect({
+    database: () => {
+      assertActive();
+      return openConfiguredSqliteDatabase(dbPath);
+    },
+    beforeQuery: waitForMigrationsBeforeQuery,
+    optimizeIntervalMs: DEFAULT_OPTIMIZE_INTERVAL_MS,
+  });
+  const driver = sqliteDialect.createDriver();
+  const dialect: Dialect = {
+    createDriver: () => driver,
+    createQueryCompiler: () => sqliteDialect.createQueryCompiler(),
+    createAdapter: () => sqliteDialect.createAdapter(),
+    createIntrospector: (db) => sqliteDialect.createIntrospector(db),
+  };
+  const config = { dialect };
+  const database = new Kysely<DatabaseSchema>(config);
+  const executor = database.getExecutor();
+  const applicationDriver: Driver = {
+    init: (options) => driver.init(options),
+    acquireConnection: (options) => driver.acquireConnection(options),
+    beginTransaction: (connection, settings) => driver.beginTransaction(connection, settings),
+    commitTransaction: (connection) => driver.commitTransaction(connection),
+    rollbackTransaction: (connection) => driver.rollbackTransaction(connection),
+    releaseConnection: (connection, options) => driver.releaseConnection(connection, options),
+    destroy: async () => {
+      // Kysely skips driver.destroy() before its first query. Retire this application instance
+      // before delegating, even then, and before any await lets a late caller use it.
+      retired = true;
+      await database.destroy();
+    },
+  };
+  return new Kysely<DatabaseSchema>({
+    config,
+    dialect,
+    driver: applicationDriver,
+    executor: executor.withConnectionProvider({
+      provideConnection: async (consumer, options) => {
+        // Guard before Kysely's runtime driver: initialized drivers otherwise reject with its
+        // generic destroyed error; uninitialized drivers can still initialize after destroy().
+        assertActive();
+        return executor.provideConnection(async (connection) => {
+          assertActive();
+          return consumer(connection);
+        }, options);
+      },
+    }),
+  });
 }
 
 /**

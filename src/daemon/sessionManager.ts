@@ -72,7 +72,7 @@ import {
 import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import { Mutex } from "async-mutex";
 import { errorMessage } from "../utils/describeUnknownError";
-import { effectiveLastToolActivity } from "./sessionClocks";
+import { effectiveLastToolActivity, sessionIdleDeadline } from "./sessionClocks";
 import { onSessionClock } from "./sessionClockPersistence";
 import {
   isLivenessOwnerLeaseLive,
@@ -2405,6 +2405,34 @@ export class SessionManager {
       .map((release) => ({
         sessionId: release.session.sessionId,
         startedAtMs: release.startedAtMs ?? this.sessionNow(),
+      }));
+  }
+
+  /**
+   * The releases in progress that carry a non-terminal reason (a `device-restart:` handoff, a
+   * `plan-auto-release`) and still hold their device (#11554). Heartbeats for a releasing session
+   * are refused, so the heartbeat monitor must not count the time since `startedAtMs` as its
+   * owner's silence; it still holds each one to its stuck deadline (#10963). A release a later
+   * joiner upgraded to a terminal reason, an idle release (see {@link getIdleReleasesInProgress})
+   * and a forced release are not listed.
+   */
+  getNonTerminalReleasesInProgress(): {
+    sessionId: string;
+    startedAtMs: number;
+    session: Session;
+  }[] {
+    return Array.from(this.releasePromises.values())
+      .filter(
+        (release) =>
+          this.activeReleasePromises.has(release) &&
+          !release.forced &&
+          release.expiryOrigin === undefined &&
+          !isTerminalReleaseReason(release.reason.value),
+      )
+      .map((release) => ({
+        sessionId: release.session.sessionId,
+        startedAtMs: release.startedAtMs ?? this.sessionNow(),
+        session: release.session,
       }));
   }
 
@@ -9433,7 +9461,7 @@ export class SessionManager {
     }
     // The idle deadline is exactly the idle window after the last control call: the suspect
     // grace (#10051) belongs to the heartbeat lease only, never to idleness (#11107).
-    if (this.sessionNow() <= session.expiresAt) {
+    if (this.sessionNow() <= sessionIdleDeadline(session)) {
       return false;
     }
     return !isReleaseVetoedByExecutions({
@@ -9455,7 +9483,7 @@ export class SessionManager {
     latestDeadlineMs: number | undefined;
   } {
     return {
-      vetoedSince: session.expiresAt,
+      vetoedSince: sessionIdleDeadline(session),
       latestDeadlineMs: this.sessionExecutionDeadlineLookup(session.sessionId),
     };
   }
@@ -9551,20 +9579,24 @@ export class SessionManager {
     if (execution === undefined) {
       return this.isSessionExpired(session);
     }
-    if (this.sessionNow() <= session.expiresAt) {
+    // The deadline the scan releases on and the client is told (#11558): a `cli-idle` session's
+    // moves with the daemon's own stall, which its `expiresAt` does not record.
+    const idleDeadline = sessionIdleDeadline(session);
+    if (this.sessionNow() <= idleDeadline) {
       return false;
     }
-    return execution.sessionClockStartTime > session.expiresAt;
+    return execution.sessionClockStartTime > idleDeadline;
   }
 
   private isLateExecutionWhileEarlierWorkIsActive(
     session: Session,
     execution: SessionClockExecution | undefined,
   ): boolean {
+    const idleDeadline = sessionIdleDeadline(session);
     return (
       execution !== undefined &&
-      this.sessionNow() > session.expiresAt &&
-      execution.sessionClockStartTime > session.expiresAt &&
+      this.sessionNow() > idleDeadline &&
+      execution.sessionClockStartTime > idleDeadline &&
       this.activeSessionExecutionChecker(session.sessionId, {
         excludeExecutionId: execution.executionId,
       })

@@ -46,3 +46,28 @@ export function effectiveLastToolActivity(
 ): number {
   return Math.max(session.lastUsedAt, session.idleStallForgivenAt ?? Number.NEGATIVE_INFINITY);
 }
+
+/** What {@link sessionIdleDeadline} reads of a session. */
+export type SessionIdleDeadlineSnapshot = Pick<
+  Session,
+  "livenessPolicy" | "lastUsedAt" | "idleStallForgivenAt" | "heartbeatTimeoutMs" | "expiresAt"
+>;
+
+/**
+ * The one answer to "when does this session idle-expire", on the session clock (#11558). Every
+ * idle judgement derives from it: the scan that releases an idle session (the idle sweep, and the
+ * heartbeat monitor for a `cli-idle` session), the lazy-expiry check when a new call is admitted,
+ * and the `idleReleaseAt` a client is told. A session is idle-expired once the clock is PAST this
+ * instant, never at it.
+ *
+ * A `cli-idle` session's deadline is its CLI idle window (`heartbeatTimeoutMs`, which adopting the
+ * policy set to that window) after its last tool activity, moved by the daemon's own stalls
+ * ({@link effectiveLastToolActivity}). Every other session's is `expiresAt`, which each tool call
+ * and each forgiven stall moves directly.
+ */
+export function sessionIdleDeadline(session: SessionIdleDeadlineSnapshot): number {
+  if (session.livenessPolicy === "cli-idle") {
+    return effectiveLastToolActivity(session) + session.heartbeatTimeoutMs;
+  }
+  return session.expiresAt;
+}

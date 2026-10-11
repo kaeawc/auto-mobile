@@ -1,5 +1,5 @@
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { logger } from "../../../src/utils/logger";
 import { TapOnElement, tapFocusFailure } from "../../../src/features/action/TapOnElement";
 import type { ElementBounds, ObserveResult } from "../../../src/models";
@@ -49,6 +49,16 @@ const capturedImeHierarchy = () =>
   } as HierarchyDelegateContext).convertToViewHierarchyResult(
     structuredClone(capturedIme) as AccessibilityHierarchy,
   );
+
+// CI's per-test time excludes only beforeAll: one throwaway run of the captured-IME refusal
+// pays the resolver's one-time module/JIT warm-up over the large capture here, not in test #0.
+beforeAll(async () => {
+  await executeAt("Demos", {
+    fixture: capturedImeHierarchy(),
+    screenSize: { width: 1080, height: 2400 },
+    realSelector: true,
+  });
+});
 
 test.each(["Demos", "Slides", "Settings", "Password"])(
   "captured %s under the full IME window refuses without dispatch",

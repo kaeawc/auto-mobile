@@ -20,8 +20,11 @@ A call that acts on a held device is refused with the typed code
 A derived `<base>:<label>` session counts as its base session, for the holder
 check and for the owning connection alike: while the base's owner is connected,
 another connection's control call naming the derived session, or reaching one of
-the owner's devices through a `device` label, is refused (#11542). A device that
-no session holds takes calls from anyone.
+the owner's devices through a `device` label, is refused (#11542). The same holds
+wherever ownership is recorded: restoring a derived session is restoring its
+base, so it is refused while another connection owns the base, and it never
+takes a label away from the base's owner (#11586). A device that no session
+holds takes calls from anyone.
 
 A session's owner is the connection that acquired it, or that restored it after
 a reconnect. Ownership is cooperative: no token is needed, but naming a session's
@@ -30,8 +33,17 @@ other connection that names the session is refused, with autolock on or off, and
 that connection is never bound to the session. The rule covers control tools
 that take no device routing too (`killDevice`, `deleteDevice`, `exportPlan`,
 `recordSteps` start and stop): the refused call does not run and does not extend the session's
-idle window (#11542). `setToolEnabled` is not refused (see
-[Ownership is cooperative](#ownership-is-cooperative)). Once the owner has disconnected
+idle window (#11542). A plan step, or a tool another tool calls, is judged by the
+same rule as a direct call from the connection that started it (#11469, #11555).
+`setToolEnabled` is not refused (see
+[Ownership is cooperative](#ownership-is-cooperative)), but naming a session is
+never use of it: while the owner is connected, no call from another connection
+extends the session's idle window, counts as its liveness, or binds that
+connection to it (#11555). The rule judges the session a call names. A proxy
+started with `--initial-session-uuid` declares that session as its own binding
+and its calls then name none, so they are not judged by this rule; its claim is
+governed by liveness ownership instead (see
+[environment variables](environment-variables.md)). Once the owner has disconnected
 (a finished `--cli` call, for example) another connection may name the session.
 
 Reads stay allowed on any device, whichever session holds it, and need no
@@ -129,6 +141,30 @@ requester of an explicit release is not cut. A derived `<base>:<label>` session
 released alone does not tell its live base session's call that it lost
 ownership: that call gets a plain cancellation (#11386). Heartbeat reap and owner-disconnect releases also cut calls that reached the session through autolock.
 
+### Plan label sessions
+
+A multi-device plan runs each label other than its primary on a derived
+`<base>:<label>` session that its allocation mints. That session lives only as
+long as the plan run (#11572), whichever reason ended it:
+
+- The next plan run under the same base mints the label again, also after the
+  label's device was lost or killed mid-plan (a terminal release) and after a
+  daemon restart.
+- Nothing else does. A call that names a label session that is not live (a late
+  call of the finished run, or a client naming `<base>:<label>` itself) is
+  refused with `session_ownership_lost` and takes no device, where a base
+  session released with `plan-auto-release` would be re-issued by name.
+- It is never rehydrated after a daemon restart, whether its row was live,
+  released by `daemon-shutdown` or waiting out a `device-restart:<device>`: its
+  device is free at once. The `executePlan` the shutdown cut answers with its
+  own result, `success: false` with `code: "daemon_shutting_down"` and
+  `retryable: true` (steps may already have run, as `executedSteps` reports),
+  and the caller runs the plan again. While the plan is still running in the
+  same daemon, a label session waiting out a device restart is recovered like
+  any other.
+
+The daemon recognizes these rows by `device_sessions.source = 'plan-label'`.
+
 When two releases of one session race, a terminal reason replaces a
 non-terminal one, and any other terminal reason replaces an idle one, so the
 recorded reason is the most specific.
@@ -163,7 +199,11 @@ acquisitions as anonymous (#11096):
 - Booted-device discovery that did not complete (adb or simctl failed, or a
   running emulator's AVD identity has not resolved) is refused with the retryable
   code `discovery_incomplete` instead of booting or adopting a device blind. Retry
-  the acquisition.
+  the acquisition. `setActiveDevice` answers it for a device it cannot find only
+  when the discovery that could have listed that device failed, and names that
+  platform: an iOS UDID while simctl failed is iOS discovery, and an id whose
+  shape names no platform takes whichever discovery failed. If only the other
+  platform's discovery failed, the device is reported as not found (#11586).
 
 ## A device that drops off
 
@@ -234,7 +274,8 @@ the holder. From the CLI: `auto-mobile --cli killDevice --device '{...}' --force
 Naming the holder's `sessionUuid` makes a call the holder's only for the
 connection that owns that session, or once that owner has disconnected. From any
 other connection the call is refused, with or without `force` (#11542): to
-force-stop the device, leave `sessionUuid` out.
+force-stop the device, leave `sessionUuid` out. The refusal of a call that
+carried `force: true` says so (#11555).
 
 A device another live AutoMobile daemon holds (two daemons sharing one adb server
 or simulator set) is refused the same way, with `device_owned_by_other_daemon`:

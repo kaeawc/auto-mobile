@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -57,6 +57,14 @@ afterEach(() => {
 });
 
 describe("pinchOn layer (#9305)", () => {
+  // CI's per-test time excludes only beforeAll: one throwaway pinch pays the resolver's one-time
+  // module/JIT cost over the captured hierarchy here, not in the first timed test.
+  beforeAll(async () => {
+    const { pinchOn } = createPinch(capturedFloatingCoverHierarchy());
+    await pinchOn.execute(pinch("coverBox", "prototype"));
+    mock.restore();
+  });
+
   test('"prototype" resolves the container among prototype nodes and pinches inside the prototype', async () => {
     const { pinchOn, service } = createPinch(capturedFloatingCoverHierarchy());
     const result = await pinchOn.execute(pinch("coverBox", "prototype"));

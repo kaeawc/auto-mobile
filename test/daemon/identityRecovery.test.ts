@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   writeFileSync,
   readFileSync,
@@ -14,7 +15,16 @@ import {
   republishOwnedIdentity,
   type IdentityRecoveryIO,
 } from "../../src/daemon/identityRecovery";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { executionTracker } from "../../src/server/executionTracker";
@@ -159,9 +169,42 @@ function harness(
 let isolatedDataDir: string;
 let originalDataDir: string | undefined;
 
+// CI's per-test time includes beforeEach/afterEach but not beforeAll/afterAll, so the temp
+// directories of this file are all created under one root that is removed once, after the file,
+// instead of a mkdtemp + recursive rm inside every timed test.
+let scratchRoot: string;
+let scratchCount = 0;
+
+beforeAll(async () => {
+  scratchRoot = mkdtempSync(join(tmpdir(), "identity-recovery-"));
+  // One throwaway recovery pays the manager's one-time module/JIT cost outside the timed tests.
+  const previous = process.env.AUTOMOBILE_DATA_DIR;
+  process.env.AUTOMOBILE_DATA_DIR = scratchDir("identity-recovery-warm-");
+  try {
+    await harness({ accepted: true }).manager.status();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.AUTOMOBILE_DATA_DIR;
+    } else {
+      process.env.AUTOMOBILE_DATA_DIR = previous;
+    }
+  }
+});
+
+afterAll(() => {
+  rmSync(scratchRoot, { recursive: true, force: true });
+});
+
+/** A fresh empty directory unique to the caller, removed with the file's scratch root. */
+function scratchDir(prefix: string): string {
+  const dir = join(scratchRoot, `${prefix}${scratchCount++}`);
+  mkdirSync(dir);
+  return dir;
+}
+
 beforeEach(() => {
   originalDataDir = process.env.AUTOMOBILE_DATA_DIR;
-  isolatedDataDir = mkdtempSync(join(tmpdir(), "identity-recovery-data-"));
+  isolatedDataDir = scratchDir("identity-recovery-data-");
   process.env.AUTOMOBILE_DATA_DIR = isolatedDataDir;
 });
 
@@ -173,12 +216,11 @@ afterEach(() => {
   } else {
     process.env.AUTOMOBILE_DATA_DIR = originalDataDir;
   }
-  rmSync(isolatedDataDir, { recursive: true, force: true });
 });
 
 describe("provider-owned identity recovery", () => {
   test("Windows never probes socket identity with absent, present, stale, or malformed PID metadata", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "identity-win32-"));
+    const dir = scratchDir("identity-win32-");
     const pidPath = join(dir, "daemon.pid");
     const controlPath = join(dir, "named-pipe");
     const manager = new DaemonManager(
@@ -200,18 +242,14 @@ describe("provider-owned identity recovery", () => {
     const probe = spyOn((manager as any).identityRecoveryIO, "probe").mockRejectedValue(
       new Error("connect ECONNREFUSED"),
     );
-    try {
-      expect(await manager.status()).toEqual({ running: false });
-      writeFileSync(pidPath, JSON.stringify({ ...complete, socketPath: controlPath }));
-      expect((await manager.status()).running).toBe(true);
-      writeFileSync(pidPath, JSON.stringify({ ...complete, socketPath: controlPath, pid: 999 }));
-      expect(await manager.status()).toEqual({ running: false });
-      writeFileSync(pidPath, "malformed old metadata");
-      expect(await manager.status()).toEqual({ running: false });
-      expect(probe).not.toHaveBeenCalled();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(await manager.status()).toEqual({ running: false });
+    writeFileSync(pidPath, JSON.stringify({ ...complete, socketPath: controlPath }));
+    expect((await manager.status()).running).toBe(true);
+    writeFileSync(pidPath, JSON.stringify({ ...complete, socketPath: controlPath, pid: 999 }));
+    expect(await manager.status()).toEqual({ running: false });
+    writeFileSync(pidPath, "malformed old metadata");
+    expect(await manager.status()).toEqual({ running: false });
+    expect(probe).not.toHaveBeenCalled();
   });
 
   for (const outcome of ["repaired", "deferred", "failed", "unauthenticated"]) {
@@ -237,7 +275,7 @@ describe("provider-owned identity recovery", () => {
   }
 
   test("recovery lock follower waits for the successor's generation instead of joining the doomed incumbent", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "identity-follower-"));
+    const dir = scratchDir("identity-follower-");
     const timer = new FakeTimer();
     const stopStarted = Promise.withResolvers<void>();
     const followerProbed = Promise.withResolvers<void>();
@@ -318,12 +356,11 @@ describe("provider-owned identity recovery", () => {
     } finally {
       publishSuccessor.resolve();
       h.manager.releaseLock();
-      rmSync(dir, { recursive: true, force: true });
     }
   });
 
   test("follower arriving during incumbent authentication waits for the replacement decision and successor", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "identity-auth-window-"));
+    const dir = scratchDir("identity-auth-window-");
     const timer = new FakeTimer();
     const h = harness({ accepted: false }, join(dir, "lock"), timer);
     const peer = harness({ accepted: false }, join(dir, "lock"), timer);
@@ -387,7 +424,6 @@ describe("provider-owned identity recovery", () => {
     } finally {
       unblock();
       h.manager.releaseLock();
-      rmSync(dir, { recursive: true, force: true });
     }
   });
 
@@ -395,7 +431,7 @@ describe("provider-owned identity recovery", () => {
   test.skipIf(process.platform === "win32")(
     "symlinked startup lock leaves its target untouched and identity recovery completes",
     async () => {
-      const dir = mkdtempSync(join(tmpdir(), "identity-symlink-marker-"));
+      const dir = scratchDir("identity-symlink-marker-");
       const path = join(dir, "lock");
       const target = join(dir, "target");
       const h = harness({ accepted: true }, path);
@@ -413,7 +449,6 @@ describe("provider-owned identity recovery", () => {
         expect(readFileSync(target, "utf8")).toBe(content);
       } finally {
         h.manager.releaseLock();
-        rmSync(dir, { recursive: true, force: true });
       }
     },
   );
@@ -422,7 +457,7 @@ describe("provider-owned identity recovery", () => {
   test.skipIf(process.platform === "win32")(
     "writable startup lock is unchanged and identity recovery completes",
     async () => {
-      const dir = mkdtempSync(join(tmpdir(), "identity-unsafe-mode-marker-"));
+      const dir = scratchDir("identity-unsafe-mode-marker-");
       const path = join(dir, "lock");
       const h = harness({ accepted: true }, path);
       try {
@@ -437,13 +472,12 @@ describe("provider-owned identity recovery", () => {
         expect(readFileSync(path, "utf8")).toBe(content);
       } finally {
         h.manager.releaseLock();
-        rmSync(dir, { recursive: true, force: true });
       }
     },
   );
 
   test("safe owned startup lock writes the recovery marker preserving PID and token", () => {
-    const dir = mkdtempSync(join(tmpdir(), "identity-safe-marker-"));
+    const dir = scratchDir("identity-safe-marker-");
     const h = harness({ accepted: true }, join(dir, "lock"));
     try {
       expect(h.manager.acquireLock()).toBe(true);
@@ -453,12 +487,11 @@ describe("provider-owned identity recovery", () => {
       expect((h.manager as any).readStartupLockHolder()).toEqual({ ...before, recovering: true });
     } finally {
       h.manager.releaseLock();
-      rmSync(dir, { recursive: true, force: true });
     }
   });
 
   test("a different holder's recovery marker invalidates ordinary readiness", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "identity-new-holder-"));
+    const dir = scratchDir("identity-new-holder-");
     const h = harness({ accepted: false }, join(dir, "lock"));
     const next = harness({ accepted: false }, join(dir, "lock"), h.timer);
     h.timer.enableAutoAdvance();
@@ -478,12 +511,11 @@ describe("provider-owned identity recovery", () => {
     } finally {
       next.manager.releaseLock();
       h.manager.releaseLock();
-      rmSync(dir, { recursive: true, force: true });
     }
   });
 
   test("torn JSON recovery metadata is retried before readiness is trusted", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "identity-torn-marker-"));
+    const dir = scratchDir("identity-torn-marker-");
     const path = join(dir, "lock");
     const h = harness({ accepted: false }, path);
     h.timer.enableAutoAdvance();
@@ -504,12 +536,11 @@ describe("provider-owned identity recovery", () => {
       expect(ready).not.toHaveBeenCalled();
     } finally {
       h.manager.releaseLock();
-      rmSync(dir, { recursive: true, force: true });
     }
   });
 
   test("in-place repair releases its recovery marker before a later ordinary follower", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "identity-marker-release-"));
+    const dir = scratchDir("identity-marker-release-");
     const h = harness({ accepted: true }, join(dir, "lock"));
     try {
       expect(await h.manager.start()).toBe("joined");
@@ -523,12 +554,11 @@ describe("provider-owned identity recovery", () => {
       expect(probe).not.toHaveBeenCalled();
     } finally {
       h.manager.releaseLock();
-      rmSync(dir, { recursive: true, force: true });
     }
   });
 
   test("ordinary lock followers never inspect socket identity and retain the full budget", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "identity-ordinary-follower-"));
+    const dir = scratchDir("identity-ordinary-follower-");
     const h = harness({ accepted: false }, join(dir, "lock"));
     const io = (h.manager as any).identityRecoveryIO;
     const socketExists = spyOn(io, "socketExists");
@@ -542,12 +572,11 @@ describe("provider-owned identity recovery", () => {
       expect(probe).not.toHaveBeenCalled();
     } finally {
       h.manager.releaseLock();
-      rmSync(dir, { recursive: true, force: true });
     }
   });
 
   test("a recovery marker published during readiness switches the follower to identity waiting", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "identity-transition-follower-"));
+    const dir = scratchDir("identity-transition-follower-");
     const h = harness({ accepted: false }, join(dir, "lock"));
     h.timer.enableAutoAdvance();
     const ready = spyOn(h.manager, "waitForReady").mockImplementation(async () => {
@@ -562,14 +591,13 @@ describe("provider-owned identity recovery", () => {
       expect(h.record).toEqual(complete);
     } finally {
       h.manager.releaseLock();
-      rmSync(dir, { recursive: true, force: true });
     }
   });
 
   test.each(["repair", "timeout", "stalled probe"])(
     "recovery lock follower handles %s within the arbitration budget",
     async (outcome) => {
-      const dir = mkdtempSync(join(tmpdir(), "identity-follower-budget-"));
+      const dir = scratchDir("identity-follower-budget-");
       const h = harness({ accepted: false }, join(dir, "lock"));
       h.timer.enableAutoAdvance();
       const reachable = spyOn(h.manager, "waitForReady").mockResolvedValue(true);
@@ -601,7 +629,6 @@ describe("provider-owned identity recovery", () => {
         expect(reachable).not.toHaveBeenCalled();
       } finally {
         h.manager.releaseLock();
-        rmSync(dir, { recursive: true, force: true });
       }
     },
   );

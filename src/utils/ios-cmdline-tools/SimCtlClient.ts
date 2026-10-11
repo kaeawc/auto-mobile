@@ -53,6 +53,10 @@ import {
   type SimulatorDisplay,
 } from "./SimulatorDisplays";
 import type { DeviceDisplays } from "../../models/DisplayPanel";
+import {
+  isTransitionalSimulatorState,
+  type TransitionalSimulator,
+} from "../../models/TransitionalSimulator";
 
 const COMMAND_SETTLEMENT_GRACE_MS = 1_000;
 const SCREENSHOT_CLEANUP_BOUND_MS = 1_000;
@@ -290,6 +294,16 @@ export interface SimCtl {
 
   /** List booted simulators without swallowing discovery failures. */
   getBootedSimulatorsChecked(timeoutMs?: number, signal?: AbortSignal): Promise<BootedDevice[]>;
+
+  /**
+   * {@link getBootedSimulatorsChecked} plus the simulators `simctl` reports `Booting` or
+   * `Shutting Down` (#11573). Optional: fakes that only model booted devices omit it.
+   */
+  getSimulatorListingChecked?(
+    timeoutMs?: number,
+    signal?: AbortSignal,
+    options?: { bypassCache?: boolean },
+  ): Promise<{ booted: BootedDevice[]; transitional: TransitionalSimulator[] }>;
 
   /**
    * Get device information by UDID
@@ -2366,6 +2380,19 @@ export class SimCtlClient implements SimCtl {
     signal?: AbortSignal,
     options: { bypassCache?: boolean } = {},
   ): Promise<BootedDevice[]> {
+    return (await this.getSimulatorListingChecked(timeoutMs, signal, options)).booted;
+  }
+
+  /**
+   * One checked listing read, split into the booted simulators and the ones `simctl` reports
+   * `Booting` or `Shutting Down`. The transitional ones are omitted from booted discovery but a
+   * session that holds one must still see it on every inventory surface (#11573).
+   */
+  async getSimulatorListingChecked(
+    timeoutMs?: number,
+    signal?: AbortSignal,
+    options: { bypassCache?: boolean } = {},
+  ): Promise<{ booted: BootedDevice[]; transitional: TransitionalSimulator[] }> {
     // An already-aborted caller must fail even on a cache hit below -- a cached
     // "success" for a request the caller has already given up on is silently
     // wrong (issue #6576).
@@ -2386,27 +2413,37 @@ export class SimCtlClient implements SimCtl {
     const observedAt =
       recorded?.devices === devices ? recorded.observedAt : this.observationSequence.next();
 
-    return devices
-      .filter((device) => isDeviceAvailable(device) && device.state === "Booted" && device.deviceId)
-      .map(
-        (device) =>
-          ({
-            name: device.name,
-            platform: "ios",
-            deviceId: device.deviceId,
-            observedAt,
-            iosVersion: device.iosVersion,
-            osVersion: device.osVersion,
-            formFactor: device.formFactor,
-            runtimeId: device.runtimeId,
-            runtime: device.runtime,
-            deviceType: device.deviceType,
-            model: device.model,
-            architecture: device.architecture,
-            displays: device.displays,
-          }) as BootedDevice,
-      )
-      .sort((a, b) => a.deviceId.localeCompare(b.deviceId));
+    const listed = devices.filter((device) => isDeviceAvailable(device) && device.deviceId);
+    const byDeviceId = (a: BootedDevice, b: BootedDevice) => a.deviceId.localeCompare(b.deviceId);
+    const toBooted = (device: DeviceInfo): BootedDevice =>
+      ({
+        name: device.name,
+        platform: "ios",
+        deviceId: device.deviceId,
+        observedAt,
+        iosVersion: device.iosVersion,
+        osVersion: device.osVersion,
+        formFactor: device.formFactor,
+        runtimeId: device.runtimeId,
+        runtime: device.runtime,
+        deviceType: device.deviceType,
+        model: device.model,
+        architecture: device.architecture,
+        displays: device.displays,
+      }) as BootedDevice;
+    return {
+      booted: listed
+        .filter((device) => device.state === "Booted")
+        .map(toBooted)
+        .sort(byDeviceId),
+      transitional: listed
+        .flatMap((device) =>
+          isTransitionalSimulatorState(device.state)
+            ? [{ device: toBooted(device), state: device.state }]
+            : [],
+        )
+        .sort((a, b) => byDeviceId(a.device, b.device)),
+    };
   }
 
   /** Cold-cache path for {@link getBootedSimulatorsChecked}: the raw discovery primitive. */

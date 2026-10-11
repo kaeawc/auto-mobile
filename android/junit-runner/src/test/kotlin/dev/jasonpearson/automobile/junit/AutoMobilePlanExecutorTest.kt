@@ -78,65 +78,239 @@ class AutoMobilePlanExecutorTest {
     val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
 
     assertEquals(true, result.success)
-    // The daemon's retryAfterMs (4000) lengthens each step beyond the 500/1000 backoff.
-    assertEquals(listOf(4000L, 4000L), waits)
+    // #11538: for the finalize codes retryAfterMs bounds the total wait, not each step.
+    assertEquals(listOf(500L, 1000L), waits)
     assertEquals(3, fakeDaemonClient.executePlanCalls)
   }
 
   @Test
-  fun `a cleanup refusal advertising the finalize cap is waited out past the 30 s budget`() {
-    // #11360: the daemon advertises its real finalize cap (about 125 s) in retryAfterMs.
+  fun `a cleanup refusal advertising the finalize cap is retried on the ordinary backoff`() {
+    // #11538: the daemon advertises its finalize cap (about 125 s) in retryAfterMs; a finalize that
+    // takes 2 s must be noticed on the next poll, not after sleeping the whole cap.
+    val waits = mutableListOf<Long>()
+    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    repeat(3) {
+      fakeDaemonClient.queueExecutePlanResponse(
+        buildDaemonResponse(finalizeRefusalPayload("device_cleanup_in_progress", 125_000), true),
+      )
+    }
+    fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(successPayload()))
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
+
+    assertEquals(result.errorMessage, true, result.success)
+    assertEquals(listOf(500L, 1000L, 2000L), waits)
+    assertEquals(4, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
+  fun `a finalize refusal that never clears is polled until the 150 s cap then given up`() {
+    val waits = mutableListOf<Long>()
+    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(finalizeRefusalPayload("device_cleanup_in_progress", 125_000), true),
+    )
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(150_000L, waits.sum())
+    assertEquals(4_000L, waits.max())
+  }
+
+  @Test
+  fun `the finalize wait ends when the daemon finishes and is bounded for the finalize codes only`() {
+    val cases =
+      listOf(
+        // code, ms at which the daemon finishes finalizing (null = no hint), expected total wait
+        Triple("device_cleanup_in_progress", null, 30_000L),
+        Triple("device_cleanup_in_progress", 1_000L, 1_500L),
+        Triple("device_cleanup_in_progress", 125_000L, 125_000L),
+        Triple("device_cleanup_in_progress", 600_000L, 150_000L),
+        Triple("device_shutting_down", null, 30_000L),
+        Triple("device_shutting_down", 1_000L, 1_500L),
+        Triple("device_shutting_down", 125_000L, 125_000L),
+        Triple("device_shutting_down", 600_000L, 150_000L),
+        // Other codes never extend the budget, whatever the hint says.
+        Triple("device_owned_by_other_session", 125_000L, 30_000L),
+        Triple("device_owned_by_other_daemon", 125_000L, 30_000L),
+        Triple("capacity_exhausted", 125_000L, 30_000L),
+        Triple("discovery_incomplete", 125_000L, 30_000L),
+      )
+    for ((code, finalizeAtMs, total) in cases) {
+      val finalizes = code == "device_cleanup_in_progress" || code == "device_shutting_down"
+      var waited = 0L
+      var waits = 0
+      while (!(finalizes && finalizeAtMs != null && waited >= finalizeAtMs)) {
+        // For the finalize codes the daemon's retryAfterMs is the finalize time still remaining.
+        val hint = if (finalizes) finalizeAtMs?.let { it - waited } else finalizeAtMs
+        val step =
+          AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(waits, waited, hint, code) ?: break
+        waited += step
+        waits += 1
+      }
+      assertEquals("$code/$finalizeAtMs total", total, waited)
+    }
+  }
+
+  @Test
+  fun `a finalize refusal reporting time left is never given up on past the 30 s budget`() {
+    // The daemon's hint is the REMAINING finalize time, so after 100 s of waiting a 5 s hint must
+    // still be honoured rather than judged against a stale total.
+    assertEquals(
+      4_000L,
+      AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(
+        8,
+        100_000L,
+        5_000L,
+        "device_cleanup_in_progress",
+      ),
+    )
+    assertEquals(
+      1_000L,
+      AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(
+        8,
+        100_000L,
+        1_000L,
+        "device_cleanup_in_progress",
+      ),
+    )
+    assertEquals(
+      2_000L,
+      AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(
+        8,
+        148_000L,
+        30_000L,
+        "device_shutting_down",
+      ),
+    )
+    assertNull(
+      AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(
+        8,
+        150_000L,
+        30_000L,
+        "device_shutting_down",
+      ),
+    )
+  }
+
+  @Test
+  fun `a failed frame is retried only when its typed retryable flag says so`() {
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    // code, retryable (null = the frame omits it), message, executePlan calls with maxRetries = 1
+    val cases =
+      listOf(
+        // A frame without the flag keeps the message-based retry (older daemons).
+        listOf("daemon_queue_timeout", null, "MCP timeout: tapOn exceeded 30000ms", 1),
+        listOf("code_without_flag", null, "daemon request timeout", 2),
+        listOf("daemon_queue_timeout", true, "MCP timeout: tapOn exceeded 30000ms", 2),
+        listOf("daemon_shutting_down", true, "Daemon is shutting down", 2),
+        listOf("daemon_restart_pending", true, "Daemon restart is pending", 2),
+        listOf("session_recovery_pending", true, "Cannot safely recover session", 2),
+        listOf("daemon_session_suspect", true, "Session missed a liveness heartbeat", 2),
+        // A terminal code is the daemon's verdict, even when the message looks transient.
+        listOf("device_outside_bound_session", false, "request timeout while binding", 1),
+        listOf("some_terminal_code", false, "connection reset", 1),
+      )
+    for (case in cases) {
+      val code = case[0] as String
+      fakeDaemonClient = FakeDaemonToolClient()
+      DaemonSocketClientManager.testClient = fakeDaemonClient
+      fakeDaemonClient.setResponse(
+        "executePlan",
+        DaemonResponse(
+          id = code,
+          type = "mcp_response",
+          success = false,
+          error = case[2] as String,
+          code = JsonPrimitive(code),
+          retryable = (case[1] as Boolean?)?.let { JsonPrimitive(it) },
+        ),
+      )
+
+      val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1, aiAssistance = false))
+
+      assertEquals(code, false, result.success)
+      assertEquals(code, case[3], fakeDaemonClient.executePlanCalls)
+    }
+  }
+
+  @Test
+  fun `a failed frame with no typed fields keeps the transient message retry`() {
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      DaemonResponse("untyped", "mcp_response", false, error = "daemon request timeout"),
+    )
+
+    executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1, aiAssistance = false))
+
+    assertEquals(2, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
+  fun `a failed frame for a held device is waited out without spending a retry`() {
     val waits = mutableListOf<Long>()
     AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
     fakeDaemonClient.queueExecutePlanResponse(
-      buildDaemonResponse(finalizeRefusalPayload("device_cleanup_in_progress", 125_000), true),
+      DaemonResponse(
+        id = "held",
+        type = "mcp_response",
+        success = false,
+        error = "Device is held",
+        code = JsonPrimitive("device_owned_by_other_session"),
+        retryable = JsonPrimitive(false),
+      ),
     )
     fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(successPayload()))
 
     val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
 
     assertEquals(result.errorMessage, true, result.success)
-    assertEquals(listOf(125_000L), waits)
-    assertEquals(2, fakeDaemonClient.executePlanCalls)
+    assertEquals(listOf(500L), waits)
   }
 
   @Test
-  fun `the finalize wait budget stretches only for cleanup and shutting down refusals`() {
-    val cases =
-      listOf(
-        // code, retryAfterMs, expected budget
-        Triple("device_cleanup_in_progress", null, 30_000L),
-        Triple("device_cleanup_in_progress", 1_000L, 30_000L),
-        Triple("device_cleanup_in_progress", 125_000L, 125_000L),
-        Triple("device_cleanup_in_progress", 600_000L, 150_000L),
-        Triple("device_shutting_down", null, 30_000L),
-        Triple("device_shutting_down", 1_000L, 30_000L),
-        Triple("device_shutting_down", 125_000L, 125_000L),
-        Triple("device_shutting_down", 600_000L, 150_000L),
-        Triple("device_owned_by_other_session", 125_000L, 30_000L),
-        Triple("device_owned_by_other_daemon", 125_000L, 30_000L),
-        Triple("capacity_exhausted", 125_000L, 30_000L),
-        Triple("discovery_incomplete", 125_000L, 30_000L),
-      )
-    for ((code, retryAfterMs, budget) in cases) {
-      // The first delay is the hint clamped to the remaining budget, so it reveals the budget.
-      val first = AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(0, 0L, retryAfterMs, code) ?: -1L
-      assertEquals(
-        "$code/$retryAfterMs first",
-        minOf(maxOf(500L, retryAfterMs ?: 0L), budget),
-        first,
-      )
-      // Having waited exactly the budget, nothing is left; one millisecond less leaves one.
-      assertNull(
-        "$code/$retryAfterMs spent",
-        AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(1, budget, retryAfterMs, code),
-      )
-      assertEquals(
-        "$code/$retryAfterMs last ms",
-        1L,
-        AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(1, budget - 1, retryAfterMs, code),
-      )
-    }
+  fun `a retryable failed frame from the executePlan opt-in is retried`() {
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    fakeDaemonClient.queueToolSelectionResponse(
+      DaemonResponse(
+        id = "opt-in",
+        type = "mcp_response",
+        success = false,
+        error = "Daemon is shutting down",
+        code = JsonPrimitive("daemon_shutting_down"),
+        retryable = JsonPrimitive(true),
+      ),
+    )
+    fakeDaemonClient.setResponse("executePlan", buildDaemonResponse(successPayload()))
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1, aiAssistance = false))
+
+    assertEquals(result.errorMessage, true, result.success)
+    assertEquals(2, fakeDaemonClient.toolSelectionArguments.size)
+  }
+
+  @Test
+  fun `a terminal failed frame from the executePlan opt-in is not retried`() {
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    fakeDaemonClient.queueToolSelectionResponse(
+      DaemonResponse(
+        id = "opt-in",
+        type = "mcp_response",
+        success = false,
+        error = "request timeout",
+        code = JsonPrimitive("device_outside_bound_session"),
+        retryable = JsonPrimitive(false),
+      ),
+    )
+    fakeDaemonClient.setResponse("executePlan", buildDaemonResponse(successPayload()))
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1, aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(1, fakeDaemonClient.toolSelectionArguments.size)
   }
 
   @Test
@@ -223,7 +397,7 @@ class AutoMobilePlanExecutorTest {
     val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
 
     assertEquals(true, result.success)
-    assertEquals(listOf(2000L), waits)
+    assertEquals(listOf(500L), waits)
     assertEquals(2, fakeDaemonClient.executePlanCalls)
   }
 

@@ -93,7 +93,11 @@ import {
   configuredImageSchema,
 } from "./deviceDescription";
 import { poolHoldFor } from "./deviceDescription";
-import { describeInventoryDevice, type AdbOfflineHold } from "./inventoryDeviceDescription";
+import {
+  describeInventoryDevice,
+  transitionalHoldInputs,
+  type TransitionalHold,
+} from "./inventoryDeviceDescription";
 import {
   notifyInstalledAppResourceListChanged,
   syncInstalledAppResourceRegistry,
@@ -133,6 +137,7 @@ import {
   type DeviceProvisioner,
 } from "../devices/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
+import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
 import {
@@ -150,7 +155,7 @@ import {
   AndroidAvdProvenanceCache,
   CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS,
 } from "../utils/AndroidAvdProvenanceCache";
-import { runWithAbortSignal } from "../utils/AbortContext";
+import { runOutsideRequestContext, runWithAbortSignal } from "../utils/AbortContext";
 import { ResourceRegistry } from "./resourceRegistry";
 import { executionTracker } from "./executionTracker";
 import { unregisterDirectSessionsForStableIdentity } from "./directSessionDeviceRegistry";
@@ -1005,8 +1010,11 @@ export function listDevicePayloads(
     devicePool?.getAndroidTransportAliases(deviceId) ?? [],
   transportAvdNameForDevice: (deviceId: string) => string | undefined = (deviceId) =>
     devicePool?.getAndroidTransportAvdName(deviceId),
-  /** Held devices `adb devices` lists in a non-`device` state, by serial (#11455). */
-  adbOfflineHolds: ReadonlyMap<string, AdbOfflineHold> = new Map(),
+  /**
+   * Held devices their platform lists in a transitional state, by device id: Android in a
+   * non-`device` adb state (#11455), iOS `Booting` / `Shutting Down` (#11573).
+   */
+  transitionalHolds: ReadonlyMap<string, TransitionalHold> = new Map(),
 ) {
   const sessionManager = DaemonState.getInstance().isInitialized()
     ? DaemonState.getInstance().getSessionManager()
@@ -1027,7 +1035,7 @@ export function listDevicePayloads(
       deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
       hold: pooled ? poolHoldFor(devicePool, device.deviceId) : undefined,
       poolStatus: pooled ? devicePool?.poolBucket(device.deviceId) : undefined,
-      adbOffline: adbOfflineHolds.get(device.deviceId),
+      ...transitionalHoldInputs(transitionalHolds.get(device.deviceId)),
       transportAvdName: transportAvdNameForDevice(device.deviceId),
     });
     if (device.platform === "android") {
@@ -3607,7 +3615,7 @@ export async function runProvisionDeviceWithinDeadline<T>(
   totalDeadlineMs: number,
   requestSignal: AbortSignal | undefined,
   phase: string,
-  operation: (signal: AbortSignal) => Promise<T>,
+  operation: DeadlineBoundOperation<T>,
   onPendingSettlement?: (settlement: Promise<unknown>) => void,
 ): Promise<T> {
   return await runOperationWithinDeadline(
@@ -3620,12 +3628,43 @@ export async function runProvisionDeviceWithinDeadline<T>(
   );
 }
 
+/**
+ * An operation raced against its request's cancellation and deadline. Losing the race does not
+ * stop it, so one that commits something for its caller registers how to take that back with
+ * `undoIfUndelivered`: the undo runs with the result when the operation succeeds after the race
+ * was already lost, i.e. exactly when the caller got an error instead of that result.
+ */
+export type DeadlineBoundOperation<T> = (
+  signal: AbortSignal,
+  undoIfUndelivered: (undo: (result: T) => Promise<void>) => void,
+) => Promise<T>;
+
+/**
+ * A session bind as a deadline-bound operation: when its request is cancelled or times out while
+ * the bind finishes, the caller gets no session id, so what the bind minted is released again
+ * (#11565). The pool fills the receipt in while it binds.
+ */
+export function bindUndoneIfUndelivered(
+  bind: (receipt: AcquisitionReceipt) => Promise<string>,
+): DeadlineBoundOperation<string> {
+  return async (_signal, undoIfUndelivered) => {
+    const receipt: AcquisitionReceipt = {};
+    undoIfUndelivered(async () => {
+      const daemonState = DaemonState.getInstance();
+      if (daemonState.isInitialized()) {
+        await daemonState.getDevicePool().releaseUndeliveredAcquisition(receipt);
+      }
+    });
+    return await bind(receipt);
+  };
+}
+
 export async function runOperationWithinDeadline<T>(
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
   totalDeadlineMs: number,
   requestSignal: AbortSignal | undefined,
   timeoutError: () => Error,
-  operation: (signal: AbortSignal) => Promise<T>,
+  operation: DeadlineBoundOperation<T>,
   onOrphan?: (pending: Promise<unknown>) => void,
 ): Promise<T> {
   const remainingMs = Math.floor(totalDeadlineMs - timer.now());
@@ -3638,9 +3677,40 @@ export async function runOperationWithinDeadline<T>(
     ? AbortSignal.any([requestSignal, controller.signal])
     : controller.signal;
   let operationSettled = false;
-  const operationPromise = runWithAbortSignal(signal, () => operation(signal)).finally(() => {
+  let undo: ((result: T) => Promise<void>) | undefined;
+  const registerUndo = (registered: (result: T) => Promise<void>): void => {
+    undo = registered;
+  };
+  const takeBackUndelivered = async (
+    result: T,
+    takeBack: (result: T) => Promise<void>,
+  ): Promise<T> => {
+    try {
+      // The request that started this work is over; its cancellation must not stop the undo.
+      await runOutsideRequestContext(() => takeBack(result));
+    } catch (error) {
+      logger.warn(`Undoing an undelivered operation result failed: ${errorMessage(error)}`, error);
+    }
     operationSettled = true;
-  });
+    return result;
+  };
+  const operationPromise = runWithAbortSignal(signal, () => operation(signal, registerUndo)).then(
+    (result) => {
+      // Returning `result` settles this promise in the same turn, so the race below delivers it
+      // unless the request was already cancelled or timed out. Then the race is lost for good,
+      // nobody receives `result`, and the operation stays unsettled (an orphan) until it is undone.
+      const takeBack = undo;
+      if (takeBack && (requestSignal?.aborted || controller.signal.aborted)) {
+        return takeBackUndelivered(result, takeBack);
+      }
+      operationSettled = true;
+      return result;
+    },
+    (error: unknown) => {
+      operationSettled = true;
+      throw error;
+    },
+  );
   void operationPromise.catch((error) => {
     // The deadline race owns the failure; this observer also handles late abort rejection.
     logger.debug(`Provision operation rejection observed: ${errorMessage(error)}`);

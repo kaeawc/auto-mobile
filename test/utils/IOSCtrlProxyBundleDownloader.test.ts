@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "fs/promises";
 import * as path from "path";
 import os from "os";
@@ -13,14 +13,32 @@ import type { ExtractBundleWorker } from "../../src/utils/IOSCtrlProxyBundleDown
 
 describe("IOSCtrlProxyBundleDownloader zip-slip containment (#4761)", function () {
   let tempDir: string;
+  let rootDir: string;
+  let testCount = 0;
 
-  beforeEach(async function () {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ctrl-proxy-zipslip-test-"));
+  // CI's per-test time includes beforeEach/afterEach but not beforeAll/afterAll, so the one
+  // recursive cleanup runs after the file and each test only makes its own empty directory.
+  beforeAll(async function () {
+    rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "ctrl-proxy-zipslip-test-"));
+    // Pay extraction's one-time module/worker cost outside the timed tests.
+    const zip = new AdmZip();
+    zip.addFile("Build/Products/marker.txt", Buffer.from("warm"));
+    const bundlePath = path.join(rootDir, "warm.zip");
+    await fs.writeFile(bundlePath, zip.toBuffer());
+    await new DefaultIOSCtrlProxyBundleDownloader().extractBundle(
+      bundlePath,
+      path.join(rootDir, "warm-extract"),
+    );
   });
 
-  afterEach(async function () {
+  beforeEach(async function () {
+    tempDir = path.join(rootDir, `test-${testCount++}`);
+    await fs.mkdir(tempDir);
+  });
+
+  afterAll(async function () {
     try {
-      await fs.rm(tempDir, { recursive: true, force: true });
+      await fs.rm(rootDir, { recursive: true, force: true });
     } catch {
       // Ignore cleanup errors
     }

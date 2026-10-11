@@ -18,11 +18,15 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { Timer } from "../../utils/SystemTimer";
 import { MANAGED_EXECUTION_SETTLEMENT_CAP_MS } from "./managedExecutionRelease";
+import { defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
 import type {
   CompleteScopeInvalidationResult,
   SlotAssignmentRecord,
+  SlotExecOwner,
+  SlotExecOwnerLiveness,
   SlotJournalEntry,
   SlotPlatform,
+  SlotProcessIdentity,
   SlotRegistry,
   SlotScopeInvalidationReason,
   SlotScopeQuery,
@@ -67,8 +71,15 @@ export interface SlotScopeResetPendingJournal {
   phase: SlotJournalEntry["phase"];
 }
 
-/** Why `--force` left a `settling` slot alone (#11539). */
+/**
+ * Why `--force` left a slot alone (#11539, #11545). `live_owner`: an execution this daemon holds is
+ * using it. `owner_liveness_unknown`: its owner record belongs to another running process, whose
+ * session liveness this daemon cannot know, so it is neither cut nor guessed dead. The rest
+ * describe a `settling` slot without a live owner.
+ */
 export type SlotScopeResetForceRefusalReason =
+  | "live_owner"
+  | "owner_liveness_unknown"
   | "within_settlement_cap"
   | "no_release_entry"
   | "other_open_journal"
@@ -100,7 +111,10 @@ export interface SlotScopeResetScopeResult {
     /** Unfinished journaled work (#11179) on the scope's slots. */
     openJournal: SlotScopeResetPendingJournal[];
   };
-  /** Slots `--force` declined to abandon, and why; present only when `pending` after a forced reset. */
+  /**
+   * Slots `--force` left alone (in use, or a settlement it declined to abandon), and why; present
+   * only when `pending` after a forced reset.
+   */
   forceRefusals?: SlotScopeResetForceRefusal[];
 }
 
@@ -122,7 +136,8 @@ export interface SlotScopeResetRequest extends SlotScopeQuery {
    * Operator override (#11336): a slot stuck `settling` after its released work outlived the
    * settlement cap is returned to `ready` (its release journal entry committed) so the reset can
    * proceed. It overrides "stuck settling", never "settling normally" and never "in use": a slot
-   * still inside the cap, or with an execution owner, still blocks (#11539).
+   * still inside the cap whose settling daemon is not provably gone, or with a live execution
+   * owner, still blocks (#11539, #11545).
    */
   force?: boolean;
 }
@@ -138,13 +153,28 @@ export interface SlotScopeResetOptions {
   pollMs?: number;
   /** Age of a release after which its settlement counts as stuck. Default: the watcher's cap. */
   settlementCapMs?: number;
+  /**
+   * Judges a `settling` slot's owner record for `--force` (#11545): pass the registry's own
+   * predicate, so the reset and the registry agree. Default: PID plus process start identity.
+   */
+  isExecOwnerLive?: SlotExecOwnerLiveness;
+  /**
+   * This daemon. An owner record another process wrote is live while that process runs, whatever
+   * became of its session there, so `--force` reports it as unknowable from here rather than as an
+   * execution in use (#11545). Default: this process.
+   */
+  thisProcess?: Pick<SlotProcessIdentity, "pid">;
 }
 
 export class SlotScopeReset {
   private readonly pollMs: number;
   private readonly settlementCapMs: number;
+  private readonly isExecOwnerLive: SlotExecOwnerLiveness;
+  private readonly thisPid: number;
 
   constructor(private readonly options: SlotScopeResetOptions) {
+    this.thisPid = (options.thisProcess ?? { pid: process.pid }).pid;
+    this.isExecOwnerLive = options.isExecOwnerLive ?? defaultSlotExecOwnerLiveness;
     this.pollMs = options.pollMs ?? SLOT_SCOPE_RESET_POLL_MS;
     this.settlementCapMs = options.settlementCapMs ?? MANAGED_EXECUTION_SETTLEMENT_CAP_MS;
   }
@@ -246,91 +276,178 @@ export class SlotScopeReset {
   }
 
   /**
-   * Return each unowned `settling` slot of the scope that is provably stuck to `ready`, committing
+   * Return each `settling` slot of the scope with no live owner that is provably stuck to `ready`, committing
    * its release journal entry in the same transaction (the existing journal API, never by hand).
    * Stuck means the release outlived the settlement cap, the watcher's own "past cap" state
-   * (#11539). A slot with an execution owner is left for the normal wait; every other slot left
-   * alone is returned as a typed refusal saying why and what to do.
+   * (#11539), or its settling daemon is provably gone (#11545). Every slot left alone is returned as a typed refusal saying why and what to do: a
+   * slot with a live execution owner (in any state) is never touched and says so (#11545).
    */
   private async abandonSettlement(
     registry: SlotScopeResetRegistry,
     scope: SlotScopeRecord,
   ): Promise<SlotScopeResetForceRefusal[]> {
-    const slots = (await registry.listAssignments(scope.scopeKey)).filter(
-      (slot) => slot.state === "settling" && slot.execOwner === null,
-    );
     const refusals: SlotScopeResetForceRefusal[] = [];
-    for (const slot of slots) {
-      const key = { scopeKey: slot.scopeKey, slotIndex: slot.slotIndex };
-      const label = `${key.scopeKey}/${key.slotIndex}`;
-      try {
-        const open = await registry.listOpenSlotJournal(key);
-        const release = open.find((entry) => entry.kind === "release");
-        if (open.some((entry) => entry.kind !== "release")) {
-          refusals.push({
-            slotIndex: key.slotIndex,
-            reason: "other_open_journal",
-            message:
-              `Slot ${label} has unfinished non-release journal work; --force does not abandon it. ` +
-              "Wait for the redrive to finish, then retry.",
-          });
-          continue;
-        }
-        if (!release) {
-          refusals.push({
-            slotIndex: key.slotIndex,
-            reason: "no_release_entry",
-            message:
-              `Slot ${label} is settling but has no open release journal entry, so --force cannot ` +
-              "tell whether it is stuck. Wait for its settler to return it to ready, or inspect it.",
-          });
-          continue;
-        }
-        const remainingMs = release.createdAtMs + this.settlementCapMs - this.options.timer.now();
-        if (remainingMs > 0) {
-          refusals.push({
-            slotIndex: key.slotIndex,
-            reason: "within_settlement_cap",
-            remainingMs,
-            message:
-              `Slot ${label} is still settling normally and its released work may be running. ` +
-              `Wait, or retry --force in ${remainingMs}ms once it outlives the settlement cap.`,
-          });
-          continue;
-        }
-        const result = await registry.advanceSlotJournal(release.id, {
-          owner: release.owner,
-          expectedPhase: release.phase,
-          phase: "committed",
-          assignment: { kind: "state", expected: release.binding, state: "ready" },
-        });
-        if (result.kind === "advanced") {
-          logger.warn(
-            `[SlotScopeReset] --force abandoned the settlement of slot ${label}, stuck past the ` +
-              `${this.settlementCapMs}ms cap; its released work may still be running (#11336)`,
-          );
-        } else {
-          logger.warn(`[SlotScopeReset] --force could not abandon slot ${label}: ${result.kind}`);
-          refusals.push({
-            slotIndex: key.slotIndex,
-            reason: "abandon_failed",
-            message: `Slot ${label} changed while --force abandoned it (${result.kind}); retry.`,
-          });
-        }
-      } catch (error) {
-        logger.warn(
-          `[SlotScopeReset] --force could not abandon slot ${label}: ${errorMessage(error)}`,
-          error,
-        );
-        refusals.push({
-          slotIndex: key.slotIndex,
-          reason: "abandon_failed",
-          message: `Slot ${label} could not be abandoned: ${errorMessage(error)}. Retry.`,
-        });
+    for (const slot of await registry.listAssignments(scope.scopeKey)) {
+      const refusal = await this.forceSlot(registry, slot);
+      if (refusal) {
+        refusals.push(refusal);
       }
     }
     return refusals;
   }
+
+  /** Apply `--force` to one slot; resolves to why it was left alone, if it was. */
+  private async forceSlot(
+    registry: SlotScopeResetRegistry,
+    slot: SlotAssignmentRecord,
+  ): Promise<SlotScopeResetForceRefusal | undefined> {
+    // An owner record dead by liveness (its clear failed) is not an execution in use (#11545).
+    if (slot.execOwner !== null && this.isExecOwnerLive(slot.execOwner)) {
+      return this.liveOwnerRefusal(slot, slot.execOwner);
+    }
+    if (slot.state !== "settling") {
+      return undefined;
+    }
+    const label = `${slot.scopeKey}/${slot.slotIndex}`;
+    try {
+      return await this.abandonSettlingSlot(registry, slot);
+    } catch (error) {
+      logger.warn(
+        `[SlotScopeReset] --force could not abandon slot ${label}: ${errorMessage(error)}`,
+        error,
+      );
+      return {
+        slotIndex: slot.slotIndex,
+        reason: "abandon_failed",
+        message: `Slot ${label} could not be abandoned: ${errorMessage(error)}. Retry.`,
+      };
+    }
+  }
+
+  /**
+   * The refusal for a slot whose owner record the liveness predicate counts as live. A record this
+   * daemon wrote is judged by its session, and one whose process is gone can only be live because
+   * this daemon holds its session: both are executions in use here. A record of another running
+   * process is live by that process alone; whether its session ended there cannot be known from
+   * this daemon, so the refusal says so instead of guessing either way.
+   */
+  private liveOwnerRefusal(
+    slot: SlotAssignmentRecord,
+    owner: SlotExecOwner,
+  ): SlotScopeResetForceRefusal {
+    const label = `${slot.scopeKey}/${slot.slotIndex}`;
+    const ownerProcess: SlotProcessIdentity = {
+      daemonId: owner.daemonId,
+      pid: owner.pid,
+      processGenerationToken: owner.processGenerationToken,
+    };
+    if (owner.pid === this.thisPid || !this.isExecOwnerLive(ownerProcess)) {
+      return {
+        slotIndex: slot.slotIndex,
+        reason: "live_owner",
+        message:
+          `Slot ${label} is in use by execution ${owner.sessionUuid}, which this daemon holds; ` +
+          "--force never overrides an execution in use. Release that execution, then retry.",
+      };
+    }
+    return {
+      slotIndex: slot.slotIndex,
+      reason: "owner_liveness_unknown",
+      message:
+        `Slot ${label} is owned by execution ${owner.sessionUuid} of another running daemon ` +
+        `(${owner.daemonId}, pid ${owner.pid}). This daemon cannot tell whether that execution ` +
+        "has ended there, so --force leaves the slot alone. Run the reset through that daemon, " +
+        "or restart it (its record then reads dead), then retry.",
+    };
+  }
+
+  /** Abandon one `settling` slot without a live owner, or say why not. May throw (registry). */
+  private async abandonSettlingSlot(
+    registry: SlotScopeResetRegistry,
+    slot: SlotAssignmentRecord,
+  ): Promise<SlotScopeResetForceRefusal | undefined> {
+    const key = { scopeKey: slot.scopeKey, slotIndex: slot.slotIndex };
+    const label = `${key.scopeKey}/${key.slotIndex}`;
+    const open = await registry.listOpenSlotJournal(key);
+    const release = open.find((entry) => entry.kind === "release");
+    if (open.some((entry) => entry.kind !== "release")) {
+      return {
+        slotIndex: key.slotIndex,
+        reason: "other_open_journal",
+        message:
+          `Slot ${label} has unfinished non-release journal work; --force does not abandon it. ` +
+          "Wait for the redrive to finish, then retry.",
+      };
+    }
+    if (!release) {
+      return {
+        slotIndex: key.slotIndex,
+        reason: "no_release_entry",
+        message:
+          `Slot ${label} is settling under ${describeSettler(slot.settler)} but has no open ` +
+          "release journal entry, so --force cannot tell whether it is stuck and does not " +
+          "abandon it. Wait for that daemon to return it to ready; if it does not, restart that " +
+          "daemon (startup recovery returns a slot whose settler is gone to ready), then retry.",
+      };
+    }
+    const remainingMs = release.createdAtMs + this.settlementCapMs - this.options.timer.now();
+    const settlerGone = this.isSettlerProvablyDead(slot, release);
+    if (remainingMs > 0 && !settlerGone) {
+      return {
+        slotIndex: key.slotIndex,
+        reason: "within_settlement_cap",
+        remainingMs,
+        message:
+          `Slot ${label} is still settling under ${describeSettler(slot.settler)}, which is not ` +
+          "known to be gone, so its released work may be running. " +
+          `Wait, or retry --force in ${remainingMs}ms once it outlives the settlement cap.`,
+      };
+    }
+    const result = await registry.advanceSlotJournal(release.id, {
+      owner: release.owner,
+      expectedPhase: release.phase,
+      phase: "committed",
+      assignment: { kind: "state", expected: release.binding, state: "ready" },
+    });
+    if (result.kind === "advanced") {
+      logger.warn(
+        remainingMs > 0
+          ? `[SlotScopeReset] --force abandoned the settlement of slot ${label}: its settling ` +
+              `daemon is gone (${describeSettler(slot.settler)}), and its released work with it (#11545)`
+          : `[SlotScopeReset] --force abandoned the settlement of slot ${label}, stuck past the ` +
+              `${this.settlementCapMs}ms cap; its released work may still be running (#11336)`,
+      );
+      return undefined;
+    }
+    logger.warn(`[SlotScopeReset] --force could not abandon slot ${label}: ${result.kind}`);
+    return {
+      slotIndex: key.slotIndex,
+      reason: "abandon_failed",
+      message: `Slot ${label} changed while --force abandoned it (${result.kind}); retry.`,
+    };
+  }
+
+  /**
+   * Whether the daemon settling this slot is provably gone, by the same predicate the registry's
+   * own recovery uses (`recoverSettledSlots`): the released work ran in that process and died with
+   * it, so nothing is "settling normally" and the cap need not be waited out (#11545). Both the
+   * slot's recorded settler and the release entry's current owner (a redriving daemon may have
+   * taken the entry over) must be dead. A slot with no recorded settler, or a settler whose
+   * liveness cannot be decided (the predicate keeps a possibly-live process), is not provably dead.
+   */
+  private isSettlerProvablyDead(slot: SlotAssignmentRecord, release: SlotJournalEntry): boolean {
+    return (
+      slot.settler !== null &&
+      !this.isExecOwnerLive(slot.settler) &&
+      !this.isExecOwnerLive(release.owner)
+    );
+  }
+}
+
+function describeSettler(settler: SlotProcessIdentity | null): string {
+  return settler === null
+    ? "an unrecorded settler"
+    : `settling daemon ${settler.daemonId} (pid ${settler.pid})`;
 }
 
 function pendingEvidence(

@@ -1,4 +1,13 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { promises as fsPromises } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -287,7 +296,19 @@ describe("size monitor on a rotated Android recording (#10017 x #10026)", () => 
   let sessionTimer: FakeTimer;
   let fakeBackend: FakeVideoCaptureBackend;
   let archiveRoot: string;
+  let sizeRoot: string;
+  let sizeCount = 0;
   let probed: string[];
+
+  // CI's per-test time includes beforeEach/afterEach but not beforeAll/afterAll: one root is made
+  // and removed outside the timed tests; each test archives into its own directory under it.
+  beforeAll(async () => {
+    sizeRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "android-segmented-size-"));
+  });
+
+  afterAll(async () => {
+    await fsPromises.rm(sizeRoot, { recursive: true, force: true });
+  });
 
   beforeEach(async () => {
     mgrTimer = new FakeTimer();
@@ -295,7 +316,8 @@ describe("size monitor on a rotated Android recording (#10017 x #10026)", () => 
     fakeBackend = new FakeVideoCaptureBackend();
     fakeBackend.setNowProvider(() => new Date(mgrTimer.now()));
     probed = [];
-    archiveRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "android-segmented-size-"));
+    archiveRoot = path.join(sizeRoot, `test-${sizeCount++}`);
+    await fsPromises.mkdir(archiveRoot);
     await setVideoRecordingManagerDependencies({
       videoRecorderService: new VideoRecorderService({
         backend: fakeBackend,
@@ -316,9 +338,8 @@ describe("size monitor on a rotated Android recording (#10017 x #10026)", () => 
     });
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     resetVideoRecordingManagerDependencies();
-    await fsPromises.rm(archiveRoot, { recursive: true, force: true });
   });
 
   async function runTwoSegments(): Promise<ActiveVideoRecording[]> {
@@ -380,11 +401,24 @@ describe("each rotated Android segment is confirmed exited by its own pid (#1001
   const probe = (pid: number) => `shell 'cat /proc/${pid}/cmdline 2>/dev/null; true'`;
   const PIDOF = 'shell \'pidof screenrecord; printf "pidof-status:%s\\n" "$?"\'';
   let tempDir: string;
+  let pidsRoot: string;
+  let pidsCount = 0;
   let factory: FakeAdbClientFactory;
   let backend: PlatformVideoCaptureBackend;
 
+  // CI's per-test time includes beforeEach/afterEach but not beforeAll/afterAll: one root is made
+  // and removed outside the timed tests; each test gets its own empty directory under it.
+  beforeAll(async () => {
+    pidsRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "android-segment-pids-"));
+  });
+
+  afterAll(async () => {
+    await fsPromises.rm(pidsRoot, { recursive: true, force: true });
+  });
+
   beforeEach(async () => {
-    tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "android-segment-pids-"));
+    tempDir = path.join(pidsRoot, `test-${pidsCount++}`);
+    await fsPromises.mkdir(tempDir);
     factory = new FakeAdbClientFactory();
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -396,10 +430,6 @@ describe("each rotated Android segment is confirmed exited by its own pid (#1001
     // The two recorders' launch shells report their own device pids; the device paths differ.
     factory.getFakeClient().setSpawnStdout(deviceFile(FIRST_ID), `${FIRST_PID}\n`);
     factory.getFakeClient().setSpawnStdout(deviceFile(SECOND_ID), `${SECOND_PID}\n`);
-  });
-
-  afterEach(async () => {
-    await fsPromises.rm(tempDir, { recursive: true, force: true });
   });
 
   async function startSegment(recordingId: string): Promise<RecordingHandle> {

@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeAll } from "bun:test";
 import { ScreenshotUtils } from "../../src/utils/screenshot/ScreenshotUtils";
 import { Jimp, rgbaToInt } from "jimp";
 
@@ -21,6 +21,12 @@ async function compareOk(a: Buffer, b: Buffer) {
 
 describe("ScreenshotUtils", function () {
   describe("Image Dimensions", function () {
+    // Warm the encoder/decoder before the first timed test of the file.
+    beforeAll(async function () {
+      const warm = await createTestImage(20, 20, { r: 1, g: 2, b: 3 });
+      await ScreenshotUtils.getImageDimensions(warm);
+    });
+
     test("should get image dimensions correctly", async function () {
       const testImage = await createTestImage(200, 150, { r: 0, g: 255, b: 0 });
 
@@ -34,8 +40,11 @@ describe("ScreenshotUtils", function () {
     let identicalImage1: Buffer;
     let identicalImage2: Buffer;
     let differentImage: Buffer;
+    let largeImage: Buffer;
 
-    beforeEach(async function () {
+    // CI's per-test time includes beforeEach but not beforeAll. The PNG buffers are immutable
+    // inputs, so encode them once (this also pays the image backend's one-time warm-up).
+    beforeAll(async function () {
       // Create identical images
       identicalImage1 = await createTestImage(100, 100, { r: 255, g: 255, b: 255 });
 
@@ -43,6 +52,13 @@ describe("ScreenshotUtils", function () {
 
       // Create different image
       differentImage = await createTestImage(100, 100, { r: 0, g: 0, b: 0 });
+
+      largeImage = await createTestImage(200, 200, { r: 255, g: 255, b: 255 });
+
+      // Pay the decode/compare backend's first-use cost outside the timed tests.
+      await compareOk(identicalImage1, differentImage);
+      await compareOk(identicalImage1, largeImage);
+      await ScreenshotUtils.getImageDimensions(identicalImage1);
     });
 
     test("should detect identical images with 100% similarity", async function () {
@@ -62,8 +78,6 @@ describe("ScreenshotUtils", function () {
     });
 
     test("should handle comparison of different sized images", async function () {
-      const largeImage = await createTestImage(200, 200, { r: 255, g: 255, b: 255 });
-
       const result = await compareOk(identicalImage1, largeImage);
 
       expect(result.similarity).toBe(100);

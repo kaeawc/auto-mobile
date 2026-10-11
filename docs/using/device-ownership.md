@@ -476,6 +476,26 @@ Owner decisions 2026-10-09 (#10982):
   writes and selecting or pinning the current device. A later control call still
   performs those steps. A sessionless read on a held device runs no readiness,
   pinning or settings work at all; it uses the read-only path.
+- A sessionless read boots a stopped device only when the call explicitly passes
+  its `deviceId` (owner decision 2026-10-11, follow-up to #11641). The ID names an
+  Android AVD image or an available iOS simulator; it boots only that image and
+  never creates a simulator. Existing boot capacity and admission rules apply.
+- A read without `deviceId` uses an already-running device and never boots or
+  creates one. A `platform` argument alone is not an explicit ID. A stopped
+  device selected earlier with `setActiveDevice`, or cached as the current device,
+  is not named by the call and cannot be booted by that read. A device named only
+  by a session binding follows the existing session readiness path instead of
+  the sessionless read path.
+- If no suitable device is running, a read without `deviceId` answers that there
+  is nothing to read: start one with `startDevice` or `provisionDevice`, or pass a
+  `deviceId`. This is an ordinary actionable no-device error, not an ownership
+  refusal. With `platform: "either"`, an unnamed read can give that answer when
+  at least one platform's discovery completed. An explicit platform still needs
+  its own completed scan. A named stopped device needs completed discovery on
+  its platform; absent tooling on the other platform does not block that match.
+  Incomplete discovery that prevents these decisions remains a retryable
+  `discovery_incomplete` error. Control calls keep their existing device selection
+  and boot behavior.
 - Reads run in their own lane (#10969).
 - A holder's calls that name only a `deviceId` are credited to the MCP connection
   that owns the held session, and admitted as that session. Other connections

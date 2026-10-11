@@ -1,6 +1,4 @@
-import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
-import type { Socket } from "node:net";
 import { join } from "node:path";
 import { spyOn } from "bun:test";
 import {
@@ -29,8 +27,6 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { AppearanceSocketServer } from "../../src/daemon/appearanceSocketServer";
 import type { AppearanceSocketResponse } from "../../src/daemon/appearanceSocketTypes";
 import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
@@ -71,7 +67,7 @@ import {
   type InMemoryClientSocket,
   type WireEnvelope,
 } from "./inMemoryDaemonWire";
-import { drainMicrotasks, drainUntil } from "./fakeTimerStepping";
+import { drainMicrotasks } from "./fakeTimerStepping";
 import { RealToolCallPath, type DeviceToolRun } from "./realToolCallPath";
 
 // Two-sided liveness scenario harness (#10667, umbrella #10655).
@@ -86,8 +82,9 @@ import { RealToolCallPath, type DeviceToolRun } from "./realToolCallPath";
 //   the previous process's rows, adopts the terminal-release journal, discovers devices,
 //   rehydrates sessions and starts the heartbeat monitor, in that order. A restart is a new
 //   `Daemon` started the same way over the same database and journal directory.
-// - the control socket: a real `UnixSocketServer` over that daemon's state (framing, admission,
-//   the `daemon/*` handlers, selector-session restore, forward routing, release notifications).
+// - the control socket: a real `UnixSocketServer` over that daemon's state, opened by its own
+//   `startDetached()` (framing, admission, the `daemon/*` and `ide/*` handlers, selector-session
+//   restore, forward routing, and the release, list-changed and resource-updated fan-out).
 // - the clients: `DaemonMcpProxy` built like src/index.ts over a real `DaemonClient`, and raw
 //   frame clients for the desktop, JUnit and `--cli` actors.
 // - a device tool call: the real registration through the real ToolRegistry, session admission
@@ -115,6 +112,10 @@ export const RELEASE_SLACK_MS = SUSPECT_GRACE_MS + SCAN_MS + KEEPER_INTERVAL_MS;
 export const JUNIT_HEARTBEAT_MS = 1_000;
 export const AUTOLOCK_WINDOW_MS = 60_000;
 
+/** The clock step a slow daemon start is waited out in. */
+const SLOW_START_STEP_MS = 1_000;
+/** Microtask turns for a starting daemon to reach its next wait: about four times the ~250 measured. */
+const SLOW_START_TURNS = 1_024;
 /** Microtask turns per fake-timer event so a keeper round trip settles before the next tick. */
 const TURNS_PER_EVENT = 32;
 const CONNECTION = "scenario-connection";
@@ -122,6 +123,8 @@ const CONNECTION = "scenario-connection";
 export const SOCKET_CLIENT_CONNECTION = "scenario-socket-client";
 /** The desktop/IDE client's own connection: it acquires and heartbeats on it. */
 export const DESKTOP_CONNECTION = "desktop-connection";
+/** The desktop/IDE client's connection for its `ide/*` and `input/*` frames. */
+const IDE_FRAME_CONNECTION = "scenario-ide-frames";
 /** The connection of a `--daemon heartbeat` keeper process. */
 const CLI_KEEPER_CONNECTION = "scenario-cli-keeper";
 export const OWNER_TOKEN = "scenario-proxy-owner";
@@ -400,7 +403,6 @@ export class LivenessScenario {
   private readonly sharedDeviceClaims: boolean;
   private readonly discovery = new FakeDeviceUtils();
   private tools!: RealToolCallPath;
-  private socketServer: UnixSocketServer | undefined;
   private readonly spies: Array<ReturnType<typeof spyOn>> = [];
   private readonly savedEnv = new Map<string, string | undefined>();
   private readonly gates = new Map<string, { opened: Promise<void>; wedged: boolean }>();
@@ -547,7 +549,7 @@ export class LivenessScenario {
    * (#11441). Its constructor and its start sequence do all the wiring; this method only supplies
    * the device boundary, the in-memory "disk" and the steps of `start()` that touch the machine.
    */
-  private async createDaemonSide(): Promise<DaemonSide> {
+  private async createDaemonSide(startupMs = 0): Promise<DaemonSide> {
     // One database across daemon "processes", so a restart rehydrates what the last one persisted.
     this.repository ??= new DeviceSessionRepository(await createTestDatabase(), this.timer);
     const repository = this.repository;
@@ -610,7 +612,7 @@ export class LivenessScenario {
     });
     let socket: InMemoryControlSocket | undefined;
     await daemon.startOn(
-      this.startHost(clock, (bound) => {
+      this.startHost(clock, startupMs, (bound) => {
         socket = bound;
       }),
     );
@@ -628,6 +630,7 @@ export class LivenessScenario {
    */
   private startHost(
     clock: ProcessTimer,
+    startupMs: number,
     onSocket: (socket: InMemoryControlSocket) => void,
   ): DaemonStartHost {
     return {
@@ -643,9 +646,20 @@ export class LivenessScenario {
       startHttpIngress: async () => {},
       sweepStaleAppearanceConfigs: async () => {},
       bindControlSocket: async () => {
+        // A slow start: the work between session rehydration and the bind takes this long.
+        if (startupMs > 0) {
+          await clock.sleep(startupMs);
+        }
         const socket = InMemoryControlSocket.attach({
           timer: clock,
           connectionIds: new FakeIdGenerator(),
+          // Every tool is enabled for every session: the selection store is a database table.
+          startupOptions: {
+            sessionToolSelectionService: {
+              isEnabled: async () => true,
+              setEnabled: async () => {},
+            },
+          },
           loopback: loopbackMcpClientFactory(
             (name, args, requestSignal) => this.loopbackToolCall(name, args, requestSignal),
             clock,
@@ -964,65 +978,11 @@ export class LivenessScenario {
   }
 
   /**
-   * One frame over a socket connection to the scenario's real daemon state (the desktop/IDE path:
-   * `ide/*`, `input/*`, `appearance/*`), answered by the real {@link UnixSocketServer} handlers.
-   * The server is in-process: frames are handed to its connection handler without a real socket.
+   * One frame from the desktop/IDE client (`ide/*`, `input/*`, `appearance/*`) on its own
+   * connection to the daemon's control socket, answered by the started daemon's socket server.
    */
-  async socketFrame(
-    method: string,
-    params: Record<string, unknown>,
-    type: DaemonRequest["type"] = "mcp_request",
-  ): Promise<DaemonResponse> {
-    if (!this.socketServer) {
-      this.socketServer = new UnixSocketServer(
-        "unused",
-        "http://localhost:0/mcp",
-        this.daemon.state as never,
-        this.timer,
-        null,
-        {
-          sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} },
-        },
-      );
-      Reflect.set(this.socketServer, "acceptingRequests", true);
-    }
-    const server = this.socketServer as unknown as {
-      handleConnection(socket: Socket): void;
-      activeRequestHandlers: Set<Promise<void>>;
-    };
-    const responses: DaemonResponse[] = [];
-    const socket = Object.assign(new EventEmitter(), {
-      destroyed: false,
-      writableLength: 0,
-      setTimeout: () => socket,
-      write(data: string, callback?: (error?: Error | null) => void): boolean {
-        responses.push(JSON.parse(data) as DaemonResponse);
-        callback?.();
-        return true;
-      },
-      end: () => socket.destroy(),
-      destroy: () => {
-        if (!socket.destroyed) {
-          socket.destroyed = true;
-          socket.emit("close", false);
-        }
-        return socket;
-      },
-    });
-    server.handleConnection(socket as unknown as Socket);
-    socket.emit("data", Buffer.from(`${JSON.stringify({ id: "frame", type, method, params })}\n`));
-    // The handler is in-process and never waits on the real event loop, so its answer is a
-    // bounded number of microtask turns away; a real turn's cost grows with the runner's load.
-    await drainUntil(() => responses.some((frame) => frame.id === "frame"), {
-      description: `the response to socketFrame ${method}`,
-    });
-    await Promise.all([...server.activeRequestHandlers]);
-    socket.destroy();
-    const response = responses.find((frame) => frame.id === "frame");
-    if (!response) {
-      throw new Error(`socketFrame ${method}: no response`);
-    }
-    return response;
+  socketFrame(method: string, params: Record<string, unknown>): Promise<WireEnvelope> {
+    return this.daemonMethod(method, params, IDE_FRAME_CONNECTION);
   }
 
   /**
@@ -1308,10 +1268,32 @@ export class LivenessScenario {
    * `Daemon.startOn()` over the same database and journal directory. Its start sequence expires
    * the dead process's rows, rehydrates them awaiting their owners, and opens their owner
    * windows. A proxy that is still running sees its connection drop and reconnects.
+   *
+   * `startupMs` makes it a slow start: that much time passes between the new process's session
+   * rehydration and its control socket accepting connections, with no daemon to reach meanwhile.
    */
-  async daemonRestart(): Promise<void> {
+  async daemonRestart(options: { startupMs?: number } = {}): Promise<void> {
     this.killDaemonSide(this.daemon);
-    this.daemon = await this.createDaemonSide();
+    const startupMs = options.startupMs ?? 0;
+    if (startupMs === 0) {
+      this.daemon = await this.createDaemonSide();
+      return;
+    }
+    let started: DaemonSide | undefined;
+    const starting = this.createDaemonSide(startupMs).then((side) => {
+      started = side;
+    });
+    // The start reaches its slow step a few turns in; step the clock until it is through.
+    const giveUpAt = this.timer.now() + startupMs + SLOW_START_STEP_MS * 10;
+    while (!started && this.timer.now() < giveUpAt) {
+      await drainMicrotasks(SLOW_START_TURNS);
+      await this.idle(SLOW_START_STEP_MS);
+    }
+    await Promise.race([starting, drainMicrotasks(SLOW_START_TURNS)]);
+    if (!started) {
+      throw new Error("LivenessScenario: the slow start never finished");
+    }
+    this.daemon = started;
   }
 
   /** The process is gone: its connections drop and none of its timers fires again. */

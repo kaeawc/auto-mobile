@@ -11,11 +11,17 @@ import {
 import { DefaultDeviceSettingsAccess } from "../../src/features/utility/DeviceSettingDefaults";
 import type { BootedDevice } from "../../src/models";
 import { resolveAppearanceMode } from "../../src/server/appearanceManager";
+import {
+  LIST_CHANGED_NOTIFICATION_METHODS,
+  ListChangedBroadcaster,
+} from "../../src/server/listChangedBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { applyAppearanceToDevice } from "../../src/utils/deviceAppearance";
 import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor";
 import { resolveAutoMobileBaseDir } from "../../src/utils/tempDir";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { drainMicrotasks } from "./fakeTimerStepping";
 import {
   IN_MEMORY_DATA_DIR,
   IN_MEMORY_SOCKET_PATH,
@@ -32,6 +38,9 @@ import { warmedTests } from "./warmedTests";
 
 // #11441: the liveness harness starts a real `Daemon` through `Daemon.startOn()`. These pin what
 // keeps that daemon off the machine, and that the harness's daemon is a process that can die.
+
+/** Microtask turns for a pushed frame to cross the in-memory socket to its client. */
+const SETTLE_TURNS = 32;
 
 let scenario: LivenessScenario | undefined;
 const scenarioTest = warmedTests(async () => {
@@ -114,6 +123,50 @@ describe("the liveness harness never reaches the host's daemon", () => {
         hostCommands.mockRestore();
         adbCommands.mockRestore();
       }
+    },
+  );
+});
+
+describe("the harness's control socket is opened by the socket server's own start", () => {
+  // `UnixSocketServer.startDetached()` is `start()` minus the socket file: the accept state and
+  // every broadcast fan-out are the server's wiring, not a copy of it in the harness (#11441).
+  scenarioTest(
+    "a subscribed client is pushed the daemon's list-changed and session-released frames, and a killed daemon pushes nothing",
+    async () => {
+      scenario = await LivenessScenario.start();
+      const session = await scenario.acquire();
+      const subscriber = scenario.daemonConnection("harness-subscriber");
+      await subscriber.connect();
+      await subscriber.subscribeToNotifications!();
+      const pushed: Array<{ method: string; sessionId?: string; reason?: string }> = [];
+      subscriber.onNotification!(({ method, sessionId, reason }) => {
+        pushed.push({ method, sessionId, reason });
+      });
+
+      ListChangedBroadcaster.emit("tools");
+      await drainMicrotasks(SETTLE_TURNS);
+      expect(pushed).toEqual([{ method: LIST_CHANGED_NOTIFICATION_METHODS.tools }]);
+
+      await scenario.closeTransport();
+      await scenario.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+      await drainMicrotasks(SETTLE_TURNS);
+      expect(pushed.slice(1)).toEqual([
+        {
+          method: SESSION_RELEASED_NOTIFICATION_METHOD,
+          sessionId: session,
+          reason: scenario.releaseOf(session)?.reason,
+        },
+      ]);
+
+      // A dead process's server is off the process-wide broadcasters: nothing is written for it.
+      const dead = scenario.daemon.socket.server as unknown as {
+        broadcastListChanged(kind: string): void;
+      };
+      await scenario.daemonRestart();
+      const deadFanOut = spyOn(dead, "broadcastListChanged");
+      ListChangedBroadcaster.emit("tools");
+      expect(deadFanOut).not.toHaveBeenCalled();
+      deadFanOut.mockRestore();
     },
   );
 });

@@ -1875,10 +1875,12 @@ export class DaemonMcpProxy {
     return this.managedSlotsResult;
   }
 
-  /** The terminally released binding, if any, for surfaces that report it (#11712). */
+  /** The terminally released binding, excluding a resumable daemon stall, for reporting surfaces (#11712). */
   getTerminalSessionRelease(): { sessionUuid: string; reason: string } | undefined {
     const terminal = this.terminalBoundSession;
-    return terminal ? { sessionUuid: terminal.sessionUuid, reason: terminal.reason } : undefined;
+    return terminal && terminal.reason !== DAEMON_STALLED_CODE
+      ? { sessionUuid: terminal.sessionUuid, reason: terminal.reason }
+      : undefined;
   }
 
   /** The sessions this proxy holds for a managed execution (#11176). */
@@ -4662,7 +4664,7 @@ export class DaemonMcpProxy {
    * binding is released and one call has been told so, a read-only tool that names no session is
    * forwarded without one: the daemon serves it on its read-only device path. Control tools keep
    * the fence and its reacquire guidance, as does a liveness handover, which every call reports
-   * until the harness acts on it. A managed execution keeps the fence for reads naming no device.
+   * until the harness acts on it. A managed execution keeps the fence for reads without a deviceId.
    */
   private isSessionlessReadAfterRelease(name: string, args: Record<string, unknown>): boolean {
     const terminal = this.terminalBoundSession;
@@ -4671,8 +4673,7 @@ export class DaemonMcpProxy {
       this.releaseSurfacedFor === terminal.sessionUuid &&
       !this.stallHandovers.has(terminal.sessionUuid) &&
       (managedSlotForSession(this.managedSlotsResult, terminal.sessionUuid) === null ||
-        (typeof args.deviceId === "string" && args.deviceId.trim().length > 0) ||
-        Boolean(args.device)) &&
+        (typeof args.deviceId === "string" && args.deviceId.trim().length > 0)) &&
       this.isDeviceReadOnlyTool(name)
     );
   }

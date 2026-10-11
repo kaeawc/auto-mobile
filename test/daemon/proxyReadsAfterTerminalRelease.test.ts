@@ -143,10 +143,17 @@ describe("reads after a terminal release of a result-minted session (#11483)", (
     expect(proxy.getTerminalSessionRelease()?.reason).toBe("cleanup-expired");
   }
 
-  test("a managed read without a device stays fenced every time after release was reported", async () => {
+  test("a managed read without a deviceId stays fenced every time after release was reported", async () => {
     await releaseManagedBinding();
     const forwardedBefore = client.callToolCalls.length;
-    for (const args of [{}, {}, { deviceId: "" }, { deviceId: " \t" }, { deviceId: 123 }]) {
+    for (const args of [
+      {},
+      {},
+      { deviceId: "" },
+      { deviceId: " \t" },
+      { deviceId: 123 },
+      { device: "A" },
+    ]) {
       const answer = await proxy.callTool("observe", args).catch((error: unknown) => error);
       expect(answer).toBeInstanceOf(DaemonBoundSessionExpiredError);
       expect(answer).toMatchObject({
@@ -157,17 +164,12 @@ describe("reads after a terminal release of a result-minted session (#11483)", (
     expect(client.callToolCalls.length).toBe(forwardedBefore);
   });
 
-  test("a managed read naming a device remains sessionless after release", async () => {
+  test("a managed read naming a deviceId remains sessionless after release", async () => {
     await releaseManagedBinding();
     const forwardedBefore = client.callToolCalls.length;
-    for (const args of [
-      { deviceId: ANDROID.deviceId },
-      { device: { deviceId: ANDROID.deviceId, platform: "android" } },
-    ]) {
-      await expect(proxy.callTool("observe", args)).resolves.toBeDefined();
-      expect(client.callToolCalls.at(-1)?.params.sessionUuid).toBeUndefined();
-    }
-    expect(client.callToolCalls.length).toBe(forwardedBefore + 2);
+    await expect(proxy.callTool("observe", { deviceId: ANDROID.deviceId })).resolves.toBeDefined();
+    expect(client.callToolCalls.at(-1)?.params).toEqual({ deviceId: ANDROID.deviceId });
+    expect(client.callToolCalls.length).toBe(forwardedBefore + 1);
   });
 
   test("a non-managed result-minted read without a device remains sessionless after release", async () => {

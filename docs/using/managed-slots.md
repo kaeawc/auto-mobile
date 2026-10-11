@@ -61,7 +61,7 @@ then narrowing such a spec can move `1 → 2 → 3`. Entering `replacing`, `sett
 or `cleanup_pending` from a different state also consumes one. A replacement can
 move `1 → 4`: fencing for deletion (`2`), committing the empty binding before
 creation (`3`), then committing the new device (`4`). An unchanged ready binding
-and an idle release with no unsettled work keep the generation. A new incarnation
+and a release that never enters `settling` keep the generation. A new incarnation
 has a new scope: a slot starts at `0` and its first binding commit reaches `1`.
 An adopted device keeps its name: its `-gN-` records the generation used by the
 scope that created it, not its current `assignmentGeneration`. Compare generations
@@ -245,8 +245,9 @@ connection used for tools and resources:
    retry lands, the draining daemon next claims the slot, or it exits.
    A release clears the execution owner and keeps the device assignment and spec,
    whatever the release reason (explicit, heartbeat loss, idle). The generation
-   stays unchanged when work settles within the drain budget; entering `settling`
-   to fence work that outlives that budget advances it by one.
+   stays unchanged unless the slot enters `settling`; entering it to fence
+   undrained work, an unconfirmed session release or unfinished cleanup advances
+   it by one.
 5. **Reuse.** A new proxy with the same scoped slot and a matching spec reuses
    the assigned device with a fresh session. A duplicate proxy for a slot whose
    execution is still live is refused with a retryable `slot_in_use`.
@@ -268,7 +269,8 @@ A managed-execution session uses the `managed-execution` liveness policy:
   the idle release. A call on the managed connection after it is answered with
   `managed_execution_ended` (`nextAction: relaunch_execution`, the release reason,
   `slotIndex` and `assignmentGeneration`; no recovery tools). Reads that name a
-  `deviceId` still work; a read that names no device is answered with
+  non-blank string `deviceId` still work; a read without one (including a
+  `device` label alone) is answered with
   `managed_execution_ended` every time;
   a direct daemon client sees `session_ownership_lost` (session-not-found answers carry
   `idle: true`). The slot's device stays assigned. To continue, start a new

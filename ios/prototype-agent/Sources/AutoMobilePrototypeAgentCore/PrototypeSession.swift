@@ -65,6 +65,9 @@ struct PrototypeSession {
     /// sequences as duplicates.
     private var sequences: [String: Int] = [:]
     /// The shown prototype's `appearance` from its show request.
+    /// The shown spec's size outside its `state`, for the spec byte cap (#11562); see
+    /// `PrototypeStateValidator.stateBytes`.
+    private var nonStateBytes = 0
     private(set) var appearanceOverride = PrototypeAppearanceOverride.device
     /// The device's own appearance, as last reported through `setDeviceDark`; it outlives a show.
     private(set) var deviceDark = false
@@ -90,9 +93,13 @@ struct PrototypeSession {
     mutating func show(
         _ spec: PrototypeSpec,
         reset: Bool = false,
-        appearance: PrototypeAppearanceOverride = .device
+        appearance: PrototypeAppearanceOverride = .device,
+        specBytes: Int? = nil
     ) {
         appearanceOverride = appearance
+        // The agent keeps no raw spec, so the request's own size (when the caller has it) less the
+        // state it carried is what the cap adds every later state to; without it only state counts.
+        nonStateBytes = max(0, (specBytes ?? 0) - PrototypeStateValidator.stateBytes(spec.state ?? [:]))
         let previous = !reset && self.spec?.id == spec.id ? pages : [:]
         pageCounts = spec.root.pagerCounts()
         pages = pageCounts.reduce(into: [:]) { result, entry in
@@ -177,9 +184,7 @@ struct PrototypeSession {
     /// first, when a value moved, then the action list.
     mutating func control(own: [(String, JSONValue)], then actions: [PrototypeAction]) -> [PrototypeEvent] {
         guard isShown else { return [] }
-        let moved = own.filter { state[$0.0] != $0.1 }
-        var written = state
-        moved.forEach { written[$0.0] = $0.1 }
+        let (written, moved) = applying(own)
         if !moved.isEmpty, !accepts(written) { return [] }
         guard let writes = plannedWrites(actions, from: written) else { return [] }
         let events: [PrototypeEvent]
@@ -187,9 +192,19 @@ struct PrototypeSession {
             events = []
         } else {
             state = written
-            events = emitStateChange(moved.map(\.0))
+            events = emitStateChange(moved)
         }
         return events + execute(actions, writes)
+    }
+
+    /// `own` written over the current state (a later write to a key wins) and the keys, in order, whose
+    /// final value differs from the current one.
+    private func applying(_ own: [(String, JSONValue)]) -> (state: [String: JSONValue], moved: [String]) {
+        var written = state
+        own.forEach { written[$0.0] = $0.1 }
+        var seen = Set<String>()
+        let moved = own.map(\.0).filter { state[$0] != written[$0] && seen.insert($0).inserted }
+        return (written, moved)
     }
 
     private typealias PlannedWrite = (key: String, value: JSONValue)
@@ -218,7 +233,7 @@ struct PrototypeSession {
     /// Whether every control, list item, modal and state action of the shown spec accepts `state`.
     private func accepts(_ state: [String: JSONValue]) -> Bool {
         guard let spec else { return false }
-        return PrototypeStateValidator.rejection(root: spec.root, state: state) == nil
+        return PrototypeStateValidator.rejection(root: spec.root, state: state, nonStateBytes: nonStateBytes) == nil
     }
 
     /// Runs `actions` in order, applying the writes planned for them.
@@ -292,12 +307,11 @@ struct PrototypeSession {
         return emit(kind: "emit", name: "change", payload: payload)
     }
 
-    /// Several keys written together, reported by one `change` event (see `emitStateChange`).
+    /// Several keys written together, reported by one `change` event (see `emitStateChange`). They are
+    /// validated as one unit like any other interaction (#11562): a state that breaks a binding
+    /// writes none of them.
     mutating func setStates(_ values: [(String, JSONValue)]) -> [PrototypeEvent] {
-        guard isShown else { return [] }
-        let baseline = state
-        values.forEach { state[$0.0] = $0.1 }
-        return emitStateChange(values.map(\.0).filter { baseline[$0] != state[$0] })
+        control(own: values, then: [])
     }
 
     /// Test-hook tap (see `PrototypeTestHooks`): performs in-process what a real tap on the
@@ -323,11 +337,10 @@ struct PrototypeSession {
     }
 
     /// A user edit of a bound control: one `emit` named `change` per changed value, matching
-    /// Android's `PrototypeRuntime.change`.
+    /// Android's `PrototypeRuntime.textChange`: validated against the bound controls and the spec byte
+    /// cap (#11562), and dropped whole when rejected.
     mutating func change(key: String, value: JSONValue) -> [PrototypeEvent] {
-        guard isShown, state[key] != value else { return [] }
-        state[key] = value
-        return emit(kind: "emit", name: "change", payload: .object(["key": .string(key), "value": value]))
+        control(own: [(key, value)], then: [])
     }
 
     /// A `switch` or `checkbox` tap flips its bound boolean, then runs the node's own actions. A key

@@ -36,6 +36,7 @@ final class PrototypeLimitsTests: XCTestCase {
         let limits = try XCTUnwrap(contract?["limits"] as? [String: Int])
         XCTAssertEqual(PrototypeLimits.maxNodes, limits["MAX_PROTOTYPE_NODES"])
         XCTAssertEqual(PrototypeLimits.maxDepth, limits["MAX_PROTOTYPE_DEPTH"])
+        XCTAssertEqual(PrototypeLimits.maxSpecBytes, limits["MAX_PROTOTYPE_SPEC_BYTES"])
         let definitions = try XCTUnwrap(contract?["definitions"] as? [String: Any])
         let repeatFields = try XCTUnwrap((definitions["repeat"] as? [String: Any])?["fields"] as? [String: Any])
         let items = try XCTUnwrap((repeatFields["items"] as? [String: Any])?["rule"] as? [String: Any])

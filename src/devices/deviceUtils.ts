@@ -1,4 +1,7 @@
-import { AdbCommandTimeoutError } from "../utils/android-cmdline-tools/AdbClient";
+import {
+  AdbCommandTimeoutError,
+  AdbUnavailableError,
+} from "../utils/android-cmdline-tools/AdbClient";
 import { createDefaultIosBootInstrumentation } from "../features/iosSimFleet/defaultIosBootInstrumentation";
 import { getSharedBootAdmissionGates } from "../features/bootAdmission/sharedBootAdmissionGates";
 import type { BootAdmission } from "../models/BootAdmission";
@@ -13,7 +16,7 @@ import type { TransitionalSimulator } from "../models/TransitionalSimulator";
 import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { SimCtlClient, SimctlUnavailableError } from "../utils/ios-cmdline-tools/SimCtlClient";
 import {
   getSharedDevicectlDeviceLister,
   type IosPhysicalDeviceLister,
@@ -105,6 +108,22 @@ export interface BootedDeviceDiscovery {
    * Present only when the simulator source completed; absent means unknown, not none.
    */
   transitionalSimulators?: TransitionalSimulator[];
+}
+
+/**
+ * A missing adb binary (ENOENT, surfaced by the adb client as `AdbUnavailableError`) is not a
+ * failed sweep: Android does not apply to this host, so it is `unavailable` (#11605).
+ */
+function androidDiscoveryErrorCode(error: unknown): DeviceDiscoveryErrorCode {
+  if (error instanceof AdbCommandTimeoutError) {
+    return "timeout";
+  }
+  return error instanceof AdbUnavailableError ? "unavailable" : "failed";
+}
+
+/** xcrun/simctl not installed is not a failed sweep: simulators do not apply to this host (#11605). */
+function simulatorDiscoveryErrorCode(error: unknown): DeviceDiscoveryErrorCode {
+  return error instanceof SimctlUnavailableError ? "unavailable" : "failed";
 }
 
 /** The iOS sources that completed, from one sweep's per-source outcome. */
@@ -987,7 +1006,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       return {
         devices: [],
         error: {
-          code: error instanceof AdbCommandTimeoutError ? "timeout" : "failed",
+          code: androidDiscoveryErrorCode(error),
           message: `Android booted-device discovery failed: ${errorMessage(error)}`,
           ...(error instanceof AdbCommandTimeoutError
             ? { retryable: true, retryAfterMs: 1_000 }
@@ -1132,7 +1151,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       ...(physicalError ? { physicalError } : {}),
       freshDeviceIds: new Set(freshPhysicalIds),
       error: {
-        code: "failed",
+        code: simulatorDiscoveryErrorCode(error),
         message: `iOS booted-device discovery failed: ${errorMessage(error)}`,
       },
     };

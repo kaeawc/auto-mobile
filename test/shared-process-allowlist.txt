@@ -102,6 +102,7 @@ test/daemon/deviceSessionResolver.test.ts
 test/daemon/deviceShutdownReservations.test.ts
 test/daemon/directModeStartup.test.ts
 test/daemon/disconnectMonitor-physicalImmediate.test.ts
+test/daemon/disconnectMonitor-transitionalSimulator.test.ts
 test/daemon/emulatorLossIncident.test.ts
 test/daemon/emulatorLossIncidentLedger.test.ts
 test/daemon/executionOwnerWatch.test.ts
@@ -220,6 +221,7 @@ test/daemon/telemetryBackfillBounds.test.ts
 test/daemon/telemetryIdentityTimelineBuckets.test.ts
 test/daemon/testRecordingSocketServerAuth.test.ts
 test/daemon/tokenOwnedSessionsLastUsedAt.test.ts
+test/daemon/toolCallActivityLatestDeadline.test.ts
 test/daemon/unsettledExecutionVeto.test.ts
 test/daemon/unsettledExecutionVetoWallClockStep.test.ts
 test/daemon/videoRecordingSocketServerAuth.test.ts
@@ -703,7 +705,6 @@ test/helpers/captureStageBaseline.test.ts
 test/helpers/captureStageTimeline.test.ts
 test/helpers/fastCheckConfig.test.ts
 test/helpers/iosVideoRecordingSessionCleanup.test.ts
-test/helpers/livenessScenarioHarness.test.ts
 test/helpers/sessionOwnershipHeartbeat.test.ts
 test/helpers/warmedTests.test.ts
 test/helpers/webrtcDeviceCaptureHelpers.test.ts

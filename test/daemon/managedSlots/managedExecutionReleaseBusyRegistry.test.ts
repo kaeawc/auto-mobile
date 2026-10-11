@@ -422,8 +422,8 @@ describe.each(REGISTRIES)(
       "throws until the cap",
       "throws until a cap after the work ends",
     ] as const;
-    const TABLE = (["explicit release", "release by the session manager"] as const).flatMap(
-      (path) =>
+    const TABLE = (["explicit release", "release by the session manager"] as const)
+      .flatMap((path) =>
         OWNERS.flatMap(([owner, ownerPid]) =>
           // A record this daemon wrote is never re-stamped: that row would be vacuous.
           HOLD_STEPS.filter((step) => step !== "claimExecution" || ownerPid !== DAEMON_PID).flatMap(
@@ -438,7 +438,18 @@ describe.each(REGISTRIES)(
               ),
           ),
         ),
-    );
+      )
+      // The watcher's read and write first run when the work ends. Busy only until a cap the
+      // work outlives, they would never be busy when called: that row would be vacuous too (the
+      // "cap after the work ends" mode is the one that faults them).
+      .filter(
+        ({ step, mode, workMs }) =>
+          !(
+            (step === "getAssignment" || step === "advanceSlotJournal") &&
+            mode === "throws until the cap" &&
+            workMs > CAP_MS
+          ),
+      );
 
     /** A table drain with a short cap; `updateSlotState` is the unjournaled mark and restore. */
     function newTableDrain(step: RegistryMethod): ManagedExecutionRelease {

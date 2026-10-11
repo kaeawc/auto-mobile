@@ -218,7 +218,10 @@ connection used for tools and resources:
    and treated as written. One window has no registry record: while neither the
    re-stamp nor the mark of such a foreign record has landed (or the lookup of
    a session released by heartbeat loss has not), only the draining daemon
-   itself refuses the slot.
+   itself refuses the slot. And an owner record whose clear failed, which the
+   draining daemon itself reads as dead, still names that daemon's process:
+   other daemons on the host answer `slot_in_use` for it until the draining
+   daemon next claims the slot or exits.
    A release clears the execution owner only; the assignment, generation and spec
    are kept, whatever the release reason (explicit, heartbeat loss, idle).
 5. **Reuse.** A new proxy with the same scoped slot and a matching spec reuses

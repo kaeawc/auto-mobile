@@ -842,7 +842,7 @@ export class ManagedExecutionRelease {
         this.warn(
           `[ManagedExecutionRelease] Clearing the owner of slot ${failure.scopeKey}/` +
             `${failure.slotIndex} for released session ${sessionId} failed; the dead record ` +
-            `pins nothing (#11339): ${failure.error}`,
+            `pins nothing in this daemon (#11339): ${failure.error}`,
         );
       }
     } finally {
@@ -908,7 +908,7 @@ export class ManagedExecutionRelease {
    * Clear this session's execution ownership of every held slot; one failure never stops the
    * rest. A slot whose `settling` mark is owed keeps its owner (reported as not released): the
    * fence comes first. A clear that throws leaves a record that is dead by liveness once the
-   * drain's hold ends, which pins nothing (#11339) and which the settlement watcher clears.
+   * drain's hold ends, which pins nothing in this daemon (#11339) and which the settlement watcher clears.
    */
   private async releaseOwnership(
     registry: ManagedExecutionSlotRegistry,

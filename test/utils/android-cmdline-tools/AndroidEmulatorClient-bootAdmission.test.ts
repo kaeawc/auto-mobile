@@ -96,6 +96,13 @@ function spawnReportingStartup(events: string[]): {
   };
 }
 
+/** Lets the launch run, without a timer, until `event` was recorded. */
+async function waitForEvent(events: string[], event: string): Promise<void> {
+  for (let turn = 0; turn < 200 && !events.includes(event); turn++) {
+    await Promise.resolve();
+  }
+}
+
 afterEach(() => {
   AndroidEmulatorClient.resetLaunchReservationsForTesting();
 });
@@ -114,12 +121,58 @@ describe("AndroidEmulatorClient boot admission (#11181)", () => {
     expect(launch.outcome).toBe("launched");
     expect(events[0]).toBe("admit");
     expect(events[1]).toBe("spawn");
+    // Handed off at the spawn, and again with the same serial once startup validation ended.
     expect(events[2]).toMatch(/^handOff:emulator-\d+$/);
-    expect(events).toHaveLength(3);
+    expect(events.slice(3)).toEqual([events[2]]);
 
     // The emulator dying before adb lists it frees the slot at once.
     child.emit("exit", 1, null);
     expect(events.at(-1)).toBe("release");
+  });
+
+  test("hands the slot off as soon as the process exists, before startup validation ends (#11564)", async () => {
+    const events: string[] = [];
+    const child = createChild();
+    const client = createClient(() => {
+      events.push("spawn");
+      return child;
+    });
+
+    const launching = client.launchEmulator({
+      avdName: AVD,
+      admitColdBoot: recordingAdmission(events),
+    });
+    // Startup validation is still waiting for the emulator's first output.
+    await waitForEvent(events, "spawn");
+
+    expect(events).toEqual(["admit", "spawn", expect.stringMatching(/^handOff:emulator-\d+$/)]);
+
+    child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    await launching;
+    expect(events).toEqual(["admit", "spawn", events[2], events[2]]);
+  });
+
+  test("an emulator that exits during startup validation frees its slot once (#11564)", async () => {
+    const events: string[] = [];
+    const child = createChild();
+    const client = createClient(() => {
+      events.push("spawn");
+      return child;
+    });
+
+    const launching = client.launchEmulator({
+      avdName: AVD,
+      admitColdBoot: recordingAdmission(events),
+    });
+    await waitForEvent(events, "spawn");
+    child.emit("exit", 1, null);
+    // Freed by the exit itself, not by the launch failing once the stdio has drained.
+    expect(events.at(-1)).toBe("release");
+    child.emit("close", 1, null);
+
+    await expect(launching).rejects.toThrow();
+    expect(events.filter((event) => event === "release")).toHaveLength(1);
+    expect(events.filter((event) => event.startsWith("handOff"))).toHaveLength(1);
   });
 
   test("a failed spawn releases the slot and never hands it off", async () => {

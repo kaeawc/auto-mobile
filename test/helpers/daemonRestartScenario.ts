@@ -1,6 +1,7 @@
 import { spyOn } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import * as databaseModule from "../../src/db";
+import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
@@ -60,6 +61,8 @@ export class RestartScenario {
   private constructor(readonly scenario: LivenessScenario) {}
 
   static async start(options: LivenessScenarioOptions = {}): Promise<RestartScenario> {
+    // A new daemon process must not inherit another test's pending writes or drain.
+    resetDbWriteBarrier();
     return new RestartScenario(await LivenessScenario.start(options));
   }
 
@@ -108,7 +111,9 @@ export class RestartScenario {
     // The three host-touching stages of stop(): everything else is the production sequence.
     Reflect.set(daemon, "cleanupDaemonFilesForShutdown", async () => {});
     this.shutdownSpies.push(
-      spyOn(databaseModule, "closeDatabase").mockResolvedValue(undefined),
+      spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {
+        resetDbWriteBarrier();
+      }),
       spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined),
     );
     await setVideoRecordingManagerDependencies({
@@ -238,5 +243,7 @@ export class RestartScenario {
     }
     resetVideoRecordingManagerDependencies();
     await this.scenario.stop();
+    // A stop() that failed before its database stage leaves the barrier draining.
+    resetDbWriteBarrier();
   }
 }

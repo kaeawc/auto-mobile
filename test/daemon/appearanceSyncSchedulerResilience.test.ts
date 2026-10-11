@@ -178,8 +178,9 @@ describe("AppearanceSyncScheduler resilience", () => {
   test("applies appearance sync when a session acquires a device later", async () => {
     const acquired = makeTarget(1);
     const applied: string[] = [];
+    // The acquiring session holds the device by the time its sync runs (#11641).
     const scheduler = makeScheduler(
-      () => [],
+      () => [acquired],
       async (device) => {
         applied.push(device.deviceId);
       },
@@ -206,8 +207,7 @@ describe("AppearanceSyncScheduler resilience", () => {
     );
 
     const tick = scheduler.trigger();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushMicrotasks();
     const stopping = scheduler.stop();
     expect(finishApply).toBeDefined();
     finishApply?.();
@@ -440,6 +440,8 @@ describe("the default appearance sync boundary", () => {
           applied.push(`${device.deviceId}:${mode}`);
         },
       });
+      // The daemon's scope: the device is held when its sync runs (#11641).
+      scheduler.setScope({ getTargets: () => [makeTarget(1)] });
 
       await scheduler.syncDevice(makeTarget(1));
 

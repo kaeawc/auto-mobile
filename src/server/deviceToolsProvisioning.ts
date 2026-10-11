@@ -3,6 +3,7 @@ import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   DEVICE_SHUTTING_DOWN_CODE,
+  DEVICE_OFFLINE_CODE,
   DeviceOwnedByOtherDaemonError,
   SESSION_CREATION_TIMEOUT_CODE,
   RetryableDeviceAcquisitionError,
@@ -218,6 +219,7 @@ function retryableAcquisitionProvisionCode(code: string): ProvisionDeviceFailure
     case DEVICE_CLEANUP_IN_PROGRESS_CODE:
     case SESSION_CREATION_TIMEOUT_CODE:
     case DEVICE_SHUTTING_DOWN_CODE:
+    case DEVICE_OFFLINE_CODE:
       return code;
     default:
       return undefined;

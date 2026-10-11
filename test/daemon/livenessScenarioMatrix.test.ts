@@ -1351,7 +1351,7 @@ describe("restart recovery onto a device a peer daemon took (#11076, #11084)", (
 });
 
 describe("an explicit acquisition of a device a peer daemon claims (#10980, #11442)", () => {
-  test("is refused before any acquisition work: no session is minted, persisted, announced or released, and the peer keeps its claim; once the peer lets go the same acquisition runs every hook once", async () => {
+  test("is refused before a session exists: none is minted, persisted, announced or released, and the peer keeps its claim; once the peer lets go the same acquisition runs every hook once", async () => {
     scenario = await LivenessScenario.start({ sharedDeviceClaims: true });
     const created: string[] = [];
     scenario.daemon.manager.onSessionCreated((session) => created.push(session.sessionId));

@@ -31,6 +31,7 @@ import { executionTracker } from "./executionTracker";
 import { isClientCancelled } from "../utils/AbortContext";
 import { acquireUndoneIfUndelivered } from "./undeliveredAcquisition";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import { refuseControlOnForeignOwnedSession } from "./foreignOwnedSessionRefusal";
 
 export interface SetActiveDeviceArgs {
   deviceId: string;
@@ -91,18 +92,31 @@ function resolveAutolockSelection(args: HandlerArgs): string | undefined {
  * #11167, #11344: sharing a session needs its owner to release it first. Naming a session another
  * connected client owns is refused, typed, before anything is selected or rebound, with autolock
  * on or off: otherwise the caller could move that client's session to another device and adopt it
- * as its own default.
+ * as its own default. The refusal is the one every other tool gives (#11647): its evidence is the
+ * device the SESSION holds, never the requested target, which may be free.
  */
 function refuseForeignOwnedSession(args: HandlerArgs): void {
-  if (!args.sessionUuid || !DaemonState.getInstance().isInitialized()) {
-    return;
-  }
-  const pool = DaemonState.getInstance().getDevicePool();
   // #11469: a plan step or nested call carries no socket identity of its own and is judged as
   // the connection of the call that started it.
   const callerMcpSessionId = args.__mcpSessionId ?? getToolSelectionContext()?.callerMcpSessionId;
-  if (pool.isSessionOwnedByOtherConnection(args.sessionUuid, callerMcpSessionId)) {
-    throw deviceAssignedToOtherSessionError(args.deviceId, args.sessionUuid, undefined);
+  refuseControlOnForeignOwnedSession("setActiveDevice", args.sessionUuid, callerMcpSessionId);
+  // #11235: a caller with no connection identity is not judged above, but a live autolock session
+  // is owned by connection, so it is foreign to that caller too.
+  const daemonState = DaemonState.getInstance();
+  if (
+    !callerMcpSessionId &&
+    args.sessionUuid &&
+    daemonState.isInitialized() &&
+    daemonState.getDevicePool().isSessionOwnedByOtherConnection(args.sessionUuid)
+  ) {
+    const sessionDevice = daemonState
+      .getSessionManager()
+      .getSession(args.sessionUuid)?.assignedDevice;
+    throw deviceAssignedToOtherSessionError(
+      sessionDevice ?? "unknown",
+      args.sessionUuid,
+      undefined,
+    );
   }
 }
 

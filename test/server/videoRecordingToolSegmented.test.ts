@@ -397,6 +397,7 @@ describe("videoRecording tool segmentation branch", () => {
       setRecordingRequesterResolverForTesting({
         baseSessionUuid: (uuid) => uuid.split(":")[0],
         connectionOwnsDeviceSession: () => false,
+        isDeviceHeld: () => true,
       });
       const recordingId = await finalizeSingle("plan-base:pixel");
       const stopsBefore = fakeBackend.stopCalls.length;
@@ -424,6 +425,7 @@ describe("videoRecording tool segmentation branch", () => {
           seen.push([mcp, deviceId, ownerBase]);
           return mcp === "mcp-owner";
         },
+        isDeviceHeld: () => true,
       });
       const recordingId = await finalizeSingle("plan-base:pixel");
 
@@ -447,6 +449,7 @@ describe("videoRecording tool segmentation branch", () => {
       setRecordingRequesterResolverForTesting({
         baseSessionUuid: (uuid) => uuid.split(":")[0],
         connectionOwnsDeviceSession: () => false,
+        isDeviceHeld: () => true,
       });
       const start = parse(
         await handler()(androidDevice, {
@@ -510,6 +513,7 @@ describe("videoRecording tool segmentation branch", () => {
         setRecordingRequesterResolverForTesting({
           baseSessionUuid: (uuid) => uuid.split(":")[0],
           connectionOwnsDeviceSession: () => false,
+          isDeviceHeld: () => true,
         });
         const active = await startVideoRecording({
           device: androidDevice,
@@ -535,6 +539,7 @@ describe("videoRecording tool segmentation branch", () => {
             seen.push([mcp, deviceId, ownerBase]);
             return mcp === "mcp-owner";
           },
+          isDeviceHeld: () => true,
         });
         const active = await startVideoRecording({
           device: androidDevice,
@@ -560,6 +565,7 @@ describe("videoRecording tool segmentation branch", () => {
         setRecordingRequesterResolverForTesting({
           baseSessionUuid: (uuid) => uuid.split(":")[0],
           connectionOwnsDeviceSession: () => false,
+          isDeviceHeld: () => true,
         });
         const active = await startVideoRecording({
           device: androidDevice,

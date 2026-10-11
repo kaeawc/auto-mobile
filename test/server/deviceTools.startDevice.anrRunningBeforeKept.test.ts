@@ -272,6 +272,68 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     expect(routeReleases).toBe(0);
   };
 
+  test("recovery refuses a named caller that is not the session already holding the device", async () => {
+    const original = pool.getDevice(device.deviceId);
+    const kill = devices.killDevice.bind(devices);
+    devices.killDevice = async (...args) => {
+      await kill(...args);
+      devices.setBootedDevices("android", []);
+    };
+    let readinessCalls = 0;
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        if (++readinessCalls === 1) {
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+        }
+      },
+    });
+    const error = await runWithToolSelectionContext({ routingSessionUuid: "third-session" }, () =>
+      ToolRegistry.getTool("startDevice")!.handler({ platform: "android", name: device.name }),
+    ).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(error).toBeInstanceOf(InputDeviceOwnedError);
+    expect(error).toMatchObject({ code: "device_owned_by_other_session" });
+    expect(readinessCalls).toBe(1);
+    expect(devices.getExecutedOperations().filter((op) => op.startsWith("killDevice:"))).toEqual(
+      [],
+    );
+    expect(pool.getDevice(device.deviceId)).toBe(original);
+    expect(original).toMatchObject({ sessionId: "owner-session", status: "busy" });
+    expect(sessions.getSession("owner-session")?.assignedDevice).toBe(device.deviceId);
+    expect(pool.isReservedForReadiness(device.deviceId)).toBe(false);
+    expect(await pool.isShutdownReserved(device.deviceId)).toBe(false);
+    expect(await pool.isShutdownReservationHeld(device.deviceId)).toBe(false);
+    expect(lifecycleReleases).toBe(1);
+  });
+
+  test("recovery proceeds when the named caller already holds the device", async () => {
+    const kill = devices.killDevice.bind(devices);
+    devices.killDevice = async (...args) => {
+      await kill(...args);
+      devices.setBootedDevices("android", []);
+    };
+    let readinessCalls = 0;
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        if (++readinessCalls === 1) {
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+        }
+      },
+    });
+    const result = await runWithToolSelectionContext({ routingSessionUuid: "owner-session" }, () =>
+      ToolRegistry.getTool("startDevice")!.handler({ platform: "android", name: device.name }),
+    );
+    expect(result.isError).not.toBe(true);
+    expect(readinessCalls).toBe(2);
+    expect(
+      devices.getExecutedOperations().filter((op) => op.startsWith("killDevice:")),
+    ).toHaveLength(1);
+    expect(pool.getDevice(device.deviceId)?.sessionId).toBe("owner-session");
+    expect(sessions.getSession("owner-session")?.assignedDevice).toBe(device.deviceId);
+  });
+
   test("recovery refuses a device another session bound while this call was preparing it", async () => {
     await releaseOriginalHolder();
     const original = pool.getDevice(device.deviceId);

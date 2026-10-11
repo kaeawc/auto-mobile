@@ -4430,8 +4430,11 @@ export async function prepareStartDeviceRunnerReadiness(
   const initialHolder = captureSystemUiAnrInitialHolder(input, devicePool);
   // startDeviceSchema strips sessionUuid, so caller identity comes from admitted ambient routing.
   const requesterSessionUuid = lifecycleRequester(input.args).sessionUuid;
+  const autolockEnabled =
+    (input.autolockEnabled ?? captureAutolockPolicy(getDeviceToolsDependencies().env)) &&
+    Boolean(devicePool);
   const recoveryAutolockClient =
-    (input.autolockEnabled ?? captureAutolockPolicy(getDeviceToolsDependencies().env)) && devicePool
+    autolockEnabled && devicePool
       ? {
           mcpSessionId: input.args.__mcpSessionId,
           expectedSessionId: devicePool.captureAutolockSessionForMcpSession(
@@ -4445,6 +4448,7 @@ export async function prepareStartDeviceRunnerReadiness(
     createSystemUiAnrRebooter(input, devicePool, recoveryAutolockClient, {
       initialHolder,
       requesterSessionUuid,
+      autolockEnabled,
     }),
   );
   if (readinessResult.recovered) {
@@ -4522,7 +4526,11 @@ function createSystemUiAnrRebooter(
   input: StartDeviceRunnerReadinessInput,
   devicePool: DevicePool | undefined,
   recoveryAutolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined,
-  entitlement: { initialHolder: string | undefined; requesterSessionUuid: string | undefined },
+  entitlement: {
+    initialHolder: string | undefined;
+    requesterSessionUuid: string | undefined;
+    autolockEnabled: boolean;
+  },
 ): (candidate: DeviceBootResult) => Promise<SystemUiAnrRecoveryResult> {
   return async (candidate) => {
     const manager = devicePool ? input.daemonState.getSessionManager() : undefined;
@@ -4530,7 +4538,10 @@ function createSystemUiAnrRebooter(
       const holder = liveHolderOtherThanThisRequest(deviceId);
       return (
         holder !== undefined &&
-        holder !== entitlement.initialHolder &&
+        !(
+          holder === entitlement.initialHolder &&
+          (entitlement.autolockEnabled || entitlement.requesterSessionUuid === undefined)
+        ) &&
         !isSameHolderSession(holder, entitlement.requesterSessionUuid, manager)
       );
     };
@@ -4541,8 +4552,6 @@ function createSystemUiAnrRebooter(
     };
     const sessionId = devicePool?.getDevice(candidate.device.deviceId)?.sessionId;
     const session = sessionId ? manager?.getSession(sessionId) : undefined;
-    // Background retirement runs outside the request's acquisition-receipt context.
-    const mayPreserveSession = Boolean(session) && !hasOtherHolder(candidate.device.deviceId);
     return await rebootAndroidAfterSystemUiAnr({
       boot: candidate,
       args: input.args,
@@ -4564,7 +4573,6 @@ function createSystemUiAnrRebooter(
           !manager ||
           !sessionId ||
           preservedSessionId !== sessionId ||
-          !mayPreserveSession ||
           devicePool.getDevice(replacement.id) !== replacement ||
           replacement.sessionId !== sessionId
         ) {

@@ -1,0 +1,226 @@
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import type { BootedDevice } from "../../src/models";
+import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { logger } from "../../src/utils/logger";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { McpTestFixture } from "../fixtures/mcpTestFixture";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { RealToolCallPath } from "../helpers/realToolCallPath";
+
+// #11602: a connection whose MCP server is bound to the base session names its own derived
+// `${base}:${label}` session. The server here is built as the daemon builds one for a client that
+// speaks streamable HTTP to it directly (`Daemon` passes `sessionContext` with the transport's
+// session id and `daemonMode: true`): one server for the whole connection, so the binding its
+// first call records is still there for the next. A proxied client never reaches this state: the
+// daemon socket gives every explicitly named session its own loopback server, seeded with it.
+
+const primary: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
+const labelled: BootedDevice = { name: "Pixel B", deviceId: "emulator-5556", platform: "android" };
+const BASE = "sess-a";
+const DERIVED = `${BASE}:B`;
+const OWNER = "conn-1";
+const OTHER = "conn-2";
+const BOUND_TO_OTHER_SESSION = /MCP connection is bound to device session/;
+
+function wire(result: { content?: unknown }): Record<string, unknown> {
+  const content = result.content as { text: string }[];
+  return JSON.parse(content[0].text) as Record<string, unknown>;
+}
+
+function errorText(result: { content?: unknown }): string {
+  return (result.content as { text: string }[])[0].text;
+}
+
+describe("a connection bound to the base session naming its own derived label session", () => {
+  let manager: SessionManager;
+  let pool: DevicePool;
+  let tools: RealToolCallPath;
+  let fixtures: McpTestFixture[];
+  let spies: Array<ReturnType<typeof spyOn>>;
+  let previousAutolock: string | undefined;
+
+  beforeAll(async () => {
+    // Pay the server module's cold import outside any test's budget.
+    const restore = installHermeticServerFixture();
+    const warm = new McpTestFixture({ daemonMode: true });
+    await warm.setup();
+    await warm.teardown();
+    restore();
+  });
+
+  /** One connection's server, as the daemon creates it for a direct streamable-HTTP client. */
+  async function connection(
+    sessionContext: NonNullable<ConstructorParameters<typeof McpTestFixture>[0]>["sessionContext"],
+  ): Promise<McpTestFixture> {
+    const fixture = new McpTestFixture({ daemonMode: true, sessionContext });
+    await fixture.setup();
+    fixtures.push(fixture);
+    return fixture;
+  }
+
+  /** A tool-error result, or the protocol error the ingress answered instead, as its text. */
+  const tap = (fixture: McpTestFixture, args: Record<string, unknown>) =>
+    fixture.client
+      .callTool({
+        name: "tapAt",
+        arguments: { x: 10, y: 10, [INTERNAL_MCP_SESSION_PARAM]: OWNER, ...args },
+      })
+      .catch((error: unknown) => ({
+        isError: true,
+        content: [{ type: "text", text: (error as Error).message }],
+      }));
+
+  beforeEach(async () => {
+    previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    fixtures = [];
+    spies = [
+      spyOn(logger, "info").mockImplementation(() => {}),
+      spyOn(logger, "warn").mockImplementation(() => {}),
+      spyOn(logger, "error").mockImplementation(() => {}),
+    ];
+    const timer = new FakeTimer();
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), () => {
+      return new FakeDbWriteBarrier();
+    });
+    manager.stopCleanupTimer();
+    const discovery = new FakeDeviceUtils();
+    discovery.setBootedDevices("android", [primary, labelled]);
+    discovery.setBootedDevices("ios", []);
+    PlatformDeviceManagerFactory.setInstance(discovery);
+    pool = new DevicePool(
+      createDevicePoolDependencies(manager, "own-label-session-daemon", {
+        timer,
+        deviceManager: discovery,
+      }),
+    );
+    await pool.initializeWithDevices([primary, labelled]);
+    DaemonState.getInstance().initialize(manager, pool, new DeviceSessionRegistry(timer));
+    tools = new RealToolCallPath([primary, labelled]).install();
+    // OWNER acquires the base, then its plan publishes the label map and allocates label B, as
+    // PlanExecutionOrchestrator.allocateDevices does.
+    await pool.bindOrReuseDeviceSession(
+      BASE,
+      primary.deviceId,
+      "android",
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      OWNER,
+    );
+    manager.setDeviceLabels(BASE, buildDeviceLabelMap(["A", "B", "C"], BASE));
+    await pool.assignMultipleDevices([DERIVED], 1_000, "android");
+  });
+
+  afterEach(async () => {
+    for (const fixture of fixtures) {
+      await fixture.teardown();
+    }
+    tools.uninstall();
+    PlatformDeviceManagerFactory.setInstance(null);
+    DaemonState.getInstance().reset();
+    manager.stopCleanupTimer();
+    for (const spy of spies) {
+      spy.mockRestore();
+    }
+    if (previousAutolock === undefined) {
+      delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    } else {
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
+    }
+  });
+
+  test("its call on the derived session runs on the labelled device", async () => {
+    const owner = await connection({ sessionId: "http-owner" });
+    // The first call binds this connection's server to the base session.
+    expect((await tap(owner, { sessionUuid: BASE })).isError).not.toBe(true);
+
+    const result = await tap(owner, { sessionUuid: DERIVED });
+
+    expect(result.isError).not.toBe(true);
+    expect(tools.runs.map((run) => run.deviceId)).toEqual([primary.deviceId, labelled.deviceId]);
+    // Like any session a connection has run a call on, the label is now one of its own beside
+    // the base: both stay routable, and a session that is neither is still refused.
+    expect((await tap(owner, { sessionUuid: BASE })).isError).not.toBe(true);
+    expect((await tap(owner, { sessionUuid: DERIVED })).isError).not.toBe(true);
+    expect(tools.runs.map((run) => run.deviceId).slice(2)).toEqual([
+      primary.deviceId,
+      labelled.deviceId,
+    ]);
+    expect(errorText(await tap(owner, { sessionUuid: "sess-b" }))).toMatch(BOUND_TO_OTHER_SESSION);
+  });
+
+  test("a name that is not one of the base's published labels is still refused", async () => {
+    const owner = await connection({ sessionId: "http-owner" });
+    await tap(owner, { sessionUuid: BASE });
+
+    for (const sessionUuid of [`${BASE}:Z`, "sess-b", `${BASE}:B:nested`]) {
+      const result = await tap(owner, { sessionUuid });
+
+      expect(result.isError).toBe(true);
+      expect(errorText(result)).toMatch(BOUND_TO_OTHER_SESSION);
+    }
+    expect(tools.runs.map((run) => run.deviceId)).toEqual([primary.deviceId]);
+  });
+
+  test("a published label that was never allocated takes no device", async () => {
+    const owner = await connection({ sessionId: "http-owner" });
+    await tap(owner, { sessionUuid: BASE });
+
+    const result = await tap(owner, { sessionUuid: `${BASE}:C` });
+
+    expect(result.isError).toBe(true);
+    expect(manager.getSession(`${BASE}:C`)).toBeNull();
+    expect(tools.runs.map((run) => run.deviceId)).toEqual([primary.deviceId]);
+  });
+
+  test("another connection's call on that derived session is refused by the owner rule", async () => {
+    const owner = await connection({ sessionId: "http-owner" });
+    await tap(owner, { sessionUuid: BASE });
+
+    // The same server forwards a call that carries another connection's identity.
+    const result = await tap(owner, { sessionUuid: DERIVED, [INTERNAL_MCP_SESSION_PARAM]: OTHER });
+
+    expect(result.isError).toBe(true);
+    expect(wire(result).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    expect(tools.runs.map((run) => run.deviceId)).toEqual([primary.deviceId]);
+  });
+
+  // Unchanged by #11602, which only lets a base-bound connection reach its labels.
+  test("a connection bound to the derived session is not let onto its base by the label", async () => {
+    const label = await connection({ sessionId: "http-label" });
+    await tap(label, { sessionUuid: DERIVED });
+
+    const result = await tap(label, { sessionUuid: BASE });
+
+    expect(result.isError).toBe(true);
+    expect(errorText(result)).toMatch(BOUND_TO_OTHER_SESSION);
+  });
+
+  test("the proxied route, a loopback server seeded with the derived session, runs", async () => {
+    const loopback = await connection({
+      sessionId: "loopback",
+      initialSessionToolBinding: DERIVED,
+    });
+
+    const result = await tap(loopback, { sessionUuid: DERIVED });
+
+    expect(result.isError).not.toBe(true);
+    expect(tools.runs.map((run) => run.deviceId)).toEqual([labelled.deviceId]);
+  });
+});

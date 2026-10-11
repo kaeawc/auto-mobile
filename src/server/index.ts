@@ -1142,7 +1142,18 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         boundDeviceSessionUuid &&
         explicitSessionUuid &&
         explicitSessionUuid !== boundDeviceSessionUuid &&
-        !sessionToolBinding.ownsSession(sessionId, explicitSessionUuid)
+        !sessionToolBinding.ownsSession(sessionId, explicitSessionUuid) &&
+        // #11602: a live derived `${base}:${label}` session counts as its base, so the connection
+        // bound to the base may name its own plan's label session. It is no second device: the
+        // label is already allocated. Whose base it is stays the owner rule's question below.
+        !(
+          DaemonState.getInstance().isInitialized() &&
+          DaemonState.getInstance().getSessionManager().getSession(explicitSessionUuid) !== null &&
+          resolveToolSelectionBaseSessionUuid(
+            explicitSessionUuid,
+            DaemonState.getInstance().getSessionManager(),
+          ) === boundDeviceSessionUuid
+        )
       ) {
         throw new ActionableError(
           `MCP connection is bound to device session ${boundDeviceSessionUuid}; ` +

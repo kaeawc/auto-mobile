@@ -5,7 +5,7 @@ import {
   type Platform,
   type SomePlatform,
 } from "../models";
-import type { BootedDeviceDiscovery } from "../devices/deviceUtils";
+import type { BootedDeviceDiscovery, DeviceDiscoveryError } from "../devices/deviceUtils";
 import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
 import {
   createConfiguredInventoryContract,
@@ -41,8 +41,14 @@ async function transitionalHeldListing(input: {
   discovery: BootedDeviceDiscovery;
   pool: ReturnType<typeof initializedDevicePool>;
   deviceManager: ReturnType<ReturnType<typeof getDeviceToolsDependencies>["deviceManagerFactory"]>;
-}): Promise<{ devices: BootedDevice[]; holds: Map<string, TransitionalHold> }> {
+}): Promise<{
+  devices: BootedDevice[];
+  holds: Map<string, TransitionalHold>;
+  /** Set when a held Android device's state could not be probed: that platform is incomplete. */
+  probeFailure: DeviceDiscoveryError | undefined;
+}> {
   const { discovered, discovery, pool, deviceManager } = input;
+  let probeFailure: DeviceDiscoveryError | undefined;
   const devices: BootedDevice[] = [];
   const holds = new Map<string, TransitionalHold>();
   for (const offlineHeld of await adbOfflineHeldDevices({
@@ -50,6 +56,9 @@ async function transitionalHeldListing(input: {
     discovered,
     devicePool: pool,
     deviceManager,
+    onProbeFailure: (failure) => {
+      probeFailure = failure;
+    },
   })) {
     holds.set(offlineHeld.device.deviceId, {
       adbState: offlineHeld.adbState,
@@ -65,7 +74,29 @@ async function transitionalHeldListing(input: {
     holds.set(held.device.deviceId, { simulatorState: held.simulatorState });
     devices.push(held.device);
   }
-  return { devices, holds };
+  return { devices, holds, probeFailure };
+}
+
+/**
+ * The discovery completeness this listing reports. A failed held-device state probe means the
+ * held Android device may still be attached: that platform is unknown, not empty.
+ */
+function withHeldProbeFailure(
+  discovery: BootedDeviceDiscovery,
+  probeFailure: DeviceDiscoveryError | undefined,
+) {
+  const succeededPlatforms = new Set(discovery.succeededPlatforms);
+  const succeededSources = discovery.succeededSources && new Set(discovery.succeededSources);
+  if (!probeFailure) {
+    return { succeededPlatforms, succeededSources, discoveryErrors: discovery.discoveryErrors };
+  }
+  succeededPlatforms.delete("android");
+  succeededSources?.delete("android");
+  return {
+    succeededPlatforms,
+    succeededSources,
+    discoveryErrors: { ...discovery.discoveryErrors, android: probeFailure },
+  };
 }
 
 function selectBootedDevices(
@@ -214,9 +245,10 @@ export function createListingHandlers() {
       for (const [deviceId, hold] of transitional.holds) {
         transitionalHolds.set(deviceId, hold);
       }
-      succeededPlatforms = discovery.succeededPlatforms;
-      succeededSources = discovery.succeededSources;
-      discoveryErrors = discovery.discoveryErrors;
+      ({ succeededPlatforms, succeededSources, discoveryErrors } = withHeldProbeFailure(
+        discovery,
+        transitional.probeFailure,
+      ));
       sourceErrors = discovery.sourceErrors;
     } catch (error) {
       // Discovery is best-effort — a partial/failed probe still returns the

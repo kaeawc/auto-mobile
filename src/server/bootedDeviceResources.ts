@@ -601,6 +601,8 @@ interface AdbOfflineHeldInput {
   deviceManager: PlatformDeviceManager;
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>;
   transportAvdName: (deviceId: string) => string | undefined;
+  /** Receives the failure when the held-device state probe cannot answer (#11573). */
+  onProbeFailure: (failure: DeviceDiscoveryError) => void;
 }
 
 /**
@@ -617,6 +619,7 @@ async function adbOfflineHeldDeviceDescriptions(
     discovered: input.discovered,
     devicePool: input.devicePool,
     deviceManager: input.deviceManager,
+    onProbeFailure: input.onProbeFailure,
   });
   return held.map(({ device, avdName, adbState }) =>
     toBootedDeviceInfo(
@@ -632,6 +635,34 @@ async function adbOfflineHeldDeviceDescriptions(
         adbOffline: { adbState, avdName },
         transportAvdName: input.transportAvdName(device.deviceId),
       },
+    ),
+  );
+}
+
+/** Held simulators `simctl` lists Booting / Shutting Down, described like any booted row (#11573). */
+function transitionalSimulatorDescriptions(input: {
+  discovery: BootedDeviceDiscovery;
+  devicePool: DevicePool | null;
+  sessionsById: Map<string, Session> | null;
+  resolveDeviceSessionUuid: (deviceId: string) => string | null;
+  configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>;
+}): BootedDeviceInfo[] {
+  const { discovery, devicePool } = input;
+  return transitionalHeldSimulators({
+    transitional: discovery.transitionalSimulators,
+    discovered: discovery.devices,
+    devicePool,
+  }).map(({ device, simulatorState }) =>
+    toBootedDeviceInfo(
+      device,
+      resolvePoolDeviceContext(
+        devicePool,
+        device,
+        input.sessionsById,
+        input.resolveDeviceSessionUuid,
+      ),
+      input.configuredImages,
+      { simulatorState },
     ),
   );
 }
@@ -878,6 +909,45 @@ interface PlatformDiscoveryResult {
   sourceObservations: Partial<Record<DiscoverySource, PlatformObservation>>;
 }
 
+/** The platform's observation: complete only when discovery and the held-device probe both were. */
+function platformDiscoveryResult(input: {
+  platform: Platform;
+  devices: BootedDeviceInfo[];
+  discovery: BootedDeviceDiscovery;
+  heldProbeFailure: DeviceDiscoveryError | undefined;
+}): PlatformDiscoveryResult {
+  const { platform, devices, discovery, heldProbeFailure } = input;
+  const sourceComplete = (source: DiscoverySource) =>
+    discovery.succeededSources?.has(source) ?? discovery.succeededPlatforms.has(platform);
+  const discoveryComplete = discovery.succeededSources
+    ? sourcesForPlatform(platform).every((source) => discovery.succeededSources!.has(source))
+    : discovery.succeededPlatforms.has(platform);
+  const complete = discoveryComplete && heldProbeFailure === undefined;
+  return {
+    devices,
+    succeededPlatforms: complete ? new Set([platform]) : new Set(),
+    sourceObservations: Object.fromEntries(
+      sourcesForPlatform(platform).map((source) => [
+        source,
+        {
+          observationComplete: heldProbeFailure === undefined && sourceComplete(source),
+          ...(!sourceComplete(source) && discovery.sourceErrors?.[source]
+            ? { discoveryError: discovery.sourceErrors[source] }
+            : {}),
+        },
+      ]),
+    ),
+    observation: complete
+      ? { observationComplete: true }
+      : {
+          observationComplete: false,
+          discoveryError: discoveryComplete
+            ? heldProbeFailure!
+            : bootedDiscoveryError(discovery, platform),
+        },
+  };
+}
+
 async function discoverBootedDevicesForPlatform(
   platform: Platform,
   devicePool: DevicePool | null,
@@ -945,9 +1015,8 @@ async function discoverBootedDevicesForPlatform(
       timer,
     );
     getAbortSignal()?.throwIfAborted();
-    const complete = discovery.succeededSources
-      ? sourcesForPlatform(platform).every((source) => discovery.succeededSources!.has(source))
-      : discovery.succeededPlatforms.has(platform);
+    // A held device discovery misses and the state probe cannot place is unknown, not absent.
+    let heldProbeFailure: DeviceDiscoveryError | undefined;
     const devices = discovery.devices.map((device) =>
       withIdentityQuarantineMarker(
         toBootedDeviceInfo(
@@ -969,20 +1038,18 @@ async function discoverBootedDevicesForPlatform(
       configuredImages,
       transportAvdName: (deviceId) =>
         devicePool?.getAndroidTransportAvdName(deviceId) ?? aliases.avdName(deviceId),
+      onProbeFailure: (failure) => {
+        heldProbeFailure = failure;
+      },
     });
     // Held simulators `simctl` lists Booting / Shutting Down are not booted either (#11573).
-    const transitionalSimulators = transitionalHeldSimulators({
-      transitional: discovery.transitionalSimulators,
-      discovered: discovery.devices,
+    const transitionalSimulators = transitionalSimulatorDescriptions({
+      discovery,
       devicePool,
-    }).map(({ device, simulatorState }) =>
-      toBootedDeviceInfo(
-        device,
-        resolvePoolDeviceContext(devicePool, device, sessionsById, resolveDeviceSessionUuid),
-        configuredImages,
-        { simulatorState },
-      ),
-    );
+      sessionsById,
+      resolveDeviceSessionUuid,
+      configuredImages,
+    });
     // A held AVD re-cold-booting while adb still lists its old serial offline would otherwise
     // appear twice under one stableId (#11132). The held row carries the session and pool status
     // the serial-less cold-boot row lacks, so the cold-boot row is the one dropped.
@@ -994,31 +1061,7 @@ async function discoverBootedDevicesForPlatform(
       ...offlineHeld,
       ...transitionalSimulators,
     );
-    return {
-      devices,
-      succeededPlatforms: complete ? new Set([platform]) : new Set(),
-      sourceObservations: Object.fromEntries(
-        sourcesForPlatform(platform).map((source) => [
-          source,
-          {
-            observationComplete: discovery.succeededSources
-              ? discovery.succeededSources.has(source)
-              : discovery.succeededPlatforms.has(platform),
-            ...(!(
-              discovery.succeededSources?.has(source) ?? discovery.succeededPlatforms.has(platform)
-            ) && discovery.sourceErrors?.[source]
-              ? { discoveryError: discovery.sourceErrors[source] }
-              : {}),
-          },
-        ]),
-      ),
-      observation: complete
-        ? { observationComplete: true }
-        : {
-            observationComplete: false,
-            discoveryError: bootedDiscoveryError(discovery, platform),
-          },
-    };
+    return platformDiscoveryResult({ platform, devices, discovery, heldProbeFailure });
   } catch (error) {
     const platformName = platform === "android" ? "Android" : "iOS";
     logger.warn(`[BootedDeviceResources] Failed to get booted ${platformName} devices: ${error}`);

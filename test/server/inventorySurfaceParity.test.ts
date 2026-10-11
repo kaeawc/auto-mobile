@@ -383,6 +383,8 @@ interface SurfaceReads {
   tool: Entry[];
   resource: Entry[];
   resourcePool: { idle: number; assigned: number; error: number } | undefined;
+  resourceComplete: boolean;
+  toolComplete: boolean | undefined;
   daemon: { success: boolean; result?: Record<string, unknown>; error?: string };
   cli: { stdout: string[]; exits: unknown[] };
   stats: { total: number; idle: number; assigned: number } | { error: string };
@@ -485,7 +487,10 @@ async function readSurfaces(
   const response = await ToolRegistry.getTool("listDevices")!.handler({
     platform: scenario.platform,
   });
-  const tool = JSON.parse(response.content?.[0]?.text ?? "{}") as { devices: Entry[] };
+  const tool = JSON.parse(response.content?.[0]?.text ?? "{}") as {
+    devices: Entry[];
+    discovery?: { complete?: boolean };
+  };
   const state: DaemonStateAccess = {
     isInitialized: () => true,
     getSessionManager: () => sessions as never,
@@ -521,6 +526,8 @@ async function readSurfaces(
     tool: tool.devices,
     resource: resource.devices as unknown as Entry[],
     resourcePool: resource.poolStatus,
+    resourceComplete: resource.observationComplete,
+    toolComplete: tool.discovery?.complete,
     daemon: daemon as SurfaceReads["daemon"],
     cli: { stdout, exits },
     stats,
@@ -599,8 +606,14 @@ describe("a held device in a transitional platform state is one row and one coun
       expect(reads.daemon.success).toBe(false);
       expect(String(reads.daemon.error)).toContain("discovery_incomplete");
       expect(reads.cli.exits).toEqual([1]);
+      // The row surfaces say the same thing: the platform observation is incomplete, so their
+      // zeroed counts are not an answer.
+      expect(reads.resourceComplete).toBe(false);
+      expect(reads.toolComplete).toBe(false);
       return;
     }
+    expect(reads.resourceComplete).toBe(true);
+    expect(reads.toolComplete).toBe(true);
     const { total, idle, assigned } = scenario.counts;
     expect(reads.stats).toEqual({ total, idle, assigned });
     expect(reads.daemon.result).toMatchObject({

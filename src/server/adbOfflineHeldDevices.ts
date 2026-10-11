@@ -1,5 +1,5 @@
 import type { DevicePool } from "../daemon/devicePool";
-import type { PlatformDeviceManager } from "../devices/deviceUtils";
+import type { DeviceDiscoveryError, PlatformDeviceManager } from "../devices/deviceUtils";
 import type { BootedDevice } from "../models";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import type { TransitionalSimulator } from "../models/TransitionalSimulator";
@@ -29,8 +29,12 @@ export async function adbOfflineHeldDevices(input: {
   discovered: readonly BootedDevice[];
   devicePool: DevicePool | null | undefined;
   deviceManager: Pick<PlatformDeviceManager, "getAndroidListedDeviceStates">;
-  /** `ignore` (default) lists what discovery produced; `throw` refuses with `discovery_incomplete`. */
-  onProbeFailure?: "ignore" | "throw";
+  /**
+   * What a failed probe means. `throw` refuses with `discovery_incomplete`; a callback receives
+   * the failure so a listing can mark its observation incomplete and still list what it has;
+   * `ignore` (default) lists what discovery produced.
+   */
+  onProbeFailure?: "ignore" | "throw" | ((failure: DeviceDiscoveryError) => void);
 }): Promise<AdbOfflineHeldDevice[]> {
   const { platform, devicePool, deviceManager } = input;
   if (platform !== "android" || !devicePool || !deviceManager.getAndroidListedDeviceStates) {
@@ -54,11 +58,15 @@ export async function adbOfflineHeldDevices(input: {
       `[AdbOfflineHeldDevices] Offline held-device probe failed: ${errorMessage(error)}`,
       error,
     );
+    const failure: DeviceDiscoveryError = {
+      code: "failed",
+      message: `Held-device state probe failed: ${errorMessage(error)}`,
+    };
     if (input.onProbeFailure === "throw") {
-      throw new BootedDeviceDiscoveryIncompleteError("android", {
-        code: "failed",
-        message: `Held-device state probe failed: ${errorMessage(error)}`,
-      });
+      throw new BootedDeviceDiscoveryIncompleteError("android", failure);
+    }
+    if (typeof input.onProbeFailure === "function") {
+      input.onProbeFailure(failure);
     }
     return [];
   }

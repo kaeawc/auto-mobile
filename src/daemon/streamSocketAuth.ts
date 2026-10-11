@@ -1,6 +1,7 @@
 import type { StreamSubscriptionIdentity } from "./streamSubscriptionPolicy";
 import type { ObserverSessionStore } from "./observerSessionRegistry";
 import { isSessionReleasing } from "./sessionReleaseState";
+import { sessionForIngress } from "./sessionForIngress";
 import { ActionableError } from "../models";
 import { DaemonState } from "./daemonState";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
@@ -41,6 +42,7 @@ export const STREAM_SOCKET_AUTH_ENV = "AUTOMOBILE_DAEMON_STREAM_AUTH";
  */
 export interface StreamAuthSessionManager {
   getSession(sessionUuid: string): unknown | null;
+  peekSession?(sessionUuid: string): unknown | null;
   getReleasingSession?(sessionUuid: string): unknown | null;
   getSessionForDevice(deviceId: string): string | null;
   getDeviceLabels(sessionUuid: string): Record<string, string> | undefined;
@@ -129,7 +131,7 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
       return { authEnabled: true, sessionExists: false, ownsDevice: false };
     }
     const base = resolveToolSelectionBaseSessionUuid(uuid, manager) ?? uuid;
-    const session = manager.getSession(base);
+    const session = sessionForIngress(manager, base);
     // A live observer keeps a viewer subscription alive like a device session does (#10698).
     const sessionExists = session
       ? !isSessionReleasing(manager, base, session)
@@ -173,7 +175,7 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
     // Resolve derived `${base}:${label}` device-label sessions to the base whose
     // identity the daemon tracks, exactly as the main socket does (#4611/#4655).
     const baseSessionUuid = this.resolveSessionIdentity(uuid) ?? uuid;
-    const session = sessionManager.getSession(baseSessionUuid);
+    const session = sessionForIngress(sessionManager, baseSessionUuid);
     if (!session && !this.admitObserver(baseSessionUuid, sessionManager)) {
       throw new ActionableError(
         `${this.operation} rejected: session ${uuid} is not an active daemon session (unknown or expired).` +

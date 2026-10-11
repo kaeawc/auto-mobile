@@ -215,6 +215,16 @@ Owner decision 2026-10-09 (#10964) extends that to the owner: no read counts as
 activity. A `deviceReadOnly` call naming a live session is admitted with
 `access: "read-only"` (no refresh, no `markSessionAdmitted`), so only control
 calls move `lastUsedAt`/`expiresAt`.
+A refused call is not use either (#11558). Admission is the stamp
+(`admitIssuedSessionForAutomation` restarts the idle window, and
+`markSessionAdmitted` makes the call's end restart it again), so a device
+tool's refusals run before that stamp: the owner rule, the device holder check,
+`deviceId` routing (`device_outside_bound_session`) and the
+device-not-actionable gate (`refuseControlCallBeforeAdmission`) run before
+admission, and admission's own refusals (suspect, lapsed owner lease, idle
+expiry) stamp nothing. A call that is admitted and then fails while the daemon
+sets its device up is use (#10824).
+`test/server/namedForeignSessionActivity.test.ts` has one row per refusal.
 Desktop input is use. The desktop and IDE clients register an observer session
 that allocates nothing, allocate a device with `setActiveDevice` on the first
 `input/*` to it, and send input under that session, so each input restarts the

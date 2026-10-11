@@ -80,10 +80,15 @@ export function latestSessionExecutionDeadlineMs(
   }
   const executionSessionId =
     resolveToolSelectionBaseSessionUuid(sessionId, sessionManager) ?? sessionId;
-  const deadlines = [...new Set([sessionId, executionSessionId])]
-    .map((id) => tracker.getLatestSessionExecutionDeadlineMs(id, options))
-    .filter((deadline): deadline is number => deadline !== undefined);
-  return deadlines.length === 0 ? undefined : Math.max(...deadlines);
+  const own = tracker.getLatestSessionExecutionDeadlineMs(sessionId, options);
+  if (executionSessionId === sessionId) {
+    return own;
+  }
+  const base = tracker.getLatestSessionExecutionDeadlineMs(executionSessionId, options);
+  if (own === undefined || base === undefined) {
+    return own ?? base;
+  }
+  return Math.max(own, base);
 }
 
 /**

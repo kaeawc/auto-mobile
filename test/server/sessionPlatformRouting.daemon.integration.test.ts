@@ -1,6 +1,10 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
-import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import {
+  DaemonBoundSessionExpiredError,
+  DaemonConnectionSessionReleasedError,
+  DaemonMcpProxy,
+} from "../../src/daemon/daemonMcpProxy";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
 import { DaemonClient } from "../../src/daemon/client";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
@@ -34,6 +38,7 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
@@ -56,9 +61,15 @@ let androidSession: string | undefined;
 let iosSession: string | undefined;
 let previousAutolock: string | undefined;
 let originalRepository: unknown;
+let originalDeviceSessionManager: unknown;
+let deviceSessionManager: FakeDeviceSessionManager;
 let restorePipelineOverrides: (() => void) | undefined;
 
 beforeEach(async () => {
+  originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
+  deviceSessionManager = new FakeDeviceSessionManager();
+  deviceSessionManager.setConnectedDevices(devices);
+  Reflect.set(ToolRegistry, "deviceSessionManager", deviceSessionManager);
   previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
   process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
   db = new Kysely<Database>({
@@ -97,18 +108,22 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  restorePipelineOverrides?.();
-  restorePipelineOverrides = undefined;
-  PlatformDeviceManagerFactory.setInstance(null);
-  (ToolRegistry as any).toolCallRepository = originalRepository;
-  ToolRegistry.clearTools();
-  DaemonState.getInstance().reset();
-  manager.stopCleanupTimer();
-  await db.destroy();
-  if (previousAutolock === undefined) {
-    delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
-  } else {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
+  try {
+    restorePipelineOverrides?.();
+    restorePipelineOverrides = undefined;
+    PlatformDeviceManagerFactory.setInstance(null);
+    (ToolRegistry as any).toolCallRepository = originalRepository;
+    ToolRegistry.clearTools();
+    DaemonState.getInstance().reset();
+    manager.stopCleanupTimer();
+    await db.destroy();
+    if (previousAutolock === undefined) {
+      delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    } else {
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
+    }
+  } finally {
+    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
   }
 });
 
@@ -412,35 +427,88 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     } finally {
       await pinned.close();
     }
-    // Releasing the default must not fence a different, still-owned session.
+    // Releasing the default fences control unless it names a surviving session or its
+    // known, uniquely held device; platform alone never bypasses the fence (#11723).
     await proxy.callTool("setActiveDevice", { deviceId: devices[1].deviceId, platform: "ios" });
     await manager.releaseSession(apple, "heartbeat-timeout");
     await pool.releaseDevice(devices[1].deviceId, apple);
     client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, apple, "heartbeat-timeout");
-    // The connection now holds no iOS session: the selector falls through to ordinary
-    // discovery instead of reporting a false ambiguity (#11167), and never reaches the Android one.
-    const receivedBeforeIos = received.length;
-    await proxy.callTool("routingProbe", { platform: "ios", keepScreenAwake: false });
-    expect(received.slice(receivedBeforeIos)).not.toContain(devices[0].deviceId);
-    // setActiveDevice made the iOS session this connection's binding, so its release fences
-    // an unqualified call (and a call naming it) until the caller picks a live session (#11235;
-    // the #6811 contract that #7276's result-reader change silently dropped).
-    await expect(proxy.callTool("routingProbe", {})).rejects.toThrow();
-    await expect(proxy.callTool("routingProbe", { sessionUuid: apple })).rejects.toThrow();
-    await proxy.callTool("routingProbe", { platform: "android", keepScreenAwake: false });
-    await proxy.callTool("routingProbe", { sessionUuid: android, keepScreenAwake: false });
+    const receivedBeforeFence = received.length;
+    const forwardedBeforeFence = client.callToolCalls.length;
+    const scansBeforeFence = deviceSessionManager.getDetectConnectedPlatformsCallCount();
+    const readinessBeforeFence = deviceSessionManager.getEnsureDeviceReadyCallCount();
+    const refusedIos = await proxy
+      .callTool("routingProbe", { platform: "ios", keepScreenAwake: false })
+      .catch((error: unknown) => error);
+    expect(refusedIos).toBeInstanceOf(DaemonConnectionSessionReleasedError);
+    expect(refusedIos).toMatchObject({ reason: "heartbeat-timeout" });
+    expect(received.length).toBe(receivedBeforeFence);
+    expect(client.callToolCalls.length).toBe(forwardedBeforeFence);
+    expect(deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(scansBeforeFence);
+    expect(deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(readinessBeforeFence);
+    await expect(proxy.callTool("routingProbe", {})).rejects.toBeInstanceOf(
+      DaemonConnectionSessionReleasedError,
+    );
+    await expect(proxy.callTool("routingProbe", { sessionUuid: apple })).rejects.toBeInstanceOf(
+      DaemonBoundSessionExpiredError,
+    );
+    await expect(
+      proxy.callTool("routingProbe", { platform: "android", keepScreenAwake: false }),
+    ).rejects.toBeInstanceOf(DaemonConnectionSessionReleasedError);
+    expect(received.length).toBe(receivedBeforeFence);
+    expect(client.callToolCalls.length).toBe(forwardedBeforeFence);
+    const namedSurvivor = await proxy.callTool("routingProbe", {
+      sessionUuid: android,
+      keepScreenAwake: false,
+    });
+    expect(namedSurvivor.isError).toBeFalsy();
+    expect(routedSessionUuidFromResult(namedSurvivor)).toBe(android);
+    expect(received.slice(receivedBeforeFence)).toEqual([devices[0].deviceId]);
+    // setActiveDevice records devices[0] as the sole survivor's device, so deviceId names Android.
+    const deviceSurvivor = await proxy.callTool("routingProbe", {
+      deviceId: devices[0].deviceId,
+      keepScreenAwake: false,
+    });
+    expect(deviceSurvivor.isError).toBeFalsy();
+    expect(routedSessionUuidFromResult(deviceSurvivor)).toBe(android);
+    expect(client.callToolCalls.at(-1)?.params.sessionUuid).toBe(android);
 
-    expect(received.slice(-2)).toEqual([devices[0].deviceId, devices[0].deviceId]);
+    expect(received.slice(receivedBeforeFence)).toEqual([devices[0].deviceId, devices[0].deviceId]);
+    // Named survivor calls leave the release fence in place. Only setActiveDevice or
+    // an acquisition replaces the default (#11656).
+    await expect(proxy.callTool("routingProbe", {})).rejects.toBeInstanceOf(
+      DaemonConnectionSessionReleasedError,
+    );
+    await expect(
+      proxy.callTool("routingProbe", { sessionUuid: apple, keepScreenAwake: false }),
+    ).rejects.toBeInstanceOf(DaemonBoundSessionExpiredError);
+    expect(received.slice(receivedBeforeFence)).toEqual([devices[0].deviceId, devices[0].deviceId]);
+    expect(manager.getSession(apple)).toBeNull();
+    await proxy.callTool("setActiveDevice", { deviceId: devices[2].deviceId, platform: "android" });
+    await proxy.callTool("routingProbe", { keepScreenAwake: false });
+    expect(received.at(-1)).toBe(devices[2].deviceId);
     const staleResult = await proxy.callTool("routingProbe", {
       sessionUuid: apple,
       keepScreenAwake: false,
     });
     expect(staleResult.isError).toBe(true);
-    expect(received.slice(-2)).toEqual([devices[0].deviceId, devices[0].deviceId]);
+    expect(received.slice(-2)).toEqual([devices[0].deviceId, devices[2].deviceId]);
     expect(manager.getSession(apple)).toBeNull();
-    await proxy.callTool("setActiveDevice", { deviceId: devices[2].deviceId, platform: "android" });
-    await proxy.callTool("routingProbe", { keepScreenAwake: false });
-    expect(received.at(-1)).toBe(devices[2].deviceId);
+    // With the fence lifted and no held iOS session, platform falls through to ordinary
+    // discovery without false ambiguity (#11167), and never reaches the Android default.
+    const receivedBeforeIos = received.length;
+    const scansBeforeIos = deviceSessionManager.getDetectConnectedPlatformsCallCount();
+    const readinessBeforeIos = deviceSessionManager.getEnsureDeviceReadyCallCount();
+    const discovered = await proxy.callTool("routingProbe", {
+      platform: "ios",
+      keepScreenAwake: false,
+    });
+    expect(discovered.isError).toBeFalsy();
+    expect(deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(scansBeforeIos + 1);
+    expect(deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(readinessBeforeIos + 1);
+    expect(deviceSessionManager.getLastEnsureDeviceReadyPlatform()).toBe("ios");
+    expect(received.slice(receivedBeforeIos)).toEqual([devices[1].deviceId]);
+    expect(received.slice(receivedBeforeIos)).not.toContain(devices[0].deviceId);
     const fakeDeviceManager = new FakeDeviceManager();
     const fakeAvdManager = new FakeAvdManager();
     setDeviceToolsDependencies({

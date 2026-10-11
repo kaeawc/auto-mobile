@@ -31,11 +31,13 @@ import {
 } from "./types";
 import {
   DeviceLabelMap,
+  type HeldDeviceSession,
   type LivenessClaimOutcome,
   type LivenessReleaseOutcome,
   Session,
   type SessionReleaseSnapshot,
 } from "./sessionManager";
+import { sessionForIngress } from "./sessionForIngress";
 import type {
   LivenessLeasePhase,
   LivenessLeaseState,
@@ -88,7 +90,11 @@ import {
 } from "./sessionReleasedDuringCall";
 import { isExpiryReleaseReason, isTerminalReleaseReason } from "./releaseReasons";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
-import type { ManagedConnectionScopes } from "./managedSlots/managedConnectionScope";
+import { canonicalFrameDeviceId } from "./frameDeviceIdentity";
+import {
+  managedConnectionControlRefusal,
+  type ManagedConnectionScopes,
+} from "./managedSlots/managedConnectionScope";
 import {
   DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
   DeviceOutsideManagedSlotsError,
@@ -144,9 +150,13 @@ export interface DaemonStateAccess {
   getSessionManager(): {
     hasSession(sessionId: string): boolean;
     getSession(sessionId: string): Session | null;
+    /** Admission/liveness judgement; never starts lazy release. */
+    peekSession?(sessionId: string): Session | null;
     getReleasingSession?(sessionId: string): Session | null;
     waitForSessionReleaseWithin?(sessionId: string, timeoutMs: number): Promise<boolean>;
     getAllSessions?(): Session[];
+    /** Reverse-map holders, including sessions awaiting or completing release. */
+    getHeldDeviceSessions?(): readonly HeldDeviceSession[];
     getTerminalReleaseSnapshot?(sessionId: string): SessionReleaseSnapshot | undefined;
     /** Why a session this daemon released was released; undefined for a never-issued UUID. */
     getReleasedSessionReason?(sessionId: string): Promise<string | undefined>;
@@ -222,6 +232,8 @@ export interface DaemonStateAccess {
      * has it ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
      */
     assertDeviceActionable?(deviceId: string, purpose: string): void;
+    /** The pooled canonical id for a known Android alias serial (identity otherwise). */
+    resolveAndroidCanonicalId?(deviceId: string): string;
     /** Refuse control of a device a managed slot holds (#11178); see `DevicePool`. */
     assertNotAssignedToManagedSlot?: ManagedSlotInputGate["assertNotAssignedToManagedSlot"];
     /** FUNNEL 1 — fold a discovery observation into pooled identity. */
@@ -354,7 +366,7 @@ function managedConnectionRegistrationRefusal(
   }
   const manager = state.getSessionManager();
   const foreign = managedSlots.sessionUuids.find((uuid) => {
-    const session = manager.getSession(uuid);
+    const session = sessionForIngress(manager, uuid);
     return (
       session?.livenessPolicy !== MANAGED_EXECUTION_LIVENESS_POLICY ||
       session.livenessOwnerToken !== managedSlots.livenessOwnerToken
@@ -470,7 +482,7 @@ function liveSessionRegistration(
   sessionId: string,
   clientName: string,
 ): DaemonMethodResult | undefined {
-  const session = manager.getSession(sessionId);
+  const session = sessionForIngress(manager, sessionId);
   if (!session) {
     return undefined;
   }
@@ -607,7 +619,8 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
     ["daemon/activeSessions", (request, state) => handleActiveSessions(request, state)],
     [
       DAEMON_RELEASE_SESSION_METHOD,
-      (request, state, executions) => handleReleaseSession(request, state, executions),
+      (request, state, executions, _signal, context) =>
+        handleReleaseSession(request, state, executions, context),
     ],
     [DAEMON_RELEASE_EXECUTION_METHOD, handleReleaseExecution],
     [DAEMON_RESET_SLOT_SCOPE_METHOD, handleResetSlotScope],
@@ -797,7 +810,7 @@ async function handleHeartbeat(
     ...(heartbeatParams?.reportDaemonInstance === true ? { daemonInstance } : {}),
   };
   const manager = state.getSessionManager();
-  const session = manager.getSession(sessionId);
+  const session = sessionForIngress(manager, sessionId);
   if (!session || isSessionReleasing(manager, sessionId, session)) {
     if (
       typeof sessionId === "string" &&
@@ -852,7 +865,7 @@ async function handleHeartbeat(
     if (rejection) {
       // A concurrent `--cli` call can move the session onto the cli-idle policy (claiming it
       // with its own token) while the keeper's claim was resolving; the keeper still no-ops.
-      const current = manager.getSession(sessionId);
+      const current = sessionForIngress(manager, sessionId);
       return rejection.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE &&
         current &&
         isCliKeeperOnCliIdleSession(heartbeatParams?.livenessOwnerKind, current)
@@ -872,7 +885,7 @@ async function handleHeartbeat(
   // strict contract when a prior CLI invocation widened the same session.
   if (
     heartbeatParams?.livenessPolicy === CLI_SESSION_LIVENESS_POLICY &&
-    manager.getSession(sessionId)?.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY
+    sessionForIngress(manager, sessionId)?.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY
   ) {
     // A managed execution's session stays on its owner lease (#11176): the CLI declaration is
     // refused, and the ack says which policy still governs the session.
@@ -891,7 +904,7 @@ async function handleHeartbeat(
     // Reports the idle instant like every other ack when asked (#10972).
     return heartbeatAck(manager, sessionId, ackReport, {
       livenessPolicy: "cli-idle",
-      idleTimeoutMs: manager.getSession(sessionId)?.heartbeatTimeoutMs,
+      idleTimeoutMs: sessionForIngress(manager, sessionId)?.heartbeatTimeoutMs,
     });
   }
   if (
@@ -956,7 +969,7 @@ function heartbeatAck(
   report: HeartbeatAckReport,
   extra: Record<string, unknown> = {},
 ): DaemonMethodResult {
-  const session = manager.getSession(sessionId);
+  const session = sessionForIngress(manager, sessionId);
   const instance =
     report.daemonInstance === undefined ? {} : { daemonInstance: report.daemonInstance };
   const idle =
@@ -1040,7 +1053,7 @@ function rejectHeartbeatWithoutOwnership(
 ): DaemonMethodResult | undefined {
   // A claim can yield while release ends admission or replaces this UUID.
   // Keep the request bound to the device session admitted above.
-  const currentSession = manager.getSession(sessionId);
+  const currentSession = sessionForIngress(manager, sessionId);
   if (
     outcome === "not-found" ||
     !currentSession ||
@@ -1234,7 +1247,7 @@ export async function handleSessionInfo(
     };
   }
   const manager = state.getSessionManager();
-  const session = manager.getSession(sessionId);
+  const session = sessionForIngress(manager, sessionId);
   if (!session) {
     return sessionNotFoundResult(manager, sessionId);
   }
@@ -1314,10 +1327,41 @@ export async function handleActiveSessions(
   };
 }
 
+/**
+ * The refusal for a lifecycle request from a connection bound to managed slots (#11178, #11596):
+ * it ends only its own slot sessions and gives up only its own slot devices. Undefined for a
+ * generic connection, and for a request that carries no socket (the daemon's own callers).
+ */
+function managedConnectionLifecycleRefusal(
+  state: DaemonStateAccess,
+  context: DaemonRequestContext,
+  action: string,
+  target: { sessionUuid?: string; deviceId?: string },
+): DaemonMethodResult | undefined {
+  const manager = state.getSessionManager();
+  const refusal = managedConnectionControlRefusal({
+    binding: state.getManagedConnectionScopes?.().get(context.socketSessionId),
+    action,
+    // Slot sessions hold the pooled canonical id; the request may name the device by an alias.
+    deviceId:
+      target.deviceId === undefined
+        ? undefined
+        : canonicalFrameDeviceId(state.getDevicePool(), target.deviceId),
+    requesterSessionUuid: target.sessionUuid,
+    slotDeviceOf: (sessionUuid) => manager.getSession(sessionUuid)?.assignedDevice ?? undefined,
+  });
+  return refusal ? { success: false, code: refusal.code, error: refusal.message } : undefined;
+}
+
+/**
+ * Release a session by id. Any ordinary connection may release any session (owner contract); a
+ * connection bound to managed slots is confined to its own slot sessions.
+ */
 async function handleReleaseSession(
   request: DaemonRequest,
   state: DaemonStateAccess,
   executions?: ReleaseCutExecutions,
+  context: DaemonRequestContext = {},
 ): Promise<DaemonMethodResult> {
   const params = request.params as { sessionId?: string; requireKnown?: boolean } | undefined;
   const sessionId = params?.sessionId;
@@ -1327,27 +1371,48 @@ async function handleReleaseSession(
       error: "sessionId parameter required",
     };
   }
+  const refusal = managedConnectionLifecycleRefusal(state, context, DAEMON_RELEASE_SESSION_METHOD, {
+    sessionUuid: sessionId,
+  });
+  if (refusal) {
+    return refusal;
+  }
   const manager = state.getSessionManager();
   const session = manager.getSession(sessionId) ?? manager.getReleasingSession?.(sessionId);
   if (!session && !manager.hasSession(sessionId)) {
-    if (typeof sessionId === "string" && state.getObserverSessionRegistry?.()?.release(sessionId)) {
-      return {
-        success: true,
-        result: {
-          message: `Session ${sessionId} released`,
-          alreadyReleased: false,
-        },
-      };
-    }
-    return await releaseUnknownSession(
+    return await releaseSessionWithoutDevice(
       state,
-      manager,
       sessionId,
       params?.requireKnown === true,
       executions,
     );
   }
   return releaseBoundSession(state, manager, sessionId, session, executions);
+}
+
+/** Release an id with no device session behind it: an observer session, or an unknown id. */
+async function releaseSessionWithoutDevice(
+  state: DaemonStateAccess,
+  sessionId: string,
+  requireKnown: boolean,
+  executions: ReleaseCutExecutions | undefined,
+): Promise<DaemonMethodResult> {
+  if (typeof sessionId === "string" && state.getObserverSessionRegistry?.()?.release(sessionId)) {
+    return {
+      success: true,
+      result: {
+        message: `Session ${sessionId} released`,
+        alreadyReleased: false,
+      },
+    };
+  }
+  return await releaseUnknownSession(
+    state,
+    state.getSessionManager(),
+    sessionId,
+    requireKnown,
+    executions,
+  );
 }
 
 const releaseExecutionParams = z.object({
@@ -1704,6 +1769,9 @@ async function handleDeviceLeaseStatus(
 async function handleRelinquishDeviceLease(
   request: DaemonRequest,
   state: DaemonStateAccess,
+  _executions?: ReleaseCutExecutions,
+  _signal?: AbortSignal,
+  context: DaemonRequestContext = {},
 ): Promise<DaemonMethodResult> {
   const parsed = z.object({ deviceId: z.string().min(1) }).safeParse(request.params);
   if (!parsed.success) {
@@ -1713,6 +1781,15 @@ async function handleRelinquishDeviceLease(
     };
   }
   const { deviceId } = parsed.data;
+  const refusal = managedConnectionLifecycleRefusal(
+    state,
+    context,
+    DAEMON_RELINQUISH_DEVICE_LEASE_METHOD,
+    { deviceId },
+  );
+  if (refusal) {
+    return refusal;
+  }
   const sources = deviceLeaseActivitySourcesFor(state);
   const port = state.getDeviceLeaseRelinquishPort?.() ?? daemonDeviceLeaseRelinquishPort();
   const status = { pid: process.pid, deviceId, ...readDeviceLeaseActivity(sources, deviceId) };

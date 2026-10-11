@@ -53,6 +53,7 @@ import {
   type LivenessHandover,
 } from "../daemon/proxyLivenessRecovery";
 import { MANAGED_SLOTS_EXPERIMENTAL_CAPABILITY } from "../models/managedSlotConfig";
+import { RELAUNCH_EXECUTION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import {
   MANAGED_SLOTS_RESOURCE_URI,
   managedSlotForSession,
@@ -498,6 +499,27 @@ const MANAGED_SLOTS_RESOURCE = {
   mimeType: "application/json",
 };
 
+/** Preserve acquisition evidence and report the terminal release only on the resource (#11712). */
+export function managedSlotsResourceView(
+  result: ManagedSlotsResult,
+  ended: { sessionUuid: string; reason: string } | undefined,
+): ManagedSlotsResult {
+  if (!ended || managedSlotForSession(result, ended.sessionUuid) === null) {
+    return result;
+  }
+  return {
+    ...result,
+    slots: result.slots.map((slot) =>
+      slot.sessionUuid === ended.sessionUuid
+        ? {
+            ...slot,
+            executionEnded: { reason: ended.reason, nextAction: RELAUNCH_EXECUTION_NEXT_ACTION },
+          }
+        : slot,
+    ),
+  };
+}
+
 function managedSlotsResourceContents(result: ManagedSlotsResult) {
   return {
     contents: [
@@ -601,7 +623,9 @@ function registerProxyResourceHandlers(
       throw new ActionableError("Resource URI is missing in the request");
     }
     if (managedSlots && uri === MANAGED_SLOTS_RESOURCE_URI) {
-      return managedSlotsResourceContents(managedSlots);
+      return managedSlotsResourceContents(
+        managedSlotsResourceView(managedSlots, proxy.getTerminalSessionRelease()),
+      );
     }
 
     logger.info(`[ProxyServer] Forwarding resource read: ${uri}`);

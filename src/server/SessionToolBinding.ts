@@ -21,6 +21,15 @@ export class SessionToolBinding {
     initialToolSelectionProfileUuid?: string,
     private readonly idGenerator: IdGenerator = defaultIdGenerator,
     initialReleasedSessionUuid?: string,
+    /**
+     * Whether the first session is a live session of the same plan as the second (#11602): a
+     * derived `${base}:${label}` session counts as its base. The daemon ingress asks the same
+     * question with the same function, so the two cannot disagree.
+     */
+    private readonly namesLiveSessionOfBoundPlan: (
+      sessionUuid: string,
+      boundSessionUuid: string,
+    ) => boolean = () => false,
   ) {
     this.initialSessionUuid = initialSessionUuid;
     this.initialToolSelectionProfileUuid = initialToolSelectionProfileUuid;
@@ -51,7 +60,10 @@ export class SessionToolBinding {
       this.initialSessionUuid &&
       explicitSessionUuid &&
       explicitSessionUuid !== this.initialSessionUuid &&
-      explicitSessionUuid !== this.connectionToolSelectionProfileUuid(mcpSessionId)
+      explicitSessionUuid !== this.connectionToolSelectionProfileUuid(mcpSessionId) &&
+      // A connection seeded with the base, or with one of its labels, names its own plan's
+      // sessions; whose base it is stays the owner rule's question.
+      !this.namesLiveSessionOfBoundPlan(explicitSessionUuid, this.initialSessionUuid)
     ) {
       throw new ActionableError(
         `MCP connection is bound to device session ${this.initialSessionUuid}; ` +

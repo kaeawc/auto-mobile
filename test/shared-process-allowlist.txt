@@ -103,6 +103,7 @@ test/daemon/devicePoolRecoveryPolicy.test.ts
 test/daemon/devicePoolRefresh.test.ts
 test/daemon/devicePoolStateChangeSites.test.ts
 test/daemon/deviceRecoveryPolicy.test.ts
+test/daemon/deviceRestartRecoveryReservation.test.ts
 test/daemon/deviceRuntimeIdentity.test.ts
 test/daemon/deviceSessionResolver.test.ts
 test/daemon/deviceShutdownReservations.test.ts
@@ -135,6 +136,7 @@ test/daemon/incumbentOwnerGuard.test.ts
 test/daemon/inputDeviceOwnership.test.ts
 test/daemon/inputHolderChangedTypedRefusal.test.ts
 test/daemon/labelOfEndedBaseRefused.test.ts
+test/daemon/lapsedOwnerShieldedByDeviceRestartHandoff.test.ts
 test/daemon/lateRehydrationOwnerToldNotFound.test.ts
 test/daemon/liveDeadlineRegistry.test.ts
 test/daemon/livenessClaimDecision.test.ts
@@ -148,6 +150,7 @@ test/daemon/managedSlots/daemonManagedSlotAcquisition.ownDevice.test.ts
 test/daemon/managedSlots/daemonManagedSlotAcquisition.redrive.test.ts
 test/daemon/managedSlots/defaultFreeDeviceReclaimer.test.ts
 test/daemon/managedSlots/freeDeviceReclaimer.test.ts
+test/daemon/managedSlots/iosSlotDeviceUnexcludedWhileCreating.test.ts
 test/daemon/managedSlots/managedExecutionDaemonRestart.test.ts
 test/daemon/managedSlots/managedExecutionRestartScenario.test.ts
 test/daemon/managedSlots/managedSlotAcquisition.test.ts
@@ -206,6 +209,7 @@ test/daemon/rehydrationIdleOrigin.test.ts
 test/daemon/rehydrationReservationAutolock.test.ts
 test/daemon/releaseReasons.test.ts
 test/daemon/releasingSessionRequests.test.ts
+test/daemon/selectorStartTakesDeviceFromWaitingRestartRecovery.test.ts
 test/daemon/sessionCacheNoEscapeHatch.test.ts
 test/daemon/sessionCacheTypedSlots.test.ts
 test/daemon/sessionExpiryProperties.test.ts
@@ -760,6 +764,7 @@ test/lint/livenessActivityClockSeparation.test.ts
 test/lint/noCaughtErrorInterpolationRule.test.ts
 test/lint/noInlineErrorNormalizeRule.test.ts
 test/lint/noLegacyAutomobilePath.test.ts
+test/lint/noRawProcessEnvNumberParse.test.ts
 test/lint/pathSeparatorAssertions.test.ts
 test/lint/processSafety.test.ts
 test/lint/rawSelectorFieldReadRule.test.ts

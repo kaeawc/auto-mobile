@@ -37,6 +37,7 @@ import {
   Session,
   type SessionReleaseSnapshot,
 } from "./sessionManager";
+import { sessionForIngress } from "./sessionForIngress";
 import type {
   LivenessLeasePhase,
   LivenessLeaseState,
@@ -149,6 +150,8 @@ export interface DaemonStateAccess {
   getSessionManager(): {
     hasSession(sessionId: string): boolean;
     getSession(sessionId: string): Session | null;
+    /** Admission/liveness judgement; never starts lazy release. */
+    peekSession?(sessionId: string): Session | null;
     getReleasingSession?(sessionId: string): Session | null;
     waitForSessionReleaseWithin?(sessionId: string, timeoutMs: number): Promise<boolean>;
     getAllSessions?(): Session[];
@@ -364,7 +367,7 @@ function managedConnectionRegistrationRefusal(
   }
   const manager = state.getSessionManager();
   const foreign = managedSlots.sessionUuids.find((uuid) => {
-    const session = manager.getSession(uuid);
+    const session = sessionForIngress(manager, uuid);
     return (
       session?.livenessPolicy !== MANAGED_EXECUTION_LIVENESS_POLICY ||
       session.livenessOwnerToken !== managedSlots.livenessOwnerToken
@@ -480,7 +483,7 @@ function liveSessionRegistration(
   sessionId: string,
   clientName: string,
 ): DaemonMethodResult | undefined {
-  const session = manager.getSession(sessionId);
+  const session = sessionForIngress(manager, sessionId);
   if (!session) {
     return undefined;
   }
@@ -808,7 +811,7 @@ async function handleHeartbeat(
     ...(heartbeatParams?.reportDaemonInstance === true ? { daemonInstance } : {}),
   };
   const manager = state.getSessionManager();
-  const session = manager.getSession(sessionId);
+  const session = sessionForIngress(manager, sessionId);
   if (!session || isSessionReleasing(manager, sessionId, session)) {
     if (typeof heartbeatParams?.livenessOwnerToken === "string") {
       manager.creditOwnerHeartbeatDuringRelease?.(sessionId, heartbeatParams.livenessOwnerToken);
@@ -866,7 +869,7 @@ async function handleHeartbeat(
     if (rejection) {
       // A concurrent `--cli` call can move the session onto the cli-idle policy (claiming it
       // with its own token) while the keeper's claim was resolving; the keeper still no-ops.
-      const current = manager.getSession(sessionId);
+      const current = sessionForIngress(manager, sessionId);
       return rejection.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE &&
         current &&
         isCliKeeperOnCliIdleSession(heartbeatParams?.livenessOwnerKind, current)
@@ -886,7 +889,7 @@ async function handleHeartbeat(
   // strict contract when a prior CLI invocation widened the same session.
   if (
     heartbeatParams?.livenessPolicy === CLI_SESSION_LIVENESS_POLICY &&
-    manager.getSession(sessionId)?.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY
+    sessionForIngress(manager, sessionId)?.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY
   ) {
     // A managed execution's session stays on its owner lease (#11176): the CLI declaration is
     // refused, and the ack says which policy still governs the session.
@@ -905,7 +908,7 @@ async function handleHeartbeat(
     // Reports the idle instant like every other ack when asked (#10972).
     return heartbeatAck(manager, sessionId, ackReport, {
       livenessPolicy: "cli-idle",
-      idleTimeoutMs: manager.getSession(sessionId)?.heartbeatTimeoutMs,
+      idleTimeoutMs: sessionForIngress(manager, sessionId)?.heartbeatTimeoutMs,
     });
   }
   if (
@@ -970,7 +973,7 @@ function heartbeatAck(
   report: HeartbeatAckReport,
   extra: Record<string, unknown> = {},
 ): DaemonMethodResult {
-  const session = manager.getSession(sessionId);
+  const session = sessionForIngress(manager, sessionId);
   const instance =
     report.daemonInstance === undefined ? {} : { daemonInstance: report.daemonInstance };
   const idle =
@@ -1054,7 +1057,7 @@ function rejectHeartbeatWithoutOwnership(
 ): DaemonMethodResult | undefined {
   // A claim can yield while release ends admission or replaces this UUID.
   // Keep the request bound to the device session admitted above.
-  const currentSession = manager.getSession(sessionId);
+  const currentSession = sessionForIngress(manager, sessionId);
   if (
     outcome === "not-found" ||
     !currentSession ||
@@ -1248,7 +1251,7 @@ export async function handleSessionInfo(
     };
   }
   const manager = state.getSessionManager();
-  const session = manager.getSession(sessionId);
+  const session = sessionForIngress(manager, sessionId);
   if (!session) {
     return sessionNotFoundResult(manager, sessionId);
   }

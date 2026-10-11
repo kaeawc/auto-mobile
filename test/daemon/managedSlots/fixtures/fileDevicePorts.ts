@@ -17,6 +17,8 @@ import {
 } from "../../../../src/daemon/managedSlots/reconciler";
 import type { SlotPlatform } from "../../../../src/daemon/managedSlots/slotRegistry";
 import type { DeviceInfo } from "../../../../src/models";
+import type { ResolvedExactDeviceSpecification } from "../../../../src/devices/exactDeviceProvisioning";
+import { classifyDisplayCutout } from "../../../../src/utils/displayCutout";
 
 export const CRASH_POINTS = ["none", "after-delete", "after-create"] as const;
 export type CrashPoint = (typeof CRASH_POINTS)[number];
@@ -89,6 +91,16 @@ export class FileDeleter implements ManagedSlotDeviceDeleter {
 }
 
 export class FileProvisioner implements ManagedSlotDeviceProvisioner {
+  async readExistingSpec(device: DeviceInfo): Promise<ResolvedExactDeviceSpecification | null> {
+    if (!device.runtime || !device.deviceType) {
+      return null;
+    }
+    return {
+      runtime: device.runtime,
+      deviceType: device.deviceType,
+      displayCutout: classifyDisplayCutout(device.platform, device.deviceType),
+    };
+  }
   private nextSession = 1;
   constructor(
     private readonly state: FileDeviceState,

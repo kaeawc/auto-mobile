@@ -145,6 +145,13 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "pool before deciding whether it resolves the requested identity or matching the pooled " +
         "entry it is about to hand out.",
     },
+    "src/server/toolRegistry.ts": {
+      calls: 1,
+      reason:
+        "A control call naming an ADB transport address the pool has never folded (#11618) lists " +
+        "fresh raw rows so the pool can fold the alias, then reconciles the folded listing " +
+        "before the holder check reads pooled identity for it.",
+    },
     "src/server/utilityTools.ts": {
       calls: 1,
       reason:

@@ -184,8 +184,11 @@ export function sessionReleaseReasonTraits(reason: string): SessionReleaseReason
     : SESSION_RELEASE_REASON_FAMILY_TRAITS[family];
 }
 
-/** Whether the UUID ends with this release (see {@link SessionReleaseReasonTraits.terminal}). */
-export function isTerminalReleaseReason(reason: string): boolean {
+/**
+ * Whether the UUID ends with this release (see {@link SessionReleaseReasonTraits.terminal}). Only
+ * tagged reasons carry the tag, so a match is a {@link SessionReleaseReason}.
+ */
+export function isTerminalReleaseReason(reason: string): reason is SessionReleaseReason {
   return sessionReleaseReasonTraits(reason).terminal;
 }
 

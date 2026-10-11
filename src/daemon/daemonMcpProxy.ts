@@ -127,7 +127,7 @@ import { ActionableError, toActionableError } from "../models";
 import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "./managedExecutionLiveness";
 import { acquireManagedSlotsThroughDaemon } from "./managedSlotProxyAcquisition";
 import type { ManagedSlotConfig } from "../models/managedSlotConfig";
-import type { ManagedSlotsResult } from "../models/managedSlotsResult";
+import { managedSlotForSession, type ManagedSlotsResult } from "../models/managedSlotsResult";
 import { DeviceControlTransportError, isReplaySafeToolName } from "./deviceControlTransportFailure";
 import { McpOverloadError, McpTimeoutError } from "./McpTimeoutError";
 import {
@@ -1875,6 +1875,14 @@ export class DaemonMcpProxy {
     return this.managedSlotsResult;
   }
 
+  /** The terminally released binding, excluding a resumable daemon stall, for reporting surfaces (#11712). */
+  getTerminalSessionRelease(): { sessionUuid: string; reason: string } | undefined {
+    const terminal = this.terminalBoundSession;
+    return terminal && terminal.reason !== DAEMON_STALLED_CODE
+      ? { sessionUuid: terminal.sessionUuid, reason: terminal.reason }
+      : undefined;
+  }
+
   /** The sessions this proxy holds for a managed execution (#11176). */
   getManagedExecutionSessions(): string[] {
     return [...this.managedExecutionSessions];
@@ -3393,9 +3401,8 @@ export class DaemonMcpProxy {
       throw new DaemonUnavailableError("MCP proxy is closing");
     }
     this.throwIfBoundSessionFenced(allowReleasedSession, attemptedSessionUuid);
-    const reconnectRecoverableHandoff = this.hasRecoverableBoundSessionHandoff();
-    if (reconnectRecoverableHandoff) {
-      await this.resetConnectionOnceDrained();
+    if (this.hasRecoverableBoundSessionHandoff()) {
+      await this.resetConnectionForRecoverableHandoff();
       // doConnect restarts the heartbeat keeper. Clear the marker before that
       // asynchronous tick can enter withRecoverableReconnect and reset the new
       // transport beneath the operation that is reclaiming this UUID.
@@ -3436,10 +3443,7 @@ export class DaemonMcpProxy {
         await this.throwOutcomeWithoutReplay(refusedToolName, error);
       }
 
-      logger.warn(
-        `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${errorMessage(error)}`,
-      );
-      await this.resetConnectionOnceDrained();
+      await this.resetConnectionForRetry(error);
       signal.throwIfAborted();
       this.throwIfBoundSessionFenced(allowReleasedSession, attemptedSessionUuid);
       await this.ensureConnected();
@@ -3468,6 +3472,37 @@ export class DaemonMcpProxy {
         throw retryError;
       }
     }
+  }
+
+  /**
+   * The latest binding was handed off recoverably (a daemon shutdown or restart, its device's
+   * restart): the next request reclaims it on a fresh connection. With tool calls in flight on
+   * the connection it is reclaimed on that connection instead
+   * ({@link connectionCarriesCallsInFlight}).
+   */
+  private resetConnectionForRecoverableHandoff(): Promise<void> {
+    return this.connectionCarriesCallsInFlight()
+      ? Promise.resolve()
+      : this.resetConnectionOnceDrained();
+  }
+
+  /**
+   * Before the one retry of a request that failed recoverably: replace the connection, unless the
+   * failure is the daemon's answer about one session on a connection with tool calls in flight
+   * ({@link isSessionAnswerOnSharedConnection}), which is asked again where it is. Not `async`:
+   * the reset is awaited as directly as before, since callers' scheduling depends on its turns.
+   */
+  private resetConnectionForRetry(error: unknown): Promise<void> {
+    if (this.isSessionAnswerOnSharedConnection(error)) {
+      logger.info(
+        `[DaemonMcpProxy] Asking once more on the same daemon connection, which has tool calls in flight: ${errorMessage(error)}`,
+      );
+      return Promise.resolve();
+    }
+    logger.warn(
+      `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${errorMessage(error)}`,
+    );
+    return this.resetConnectionOnceDrained();
   }
 
   /**
@@ -3501,7 +3536,11 @@ export class DaemonMcpProxy {
    */
   private async throwOutcomeWithoutReplay(toolName: string, error: unknown): Promise<never> {
     if (!(error instanceof DaemonShuttingDownError)) {
-      await this.resetConnection();
+      // A not-found answer came over a working connection: there is no dead transport to replace
+      // beneath the calls still in flight on it ({@link isSessionAnswerOnSharedConnection}).
+      if (!this.isSessionAnswerOnSharedConnection(error)) {
+        await this.resetConnection();
+      }
       throw new DaemonToolOutcomeUnknownError(toolName, error);
     }
     this.waitForDaemonShutdownDisconnect();
@@ -3559,6 +3598,42 @@ export class DaemonMcpProxy {
     if (this.client === drainedClient && !this.closing) {
       await this.resetConnection();
     }
+  }
+
+  /**
+   * Whether tool calls are awaiting their answers on the current, working daemon connection. It
+   * is the one socket for every session this proxy holds, so closing it cancels each of those
+   * calls in the daemon mid-run and answers it outcome-unknown, whichever session it drives
+   * (#11656). What happens to ONE session (the daemon answers not-found for it, or hands it off
+   * for its device's restart) is therefore never a reason to close it under them: the daemon that
+   * answered is the one running those calls, so the session is asked again, or reclaimed, on the
+   * connection it shares with them. Nothing waits for those calls, so no heartbeat is held up
+   * behind one, and with none in flight the fresh connection costs nobody anything and is still
+   * made (it is what reaches a successor daemon).
+   *
+   * False for a connection that is not in use as it stands: one draining at daemon shutdown, whose
+   * reset waits for its calls ({@link drainingToolCalls}), and one a transport failure proved dead,
+   * where there is nothing left to lose. What ends a connection as a whole (a transport failure,
+   * the daemon's shutdown or close) is not decided here.
+   */
+  private connectionCarriesCallsInFlight(): boolean {
+    const client = this.client;
+    return (
+      client !== null &&
+      this.connected &&
+      !this.deadSocketClients.has(client) &&
+      (this.toolCallsInFlight.get(client) ?? 0) > 0
+    );
+  }
+
+  /**
+   * The daemon answered a request not-found for its session while other tool calls are in flight
+   * on the connection: an answer about that session, which leaves the connection as it is
+   * ({@link connectionCarriesCallsInFlight}). The request that was answered has settled, so the
+   * calls counted are never its own.
+   */
+  private isSessionAnswerOnSharedConnection(error: unknown): boolean {
+    return this.isDaemonSessionNotFoundError(error) && this.connectionCarriesCallsInFlight();
   }
 
   /**
@@ -4290,6 +4365,7 @@ export class DaemonMcpProxy {
     if (this.hasLivenessLifecycleFence()) {
       await this.waitForLivenessRecovery(signal);
     }
+    callerArgs = this.withFencedControlDeviceSession(name, callerArgs);
     this.reportToolSessionLoss(name, callerArgs);
     if (this.stallHandovers.size > 0) {
       await this.resumeStalledSessionNamedBy(callerArgs);
@@ -4548,6 +4624,62 @@ export class DaemonMcpProxy {
     };
   }
 
+  /** A fenced control must name a held session or its known, unique device (#11656). */
+  private withFencedControlDeviceSession(
+    name: string,
+    args: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (
+      this.config.initialSessionUuid ||
+      isDeviceBindingTool(name) ||
+      isDeviceInventoryTool(name) ||
+      name === SET_TOOL_ENABLED_TOOL_NAME ||
+      !this.toolTargetsDevice(name) ||
+      this.isDeviceReadOnlyTool(name)
+    ) {
+      return args;
+    }
+    // A selector call may itself discover the idle release. Fence before resolving its device,
+    // so loss reporting, stall recovery and routing all see the same named survivor.
+    if (!this.terminalBoundSession && this.isBoundSessionReplayExpired()) {
+      this.fenceBoundSessionUuid(this.boundSessionUuid!, "replay-lease-expired");
+    }
+    const terminal = this.terminalBoundSession;
+    if (!terminal) {
+      return args;
+    }
+    const holder = this.sessionUuidFromArgs(args) ?? this.survivingSessionHoldingDevice(args);
+    // The daemon must preserve its default as well: the fenced UUID marks this as one call
+    // on a sibling, even though terminal fencing cleared the proxy's live binding.
+    return holder === undefined
+      ? args
+      : { ...args, sessionUuid: holder, [DAEMON_BOUND_SESSION_PARAM]: terminal.sessionUuid };
+  }
+
+  private survivingSessionHoldingDevice(args: Record<string, unknown>): string | undefined {
+    if (!this.hasImplicitDeviceSelector(args, false) || typeof args.deviceId !== "string") {
+      return undefined;
+    }
+    let holder: string | undefined;
+    for (const id of this.ownedDeviceSessions) {
+      if (id === this.terminalBoundSession?.sessionUuid) {
+        continue;
+      }
+      const deviceId = this.sessionDeviceIds.get(id);
+      // An unknown device might be a second holder: do not guess uniqueness.
+      if (deviceId === undefined) {
+        return undefined;
+      }
+      if (deviceId === args.deviceId) {
+        if (holder !== undefined) {
+          return undefined;
+        }
+        holder = id;
+      }
+    }
+    return holder;
+  }
+
   private prepareToolRoutingArgs(
     name: string,
     callerArgs: Record<string, unknown>,
@@ -4559,7 +4691,7 @@ export class DaemonMcpProxy {
     const isTerminalSessionlessDiscovery =
       this.terminalBoundSession !== undefined &&
       this.sessionUuidFromArgs(callerArgs) === undefined &&
-      (isDeviceInventoryTool(name) || this.isSessionlessReadAfterRelease(name));
+      (isDeviceInventoryTool(name) || this.isSessionlessReadAfterRelease(name, callerArgs));
     const usesDeviceSelector =
       this.toolTargetsDevice(name) &&
       this.hasImplicitDeviceSelector(callerArgs, name === "setActiveDevice");
@@ -4568,8 +4700,12 @@ export class DaemonMcpProxy {
         ? this.withAcquiredDeviceRoute(callerArgs)
         : isSessionAcquisition || isTerminalSessionlessDiscovery
           ? callerArgs
-          : this.withBoundSessionUuid(callerArgs, usesDeviceSelector);
-    const canUseSurvivingSession = this.canUseSurvivingSession(callerArgs, usesDeviceSelector);
+          : this.withBoundSessionUuid(callerArgs, usesDeviceSelector, name);
+    const canUseSurvivingSession = this.canUseSurvivingSession(
+      callerArgs,
+      usesDeviceSelector,
+      name,
+    );
     const forwardedArgs = this.withToolSelectionProfile(
       this.withOwnedSessionCapabilities(
         routingArgs,
@@ -4589,14 +4725,16 @@ export class DaemonMcpProxy {
    * binding is released and one call has been told so, a read-only tool that names no session is
    * forwarded without one: the daemon serves it on its read-only device path. Control tools keep
    * the fence and its reacquire guidance, as does a liveness handover, which every call reports
-   * until the harness acts on it.
+   * until the harness acts on it. A managed execution keeps the fence for reads without a deviceId.
    */
-  private isSessionlessReadAfterRelease(name: string): boolean {
+  private isSessionlessReadAfterRelease(name: string, args: Record<string, unknown>): boolean {
     const terminal = this.terminalBoundSession;
     return (
       terminal !== undefined &&
       this.releaseSurfacedFor === terminal.sessionUuid &&
       !this.stallHandovers.has(terminal.sessionUuid) &&
+      (managedSlotForSession(this.managedSlotsResult, terminal.sessionUuid) === null ||
+        (typeof args.deviceId === "string" && args.deviceId.trim().length > 0)) &&
       this.isDeviceReadOnlyTool(name)
     );
   }
@@ -4723,6 +4861,7 @@ export class DaemonMcpProxy {
   private withBoundSessionUuid(
     args: Record<string, unknown>,
     usesDeviceSelector = false,
+    toolName?: string,
   ): Record<string, unknown> {
     // A daemon session released by ordinary heartbeat/idle expiry leaves this
     // remembered binding dangling; replaying its UUID on a later sessionless call
@@ -4731,9 +4870,9 @@ export class DaemonMcpProxy {
     // no forwarded call (explicit or implicit) refreshing the binding, treat it
     // as retired.
     const explicitSessionUuid = this.sessionUuidFromArgs(args);
-    if (!this.canUseSurvivingSession(args, usesDeviceSelector)) {
+    if (!this.canUseSurvivingSession(args, usesDeviceSelector, toolName)) {
       this.throwIfBoundSessionUnavailable(explicitSessionUuid, () =>
-        this.canUseSurvivingSession(args, usesDeviceSelector),
+        this.canUseSurvivingSession(args, usesDeviceSelector, toolName),
       );
     }
     const normalizedArgs =
@@ -4773,6 +4912,7 @@ export class DaemonMcpProxy {
   private canUseSurvivingSession(
     args: Record<string, unknown>,
     usesDeviceSelector: boolean,
+    toolName?: string,
   ): boolean {
     if (!this.terminalBoundSession || this.config.initialSessionUuid) {
       return false;
@@ -4781,7 +4921,13 @@ export class DaemonMcpProxy {
     const liveOwned = [...this.ownedDeviceSessions].filter(
       (id) => id !== this.terminalBoundSession?.sessionUuid,
     );
-    return explicit ? liveOwned.includes(explicit) : liveOwned.length > 0 && usesDeviceSelector;
+    return explicit
+      ? liveOwned.includes(explicit)
+      : liveOwned.length > 0 &&
+          usesDeviceSelector &&
+          (toolName === undefined ||
+            toolName === "setActiveDevice" ||
+            this.isDeviceReadOnlyTool(toolName));
   }
 
   private throwIfBoundSessionUnavailable(
@@ -6293,7 +6439,7 @@ export class DaemonMcpProxy {
       this.hasImplicitDeviceSelector(args, name === "setActiveDevice");
     this.reportPendingSessionLoss(
       args,
-      !sessionless && !this.canUseSurvivingSession(args, usesDeviceSelector),
+      !sessionless && !this.canUseSurvivingSession(args, usesDeviceSelector, name),
     );
   }
 
@@ -7269,26 +7415,42 @@ export class DaemonMcpProxy {
       rememberedSessionUuid &&
       (rememberedSessionUuid === this.boundSessionUuid || this.toolAcceptsSessionUuid(name))
     ) {
-      if (
-        this.terminalBoundSession &&
-        rememberedSessionUuid !== this.terminalBoundSession.sessionUuid &&
-        this.ownedDeviceSessions.has(rememberedSessionUuid)
-      ) {
-        this.terminalBoundSession = undefined;
-      }
       this.rememberSessionDevice(rememberedSessionUuid, forwardedArgs.deviceId);
-      if (this.keepsBindingFor(rememberedSessionUuid, selectsDefault)) {
+      this.bindRememberedSession(rememberedSessionUuid, selectsDefault);
+    }
+  }
+
+  /** A remembered session preserves a released binding until an explicit selection replaces it. */
+  private bindRememberedSession(sessionUuid: string, selectsDefault: boolean): void {
+    if (this.terminalBoundSession) {
+      if (!selectsDefault) {
+        // The binding was released and the agent has not chosen another (#11656): a call naming
+        // a session this proxy still holds ran on it and changes nothing else. The fence stays,
+        // so the release is reported to the next sessionless control call, in whatever order the
+        // release and this call's completion arrived, and nothing sessionless reaches a sibling.
         return;
       }
-      this.updateBoundSessionUuid(rememberedSessionUuid);
-      this.startBoundSessionHeartbeat();
+      if (
+        sessionUuid !== this.terminalBoundSession.sessionUuid &&
+        this.ownedDeviceSessions.has(sessionUuid)
+      ) {
+        // setActiveDevice chose a session this proxy still holds: that is the new binding.
+        this.terminalBoundSession = undefined;
+      }
     }
+    if (this.keepsBindingFor(sessionUuid, selectsDefault)) {
+      return;
+    }
+    this.updateBoundSessionUuid(sessionUuid);
+    this.startBoundSessionHeartbeat();
   }
 
   /**
    * An explicit `sessionUuid` other than the connection's binding targets that one call (#11347):
    * the binding, and with it every later sessionless call, stays where setActiveDevice or an
-   * acquisition put it. A connection with no binding still adopts the first session it names.
+   * acquisition put it. A connection that never had a binding still adopts the first session it
+   * names; one whose binding was released does not (the fence in {@link rememberSessionUuid}
+   * answers first), so a named call never moves a binding nor replaces a released one (#11656).
    */
   private keepsBindingFor(sessionUuid: string, selectsDefault: boolean): boolean {
     if (this.keepsStartupBindingFor(sessionUuid)) {

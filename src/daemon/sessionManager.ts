@@ -1436,6 +1436,11 @@ export class SessionManager {
   // Base session → its derived `${base}:${label}` sessions (#11091), outside the base's cache so
   // it survives the base's removal. Consumed by takeDerivedLabelSessions.
   private readonly derivedLabelSessionsByBase = new Map<string, Set<string>>();
+  // Retain the base's terminal end while the cascade owns a still-published label (#11640).
+  private readonly endedLabelBases = new Map<
+    string,
+    { baseSessionId: string; releaseReason: string }
+  >();
   /**
    * Derived label sessions a plan run's allocation may mint right now, counted per open run
    * (#11572). See {@link openPlanLabelMints}.
@@ -3405,7 +3410,7 @@ export class SessionManager {
     sessionId: string,
     execution?: SessionExecutionMetadata,
   ): Session | null {
-    return this.getSessionInternal(sessionId, true, execution);
+    return this.unlessBaseEnded(this.getSessionInternal(sessionId, true, execution));
   }
 
   private getSessionInternal(
@@ -3439,23 +3444,44 @@ export class SessionManager {
       // and removed its assignment. Keep expiry cleanup from creating a second
       // incarnation with the same UUID before teardown completes, without
       // exposing the expired session to callers during that teardown.
-      if (this.releasingSessions.has(session)) {
-        return null;
-      }
-      logger.info(`Session ${sessionId} has expired, releasing`);
-      const releaseReason = this.expiredSessionReleaseReason(session, "lazy-expiry");
-      this.cancelExecutionsOverriddenByExpiry(session, releaseReason, execution?.executionId);
-      const release = this.releaseSession(sessionId, releaseReason, true, undefined, {
-        expiryOrigin: "lazy-expiry",
-      });
-      void this.getBarrier()
-        .trackExisting(release)
-        .catch((error) =>
-          logger.warn(`[SessionManager] Failed to release expired session ${sessionId}: ${error}`),
-        );
+      this.releaseExpiredSessionLazily(session, execution?.executionId);
       return null;
     }
     return session;
+  }
+
+  /** The lazy-expiry release of a session a lookup found past its idle deadline. */
+  private releaseExpiredSessionLazily(session: Session, callerExecutionId?: string): void {
+    if (this.releasingSessions.has(session)) {
+      return;
+    }
+    const sessionId = session.sessionId;
+    logger.info(`Session ${sessionId} has expired, releasing`);
+    const releaseReason = this.expiredSessionReleaseReason(session, "lazy-expiry");
+    this.cancelExecutionsOverriddenByExpiry(session, releaseReason, callerExecutionId);
+    const release = this.releaseSession(sessionId, releaseReason, true, undefined, {
+      expiryOrigin: "lazy-expiry",
+    });
+    void this.getBarrier()
+      .trackExisting(release)
+      .catch((error) =>
+        logger.warn(`[SessionManager] Failed to release expired session ${sessionId}: ${error}`),
+      );
+  }
+
+  /**
+   * Release `sessionId` if it is past its idle deadline, exactly as a lookup naming it does
+   * ({@link getSession}); a live, fenced or already releasing session is left as it is.
+   */
+  private releaseSessionPastIdleDeadline(sessionId: string, callerExecutionId?: string): void {
+    const session = this.sessions.get(sessionId);
+    if (
+      session &&
+      !this.terminalReleaseSnapshots.has(sessionId) &&
+      this.isSessionExpired(session)
+    ) {
+      this.releaseExpiredSessionLazily(session, callerExecutionId);
+    }
   }
 
   /**
@@ -3472,7 +3498,7 @@ export class SessionManager {
     if (this.deviceHeldForLateRead(sessionId, execution) !== undefined) {
       return null;
     }
-    return this.getSessionInternal(sessionId, true, execution, false);
+    return this.unlessBaseEnded(this.getSessionInternal(sessionId, true, execution, false));
   }
 
   /**
@@ -3631,10 +3657,12 @@ export class SessionManager {
         execution,
         callerExecutionId,
       );
+      await this.refuseLabelCallOnLapsedBaseLease(existing, access, execution, callerExecutionId);
       await this.refreshExistingSessionForAccess(existing, access);
       return existing;
     }
 
+    this.refuseLabelOfEndedBase(sessionId, access, execution, callerExecutionId);
     this.assertTerminalReleaseAdmission(sessionId);
 
     const terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
@@ -4930,8 +4958,11 @@ export class SessionManager {
    * caller can tell a known release from a plain unknown id.
    */
   async getReleasedSessionReason(sessionId: string): Promise<string | undefined> {
-    if (this.sessions.has(sessionId)) {
-      return undefined;
+    const published = this.sessions.get(sessionId);
+    if (published) {
+      // A label whose base has ended is answered with the base's end (#11640), before the
+      // release that follows has recorded it on the label's own row.
+      return this.endedBaseOfLabel(published)?.releaseReason;
     }
     const inMemory = this.terminalReleaseSnapshots.get(sessionId)?.releaseReason;
     if (inMemory) {
@@ -5150,7 +5181,8 @@ export class SessionManager {
     const session =
       allowExpired || this.terminalReleaseSnapshots.has(sessionId)
         ? (this.sessions.get(sessionId) ?? null)
-        : this.getSession(sessionId);
+        : // Not `getSession`: a label whose base has ended is still there to release (#11640).
+          this.getSessionInternal(sessionId, false);
     if (!session) {
       return await this.releaseUnpublishedSession(sessionId, releaseReason, allowExpired);
     }
@@ -9457,6 +9489,7 @@ export class SessionManager {
     if (!this.planLabelMints.has(sessionId) || this.sessions.has(sessionId)) {
       return;
     }
+    this.endedLabelBases.delete(sessionId);
     if (this.terminalReleaseSnapshots.delete(sessionId)) {
       this.terminalReleaseReasonStates.delete(sessionId);
       this.terminalReleaseJournal.resolve(sessionId);
@@ -9563,11 +9596,30 @@ export class SessionManager {
   /**
    * Whether `sessionId` is live and speaks for the same session as `otherSessionId` wherever
    * ownership is judged: the two are sessions of one plan (#11602). Releases nothing.
+   *
+   * A label that ended with that plan's base (#11640) still counts: a connection bound to the
+   * plan is not told the label is some other session, its call goes on to admission and gets the
+   * base's terminal release there.
    */
   isLiveSessionOfSamePlan(sessionId: string, otherSessionId: string): boolean {
     return (
-      this.peekSession(sessionId) !== null &&
-      this.ownershipSessionUuid(sessionId) === this.ownershipSessionUuid(otherSessionId)
+      (this.peekSession(sessionId) !== null &&
+        this.ownershipSessionUuid(sessionId) === this.ownershipSessionUuid(otherSessionId)) ||
+      this.endedWithPlanOf(sessionId, otherSessionId)
+    );
+  }
+
+  /** Whether `sessionId` is a label whose ended base is `otherSessionId` or its base. */
+  private endedWithPlanOf(sessionId: string, otherSessionId: string): boolean {
+    const label = this.sessions.get(sessionId);
+    const ended = label && this.endedBaseOfLabel(label);
+    if (!ended) {
+      return false;
+    }
+    const other = this.sessions.get(otherSessionId);
+    return (
+      otherSessionId === ended.baseSessionId ||
+      (other !== undefined && this.endedBaseOfLabel(other)?.baseSessionId === ended.baseSessionId)
     );
   }
 
@@ -9577,8 +9629,15 @@ export class SessionManager {
    * so a release of the base can still cascade to its derived sessions. Entries may name sessions
    * that are already gone; the caller checks each one.
    */
-  takeDerivedLabelSessions(baseSessionId: string): string[] {
+  takeDerivedLabelSessions(baseSessionId: string, releaseReason?: string): string[] {
     const derived = this.derivedLabelSessionsByBase.get(baseSessionId);
+    if (releaseReason !== undefined && isTerminalReleaseReason(releaseReason)) {
+      for (const labelSessionId of derived ?? []) {
+        if (this.sessions.has(labelSessionId)) {
+          this.endedLabelBases.set(labelSessionId, { baseSessionId, releaseReason });
+        }
+      }
+    }
     this.derivedLabelSessionsByBase.delete(baseSessionId);
     // The base is being released: its plan run, and with it every label session's, is over.
     derived?.forEach((labelSession) => this.runningPlanLabelSessions.delete(labelSession));
@@ -9590,9 +9649,13 @@ export class SessionManager {
    * label routing reads this on every `device:`-labelled request, so it must not
    * fire a session-activity write per read. Returns `undefined` for an
    * unknown/expired session or a session with no registered labels.
+   *
+   * It releases nothing either (#11640): every route from a label to its base reads this map, so
+   * a session past its idle deadline publishes no labels and is left to the scan, or to a call
+   * that names it, to release.
    */
   getDeviceLabels(sessionId: string): DeviceLabelMap | undefined {
-    return this.getSession(sessionId)?.cacheData.deviceLabels;
+    return this.peekSession(sessionId)?.cacheData.deviceLabels;
   }
 
   /**
@@ -9658,7 +9721,7 @@ export class SessionManager {
    * `test/lint/livenessActivityClockSeparation.test.ts` (#10668).
    */
   recordHeartbeat(sessionId: string): void {
-    const session = this.getSession(sessionId);
+    const session = this.unlessBaseEnded(this.getSession(sessionId));
     if (!session) {
       logger.warn(`Cannot record heartbeat for session ${sessionId}: not found`);
       return;
@@ -9714,14 +9777,14 @@ export class SessionManager {
     sessionId: string,
     ownerToken: string,
   ): Promise<LivenessClaimOutcome> {
-    const session = this.getSession(sessionId);
+    const session = this.unlessBaseEnded(this.getSession(sessionId));
     if (!session) {
       logger.warn(`Cannot claim liveness ownership for session ${sessionId}: not found`);
       return "not-found";
     }
     const mutex = this.livenessOwnershipClaimMutexFor(session);
     return await mutex.runExclusive(async () => {
-      if (this.getSession(sessionId) !== session) {
+      if (this.unlessBaseEnded(this.getSession(sessionId)) !== session) {
         return "not-found";
       }
       const processedClaims = session.livenessOwnershipClaims ?? new Set<string>();
@@ -9771,7 +9834,145 @@ export class SessionManager {
    * an expired session the scan has not reached is reported gone and is not released here.
    */
   peekSession(sessionId: string): Session | null {
-    return this.getSessionInternal(sessionId, false, undefined, false);
+    return this.unlessBaseEnded(this.getSessionInternal(sessionId, false, undefined, false));
+  }
+
+  /**
+   * How the base of the plan label session `label` has ended, when it has (#11640): the base's
+   * end ends its labels, so a label whose base is released, being released for a terminal reason,
+   * or past its idle deadline and not yet scanned is no longer a live session to anyone. The
+   * reason is the base's recorded one, or the one its expiry would record. A read of state: it
+   * releases, stamps and fences nothing. Undefined for a session no plan run minted, and once the
+   * label itself has been removed, including while the release cascade runs.
+   */
+  private endedBaseOfLabel(
+    label: Session,
+  ): { baseSessionId: string; releaseReason: string } | undefined {
+    if (label.persistenceMetadata?.source !== PLAN_LABEL_SESSION_SOURCE) {
+      return undefined;
+    }
+    const retained = this.endedLabelBases.get(label.sessionId);
+    if (retained) {
+      return retained;
+    }
+    // Each hop is a strict prefix of the last, so this ends at the outermost base.
+    for (
+      let baseSessionId = this.getBaseSessionOfDerivedLabel(label.sessionId);
+      baseSessionId !== undefined;
+      baseSessionId = this.getBaseSessionOfDerivedLabel(baseSessionId)
+    ) {
+      const releaseReason = this.sessionEndReason(baseSessionId);
+      if (releaseReason !== undefined) {
+        return { baseSessionId, releaseReason };
+      }
+    }
+    return undefined;
+  }
+
+  /** The terminal reason `sessionId` ended with, or would be released with by a lookup now. */
+  private sessionEndReason(sessionId: string): string | undefined {
+    const fenced = this.terminalReleaseSnapshots.get(sessionId);
+    if (fenced) {
+      return fenced.releaseReason;
+    }
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return undefined;
+    }
+    const inFlight = this.releasePromises.get(sessionId);
+    if (inFlight?.session === session && isTerminalReleaseReason(inFlight.reason.value)) {
+      return inFlight.reason.value;
+    }
+    return this.isSessionExpired(session)
+      ? this.expiredSessionReleaseReason(session, "lazy-expiry")
+      : undefined;
+  }
+
+  /** A looked-up session, unless it is a plan label whose base has ended (#11640). */
+  private unlessBaseEnded(session: Session | null): Session | null {
+    return session && this.endedBaseOfLabel(session) ? null : session;
+  }
+
+  /** The terminal release `session` is answered with before its own release has recorded one. */
+  private terminalReleaseAsOfNow(session: Session, releaseReason: string): SessionReleaseSnapshot {
+    const now = this.sessionNow();
+    return {
+      sessionId: session.sessionId,
+      deviceId: session.assignedDevice,
+      releaseReason,
+      releasedAtMs: now,
+      terminal: true,
+      heartbeat: {
+        lastHeartbeatMs: session.lastHeartbeat,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+        timeoutMs: session.heartbeatTimeoutMs,
+        ageMs: Math.max(0, now - session.lastHeartbeat),
+      },
+    };
+  }
+
+  /**
+   * Refuse a call naming a plan label whose base has ended (#11640) with the terminal answer the
+   * base's own end gives, under the label's id and for the owner and anyone else alike. Judging
+   * is a read; a refused control call then ends the base as a call naming the base would, through
+   * the base's lazy expiry, and the base's release takes its labels with it. A read is not use
+   * and releases nothing.
+   */
+  private refuseLabelOfEndedBase(
+    sessionId: string,
+    access: SessionAccess,
+    execution: SessionExecutionMetadata | undefined,
+    callerExecutionId: string | undefined,
+  ): void {
+    const label = this.sessions.get(sessionId);
+    const ended = label && this.endedBaseOfLabel(label);
+    if (!label || !ended) {
+      return;
+    }
+    if (access !== "read-only") {
+      this.releaseSessionPastIdleDeadline(
+        ended.baseSessionId,
+        execution?.executionId ?? callerExecutionId,
+      );
+    }
+    throw new TerminalSessionError(
+      sessionId,
+      this.terminalReleaseAsOfNow(label, ended.releaseReason),
+    );
+  }
+
+  /**
+   * The terminal answer for a call that needs `sessionId` live when it has ended or is past its
+   * idle deadline (#11640), or undefined while it is live. A plan step routed by a `device` label
+   * asks this about its base once the base publishes no labels, so the plan fails with the base's
+   * release reason rather than "label is not allocated". The step names the base, so a base past
+   * its deadline is released here through its lazy expiry, like any call naming it.
+   */
+  terminalAnswerForEndedSession(
+    sessionId: string,
+    callerExecutionId?: string,
+  ): TerminalSessionError | undefined {
+    const answer = this.peekTerminalAnswerForEndedSession(sessionId);
+    if (answer) {
+      this.releaseSessionPastIdleDeadline(sessionId, callerExecutionId);
+    }
+    return answer;
+  }
+
+  /** The same terminal answer, judged without releasing or stamping anything (#11640). */
+  peekTerminalAnswerForEndedSession(sessionId: string): TerminalSessionError | undefined {
+    const session = this.sessions.get(sessionId);
+    const releaseReason =
+      this.sessionEndReason(sessionId) ??
+      (session ? this.endedBaseOfLabel(session)?.releaseReason : undefined);
+    if (releaseReason === undefined) {
+      return undefined;
+    }
+    const fenced = this.terminalReleaseSnapshots.get(sessionId);
+    if (fenced || !session) {
+      return fenced && new TerminalSessionError(sessionId, fenced);
+    }
+    return new TerminalSessionError(sessionId, this.terminalReleaseAsOfNow(session, releaseReason));
   }
 
   /**
@@ -9801,12 +10002,15 @@ export class SessionManager {
     sessionId: string,
     ownerToken: string,
   ): Promise<LivenessReleaseOutcome> {
-    const session = this.getSession(sessionId);
+    const session = this.unlessBaseEnded(this.getSession(sessionId));
     if (!session || !this.isAdmittedForAutomation(session)) {
       return "not-found";
     }
     return await this.livenessOwnershipClaimMutexFor(session).runExclusive(async () => {
-      if (this.getSession(sessionId) !== session || !this.isAdmittedForAutomation(session)) {
+      if (
+        this.unlessBaseEnded(this.getSession(sessionId)) !== session ||
+        !this.isAdmittedForAutomation(session)
+      ) {
         return "not-found";
       }
       if (session.livenessOwnerToken === undefined) {
@@ -10067,6 +10271,45 @@ export class SessionManager {
   }
 
   /**
+   * A control call naming a plan label whose base lost its owner's heartbeat lease, before the
+   * monitor's scan (#11640): the base's end ends its labels, so the call is answered as a call
+   * naming the base is ({@link refuseControlCallOnLapsedOwnerLease}), which releases the base
+   * unless a control call in flight still keeps it. The terminal answer is given under the
+   * label's id with the base's reason; the retryable one names the base, whose lease it is about.
+   */
+  private async refuseLabelCallOnLapsedBaseLease(
+    label: Session,
+    access: SessionAccess,
+    execution: SessionExecutionMetadata | undefined,
+    unnamedCallerExecutionId: string | undefined,
+  ): Promise<void> {
+    if (access === "read-only" || label.persistenceMetadata?.source !== PLAN_LABEL_SESSION_SOURCE) {
+      return;
+    }
+    const baseSessionId = this.getBaseSessionOfDerivedLabel(label.sessionId);
+    const base = baseSessionId === undefined ? undefined : this.sessions.get(baseSessionId);
+    if (!base || !this.isOwnerLeaseLapsed(base)) {
+      return;
+    }
+    try {
+      await this.refuseControlCallOnLapsedOwnerLease(
+        base,
+        access,
+        execution,
+        unnamedCallerExecutionId,
+      );
+    } catch (error) {
+      if (error instanceof TerminalSessionError) {
+        throw new TerminalSessionError(
+          label.sessionId,
+          this.terminalReleaseAsOfNow(label, error.release.releaseReason),
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Register the detector that applies {@link forgiveDaemonStall} for a stall the monitor has not
    * yet noticed. Every expiry judgement (lookup, sweep) runs it first, so which timer fires first
    * after a stall or wake no longer decides the outcome. Pass undefined to detach.
@@ -10241,7 +10484,7 @@ export class SessionManager {
 
   /** Return whether `ownerToken` is still authorized to refresh the session. */
   hasLivenessOwnership(sessionId: string, ownerToken: string): boolean {
-    return this.getSession(sessionId)?.livenessOwnerToken === ownerToken;
+    return this.unlessBaseEnded(this.getSession(sessionId))?.livenessOwnerToken === ownerToken;
   }
 
   /**
@@ -10251,7 +10494,7 @@ export class SessionManager {
    * another token that holds its base (#11602).
    */
   claimUnownedLivenessOwnership(sessionId: string, ownerToken: string): boolean {
-    const session = this.getSession(sessionId);
+    const session = this.unlessBaseEnded(this.getSession(sessionId));
     if (!session) {
       return false;
     }
@@ -10281,7 +10524,7 @@ export class SessionManager {
    * is best-effort and must never fail the tool call that carried it.
    */
   adoptCliLivenessPolicy(sessionId: string, requestedIdleTimeoutMs?: number): boolean {
-    const session = this.getSession(sessionId);
+    const session = this.unlessBaseEnded(this.getSession(sessionId));
     if (!session) {
       logger.warn(`Cannot adopt CLI liveness policy for session ${sessionId}: not found`);
       return false;
@@ -10397,7 +10640,7 @@ export class SessionManager {
    * restore (unknown session, or one that never adopted the CLI policy).
    */
   restoreHeartbeatLivenessPolicy(sessionId: string): boolean {
-    const session = this.getSession(sessionId);
+    const session = this.unlessBaseEnded(this.getSession(sessionId));
     if (!session || session.livenessPolicy !== "cli-idle") {
       return false;
     }
@@ -10665,6 +10908,7 @@ export class SessionManager {
       this.deviceSessionMap.delete(session.assignedDevice);
     }
     this.sessions.delete(sessionId);
+    this.endedLabelBases.delete(sessionId);
     // The session ended: its row is no longer rewritten live, and no retry timer outlives it.
     this.settleOwedSupersededRowReassert(session);
     this.sessionDeviceMap.delete(sessionId);

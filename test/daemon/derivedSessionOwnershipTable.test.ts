@@ -8,7 +8,7 @@ import {
   OWNER_DISCONNECT_GRACE_MS,
   OWNER_DISCONNECTED_RELEASE_REASON,
 } from "../../src/daemon/ownerDisconnectRelease";
-import { PLAN_AUTO_RELEASE_REASON, SessionManager } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { logger } from "../../src/utils/logger";
@@ -472,7 +472,8 @@ describe("a derived label session is judged and recorded as its base", () => {
 
     expect(releases).toEqual([
       [BASE, OWNER_DISCONNECTED_RELEASE_REASON],
-      [DERIVED, PLAN_AUTO_RELEASE_REASON],
+      // The base's end ends its labels with the base's own reason (#11640).
+      [DERIVED, OWNER_DISCONNECTED_RELEASE_REASON],
     ]);
     expect(w.manager.getSession(DERIVED)).toBeNull();
     expect(w.pool.getDevice(primary.deviceId)?.sessionId).toBeNull();

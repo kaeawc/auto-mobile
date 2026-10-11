@@ -4072,9 +4072,50 @@ export function validatePooledDeviceMapping(device: BootedDevice, requestedIdent
  */
 export type ColdBootSettlementCollector = (settlement: Promise<void> | undefined) => void;
 
+/**
+ * The live session holding `deviceId`, unless this request's own acquisition put it there: the
+ * session a request minted or moved is taken back by that request's undo, not kept.
+ */
+export function liveHolderOtherThanThisRequest(deviceId: string): string | undefined {
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return undefined;
+  }
+  const holder = daemonState.getDevicePool().getDevice(deviceId)?.sessionId;
+  if (!holder || !daemonState.getSessionManager().getSession(holder)) {
+    return undefined;
+  }
+  const receipt = requestAcquisitionReceipt();
+  const ownSessions = [receipt?.minted?.session.sessionId, receipt?.rebound?.session.sessionId];
+  return ownSessions.includes(holder) ? undefined : holder;
+}
+
 export function cancelUnownedColdBoot(
   boot: DeviceBootResult | undefined,
 ): Promise<void> | undefined {
+  if (boot?.source !== "cold-boot" || !boot.processHandle) {
+    return undefined;
+  }
+  const otherHolder = liveHolderOtherThanThisRequest(boot.device.deviceId);
+  if (otherHolder) {
+    // A readiness reservation keeps the device out of general allocation only, so another
+    // session's exact bind is admitted while this call still prepares the runner (#11651).
+    // Lifecycle on a device another session holds is refused: it stays running for its holder,
+    // and it stays counted against boot capacity as the booted device it is.
+    logger.info(
+      `[DeviceTools] Leaving cold boot ${boot.device.deviceId} running: session ${otherHolder} holds it`,
+    );
+    return undefined;
+  }
+  return stopUnownedColdBoot(boot);
+}
+
+/**
+ * `cancelUnownedColdBoot` without the other-holder check. System UI ANR recovery uses it for its
+ * replacement boot: the replacement reuses the serial of the device it replaces, whose pool entry
+ * still names the session being recovered, so that holder says nothing about the replacement.
+ */
+function stopUnownedColdBoot(boot: DeviceBootResult | undefined): Promise<void> | undefined {
   if (boot?.source !== "cold-boot" || !boot.processHandle) {
     return undefined;
   }
@@ -4439,7 +4480,7 @@ function createSystemUiAnrRebooter(
         runWithinShutdownDeadline,
         waitForDeviceShutdown,
         shouldClearIntentionalShutdownAfterFailure,
-        cancelUnownedColdBoot,
+        cancelUnownedColdBoot: stopUnownedColdBoot,
         isUnknownAndroidRuntimeName,
       },
     });

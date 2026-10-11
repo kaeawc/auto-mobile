@@ -1,40 +1,39 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "child_process";
-import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import {
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
-} from "../../../src/server/deviceTools";
-import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { DaemonState } from "../../../src/daemon/daemonState";
-import { DevicePool } from "../../../src/daemon/devicePool";
-import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
-import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../../src/daemon/inputDeviceOwnership";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../../src/devices/virtualDeviceLifecycleCoordinator";
-import type { DeviceInfo } from "../../../src/models";
-import { DeviceAlreadyRunningError } from "../../../src/models/DeviceAlreadyRunningError";
-import { clearDirectSessionDevices } from "../../../src/server/directSessionDeviceRegistry";
-import { setDeviceManager } from "../../../src/server/bootedDeviceResources";
-import { DefaultDeviceMatcher } from "../../../src/utils/deviceMatcher";
-import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
-import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
+} from "../../src/server/deviceTools";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
+import type { DeviceInfo } from "../../src/models";
+import { DeviceAlreadyRunningError } from "../../src/models/DeviceAlreadyRunningError";
+import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { setDeviceManager } from "../../src/server/bootedDeviceResources";
+import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 isolateToolRegistry();
 
-// Hunt (provisioning-concurrency-4, cell 1): two starts whose selectors differ but resolve to the
-// same stopped device. #9902 fixed iOS: the loser re-checks after the device's lifecycle lease
-// settles and adopts the simulator the winner booted. Android gates that re-check on the in-flight
-// cold-boot marker, which `bootMatchedImage` reads BEFORE it waits for the AVD's lease. When both
-// starts queue behind a lease someone else briefly holds (a kill still confirming the emulator's
-// exit, a configure), neither has claimed the marker yet, so the loser later cold-boots an AVD
-// that is now running and fails with the untyped "already running".
+// #11565: two starts whose selectors differ but resolve to the same stopped device. #9902 fixed
+// iOS: the loser re-checks after the device lifecycle lease settles and adopts the simulator the
+// winner booted. Android gated that re-check on the in-flight cold-boot marker, which is read
+// BEFORE the wait for the AVD lease. When both starts queue behind a lease someone else briefly
+// holds (a kill still confirming the emulator exit, a configure), neither has claimed the marker
+// yet, so the loser must re-check after the wait rather than cold-boot an AVD that is now running.
 
 /**
  * `FakeDeviceUtils.startDevice` boots a running image again without complaint. The real
@@ -97,7 +96,7 @@ describe("two starts that resolve to one device, queued behind its lifecycle lea
     devices.setDeviceImages("android", [avd]);
     devices.setDeviceImages("ios", [simulator]);
     coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
-    const idGenerator = new CountingIdGenerator("hunt-queued-start");
+    const idGenerator = new CountingIdGenerator("queued-start");
     const env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
     setDeviceToolsDependencies({
       env,
@@ -115,7 +114,7 @@ describe("two starts that resolve to one device, queued behind its lifecycle lea
     setDeviceManager(devices);
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "hunt-queued-start-daemon", {
+      createDevicePoolDependencies(sessions, "queued-start-daemon", {
         env,
         timer,
         idGenerator,
@@ -207,7 +206,6 @@ describe("two starts that resolve to one device, queued behind its lifecycle lea
     const [first, second] = await startTwoBehindHeldLease("android", "mcp-a");
 
     expect(first.ok).toBe(true);
-    // Actual: { ok: false, error: DeviceAlreadyRunningError "android device '…' is already running" }.
     expect(second.ok ? "adopted" : second.error.message).toBe("adopted");
     expect(second.ok && second.payload.acquisition).toBe("already-booted");
     expect(second.ok && second.payload.runtime.session.sessionUuid).toBe(
@@ -220,7 +218,7 @@ describe("two starts that resolve to one device, queued behind its lifecycle lea
 
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(false);
-    // iOS answers device_owned_by_other_session here; Android answers an untyped "already running".
+    // The same typed refusal iOS answers, not an untyped "already running".
     expect(second.ok ? undefined : (second.error.code ?? second.error.message)).toBe(
       DEVICE_OWNED_BY_OTHER_SESSION_CODE,
     );

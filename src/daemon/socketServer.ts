@@ -908,6 +908,8 @@ interface IdeMutationCall {
    * cut by a release of its session; a forced call acts for no session and runs to its end.
    */
   track(execution: ActiveExecution, asHolder: boolean): void;
+  /** The socket session that sent the frame: a managed connection mutates only its slot devices. */
+  readonly socketSessionId: string | undefined;
 }
 
 function assertSocketInputNotAborted(signal?: AbortSignal): void {
@@ -5234,7 +5236,7 @@ export class UnixSocketServer {
     if (!IDE_DEVICE_MUTATION_METHODS.has(request.method)) {
       return await this.handleIdeSocketRequest(request, socketSessionId);
     }
-    return await this.runTrackedIdeMutation((call) =>
+    return await this.runTrackedIdeMutation(socketSessionId, (call) =>
       this.handleIdeSocketRequest(request, socketSessionId, call),
     );
   }
@@ -5286,6 +5288,9 @@ export class UnixSocketServer {
             "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params",
           );
         }
+        this.assertManagedConnectionControl(socketSessionId, "ide/setSessionToolEnabled", {
+          requesterSessionUuid: args.sessionUuid,
+        });
         await (this.sessionToolSelectionService ?? getSessionToolSelectionService()).setEnabled(
           args.sessionUuid,
           args.toolName,
@@ -5581,7 +5586,8 @@ export class UnixSocketServer {
    * device accepts them only from its holder (the optional `sessionUuid` param), or when `force`
    * is allowed and set. Reads stay open to watchers. Unheld devices stay open to any client,
    * except a device a managed slot holds, which only that slot's execution may mutate, `force`
-   * or not (#11178).
+   * or not (#11178). A socket bound to managed slots mutates only its own slot devices, for its own
+   * slot sessions, `force` or not (#11596).
    *
    * The holder's own mutation is a control call on its session, so it also passes the session
    * admission `input/*` passes (#11486): a suspect, lapsed or idle-expired holder is refused with
@@ -5604,6 +5610,10 @@ export class UnixSocketServer {
     if (!this.daemonState.isInitialized()) {
       return;
     }
+    this.assertManagedConnectionControl(ideMutation?.socketSessionId, action, {
+      deviceId,
+      requesterSessionUuid,
+    });
     const sessionManager = this.daemonState.getSessionManager();
     await assertInputNotOnForeignManagedSlotDevice({
       action,
@@ -5676,11 +5686,15 @@ export class UnixSocketServer {
    * release's typed refusal whatever the interrupted work threw. A forced route is not the
    * holder's call, so the release neither cuts it nor names the holder's session to its caller.
    */
-  private async runTrackedIdeMutation<T>(run: (call: IdeMutationCall) => Promise<T>): Promise<T> {
+  private async runTrackedIdeMutation<T>(
+    socketSessionId: string | undefined,
+    run: (call: IdeMutationCall) => Promise<T>,
+  ): Promise<T> {
     const abort = new AbortController();
     let tracked: ActiveExecution | undefined;
     let cutByRelease: ActiveExecution | undefined;
     const call: IdeMutationCall = {
+      socketSessionId,
       track: (execution, asHolder) => {
         tracked = execution;
         if (!asHolder) {
@@ -7510,6 +7524,19 @@ export class UnixSocketServer {
     action: InputTargetAction,
     deviceId: string,
   ): void {
+    this.assertManagedConnectionControl(socketSessionId, action, { deviceId });
+  }
+
+  /**
+   * The one confinement every control frame from a managed connection passes (#11178, #11596): the
+   * device it would act on is one of the connection's slot devices, and the session it names is
+   * one of its slot sessions. A generic (unbound) socket is never refused here.
+   */
+  private assertManagedConnectionControl(
+    socketSessionId: string | undefined,
+    action: string,
+    target: { deviceId?: string; requesterSessionUuid?: string },
+  ): void {
     if (!this.daemonState.isInitialized()) {
       return;
     }
@@ -7517,7 +7544,8 @@ export class UnixSocketServer {
     const refusal = managedConnectionControlRefusal({
       binding: this.daemonState.getManagedConnectionScopes?.().get(socketSessionId),
       action,
-      deviceId,
+      deviceId: target.deviceId,
+      requesterSessionUuid: target.requesterSessionUuid,
       slotDeviceOf: (sessionUuid) => sessionManager.getSession(sessionUuid)?.assignedDevice,
     });
     if (refusal) {

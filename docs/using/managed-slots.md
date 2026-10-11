@@ -405,6 +405,11 @@ slot. Only control and lifecycle calls on another slot's device are refused.
   even on the connection's own slot device: it could not boot the device again,
   so a stop would strand the execution. End the execution instead; the next
   acquisition on the slot boots and reuses the device.
+- The same confinement applies to a managed connection's direct socket frames:
+  `input/*`, the device-mutating `ide/*` routes (`force` or not),
+  `ide/setSessionToolEnabled`, `daemon/releaseSession` and
+  `daemon/relinquishDeviceLease` are refused off-slot (#11596). An ordinary
+  connection may still release any session.
 - A managed connection's multi-device plan labels are served only by its own slot
   sessions. Any other label, or one whose declared platform the slot device does
   not match, is refused with `device_outside_managed_slots` before anything is

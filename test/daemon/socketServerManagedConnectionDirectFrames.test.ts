@@ -1,34 +1,29 @@
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { DaemonStateAccess } from "../../../src/daemon/daemonRequestHandlers";
-import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
-import { ManagedConnectionScopes } from "../../../src/daemon/managedSlots/managedConnectionScope";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import { UnixSocketServer } from "../../../src/daemon/socketServer";
-import type { DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
-import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
-import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import type { BootedDevice } from "../../../src/models";
-import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { createFakeDaemonState } from "../helpers/inputSocketHarness";
+import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { ManagedConnectionScopes } from "../../src/daemon/managedSlots/managedConnectionScope";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { UnixSocketServer } from "../../src/daemon/socketServer";
+import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import type { BootedDevice } from "../../src/models";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { createFakeDaemonState } from "./helpers/inputSocketHarness";
 
 /**
- * Hunt: a socket bound to managed slots is confined to its slot devices and slot sessions for
- * control and lifecycle (#11178, `managedConnectionScope.ts`: "a control call on any other device,
- * a call naming any other session ... are refused with `device_outside_managed_slots`"). The
- * dispatcher applies that confinement to `input/*` (`assertManagedConnectionInputTarget`) and to
- * `daemon/registerSession`, and the MCP tool path applies it to `setKeyValue` and friends
- * (`assertManagedSlotControlAccess`). The sibling direct frames skip it:
- *
- * - `ide/setKeyValue` / `ide/removeKeyValue` / `ide/clearKeyValueFile` / `ide/updateService` run
- *   `assertIdeMutationOwnership`, which checks the device's holder and the generic slot exclusion
- *   but never the connection's binding, so a managed socket writes to, or reinstalls the service
- *   of, a device outside its slots.
- * - `daemon/releaseSession` is dispatched without the requesting socket (`handleReleaseSession`
- *   receives no `DaemonRequestContext`), so a managed socket ends any other connection's session.
+ * A socket bound to managed slots is confined to its slot devices and slot sessions for control
+ * and lifecycle (#11178, `managedConnectionScope.ts`: "a control call on any other device, a call
+ * naming any other session ... are refused with `device_outside_managed_slots`"). Every direct
+ * control and lifecycle frame applies that confinement (#11596): `input/*`, the device-mutating
+ * `ide/*` routes (`force` or not), `ide/setSessionToolEnabled`, `daemon/registerSession`,
+ * `daemon/releaseSession` and `daemon/relinquishDeviceLease`. Reads stay open, and an ordinary
+ * (unbound) connection is never confined: anyone may release a session from one.
  *
  * Real socket server, real SessionManager and ManagedConnectionScopes on a FakeTimer; only the
  * device clients are fakes.
@@ -81,25 +76,42 @@ describe("direct frames from a managed connection outside its slots", () => {
   let scopes: ManagedConnectionScopes;
   let internals: Internals;
   let managed: FakeSocket;
+  let generic: FakeSocket;
   let writes: string[];
   let taps: number;
+  let toolSelections: string[];
+  let configurable: { mockRestore(): void } | undefined;
 
-  async function send(
+  async function sendOn(
+    socket: FakeSocket,
     id: string,
     method: string,
     params: Record<string, unknown>,
   ): Promise<DaemonResponse | undefined> {
-    managed.send({ id, type: "mcp_request", method, params });
+    socket.send({ id, type: "mcp_request", method, params });
     for (let i = 0; i < 6; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
     await Promise.all([...internals.activeRequestHandlers]);
-    return managed.responses.find((frame) => frame.id === id);
+    return socket.responses.find((frame) => frame.id === id);
   }
+
+  const send = (id: string, method: string, params: Record<string, unknown>) =>
+    sendOn(managed, id, method, params);
+
+  const keyValue = (deviceId: string, extra: Record<string, unknown> = {}) => ({
+    platform: "android",
+    deviceId,
+    appId: "com.example",
+    fileName: "prefs",
+    key: "k",
+    ...extra,
+  });
 
   beforeEach(async () => {
     writes = [];
     taps = 0;
+    toolSelections = [];
     const timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     await sessionManager.createSession(SLOT_SESSION, slotDevice.deviceId, "android", 60_000);
@@ -156,7 +168,14 @@ describe("direct frames from a managed connection outside its slots", () => {
       new FakeTimer(),
       null,
       // The storage tools are enabled, so the frames reach the ownership gate.
-      { sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} } },
+      {
+        sessionToolSelectionService: {
+          isEnabled: async () => true,
+          setEnabled: async (sessionUuid: string, toolName: string, enabled: boolean) => {
+            toolSelections.push(`${sessionUuid}:${toolName}:${enabled}`);
+          },
+        },
+      },
     );
     internals = server as unknown as Internals;
     internals.acceptingRequests = true;
@@ -165,13 +184,19 @@ describe("direct frames from a managed connection outside its slots", () => {
     // What `daemon/acquireManagedSlots` does for the socket that asked (`bindManagedConnection`).
     const [socketSessionId] = [...internals.sessions.keys()];
     scopes.bind(socketSessionId!, { scopeKey: "scope-a", sessionUuids: [SLOT_SESSION] });
+    // An ordinary connection on the same daemon: never bound, never confined.
+    generic = new FakeSocket();
+    internals.handleConnection(generic as unknown as Socket);
   });
 
   afterEach(() => {
     spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
     spyOn(AndroidCtrlProxyManager, "getInstance").mockRestore();
     PlatformDeviceManagerFactory.reset();
+    configurable?.mockRestore();
+    configurable = undefined;
     managed.destroy();
+    generic.destroy();
     sessionManager.stopCleanupTimer();
   });
 
@@ -251,6 +276,43 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(response).toMatchObject(OUTSIDE_SLOTS);
   });
 
+  test("ide/removeKeyValue on a device outside the slots is refused", async () => {
+    const response = await send("remove", "ide/removeKeyValue", keyValue(freeDevice.deviceId));
+
+    expect(writes).toEqual([]);
+    expect(response).toMatchObject(OUTSIDE_SLOTS);
+  });
+
+  test("ide/setKeyValue on the slot device for a session outside the slots is refused", async () => {
+    const response = await send(
+      "kv-session",
+      "ide/setKeyValue",
+      keyValue(slotDevice.deviceId, { value: "v", type: "STRING", sessionUuid: GENERIC_SESSION }),
+    );
+
+    expect(writes).toEqual([]);
+    expect(response).toMatchObject(OUTSIDE_SLOTS);
+  });
+
+  test("ide/setSessionToolEnabled changes only the connection's own slot sessions", async () => {
+    // The process registry is empty here; the route only needs the tool to be configurable.
+    configurable = spyOn(ToolRegistry, "isUserConfigurableTool").mockReturnValue(true);
+    const foreign = await send("tool-foreign", "ide/setSessionToolEnabled", {
+      sessionUuid: GENERIC_SESSION,
+      toolName: "setKeyValue",
+      enabled: false,
+    });
+    const own = await send("tool-own", "ide/setSessionToolEnabled", {
+      sessionUuid: SLOT_SESSION,
+      toolName: "setKeyValue",
+      enabled: false,
+    });
+
+    expect(foreign).toMatchObject(OUTSIDE_SLOTS);
+    expect(toolSelections).toEqual([`${SLOT_SESSION}:setKeyValue:false`]);
+    expect(own).toMatchObject({ success: true });
+  });
+
   test("daemon/releaseSession naming another connection's session is refused and releases nothing", async () => {
     const response = await send("release", "daemon/releaseSession", {
       sessionId: GENERIC_SESSION,
@@ -259,5 +321,58 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(sessionManager.getSession(GENERIC_SESSION)).not.toBeNull();
     expect(sessionManager.getSessionForDevice(heldDevice.deviceId)).toBe(GENERIC_SESSION);
     expect(response).toMatchObject(OUTSIDE_SLOTS);
+  });
+
+  test("daemon/releaseSession naming a session nobody holds is still outside the slots", async () => {
+    const response = await send("release-unknown", "daemon/releaseSession", {
+      sessionId: "never-registered",
+    });
+
+    expect(response).toMatchObject(OUTSIDE_SLOTS);
+  });
+
+  test("daemon/releaseSession of the connection's own slot session releases it", async () => {
+    const response = await send("release-own", "daemon/releaseSession", {
+      sessionId: SLOT_SESSION,
+    });
+
+    expect(response).toMatchObject({ success: true });
+    expect(sessionManager.getSession(SLOT_SESSION)).toBeNull();
+    expect(sessionManager.getSession(GENERIC_SESSION)).not.toBeNull();
+  });
+
+  test("daemon/relinquishDeviceLease on a device outside the slots is refused", async () => {
+    const response = await send("lease", "daemon/relinquishDeviceLease", {
+      deviceId: heldDevice.deviceId,
+    });
+
+    expect(response).toMatchObject(OUTSIDE_SLOTS);
+  });
+
+  test("reads from the managed connection outside its slots still answer", async () => {
+    const info = await send("info", "daemon/sessionInfo", { sessionId: GENERIC_SESSION });
+    const sessions = await send("sessions", "daemon/activeSessions", {});
+    const ping = await send("ping", "ide/ping", {});
+
+    expect(info).toMatchObject({ success: true });
+    expect(sessions).toMatchObject({ success: true });
+    expect(ping).toMatchObject({ success: true });
+  });
+
+  test("an ordinary connection is not confined: it mutates a free device and releases any session", async () => {
+    const written = await sendOn(
+      generic,
+      "generic-kv",
+      "ide/setKeyValue",
+      keyValue(freeDevice.deviceId, { value: "v", type: "STRING" }),
+    );
+    const released = await sendOn(generic, "generic-release", "daemon/releaseSession", {
+      sessionId: GENERIC_SESSION,
+    });
+
+    expect(written).toMatchObject({ success: true });
+    expect(writes).toEqual(["setPreference"]);
+    expect(released).toMatchObject({ success: true });
+    expect(sessionManager.getSession(GENERIC_SESSION)).toBeNull();
   });
 });

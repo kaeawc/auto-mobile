@@ -16,6 +16,11 @@ export interface AcquisitionReceipt {
     readonly session: Session;
     readonly deviceId: string;
     readonly activityGeneration: number;
+    /**
+     * The client chose this session's id (`setActiveDevice`), so it knows the id although the
+     * call never answered: taking the session back must leave the id free to be created again.
+     */
+    readonly clientSuppliedId?: boolean;
   };
   /** The existing session this call moved to `deviceId`, and the device it held before. */
   rebound?: {
@@ -34,8 +39,14 @@ export interface AcquisitionReceipt {
 export function mintedSession(
   session: Session,
   deviceId: string,
+  clientSuppliedId = false,
 ): NonNullable<AcquisitionReceipt["minted"]> {
-  return { session, deviceId, activityGeneration: session.activityGeneration };
+  return {
+    session,
+    deviceId,
+    activityGeneration: session.activityGeneration,
+    ...(clientSuppliedId ? { clientSuppliedId } : {}),
+  };
 }
 
 /** The caller's receipt, or a private one for an acquisition whose caller keeps none. */

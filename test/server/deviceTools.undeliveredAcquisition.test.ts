@@ -491,6 +491,44 @@ describe.each([
     expect([...ownership.held]).toEqual([SIM_UDID]);
   });
 
+  test.each(CANCEL_POINTS)(
+    "provisionDevice cancelled %s reports that it leaves no device of its own behind",
+    async (point) => {
+      const controller = new AbortController();
+      const reachCancelPoint = cancelAt(point, () =>
+        controller.abort(new Error("client cancelled")),
+      );
+      const response = ToolRegistry.getTool("provisionDevice")!.handler(
+        {
+          device: { platform: "android", name: avd.name, spec: ANDROID_SPEC },
+          boot: true,
+          readiness: "automation",
+          __mcpSessionId: "mcp-client",
+        },
+        undefined,
+        controller.signal,
+      ) as Promise<{ content: Array<{ text: string }> }>;
+      await reachCancelPoint();
+      const payload = JSON.parse((await response).content[0].text) as {
+        error: { code: string };
+        recovery: { phaseReached: string; device?: object; outcomes: object; cleanup?: object };
+      };
+      await drain();
+
+      // The adopted AVD's emulator, booted by this call, is stopped: the evidence names no
+      // running device and no cleanup this request still owes.
+      expect(bootHandle.killed).toBe(true);
+      expect(payload.error.code).toBe("request_cancelled");
+      expect(payload.recovery).toMatchObject({
+        boundary: "caller_cancellation",
+        phaseReached: "provisioning",
+        outcomes: { deviceCreation: "not_created", settlement: "settled" },
+        cleanup: { status: "unnecessary" },
+      });
+      expect(payload.recovery.device).toBeUndefined();
+    },
+  );
+
   describe("a device the cancelled call created", () => {
     const created = {
       platform: "android" as const,
@@ -687,6 +725,27 @@ describe.each([
         expect([...ownership.held]).toEqual([]);
       },
     );
+
+    test("the id a cancelled selection minted can be named again by its client", async () => {
+      await startRunning(bootedSimulator);
+      const controller = new AbortController();
+      cancelAfterRebind(() => controller.abort(new Error("client cancelled")));
+      const selection = {
+        deviceId: SIM_UDID,
+        platform: "ios",
+        sessionUuid: "client-chosen-session",
+      };
+
+      expect(await setActiveDevice(selection, controller.signal)).toBe(false);
+      await drain();
+      // The client chose the id and retries with it after its own timeout.
+      sessions.setDeviceReadiness = SessionManager.prototype.setDeviceReadiness.bind(sessions);
+      const retried = await setActiveDevice(selection, new AbortController().signal);
+
+      expect(retried).toBe(true);
+      expect(sessions.getSession("client-chosen-session")?.assignedDevice).toBe(SIM_UDID);
+      expect(pool.getDevice(SIM_UDID)).toMatchObject({ sessionId: "client-chosen-session" });
+    });
 
     test("control: an uncancelled rebind moves the session and its claim", async () => {
       await startRunning(bootedSimulator, otherBootedSimulator);

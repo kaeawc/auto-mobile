@@ -8131,7 +8131,8 @@ export class DevicePool {
    * no client holds the session id. Only the session the acquisition minted is released, for good,
    * and only while it still holds the device; the claim goes with the device. A session that was
    * reused, has been replaced, or was already released is left alone (#11565). A session the call
-   * moved from another device is moved back there (#11593).
+   * moved from another device is moved back there, and one minted under an id its client chose is
+   * rolled back without retiring that id, which the client will name again (#11593).
    */
   async releaseUndeliveredAcquisition(receipt: AcquisitionReceipt): Promise<void> {
     const { minted, rebound } = receipt;
@@ -8147,7 +8148,7 @@ export class DevicePool {
     );
     await this.rollbackAssignments(
       new Map([[session.sessionId, { deviceId, session }]]),
-      "session-creation-cancelled",
+      minted.clientSuppliedId ? "allocation-rollback" : "session-creation-cancelled",
     );
   }
 

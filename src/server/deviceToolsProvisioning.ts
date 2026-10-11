@@ -186,6 +186,8 @@ type ProvisionBootOptions = {
     lifecycleLease: VirtualDeviceLifecycleLease,
     reason: unknown,
   ) => Promise<void>;
+  /** Records that an adopted device's undone request left nothing of its own behind. */
+  recordUndeliveredAdoption?: (reason: unknown) => void;
   provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>;
   perf: ReturnType<typeof createPerformanceTracker>;
   totalDeadlineMs: number;
@@ -1547,15 +1549,10 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
           lifecycleLease: bootLifecycleLease,
           signal: signal,
           settlementState: settlementState,
-          deleteCreatedIfUndelivered: provisionedDevice.created
-            ? async (rollbackLease, reason) =>
-                await deleteUndeliveredCreatedDevice(args, provisionedDevice.device, {
-                  lifecycleLease: rollbackLease,
-                  reason,
-                  recordLifecycle,
-                  observedRuntimeDevice,
-                })
-            : undefined,
+          ...undeliveredProvisionRollback(args, provisionedDevice, {
+            recordLifecycle,
+            observedRuntimeDevice: () => observedRuntimeDevice,
+          }),
           onBooted: (device) => {
             observedRuntimeDevice = device;
             recordLifecycle({
@@ -1854,6 +1851,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       settlementState,
       onBooted,
       deleteCreatedIfUndelivered,
+      recordUndeliveredAdoption,
     }: ProvisionBootOptions,
   ): Promise<ProvisionBootResult> {
     const requestedIdentity = `platform=${args.device.platform} name=${args.device.name}`;
@@ -1980,7 +1978,10 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
         },
       );
       ownershipTransferred = true;
-      recordProvisionedDeviceStarted(boot, lifecycleLease, deleteCreatedIfUndelivered);
+      recordProvisionedDeviceStarted(boot, lifecycleLease, {
+        deleteCreatedIfUndelivered,
+        recordUndeliveredAdoption,
+      });
       return {
         device: boot.device,
         sessionId,
@@ -2006,7 +2007,10 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
   function recordProvisionedDeviceStarted(
     boot: DeviceBootResult,
     lifecycleLease: VirtualDeviceLifecycleLease,
-    deleteCreatedIfUndelivered: ProvisionBootOptions["deleteCreatedIfUndelivered"],
+    {
+      deleteCreatedIfUndelivered,
+      recordUndeliveredAdoption,
+    }: Pick<ProvisionBootOptions, "deleteCreatedIfUndelivered" | "recordUndeliveredAdoption">,
   ): void {
     const receipt = requestAcquisitionReceipt();
     if (!receipt) {
@@ -2014,14 +2018,50 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
     }
     const { identity } = lifecycleLease;
     receipt.started = {
-      rollBack: async (reason) =>
+      rollBack: async (reason) => {
         await rollBackUndeliveredBoot(
           boot,
           identity,
           deleteCreatedIfUndelivered
             ? async (rollbackLease) => await deleteCreatedIfUndelivered(rollbackLease, reason)
             : undefined,
-        ),
+        );
+        recordUndeliveredAdoption?.(reason);
+      },
+    };
+  }
+
+  /** What a request undone after it bound takes back, by whether it created its device. */
+  function undeliveredProvisionRollback(
+    args: ProvisionDeviceArgs,
+    provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>,
+    {
+      recordLifecycle,
+      observedRuntimeDevice,
+    }: {
+      recordLifecycle: RecordProvisionDeviceLifecycle;
+      observedRuntimeDevice: () => BootedDevice | undefined;
+    },
+  ): Pick<ProvisionBootOptions, "deleteCreatedIfUndelivered" | "recordUndeliveredAdoption"> {
+    if (provisioned.created) {
+      return {
+        deleteCreatedIfUndelivered: async (lifecycleLease, reason) =>
+          await deleteUndeliveredCreatedDevice(args, provisioned.device, {
+            lifecycleLease,
+            reason,
+            recordLifecycle,
+            observedRuntimeDevice: observedRuntimeDevice(),
+          }),
+      };
+    }
+    return {
+      // The same lifecycle a cancel before the bind records for a device it did not create.
+      recordUndeliveredAdoption: (reason) =>
+        recordLifecycle({
+          state: "no_device_created",
+          phase: "provisioning",
+          reason: provisionDeviceLifecycleReason(toProvisionDeviceError(args, reason)),
+        }),
     };
   }
 

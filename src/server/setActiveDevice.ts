@@ -244,8 +244,8 @@ async function bindRequestedDevice(input: {
   const minted = existing ? null : sessions.getSession(args.sessionUuid);
   if (minted) {
     // The pool leaves a rebind's session to its caller: this call created it, so a call
-    // cancelled before it answers releases it again.
-    receipt.minted = mintedSession(minted, args.deviceId);
+    // cancelled before it answers releases it again. The client chose the id and may retry it.
+    receipt.minted = mintedSession(minted, args.deviceId, true);
   }
   sessions.setDeviceReadiness(args.sessionUuid, "booted");
 }

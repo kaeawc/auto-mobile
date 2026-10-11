@@ -9,6 +9,7 @@ import { addSessionUuidToSchema, DEVICE_LABEL_DESCRIPTION } from "./toolSchemaHe
 import {
   startTestRecording,
   getStoppedTestRecording,
+  joinInFlightTestRecordingStop,
   stopTestRecording,
   getTestRecordingStatus,
   type TestRecordingStatus,
@@ -433,12 +434,39 @@ function exportRequester(params: object, deviceId: string): LifecycleRequester {
   return held ? { ...requester, sessionUuid: held } : requester;
 }
 
+function exportedTestRecordingResponse(result: Awaited<ReturnType<typeof stopTestRecording>>) {
+  return createStructuredToolResponse({
+    success: true,
+    recordingId: result.recordingId,
+    planName: result.planName,
+    planContent: result.planContent,
+    stepCount: result.stepCount,
+    durationMs: result.durationMs,
+    ...(result.error ? { error: result.error } : {}),
+  });
+}
+
 // Export plan tool handler
 const exportPlanTool = async (params: {
   recordingId?: string;
   planName?: string;
   sessionUuid?: string;
 }): Promise<any> => {
+  // An announced id may still be finalizing after its owner's session ended.
+  try {
+    if (params.recordingId) {
+      const joined = await joinInFlightTestRecordingStop(params.recordingId, params.sessionUuid);
+      if (joined) {
+        return exportedTestRecordingResponse(joined);
+      }
+    }
+  } catch (error) {
+    logger.error(`[exportPlan] Failed to join recording stop: ${errorMessage(error)}`, error);
+    return withIsErrorOnFailure(
+      createStructuredToolResponse({ success: false, error: errorMessage(error) }),
+      false,
+    );
+  }
   // Outside the try: a holder refusal reaches the client typed, never as a generic failure.
   const status = await activeRecordingForExport(params);
   try {
@@ -448,15 +476,7 @@ const exportPlanTool = async (params: {
         ? getStoppedTestRecording(params.recordingId, params.sessionUuid)
         : undefined;
     if (retained) {
-      return createStructuredToolResponse({
-        success: true,
-        recordingId: retained.recordingId,
-        planName: retained.planName,
-        planContent: retained.planContent,
-        stepCount: retained.stepCount,
-        durationMs: retained.durationMs,
-        ...(retained.error ? { error: retained.error } : {}),
-      });
+      return exportedTestRecordingResponse(retained);
     }
     if (!status) {
       return withIsErrorOnFailure(
@@ -482,15 +502,7 @@ const exportPlanTool = async (params: {
     // Stop the recording the holder check judged, and get the plan
     const result = await stopTestRecording(status.recordingId, params.planName);
 
-    return createStructuredToolResponse({
-      success: true,
-      recordingId: result.recordingId,
-      planName: result.planName,
-      planContent: result.planContent,
-      stepCount: result.stepCount,
-      durationMs: result.durationMs,
-      ...(result.error ? { error: result.error } : {}),
-    });
+    return exportedTestRecordingResponse(result);
   } catch (error) {
     logger.error(`[exportPlan] Failed to export plan: ${error}`);
     return withIsErrorOnFailure(

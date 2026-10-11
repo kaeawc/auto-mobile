@@ -1290,8 +1290,10 @@ export class Daemon {
     );
     // A sessionless call admitted while the device was free must not keep driving it for the new
     // holder (#10829). The call performing the acquisition is spared.
-    // A sessionless recording on the device is stopped and finalized the same way (#10961).
-    const stopOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(this.sessionManager);
+    // The acquiring holder adopts active sessionless recordings without stopping them (#11665).
+    const adoptOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(
+      this.sessionManager,
+    );
     // Sessionless network mocks and simulations are cleared the same way (#11130).
     const clearOwnerlessNetworkState = createOwnerlessNetworkStateAcquisitionCleanup(
       this.sessionManager,
@@ -1316,7 +1318,7 @@ export class Daemon {
       });
       // A sessionless stroke parked on the device with no frame in flight is lifted too (#11541).
       this.socketServer?.liftSessionlessStrokesOn(deviceId);
-      stopOwnerlessRecordings(deviceId);
+      adoptOwnerlessRecordings(deviceId, sessionId);
       clearOwnerlessNetworkState(deviceId);
       resetSettingDefaults(deviceId, sessionId);
     });

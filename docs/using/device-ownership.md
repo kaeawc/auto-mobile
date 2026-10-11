@@ -509,9 +509,19 @@ Owner decisions 2026-10-09 (#10982):
 
 - A recording stops and finalizes when its session is released, capped at about
   120 seconds (#10957). This also covers an idle release (#10826).
-- A recording with no owner stops when a session acquires the device (#10961).
 - Recording artifacts stay fetchable by id (#10958).
 - Hiding a desktop or IDE window during a recording does not release the device.
+
+A video start from the connection holding a device belongs to that holding session,
+even when the call omits `sessionUuid`. Starting a test recording on an unheld device
+is refused with `no_active_device_session`; acquire a session on that device first.
+
+An active recording with no owner keeps running when a session acquires its device:
+the acquiring holder adopts it (owner decision 2026-10-11, #11665, replacing #10961).
+Until acquisition it remains stoppable sessionless; afterwards only the holder or
+the connection that acquired its session may stop it. This includes segmented video
+and test recordings. Release finalizes adopted recordings within the existing cap,
+announces their recording ids, and keeps their artifacts fetchable by id (#10958).
 
 ## Retryable acquisition refusals
 

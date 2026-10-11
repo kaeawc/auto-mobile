@@ -220,8 +220,8 @@ function sessionOwnershipLostError(
   return new McpError(-32603, sessionOwnershipLostMessage(error, managedSlots), payload);
 }
 
-function noActiveDeviceSessionPayload(
-  error: DaemonConnectionSessionReleasedError,
+export function noActiveDeviceSessionPayload(
+  error: { message: string; reason: string },
   managedSlots?: ManagedSlotsResult,
 ) {
   const ended = managedEndedPayload(managedSlots, undefined, error.reason);

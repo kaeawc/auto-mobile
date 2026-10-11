@@ -295,6 +295,57 @@ describe("a connection bound to the base session naming its own derived label se
     }),
   );
 
+  /** `setActiveDevice` naming `sessionUuid` for the idle third device, with or without identity. */
+  const select = (fixture: McpTestFixture, sessionUuid: string, identity?: string) =>
+    fixture.client
+      .callTool({
+        name: "setActiveDevice",
+        arguments: {
+          deviceId: third.deviceId,
+          platform: "android",
+          sessionUuid,
+          ...(identity ? { [INTERNAL_MCP_SESSION_PARAM]: identity } : {}),
+        },
+      })
+      .catch((error: unknown) => ({
+        isError: true,
+        content: [{ type: "text", text: (error as Error).message }],
+      }));
+
+  test.each([
+    { name: "a name the base never published", label: "Z" },
+    { name: "a published label the plan has not allocated", label: "C" },
+  ])(
+    "a bind with no connection identity cannot mint a label session of the base: $name",
+    ({ label }) =>
+      scenario(async () => {
+        const anonymous = await connection({});
+
+        const result = await select(anonymous, `${BASE}:${label}`);
+
+        expect(result.isError).toBe(true);
+        expect(errorText(result)).toMatch(/cannot be reused/);
+        expect(manager.hasSession(`${BASE}:${label}`)).toBe(false);
+        expect(pool.getDevice(third.deviceId)?.sessionId).toBeNull();
+        // No fence is left behind: the plan's own allocation mints the name afterwards.
+        const close = manager.openPlanLabelMints(BASE, { [label]: `${BASE}:${label}` });
+        await pool.assignMultipleDevices([`${BASE}:${label}`], 1_000, "android").finally(close);
+        expect(pool.getDevice(third.deviceId)?.sessionId).toBe(`${BASE}:${label}`);
+      })(),
+  );
+
+  test(
+    "a caller-chosen session id that contains ':' and names no live base is bound as before",
+    scenario(async () => {
+      const anonymous = await connection({});
+
+      const result = await select(anonymous, "team:run");
+
+      expect(result.isError).not.toBe(true);
+      expect(pool.getDevice(third.deviceId)?.sessionId).toBe("team:run");
+    }),
+  );
+
   test(
     "a connection seeded with the base names its plan's live label, and nothing else",
     scenario(async () => {

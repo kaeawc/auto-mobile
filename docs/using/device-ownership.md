@@ -34,8 +34,13 @@ record, so a token
 claimed on a label proves nothing about its base (#11602). A connection bound to
 the base session, or to one of its labels, may name any live session of that
 plan directly as `sessionUuid`; a name the base has not published, or a label
-that is not allocated, is still refused as a different session. A device that no
-session holds takes calls from anyone.
+that is not allocated, is still refused as a different session. A connection
+seeded with the base (`--initial-session-uuid <base>`) is judged the same way: its
+proxy forwards a `<base>:<label>` name and the daemon answers from the label map.
+None of these judgements holds, extends or releases a session: a base past its
+idle deadline that the scan has not reached yet publishes no labels, and is
+released by the scan or by a call that names it, never by a lookup about its
+label. A device that no session holds takes calls from anyone.
 
 A session's owner is the connection that acquired it, or that restored it after
 a reconnect. Ownership is cooperative: no token is needed, but naming a session's
@@ -165,6 +170,18 @@ long as the plan run (#11572), whichever reason ended it:
   call of the finished run, or a client naming `<base>:<label>` itself) is
   refused with `session_ownership_lost` and takes no device, where a base
   session released with `plan-auto-release` would be re-issued by name.
+- The rule is applied where a session is created, so it covers every caller
+  (#11602): while `<base>` is live, nothing but its plan's allocation creates a
+  session named `<base>:<anything>`. A `setActiveDevice` or other bind naming
+  one, with or without a connection identity and by the base's own owner too, is
+  refused the same way, holds no device and leaves no fence, whether or not the
+  base published that label.
+- A session id that merely contains `:` is a session of its own when the part
+  before the `:` is not a live session, and it stays one if that prefix is
+  acquired as a session later. A plan never takes such a session as a label: an
+  `executePlan` whose label would be a live session no plan run created is
+  refused with `device_owned_by_other_session` before it publishes or allocates
+  anything. Release that session or rename the label.
 - It is never rehydrated after a daemon restart, whether its row was live,
   released by `daemon-shutdown` or waiting out a `device-restart:<device>`: its
   device is free at once. The `executePlan` the shutdown cut answers with its

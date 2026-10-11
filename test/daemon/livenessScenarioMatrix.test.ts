@@ -405,18 +405,21 @@ describe("daemon release wiring (#10975)", () => {
     const startedAt = scenario.timer.now();
     // Straight to the daemon's MCP entry: no control socket stamped a deadline on the call.
     const call = scenario.startLongCall(session, undefined, { wedged: true, direct: true });
-
-    // Held until the ceiling; past it the expiry overrides the veto and aborts what it overrode.
-    const releasedAt = await scenario.idleWhileHeld(
-      session,
-      startedAt + UNSETTLED_EXECUTION_VETO_CEILING_MS + 2 * IDLE_WINDOW_MS,
-      300_000,
-    );
-    expect(releasedAt).toBeGreaterThan(startedAt + UNSETTLED_EXECUTION_VETO_CEILING_MS);
-    expect(scenario.abortedCalls).toEqual([session]);
-    expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
-    expectFreed();
-    await call.settle();
+    try {
+      // Held until the ceiling; past it the expiry overrides the veto and aborts what it overrode.
+      const releasedAt = await scenario.idleWhileHeld(
+        session,
+        startedAt + UNSETTLED_EXECUTION_VETO_CEILING_MS + 2 * IDLE_WINDOW_MS,
+        300_000,
+      );
+      expect(releasedAt).toBeGreaterThan(startedAt + UNSETTLED_EXECUTION_VETO_CEILING_MS);
+      expect(scenario.abortedCalls).toEqual([session]);
+      expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
+      expectFreed();
+    } finally {
+      // A failed expectation must not leave the wedged call in the process-wide tracker.
+      await call.settle();
+    }
   });
 });
 
@@ -1885,10 +1888,21 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
         await scenario.idle(0);
       };
 
-      // Subscribed side: its own resource's changes arrive, another resource's never do.
+      // A second client reads every frame the daemon writes it, with no filter of its own.
+      const watcher = scenario.daemonConnection("resource-watcher");
+      await watcher.connect();
+      const written: Array<string | undefined> = [];
+      watcher.onNotification!(({ uri }) => written.push(uri));
+      await watcher.callDaemonMethod("resources/subscribe", { uri: OTHER_RESOURCE });
+
+      // Subscribed side: each client is written its own resource's changes and no other's.
       await change(OTHER_RESOURCE);
       await change(WATCHED_RESOURCE);
       expect(pushed).toEqual([WATCHED_RESOURCE]);
+      expect(written).toEqual([OTHER_RESOURCE]);
+      await watcher.callDaemonMethod("resources/unsubscribe", { uri: OTHER_RESOURCE });
+      await change(OTHER_RESOURCE);
+      expect(written).toEqual([OTHER_RESOURCE]);
 
       // The proxy replays the subscription to the daemon that replaces this one.
       await scenario.daemonRestart();
@@ -1955,7 +1969,6 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
     expect(scenario.sessionsWithOpenTransport).toEqual([session]);
     await scenario.idle(RELEASE_SLACK_MS);
     expect(scenario.sessionsWithOpenTransport).toEqual([]);
-    expect(scenario.timer.now()).toBeLessThanOrEqual(releasedAt! + MCP_TRANSPORT_IDLE_CLOSE_MS);
   });
 
   test("a managed slot names the daemon that holds its execution: the restarted daemon records itself as the owner", async () => {

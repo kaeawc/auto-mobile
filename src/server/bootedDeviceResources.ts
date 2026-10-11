@@ -21,7 +21,6 @@ import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
 import { DaemonState } from "../daemon/daemonState";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
-import { classifyPoolStatus } from "../daemon/devicePool";
 import type { Session } from "../daemon/sessionManager";
 import type {
   DevicePool,
@@ -528,15 +527,12 @@ function toBootedDeviceInfo(
     pooled: poolContext?.pooled,
     unhealthy: poolContext?.poolInfo.unhealthy,
     configuredImages,
-    // Preserve the pool's already-published assignment in the canonical session
-    // when the optional session-detail map is unavailable for this observation.
-    session:
-      poolContext?.session ??
-      (poolContext?.poolInfo.assignedSession
-        ? { sessionId: poolContext.poolInfo.assignedSession }
-        : undefined),
+    // The holder is the pool's assignment, resolved in describeInventoryDevice; the map only
+    // supplies session detail and may be unavailable for this observation.
+    sessionsById: poolContext?.sessionsById,
     deviceSessionUuid: poolContext?.deviceSessionUuid,
     hold: poolContext?.hold,
+    poolStatus: poolContext?.poolInfo.poolStatus,
     ...extras,
   });
   const projected = projectBootedDevice(description);
@@ -592,7 +588,7 @@ interface AdbOfflineHeldInput {
   platform: Platform;
   discovered: readonly BootedDevice[];
   devicePool: DevicePool | null;
-  sessionInfoByDeviceId: Map<string, Session> | null;
+  sessionsById: Map<string, Session> | null;
   resolveDeviceSessionUuid: (deviceId: string) => string | null;
   deviceManager: PlatformDeviceManager;
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>;
@@ -620,7 +616,7 @@ async function adbOfflineHeldDeviceDescriptions(
       resolvePoolDeviceContext(
         input.devicePool,
         device,
-        input.sessionInfoByDeviceId,
+        input.sessionsById,
         input.resolveDeviceSessionUuid,
       ),
       input.configuredImages,
@@ -719,26 +715,16 @@ export async function configuredImagesForBootedPlatform(
 interface PoolDeviceContext {
   poolInfo: PoolDeviceInfo;
   pooled: PooledDevice;
-  session?: Session;
+  sessionsById?: ReadonlyMap<string, Session>;
   deviceSessionUuid?: string;
   /** Why generic allocation will not lend this device; the same answer `listDevices` publishes. */
   hold: ReturnType<typeof poolHoldFor>;
 }
 
-/** The same classification as `DevicePool.getStats()` (#11387): see {@link classifyPoolStatus}. */
-function effectivePoolStatus(
-  status: PooledDevice["status"],
-  hold: ReturnType<typeof poolHoldFor>,
-  unhealthy: boolean,
-): PoolDeviceStatus {
-  const held = hold.heldBy !== undefined || hold.reserved === true;
-  return classifyPoolStatus(status, held || unhealthy);
-}
-
 function resolvePoolDeviceContext(
   devicePool: DevicePool | null,
   device: BootedDevice,
-  sessionInfoByDeviceId: Map<string, Session> | null,
+  sessionsById: Map<string, Session> | null,
   resolveDeviceSessionUuid: (deviceId: string) => string | null,
 ): PoolDeviceContext | undefined {
   if (!devicePool) {
@@ -751,11 +737,7 @@ function resolvePoolDeviceContext(
   }
 
   const hold = poolHoldFor(devicePool, device.deviceId);
-  const poolStatus = effectivePoolStatus(
-    pooledDevice.status,
-    hold,
-    devicePool.getDeviceHealthMarker(device.deviceId) !== undefined,
-  );
+  const poolStatus = devicePool.poolBucket(device.deviceId) ?? "idle";
 
   return {
     poolInfo: {
@@ -768,7 +750,7 @@ function resolvePoolDeviceContext(
     },
     pooled: pooledDevice,
     hold,
-    session: sessionInfoByDeviceId?.get(device.deviceId),
+    sessionsById: sessionsById ?? undefined,
     deviceSessionUuid: resolveDeviceSessionUuid(device.deviceId) ?? undefined,
   };
 }
@@ -826,11 +808,7 @@ async function summarizePoolStatus(
     }
   }
   for (const pooled of fallback) {
-    const status = effectivePoolStatus(
-      pooled.status,
-      poolHoldFor(devicePool, pooled.id),
-      devicePool.getDeviceHealthMarker(pooled.id) !== undefined,
-    );
+    const status = devicePool.poolBucket(pooled.id) ?? "idle";
     if (ownershipKnown || status !== "idle") {
       tally(status);
     }
@@ -895,7 +873,7 @@ interface PlatformDiscoveryResult {
 async function discoverBootedDevicesForPlatform(
   platform: Platform,
   devicePool: DevicePool | null,
-  sessionInfoByDeviceId: Map<string, Session> | null,
+  sessionsById: Map<string, Session> | null,
   options: {
     resolveDeviceSessionUuid: (deviceId: string) => string | null;
     timer: Timer;
@@ -944,12 +922,7 @@ async function discoverBootedDevicesForPlatform(
         withIdentityQuarantineMarker(
           toBootedDeviceInfo(
             device,
-            resolvePoolDeviceContext(
-              devicePool,
-              device,
-              sessionInfoByDeviceId,
-              resolveDeviceSessionUuid,
-            ),
+            resolvePoolDeviceContext(devicePool, device, sessionsById, resolveDeviceSessionUuid),
             new Map(),
             { transportAvdName: transportAvdName(device) },
           ),
@@ -971,12 +944,7 @@ async function discoverBootedDevicesForPlatform(
       withIdentityQuarantineMarker(
         toBootedDeviceInfo(
           device,
-          resolvePoolDeviceContext(
-            devicePool,
-            device,
-            sessionInfoByDeviceId,
-            resolveDeviceSessionUuid,
-          ),
+          resolvePoolDeviceContext(devicePool, device, sessionsById, resolveDeviceSessionUuid),
           configuredImages,
           { transportAvdName: transportAvdName(device) },
         ),
@@ -987,7 +955,7 @@ async function discoverBootedDevicesForPlatform(
       platform,
       discovered: discovery.devices,
       devicePool,
-      sessionInfoByDeviceId,
+      sessionsById,
       resolveDeviceSessionUuid,
       deviceManager,
       configuredImages,
@@ -1052,7 +1020,7 @@ async function discoverBootedDevicesForPlatform(
 interface DaemonDeviceContext {
   devicePool: DevicePool | null;
   poolStatus?: PoolStatusSummary;
-  sessionInfoByDeviceId: Map<string, Session> | null;
+  sessionsById: Map<string, Session> | null;
   resolveDeviceSessionUuid: (deviceId: string) => string | null;
 }
 
@@ -1061,14 +1029,14 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
   if (!daemonState.isInitialized()) {
     return {
       devicePool: null,
-      sessionInfoByDeviceId: null,
+      sessionsById: null,
       resolveDeviceSessionUuid: () => null,
     };
   }
 
   let devicePool: DevicePool | null = null;
   let poolStatus: PoolStatusSummary | undefined;
-  let sessionInfoByDeviceId: Map<string, Session> | null = null;
+  let sessionsById: Map<string, Session> | null = null;
   let resolveDeviceSessionUuid: (deviceId: string) => string | null = () => null;
   try {
     devicePool = daemonState.getDevicePool();
@@ -1086,7 +1054,7 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
 
   try {
     const sessions = daemonState.getSessionManager().getAllSessions();
-    sessionInfoByDeviceId = new Map(sessions.map((session) => [session.assignedDevice, session]));
+    sessionsById = new Map(sessions.map((session) => [session.sessionId, session]));
   } catch (error) {
     logger.warn(`[BootedDeviceResources] Failed to read session manager state: ${error}`);
   }
@@ -1099,7 +1067,7 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
     logger.warn(`[BootedDeviceResources] Failed to read device session registry: ${error}`);
   }
 
-  return { devicePool, poolStatus, sessionInfoByDeviceId, resolveDeviceSessionUuid };
+  return { devicePool, poolStatus, sessionsById, resolveDeviceSessionUuid };
 }
 
 /**
@@ -1508,7 +1476,7 @@ async function computeBootedDevicesForPlatforms(
       const discovery = await discoverBootedDevicesForPlatform(
         platform,
         daemonContext.devicePool,
-        daemonContext.sessionInfoByDeviceId,
+        daemonContext.sessionsById,
         {
           resolveDeviceSessionUuid: daemonContext.resolveDeviceSessionUuid,
           timer,

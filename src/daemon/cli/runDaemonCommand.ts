@@ -316,11 +316,14 @@ const formatPoolStats = (
 /**
  * Render the booted-devices resource as `available-devices` output. A resource with no usable pool
  * status (no text, unparseable text, an error object, or no `poolStatus`) is an unknown, so it
- * fails rather than printing zeros that read as "0 devices".
+ * fails rather than printing zeros that read as "0 devices". So does an incomplete observation
+ * (`observationComplete: false`) with no device entries; a partial one with entries still prints
+ * (the JSON has no field that could carry the incompleteness).
  */
 function printAvailableDevicesContent(content: string | undefined): void {
   let data: {
     error?: unknown;
+    observationComplete?: boolean;
     poolStatus?: {
       idle: number;
       assigned: number;
@@ -348,6 +351,14 @@ function printAvailableDevicesContent(content: string | undefined): void {
     throw new ActionableError(
       "The booted-devices resource carried no pool status, so the device count is unknown " +
         "(discovery_incomplete); retry once the daemon finishes discovery.",
+    );
+  }
+  if (data.observationComplete === false && (data.devices?.length ?? 0) === 0) {
+    // Every discovery source failed and the pool has nothing to fall back on: zeros here would
+    // read as "0 devices" when the count is actually unknown.
+    throw new ActionableError(
+      "The booted-devices resource reports incomplete discovery and the pool has no devices, so the count is " +
+        "unknown (discovery_incomplete); retry once the daemon finishes discovery.",
     );
   }
   console.log(

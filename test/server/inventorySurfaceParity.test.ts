@@ -4,11 +4,12 @@ import {
   handleDaemonRequest,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
-import { DaemonState } from "../../src/daemon/daemonState";
+import { DaemonState, type DaemonStateLike } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -21,11 +22,15 @@ import {
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
+import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { type DiscoverySource, discoverySourceFor } from "../../src/utils/discoverySource";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { createExecResult } from "../../src/utils/execResult";
 import { FakeDeviceHealthMarkers } from "../fakes/FakeDeviceHealthMarkers";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -627,5 +632,370 @@ describe("a held device in a transitional platform state is one row and one coun
       availableDevices: idle,
       assignedDevices: assigned,
     });
+  });
+});
+
+// Inventory contract (#11605): one rule on every surface. A discovery source whose tooling is not
+// installed on this host is NOT APPLICABLE: it never makes an observation incomplete, is never
+// retryable, and its device count is a true zero. A source that exists and failed is INCOMPLETE:
+// the answer is unknown (`discovery_incomplete`, retryable), never zero. A single-platform machine
+// is a fully supported configuration. The host shapes are crossed with the row kinds above.
+
+const hostSimulator: BootedDevice = {
+  platform: "ios",
+  name: "iPhone 17",
+  deviceId: "11111111-2222-3333-4444-555555555555",
+};
+const ABSENT = {
+  android: "emulator-5999",
+  "ios-simulator": "99999999-2222-3333-4444-555555555555",
+  "ios-physical": "00008110-001A2B3C4D5E6F78",
+} as const;
+const ALL_SOURCES: DiscoverySource[] = ["android", "ios-simulator", "ios-physical"];
+
+interface Host {
+  host: string;
+  notInstalled: DiscoverySource[];
+  failing: DiscoverySource[];
+}
+
+type RowKind =
+  | "nothing booted"
+  | "one device booted"
+  | "held Booting simulator"
+  | "held Shutting Down simulator"
+  | "held emulator, offline probe throws"
+  /**
+   * A device pooled (and held) before its tooling began reporting "not installed" -- adb replaced
+   * mid-upgrade, the active Xcode switched. The pooled entry proves the tooling existed, so the
+   * source is unknown, never a true zero.
+   */
+  | "tooling vanished under a held emulator"
+  | "tooling vanished under a held simulator";
+
+const hosts: Host[] = [
+  { host: "both platforms installed", notInstalled: [], failing: [] },
+  { host: "Android-only", notInstalled: ["ios-simulator", "ios-physical"], failing: [] },
+  { host: "iOS-only", notInstalled: ["android"], failing: [] },
+  { host: "devicectl missing", notInstalled: ["ios-physical"], failing: [] },
+  { host: "adb installed but failing", notInstalled: [], failing: ["android"] },
+  { host: "simctl installed but failing", notInstalled: [], failing: ["ios-simulator"] },
+  { host: "everything failing", notInstalled: [], failing: ALL_SOURCES },
+];
+
+const works = (host: Host, source: DiscoverySource) =>
+  !host.notInstalled.includes(source) && !host.failing.includes(source);
+
+// A transitional simulator needs a simctl that lists it; a probe failure needs an adb that listed
+// the held emulator. Elsewhere the row kind cannot occur.
+const hostCells: Array<Host & { kind: RowKind }> = [
+  ...hosts.flatMap((host) =>
+    (
+      [
+        "nothing booted",
+        "one device booted",
+        ...(works(host, "ios-simulator")
+          ? (["held Booting simulator", "held Shutting Down simulator"] as const)
+          : []),
+        ...(works(host, "android") ? (["held emulator, offline probe throws"] as const) : []),
+      ] as RowKind[]
+    ).map((kind) => ({ ...host, kind })),
+  ),
+  {
+    host: "adb disappears",
+    notInstalled: ["android"],
+    failing: [],
+    kind: "tooling vanished under a held emulator",
+  },
+  {
+    host: "Xcode disappears",
+    notInstalled: ["ios-simulator", "ios-physical"],
+    failing: [],
+    kind: "tooling vanished under a held simulator",
+  },
+];
+
+const unexpectedRemoteCall = (): never => {
+  throw new Error("Unexpected daemon operation");
+};
+const remoteState: DaemonStateLike = {
+  isInitialized: () => false,
+  getSessionManager: unexpectedRemoteCall,
+  getDevicePool: unexpectedRemoteCall,
+  getDeviceSessionRegistry: unexpectedRemoteCall,
+};
+
+/** Run `--daemon available-devices` and reduce it to the count it printed, or its refusal code. */
+async function availableDevicesCli(
+  args: string[],
+  state: DaemonStateLike,
+  resourceText: string,
+): Promise<unknown> {
+  const stdout: string[] = [];
+  const exits: unknown[] = [];
+  class Client extends FakeDaemonClient {
+    override async connect() {}
+    override async readResource() {
+      return { contents: [{ uri: "automobile:devices/booted", text: resourceText }] } as never;
+    }
+    override async close() {}
+  }
+  class Manager extends SafeDaemonManager {
+    override getDaemonState() {
+      return state;
+    }
+    override createClient() {
+      return new Client();
+    }
+  }
+  const log = spyOn(console, "log").mockImplementation((text) => {
+    stdout.push(String(text));
+  });
+  const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+  const exit = spyOn(process, "exit").mockImplementation((code) => {
+    exits.push(code);
+    throw new Error("exit");
+  });
+  try {
+    await runDaemonCommand("available-devices", args, {}, Manager).catch(() => {});
+  } finally {
+    exit.mockRestore();
+    errorSpy.mockRestore();
+    log.mockRestore();
+  }
+  if (exits.length === 0) {
+    return JSON.parse(stdout[0] ?? "{}").availableDevices;
+  }
+  // A refusal exits 1; `--json` carries the typed code on stdout, text mode prints nothing there.
+  return {
+    exit: exits[0],
+    ...(args.includes("--json") ? { code: JSON.parse(stdout[0] ?? "{}").code } : { stdout }),
+  };
+}
+
+describe("every inventory surface gives one answer per discovery-source outcome (#11605)", () => {
+  let sessions: SessionManager | undefined;
+
+  beforeAll(() => {
+    if (!ToolRegistry.getTool("listDevices")) {
+      registerDeviceTools();
+    }
+  });
+
+  afterEach(() => {
+    DaemonState.getInstance().reset();
+    sessions?.stopCleanupTimer();
+    resetBootedDevicesResourceCache();
+    setDeviceManager(null);
+    PlatformDeviceManagerFactory.setInstance(null);
+  });
+
+  afterAll(() => {
+    resetDeviceToolsDependencies();
+  });
+
+  test.each(hostCells)("$host, $kind", async (cell) => {
+    const { kind } = cell;
+    const transitionalState =
+      kind === "held Booting simulator"
+        ? ("Booting" as const)
+        : kind === "held Shutting Down simulator"
+          ? ("Shutting Down" as const)
+          : undefined;
+    const probeThrows = kind === "held emulator, offline probe throws";
+    const vanishedUnder =
+      kind === "tooling vanished under a held emulator"
+        ? android
+        : kind === "tooling vanished under a held simulator"
+          ? hostSimulator
+          : undefined;
+    // The booted device sits on a source that works on this host; when every source fails it is a
+    // pooled emulator the daemon saw before the failure began.
+    const device =
+      vanishedUnder ??
+      (transitionalState
+        ? hostSimulator
+        : probeThrows
+          ? android
+          : kind === "nothing booted"
+            ? undefined
+            : works(cell, "android") || !works(cell, "ios-simulator")
+              ? android
+              : hostSimulator);
+    const held = device !== undefined && kind !== "one device booted";
+    const sourceOf = (target: BootedDevice) => discoverySourceFor(target.platform, target.deviceId);
+
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = new FakeDeviceUtils();
+    manager.setBootedDevices("android", device?.platform === "android" ? [device] : []);
+    manager.setBootedDevices("ios", device?.platform === "ios" ? [device] : []);
+    const activeSessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    sessions = activeSessions;
+    const pool = poolFor({ timer, sessions: activeSessions, manager });
+    await pool.initializeWithDevices(device ? [device] : []);
+    if (device && held) {
+      await pool.bindOrReuseDeviceSession("session-held", device.deviceId, device.platform);
+      // Discovery stops listing the held device: it is transitional, offline, or its tool is gone.
+      manager.setBootedDevices(device.platform, []);
+    }
+    if (transitionalState) {
+      manager.setTransitionalSimulators([{ device: hostSimulator, state: transitionalState }]);
+    }
+    if (probeThrows) {
+      (manager as PlatformDeviceManager).getAndroidListedDeviceStates = async () => {
+        throw new Error("adb devices -l timed out");
+      };
+    }
+    manager.notInstalledSources = new Set(cell.notInstalled);
+    manager.failedSources = new Set(cell.failing);
+    DaemonState.getInstance().initialize(activeSessions, pool);
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => manager,
+      avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
+    });
+    setDeviceManager(manager);
+    PlatformDeviceManagerFactory.setInstance(manager);
+    const before = {
+      held: pool.getStats().assigned,
+      sessions: activeSessions.getAllSessions().length,
+    };
+
+    const resource = await getBootedDevicesForPlatforms(["android", "ios"], timer);
+    const resourceText = JSON.stringify(resource);
+    const listed = JSON.parse(
+      (await ToolRegistry.getTool("listDevices")!.handler({})).content?.[0]?.text ?? "{}",
+    );
+    const codeOf = (error: unknown) => (error as { code?: string }).code ?? "untyped";
+    const daemonState = DaemonState.getInstance();
+    const daemonResponse = await handleDaemonRequest(
+      { id: "r", type: "daemon_request", method: "daemon/availableDevices", params: {} },
+      {
+        isInitialized: () => true,
+        getSessionManager: () => activeSessions as never,
+        getDevicePool: () => pool,
+        getDeviceSessionRegistry: () => ({ list: () => [] }),
+      },
+    );
+    const ideLookup = (
+      UnixSocketServer.prototype as unknown as {
+        listBootedDevicesForIdeAction(p: "android" | "ios", serial: string): Promise<unknown>;
+      }
+    ).listBootedDevicesForIdeAction;
+    const select = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+    const selectAbsent = (source: DiscoverySource) =>
+      select({ deviceId: ABSENT[source], sessionUuid: "selection" }).then(
+        () => [`${source}:selected`],
+        (error: unknown) =>
+          (error as { retryable?: boolean }).retryable === true
+            ? [`${source}:${codeOf(error)}`]
+            : [],
+      );
+
+    const answers = {
+      resource: {
+        observationComplete: resource.observationComplete,
+        devices: resource.devices.length,
+        notApplicable: ALL_SOURCES.filter(
+          (source) => resource.sourceObservations[source]?.notApplicable === true,
+        ),
+        incomplete: ALL_SOURCES.filter(
+          (source) => resource.sourceObservations[source]?.observationComplete === false,
+        ),
+      },
+      listDevices: {
+        complete: listed.discovery.complete,
+        devices: listed.devices.length,
+        notApplicable: listed.discovery.notApplicableSources ?? [],
+        incomplete: listed.discovery.failedSources ?? [],
+      },
+      getRefreshedStats: await pool.getRefreshedStats().then((stats) => stats.idle, codeOf),
+      getRefreshedInventory: await pool
+        .getRefreshedInventory()
+        .then((inventory) => inventory.deviceIds.size, codeOf),
+      daemonAvailableDevices: daemonResponse.success
+        ? (daemonResponse.result as { availableDevices: number }).availableDevices
+        : { code: daemonResponse.code, retryable: daemonResponse.retryable },
+      cliStdio: await availableDevicesCli([], remoteState, resourceText),
+      cliStdioJson: await availableDevicesCli(["--json"], remoteState, resourceText),
+      cliInDaemon: await availableDevicesCli([], daemonState, resourceText),
+      cliInDaemonJson: await availableDevicesCli(["--json"], daemonState, resourceText),
+      // An absent serial is only an unknown when the source that would list it exists and failed.
+      ideRefusesAbsentSerialOf: (
+        await Promise.all(
+          ALL_SOURCES.map((source) =>
+            ideLookup
+              .call({ daemonState }, source === "android" ? "android" : "ios", ABSENT[source])
+              .then(
+                () => [],
+                (error: unknown) => [`${source}:${codeOf(error)}`],
+              ),
+          ),
+        )
+      ).flat(),
+      // setActiveDevice is retryable only for the source that could have listed the absent id.
+      setActiveDeviceRetryableFor: [
+        ...(await selectAbsent("android")),
+        ...(await selectAbsent("ios-simulator")),
+        ...(await selectAbsent("ios-physical")),
+      ],
+      // Reads never hold, bind or boot: whatever was held before stays exactly that.
+      heldAfterReads: pool.getStats().assigned,
+      sessionsAfterReads: activeSessions.getAllSessions().length,
+      boots: manager.getExecutedOperations().filter((op) => op.startsWith("startDevice")),
+    };
+
+    // A source whose tooling vanished under a pooled device exists and did not complete.
+    const vanished = vanishedUnder ? [sourceOf(vanishedUnder)] : [];
+    const discoveryIncomplete = ALL_SOURCES.filter(
+      (source) => cell.failing.includes(source) || vanished.includes(source),
+    );
+    // A failed offline probe is an installed adb that failed: Android is unknown on the inventory.
+    const incomplete = ALL_SOURCES.filter(
+      (source) => discoveryIncomplete.includes(source) || (probeThrows && source === "android"),
+    );
+    const notInstalled = cell.notInstalled.filter((source) => !vanished.includes(source));
+    const complete = incomplete.length === 0;
+    const deviceListed = device !== undefined && !incomplete.includes(sourceOf(device));
+    const count = deviceListed ? (held ? 0 : 1) : complete ? 0 : "unknown";
+    const refusal = { exit: 1, code: "discovery_incomplete" };
+    const cli = (json: boolean) =>
+      count === "unknown" ? (json ? refusal : { exit: 1, stdout: [] }) : count;
+    expect(answers).toEqual({
+      resource: {
+        observationComplete: complete,
+        devices: deviceListed ? 1 : 0,
+        notApplicable: notInstalled,
+        incomplete,
+      },
+      listDevices: {
+        complete,
+        devices: deviceListed ? 1 : 0,
+        notApplicable: notInstalled,
+        incomplete,
+      },
+      getRefreshedStats: count === "unknown" ? "discovery_incomplete" : count,
+      getRefreshedInventory: count === "unknown" ? "discovery_incomplete" : deviceListed ? 1 : 0,
+      daemonAvailableDevices:
+        count === "unknown" ? { code: "discovery_incomplete", retryable: true } : count,
+      cliStdio: cli(false),
+      cliStdioJson: cli(true),
+      cliInDaemon: cli(false),
+      cliInDaemonJson: cli(true),
+      // The lookups read discovery, not the offline probe.
+      ideRefusesAbsentSerialOf: discoveryIncomplete.map(
+        (source) => `${source}:discovery_incomplete`,
+      ),
+      setActiveDeviceRetryableFor: discoveryIncomplete.map(
+        (source) => `${source}:discovery_incomplete`,
+      ),
+      heldAfterReads: before.held,
+      sessionsAfterReads: before.sessions,
+      boots: [],
+    });
+    // A healthy host (nothing failing, nothing vanished) is never told discovery_incomplete.
+    if (cell.failing.length === 0 && !vanishedUnder && !probeThrows) {
+      expect(JSON.stringify(answers)).not.toContain("discovery_incomplete");
+    }
   });
 });

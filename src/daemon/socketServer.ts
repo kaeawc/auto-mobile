@@ -148,6 +148,12 @@ import {
 } from "./inputDeviceOwnership";
 import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
 import { ToolRegistry } from "../server/toolRegistry";
+import {
+  canonicalFrameDeviceId,
+  canonicalizeFrameDiscovery,
+  type CanonicalFrameDiscovery,
+  type FrameDeviceIdentityPool,
+} from "./frameDeviceIdentity";
 import { managedConnectionControlRefusal } from "./managedSlots/managedConnectionScope";
 import { provisionCancellationOutcomes } from "../server/provisionCancellationOutcomes";
 import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../server/deviceTools";
@@ -809,20 +815,21 @@ interface SocketDaemonStateAccess extends DaemonStateAccess {
   getSessionManager(): ReturnType<DaemonStateAccess["getSessionManager"]> & {
     isReleasedSessionInRestartRecoveryWindow?(sessionId: string): Promise<boolean>;
   };
-  getDevicePool(): ReturnType<DaemonStateAccess["getDevicePool"]> & {
-    getDevice?(deviceId: string): { autolockSessionId?: string | null } | null | undefined;
-    resolveOwnedDeviceSessionForMcpSession?(
-      mcpSessionId: string | undefined,
-      deviceId: string,
-    ): string | undefined;
-    isSessionOwnedByOtherConnection?(sessionId: string, mcpSessionId?: string): boolean;
-    assertNotClaimedByForeignDaemon?(
-      deviceId: string,
-      platform: "android" | "ios",
-      remedy?: string,
-      maxAgeMs?: number,
-    ): Promise<void>;
-  };
+  getDevicePool(): ReturnType<DaemonStateAccess["getDevicePool"]> &
+    FrameDeviceIdentityPool & {
+      getDevice?(deviceId: string): { autolockSessionId?: string | null } | null | undefined;
+      resolveOwnedDeviceSessionForMcpSession?(
+        mcpSessionId: string | undefined,
+        deviceId: string,
+      ): string | undefined;
+      isSessionOwnedByOtherConnection?(sessionId: string, mcpSessionId?: string): boolean;
+      assertNotClaimedByForeignDaemon?(
+        deviceId: string,
+        platform: "android" | "ios",
+        remedy?: string,
+        maxAgeMs?: number,
+      ): Promise<void>;
+    };
 }
 
 /** Classifies one tools/call argument set as a device read (`deviceReadOnly`). */
@@ -5374,14 +5381,14 @@ export class UnixSocketServer {
         }
 
         // Find the booted device
-        const bootedDevices = await this.listBootedDevicesForIdeAction(
+        const { devices: bootedDevices, deviceId } = await this.resolveIdeActionDevices(
           args.platform,
           args.deviceId,
         );
         // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
         await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/updateService");
-        this.assertDeviceActionable(args.deviceId, "to update the accessibility service");
-        const targetDevice = bootedDevices.find((d) => d.deviceId === args.deviceId);
+        this.assertDeviceActionable(deviceId, "to update the accessibility service");
+        const targetDevice = bootedDevices.find((d) => d.deviceId === deviceId);
         if (!targetDevice) {
           throw new Error(`Device not found: ${args.deviceId}`);
         }
@@ -5732,6 +5739,48 @@ export class UnixSocketServer {
   }
 
   /**
+   * The booted devices for an `ide/*` action and the device it names, both as pooled canonical
+   * ids: the frame may name a held handset by its other transport id (#11596).
+   */
+  private async resolveIdeActionDevices(
+    platform: "android" | "ios",
+    serial: string,
+  ): Promise<CanonicalFrameDiscovery & { deviceId: string }> {
+    const canonical = await this.canonicalFrameDiscovery(
+      platform,
+      await this.listBootedDevicesForIdeAction(platform, serial),
+      serial,
+    );
+    return { devices: canonical.devices, deviceId: canonical.deviceId ?? serial };
+  }
+
+  /**
+   * The ONE place a direct frame's discovery rows and `deviceId` become the pool's canonical ids
+   * (#11596). Every `input/*` and `ide/*` handler resolves its target through here before any
+   * holder, managed-slot or admission decision. A no-op in direct mode, where there is no pool.
+   */
+  private async canonicalFrameDiscovery(
+    platform: "android" | "ios",
+    rawDevices: readonly BootedDevice[],
+    deviceId: string | undefined,
+  ): Promise<CanonicalFrameDiscovery> {
+    return await canonicalizeFrameDiscovery(
+      this.daemonState.isInitialized() ? this.daemonState.getDevicePool() : undefined,
+      platform,
+      rawDevices,
+      deviceId,
+    );
+  }
+
+  /** A frame's device id as the pool's canonical id, for lookups that run without a discovery. */
+  private canonicalFrameDeviceId(deviceId: string): string {
+    return canonicalFrameDeviceId(
+      this.daemonState.isInitialized() ? this.daemonState.getDevicePool() : undefined,
+      deviceId,
+    );
+  }
+
+  /**
    * Resolve the platform-appropriate storage-mutation client for a key-value
    * `ide/*` request. iOS Storage-facet edits carry `platform: "ios"` so the pane
    * targets the iOS simulator + IOSCtrlProxyClient; a missing platform defaults
@@ -5752,11 +5801,12 @@ export class UnixSocketServer {
     if (platform !== "android" && platform !== "ios") {
       throw new Error(`Invalid platform: ${platform}. Must be 'android' or 'ios'.`);
     }
-    const bootedDevices = await this.listBootedDevicesForIdeAction(platform, deviceId);
+    const { devices: bootedDevices, deviceId: canonicalDeviceId } =
+      await this.resolveIdeActionDevices(platform, deviceId);
     // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
     await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/keyValueMutation");
-    this.assertDeviceActionable(deviceId, "to mutate stored values");
-    const targetDevice = bootedDevices.find((d) => d.deviceId === deviceId);
+    this.assertDeviceActionable(canonicalDeviceId, "to mutate stored values");
+    const targetDevice = bootedDevices.find((d) => d.deviceId === canonicalDeviceId);
     if (!targetDevice) {
       throw new Error(`Device not found: ${deviceId}`);
     }
@@ -5829,7 +5879,9 @@ export class UnixSocketServer {
     // session. Enforce the UNION of base + derived (issue #4611 Gap B, product
     // decision) so a tool is enabled when EITHER grants it — symmetric with the
     // MCP `registerDeviceAware` path. The shared helper resolves the base.
-    const derivedSessionUuid = sessionManager.getSessionForDevice?.(deviceId) ?? undefined;
+    // The holder is keyed on the pooled canonical id; the frame may name the device by an alias.
+    const derivedSessionUuid =
+      sessionManager.getSessionForDevice?.(this.canonicalFrameDeviceId(deviceId)) ?? undefined;
     const baseSessionUuid = resolveToolSelectionBaseSessionUuid(derivedSessionUuid, sessionManager);
     await assertToolEnabledForAnySession(
       toolName,
@@ -7490,13 +7542,15 @@ export class UnixSocketServer {
     action: InputTargetAction,
     bypassAndroidDeviceListCache: boolean = false,
   ): Promise<BootedDevice> {
-    const bootedDevices = await this.discoverInputTargetDevices(
-      platform,
-      action,
-      bypassAndroidDeviceListCache,
-    );
-    if (deviceId) {
-      const targetDevice = bootedDevices.find((device) => device.deviceId === deviceId);
+    const { devices: bootedDevices, deviceId: canonicalDeviceId } =
+      await this.discoverInputTargetDevices(
+        platform,
+        action,
+        bypassAndroidDeviceListCache,
+        deviceId,
+      );
+    if (canonicalDeviceId) {
+      const targetDevice = bootedDevices.find((device) => device.deviceId === canonicalDeviceId);
       if (!targetDevice) {
         throw new Error(`Device not found: ${deviceId}`);
       }
@@ -7799,21 +7853,24 @@ export class UnixSocketServer {
     platform: "android" | "ios",
     action: InputTargetAction,
     bypassAndroidDeviceListCache: boolean,
-  ): Promise<BootedDevice[]> {
+    deviceId: string | undefined,
+  ): Promise<CanonicalFrameDiscovery> {
     const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(
       platform,
       {
         bypassAndroidDeviceListCache,
       },
     );
+    // The frame's rows and device id as pooled canonical ids, before anything reads pool state.
+    const canonical = await this.canonicalFrameDiscovery(platform, discovery.devices, deviceId);
     // FUNNEL 1: the target this resolves is handed straight to the device-addressed
     // admission gate, which reads pool state — so the pool must have seen this
     // observation first (#6863 review).
-    await this.reconcileDiscoveryObservation(discovery.devices, `socket:${action}`);
+    await this.reconcileDiscoveryObservation(canonical.devices, `socket:${action}`);
     if (!discovery.succeededPlatforms.has(platform)) {
       throw new Error(`Unable to discover booted ${platform} devices for ${action}`);
     }
-    return discovery.devices;
+    return canonical;
   }
 
   private mcpRequestOptions(

@@ -738,12 +738,14 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             servedObservation.windowTruncations ??
             collectWindowTruncations((payload.observation as ObserveResult).viewHierarchy?.windows);
           Object.assign(diff, windowTruncations ? { windowTruncations } : {});
-          const screenChangedWithEmptyDiff =
-            hasScreenChangedEffect(payload) && isEmptyObserveDiff(diff);
-          observationOut = screenChangedWithEmptyDiff ? servedObservation : diff;
+          const emitFull =
+            (hasScreenChangedEffect(payload) && isEmptyObserveDiff(diff)) ||
+            (classifyObservationAction(ctx.name, ctx.args) !== "scroll" &&
+              replacedMostActionableNodes(diff));
+          observationOut = emitFull ? servedObservation : diff;
           observationDiff = {
-            mode: screenChangedWithEmptyDiff ? "full" : "diff",
-            reason: screenChangedWithEmptyDiff ? "screen_changed" : "diff_emitted",
+            mode: emitFull ? "full" : "diff",
+            reason: emitFull ? "screen_changed" : "diff_emitted",
             fromScreen: observationScreenIdentity(baseline),
             toScreen: observationScreenIdentity(sanitized),
           };
@@ -1668,6 +1670,21 @@ function isEmptyObserveDiff(diff: ReturnType<typeof diffObserveResult>): boolean
     diff.displayChanged === undefined &&
     diff.fields === undefined
   );
+}
+
+/** Fewest replaced actionable rows that can read as a screen replacement. */
+const MIN_REPLACED_ACTIONABLE_NODES = 3;
+
+/**
+ * Whether a same-screen-identity diff actually replaces the screen's actionable
+ * content (#11638): sub-screens of one activity (Settings' `SubSettings`) share
+ * an identity, so navigating between them would otherwise be emitted as a diff
+ * of unrelated rows. At least half of the current actionable skeleton having
+ * been both added and removed means the client needs the new screen, not a delta.
+ */
+function replacedMostActionableNodes(diff: ReturnType<typeof diffObserveResult>): boolean {
+  const replaced = Math.min(diff.added.length, diff.removed.length);
+  return replaced >= MIN_REPLACED_ACTIONABLE_NODES && replaced * 2 >= (diff.skeleton?.length ?? 0);
 }
 
 function observationScreenIdentity(observation: ObserveResult): ObservationDiffScreenIdentity {

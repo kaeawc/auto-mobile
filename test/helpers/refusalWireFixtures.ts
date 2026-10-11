@@ -8,6 +8,7 @@ import {
   DeviceCleanupInProgressError,
   DeviceOwnedByOtherDaemonError,
   DeviceShuttingDownError,
+  DeviceTransportOfflineError,
   SessionCreationTimeoutError,
 } from "../../src/daemon/deviceAcquisitionRefusals";
 import { IOS_SIM_MAX_BOOTED_ENV } from "../../src/features/iosSimFleet/capacityPolicy";
@@ -223,6 +224,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     "device_shutting_down",
     "DeviceShuttingDownError via shapeToolCallError",
     () => shaped(new DeviceShuttingDownError(DEVICE, "and cannot be assigned")),
+  ],
+  [
+    "device_offline",
+    "DeviceTransportOfflineError via shapeToolCallError",
+    () => shaped(new DeviceTransportOfflineError(DEVICE, "offline")),
   ],
   [
     "session_creation_timeout",

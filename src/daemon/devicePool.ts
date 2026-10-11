@@ -1,4 +1,5 @@
 import { mintedSession, type AcquisitionReceipt } from "./acquisitionReceipt";
+import { TransitionalAdbBindWait } from "./transitionalAdbBindWait";
 import type { SessionReleaseReason } from "./releaseReasons";
 import type { Environment } from "./poolConfig";
 import {
@@ -711,6 +712,8 @@ export interface TargetDeviceDiscoverySnapshot {
 
 export interface TargetDeviceDiscoveryOptions {
   deviceId: string;
+  sessionId?: string;
+  readinessReservationOwners?: ReadonlySet<symbol>;
   sourceImage?: DeviceInfo;
   unavailableMessage: string;
   platform: Platform;
@@ -7911,6 +7914,8 @@ export class DevicePool {
     const heldBefore = this.devices.get(deviceId)?.sessionId ?? null;
     const boundSessionId = await this.withTargetDeviceDiscovery({
       deviceId,
+      sessionId,
+      readinessReservationOwners,
       sourceImage: verifiedAndroidAvdIdentity ?? sourceImage,
       unavailableMessage: `Device '${deviceId}' is not available in the device pool.`,
       platform,
@@ -8272,9 +8277,25 @@ export class DevicePool {
     }
   }
 
+  /** Leave foreign ownership refusals to the operation instead of waiting on transport. */
+  private hasForeignTargetDeviceHolder(
+    device: PooledDevice | undefined,
+    sessionId: string | undefined,
+    readinessReservationOwners: ReadonlySet<symbol> | undefined,
+  ): boolean {
+    return (
+      device !== undefined &&
+      ((device.sessionId !== null && device.sessionId !== sessionId) ||
+        this.hasReadinessNameReservation(device, readinessReservationOwners) ||
+        this.isReservedForOtherRehydration(device, sessionId))
+    );
+  }
+
   /** Snapshot first, then serialize assertions and claim; replacements retry unlocked. */
   private async withTargetDeviceDiscovery({
     deviceId,
+    sessionId,
+    readinessReservationOwners,
     sourceImage,
     unavailableMessage,
     platform,
@@ -8282,6 +8303,12 @@ export class DevicePool {
   }: TargetDeviceDiscoveryOptions): Promise<string> {
     let staleRetries = 0;
     let readyNotifiedEntry: PooledDevice | undefined;
+    const transportWait = new TransitionalAdbBindWait(deviceId, {
+      timer: this.timer,
+      probe: this.deviceManager.getAndroidListedDeviceStates?.bind(this.deviceManager),
+      probeTimeoutMs: ANDROID_OFFLINE_PROBE_TIMEOUT_MS,
+      getSignal: getAbortSignal,
+    });
     while (true) {
       throwIfRequestAborted();
       const capturedEntry = this.devices.get(deviceId);
@@ -8312,6 +8339,21 @@ export class DevicePool {
           },
           { timer: this.timer, signal: getAbortSignal(), label: "Exact device discovery" },
         );
+        const skipTransportWait = [
+          shutdownReserved,
+          shutdownMarker !== undefined,
+          this.recoveringAndroidDeviceIds.has(deviceId),
+          this.hasForeignTargetDeviceHolder(capturedEntry, sessionId, readinessReservationOwners),
+        ].some(Boolean);
+        if (
+          !skipTransportWait &&
+          snapshot.androidPresence &&
+          didSourceSucceedForDevice(snapshot.androidPresence, "android", deviceId) &&
+          !snapshot.androidPresence.devices.some((device) => device.deviceId === deviceId) &&
+          (await transportWait.waitIfTransitional())
+        ) {
+          continue;
+        }
         snapshot.readyNotifiedEntry = readyNotifiedEntry;
         result = await this.assignmentMutex.runExclusive(async () => {
           throwIfRequestAborted();

@@ -646,12 +646,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     timer: Timer,
     builder?: IosCtrlProxyBuilder,
     tunnelClient?: IosTunnelClient,
+    processExecutor?: HostProcessExecutor,
   ): IOSCtrlProxyManager {
     return new IOSCtrlProxyManager({
       device,
       timer,
       builder,
       tunnelClient,
+      processExecutor,
       physicalDeviceLister: NO_PHYSICAL_DEVICES,
     });
   }

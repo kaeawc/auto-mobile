@@ -93,7 +93,11 @@ import {
   configuredImageSchema,
 } from "./deviceDescription";
 import { poolHoldFor } from "./deviceDescription";
-import { describeInventoryDevice, type AdbOfflineHold } from "./inventoryDeviceDescription";
+import {
+  describeInventoryDevice,
+  transitionalHoldInputs,
+  type TransitionalHold,
+} from "./inventoryDeviceDescription";
 import {
   notifyInstalledAppResourceListChanged,
   syncInstalledAppResourceRegistry,
@@ -1006,8 +1010,11 @@ export function listDevicePayloads(
     devicePool?.getAndroidTransportAliases(deviceId) ?? [],
   transportAvdNameForDevice: (deviceId: string) => string | undefined = (deviceId) =>
     devicePool?.getAndroidTransportAvdName(deviceId),
-  /** Held devices `adb devices` lists in a non-`device` state, by serial (#11455). */
-  adbOfflineHolds: ReadonlyMap<string, AdbOfflineHold> = new Map(),
+  /**
+   * Held devices their platform lists in a transitional state, by device id: Android in a
+   * non-`device` adb state (#11455), iOS `Booting` / `Shutting Down` (#11573).
+   */
+  transitionalHolds: ReadonlyMap<string, TransitionalHold> = new Map(),
 ) {
   const sessionManager = DaemonState.getInstance().isInitialized()
     ? DaemonState.getInstance().getSessionManager()
@@ -1028,7 +1035,7 @@ export function listDevicePayloads(
       deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
       hold: pooled ? poolHoldFor(devicePool, device.deviceId) : undefined,
       poolStatus: pooled ? devicePool?.poolBucket(device.deviceId) : undefined,
-      adbOffline: adbOfflineHolds.get(device.deviceId),
+      ...transitionalHoldInputs(transitionalHolds.get(device.deviceId)),
       transportAvdName: transportAvdNameForDevice(device.deviceId),
     });
     if (device.platform === "android") {

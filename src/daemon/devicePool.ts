@@ -71,7 +71,7 @@ import {
   waitForDeviceReadyOrCancel,
 } from "../devices/deviceUtils";
 import { BootedDeviceDiscoveryIncompleteError } from "../devices/deviceBootService";
-import { adbOfflineHeldDevices } from "../server/adbOfflineHeldDevices";
+import { adbOfflineHeldDevices, transitionalHeldSimulators } from "../server/adbOfflineHeldDevices";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -5899,7 +5899,8 @@ export class DevicePool {
 
   /**
    * The pooled device ids the booted-devices resource and listDevices would list: what discovery
-   * reports now plus held Android devices adb still lists offline. A pooled entry outside this set
+   * reports now plus held Android devices adb still lists offline and held simulators `simctl` lists
+   * Booting / Shutting Down (#11573). A pooled entry outside this set
    * is a phantom (shut down since the last refresh) and must not be counted (#11568). Only
    * platforms with pooled entries are read, through the manager's own discovery path (adb's
    * device-list cache applies), so a stats read adds one listing per such platform and no
@@ -5937,8 +5938,17 @@ export class DevicePool {
         discovered: devices,
         devicePool: this,
         deviceManager: this.deviceManager,
+        // A held device discovery misses and the probe cannot place is unknown, never zero.
+        onProbeFailure: "throw",
       });
       for (const held of offlineHeld) {
+        live.add(held.device.deviceId);
+      }
+      for (const held of transitionalHeldSimulators({
+        transitional: discovery.transitionalSimulators,
+        discovered: devices,
+        devicePool: this,
+      })) {
         live.add(held.device.deviceId);
       }
     }

@@ -95,6 +95,12 @@ export interface DeviceDescription {
      * offline budget (#11118). Absent for a device adb reports online.
      */
     connection?: { state: "offline"; adbState: string };
+    /**
+     * Present only while a session holds an iOS simulator that `simctl` lists `Booting` or
+     * `Shutting Down` (#11573); `lifecycle.state` is then `booting` / `shutting-down`. Absent for
+     * a simulator that is booted.
+     */
+    simulatorState?: "Booting" | "Shutting Down";
   };
 }
 

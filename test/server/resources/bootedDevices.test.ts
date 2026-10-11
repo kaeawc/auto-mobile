@@ -2037,8 +2037,8 @@ describe("MCP Booted Device Resources", () => {
         ios: {
           observationComplete: false,
           discoveryError: {
-            code: "unavailable",
-            message: "iOS booted-device discovery is unavailable.",
+            code: "failed",
+            message: "iOS booted-device discovery failed.",
           },
         },
       });

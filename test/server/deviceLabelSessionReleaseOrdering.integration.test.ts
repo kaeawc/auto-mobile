@@ -5,6 +5,7 @@ import { PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
 import { releaseDeviceLabelSessions } from "../../src/server/deviceLabelMapping";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 
 // #4984: releasing a derived device-label session must await the session release
 // (so its central onSessionRelease cleanup — CtrlProxy binding + build context —
@@ -53,7 +54,9 @@ describe("releaseDeviceLabelSessions ordering", () => {
         // The base session must exist for its device-label map to persist; the derived
         // session is the one releaseDeviceLabelSessions frees.
         await sessionManager.createSession(base, "emulator-5554", "android");
-        await sessionManager.createSession(derived, "emulator-5555", "android");
+        await asPlanAllocation(sessionManager, base, [derived], () =>
+          sessionManager.createSession(derived, "emulator-5555", "android"),
+        );
         sessionManager.setDeviceLabels(base, { A: base, B: derived });
 
         const released = await releaseDeviceLabelSessions(base);

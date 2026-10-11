@@ -223,4 +223,28 @@ describe("AdbClient concurrent device-list snapshots", () => {
     expect(await client.getBootedAndroidDevices({ timeoutMs: 2_000 })).toHaveLength(1);
     expect(calls).toBe(1);
   });
+
+  test("a client on another timer never reads a device list cached on a different timer (#11614)", async () => {
+    // Leak class: the list used to be cached on the first timer that touched it, so a later
+    // test's client (own FakeTimer) saw the earlier test's frozen entry and its in-flight read.
+    const earlier = new AdbClient(
+      null,
+      async () => resultFor("emulator-5554"),
+      null,
+      undefined,
+      new FakeTimer(),
+    );
+    const later = new AdbClient(
+      null,
+      async () => resultFor("emulator-5556"),
+      null,
+      undefined,
+      new FakeTimer(),
+    );
+
+    expect(await earlier.getBootedAndroidDevices()).toMatchObject([{ deviceId: "emulator-5554" }]);
+    expect(await later.getBootedAndroidDevices()).toMatchObject([{ deviceId: "emulator-5556" }]);
+    // The same timer still shares one cache entry.
+    expect(await earlier.getBootedAndroidDevices()).toMatchObject([{ deviceId: "emulator-5554" }]);
+  });
 });

@@ -180,10 +180,12 @@ well, set the device with \`displayConfig\` and restore the \`previous\` value i
 
 What the device reports (\`prototype_appearance_v1\`; absent on a device without it):
 
-- A successful show returns \`lastResult.appearance: {mode, source, deviceDark}\`; \`status\` and
-  \`inspect\` carry the same object on each prototype. \`deviceDark\` is the device's own setting
-  whatever decided \`mode\`; it is present only when the device reported it (a show result or
-  \`inspect\`) and is omitted after an \`appearance_changed\` event until the next one.
+- A successful show returns \`lastResult.appearance: {mode, source, deviceDark}\`, and \`inspect\`
+  carries the same object on each prototype. \`deviceDark\` is the device's own setting whatever
+  decided \`mode\`. Only a device answer states it, and only for the moment it answered: the show
+  result and \`inspect\`. \`status\` is host-local, so it reports \`mode\` and \`source\` (kept current by
+  \`appearance_changed\` events) and never \`deviceDark\`, because the device can flip while a pinned
+  mode stays put and then no event arrives. Call \`inspect\` when you need it now.
 - While a prototype is shown it follows the device live. Any change of the resolved mode (the
   device flipping, or prototype state changing a background the mode is inferred from) sends one
   \`appearance_changed\` event with a null \`name\` and the payload \`{mode, source}\`, and refreshes

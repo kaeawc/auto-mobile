@@ -20,3 +20,22 @@ Use this workflow before pushing a Node or TypeScript change.
    timing overages use the timing gate's isolated recheck; do not alter tests
    when that recheck is clean. Treat a matching cross-platform failure as
    shared state or stale base until proven otherwise.
+
+## What the gate reproduces, and what stays CI-only
+
+`prepush-node.sh` runs: stale-base guard, `format:check`, `typecheck`, `lint`
+(oxlint, ratchet, `check-boundaries.sh`), the test as-any ratchet, tool
+definitions drift, the static Fast Validation subset (`yaml`, `runtime-pins`,
+`stdlib-first`, `shared-process-allowlist`, `docs-assets`, `env-var-docs`,
+`lfs-pointers`, `lychee-offline`, and the other tool-free checks named in
+`FAST_VALIDATION_CHECKS`), `test/lint/`, the image smoke, the unit lane, the
+`test/db` fast path, and the 100 ms timing budget on Linux.
+
+CI-only by design: the Windows and macOS unit/integration legs (path
+separators, `test/lint/pathSeparatorAssertions.test.ts` is the static proxy),
+the loaded-runner timing budget (a local pass proves only the unloaded case;
+`--timing` forces it on macOS), ShellCheck at CI's pinned version (local may be
+newer: keep `# shellcheck disable=SC2329` paired with SC2317), online docs link
+checks (`merge.yml`), the clean-room pinned runtime graph install
+(`scripts/ci/verify-pinned-runtime-graph.sh`, needs network), benchmarks,
+CodeQL, and the Android/iOS/desktop builds.

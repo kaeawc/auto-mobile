@@ -61,6 +61,13 @@ export interface HeartbeatSessionSource {
    * release's start and never reaps it for the silence the release itself imposed.
    */
   getNonTerminalReleasesInProgress?(): NonTerminalReleaseInProgress[];
+  /**
+   * Whether the release of this session that started at `startedAtMs` is still running and still
+   * holds its device, whatever reason it carries now (#11554). A joiner can upgrade a non-terminal
+   * release to a terminal reason, which drops it from {@link getNonTerminalReleasesInProgress}
+   * while it is as wedged as before; the monitor asks this before it forgets a release it tracks.
+   */
+  isReleaseInProgress?(sessionId: string, startedAtMs: number): boolean;
 }
 
 /** One idle release the session source is still running. */
@@ -584,9 +591,12 @@ export class SessionHeartbeatMonitor {
   /**
    * Mirror the releases the source runs without a monitor reap into {@link reapStartedAt}: its
    * idle releases (#11481) and its non-terminal releases, which the monitor never joins (#11554)
-   * and so must hold to the stuck deadline from their own start. One that settled, was forced and
-   * so no longer holds its device, or was upgraded to a terminal reason drops out of the source's
-   * lists and is forgotten here; a new release of the same session id starts a new deadline. A
+   * and so must hold to the stuck deadline from their own start. One that settled, or was forced
+   * and so no longer holds its device, is forgotten here; a new release of the same session id
+   * starts a new deadline. One a joiner upgraded to a terminal reason also drops out of the
+   * source's lists, but it is the same release, as wedged as before, and no reap of the monitor
+   * need ever join it (an in-flight call vetoes the reap): it stays tracked from its own start
+   * until the source says it is over, and is forced with whatever reason it carries by then. A
    * reap of the monitor's own is left alone: it is already tracked from its own start and
    * forgotten when it settles.
    */
@@ -602,7 +612,11 @@ export class SessionHeartbeatMonitor {
       ]),
     );
     for (const [sessionId, tracked] of this.reapStartedAt) {
-      if (tracked.sourceRelease && inProgress.get(sessionId) !== tracked.at) {
+      if (
+        tracked.sourceRelease &&
+        inProgress.get(sessionId) !== tracked.at &&
+        this.sessions.isReleaseInProgress?.(sessionId, tracked.at) !== true
+      ) {
         this.reapStartedAt.delete(sessionId);
       }
     }

@@ -154,6 +154,7 @@ test/daemon/managedSlots/slotsUnresolvedEmulatorIdentityGate.test.ts
 test/daemon/managedSlots/sqliteSlotRegistry.test.ts
 test/daemon/managerOutputReductionArgs.test.ts
 test/daemon/observationRequestBatch.test.ts
+test/daemon/observerLeaseSleepForgiveness.test.ts
 test/daemon/observerLeaseWallClockStep.test.ts
 test/daemon/observerSessionRegistry.test.ts
 test/daemon/observerSessionRequestHandlers.test.ts

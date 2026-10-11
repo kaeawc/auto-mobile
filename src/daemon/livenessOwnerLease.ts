@@ -11,6 +11,7 @@ import type { SessionLivenessClock } from "./sessionClocks";
 import type { Session, SessionLivenessPolicy } from "./sessionManager";
 import { SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
 import { holdsOwnerHeartbeatLease } from "./managedExecutionLiveness";
+import { leaseRunningAt } from "./stallForgiveness";
 
 /**
  * How long a session whose owner missed its lease is held, device still reserved
@@ -202,7 +203,7 @@ export function ownerLeaseLiveAt(
   const lastHeartbeat = judgesOwnerHeartbeats(session)
     ? (session.lastOwnerHeartbeat ?? session.lastHeartbeat)
     : session.lastHeartbeat;
-  return at - lastHeartbeat <= session.heartbeatTimeoutMs;
+  return leaseRunningAt(lastHeartbeat, session.heartbeatTimeoutMs, at);
 }
 
 /**

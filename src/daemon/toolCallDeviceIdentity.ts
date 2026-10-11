@@ -1,4 +1,6 @@
+import type { DeviceDiscoveryError } from "../devices/deviceUtils";
 import { ActionableError, type BootedDevice } from "../models";
+import { AndroidBootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import { isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import {
   canonicalFrameDeviceId,
@@ -30,7 +32,8 @@ const unprovenTransportProbes = new WeakMap<object, Map<string, number>>();
  * fold only (no device I/O): the top-level `deviceId` every device tool, `setActiveDevice` and
  * `startDevice` take, and `killDevice`'s `device.deviceId`. Returns `args` itself when nothing
  * changes; never mutates it. Identity for iOS ids, for ids the pool has not folded, and with no
- * pool (direct mode).
+ * pool (direct mode). The read half of {@link resolveToolCallDeviceIds}; called on its own only
+ * where nothing may wait (the socket server's forward key).
  */
 export function canonicalizeToolCallDeviceIds<T>(
   pool: ToolCallDeviceIdentityPool | undefined,
@@ -39,24 +42,34 @@ export function canonicalizeToolCallDeviceIds<T>(
   if (!pool || !isRecord(args)) {
     return args;
   }
+  const nested = args.device;
+  return withDeviceIds(
+    args,
+    typeof args.deviceId === "string" ? canonicalFrameDeviceId(pool, args.deviceId) : undefined,
+    isRecord(nested) && typeof nested.deviceId === "string"
+      ? canonicalFrameDeviceId(pool, nested.deviceId)
+      : undefined,
+  );
+}
+
+/** `args` with its device ids replaced; `args` itself when both already are what it carries. */
+function withDeviceIds<T extends Record<string, unknown>>(
+  args: T,
+  deviceId: string | undefined,
+  nestedDeviceId: string | undefined,
+): T {
   let result: Record<string, unknown> = args;
-  if (typeof args.deviceId === "string") {
-    const canonical = canonicalFrameDeviceId(pool, args.deviceId);
-    if (canonical !== args.deviceId) {
-      result = { ...result, deviceId: canonical };
-    }
+  if (deviceId !== undefined && deviceId !== args.deviceId) {
+    result = { ...result, deviceId };
   }
   const nested = args.device;
-  if (isRecord(nested) && typeof nested.deviceId === "string") {
-    const canonical = canonicalFrameDeviceId(pool, nested.deviceId);
-    if (canonical !== nested.deviceId) {
-      result = { ...result, device: { ...nested, deviceId: canonical } };
-    }
+  if (nestedDeviceId !== undefined && isRecord(nested) && nestedDeviceId !== nested.deviceId) {
+    result = { ...result, device: { ...nested, deviceId: nestedDeviceId } };
   }
   return result as T;
 }
 
-/** Whether `args` carries a device id {@link canonicalizeToolCallDeviceIds} would resolve. */
+/** Whether `args` carries a device id {@link resolveToolCallDeviceIds} would resolve. */
 export function toolCallNamesDeviceId(args: unknown): boolean {
   return (
     isRecord(args) &&
@@ -69,23 +82,80 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export interface ControlCallDeviceIdentityInput {
-  pool: ToolCallDeviceIdentityPool | undefined;
-  deviceId: string;
+/** One `adb devices` listing as RAW rows, and whether it completed. */
+export interface RawAndroidListing {
+  devices: readonly BootedDevice[];
+  /**
+   * False when the listing failed, timed out or could not be asked: its rows say nothing about
+   * which transports are connected, and an id missing from them is unknown, not absent.
+   */
+  complete: boolean;
+  error?: DeviceDiscoveryError;
+}
+
+/** What a control call may do to place a transport address the pool has never folded. */
+export interface ToolCallDeviceIdProbe {
   /**
    * A fresh `adb devices` listing as RAW rows: each transport under its own serial, carrying its
    * own adb transport id. Never rows already mapped onto pooled ids (a readiness scan): a mapped
    * alias row is named like the canonical device but carries the alias's connection, and folding
    * it would record that connection as the canonical serial's and misroute the holder's dispatch.
    */
-  listRawAndroidDevices: () => Promise<readonly BootedDevice[]>;
+  listRawAndroidDevices: () => Promise<RawAndroidListing>;
   /**
    * The discovery funnel (`reconcileDiscoveryObservation`): handed the listing as pooled canonical
    * rows once it is folded, before the id is returned and any pool state is read for it.
    */
   reconcileDiscovery: (devices: readonly BootedDevice[]) => Promise<void>;
+  /**
+   * Whether the pool tracks an Android device. One it tracks may be held by a session, assigned
+   * to a managed slot or claimed by another daemon, and an address a failed listing could not
+   * place may be a second route to it. With none, there is nothing the address could be an alias
+   * of: a host without adb (or without Android devices) is refused nothing here.
+   */
+  tracksAndroidDevice: () => boolean;
   /** The caller's clock, for {@link UNPROVEN_TRANSPORT_PROBE_RETRY_MS}. */
   now: number;
+}
+
+export interface ControlCallDeviceIdentityInput extends ToolCallDeviceIdProbe {
+  pool: ToolCallDeviceIdentityPool | undefined;
+  deviceId: string;
+}
+
+/**
+ * THE entry point for a tool call's device ids (#11618): `args` with the top-level `deviceId` and
+ * `killDevice`'s `device.deviceId` as the pool's canonical ids. Every path that takes a
+ * caller-supplied id goes through here before any holder, managed-slot, routing, admission or
+ * queue decision reads it: the MCP ingress, an internal call (plan step, nested tool) and the
+ * execution-target resolver.
+ *
+ * With a `probe` (a CONTROL call) an address the pool has never folded is placed first
+ * ({@link canonicalControlCallDeviceId}); without one (a read) only the pool's cached fold
+ * answers, and nothing is ever refused. Returns `args` itself, synchronously, when nothing changes
+ * and nothing needs a probe; never mutates it. Identity with no pool (direct mode).
+ */
+export function resolveToolCallDeviceIds<T>(
+  pool: ToolCallDeviceIdentityPool | undefined,
+  args: T,
+  probe: ToolCallDeviceIdProbe | undefined,
+): T | Promise<T> {
+  if (!pool || !isRecord(args)) {
+    return args;
+  }
+  if (!probe) {
+    return canonicalizeToolCallDeviceIds(pool, args);
+  }
+  const resolve = (deviceId: unknown): string | Promise<string> | undefined =>
+    typeof deviceId === "string"
+      ? canonicalControlCallDeviceId({ ...probe, pool, deviceId })
+      : undefined;
+  const topLevel = resolve(args.deviceId);
+  const nested = resolve(isRecord(args.device) ? args.device.deviceId : undefined);
+  if (typeof topLevel !== "object" && typeof nested !== "object") {
+    return withDeviceIds(args, topLevel, nested);
+  }
+  return Promise.all([topLevel, nested]).then(([top, inner]) => withDeviceIds(args, top, inner));
 }
 
 /**
@@ -93,6 +163,14 @@ export interface ControlCallDeviceIdentityInput {
  * folded yet: a wireless id first named by a tool call, before any pool refresh saw it. Such an
  * address proves nothing about which handset answers on it, so it is probed and folded additively
  * (`canonicalizeFrameDiscovery`, as a direct frame does) before the holder check reads it.
+ *
+ * A FAILED listing never fails open. When `adb devices` does not complete, the address cannot be
+ * placed; if the pool tracks an Android device it may be a second route to, the call is refused
+ * typed and retryable (`discovery_incomplete`) instead of being judged as an unheld device. A
+ * call naming a device by the id the pool holds it under never comes this far, so a holder is
+ * never locked out of its own device by an adb failure. A transport that IS listed and whose
+ * identity the pool cannot prove is a different question, and stays allowed
+ * ({@link mayControlUnheldUnidentifiedTransport}).
  *
  * Cost: an id the pool already holds or has folded, an emulator or USB serial and an iOS id are
  * answered from the pool's cached fold with no device I/O. Only an unfolded transport ADDRESS is
@@ -131,9 +209,12 @@ async function foldFirstSeenTransport(
   input: ControlCallDeviceIdentityInput,
 ): Promise<string> {
   const { deviceId, now } = input;
-  const android = (await input.listRawAndroidDevices()).filter(
-    (device) => device.platform === "android",
-  );
+  const listing = await input.listRawAndroidDevices();
+  if (!listing.complete) {
+    // Never remembered: the next call asks adb again, so a recovered adb is seen at once.
+    return unlistedTransportOutcome(input, listing.error);
+  }
+  const android = listing.devices.filter((device) => device.platform === "android");
   const canonical = await canonicalizeFrameDiscovery(pool, "android", android, deviceId);
   await input.reconcileDiscovery(canonical.devices);
   const folded = canonical.deviceId;
@@ -149,6 +230,30 @@ async function foldFirstSeenTransport(
     memo.set(deviceId, now);
   }
   return deviceId;
+}
+
+/**
+ * The answer for an address a failed listing said nothing about: refused while the pool tracks an
+ * Android device it may reach, the id as sent otherwise.
+ */
+function unlistedTransportOutcome(
+  input: ControlCallDeviceIdentityInput,
+  discoveryError: DeviceDiscoveryError | undefined,
+): string {
+  if (!input.tracksAndroidDevice()) {
+    return input.deviceId;
+  }
+  const error = discoveryError ?? {
+    code: "failed",
+    message: "Android booted-device discovery did not complete.",
+  };
+  throw new AndroidBootedDeviceDiscoveryIncompleteError(
+    error,
+    `discovery_incomplete: Android transport '${input.deviceId}' could not be identified ` +
+      `(${error.message}), so it cannot be told apart from a device the pool already tracks, ` +
+      "which a session may hold; nothing was sent. Retry shortly, or name the device by the id " +
+      "listDevices reports for it.",
+  );
 }
 
 /** A bare ADB transport address the pool neither holds as a device nor has folded onto one. */

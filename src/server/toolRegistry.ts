@@ -49,10 +49,10 @@ import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import {
   assertToolTargetIdentityProven,
-  canonicalControlCallDeviceId,
-  canonicalizeToolCallDeviceIds,
+  resolveToolCallDeviceIds,
   toolCallNamesDeviceId,
 } from "../daemon/toolCallDeviceIdentity";
+import { didSourceSucceedForDevice } from "../utils/discoverySource";
 import {
   managedConnectionControlRefusal,
   managedConnectionPlainToolRefusal,
@@ -865,67 +865,90 @@ function isDeviceHeld(deviceId: string): boolean {
 }
 
 /**
- * The call's `deviceId` as the pool's canonical id, resolved ONCE before any holder, managed-slot,
- * routing, admission or queue decision (#11618): a handset on USB and wireless debugging is one
- * pooled device held under one id, and a call may name it by either. Everything after this line,
- * the handler included, sees only the canonical id. A read resolves from the pool's cached fold;
- * a control call also folds a transport the pool has not seen yet, so a wireless id first named
- * here cannot slip past the holder of the handset it reaches.
+ * The registry's one entry point for the device ids a caller supplies (#11618), over
+ * `resolveToolCallDeviceIds`: the MCP ingress (`ToolRegistryClass.resolveToolCallDeviceIds`), an
+ * internal call (`callInternal`: a plan step, a nested tool) and the execution-target resolver all
+ * come through here, so a device named by its other transport id is judged, queued and driven as
+ * the one pooled device it is on every path. A handset on USB and wireless debugging is one
+ * pooled device held under one id, and a call may name it by either.
+ *
+ * A read resolves from the pool's cached fold. A control call also places a transport the pool
+ * has not seen yet, so a wireless id first named here cannot slip past the holder of the handset
+ * it reaches; when the adb listing fails while the pool tracks an Android device, it is refused
+ * (`discovery_incomplete`) rather than judged as an unheld device. Synchronous, and `args` itself,
+ * whenever nothing changes and nothing is probed.
  */
-function canonicalizeCallDeviceId(input: ExecutionTargetInput): Promise<void> | undefined {
-  const { args, options } = input;
-  if (typeof args?.deviceId !== "string" || !DaemonState.getInstance().isInitialized()) {
-    return undefined;
+function resolveCallerDeviceIds<T extends Record<string, unknown>>(
+  args: T,
+  request: { control: boolean; signal?: AbortSignal; timer?: Timer },
+): T | Promise<T> {
+  const daemonState = DaemonState.getInstance();
+  if (!toolCallNamesDeviceId(args) || !daemonState.isInitialized()) {
+    return args;
   }
-  const pool = DaemonState.getInstance().getDevicePool();
-  const resolvesDevice = options.shouldEnsureDevice ? options.shouldEnsureDevice(args) : true;
-  if (isDeviceReadOnlyCall(options, args) || !resolvesDevice || args.platform === "ios") {
-    args.deviceId = canonicalizeToolCallDeviceIds(pool, { deviceId: args.deviceId }).deviceId;
-    return undefined;
+  const pool = daemonState.getDevicePool();
+  if (!request.control) {
+    return resolveToolCallDeviceIds(pool, args, undefined);
   }
-  const resolved = canonicalControlCallDeviceId({
-    pool,
-    deviceId: args.deviceId,
-    now: (input.timer ?? defaultTimer).now(),
+  const { signal } = request;
+  return resolveToolCallDeviceIds(pool, args, {
+    now: (request.timer ?? defaultTimer).now(),
+    tracksAndroidDevice: () => pool.getAllDevices().some((device) => device.platform === "android"),
     // RAW adb rows, as the pool's own refresh folds them. The session manager's scan is already
     // mapped onto pooled ids and would record an alias's connection under the canonical serial.
-    listRawAndroidDevices: async () =>
-      (
-        await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed("android", {
-          signal: input.signal,
-          bypassAndroidDeviceListCache: true,
-        })
-      ).devices,
+    listRawAndroidDevices: async () => {
+      const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(
+        "android",
+        { signal, bypassAndroidDeviceListCache: true },
+      );
+      return {
+        devices: discovery.devices,
+        complete: didSourceSucceedForDevice(discovery, "android", undefined),
+        error: discovery.discoveryErrors?.android,
+      };
+    },
     reconcileDiscovery: (devices) =>
-      reconcileDiscoveryObservation(devices, "tools/call:first-seen-transport", {
-        signal: input.signal,
-      }),
-  });
-  if (typeof resolved === "string") {
-    args.deviceId = resolved;
-    return undefined;
-  }
-  return resolved.then((deviceId) => {
-    args.deviceId = deviceId;
+      reconcileDiscoveryObservation(devices, "tools/call:first-seen-transport", { signal }),
   });
 }
 
 /**
- * An internal call's arguments (a plan step, a nested tool) with the device ids a PLAIN tool takes
- * as the pool's canonical ids (#11618): `setActiveDevice`, `killDevice` and `startDevice` never
- * reach the execution-target resolver, and the managed-slot gate below reads the same arguments.
- * A device-aware tool resolves its own `deviceId` in the resolver, where a first-seen transport
- * can be probed.
+ * Whether a call's device ids are resolved as a control call's: anything but a read. An iOS id is
+ * never an adb transport, so it is never probed.
  */
-function canonicalPlainInternalCallArgs(
-  tool: RegisteredTool,
+function isDeviceIdControlCall(
+  tool: Pick<RegisteredTool, "isDeviceReadOnlyCall">,
   args: Record<string, unknown>,
-): Record<string, unknown> {
-  const daemonState = DaemonState.getInstance();
-  if (tool.requiresDevice || !toolCallNamesDeviceId(args) || !daemonState.isInitialized()) {
-    return args;
+): boolean {
+  return tool.isDeviceReadOnlyCall?.(args) !== true && args.platform !== "ios";
+}
+
+/**
+ * A device-aware call's `deviceId` as the pool's canonical id, resolved ONCE before any holder,
+ * managed-slot, routing, admission or queue decision: everything after this line, the handler
+ * included, sees only the canonical id. A call that resolves no device probes nothing.
+ */
+function canonicalizeCallDeviceId(input: ExecutionTargetInput): Promise<void> | undefined {
+  const { args, options } = input;
+  if (typeof args?.deviceId !== "string") {
+    return undefined;
   }
-  return canonicalizeToolCallDeviceIds(daemonState.getDevicePool(), args);
+  const resolvesDevice = options.shouldEnsureDevice ? options.shouldEnsureDevice(args) : true;
+  const resolved = resolveCallerDeviceIds(
+    { deviceId: args.deviceId as string },
+    {
+      control: !isDeviceReadOnlyCall(options, args) && resolvesDevice && args.platform !== "ios",
+      signal: input.signal,
+      timer: input.timer,
+    },
+  );
+  if (resolved instanceof Promise) {
+    return resolved.then(({ deviceId }) => {
+      args.deviceId = deviceId;
+    });
+  }
+  args.deviceId = resolved.deviceId;
+  return undefined;
 }
 
 /**
@@ -3216,6 +3239,24 @@ export class ToolRegistryClass {
   // `RegisteredTool` for sites that must resolve it themselves first (e.g. to run
   // `tool.schema.parse` before the call). Throws `ActionableError` when a name
   // does not resolve; callers that degrade gracefully wrap the call in try/catch.
+  /**
+   * The MCP ingress's use of the one device-id resolver (#11618): a `tools/call`'s arguments with
+   * the device ids they name as the pool's canonical ids, before the server routes, judges or
+   * queues the call. Covers plain tools, which no execution-target resolver sees, and a client
+   * that reaches the daemon's MCP endpoint without the socket server in front of it.
+   */
+  resolveToolCallDeviceIds(
+    tool: RegisteredTool,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Record<string, unknown> | Promise<Record<string, unknown>> {
+    return resolveCallerDeviceIds(args, {
+      control: isDeviceIdControlCall(tool, args),
+      signal,
+      timer: this.timer,
+    });
+  }
+
   async callInternal(
     tool: string | RegisteredTool,
     args: Record<string, unknown>,
@@ -3232,8 +3273,18 @@ export class ToolRegistryClass {
     if (!resolved) {
       throw new ActionableError(`Tool not found: ${tool}`);
     }
+    // A device-aware tool resolves its own `deviceId` in the execution-target resolver; a plain
+    // tool (`setActiveDevice`, `killDevice`, `startDevice`) never reaches it, and the managed-slot
+    // gate below reads the same arguments.
+    const callArgs = resolved.requiresDevice
+      ? args
+      : resolveCallerDeviceIds(args, {
+          control: isDeviceIdControlCall(resolved, args),
+          signal,
+          timer: this.timer,
+        });
     const invocation = this.createInternalToolInvocationContext(
-      canonicalPlainInternalCallArgs(resolved, args),
+      callArgs instanceof Promise ? await callArgs : callArgs,
       options,
     );
     assertInternalCallWithinManagedSlots(resolved.name, invocation);

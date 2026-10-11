@@ -1,3 +1,5 @@
+import { SessionRecoveryAssignmentError } from "./SessionRecoveryAssignmentError";
+
 /** The wire fields of a typed refusal: a `code` a client can branch on and whether to retry. */
 export interface TypedRefusalFields {
   code: string;
@@ -14,6 +16,12 @@ export interface TypedRefusalFields {
  * else (e.g. a Node `ENOENT`) yields `undefined`.
  */
 export function typedRefusalFields(error: unknown): TypedRefusalFields | undefined {
+  // Its code and retry intent live in `details` (the MCP envelope nests them there); lift them to
+  // the top level and keep `details` whole for readers of the nested shape.
+  if (error instanceof SessionRecoveryAssignmentError) {
+    const { code, retryable } = error.details;
+    return { code, retryable, details: { ...error.details } };
+  }
   if (typeof error !== "object" || error === null) {
     return undefined;
   }

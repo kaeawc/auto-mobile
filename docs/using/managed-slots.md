@@ -290,9 +290,12 @@ The registry tracks each scope as `valid`, `invalidating` or `invalidated`
   ```
 
   `--force` abandons a slot stuck `settling` (its released work outlived the
-  settlement cap): the slot returns to `ready`, its release journal entry is
-  committed, and the reset proceeds. It never overrides a slot with a live
-  execution owner, which still reports `pending`; the stuck work may keep running.
+  5-minute settlement cap): the slot returns to `ready`, its release journal entry
+  is committed, and the reset proceeds. It never overrides a slot with a live
+  execution owner, nor a slot still inside the cap: those report `pending`, and
+  the scope's `forceRefusals` says why and how long remains (`remainingMs`) before
+  `--force` will apply. A `settling` slot with no open release entry is reported
+  the same way. The stuck work may keep running after an abandon.
 
   `--runner-namespace` and `--incarnation` are required; `--managed-host-scope`
   narrows to one host scope; `--wait-ms` is the bounded settle wait (integer 0 to

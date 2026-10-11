@@ -14,6 +14,7 @@ import {
 } from "../devices/virtualDeviceLifecycleCoordinator";
 import { logger } from "../utils/logger";
 import { isTypedToolRefusal, shapeToolCallError } from "./shapeToolCallError";
+import { typedRefusalFields } from "../models/typedRefusalFields";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import type { ProgressCallback } from "./toolRegistry";
@@ -153,6 +154,12 @@ export function typedTeardownRefusal(
   phase: "precondition" | "stop" | "destroy" | "verification" = "precondition",
 ): TeardownToolResponse | undefined {
   if (!isTypedToolRefusal(error)) {
+    return undefined;
+  }
+  // A boot or shutdown timeout is typed for startDevice/killDevice (#11548), but a teardown
+  // deadline stays the `operation_failed` failure it always reported; typing it is a separate
+  // wire decision.
+  if (typedRefusalFields(error)?.code === "timeout") {
     return undefined;
   }
   const wire = JSON.parse(

@@ -38,6 +38,7 @@ import { logger } from "../utils/logger";
 import { truncateBodyText } from "../utils/truncateBodyText";
 import { displayTransitions } from "../features/observe/DisplayTransition";
 import { getObserveCacheStore } from "../features/observe/cache/ObserveCacheRegistry";
+import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   ANONYMOUS_ACQUISITION_SESSION_SOURCE,
   isAnonymousAcquisitionSession,
@@ -8755,13 +8756,20 @@ export class DevicePool {
   /**
    * Whether a still-connected MCP client other than `mcpSessionId` owns the live session
    * `sessionId` (#11344): it acquired or restored it, or routes to it by autolock. The general
-   * rule {@link mayRestoreMcpSessionOwnership} applies, with autolock on or off.
+   * rule {@link mayRestoreMcpSessionOwnership} applies, with autolock on or off. A derived
+   * `${base}:${label}` session records no owner of its own, so it counts as its base (#11542).
    */
   isSessionOwnedByOtherConnection(sessionId: string, mcpSessionId?: string): boolean {
     if (mcpSessionId !== undefined) {
+      if (this.sessionManager.getSession(sessionId) === null) {
+        return false;
+      }
+      const baseSessionId = resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager);
       return (
-        this.hasConnectedMcpSessionOwner(sessionId, mcpSessionId) &&
-        this.sessionManager.getSession(sessionId) !== null
+        this.hasConnectedMcpSessionOwner(sessionId, mcpSessionId) ||
+        (baseSessionId !== undefined &&
+          baseSessionId !== sessionId &&
+          this.hasConnectedMcpSessionOwner(baseSessionId, mcpSessionId))
       );
     }
     // A caller with no connection identity cannot be told apart from the owner of an ordinary

@@ -161,11 +161,72 @@ struct PrototypeSession {
     /// changed state, exactly one `change` event carrying the final state follows the last action;
     /// `emit` actions fire in order with the state as it was at that point. A list that nets no
     /// change emits nothing.
+    ///
+    /// The tap is atomic, as on Android (#11408, #11551): every state write is planned and
+    /// validated against the controls bound to its key (`PrototypeStateValidator`) before anything
+    /// runs, so one rejected write drops the whole tap with no write, page move or event.
     mutating func run(_ actions: [PrototypeAction]) -> [PrototypeEvent] {
+        guard isShown, let writes = plannedWrites(actions, from: state) else { return [] }
+        return execute(actions, writes)
+    }
+
+    /// One interaction as one unit, as Android's `PrototypeRuntime.control`: the control's `own`
+    /// writes (a flipped switch, a chosen option, a closed dialog; empty for a plain tap) and every
+    /// state write of its `actions` are validated before anything is applied, so a rejected
+    /// interaction changes and emits nothing. An accepted one reports the control's own `change`
+    /// first, when a value moved, then the action list.
+    mutating func control(own: [(String, JSONValue)], then actions: [PrototypeAction]) -> [PrototypeEvent] {
+        guard isShown else { return [] }
+        let moved = own.filter { state[$0.0] != $0.1 }
+        var written = state
+        moved.forEach { written[$0.0] = $0.1 }
+        if !moved.isEmpty, !accepts(written) { return [] }
+        guard let writes = plannedWrites(actions, from: written) else { return [] }
+        let events: [PrototypeEvent]
+        if moved.isEmpty {
+            events = []
+        } else {
+            state = written
+            events = emitStateChange(moved.map(\.0))
+        }
+        return events + execute(actions, writes)
+    }
+
+    private typealias PlannedWrite = (key: String, value: JSONValue)
+
+    /// The write each state action of `actions` makes when the list starts from `start`, by action
+    /// index; nil when the state it leaves behind is invalid. Nothing is applied here. Actions after
+    /// a `dismiss` never run, so they are not planned; a toggle or step that is a no-op has no entry.
+    private func plannedWrites(
+        _ actions: [PrototypeAction],
+        from start: [String: JSONValue]
+    )
+        -> [Int: PlannedWrite]?
+    {
+        var planned = start
+        var writes: [Int: PlannedWrite] = [:]
+        for (index, action) in actions.enumerated() {
+            if action.type == "dismiss" { break }
+            guard let write = stateWrite(action, in: planned) else { continue }
+            planned[write.key] = write.value
+            guard accepts(planned) else { return nil }
+            writes[index] = write
+        }
+        return writes
+    }
+
+    /// Whether every control, list item, modal and state action of the shown spec accepts `state`.
+    private func accepts(_ state: [String: JSONValue]) -> Bool {
+        guard let spec else { return false }
+        return PrototypeStateValidator.rejection(root: spec.root, state: state) == nil
+    }
+
+    /// Runs `actions` in order, applying the writes planned for them.
+    private mutating func execute(_ actions: [PrototypeAction], _ writes: [Int: PlannedWrite]) -> [PrototypeEvent] {
         let baseline = state
         var touched: [String] = []
         var events: [PrototypeEvent] = []
-        for action in actions {
+        for (index, action) in actions.enumerated() {
             guard isShown else { break }
             switch action.type {
             case "emit":
@@ -175,7 +236,10 @@ struct PrototypeSession {
             case "dismiss":
                 events += dismiss(reason: .user)
             default:
-                if let key = applyStateAction(action), !touched.contains(key) { touched.append(key) }
+                if let write = writes[index] {
+                    state[write.key] = write.value
+                    if !touched.contains(write.key) { touched.append(write.key) }
+                }
             }
         }
         guard isShown else { return events }
@@ -193,10 +257,10 @@ struct PrototypeSession {
         return setPage(pager, target)
     }
 
-    /// Applies one state action and returns the key it wrote, or nil when it was a no-op. A toggle
-    /// of a non-boolean, or an increment/decrement of a non-number or to a non-finite value, is a
-    /// no-op, as on Android.
-    private mutating func applyStateAction(_ action: PrototypeAction) -> String? {
+    /// The key and value a state action writes given `state`, or nil when it writes nothing: a
+    /// toggle of a non-boolean, or an increment/decrement of a non-number or to a non-finite value,
+    /// is a no-op, as on Android's `stateWrite`.
+    private func stateWrite(_ action: PrototypeAction, in state: [String: JSONValue]) -> PlannedWrite? {
         guard let key = action.key else { return nil }
         let next: JSONValue? = switch action.type {
         case "setState": action.value
@@ -205,9 +269,7 @@ struct PrototypeSession {
         case "decrement": stepped(state[key], by: -(action.by ?? 1))
         default: nil
         }
-        guard let next else { return nil }
-        state[key] = next
-        return key
+        return next.map { (key, $0) }
     }
 
     private func stepped(_ value: JSONValue?, by step: Double) -> JSONValue? {
@@ -272,11 +334,12 @@ struct PrototypeSession {
     /// that no longer holds a boolean leaves the control inert.
     mutating func toggle(key: String, then actions: [PrototypeAction]) -> [PrototypeEvent] {
         guard isShown, case let .bool(stored)? = state[key] else { return [] }
-        return change(key: key, value: .bool(!stored)) + run(actions)
+        return control(own: [(key, .bool(!stored))], then: actions)
     }
 
     /// A `tabBar`/`bottomNav` selection drives its pager when it has one, else its state key, then
-    /// runs the node's `onTap` actions, as Android's selection does.
+    /// runs the node's `onTap` actions, as Android's selection does. The pager only moves once the
+    /// action list is known to be accepted.
     mutating func select(
         index: Int,
         pager: String?,
@@ -286,13 +349,11 @@ struct PrototypeSession {
         -> [PrototypeEvent]
     {
         guard isShown else { return [] }
-        var events: [PrototypeEvent] = []
-        if let pager {
-            events = setPage(pager, index)
-        } else if let key {
-            events = change(key: key, value: .number(Double(index)))
+        guard let pager else {
+            return control(own: key.map { [($0, .number(Double(index)))] } ?? [], then: actions)
         }
-        return events + run(actions)
+        guard let writes = plannedWrites(actions, from: state) else { return [] }
+        return setPage(pager, index) + execute(actions, writes)
     }
 
     /// The terminal event: every dismissal emits exactly one `dismissed`, carrying its reason.

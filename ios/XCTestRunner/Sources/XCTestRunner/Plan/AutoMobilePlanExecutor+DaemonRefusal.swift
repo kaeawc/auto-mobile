@@ -104,9 +104,10 @@ extension AutoMobilePlanExecutor {
 
     /// The bounded wait for a device another session holds, mirroring Android's
     /// `deviceOwnedBackoffDelayMs`: 500 ms doubling to a 4 s cap, within a 30 s total budget. A
-    /// `retryAfterMs` hint from the daemon lengthens a step and, for the finalize codes only
-    /// (`device_cleanup_in_progress`, `device_shutting_down`), extends the budget up to 150 s
-    /// (#11360); for every other code it never extends the budget.
+    /// `retryAfterMs` hint from the daemon lengthens a step for every code except the finalize codes
+    /// (`device_cleanup_in_progress`, `device_shutting_down`). For those it is the finalize time
+    /// still remaining: it bounds the total wait (up to 150 s, #11360) while each step stays on the
+    /// ordinary backoff, so a finalize that ends early is noticed on the next poll (#11538).
     struct DeviceWaitBackoff: Sendable {
         static let initialDelayMs = 500
         static let maxDelayMs = 4000
@@ -126,11 +127,11 @@ extension AutoMobilePlanExecutor {
         }
 
         /// Total wait budget for this refusal: `budgetMs`, stretched for the finalize codes to the
-        /// daemon's `retryAfterMs` clamped to `finalizeWaitCapMs` (#11360). Android's
-        /// `deviceOwnedBudgetMs`.
+        /// time already waited plus the daemon's remaining-finalize `retryAfterMs`, clamped to
+        /// `finalizeWaitCapMs` (#11360, #11538). Android's `deviceOwnedBudgetMs`.
         private func effectiveBudgetMs(retryAfterMs: Int?, code: String?) -> Int {
             guard let code, Self.finalizeWaitCodes.contains(code), let retryAfterMs else { return budgetMs }
-            return max(budgetMs, min(retryAfterMs, Self.finalizeWaitCapMs))
+            return max(budgetMs, min(waitedMs + retryAfterMs, Self.finalizeWaitCapMs))
         }
 
         /// The next delay, recorded as waited, or nil once the budget is spent.
@@ -139,7 +140,9 @@ extension AutoMobilePlanExecutor {
             guard remaining > 0 else { return nil }
             let doubled = Self.initialDelayMs << min(waits, 8)
             let backoff = min(doubled, Self.maxDelayMs)
-            let delay = min(max(backoff, retryAfterMs ?? 0), remaining)
+            let isFinalize = code.map(Self.finalizeWaitCodes.contains) ?? false
+            let hint = isFinalize ? 0 : (retryAfterMs ?? 0)
+            let delay = min(max(backoff, hint), remaining)
             waits += 1
             waitedMs += delay
             return delay

@@ -39,10 +39,15 @@ seeded with the base is judged the same way. A proxy started with
 `--initial-session-uuid <base>` has no label map, so it forwards a
 `<base>:<name>` call for the daemon to judge like any explicitly named session:
 by issued-session admission and the owner rule, not by the proxy's binding.
-None of these judgements holds, extends or releases a session: a base past its
-idle deadline that the scan has not reached yet publishes no labels, and is
-released by the scan or by a call that names it, never by a lookup about its
-label. A device that no session holds takes calls from anyone.
+None of these judgements holds, extends or releases a session, and neither does
+any other lookup that goes from a label to its base, the one a device tool call
+naming only `<base>:<name>` makes to route itself and pick its tools included
+(#11640). A base past its idle deadline that the scan has not reached yet
+publishes no labels, and is released by the scan or by a call that names it,
+never by a lookup about its label. Releasing the base releases its label
+sessions with it; in the meantime, at most one scan interval, a label that is
+still inside its own idle window is judged as a session of its own, not as its
+base's (#11640). A device that no session holds takes calls from anyone.
 
 A session's owner is the connection that acquired it, or that restored it after
 a reconnect. Ownership is cooperative: no token is needed, but naming a session's

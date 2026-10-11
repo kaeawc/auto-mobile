@@ -22,6 +22,13 @@ Canonical fields after phase 3:
   and `formFactor` are top-level static facts.
 - `runtime.lifecycle`, `runtime.readiness`, `runtime.poolStatus` (`assigned` also covers a device held by a managed slot or another daemon, with `runtime.heldBy` of `managed_slot`/`other_daemon`), and
   `runtime.session` describe observed state and ownership.
+- A held device its platform still lists in a transitional state is published, never dropped, and
+  counted `assigned`: an Android device adb lists outside `device` carries
+  `runtime.connection.adbState`; an iOS simulator `simctl` lists `Booting` or `Shutting Down`
+  carries the additive `runtime.simulatorState` (`"Booting"`/`"Shutting Down"`) with
+  `runtime.lifecycle.state` `booting`/`shutting-down` and `readiness` `not_ready`. An unheld
+  simulator in those states stays unlisted. When the held-Android state probe cannot answer, the
+  pool counts are refused as retryable `discovery_incomplete` rather than read as zero.
 - Image provenance is `image.{path,target,basedOn}`; availability failures use
   top-level `availabilityError`.
 - `runtime.serviceStatus` carries automation integrity and runner diagnostics.

@@ -5,7 +5,7 @@ import {
   type Platform,
   type SomePlatform,
 } from "../models";
-import type { BootedDeviceDiscovery } from "../devices/deviceUtils";
+import type { BootedDeviceDiscovery, DeviceDiscoveryError } from "../devices/deviceUtils";
 import {
   type DiscoverySource,
   expectingPooledSources,
@@ -36,9 +36,74 @@ import {
 } from "./deviceTools";
 import type { ListDeviceImagesArgs, ListDevicesArgs } from "./deviceTools";
 import { AndroidTransportAliases } from "../utils/androidSerial";
-import { adbOfflineHeldDevices } from "./adbOfflineHeldDevices";
-import type { AdbOfflineHold } from "./inventoryDeviceDescription";
+import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
+import type { TransitionalHold } from "./inventoryDeviceDescription";
 import { describeBootCapacity } from "../features/bootAdmission/sharedBootAdmissionGates";
+
+/** Held Android devices adb lists offline and held simulators simctl lists Booting / Shutting Down. */
+async function transitionalHeldListing(input: {
+  platform: SomePlatform;
+  discovered: BootedDevice[];
+  discovery: BootedDeviceDiscovery;
+  pool: ReturnType<typeof initializedDevicePool>;
+  deviceManager: ReturnType<ReturnType<typeof getDeviceToolsDependencies>["deviceManagerFactory"]>;
+}): Promise<{
+  devices: BootedDevice[];
+  holds: Map<string, TransitionalHold>;
+  /** Set when a held Android device's state could not be probed: that platform is incomplete. */
+  probeFailure: DeviceDiscoveryError | undefined;
+}> {
+  const { discovered, discovery, pool, deviceManager } = input;
+  let probeFailure: DeviceDiscoveryError | undefined;
+  const devices: BootedDevice[] = [];
+  const holds = new Map<string, TransitionalHold>();
+  for (const offlineHeld of await adbOfflineHeldDevices({
+    platform: input.platform === "ios" ? "ios" : "android",
+    discovered,
+    devicePool: pool,
+    deviceManager,
+    onProbeFailure: (failure) => {
+      probeFailure = failure;
+    },
+  })) {
+    holds.set(offlineHeld.device.deviceId, {
+      adbState: offlineHeld.adbState,
+      avdName: offlineHeld.avdName,
+    });
+    devices.push(offlineHeld.device);
+  }
+  for (const held of transitionalHeldSimulators({
+    transitional: discovery.transitionalSimulators,
+    discovered,
+    devicePool: pool,
+  })) {
+    holds.set(held.device.deviceId, { simulatorState: held.simulatorState });
+    devices.push(held.device);
+  }
+  return { devices, holds, probeFailure };
+}
+
+/**
+ * The discovery completeness this listing reports. A failed held-device state probe means the
+ * held Android device may still be attached: that platform is unknown, not empty.
+ */
+function withHeldProbeFailure(
+  discovery: BootedDeviceDiscovery,
+  probeFailure: DeviceDiscoveryError | undefined,
+) {
+  const succeededPlatforms = new Set(discovery.succeededPlatforms);
+  const succeededSources = discovery.succeededSources && new Set(discovery.succeededSources);
+  if (!probeFailure) {
+    return { succeededPlatforms, succeededSources, discoveryErrors: discovery.discoveryErrors };
+  }
+  succeededPlatforms.delete("android");
+  succeededSources?.delete("android");
+  return {
+    succeededPlatforms,
+    succeededSources,
+    discoveryErrors: { ...discovery.discoveryErrors, android: probeFailure },
+  };
+}
 
 function selectBootedDevices(
   booted: BootedDevice[],
@@ -150,7 +215,7 @@ export function createListingHandlers() {
     // Sampled alongside discovery; best-effort and absent when no platform is gated (#11181).
     const capacity = describeBootCapacity(requestedPlatforms, deps.bootCapacityReporters);
     let booted: BootedDevice[] = [];
-    const adbOfflineHolds = new Map<string, AdbOfflineHold>();
+    const transitionalHolds = new Map<string, TransitionalHold>();
     // #5893 item 4: `getBootedDevices` collapses a failed per-platform probe to
     // `[]`, so a transient tooling failure is indistinguishable from a genuinely
     // empty inventory. Use the detailed contract, which reports which platforms
@@ -183,23 +248,23 @@ export function createListingHandlers() {
                 new Set(),
               );
       await reconcileDiscoveryObservation(booted, "listDevices");
-      // Held devices adb lists offline are absent from online discovery; list them like the
-      // booted-devices resource does (#11118, #11455).
-      for (const offlineHeld of await adbOfflineHeldDevices({
-        platform: platform === "ios" ? "ios" : "android",
+      // Held devices their platform lists in a transitional state are absent from booted
+      // discovery; list them like the booted-devices resource does (#11118, #11455, #11573).
+      const transitional = await transitionalHeldListing({
+        platform,
         discovered: booted,
-        devicePool: pool,
+        discovery,
+        pool,
         deviceManager,
-      })) {
-        adbOfflineHolds.set(offlineHeld.device.deviceId, {
-          adbState: offlineHeld.adbState,
-          avdName: offlineHeld.avdName,
-        });
-        booted = [...booted, offlineHeld.device];
+      });
+      booted = [...booted, ...transitional.devices];
+      for (const [deviceId, hold] of transitional.holds) {
+        transitionalHolds.set(deviceId, hold);
       }
-      succeededPlatforms = discovery.succeededPlatforms;
-      succeededSources = discovery.succeededSources;
-      discoveryErrors = discovery.discoveryErrors;
+      ({ succeededPlatforms, succeededSources, discoveryErrors } = withHeldProbeFailure(
+        discovery,
+        transitional.probeFailure,
+      ));
       sourceErrors = discovery.sourceErrors;
     } catch (error) {
       // Discovery is best-effort — a partial/failed probe still returns the
@@ -239,7 +304,7 @@ export function createListingHandlers() {
       configured.images,
       (deviceId) => pool?.getAndroidTransportAliases(deviceId) ?? directAliases.aliases(deviceId),
       (deviceId) => pool?.getAndroidTransportAvdName(deviceId) ?? directAliases.avdName(deviceId),
-      adbOfflineHolds,
+      transitionalHolds,
     );
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 

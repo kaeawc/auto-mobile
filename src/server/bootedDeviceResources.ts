@@ -1,5 +1,9 @@
-import { adbOfflineHeldDevices } from "./adbOfflineHeldDevices";
-import { describeInventoryDevice, type AdbOfflineHold } from "./inventoryDeviceDescription";
+import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
+import {
+  describeInventoryDevice,
+  type AdbOfflineHold,
+  type SimulatorTransitionHold,
+} from "./inventoryDeviceDescription";
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { androidTransportIdentityAdbFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
@@ -568,7 +572,11 @@ function toBootedDeviceInfo(
   device: BootedDevice,
   poolContext: PoolDeviceContext | undefined,
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
-  extras: { adbOffline?: AdbOfflineHold; transportAvdName?: string } = {},
+  extras: {
+    adbOffline?: AdbOfflineHold;
+    simulatorState?: SimulatorTransitionHold["simulatorState"];
+    transportAvdName?: string;
+  } = {},
 ): BootedDeviceInfo {
   const description = describeInventoryDevice({
     device,
@@ -641,6 +649,8 @@ interface AdbOfflineHeldInput {
   deviceManager: PlatformDeviceManager;
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>;
   transportAvdName: (deviceId: string) => string | undefined;
+  /** Receives the failure when the held-device state probe cannot answer (#11573). */
+  onProbeFailure: (failure: DeviceDiscoveryError) => void;
 }
 
 /**
@@ -657,6 +667,7 @@ async function adbOfflineHeldDeviceDescriptions(
     discovered: input.discovered,
     devicePool: input.devicePool,
     deviceManager: input.deviceManager,
+    onProbeFailure: input.onProbeFailure,
   });
   return held.map(({ device, avdName, adbState }) =>
     toBootedDeviceInfo(
@@ -672,6 +683,34 @@ async function adbOfflineHeldDeviceDescriptions(
         adbOffline: { adbState, avdName },
         transportAvdName: input.transportAvdName(device.deviceId),
       },
+    ),
+  );
+}
+
+/** Held simulators `simctl` lists Booting / Shutting Down, described like any booted row (#11573). */
+function transitionalSimulatorDescriptions(input: {
+  discovery: BootedDeviceDiscovery;
+  devicePool: DevicePool | null;
+  sessionsById: Map<string, Session> | null;
+  resolveDeviceSessionUuid: (deviceId: string) => string | null;
+  configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>;
+}): BootedDeviceInfo[] {
+  const { discovery, devicePool } = input;
+  return transitionalHeldSimulators({
+    transitional: discovery.transitionalSimulators,
+    discovered: discovery.devices,
+    devicePool,
+  }).map(({ device, simulatorState }) =>
+    toBootedDeviceInfo(
+      device,
+      resolvePoolDeviceContext(
+        devicePool,
+        device,
+        input.sessionsById,
+        input.resolveDeviceSessionUuid,
+      ),
+      input.configuredImages,
+      { simulatorState },
     ),
   );
 }
@@ -918,6 +957,41 @@ interface PlatformDiscoveryResult {
   sourceObservations: Partial<Record<DiscoverySource, PlatformObservation>>;
 }
 
+/** The platform's observation: complete only when discovery and the held-device probe both were. */
+function platformDiscoveryResult(input: {
+  platform: Platform;
+  devices: BootedDeviceInfo[];
+  discovery: BootedDeviceDiscovery;
+  heldProbeFailure: DeviceDiscoveryError | undefined;
+}): PlatformDiscoveryResult {
+  const { platform, devices, discovery, heldProbeFailure } = input;
+  // Discovery completeness is the one classifier's (#11605): tooling that is not installed is not
+  // applicable, never incomplete. A failed held-device probe is an installed tool that failed, so
+  // it makes every source of the platform unknown whatever discovery said.
+  const discoveryComplete = incompleteDiscoverySources(discovery, [platform]).length === 0;
+  const complete = discoveryComplete && heldProbeFailure === undefined;
+  const observed = (source: DiscoverySource): PlatformObservation => {
+    const observation = sourceObservation(discovery, source);
+    return heldProbeFailure === undefined
+      ? observation
+      : {
+          observationComplete: false,
+          ...(observation.discoveryError ? { discoveryError: observation.discoveryError } : {}),
+        };
+  };
+  return {
+    devices,
+    succeededPlatforms: complete ? new Set([platform]) : new Set(),
+    sourceObservations: Object.fromEntries(
+      sourcesForPlatform(platform).map((source) => [source, observed(source)]),
+    ),
+    observation:
+      discoveryComplete && heldProbeFailure !== undefined
+        ? { observationComplete: false, discoveryError: heldProbeFailure }
+        : platformObservation(discovery, platform),
+  };
+}
+
 async function discoverBootedDevicesForPlatform(
   platform: Platform,
   devicePool: DevicePool | null,
@@ -988,7 +1062,8 @@ async function discoverBootedDevicesForPlatform(
       timer,
     );
     getAbortSignal()?.throwIfAborted();
-    const complete = incompleteDiscoverySources(discovery, [platform]).length === 0;
+    // A held device discovery misses and the state probe cannot place is unknown, not absent.
+    let heldProbeFailure: DeviceDiscoveryError | undefined;
     const devices = discovery.devices.map((device) =>
       withIdentityQuarantineMarker(
         toBootedDeviceInfo(
@@ -1010,6 +1085,17 @@ async function discoverBootedDevicesForPlatform(
       configuredImages,
       transportAvdName: (deviceId) =>
         devicePool?.getAndroidTransportAvdName(deviceId) ?? aliases.avdName(deviceId),
+      onProbeFailure: (failure) => {
+        heldProbeFailure = failure;
+      },
+    });
+    // Held simulators `simctl` lists Booting / Shutting Down are not booted either (#11573).
+    const transitionalSimulators = transitionalSimulatorDescriptions({
+      discovery,
+      devicePool,
+      sessionsById,
+      resolveDeviceSessionUuid,
+      configuredImages,
     });
     // A held AVD re-cold-booting while adb still lists its old serial offline would otherwise
     // appear twice under one stableId (#11132). The held row carries the session and pool status
@@ -1020,18 +1106,9 @@ async function discoverBootedDevicesForPlatform(
         (device) => !heldStableIds.has(device.identity.stableId),
       ),
       ...offlineHeld,
+      ...transitionalSimulators,
     );
-    return {
-      devices,
-      succeededPlatforms: complete ? new Set([platform]) : new Set(),
-      sourceObservations: Object.fromEntries(
-        sourcesForPlatform(platform).map((source) => [
-          source,
-          sourceObservation(discovery, source),
-        ]),
-      ),
-      observation: platformObservation(discovery, platform),
-    };
+    return platformDiscoveryResult({ platform, devices, discovery, heldProbeFailure });
   } catch (error) {
     const platformName = platform === "android" ? "Android" : "iOS";
     logger.warn(`[BootedDeviceResources] Failed to get booted ${platformName} devices: ${error}`);
@@ -1136,7 +1213,9 @@ function isProbeableDevice(device: BootedDeviceInfo): boolean {
     device.runtime.deviceId !== null &&
     device.identityUnresolved !== true &&
     // adb lists it offline (#11118): every probe would just time out against it.
-    device.runtime.connection === undefined
+    device.runtime.connection === undefined &&
+    // A simulator mid-transition has no service to probe (#11573).
+    device.runtime.simulatorState === undefined
   );
 }
 

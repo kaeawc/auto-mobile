@@ -347,11 +347,16 @@ describe("daemon/refreshDevices outcome", () => {
 });
 
 describe("Android discovery failure refresh outcome", () => {
-  function setup(failure?: string | Error) {
+  function setup(failure?: string | Error, simctlFailure?: string) {
     const timer = new FakeTimer();
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const iosDevice: BootedDevice = { deviceId: "SIM-FRESH", name: "iPhone", platform: "ios" };
-    const iosDiscovery = async () => [iosDevice];
+    const iosDiscovery = async () => {
+      if (simctlFailure) {
+        throw new Error(simctlFailure);
+      }
+      return [iosDevice];
+    };
     const deviceManager = new MultiPlatformDeviceManager(
       new FakeAdbClient() as unknown as AdbClient,
       {
@@ -407,6 +412,64 @@ describe("Android discovery failure refresh outcome", () => {
       retryable: undefined,
     });
     expect((await pool.refreshDevicesWithOutcome()).failure).toBeUndefined();
+  });
+
+  // #11586: the answer is typed by the platform whose discovery failed and could have listed the id.
+  const SIMULATOR_UDID = "0F1E2D3C-4B5A-4978-8695-A4B3C2D1E0F9";
+  const select = (deviceId: string, platform?: "android" | "ios") =>
+    createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} })({
+      deviceId,
+      sessionUuid: "selection",
+      ...(platform ? { platform } : {}),
+    }).then(
+      () => undefined,
+      (error: unknown) =>
+        error as Error & { code?: string; platform?: string; retryable?: boolean },
+    );
+
+  test("a missing iOS UDID while only adb failed is not found, not Android discovery", async () => {
+    setup("adb devices -l exited 1");
+
+    const error = await select(SIMULATOR_UDID);
+
+    expect(error?.message).toBe(`Device '${SIMULATOR_UDID}' not found in device pool`);
+    expect(error?.code).toBeUndefined();
+  });
+
+  test("a missing iOS UDID while simctl failed is iOS-typed retryable discovery_incomplete", async () => {
+    setup(undefined, "simctl list exited 72");
+
+    const error = await select(SIMULATOR_UDID);
+
+    expect(error).toMatchObject({ code: "discovery_incomplete", platform: "ios", retryable: true });
+    expect(error?.message).toContain("simctl list exited 72");
+  });
+
+  test("a missing emulator serial while only simctl failed is not found", async () => {
+    setup(undefined, "simctl list exited 72");
+
+    const error = await select("emulator-5604");
+
+    expect(error?.message).toBe("Device 'emulator-5604' not found in device pool");
+  });
+
+  test.each([
+    { adb: "adb devices -l exited 1", simctl: undefined, platform: "android" },
+    { adb: undefined, simctl: "simctl list exited 72", platform: "ios" },
+    { adb: "adb devices -l exited 1", simctl: "simctl list exited 72", platform: "android" },
+  ])("an id of unknown shape is typed by whichever discovery failed: %j", async (row) => {
+    setup(row.adb, row.simctl);
+
+    const error = await select("R58M123ABCD");
+
+    expect(error).toMatchObject({ code: "discovery_incomplete", platform: row.platform });
+  });
+
+  test("the requested platform decides over the id's shape", async () => {
+    setup("adb devices -l exited 1", "simctl list exited 72");
+
+    expect(await select("R58M123ABCD", "ios")).toMatchObject({ platform: "ios" });
+    expect(await select("R58M123ABCD", "android")).toMatchObject({ platform: "android" });
   });
 
   test("working adb with an absent device preserves the exact selection error", async () => {

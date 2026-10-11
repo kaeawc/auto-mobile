@@ -35,17 +35,43 @@ export function recordingCandidateIncarnations(
 }
 
 /**
- * How long a candidate may stay ADB `offline` before the monitor treats it as
- * lost (#11090). A loaded host can hold a running emulator `offline` well past
+ * How long a candidate may stay listed in a transitional platform state before
+ * the monitor treats it as lost (#11090, #11592). A loaded host can hold a
+ * running emulator `offline`, or a restarting simulator `Booting`, well past
  * the 3-sweep absent debounce (~10 s); releasing its session then drops a
- * working device. Truly absent serials keep the 3-miss rule, and an emulator
- * AutoMobile launched is evicted on process exit by its own watcher, so this
- * budget only bounds external emulators and devices whose transport never
- * returns.
+ * working device. A device the platform no longer lists at all keeps the
+ * 3-miss rule, and an emulator AutoMobile launched is evicted on process exit
+ * by its own watcher, so this budget only bounds devices that never settle.
  */
 export const OFFLINE_DEVICE_DISCONNECT_BUDGET_MS = 60_000;
 
-/** Start of a candidate's current ADB `offline` episode, keyed to its incarnation. */
+/**
+ * The `adb devices` states that mean "attached and settling": the transport is
+ * re-attaching (`offline`) or waiting on the authorization prompt
+ * (`unauthorized`). An emulator that is listed `device` before boot completes
+ * is already in the booted listing, so it never reaches this check. Other
+ * non-`device` rows (recovery, bootloader, sideload, no permissions) are not
+ * on their way back to `device` and keep the absent debounce.
+ */
+export function isTransitionalAdbState(state: string): boolean {
+  return state === "offline" || state === "unauthorized";
+}
+
+/**
+ * This sweep's candidates the platform still lists in a transitional state:
+ * adb `offline`/`unauthorized` serials and `simctl` `Booting`/`Shutting Down`
+ * simulators (#11592). One set, so the evaluator holds both platforms under
+ * the same budget. An undefined adb half (probe failed or skipped) contributes
+ * nothing, which leaves those serials on ordinary miss counting.
+ */
+export function selectTransitionalDeviceIds(
+  transitionalAdbDeviceIds: ReadonlySet<string> | undefined,
+  transitionalSimulatorIds: Iterable<string>,
+): Set<string> {
+  return new Set([...(transitionalAdbDeviceIds ?? []), ...transitionalSimulatorIds]);
+}
+
+/** Start of a candidate's current transitional-state episode, keyed to its incarnation. */
 export interface OfflineEpisode {
   sinceMs: number;
   incarnation: DisconnectCandidateIncarnation | undefined;
@@ -53,9 +79,10 @@ export interface OfflineEpisode {
 
 export interface DisconnectMonitorEvaluation {
   disconnected: string[];
-  missed: Array<{ deviceId: string; misses: number }>;
-  /** Candidates held as ADB `offline` this sweep instead of counting a miss. */
-  offline: Array<{ deviceId: string; offlineForMs: number }>;
+  /** `budgetExhausted` marks a candidate released from a transitional hold, not an absent one. */
+  missed: Array<{ deviceId: string; misses: number; budgetExhausted?: true }>;
+  /** Candidates held in a transitional platform state this sweep instead of counting a miss. */
+  transitional: Array<{ deviceId: string; transitionalForMs: number }>;
   skippedAllDiscoveryFailed: boolean;
 }
 
@@ -82,13 +109,14 @@ export interface DisconnectMonitorEvaluationInput {
    */
   immediateDisconnectDeviceIds?: ReadonlySet<string>;
   /**
-   * Candidates `adb devices` lists as `offline` this sweep (#11090). With
+   * Candidates the platform still lists in a transitional state this sweep
+   * (#11090, #11592); build it with {@link selectTransitionalDeviceIds}. With
    * {@link offlineEpisodes} and {@link nowMs}, these sweeps neither count nor
-   * reset an absent miss; the candidate is disconnected once its offline
-   * episode exceeds {@link offlineBudgetMs}. Undefined (probe failed or
-   * skipped) falls back to ordinary miss counting.
+   * reset an absent miss; the candidate is disconnected once its episode
+   * reaches {@link offlineBudgetMs}. A candidate not in the set (including
+   * when a probe failed or was skipped) falls back to ordinary miss counting.
    */
-  offlineDeviceIds?: ReadonlySet<string>;
+  transitionalDeviceIds?: ReadonlySet<string>;
   offlineEpisodes?: Map<string, OfflineEpisode>;
   nowMs?: number;
   offlineBudgetMs?: number;
@@ -190,9 +218,9 @@ export function selectOfflineRecoveryCandidates(
 }
 
 /**
- * End offline episodes for candidates that left the candidate set, came back
- * as `device`, or now name a different incarnation. Absent sweeps do not end
- * an episode, so offline/absent flapping stays bounded by the budget.
+ * End transitional episodes for candidates that left the candidate set, are
+ * booted again, or now name a different incarnation. Absent sweeps do not end
+ * an episode, so transitional/absent flapping stays bounded by the budget.
  */
 function pruneOfflineEpisodes(
   offlineEpisodes: Map<string, OfflineEpisode> | undefined,
@@ -214,8 +242,8 @@ export function evaluateDeviceDisconnects(
   input: DisconnectMonitorEvaluationInput,
 ): DisconnectMonitorEvaluation {
   const disconnected: string[] = [];
-  const missed: Array<{ deviceId: string; misses: number }> = [];
-  const offline: Array<{ deviceId: string; offlineForMs: number }> = [];
+  const missed: DisconnectMonitorEvaluation["missed"] = [];
+  const transitional: Array<{ deviceId: string; transitionalForMs: number }> = [];
   const offlineEpisodes = input.offlineEpisodes;
   const forceDisconnectedDeviceIds = input.forceDisconnectedDeviceIds ?? new Set<string>();
   const candidateIncarnations = input.candidateIncarnations ?? new Map<string, number>();
@@ -279,24 +307,30 @@ export function evaluateDeviceDisconnects(
   };
 
   /**
-   * Hold an ADB-offline candidate: the transport is listed, so the device is
-   * not gone, and its absent miss streak is neither advanced nor reset. The
-   * episode survives interleaved absent sweeps, so offline/absent flapping is
-   * still bounded by the budget or the absent debounce.
+   * Hold a candidate the platform lists in a transitional state: it is not
+   * gone, and its absent miss streak is neither advanced nor reset. The
+   * episode survives interleaved absent sweeps, so transitional/absent
+   * flapping is still bounded by the budget or the absent debounce, and a
+   * candidate that then leaves the listing (a simulator reaching `Shutdown`)
+   * is released on the absent debounce rather than a fresh budget.
    */
-  const holdOffline = (deviceId: string, nowMs: number, episodes: Map<string, OfflineEpisode>) => {
+  const holdTransitional = (
+    deviceId: string,
+    nowMs: number,
+    episodes: Map<string, OfflineEpisode>,
+  ) => {
     const episode = episodes.get(deviceId) ?? {
       sinceMs: nowMs,
       incarnation: candidateIncarnations.get(deviceId),
     };
     episodes.set(deviceId, episode);
-    const offlineForMs = nowMs - episode.sinceMs;
-    if (offlineForMs < (input.offlineBudgetMs ?? OFFLINE_DEVICE_DISCONNECT_BUDGET_MS)) {
-      offline.push({ deviceId, offlineForMs });
+    const transitionalForMs = nowMs - episode.sinceMs;
+    if (transitionalForMs < (input.offlineBudgetMs ?? OFFLINE_DEVICE_DISCONNECT_BUDGET_MS)) {
+      transitional.push({ deviceId, transitionalForMs });
       return;
     }
     input.deviceDisconnectMisses.set(deviceId, MISSING_DEVICE_MISS_THRESHOLD);
-    missed.push({ deviceId, misses: MISSING_DEVICE_MISS_THRESHOLD });
+    missed.push({ deviceId, misses: MISSING_DEVICE_MISS_THRESHOLD, budgetExhausted: true });
     disconnected.push(deviceId);
   };
 
@@ -332,11 +366,11 @@ export function evaluateDeviceDisconnects(
     }
 
     if (
-      input.offlineDeviceIds?.has(deviceId) === true &&
+      input.transitionalDeviceIds?.has(deviceId) === true &&
       offlineEpisodes !== undefined &&
       input.nowMs !== undefined
     ) {
-      holdOffline(deviceId, input.nowMs, offlineEpisodes);
+      holdTransitional(deviceId, input.nowMs, offlineEpisodes);
       return;
     }
 
@@ -354,12 +388,12 @@ export function evaluateDeviceDisconnects(
     for (const deviceId of input.candidateDeviceIds) {
       clearMiss(deviceId);
     }
-    return { disconnected, missed, offline, skippedAllDiscoveryFailed: true };
+    return { disconnected, missed, transitional, skippedAllDiscoveryFailed: true };
   }
 
   for (const deviceId of input.candidateDeviceIds) {
     evaluateCandidate(deviceId);
   }
 
-  return { disconnected, missed, offline, skippedAllDiscoveryFailed: false };
+  return { disconnected, missed, transitional, skippedAllDiscoveryFailed: false };
 }

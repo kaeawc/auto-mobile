@@ -196,6 +196,124 @@ class AutoMobilePlanExecutorTest {
   }
 
   @Test
+  fun `a failed frame is retried only when its typed retryable flag says so`() {
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    // code, retryable (null = the frame omits it), message, executePlan calls with maxRetries = 1
+    val cases =
+      listOf(
+        // A frame without the flag keeps the message-based retry (older daemons).
+        listOf("daemon_queue_timeout", null, "MCP timeout: tapOn exceeded 30000ms", 1),
+        listOf("code_without_flag", null, "daemon request timeout", 2),
+        listOf("daemon_queue_timeout", true, "MCP timeout: tapOn exceeded 30000ms", 2),
+        listOf("daemon_shutting_down", true, "Daemon is shutting down", 2),
+        listOf("daemon_restart_pending", true, "Daemon restart is pending", 2),
+        listOf("session_recovery_pending", true, "Cannot safely recover session", 2),
+        listOf("daemon_session_suspect", true, "Session missed a liveness heartbeat", 2),
+        // A terminal code is the daemon's verdict, even when the message looks transient.
+        listOf("device_outside_bound_session", false, "request timeout while binding", 1),
+        listOf("some_terminal_code", false, "connection reset", 1),
+      )
+    for (case in cases) {
+      val code = case[0] as String
+      fakeDaemonClient = FakeDaemonToolClient()
+      DaemonSocketClientManager.testClient = fakeDaemonClient
+      fakeDaemonClient.setResponse(
+        "executePlan",
+        DaemonResponse(
+          id = code,
+          type = "mcp_response",
+          success = false,
+          error = case[2] as String,
+          code = JsonPrimitive(code),
+          retryable = (case[1] as Boolean?)?.let { JsonPrimitive(it) },
+        ),
+      )
+
+      val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1, aiAssistance = false))
+
+      assertEquals(code, false, result.success)
+      assertEquals(code, case[3], fakeDaemonClient.executePlanCalls)
+    }
+  }
+
+  @Test
+  fun `a failed frame with no typed fields keeps the transient message retry`() {
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      DaemonResponse("untyped", "mcp_response", false, error = "daemon request timeout"),
+    )
+
+    executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1, aiAssistance = false))
+
+    assertEquals(2, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
+  fun `a failed frame for a held device is waited out without spending a retry`() {
+    val waits = mutableListOf<Long>()
+    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    fakeDaemonClient.queueExecutePlanResponse(
+      DaemonResponse(
+        id = "held",
+        type = "mcp_response",
+        success = false,
+        error = "Device is held",
+        code = JsonPrimitive("device_owned_by_other_session"),
+        retryable = JsonPrimitive(false),
+      ),
+    )
+    fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(successPayload()))
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
+
+    assertEquals(result.errorMessage, true, result.success)
+    assertEquals(listOf(500L), waits)
+  }
+
+  @Test
+  fun `a retryable failed frame from the executePlan opt-in is retried`() {
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    fakeDaemonClient.queueToolSelectionResponse(
+      DaemonResponse(
+        id = "opt-in",
+        type = "mcp_response",
+        success = false,
+        error = "Daemon is shutting down",
+        code = JsonPrimitive("daemon_shutting_down"),
+        retryable = JsonPrimitive(true),
+      ),
+    )
+    fakeDaemonClient.setResponse("executePlan", buildDaemonResponse(successPayload()))
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1, aiAssistance = false))
+
+    assertEquals(result.errorMessage, true, result.success)
+    assertEquals(2, fakeDaemonClient.toolSelectionArguments.size)
+  }
+
+  @Test
+  fun `a terminal failed frame from the executePlan opt-in is not retried`() {
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    fakeDaemonClient.queueToolSelectionResponse(
+      DaemonResponse(
+        id = "opt-in",
+        type = "mcp_response",
+        success = false,
+        error = "request timeout",
+        code = JsonPrimitive("device_outside_bound_session"),
+        retryable = JsonPrimitive(false),
+      ),
+    )
+    fakeDaemonClient.setResponse("executePlan", buildDaemonResponse(successPayload()))
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1, aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(1, fakeDaemonClient.toolSelectionArguments.size)
+  }
+
+  @Test
   fun `a cleanup refusal with no retryAfterMs keeps the 30 s budget`() {
     val waits = mutableListOf<Long>()
     AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }

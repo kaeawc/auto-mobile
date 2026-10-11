@@ -1,6 +1,7 @@
 import type { AndroidEmulatorReadinessOptions } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { ChildProcess } from "child_process";
 import { BootedDevice, DeviceInfo, SomePlatform, Platform } from "../../src/models";
+import type { TransitionalSimulator } from "../../src/models/TransitionalSimulator";
 import {
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
@@ -294,6 +295,13 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
 
   private androidDiscoveryErrorMessage: string | undefined;
 
+  private transitionalSimulators: TransitionalSimulator[] = [];
+
+  /** Simulators `simctl` lists Booting / Shutting Down; reported while the simulator source succeeds. */
+  setTransitionalSimulators(simulators: TransitionalSimulator[]): void {
+    this.transitionalSimulators = simulators;
+  }
+
   async getBootedDevicesDetailed(
     platform: SomePlatform,
     options: BootedDeviceDiscoveryOptions = {},
@@ -380,6 +388,9 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
       discoveryErrors,
       ...(Object.keys(sourceErrors).length > 0 ? { sourceErrors } : {}),
       ...(this.omitSucceededSources ? {} : { succeededSources }),
+      ...(succeededSources.has("ios-simulator")
+        ? { transitionalSimulators: this.transitionalSimulators }
+        : {}),
     };
   }
 

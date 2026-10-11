@@ -1,0 +1,255 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`a derived label session is judged and recorded as its base judged foreign to the caller: the owner connection 1`] = `false`;
+
+exports[`a derived label session is judged and recorded as its base judged foreign to the caller: another connection 1`] = `true`;
+
+exports[`a derived label session is judged and recorded as its base judged foreign to the caller: no owner 1`] = `false`;
+
+exports[`a derived label session is judged and recorded as its base judged foreign to a caller with no connection identity: the owner connection 1`] = `false`;
+
+exports[`a derived label session is judged and recorded as its base judged foreign to a caller with no connection identity: another connection 1`] = `false`;
+
+exports[`a derived label session is judged and recorded as its base judged foreign to a caller with no connection identity: no owner 1`] = `false`;
+
+exports[`a derived label session is judged and recorded as its base restore by naming it: the owner connection 1`] = `
+{
+  "ownership": {
+    "base foreign to conn-other": true,
+    "base foreign to conn-owner": false,
+    "derived foreign to conn-other": true,
+    "derived foreign to conn-owner": false,
+  },
+  "refused": [],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base restore by naming it: another connection 1`] = `
+{
+  "ownership": {
+    "base foreign to conn-other": true,
+    "base foreign to conn-owner": false,
+    "derived foreign to conn-other": true,
+    "derived foreign to conn-owner": false,
+  },
+  "refused": [
+    "owned-by-other-connection",
+  ],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base restore by naming it: no owner 1`] = `
+{
+  "ownership": {
+    "base foreign to conn-other": false,
+    "base foreign to conn-owner": true,
+    "derived foreign to conn-other": false,
+    "derived foreign to conn-owner": true,
+  },
+  "refused": [],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base restore proving the base's liveness token: the owner connection 1`] = `
+{
+  "ownership": {
+    "base foreign to conn-other": true,
+    "base foreign to conn-owner": false,
+    "derived foreign to conn-other": true,
+    "derived foreign to conn-owner": false,
+  },
+  "refused": [],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base restore proving the base's liveness token: another connection 1`] = `
+{
+  "ownership": {
+    "base foreign to conn-other": false,
+    "base foreign to conn-owner": true,
+    "derived foreign to conn-other": false,
+    "derived foreign to conn-owner": true,
+  },
+  "refused": [],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base restore proving the base's liveness token: no owner 1`] = `
+{
+  "ownership": {
+    "base foreign to conn-other": false,
+    "base foreign to conn-owner": true,
+    "derived foreign to conn-other": false,
+    "derived foreign to conn-owner": true,
+  },
+  "refused": [],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base restore with a token that is not the base's: the owner connection 1`] = `
+{
+  "ownership": {
+    "base foreign to conn-other": true,
+    "base foreign to conn-owner": false,
+    "derived foreign to conn-other": true,
+    "derived foreign to conn-owner": false,
+  },
+  "refused": [],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base restore with a token that is not the base's: another connection 1`] = `
+{
+  "ownership": {
+    "base foreign to conn-other": true,
+    "base foreign to conn-owner": false,
+    "derived foreign to conn-other": true,
+    "derived foreign to conn-owner": false,
+  },
+  "refused": [
+    "owned-by-other-connection",
+  ],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base restore with a token that is not the base's: no owner 1`] = `
+{
+  "ownership": {
+    "base foreign to conn-other": false,
+    "base foreign to conn-owner": true,
+    "derived foreign to conn-other": false,
+    "derived foreign to conn-owner": true,
+  },
+  "refused": [],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base restore on a connection that closed while it waited: the owner connection 1`] = `
+{
+  "baseReleased": true,
+  "ownership": {
+    "base foreign to conn-other": false,
+    "base foreign to conn-owner": false,
+    "derived foreign to conn-other": false,
+    "derived foreign to conn-owner": false,
+  },
+  "refused": [],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base restore on a connection that closed while it waited: another connection 1`] = `
+{
+  "baseReleased": false,
+  "ownership": {
+    "base foreign to conn-other": true,
+    "base foreign to conn-owner": false,
+    "derived foreign to conn-other": true,
+    "derived foreign to conn-owner": false,
+  },
+  "refused": [
+    "owned-by-other-connection",
+  ],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base restore on a connection that closed while it waited: no owner 1`] = `
+{
+  "baseReleased": true,
+  "ownership": {
+    "base foreign to conn-other": false,
+    "base foreign to conn-owner": false,
+    "derived foreign to conn-other": false,
+    "derived foreign to conn-owner": false,
+  },
+  "refused": [],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base restore, then the caller disconnects: the owner connection 1`] = `
+{
+  "after": {
+    "base foreign to conn-other": false,
+    "base foreign to conn-owner": false,
+    "derived foreign to conn-other": false,
+    "derived foreign to conn-owner": false,
+  },
+  "baseReleased": true,
+  "ownership": {
+    "base foreign to conn-other": true,
+    "base foreign to conn-owner": false,
+    "derived foreign to conn-other": true,
+    "derived foreign to conn-owner": false,
+  },
+  "refused": [],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base restore, then the caller disconnects: another connection 1`] = `
+{
+  "after": {
+    "base foreign to conn-other": true,
+    "base foreign to conn-owner": false,
+    "derived foreign to conn-other": true,
+    "derived foreign to conn-owner": false,
+  },
+  "baseReleased": false,
+  "ownership": {
+    "base foreign to conn-other": true,
+    "base foreign to conn-owner": false,
+    "derived foreign to conn-other": true,
+    "derived foreign to conn-owner": false,
+  },
+  "refused": [
+    "owned-by-other-connection",
+  ],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base restore, then the caller disconnects: no owner 1`] = `
+{
+  "after": {
+    "base foreign to conn-other": false,
+    "base foreign to conn-owner": false,
+    "derived foreign to conn-other": false,
+    "derived foreign to conn-owner": false,
+  },
+  "baseReleased": true,
+  "ownership": {
+    "base foreign to conn-other": false,
+    "base foreign to conn-owner": true,
+    "derived foreign to conn-other": false,
+    "derived foreign to conn-owner": true,
+  },
+  "refused": [],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base resolved as the caller's own session from its device: the owner connection 1`] = `true`;
+
+exports[`a derived label session is judged and recorded as its base resolved as the caller's own session from its device: another connection 1`] = `false`;
+
+exports[`a derived label session is judged and recorded as its base resolved as the caller's own session from its device: no owner 1`] = `false`;
+
+exports[`a derived label session is judged and recorded as its base an acquisition of its device by the caller: the owner connection 1`] = `
+{
+  "ownership": {
+    "base foreign to conn-other": true,
+    "base foreign to conn-owner": false,
+    "derived foreign to conn-other": true,
+    "derived foreign to conn-owner": false,
+  },
+  "reused": true,
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base an acquisition of its device by the caller: another connection 1`] = `
+{
+  "refused": "Device '<device>' is already assigned to another session. Acquire a different device or wait for its owner to release it.",
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base an acquisition of its device by the caller: no owner 1`] = `
+{
+  "refused": "Device '<device>' is already assigned to another session. Acquire a different device or wait for its owner to release it.",
+}
+`;

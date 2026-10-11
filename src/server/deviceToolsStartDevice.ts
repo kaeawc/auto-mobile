@@ -16,7 +16,7 @@ import { IOSCtrlProxyClient } from "../features/observe/ios/IOSCtrlProxyClient";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { logger } from "../utils/logger";
-import { createPerformanceTracker } from "../utils/PerformanceTracker";
+import { createPerformanceTracker, isDebugPerfEnabled } from "../utils/PerformanceTracker";
 import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
 import { createStructuredToolResponse, type StructuredToolResponse } from "../utils/toolUtils";
 import {
@@ -957,9 +957,16 @@ function buildBootedResponse(
     isReady: true,
     acquisition,
     readiness,
-    // TimingData's runtime shape is serialized as the legacy flat result.
-    // oxlint-disable-next-line auto-mobile/no-unknown-cast
-    timing: (timing ?? {}) as unknown as Record<string, number>,
+    // The per-command timing tree (~170 adb polls on a cold boot) is a daemon
+    // diagnostic, not something a client acts on (#11636); it stays behind the
+    // existing --debug-perf opt-in. `readiness.elapsedMs` carries the total.
+    ...(isDebugPerfEnabled()
+      ? {
+          // TimingData's runtime shape is serialized as the legacy flat result.
+          // oxlint-disable-next-line auto-mobile/no-unknown-cast
+          timing: (timing ?? {}) as unknown as Record<string, number>,
+        }
+      : {}),
   });
 }
 

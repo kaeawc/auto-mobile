@@ -22,6 +22,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { setDebugPerfEnabled } from "../../src/utils/PerformanceTracker";
 import {
   clearDirectSessionDevices,
   resolveDirectSessionDevice,
@@ -652,6 +653,31 @@ describe("startDevice handler", () => {
     expect(fakeDeviceUtils.getExecutedOperations()).toContain(
       "waitForDeviceReady:Pixel_7_API_34:42000",
     );
+  });
+
+  it("omits the internal timing tree from a success response unless debug-perf is on (#11636)", async () => {
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    const result = await callStartDevice({ platform: "android" });
+
+    expect(result.acquisition).toBe("already-booted");
+    expect(result.readiness).toBeDefined();
+    expect("timing" in result).toBe(false);
+  });
+
+  it("keeps the timing tree on a success response behind debug-perf (#11636)", async () => {
+    setDebugPerfEnabled(true);
+    try {
+      fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+      fakeMatcher.setBootedResult(androidDevice);
+
+      const result = await callStartDevice({ platform: "android" });
+
+      expect(result.timing).toBeDefined();
+    } finally {
+      setDebugPerfEnabled(false);
+    }
   });
 
   it("falls through to image when no booted device matches", async () => {

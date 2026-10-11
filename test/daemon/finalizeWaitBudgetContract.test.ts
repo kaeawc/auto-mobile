@@ -73,6 +73,7 @@ function registeredRecordingCapMs(deviceId: string): number | undefined {
       listActiveVideoRecordings: async () => [],
       stopVideoRecording: async () => {},
       isTestRecordingOwnedBy: () => false,
+      ownedTestRecordingId: () => undefined,
       stopTestRecording: async () => {},
       activeRecordingIdsForOwner: () => [],
       timer: new FakeTimer(),

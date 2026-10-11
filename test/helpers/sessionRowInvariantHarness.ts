@@ -80,6 +80,8 @@ class ChaoticRepository extends DeviceSessionRepository {
   terminalWritesInFlight = 0;
   /** Live-row writes issued and not yet landed or failed. */
   upsertsInFlight = 0;
+  /** Live-row writes that landed so far. */
+  upsertsLanded = 0;
   /** Every write as it is issued, lands or fails, for the trace of a failing run. */
   readonly log: string[] = [];
 
@@ -117,6 +119,7 @@ class ChaoticRepository extends DeviceSessionRepository {
         throw new Error("SQLITE_BUSY: database is locked");
       }
       const generation = await super.upsertActiveSession(...args);
+      this.upsertsLanded++;
       this.log.push(`${write} landed as generation ${generation}`);
       return generation;
     } finally {
@@ -906,13 +909,15 @@ export async function runSessionRowInterleaving(
     }
     let drainedInTime: boolean | undefined;
     let writesAtDrain = 0;
-    let upsertsInFlightAtDrain = 0;
+    let liveRowWritesUnderDrain = false;
+    const upsertsLandedAtShutdown = repository.upsertsLanded;
     background(
       "drain",
       manager.drainReleasePromises(SHUTDOWN_DRAIN_TIMEOUT_MS, handoffs).then((inTime) => {
         drainedInTime = inTime;
         writesAtDrain = repository.releaseWritesIssued;
-        upsertsInFlightAtDrain = repository.upsertsInFlight;
+        liveRowWritesUnderDrain =
+          repository.upsertsInFlight > 0 || repository.upsertsLanded !== upsertsLandedAtShutdown;
       }),
     );
     await settle();
@@ -922,9 +927,10 @@ export async function runSessionRowInterleaving(
       violations.push("shutdown: the release drain did not finish");
       return;
     }
-    // A live-row write still parked is the write barrier's to wait for, not the drain's; the
-    // release it is followed by (after the session's own) is then issued past the drain.
-    if (repository.releaseWritesIssued !== writesAtDrain && upsertsInFlightAtDrain === 0) {
+    // A live-row write (an activity's re-persist) still parked, or landing while the drain runs,
+    // is the write barrier's to wait for, not the drain's: the release it is followed by, after
+    // the session's own, can then be issued past the drain. Open in #11557, and not judged here.
+    if (repository.releaseWritesIssued !== writesAtDrain && !liveRowWritesUnderDrain) {
       violations.push(
         "shutdown: a release write was issued after the drain, as the database closes",
       );

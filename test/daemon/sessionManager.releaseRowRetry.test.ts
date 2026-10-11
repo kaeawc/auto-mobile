@@ -140,6 +140,37 @@ describe("the row of a released session (#11557)", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
+  test("a retry its own precondition skipped is still owed, for the generation the row has now", async () => {
+    await planReleaseWithFailingWrite(1);
+    let landRetryWrite!: () => void;
+    store.park = new Promise<void>((resolve) => {
+      landRetryWrite = resolve;
+    });
+    await timer.advanceTimeAsync(RELEASE_RETRY_DELAY_MS);
+    await settleMicrotasks();
+    // An issue of the name that failed claimed the row and handed it back under the write.
+    const claimed = (await row())!;
+    store.seed({
+      ...claimed,
+      stable_identity_generation: (claimed.stable_identity_generation ?? 0) + 2,
+    });
+    store.park = undefined;
+    landRetryWrite();
+    await settleMicrotasks();
+    // The scenario was driven: the write named the generation from before, and changed nothing.
+    expect(await row()).toMatchObject({ status: "active", release_reason: null });
+    expect(timer.getPendingTimeouts()).toEqual([RELEASE_RETRY_DELAY_MS]);
+
+    await timer.advanceTimeAsync(RELEASE_RETRY_DELAY_MS);
+    await settleMicrotasks();
+
+    expect(await row()).toMatchObject({
+      status: "released",
+      release_reason: PLAN_AUTO_RELEASE_REASON,
+    });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("a release that took the shutdown handoff's reason is not retried with its first", async () => {
     await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
     let failFirstWrite!: () => void;
@@ -178,6 +209,42 @@ describe("the row of a released session (#11557)", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
     const reissued = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
     expect(manager.getSession(SESSION)).toBe(reissued);
+  });
+
+  test("a terminal release of the handed-off session while that write is still parked is answered from its row", async () => {
+    const landReleaseWrite = await supersededReleaseWithParkedWrite();
+    await manager.releaseSession(SESSION, `device-restart:${DEVICE}`);
+
+    // The parked write hides nothing: the row this release writes is read back as the release.
+    expect(await manager.releaseSession(SESSION, DEVICE_LOSS)).toBe(DEVICE);
+
+    landReleaseWrite();
+    await settleMicrotasks();
+    expect(await row()).toMatchObject({ release_reason: DEVICE_LOSS });
+    expect(releases).toContain(DEVICE_LOSS);
+    expect(
+      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS).then(
+        () => "issued",
+        (error: unknown) => (error instanceof Error ? error.name : String(error)),
+      ),
+    ).toBe("TerminalSessionError");
+  });
+
+  test("a peer's terminal row for the same reason, written while that write is parked, still ends the name", async () => {
+    const landReleaseWrite = await supersededReleaseWithParkedWrite();
+    await manager.releaseSession(SESSION, PLAN_AUTO_RELEASE_REASON);
+    const released = (await row())!;
+    store.seed({ ...released, status: "released", release_reason: DEVICE_LOSS });
+
+    expect(
+      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS).then(
+        () => "issued",
+        (error: unknown) => (error instanceof Error ? error.name : String(error)),
+      ),
+    ).toBe("TerminalSessionError");
+    landReleaseWrite();
+    await settleMicrotasks();
+    expect(await row()).toMatchObject({ release_reason: DEVICE_LOSS });
   });
 
   test("a lookup of the name while that terminal row stands does not fence it", async () => {

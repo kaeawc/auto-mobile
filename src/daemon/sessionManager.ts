@@ -1609,7 +1609,11 @@ export class SessionManager {
     string,
     { session: Session; reasons: readonly string[]; release: SessionReleaseSnapshot }
   > = new Map();
-  /** The superseded releases' reasons those pending rewrites replace, one entry per rewrite. */
+  /**
+   * The superseded releases' reasons whose terminal row a rewrite or a replacement under way is
+   * replacing, one entry per write. Not the parked write's whole window: the row a peer or a
+   * committed release wrote meanwhile is the UUID's end.
+   */
   private readonly supersededReasonsBeingRewritten: Map<string, string[]> = new Map();
   /**
    * Rewrites of {@link pendingSupersededRowReasserts} that failed and are still owed (#11557):
@@ -2889,8 +2893,9 @@ export class SessionManager {
         throw error;
       }
       const current = await this.readPersistedSession(session.sessionId);
-      const terminalRelease =
-        current && this.terminalReleaseFromPersisted(session.sessionId, current);
+      const terminalRelease = this.unlessBeingReplaced(
+        current && this.terminalReleaseFromPersisted(session.sessionId, current),
+      );
       if (terminalRelease) {
         this.terminalReleaseSnapshots.set(session.sessionId, terminalRelease);
         throw new TerminalSessionError(session.sessionId, terminalRelease);
@@ -2915,7 +2920,7 @@ export class SessionManager {
     // A plan run minting its label writes over the row its previous run left, terminal or not.
     const persistedTerminalRelease = this.planLabelMints.has(session.sessionId)
       ? undefined
-      : await this.getPersistedTerminalRelease(session.sessionId);
+      : this.unlessBeingReplaced(await this.getPersistedTerminalRelease(session.sessionId));
     if (persistedTerminalRelease) {
       this.terminalReleaseSnapshots.set(session.sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(session.sessionId, persistedTerminalRelease);
@@ -3198,16 +3203,26 @@ export class SessionManager {
     return current;
   }
 
+  /**
+   * `release`, read from the row by an issue of the name that would fence the UUID on it, unless
+   * it is this daemon's own superseded release's row with its replacement under way (#11557):
+   * that row ended nothing. The issue is then refused or goes on as for any row that is not
+   * terminal, and raises no fence.
+   */
+  private unlessBeingReplaced(
+    release: SessionReleaseSnapshot | undefined,
+  ): SessionReleaseSnapshot | undefined {
+    return release &&
+      this.supersededReasonsBeingRewritten.get(release.sessionId)?.includes(release.releaseReason)
+      ? undefined
+      : release;
+  }
+
   private terminalReleaseFromPersisted(
     sessionId: string,
     persisted: DeviceSession,
   ): SessionReleaseSnapshot | undefined {
     if (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason)) {
-      return undefined;
-    }
-    if (this.supersededReasonsBeingRewritten.get(sessionId)?.includes(persisted.release_reason)) {
-      // This daemon's own superseded release's row, about to be rewritten (#11557): it ended
-      // nothing, so no reader may take it for the UUID's end and fence the name on it.
       return undefined;
     }
     return this.releaseSnapshotFromPersisted(sessionId, persisted, persisted.release_reason);
@@ -3824,8 +3839,9 @@ export class SessionManager {
     }
 
     const persisted = await this.readPersistedSession(sessionId);
-    const persistedTerminalRelease =
-      persisted && this.terminalReleaseFromPersisted(sessionId, persisted);
+    const persistedTerminalRelease = this.unlessBeingReplaced(
+      persisted && this.terminalReleaseFromPersisted(sessionId, persisted),
+    );
     if (persistedTerminalRelease) {
       this.terminalReleaseSnapshots.set(sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(sessionId, persistedTerminalRelease);
@@ -3845,9 +3861,9 @@ export class SessionManager {
   ): Promise<Session> {
     let persisted = await this.readPersistedSession(sessionId);
     this.refusePlanLabelSessionOutsideItsRun(sessionId, persisted);
-    const persistedTerminalRelease = persisted
-      ? this.terminalReleaseFromPersisted(sessionId, persisted)
-      : undefined;
+    const persistedTerminalRelease = this.unlessBeingReplaced(
+      persisted ? this.terminalReleaseFromPersisted(sessionId, persisted) : undefined,
+    );
     if (persistedTerminalRelease) {
       this.terminalReleaseSnapshots.set(sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(sessionId, persistedTerminalRelease);
@@ -3867,7 +3883,9 @@ export class SessionManager {
       // Answered from the row as the expiry write left it (#11498): a row whose deadline was
       // extended under this call is still live or recoverable, and is admitted like any other.
       persisted = await this.terminalizeExpiredPersistedSession(persisted);
-      const terminalRelease = persisted && this.terminalReleaseFromPersisted(sessionId, persisted);
+      const terminalRelease = this.unlessBeingReplaced(
+        persisted && this.terminalReleaseFromPersisted(sessionId, persisted),
+      );
       if (terminalRelease) {
         this.terminalReleaseSnapshots.set(sessionId, terminalRelease);
         throw new TerminalSessionError(sessionId, terminalRelease);
@@ -4028,7 +4046,9 @@ export class SessionManager {
       return claimed;
     }
     const current = await this.readPersistedSession(sessionId);
-    const terminalRelease = current && this.terminalReleaseFromPersisted(sessionId, current);
+    const terminalRelease = this.unlessBeingReplaced(
+      current && this.terminalReleaseFromPersisted(sessionId, current),
+    );
     if (terminalRelease) {
       this.terminalReleaseSnapshots.set(sessionId, terminalRelease);
       throw new TerminalSessionError(sessionId, terminalRelease);
@@ -6803,7 +6823,7 @@ export class SessionManager {
     // From here until the rewrite below is done, a terminal row under a session that lives on is
     // this parked write's: an activity write that finds it must not end the session (#11498).
     const settleReassert = snapshot.terminal
-      ? this.expectSupersededRowReassert(snapshot.sessionId, [snapshot.releaseReason])
+      ? this.expectSupersededRowReassert(snapshot.sessionId)
       : undefined;
     // The session the release that gave up on this write was ending, if it still held it.
     const released = this.sessions.get(snapshot.sessionId);
@@ -6998,9 +7018,44 @@ export class SessionManager {
       }
       return;
     }
+    if (await this.wasRetriedReleaseWriteSkipped(entry)) {
+      this.scheduleTerminalReleaseRetry(snapshot);
+      return;
+    }
     this.confirmReleaseWrite(snapshot);
     if (this.pendingTerminalReleaseRetries.get(snapshot.sessionId) === entry) {
       this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
+    }
+  }
+
+  /**
+   * Whether a retried non-terminal write was skipped by its own precondition and is still owed: an
+   * issue of the name that failed claimed the row and handed it back while the write was in
+   * flight, so the generation it named is gone and the row still reads as a restart would
+   * rehydrate it. A read that fails leaves the write counted as landed, as before the read.
+   */
+  private async wasRetriedReleaseWriteSkipped(entry: TerminalReleaseRetry): Promise<boolean> {
+    const { snapshot } = entry;
+    if (snapshot.terminal || this.pendingTerminalReleaseRetries.get(snapshot.sessionId) !== entry) {
+      return false;
+    }
+    try {
+      const row = await this.deviceSessionRepository.getSession?.(snapshot.sessionId);
+      return (
+        row !== undefined &&
+        row.release_reason !== snapshot.releaseReason &&
+        this.pendingTerminalReleaseRetries.get(snapshot.sessionId) === entry &&
+        this.isRecoverablePersistedSession(row) &&
+        !this.isRowOwnedByLivePeer(row) &&
+        !this.isSessionBeingRecreated(snapshot.sessionId)
+      );
+    } catch (error) {
+      logger.warn(
+        `[SessionManager] Failed to read the row of session ${snapshot.sessionId} after ` +
+          `retrying its ${snapshot.releaseReason} release: ${errorMessage(error)}`,
+        error,
+      );
+      return false;
     }
   }
 

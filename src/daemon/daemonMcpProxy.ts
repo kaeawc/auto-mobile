@@ -1273,7 +1273,9 @@ export function mergeDaemonOptions(
  */
 /**
  * Longest a bind waits out a `device_cleanup_in_progress` refusal: the recording-finalize cap
- * (about 120 s, #10957) plus slack for the restores around it.
+ * (about 120 s, #10957) plus slack for the restores around it. Shared with the JUnit runner and
+ * XCTestRunner through `finalizeWait.waitBudgetMs` in `test/fixtures/refusal-wire-hints/hints.json`
+ * (#11360): change them together.
  */
 export const DEVICE_CLEANUP_WAIT_BUDGET_MS = 150_000;
 

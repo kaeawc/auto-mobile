@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { PLAN_LABEL_SESSION_SOURCE, TerminalSessionError } from "../../src/daemon/sessionManager";
 import {
@@ -32,6 +32,17 @@ const heldDevices = (hunt: PlanSessionHunt): string[] =>
     .map((device) => device.deviceId);
 
 describe("who creates a session named like a label of a live base", () => {
+  // The first executePlan pays the plan pipeline's one-time module and schema cost.
+  beforeAll(async () => {
+    const hunt = await createPlanSessionHunt([deviceA, deviceB, deviceC]);
+    try {
+      await hunt.acquire(BASE);
+      await hunt.runPlan(twoDevicePlan(["B"]));
+    } finally {
+      hunt.tearDown();
+    }
+  });
+
   test(
     "a session id chosen before its prefix became a base stays a session of its own",
     scenario(async (hunt) => {

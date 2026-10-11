@@ -562,6 +562,15 @@
         "acquireNewSession": false
       }
     },
+    "daemon_restart_deferred": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_restart_deferred",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 1000
+      }
+    },
     "daemon_restart_pending": {
       "expected": "retry",
       "fields": {

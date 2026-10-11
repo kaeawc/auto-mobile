@@ -1,0 +1,13 @@
+{
+  "code": "daemon_restart_deferred",
+  "builder": "DaemonRestartDeferredError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"code\":\"daemon_restart_deferred\",\"message\":\"AutoMobile daemon restart deferred (a device operation is active). Retry after 1000ms; use an explicit daemon restart only after confirming that no device operation is active.\",\"retryable\":true,\"retryAfterMs\":1000}}"
+      }
+    ],
+    "isError": true
+  }
+}

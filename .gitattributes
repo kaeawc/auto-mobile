@@ -144,3 +144,4 @@ test/fixtures/android-apk-signing/*.b64 text eol=lf
 test/fixtures/android-apk-signing/*.txt text eol=lf
 test/fixtures/refusal-wire/*.json text eol=lf
 test/fixtures/refusal-wire/surfaces/*.json text eol=lf
+test/fixtures/refusal-wire-hints/*.json text eol=lf

@@ -436,10 +436,11 @@ internal object AutoMobilePlanExecutor {
         outputPayload =
           response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
         parsed =
-          ParsedToolResult(
-            false,
-            response.error ?: "Unable to enable executePlan",
-          )
+          parseDaemonToolResult(response, json).let {
+            if (response.error.isNullOrBlank())
+              it.copy(errorMessage = "Unable to enable executePlan")
+            else it
+          }
         toolResults = emptyList()
       } else {
         if (options.debugMode) {
@@ -515,7 +516,11 @@ internal object AutoMobilePlanExecutor {
       }
       if (
         attempt > maxRetries ||
-          !(parsed.retryable || parsed.acquireNewSession || isTransientError(errorMessage))
+          !(parsed.retryable ||
+            parsed.acquireNewSession ||
+            // An explicit `retryable: false` on a typed frame is the daemon's verdict (#11544); any
+            // other failure falls back to matching the message text.
+            (!parsed.terminal && isTransientError(errorMessage)))
       ) {
         break
       }
@@ -896,7 +901,23 @@ internal object AutoMobilePlanExecutor {
 
   private fun parseDaemonToolResult(response: DaemonResponse, json: Json): ParsedToolResult {
     if (!response.success) {
-      return ParsedToolResult(false, response.error ?: "Daemon returned failure")
+      // A failed frame carries the typed refusal fields at the top level (#11544).
+      val code = (response.code as? JsonPrimitive)?.takeIf { it.isString }?.content
+      return ParsedToolResult(
+        false,
+        response.error ?: "Daemon returned failure",
+        retryable = response.retryable == JsonPrimitive(true),
+        code = code,
+        daemonMessage = response.error,
+        acquireNewSession =
+          (response.nextAction as? JsonPrimitive)?.takeIf { it.isString }?.content ==
+            ACQUIRE_NEW_SESSION_NEXT_ACTION,
+        retryAfterMs = retryAfterHintMs(response.retryAfterMs),
+        // Only an explicit `retryable: false` on a typed code is the daemon's final verdict; a
+        // frame that omits the flag (older daemons, `daemon_queue_timeout` today) keeps the
+        // message-based retry it always had.
+        terminal = code != null && response.retryable == JsonPrimitive(false),
+      )
     }
 
     val resultElement =
@@ -963,11 +984,7 @@ internal object AutoMobilePlanExecutor {
             else -> null
           },
         acquireNewSession = acquireNewSession,
-        retryAfterMs =
-          ((errorObject?.get("retryAfterMs") ?: parsed["retryAfterMs"]) as? JsonPrimitive)
-            ?.takeIf { !it.isString }
-            ?.longOrNull
-            ?.takeIf { it > 0 },
+        retryAfterMs = retryAfterHintMs(errorObject?.get("retryAfterMs") ?: parsed["retryAfterMs"]),
       )
     }
     return ParsedToolResult(true, "")
@@ -1385,14 +1402,28 @@ internal object AutoMobilePlanExecutor {
     setOf(DEVICE_CLEANUP_IN_PROGRESS_CODE, DEVICE_SHUTTING_DOWN_CODE)
 
   /**
+   * A `retryAfterMs` hint as the runners use it: absent when zero or negative (as when missing),
+   * otherwise clamped to [DEVICE_FINALIZE_WAIT_CAP_MS] so adding it to a waited time cannot
+   * overflow (#11544). Swift's `DeviceWaitBackoff.usableHintMs` does the same.
+   */
+  internal fun positiveRetryAfterMs(retryAfterMs: Long?): Long? =
+    retryAfterMs?.takeIf { it > 0 }?.coerceAtMost(DEVICE_FINALIZE_WAIT_CAP_MS)
+
+  /** The usable hint of a wire `retryAfterMs` element: only a whole JSON number counts. */
+  internal fun retryAfterHintMs(wire: JsonElement?): Long? =
+    positiveRetryAfterMs((wire as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull)
+
+  /**
    * Total wait budget for this refusal. For the finalize codes the daemon's `retryAfterMs` is the
    * finalize time STILL REMAINING, so it bounds the total: [waitedMs] already spent plus that hint,
    * clamped to [DEVICE_FINALIZE_WAIT_CAP_MS] and never below [deviceOwnedWaitBudgetMs]
    * (#11360, #11538). Every other code, and a refusal with no hint, keeps the plain budget.
    */
   private fun deviceOwnedBudgetMs(waitedMs: Long, retryAfterMs: Long?, code: String?): Long {
-    if (code !in FINALIZE_WAIT_CODES || retryAfterMs == null) return deviceOwnedWaitBudgetMs
-    val untilFinalized = minOf(waitedMs + retryAfterMs, DEVICE_FINALIZE_WAIT_CAP_MS)
+    val hintMs = positiveRetryAfterMs(retryAfterMs)
+    if (code !in FINALIZE_WAIT_CODES || hintMs == null) return deviceOwnedWaitBudgetMs
+    // The hint is clamped before the addition so a hint near Long.MAX_VALUE cannot wrap negative.
+    val untilFinalized = minOf(waitedMs + hintMs, DEVICE_FINALIZE_WAIT_CAP_MS)
     return maxOf(deviceOwnedWaitBudgetMs, untilFinalized)
   }
 
@@ -1413,7 +1444,7 @@ internal object AutoMobilePlanExecutor {
     if (remaining <= 0) return null
     val doubled = DEVICE_OWNED_INITIAL_DELAY_MS shl waitsSoFar.coerceAtMost(8)
     val backoff = minOf(doubled, DEVICE_OWNED_MAX_DELAY_MS)
-    val hint = if (code in FINALIZE_WAIT_CODES) 0L else retryAfterMs ?: 0L
+    val hint = if (code in FINALIZE_WAIT_CODES) 0L else positiveRetryAfterMs(retryAfterMs) ?: 0L
     return minOf(maxOf(backoff, hint), remaining)
   }
 
@@ -1473,5 +1504,7 @@ internal object AutoMobilePlanExecutor {
     val acquireNewSession: Boolean = false,
     /** The daemon's `retryAfterMs` hint for a retryable refusal, when it sent one. */
     val retryAfterMs: Long? = null,
+    /** A typed failed frame said `retryable: false`: the daemon's final verdict (#11544). */
+    val terminal: Boolean = false,
   )
 }

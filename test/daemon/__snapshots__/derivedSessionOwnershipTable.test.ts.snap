@@ -253,3 +253,384 @@ exports[`a derived label session is judged and recorded as its base an acquisiti
   "refused": "Device '<device>' is already assigned to another session. Acquire a different device or wait for its owner to release it.",
 }
 `;
+
+exports[`a derived label session is judged and recorded as its base a liveness claim, then a restore proving the claimed token: the owner connection 1`] = `
+{
+  "ownership": {
+    "base foreign to conn-other": true,
+    "base foreign to conn-owner": false,
+    "derived foreign to conn-other": true,
+    "derived foreign to conn-owner": false,
+  },
+  "refused": [],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a liveness claim, then a restore proving the claimed token: no owner 1`] = `
+{
+  "ownership": {
+    "base foreign to conn-other": false,
+    "base foreign to conn-owner": true,
+    "derived foreign to conn-other": false,
+    "derived foreign to conn-owner": true,
+  },
+  "refused": [],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a liveness claim: the owner connection 1`] = `
+{
+  "liveness": {
+    "base answers to claimant-liveness-token": true,
+    "base answers to owner-liveness-token": false,
+    "base row's token": "claimant-liveness-token",
+    "derived answers to claimant-liveness-token": true,
+    "derived answers to owner-liveness-token": false,
+    "derived row's token": null,
+  },
+  "outcome": "claimed",
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a liveness claim: another connection 1`] = `
+{
+  "liveness": {
+    "base answers to claimant-liveness-token": true,
+    "base answers to owner-liveness-token": false,
+    "base row's token": "claimant-liveness-token",
+    "derived answers to claimant-liveness-token": true,
+    "derived answers to owner-liveness-token": false,
+    "derived row's token": null,
+  },
+  "outcome": "claimed",
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a liveness claim: no owner 1`] = `
+{
+  "liveness": {
+    "base answers to claimant-liveness-token": true,
+    "base answers to owner-liveness-token": false,
+    "base row's token": "claimant-liveness-token",
+    "derived answers to claimant-liveness-token": true,
+    "derived answers to owner-liveness-token": false,
+    "derived row's token": null,
+  },
+  "outcome": "claimed",
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a liveness claim against the base owner's live lease: the owner connection 1`] = `
+{
+  "hold": {
+    "holdRemainingMs": 4000,
+    "remainingMs": 4000,
+    "state": "live",
+  },
+  "liveness": {
+    "base answers to claimant-liveness-token": false,
+    "base answers to owner-liveness-token": true,
+    "base row's token": "owner-liveness-token",
+    "derived answers to claimant-liveness-token": false,
+    "derived answers to owner-liveness-token": true,
+    "derived row's token": null,
+  },
+  "outcome": "conflict",
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a liveness claim against the base owner's live lease: another connection 1`] = `
+{
+  "hold": {
+    "holdRemainingMs": 4000,
+    "remainingMs": 4000,
+    "state": "live",
+  },
+  "liveness": {
+    "base answers to claimant-liveness-token": false,
+    "base answers to owner-liveness-token": true,
+    "base row's token": "owner-liveness-token",
+    "derived answers to claimant-liveness-token": false,
+    "derived answers to owner-liveness-token": true,
+    "derived row's token": null,
+  },
+  "outcome": "conflict",
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a liveness claim against the base owner's live lease: no owner 1`] = `
+{
+  "hold": {
+    "holdRemainingMs": 4000,
+    "remainingMs": 4000,
+    "state": "live",
+  },
+  "liveness": {
+    "base answers to claimant-liveness-token": false,
+    "base answers to owner-liveness-token": true,
+    "base row's token": "owner-liveness-token",
+    "derived answers to claimant-liveness-token": false,
+    "derived answers to owner-liveness-token": true,
+    "derived row's token": null,
+  },
+  "outcome": "conflict",
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a liveness claim, then a restore proving the claimed token: another connection 1`] = `
+{
+  "ownership": {
+    "base foreign to conn-other": false,
+    "base foreign to conn-owner": true,
+    "derived foreign to conn-other": false,
+    "derived foreign to conn-owner": true,
+  },
+  "refused": [],
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a tokened heartbeat adopting unowned liveness: the owner connection 1`] = `
+{
+  "adopted": true,
+  "liveness": {
+    "base answers to claimant-liveness-token": true,
+    "base answers to owner-liveness-token": false,
+    "base row's token": "claimant-liveness-token",
+    "derived answers to claimant-liveness-token": true,
+    "derived answers to owner-liveness-token": false,
+    "derived row's token": null,
+  },
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a tokened heartbeat adopting unowned liveness: another connection 1`] = `
+{
+  "adopted": true,
+  "liveness": {
+    "base answers to claimant-liveness-token": true,
+    "base answers to owner-liveness-token": false,
+    "base row's token": "claimant-liveness-token",
+    "derived answers to claimant-liveness-token": true,
+    "derived answers to owner-liveness-token": false,
+    "derived row's token": null,
+  },
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a tokened heartbeat adopting unowned liveness: no owner 1`] = `
+{
+  "adopted": true,
+  "liveness": {
+    "base answers to claimant-liveness-token": true,
+    "base answers to owner-liveness-token": false,
+    "base row's token": "claimant-liveness-token",
+    "derived answers to claimant-liveness-token": true,
+    "derived answers to owner-liveness-token": false,
+    "derived row's token": null,
+  },
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a liveness release by the base owner's token: the owner connection 1`] = `
+{
+  "liveness": {
+    "base answers to claimant-liveness-token": false,
+    "base answers to owner-liveness-token": false,
+    "base row's token": null,
+    "derived answers to claimant-liveness-token": false,
+    "derived answers to owner-liveness-token": false,
+    "derived row's token": null,
+  },
+  "outcome": "released",
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a liveness release by the base owner's token: another connection 1`] = `
+{
+  "liveness": {
+    "base answers to claimant-liveness-token": false,
+    "base answers to owner-liveness-token": false,
+    "base row's token": null,
+    "derived answers to claimant-liveness-token": false,
+    "derived answers to owner-liveness-token": false,
+    "derived row's token": null,
+  },
+  "outcome": "released",
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a liveness release by the base owner's token: no owner 1`] = `
+{
+  "liveness": {
+    "base answers to claimant-liveness-token": false,
+    "base answers to owner-liveness-token": false,
+    "base row's token": null,
+    "derived answers to claimant-liveness-token": false,
+    "derived answers to owner-liveness-token": false,
+    "derived row's token": null,
+  },
+  "outcome": "released",
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a claiming heartbeat: the owner connection 1`] = `
+{
+  "answer": {
+    "code": null,
+    "error": null,
+    "success": true,
+  },
+  "liveness": {
+    "base answers to claimant-liveness-token": true,
+    "base answers to owner-liveness-token": false,
+    "base row's token": "claimant-liveness-token",
+    "derived answers to claimant-liveness-token": true,
+    "derived answers to owner-liveness-token": false,
+    "derived row's token": null,
+  },
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a claiming heartbeat: another connection 1`] = `
+{
+  "answer": {
+    "code": null,
+    "error": null,
+    "success": true,
+  },
+  "liveness": {
+    "base answers to claimant-liveness-token": true,
+    "base answers to owner-liveness-token": false,
+    "base row's token": "claimant-liveness-token",
+    "derived answers to claimant-liveness-token": true,
+    "derived answers to owner-liveness-token": false,
+    "derived row's token": null,
+  },
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a claiming heartbeat: no owner 1`] = `
+{
+  "answer": {
+    "code": null,
+    "error": null,
+    "success": true,
+  },
+  "liveness": {
+    "base answers to claimant-liveness-token": true,
+    "base answers to owner-liveness-token": false,
+    "base row's token": "claimant-liveness-token",
+    "derived answers to claimant-liveness-token": true,
+    "derived answers to owner-liveness-token": false,
+    "derived row's token": null,
+  },
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a claiming heartbeat against the base owner's live lease: the owner connection 1`] = `
+{
+  "answer": {
+    "code": "liveness_owner_conflict",
+    "error": "Session <session> is owned by another liveness owner whose lease is still live, so this claim was rejected and nothing changed. Retry after the owner's lease expires, or claim with the owner's stable token.",
+    "success": false,
+  },
+  "liveness": {
+    "base answers to claimant-liveness-token": false,
+    "base answers to owner-liveness-token": true,
+    "base row's token": "owner-liveness-token",
+    "derived answers to claimant-liveness-token": false,
+    "derived answers to owner-liveness-token": true,
+    "derived row's token": null,
+  },
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a claiming heartbeat against the base owner's live lease: another connection 1`] = `
+{
+  "answer": {
+    "code": "liveness_owner_conflict",
+    "error": "Session <session> is owned by another liveness owner whose lease is still live, so this claim was rejected and nothing changed. Retry after the owner's lease expires, or claim with the owner's stable token.",
+    "success": false,
+  },
+  "liveness": {
+    "base answers to claimant-liveness-token": false,
+    "base answers to owner-liveness-token": true,
+    "base row's token": "owner-liveness-token",
+    "derived answers to claimant-liveness-token": false,
+    "derived answers to owner-liveness-token": true,
+    "derived row's token": null,
+  },
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a claiming heartbeat against the base owner's live lease: no owner 1`] = `
+{
+  "answer": {
+    "code": "liveness_owner_conflict",
+    "error": "Session <session> is owned by another liveness owner whose lease is still live, so this claim was rejected and nothing changed. Retry after the owner's lease expires, or claim with the owner's stable token.",
+    "success": false,
+  },
+  "liveness": {
+    "base answers to claimant-liveness-token": false,
+    "base answers to owner-liveness-token": true,
+    "base row's token": "owner-liveness-token",
+    "derived answers to claimant-liveness-token": false,
+    "derived answers to owner-liveness-token": true,
+    "derived row's token": null,
+  },
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base the base owner's own heartbeat: the owner connection 1`] = `
+{
+  "answer": {
+    "code": null,
+    "error": null,
+    "success": true,
+  },
+  "liveness": {
+    "base answers to claimant-liveness-token": false,
+    "base answers to owner-liveness-token": true,
+    "base row's token": "owner-liveness-token",
+    "derived answers to claimant-liveness-token": false,
+    "derived answers to owner-liveness-token": true,
+    "derived row's token": null,
+  },
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base the base owner's own heartbeat: another connection 1`] = `
+{
+  "answer": {
+    "code": null,
+    "error": null,
+    "success": true,
+  },
+  "liveness": {
+    "base answers to claimant-liveness-token": false,
+    "base answers to owner-liveness-token": true,
+    "base row's token": "owner-liveness-token",
+    "derived answers to claimant-liveness-token": false,
+    "derived answers to owner-liveness-token": true,
+    "derived row's token": null,
+  },
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base the base owner's own heartbeat: no owner 1`] = `
+{
+  "answer": {
+    "code": null,
+    "error": null,
+    "success": true,
+  },
+  "liveness": {
+    "base answers to claimant-liveness-token": false,
+    "base answers to owner-liveness-token": true,
+    "base row's token": "owner-liveness-token",
+    "derived answers to claimant-liveness-token": false,
+    "derived answers to owner-liveness-token": true,
+    "derived row's token": null,
+  },
+}
+`;

@@ -61,6 +61,7 @@ test/daemon/daemonSocketReachability.test.ts
 test/daemon/daemonStartupFailureTracker.test.ts
 test/daemon/daemonStartupGuard.test.ts
 test/daemon/daemonTransportError.test.ts
+test/daemon/derivedLabelLivenessClaim.test.ts
 test/daemon/desktopWireContract.test.ts
 test/daemon/deviceControlTransportFailure.test.ts
 test/daemon/deviceDataStreamSocketServerCharacterization.test.ts
@@ -124,8 +125,10 @@ test/daemon/hierarchyStreamDiff.test.ts
 test/daemon/idleDeviceReaper.test.ts
 test/daemon/incumbentOwnerGuard.test.ts
 test/daemon/inputDeviceOwnership.test.ts
+test/daemon/inputHolderChangedTypedRefusal.test.ts
 test/daemon/lateRehydrationOwnerToldNotFound.test.ts
 test/daemon/liveDeadlineRegistry.test.ts
+test/daemon/livenessClaimDecision.test.ts
 test/daemon/livenessKeeperSuspectInteractions.test.ts
 test/daemon/livenessOwnerLease.test.ts
 test/daemon/managedExecutionLiveness.test.ts
@@ -161,6 +164,7 @@ test/daemon/observerSessionRequestHandlers.test.ts
 test/daemon/outboundWriteGuard.test.ts
 test/daemon/ownerConflictLeash.test.ts
 test/daemon/ownerDisconnectReleaseRearm.test.ts
+test/daemon/ownershipLookupReleasesNothing.test.ts
 test/daemon/passiveWorkPolicy.test.ts
 test/daemon/perSourceIosLiveness.test.ts
 test/daemon/performancePushSocketServer.test.ts
@@ -180,6 +184,7 @@ test/daemon/proxyLivenessRecovery.test.ts
 test/daemon/proxyReleaseReasonClassification.test.ts
 test/daemon/recycledProcessGeneration.test.ts
 test/daemon/refusalWireContract.test.ts
+test/daemon/refusedRoutingCallExtendsIdle.test.ts
 test/daemon/registerSessionManagedConnection.test.ts
 test/daemon/rehydratedLegacyLivenessDefaults.test.ts
 test/daemon/rehydrationIdleOrigin.test.ts
@@ -610,6 +615,7 @@ test/features/prototype/prototypeIcons.test.ts
 test/features/prototype/prototypeMissingAssets.test.ts
 test/features/prototype/prototypeNodeContractParity.test.ts
 test/features/prototype/prototypeRepeat.test.ts
+test/features/prototype/prototypeScrimRole.test.ts
 test/features/prototype/prototypeSelectionControls.test.ts
 test/features/prototype/prototypeSetStateBinding.test.ts
 test/features/prototype/prototypeThemeModes.test.ts
@@ -944,6 +950,7 @@ test/server/observeWaitForMultiPanel.test.ts
 test/server/performanceMonitorSessionCleanup.test.ts
 test/server/ping.test.ts
 test/server/planHealthSummary.test.ts
+test/server/planLabelNeverTakesSessionOfItsOwn.test.ts
 test/server/planOrchestratorVideoRecorderInjection.test.ts
 test/server/platform/PlatformClient.test.ts
 test/server/prompts/list.test.ts

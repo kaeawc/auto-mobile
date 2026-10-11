@@ -29,6 +29,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeLogger } from "../fakes/FakeLogger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 
 const devices: BootedDevice[] = [
   { name: "Pixel A", deviceId: "device-A", platform: "android" },
@@ -161,9 +162,11 @@ describe("executePlan cleans every acquired device before release", () => {
   const acquire = async (targets: BootedDevice[], labels = true): Promise<void> => {
     const names = targets.map((_, i) => String.fromCharCode(65 + i));
     const map = buildDeviceLabelMap(names, "base");
-    for (const [i, target] of targets.entries()) {
-      await sessionManager.createSession(map[names[i]], target.deviceId, target.platform);
-    }
+    await asPlanAllocation(sessionManager, "base", Object.values(map), async () => {
+      for (const [i, target] of targets.entries()) {
+        await sessionManager.createSession(map[names[i]], target.deviceId, target.platform);
+      }
+    });
     if (labels) {
       sessionManager.setDeviceLabels("base", map);
     }

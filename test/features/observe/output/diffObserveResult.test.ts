@@ -975,6 +975,63 @@ describe("diffObserveResult", () => {
     ).toBeUndefined();
   });
 
+  // #11637: a warning on the same node whose only difference is the regenerated
+  // synthetic `s2-` view id (same bounds) is not a change.
+  test("skeleton layout-warning diffs ignore a regenerated synthetic view id (#11637)", () => {
+    const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+    const statusBarWarning = (viewId: string) => ({
+      type: "interaction-in-system-gesture-region",
+      severity: "info",
+      element: { viewId, bounds: { left: 0, top: 0, right: 1080, bottom: 136 } },
+      categories: ["interaction"],
+      insetTypes: ["systemGestures"],
+      sides: ["top"],
+      overflowPx: { top: 10 },
+      insetPx: { top: 24 },
+      overlapPercent: 40,
+      confidence: "medium",
+    });
+
+    const diff = diffObserveResult(
+      obs(node, {
+        layoutWarnings: { scope: "full", warnings: [statusBarWarning("s2-bf13aa90c1d2e3f4")] },
+      }),
+      obs(node, {
+        layoutWarnings: { scope: "full", warnings: [statusBarWarning("s2-9bf0aa90c1d2e3f4")] },
+      }),
+      { layoutWarningsDiffMode: "perEntry" },
+    );
+
+    expect(diff.fields).toBeUndefined();
+  });
+
+  test("skeleton layout-warning diffs still report a moved warning with a synthetic id", () => {
+    const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+    const warningAt = (viewId: string, bottom: number) => ({
+      type: "interaction-in-system-gesture-region",
+      severity: "info",
+      element: { viewId, bounds: { left: 0, top: 0, right: 1080, bottom } },
+      categories: ["interaction"],
+      insetTypes: ["systemGestures"],
+      sides: ["top"],
+      overflowPx: { top: 10 },
+      insetPx: { top: 24 },
+      overlapPercent: 40,
+      confidence: "medium",
+    });
+
+    const diff = diffObserveResult(
+      obs(node, { layoutWarnings: { scope: "full", warnings: [warningAt("s2-aaaa", 136)] } }),
+      obs(node, { layoutWarnings: { scope: "full", warnings: [warningAt("s2-bbbb", 200)] } }),
+      { layoutWarningsDiffMode: "perEntry" },
+    );
+
+    expect(diff.fields!.layoutWarnings).toMatchObject({
+      added: [{ element: { bounds: { bottom: 200 } } }],
+      removed: [{ element: { bounds: { bottom: 136 } } }],
+    });
+  });
+
   test("skeleton added and removed nodes retain compact actionable rows and keys", () => {
     const baseline = obs({
       "resource-id": "root",
@@ -1022,6 +1079,95 @@ describe("diffObserveResult", () => {
     });
     expect(diff.removed[0].attributes).toMatchObject({ elementId: "old", affordances: ["tap"] });
     expect(diff.added[0].key).toContain("new");
+  });
+
+  // #11637: relayouts of non-interactive containers are not actionable, exactly as
+  // non-interactive added/removed nodes are already dropped from the projection.
+  test("skeleton diffs drop bounds-only moves of non-interactive nodes but keep interactive ones", () => {
+    const tree = (shift: number) =>
+      obs({
+        "resource-id": "root",
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+        node: [
+          {
+            "resource-id": "content_frame",
+            bounds: { left: 0, top: 0 + shift, right: 100, bottom: 50 + shift },
+          },
+          {
+            "resource-id": "go",
+            text: "Go",
+            clickable: true,
+            actions: ["click"],
+            bounds: { left: 0, top: 60 + shift, right: 20, bottom: 80 + shift },
+          },
+        ],
+      });
+
+    const compact = diffObserveResult(tree(0), tree(5), { projectAddedRemoved: true });
+    const full = diffObserveResult(tree(0), tree(5));
+
+    expect(full.changed.length).toBeGreaterThanOrEqual(2);
+    expect(compact.changed.map((entry) => entry.key.split("\0")[0])).toContain("go");
+    expect(compact.changed.map((entry) => entry.key.split("\0")[0])).not.toContain("content_frame");
+  });
+
+  // #11638: a label-less control that shares a generic resource id with a control in
+  // a different row must not be paired as "the same switch flipped".
+  test("does not re-pair label-less toggles from different rows as a state change (#11638)", () => {
+    const row = (title: string, top: number, checked: boolean) => ({
+      "resource-id": "preference_row",
+      bounds: { left: 0, top, right: 100, bottom: top + 40 },
+      node: [
+        {
+          "resource-id": "title",
+          text: title,
+          bounds: { left: 0, top, right: 60, bottom: top + 20 },
+        },
+        {
+          "resource-id": "switchWidget",
+          checked,
+          "state-description": checked ? "ON" : "OFF",
+          bounds: { left: 70, top, right: 100, bottom: top + 20 },
+        },
+      ],
+    });
+    const screen = (node: Record<string, unknown>) =>
+      obs({
+        "resource-id": "root",
+        bounds: { left: 0, top: 0, right: 100, bottom: 400 },
+        node: [node],
+      });
+
+    const diff = diffObserveResult(
+      screen(row("Airplane mode", 100, false)),
+      screen(row("Wi-Fi", 200, true)),
+    );
+
+    const flipped = diff.changed.filter((entry) => "state-description" in entry.changes);
+    expect(flipped).toEqual([]);
+    expect(
+      [...diff.added, ...diff.removed].filter(
+        (node) => node.attributes["resource-id"] === "switchWidget",
+      ),
+    ).toHaveLength(2);
+  });
+
+  test("still re-pairs a labelled node whose state changed while it moved", () => {
+    const item = (top: number, checked: boolean) => ({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 400 },
+      node: [
+        {
+          "resource-id": "wifi_switch",
+          text: "Wi-Fi",
+          checked,
+          bounds: { left: 0, top, right: 100, bottom: top + 20 },
+        },
+      ],
+    });
+    const diff = diffObserveResult(obs(item(100, false)), obs(item(140, true)));
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].changes.checked).toEqual({ from: false, to: true });
   });
 
   test("the emitted focusedElement is stripped of its `node` child subtree", () => {

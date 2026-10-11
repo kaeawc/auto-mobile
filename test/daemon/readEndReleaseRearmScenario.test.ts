@@ -6,11 +6,13 @@ import {
 import { executionTracker } from "../../src/server/executionTracker";
 import { LivenessScenario } from "../helpers/livenessScenarioHarness";
 
-// #11381 items 5 and 6, on the liveness scenario harness: a real started Daemon (its own
-// tool-call-end subscription, owner-disconnect port and veto, heartbeat monitor), the real stdio
-// proxy and the real ToolRegistry device-call path. The session's last call in flight ends after
-// its owner's connection closed and the disconnect grace ran out; the release that call deferred
-// must be retried at that instant, for a device read exactly as for a control call.
+// #11381 item 6, on the liveness scenario harness: a real started Daemon (its own tool-call-end
+// subscription, owner-disconnect port and veto, heartbeat monitor), the real stdio proxy and the
+// real ToolRegistry device-call path. The session's last call in flight ends after its owner's
+// connection closed and the disconnect grace ran out; the release that call deferred must be
+// retried at that instant, for a device read exactly as for a control call. This covers the
+// daemon's wiring of a call's end; the inventory read of item 5, which the MCP entry classifies,
+// is driven in inventoryReadEndRearmsOwnerDisconnectRelease.test.ts.
 //
 // Whether a read should defer the owner-disconnect release at all is an open owner question
 // (#11381 item 1), so no row asserts that the session is held while the read runs: only that the
@@ -65,6 +67,10 @@ describe("the owner's connection closes with the session's last call in flight (
       );
 
       const closedAt = running.timer.now();
+      // No time has passed since the owner's lease began, so the heartbeat monitor (which leaves
+      // reads out) cannot reap before the disconnect grace runs out: its lease is as long.
+      const leaseStart = running.daemon.manager.getSession(session)?.lastOwnerHeartbeat;
+      expect(leaseStart ?? closedAt).toBe(closedAt);
       await running.closeTransport();
       await running.idle(OWNER_DISCONNECT_GRACE_MS);
       const idleDeadline = running.daemon.manager.getSession(session)?.expiresAt;

@@ -113,6 +113,7 @@ test/daemon/explicitReleaseCutCall.test.ts
 test/daemon/explicitReleaseOfUnrecoveredRestartRow.test.ts
 test/daemon/failuresPushSocketServer.test.ts
 test/daemon/fakeDaemonClientContract.test.ts
+test/daemon/finalizeWaitBudgetContract.test.ts
 test/daemon/findAvailableDaemonPort.test.ts
 test/daemon/forwardLeaseHolders.test.ts
 test/daemon/frameDeviceIdentity.test.ts

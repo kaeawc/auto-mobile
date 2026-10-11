@@ -1393,12 +1393,14 @@ internal object AutoMobilePlanExecutor {
 
   /**
    * Longest the runner waits on a recording-finalize refusal (#11360). The daemon advertises its
-   * real finalize cap (about 125 s) in `retryAfterMs`; this bounds a runaway hint.
+   * real finalize cap (about 125 s) in `retryAfterMs`; this bounds a runaway hint. It is the
+   * `finalizeWait.waitBudgetMs` of `test/fixtures/refusal-wire-hints/hints.json`, shared with the
+   * MCP proxy and XCTestRunner.
    */
   internal const val DEVICE_FINALIZE_WAIT_CAP_MS = 150_000L
 
   /** Refusals whose `retryAfterMs` is the daemon's real finalize time, not a polling hint. */
-  private val FINALIZE_WAIT_CODES =
+  internal val FINALIZE_WAIT_CODES =
     setOf(DEVICE_CLEANUP_IN_PROGRESS_CODE, DEVICE_SHUTTING_DOWN_CODE)
 
   /**

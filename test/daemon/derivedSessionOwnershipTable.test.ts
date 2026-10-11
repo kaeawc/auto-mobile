@@ -230,7 +230,8 @@ const OPERATIONS: Record<string, Operation> = {
   },
   "a liveness claim once the base owner's lease and grace have lapsed": async (w, id) => {
     await w.manager.claimLivenessOwnership(BASE, OWNER_TOKEN);
-    w.timer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
+    // An accepted claim is its owner's heartbeat, holding suspect grace; the lapse check is strict (#11646).
+    w.timer.advanceTime(OWNER_DISCONNECT_GRACE_MS + 1);
     return { outcome: await w.manager.claimLivenessOwnership(id, CLAIMANT_TOKEN) };
   },
   "a tokened heartbeat adopting unowned liveness": (w, id) => ({
@@ -415,7 +416,8 @@ describe("a derived label session is judged and recorded as its base", () => {
     await w.manager.claimLivenessOwnership(BASE, OWNER_TOKEN);
     expect(w.manager.claimUnownedLivenessOwnership(DERIVED, CLAIMANT_TOKEN)).toBe(false);
 
-    w.timer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
+    // An accepted claim is its owner's heartbeat, holding suspect grace; the lapse check is strict (#11646).
+    w.timer.advanceTime(OWNER_DISCONNECT_GRACE_MS + 1);
 
     expect(w.manager.claimUnownedLivenessOwnership(DERIVED, CLAIMANT_TOKEN)).toBe(true);
     expect(w.manager.hasLivenessOwnership(BASE, OWNER_TOKEN)).toBe(true);

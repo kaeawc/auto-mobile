@@ -197,6 +197,29 @@ describe("AndroidBootAdmissionGate (#11181)", () => {
     expect((await gate.describeCapacity()).inFlight).toBe(0);
   });
 
+  // #11537: a newer listing shows the handed-off emulator and drops its ledger entry while an
+  // older listing, taken before adb listed it, is still open for another admission.
+  test("a handed-off boot another listing saw still holds its slot for an older open sample", async () => {
+    const { source, gate } = setup({ [ANDROID_MAX_BOOTED_ENV]: "1" });
+    const readNow = source.sample.bind(source);
+    const beforeListed = await readNow();
+    let finishOlderListing: () => void = () => {};
+    source.sample = () =>
+      new Promise((resolve) => {
+        finishOlderListing = () => resolve(beforeListed);
+      });
+    const second = rejection(gate.admit({ timeoutMs: 60_000, avdName: AVD }));
+    source.sample = readNow;
+
+    const first = await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+    first.handOff("emulator-5554");
+    source.emulatorSerials = ["emulator-5554"];
+    expect(await gate.describeCapacity()).toEqual({ limit: 1, booted: 1, inFlight: 0 });
+    finishOlderListing();
+
+    expect(await second).toBeInstanceOf(BootCapacityExhaustedError);
+  });
+
   test("a sample timeout is reported as retryable discovery_incomplete", async () => {
     const { timer, source, gate } = setup();
     source.sample = () => new Promise(() => {});

@@ -8,6 +8,7 @@ import { DisplayPinNeedsSessionError } from "../models/PinnedDisplayError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { DeviceSessionManager, type DeviceReadyOptions } from "../devices/DeviceSessionManager";
 import { logger } from "../utils/logger";
+import { AndroidBootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import { deviceListRefreshFailureMessage } from "../daemon/devicePoolRefresh";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import {
@@ -99,7 +100,11 @@ async function requestedPoolDevice(pool: DevicePool, deviceId: string): Promise<
     const outcome = await pool.refreshDevicesWithOutcome();
     device = pool.getDevice(deviceId);
     if (!device && outcome.failure !== undefined) {
-      throw new ActionableError(deviceListRefreshFailureMessage(outcome.failure));
+      // Same typed retryable refusal startDevice/getAndroid answer for incomplete discovery (#11511).
+      throw new AndroidBootedDeviceDiscoveryIncompleteError(
+        undefined,
+        deviceListRefreshFailureMessage(outcome.failure),
+      );
     }
   }
   if (!device) {

@@ -91,13 +91,35 @@ export type DiscoverySourceOutcome = "complete" | "not_applicable" | "incomplete
 export interface DiscoverySourceEvidence extends DiscoveryCompleteness {
   sourceErrors?: Partial<Record<DiscoverySource, { code: string }>>;
   discoveryErrors?: Partial<Record<Platform, { code: string }>>;
+  /**
+   * Sources this host is known to have, because a pooled device was listed through them. Their
+   * tooling reporting "not installed" now (adb replaced mid-upgrade, the active Xcode switched)
+   * is an unknown about devices that existed, never a true zero. See {@link expectingPooledSources}.
+   */
+  expectedSources?: ReadonlySet<DiscoverySource>;
+}
+
+/**
+ * The same discovery result, with every source a pooled device depends on marked as expected: a
+ * pooled entry is proof the tooling existed on this host, so its devices are not "not applicable".
+ */
+export function expectingPooledSources<T extends DiscoverySourceEvidence>(
+  discovery: T,
+  pooled: Iterable<{ platform: Platform; id: string }> | undefined,
+): T {
+  const expectedSources = new Set(discovery.expectedSources);
+  for (const device of pooled ?? []) {
+    expectedSources.add(discoverySourceFor(device.platform, device.id));
+  }
+  return { ...discovery, expectedSources };
 }
 
 /**
  * The one classifier every inventory surface asks. "Not installed" is read from the typed
  * `unavailable` error the producer derived from the tool invocation itself (ENOENT / the tool's
  * own "not found" report), never guessed from the host platform here. A source with no error of
- * its own inherits its platform's error: without Xcode neither iOS source ran.
+ * its own inherits its platform's error: without Xcode neither iOS source ran. A source a pooled
+ * device depends on (`expectedSources`) is never not applicable.
  */
 export function discoverySourceOutcome(
   discovery: DiscoverySourceEvidence,
@@ -111,7 +133,9 @@ export function discoverySourceOutcome(
     return "complete";
   }
   const error = discovery.sourceErrors?.[source] ?? discovery.discoveryErrors?.[platform];
-  return error?.code === "unavailable" ? "not_applicable" : "incomplete";
+  return error?.code === "unavailable" && !discovery.expectedSources?.has(source)
+    ? "not_applicable"
+    : "incomplete";
 }
 
 function sourcesWithOutcome(

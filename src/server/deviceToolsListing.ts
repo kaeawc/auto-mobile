@@ -8,6 +8,7 @@ import {
 import type { BootedDeviceDiscovery } from "../devices/deviceUtils";
 import {
   type DiscoverySource,
+  expectingPooledSources,
   incompleteDiscoverySources,
   notApplicableDiscoverySources,
   sourcesForPlatform,
@@ -67,10 +68,14 @@ function listingDiscoveryObservation(
   succeededSources: Set<DiscoverySource> | undefined,
   discoveryErrors: BootedDeviceDiscovery["discoveryErrors"],
   sourceErrors: BootedDeviceDiscovery["sourceErrors"],
+  pool: { getAllDevices(): Iterable<{ platform: Platform; id: string }> } | null | undefined,
 ) {
   // One classifier for every inventory surface (#11605): a source whose tooling is not installed
   // on this host is not a failure, so it is neither a failed source nor a failed platform.
-  const evidence = { succeededPlatforms, succeededSources, discoveryErrors, sourceErrors };
+  const evidence = expectingPooledSources(
+    { succeededPlatforms, succeededSources, discoveryErrors, sourceErrors },
+    pool?.getAllDevices(),
+  );
   const incompleteSources = incompleteDiscoverySources(evidence, requestedPlatforms);
   const notApplicableSources = notApplicableDiscoverySources(evidence, requestedPlatforms);
   const failedPlatforms = requestedPlatforms.filter(
@@ -211,6 +216,7 @@ export function createListingHandlers() {
       succeededSources,
       discoveryErrors,
       sourceErrors,
+      pool,
     );
 
     const resolvedBooted = await hydrateRequiredDisplayInventories(

@@ -64,6 +64,7 @@ import { resolveApkChecksum, resolveIpaChecksum } from "../constants/release";
 import {
   type DiscoverySource,
   discoverySourceOutcome,
+  expectingPooledSources,
   incompleteDiscoverySources,
   notApplicableDiscoverySources,
   sourcesForPlatform,
@@ -454,16 +455,36 @@ function bootedDiscoveryError(
   discovery: BootedDeviceDiscovery,
   platform: Platform,
 ): DeviceDiscoveryError {
-  // An `unavailable` error is tooling this host does not have, never why a sweep is incomplete.
+  // Prefer a real failure: an `unavailable` error is tooling this host does not have, and explains
+  // an incomplete sweep only when a pooled device depends on that tooling.
+  const errors = [
+    discovery.discoveryErrors?.[platform],
+    platform === "ios" ? discovery.sourceErrors?.["ios-physical"] : undefined,
+  ].filter((error) => error !== undefined);
   return (
-    [
-      discovery.discoveryErrors?.[platform],
-      platform === "ios" ? discovery.sourceErrors?.["ios-physical"] : undefined,
-    ].find((error) => error !== undefined && error.code !== "unavailable") ?? {
+    errors.find((error) => error.code !== "unavailable") ??
+    errors[0] ?? {
       code: "failed",
       message: `${platform === "android" ? "Android" : "iOS"} booted-device discovery did not complete.`,
     }
   );
+}
+
+/** A platform's observation: complete unless one of its sources exists here and did not finish. */
+function platformObservation(
+  discovery: BootedDeviceDiscovery,
+  platform: Platform,
+): PlatformObservation {
+  if (incompleteDiscoverySources(discovery, [platform]).length > 0) {
+    return {
+      observationComplete: false,
+      discoveryError: bootedDiscoveryError(discovery, platform),
+    };
+  }
+  const noneApply =
+    notApplicableDiscoverySources(discovery, [platform]).length ===
+    sourcesForPlatform(platform).length;
+  return { observationComplete: true, ...(noneApply ? { notApplicable: true as const } : {}) };
 }
 
 /**
@@ -477,9 +498,11 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
   const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
   for (const platform of ["android", "ios"] as Platform[]) {
     try {
-      const discovery =
-        await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
       const pool = readDaemonDeviceContext().devicePool;
+      const discovery = expectingPooledSources(
+        await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform),
+        pool?.getAllDevices(),
+      );
       const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
       const normalized =
         platform === "android"
@@ -908,10 +931,13 @@ async function discoverBootedDevicesForPlatform(
   const { resolveDeviceSessionUuid, timer } = options;
   try {
     const deviceManager = PlatformDeviceManagerFactory.getInstance();
-    const rawDiscovery = await deviceManager.getBootedDevicesDetailed(platform, {
-      coalesceInventoryEnrichment: true,
-      signal: getAbortSignal(),
-    });
+    const rawDiscovery = expectingPooledSources(
+      await deviceManager.getBootedDevicesDetailed(platform, {
+        coalesceInventoryEnrichment: true,
+        signal: getAbortSignal(),
+      }),
+      devicePool?.getAllDevices(),
+    );
     getAbortSignal()?.throwIfAborted();
     const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
     // The same lookup the listDevices tool applies, so both surfaces name the same stable AVD.
@@ -1004,18 +1030,7 @@ async function discoverBootedDevicesForPlatform(
           sourceObservation(discovery, source),
         ]),
       ),
-      observation: complete
-        ? {
-            observationComplete: true,
-            ...(notApplicableDiscoverySources(discovery, [platform]).length ===
-            sourcesForPlatform(platform).length
-              ? { notApplicable: true as const }
-              : {}),
-          }
-        : {
-            observationComplete: false,
-            discoveryError: bootedDiscoveryError(discovery, platform),
-          },
+      observation: platformObservation(discovery, platform),
     };
   } catch (error) {
     const platformName = platform === "android" ? "Android" : "iOS";

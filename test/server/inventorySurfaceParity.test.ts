@@ -21,7 +21,7 @@ import {
 } from "../../src/server/deviceTools";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import type { DiscoverySource } from "../../src/utils/discoverySource";
+import { type DiscoverySource, discoverySourceFor } from "../../src/utils/discoverySource";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
@@ -393,6 +393,12 @@ interface Host {
   host: string;
   notInstalled: DiscoverySource[];
   failing: DiscoverySource[];
+  /**
+   * A device pooled (and held) before its tooling began reporting "not installed" -- adb replaced
+   * mid-upgrade, the active Xcode switched. The pooled entry proves the tooling existed, so the
+   * source is unknown, never a true zero.
+   */
+  vanishedUnder?: BootedDevice;
 }
 
 const hosts: Host[] = [
@@ -405,9 +411,25 @@ const hosts: Host[] = [
   { host: "everything failing", notInstalled: [], failing: ALL_SOURCES },
 ];
 
-const hostCells = hosts.flatMap((host) =>
-  (["nothing booted", "one device booted"] as const).map((booted) => ({ ...host, booted })),
-);
+const hostCells: Array<Host & { booted: string }> = [
+  ...hosts.flatMap((host) =>
+    (["nothing booted", "one device booted"] as const).map((booted) => ({ ...host, booted })),
+  ),
+  {
+    host: "adb disappears",
+    notInstalled: ["android"],
+    failing: [],
+    vanishedUnder: android,
+    booted: "under a held emulator",
+  },
+  {
+    host: "Xcode disappears",
+    notInstalled: ["ios-simulator", "ios-physical"],
+    failing: [],
+    vanishedUnder: simulator,
+    booted: "under a held simulator",
+  },
+];
 
 const unexpectedRemoteCall = (): never => {
   throw new Error("Unexpected daemon operation");
@@ -488,7 +510,14 @@ describe("every inventory surface gives one answer per discovery-source outcome 
     resetDeviceToolsDependencies();
   });
 
-  test.each(hostCells)("$host, $booted", async ({ notInstalled, failing, booted }) => {
+  test.each(hostCells)("$host, $booted", async (cell) => {
+    const { booted, vanishedUnder } = cell;
+    // Tooling that vanished under a pooled device is an existing source that did not complete.
+    const vanished = vanishedUnder
+      ? [discoverySourceFor(vanishedUnder.platform, vanishedUnder.deviceId)]
+      : [];
+    const failing = [...cell.failing, ...vanished];
+    const notInstalled = cell.notInstalled.filter((source) => !vanished.includes(source));
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const manager = new FakeDeviceUtils();
@@ -497,19 +526,24 @@ describe("every inventory surface gives one answer per discovery-source outcome 
     const usable = (source: DiscoverySource) =>
       !notInstalled.includes(source) && !failing.includes(source);
     const device =
-      booted === "nothing booted"
+      vanishedUnder ??
+      (booted === "nothing booted"
         ? undefined
         : usable("android") || !usable("ios-simulator")
           ? android
-          : simulator;
+          : simulator);
     manager.setBootedDevices("android", device?.platform === "android" ? [device] : []);
     manager.setBootedDevices("ios", device?.platform === "ios" ? [device] : []);
     const activeSessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessions = activeSessions;
     const pool = poolFor({ timer, sessions: activeSessions, manager });
     await pool.initializeWithDevices(device ? [device] : []);
-    manager.notInstalledSources = new Set(notInstalled);
-    manager.failedSources = new Set(failing);
+    if (vanishedUnder) {
+      await pool.assignDeviceToSession("session-held", vanishedUnder.platform);
+      manager.setBootedDevices(vanishedUnder.platform, []);
+    }
+    manager.notInstalledSources = new Set(cell.notInstalled);
+    manager.failedSources = new Set(cell.failing);
     DaemonState.getInstance().initialize(activeSessions, pool);
     setDeviceToolsDependencies({
       deviceManagerFactory: () => manager,
@@ -573,10 +607,12 @@ describe("every inventory surface gives one answer per discovery-source outcome 
       ideRefusesAbsentSerialOf: (
         await Promise.all(
           ALL_SOURCES.map((source) =>
-            ideLookup.call({}, source === "android" ? "android" : "ios", ABSENT[source]).then(
-              () => [],
-              (error: unknown) => [`${source}:${codeOf(error)}`],
-            ),
+            ideLookup
+              .call({ daemonState }, source === "android" ? "android" : "ios", ABSENT[source])
+              .then(
+                () => [],
+                (error: unknown) => [`${source}:${codeOf(error)}`],
+              ),
           ),
         )
       ).flat(),
@@ -594,8 +630,11 @@ describe("every inventory surface gives one answer per discovery-source outcome 
     };
 
     const complete = failing.length === 0;
-    const count = !device ? (complete ? 0 : "unknown") : failing.length === 3 ? "unknown" : 1;
-    const listedDevices = device && failing.length < 3 ? 1 : 0;
+    const deviceListed =
+      device !== undefined &&
+      !failing.includes(discoverySourceFor(device.platform, device.deviceId));
+    const count = deviceListed ? 1 : complete ? 0 : "unknown";
+    const listedDevices = deviceListed ? 1 : 0;
     const refusal = { exit: 1, code: "discovery_incomplete" };
     const cli = (json: boolean) =>
       count === "unknown" ? (json ? refusal : { exit: 1, stdout: [] }) : count;
@@ -621,9 +660,11 @@ describe("every inventory surface gives one answer per discovery-source outcome 
       cliInDaemon: cli(false),
       cliInDaemonJson: cli(true),
       ideRefusesAbsentSerialOf: failing.map((source) => `${source}:discovery_incomplete`),
-      setActiveDevice: failing.includes("android") ? "discovery_incomplete" : "not found",
-      heldAfterReads: 0,
-      sessionsAfterReads: 0,
+      // The refresh outcome exempts every `unavailable` Android error, pooled or not (#11586 owns it).
+      setActiveDevice: cell.failing.includes("android") ? "discovery_incomplete" : "not found",
+      // A held device stays held however the reads answered; nothing else is ever bound.
+      heldAfterReads: vanishedUnder ? 1 : 0,
+      sessionsAfterReads: vanishedUnder ? 1 : 0,
       boots: [],
     });
   });

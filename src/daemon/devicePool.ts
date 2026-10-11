@@ -109,6 +109,7 @@ import {
 } from "../devices/deviceIdentityEvidence";
 import {
   didSourceSucceedForDevice,
+  expectingPooledSources,
   incompleteDiscoverySources,
   isDeviceSourceIncomplete,
   discoverySourceFor,
@@ -5907,7 +5908,7 @@ export class DevicePool {
    * unbounded per-device call. An incomplete
    * listing throws {@link BootedDeviceDiscoveryIncompleteError}: the count is unknown, never the
    * stale pool tally and never zero. A source whose tooling is not installed on this host is not
-   * incomplete: it lists nothing, so its pooled entries are simply not live (#11605).
+   * incomplete (#11605) -- unless a pooled device depends on it, which proves the tooling existed.
    */
   private async readLiveInventoryDeviceIds(): Promise<Set<string>> {
     const live = new Set<string>();
@@ -5950,8 +5951,11 @@ export class DevicePool {
     return live;
   }
 
-  private readInventoryDiscovery(platform: Platform): Promise<BootedDeviceDiscovery> {
-    return this.deviceManager.getBootedDevicesDetailed(platform, { signal: getAbortSignal() });
+  private async readInventoryDiscovery(platform: Platform): Promise<BootedDeviceDiscovery> {
+    return expectingPooledSources(
+      await this.deviceManager.getBootedDevicesDetailed(platform, { signal: getAbortSignal() }),
+      this.getAllDevices(),
+    );
   }
 
   /**

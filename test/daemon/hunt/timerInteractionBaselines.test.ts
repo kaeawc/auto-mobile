@@ -18,6 +18,7 @@ import {
   DEVICE_B,
   DISCONNECT_POLL_MS,
   armedTimers,
+  forbidHostCommands,
   inventory,
   mcpVerdict,
   persistedRow,
@@ -48,6 +49,9 @@ const TERMINAL = { code: "session_ownership_lost", nextAction: "acquire_new_sess
 const QUIET_TURNS = 400;
 
 let scenario: LivenessScenario;
+
+// Fake-only: no scenario here, the warm-up included, may launch a host or adb command.
+forbidHostCommands();
 
 beforeAll(async () => {
   const warm = await LivenessScenario.start();

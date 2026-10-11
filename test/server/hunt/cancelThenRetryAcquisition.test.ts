@@ -24,8 +24,11 @@ import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
+import { forbidHostCommands } from "../../daemon/hunt/timerInteractionRig";
 
 isolateToolRegistry();
+// Fake-only: nothing here may launch a host or adb command.
+forbidHostCommands();
 
 // Hunt 2026-10-10, lifecycle timer interactions, cell 8 (cancel-then-retry).
 //

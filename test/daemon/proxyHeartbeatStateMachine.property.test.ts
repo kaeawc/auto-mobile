@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
@@ -724,15 +724,35 @@ describe("proxy heartbeat state machine (property-based)", () => {
     expect(await violationsOf(history)).toEqual([]);
   });
 
-  test("held sessions are heartbeated, dead ones never are, and the keeper runs exactly while needed", async () => {
-    await fc.assert(
-      fc.asyncProperty(fc.array(command, { minLength: 1, maxLength: 8 }), async (history) => {
-        const violations = await violationsOf(history);
-        if (violations.length > 0) {
-          throw new Error(violations.join("; "));
-        }
+  // The property's generated cases are recorded once with the same arbitrary and RUN_OPTIONS
+  // (generation does not depend on the verdict, so the sequence is exactly what `fc.assert` would
+  // run), then replayed in shards so each `test()` stays inside the unit-test time budget.
+  const SHARDS = 10;
+  const generated: Command[][] = [];
+  beforeAll(() => {
+    fc.assert(
+      fc.property(fc.array(command, { minLength: 1, maxLength: 8 }), (history) => {
+        generated.push(history);
       }),
       { ...RUN_OPTIONS, examples: REGRESSIONS.map(([, history]) => [[...history]]) },
     );
+  });
+
+  test.each(Array.from({ length: SHARDS }, (_, shard) => shard))(
+    "held sessions are heartbeated, dead ones never are, and the keeper runs exactly while needed (shard %d)",
+    async (shard) => {
+      const size = Math.ceil(generated.length / SHARDS);
+      for (const history of generated.slice(shard * size, (shard + 1) * size)) {
+        const violations = await violationsOf(history);
+        if (violations.length > 0) {
+          throw new Error(`${violations.join("; ")} for ${JSON.stringify(history)}`);
+        }
+      }
+    },
+  );
+
+  test("the shards replay every generated case", () => {
+    // `fc.assert` counts the explicit `examples` inside `numRuns`.
+    expect(generated).toHaveLength(RUN_OPTIONS.numRuns);
   });
 });

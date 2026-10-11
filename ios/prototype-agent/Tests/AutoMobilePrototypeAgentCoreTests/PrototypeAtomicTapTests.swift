@@ -171,7 +171,10 @@ final class PrototypeAtomicTapTests: XCTestCase {
     // MARK: The validator's rule table
 
     private func rejection(_ node: String, state: [String: JSONValue]) throws -> String? {
-        let root = try JSONDecoder().decode(PrototypeNode.self, from: Data(#"{"type":"column","children":[\#(node)]}"#.utf8))
+        let root = try JSONDecoder().decode(
+            PrototypeNode.self,
+            from: Data(#"{"type":"column","children":[\#(node)]}"#.utf8)
+        )
         return PrototypeStateValidator.rejection(root: root, state: state)
     }
 
@@ -221,7 +224,7 @@ final class PrototypeAtomicTapTests: XCTestCase {
         for bad in ["2023-02-29", "1899-12-31", "2101-01-01", "2024-13-01", "2024-1-01", "tomorrow", "2024-04-31"] {
             XCTAssertNotNil(try rejection(date, state: ["d": .string(bad)]), bad)
         }
-        XCTAssertNotNil(try rejection(date, state: ["d": .number(20240101)]))
+        XCTAssertNotNil(try rejection(date, state: ["d": .number(20_240_101)]))
     }
 
     func testTextBooleanAndChoiceBindings() throws {
@@ -233,7 +236,8 @@ final class PrototypeAtomicTapTests: XCTestCase {
             XCTAssertNotNil(try rejection(node, state: ["f": .number(1)]))
             XCTAssertNotNil(try rejection(node, state: [:]))
         }
-        let radio = #"{"type":"radioGroup","stateKey":"c","options":[{"value":"a","label":"A"},{"value":"b","label":"B"}]}"#
+        let radio =
+            #"{"type":"radioGroup","stateKey":"c","options":[{"value":"a","label":"A"},{"value":"b","label":"B"}]}"#
         XCTAssertNil(try rejection(radio, state: ["c": .string("zzz")]))
         XCTAssertNotNil(try rejection(radio, state: ["c": .number(0)]))
         XCTAssertNotNil(try rejection(
@@ -243,7 +247,10 @@ final class PrototypeAtomicTapTests: XCTestCase {
         let filter = #"{"type":"chip","variant":"filter","label":"x","stateKey":"f"}"#
         XCTAssertNil(try rejection(filter, state: ["f": .bool(true)]))
         XCTAssertNotNil(try rejection(filter, state: ["f": .string("true")]))
-        XCTAssertNotNil(try rejection(#"{"type":"chip","variant":"assist","label":"x","stateKey":"f"}"#, state: ["f": .bool(true)]))
+        XCTAssertNotNil(try rejection(
+            #"{"type":"chip","variant":"assist","label":"x","stateKey":"f"}"#,
+            state: ["f": .bool(true)]
+        ))
     }
 
     func testListItemTrailingAndModalOpenWhenBindings() throws {
@@ -302,8 +309,10 @@ final class PrototypeAtomicTapTests: XCTestCase {
             ("select key", { $0.select(index: 1, pager: nil, key: "tab", then: actions) }),
             ("select pager", { $0.select(index: 1, pager: "pager", key: nil, then: actions) }),
             ("closeModal", { session in
-                let dialog = session.spec?.root.children?.first { $0.type == "dialog" }
-                return session.closeModal(dialog!, then: actions)
+                guard let dialog = session.spec?.root.children?.first(where: { $0.type == "dialog" }) else {
+                    return []
+                }
+                return session.closeModal(dialog, then: actions)
             }),
         ]
     }

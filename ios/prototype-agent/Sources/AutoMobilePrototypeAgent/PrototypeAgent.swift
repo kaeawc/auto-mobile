@@ -290,7 +290,14 @@ final class PrototypeAgent {
                 }
                 // The show result reports the device's appearance, so read it before resolving.
                 syncDeviceAppearance()
-                model.show(spec, reset: message["reset"] as? Bool == true, appearance: appearance)
+                model.show(
+                    spec,
+                    reset: message["reset"] as? Bool == true,
+                    appearance: appearance,
+                    specBytes: message["spec"].flatMap {
+                        try? JSONSerialization.data(withJSONObject: $0, options: .fragmentsAllowed).count
+                    }
+                )
                 warnAboutFontAssets(for: spec)
                 warnAboutUnknownThemeColors(for: spec)
                 var extra = missingAssetsExtra()

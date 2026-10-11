@@ -204,12 +204,27 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     expect(recorded).toEqual(["readProbe"]);
   });
 
-  test("a sessionless read on an unheld device keeps the normal readiness path", async () => {
+  test("a sessionless read on an unheld device runs required readiness without pinning", async () => {
     await call("readProbe", { platform: "android", deviceId: free.deviceId });
 
     expect(listed).toBe(0);
     expect(devices.getEnsureDeviceReadyCalls()).toBe(1);
+    expect(devices.getLastOptions()?.intent).toBe("read");
+    expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
     expect(audited).toEqual([{ name: "readProbe", deviceId: free.deviceId }]);
+  });
+
+  test("a sessionless control call on a free device uses control readiness and pins", async () => {
+    ToolRegistry.registerDeviceAware(
+      "controlProbe",
+      "Control probe",
+      z.object({}).passthrough(),
+      async () => ({ success: true }),
+    );
+    await call("controlProbe", { platform: "android", deviceId: free.deviceId });
+    expect(devices.getEnsureDeviceReadyCalls()).toBe(1);
+    expect(devices.getLastOptions()?.intent).toBeUndefined();
+    expect(devices.getSetCurrentDeviceCalls()).toEqual([free]);
   });
 
   // #10968: the IDE injects its observer session UUID into every call. That UUID is not a device
@@ -226,6 +241,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     await call("readProbe", { sessionUuid: "observer-session", deviceId: free.deviceId });
 
     expect(devices.getEnsureDeviceReadyCalls()).toBe(1);
+    expect(devices.getLastOptions()?.intent).toBe("read");
+    expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
     expect(audited).toEqual([{ name: "readProbe", deviceId: free.deviceId }]);
     expect(sessionManager.getSession("observer-session")).toBeNull();
     expect(sessionManager.getSessionForDevice(free.deviceId)).toBeNull();
@@ -563,6 +580,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
 
         expect(error).not.toBeInstanceOf(InputDeviceOwnedError);
         expect(audited).toEqual([{ name, deviceId: free.deviceId }]);
+        expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
         expect(listed).toBe(0);
       });
     }

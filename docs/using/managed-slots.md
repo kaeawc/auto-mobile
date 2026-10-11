@@ -317,7 +317,11 @@ The registry tracks each scope as `valid`, `invalidating` or `invalidated`
   (retryable `scope_transition_pending` meanwhile, bounded by the preparation
   deadline), then moves the old scope's devices to a free pool that only managed
   slots can adopt. Other namespaces are untouched. Requests carrying the old
-  incarnation are refused with `scope_invalidated`.
+  incarnation are refused with `scope_invalidated`. A daemon restart during the
+  wait changes nothing: the restarted daemon still records itself as the owner
+  of the execution it holds, so the transition keeps waiting for that execution
+  on every daemon of the host. No other session can claim a slot of the retiring
+  scope (#11642).
 - **Operator command.** Invalidate one incarnation explicitly:
 
   ```bash

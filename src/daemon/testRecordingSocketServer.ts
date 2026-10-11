@@ -34,8 +34,19 @@ const TEST_RECORDING_PURPOSE = "to start a test recording";
  */
 export interface TestRecordingDeviceResolution {
   selectDevice(deviceId?: string, platform?: Platform): Promise<BootedDevice>;
-  readyDevice(device: BootedDevice): Promise<BootedDevice>;
+  /**
+   * `sessionUuid` is the session that asked for the recording: readiness writes to the device
+   * (appearance on connect), and those writes follow that session's own config, not the global
+   * one (#10976, #11641).
+   */
+  readyDevice(device: BootedDevice, sessionUuid?: string): Promise<BootedDevice>;
 }
+
+/** What device resolution needs of the device session manager; narrowed so a test can supply one. */
+export type TestRecordingDeviceSessions = Pick<
+  DeviceSessionManager,
+  "ensureDeviceReady" | "getPlatformDeviceManager" | "getCurrentDevice"
+>;
 
 /**
  * Pick the device this recording targets, and fold the discovery it ran into
@@ -124,22 +135,32 @@ const defaultManagedSlotGate: TestRecordingManagedSlotGate = async (input) => {
   });
 };
 
-const defaultDeviceResolution: TestRecordingDeviceResolution = {
-  selectDevice: (deviceId, platform) => {
-    const deviceSessionManager = DeviceSessionManager.getInstance();
-    return resolveTestRecordingDevice(
-      deviceSessionManager.getPlatformDeviceManager(),
-      deviceId,
-      platform,
-      () => deviceSessionManager.getCurrentDevice(),
-    );
-  },
-  // Readiness for an already-selected, already-admitted device: the same
-  // provided-device path (runner setup, current-device selection, appearance)
-  // a start took before, now naming its target exactly.
-  readyDevice: (device) =>
-    DeviceSessionManager.getInstance().ensureDeviceReady(device.platform, device.deviceId),
-};
+/**
+ * The production device resolution over a device session manager, resolved at each use. Exported
+ * with the manager injectable so a test can drive real readiness (and its device writes) on fakes.
+ */
+export function createTestRecordingDeviceResolution(
+  deviceSessions: () => TestRecordingDeviceSessions = () => DeviceSessionManager.getInstance(),
+): TestRecordingDeviceResolution {
+  return {
+    selectDevice: (deviceId, platform) => {
+      const deviceSessionManager = deviceSessions();
+      return resolveTestRecordingDevice(
+        deviceSessionManager.getPlatformDeviceManager(),
+        deviceId,
+        platform,
+        () => deviceSessionManager.getCurrentDevice(),
+      );
+    },
+    // Readiness for an already-selected, already-admitted device: the same
+    // provided-device path (runner setup, current-device selection, appearance)
+    // a start took before, now naming its target exactly and the session it runs for.
+    readyDevice: (device, sessionUuid) =>
+      deviceSessions().ensureDeviceReady(device.platform, device.deviceId, {
+        sessionId: sessionUuid,
+      }),
+  };
+}
 
 const ensurePlatform = (value: unknown): Platform | undefined => {
   if (value === undefined) {
@@ -173,7 +194,7 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
       "testRecording",
     ),
     admissionGate: DeviceAdmissionGate = daemonDeviceAdmissionGate,
-    deviceResolution: TestRecordingDeviceResolution = defaultDeviceResolution,
+    deviceResolution: TestRecordingDeviceResolution = createTestRecordingDeviceResolution(),
     managedSlotGate: TestRecordingManagedSlotGate = defaultManagedSlotGate,
   ) {
     super(socketPath, timer, "TestRecording");
@@ -223,7 +244,7 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
           device: selected,
           requesterSessionUuid: request.sessionUuid,
         });
-        const device = await this.deviceResolution.readyDevice(selected);
+        const device = await this.deviceResolution.readyDevice(selected, request.sessionUuid);
         const result = await startTestRecording(
           device,
           undefined,

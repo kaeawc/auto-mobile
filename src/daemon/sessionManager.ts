@@ -9623,6 +9623,7 @@ export class SessionManager {
     },
     processedClaims: Set<string>,
   ): Promise<void> {
+    const settleClaimantHeartbeat = this.markAcceptedClaimantHeartbeating(session);
     try {
       if (this.deviceSessionRepository.recordLivenessOwnership) {
         await this.deviceSessionRepository.recordLivenessOwnership(session.sessionId, ownerToken);
@@ -9633,8 +9634,45 @@ export class SessionManager {
       processedClaims.delete(ownerToken);
       session.livenessOwnerToken = previous.previousOwnerToken;
       session.lastOwnerHeartbeat = previous.previousOwnerHeartbeat;
+      settleClaimantHeartbeat("undo");
       throw error;
     }
+    settleClaimantHeartbeat("keep");
+  }
+
+  /**
+   * An accepted claim is its owner's heartbeat (#11646). The claim arrives on the proxy's first
+   * heartbeat, and the request handler records that heartbeat only after the ownership row write
+   * resolves; until then the monitor would judge the session as one that never heartbeated, or
+   * one still awaiting its rehydrated owner, and release it although its owner is live. The fact
+   * is in-memory and set before the write, so a slow database stays off the heartbeat path
+   * (#11079); the lease itself was stamped with the takeover, and is what the session is judged
+   * on from here. Called only for an accepted claim, so a refused one changes nothing.
+   *
+   * Returns how the claim settles. "undo", for a claim whose write fails, leaves the session as
+   * unheard and as unclaimed as the claim found it; a heartbeat or tool call recorded while the
+   * write was pending moved the activity generation and stands on its own, so the undo leaves it
+   * alone. A rehydrated session's owner window (`awaitingOwnerSince`) stays in place while the
+   * write is pending, so the daemon's stall forgiveness keeps moving it and an undone claim
+   * returns to the forgiven window, not the one the claim found; it is dropped once the
+   * promotion stands.
+   */
+  private markAcceptedClaimantHeartbeating(session: Session): (outcome: "keep" | "undo") => void {
+    const { hasReceivedHeartbeat, ownership, activityGeneration } = session;
+    session.hasReceivedHeartbeat = true;
+    if (ownership === "awaiting-owner") {
+      session.ownership = "owned";
+    }
+    return (outcome) => {
+      if (outcome === "undo" && session.activityGeneration === activityGeneration) {
+        session.hasReceivedHeartbeat = hasReceivedHeartbeat;
+        session.ownership = ownership;
+        return;
+      }
+      if (ownership === "awaiting-owner" && session.ownership === "owned") {
+        session.awaitingOwnerSince = undefined;
+      }
+    };
   }
 
   /** Return whether `ownerToken` is still authorized to refresh the session. */

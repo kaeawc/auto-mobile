@@ -9,6 +9,7 @@ import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import { DaemonState } from "../daemon/daemonState";
 import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
+import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
 import { DeviceBootService, type DeviceBootResult } from "../devices/deviceBootService";
 import { IOSCtrlProxyClient } from "../features/observe/ios/IOSCtrlProxyClient";
@@ -58,6 +59,7 @@ import {
   refreshResourcesAfterCommittedBoot,
   reserveInitialDeviceForReadiness,
   resolveRunnerReadinessTimeoutMs,
+  bindUndoneIfUndelivered,
   runOperationWithinDeadline,
   setAcquisitionStage,
   startDeviceSchema,
@@ -626,8 +628,8 @@ async function bindPreparedDevice(
                 requestedIdentity,
                 "binding the device session",
               ),
-            async () =>
-              await bindBootedDeviceSession(
+            bindUndoneIfUndelivered(async (receipt) => {
+              return await bindBootedDeviceSession(
                 state.boot!.device,
                 args,
                 state.boot!.sourceImage && !readinessResult.preservedSessionId
@@ -645,8 +647,10 @@ async function bindPreparedDevice(
                   collectCancellationSettlement: (settlement) => {
                     state.bindingSettlements.push(settlement);
                   },
+                  receipt,
                 },
-              ),
+              );
+            }),
             (settlement) => {
               state.bindingSettlements.push(settlement);
             },
@@ -766,12 +770,15 @@ async function bindBootedDeviceSession(
     verifiedAndroidAvdIdentity,
     achievedReadiness = "automationReady",
     collectCancellationSettlement,
+    receipt,
   }: {
     autolockEnabled?: boolean;
     readinessReservationOwners?: ReadonlySet<symbol>;
     verifiedAndroidAvdIdentity?: DeviceInfo;
     achievedReadiness?: DeviceReadinessLevel;
     collectCancellationSettlement?: (settlement: Promise<void>) => void;
+    /** Filled in with the session this bind mints, for a caller that may have to take it back. */
+    receipt?: AcquisitionReceipt;
   } = {},
 ): Promise<string> {
   if (device.platform === "android") {
@@ -799,7 +806,7 @@ async function bindBootedDeviceSession(
         verifiedAndroidAvdIdentity,
         achievedReadiness,
         collectCancellationSettlement,
-        { autolockEnabled },
+        { autolockEnabled, receipt },
       );
     if (autolockSessionId) {
       // #6227 (round 9): readiness is recorded INSIDE `autolockDevice`, before
@@ -831,6 +838,7 @@ async function bindBootedDeviceSession(
       undefined,
       args.__mcpSessionId,
       args.__oneShotCli === true,
+      receipt,
     );
   recordAcquiredSessionReadiness(daemonState, boundSessionId, achievedReadiness);
   return boundSessionId;

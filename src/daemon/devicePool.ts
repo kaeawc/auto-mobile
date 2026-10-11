@@ -1,3 +1,4 @@
+import type { AcquisitionReceipt } from "./acquisitionReceipt";
 import type { SessionReleaseReason } from "./releaseReasons";
 import type { Environment } from "./poolConfig";
 import {
@@ -214,6 +215,8 @@ interface ExplicitBindOptions {
   expectedExistingSessionDeviceId?: string;
   mcpSessionId?: string;
   oneShotCli: boolean;
+  /** Records the session this call mints: the only thing a failed or undelivered bind takes back. */
+  receipt: AcquisitionReceipt;
 }
 
 interface McpSessionRecoveryLease {
@@ -1748,9 +1751,9 @@ export class DevicePool {
                 stableIds: [platform === "android" ? sourceImage?.name : undefined],
               })
           : undefined,
-        claimAcquiredDevice: async (sessionId, deviceId, heldBefore, platform) => {
+        claimAcquiredDevice: async (sessionId, deviceId, heldBefore, platform, createdSession) => {
           if (this.foreignOwnershipFor(platform)) {
-            await this.claimExplicitlyBoundDevice(sessionId, deviceId, heldBefore);
+            await this.claimExplicitlyBoundDevice(sessionId, deviceId, heldBefore, createdSession);
           }
         },
       },
@@ -5663,7 +5666,7 @@ export class DevicePool {
     deviceId: string,
     session: Session,
   ): Promise<void> {
-    if (await this.publishDeviceClaim(sessionId, deviceId)) {
+    if (await this.publishDeviceClaim(deviceId)) {
       return;
     }
     logger.warn(
@@ -5735,7 +5738,7 @@ export class DevicePool {
     ) {
       return result;
     }
-    if (await this.publishDeviceClaim(sessionId, deviceId)) {
+    if (await this.publishDeviceClaim(deviceId)) {
       return result;
     }
     logger.info(
@@ -5748,9 +5751,10 @@ export class DevicePool {
   /**
    * Publish this daemon's claim on an Android device a session holds. False only when another
    * live daemon's claim on it is still in use. A claim that lands after the session already let
-   * the device go is withdrawn again, so it never outlives the assignment.
+   * the device go, with no other session holding it, is withdrawn again, so it never outlives the
+   * assignment.
    */
-  private async publishDeviceClaim(sessionId: string, deviceId: string): Promise<boolean> {
+  private async publishDeviceClaim(deviceId: string): Promise<boolean> {
     const ownership = this.foreignOwnershipFor(this.devices.get(deviceId)?.platform);
     if (!ownership) {
       return true;
@@ -5759,7 +5763,9 @@ export class DevicePool {
       return false;
     }
     this.claimedDeviceIds.set(deviceId, ownership);
-    if (this.devices.get(deviceId)?.sessionId !== sessionId) {
+    // The claim is this daemon's, not one session's: a session that took the device since
+    // depends on it, so it is only withdrawn when nothing here holds the device (#11565).
+    if (!this.devices.get(deviceId)?.sessionId) {
       this.releaseDeviceClaim(deviceId);
     }
     return true;
@@ -6533,6 +6539,7 @@ export class DevicePool {
    */
   private async rollbackAssignments(
     assignments: ReadonlyMap<string, RollbackAssignment>,
+    releaseReason: SessionReleaseReason = "allocation-rollback",
   ): Promise<void> {
     await this.assignmentMutex.runExclusive(async () => {
       for (const [sessionId, allocation] of assignments) {
@@ -6572,7 +6579,7 @@ export class DevicePool {
           continue;
         }
 
-        await this.sessionManager.releaseSession(sessionId, "allocation-rollback");
+        await this.sessionManager.releaseSession(sessionId, releaseReason);
         const replacementSession = this.sessionManager.getSession(sessionId);
         if (replacementSession?.assignedDevice === deviceId) {
           logger.warn(
@@ -7787,6 +7794,7 @@ export class DevicePool {
     expectedExistingSessionDeviceId?: string,
     mcpSessionId?: string,
     oneShotCli = false,
+    receipt?: AcquisitionReceipt,
   ): Promise<string> {
     // Registered before the first await so a close racing the whole bind is seen (#11146).
     const endBind = this.beginMcpBind(mcpSessionId);
@@ -7801,6 +7809,7 @@ export class DevicePool {
         expectedExistingSessionDeviceId,
         mcpSessionId,
         oneShotCli,
+        receipt: receipt ?? {},
       });
     } finally {
       endBind();
@@ -7939,7 +7948,12 @@ export class DevicePool {
       },
     });
     if (this.foreignOwnershipFor(platform)) {
-      await this.claimExplicitlyBoundDevice(boundSessionId, deviceId, heldBefore);
+      await this.claimExplicitlyBoundDevice(
+        boundSessionId,
+        deviceId,
+        heldBefore,
+        options.receipt.minted?.session,
+      );
     }
     return boundSessionId;
   }
@@ -7969,7 +7983,7 @@ export class DevicePool {
     device.assignmentCount++;
     device.errorCount = 0;
 
-    await this.createSessionOrRestore(
+    const session = await this.createSessionOrRestore(
       device,
       assignmentSnapshot,
       this.createSessionForBinding(
@@ -7988,6 +8002,10 @@ export class DevicePool {
         },
       ),
     );
+    // A rebind keeps an id the client supplied, and a restored session predates this call.
+    if (!allowSessionRebind && previousSession === null) {
+      options.receipt.minted = { session, deviceId };
+    }
     this.recordBindOwnership(caller.mcpSessionId, sessionId);
     this.notifyDeviceStateChanged(device);
   }
@@ -7996,13 +8014,33 @@ export class DevicePool {
    * Publish this daemon's claim on an explicitly bound device. Another daemon can claim it between
    * the pre-bind check and here; then a fresh bind is rolled back and refused like the check
    * (#10980). A device this daemon already held keeps its session.
+   *
+   * The publish is awaited after the session committed. When it throws, `createdSession` (the
+   * session this very acquisition minted, absent for a reused or rebound one) is released again
+   * rather than left holding the device under a call that failed (#11565).
    */
   private async claimExplicitlyBoundDevice(
     sessionId: string,
     deviceId: string,
     heldBefore: string | null,
+    createdSession?: Session,
   ): Promise<void> {
-    if (await this.publishDeviceClaim(sessionId, deviceId)) {
+    let claimed: boolean;
+    try {
+      claimed = await this.publishDeviceClaim(deviceId);
+    } catch (error) {
+      if (createdSession) {
+        logger.warn(
+          `[DevicePool] Publishing the claim on ${deviceId} failed; releasing it from session ${sessionId}: ${errorMessage(error)}`,
+          error,
+        );
+        await this.rollbackAssignments(
+          new Map([[sessionId, { deviceId, session: createdSession }]]),
+        );
+      }
+      throw error;
+    }
+    if (claimed) {
       return;
     }
     const session = this.sessionManager.getSession(sessionId);
@@ -8019,6 +8057,28 @@ export class DevicePool {
     throw new DeviceOwnedByOtherDaemonError(
       deviceId,
       this.foreignOwnershipFor(this.devices.get(deviceId)?.platform)?.foreignOwnerPid(deviceId),
+    );
+  }
+
+  /**
+   * Take back an acquisition whose result never reached its caller: the request was cancelled or
+   * timed out while the bind was still finishing (typically publishing its cross-daemon claim), so
+   * no client holds the session id. Only the session the acquisition minted is released, for good,
+   * and only while it still holds the device; the claim goes with the device. A session that was
+   * reused, has been replaced, or was already released is left alone (#11565).
+   */
+  async releaseUndeliveredAcquisition(receipt: AcquisitionReceipt): Promise<void> {
+    const minted = receipt.minted;
+    if (!minted) {
+      return;
+    }
+    const { session, deviceId } = minted;
+    logger.info(
+      `[DevicePool] Acquisition of ${deviceId} was cancelled before its session ${session.sessionId} was delivered; releasing it`,
+    );
+    await this.rollbackAssignments(
+      new Map([[session.sessionId, { deviceId, session }]]),
+      "session-creation-cancelled",
     );
   }
 

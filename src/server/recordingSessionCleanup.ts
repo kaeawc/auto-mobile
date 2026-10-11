@@ -53,7 +53,8 @@ export interface RecordingSessionCleanupDeps {
   >;
   stopVideoRecording(recordingId: string): Promise<void>;
   isTestRecordingOwnedBy(sessionId: string | undefined, deviceId: string): boolean;
-  stopTestRecording(): Promise<void>;
+  stopTestRecording(recordingId?: string): Promise<void>;
+  ownedTestRecordingId(sessionId: string | undefined, deviceId: string): string | undefined;
   /** Ids of the recordings a session owns on the device, from memory only (no DB read). */
   activeRecordingIdsForOwner(sessionId: string | undefined, deviceId: string): string[];
   /** Deadline clock for the finalize cap; a FakeTimer in tests. */
@@ -75,6 +76,7 @@ export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
     await stopVideoRecordingUnattended(recordingId);
   },
   isTestRecordingOwnedBy,
+  ownedTestRecordingId,
   activeRecordingIdsForOwner: (sessionId, deviceId) => {
     // One id, not a string to spread: spreading it would split the id into characters.
     const testRecordingId = ownedTestRecordingId(sessionId, deviceId);
@@ -84,8 +86,8 @@ export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
       ...(testRecordingId === undefined ? [] : [testRecordingId]),
     ];
   },
-  stopTestRecording: async () => {
-    await stopTestRecording();
+  stopTestRecording: async (recordingId) => {
+    await stopTestRecording(recordingId);
   },
   timer: defaultTimer,
   finalizeCapMs: defaultFinalizeCapMs,
@@ -199,6 +201,7 @@ async function stopOwnedRecordingsWithinCap(
   // Every recording the owner has, up front: single-file, segmented and the test recording, so
   // the cap force-stops all of them rather than only the one mid-stop (#11041).
   const stopping = new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId));
+  const testRecordingId = deps.ownedTestRecordingId(sessionId, deviceId);
   const capMs = deps.finalizeCapMs(deviceId);
   try {
     await raceWithDeadline(stopOwnedRecordings(deps, sessionId, deviceId, stopping), {
@@ -215,14 +218,22 @@ async function stopOwnedRecordingsWithinCap(
       `[recording] Finalizing recordings of released session ${sessionId ?? "(owner-less)"} on ${deviceId} exceeded ${capMs}ms; ` +
         `force-stopping ${[...stopping].join(", ") || "none"} and marking incomplete`,
     );
+    // The video incomplete handler cannot stop a test recorder. Start this independently
+    // of the wedged stage, by its captured owner id, so it cannot stop a replacement recorder.
     await Promise.all(
       [...stopping].map((recordingId) =>
-        attempt(`mark recording ${recordingId} incomplete`, () =>
-          raceWithDeadline(() => deps.markVideoRecordingIncomplete(recordingId), {
-            timer: deps.timer,
-            timeoutMs: INCOMPLETE_MARK_GRACE_MS,
-            label: `mark recording ${recordingId} incomplete`,
-          }),
+        attempt(`force-stop recording ${recordingId}`, () =>
+          raceWithDeadline(
+            () =>
+              recordingId === testRecordingId
+                ? deps.stopTestRecording(recordingId)
+                : deps.markVideoRecordingIncomplete(recordingId),
+            {
+              timer: deps.timer,
+              timeoutMs: INCOMPLETE_MARK_GRACE_MS,
+              label: `force-stop recording ${recordingId}`,
+            },
+          ),
         ),
       ),
     );

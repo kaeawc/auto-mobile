@@ -1,31 +1,31 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { BootedDevice, PlanStep } from "../../../src/models";
-import type { SessionManager } from "../../../src/daemon/sessionManager";
-import { VideoRecorderService } from "../../../src/features/video";
+import type { BootedDevice, PlanStep } from "../../src/models";
+import type { SessionManager } from "../../src/daemon/sessionManager";
+import { VideoRecorderService } from "../../src/features/video";
 import {
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
   type RecordingSessionCleanupDeps,
-} from "../../../src/server/recordingSessionCleanup";
+} from "../../src/server/recordingSessionCleanup";
 import {
   getTestRecordingStatus,
   isTestRecordingOwnedBy,
   resetStoppedTestRecordings,
   startTestRecording,
   stopTestRecording,
-} from "../../../src/server/testRecordingManager";
+} from "../../src/server/testRecordingManager";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../../src/server/videoRecordingManager";
-import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
-import { FakeHighlightClient } from "../../fakes/FakeHighlightClient";
-import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { FakeVideoCaptureBackend } from "../../fakes/FakeVideoCaptureBackend";
-import { FakeVideoRecordingConfigRepository } from "../../fakes/FakeVideoRecordingConfigRepository";
-import { FakeVideoRecordingRepository } from "../../fakes/FakeVideoRecordingRepository";
+} from "../../src/server/videoRecordingManager";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
+import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
+import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 
 type CleanupManager = Parameters<typeof registerRecordingSessionCleanup>[0];
 type ReleaseCallback = Parameters<SessionManager["onSessionRelease"]>[0];

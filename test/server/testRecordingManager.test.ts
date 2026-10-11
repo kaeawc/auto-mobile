@@ -154,6 +154,50 @@ describe("testRecordingManager retained plan (#10958)", () => {
 });
 
 describe("testRecordingManager startup reservation", () => {
+  for (const [owner, stranger] of [
+    [undefined, "stranger"],
+    ["owner-a", undefined],
+    ["owner-a", "owner-b"],
+    ["base:pixel", "base"],
+  ]) {
+    test(`active and starting recordings refuse another owner (${owner ?? "ownerless"} / ${stranger ?? "ownerless"})`, async () => {
+      const timer = new FakeTimer();
+      const ids = new CountingIdGenerator("owner-check");
+      const recorder = new FakeRecorder();
+      recorder.steps = [capturedStep];
+      let factories = 0;
+      const factory = () => {
+        factories += 1;
+        return recorder;
+      };
+      const first = startTestRecording(device, timer, ids, factory, owner);
+      const checkRefusal = async () => {
+        try {
+          await startTestRecording(device, timer, ids, factory, stranger);
+          throw new Error("expected an ownership refusal");
+        } catch (error) {
+          expect(error).toBeInstanceOf(ActionableError);
+          expect((error as Error).message).toContain("owned by another session");
+          if (owner) {
+            expect((error as Error).message).not.toContain(owner);
+          }
+        }
+        expect(factories).toBe(1);
+        expect(recorder.stopCount).toBe(0);
+      };
+      await checkRefusal();
+      const sameOwner = startTestRecording(device, timer, ids, factory, owner);
+      recorder.startGate.resolve();
+      expect(await sameOwner).toEqual(await first);
+      await checkRefusal();
+      expect(await startTestRecording(device, timer, ids, factory, owner)).toEqual(await first);
+      await expect(startTestRecording(otherDevice, timer, ids, factory, stranger)).rejects.toThrow(
+        "Recording already active on device",
+      );
+      await stopTestRecording(undefined, undefined, timer);
+    });
+  }
+
   test("same-device callers join one start; a different device is refused", async () => {
     const timer = new FakeTimer();
     const ids = new CountingIdGenerator("recording");

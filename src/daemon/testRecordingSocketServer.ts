@@ -8,6 +8,7 @@ import {
   getTestRecordingStatus,
   startTestRecording,
   getStoppedTestRecording,
+  joinInFlightTestRecordingStop,
   stopTestRecording,
 } from "../server/testRecordingManager";
 import { TestRecordingCommand, TestRecordingResponse } from "./testRecordingSocketTypes";
@@ -287,6 +288,12 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
     // that does not own it cannot stop another session's recording — the
     // recordingId-only guard in stopTestRecording is not an ownership check
     // (issue #4752).
+    if (request.recordingId) {
+      const joined = await joinInFlightTestRecordingStop(request.recordingId, request.sessionUuid);
+      if (joined) {
+        return this.toStopResponse(joined);
+      }
+    }
     const active = getTestRecordingStatus();
     // A stop by id after a release-time stop returns the owner's retained plan (#10958).
     // It needs no device and no live session: the owning session's uuid is the scope.

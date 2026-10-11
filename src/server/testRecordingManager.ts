@@ -1,6 +1,6 @@
 import * as yaml from "js-yaml";
 import { BootedDevice, Plan, PlanStep, type Platform } from "../models";
-import { toActionableError } from "../models/ActionableError";
+import { ActionableError, toActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
@@ -49,6 +49,8 @@ interface RecordingSession {
   deviceId: string;
   platform: Platform;
   startedAt: number;
+  /** Keep release-time and socket stops on the same injected clock as the start. */
+  timer: Timer;
   recorder: TestRecorder;
   /** Daemon session that started the recording; undefined for an unowned (direct) start. */
   ownerSessionUuid?: string;
@@ -118,12 +120,47 @@ export function getStoppedTestRecording(
   if (!entry || ownerSessionUuid === undefined) {
     return undefined;
   }
-  const requesterBase = baseSessionUuid(ownerSessionUuid);
-  const visible =
-    entry.owner === ownerSessionUuid ||
-    isOwnerWithinBase(entry.owner, requesterBase) ||
-    baseSessionUuid(entry.owner) === requesterBase;
-  return visible ? entry.result : undefined;
+  return testRecordingOwnerVisible(entry.owner, ownerSessionUuid, baseSessionUuid)
+    ? entry.result
+    : undefined;
+}
+
+function testRecordingOwnerVisible(
+  owner: string | undefined,
+  requester: string | undefined,
+  baseSessionUuid: (sessionUuid: string) => string,
+): boolean {
+  if (owner === undefined || requester === undefined) {
+    return false;
+  }
+  const requesterBase = baseSessionUuid(requester);
+  return (
+    owner === requester ||
+    isOwnerWithinBase(owner, requesterBase) ||
+    baseSessionUuid(owner) === requesterBase
+  );
+}
+
+/**
+ * Join only the owner's announced id before live-session gates (#10958). The shared stop
+ * already has STOP_RECORDING_TIMEOUT_MS as its deadline; no additional timer is needed.
+ * A stranger or an unknown id returns immediately, without waiting on or exposing the stop.
+ */
+export async function joinInFlightTestRecordingStop(
+  recordingId: string,
+  ownerSessionUuid: string | undefined,
+  baseSessionUuid: (sessionUuid: string) => string = daemonBaseSessionUuid,
+): Promise<TestRecordingStopResult | undefined> {
+  const stopping = stoppingRecording;
+  if (
+    !stopping ||
+    stopping.session.recordingId !== recordingId ||
+    !testRecordingOwnerVisible(stopping.session.ownerSessionUuid, ownerSessionUuid, baseSessionUuid)
+  ) {
+    return undefined;
+  }
+  await stopping.promise;
+  return getStoppedTestRecording(recordingId, ownerSessionUuid, baseSessionUuid);
 }
 
 /** Test seam: forget retained plans. */
@@ -245,6 +282,11 @@ export async function startTestRecording(
           `Stop the existing recording before starting a new one on ${device.deviceId}.`,
       );
     }
+    if (activeRecording.ownerSessionUuid !== ownerSessionUuid) {
+      throw new ActionableError(
+        `A recording owned by another session is active on device ${device.deviceId}. Wait for it to stop before starting a recording.`,
+      );
+    }
     logger.info(
       `[TestRecording] Recording already active (${activeRecording.recordingId}), returning existing session`,
     );
@@ -264,6 +306,11 @@ export async function startTestRecording(
           `Stop the existing recording before starting a new one on ${device.deviceId}.`,
       );
     }
+    if (session.ownerSessionUuid !== ownerSessionUuid) {
+      throw new ActionableError(
+        `A recording owned by another session is active on device ${device.deviceId}. Wait for it to stop before starting a recording.`,
+      );
+    }
     return promise;
   }
 
@@ -281,6 +328,7 @@ export async function startTestRecording(
     deviceId: device.deviceId,
     platform: device.platform,
     startedAt,
+    timer,
     recorder: recorderFactory(device),
     ownerSessionUuid,
   };
@@ -315,10 +363,15 @@ export async function startTestRecording(
   return promise;
 }
 
+/** Stops without an explicit clock use the recorder's injected clock, including release cleanup. */
+function testRecordingStopTimer(): Timer {
+  return ownableSession()?.timer ?? defaultTimer;
+}
+
 export async function stopTestRecording(
   recordingId?: string,
   planName?: string,
-  timer: Timer = defaultTimer,
+  timer: Timer = testRecordingStopTimer(),
 ): Promise<TestRecordingStopResult> {
   if (startingRecording) {
     await startingRecording.promise;

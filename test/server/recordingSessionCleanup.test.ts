@@ -4,10 +4,33 @@ import { logger } from "../../src/utils/logger";
 import type { SessionManager } from "../../src/daemon/sessionManager";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
+  defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
   type RecordingSessionCleanupDeps,
 } from "../../src/server/recordingSessionCleanup";
+
+import {
+  getStoppedTestRecording,
+  getTestRecordingStatus,
+  ownedTestRecordingId,
+  resetStoppedTestRecordings,
+  startTestRecording,
+  stopTestRecording,
+} from "../../src/server/testRecordingManager";
+import { VideoRecorderService } from "../../src/features/video";
+import {
+  markVideoRecordingIncomplete,
+  resetVideoRecordingManagerDependencies,
+  setVideoRecordingManagerDependencies,
+  startVideoRecording,
+} from "../../src/server/videoRecordingManager";
+import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
+import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
+import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
+import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { FakeSecurePermissions } from "../fakes/FakeSecurePermissions";
 
 type CleanupManager = Parameters<typeof registerRecordingSessionCleanup>[0] &
   Parameters<typeof createOwnerlessRecordingAcquisitionCleanup>[0];
@@ -144,6 +167,9 @@ class FakeRecordings implements RecordingSessionCleanupDeps {
       this.testRecording.ownerSessionUuid === sessionId &&
       this.testRecording.deviceId === deviceId
     );
+  }
+  ownedTestRecordingId(sessionId: string | undefined, deviceId: string): string | undefined {
+    return this.isTestRecordingOwnedBy(sessionId, deviceId) ? `test-${sessionId}` : undefined;
   }
   async stopTestRecording(): Promise<void> {
     this.testStops += 1;
@@ -337,45 +363,92 @@ describe("registerRecordingSessionCleanup", () => {
   });
 
   describe("finalize cap covers every recording (#11041)", () => {
-    test("a hung segmented stop force-stops the segment and the test recording, not just the single-file one", async () => {
-      const { manager, recordings } = setup();
-      recordings.start("SIM-1", "session-a");
-      recordings.segmentedIds = ["seg-1"];
-      recordings.testRecording = { ownerSessionUuid: "session-a", deviceId: "SIM-1" };
-      recordings.hangSegmented = true;
-      const warn = spyOn(logger, "warn").mockImplementation(() => {});
-      try {
-        manager.release("session-a", "SIM-1");
-        const done = manager.settle();
-        await recordings.timer.advanceTimersByTimeAsync(120_000);
-        await done;
-        expect([...recordings.incomplete].sort()).toEqual([
-          "rec-session-a",
-          "seg-1",
-          "test-session-a",
-        ]);
-      } finally {
-        warn.mockRestore();
-      }
-    });
-
-    test("recordings finalized before the cap are not marked incomplete", async () => {
-      const { manager, recordings } = setup();
-      recordings.start("SIM-1", "session-a");
-      recordings.segmentedIds = ["seg-1"];
-      recordings.testRecording = { ownerSessionUuid: "session-a", deviceId: "SIM-1" };
-      recordings.hangStops = true;
-      const warn = spyOn(logger, "warn").mockImplementation(() => {});
-      try {
-        manager.release("session-a", "SIM-1");
-        const done = manager.settle();
-        await recordings.timer.advanceTimersByTimeAsync(120_000);
-        await done;
-        expect([...recordings.incomplete].sort()).toEqual(["rec-session-a", "test-session-a"]);
-      } finally {
-        warn.mockRestore();
-      }
-    });
+    for (const wedgedStage of ["segmented", "video"] as const) {
+      test(`a hung ${wedgedStage} stage stops the real test recorder and marks only unfinished videos incomplete`, async () => {
+        const timer = new FakeTimer();
+        const manager = new FakeSessionManager();
+        const device = { deviceId: "SIM-1", platform: "android" as const, name: "Fake" };
+        const repository = new FakeVideoRecordingRepository();
+        await setVideoRecordingManagerDependencies({
+          videoRecorderService: new VideoRecorderService({
+            backend: new FakeVideoCaptureBackend(),
+            idGenerator: new FakeIdGenerator(["rec-session-a"]),
+            securePermissions: new FakeSecurePermissions(false),
+            archiveRoot: "/unused/fake-video",
+            now: () => new Date(timer.now()),
+          }),
+          recordingRepository: repository,
+          configRepository: new FakeVideoRecordingConfigRepository(),
+          highlightClient: new FakeHighlightClient(),
+          timer,
+          now: () => new Date(timer.now()),
+          statFileSize: async () => 0,
+        });
+        let testStops = 0;
+        const marked: string[] = [];
+        let segmentActive = true;
+        const testId = "test-session-a";
+        try {
+          await startVideoRecording({ device, ownerSessionUuid: "session-a" });
+          await startTestRecording(
+            device,
+            timer,
+            new FakeIdGenerator([testId]),
+            () => ({
+              stepCount: 1,
+              start: async () => undefined,
+              stop: async () => {
+                testStops += 1;
+                return { steps: [{ tool: "tapOn", params: { text: "OK" } }], stepCount: 1 };
+              },
+            }),
+            "session-a",
+          );
+          registerRecordingSessionCleanup(manager, {
+            ...defaultRecordingSessionCleanupDeps,
+            timer,
+            stopSegmentedRecordings: async () => {
+              if (wedgedStage === "segmented") {
+                await new Promise<void>(() => {});
+              }
+              segmentActive = false;
+            },
+            stopVideoRecording: () => new Promise<void>(() => {}),
+            activeRecordingIdsForOwner: (owner, id) => [
+              ...defaultRecordingSessionCleanupDeps.activeRecordingIdsForOwner(owner, id),
+              ...(segmentActive ? ["seg-1"] : []),
+            ],
+            markVideoRecordingIncomplete: async (id) => {
+              marked.push(id);
+              await markVideoRecordingIncomplete(id);
+            },
+          });
+          manager.release("session-a", device.deviceId);
+          const done = manager.settle();
+          await timer.advanceTimersByTimeAsync(120_000);
+          await done;
+          // Preserve the all-recordings coverage, and distinguish actual test teardown from
+          // sending its id to the video-only incomplete marker (#11041, #11665).
+          expect([...marked, ...(testStops === 1 ? [testId] : [])].sort()).toEqual(
+            wedgedStage === "segmented"
+              ? ["rec-session-a", "seg-1", testId]
+              : ["rec-session-a", testId],
+          );
+          expect(marked).not.toContain(testId);
+          expect(testStops).toBe(1);
+          expect(getTestRecordingStatus(timer)).toBeNull();
+          expect(ownedTestRecordingId("session-a", device.deviceId)).toBeUndefined();
+          expect(getStoppedTestRecording(testId, "session-a")?.stepCount).toBe(1);
+          expect((await repository.getRecording("rec-session-a"))?.status).toBe("incomplete");
+        } finally {
+          if (getTestRecordingStatus(timer)) {
+            await stopTestRecording(undefined, undefined, timer);
+          }
+          resetStoppedTestRecordings();
+          resetVideoRecordingManagerDependencies();
+        }
+      });
+    }
   });
 
   describe("owner-less recordings on acquisition (#10961)", () => {

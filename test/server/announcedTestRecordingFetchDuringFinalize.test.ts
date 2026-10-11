@@ -1,24 +1,24 @@
-import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import type { BootedDevice, PlanStep } from "../../../src/models";
-import type { SessionManager } from "../../../src/daemon/sessionManager";
-import { SessionScopedStreamAuthenticator } from "../../../src/daemon/streamSocketAuth";
-import { TestRecordingSocketServer } from "../../../src/daemon/testRecordingSocketServer";
-import type { TestRecordingCommand } from "../../../src/daemon/testRecordingSocketTypes";
-import { registerPlanTools } from "../../../src/server/planTools";
+import type { BootedDevice, PlanStep } from "../../src/models";
+import type { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
+import { TestRecordingSocketServer } from "../../src/daemon/testRecordingSocketServer";
+import type { TestRecordingCommand } from "../../src/daemon/testRecordingSocketTypes";
+import { registerPlanTools } from "../../src/server/planTools";
 import {
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
-} from "../../../src/server/recordingSessionCleanup";
+} from "../../src/server/recordingSessionCleanup";
 import {
   resetStoppedTestRecordings,
   startTestRecording,
   stopTestRecording,
-} from "../../../src/server/testRecordingManager";
-import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
-import { FakeTimer } from "../../fakes/FakeTimer";
+} from "../../src/server/testRecordingManager";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 isolateToolRegistry();
 
@@ -178,4 +178,92 @@ describe("the previous owner fetches the announced test recording while its rele
 
     expect(await pending).toEqual({ recordingId: announcedId, error: undefined });
   });
+  const stopInFlight = async (rejectStop = false) => {
+    const gate = new Promise<void>((resolve) => {
+      finishStop = resolve;
+    });
+    const started = await startTestRecording(
+      device,
+      timer,
+      new CountingIdGenerator("join"),
+      () => ({
+        stepCount: 1,
+        start: async () => undefined,
+        stop: async () => {
+          await gate;
+          if (rejectStop) {
+            throw new Error("fake recorder stop failed");
+          }
+          return { steps: [step], stepCount: 1 };
+        },
+      }),
+      OWNER,
+    );
+    const stopped = stopTestRecording(started.recordingId, undefined, timer);
+    // Observe rejection immediately while the requester joins the same stop.
+    const outcome = stopped.then(
+      () => undefined,
+      (error: Error) => error,
+    );
+    return { id: started.recordingId, outcome };
+  };
+
+  const endedSessionServer = () =>
+    new TestableServer(
+      undefined,
+      timer,
+      new SessionScopedStreamAuthenticator(
+        () => ({
+          getSession: () => null,
+          getSessionForDevice: () => null,
+          getDeviceLabels: () => undefined,
+        }),
+        "testRecording",
+        {},
+      ),
+    );
+
+  for (const surface of ["exportPlan", "socket"] as const) {
+    for (const requester of ["stranger", "unknown-id"] as const) {
+      test(`${surface} does not join a stranger or an unknown id`, async () => {
+        const { id, outcome } = await stopInFlight();
+        const recordingId = requester === "unknown-id" ? "unknown" : id;
+        const sessionUuid = requester === "stranger" ? "session-b" : OWNER;
+        // These must settle while the owner's recorder is still blocked on the fake gate.
+        if (surface === "exportPlan") {
+          const response = await ToolRegistry.getTool("exportPlan")!.handler({
+            recordingId,
+            sessionUuid,
+          });
+          const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+          expect(payload.error).toBe("No active recording. Start a recording before exporting.");
+          expect(payload.planContent).toBeUndefined();
+        } else {
+          await expect(
+            endedSessionServer().invoke({ command: "stop", recordingId, sessionUuid }),
+          ).rejects.toThrow("not an active daemon session");
+        }
+        finishStop();
+        expect(await outcome).toBeUndefined();
+      });
+    }
+
+    test(`${surface} returns its existing error path when the joined stop rejects`, async () => {
+      const { id, outcome } = await stopInFlight(true);
+      const pending =
+        surface === "exportPlan"
+          ? ToolRegistry.getTool("exportPlan")!
+              .handler({ recordingId: id, sessionUuid: OWNER })
+              .then((response) => JSON.parse(response.content?.[0]?.text ?? "{}"))
+          : endedSessionServer()
+              .invoke({ command: "stop", recordingId: id, sessionUuid: OWNER })
+              .then(
+                () => ({ error: undefined }),
+                (error: Error) => ({ error: error.message }),
+              );
+      finishStop();
+      expect((await pending).error).toContain("fake recorder stop failed");
+      expect(await outcome).toBeInstanceOf(Error);
+    });
+  }
 });

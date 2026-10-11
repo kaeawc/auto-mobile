@@ -9,7 +9,7 @@ import {
   getToolSelectionContext,
   runWithToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
-import { runWithAbortSignal } from "../utils/AbortContext";
+import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { createServer, Server as NetServer, Socket } from "node:net";
 import { createHash } from "node:crypto";
 import { unlink } from "node:fs/promises";
@@ -5216,8 +5216,8 @@ export class UnixSocketServer {
   }
 
   /**
-   * `input/*` frames get the same owner fence as forwarded MCP calls: a signal that aborts on
-   * socket close and on `daemon/cancelRequest`, and a budget that runs from receipt (#10006).
+   * Input and device-mutating IDE frames share the owner fence of forwarded MCP calls: socket
+   * close and `daemon/cancelRequest` abort them (#10006, #11667). Input also has a budget from receipt.
    * Other local requests run unfenced, as before.
    */
   private async runLocalSocketRequest(
@@ -5228,7 +5228,7 @@ export class UnixSocketServer {
     receivedAtMs: number,
     onOwnerSignal: (signal: AbortSignal) => void,
   ): Promise<unknown> {
-    if (!request.method.startsWith("input/")) {
+    if (!request.method.startsWith("input/") && !IDE_DEVICE_MUTATION_METHODS.has(request.method)) {
       return await this.handleLocalSocketRequest(request, sessionId);
     }
     const owner = this.mcpRequestSignal(sessionId, ownerSocket, cancelSignal);
@@ -5282,19 +5282,23 @@ export class UnixSocketServer {
     if (request.method === "input/gestureEnd") {
       return await this.handleInputGesture(request, "end", socketSessionId, input);
     }
-    return await this.dispatchIdeSocketRequest(request, socketSessionId);
+    return await this.dispatchIdeSocketRequest(request, socketSessionId, signal);
   }
 
   /** A route that mutates a device runs as one tracked control call (#11486); the rest run bare. */
   private async dispatchIdeSocketRequest(
     request: DaemonRequest,
     socketSessionId?: string,
+    signal?: AbortSignal,
   ): Promise<any | undefined> {
     if (!IDE_DEVICE_MUTATION_METHODS.has(request.method)) {
       return await this.handleIdeSocketRequest(request, socketSessionId);
     }
-    return await this.runTrackedIdeMutation(socketSessionId, (call) =>
-      this.handleIdeSocketRequest(request, socketSessionId, call),
+    signal?.throwIfAborted();
+    return await this.runTrackedIdeMutation(
+      socketSessionId,
+      (call) => this.handleIdeSocketRequest(request, socketSessionId, call),
+      signal,
     );
   }
 
@@ -5468,6 +5472,7 @@ export class UnixSocketServer {
         );
         ideMutation?.dispatching();
 
+        getAbortSignal()?.throwIfAborted();
         if (args.platform === "android") {
           AndroidCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
           const manager = AndroidCtrlProxyManager.getInstance(targetDevice);
@@ -5759,6 +5764,7 @@ export class UnixSocketServer {
   private async runTrackedIdeMutation<T>(
     socketSessionId: string | undefined,
     run: (call: IdeMutationCall) => Promise<T>,
+    ownerSignal?: AbortSignal,
   ): Promise<T> {
     const abort = new AbortController();
     let tracked: ActiveExecution | undefined;
@@ -5790,7 +5796,9 @@ export class UnixSocketServer {
       },
     };
     try {
-      return await runWithAbortSignal(abort.signal, () => run(call));
+      const signal = ownerSignal ? AbortSignal.any([ownerSignal, abort.signal]) : abort.signal;
+      signal.throwIfAborted();
+      return await runWithAbortSignal(signal, () => run(call));
     } catch (error) {
       throw sessionReleaseThatCancelledCall(cutByRelease?.cancelReason) ?? error;
     } finally {
@@ -5812,6 +5820,7 @@ export class UnixSocketServer {
     platform: "android" | "ios",
     serial: string,
   ): Promise<BootedDevice[]> {
+    getAbortSignal()?.throwIfAborted();
     const manager = PlatformDeviceManagerFactory.getInstance();
     const discovery = expectingPooledSources(
       await manager.getBootedDevicesDetailed(platform),
@@ -5829,6 +5838,7 @@ export class UnixSocketServer {
         ? new AndroidBootedDeviceDiscoveryIncompleteError(discoveryError)
         : new BootedDeviceDiscoveryIncompleteError(platform, discoveryError);
     }
+    getAbortSignal()?.throwIfAborted();
     return discovery.devices;
   }
 
@@ -5933,6 +5943,7 @@ export class UnixSocketServer {
       throw new Error(`Device not found: ${deviceId}`);
     }
     await this.assertIdeMutationOwnership(request, targetDevice, action, false, ideMutation);
+    getAbortSignal()?.throwIfAborted();
     const client =
       platform === "ios"
         ? IOSCtrlProxyClient.getInstance(targetDevice)
@@ -5961,6 +5972,7 @@ export class UnixSocketServer {
     resolution: PreferenceStoreResolution | undefined;
   }> {
     if (platform !== "android") {
+      getAbortSignal()?.throwIfAborted();
       const resolution = (await viaSdk()) || undefined;
       return { usedDirectFileFallback: false, resolution };
     }
@@ -5970,10 +5982,14 @@ export class UnixSocketServer {
       fileName,
       () => this.adbClientFactory.create(device),
       async () => {
+        getAbortSignal()?.throwIfAborted();
         resolution = (await viaSdk()) || undefined;
       },
       // The ide/* params carry no userId, so an ambiguous-user error cannot say "pass userId".
-      (adb) => viaDirectFile(adb).catch(rethrowForRouteWithoutUserId),
+      (adb) => {
+        getAbortSignal()?.throwIfAborted();
+        return viaDirectFile(adb).catch(rethrowForRouteWithoutUserId);
+      },
     );
     return { ...result, resolution };
   }
@@ -6627,6 +6643,15 @@ export class UnixSocketServer {
    */
   liftSessionlessStrokesOn(deviceId: string): void {
     this.trackRequestHandler(this.ownedGestures.cancelAllUnheldOn(deviceId));
+  }
+
+  /** Queue the old device's holder strokes before rebind makes it available (#11667). */
+  liftStrokesHeldByOn(sessionId: string, deviceId: string): void {
+    // Forced same-serial rebinds also notify unbound; the holder kept this device.
+    if (this.getSessionForDevice(deviceId) === sessionId) {
+      return;
+    }
+    this.trackRequestHandler(this.ownedGestures.cancelAllHeldByOn(sessionId, deviceId));
   }
 
   /**

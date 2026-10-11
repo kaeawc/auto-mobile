@@ -360,6 +360,14 @@ export interface SessionCacheData {
   deviceReadiness?: DeviceReadinessLevel;
 }
 
+/** Ownership retained in the device reverse map, regardless of expiry or release admission. */
+export interface HeldDeviceSession {
+  deviceId: string;
+  sessionId: string;
+  platform: string;
+  stableDeviceId?: string;
+}
+
 /**
  * Session Record
  *
@@ -4945,6 +4953,23 @@ export class SessionManager {
    */
   getSessionForDevice(deviceId: string): string | null {
     return this.deviceSessionMap.get(deviceId) ?? null;
+  }
+
+  /** The same holders as getSessionForDevice, including expired and releasing sessions. */
+  getHeldDeviceSessions(): readonly HeldDeviceSession[] {
+    return [...this.deviceSessionMap].flatMap(([deviceId, sessionId]) => {
+      const session = this.sessions.get(sessionId) ?? this.releasePromises.get(sessionId)?.session;
+      return session
+        ? [
+            {
+              deviceId,
+              sessionId,
+              platform: session.platform,
+              stableDeviceId: session.stableDeviceId,
+            },
+          ]
+        : [];
+    });
   }
 
   /** Map membership, including fenced releases and any newer same-UUID incarnation. */

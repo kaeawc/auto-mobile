@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import {
   runCliCommand,
   setDaemonProxyFactoryForTesting,
@@ -52,6 +52,20 @@ describe("CLI --session-uuid with device-session acquisition tools", () => {
       },
     }));
   };
+
+  // CI's per-test time excludes only beforeAll: pay the first runCliCommand's one-time cost
+  // (tool registry, argument parsing, profile store) here, not in the first timed test.
+  beforeAll(async () => {
+    const warmDir = isolateCliDataDir("cli-acquisition-warm-");
+    try {
+      installFakeProxy();
+      await runCliCommand(["--session-uuid", "session-abc", "observe"]);
+    } finally {
+      calls.length = 0;
+      resetDaemonProxyFactoryForTesting();
+      warmDir.restore();
+    }
+  });
 
   test.each(DEVICE_SESSION_ACQUISITION_TOOLS)(
     "does not inject sessionUuid into %s params",

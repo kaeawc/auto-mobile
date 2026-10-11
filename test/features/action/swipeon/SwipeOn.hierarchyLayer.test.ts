@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { ObserveResult, SwipeOnOptions } from "../../../../src/models";
@@ -73,6 +73,16 @@ const swipe = (options: SwipeOnOptions): SwipeOnOptions => options;
 afterEach(() => mock.restore());
 
 describe("swipeOn layer (#9305)", () => {
+  // CI's per-test time excludes only beforeAll: one throwaway swipe pays the resolver's one-time
+  // module/JIT cost over the captured hierarchy here, not in the first timed test.
+  beforeAll(async () => {
+    const { action } = harness();
+    await action.execute(
+      swipe({ direction: "up", container: { elementId: "coverBox" }, layer: "app" }),
+    );
+    mock.restore();
+  });
+
   test('"app" excludes prototype nodes from container resolution', async () => {
     const { action, gesture } = harness();
     const result = await action.execute(

@@ -35,6 +35,7 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { resetProvisionedDeviceTransportFenceForTests } from "../../src/utils/provisionedDeviceTransportFence";
 import { FakeDeviceCreationGate } from "../fakes/FakeDeviceCreationGate";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -203,6 +204,7 @@ describe.each([
 ])("an acquisition cancelled before its result is delivered (%s)", (_, autolock) => {
   let timer: FakeTimer;
   let sessions: SessionManager;
+  let persistence: FakeDeviceSessionPersistence;
   let devices: FakeDeviceUtils;
   let pool: DevicePool;
   let ownership: ClaimOwnership;
@@ -274,7 +276,8 @@ describe.each([
     });
     PlatformDeviceManagerFactory.setInstance(devices);
     setDeviceManager(devices);
-    sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    persistence = new FakeDeviceSessionPersistence();
+    sessions = new SessionManager(timer, persistence);
     pool = new DevicePool(
       createDevicePoolDependencies(sessions, "undelivered-daemon", {
         env,
@@ -644,6 +647,13 @@ describe.each([
     const resumed: string[] = [];
     const setActiveDevice = (args: Record<string, unknown>, signal: AbortSignal) =>
       createSetActiveDeviceHandler({
+        displayInventory: new FakeDisplayInventoryProvider({
+          panels: [
+            { key: "inside", role: "inner", sizePx: { width: 200, height: 200 } },
+            { key: "outside", role: "cover", sizePx: { width: 100, height: 100 } },
+          ],
+          postures: ["opened", "closed"],
+        }),
         resumeCtrlProxy: async (deviceId) => {
           resumed.push(deviceId);
           const cancel = beforeBind;
@@ -679,19 +689,45 @@ describe.each([
         const sessionUuid = await deliveredSession("getApple", { udid: SIM_UDID });
         expect(pool.getDevice(SIM_UDID)?.sessionId).toBe(sessionUuid!);
         sessions.setDisplayPin(sessionUuid!, "main");
+        // What the session cached for the device it holds: a rebind discards all of it.
+        sessions.updateSessionCache(sessionUuid!, {
+          lastObserveTime: 41,
+          lastRenderedDisplayKey: "main",
+          lastRenderedDisplayGeneration: 7,
+          lastActionMetadata: { deviceId: SIM_UDID, blocks: { tap: { x: 1 } } },
+        });
+        const released: string[] = [];
+        sessions.onSessionRelease((sessionId) => released.push(sessionId));
+        const before = structuredClone(sessions.getSession(sessionUuid!));
+        const rowBefore = structuredClone(await persistence.getSession!(sessionUuid!));
+        expect(before?.cacheData).toMatchObject({
+          displayPin: "main",
+          deviceReadiness: "automationReady",
+        });
         const controller = new AbortController();
         const reachCancelPoint = cancelSelectionAt(point, () =>
           controller.abort(new Error("client cancelled")),
         );
 
         const answered = setActiveDevice(
-          { deviceId: OTHER_SIM_UDID, platform: "ios", sessionUuid },
+          { deviceId: OTHER_SIM_UDID, platform: "ios", sessionUuid, display: "inner" },
           controller.signal,
         );
         await reachCancelPoint();
         expect(await answered).toBe(false);
         await drain();
 
+        // Device, display pin, cache, liveness and idle clock: the session is what it was. Its
+        // tool enablement lives with the session id and goes only when the session is released.
+        expect(structuredClone(sessions.getSession(sessionUuid!))).toEqual(before);
+        expect(released).toEqual([]);
+        expect(await persistence.getSession!(sessionUuid!)).toMatchObject({
+          device_id: rowBefore!.device_id,
+          status: "active",
+          expires_at_ms: rowBefore!.expires_at_ms,
+          last_used_at_ms: rowBefore!.last_used_at_ms,
+          liveness_owner_token: rowBefore!.liveness_owner_token,
+        });
         expect(sessions.getSession(sessionUuid!)?.assignedDevice).toBe(SIM_UDID);
         expect(pool.getDevice(SIM_UDID)).toMatchObject({ sessionId: sessionUuid, status: "busy" });
         expect(pool.getDevice(OTHER_SIM_UDID)).toMatchObject({ sessionId: null, status: "idle" });
@@ -745,6 +781,63 @@ describe.each([
       expect(retried).toBe(true);
       expect(sessions.getSession("client-chosen-session")?.assignedDevice).toBe(SIM_UDID);
       expect(pool.getDevice(SIM_UDID)).toMatchObject({ sessionId: "client-chosen-session" });
+    });
+
+    test("a selection cancelled while its session is persisted leaves the client's id free to retry", async () => {
+      await startRunning(bootedSimulator);
+      const controller = new AbortController();
+      const upsert = persistence.upsertActiveSession.bind(persistence);
+      persistence.upsertActiveSession = async (...write) => {
+        const generation = await upsert(...write);
+        // The write landed; the client gives up while the mint is still finishing.
+        controller.abort(new Error("client cancelled"));
+        return generation;
+      };
+      const selection = {
+        deviceId: SIM_UDID,
+        platform: "ios",
+        sessionUuid: "client-chosen-session",
+      };
+
+      expect(await setActiveDevice(selection, controller.signal)).toBe(false);
+      await drain();
+
+      expect(controller.signal.aborted).toBe(true);
+      expect(sessions.getAllSessions()).toEqual([]);
+      expect(sessions.getTerminalReleaseSnapshot("client-chosen-session")).toBeUndefined();
+      expect(pool.getDevice(SIM_UDID)).toMatchObject({ sessionId: null, status: "idle" });
+      expect([...ownership.held]).toEqual([]);
+      expect((await persistence.getSession!("client-chosen-session"))?.status).not.toBe("active");
+
+      persistence.upsertActiveSession = upsert;
+      const retried = await setActiveDevice(selection, new AbortController().signal);
+
+      expect(retried).toBe(true);
+      expect(sessions.getSession("client-chosen-session")?.assignedDevice).toBe(SIM_UDID);
+      expect(pool.getDevice(SIM_UDID)).toMatchObject({ sessionId: "client-chosen-session" });
+    });
+
+    test("a selection that only re-pins the display, cancelled, leaves the pin it replaced", async () => {
+      await startRunning(bootedSimulator);
+      const sessionUuid = await deliveredSession("getApple", { udid: SIM_UDID });
+      sessions.setDisplayPin(sessionUuid!, "cover");
+      const before = structuredClone(sessions.getSession(sessionUuid!));
+      const controller = new AbortController();
+      const setDisplayPin = sessions.setDisplayPin.bind(sessions);
+      sessions.setDisplayPin = (...pin) => {
+        setDisplayPin(...pin);
+        sessions.setDisplayPin = setDisplayPin;
+        controller.abort(new Error("client cancelled"));
+      };
+
+      const answered = await setActiveDevice(
+        { deviceId: SIM_UDID, platform: "ios", sessionUuid, display: "inner" },
+        controller.signal,
+      );
+      await drain();
+
+      expect(answered).toBe(false);
+      expect(structuredClone(sessions.getSession(sessionUuid!))).toEqual(before);
     });
 
     test("control: an uncancelled rebind moves the session and its claim", async () => {

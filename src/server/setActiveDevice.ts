@@ -1,4 +1,4 @@
-import { mintedSession, type AcquisitionReceipt } from "../daemon/acquisitionReceipt";
+import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import { DaemonState } from "../daemon/daemonState";
 import type { DevicePool, PooledDevice } from "../daemon/devicePool";
 import type { SessionManager } from "../daemon/sessionManager";
@@ -203,15 +203,17 @@ async function bindRequestedDevice(input: {
 }): Promise<void> {
   const { args, device, pool, sessions, receipt } = input;
   const existing = sessions.getSession(args.sessionUuid);
-  if (existing?.assignedDevice === args.deviceId) {
-    return;
-  }
   if (existing?.assignedDevice) {
+    // Remembered for a selection of the device the session already holds too: nothing is
+    // rebound then, but the selection may still replace the session's display pin.
     input.rememberPrior({
       sessionUuid: args.sessionUuid,
       deviceId: existing.assignedDevice,
       displayPin: existing.cacheData.displayPin,
     });
+  }
+  if (existing?.assignedDevice === args.deviceId) {
+    return;
   }
   if (existing && existing.platform !== device.platform) {
     throw new ActionableError(
@@ -222,6 +224,12 @@ async function bindRequestedDevice(input: {
   }
   // The pool persists the replacement before releasing the previous binding.
   // #5870: infer platform from the resolved device when the caller omitted it.
+  if (!existing) {
+    // This call mints the session under an id its client chose and will name again: from here
+    // on a cancellation takes the session back without retiring the id, wherever it lands in
+    // the mint (#11593).
+    receipt.clientChosenSessionId = args.sessionUuid;
+  }
   const boundSession = await pool.bindOrReuseDeviceSession(
     args.sessionUuid,
     args.deviceId,
@@ -240,12 +248,6 @@ async function bindRequestedDevice(input: {
   );
   if (boundSession !== args.sessionUuid) {
     throw deviceAssignedToOtherSessionError(args.deviceId, boundSession, args.sessionUuid);
-  }
-  const minted = existing ? null : sessions.getSession(args.sessionUuid);
-  if (minted) {
-    // The pool leaves a rebind's session to its caller: this call created it, so a call
-    // cancelled before it answers releases it again. The client chose the id and may retry it.
-    receipt.minted = mintedSession(minted, args.deviceId, true);
   }
   sessions.setDeviceReadiness(args.sessionUuid, "booted");
 }

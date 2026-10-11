@@ -35,6 +35,7 @@ import {
   type LivenessOwnerView,
 } from "./livenessClaimDecision";
 import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
+import { requestAcquisitionReceipt } from "./acquisitionReceipt";
 import { defaultTimer, SteadyWallClock, Timer } from "../utils/SystemTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { logger } from "../utils/logger";
@@ -2962,10 +2963,10 @@ export class SessionManager {
       throw new TerminalSessionError(session.sessionId, persistedTerminalRelease);
     }
     this.assertCreationNotAbandoned(session, creation);
-    await this.rejectCreationAfterShutdownFence(session);
+    await this.rejectCreationAfterShutdownFence(session, false);
     await this.persistCreatedSession(session, claimedRow);
     await this.retireCreationIfAbandoned(session, creation);
-    await this.rejectCreationAfterShutdownFence(session);
+    await this.rejectCreationAfterShutdownFence(session, true);
     this.assertTerminalReleaseAdmission(session.sessionId, session);
     const terminalRelease = this.terminalReleaseSnapshots.get(session.sessionId);
     if (terminalRelease) {
@@ -3051,10 +3052,21 @@ export class SessionManager {
     );
   }
 
-  private async rejectCreationAfterShutdownFence(session: Session): Promise<void> {
+  private async rejectCreationAfterShutdownFence(
+    session: Session,
+    rowWritten: boolean,
+  ): Promise<void> {
     const cancellation = getAbortSignal();
     if (this.acceptingSessionCreations && !cancellation?.aborted) {
       return;
+    }
+    if (
+      cancellation?.aborted &&
+      this.acceptingSessionCreations &&
+      requestAcquisitionReceipt()?.clientChosenSessionId === session.sessionId
+    ) {
+      await this.rollBackCancelledClientChosenCreation(session, rowWritten);
+      cancellation.throwIfAborted();
     }
     const releasedAtMs = this.sessionNow();
     const snapshot: SessionReleaseSnapshot = {
@@ -3076,6 +3088,38 @@ export class SessionManager {
       cancellation.throwIfAborted();
     }
     throw new DaemonSessionCreationRejectedError(session.sessionId, snapshot);
+  }
+
+  /**
+   * A mint cancelled under an id its client chose (#11593). The client knows the id although the
+   * call never answered and names it again on its retry, so the id is not retired: nothing is
+   * fenced, and the active row this mint already wrote is released as a plain allocation
+   * rollback, which a later creation replaces. A release write that fails stays pending and is
+   * retried; the retry creation's own upsert supersedes it.
+   */
+  private async rollBackCancelledClientChosenCreation(
+    session: Session,
+    rowWritten: boolean,
+  ): Promise<void> {
+    if (!rowWritten) {
+      return;
+    }
+    const releasedAtMs = this.sessionNow();
+    const snapshot: SessionReleaseSnapshot = {
+      sessionId: session.sessionId,
+      deviceId: session.assignedDevice,
+      releaseReason: "allocation-rollback",
+      releasedAtMs,
+      terminal: false,
+      heartbeat: {
+        lastHeartbeatMs: session.lastHeartbeat,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+        timeoutMs: session.heartbeatTimeoutMs,
+        ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
+      },
+    };
+    this.captureReleaseRowGeneration(snapshot, this.persistedRowGenerations.get(session));
+    await this.persistSessionRelease(snapshot);
   }
 
   /** The persisted row, with tool activity during a device-restart recovery applied to its expiry. */

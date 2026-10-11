@@ -3,7 +3,11 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { Mutex } from "async-mutex";
 import type { BootedDevice, Platform } from "../models";
-import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
+import type {
+  BootedDeviceDiscovery,
+  DeviceDiscoveryError,
+  PlatformDeviceManager,
+} from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import {
@@ -19,6 +23,12 @@ export interface DevicePoolRefreshResult {
   addedCount: number;
   completeness?: DiscoveryCompleteness;
   failure?: string;
+  /**
+   * The sources whose sweep failed, each with its error (#11586). Tooling that is merely
+   * unavailable on this host is not a failure. A `failure` with no `failedSources` is a refresh
+   * that threw before its cause could be attributed to a source.
+   */
+  failedSources?: Partial<Record<DiscoverySource, DeviceDiscoveryError>>;
 }
 
 /** Preserve partial discovery and report Android failures through the refresh outcome. */
@@ -27,12 +37,33 @@ export function discoveryRefreshOutcome(
   addedCount: number,
 ): DevicePoolRefreshResult {
   const androidError = discovery.discoveryErrors?.android;
+  const failedSources = failedDiscoverySources(discovery);
   return {
     addedCount,
     ...(androidError && androidError.code !== "unavailable"
       ? { failure: androidError.message }
       : {}),
+    ...(Object.keys(failedSources).length > 0 ? { failedSources } : {}),
   };
+}
+
+/** The platform errors name each platform's own listing: adb, and simctl for iOS. */
+function failedDiscoverySources(
+  discovery: BootedDeviceDiscovery,
+): Partial<Record<DiscoverySource, DeviceDiscoveryError>> {
+  const errors: Partial<Record<DiscoverySource, DeviceDiscoveryError>> = {
+    android: discovery.discoveryErrors?.android,
+    "ios-simulator": discovery.discoveryErrors?.ios,
+    ...discovery.sourceErrors,
+  };
+  const failed: Partial<Record<DiscoverySource, DeviceDiscoveryError>> = {};
+  for (const source of ["android", "ios-simulator", "ios-physical"] as const) {
+    const error = errors[source];
+    if (error && error.code !== "unavailable") {
+      failed[source] = error;
+    }
+  }
+  return failed;
 }
 
 /** Client-facing form of the existing refresh failure, bounded independently of logs. */

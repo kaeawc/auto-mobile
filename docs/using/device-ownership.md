@@ -20,8 +20,11 @@ A call that acts on a held device is refused with the typed code
 A derived `<base>:<label>` session counts as its base session, for the holder
 check and for the owning connection alike: while the base's owner is connected,
 another connection's control call naming the derived session, or reaching one of
-the owner's devices through a `device` label, is refused (#11542). A device that
-no session holds takes calls from anyone.
+the owner's devices through a `device` label, is refused (#11542). The same holds
+wherever ownership is recorded: restoring a derived session is restoring its
+base, so it is refused while another connection owns the base, and it never
+takes a label away from the base's owner (#11586). A device that no session
+holds takes calls from anyone.
 
 A session's owner is the connection that acquired it, or that restored it after
 a reconnect. Ownership is cooperative: no token is needed, but naming a session's
@@ -196,7 +199,11 @@ acquisitions as anonymous (#11096):
 - Booted-device discovery that did not complete (adb or simctl failed, or a
   running emulator's AVD identity has not resolved) is refused with the retryable
   code `discovery_incomplete` instead of booting or adopting a device blind. Retry
-  the acquisition.
+  the acquisition. `setActiveDevice` answers it for a device it cannot find only
+  when the discovery that could have listed that device failed, and names that
+  platform: an iOS UDID while simctl failed is iOS discovery, and an id whose
+  shape names no platform takes whichever discovery failed. If only the other
+  platform's discovery failed, the device is reported as not found (#11586).
 
 ## A device that drops off
 

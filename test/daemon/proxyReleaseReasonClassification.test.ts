@@ -8,6 +8,7 @@ import {
   type NotFoundAnswerFacts,
   type NotFoundAnswerOutcome,
   RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
+  UNREHYDRATED_HANDOFF,
 } from "../../src/daemon/daemonMcpProxy";
 import {
   isRecoverableDaemonReleaseReason,
@@ -796,9 +797,10 @@ describe("a not-found answer is decided alike on every path, for every session (
     }
   });
 
-  // A handoff after the window was spent is a new handoff: the daemon is handing the session
-  // back again, so its owner waits again, once the call that reached the session re-armed it.
-  test("a recoverable handoff after a spent window opens a new window", async () => {
+  // A window belongs to a handoff. One the session was not told of before is a new handoff: the
+  // daemon is handing the session back, so its owner waits again, also after an earlier
+  // handoff's window ran out, once the call that reached the session re-armed its heartbeat.
+  test("a handoff the session was not told of before opens a new window after an expired one", async () => {
     const { world, perTick } = await holding([SESSION]);
     try {
       world.release("");
@@ -811,38 +813,77 @@ describe("a not-found answer is decided alike on every path, for every session (
       const sent = await perTick(5);
 
       expect(sent[SESSION]!.slice(-4)).toEqual(ones(4));
-      expect(world.connectionResets()).toBe(0);
     } finally {
       await world.close();
     }
   });
 
-  // The window is bounded however its last answer is heard. The daemon pauses for longer than a
-  // heartbeat request is given, so the keeper gives up on the heartbeat whose answer finds the
-  // window expired and liveness recovery asks again. Both answers arrive, in order, and the
-  // second must stop the session as the first would have, not start waiting all over again.
-  test.each([[[SESSION]], [[SESSION, SECOND]]])(
-    "a window that expires while the daemon is paused is not opened again (%j)",
-    async (sessions) => {
-      // Wherever the pause starts around the tick whose answer finds the window expired.
-      for (let pausedAt = WINDOW_TICKS - 4; pausedAt <= WINDOW_TICKS + 1; pausedAt += 1) {
-        const { world, perTick } = await holding(sessions);
-        try {
-          world.callsRestoreNothing();
-          world.release("device-restart:emulator-5554", SESSION);
-          await perTick(pausedAt);
-          // Long enough that the next tick's heartbeat is given up on before its answer comes.
-          world.pauseDaemon(INTERVAL_MS + LEASE_MS / 2 + INTERVAL_MS / 4);
+  // I6: the same handoff never gets a second window, however often a call that restores nothing
+  // re-arms the heartbeat: each such call is answered by one more heartbeat and no more.
+  test.each(["", "device-restart:emulator-5554"])(
+    "reads never earn the same handoff (%p) another window",
+    async (reason) => {
+      const { world, perTick } = await holding([SESSION]);
+      try {
+        world.callsRestoreNothing();
+        world.release(reason);
+        world.replaceDaemon();
+        await perTick(WINDOW_TICKS + 3);
+        const before = world.heartbeats();
 
-          const sent = await perTick(WINDOW_TICKS);
+        for (let read = 0; read < 4; read += 1) {
+          await world.timer.resolvePromise(world.proxy.callTool("observe", {}), 1);
+          await perTick(3);
+        }
 
-          const afterwards = sent[SESSION]!.slice(8);
-          expect({ pausedAt, asked: afterwards.filter((count) => count > 0) }).toEqual({
-            pausedAt,
-            asked: [],
-          });
-        } finally {
-          await world.close();
+        expect(world.heartbeats() - before).toBeLessThanOrEqual(4);
+        expect(world.connectionResets()).toBe(0);
+      } finally {
+        await world.close();
+      }
+    },
+  );
+
+  // I6 again, by the other road: the daemon pauses for longer than a heartbeat request is given,
+  // so the keeper gives up on the heartbeat whose answer finds the window expired, and liveness
+  // recovery asks again, on the same connection or (a longer pause) on one it replaced. That
+  // connection reaches the same daemon and the same handoff: the session is stopped as it would
+  // have been, never waited for all over again, also when the daemon pauses at every expiry.
+  test.each([
+    ["the latest binding", [SESSION], "device-restart:emulator-5554"],
+    ["a held session", [SESSION, SECOND], "device-restart:emulator-5554"],
+    ["the latest binding", [SESSION], ""],
+    ["a held session", [SESSION, SECOND], ""],
+  ] as const)(
+    "a window that expires while the daemon is paused is not opened again: %s, %p %p",
+    async (_which, sessions, reason) => {
+      const budget = WINDOW_TICKS + 12;
+      for (const pauseMs of [3_250, 5_000, 7_000]) {
+        for (let pausedAt = WINDOW_TICKS - 4; pausedAt <= WINDOW_TICKS + 1; pausedAt += 1) {
+          const { world, perTick } = await holding(sessions);
+          try {
+            world.callsRestoreNothing();
+            world.release(reason, SESSION);
+            if (reason === "") {
+              world.release("", SECOND);
+              world.replaceDaemon();
+            }
+            const before = world.heartbeats(SESSION);
+            await perTick(pausedAt);
+            world.pauseDaemon(pauseMs);
+            await perTick(WINDOW_TICKS);
+            // And again where a second window would run out, were there one.
+            world.pauseDaemon(pauseMs);
+            await perTick(WINDOW_TICKS);
+
+            expect({
+              pauseMs,
+              pausedAt,
+              asked: world.heartbeats(SESSION) - before <= budget,
+            }).toEqual({ pauseMs, pausedAt, asked: true });
+          } finally {
+            await world.close();
+          }
         }
       }
     },
@@ -983,34 +1024,43 @@ describe("a not-found answer is decided alike on every path, for every session (
 describe("decideNotFoundAnswer", () => {
   const W = RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS;
   const NOW = 100_000;
+  const RECOVERABLE = ["daemon-restart", "daemon-shutdown", "device-restart:emulator-5554"];
+  const handoffOf = (releaseReason: string): string => `release:${releaseReason}`;
   const facts = (overrides: Partial<NotFoundAnswerFacts>): NotFoundAnswerFacts => ({
     releaseReason: undefined,
     owned: true,
     establishes: false,
     windowSince: undefined,
+    handoffs: new Set(),
     now: NOW,
     mayAskAgain: false,
     ...overrides,
   });
-  const awaitedSince = (windowSince: number): NotFoundAnswerOutcome => ({
-    kind: "awaited",
-    windowSince,
-  });
   const STOPPED: NotFoundAnswerOutcome = { kind: "stopped" };
+  /** Every state a session that has had a window for `handoffs` can be in. */
+  const statesWith = (handoffs: readonly string[]): Array<Partial<NotFoundAnswerFacts>> =>
+    [NOW, NOW - 1, NOW - W + 1, NOW - W, NOW - 10 * W].flatMap((windowSince) =>
+      [false, true].flatMap((establishes) =>
+        [false, true].map((mayAskAgain) => ({
+          windowSince,
+          handoffs: new Set(handoffs),
+          establishes,
+          mayAskAgain,
+        })),
+      ),
+    );
 
   // I2: a reason that is not a recoverable handoff of an owned session ends it, whatever else
   // is true of the session, and under that reason.
   test.each(EVERY_REASON.filter((reason) => !isRecoverableDaemonReleaseReason(reason)))(
     "%s ends the session in every state",
     (releaseReason) => {
-      for (const establishes of [false, true]) {
-        for (const windowSince of [undefined, NOW - 1, NOW - W, "spent"] as const) {
-          for (const mayAskAgain of [false, true]) {
-            expect(
-              decideNotFoundAnswer(facts({ releaseReason, establishes, windowSince, mayAskAgain })),
-            ).toEqual({ kind: "ended", reason: releaseReason });
-          }
-        }
+      const states = [facts({}), ...statesWith([UNREHYDRATED_HANDOFF]).map(facts)];
+      for (const state of states) {
+        expect(decideNotFoundAnswer({ ...state, releaseReason })).toEqual({
+          kind: "ended",
+          reason: releaseReason,
+        });
       }
     },
   );
@@ -1022,71 +1072,71 @@ describe("decideNotFoundAnswer", () => {
     });
   });
 
-  // I1: inside its window nothing but an ending reason changes what happens to the session.
-  test.each([undefined, "daemon-restart", "daemon-shutdown", "device-restart:emulator-5554"])(
-    "inside the window %p is awaited without asking again, and the window is not extended",
-    (releaseReason) => {
-      for (const mayAskAgain of [false, true]) {
-        for (const windowSince of [NOW, NOW - 1, NOW - W + 1]) {
-          expect(decideNotFoundAnswer(facts({ releaseReason, windowSince, mayAskAgain }))).toEqual(
-            awaitedSince(windowSince),
-          );
-        }
-      }
-    },
-  );
+  // I6: a handoff gets one window. Once the session has had it, no answer of that handoff opens
+  // or extends one, whichever connection it arrives on and whoever asks: inside the window it is
+  // awaited as it stands, past it the session is stopped, and the connection is left alone.
+  test.each([
+    ...RECOVERABLE.map((reason) => [reason, handoffOf(reason)]),
+    ["", UNREHYDRATED_HANDOFF],
+  ])("a handoff the session had its window for (%p) never opens another", (reason, handoff) => {
+    const releaseReason = reason === "" ? undefined : reason;
+    for (const state of statesWith([handoff!])) {
+      const open = NOW - state.windowSince! < W;
+      expect(decideNotFoundAnswer(facts({ ...state, releaseReason }))).toEqual(
+        open ? { kind: "awaited", windowSince: state.windowSince! } : STOPPED,
+      );
+    }
+  });
 
-  // A spent window: the session was stopped, and is asked again only because a call reached it.
-  test("after a spent window no reason stops again without a reconnect, and a handoff opens a new one", () => {
+  // A handoff the session was not told of before opens its one window now, also when an earlier
+  // handoff's window is still open or long over.
+  test.each(RECOVERABLE)("a new handoff (%s) opens one window", (releaseReason) => {
+    const opened = { kind: "awaited", windowSince: NOW, handoff: handoffOf(releaseReason) };
+    for (const state of statesWith([UNREHYDRATED_HANDOFF, "release:another-handoff"])) {
+      const open = NOW - state.windowSince! < W;
+      // Outside any window the latest binding first asks a connection that had answered again.
+      const asksAgain = !open && !state.establishes && state.mayAskAgain;
+      expect(decideNotFoundAnswer(facts({ ...state, releaseReason }))).toEqual(
+        asksAgain ? { kind: "ask-again", handoff: true } : opened,
+      );
+    }
+    expect(decideNotFoundAnswer(facts({ releaseReason }))).toEqual(opened);
+    expect(decideNotFoundAnswer(facts({ releaseReason, mayAskAgain: true }))).toEqual({
+      kind: "ask-again",
+      handoff: true,
+    });
+  });
+
+  test("no reason opens the unrehydrated window only as the first answer on a connection just made", () => {
+    const opened = { kind: "awaited", windowSince: NOW, handoff: UNREHYDRATED_HANDOFF };
     for (const mayAskAgain of [false, true]) {
-      expect(decideNotFoundAnswer(facts({ windowSince: "spent", mayAskAgain }))).toEqual(STOPPED);
-      for (const releaseReason of ["daemon-restart", "device-restart:emulator-5554"]) {
+      for (const windowSince of [undefined, NOW - W]) {
+        const handoffs = new Set(windowSince === undefined ? [] : ["release:daemon-restart"]);
         expect(
-          decideNotFoundAnswer(facts({ releaseReason, windowSince: "spent", mayAskAgain })),
-        ).toEqual(awaitedSince(NOW));
+          decideNotFoundAnswer(facts({ establishes: true, windowSince, handoffs, mayAskAgain })),
+        ).toEqual(opened);
       }
+      // A session this proxy does not own is never waited for.
+      expect(decideNotFoundAnswer(facts({ establishes: true, owned: false }))).toEqual(STOPPED);
     }
   });
 
-  // I5: a window ends with the answer that finds it expired, whatever that answer says.
-  test.each([undefined, "daemon-restart", "device-restart:emulator-5554"])(
-    "the answer that finds the window expired (%p) stops the session and is not asked again",
-    (releaseReason) => {
-      for (const mayAskAgain of [false, true]) {
-        for (const windowSince of [NOW - W, NOW - 10 * W]) {
-          expect(decideNotFoundAnswer(facts({ releaseReason, windowSince, mayAskAgain }))).toEqual(
-            STOPPED,
-          );
-        }
-      }
-    },
-  );
-
-  test("the first answer on a connection just established opens a window, with or without a reason", () => {
-    for (const releaseReason of [undefined, "daemon-restart"]) {
-      for (const windowSince of [undefined, NOW - W, "spent"] as const) {
-        expect(
-          decideNotFoundAnswer(
-            facts({ releaseReason, establishes: true, windowSince, mayAskAgain: true }),
-          ),
-        ).toEqual(awaitedSince(NOW));
-      }
-    }
-    // A session this proxy does not own is never waited for.
-    expect(decideNotFoundAnswer(facts({ establishes: true, owned: false }))).toEqual(STOPPED);
-  });
-
-  test("with no window, on a connection that had answered: asked again once, then decided", () => {
+  test("no reason on a connection that had answered: asked again once if it never had a window, then stopped", () => {
     expect(decideNotFoundAnswer(facts({ mayAskAgain: true }))).toEqual({
       kind: "ask-again",
       handoff: false,
     });
-    expect(
-      decideNotFoundAnswer(facts({ releaseReason: "daemon-shutdown", mayAskAgain: true })),
-    ).toEqual({ kind: "ask-again", handoff: true });
     expect(decideNotFoundAnswer(facts({}))).toEqual(STOPPED);
-    expect(decideNotFoundAnswer(facts({ releaseReason: "daemon-shutdown" }))).toEqual(
-      awaitedSince(NOW),
-    );
+    // I1: inside another handoff's window it is awaited, and nothing is asked again.
+    const handoffs = new Set(["release:daemon-restart"]);
+    for (const mayAskAgain of [false, true]) {
+      expect(decideNotFoundAnswer(facts({ windowSince: NOW - 1, handoffs, mayAskAgain }))).toEqual({
+        kind: "awaited",
+        windowSince: NOW - 1,
+      });
+      expect(decideNotFoundAnswer(facts({ windowSince: NOW - W, handoffs, mayAskAgain }))).toEqual(
+        STOPPED,
+      );
+    }
   });
 });

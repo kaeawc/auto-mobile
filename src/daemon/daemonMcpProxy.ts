@@ -509,17 +509,25 @@ function isLivenessOwnershipLostError(error: unknown): boolean {
  * - `ended`: the daemon named a release that is not a recoverable handoff of a session this proxy
  *   owns. Terminal for that session only, under that reason.
  * - `awaited`: the session is inside its window (`windowSince`): it keeps being heartbeated, each
- *   heartbeat claiming again, and the connection is never reset for it.
- * - `ask-again`: the latest binding, on a connection that had answered before and with no window:
- *   asked once more on a fresh connection. `handoff`: the daemon named a recoverable handoff, so
- *   the daemon that answers there may be its successor.
+ *   heartbeat claiming again, and the connection is never reset for it. `handoff`: the answer is
+ *   the first of that handoff, which opens the window now.
+ * - `ask-again`: the latest binding, on a connection that had answered before and outside any
+ *   window: asked once more on a fresh connection. `handoff`: the daemon named a recoverable
+ *   handoff, so the daemon that answers there may be its successor.
  * - `stopped`: no longer heartbeated until a tool call reaches it again; never fenced.
  */
 export type NotFoundAnswerOutcome =
   | { kind: "ended"; reason: string }
-  | { kind: "awaited"; windowSince: number }
+  | { kind: "awaited"; windowSince: number; handoff?: string }
   | { kind: "ask-again"; handoff: boolean }
   | { kind: "stopped" };
+
+/**
+ * The handoff a session's answer with no reason belongs to: a daemon the proxy just connected to
+ * that has not rehydrated the session yet. A not-found answer names no daemon instance, so every
+ * such answer is the same handoff until the daemon acknowledges the session again.
+ */
+export const UNREHYDRATED_HANDOFF = "unrehydrated";
 
 /** Everything the outcome of a not-found heartbeat answer depends on. */
 export interface NotFoundAnswerFacts {
@@ -532,11 +540,13 @@ export interface NotFoundAnswerFacts {
    * it: the daemon behind it may have restarted and not rehydrated the session yet.
    */
   establishes: boolean;
+  /** When the session's latest window opened, while it has had one (open or expired). */
+  windowSince: number | undefined;
   /**
-   * When the session's window opened, while it has one; `spent` once an answer found it expired
-   * and stopped the session, so any later answer follows a call that reached the session.
+   * The handoffs the session already got its window for, since the daemon last acknowledged it
+   * or admitted a call under it.
    */
-  windowSince: number | "spent" | undefined;
+  handoffs: ReadonlySet<string>;
   now: number;
   /** The heartbeat may be asked once more on a fresh connection (the latest binding's first ask). */
   mayAskAgain: boolean;
@@ -557,15 +567,17 @@ function isRecoverableHandoffOfOwnedSession(
 /**
  * The one decision for a not-found heartbeat answer, from the session's own state (#11570).
  *
- * A window opens with the session's first answer on a just-established connection, with or
- * without a reason (#11529, #11557), or with a recoverable release reason on a connection that
- * had answered before (#11461), which the latest binding first asks about once more on a fresh
- * connection. It lasts {@link RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS} and no later answer
- * extends it. Inside it every answer that does not end the session is awaited. The answer that
- * finds it expired stops the session, and the window is spent: the session is only asked again
- * once a call has reached it, and then a recoverable handoff (the daemon is handing it back
- * again) or a newly established connection opens a new window, while an answer with no reason
- * stops it again without asking on a fresh connection.
+ * A window belongs to a HANDOFF, never to a connection. A handoff is identified by the
+ * recoverable release reason the daemon names (#11461), or, for an answer with no reason that is
+ * the session's first on a just-established connection, by {@link UNREHYDRATED_HANDOFF} (#11529,
+ * #11557). The first answer of a handoff opens one window of
+ * {@link RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS}; no later answer of the same handoff opens or
+ * extends one, whatever connection it arrives on (a reconnect by liveness recovery or to ask
+ * again reaches the same daemon as far as the answer can tell). So a session that is not
+ * acknowledged is heartbeated for at most one window per distinct handoff it was actually told
+ * of. Inside a window every answer that does not end the session is awaited. Outside one the
+ * session is stopped; the latest binding is first asked once more on a fresh connection when it
+ * has had no window at all, or when the answer names a handoff it has had no window for yet.
  */
 export function decideNotFoundAnswer(facts: NotFoundAnswerFacts): NotFoundAnswerOutcome {
   const { releaseReason, owned, establishes, windowSince, now } = facts;
@@ -573,24 +585,41 @@ export function decideNotFoundAnswer(facts: NotFoundAnswerFacts): NotFoundAnswer
   if (releaseReason !== undefined && !recoverable) {
     return { kind: "ended", reason: releaseReason };
   }
-  const spent = windowSince === "spent";
-  if (
-    typeof windowSince === "number" &&
-    now - windowSince < RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS
-  ) {
+  const open =
+    windowSince !== undefined && now - windowSince < RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS;
+  const handoff = newHandoffOf(facts, recoverable);
+  if (handoff !== undefined) {
+    // A connection that had answered before named the handoff: the daemon is going away or
+    // handing the session back, so the latest binding asks on a fresh one first.
+    return recoverable && !open && !establishes && facts.mayAskAgain
+      ? { kind: "ask-again", handoff: true }
+      : { kind: "awaited", windowSince: now, handoff };
+  }
+  if (open) {
     return { kind: "awaited", windowSince };
   }
-  if (owned && establishes) {
-    return { kind: "awaited", windowSince: now };
-  }
-  if (windowSince !== undefined && !spent) {
-    return { kind: "stopped" };
-  }
-  if (!spent && facts.mayAskAgain) {
-    return { kind: "ask-again", handoff: recoverable };
-  }
-  return recoverable ? { kind: "awaited", windowSince: now } : { kind: "stopped" };
+  return windowSince === undefined && facts.mayAskAgain
+    ? { kind: "ask-again", handoff: false }
+    : { kind: "stopped" };
 }
+
+/**
+ * The handoff a not-found answer that does not end its session tells of, when the session has
+ * had no window for it yet: the recoverable release the daemon names, or, with no reason, the
+ * one {@link UNREHYDRATED_HANDOFF} when the answer is the session's first on a connection just
+ * established. Undefined for an answer of a handoff it already had its window for, and for an
+ * answer with no reason on a connection that had answered before, which tells of none.
+ */
+function newHandoffOf(facts: NotFoundAnswerFacts, recoverable: boolean): string | undefined {
+  const handoff = recoverable
+    ? `release:${facts.releaseReason}`
+    : facts.owned && facts.establishes
+      ? UNREHYDRATED_HANDOFF
+      : undefined;
+  return handoff === undefined || facts.handoffs.has(handoff) ? undefined : handoff;
+}
+
+const NO_HANDOFFS: ReadonlySet<string> = new Set();
 
 /** The latest binding's keeper heartbeat while it is in flight. */
 interface LatestHeartbeatAsk {
@@ -1301,14 +1330,13 @@ export class DaemonMcpProxy {
    */
   private readonly recoveryNotFoundOutcomes = new Map<string, NotFoundAnswerOutcome>();
   /**
-   * When (injected timer) each session's not-found window opened ({@link decideNotFoundAnswer}),
-   * or `spent` once the session was stopped for an answer that found it expired. An entry
-   * outlives its window, so a later answer with no reason on the same connection cannot open
-   * another.
+   * Each session's latest not-found window (when it opened, by the injected timer) and the
+   * handoffs it has had a window for ({@link decideNotFoundAnswer}). An entry outlives its window,
+   * so no later answer of the same handoff opens another.
    * Cleared by a heartbeat acknowledgement, by a call the daemon admitted under the session, or by
    * the session ending here; a call that proves nothing about the session leaves it (#11570).
    */
-  private readonly notFoundWindows = new Map<string, number | "spent">();
+  private readonly notFoundWindows = new Map<string, { since: number; handoffs: Set<string> }>();
   /**
    * Sessions the proxy stopped heartbeating on a not-found answer that did not end them (#10702):
    * the latest binding stays bound, a held session is dropped. A tool call that reaches the
@@ -6615,12 +6643,13 @@ export class DaemonMcpProxy {
     options: { establishes?: boolean; mayAskAgain?: boolean } = {},
   ): NotFoundAnswerOutcome {
     const firstOnConnection = this.answersOwnershipReestablishment(client, sessionUuid);
-    const windowSince = this.notFoundWindows.get(sessionUuid);
+    const window = this.notFoundWindows.get(sessionUuid);
     const outcome = decideNotFoundAnswer({
       releaseReason,
       owned: this.ownedDeviceSessions.has(sessionUuid),
       establishes: firstOnConnection || options.establishes === true,
-      windowSince,
+      windowSince: window?.since,
+      handoffs: window?.handoffs ?? NO_HANDOFFS,
       now: this.timer.now(),
       mayAskAgain: options.mayAskAgain === true,
     });
@@ -6628,10 +6657,13 @@ export class DaemonMcpProxy {
     if (outcome.kind !== "awaited") {
       return outcome;
     }
-    if (outcome.windowSince === windowSince) {
+    if (outcome.handoff === undefined) {
       logger.debug(`[DaemonMcpProxy] Session ${sessionUuid} is still not recovered (${released})`);
     } else if (this.isHeldSession(sessionUuid)) {
-      this.notFoundWindows.set(sessionUuid, outcome.windowSince);
+      this.notFoundWindows.set(sessionUuid, {
+        since: outcome.windowSince,
+        handoffs: new Set([...(window?.handoffs ?? NO_HANDOFFS), outcome.handoff]),
+      });
       logger.info(
         `[DaemonMcpProxy] The daemon no longer knows session ${sessionUuid} (released: ` +
           `${released}); heartbeating it for up to ${RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS}ms ` +
@@ -6686,22 +6718,9 @@ export class DaemonMcpProxy {
       );
     }
     if (outcome.kind !== "ended") {
-      this.markStoppedForNotFound(sessionUuid);
+      this.notFoundStopped.add(sessionUuid);
     }
     this.syncHeartbeatKeeper();
-  }
-
-  /**
-   * `sessionUuid` is no longer heartbeated until a call reaches it. Its window is spent only now
-   * that the session is stopped: an answer nobody acted on (its heartbeat was given up on) leaves
-   * the window expired, so the heartbeat that takes over stops the session too instead of opening
-   * a new window no call asked for.
-   */
-  private markStoppedForNotFound(sessionUuid: string): void {
-    this.notFoundStopped.add(sessionUuid);
-    if (this.notFoundWindows.has(sessionUuid)) {
-      this.notFoundWindows.set(sessionUuid, "spent");
-    }
   }
 
   /**

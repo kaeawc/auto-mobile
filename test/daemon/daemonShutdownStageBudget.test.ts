@@ -25,6 +25,7 @@ import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingReposit
 
 interface DaemonSocketServerInternals {
   socketServer: {
+    liftSessionlessStrokesOn(deviceId: string): void;
     quiesce(): Promise<void>;
     drainSessionReleaseNotifications(): Promise<void>;
     close(): Promise<void>;
@@ -108,6 +109,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     });
     restores.push(unsubscribe);
     (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      liftSessionlessStrokesOn: () => {},
       quiesce: async () => {},
       drainSessionReleaseNotifications: async () => {
         notifiedAt = timer.now();

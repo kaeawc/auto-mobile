@@ -160,6 +160,8 @@ struct NodeView: View {
     var coverSize: CGSize?
     /// Set by a parent that lays its children out through `PrototypeNode.drawnChildren`.
     var inStackSlot = false
+    /// The main axis of the row or column laying this node out, so a `weight` knows what it fills.
+    var stackAxis: PrototypeAxis?
     @Environment(\.pagerContext) private var pager
     @Environment(\.prototypePalette) private var palette
     @Environment(\.prototypeTypography) private var typography
@@ -253,11 +255,19 @@ struct NodeView: View {
             PrototypeLayeredLayout(alignment: swiftUIAlignment(style?.alignment)) { children }
                 .animation(sizeAnimation, value: layoutSignature)
         case "row":
-            HStack(alignment: .center, spacing: style?.spacing ?? 0) { arranged(horizontal: true) }
-                .animation(sizeAnimation, value: layoutSignature)
+            if hasWeightedChild {
+                weightedStack(axis: .horizontal)
+            } else {
+                HStack(alignment: .center, spacing: style?.spacing ?? 0) { arranged(horizontal: true) }
+                    .animation(sizeAnimation, value: layoutSignature)
+            }
         case "column":
-            VStack(alignment: .leading, spacing: style?.spacing ?? 0) { arranged(horizontal: false) }
-                .animation(sizeAnimation, value: layoutSignature)
+            if hasWeightedChild {
+                weightedStack(axis: .vertical)
+            } else {
+                VStack(alignment: .leading, spacing: style?.spacing ?? 0) { arranged(horizontal: false) }
+                    .animation(sizeAnimation, value: layoutSignature)
+            }
         case "text":
             textView
         case "image":
@@ -333,6 +343,27 @@ struct NodeView: View {
         ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
             NodeView(node: entry.node, model: model, inStackSlot: true)
         }
+    }
+
+    /// A child's `weight` under the current state.
+    private func weight(of child: PrototypeNode) -> Double? {
+        child.resolvedStyle(state: model.state)?.weight
+    }
+
+    private var hasWeightedChild: Bool {
+        node.drawnChildren(holds: model.holds).contains { weight(of: $0.node) != nil }
+    }
+
+    /// A row or column whose children share the main axis by `weight` (Android's `Modifier.weight`):
+    /// see `PrototypeWeightedStack`. It adds no arrangement spacers: a weight takes the free space.
+    private func weightedStack(axis: PrototypeAxis) -> some View {
+        PrototypeWeightedStackLayout(axis: axis, spacing: style?.spacing ?? 0) {
+            ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
+                NodeView(node: entry.node, model: model, inStackSlot: true, stackAxis: axis)
+                    .layoutValue(key: PrototypeWeightKey.self, value: weight(of: entry.node))
+            }
+        }
+        .animation(sizeAnimation, value: layoutSignature)
     }
 
     /// Start/center/end come from the frame alignment; only the space* modes need spacers, so a
@@ -648,10 +679,13 @@ struct NodeView: View {
                 trailing: (padding?.end ?? 0) + insets.right
             ))
             .modifier(SizeModifier(
-                width: coverSize.map { .points($0.width) } ?? style?.width,
-                height: coverSize.map { .points($0.height) } ?? style?.height,
-                alignment: contentAlignment,
-                fillsByDefault: node.type == "spacer"
+                rules: PrototypeSizeRules(
+                    style: style,
+                    coverSize: coverSize.map { (Double($0.width), Double($0.height)) },
+                    weightedAxis: stackAxis,
+                    fillsByDefault: node.type == "spacer"
+                ),
+                alignment: contentAlignment
             ))
             // The gradient is painted over the background colour, as on Android.
             .background {
@@ -722,15 +756,23 @@ struct NodeView: View {
 }
 
 private struct SizeModifier: ViewModifier {
-    let width: Dimension?
-    let height: Dimension?
+    let rules: PrototypeSizeRules
     let alignment: Alignment
-    let fillsByDefault: Bool
 
+    private var width: Dimension? { rules.width }
+    private var height: Dimension? { rules.height }
+    private var fillsByDefault: Bool { rules.fillsByDefault }
+
+    @ViewBuilder
     func body(content: Content) -> some View {
-        // Not `frame(maxWidth: nil, maxHeight: nil)`: see `PrototypeLayeredLayout` (#10899).
-        PrototypeLayeredLayout(fillsWidth: fills(width), fillsHeight: fills(height), alignment: alignment) {
-            content.frame(width: fixed(width), height: fixed(height), alignment: alignment)
+        if rules.needsResolvedLayout {
+            // Bounds, aspect ratio and weights need Compose's constraint order (#11543).
+            PrototypeSizedLayout(rules: rules, alignment: alignment) { content }
+        } else {
+            // Not `frame(maxWidth: nil, maxHeight: nil)`: see `PrototypeLayeredLayout` (#10899).
+            PrototypeLayeredLayout(fillsWidth: fills(width), fillsHeight: fills(height), alignment: alignment) {
+                content.frame(width: fixed(width), height: fixed(height), alignment: alignment)
+            }
         }
     }
 

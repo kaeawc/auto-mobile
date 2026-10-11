@@ -34,8 +34,11 @@ export interface GestureOwnershipDeps {
  * under a socket that is not live (issue #10005): a start acked after its socket closed is
  * cancelled on the spot, the same cancellation {@link cancelAllFor} performs at socket close.
  * A stroke also never outlives the device holder it was admitted under (#11448):
- * {@link cancelAllHeldBy} lifts a released session's strokes, and {@link cancelIfDeviceChangedHands}
- * lifts one whose device has a different holder by the time a later frame is refused.
+ * {@link cancelAllHeldBy} lifts a released session's strokes, {@link cancelIfDeviceChangedHands}
+ * lifts one whose device has a different holder by the time a later frame is refused, a start
+ * whose holder left the device before the ack is cancelled instead of recorded, and
+ * {@link cancelAllUnheldOn} lifts the strokes no session held when a session acquires their
+ * device (#11541).
  */
 export class GestureOwnershipRegistry {
   private readonly bySocket = new Map<string, Map<string, OwnedGesture>>();
@@ -53,15 +56,19 @@ export class GestureOwnershipRegistry {
 
   /**
    * The runner acked a `gestureStart`. Records ownership while the socket is live; when the socket
-   * is already gone, cancels the gesture immediately instead and records nothing.
+   * is already gone, cancels the gesture immediately instead and records nothing. The same holds
+   * when `admissionStillHolds` is false: the holder the start was admitted under left the device
+   * while the ack was awaited, so its release-time lift found nothing to lift (#11541). The caller
+   * evaluates it synchronously with this call, so no release can land between the two.
    */
   async onStartAcked(
     socketSessionId: string,
     targetDevice: BootedDevice,
     gestureId: string,
     holderSessionId?: string,
+    admissionStillHolds: boolean = true,
   ): Promise<"owned" | "cancelled"> {
-    if (!this.deps.isSocketLive(socketSessionId)) {
+    if (!admissionStillHolds || !this.deps.isSocketLive(socketSessionId)) {
       await this.cancelOne(targetDevice, gestureId, socketSessionId);
       return "cancelled";
     }
@@ -106,21 +113,42 @@ export class GestureOwnershipRegistry {
    * socket close or refused frame issues no second cancel. Best-effort; never throws.
    */
   async cancelAllHeldBy(holderSessionId: string): Promise<void> {
-    const released: Array<OwnedGesture & { socketSessionId: string }> = [];
+    await this.cancelAllMatching((gesture) => gesture.holderSessionId === holderSessionId);
+  }
+
+  /**
+   * Cancel every open gesture on `deviceId` that was admitted while no session held the device: a
+   * session has just acquired it, and sessionless work must not keep driving a device for its new
+   * holder (#10829, #11541). Strokes admitted under a session are left to that session's release.
+   * Ownership is dropped before the first cancel is awaited. Best-effort; never throws.
+   */
+  async cancelAllUnheldOn(deviceId: string): Promise<void> {
+    await this.cancelAllMatching(
+      (gesture) =>
+        gesture.holderSessionId === undefined && gesture.targetDevice.deviceId === deviceId,
+    );
+  }
+
+  private async cancelAllMatching(matches: (gesture: OwnedGesture) => boolean): Promise<void> {
+    const lifted: Array<OwnedGesture & { socketSessionId: string }> = [];
     for (const [socketSessionId, forSocket] of this.bySocket) {
       for (const [key, gesture] of forSocket) {
-        if (gesture.holderSessionId === holderSessionId) {
+        if (matches(gesture)) {
           forSocket.delete(key);
-          released.push({ ...gesture, socketSessionId });
+          lifted.push({ ...gesture, socketSessionId });
         }
       }
       if (forSocket.size === 0) {
         this.bySocket.delete(socketSessionId);
       }
     }
-    for (const { targetDevice, gestureId, socketSessionId } of released) {
-      await this.cancelOne(targetDevice, gestureId, socketSessionId);
-    }
+    // Every cancel is handed to the device queue before the first is awaited, so each is ahead
+    // of whatever the next holder sends, however long an earlier device takes to answer.
+    await Promise.all(
+      lifted.map(({ targetDevice, gestureId, socketSessionId }) =>
+        this.cancelOne(targetDevice, gestureId, socketSessionId),
+      ),
+    );
   }
 
   /**

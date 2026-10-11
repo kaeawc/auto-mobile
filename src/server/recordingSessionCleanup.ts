@@ -75,11 +75,15 @@ export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
     await stopVideoRecordingUnattended(recordingId);
   },
   isTestRecordingOwnedBy,
-  activeRecordingIdsForOwner: (sessionId, deviceId) => [
-    ...listActiveVideoRecordingIdsForOwner(sessionId, deviceId),
-    ...segmentedVideoRecordingHandlesForOwner(sessionId, deviceId),
-    ...(ownedTestRecordingId(sessionId, deviceId) ?? []),
-  ],
+  activeRecordingIdsForOwner: (sessionId, deviceId) => {
+    // One id, not a string to spread: spreading it would split the id into characters.
+    const testRecordingId = ownedTestRecordingId(sessionId, deviceId);
+    return [
+      ...listActiveVideoRecordingIdsForOwner(sessionId, deviceId),
+      ...segmentedVideoRecordingHandlesForOwner(sessionId, deviceId),
+      ...(testRecordingId === undefined ? [] : [testRecordingId]),
+    ];
+  },
   stopTestRecording: async () => {
     await stopTestRecording();
   },

@@ -276,6 +276,13 @@ offline budget, restart recovery): `docs/using/device-ownership.md`. Change it i
 the same PR as any constant in `src/daemon/sessionLivenessWindows.ts` or
 `OFFLINE_DEVICE_DISCONNECT_BUDGET_MS`.
 
+One function answers "when does this session idle-expire": `sessionIdleDeadline`
+in `src/daemon/sessionClocks.ts` (#11558). The idle sweep, the heartbeat monitor's
+`cli-idle` scan, the lazy-expiry check at a new call's admission and the reported
+`idleReleaseAt` all read it; never compare `expiresAt` or `lastUsedAt` with the
+clock directly in a new idle judgement. `test/daemon/idleExpiryOneSourceOfTruth.test.ts`
+holds the three to one instant for every session kind.
+
 Release reasons are classified in one place, `src/daemon/releaseReasons.ts`
 (#11258): a typed `Record` tags each reason `idle`, `expiry`, `terminal` and
 `recoverable`, and a new reason does not compile until it is tagged there. Never

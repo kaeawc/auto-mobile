@@ -1385,20 +1385,23 @@ internal object AutoMobilePlanExecutor {
     setOf(DEVICE_CLEANUP_IN_PROGRESS_CODE, DEVICE_SHUTTING_DOWN_CODE)
 
   /**
-   * Total wait budget for this refusal: [deviceOwnedWaitBudgetMs], stretched for the finalize codes
-   * to the daemon's `retryAfterMs` clamped to [DEVICE_FINALIZE_WAIT_CAP_MS] (#11360). Every other
-   * code, and a refusal with no hint, keeps the plain budget.
+   * Total wait budget for this refusal. For the finalize codes the daemon's `retryAfterMs` is the
+   * finalize time STILL REMAINING, so it bounds the total: [waitedMs] already spent plus that hint,
+   * clamped to [DEVICE_FINALIZE_WAIT_CAP_MS] and never below [deviceOwnedWaitBudgetMs]
+   * (#11360, #11538). Every other code, and a refusal with no hint, keeps the plain budget.
    */
-  private fun deviceOwnedBudgetMs(retryAfterMs: Long?, code: String?): Long {
+  private fun deviceOwnedBudgetMs(waitedMs: Long, retryAfterMs: Long?, code: String?): Long {
     if (code !in FINALIZE_WAIT_CODES || retryAfterMs == null) return deviceOwnedWaitBudgetMs
-    return maxOf(deviceOwnedWaitBudgetMs, minOf(retryAfterMs, DEVICE_FINALIZE_WAIT_CAP_MS))
+    val untilFinalized = minOf(waitedMs + retryAfterMs, DEVICE_FINALIZE_WAIT_CAP_MS)
+    return maxOf(deviceOwnedWaitBudgetMs, untilFinalized)
   }
 
   /**
    * Exponential delay (500ms doubling, capped at 4s) for the next wait on a held device, clamped to
-   * the remaining budget; null once the budget is spent. A daemon `retryAfterMs` hint lengthens a
-   * step and, for the finalize codes only ([code]), extends the budget up to 150 s (#11360);
-   * otherwise it never extends [deviceOwnedWaitBudgetMs].
+   * the remaining budget; null once the budget is spent. For the finalize codes ([code]) the
+   * daemon's `retryAfterMs` only bounds the total wait (up to 150 s, #11360); each step stays at
+   * the ordinary backoff so a finalize that finishes early is noticed on the next poll (#11538).
+   * For every other code a hint lengthens a step and never extends [deviceOwnedWaitBudgetMs].
    */
   internal fun deviceOwnedBackoffDelayMs(
     waitsSoFar: Int,
@@ -1406,11 +1409,12 @@ internal object AutoMobilePlanExecutor {
     retryAfterMs: Long? = null,
     code: String? = null,
   ): Long? {
-    val remaining = deviceOwnedBudgetMs(retryAfterMs, code) - waitedMs
+    val remaining = deviceOwnedBudgetMs(waitedMs, retryAfterMs, code) - waitedMs
     if (remaining <= 0) return null
     val doubled = DEVICE_OWNED_INITIAL_DELAY_MS shl waitsSoFar.coerceAtMost(8)
     val backoff = minOf(doubled, DEVICE_OWNED_MAX_DELAY_MS)
-    return minOf(maxOf(backoff, retryAfterMs ?: 0L), remaining)
+    val hint = if (code in FINALIZE_WAIT_CODES) 0L else retryAfterMs ?: 0L
+    return minOf(maxOf(backoff, hint), remaining)
   }
 
   private const val RELEASE_SESSION_METHOD = "daemon/releaseSession"

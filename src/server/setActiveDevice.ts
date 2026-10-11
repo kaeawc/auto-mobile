@@ -259,6 +259,8 @@ async function bindRequestedDevice(input: {
     undefined,
     // Records the move (or the mint), so a call cancelled before it answers is undone (#11593).
     receipt,
+    // Asked again under the pool's assignment mutex: a start may have reserved the device since.
+    true,
   );
   if (boundSession !== args.sessionUuid) {
     throw deviceAssignedToOtherSessionError(args.deviceId, boundSession, args.sessionUuid);
@@ -297,6 +299,8 @@ async function selectSessionDevice(input: {
   const sessions = DaemonState.getInstance().getSessionManager();
   const pool = DaemonState.getInstance().getDevicePool();
   const device = await requestedPoolDevice(pool, args.deviceId, args.platform);
+  // A device another request is still preparing is refused before anything touches it (#11651).
+  pool.assertNotPreparedForOtherRequest(args.deviceId);
   const hadDisplayPin = sessions.getDisplayPin(args.sessionUuid) !== undefined;
   const displayPin =
     args.display === undefined
@@ -358,6 +362,8 @@ function admitSessionlessSelection(args: HandlerArgs): void {
     }
     throw deviceAssignedToOtherSessionError(args.deviceId, liveHolder, undefined);
   }
+  // No session holds it yet, but another request is preparing it and will bind it (#11651).
+  pool.assertNotPreparedForOtherRequest(args.deviceId);
   if (args.__executionId && args.display === undefined) {
     executionTracker.markSessionlessDeviceUse(args.__executionId, args.deviceId);
   }

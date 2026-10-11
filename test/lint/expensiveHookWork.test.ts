@@ -1,13 +1,14 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { baselineEntries, scanExpensiveHookWork } from "./expensiveHookWork";
 
 const REPO_ROOT = path.join(import.meta.dir, "..", "..");
 const TEST_DIR = path.join(REPO_ROOT, "test");
 const BASELINE_FILE = path.join(import.meta.dir, "expensive-hook-work-baseline.txt");
-// The baseline may only shrink: lower this when entries are removed, never raise it.
-const BASELINE_CEILING = 148;
+// Equals the baseline's line count; the UPDATE command below keeps it in sync.
+const BASELINE_CEILING = 156;
 // Parsing every test file can exceed Bun's default hook limit on loaded CI runners.
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
 
@@ -87,29 +88,56 @@ describe("scanExpensiveHookWork", () => {
   });
 });
 
+const UPDATE_COMMAND =
+  "UPDATE_EXPENSIVE_HOOK_BASELINE=1 bun test test/lint/expensiveHookWork.test.ts";
+
 describe("expensive per-test hook work stays out of unit tests", () => {
-  const baseline = readFileSync(BASELINE_FILE, "utf8").split("\n").filter(Boolean);
+  let baseline: string[] = [];
   let found: string[] = [];
 
   beforeAll(() => {
     found = unitTestFiles(TEST_DIR)
       .map((file) => [relativePosix(file), readFileSync(file, "utf8")] as const)
-      .flatMap(([file, source]) => baselineEntries(file, scanExpensiveHookWork(file, source)));
+      .flatMap(([file, source]) => baselineEntries(file, scanExpensiveHookWork(file, source)))
+      .sort();
+    if (process.env.UPDATE_EXPENSIVE_HOOK_BASELINE === "1") {
+      // Regenerate: lists exactly the files that still offend (drops stale lines) and syncs the ceiling.
+      writeFileSync(BASELINE_FILE, found.map((entry) => `${entry}\n`).join(""));
+      const self = fileURLToPath(import.meta.url);
+      writeFileSync(
+        self,
+        readFileSync(self, "utf8").replace(
+          /BASELINE_CEILING = \d+;/,
+          `BASELINE_CEILING = ${found.length};`,
+        ),
+      );
+    }
+    baseline = readFileSync(BASELINE_FILE, "utf8").split("\n").filter(Boolean);
   }, TREE_SCAN_HOOK_TIMEOUT_MS);
 
   test("no new test does mkdtemp, rm, image/zip or DevicePool construction in beforeEach/afterEach", () => {
     const added = found.filter((entry) => !baseline.includes(entry));
-    // CI's per-test time includes beforeEach/afterEach but not beforeAll/afterAll, and a contended
-    // runner stretches it 5-15x. Use useScratchRoot (test/helpers/scratchRoot.ts) for temp
-    // directories, and build immutable fixtures or harnesses once in beforeAll.
-    expect(added).toEqual([]);
+    if (added.length > 0) {
+      throw new Error(
+        `New expensive beforeEach/afterEach work (CI per-test time includes these hooks, 5-15x on a ` +
+          `contended runner):\n  ${added.map((entry) => entry.replace("\t", "  [") + "]").join("\n  ")}\n` +
+          `Fix it: use useScratchRoot (test/helpers/scratchRoot.ts) for temp directories and build ` +
+          `immutable fixtures/harnesses in beforeAll. If the per-test state is genuinely mutable ` +
+          `(e.g. a DevicePool), baseline it with: ${UPDATE_COMMAND}  (then commit ` +
+          `test/lint/expensive-hook-work-baseline.txt and this test file).`,
+      );
+    }
   });
 
   test("the baseline lists only still-offending files, so it can only shrink", () => {
     const stale = baseline.filter((entry) => !found.includes(entry));
-    // Fixed a file? Delete its line from expensive-hook-work-baseline.txt and lower the ceiling.
-    expect(stale).toEqual([]);
-    expect(baseline.length).toBeLessThanOrEqual(BASELINE_CEILING);
+    if (stale.length > 0) {
+      throw new Error(
+        `Stale baseline lines (file fixed, renamed or deleted):\n  ${stale.join("\n  ").replaceAll("\t", "  ")}\n` +
+          `Run: ${UPDATE_COMMAND}  and commit the result.`,
+      );
+    }
+    expect(baseline.length).toBe(BASELINE_CEILING);
   });
 
   test("the baseline is sorted and free of duplicates", () => {

@@ -7,36 +7,73 @@ import {
   RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
 } from "../../src/daemon/daemonMcpProxy";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
+import { ROUTED_SESSION_META_KEY } from "../../src/server/routedSessionMeta";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-// The proxy's heartbeat state machine (#11411, #11400), checked over short random histories. The
-// table it implements is documented on DaemonMcpProxy.hasHeartbeatTargets; observed from outside:
+// The proxy's heartbeat state machine (#11411, #11400, #11570), checked over short random
+// histories of N sessions: the latest binding and every session held besides it.
 //
-// | what the daemon holds / told the proxy              | keeper       | heartbeats   | a call naming it  |
-// | --------------------------------------------------- | ------------ | ------------ | ----------------- |
-// | live, acquired or reached by a call since           | runs         | every tick   | forwarded         |
-// | gone with a recoverable reason, told by a not-found | runs         | exactly once | forwarded         |
-// |   heartbeat, within the recovery window of the      |              | a tick       |                   |
-// |   first such answer (#11461)                        |              |              |                   |
-// | gone with no reason, told by the first heartbeat    | runs         | exactly once | forwarded         |
-// |   answered on a connection that was just made (a    |              | a tick       |                   |
-// |   restarted daemon that has not rehydrated it yet), |              |              |                   |
-// |   within the same window, for the latest binding    |              |              |                   |
-// |   (#11529) and every session held besides it        |              |              |                   |
-// |   (#11557)                                          |              |              |                   |
-// | gone with no reason otherwise, or past the window,  | for others   | none needed  | forwarded, and    |
-// |   told by a not-found heartbeat                     |              |              | success re-arms   |
-// | gone with any reason that is not recoverable        | for others   | never again  | refused locally   |
-// |   (terminal, `plan-auto-release`, unknown to this   |              |              | while it is the   |
-// |   build), proxy told (release notification or       |              |              | fenced binding    |
-// |   not-found heartbeat)                              |              |              |                   |
+// STATE, per session (nothing about one session is decided by another's):
+//   heartbeating  the keeper asks it every tick (the latest binding or a held session), or it is
+//                 STOPPED: not asked again until a tool call reaches it.
+//   establishing  a connection was made while the proxy was heartbeating it, and the daemon has
+//                 not answered a heartbeat for it on that connection yet.
+//   window        when its not-found window opened; open for
+//                 RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS, then expired. Never extended.
+//   ended         the reason it ended for good, once the proxy was told (never leaves this state).
+//
+// EVENTS and what each does to the session it is about:
+//
+// | event                                         | effect                                              |
+// | --------------------------------------------- | --------------------------------------------------- |
+// | connection (re)established, by a daemon       | every heartbeating session: establishing            |
+// |   restart or by liveness recovery             |                                                     |
+// | ... by the proxy asking a reason-less         | nothing is establishing: the same daemon answers    |
+// |   not-found again on a fresh connection       |                                                     |
+// | ... by the proxy asking a recoverable         | every heartbeating session: establishing (the       |
+// |   handoff answer again                        |   daemon said it is going away)                     |
+// | heartbeat answered ok                         | establishing and window cleared; heartbeating       |
+// | heartbeat answered not-found, reason R that   | ENDED with R: that session only, under its own      |
+// |   is not a recoverable handoff                |   reason; never heartbeated or forwarded again      |
+// | heartbeat answered not-found, recoverable     | window open: AWAITED (one heartbeat a tick, each     |
+// |   reason or none                              |   claiming, no connection reset)                    |
+// |                                               | establishing: window opens now; AWAITED             |
+// |                                               | window expired: STOPPED                             |
+// |                                               | no window, connection had answered: the latest      |
+// |                                               |   binding is asked once more on a fresh connection, |
+// |                                               |   then (and a held session at once) a recoverable   |
+// |                                               |   reason opens the window and no reason is STOPPED  |
+// | tool call the daemon admits under the session | restored: window cleared, heartbeating again,       |
+// |   and uses (it echoes the session)            |   whether it is the latest binding or was held      |
+// | tool call that restores nothing (a read, a    | the window is left as it is: neither dropped nor    |
+// |   refusal)                                    |   reopened; a STOPPED latest binding is asked once  |
+// | release notification, reason R not            | ENDED with R                                        |
+// |   recoverable                                 |                                                     |
+// | close                                         | every window and the keeper's timer are gone        |
+//
+// Liveness recovery, the first heartbeat of a connection and a keeper tick all hear the daemon's
+// answer through the same decision (decideNotFoundAnswer), so the row is the same whoever asked.
+//
+// INVARIANTS asserted on every history:
+//   I1  a recoverable or reason-less not-found inside a session's window never fences it (its
+//       calls are forwarded) and never resets the connection.
+//   I2  a reason that ends a session fences exactly that session, under its own reason.
+//   I3  every live session the proxy acquired or used is heartbeated on every tick.
+//   I4  a session that ended is never heartbeated again and no call is forwarded under it.
+//   I5  a window is bounded: an awaited session is asked exactly once a tick, a stopped one not
+//       at all, and after close no timer is left and no heartbeat is sent.
 //
 // "keeper runs" is observed as the keeper's interval being scheduled: it is, exactly while some
 // session the proxy must heartbeat exists.
+//
+// Three rows need a harness this world does not have and are pinned as examples in
+// proxyReleaseReasonClassification.test.ts and proxyBoundSessionFirstHeartbeat.test.ts: the first
+// heartbeat of a first connection, the handoff answer asked again on a successor daemon, and a
+// fence that lands while a call naming another session is still connecting.
 
 // See test/utils/Backoff.property.test.ts for the pinned-seed rationale.
 const RUN_OPTIONS = { seed: 11_411, numRuns: 100 } as const;
@@ -62,7 +99,11 @@ type Birth = "lives" | "reaped" | "released";
 type Command =
   | { kind: "acquire"; birth: Birth }
   | { kind: "release"; target: number; gone: Gone; notify: boolean; reason?: string }
-  | { kind: "call"; target: number; rejected: boolean }
+  /**
+   * A control call (the daemon admits it under the session, uses it and echoes it) that the tool
+   * then answers or rejects, or with `read` a call that is answered without restoring anything.
+   */
+  | { kind: "call"; target: number; rejected: boolean; read?: boolean }
   /** The daemon is replaced; nothing listens for `gapMs` in between. */
   | { kind: "daemon-restart"; gapMs: number }
   | { kind: "tick" };
@@ -115,6 +156,15 @@ const command: fc.Arbitrary<Command> = fc.oneof(
   {
     weight: 1,
     arbitrary: fc.record({
+      kind: fc.constant("call" as const),
+      target,
+      rejected: fc.constant(false),
+      read: fc.constant(true),
+    }),
+  },
+  {
+    weight: 1,
+    arbitrary: fc.record({
       kind: fc.constant("daemon-restart" as const),
       // No gap, or one longer than a heartbeat request, which starts liveness recovery.
       gapMs: fc.constantFrom(0, LEASE_MS),
@@ -137,15 +187,12 @@ interface SessionModel {
   endedAs: string;
   heartbeats: number;
   /**
-   * When the daemon first answered a heartbeat not-found with the recoverable reason, until a
-   * call restores the session: the proxy keeps heartbeating it for the recovery window (#11461).
+   * When the session's not-found window opened: with a recoverable reason (#11461), or with any
+   * answer that does not end it on a connection the proxy had just made while holding it
+   * (#11529). Kept past its end, until an acknowledgement or a call the daemon admits under the
+   * session: no later answer opens another on the same connection.
    */
-  recoverableSince?: number;
-  /**
-   * The daemon answered with no reason on a connection the proxy had just made to re-establish
-   * ownership of this session: its later answers with no reason keep that window open (#11529).
-   */
-  rehydrating?: boolean;
+  windowSince?: number;
   /**
    * The same answer, when the history leaves it in doubt whether the proxy held the session when
    * it connected: the proxy may or may not be heartbeating it for the window that started then.
@@ -184,10 +231,25 @@ class World {
   /** Sessions the daemon answered a heartbeat for on the current connection. */
   private readonly answeredOnConnection = new Set<string>();
   /**
-   * The daemon was unreachable for longer than a heartbeat request. The first answer on the next
-   * connection goes to the heartbeat that gave up waiting, and liveness recovery classifies its own.
+   * The answer that lets the proxy ask once more on a fresh connection, heard during the current
+   * command: a not-found that does not end its session, which has no window, on a connection that
+   * had answered before. `same-daemon`: for the latest binding and with no reason, so the
+   * connection made for it re-establishes nothing. `successor`: with a recoverable reason, so that
+   * connection re-establishes every session. `doubt`: the history leaves the latest binding open.
    */
-  private afterUnreachableGap = false;
+  private askAgain: "same-daemon" | "successor" | "doubt" | undefined;
+  /** The proxy closed a working connection itself; the next one it makes follows from that. */
+  private ownReset: "same-daemon" | "successor" | "doubt" | "other" | undefined;
+  /** Working connections the proxy closed itself, but for a handoff the daemon announced. */
+  private ownResets = 0;
+  /**
+   * The daemon announced a recoverable handoff: the proxy reclaims the session on a replacement
+   * connection, which it makes before its next request.
+   */
+  private handoffAnnounced = false;
+  /** The time until which liveness recovery may still replace the connection after a gap. */
+  private recoveringUntil = Number.NEGATIVE_INFINITY;
+  private closed = false;
   rejectNextCall = false;
   private nextBirth: Birth = "lives";
   private reachable = true;
@@ -225,15 +287,33 @@ class World {
       },
       onCallTool: (name, params) => {
         if (typeof params.sessionUuid === "string") {
-          this.answerCall(params.sessionUuid);
+          this.answerCall(name, params.sessionUuid);
         }
       },
-      toolResultFor: (name) => (name === "getAndroid" ? this.mintSession() : undefined),
+      toolResultFor: (name, params) =>
+        name === "getAndroid"
+          ? this.mintSession()
+          : name === "tapOn"
+            ? // The daemon admitted the call under this session and used it.
+              {
+                content: [{ type: "text", text: "tapped" }],
+                _meta: { [ROUTED_SESSION_META_KEY]: params.sessionUuid },
+              }
+            : undefined,
     });
     const connect = created.connect.bind(created);
     created.connect = async () => {
       await connect();
       this.connectionEstablished();
+    };
+    const close = created.close.bind(created);
+    created.close = async () => {
+      if (!this.closed && this.reachable && this.client === created && created.isConnected()) {
+        this.ownResets += this.handoffAnnounced ? 0 : 1;
+        this.handoffAnnounced = false;
+        this.ownReset = this.askAgain ?? "other";
+      }
+      await close();
     };
     return created;
   }
@@ -243,11 +323,13 @@ class World {
    * ownership of that session.
    */
   private connectionEstablished(): void {
+    const ownReset = this.ownReset;
+    this.ownReset = undefined;
     this.answeredOnConnection.clear();
     this.reestablishing.clear();
-    this.reestablishes = !this.afterUnreachableGap;
-    if (this.afterUnreachableGap) {
-      this.afterUnreachableGap = false;
+    // Asked again of the same daemon: its answers are not a restarted daemon's first.
+    this.reestablishes = ownReset !== "same-daemon";
+    if (ownReset === "same-daemon" || ownReset === "doubt") {
       return;
     }
     for (const sessionUuid of this.held) {
@@ -293,6 +375,8 @@ class World {
       return;
     }
     if (session.daemon === "live") {
+      // An acknowledgement ends the window: the daemon knows the session.
+      session.windowSince = undefined;
       return;
     }
     if (session.daemon === "terminal") {
@@ -301,20 +385,11 @@ class World {
       }
       this.learnDead(sessionUuid);
     }
-    if (session.daemon === "unknown" && reestablishes) {
-      session.rehydrating = true;
-    } else if (session.daemon === "unknown" && first && this.reestablishes) {
-      session.maybeRehydratingSince ??= this.timer.now();
-    }
-    // A recoverable handoff is not "told gone" until its recovery window has passed: its owner
-    // keeps heartbeating so a daemon still recovering the session finds it reclaimed (#11461).
-    // Nor is a session a just-connected daemon answered for with no reason (#11529).
-    const awaited =
-      session.daemon === "recoverable" ||
-      (session.daemon === "unknown" && session.rehydrating === true);
-    session.told = !awaited || this.recoveryWindowPassed(session);
-    if (session.told) {
-      this.held.delete(sessionUuid);
+    if (session.daemon !== "terminal") {
+      session.told = !this.awaitedAfterNotFound(sessionUuid, session, reestablishes, first);
+      if (session.told) {
+        this.held.delete(sessionUuid);
+      }
     }
     throw Object.assign(new Error(`Session not found: ${sessionUuid}`), {
       code: DAEMON_SESSION_NOT_FOUND_CODE,
@@ -323,29 +398,77 @@ class World {
     });
   }
 
-  /** Notes a recoverable not-found answer; true once the window since the first has passed. */
-  private recoveryWindowPassed(session: SessionModel): boolean {
-    session.recoverableSince ??= this.timer.now();
-    return this.timer.now() - session.recoverableSince >= RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS;
+  /**
+   * The row of the table for a not-found answer that does not end the session: whether the proxy
+   * keeps heartbeating it (awaited) or stops. A recoverable handoff is not "told gone" until its
+   * window has passed: its owner keeps heartbeating so a daemon still recovering the session finds
+   * it reclaimed (#11461). Nor is a session a just-connected daemon answered for (#11529).
+   */
+  private awaitedAfterNotFound(
+    sessionUuid: string,
+    session: SessionModel,
+    establishes: boolean,
+    first: boolean,
+  ): boolean {
+    const now = this.timer.now();
+    if (session.windowSince !== undefined) {
+      if (now - session.windowSince < RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS) {
+        return true;
+      }
+      if (!establishes) {
+        return false;
+      }
+    }
+    if (establishes) {
+      session.windowSince = now;
+      return true;
+    }
+    // No window, on a connection that had answered: the latest binding is asked once more.
+    const recoverable = session.daemon === "recoverable";
+    this.askAgain ??= recoverable
+      ? "successor"
+      : this.latestCertain && this.latest === sessionUuid
+        ? "same-daemon"
+        : "doubt";
+    if (recoverable) {
+      session.windowSince = now;
+      return true;
+    }
+    if (first && this.reestablishes) {
+      session.maybeRehydratingSince ??= now;
+    }
+    return false;
   }
 
-  private answerCall(sessionUuid: string): void {
+  private insideWindow(session: SessionModel, now: number): boolean {
+    return (
+      session.windowSince !== undefined &&
+      now - session.windowSince < RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS
+    );
+  }
+
+  private answerCall(toolName: string, sessionUuid: string): void {
     const session = this.sessions.get(sessionUuid);
     if (!session || session.daemon === "terminal") {
       this.violations.push(`a call naming dead session ${sessionUuid} reached the daemon`);
       throw new Error(`Session not found: ${sessionUuid}`);
     }
-    // A recoverable or not yet materialised session is restored by the call that names it, and
-    // the proxy may heartbeat it again.
-    session.daemon = "live";
+    // Whatever the call was, the proxy may ask a session it had stopped asking once more.
     session.told = false;
-    session.recoverableSince = undefined;
-    session.rehydrating = undefined;
+    if (toolName !== "tapOn") {
+      // A read is answered without the session: it restores nothing and says nothing about it.
+      return;
+    }
+    // A recoverable or not yet materialised session is restored by the control call that names
+    // it, and the proxy may heartbeat it again.
+    session.daemon = "live";
     session.maybeRehydratingSince = undefined;
     if (this.rejectNextCall) {
+      // Admitted, then rejected by the tool: no echo, so the window is the next heartbeat's to end.
       this.rejectNextCall = false;
       throw new Error("Element not found: text 'Continue'");
     }
+    session.windowSince = undefined;
   }
 
   private learnDead(sessionUuid: string): void {
@@ -417,10 +540,12 @@ class World {
     );
     if (gone === "terminal") {
       this.learnDead(sessionUuid);
+    } else {
+      this.handoffAnnounced = true;
     }
   }
 
-  async call(sessionUuid: string, rejected: boolean): Promise<void> {
+  async call(sessionUuid: string, rejected: boolean, read = false): Promise<void> {
     const session = this.sessions.get(sessionUuid)!;
     const dead = session.daemon === "terminal";
     if (dead && this.fenced !== sessionUuid) {
@@ -429,11 +554,29 @@ class World {
     }
     this.rejectNextCall = rejected;
     const outcome = await this.whileTimePasses(
-      this.proxy.callTool("tapOn", { sessionUuid, text: "Continue" }),
+      read
+        ? this.proxy.callTool("observe", { sessionUuid })
+        : this.proxy.callTool("tapOn", { sessionUuid, text: "Continue" }),
     );
     this.rejectNextCall = false;
     if (dead) {
-      // answerCall records the violation when the fenced session's call reaches the daemon.
+      // answerCall records the violation when the fenced session's call reaches the daemon (I4).
+      // I2: the fence is this session's, so the refusal names it and the reason it ended for.
+      if (!outcome.includes(sessionUuid) || !outcome.includes(session.endedAs)) {
+        this.violations.push(
+          `the call naming fenced session ${sessionUuid} (${session.endedAs}) was answered: ${outcome}`,
+        );
+      }
+      return;
+    }
+    if (read) {
+      if (outcome !== "answered") {
+        this.violations.push(`a read naming usable session ${sessionUuid} was refused: ${outcome}`);
+      }
+      // Whether the proxy bound a session it was not holding is left open; it holds nothing new.
+      // An answered call naming a session it owns lifts the fence, as a control call does.
+      this.latestCertain &&= this.latest === sessionUuid;
+      this.fenced = undefined;
       return;
     }
     if (outcome === "answered") {
@@ -459,11 +602,12 @@ class World {
     const previous = this.client;
     this.client = this.newClient();
     this.reachable = gapMs === 0;
-    this.afterUnreachableGap = gapMs > 0;
     previous.emitConnectionClosed();
     if (gapMs > 0) {
       await this.timer.advanceTimeAsync(gapMs);
       this.reachable = true;
+      // Recovery may replace a connection that is open but silent, once, within the lease.
+      this.recoveringUntil = this.timer.now() + 2 * LEASE_MS;
       // Recovery spreads its attempts over the lease: let the one that reaches the replacement
       // daemon run, as wall-clock time would before the harness's next call.
       await this.timer.advanceTimeAsync(LEASE_MS);
@@ -501,17 +645,19 @@ class World {
 
   async tick(): Promise<void> {
     const before = new Map([...this.mustBeat].map((id) => [id, this.sessions.get(id)!.heartbeats]));
-    // Sessions the proxy already knows are recoverable-not-found, or not rehydrated yet, and
-    // still waits for.
-    const awaited = [...this.sessions]
-      .filter(
-        ([, session]) =>
-          (session.daemon === "recoverable" ||
-            (session.daemon === "unknown" && session.rehydrating === true)) &&
-          session.recoverableSince !== undefined &&
-          !session.told,
-      )
+    const startedAt = this.timer.now();
+    const gone = [...this.sessions]
+      .filter(([, session]) => session.daemon === "recoverable" || session.daemon === "unknown")
       .map(([id, session]) => ({ id, session, heartbeats: session.heartbeats }));
+    // Sessions the proxy was answered not-found for, inside their window: it still waits for them.
+    const awaited = gone.filter(
+      ({ session }) => this.insideWindow(session, startedAt) && !session.told,
+    );
+    // Sessions it stopped asking: nothing reaches them until a call does.
+    const stopped = gone.filter(
+      ({ session }) => session.told && session.maybeRehydratingSince === undefined,
+    );
+    const resetsBefore = this.ownResets;
     await this.timer.advanceTimeAsync(INTERVAL_MS);
     for (const { id, session, heartbeats } of awaited) {
       const sent = session.heartbeats - heartbeats;
@@ -520,6 +666,20 @@ class World {
           `awaited not-found session ${id} got ${sent} heartbeats on a keeper tick, not 1`,
         );
       }
+    }
+    for (const { id, session, heartbeats } of stopped) {
+      if (session.heartbeats !== heartbeats) {
+        this.violations.push(`stopped session ${id} was heartbeated with no call reaching it`);
+      }
+    }
+    // I1: the proxy closes a working connection on a tick only to ask a not-found again that was
+    // outside any window (or, for a while after a gap, to replace a silent connection).
+    if (
+      this.ownResets > resetsBefore &&
+      this.askAgain === undefined &&
+      startedAt >= this.recoveringUntil
+    ) {
+      this.violations.push("the connection was reset on a tick with no not-found to ask again");
     }
     for (const [sessionUuid, heartbeats] of before) {
       if (this.sessions.get(sessionUuid)!.heartbeats === heartbeats) {
@@ -543,8 +703,24 @@ class World {
     }
   }
 
+  /** I5: closing leaves no timer behind, and nothing is heartbeated afterwards. */
+  async close(): Promise<void> {
+    this.closed = true;
+    await this.proxy.close();
+    if (this.timer.getPendingIntervalCount() > 0) {
+      this.violations.push("a keeper interval is still scheduled after close");
+    }
+    const sent = () => [...this.sessions.values()].map((session) => session.heartbeats);
+    const before = sent();
+    await this.timer.advanceTimeAsync(RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS);
+    if (sent().some((count, index) => count !== before[index])) {
+      this.violations.push("a session was heartbeated after close");
+    }
+  }
+
   async apply(step: Command): Promise<void> {
     this.commandsApplied += 1;
+    this.askAgain = undefined;
     await this.run(step);
     // Settled, a heartbeat in flight neither coalesces with the next tick nor outlives its command.
     await this.settle();
@@ -565,7 +741,7 @@ class World {
       if (step.kind === "release") {
         this.release(sessionUuid, step.gone, step.notify, step.reason);
       } else {
-        await this.call(sessionUuid, step.rejected);
+        await this.call(sessionUuid, step.rejected, step.read === true);
       }
     }
   }
@@ -582,10 +758,10 @@ async function violationsOf(history: readonly Command[]): Promise<string[]> {
     }
     // One more tick settles whatever the last command left pending.
     await world.apply({ kind: "tick" });
-    return world.violations;
   } finally {
-    await world.proxy.close();
+    await world.close();
   }
+  return world.violations;
 }
 
 const ACQUIRE: Command = { kind: "acquire", birth: "lives" };
@@ -704,6 +880,65 @@ const REGRESSIONS: ReadonlyArray<readonly [string, readonly Command[]]> = [
       TICK,
       TICK,
       { kind: "call", target: 1, rejected: false },
+      TICK,
+    ],
+  ],
+  [
+    "#11570.1 liveness recovery reaches a restarted daemon that has rehydrated none of the held sessions",
+    [
+      ACQUIRE,
+      ACQUIRE,
+      ACQUIRE,
+      TICK,
+      { kind: "daemon-restart", gapMs: LEASE_MS },
+      ...Array.from(
+        { length: RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS / INTERVAL_MS + 3 },
+        () => TICK,
+      ),
+    ],
+  ],
+  [
+    "#11570.2 a read inside the window neither drops it nor starts it over",
+    [
+      ACQUIRE,
+      ACQUIRE,
+      TICK,
+      { kind: "daemon-restart", gapMs: 0 },
+      TICK,
+      TICK,
+      { kind: "call", target: 1, rejected: false, read: true },
+      TICK,
+      { kind: "call", target: 0, rejected: false, read: true },
+      ...Array.from(
+        { length: RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS / INTERVAL_MS + 3 },
+        () => TICK,
+      ),
+    ],
+  ],
+  [
+    "#11570.2 a call the tool rejected leaves the window to the next heartbeat",
+    [
+      ACQUIRE,
+      { kind: "release", target: 0, gone: "recoverable", notify: false },
+      TICK,
+      TICK,
+      { kind: "call", target: 0, rejected: true },
+      { kind: "release", target: 0, gone: "recoverable", notify: false },
+      TICK,
+      TICK,
+    ],
+  ],
+  [
+    "#11570.6 a held session dropped for a reason-less not-found is heartbeated again once a call uses it",
+    [
+      ACQUIRE,
+      ACQUIRE,
+      TICK,
+      { kind: "release", target: 0, gone: "unknown", notify: false },
+      TICK,
+      TICK,
+      { kind: "call", target: 0, rejected: false },
+      TICK,
       TICK,
     ],
   ],

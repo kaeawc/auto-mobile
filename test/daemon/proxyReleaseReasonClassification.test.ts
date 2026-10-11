@@ -4,6 +4,9 @@ import { DAEMON_VERSION } from "../../src/daemon/constants";
 import {
   DaemonBoundSessionExpiredError,
   DaemonMcpProxy,
+  decideNotFoundAnswer,
+  type NotFoundAnswerFacts,
+  type NotFoundAnswerOutcome,
   RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
 } from "../../src/daemon/daemonMcpProxy";
 import {
@@ -12,6 +15,7 @@ import {
   SESSION_RELEASE_REASON_TRAITS,
 } from "../../src/daemon/releaseReasons";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
+import { ROUTED_SESSION_META_KEY } from "../../src/server/routedSessionMeta";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -31,6 +35,8 @@ const LEASE_MS = 4_000;
 const SESSION = "classified-session";
 /** What the acquisitions after the first mint, in order. */
 const LATER_SESSIONS = ["second-session", "third-session"] as const;
+const [SECOND, THIRD] = LATER_SESSIONS;
+const WINDOW_TICKS = RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS / INTERVAL_MS;
 
 /** Every reason a daemon may record, each family with an id, plus one this build does not know. */
 const EVERY_REASON: readonly string[] = [
@@ -64,6 +70,13 @@ interface Harness {
   restartDaemon(): Promise<void>;
   /** The daemon is replaced at once: the old connection closes and the next one is answered. */
   replaceDaemon(): void;
+  /**
+   * The daemon is replaced the next time the proxy closes its connection itself, and its
+   * successor answers each of `sessions` not-found with no reason: it has rehydrated nothing.
+   */
+  succeedDaemonOnReset(sessions: readonly string[]): void;
+  /** From now on a call that reaches a released session restores nothing, as a read does. */
+  callsRestoreNothing(): void;
   /** Connections the proxy closed itself while the daemon was still answering on them. */
   connectionResets(): number;
   forwardedCalls(): Array<{ toolName: string; sessionUuid: unknown }>;
@@ -78,17 +91,25 @@ function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } 
   const minted: string[] = [];
   let reachable = true;
   let connectionResets = 0;
+  let callsRestore = true;
+  let successorKnowsNone: readonly string[] | undefined;
+  const succeeded = new Map<FakeDaemonClient, Map<string, string>>();
   let proxyClosing = false;
   const closedByDaemon = new Set<FakeDaemonClient>();
   const forwarded: Array<{ toolName: string; sessionUuid: unknown }> = [];
   /** What the daemon answers a heartbeat for a session it released (sessionNotFoundResult). */
-  const answerDaemonMethod = (method: string, params: Record<string, unknown>): void => {
+  const answerDaemonMethod = (
+    method: string,
+    params: Record<string, unknown>,
+    answering: FakeDaemonClient,
+  ): void => {
     const sessionUuid = params.sessionId;
     if (method !== "daemon/heartbeat" || typeof sessionUuid !== "string") {
       return;
     }
     heartbeats.set(sessionUuid, (heartbeats.get(sessionUuid) ?? 0) + 1);
-    const reason = releasedAs.get(sessionUuid);
+    // A daemon that was succeeded answers what it still had in flight from what it knew.
+    const reason = (succeeded.get(answering) ?? releasedAs).get(sessionUuid);
     if (reason !== undefined) {
       throw Object.assign(new Error(`Session not found: ${sessionUuid}`), {
         code: DAEMON_SESSION_NOT_FOUND_CODE,
@@ -104,7 +125,7 @@ function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } 
   };
   const newClient = (): FakeDaemonClient => {
     const created = new FakeDaemonClient({
-      toolResultFor: (name) =>
+      toolResultFor: (name, params) =>
         name === "getAndroid"
           ? {
               content: [
@@ -114,12 +135,18 @@ function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } 
                 },
               ],
             }
-          : undefined,
+          : name === "tapOn"
+            ? // A control call: the daemon echoes the session it admitted the call under and used.
+              {
+                content: [{ type: "text", text: "tapped" }],
+                _meta: { [ROUTED_SESSION_META_KEY]: params.sessionUuid },
+              }
+            : undefined,
       onCallTool: (toolName, params) => {
         forwarded.push({ toolName, sessionUuid: params.sessionUuid });
         const named = typeof params.sessionUuid === "string" ? params.sessionUuid : "";
         const reason = releasedAs.get(named);
-        if (reason === "" || isRecoverableDaemonReleaseReason(reason ?? "-")) {
+        if (callsRestore && (reason === "" || isRecoverableDaemonReleaseReason(reason ?? "-"))) {
           // The daemon hands a session it can recover back to the call that reaches it, and
           // answers its heartbeats again.
           releasedAs.delete(named);
@@ -129,13 +156,21 @@ function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } 
       // order of a heartbeat's answer and the call it races as it is without one.
       onCallDaemonMethod: (method, params) =>
         options.roundTripMs === undefined
-          ? answerDaemonMethod(method, params)
-          : timer.sleep(options.roundTripMs).then(() => answerDaemonMethod(method, params)),
+          ? answerDaemonMethod(method, params, created)
+          : timer
+              .sleep(options.roundTripMs)
+              .then(() => answerDaemonMethod(method, params, created)),
     });
     const close = created.close.bind(created);
     created.close = async () => {
       if (!proxyClosing && !closedByDaemon.has(created)) {
         connectionResets += 1;
+        if (successorKnowsNone !== undefined && client === created) {
+          succeeded.set(created, new Map(releasedAs));
+          client = newClient();
+          successorKnowsNone.forEach((sessionUuid) => releasedAs.set(sessionUuid, ""));
+          successorKnowsNone = undefined;
+        }
       }
       await close();
     };
@@ -183,6 +218,12 @@ function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } 
       client = newClient();
       closedByDaemon.add(previous);
       previous.emitConnectionClosed();
+    },
+    succeedDaemonOnReset: (sessions) => {
+      successorKnowsNone = sessions;
+    },
+    callsRestoreNothing: () => {
+      callsRestore = false;
     },
     connectionResets: () => connectionResets,
     close: async () => {
@@ -425,41 +466,38 @@ describe("release reasons are classified alike on every path", () => {
   });
 });
 
+interface Held {
+  world: Harness;
+  /** Heartbeats each session got on each of the next `ticks` keeper ticks. */
+  perTick(ticks: number): Promise<Record<string, number[]>>;
+}
+
+/** A proxy holding `sessions` (the last one is its latest binding), heartbeated once. */
+async function holding(sessions: readonly string[]): Promise<Held> {
+  const world = harness({ livenessOwnerToken: "stable-owner-token", roundTripMs: 5 });
+  for (let acquired = 0; acquired < sessions.length; acquired += 1) {
+    await world.timer.resolvePromise(world.proxy.callTool("getAndroid", {}), 1);
+  }
+  await world.timer.advanceTimeAsync(INTERVAL_MS + 10);
+  return {
+    world,
+    perTick: async (ticks) => {
+      const sent: Record<string, number[]> = Object.fromEntries(sessions.map((id) => [id, []]));
+      for (let tick = 0; tick < ticks; tick += 1) {
+        const before = sessions.map((id) => world.heartbeats(id));
+        await world.timer.advanceTimeAsync(INTERVAL_MS);
+        sessions.forEach((id, index) => sent[id]!.push(world.heartbeats(id) - before[index]!));
+      }
+      return sent;
+    },
+  };
+}
+
 // #11557: the proxy holds every session it acquired, not only the latest. A daemon that restarted
 // answers the first heartbeat of each of them on the new connection the same way, so each is
 // decided the same way: a session the daemon has not rehydrated yet is heartbeated through the
 // window, whichever acquisition minted it, and one that ended is dropped alone.
 describe("every held session is re-established on a new connection as the latest is", () => {
-  const [SECOND, THIRD] = LATER_SESSIONS;
-  const WINDOW_TICKS = RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS / INTERVAL_MS;
-
-  interface Held {
-    world: Harness;
-    /** Heartbeats each session got on each of the next `ticks` keeper ticks. */
-    perTick(ticks: number): Promise<Record<string, number[]>>;
-  }
-
-  /** A proxy holding `sessions` (the last one is its latest binding), heartbeated once. */
-  async function holding(sessions: readonly string[]): Promise<Held> {
-    const world = harness({ livenessOwnerToken: "stable-owner-token", roundTripMs: 5 });
-    for (let acquired = 0; acquired < sessions.length; acquired += 1) {
-      await world.timer.resolvePromise(world.proxy.callTool("getAndroid", {}), 1);
-    }
-    await world.timer.advanceTimeAsync(INTERVAL_MS + 10);
-    return {
-      world,
-      perTick: async (ticks) => {
-        const sent: Record<string, number[]> = Object.fromEntries(sessions.map((id) => [id, []]));
-        for (let tick = 0; tick < ticks; tick += 1) {
-          const before = sessions.map((id) => world.heartbeats(id));
-          await world.timer.advanceTimeAsync(INTERVAL_MS);
-          sessions.forEach((id, index) => sent[id]!.push(world.heartbeats(id) - before[index]!));
-        }
-        return sent;
-      },
-    };
-  }
-
   test("a restarted daemon that knows none of them yet is heartbeated for each, once a tick for the window", async () => {
     const { world, perTick } = await holding([SESSION, SECOND]);
     try {
@@ -619,5 +657,300 @@ describe("every held session is re-established on a new connection as the latest
     const before = [world.heartbeats(SESSION), world.heartbeats(SECOND)];
     await world.timer.advanceTimeAsync(RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS);
     expect([world.heartbeats(SESSION), world.heartbeats(SECOND)]).toEqual(before);
+  });
+});
+
+// #11570: every not-found heartbeat answer is decided in one place (decideNotFoundAnswer) from
+// the session's own state, whichever heartbeat heard it. The state machine is written out in
+// proxyHeartbeatStateMachine.property.test.ts; these are its rows that had been decided
+// differently by the path the answer arrived on.
+describe("a not-found answer is decided alike on every path, for every session (#11570)", () => {
+  const ones = (ticks: number): number[] => Array.from({ length: ticks }, () => 1);
+
+  // The daemon was unreachable for longer than a heartbeat request, so liveness recovery asks
+  // the daemon that replaced it. That answer is each session's first on the new connection.
+  test("liveness recovery reaching a restarted daemon waits for every session it has not rehydrated", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND, THIRD]);
+    try {
+      for (const sessionUuid of [SESSION, SECOND, THIRD]) {
+        world.release("", sessionUuid);
+      }
+      await world.restartDaemon();
+
+      const waited = await perTick(4);
+      // The daemon rehydrated two of them and found their owner's heartbeats waiting.
+      world.release(undefined, SESSION);
+      world.release(undefined, SECOND);
+      const sent = await perTick(WINDOW_TICKS + 4);
+
+      expect(waited).toEqual({ [SESSION]: ones(4), [SECOND]: ones(4), [THIRD]: ones(4) });
+      expect(sent[SESSION]).toEqual(ones(WINDOW_TICKS + 4));
+      expect(sent[SECOND]).toEqual(ones(WINDOW_TICKS + 4));
+      // The latest binding was never rehydrated: its window ends, and nothing is fenced.
+      expect(sent[THIRD]!.slice(-2)).toEqual([0, 0]);
+      expect(world.connectionResets()).toBe(0);
+      await world.timer.resolvePromise(world.proxy.callTool("observe", {}), 1);
+      expect(world.forwardedCalls()).toEqual([{ toolName: "observe", sessionUuid: THIRD }]);
+    } finally {
+      await world.close();
+    }
+  });
+
+  // A read is answered without the session, and restores none. It said nothing about the
+  // session, so the window it is in stays as it is: not dropped (the next answer would be asked
+  // again on a fresh connection) and not started over.
+  test("a call that restores nothing neither drops the session's window nor extends it", async () => {
+    /** The ticks on which the session was asked, with or without a read two ticks in. */
+    const askedTicks = async (read: boolean): Promise<{ asked: boolean[]; resets: number }> => {
+      const { world, perTick } = await holding([SESSION]);
+      try {
+        world.release("");
+        world.replaceDaemon();
+        world.callsRestoreNothing();
+        await perTick(2);
+        if (read) {
+          await world.timer.resolvePromise(world.proxy.callTool("observe", {}), 1);
+        }
+        const sent = await perTick(WINDOW_TICKS + 2);
+        return {
+          asked: sent[SESSION]!.map((count) => count > 0),
+          resets: world.connectionResets(),
+        };
+      } finally {
+        await world.close();
+      }
+    };
+
+    const undisturbed = await askedTicks(false);
+    const withRead = await askedTicks(true);
+
+    expect(withRead).toEqual(undisturbed);
+    expect(withRead.resets).toBe(0);
+    expect(withRead.asked.slice(0, WINDOW_TICKS - 3)).not.toContain(false);
+    expect(withRead.asked.slice(-2)).toEqual([false, false]);
+  });
+
+  // Past its window a session is asked once after each call that reaches it, on the connection
+  // it has: its window is not opened again, and the connection is not reset to ask again.
+  test("past the window a call that restores nothing gets one more heartbeat and no reconnect", async () => {
+    const { world, perTick } = await holding([SESSION]);
+    try {
+      world.release("");
+      world.replaceDaemon();
+      world.callsRestoreNothing();
+      await perTick(WINDOW_TICKS + 3);
+
+      await world.timer.resolvePromise(world.proxy.callTool("observe", {}), 1);
+      const sent = await perTick(4);
+
+      expect(sent[SESSION]!.reduce((sum, count) => sum + count, 0)).toBeLessThanOrEqual(1);
+      expect(sent[SESSION]!.slice(-2)).toEqual([0, 0]);
+      expect(world.connectionResets()).toBe(0);
+    } finally {
+      await world.close();
+    }
+  });
+
+  // The daemon answers the latest binding's heartbeat with a recoverable handoff: it is going
+  // away. The proxy asks once more on a fresh connection, which reaches the successor. That
+  // daemon has rehydrated nothing, so every session held gets its first answer there.
+  test("asking a handoff answer again on the successor daemon waits for every held session", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND, THIRD]);
+    try {
+      world.release("daemon-restart", THIRD);
+      world.succeedDaemonOnReset([SESSION, SECOND, THIRD]);
+
+      const sent = await perTick(6);
+
+      expect(world.connectionResets()).toBe(1);
+      for (const sessionUuid of [SESSION, SECOND, THIRD]) {
+        expect(sent[sessionUuid]!.slice(-4)).toEqual(ones(4));
+      }
+    } finally {
+      await world.close();
+    }
+  });
+
+  // A held session the daemon answered not-found for with no reason is dropped, not fenced: the
+  // daemon may hand it back to a call. Once a call was admitted under it and used it, the proxy
+  // owns a live session again and must heartbeat it, or the daemon releases it for silence.
+  test("a held session dropped for a not-found answer is heartbeated again once a call uses it", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND]);
+    try {
+      world.release("", SESSION);
+      const dropped = await perTick(3);
+
+      await world.timer.resolvePromise(
+        world.proxy.callTool("tapOn", { sessionUuid: SESSION, text: "Go" }),
+        1,
+      );
+      const sent = await perTick(4);
+
+      expect(dropped[SESSION]).toEqual([1, 0, 0]);
+      expect(sent[SESSION]).toEqual(ones(4));
+      expect(sent[SECOND]).toEqual(ones(4));
+      // Naming it did not move the binding: sessionless calls stay on the latest one.
+      await world.timer.resolvePromise(world.proxy.callTool("observe", {}), 1);
+      expect(world.forwardedCalls().at(-1)).toEqual({ toolName: "observe", sessionUuid: SECOND });
+    } finally {
+      await world.close();
+    }
+  });
+
+  // Reads never hold a session: only the daemon's echo of admitted use restores one.
+  test("a read naming a dropped held session does not hold it again", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND]);
+    try {
+      world.release("", SESSION);
+      await perTick(3);
+
+      await world.timer.resolvePromise(
+        world.proxy.callTool("observe", { sessionUuid: SESSION }),
+        1,
+      );
+      const sent = await perTick(4);
+
+      expect(sent[SESSION]).toEqual([0, 0, 0, 0]);
+      expect(sent[SECOND]).toEqual(ones(4));
+    } finally {
+      await world.close();
+    }
+  });
+
+  // A session released for good while it was dropped is never held again, whatever a call says.
+  test("a dropped held session the daemon then released for good is never heartbeated again", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND]);
+    try {
+      world.release("", SESSION);
+      await perTick(3);
+      world.notify("device-killed");
+
+      await world.timer
+        .resolvePromise(world.proxy.callTool("tapOn", { sessionUuid: SESSION, text: "Go" }), 1)
+        .catch(() => undefined);
+      const sent = await perTick(4);
+
+      expect(sent[SESSION]).toEqual([0, 0, 0, 0]);
+      expect(sent[SECOND]).toEqual(ones(4));
+    } finally {
+      await world.close();
+    }
+  });
+
+  test("closing forgets every window and stopped session", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND, THIRD]);
+    world.release("", SESSION);
+    await perTick(2);
+    world.release("", SECOND);
+    world.release("", THIRD);
+    world.replaceDaemon();
+    await perTick(3);
+
+    await world.close();
+
+    expect(world.timer.getPendingIntervalCount()).toBe(0);
+    expect(world.timer.getPendingTimeoutCount()).toBe(0);
+    const before = [SESSION, SECOND, THIRD].map((id) => world.heartbeats(id));
+    await world.timer.advanceTimeAsync(RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS);
+    expect([SESSION, SECOND, THIRD].map((id) => world.heartbeats(id))).toEqual(before);
+  });
+});
+
+describe("decideNotFoundAnswer", () => {
+  const W = RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS;
+  const NOW = 100_000;
+  const facts = (overrides: Partial<NotFoundAnswerFacts>): NotFoundAnswerFacts => ({
+    releaseReason: undefined,
+    owned: true,
+    establishes: false,
+    windowSince: undefined,
+    now: NOW,
+    mayAskAgain: false,
+    ...overrides,
+  });
+  const awaitedSince = (windowSince: number): NotFoundAnswerOutcome => ({
+    kind: "awaited",
+    windowSince,
+  });
+  const STOPPED: NotFoundAnswerOutcome = { kind: "stopped" };
+
+  // I2: a reason that is not a recoverable handoff of an owned session ends it, whatever else
+  // is true of the session, and under that reason.
+  test.each(EVERY_REASON.filter((reason) => !isRecoverableDaemonReleaseReason(reason)))(
+    "%s ends the session in every state",
+    (releaseReason) => {
+      for (const establishes of [false, true]) {
+        for (const windowSince of [undefined, NOW - 1, NOW - W]) {
+          for (const mayAskAgain of [false, true]) {
+            expect(
+              decideNotFoundAnswer(facts({ releaseReason, establishes, windowSince, mayAskAgain })),
+            ).toEqual({ kind: "ended", reason: releaseReason });
+          }
+        }
+      }
+    },
+  );
+
+  test("a recoverable reason ends a session this proxy does not own", () => {
+    expect(decideNotFoundAnswer(facts({ releaseReason: "daemon-restart", owned: false }))).toEqual({
+      kind: "ended",
+      reason: "daemon-restart",
+    });
+  });
+
+  // I1: inside its window nothing but an ending reason changes what happens to the session.
+  test.each([undefined, "daemon-restart", "daemon-shutdown", "device-restart:emulator-5554"])(
+    "inside the window %p is awaited without asking again, and the window is not extended",
+    (releaseReason) => {
+      for (const mayAskAgain of [false, true]) {
+        for (const windowSince of [NOW, NOW - 1, NOW - W + 1]) {
+          expect(decideNotFoundAnswer(facts({ releaseReason, windowSince, mayAskAgain }))).toEqual(
+            awaitedSince(windowSince),
+          );
+        }
+      }
+    },
+  );
+
+  // I5: a window ends, and no answer on the same connection opens another.
+  test.each([undefined, "daemon-restart", "device-restart:emulator-5554"])(
+    "past the window %p stops the session and is never asked again",
+    (releaseReason) => {
+      for (const mayAskAgain of [false, true]) {
+        for (const windowSince of [NOW - W, NOW - 10 * W]) {
+          expect(decideNotFoundAnswer(facts({ releaseReason, windowSince, mayAskAgain }))).toEqual(
+            STOPPED,
+          );
+        }
+      }
+    },
+  );
+
+  test("the first answer on a connection just established opens a window, with or without a reason", () => {
+    for (const releaseReason of [undefined, "daemon-restart"]) {
+      for (const windowSince of [undefined, NOW - W]) {
+        expect(
+          decideNotFoundAnswer(
+            facts({ releaseReason, establishes: true, windowSince, mayAskAgain: true }),
+          ),
+        ).toEqual(awaitedSince(NOW));
+      }
+    }
+    // A session this proxy does not own is never waited for.
+    expect(decideNotFoundAnswer(facts({ establishes: true, owned: false }))).toEqual(STOPPED);
+  });
+
+  test("with no window, on a connection that had answered: asked again once, then decided", () => {
+    expect(decideNotFoundAnswer(facts({ mayAskAgain: true }))).toEqual({
+      kind: "ask-again",
+      handoff: false,
+    });
+    expect(
+      decideNotFoundAnswer(facts({ releaseReason: "daemon-shutdown", mayAskAgain: true })),
+    ).toEqual({ kind: "ask-again", handoff: true });
+    expect(decideNotFoundAnswer(facts({}))).toEqual(STOPPED);
+    expect(decideNotFoundAnswer(facts({ releaseReason: "daemon-shutdown" }))).toEqual(
+      awaitedSince(NOW),
+    );
   });
 });

@@ -342,6 +342,13 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "Rollback: a session resumed after a daemon_stalled handover is held again with the " +
       "lastUsedAt it had before the handover; the heartbeat ack that resumed it renews nothing (#10989).",
   },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.noteSessionRestoredByCall": {
+    writes: 1,
+    reason:
+      "Tool usage: the daemon echoed a held session as the one it admitted a control call under " +
+      "and used, after the proxy had dropped it for a not-found heartbeat answer; it is held " +
+      "again from that call (#11570). A read or refused call carries no echo and holds nothing.",
+  },
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.rebindResumedSession": {
     writes: 1,
     reason:

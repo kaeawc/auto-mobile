@@ -384,6 +384,8 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
     for (let elapsed = 0; elapsed < STOP_MS && handovers.length === 0; elapsed += 250) {
       await baseTimer.advanceTimeAsync(250);
     }
+    expect(handovers[0]?.code).toBe("daemon_stalled");
+    expect(proxy.getTerminalSessionRelease()).toBeUndefined();
     // A new daemon process answers on the socket instead of the one that stalled.
     daemonInstance = "daemon-2";
     daemonTimer.resume();

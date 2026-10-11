@@ -7519,7 +7519,11 @@ export class DevicePool {
     return this.shutdownReservationCoordinator.isDeviceUnderShutdownReservation(deviceId);
   }
 
-  private isReservedForReadiness(deviceId: string): boolean {
+  /**
+   * Whether some acquisition is preparing this device right now and has not bound it yet.
+   * Synchronous (no assignment lock): a selector start reads it to prefer another match (#11651).
+   */
+  isReservedForReadiness(deviceId: string): boolean {
     return this.shutdownReservationCoordinator.isReservedForReadiness(deviceId);
   }
 

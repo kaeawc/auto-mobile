@@ -1,10 +1,14 @@
 import { afterEach, beforeAll, expect, test } from "bun:test";
-import { deviceRestartReleaseReason } from "../../../src/db/deviceSessionRepository";
-import { KEEPER_INTERVAL_MS, LivenessScenario } from "../../helpers/livenessScenarioHarness";
+import { deviceRestartReleaseReason } from "../../src/db/deviceSessionRepository";
+import {
+  KEEPER_INTERVAL_MS,
+  LivenessScenario,
+  NO_HEARTBEAT_BUDGET_MS,
+} from "../helpers/livenessScenarioHarness";
 
-// HUNT (proxy-cli-ingress-parity-1): one stdio proxy holding two sessions on its one daemon
-// connection, driven end to end: the real proxy and daemon client, the real daemon, socket server
-// and session manager over an in-memory wire and database (LivenessScenario).
+// One stdio proxy holding two sessions on its one daemon connection (#11656), driven end to end:
+// the real proxy and daemon client, the real daemon, socket server and session manager over an
+// in-memory wire and database (LivenessScenario).
 //
 // ONE of the two sessions goes away while the agent has a control call in flight on the OTHER,
 // which nobody released. Two ways it goes:
@@ -16,12 +20,13 @@ import { KEEPER_INTERVAL_MS, LivenessScenario } from "../../helpers/livenessScen
 // - Its device is lost and recovery hands the session off (`device-restart:<device>`), which the
 //   daemon announces at once.
 //
-// When the session is one the proxy holds beside its binding, that is the session's own business
-// and nothing else is touched. When it is the proxy's latest binding, the proxy goes to a fresh
-// connection for it (the bare answer is "asked again", the handoff is reclaimed): it closes the
-// one shared daemon socket without waiting for the calls in flight on it. The sibling's control
-// call is cancelled in the daemon mid-run and answered "may or may not have run on the device".
-// The same reset waits for calls in flight when the daemon is shutting down (#11634).
+// Either is that session's own business, whether it is one the proxy holds beside its binding or
+// the binding itself. With nothing else in flight the proxy asks about its binding on a fresh
+// connection (the bare answer is asked again, the handoff is reclaimed). With a call in flight it
+// asks on the connection it has: closing the one shared daemon socket would cancel the other
+// session's control call in the daemon mid-run and answer it "may or may not have run on the
+// device". A connection that is going away as a whole (daemon shutdown, a dead transport) is
+// another matter: proxyHeartbeatStateMachine.property.test.ts and daemonRestartEndToEnd.test.ts.
 
 const SIBLING_DEVICE = "emulator-5554";
 const BINDING_DEVICE = "emulator-5556";
@@ -100,9 +105,25 @@ async function oneSessionGoesWhileTheOtherIsDriven(
   const failure = call.failure();
   return {
     answered: failure instanceof Error ? failure.name : "result",
-    drove: scenario.driven.map((run) => run.sessionUuid),
+    drove: driven(),
     callSessionHeld,
   };
+}
+
+/**
+ * Time passes as on a wall clock: in steps much shorter than a keeper tick, so an answer the
+ * daemon is still composing arrives before the next tick rather than with it.
+ */
+async function wallClock(ms: number): Promise<void> {
+  const stepMs = KEEPER_INTERVAL_MS / 10;
+  for (let passed = 0; passed < ms; passed += stepMs) {
+    await scenario.idle(stepMs);
+  }
+}
+
+/** The session of every command that reached the device boundary, in order. */
+function driven(): Array<string | undefined> {
+  return scenario.driven.map((run) => run.sessionUuid);
 }
 
 const SIBLING_CALL_UNDISTURBED = {
@@ -142,6 +163,44 @@ test("the binding's explicit release in flight leaves the control call on the he
 
   // Nobody released the sibling: its session is still held, so its call runs to its result.
   expect(outcome).toEqual(SIBLING_CALL_UNDISTURBED);
+});
+
+test("both sessions are heartbeated on every tick while the sibling's call outlasts the handoff", async () => {
+  scenario = await LivenessScenario.start({ devices: [SIBLING_DEVICE, BINDING_DEVICE] });
+  const sibling = await scenario.acquire(SIBLING_DEVICE);
+  const binding = await scenario.acquire(BINDING_DEVICE);
+  await scenario.idle(KEEPER_INTERVAL_MS);
+  const call = scenario.startLongCall(sibling);
+  await deviceRestartHandoff(binding);
+  // The tick that hears of the handoff asks the binding twice: count from the next one on, and
+  // between two ticks, where every heartbeat of the ticks counted has been answered.
+  await wallClock(1.5 * KEEPER_INTERVAL_MS);
+  const asked = () => ({
+    sibling: scenario.heartbeatsBySession.get(sibling) ?? 0,
+    binding: scenario.heartbeatsBySession.get(binding) ?? 0,
+  });
+  const before = asked();
+
+  // The whole no-heartbeat release budget: a keeper waiting behind the call would lose both.
+  const ticks = NO_HEARTBEAT_BUDGET_MS / KEEPER_INTERVAL_MS;
+  await wallClock(ticks * KEEPER_INTERVAL_MS);
+  const after = asked();
+  const siblingHeld = scenario.isHeld(sibling);
+  await call.settle();
+
+  expect({
+    sibling: after.sibling - before.sibling,
+    binding: after.binding - before.binding,
+    siblingHeld,
+    answered: call.failure() ?? "result",
+    drove: driven(),
+  }).toEqual({
+    sibling: ticks,
+    binding: ticks,
+    siblingHeld: true,
+    answered: "result",
+    drove: [sibling],
+  });
 });
 
 test("the binding's device-restart handoff leaves the control call on the held sibling alone", async () => {

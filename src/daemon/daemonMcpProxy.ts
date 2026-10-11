@@ -3395,7 +3395,11 @@ export class DaemonMcpProxy {
     this.throwIfBoundSessionFenced(allowReleasedSession, attemptedSessionUuid);
     const reconnectRecoverableHandoff = this.hasRecoverableBoundSessionHandoff();
     if (reconnectRecoverableHandoff) {
-      await this.resetConnectionOnceDrained();
+      // The handoff is the binding's own: with calls in flight on the connection it is reclaimed
+      // on that connection instead ({@link connectionCarriesCallsInFlight}).
+      if (!this.connectionCarriesCallsInFlight()) {
+        await this.resetConnectionOnceDrained();
+      }
       // doConnect restarts the heartbeat keeper. Clear the marker before that
       // asynchronous tick can enter withRecoverableReconnect and reset the new
       // transport beneath the operation that is reclaiming this UUID.
@@ -3436,10 +3440,16 @@ export class DaemonMcpProxy {
         await this.throwOutcomeWithoutReplay(refusedToolName, error);
       }
 
-      logger.warn(
-        `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${errorMessage(error)}`,
-      );
-      await this.resetConnectionOnceDrained();
+      if (this.isSessionAnswerOnSharedConnection(error)) {
+        logger.info(
+          `[DaemonMcpProxy] Asking once more on the same daemon connection, which has tool calls in flight: ${errorMessage(error)}`,
+        );
+      } else {
+        logger.warn(
+          `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${errorMessage(error)}`,
+        );
+        await this.resetConnectionOnceDrained();
+      }
       signal.throwIfAborted();
       this.throwIfBoundSessionFenced(allowReleasedSession, attemptedSessionUuid);
       await this.ensureConnected();
@@ -3501,7 +3511,11 @@ export class DaemonMcpProxy {
    */
   private async throwOutcomeWithoutReplay(toolName: string, error: unknown): Promise<never> {
     if (!(error instanceof DaemonShuttingDownError)) {
-      await this.resetConnection();
+      // A not-found answer came over a working connection: there is no dead transport to replace
+      // beneath the calls still in flight on it ({@link isSessionAnswerOnSharedConnection}).
+      if (!this.isSessionAnswerOnSharedConnection(error)) {
+        await this.resetConnection();
+      }
       throw new DaemonToolOutcomeUnknownError(toolName, error);
     }
     this.waitForDaemonShutdownDisconnect();
@@ -3559,6 +3573,42 @@ export class DaemonMcpProxy {
     if (this.client === drainedClient && !this.closing) {
       await this.resetConnection();
     }
+  }
+
+  /**
+   * Whether tool calls are awaiting their answers on the current, working daemon connection. It
+   * is the one socket for every session this proxy holds, so closing it cancels each of those
+   * calls in the daemon mid-run and answers it outcome-unknown, whichever session it drives
+   * (#11656). What happens to ONE session (the daemon answers not-found for it, or hands it off
+   * for its device's restart) is therefore never a reason to close it under them: the daemon that
+   * answered is the one running those calls, so the session is asked again, or reclaimed, on the
+   * connection it shares with them. Nothing waits for those calls, so no heartbeat is held up
+   * behind one, and with none in flight the fresh connection costs nobody anything and is still
+   * made (it is what reaches a successor daemon).
+   *
+   * False for a connection that is not in use as it stands: one draining at daemon shutdown, whose
+   * reset waits for its calls ({@link drainingToolCalls}), and one a transport failure proved dead,
+   * where there is nothing left to lose. What ends a connection as a whole (a transport failure,
+   * the daemon's shutdown or close) is not decided here.
+   */
+  private connectionCarriesCallsInFlight(): boolean {
+    const client = this.client;
+    return (
+      client !== null &&
+      this.connected &&
+      !this.deadSocketClients.has(client) &&
+      (this.toolCallsInFlight.get(client) ?? 0) > 0
+    );
+  }
+
+  /**
+   * The daemon answered a request not-found for its session while other tool calls are in flight
+   * on the connection: an answer about that session, which leaves the connection as it is
+   * ({@link connectionCarriesCallsInFlight}). The request that was answered has settled, so the
+   * calls counted are never its own.
+   */
+  private isSessionAnswerOnSharedConnection(error: unknown): boolean {
+    return this.isDaemonSessionNotFoundError(error) && this.connectionCarriesCallsInFlight();
   }
 
   /**

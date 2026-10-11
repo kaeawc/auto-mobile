@@ -9219,10 +9219,29 @@ export class SessionManager {
    * and for a label whose base is gone.
    */
   private livenessBaseSession(session: Session): Session | undefined {
-    const baseSessionId = resolveOwnershipSessionUuid(session.sessionId, this);
+    const baseSessionId = this.ownershipSessionUuid(session.sessionId);
     return baseSessionId === session.sessionId
       ? undefined
-      : (this.getSession(baseSessionId) ?? undefined);
+      : (this.peekSession(baseSessionId) ?? undefined);
+  }
+
+  /**
+   * The live session under `sessionId` for a lookup that only judges: unlike {@link getSession},
+   * an expired session the scan has not reached is reported gone and is not released here.
+   */
+  peekSession(sessionId: string): Session | null {
+    return this.getSessionInternal(sessionId, false, undefined, false);
+  }
+
+  /**
+   * The session that speaks for `sessionId` wherever ownership is judged or recorded
+   * ({@link resolveOwnershipSessionUuid}), resolved without releasing anything: an expired base
+   * publishes no labels, and its release is left to the scan and the lazy-expiry paths.
+   */
+  ownershipSessionUuid(sessionId: string): string {
+    return resolveOwnershipSessionUuid(sessionId, {
+      getDeviceLabels: (id) => this.peekSession(id)?.cacheData.deviceLabels,
+    });
   }
 
   /** A session's liveness owner as a claim judges it: on the owner's own heartbeats. */

@@ -1876,9 +1876,28 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   // A typed refusal thrown while routing, before the body's own `try`, would otherwise escape into
   // the SDK as an untyped -32603 error. Shape it here so every typed refusal reaches the client in
   // the same result shape; untyped pre-`try` failures (unknown tool, ...) still throw (#11292).
+  // #11618: the device ids a call names, as the pool's canonical ids, before anything below routes,
+  // judges or queues it. The socket server resolves a forwarded call's ids from the pool's cached
+  // fold only, and a client on the daemon's HTTP endpoint reaches this server with the ids as sent.
+  // Synchronous unless a control call names a transport the pool has never seen.
+  const withCanonicalDeviceIds = (
+    call: ToolCall<McpToolCallExtra>,
+  ): ToolCall<McpToolCallExtra> | Promise<ToolCall<McpToolCallExtra>> => {
+    const tool = daemonMode ? ToolRegistry.getTool(call.name) : undefined;
+    if (!tool) {
+      return call;
+    }
+    const args = ToolRegistry.resolveToolCallDeviceIds(tool, call.args, call.extra.signal);
+    return args instanceof Promise
+      ? args.then((resolved) => ({ ...call, args: resolved }))
+      : args === call.args
+        ? call
+        : { ...call, args };
+  };
   const executeToolCall = async (call: ToolCall<McpToolCallExtra>): Promise<McpToolCallResult> => {
     try {
-      return await executeToolCallBody(call);
+      const canonical = withCanonicalDeviceIds(call);
+      return await executeToolCallBody(canonical instanceof Promise ? await canonical : canonical);
     } catch (error) {
       if (!isTypedToolRefusal(error)) {
         throw error;

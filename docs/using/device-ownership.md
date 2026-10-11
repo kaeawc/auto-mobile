@@ -345,6 +345,32 @@ keep their existing behavior; screenshot, hierarchy and observe reads never
 pass this control check. A managed connection still controls only its own slot
 devices, after the identity check and before the existing ownership checks.
 
+A tool call may name such a device by either endpoint (#11618). The `deviceId` is
+resolved to the pool's one id for the device before any ownership, managed-slot
+or routing check, so a call naming the Wi-Fi id of a held handset is refused or
+admitted exactly as one naming its USB serial, runs on the same per-device queue,
+and the tool sees the pool's id. The same holds for an emulator's loopback adb
+address (`localhost:5555` for `emulator-5554`), and for every tool that takes a
+device id on every path: `setActiveDevice`, `killDevice`'s `device.deviceId`, a
+`getAndroid`, `getApple` or `startDevice` `deviceId`, plan steps, and a client
+that calls the daemon's MCP endpoint directly. A wireless id a control call names
+before the pool has seen it is identified first (one adb probe, not repeated per
+call); reads use only what the pool already knows.
+
+A failed `adb devices` listing is never read as "no such device". If the listing
+fails while the pool tracks an Android device, a control call naming a wireless
+or TCP address the pool has not seen is refused with the retryable
+`discovery_incomplete`: the address may be a second route to a device a session
+holds. Nothing is sent and the refusal is not use; the next call asks adb again.
+The holder is not affected: a call naming the device by the id `listDevices`
+reports never depends on that listing, and reads still answer. A machine whose
+pool tracks no Android device is refused nothing.
+
+An Android transport the pool cannot identify at all (a wireless phone
+reporting a generic serial, an emulator on a non-loopback `adb connect` address)
+is not an alias of anything: if no session holds it, tool calls on it are allowed
+as before.
+
 ## Daemon restart
 
 The restarted daemon stamps itself as owner of every session it rehydrates (#11114),
@@ -389,13 +415,15 @@ releasing.
   pass `--session-uuid` on every later call (see
   `scripts/android/navigation-graph-sdk-event-integration.sh`).
 
-If an agent holds two sessions and its default session ends, its next control
-call without `sessionUuid` is refused with `no_active_device_session`,
-`nextAction: "acquire_new_session"` and the release reason. The default is the
-session its calls without `sessionUuid` go to. Calls that pass the other
-session's `sessionUuid` keep working throughout and do not change the default.
-To continue without naming it each time, call `setActiveDevice` for the surviving
-device or acquire a new session with `getAndroid` or `getApple`.
+If an agent holds two sessions and its default session ends, a control call
+that passes the surviving session's `sessionUuid` or `deviceId` runs on that
+session and does not change the default. A control call with only `platform`,
+a `deviceId` that no surviving session holds (or that the proxy cannot match to
+exactly one surviving session), or no selector is refused with
+`no_active_device_session`, `nextAction: "acquire_new_session"` and the release
+reason. To continue without naming the surviving session or its device each
+time, call `setActiveDevice` for that device or acquire a new session with
+`getAndroid` or `getApple`.
 
 ## Stopping a held device: `killDevice` and `deleteDevice`
 
@@ -476,6 +504,11 @@ An acquisition the daemon cannot grant yet is refused with a typed, retryable
 code (owner decision 2026-10-09, #10982): `device_cleanup_in_progress` while the
 device is still being released (#10960), and `device_owned_by_other_daemon` when
 another daemon holds it. Clients may wait and retry.
+
+An exact Android acquisition also waits up to 5 s when adb still lists its
+transport as `offline` or `unauthorized` (#11713). If it stays transitional,
+`device_offline` carries `retryable: true`, `deviceId`, and a 1 s `retryAfterMs`
+hint. The refusal is retryable, and any existing pool entry is left untouched.
 
 Each refusal carries a `retryAfterMs` hint. For `device_cleanup_in_progress` it
 is the time the cleanup can still take (#11360): the rest of a release's bounded

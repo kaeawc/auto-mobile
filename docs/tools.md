@@ -691,12 +691,14 @@ iOS. `device` sends nothing and works on every device.
 A device advertising `prototype_appearance_v1` reports
 `appearance: { mode, source, deviceDark }`. `mode` is `light` or `dark`. `source` names the step
 that decided it: `explicit`, `roleLuminance`, `authoredBackground`, `override` or `system`.
-`deviceDark` is the device's own setting whatever decided the mode, and is present only when the
-device reported it (a `show` result, an `inspect` entry or an iOS status): the host never infers
-it. A successful `show` returns the object in `lastResult`, and `status` and `inspect` return it
-on each prototype. The field is absent
-when the device lacks the flag, on `dismiss` and on a failed show; a failed same-id show keeps
-the value of the prototype still on screen.
+`deviceDark` is the device's own setting whatever decided the mode. Only a device answer states it,
+and only as of that answer: the `show` result and each `inspect` entry. The host never infers it,
+and the host-local `status` action never reports it: the device can flip while a pinned or
+authored mode stays put, which sends no event, so a remembered value could be wrong. Call
+`inspect` for the current one. A successful `show` returns the object in `lastResult`, and
+`inspect` returns it on each prototype; `status` returns `mode` and `source` only. The field is
+absent when the device lacks the flag, on `dismiss` and on a failed show; a failed same-id show
+keeps the `mode` and `source` of the prototype still on screen.
 
 While a prototype is shown it follows the device live. On any change of the resolved mode (the
 device flipping, or prototype state changing a background the mode is inferred from) the device
@@ -704,9 +706,8 @@ sends one `prototype_event` with `kind: "appearance_changed"`, `name: null` and
 `payload: { mode, source }`. Nothing is sent when the mode stays the same, nor for the show
 itself. Wait for it with `awaitEvent` and `kind: "appearance_changed"` (its `name` is null, so
 `eventName` does not match it). The event also refreshes the `appearance` that `status` reports:
-`mode` and `source` come from the event and `deviceDark` is omitted, because the event does not
-carry it and a pinned mode sends no event when the device flips. The next `show` result or
-`inspect` supplies `deviceDark` again.
+`mode` and `source` come from the event. `deviceDark` is not part of `status` at all (see above);
+the next `show` result or `inspect` states it.
 
 In a scrim slot (`window.placement.scrim`, a bottomSheet `scrim`) only the `scrim` role is drawn
 translucent, at 0.4 alpha; any other role is drawn unchanged. The per-mode forms

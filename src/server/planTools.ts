@@ -11,7 +11,13 @@ import {
   getStoppedTestRecording,
   stopTestRecording,
   getTestRecordingStatus,
+  type TestRecordingStatus,
 } from "./testRecordingManager";
+import {
+  assertLifecycleCallerHoldsDevice,
+  assertLifecycleCallerNotOnForeignManagedSlot,
+  lifecycleRequester,
+} from "./lifecycleDeviceOwnership";
 import { startMcpRecording, stopMcpRecording, getMcpRecordingStatus } from "./mcpRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
 import { PlanExecutionOrchestrator, PlanExecutionRequest } from "./planExecutionOrchestrator";
@@ -350,15 +356,52 @@ const exportPlanResultSchema = z.object({
   error: z.string().optional(),
 });
 
+/**
+ * exportPlan stops the daemon's one live test recording, so it is a control call on that
+ * recording's device (#11647). It is a plain tool: device-aware ownership never sees it and the
+ * ingress only judges a session the call names. The handler therefore asks the question the
+ * test-recording socket's `stop` asks, in the shape killDevice uses: a device a live session holds
+ * is exported only by its holder, and a managed slot's device only by that slot's execution.
+ * An unheld device's recording (owned or not) stays exportable by anyone, as on the socket.
+ *
+ * Returns the recording to stop. The holder check runs after the last await, in the same tick the
+ * caller starts the stop in. Throws the typed `device_owned_by_other_session` /
+ * `device_assigned_to_managed_slot` refusal, which the caller must not swallow.
+ */
+async function activeRecordingForExport(params: object): Promise<TestRecordingStatus | null> {
+  const seen = getTestRecordingStatus();
+  if (!seen) {
+    return null;
+  }
+  const requester = lifecycleRequester(params);
+  await assertLifecycleCallerNotOnForeignManagedSlot({
+    toolName: "exportPlan",
+    device: seen,
+    requester,
+  });
+  const status = getTestRecordingStatus();
+  if (!status) {
+    return null;
+  }
+  assertLifecycleCallerHoldsDevice({
+    toolName: "exportPlan",
+    device: status,
+    requester,
+    // A recording has no forced stop: only the holder exports it.
+    force: false,
+  });
+  return status;
+}
+
 // Export plan tool handler
 const exportPlanTool = async (params: {
   recordingId?: string;
   planName?: string;
   sessionUuid?: string;
 }): Promise<any> => {
+  // Outside the try: a holder refusal reaches the client typed, never as a generic failure.
+  const status = await activeRecordingForExport(params);
   try {
-    // Check if there's an active recording
-    const status = getTestRecordingStatus();
     // After a release-time stop the owner fetches the retained plan by id (#10958).
     const retained =
       !status && params.recordingId
@@ -396,8 +439,8 @@ const exportPlanTool = async (params: {
       );
     }
 
-    // Stop the recording and get the plan
-    const result = await stopTestRecording(params.recordingId, params.planName);
+    // Stop the recording the holder check judged, and get the plan
+    const result = await stopTestRecording(status.recordingId, params.planName);
 
     return createStructuredToolResponse({
       success: true,

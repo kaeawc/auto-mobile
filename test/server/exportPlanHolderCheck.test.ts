@@ -1,32 +1,33 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { INTERNAL_MCP_SESSION_PARAM } from "../../../src/daemon/constants";
-import { DaemonState } from "../../../src/daemon/daemonState";
-import { DevicePool } from "../../../src/daemon/devicePool";
-import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
-import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../../src/daemon/inputDeviceOwnership";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import type { BootedDevice, PlanStep } from "../../../src/models";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import type { BootedDevice, PlanStep } from "../../src/models";
 import {
   getTestRecordingStatus,
   isTestRecordingOwnedBy,
   resetStoppedTestRecordings,
   startTestRecording,
   stopTestRecording,
-} from "../../../src/server/testRecordingManager";
-import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
-import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
-import { logger } from "../../../src/utils/logger";
-import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { McpTestFixture } from "../../fixtures/mcpTestFixture";
-import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
-import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
-import { RealToolCallPath } from "../../helpers/realToolCallPath";
+} from "../../src/server/testRecordingManager";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { logger } from "../../src/utils/logger";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { McpTestFixture } from "../fixtures/mcpTestFixture";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { RealToolCallPath } from "../helpers/realToolCallPath";
 
 const held: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
 const free: BootedDevice = { name: "Pixel B", deviceId: "emulator-5556", platform: "android" };
+const unheld: BootedDevice = { name: "Pixel C", deviceId: "emulator-5558", platform: "android" };
 const HOLDER = "sess-holder";
 const STRANGER = "sess-stranger";
 const OWNER = "conn-holder";
@@ -36,14 +37,11 @@ const step: PlanStep = { tool: "tapOn", params: { text: "OK" } };
 /**
  * `exportPlan` stops the daemon's one live test recording and returns its plan. It is a plain
  * tool (no device routing), so ToolRegistry's device-holder check never sees it, and the MCP
- * ingress only judges the session a call NAMES (#11344/#11542). A call from another connection
- * that names its own session, or none, is therefore judged by nobody: it stops the recording the
- * holder's session owns on the holder's device and is handed the holder's recorded plan.
- *
- * Every other ingress refuses the same request: the test-recording socket's `stop` authorizes the
- * caller against the active recording's device (`device ... is bound to a different daemon
- * session`), and `killDevice`/`deleteDevice`, the other plain tools that act on a device, check
- * the holder themselves (`assertLifecycleCallerHoldsDevice`, `device_owned_by_other_session`).
+ * ingress only judges the session a call NAMES (#11344/#11542). Its handler therefore checks the
+ * holder of the recording's device itself (#11647), as `killDevice`/`deleteDevice` do
+ * (`assertLifecycleCallerHoldsDevice`, `device_owned_by_other_session`) and as the test-recording
+ * socket's `stop` does: a call from another connection that names its own session, or none,
+ * neither stops the holder's recording nor receives its plan.
  */
 describe("exportPlan from a connection that does not hold the recording's device", () => {
   let timer: FakeTimer;
@@ -80,6 +78,23 @@ describe("exportPlan from a connection that does not hold the recording's device
       connection,
     );
 
+  /** Starts a recording through the real manager with a fake recorder that counts its stops. */
+  const record = (device: BootedDevice, idPrefix: string, ownerSessionUuid?: string) =>
+    startTestRecording(
+      device,
+      timer,
+      new CountingIdGenerator(idPrefix),
+      () => ({
+        stepCount: 1,
+        start: async () => undefined,
+        stop: async () => {
+          recorderStops += 1;
+          return { steps: [step], stepCount: 1 };
+        },
+      }),
+      ownerSessionUuid,
+    );
+
   beforeAll(async () => {
     // Pay the server module's cold import outside any test's budget.
     const restore = installHermeticServerFixture();
@@ -103,7 +118,7 @@ describe("exportPlan from a connection that does not hold the recording's device
     });
     manager.stopCleanupTimer();
     const discovery = new FakeDeviceUtils();
-    discovery.setBootedDevices("android", [held, free]);
+    discovery.setBootedDevices("android", [held, free, unheld]);
     discovery.setBootedDevices("ios", []);
     PlatformDeviceManagerFactory.setInstance(discovery);
     pool = new DevicePool(
@@ -112,9 +127,9 @@ describe("exportPlan from a connection that does not hold the recording's device
         deviceManager: discovery,
       }),
     );
-    await pool.initializeWithDevices([held, free]);
+    await pool.initializeWithDevices([held, free, unheld]);
     DaemonState.getInstance().initialize(manager, pool, new DeviceSessionRegistry(timer));
-    tools = new RealToolCallPath([held, free]).install();
+    tools = new RealToolCallPath([held, free, unheld]).install();
     await bind(HOLDER, held, OWNER);
     manager.setDeviceReadiness(HOLDER, "automationReady");
     await bind(STRANGER, free, OTHER);
@@ -125,20 +140,7 @@ describe("exportPlan from a connection that does not hold the recording's device
 
     // The holder's session records on the device it holds (the real manager, a fake recorder).
     recorderStops = 0;
-    const started = await startTestRecording(
-      held,
-      timer,
-      new CountingIdGenerator("recording"),
-      () => ({
-        stepCount: 1,
-        start: async () => undefined,
-        stop: async () => {
-          recorderStops += 1;
-          return { steps: [step], stepCount: 1 };
-        },
-      }),
-      HOLDER,
-    );
+    const started = await record(held, "recording", HOLDER);
     recordingId = started.recordingId;
   });
 
@@ -173,7 +175,6 @@ describe("exportPlan from a connection that does not hold the recording's device
   test("naming its own session, another connection does not stop the holder's recording", async () => {
     const result = await exportPlan(OTHER, STRANGER);
 
-    // Actual: the recording is stopped and the stranger receives the holder's plan.
     expect(recorderStops).toBe(0);
     expect(getTestRecordingStatus()?.recordingId).toBe(recordingId);
     expect(JSON.stringify(result)).not.toContain("planContent");
@@ -198,5 +199,43 @@ describe("exportPlan from a connection that does not hold the recording's device
     expect(recorderStops).toBe(1);
     expect(JSON.stringify(result)).toContain(recordingId);
     expect(getTestRecordingStatus()).toBeNull();
+  });
+
+  test("a sessionless call is refused on a held device even from the holder's connection", async () => {
+    // docs/using/device-ownership.md: a sessionless control call on a held device is refused.
+    const result = await exportPlan(OWNER);
+
+    expect(recorderStops).toBe(0);
+    expect(getTestRecordingStatus()?.recordingId).toBe(recordingId);
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result)).toContain(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+  });
+
+  test("a recording on a device no session holds stays exportable by any caller", async () => {
+    await stopTestRecording(undefined, undefined, timer);
+    recorderStops = 0;
+    expect(manager.getSessionForDevice(unheld.deviceId)).toBeNull();
+    const started = await record(unheld, "unheld");
+
+    const result = await exportPlan(OTHER);
+
+    expect(result.isError).not.toBe(true);
+    expect(recorderStops).toBe(1);
+    expect(JSON.stringify(result)).toContain(started.recordingId);
+  });
+
+  test("an ownerless recording on a held device is exported only by the device's holder", async () => {
+    await stopTestRecording(undefined, undefined, timer);
+    recorderStops = 0;
+    const started = await record(held, "ownerless");
+
+    const refused = await exportPlan(OTHER, STRANGER);
+    expect(refused.isError).toBe(true);
+    expect(JSON.stringify(refused)).toContain(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    expect(recorderStops).toBe(0);
+
+    const exported = await exportPlan(OWNER, HOLDER);
+    expect(exported.isError).not.toBe(true);
+    expect(JSON.stringify(exported)).toContain(started.recordingId);
   });
 });

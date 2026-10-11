@@ -193,9 +193,12 @@ connection used for tools and resources:
    `settling` before its owner is cleared, so the next acquisition waits
    (retryable `slot_settling`) until the work ends or the settler is found dead.
    The slot registry is shared by every daemon on the host and can be busy, so no
-   registry step of the drain is assumed to have happened (#11616). A step that
-   fails is retried with backoff (250 ms doubling to 5 s) until the 5-minute
-   settlement cap, then every 30 s until it lands or the daemon stops. If the
+   registry step of the drain is assumed to have happened (#11616). A failed
+   slot lookup, `settling` mark or return to `ready` is retried with backoff
+   (250 ms doubling to 5 s) until the 5-minute settlement cap, then every 30 s
+   until it lands or the daemon stops. A failed owner clear is not retried on its
+   own: the record it leaves belongs to an ended session, pins nothing, and is
+   cleared when the slot returns to `ready` or is next claimed. If the
    `settling` mark itself cannot be written, the slot keeps its owner record and
    the daemon keeps treating that owner as live for as long as the released work
    runs, so the slot is never handed to the next execution under running work;

@@ -797,31 +797,43 @@ export class ManagedExecutionRelease {
    * session ends. A one-shot check would leave it `settling` for the daemon's lifetime, so the
    * check repeats at the fast cadence. It is bounded by the same cap as the release itself: past
    * it the slot stays `settling`, where `reset-slot-scope --force` applies once the owner is gone.
+   * Each slot is re-checked on its own, so one whose registry step keeps failing (and is retried
+   * past the cap) never holds up another's re-check (#11616).
    */
   private async restoreOnceUnowned(
     registry: ManagedExecutionSlotRegistry,
     marked: readonly MarkedSlot[],
     deadline: number,
   ): Promise<void> {
+    const stillOwned = (
+      await Promise.all(marked.map((slot) => this.restoreSlotOnceUnowned(registry, slot, deadline)))
+    ).filter((slot): slot is MarkedSlot => slot !== null);
+    if (stillOwned.length === 0) {
+      return;
+    }
+    const slots = stillOwned.map((slot) => `${slot.key.scopeKey}/${slot.key.slotIndex}`).join(", ");
+    logger.warn(
+      `[ManagedExecutionRelease] A live execution still holds the owner record of settled ` +
+        `slot(s) ${slots} past the ${this.settlementCapMs}ms settlement cap; they stay ` +
+        "settling. Once that execution ends, `reset-slot-scope --force` or a daemon restart " +
+        "returns them to ready (#11545)",
+    );
+  }
+
+  /** Resolves to the slot when a live owner record still held it at the cap, else to null. */
+  private async restoreSlotOnceUnowned(
+    registry: ManagedExecutionSlotRegistry,
+    slot: MarkedSlot,
+    deadline: number,
+  ): Promise<MarkedSlot | null> {
     const { timer } = this.options;
-    let held = [...marked];
     for (;;) {
-      const outcomes = await Promise.all(
-        held.map((slot) => this.restoreReady(registry, slot, deadline)),
-      );
-      held = held.filter((_slot, index) => outcomes[index] === "owner_live");
-      if (held.length === 0 || this.closed) {
-        return;
+      const outcome = await this.restoreReady(registry, slot, deadline);
+      if (outcome === "done" || this.closed) {
+        return null;
       }
       if (timer.now() >= deadline) {
-        const slots = held.map((slot) => `${slot.key.scopeKey}/${slot.key.slotIndex}`).join(", ");
-        logger.warn(
-          `[ManagedExecutionRelease] A live execution still holds the owner record of settled ` +
-            `slot(s) ${slots} past the ${this.settlementCapMs}ms settlement cap; they stay ` +
-            "settling. Once that execution ends, `reset-slot-scope --force` or a daemon restart " +
-            "returns them to ready (#11545)",
-        );
-        return;
+        return slot;
       }
       await timer.sleep(this.settlementPollMs);
     }

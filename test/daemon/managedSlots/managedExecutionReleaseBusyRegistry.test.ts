@@ -338,7 +338,14 @@ describe.each(REGISTRIES)(
     const TABLE = (["explicit release", "release by the session manager"] as const).flatMap(
       (path) =>
         DRAIN_STEPS.flatMap((step) =>
-          (["succeeds", "throws once", "throws until the cap"] as const).flatMap((mode) =>
+          (
+            [
+              "succeeds",
+              "throws once",
+              "throws until the cap",
+              "throws until a cap after the work ends",
+            ] as const
+          ).flatMap((mode) =>
             (
               [
                 ["ends inside the cap", 3_000],
@@ -384,8 +391,13 @@ describe.each(REGISTRIES)(
         const tableDrain = newTableDrain(step);
         work.active.set(S1, 1);
         busy.calls[step] = mode === "throws once" ? 1 : 0;
+        // The mark and the lookup are busy from the release on; the watcher's read and write
+        // only start once the work has ended, so their cap of contention is counted from there.
         if (mode === "throws until the cap") {
           busy.untilMs[step] = timer.now() + CAP_MS;
+        }
+        if (mode === "throws until a cap after the work ends") {
+          busy.untilMs[step] = timer.now() + workMs + CAP_MS;
         }
         timer.setTimeout(() => work.active.delete(S1), workMs);
         const claimedUnderWork = claimedWhileWorkRuns();
@@ -414,6 +426,73 @@ describe.each(REGISTRIES)(
         expect((await claimForNextExecution()).kind).toBe("claimed");
       },
     );
+
+    test("a slot whose read stays busy past the cap does not hold up the re-check of another slot", async () => {
+      // Execution 1 holds two slots; both owner clears fail, so each settling slot keeps its
+      // owner record and the watcher has to wait for that owner to read dead.
+      const second: SlotKey = { scopeKey: key.scopeKey, slotIndex: 1 };
+      await registry.initSlot(second, {
+        role: "secondary",
+        platform: "android",
+        requestedSpec: {},
+      });
+      await registry.commitBinding(
+        second,
+        { generation: 0, stableDeviceId: null },
+        {
+          stableDeviceId: "amslot-test-1-g1",
+          deviceName: "amslot-test-1-g1",
+          resolvedSpec: {},
+          specFingerprint: "fp",
+          state: "ready",
+        },
+      );
+      const claimed = await registry.claimExecution(
+        second,
+        { generation: 1, stableDeviceId: "amslot-test-1-g1" },
+        { daemonId: SETTLER.daemonId, pid: DAEMON_PID, sessionUuid: S1 },
+      );
+      expect(claimed.kind).toBe("claimed");
+      // Slot 0's read is busy until well past the cap; slot 1's registry is fine.
+      const busyUntilMs = timer.now() + CAP_MS + 4_000;
+      const slotZeroBusy = new Proxy(faulty, {
+        get(target, property) {
+          if (property !== "getAssignment") {
+            const value: unknown = Reflect.get(target, property, target);
+            return typeof value === "function" ? value.bind(target) : value;
+          }
+          return async (slot: SlotKey) => {
+            if (slot.slotIndex === 0 && timer.now() < busyUntilMs) {
+              throw new Error("SQLITE_BUSY: database is locked");
+            }
+            return target.getAssignment(slot);
+          };
+        },
+      });
+      const tableDrain = newDrain({
+        registry: async () => slotZeroBusy,
+        settlementCapMs: CAP_MS,
+        settlementSlowPollMs: SLOW_POLL_MS,
+      });
+      work.active.set(S1, 1);
+      busy.calls.releaseExecution = 2;
+      await tableDrain.releaseExecution(S1);
+      // The same session id is held again when the work ends, then ends for good two seconds on.
+      timer.setTimeout(() => {
+        sessions.live.set(S1, DEVICE);
+        work.active.delete(S1);
+      }, 1_000);
+      timer.setTimeout(() => sessions.live.delete(S1), 3_000);
+
+      await timer.sleep(4_000);
+
+      // Inside the cap, with slot 0 still retrying: slot 1 was re-checked on its own.
+      expect(timer.now()).toBeLessThan(busyUntilMs - 4_000);
+      expect(await registry.getAssignment(second)).toMatchObject({ state: "ready" });
+      expect(await registry.getAssignment(key)).toMatchObject({ state: "settling" });
+      await tableDrain.whenIdle();
+      expect(await registry.getAssignment(key)).toMatchObject({ state: "ready" });
+    });
 
     test.each(DRAIN_STEPS)(
       "%s busy until the cap under work that never ends: still fenced past the cap, and --force recovers the slot or says why not",

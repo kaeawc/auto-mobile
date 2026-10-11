@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import type { SlotKey } from "../../../src/daemon/managedSlots/slotRegistry";
+import { getDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
 import { executionTracker } from "../../../src/server/executionTracker";
 import { ManagedRestartScenario, SCOPE, type ManagedExecution } from "./managedRestartScenario";
 
@@ -23,6 +24,8 @@ const DEVICE = "emulator-5554";
 const AVD = `Pixel_${DEVICE}`;
 const BOOT_2 = { ...SCOPE, runnerIncarnation: "boot-2" };
 const activeExecutionsAtFileStart = executionTracker.getActiveExecutionCount();
+// An earlier file can leave a write in flight: Windows runs the unit lane in one shared process.
+void getDbWriteBarrier().trackExisting(new Promise<void>(() => undefined));
 
 let s: ManagedRestartScenario;
 let key: SlotKey;
@@ -66,16 +69,25 @@ function callInFlight(execution: ManagedExecution, wedged = false): void {
 function observed<T>(run: () => Promise<T>): () => T {
   let seen: T | undefined;
   let activeExecutionsAfterStop: number | undefined;
+  let writeBarrierAfterStop: { draining: boolean; inFlight: number } | undefined;
   beforeAll(async () => {
     try {
       seen = await run();
     } finally {
       await s?.stop();
       activeExecutionsAfterStop = executionTracker.getActiveExecutionCount();
+      const barrier = getDbWriteBarrier();
+      writeBarrierAfterStop = {
+        draining: barrier.isDraining(),
+        inFlight: barrier.inFlightCount(),
+      };
     }
   });
   test("teardown restores the process-wide execution count", () => {
     expect(activeExecutionsAfterStop).toBe(activeExecutionsAtFileStart);
+  });
+  test("teardown leaves the process-wide write barrier open", () => {
+    expect(writeBarrierAfterStop).toEqual({ draining: false, inFlight: 0 });
   });
   return () => {
     if (seen === undefined) {

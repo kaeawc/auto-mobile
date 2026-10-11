@@ -26,7 +26,6 @@ import { resolveWorkProfilePollIntervalMs } from "../../src/utils/WorkProfileMon
 import { DefaultIosTunnelClient } from "../../src/ctrlProxy/ios/IosTunnelClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
-import { logger } from "../../src/utils/logger";
 
 function iproxyStartTimeoutMs(env: NodeJS.ProcessEnv): number {
   return new DefaultIosTunnelClient({

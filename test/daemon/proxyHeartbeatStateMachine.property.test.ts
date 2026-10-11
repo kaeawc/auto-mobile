@@ -42,7 +42,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // | heartbeat answered not-found, recoverable     | window open: AWAITED (one heartbeat a tick, each     |
 // |   reason or none                              |   claiming, no connection reset)                    |
 // |                                               | establishing: window opens now; AWAITED             |
-// |                                               | window expired: STOPPED                             |
+// |                                               | window expired: STOPPED, and the window is spent    |
+// |                                               | window spent (asked again after a call): a          |
+// |                                               |   recoverable reason opens a new window, no reason  |
+// |                                               |   is STOPPED again with no fresh connection         |
 // |                                               | no window, connection had answered: the latest      |
 // |                                               |   binding is asked once more on a fresh connection, |
 // |                                               |   then (and a held session at once) a recoverable   |
@@ -193,6 +196,8 @@ interface SessionModel {
    * session: no later answer opens another on the same connection.
    */
   windowSince?: number;
+  /** An answer found the window expired and the proxy stopped asking: the window is spent. */
+  windowSpent?: boolean;
   /**
    * The same answer, when the history leaves it in doubt whether the proxy held the session when
    * it connected: the proxy may or may not be heartbeating it for the window that started then.
@@ -377,6 +382,7 @@ class World {
     if (session.daemon === "live") {
       // An acknowledgement ends the window: the daemon knows the session.
       session.windowSince = undefined;
+      session.windowSpent = false;
       return;
     }
     if (session.daemon === "terminal") {
@@ -411,20 +417,29 @@ class World {
     first: boolean,
   ): boolean {
     const now = this.timer.now();
-    if (session.windowSince !== undefined) {
-      if (now - session.windowSince < RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS) {
-        return true;
-      }
-      if (!establishes) {
-        return false;
-      }
+    const recoverable = session.daemon === "recoverable";
+    if (!session.windowSpent && this.insideWindow(session, now)) {
+      return true;
     }
     if (establishes) {
       session.windowSince = now;
+      session.windowSpent = false;
       return true;
     }
+    if (session.windowSince !== undefined && !session.windowSpent) {
+      // This answer finds the window expired: the session is stopped, the window spent.
+      session.windowSpent = true;
+      return false;
+    }
+    if (session.windowSpent) {
+      // Asked again after a call reached it: a handoff opens a new window, no reason stops it.
+      if (recoverable) {
+        session.windowSince = now;
+        session.windowSpent = false;
+      }
+      return recoverable;
+    }
     // No window, on a connection that had answered: the latest binding is asked once more.
-    const recoverable = session.daemon === "recoverable";
     this.askAgain ??= recoverable
       ? "successor"
       : this.latestCertain && this.latest === sessionUuid
@@ -469,6 +484,7 @@ class World {
       throw new Error("Element not found: text 'Continue'");
     }
     session.windowSince = undefined;
+    session.windowSpent = false;
   }
 
   private learnDead(sessionUuid: string): void {
@@ -651,7 +667,8 @@ class World {
       .map(([id, session]) => ({ id, session, heartbeats: session.heartbeats }));
     // Sessions the proxy was answered not-found for, inside their window: it still waits for them.
     const awaited = gone.filter(
-      ({ session }) => this.insideWindow(session, startedAt) && !session.told,
+      ({ session }) =>
+        !session.windowSpent && this.insideWindow(session, startedAt) && !session.told,
     );
     // Sessions it stopped asking: nothing reaches them until a call does.
     const stopped = gone.filter(
@@ -924,6 +941,25 @@ const REGRESSIONS: ReadonlyArray<readonly [string, readonly Command[]]> = [
       TICK,
       { kind: "call", target: 0, rejected: true },
       { kind: "release", target: 0, gone: "recoverable", notify: false },
+      TICK,
+      TICK,
+    ],
+  ],
+  [
+    "#11570.2 a handoff after a spent window opens a new one once a call reached the session",
+    [
+      ACQUIRE,
+      TICK,
+      { kind: "daemon-restart", gapMs: 0 },
+      ...Array.from(
+        { length: RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS / INTERVAL_MS + 3 },
+        () => TICK,
+      ),
+      { kind: "call", target: 0, rejected: false, read: true },
+      TICK,
+      { kind: "release", target: 0, gone: "recoverable", notify: false },
+      { kind: "call", target: 0, rejected: false, read: true },
+      TICK,
       TICK,
       TICK,
     ],

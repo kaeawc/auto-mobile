@@ -75,6 +75,11 @@ interface Harness {
    * successor answers each of `sessions` not-found with no reason: it has rehydrated nothing.
    */
   succeedDaemonOnReset(sessions: readonly string[]): void;
+  /**
+   * The daemon goes silent: it answers nothing more on the connection it has. The next
+   * connection reaches its replacement.
+   */
+  stallAndReplaceDaemon(): void;
   /** From now on a call that reaches a released session restores nothing, as a read does. */
   callsRestoreNothing(): void;
   /** Connections the proxy closed itself while the daemon was still answering on them. */
@@ -96,6 +101,7 @@ function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } 
   const succeeded = new Map<FakeDaemonClient, Map<string, string>>();
   let proxyClosing = false;
   const closedByDaemon = new Set<FakeDaemonClient>();
+  const silent = new Set<FakeDaemonClient>();
   const forwarded: Array<{ toolName: string; sessionUuid: unknown }> = [];
   /** What the daemon answers a heartbeat for a session it released (sessionNotFoundResult). */
   const answerDaemonMethod = (
@@ -155,11 +161,13 @@ function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } 
       // Answered in the caller's turn unless a round trip is asked for: the table below pins the
       // order of a heartbeat's answer and the call it races as it is without one.
       onCallDaemonMethod: (method, params) =>
-        options.roundTripMs === undefined
-          ? answerDaemonMethod(method, params, created)
-          : timer
-              .sleep(options.roundTripMs)
-              .then(() => answerDaemonMethod(method, params, created)),
+        silent.has(created)
+          ? new Promise<never>(() => undefined)
+          : options.roundTripMs === undefined
+            ? answerDaemonMethod(method, params, created)
+            : timer
+                .sleep(options.roundTripMs)
+                .then(() => answerDaemonMethod(method, params, created)),
     });
     const close = created.close.bind(created);
     created.close = async () => {
@@ -221,6 +229,11 @@ function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } 
     },
     succeedDaemonOnReset: (sessions) => {
       successorKnowsNone = sessions;
+    },
+    stallAndReplaceDaemon: () => {
+      silent.add(client);
+      closedByDaemon.add(client);
+      client = newClient();
     },
     callsRestoreNothing: () => {
       callsRestore = false;
@@ -696,6 +709,28 @@ describe("a not-found answer is decided alike on every path, for every session (
     }
   });
 
+  // The daemon goes silent with the connection open, so no heartbeat is answered and liveness
+  // recovery replaces the connection itself. Its own heartbeat is then each session's first
+  // answer on the connection to the replacement daemon, which has rehydrated none of them.
+  test("liveness recovery that replaces a silent connection waits for every session on the new one", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND, THIRD]);
+    try {
+      for (const sessionUuid of [SESSION, SECOND, THIRD]) {
+        world.release("", sessionUuid);
+      }
+      world.stallAndReplaceDaemon();
+      // The heartbeats time out, and recovery's second attempt replaces the connection.
+      await world.timer.advanceTimeAsync(2 * LEASE_MS);
+
+      const sent = await perTick(4);
+
+      expect(sent).toEqual({ [SESSION]: ones(4), [SECOND]: ones(4), [THIRD]: ones(4) });
+      expect(world.connectionResets()).toBe(0);
+    } finally {
+      await world.close();
+    }
+  });
+
   // A read is answered without the session, and restores none. It said nothing about the
   // session, so the window it is in stays as it is: not dropped (the next answer would be asked
   // again on a fresh connection) and not started over.
@@ -745,6 +780,27 @@ describe("a not-found answer is decided alike on every path, for every session (
 
       expect(sent[SESSION]!.reduce((sum, count) => sum + count, 0)).toBeLessThanOrEqual(1);
       expect(sent[SESSION]!.slice(-2)).toEqual([0, 0]);
+      expect(world.connectionResets()).toBe(0);
+    } finally {
+      await world.close();
+    }
+  });
+
+  // A handoff after the window was spent is a new handoff: the daemon is handing the session
+  // back again, so its owner waits again, once the call that reached the session re-armed it.
+  test("a recoverable handoff after a spent window opens a new window", async () => {
+    const { world, perTick } = await holding([SESSION]);
+    try {
+      world.release("");
+      world.replaceDaemon();
+      world.callsRestoreNothing();
+      await perTick(WINDOW_TICKS + 3);
+      world.release("device-restart:emulator-5554");
+
+      await world.timer.resolvePromise(world.proxy.callTool("observe", {}), 1);
+      const sent = await perTick(5);
+
+      expect(sent[SESSION]!.slice(-4)).toEqual(ones(4));
       expect(world.connectionResets()).toBe(0);
     } finally {
       await world.close();
@@ -907,7 +963,7 @@ describe("decideNotFoundAnswer", () => {
     "%s ends the session in every state",
     (releaseReason) => {
       for (const establishes of [false, true]) {
-        for (const windowSince of [undefined, NOW - 1, NOW - W]) {
+        for (const windowSince of [undefined, NOW - 1, NOW - W, "spent"] as const) {
           for (const mayAskAgain of [false, true]) {
             expect(
               decideNotFoundAnswer(facts({ releaseReason, establishes, windowSince, mayAskAgain })),
@@ -939,9 +995,21 @@ describe("decideNotFoundAnswer", () => {
     },
   );
 
-  // I5: a window ends, and no answer on the same connection opens another.
+  // A spent window: the session was stopped, and is asked again only because a call reached it.
+  test("after a spent window no reason stops again without a reconnect, and a handoff opens a new one", () => {
+    for (const mayAskAgain of [false, true]) {
+      expect(decideNotFoundAnswer(facts({ windowSince: "spent", mayAskAgain }))).toEqual(STOPPED);
+      for (const releaseReason of ["daemon-restart", "device-restart:emulator-5554"]) {
+        expect(
+          decideNotFoundAnswer(facts({ releaseReason, windowSince: "spent", mayAskAgain })),
+        ).toEqual(awaitedSince(NOW));
+      }
+    }
+  });
+
+  // I5: a window ends with the answer that finds it expired, whatever that answer says.
   test.each([undefined, "daemon-restart", "device-restart:emulator-5554"])(
-    "past the window %p stops the session and is never asked again",
+    "the answer that finds the window expired (%p) stops the session and is not asked again",
     (releaseReason) => {
       for (const mayAskAgain of [false, true]) {
         for (const windowSince of [NOW - W, NOW - 10 * W]) {
@@ -955,7 +1023,7 @@ describe("decideNotFoundAnswer", () => {
 
   test("the first answer on a connection just established opens a window, with or without a reason", () => {
     for (const releaseReason of [undefined, "daemon-restart"]) {
-      for (const windowSince of [undefined, NOW - W]) {
+      for (const windowSince of [undefined, NOW - W, "spent"] as const) {
         expect(
           decideNotFoundAnswer(
             facts({ releaseReason, establishes: true, windowSince, mayAskAgain: true }),

@@ -532,8 +532,11 @@ export interface NotFoundAnswerFacts {
    * it: the daemon behind it may have restarted and not rehydrated the session yet.
    */
   establishes: boolean;
-  /** When the session's window opened, while it has one (open or expired). */
-  windowSince: number | undefined;
+  /**
+   * When the session's window opened, while it has one; `spent` once an answer found it expired
+   * and stopped the session, so any later answer follows a call that reached the session.
+   */
+  windowSince: number | "spent" | undefined;
   now: number;
   /** The heartbeat may be asked once more on a fresh connection (the latest binding's first ask). */
   mayAskAgain: boolean;
@@ -558,9 +561,11 @@ function isRecoverableHandoffOfOwnedSession(
  * without a reason (#11529, #11557), or with a recoverable release reason on a connection that
  * had answered before (#11461), which the latest binding first asks about once more on a fresh
  * connection. It lasts {@link RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS} and no later answer
- * extends it. Inside it every answer that does not end the session is awaited. Past it the
- * session is stopped, and only another connection established while it is heartbeated again
- * opens a new one.
+ * extends it. Inside it every answer that does not end the session is awaited. The answer that
+ * finds it expired stops the session, and the window is spent: the session is only asked again
+ * once a call has reached it, and then a recoverable handoff (the daemon is handing it back
+ * again) or a newly established connection opens a new window, while an answer with no reason
+ * stops it again without asking on a fresh connection.
  */
 export function decideNotFoundAnswer(facts: NotFoundAnswerFacts): NotFoundAnswerOutcome {
   const { releaseReason, owned, establishes, windowSince, now } = facts;
@@ -568,16 +573,20 @@ export function decideNotFoundAnswer(facts: NotFoundAnswerFacts): NotFoundAnswer
   if (releaseReason !== undefined && !recoverable) {
     return { kind: "ended", reason: releaseReason };
   }
-  if (windowSince !== undefined && now - windowSince < RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS) {
+  const spent = windowSince === "spent";
+  if (
+    typeof windowSince === "number" &&
+    now - windowSince < RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS
+  ) {
     return { kind: "awaited", windowSince };
   }
   if (owned && establishes) {
     return { kind: "awaited", windowSince: now };
   }
-  if (windowSince !== undefined) {
+  if (windowSince !== undefined && !spent) {
     return { kind: "stopped" };
   }
-  if (facts.mayAskAgain) {
+  if (!spent && facts.mayAskAgain) {
     return { kind: "ask-again", handoff: recoverable };
   }
   return recoverable ? { kind: "awaited", windowSince: now } : { kind: "stopped" };
@@ -1292,12 +1301,13 @@ export class DaemonMcpProxy {
    */
   private readonly recoveryNotFoundOutcomes = new Map<string, NotFoundAnswerOutcome>();
   /**
-   * When (injected timer) each session's not-found window opened ({@link decideNotFoundAnswer}).
-   * An entry outlives its window, so a later answer on the same connection cannot open another.
+   * When (injected timer) each session's not-found window opened ({@link decideNotFoundAnswer}),
+   * or `spent` once an answer found it expired. An entry outlives its window, so a later answer
+   * with no reason on the same connection cannot open another.
    * Cleared by a heartbeat acknowledgement, by a call the daemon admitted under the session, or by
    * the session ending here; a call that proves nothing about the session leaves it (#11570).
    */
-  private readonly notFoundWindows = new Map<string, number>();
+  private readonly notFoundWindows = new Map<string, number | "spent">();
   /**
    * Sessions the proxy stopped heartbeating on a not-found answer that did not end them (#10702):
    * the latest binding stays bound, a held session is dropped. A tool call that reaches the
@@ -6615,6 +6625,9 @@ export class DaemonMcpProxy {
     });
     const released = releaseReason ?? "no reason, from a daemon just connected to";
     if (outcome.kind !== "awaited") {
+      if (outcome.kind === "stopped" && typeof windowSince === "number") {
+        this.notFoundWindows.set(sessionUuid, "spent");
+      }
       return outcome;
     }
     if (outcome.windowSince === windowSince) {

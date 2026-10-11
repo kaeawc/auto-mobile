@@ -10245,7 +10245,10 @@ export class SessionManager {
     }
   }
 
-  /** Judge the session's own lease, renewed only here by release-local owner proof (#11691). */
+  /**
+   * Judge on the later of the session's own lease, a heartbeated same-token base's lease, and
+   * release-local owner proof; keep the session's policy and clocks unchanged (#11707).
+   */
   private releaseOwnerLeaseSnapshot(
     session: Session,
     operation?: SessionReleaseOperation,
@@ -10254,6 +10257,18 @@ export class SessionManager {
       return undefined;
     }
     const snapshot = sessionJudgedLeaseSnapshot(session, this.sessionNow());
+    const base = this.livenessBaseSession(session);
+    if (
+      base &&
+      judgesOwnerHeartbeats(base) &&
+      base.livenessOwnerToken !== undefined &&
+      base.livenessOwnerToken === session.livenessOwnerToken
+    ) {
+      snapshot.lastHeartbeat = Math.max(
+        snapshot.lastHeartbeat,
+        sessionJudgedLeaseSnapshot(base, snapshot.now).lastHeartbeat,
+      );
+    }
     snapshot.lastHeartbeat = Math.max(
       snapshot.lastHeartbeat,
       operation?.ownerHeartbeatDuringRelease ?? Number.NEGATIVE_INFINITY,

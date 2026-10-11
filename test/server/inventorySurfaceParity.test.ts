@@ -99,6 +99,28 @@ const scenarios: Scenario[] = [
     },
   },
   {
+    // A real Session object whose assignedDevice disagrees with the pool (pool idle): the pool's
+    // assignment is the one holder authority, so neither surface may name that session (#11535).
+    name: "idle, a real session still points at the device",
+    async build(ctx) {
+      const pool = poolFor(ctx);
+      await pool.initializeWithDevices([android]);
+      await ctx.sessions.createSession("session-pointing-at-device", android.deviceId, "android");
+      return { pool, discovered: [android] };
+    },
+  },
+  {
+    // The pool holds the device for one session while a different real session points at it.
+    name: "held by the pool, a different real session points at the device",
+    async build(ctx) {
+      const pool = poolFor(ctx);
+      await pool.initializeWithDevices([android]);
+      await pool.assignDeviceToSession("session-held");
+      await ctx.sessions.createSession("session-other", android.deviceId, "android");
+      return { pool, discovered: [android] };
+    },
+  },
+  {
     name: "held and adb-offline",
     adbOffline: true,
     async build(ctx) {

@@ -23,8 +23,19 @@ another connection's control call naming the derived session, or reaching one of
 the owner's devices through a `device` label, is refused (#11542). The same holds
 wherever ownership is recorded: restoring a derived session is restoring its
 base, so it is refused while another connection owns the base, and it never
-takes a label away from the base's owner (#11586). A device that no session
-holds takes calls from anyone.
+takes a label away from the base's owner (#11586). A heartbeat that
+claims liveness ownership of a derived session is judged against the base's
+liveness owner as well: another token cannot claim or adopt a label while the
+base owner's lease is live or in its grace, the owner holding the base is never
+refused on its label, and a label's current owner is never refused its own
+re-claim. A refused claim reports the hold it was refused for, the base owner's
+when the label's own owner holds nothing. The label keeps its own liveness
+record, so a token
+claimed on a label proves nothing about its base (#11602). A connection bound to
+the base session, or to one of its labels, may name any live session of that
+plan directly as `sessionUuid`; a name the base has not published, or a label
+that is not allocated, is still refused as a different session. A device that no
+session holds takes calls from anyone.
 
 A session's owner is the connection that acquired it, or that restored it after
 a reconnect. Ownership is cooperative: no token is needed, but naming a session's

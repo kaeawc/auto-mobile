@@ -547,14 +547,18 @@ describe("devices the alias fold does not concern (#11618)", () => {
       platform: "android",
       deviceId: EMULATOR_TCP,
     });
-    await h.outcome("readProbe", { platform: "android", deviceId: EMULATOR_TCP });
+    const readByAlias = await h.outcome("readProbe", {
+      platform: "android",
+      deviceId: EMULATOR_TCP,
+    });
 
     expect(byCanonical).toBe(DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE);
     expect(byAlias).toBe(DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE);
-    // An unheld device's read runs on the ordinary path, on the one pooled device.
-    expect(h.tools.runs).toEqual([
-      { name: "readProbe", deviceId: EMULATOR, sessionUuid: undefined },
-    ]);
+    // #11641: even an idle managed slot's device is read-only, on the canonical device, without readiness.
+    expect(readByAlias).toBe("ran");
+    expect(h.reads).toEqual([EMULATOR]);
+    expect(h.tools.runs).toEqual([]);
+    expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("an iOS id is passed through untouched and never probed", async () => {

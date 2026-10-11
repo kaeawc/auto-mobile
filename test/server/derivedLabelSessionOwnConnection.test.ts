@@ -16,6 +16,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import { RealToolCallPath } from "../helpers/realToolCallPath";
 
 // #11602: a connection whose MCP server is bound to the base session, or to one of its labels,
@@ -125,7 +126,9 @@ describe("a connection bound to the base session naming its own derived label se
       OWNER,
     );
     manager.setDeviceLabels(BASE, buildDeviceLabelMap(["A", "B", "C"], BASE));
-    await pool.assignMultipleDevices([DERIVED], 1_000, "android");
+    await asPlanAllocation(manager, BASE, [DERIVED], () =>
+      pool.assignMultipleDevices([DERIVED], 1_000, "android"),
+    );
   }
 
   async function tearDown(): Promise<void> {
@@ -232,7 +235,9 @@ describe("a connection bound to the base session naming its own derived label se
   test(
     "once bound to a label it still reaches the plan's other labels and its base",
     scenario(async () => {
-      await pool.assignMultipleDevices([`${BASE}:C`], 1_000, "android");
+      await asPlanAllocation(manager, BASE, [`${BASE}:C`], () =>
+        pool.assignMultipleDevices([`${BASE}:C`], 1_000, "android"),
+      );
       const owner = await connection({ sessionId: "http-owner" });
       await tap(owner, { sessionUuid: BASE });
       // A successful call moves the connection's binding to the session it named.
@@ -271,7 +276,9 @@ describe("a connection bound to the base session naming its own derived label se
     scenario(async () => {
       const nested = `${DERIVED}:C`;
       manager.setDeviceLabels(DERIVED, { B: DERIVED, C: nested });
-      await pool.assignMultipleDevices([nested], 1_000, "android");
+      await asPlanAllocation(manager, DERIVED, [nested], () =>
+        pool.assignMultipleDevices([nested], 1_000, "android"),
+      );
       const owner = await connection({ sessionId: "http-owner" });
       await tap(owner, { sessionUuid: BASE });
 
@@ -285,6 +292,22 @@ describe("a connection bound to the base session naming its own derived label se
         third.deviceId,
         primary.deviceId,
       ]);
+    }),
+  );
+
+  test(
+    "a connection seeded with the base names its plan's live label, and nothing else",
+    scenario(async () => {
+      const seeded = await connection({ sessionId: "seeded", initialSessionToolBinding: BASE });
+
+      const result = await tap(seeded, { sessionUuid: DERIVED });
+
+      expect(result.isError).not.toBe(true);
+      expect(tools.runs.map((run) => run.deviceId)).toEqual([labelled.deviceId]);
+      for (const sessionUuid of [`${BASE}:Z`, `${BASE}:C`, "sess-b"]) {
+        expect(errorText(await tap(seeded, { sessionUuid }))).toMatch(BOUND_TO_OTHER_SESSION);
+      }
+      expect(tools.runs).toHaveLength(1);
     }),
   );
 

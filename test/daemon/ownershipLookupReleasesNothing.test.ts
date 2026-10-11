@@ -75,6 +75,8 @@ describe("judging ownership of a label whose base has expired but is not yet sca
       w.manager.claimUnownedLivenessOwnership(LABEL, TOKEN),
     "the hold a refused claim reports": (w) => w.manager.getOwnerLeaseHold(LABEL),
     "the session that speaks for the label": (w) => w.manager.ownershipSessionUuid(LABEL),
+    "whether the label is a session of the base's plan": (w) =>
+      w.manager.isLiveSessionOfSamePlan(LABEL, BASE),
   };
 
   test.each(Object.keys(judgements))("%s neither releases nor stamps the base", async (name) => {

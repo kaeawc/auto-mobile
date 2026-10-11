@@ -9031,6 +9031,17 @@ export class SessionManager {
   }
 
   /**
+   * Whether `sessionId` is live and speaks for the same session as `otherSessionId` wherever
+   * ownership is judged: the two are sessions of one plan (#11602). Releases nothing.
+   */
+  isLiveSessionOfSamePlan(sessionId: string, otherSessionId: string): boolean {
+    return (
+      this.peekSession(sessionId) !== null &&
+      this.ownershipSessionUuid(sessionId) === this.ownershipSessionUuid(otherSessionId)
+    );
+  }
+
+  /**
    * Remove and return every derived `${base}:${label}` session ever published for `baseSessionId`
    * (#11091). Unlike the base's `deviceLabels` cache slot, this index survives the base's removal,
    * so a release of the base can still cascade to its derived sessions. Entries may name sessions

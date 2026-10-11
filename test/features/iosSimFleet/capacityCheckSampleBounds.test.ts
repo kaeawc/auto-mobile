@@ -230,4 +230,84 @@ describe("iOS read-only capacity reads take a bounded, cancellable sample", () =
     expect(report.answer).toMatchObject({ limit: 1, booted: 1, inFlight: 0 });
     expect(earlier.answer).toMatchObject({ outcome: "allow" });
   });
+
+  test("a boot released any number of microtasks after the listing answers still holds its slot for the check", async () => {
+    const answers: Array<{ microtasks: number; answer: unknown }> = [];
+    for (let microtasks = 0; microtasks <= 24; microtasks++) {
+      const source = new ScriptedSource();
+      const { gate, ledger } = build(source);
+      source.immediate = [sim(A, "Shutdown"), sim(B, "Shutdown")];
+      const first = await gate.admitBoot(undefined, { bootUdid: A });
+      expect(first.decision.outcome).toBe("allow");
+
+      source.immediate = undefined;
+      const check = settling(gate.assertCapacityAvailable());
+      await tick();
+      expect(source.pending.length).toBe(1);
+      source.pending[0]([sim(A, "Shutdown"), sim(B, "Shutdown")]);
+      for (let i = 0; i < microtasks; i++) {
+        await Promise.resolve();
+      }
+      first.releaseAdmission?.();
+      await tick();
+      answers.push({ microtasks, answer: check.answer });
+      expect(ledger.liveWindows).toBe(0);
+    }
+
+    for (const { microtasks, answer } of answers) {
+      expect(answer, `N=${microtasks}`).toMatchObject({ code: "capacity_exhausted" });
+    }
+  });
+
+  test("a boot released any number of microtasks after the listing answers still holds its slot for the capacity report", async () => {
+    const answers: Array<{ microtasks: number; answer: unknown }> = [];
+    for (let microtasks = 0; microtasks <= 24; microtasks++) {
+      const source = new ScriptedSource();
+      const { gate, ledger } = build(source);
+      source.immediate = [sim(A, "Shutdown"), sim(B, "Shutdown")];
+      const first = await gate.admitBoot(undefined, { bootUdid: A });
+      expect(first.decision.outcome).toBe("allow");
+
+      source.immediate = undefined;
+      const report = settling(gate.describeCapacity());
+      await tick();
+      expect(source.pending.length).toBe(1);
+      source.pending[0]([sim(A, "Shutdown"), sim(B, "Shutdown")]);
+      for (let i = 0; i < microtasks; i++) {
+        await Promise.resolve();
+      }
+      first.releaseAdmission?.();
+      await tick();
+      answers.push({ microtasks, answer: report.answer });
+      expect(ledger.liveWindows).toBe(0);
+    }
+
+    for (const { microtasks, answer } of answers) {
+      expect(answer, `N=${microtasks}`).toMatchObject({ limit: 1, booted: 0, inFlight: 1 });
+    }
+  });
+
+  test("a caller aborted after the listing resolves but before judgment rejects and closes its window", async () => {
+    const source = new ScriptedSource();
+    const { gate, timer, ledger } = build(source);
+    const controller = new AbortController();
+    const check = settling(gate.assertCapacityAvailable({ signal: controller.signal }));
+    await tick();
+    expect(source.pending.length).toBe(1);
+    source.pending[0]([sim(A, "Shutdown"), sim(B, "Shutdown")]);
+
+    // Deadline cleanup proves the listing won the race; the gate has yet to judge it.
+    for (let i = 0; i < 20 && timer.getPendingTimeoutCount() > 0; i++) {
+      await Promise.resolve();
+    }
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(ledger.liveWindows).toBe(1);
+    expect(check.answer).toBe("pending");
+    const reason = new Error("cancelled before judgment");
+    controller.abort(reason);
+    await tick();
+
+    expect(check.answer).toBe(reason);
+    expect(ledger.liveWindows).toBe(0);
+  });
 });

@@ -188,40 +188,47 @@ export class IosSimCapacityGate
    * A warm simulator is not a substitute here: the caller boots its own device.
    */
   async assertCapacityAvailable(options: { signal?: AbortSignal } = {}): Promise<void> {
-    const { report, window } = await this.sampleInWindow(options);
-    assertCapacityGranted({ decision: this.decide(report, undefined, "hint", undefined, window) });
+    return this.sampleInWindow(options, (report, window) => {
+      assertCapacityGranted({
+        decision: this.decide(report, undefined, "hint", undefined, window),
+      });
+    });
   }
 
   /** Current limit, booted simulators (every Booted one, owned or not) and admitted boots in flight. */
   async describeCapacity(options: { signal?: AbortSignal } = {}): Promise<BootCapacitySnapshot> {
     // Sampled like the check and an admission, so a listing's capacity block and a boot decided
     // at the same instant count the same simulators (#11643).
-    const { report, window } = await this.sampleInWindow(options);
-    this.assertCountKnown(report);
-    return {
-      limit: this.limitsFor(report).maxBooted,
-      booted: occupyingUdids(report).length,
-      inFlight: this.inFlightBootCount(report, undefined, window),
-      hostPressure: {
-        sustained: this.pressuredStreak >= this.sustainedSamples,
-        consecutiveSamples: this.pressuredStreak,
-        memoryPressure: report.host?.memoryPressure ?? "unknown",
-      },
-    };
+    return this.sampleInWindow(options, (report, window) => {
+      this.assertCountKnown(report);
+      return {
+        limit: this.limitsFor(report).maxBooted,
+        booted: occupyingUdids(report).length,
+        inFlight: this.inFlightBootCount(report, undefined, window),
+        hostPressure: {
+          sustained: this.pressuredStreak >= this.sustainedSamples,
+          consecutiveSamples: this.pressuredStreak,
+          memoryPressure: report.host?.memoryPressure ?? "unknown",
+        },
+      };
+    });
   }
 
   /**
    * One listing begun inside its own ledger window, as `admitBoot` takes it: a boot that ends
    * while the listing is open, or after an earlier caller's listing began, still holds its slot
-   * for this read (#11643). Bounded and cancellable like an admission's sample, so a hung
+   * for this read (#11643). Judge synchronously inside the window so a boot released between
+   * closing the window and an awaiting caller resuming cannot disappear from the count.
+   * Bounded and cancellable like an admission's sample, so a hung
    * `simctl list` neither hangs the caller nor keeps the window (and every boot that ends in it)
    * alive: an unfinished sample is an unknown count, retryable `discovery_incomplete`, never
    * "capacity available". A read is not a boot decision, so it does not advance the
    * sustained-pressure streak.
    */
-  private async sampleInWindow(options: {
-    signal?: AbortSignal;
-  }): Promise<{ report: FleetCostReport; window: LedgerSampleWindow }> {
+  private async sampleInWindow<T>(
+    options: { signal?: AbortSignal },
+    judge: (report: FleetCostReport, window: LedgerSampleWindow) => T,
+  ): Promise<T> {
     options.signal?.throwIfAborted();
     const window = this.admittedBoots.beginSample();
     try {
@@ -239,7 +246,7 @@ export class IosSimCapacityGate
           }),
       });
       options.signal?.throwIfAborted();
-      return { report, window };
+      return judge(report, window);
     } finally {
       window.close();
     }

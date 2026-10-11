@@ -321,7 +321,10 @@ releasing.
   (`getAndroid`, `getApple`, `startDevice`) changes the session a connection's
   untargeted calls run on. An explicit `sessionUuid` targets that one call: the
   next call without one still runs on the default (#11347). A connection that has
-  no default yet adopts the first session it names.
+  no default yet adopts the first session it names. A call passing only `platform`
+  matching the default session's device runs on the default when no other owned
+  session has that platform or an unknown platform. `deviceId` names the target
+  device; a `platform` other than the default's does not use the default.
 - **`scripts/mcp-drive.ts`:** a `getAndroid`/`getApple` step captures the session
   and injects it into later steps; `--session <uuid>` reuses an existing one.
 - **Scripts that run `--cli` calls:** keep the acquiring call's `sessionUuid` and

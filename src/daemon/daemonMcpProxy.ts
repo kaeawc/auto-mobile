@@ -77,6 +77,7 @@ import {
   readDeviceSessionSuspectRefusal,
   type DeviceSessionSuspectRefusal,
   getDeviceIdFromResult,
+  getDevicePlatformFromResult,
   getActiveDeviceSelectionFromResult,
   getDeviceSessionIdFromResult,
   DEVICE_SESSION_ACQUISITION_TOOLS,
@@ -1446,6 +1447,8 @@ export class DaemonMcpProxy {
   private readonly daemonIdleReports = new Map<string, DaemonIdleReport>();
   /** Device each held session runs on, learned from acquisition results and explicit calls. */
   private readonly sessionDeviceIds = new Map<string, string>();
+  /** Platform each acquired session runs on; absent when its result did not describe one. */
+  private readonly sessionPlatforms = new Map<string, "android" | "ios">();
   /**
    * Handovers per affected session. A tool call that names the session first attempts an
    * observation-only resume and returns the structured error only when the daemon still does not
@@ -4629,7 +4632,8 @@ export class DaemonMcpProxy {
       (isDeviceInventoryTool(name) || this.isSessionlessReadAfterRelease(name));
     const usesDeviceSelector =
       this.toolTargetsDevice(name) &&
-      this.hasImplicitDeviceSelector(callerArgs, name === "setActiveDevice");
+      this.hasImplicitDeviceSelector(callerArgs, name === "setActiveDevice") &&
+      !this.platformSelectorTargetsBoundSession(name, callerArgs);
     const routingArgs =
       name === SET_TOOL_ENABLED_TOOL_NAME
         ? this.withAcquiredDeviceRoute(callerArgs)
@@ -4773,6 +4777,32 @@ export class DaemonMcpProxy {
     }
     return (
       typeof args.deviceId === "string" || args.platform === "android" || args.platform === "ios"
+    );
+  }
+
+  /** A matching platform alone is untargeted only when no other owned session could match. */
+  private platformSelectorTargetsBoundSession(
+    name: string,
+    args: Record<string, unknown>,
+  ): boolean {
+    const platform = args.platform;
+    const bound = this.boundSessionUuid;
+    if (
+      isDeviceBindingTool(name) ||
+      (platform !== "android" && platform !== "ios") ||
+      typeof args.deviceId === "string" ||
+      this.sessionUuidFromArgs(args) !== undefined ||
+      !bound ||
+      this.terminalBoundSession ||
+      this.sessionPlatforms.get(bound) !== platform
+    ) {
+      return false;
+    }
+    return ![...this.ownedDeviceSessions].some(
+      (sessionUuid) =>
+        sessionUuid !== bound &&
+        (this.sessionPlatforms.get(sessionUuid) === undefined ||
+          this.sessionPlatforms.get(sessionUuid) === platform),
     );
   }
 
@@ -6659,6 +6689,7 @@ export class DaemonMcpProxy {
     this.ownershipReestablishment?.sessionUuids.delete(sessionUuid);
     if (!keepHandover) {
       this.sessionDeviceIds.delete(sessionUuid);
+      this.sessionPlatforms.delete(sessionUuid);
       this.stallHandovers.delete(sessionUuid);
     }
   }
@@ -7230,10 +7261,19 @@ export class DaemonMcpProxy {
       return;
     }
     const mintedSessionUuid = getDeviceSessionIdFromResult(result);
-    if (!mintedSessionUuid || mintedSessionUuid === this.boundSessionUuid) {
+    if (!mintedSessionUuid) {
       return;
     }
-    this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
+    if (mintedSessionUuid !== this.boundSessionUuid) {
+      this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
+    }
+    const platform = getDevicePlatformFromResult(result);
+    if (platform) {
+      this.sessionPlatforms.set(mintedSessionUuid, platform);
+    }
+    if (mintedSessionUuid === this.boundSessionUuid) {
+      return;
+    }
     this.rememberSessionDevice(mintedSessionUuid, getDeviceIdFromResult(result));
     // A prior binding's keeper must not outlive the rebind to a fresh session.
     // (A terminal fence already stopped it; this covers re-acquiring over a live
@@ -7949,6 +7989,7 @@ export class DaemonMcpProxy {
     this.livenessAcks.clear();
     this.daemonIdleReports.clear();
     this.sessionDeviceIds.clear();
+    this.sessionPlatforms.clear();
     this.stallHandovers.clear();
     this.resumedStallNotices.clear();
     this.pendingSessionLosses.clear();

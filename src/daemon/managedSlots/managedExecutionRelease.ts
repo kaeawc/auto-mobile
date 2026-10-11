@@ -1221,7 +1221,8 @@ export class ManagedExecutionRelease {
     sessionId: string,
   ): Promise<"done" | "owner_live"> {
     const owner = (await registry.getAssignment(key))?.execOwner ?? null;
-    if (owner === null || owner.sessionUuid !== sessionId) {
+    // Closed during the read: no write follows; the record dies with this process.
+    if (owner === null || owner.sessionUuid !== sessionId || this.closed) {
       return "done";
     }
     if (this.options.sessions.isSessionLive(sessionId) || this.isExecOwnerLive(owner)) {

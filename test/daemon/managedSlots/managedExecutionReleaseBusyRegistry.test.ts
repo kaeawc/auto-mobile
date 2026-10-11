@@ -843,6 +843,33 @@ describe.each(REGISTRIES)(
         reads.mockRestore();
         releases.mockRestore();
       });
+
+      test("a close that lands during the retry's read is followed by no clear", async () => {
+        busy.calls.releaseExecution = 1;
+        const closesOnRead = new Proxy(faulty, {
+          get(target, property) {
+            const value: unknown = Reflect.get(target, property, target);
+            if (property !== "getAssignment" || typeof value !== "function") {
+              return typeof value === "function" ? value.bind(target) : value;
+            }
+            return async (slot: SlotKey) => {
+              closing.close();
+              return target.getAssignment(slot);
+            };
+          },
+        });
+        const closing: ManagedExecutionRelease = newDrain({ registry: async () => closesOnRead });
+        await closing.releaseExecution(S1);
+        const releases = spyOn(registry, "releaseExecution");
+
+        await closing.whenIdle();
+
+        expect(releases).not.toHaveBeenCalled();
+        expect(await registry.getAssignment(key)).toMatchObject({
+          execOwner: { sessionUuid: S1 },
+        });
+        releases.mockRestore();
+      });
     });
 
     const NEVER_ENDING = OWNERS.flatMap(([owner, ownerPid]) =>

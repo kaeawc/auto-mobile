@@ -78,7 +78,11 @@ read-only `sqlQuery` statement are reads; their other forms, `systemTray`,
 an open read. A read is
 never use, not even the holder's own (#10964): it does not extend the session's
 idle window. Only control calls do, including a holder's calls that name only
-`deviceId`, which run as the holder's session.
+`deviceId`, which run as the holder's session. A control call that is refused
+before it runs is not use either: a call that names a `deviceId` other than its
+session's device (`device_outside_bound_session`), or whose device cannot be
+driven (lost, recovering, shutting down), leaves the idle window where it was
+(#11558).
 
 ## When a session is released
 

@@ -34,6 +34,7 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
@@ -56,9 +57,15 @@ let androidSession: string | undefined;
 let iosSession: string | undefined;
 let previousAutolock: string | undefined;
 let originalRepository: unknown;
+let originalDeviceSessionManager: unknown;
+let deviceSessionManager: FakeDeviceSessionManager;
 let restorePipelineOverrides: (() => void) | undefined;
 
 beforeEach(async () => {
+  originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
+  deviceSessionManager = new FakeDeviceSessionManager();
+  deviceSessionManager.setConnectedDevices(devices);
+  Reflect.set(ToolRegistry, "deviceSessionManager", deviceSessionManager);
   previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
   process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
   db = new Kysely<Database>({
@@ -97,18 +104,22 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  restorePipelineOverrides?.();
-  restorePipelineOverrides = undefined;
-  PlatformDeviceManagerFactory.setInstance(null);
-  (ToolRegistry as any).toolCallRepository = originalRepository;
-  ToolRegistry.clearTools();
-  DaemonState.getInstance().reset();
-  manager.stopCleanupTimer();
-  await db.destroy();
-  if (previousAutolock === undefined) {
-    delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
-  } else {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
+  try {
+    restorePipelineOverrides?.();
+    restorePipelineOverrides = undefined;
+    PlatformDeviceManagerFactory.setInstance(null);
+    (ToolRegistry as any).toolCallRepository = originalRepository;
+    ToolRegistry.clearTools();
+    DaemonState.getInstance().reset();
+    manager.stopCleanupTimer();
+    await db.destroy();
+    if (previousAutolock === undefined) {
+      delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    } else {
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
+    }
+  } finally {
+    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
   }
 });
 
@@ -420,7 +431,17 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     // The connection now holds no iOS session: the selector falls through to ordinary
     // discovery instead of reporting a false ambiguity (#11167), and never reaches the Android one.
     const receivedBeforeIos = received.length;
-    await proxy.callTool("routingProbe", { platform: "ios", keepScreenAwake: false });
+    const scansBeforeIos = deviceSessionManager.getDetectConnectedPlatformsCallCount();
+    const readinessBeforeIos = deviceSessionManager.getEnsureDeviceReadyCallCount();
+    const discovered = await proxy.callTool("routingProbe", {
+      platform: "ios",
+      keepScreenAwake: false,
+    });
+    expect(discovered.isError).toBeFalsy();
+    expect(deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(scansBeforeIos + 1);
+    expect(deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(readinessBeforeIos + 1);
+    expect(deviceSessionManager.getLastEnsureDeviceReadyPlatform()).toBe("ios");
+    expect(received.slice(receivedBeforeIos)).toEqual([devices[1].deviceId]);
     expect(received.slice(receivedBeforeIos)).not.toContain(devices[0].deviceId);
     // setActiveDevice made the iOS session this connection's binding, so its release fences
     // an unqualified call (and a call naming it) until the caller picks a live session (#11235;

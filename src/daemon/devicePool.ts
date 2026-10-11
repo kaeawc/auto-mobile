@@ -45,6 +45,7 @@ import {
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
   SESSION_RELEASE_TEARDOWN_CAP_MS,
   SessionManager,
+  DEVICE_RESTART_RECOVERY_WINDOW_MS,
   SessionRecoveryIdentityLossError,
   type RehydrationDeviceReservation,
   type Session,
@@ -93,7 +94,10 @@ import {
   type DeviceRecoveryPolicy,
   isDeviceSessionContinuityEnabled,
 } from "./poolConfig";
-import { DeviceSessionRepository } from "../db/deviceSessionRepository";
+import {
+  DeviceSessionRepository,
+  isDeviceRestartReleaseReason,
+} from "../db/deviceSessionRepository";
 import { AndroidDeviceReboot, BoundedAndroidDeviceReboot } from "../devices/androidDeviceReboot";
 import {
   DeviceCriteriaMatcher,
@@ -1231,8 +1235,12 @@ export class DevicePool {
   /** Devices held for the persisted rows restart recovery is working through (#11294). */
   private readonly rehydrationReservations = new Map<
     string,
-    RehydrationDeviceReservation["target"]
+    RehydrationDeviceReservation["target"] & {
+      restartHandoff?: boolean;
+      expiryTimer?: NodeJS.Timeout;
+    }
   >();
+  private rehydrationReservationsStopped = false;
   /** Last foreign owner PID logged per device, so a waiting allocation logs each owner once. */
   private readonly loggedForeignDeviceOwners = new Map<string, number>();
   /** Devices whose allocation claim this daemon published and has not withdrawn, by claim store. */
@@ -1561,7 +1569,18 @@ export class DevicePool {
     // release callers retain their ordered cleanup and release flow, while
     // connection ownership and autolock metadata are removed when their session
     // ends.
-    this.sessionManager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, options) => {
+    this.sessionManager.onSessionCreated((session) => {
+      if (this.rehydrationReservations.get(session.sessionId)?.restartHandoff) {
+        this.releaseRehydrationReservation(session.sessionId);
+      }
+    });
+    this.sessionManager.onSessionRelease((sessionId, deviceId, reason, snapshot, options) => {
+      if (snapshot.terminal) {
+        // Includes terminal upgrades of an already completed restart handoff.
+        this.releaseRehydrationReservation(sessionId);
+      } else if (isDeviceRestartReleaseReason(reason)) {
+        this.armDeviceRestartReservationExpiry(sessionId, snapshot.releasedAtMs);
+      }
       this.clearMcpSessionOwnership(sessionId);
       // An expiry handler that owns the ordered release consumes its capture after the attempt.
       if (options.expiryOrigin && !options.deviceReleaseManaged) {
@@ -4629,13 +4648,44 @@ export class DevicePool {
     releaseReason: SessionReleaseReason,
     attempt?: () => Promise<void>,
   ): Promise<void> {
-    await this.retrySessionRelease(
-      sessionId,
-      deviceId,
-      attempt ??
-        (async () =>
-          await this.releaseSessionForDisconnectedDevice(sessionId, deviceId, releaseReason)),
-    );
+    const session = isDeviceRestartReleaseReason(releaseReason)
+      ? this.sessionManager.getSession(sessionId)
+      : null;
+    if (session) {
+      const platform = session.platform;
+      await this.reserveRehydrationDevices(
+        [
+          {
+            sessionId,
+            target: {
+              platform,
+              stableDeviceId: releaseReason.slice("device-restart:".length),
+              deviceId,
+              ...(platform === "android"
+                ? { androidEmulator: isAndroidEmulatorSerial(deviceId) }
+                : {}),
+            },
+          },
+        ],
+        () => this.sessionManager.isCurrentSession(session),
+        true,
+      );
+      this.armDeviceRestartReservationExpiry(sessionId, this.sessionManager.sessionNow());
+    }
+    try {
+      await this.retrySessionRelease(
+        sessionId,
+        deviceId,
+        attempt ??
+          (async () =>
+            await this.releaseSessionForDisconnectedDevice(sessionId, deviceId, releaseReason)),
+      );
+    } finally {
+      // A failed release that left its live owner holding the device needs no recovery hold.
+      if (session && this.sessionManager.isCurrentSession(session)) {
+        this.releaseRehydrationReservation(sessionId);
+      }
+    }
   }
 
   private async retrySessionRelease<T>(
@@ -5866,6 +5916,10 @@ export class DevicePool {
    * sessions are released; a crashed daemon's claims lapse through the owner-socket check.
    */
   releaseDeviceClaimsForShutdown(): void {
+    this.rehydrationReservationsStopped = true;
+    for (const sessionId of [...this.rehydrationReservations.keys()]) {
+      this.releaseRehydrationReservation(sessionId);
+    }
     for (const deviceId of [...this.claimedDeviceIds.keys()]) {
       this.releaseDeviceClaim(deviceId);
     }
@@ -7722,6 +7776,14 @@ export class DevicePool {
    * recovers or fails through the normal path. When two rows name one device the first keeps it.
    */
   async reserveDevicesForRehydration(rows: readonly RehydrationDeviceReservation[]): Promise<void> {
+    await this.reserveRehydrationDevices(rows);
+  }
+
+  private async reserveRehydrationDevices(
+    rows: readonly RehydrationDeviceReservation[],
+    stillCurrent: () => boolean = () => true,
+    restartHandoff = false,
+  ): Promise<void> {
     if (rows.length === 0) {
       return;
     }
@@ -7737,20 +7799,45 @@ export class DevicePool {
         return;
       }
     }
+    if (this.rehydrationReservationsStopped || !stillCurrent()) {
+      return;
+    }
     for (const { sessionId, target } of rows) {
       const managed = this.managedSlotExclusion?.holderOf({
         platform: target.platform,
         stableIds: [target.stableDeviceId, target.deviceId],
       });
-      const alreadyReserved = [...this.rehydrationReservations.values()].some(
-        (reserved) =>
+      const alreadyReserved = [...this.rehydrationReservations.entries()].some(
+        ([holder, reserved]) =>
+          holder !== sessionId &&
           reserved.platform === target.platform &&
           reserved.stableDeviceId === target.stableDeviceId,
       );
       if (!managed && !alreadyReserved) {
-        this.rehydrationReservations.set(sessionId, target);
-        this.notifyRehydrationReservationChanged(target);
+        this.replaceRehydrationReservation(sessionId, target, restartHandoff);
       }
+    }
+  }
+
+  private replaceRehydrationReservation(
+    sessionId: string,
+    target: RehydrationDeviceReservation["target"],
+    restartHandoff: boolean,
+  ): void {
+    const previous = this.rehydrationReservations.get(sessionId);
+    if (previous?.expiryTimer) {
+      this.timer.clearTimeout(previous.expiryTimer);
+    }
+    this.rehydrationReservations.set(sessionId, { ...target, restartHandoff });
+    const targetChanged =
+      !previous ||
+      previous.platform !== target.platform ||
+      previous.stableDeviceId !== target.stableDeviceId;
+    if (previous && targetChanged) {
+      this.notifyRehydrationReservationChanged(previous);
+    }
+    if (targetChanged) {
+      this.notifyRehydrationReservationChanged(target);
     }
   }
 
@@ -7765,10 +7852,30 @@ export class DevicePool {
     }
   }
 
+  private armDeviceRestartReservationExpiry(sessionId: string, releasedAtMs: number): void {
+    const target = this.rehydrationReservations.get(sessionId);
+    if (!target?.restartHandoff) {
+      return;
+    }
+    if (target.expiryTimer) {
+      this.timer.clearTimeout(target.expiryTimer);
+    }
+    target.expiryTimer = this.timer.setTimeout(
+      () => this.releaseRehydrationReservation(sessionId),
+      Math.max(
+        0,
+        releasedAtMs + DEVICE_RESTART_RECOVERY_WINDOW_MS - this.sessionManager.sessionNow(),
+      ),
+    );
+  }
+
   /** Give up the restart-recovery reservation made for `sessionId`, if any (#11294). */
   releaseRehydrationReservation(sessionId: string): void {
     const target = this.rehydrationReservations.get(sessionId);
     if (this.rehydrationReservations.delete(sessionId)) {
+      if (target?.expiryTimer) {
+        this.timer.clearTimeout(target.expiryTimer);
+      }
       logger.info(`[DevicePool] Released the restart-recovery reservation for ${sessionId}`);
       if (target) {
         this.notifyRehydrationReservationChanged(target);

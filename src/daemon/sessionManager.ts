@@ -1370,7 +1370,7 @@ const LEGACY_DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 /** Default grace before a never-heartbeated default-policy session is reaped. */
 export const DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS = 5_000;
 // Give a restarted emulator the same three-minute cold-boot allowance as device readiness.
-const DEVICE_RESTART_RECOVERY_WINDOW_MS = DEFAULT_DEVICE_READY_TIMEOUT_MS;
+export const DEVICE_RESTART_RECOVERY_WINDOW_MS = DEFAULT_DEVICE_READY_TIMEOUT_MS;
 
 function isDeviceRestartReleasedRow(
   persisted: DeviceSession,
@@ -3233,6 +3233,15 @@ export class SessionManager {
       },
     );
     const current = await this.readPersistedSession(persisted.session_uuid);
+    if (
+      current?.release_reason === "expired" &&
+      current.stable_identity_generation === persisted.stable_identity_generation
+    ) {
+      const snapshot = this.expiredReleaseFromPersisted(persisted.session_uuid, current);
+      if (snapshot) {
+        this.notifySessionRelease(snapshot, { upgradeOnly: true });
+      }
+    }
     if (!this.isReissuablePersistedSession(current)) {
       this.restartRecoveryActivityAt.delete(persisted.session_uuid);
     }

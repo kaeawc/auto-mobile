@@ -301,6 +301,16 @@ recorded first in a crash-safe sidecar (`terminal-release-intents.jsonl` in the
 daemon data directory, `src/daemon/terminalReleaseJournal.ts`), and the restarted
 daemon finishes it before rehydrating, so a released UUID is never revived.
 
+A device-restart handoff reserves the recorded platform and stable device identity for
+its session throughout the recovery window, even while the device is absent and no
+call is waiting. Other sessions' selectors skip it and binding by id is refused;
+reads remain available. The hold ends on successful recovery, any terminal session
+release, the three-minute window ending, or daemon shutdown. An idle expiry that falls inside
+the window ends the hold once the expired session is next seen, otherwise when the window
+ends. Managed slots still
+win, and the reservation does not extend the owner's heartbeat lease. A wiped or
+re-imaged device returning under the same AVD name or UDID remains an identity gap.
+
 ## Planned: device state between owners
 
 Display and system settings a session changed are not yet reset when a different

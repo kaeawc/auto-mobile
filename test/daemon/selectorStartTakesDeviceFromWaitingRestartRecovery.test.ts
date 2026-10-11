@@ -1,14 +1,14 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { DevicePool, type PooledDevice } from "../../../src/daemon/devicePool";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import type { BootedDevice } from "../../../src/models";
-import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
-import { FakeDeviceManager } from "../../fakes/FakeDeviceManager";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
-import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import type { BootedDevice } from "../../src/models";
+import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 
 // Hunt 2026-10-11, device-restart recovery, cell 2 (who can take the device during S's recovery
 // window).
@@ -45,18 +45,26 @@ interface DevicePoolLossInternals {
 }
 
 describe("a session waiting in flight for its restarting device", () => {
-  let sessions: SessionManager;
+  let fixtures: Awaited<ReturnType<typeof createSimulatorHolder>>[];
+  let active: Awaited<ReturnType<typeof createSimulatorHolder>>;
 
-  afterEach(() => {
-    sessions.stopCleanupTimer();
+  beforeAll(async () => {
+    // Independent bound holders: only fixture construction is outside the timed tests.
+    // Each test still performs the real loss, handoff, absent retry and returning-device path.
+    fixtures = [await createSimulatorHolder(), await createSimulatorHolder()];
   });
 
-  /** The holder's simulator restarts, and the holder's next control call waits for it. */
-  async function holderWaitsForItsRestartingSimulator() {
+  afterEach(() => {
+    active.pool.releaseDeviceClaimsForShutdown();
+    active.sessions.stopCleanupTimer();
+    active.timer.reset();
+  });
+
+  async function createSimulatorHolder() {
     const timer = new FakeTimer();
     timer.setCurrentTime(1_000);
     const persistence = new FakeDeviceSessionPersistence();
-    sessions = new SessionManager(timer, persistence);
+    const sessions = new SessionManager(timer, persistence);
     sessions.stopCleanupTimer();
     const manager = new FakeDeviceManager([], [SIMULATOR]);
     const pool = new DevicePool(
@@ -82,7 +90,13 @@ describe("a session waiting in flight for its restarting device", () => {
     if (!held) {
       throw new Error("expected the simulator to be pooled");
     }
+    return { timer, persistence, sessions, manager, pool, held };
+  }
 
+  /** The holder's simulator restarts, and the holder's next control call waits for it. */
+  async function holderWaitsForItsRestartingSimulator(index: number) {
+    active = fixtures[index];
+    const { timer, persistence, sessions, manager, pool, held } = active;
     manager.bootedDevices = [];
     await (pool as unknown as DevicePoolLossInternals).evictMissingPooledDevice(
       held,
@@ -103,31 +117,41 @@ describe("a session waiting in flight for its restarting device", () => {
       HOLDER,
       sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true),
     );
-    // Two and a half seconds into the restart the holder's call is still waiting.
-    await timer.advanceTimeAsync(2_500, () => drainMicrotasks(50));
+    await drainUntil(() => timer.getPendingTimeouts().includes(1_000), {
+      description: "holder's first restart retry",
+    });
+    // Exercise one absent-device retry, then wait for its next poll to park.
+    timer.advanceTime(1_000);
+    await drainUntil(() => timer.getPendingTimeouts().includes(1_000), {
+      description: "holder still waiting after absent-device retry",
+    });
     expect(answers).toEqual({});
 
-    return { timer, persistence, pool, manager, answers, record, holderCall };
+    return { timer, persistence, sessions, pool, manager, answers, record, holderCall };
   }
 
   test("control: resumes on the same simulator when it comes back", async () => {
-    const { timer, manager, answers, holderCall } = await holderWaitsForItsRestartingSimulator();
+    const { timer, manager, answers, holderCall } = await holderWaitsForItsRestartingSimulator(0);
 
     manager.bootedDevices = [SIMULATOR];
-    await timer.advanceTimeAsync(2_000, () => drainMicrotasks(50));
+    timer.advanceTime(1_000);
     await holderCall;
 
     expect(answers).toEqual({ [HOLDER]: `holds ${SIMULATOR.deviceId}` });
   });
 
   test("keeps it when another session starts a device by selector as it comes back", async () => {
-    const { timer, persistence, pool, manager, answers, record, holderCall } =
-      await holderWaitsForItsRestartingSimulator();
+    const { timer, persistence, sessions, pool, manager, answers, record, holderCall } =
+      await holderWaitsForItsRestartingSimulator(1);
 
     manager.bootedDevices = [SIMULATOR];
     const newcomerCall = record(NEWCOMER, sessions.getOrCreateSession(NEWCOMER, pool, "ios"));
-    await timer.advanceTimeAsync(2_000, () => drainMicrotasks(50));
-    await Promise.all([holderCall, newcomerCall]);
+    timer.advanceTime(1_000);
+    await holderCall;
+    await settleByFakeEvents(timer, newcomerCall, {
+      description: "selector refusal while holder owns device",
+    });
+    expect(answers[NEWCOMER]).toBe("Error");
 
     expect({
       holder: answers[HOLDER],

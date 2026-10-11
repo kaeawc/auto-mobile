@@ -795,7 +795,8 @@ test.each(["not-attempted", "exhausted"] as const)(
       },
     );
     await flush();
-    expect(timer.getPendingTimeouts()).toEqual([1_000]);
+    // The handoff hold outlives this caller; its three-minute expiry is still armed.
+    expect(timer.getPendingTimeouts()).toEqual([180_000, 1_000]);
     await incidents.completeRecovery(incident.id, outcome, { sessionState: "awaiting-device" });
     timer.advanceTime(1_000);
     await drainUntilQuiescent(timer);
@@ -840,7 +841,8 @@ test("restart assignment keeps waiting while the loss incident has no recovery o
   timer.advanceTime(1_000);
   await flush();
   expect(settled).toBe(false);
-  expect(timer.getPendingTimeouts()).toEqual([1_000]);
+  // The handoff hold outlives this caller; its three-minute expiry is still armed.
+  expect(timer.getPendingTimeouts()).toEqual([180_000, 1_000]);
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
   timer.advanceTime(1_000);
@@ -954,7 +956,8 @@ test("last joined restart waiter aborts slow discovery and fences its late devic
   await drainUntilQuiescent(timer);
   expect(sessions.getSession("session")).toBeNull();
   expect(pool.getDevice(original.deviceId)?.sessionId ?? null).toBeNull();
-  expect(timer.getPendingTimeouts()).toEqual([]);
+  // The handoff hold outlives this caller; its three-minute expiry is still armed.
+  expect(timer.getPendingTimeouts()).toEqual([180_000]);
 });
 
 // #11359: the request deadline is wall time, so a wall step must not move the wait's budget.
@@ -994,7 +997,8 @@ test.each([
     await drainUntilQuiescent(timer);
     expect(sessions.getSession("session")).toBeNull();
     expect(pool.getDevice(original.deviceId)?.sessionId ?? null).toBeNull();
-    expect(timer.getPendingTimeouts()).toEqual([]);
+    // The handoff hold outlives this caller; its three-minute expiry is still armed.
+    expect(timer.getPendingTimeouts()).toEqual([180_000]);
   },
 );
 
@@ -1107,7 +1111,10 @@ test.each(["deadline", "abort"] as const)(
       timer.advanceTime(1_499);
       await drainUntilQuiescent(timer);
       expect(settled).toBe(false);
-      expect(timer.getPendingTimeouts()).toEqual(cancellation === "deadline" ? [1_500] : []);
+      // The handoff hold outlives this caller; its three-minute expiry is still armed.
+      expect(timer.getPendingTimeouts()).toEqual(
+        cancellation === "deadline" ? [180_000, 1_500] : [180_000],
+      );
       if (cancellation === "deadline") {
         timer.advanceTime(1);
       } else {
@@ -1199,7 +1206,8 @@ test("restart assignment bounds slow discovery and fences its late device claim"
   await drainUntilQuiescent(timer);
   expect(sessions.getSession("session")).toBeNull();
   expect(pool.getDevice(original.deviceId)?.sessionId ?? null).toBeNull();
-  expect(timer.getPendingTimeouts()).toEqual([]);
+  // The handoff hold outlives this caller; its three-minute expiry is still armed.
+  expect(timer.getPendingTimeouts()).toEqual([180_000]);
 });
 
 test("binding during a gated idle process exit rejects and evicts the dead emulator", async () => {
@@ -1961,7 +1969,8 @@ test("device-restart resume waits for the same serial and preserves its session 
   try {
     const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
     await flush();
-    expect(timer.getPendingTimeouts()).toEqual([1_000]);
+    // The handoff hold outlives this caller; its three-minute expiry is still armed.
+    expect(timer.getPendingTimeouts()).toEqual([180_000, 1_000]);
     expect(await persistence.getSession?.("session")).toMatchObject({
       release_reason: `device-restart:${original.name}`,
     });
@@ -1987,7 +1996,8 @@ test("device-restart resume keeps retrying across a forward wall-clock step insi
   try {
     const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
     await flush();
-    expect(timer.getPendingTimeouts()).toEqual([1_000]);
+    // The handoff hold outlives this caller; its three-minute expiry is still armed.
+    expect(timer.getPendingTimeouts()).toEqual([180_000, 1_000]);
     // An NTP step an hour forward on a clock whose monotonic reading runs through host sleep
     // (Linux, Windows), so the session clock ignores the step: the recovery window derives from
     // session stamps, and the retry gate must not read the stepped wall clock as past it.
@@ -2016,7 +2026,8 @@ test("device-restart resume waits through an unknown new serial and binds by AVD
     await pool.refreshDevices();
     const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
     await drainUntilQuiescent(timer);
-    expect(timer.getPendingTimeouts()).toEqual([1_000]);
+    // The handoff hold outlives this caller; its three-minute expiry is still armed.
+    expect(timer.getPendingTimeouts()).toEqual([180_000, 1_000]);
     expect(await persistence.getSession?.("session")).toMatchObject({
       release_reason: `device-restart:${original.name}`,
     });
@@ -2109,7 +2120,8 @@ test("device-restart resume terminalizes absence at the persisted restart deadli
   try {
     const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
     await flush();
-    expect(timer.getPendingTimeouts()).toEqual([1_000]);
+    // The handoff hold outlives this caller; its three-minute expiry is still armed.
+    expect(timer.getPendingTimeouts()).toEqual([180_000, 1_000]);
     timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
     await expect(resume).rejects.toThrow("recovery reason: target-absent");
     expect(await persistence.getSession?.("session")).toMatchObject({
@@ -3776,6 +3788,10 @@ test("a cancelled Android recovery does not spend the crash-loop budget (#7545)"
     await expect(firstRecovery).resolves.toBe("released");
     expect(manager.startedDevices).toHaveLength(0);
     expect(sessions.getSession("session")).toBeNull();
+
+    // The cancelled attempt intentionally holds the AVD for its old session's recovery.
+    // End that handoff through terminal release before another session can bind it.
+    await sessions.releaseSession("session", "explicit-release");
 
     // Re-provision the AVD and bind a fresh session, then simulate a
     // genuine loss. maxAttempts is 1, so this only recovers if the

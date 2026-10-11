@@ -5014,8 +5014,9 @@ export class SessionManager {
    * caller can tell a known release from a plain unknown id.
    *
    * A session an idle or heartbeat release has fenced is answered with that reason while the
-   * release is still writing its row (#11646): a tool call is already refused with it, and no
-   * later event un-ends a timer release. Any other release still holding the session (an explicit
+   * release is still writing its row (#11646): a tool call is already refused with it, and the only
+   * releases a commit fence can still overrule are device losses, which no timer reason joins as
+   * the fence's reason. Any other release still holding the session (an explicit
    * release, a device loss a newer observation may still overrule, a handoff) has no own answer
    * yet; a plan label whose base has ended is otherwise answered with the base's reason.
    */

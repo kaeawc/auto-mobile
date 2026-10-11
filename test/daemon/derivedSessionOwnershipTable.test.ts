@@ -403,6 +403,17 @@ describe("a derived label session is judged and recorded as its base", () => {
     expect(w.manager.hasLivenessOwnership(BASE, OWNER_TOKEN)).toBe(true);
   });
 
+  test("a label is adopted as before once its base owner's lease has lapsed", async () => {
+    const w = await world(OWNER);
+    await w.manager.claimLivenessOwnership(BASE, OWNER_TOKEN);
+    expect(w.manager.claimUnownedLivenessOwnership(DERIVED, CLAIMANT_TOKEN)).toBe(false);
+
+    w.timer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
+
+    expect(w.manager.claimUnownedLivenessOwnership(DERIVED, CLAIMANT_TOKEN)).toBe(true);
+    expect(w.manager.hasLivenessOwnership(BASE, OWNER_TOKEN)).toBe(true);
+  });
+
   // The label keeps its own liveness record: the heartbeat path reads and renews the session it
   // names, so the claim is judged on the base and recorded on the label.
   test("a claim through a label is recorded on the label and proves nothing about its base", async () => {

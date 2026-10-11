@@ -9524,7 +9524,7 @@ export class SessionManager {
   /**
    * Recover daemon-local liveness ownership after restart without allowing a
    * keeper to replace an owner that was established by this daemon instance.
-   * A derived label session is not adopted past its base's owner either (#11602).
+   * A derived label session is not adopted past a live lease of its base's owner either (#11602).
    */
   claimUnownedLivenessOwnership(sessionId: string, ownerToken: string): boolean {
     const session = this.getSession(sessionId);
@@ -9535,8 +9535,9 @@ export class SessionManager {
     ) {
       return false;
     }
-    const baseOwnerToken = this.livenessBaseSession(session)?.livenessOwnerToken;
-    if (baseOwnerToken !== undefined && baseOwnerToken !== ownerToken) {
+    // The rule a claim naming the label is judged by: only a live lease of another token refuses.
+    const base = this.livenessBaseSession(session);
+    if (base && this.isForeignLiveOwner(base, ownerToken)) {
       return false;
     }
     session.livenessOwnerToken = ownerToken;

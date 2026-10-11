@@ -9,6 +9,7 @@ import {
   SUSPECT_GRACE_MS,
 } from "../../src/daemon/sessionLivenessWindows";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
+import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -101,7 +102,6 @@ describe("a label whose base is past its idle deadline and not yet scanned", () 
   });
 
   const lookups: Record<string, (w: World) => unknown> = {
-    "a lookup of the label": (w) => w.manager.getSession(LABEL),
     "a peek at the label": (w) => w.manager.peekSession(LABEL),
     "a lookup for a new execution": (w) => w.manager.getSessionForNewExecution(LABEL),
     "a read admitted under the label": (w) =>
@@ -109,10 +109,15 @@ describe("a label whose base is past its idle deadline and not yet scanned", () 
     "a liveness claim on the label": (w) => w.manager.claimLivenessOwnership(LABEL, TOKEN),
     "a heartbeat adopting the label's unowned liveness": (w) =>
       w.manager.claimUnownedLivenessOwnership(LABEL, TOKEN),
+    "CLI policy adoption": (w) => w.manager.adoptCliLivenessPolicy(LABEL),
+    "liveness release": (w) => w.manager.releaseLivenessOwnership(LABEL, TOKEN),
+    "heartbeat recording": (w) => w.manager.recordHeartbeat(LABEL),
+    "heartbeat policy restoration": (w) => w.manager.restoreHeartbeatLivenessPolicy(LABEL),
   };
 
   test.each(Object.keys(lookups))("%s finds no live session and releases nothing", async (name) => {
     const w = await expiredUnscannedBase();
+    const before = { ...w.label };
 
     const found: unknown = await lookups[name](w);
     await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
@@ -122,6 +127,61 @@ describe("a label whose base is past its idle deadline and not yet scanned", () 
     expect(w.manager.hasSession(BASE)).toBe(true);
     expect(w.manager.hasSession(LABEL)).toBe(true);
     expect(w.label.livenessOwnerToken).toBeUndefined();
+    expect(w.label).toEqual(before);
+  });
+
+  test("a holder lookup keeps the label visible and releases nothing", async () => {
+    const w = await expiredUnscannedBase();
+    expect(w.manager.getSession(LABEL)).toBe(w.label);
+    await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+    expect(w.released).toEqual([]);
+    expect(w.manager.hasSession(BASE)).toBe(true);
+  });
+
+  test("stream ingress sees no live label while its device remains held", async () => {
+    const w = await expiredUnscannedBase();
+    const auth = new SessionScopedStreamAuthenticator(() => w.manager, "test stream", {});
+    const input = { sessionUuid: LABEL, deviceId: w.label.assignedDevice };
+    expect(() => auth.authorize(input)).toThrow("is not an active daemon session");
+    expect(auth.resolveSubscriptionIdentity(input)).toMatchObject({
+      sessionExists: false,
+      ownsDevice: false,
+      hasDeviceOwner: true,
+    });
+    await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+    expect(w.released).toEqual([]);
+    expect(w.manager.getSession(LABEL)).toBe(w.label);
+  });
+
+  test("liveness release leaves the label's existing owner intact", async () => {
+    const w = await liveBaseAndLabel();
+    expect(await w.manager.claimLivenessOwnership(LABEL, TOKEN)).toBe("claimed");
+    w.timer.advanceTime(BASE_IDLE_MS + 1);
+    const before = { ...w.label };
+    expect(await w.manager.releaseLivenessOwnership(LABEL, TOKEN)).toBe("not-found");
+    expect(w.label).toEqual(before);
+    expect(w.label.livenessOwnerToken).toBe(TOKEN);
+    expect(w.released).toEqual([]);
+  });
+
+  test("non-owner control gets the base's terminal reason and lazily ends the base", async () => {
+    const w = await expiredUnscannedBase();
+    const before = { ...w.label };
+    const error = await refusal(
+      w.manager.getOrCreateSession(
+        LABEL,
+        undefined,
+        undefined,
+        undefined,
+        true,
+        "non-owner-control",
+      ),
+    );
+    await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+    expect(error.sessionUuid).toBe(LABEL);
+    expect(error.release.releaseReason).toBe("lazy-expiry");
+    expect(w.released).toEqual([[BASE, "lazy-expiry"]]);
+    expect(w.label).toEqual(before);
   });
 
   test("a read naming it is answered sessionless, never refused", async () => {

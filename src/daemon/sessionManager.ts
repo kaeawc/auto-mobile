@@ -1430,6 +1430,11 @@ export class SessionManager {
   // Base session → its derived `${base}:${label}` sessions (#11091), outside the base's cache so
   // it survives the base's removal. Consumed by takeDerivedLabelSessions.
   private readonly derivedLabelSessionsByBase = new Map<string, Set<string>>();
+  // Retain the base's terminal end while the cascade owns a still-published label (#11640).
+  private readonly endedLabelBases = new Map<
+    string,
+    { baseSessionId: string; releaseReason: string }
+  >();
   /**
    * Derived label sessions a plan run's allocation may mint right now, counted per open run
    * (#11572). See {@link openPlanLabelMints}.
@@ -3387,7 +3392,7 @@ export class SessionManager {
    * Get existing session
    */
   getSession(sessionId: string): Session | null {
-    return this.unlessBaseEnded(this.getSessionInternal(sessionId, false));
+    return this.getSessionInternal(sessionId, false);
   }
 
   /**
@@ -3651,7 +3656,7 @@ export class SessionManager {
       return existing;
     }
 
-    this.refuseLabelOfEndedBase(sessionId, access, execution?.executionId ?? callerExecutionId);
+    this.refuseLabelOfEndedBase(sessionId, access, execution, callerExecutionId);
     this.assertTerminalReleaseAdmission(sessionId);
 
     const terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
@@ -9475,6 +9480,7 @@ export class SessionManager {
     if (!this.planLabelMints.has(sessionId) || this.sessions.has(sessionId)) {
       return;
     }
+    this.endedLabelBases.delete(sessionId);
     if (this.terminalReleaseSnapshots.delete(sessionId)) {
       this.terminalReleaseReasonStates.delete(sessionId);
       this.terminalReleaseJournal.resolve(sessionId);
@@ -9614,8 +9620,15 @@ export class SessionManager {
    * so a release of the base can still cascade to its derived sessions. Entries may name sessions
    * that are already gone; the caller checks each one.
    */
-  takeDerivedLabelSessions(baseSessionId: string): string[] {
+  takeDerivedLabelSessions(baseSessionId: string, releaseReason?: string): string[] {
     const derived = this.derivedLabelSessionsByBase.get(baseSessionId);
+    if (releaseReason !== undefined && isTerminalReleaseReason(releaseReason)) {
+      for (const labelSessionId of derived ?? []) {
+        if (this.sessions.has(labelSessionId)) {
+          this.endedLabelBases.set(labelSessionId, { baseSessionId, releaseReason });
+        }
+      }
+    }
     this.derivedLabelSessionsByBase.delete(baseSessionId);
     // The base is being released: its plan run, and with it every label session's, is over.
     derived?.forEach((labelSession) => this.runningPlanLabelSessions.delete(labelSession));
@@ -9699,7 +9712,7 @@ export class SessionManager {
    * `test/lint/livenessActivityClockSeparation.test.ts` (#10668).
    */
   recordHeartbeat(sessionId: string): void {
-    const session = this.getSession(sessionId);
+    const session = this.unlessBaseEnded(this.getSession(sessionId));
     if (!session) {
       logger.warn(`Cannot record heartbeat for session ${sessionId}: not found`);
       return;
@@ -9755,14 +9768,14 @@ export class SessionManager {
     sessionId: string,
     ownerToken: string,
   ): Promise<LivenessClaimOutcome> {
-    const session = this.getSession(sessionId);
+    const session = this.unlessBaseEnded(this.getSession(sessionId));
     if (!session) {
       logger.warn(`Cannot claim liveness ownership for session ${sessionId}: not found`);
       return "not-found";
     }
     const mutex = this.livenessOwnershipClaimMutexFor(session);
     return await mutex.runExclusive(async () => {
-      if (this.getSession(sessionId) !== session) {
+      if (this.unlessBaseEnded(this.getSession(sessionId)) !== session) {
         return "not-found";
       }
       const processedClaims = session.livenessOwnershipClaims ?? new Set<string>();
@@ -9821,13 +9834,17 @@ export class SessionManager {
    * or past its idle deadline and not yet scanned is no longer a live session to anyone. The
    * reason is the base's recorded one, or the one its expiry would record. A read of state: it
    * releases, stamps and fences nothing. Undefined for a session no plan run minted, and once the
-   * base's release has handed the label to the release cascade.
+   * label itself has been removed, including while the release cascade runs.
    */
   private endedBaseOfLabel(
     label: Session,
   ): { baseSessionId: string; releaseReason: string } | undefined {
     if (label.persistenceMetadata?.source !== PLAN_LABEL_SESSION_SOURCE) {
       return undefined;
+    }
+    const retained = this.endedLabelBases.get(label.sessionId);
+    if (retained) {
+      return retained;
     }
     // Each hop is a strict prefix of the last, so this ends at the outermost base.
     for (
@@ -9895,6 +9912,7 @@ export class SessionManager {
   private refuseLabelOfEndedBase(
     sessionId: string,
     access: SessionAccess,
+    execution: SessionExecutionMetadata | undefined,
     callerExecutionId: string | undefined,
   ): void {
     const label = this.sessions.get(sessionId);
@@ -9903,7 +9921,10 @@ export class SessionManager {
       return;
     }
     if (access !== "read-only") {
-      this.releaseSessionPastIdleDeadline(ended.baseSessionId, callerExecutionId);
+      this.releaseSessionPastIdleDeadline(
+        ended.baseSessionId,
+        execution?.executionId ?? callerExecutionId,
+      );
     }
     throw new TerminalSessionError(
       sessionId,
@@ -9922,16 +9943,26 @@ export class SessionManager {
     sessionId: string,
     callerExecutionId?: string,
   ): TerminalSessionError | undefined {
-    const releaseReason = this.sessionEndReason(sessionId);
+    const answer = this.peekTerminalAnswerForEndedSession(sessionId);
+    if (answer) {
+      this.releaseSessionPastIdleDeadline(sessionId, callerExecutionId);
+    }
+    return answer;
+  }
+
+  /** The same terminal answer, judged without releasing or stamping anything (#11640). */
+  peekTerminalAnswerForEndedSession(sessionId: string): TerminalSessionError | undefined {
+    const session = this.sessions.get(sessionId);
+    const releaseReason =
+      this.sessionEndReason(sessionId) ??
+      (session ? this.endedBaseOfLabel(session)?.releaseReason : undefined);
     if (releaseReason === undefined) {
       return undefined;
     }
     const fenced = this.terminalReleaseSnapshots.get(sessionId);
-    const session = this.sessions.get(sessionId);
     if (fenced || !session) {
       return fenced && new TerminalSessionError(sessionId, fenced);
     }
-    this.releaseSessionPastIdleDeadline(sessionId, callerExecutionId);
     return new TerminalSessionError(sessionId, this.terminalReleaseAsOfNow(session, releaseReason));
   }
 
@@ -9962,12 +9993,15 @@ export class SessionManager {
     sessionId: string,
     ownerToken: string,
   ): Promise<LivenessReleaseOutcome> {
-    const session = this.getSession(sessionId);
+    const session = this.unlessBaseEnded(this.getSession(sessionId));
     if (!session || !this.isAdmittedForAutomation(session)) {
       return "not-found";
     }
     return await this.livenessOwnershipClaimMutexFor(session).runExclusive(async () => {
-      if (this.getSession(sessionId) !== session || !this.isAdmittedForAutomation(session)) {
+      if (
+        this.unlessBaseEnded(this.getSession(sessionId)) !== session ||
+        !this.isAdmittedForAutomation(session)
+      ) {
         return "not-found";
       }
       if (session.livenessOwnerToken === undefined) {
@@ -10377,7 +10411,7 @@ export class SessionManager {
 
   /** Return whether `ownerToken` is still authorized to refresh the session. */
   hasLivenessOwnership(sessionId: string, ownerToken: string): boolean {
-    return this.getSession(sessionId)?.livenessOwnerToken === ownerToken;
+    return this.unlessBaseEnded(this.getSession(sessionId))?.livenessOwnerToken === ownerToken;
   }
 
   /**
@@ -10387,7 +10421,7 @@ export class SessionManager {
    * another token that holds its base (#11602).
    */
   claimUnownedLivenessOwnership(sessionId: string, ownerToken: string): boolean {
-    const session = this.getSession(sessionId);
+    const session = this.unlessBaseEnded(this.getSession(sessionId));
     if (!session) {
       return false;
     }
@@ -10417,7 +10451,7 @@ export class SessionManager {
    * is best-effort and must never fail the tool call that carried it.
    */
   adoptCliLivenessPolicy(sessionId: string, requestedIdleTimeoutMs?: number): boolean {
-    const session = this.getSession(sessionId);
+    const session = this.unlessBaseEnded(this.getSession(sessionId));
     if (!session) {
       logger.warn(`Cannot adopt CLI liveness policy for session ${sessionId}: not found`);
       return false;
@@ -10533,7 +10567,7 @@ export class SessionManager {
    * restore (unknown session, or one that never adopted the CLI policy).
    */
   restoreHeartbeatLivenessPolicy(sessionId: string): boolean {
-    const session = this.getSession(sessionId);
+    const session = this.unlessBaseEnded(this.getSession(sessionId));
     if (!session || session.livenessPolicy !== "cli-idle") {
       return false;
     }
@@ -10801,6 +10835,7 @@ export class SessionManager {
       this.deviceSessionMap.delete(session.assignedDevice);
     }
     this.sessions.delete(sessionId);
+    this.endedLabelBases.delete(sessionId);
     // The session ended: its row is no longer rewritten live, and no retry timer outlives it.
     this.settleOwedSupersededRowReassert(session);
     this.sessionDeviceMap.delete(sessionId);

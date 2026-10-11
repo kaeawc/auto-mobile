@@ -207,8 +207,10 @@ The daemon recognizes these rows by `device_sessions.source = 'plan-label'`.
 
 A label session is usable only while its base is live (#11640). Once the base
 has ended for a terminal reason, is being released for one, or is past its idle
-deadline and not yet scanned, each of its label sessions is no session to
-anyone, the base's owner included, whatever the label's own idle window says:
+deadline and not yet scanned, its labels admit no control or liveness request,
+even from the base's owner, whatever the label's own idle window says. Holder
+lookups still see the label until its own release starts:
+its device stays held until the release cascade frees it.
 
 - A control call naming the label (a tool call, an `input/*` frame for its
   device, a plan step) is refused with `session_ownership_lost`, `retryable:
@@ -238,11 +240,13 @@ anyone, the base's owner included, whatever the label's own idle window says:
   its UUID usable (`plan-auto-release`, a `daemon-shutdown` or
   `device-restart:<device>` handoff) releases its labels with
   `plan-auto-release`, as before.
-- A plan whose base ends while it runs fails with the base's end, not with
-  "label is not allocated": the `executePlan` result has `success: false`,
+- A plan whose step is refused because its base ended fails with that end, not
+  with "label is not allocated": the `executePlan` result has `success: false`,
   `code: "session_ownership_lost"`, `retryable: false`, `nextAction:
   "acquire_new_session"` and `details.reason` set to the base's release reason,
-  and its failed step's error names that reason.
+  and its failed step's error names that reason. An unrelated step failure keeps
+  its own error without those terminal fields. Building the result releases
+  nothing.
 
 How long a plan can run on its labels: a step on a label restarts only the
 label's idle window, never the base's. The base's idle window is restarted by

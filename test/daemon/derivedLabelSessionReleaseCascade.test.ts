@@ -3,7 +3,11 @@ import {
   registerDerivedLabelSessionReleaseCascade,
   type DerivedLabelSessionReleaseCascade,
 } from "../../src/daemon/derivedLabelSessionReleaseCascade";
-import { PLAN_AUTO_RELEASE_REASON, SessionManager } from "../../src/daemon/sessionManager";
+import {
+  PLAN_AUTO_RELEASE_REASON,
+  SessionManager,
+  TerminalSessionError,
+} from "../../src/daemon/sessionManager";
 import { sessionReleaseThatCancelledCall } from "../../src/daemon/sessionReleasedDuringCall";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { ExecutionTracker } from "../../src/server/executionTracker";
@@ -95,7 +99,59 @@ describe("derived label sessions are released with their base (#11091)", () => {
       ["base:C", PLAN_AUTO_RELEASE_REASON],
     ]);
     expect(manager.getTerminalReleaseSnapshot("base:B")).toBeUndefined();
+    await manager.createSession("base", "device-A", "android");
+    await asPlanAllocation(manager, "base", ["base:B"], () =>
+      manager.createSession("base:B", "device-B", "android"),
+    );
+    manager.setDeviceLabels("base", buildDeviceLabelMap(["A", "B"], "base"));
+    expect((await manager.getOrCreateSession("base:B")).sessionId).toBe("base:B");
   });
+
+  test.each(["explicit-release", "lazy-expiry", "cleanup-expired"])(
+    "%s refuses label admission on every microtask turn through the cascade",
+    async (reason) => {
+      const base = manager.getSession("base")!;
+      const label = manager.getSession("base:B")!;
+      base.expiresAt = manager.sessionNow() + 1_000;
+      const stampedAt = label.lastUsedAt;
+      let release: Promise<unknown> | undefined;
+      if (reason === "explicit-release") {
+        release = manager.releaseSession("base", reason);
+      } else {
+        timer.advanceTime(1_001);
+        if (reason === "lazy-expiry") {
+          manager.getSession("base");
+        } else {
+          manager.cleanupExpiredSessions();
+        }
+      }
+      const attempts: Promise<unknown>[] = [];
+      for (let turn = 0; turn < 64; turn++) {
+        expect(manager.peekSession("base:B")).toBeNull();
+        attempts.push(
+          manager.getOrCreateSession("base:B").then(
+            () => {
+              throw new Error(`label admitted at microtask turn ${turn}`);
+            },
+            (error: unknown) => {
+              expect(error).toBeInstanceOf(TerminalSessionError);
+              if (!(error instanceof TerminalSessionError)) {
+                throw error;
+              }
+              expect(error.sessionUuid).toBe("base:B");
+              expect(error.release.releaseReason).toBe(reason);
+            },
+          ),
+        );
+        await Promise.resolve();
+      }
+      await Promise.all(attempts);
+      await release;
+      await cascade.settled();
+      expect(label.lastUsedAt).toBe(stampedAt);
+      expect(manager.hasSession("base:B")).toBe(false);
+    },
+  );
 
   // #11490: the cascade frees a derived session's device, so it cuts that session's calls first.
   // #11640: the label ended with its base, so its call is told so, typed and under its own id.

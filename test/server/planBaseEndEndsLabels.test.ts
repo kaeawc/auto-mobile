@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
+import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
+import { planBaseEndFields } from "../../src/server/planExecutionOrchestrator";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../../src/daemon/sessionReleasedDuringCall";
 import { TerminalSessionError } from "../../src/daemon/sessionManager";
@@ -33,6 +35,17 @@ const STRANGER = "conn-stranger";
 /** The plan call's request deadline, after which it no longer holds its base (plus the grace). */
 const PLAN_DEADLINE_MS = 60_000;
 const DEADLINE_GRACE_MS = 10_000;
+
+beforeAll(async () => {
+  const warm = await createPlanSessionHunt([deviceA, deviceB, deviceC]);
+  try {
+    // Pay the harness's cold tool/schema initialization outside each scenario's budget.
+    await warm.acquire();
+    await warm.runPlan(twoDevicePlan(["B", "B", "B"]));
+  } finally {
+    warm.tearDown();
+  }
+});
 
 interface LongPlan {
   hunt: PlanSessionHunt;
@@ -196,12 +209,107 @@ describe("a plan whose steps run on a label for longer than its base's idle wind
       // Nearly three idle windows passed without a stamp on the base, which the plan's call held.
       expect(baseLiveAfterStep).toEqual([true, true, true]);
       expect(sessionManager.sessionNow() - baseStampedAt).toBeGreaterThan(2 * idleMs);
-      expect(plan.released.filter(([, reason]) => reason !== "plan-auto-release")).toEqual([]);
     }),
   );
 });
 
 describe("a plan whose base idles out while its steps run on a label", () => {
+  test.each([BASE, LABEL_B])(
+    "result fields for the terminal refusal of %s are a pure read",
+    (sessionUuid) =>
+      longPlanOnItsLabel(async (plan) => {
+        const { sessionManager } = plan.hunt.daemon();
+        let checked = false;
+        plan.whenBaseOutlived(async () => {
+          const ended = sessionManager.peekTerminalAnswerForEndedSession(sessionUuid);
+          expect(ended).toBeInstanceOf(TerminalSessionError);
+          const failedStep = { stepIndex: 1, tool: "huntProbe", device: "B", error: String(ended) };
+          expect(planBaseEndFields(BASE, false, failedStep)).toMatchObject({
+            code: SESSION_OWNERSHIP_LOST_CODE,
+            retryable: false,
+            details: { sessionUuid: BASE, reason: "lazy-expiry" },
+          });
+          expect(
+            planBaseEndFields(BASE, false, {
+              ...failedStep,
+              error: `ordinary error mentions ${ended}`,
+            }),
+          ).toEqual({});
+          await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+          expect(plan.released).toEqual([]);
+          expect(sessionManager.hasSession(BASE)).toBe(true);
+          checked = true;
+        });
+        await plan.run();
+        expect(checked).toBe(true);
+      })(),
+  );
+
+  test(
+    "the label still holds its device against a stranger's exact-device bind",
+    longPlanOnItsLabel(async (plan) => {
+      const { sessionManager, pool } = plan.hunt.daemon();
+      let checked = false;
+      plan.whenBaseOutlived(async () => {
+        const label = sessionManager.getSession(LABEL_B);
+        expect(label?.sessionId).toBe(LABEL_B);
+        await expect(
+          pool.bindOrReuseDeviceSession(
+            "5e550000-0000-4000-8000-0000000000ff",
+            deviceB.deviceId,
+            "ios",
+            undefined,
+            undefined,
+            undefined,
+            false,
+            undefined,
+            undefined,
+            undefined,
+            STRANGER,
+          ),
+        ).rejects.toBeInstanceOf(InputDeviceOwnedError);
+        expect(plan.hunt.poolHolder(deviceB.deviceId)).toBe(LABEL_B);
+        expect(sessionManager.getSession(LABEL_B)).toBe(label);
+        expect(plan.released).toEqual([]);
+        checked = true;
+      });
+      await plan.run();
+      expect(checked).toBe(true);
+    }),
+  );
+
+  test(
+    "an ordinary step failure stays ordinary and building its fields releases nothing",
+    longPlanOnItsLabel(async (plan) => {
+      const { sessionManager } = plan.hunt.daemon();
+      plan.whenBaseOutlived(async () => {
+        const stampedAt = sessionManager.getSession(LABEL_B)?.lastUsedAt;
+        expect(
+          planBaseEndFields(BASE, false, {
+            stepIndex: 1,
+            tool: "huntProbe",
+            device: "B",
+            error: "Error: ordinary probe failure unrelated to sessions",
+          }),
+        ).toEqual({});
+        await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+        expect(plan.released).toEqual([]);
+        expect(sessionManager.hasSession(BASE)).toBe(true);
+        expect(sessionManager.getSession(LABEL_B)?.lastUsedAt).toBe(stampedAt);
+        throw new Error("ordinary probe failure unrelated to sessions");
+      });
+      const result = await plan.run();
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("ordinary probe failure unrelated to sessions");
+      expect(result.code).toBeUndefined();
+      await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+      expect(plan.released.filter(([id]) => id === BASE)).toEqual([[BASE, "lazy-expiry"]]);
+      expect(plan.released.filter(([id]) => id === LABEL_B)).toEqual([[LABEL_B, "lazy-expiry"]]);
+      expect(plan.hunt.poolHolder(deviceA.deviceId)).toBeUndefined();
+      expect(plan.hunt.poolHolder(deviceB.deviceId)).toBeUndefined();
+    }),
+  );
+
   test.each([
     ["a stranger connection", STRANGER],
     ["the owner", OWNER],

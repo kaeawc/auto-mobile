@@ -17,7 +17,7 @@ import { executionTracker } from "../server/executionTracker";
 /** The slice of the session manager the cascade needs. */
 export interface DerivedLabelSessionSource extends SessionReleaseManager {
   getSession(sessionId: string): { assignedDevice: string } | null;
-  takeDerivedLabelSessions(baseSessionId: string): string[];
+  takeDerivedLabelSessions(baseSessionId: string, releaseReason?: string): string[];
   onSessionRelease(callback: SessionReleaseCallback): void;
 }
 
@@ -100,7 +100,7 @@ export function registerDerivedLabelSessionReleaseCascade(
     if (options?.upgradeOnly) {
       return;
     }
-    const derived = manager.takeDerivedLabelSessions(sessionId);
+    const derived = manager.takeDerivedLabelSessions(sessionId, reason);
     if (derived.length === 0) {
       return;
     }

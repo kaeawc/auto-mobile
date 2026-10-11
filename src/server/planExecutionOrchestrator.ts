@@ -292,13 +292,29 @@ export function planShutdownInterruptionFields(
 export function planBaseEndFields(
   baseSessionUuid: string | undefined,
   planSucceeded: boolean,
+  failedStep?: PlanExecutionResult["failedStep"],
 ): Pick<ExecutePlanResult, "code" | "retryable" | "nextAction" | "details"> {
   const daemonState = DaemonState.getInstance();
-  if (planSucceeded || !baseSessionUuid || !daemonState.isInitialized()) {
+  if (planSucceeded || !baseSessionUuid || !failedStep || !daemonState.isInitialized()) {
     return {};
   }
-  const ended = daemonState.getSessionManager().terminalAnswerForEndedSession(baseSessionUuid);
+  const manager = daemonState.getSessionManager();
+  const ended = manager.peekTerminalAnswerForEndedSession(baseSessionUuid);
   if (!ended) {
+    return {};
+  }
+  // The executor retains only the failed step's string, not its thrown error. Match the exact
+  // terminal answer, never infer causality from the base merely having expired (#11640).
+  const labelEnd = failedStep.device
+    ? manager.peekTerminalAnswerForEndedSession(`${baseSessionUuid}:${failedStep.device}`)
+    : undefined;
+  if (
+    failedStep.error !== String(ended) &&
+    !(
+      labelEnd?.release.releaseReason === ended.release.releaseReason &&
+      failedStep.error === String(labelEnd)
+    )
+  ) {
     return {};
   }
   return {
@@ -557,7 +573,7 @@ export class PlanExecutionOrchestrator {
         totalSteps: result.totalSteps,
         failedStep: result.failedStep,
         error: result.failedStep ? result.failedStep.error : undefined,
-        ...planBaseEndFields(this.request.sessionUuid, result.success),
+        ...planBaseEndFields(this.request.sessionUuid, result.success, result.failedStep),
         ...planShutdownInterruptionFields(this.signal, result.success),
         platform: this.device.platform,
         deviceId: this.device.deviceId,

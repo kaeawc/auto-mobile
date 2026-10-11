@@ -8,7 +8,7 @@ import {
   OWNER_DISCONNECT_GRACE_MS,
   OWNER_DISCONNECTED_RELEASE_REASON,
 } from "../../src/daemon/ownerDisconnectRelease";
-import { PLAN_AUTO_RELEASE_REASON, SessionManager } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { logger } from "../../src/utils/logger";

@@ -908,9 +908,25 @@ interface IdeMutationCall {
    * cut by a release of its session; a forced call acts for no session and runs to its end.
    */
   track(execution: ActiveExecution, asHolder: boolean): void;
+  /** The holder's session admission passed for `execution`: its dispatch will be session use. */
+  admit(execution: ActiveExecution): void;
+  /**
+   * The route passed every pre-dispatch check and is about to act on the device: only now is the
+   * holder's call use of its session (#11596). A route refused before this point ends unstamped.
+   */
+  dispatching(): void;
   /** The socket session that sent the frame: a managed connection mutates only its slot devices. */
   readonly socketSessionId: string | undefined;
 }
+
+/**
+ * One `input/*` frame's device work. It calls `dispatching` once every pre-dispatch check passed
+ * (owner still there, current frame context, budget left, coordinates in bounds), immediately
+ * before it acts on the device: only then is the frame use of the holder's session (#11596).
+ * `runTrackedDeviceInput` always supplies it; it is absent only when a test drives a handler
+ * without that funnel.
+ */
+type InputOperation<T> = (signal?: AbortSignal, dispatching?: () => void) => Promise<T>;
 
 function assertSocketInputNotAborted(signal?: AbortSignal): void {
   signal?.throwIfAborted();
@@ -5409,6 +5425,7 @@ export class UnixSocketServer {
           (request.params as { force?: unknown }).force === true,
           ideMutation,
         );
+        ideMutation?.dispatching();
 
         if (args.platform === "android") {
           AndroidCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
@@ -5460,6 +5477,7 @@ export class UnixSocketServer {
         let usedDirectFileFallback = false;
         let resolution: PreferenceStoreResolution | undefined;
         if (args.value === null || args.value === undefined) {
+          ideMutation?.dispatching();
           ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
             platform,
             device,
@@ -5475,6 +5493,7 @@ export class UnixSocketServer {
           validateTypeForPlatform(platform, args.type as KeyValueType);
           const value = args.value;
           const type = args.type as KeyValueType;
+          ideMutation?.dispatching();
           ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
             platform,
             device,
@@ -5520,6 +5539,7 @@ export class UnixSocketServer {
         const appId = args.appId;
         const fileName = args.fileName;
         const key = args.key;
+        ideMutation?.dispatching();
         const { usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
           platform,
           device,
@@ -5558,6 +5578,7 @@ export class UnixSocketServer {
         );
         const appId = args.appId;
         const fileName = args.fileName;
+        ideMutation?.dispatching();
         const { usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
           platform,
           device,
@@ -5596,7 +5617,9 @@ export class UnixSocketServer {
    *
    * Passing the gate starts the mutation's tracked execution on `ideMutation`, under the holder's
    * session: from here to the end of the route it is control in flight on that session, forced or
-   * not, so the session is never released under it (#11486).
+   * not, so the session is never released under it (#11486). Tracking is not use: the route
+   * restarts the holder's idle window only when it calls `ideMutation.dispatching()`, after its
+   * last pre-dispatch check (#11596).
    */
   private async assertIdeMutationOwnership(
     request: DaemonRequest,
@@ -5668,8 +5691,13 @@ export class UnixSocketServer {
         return;
       }
       await this.admitInputAsControlCall(execution, target.deviceId, target.holderSessionUuid);
-      // The holder's own admitted mutation is use of its session, like its input (#10824).
-      executionTracker.markSessionAdmitted(execution.id);
+      if (ideMutation) {
+        // Tracked from here; stamped as session use only when the route dispatches (#11596).
+        ideMutation.admit(execution);
+      } else {
+        // The holder's own admitted mutation is use of its session, like its input (#10824).
+        executionTracker.markSessionAdmitted(execution.id);
+      }
     } finally {
       if (!ideMutation) {
         executionTracker.endExecution(execution.id);
@@ -5693,8 +5721,18 @@ export class UnixSocketServer {
     const abort = new AbortController();
     let tracked: ActiveExecution | undefined;
     let cutByRelease: ActiveExecution | undefined;
+    let admitted: ActiveExecution | undefined;
     const call: IdeMutationCall = {
       socketSessionId,
+      admit: (execution) => {
+        admitted = execution;
+      },
+      dispatching: () => {
+        if (admitted) {
+          // The holder's own mutation that reaches the device is use of its session (#10824).
+          executionTracker.markSessionAdmitted(admitted.id);
+        }
+      },
       track: (execution, asHolder) => {
         tracked = execution;
         if (!asHolder) {
@@ -6060,7 +6098,7 @@ export class UnixSocketServer {
     const gestureResult = await this.runTrackedKeyedDeviceInput(
       request.method,
       targetDevice,
-      async (signal) => {
+      async (signal, dispatching) => {
         assertSocketInputNotAborted(signal);
         this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/tap");
         const queueWaitMs = this.timer.now() - queueEnterMs;
@@ -6080,6 +6118,7 @@ export class UnixSocketServer {
             [args.x, args.y],
             client.getScreenScaleMetadata?.() ?? null,
           );
+          dispatching?.();
           // The signal reaches the send step itself, so an owner that went away while the client
           // was still connecting never has its tap written to the device (#10006).
           return await this.dispatchFencedInput("Tap", signal, (onDispatch) =>
@@ -6112,6 +6151,7 @@ export class UnixSocketServer {
         );
         // The scale probe awaited the runner; the owner may have left meanwhile.
         assertSocketInputNotAborted(signal);
+        dispatching?.();
         return args.frameContext === undefined
           ? await iosClient.requestTapCoordinates(x, y, args.duration, gestureTimeoutMs)
           : await iosClient.requestTapCoordinates(
@@ -6162,7 +6202,7 @@ export class UnixSocketServer {
     const gestureResult = await this.runTrackedKeyedDeviceInput(
       request.method,
       targetDevice,
-      async (signal) => {
+      async (signal, dispatching) => {
         assertSocketInputNotAborted(signal);
         this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/swipe");
         const queueWaitMs = this.timer.now() - queueEnterMs;
@@ -6178,6 +6218,7 @@ export class UnixSocketServer {
 
         if (args.platform === "android") {
           const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+          dispatching?.();
           return await this.dispatchFencedInput("Swipe", signal, (onDispatch) =>
             client.requestSwipe(
               args.startX,
@@ -6207,6 +6248,7 @@ export class UnixSocketServer {
           "handleInputSwipe",
         );
         assertSocketInputNotAborted(signal);
+        dispatching?.();
         return args.frameContext === undefined
           ? await client.requestDrag(
               startX,
@@ -6290,7 +6332,7 @@ export class UnixSocketServer {
         this.runTrackedKeyedDeviceInput(
           method,
           targetDevice,
-          async (signal) => {
+          async (signal, dispatching) => {
             assertSocketInputNotAborted(signal);
             const queueWaitMs = this.timer.now() - queueEnterMs;
             const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
@@ -6302,6 +6344,8 @@ export class UnixSocketServer {
                 detail: `spent ${queueWaitMs}ms waiting in queue`,
               });
             }
+            // Before the start's admission is captured: it reads the session this frame uses.
+            dispatching?.();
             const client = AndroidCtrlProxyClient.getInstance(
               targetDevice,
               defaultAdbClientFactory,
@@ -6622,7 +6666,7 @@ export class UnixSocketServer {
     const inputResult = await this.runTrackedKeyedDeviceInput(
       request.method,
       targetDevice,
-      async (signal) => {
+      async (signal, dispatching) => {
         assertSocketInputNotAborted(signal);
         // A same-serial emulator may reconnect while this request waits behind an
         // earlier input. Re-read its ADB transport inside the keyed callback so the
@@ -6650,6 +6694,7 @@ export class UnixSocketServer {
         }
 
         const imeAction: ImeAction | undefined = args.submit ? "done" : undefined;
+        dispatching?.();
         return await this.runInputOperationWithTimeout(
           request.method,
           totalTimeoutMs,
@@ -6719,7 +6764,7 @@ export class UnixSocketServer {
     const buttonResult = await this.runTrackedKeyedDeviceInput(
       request.method,
       targetDevice,
-      async (signal) => {
+      async (signal, dispatching) => {
         assertSocketInputNotAborted(signal);
         this.requireCurrentFrameContext(
           targetDevice.deviceId,
@@ -6742,6 +6787,7 @@ export class UnixSocketServer {
         // press to pick up): without it, session teardown mid-home-press leaves
         // the ADB dispatch and foreground-verification reads running (issue #6289).
         const pressButton = new PressButton(targetDevice);
+        dispatching?.();
         return args.frameContext === undefined
           ? await pressButton.press(args.button, remainingTimeoutMs, undefined, signal)
           : await pressButton.press(args.button, remainingTimeoutMs, args.frameContext, signal);
@@ -6788,7 +6834,7 @@ export class UnixSocketServer {
     const keyResult = await this.runTrackedKeyedDeviceInput(
       request.method,
       targetDevice,
-      async (signal) => {
+      async (signal, dispatching) => {
         assertSocketInputNotAborted(signal);
         this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/key");
         const queueWaitMs = this.timer.now() - queueEnterMs;
@@ -6804,6 +6850,7 @@ export class UnixSocketServer {
 
         const inputKey = new InputKey(targetDevice, defaultAdbClientFactory, undefined, this.timer);
         let dispatched = false;
+        dispatching?.();
         return await this.runInputOperationWithTimeout(
           request.method,
           totalTimeoutMs,
@@ -7613,21 +7660,21 @@ export class UnixSocketServer {
   private async runTrackedKeyedDeviceInput<T>(
     toolName: string,
     targetDevice: BootedDevice,
-    operation: (signal?: AbortSignal) => Promise<T>,
+    operation: InputOperation<T>,
     gate?: InputDeviceGate,
   ): Promise<T> {
     const executionKey = `device:${targetDevice.deviceId}`;
     return await this.runTrackedDeviceInput(
       toolName,
       targetDevice,
-      async (signal) =>
+      async (signal, dispatching) =>
         this.runKeyedMcpForward(
           executionKey,
           () => {
             // Parked on the device key, the input may have been cancelled (a session acquired the
             // device, #10829): it is not sent.
             signal?.throwIfAborted();
-            return operation(signal);
+            return operation(signal, dispatching);
           },
           executionKey,
           gate?.chainWait,
@@ -7751,7 +7798,7 @@ export class UnixSocketServer {
   private async runTrackedDeviceInput<T>(
     toolName: string,
     targetDevice: BootedDevice,
-    operation: (signal?: AbortSignal) => Promise<T>,
+    operation: InputOperation<T>,
     ownerSignal?: AbortSignal,
     requester?: () => string | undefined,
   ): Promise<T> {
@@ -7795,9 +7842,12 @@ export class UnixSocketServer {
       executionTracker.bindDeviceExecution(execution.id, targetDevice.deviceId);
       signal.throwIfAborted();
       await this.admitInputAsControlCall(execution, targetDevice.deviceId, sessionUuid);
-      // The holder, readiness and admission checks passed: this input is use of the session
-      // (#10824).
-      executionTracker.markSessionAdmitted(execution.id);
+      // The holder, readiness and admission checks passed, so the execution stays tracked as
+      // control in flight on the session from here on. It is USE of the session (#10824) only once
+      // the handler's own pre-dispatch checks passed too: a frame refused for a stale frame
+      // context, spent budget or out-of-bounds coordinates sends nothing and must not restart the
+      // idle window (#11596).
+      const dispatching = () => executionTracker.markSessionAdmitted(execution.id);
       if (!sessionUuid) {
         // Admitted on a device no session holds: a session acquiring it while this input is parked
         // or in flight cancels it (#10829).
@@ -7814,7 +7864,10 @@ export class UnixSocketServer {
               },
             },
           },
-          () => this.runFencedInputOperation(signal, ownerSignal, operation),
+          () =>
+            this.runFencedInputOperation(signal, ownerSignal, (fenced) =>
+              operation(fenced, dispatching),
+            ),
         ),
       );
     } finally {

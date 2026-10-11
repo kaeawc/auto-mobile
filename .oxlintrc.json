@@ -99,7 +99,8 @@
         "auto-mobile/catch-convention": "warn",
         "auto-mobile/no-unknown-cast": "warn",
         "typescript/no-floating-promises": "warn",
-        "typescript/no-misused-promises": "warn"
+        "typescript/no-misused-promises": "warn",
+        "auto-mobile/no-raw-env-number-parse": "error"
       }
     },
     {

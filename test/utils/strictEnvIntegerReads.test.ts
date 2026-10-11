@@ -17,6 +17,37 @@ import {
 } from "../../src/features/observe/shared/ctrlProxyForwardLeaseOwnership";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { PortManager, computeConfiguredScanEnd } from "../../src/utils/PortManager";
+import {
+  resolveConnectionTimeoutMs,
+  resolveDaemonStartupTimeoutMs,
+  resolveExistingDaemonReachabilityTimeoutMs,
+} from "../../src/daemon/constants";
+import { resolveWorkProfilePollIntervalMs } from "../../src/utils/WorkProfileMonitor";
+import { DefaultIosTunnelClient } from "../../src/ctrlProxy/ios/IosTunnelClient";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
+
+function iproxyStartTimeoutMs(env: NodeJS.ProcessEnv): number {
+  return new DefaultIosTunnelClient({
+    processExecutor: new FakeProcessExecutor(),
+    timer: new FakeTimer(),
+    remoteRunner: {
+      startIproxy: async () => ({ success: true }),
+      stopIproxy: async () => ({ success: true }),
+      getIproxyStatus: async () => ({ success: true }),
+    },
+    useRemoteRunner: () => false,
+    isRunning: async () => false,
+    isConnected: async () => true,
+    prepareRemoteStart: async () => {},
+    getServicePort: () => 8765,
+    getDeviceId: () => "usb-device",
+    isStopping: () => false,
+    isSimulator: () => false,
+    restart: async () => {},
+    env,
+  }).getStartTimeoutMs();
+}
 
 // #11629: every numeric env read is a plain base-10 positive integer, else the default.
 const GARBAGE = ["12abc", "2m", "30s", "1e3", "1.5", "0x10", "-5", "0", "+4", "abc"];
@@ -116,6 +147,55 @@ const cases: Case[] = [
     valid: 12345,
     read: (env) => resolveCtrlProxyForwardLeaseIdleMs(env),
   },
+  {
+    name: "daemon connection timeout",
+    env: "AUTOMOBILE_DAEMON_TIMEOUT_MS",
+    unset: 120_000,
+    valid: 12345,
+    read: (env) => resolveConnectionTimeoutMs(env),
+  },
+  {
+    name: "daemon connection timeout (legacy alias)",
+    env: "AUTO_MOBILE_DAEMON_TIMEOUT_MS",
+    unset: 120_000,
+    valid: 12345,
+    read: (env) => resolveConnectionTimeoutMs(env),
+  },
+  {
+    name: "daemon startup timeout",
+    env: "AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS",
+    unset: 30_000,
+    valid: 12345,
+    read: (env) => resolveDaemonStartupTimeoutMs(env),
+  },
+  {
+    name: "existing daemon reachability timeout",
+    env: "AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS",
+    unset: 10_000,
+    valid: 12345,
+    read: (env) => resolveExistingDaemonReachabilityTimeoutMs(30_000, env),
+  },
+  {
+    name: "work profile poll interval",
+    env: "AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS",
+    unset: 5000,
+    valid: 12345,
+    read: (env) => resolveWorkProfilePollIntervalMs(undefined, env),
+  },
+  {
+    name: "iproxy start timeout",
+    env: "AUTOMOBILE_IPROXY_START_TIMEOUT_MS",
+    unset: 5000,
+    valid: 12345,
+    read: (env) => iproxyStartTimeoutMs(env),
+  },
+  {
+    name: "iproxy start timeout (legacy alias)",
+    env: "AUTO_MOBILE_IPROXY_START_TIMEOUT_MS",
+    unset: 5000,
+    valid: 12345,
+    read: (env) => iproxyStartTimeoutMs(env),
+  },
 ];
 
 // Some readers consult process.env directly: set it, and restore afterwards.
@@ -144,6 +224,26 @@ afterEach(() => {
 });
 
 describe("strict positive-integer env reads (#11629)", () => {
+  test("an explicit work profile poll interval wins over the environment", () => {
+    expect(
+      resolveWorkProfilePollIntervalMs(250, { AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS: "9000" }),
+    ).toBe(250);
+  });
+
+  test("the daemon startup timeout is still clamped to the timer ceiling", () => {
+    expect(
+      resolveDaemonStartupTimeoutMs({ AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS: "99999999999" }),
+    ).toBe(2_147_483_647);
+  });
+
+  test("the reachability timeout stays under two-thirds of the startup budget", () => {
+    expect(
+      resolveExistingDaemonReachabilityTimeoutMs(30_000, {
+        AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS: "60000",
+      }),
+    ).toBe(20_000);
+  });
+
   describe.each(cases)("$name ($env)", ({ env, unset, valid, read }) => {
     test("unset is the default", () => {
       expect(readWith(env, undefined, read)).toBe(unset);

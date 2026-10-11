@@ -95,6 +95,7 @@ function parseEnvNumber(raw: string | undefined, fallback: number, allowZero: bo
   if (raw === undefined || raw.trim() === "") {
     return fallback;
   }
+  // oxlint-disable-next-line auto-mobile/no-raw-env-number-parse -- deliberately lenient: zero (disables the sweep) and fractional values are valid here.
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0 || (!allowZero && parsed === 0)) {
     logger.warn(

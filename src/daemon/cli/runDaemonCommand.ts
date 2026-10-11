@@ -1124,6 +1124,10 @@ const STRICT_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpec>> = {
     valueFlags: RESET_SLOT_SCOPE_FLAGS,
     booleanFlags: ["--force"],
   },
+  // One session id each, optionally with --json: `release-session a b` would free only `a`
+  // and `session-info a --jsno` would drop the typo'd flag (#11612).
+  "session-info": { launchFlags: false, booleanFlags: [DAEMON_JSON_FLAG], positionals: 1 },
+  "release-session": { launchFlags: false, booleanFlags: [DAEMON_JSON_FLAG], positionals: 1 },
 };
 
 /**

@@ -1350,6 +1350,43 @@ describe("restart recovery onto a device a peer daemon took (#11076, #11084)", (
   });
 });
 
+describe("an explicit acquisition of a device a peer daemon claims (#10980, #11442)", () => {
+  test("is refused before any acquisition work: no session is minted, persisted, announced or released, and the peer keeps its claim; once the peer lets go the same acquisition runs every hook once", async () => {
+    scenario = await LivenessScenario.start({ sharedDeviceClaims: true });
+    const created: string[] = [];
+    scenario.daemon.manager.onSessionCreated((session) => created.push(session.sessionId));
+    const persisted = spyOn(scenario.repository, "upsertActiveSession");
+    const readinessBefore = scenario.readinessTouches;
+    scenario.deviceClaims.set(DEVICE_A, PEER_DAEMON_PID);
+
+    // Refused side. The publish-time backstop would also refuse this bind, but only after the
+    // session was created and its hooks ran (navigation graph, appearance sync), then roll it back.
+    const refusal = await rejection(scenario.acquire(DEVICE_A));
+    await scenario.idle(SCAN_MS);
+
+    expect(String(refusal)).toContain("device_owned_by_other_daemon");
+    expect(created).toEqual([]);
+    expect(persisted).not.toHaveBeenCalled();
+    expect(scenario.daemon.manager.getAllSessions()).toEqual([]);
+    expect(scenario.releases).toEqual([]);
+    expect(scenario.readinessTouches).toBe(readinessBefore);
+    expect(scenario.driven).toEqual([]);
+    expect(scenario.deviceClaims.get(DEVICE_A)).toBe(PEER_DAEMON_PID);
+    expectFreed(DEVICE_A);
+
+    // Acquired side: the peer released the device, so the hooks above are observable when they run.
+    scenario.deviceClaims.delete(DEVICE_A);
+    const session = await scenario.acquire(DEVICE_A);
+    await scenario.idle(SCAN_MS);
+
+    expect(created).toEqual([session]);
+    expect(persisted).toHaveBeenCalledTimes(1);
+    expect(scenario.deviceClaims.get(DEVICE_A)).toBe(SCENARIO_DAEMON_PID);
+    expectHeld(session, DEVICE_A);
+    persisted.mockRestore();
+  });
+});
+
 describe("a crash after a terminal release intent (#10959, #11067, #11082)", () => {
   test("a release whose database write never landed is still refused after the restart, while the live session beside it is recovered", async () => {
     scenario = await LivenessScenario.start({

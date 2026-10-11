@@ -34,6 +34,7 @@ import { SIMULATOR_FPS_DEFAULT } from "../features/screen-stream/IosScreenCaptur
 import { WEBRTC_ANDROID_FPS_DEFAULT } from "../features/webrtc/webrtcStreamingConfig";
 import type { BootedDevice } from "../models";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { H264CaptureSource } from "../features/webrtc/H264CaptureSource";
 import {
   H264AccessUnitAssembler,
@@ -225,6 +226,8 @@ const HEARTBEAT_INTERVAL_MS = 1_000;
 // desktop's 10s stall watchdog to reconnect. A silent-but-attached process cannot extend this.
 const SOURCE_PROBE_AFTER_MS = 6_000;
 const SOURCE_EVIDENCE_MAX_AGE_MS = 9_000;
+// Same bound the WebRTC server puts on its close (WEBRTC_SOCKET_CLOSE_TIMEOUT_MS).
+const VIDEO_STREAM_SOCKET_CLOSE_TIMEOUT_MS = 5_000;
 
 function subscriberMaySetCaptureHints(
   kind: StreamSubscriptionKind,
@@ -464,8 +467,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     for (const deviceId of this.captures.keys()) {
       this.endDeviceSubscribers(deviceId, "daemon_shutdown");
     }
-    await Promise.all([...this.captures.keys()].map((deviceId) => this.stopCapture(deviceId)));
-    await Promise.all(this.pendingStops.values());
+    await this.stopCapturesForClose();
     this.socketDeviceIds.clear();
     this.socketSessionUuids.clear();
     this.socketSubscriptionKinds.clear();
@@ -482,6 +484,37 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       for (const { onClose } of this.endingSockets.values()) {
         onClose();
       }
+    }
+  }
+
+  /**
+   * Stop every capture, bounded: a source whose stop() never settles (encoder teardown waiting on
+   * adb forward cleanup for a dead device) must not hold the rest of close(), or the daemon
+   * shutdown stages behind it, past the process limit (#11601). The abandoned stop keeps running.
+   */
+  private async stopCapturesForClose(): Promise<void> {
+    const timedOut = Symbol("video stream capture stop timeout");
+    try {
+      await raceWithDeadline(
+        async () => {
+          await Promise.all([...this.captures.keys()].map((id) => this.stopCapture(id)));
+          await Promise.all(this.pendingStops.values());
+        },
+        {
+          timer: this.timer,
+          timeoutMs: VIDEO_STREAM_SOCKET_CLOSE_TIMEOUT_MS,
+          label: "Video stream socket server shutdown",
+          timeoutError: () => timedOut,
+        },
+      );
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
+      }
+      logger.warn(
+        `[VideoStream] shutdown abandoned the capture stop for ${[...this.pendingStops.keys()].join(", ") || "no device"} ` +
+          `after ${VIDEO_STREAM_SOCKET_CLOSE_TIMEOUT_MS}ms; continuing socket teardown`,
+      );
     }
   }
 

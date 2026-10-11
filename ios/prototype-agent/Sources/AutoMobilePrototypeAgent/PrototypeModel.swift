@@ -109,10 +109,15 @@ final class PrototypeModel: ObservableObject {
         apply(activity: false) { $0.setDeviceDark(dark) }
     }
 
-    func show(_ spec: PrototypeSpec, reset: Bool = false, appearance: PrototypeAppearanceOverride = .device) {
+    func show(
+        _ spec: PrototypeSpec,
+        reset: Bool = false,
+        appearance: PrototypeAppearanceOverride = .device,
+        specBytes: Int? = nil
+    ) {
         // Keep the touchable rects: SwiftUI re-reports a frame only when it changes, so clearing
         // them on a same-geometry re-show would leave the prototype passing every touch through.
-        session.show(spec, reset: reset, appearance: appearance)
+        session.show(spec, reset: reset, appearance: appearance, specBytes: specBytes)
         syncSnackbarTimeouts()
         // An accepted show, including a same-id replace, is activity.
         idleTimer.arm()
@@ -256,7 +261,12 @@ final class PrototypeModel: ObservableObject {
     func binding(forStateKey key: String) -> Binding<String> {
         Binding(
             get: { self.state[key]?.displayString ?? "" },
-            set: { value in self.apply { $0.change(key: key, value: .string(value)) } }
+            set: { value in
+                self.apply { $0.change(key: key, value: .string(value)) }
+                // A rejected edit (#11562) leaves the state as it was; redraw so the field shows it
+                // again instead of the text that was refused.
+                if self.state[key] != .string(value) { self.objectWillChange.send() }
+            }
         )
     }
 }

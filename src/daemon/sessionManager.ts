@@ -94,6 +94,7 @@ import {
   suspectGraceMsFor,
   type LivenessLeaseState,
   type LivenessOwnerHold,
+  type LivenessOwnerLeaseSnapshot,
 } from "./livenessOwnerLease";
 import { isReleaseVetoedByExecutions } from "./unsettledExecutionVeto";
 import {
@@ -120,6 +121,7 @@ import {
   isTerminalReleaseReason,
   outranksReleaseReason,
   releasedRowStatus,
+  shouldJudgeOwnerLeaseForRelease,
   type SessionReleaseReason,
 } from "./releaseReasons";
 import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
@@ -883,6 +885,10 @@ interface PendingSessionRelease {
 
 interface SessionReleaseOperation extends PendingSessionRelease {
   session: Session;
+  /** Suspect before the handoff: the owner's existing grace still runs across teardown (#11691). */
+  judgeSuspectOwnerAtCommit?: boolean;
+  /** Owner proof received during this release; never advances session activity or idle clocks. */
+  ownerHeartbeatDuringRelease?: number;
   /** When the release started; bounds the retry hint for a bind it refuses (#10960). */
   startedAtMs?: number;
   /** Set for an idle release the manager started itself (#11481): see `getIdleReleasesInProgress`. */
@@ -5190,10 +5196,12 @@ export class SessionManager {
     this.releasingSessions.add(session);
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
     const reason = this.createReleaseReasonState(sessionId, releaseReason);
+    const judgeSuspectOwnerAtCommit = this.judgeOwnerLeaseForRelease(session, reason, "start");
     const release: SessionReleaseOperation = {
       session,
       promise: Promise.resolve(null),
       reason,
+      judgeSuspectOwnerAtCommit,
       startedAtMs: this.sessionNow(),
       expiryOrigin: options.expiryOrigin,
       forcedAbort: new AbortController(),
@@ -5692,6 +5700,7 @@ export class SessionManager {
         return this.abandonSupersededRelease(sessionId, deviceId, pendingCleanup);
       }
       const releasedAtMs = this.sessionNow();
+      this.judgeOwnerLeaseForRelease(session, reason, "commit", operation);
       const releaseReason = reason.value;
       const terminalFenceHeldBefore = this.terminalReleaseSnapshots.has(sessionId);
       let releaseSnapshot: SessionReleaseSnapshot = {
@@ -10146,6 +10155,70 @@ export class SessionManager {
       suspectGraceMsFor(session) > 0 &&
       livenessLeaseState(sessionJudgedLeaseSnapshot(session, this.sessionNow())).phase === "lapsed"
     );
+  }
+
+  /**
+   * Credit only the releasing session's owner, within its still-running lease and grace. Socket
+   * heartbeats remain refused; this proof is private to the suspect handoff's commit judgement.
+   */
+  creditOwnerHeartbeatDuringRelease(sessionId: string, ownerToken: string): void {
+    const session = this.getReleasingSession(sessionId);
+    const operation = this.releasePromises.get(sessionId);
+    if (
+      !session ||
+      operation?.session !== session ||
+      operation.forced ||
+      operation.judgeSuspectOwnerAtCommit !== true ||
+      !shouldJudgeOwnerLeaseForRelease(operation.reason.value) ||
+      ownerToken.length === 0 ||
+      session.livenessOwnerToken !== ownerToken
+    ) {
+      return;
+    }
+    const snapshot = this.releaseOwnerLeaseSnapshot(session, operation);
+    if (snapshot && livenessLeaseState(snapshot).phase !== "lapsed") {
+      operation.ownerHeartbeatDuringRelease = snapshot.now;
+    }
+  }
+
+  /** Judge the session's own lease, renewed only here by release-local owner proof (#11691). */
+  private releaseOwnerLeaseSnapshot(
+    session: Session,
+    operation?: SessionReleaseOperation,
+  ): LivenessOwnerLeaseSnapshot | undefined {
+    if (!judgesOwnerHeartbeats(session) || suspectGraceMsFor(session) === 0) {
+      return undefined;
+    }
+    const snapshot = sessionJudgedLeaseSnapshot(session, this.sessionNow());
+    snapshot.lastHeartbeat = Math.max(
+      snapshot.lastHeartbeat,
+      operation?.ownerHeartbeatDuringRelease ?? Number.NEGATIVE_INFINITY,
+    );
+    return snapshot;
+  }
+
+  /** Judge pre-handoff silence for plan cleanup and device restart only. */
+  private judgeOwnerLeaseForRelease(
+    session: Session,
+    reason: ReleaseReasonState,
+    stage: "start" | "commit",
+    operation?: SessionReleaseOperation,
+  ): boolean {
+    if (
+      (stage === "commit" && operation?.judgeSuspectOwnerAtCommit !== true) ||
+      !shouldJudgeOwnerLeaseForRelease(reason.value)
+    ) {
+      return false;
+    }
+    const snapshot = this.releaseOwnerLeaseSnapshot(session, operation);
+    if (!snapshot) {
+      return false;
+    }
+    const { phase } = livenessLeaseState(snapshot);
+    if (phase === "lapsed") {
+      this.upgradeReleaseReason(reason, "heartbeat-timeout");
+    }
+    return phase === "suspect";
   }
 
   /**

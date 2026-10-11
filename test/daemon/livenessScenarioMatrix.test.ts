@@ -583,6 +583,26 @@ describe("owner exits or goes silent", () => {
     expect(releasedAt).toBeLessThanOrEqual(settledAt + NO_HEARTBEAT_BUDGET_MS);
     expectFreed();
   });
+
+  // The start sequence hands the heartbeat monitor a probe that ignores reads (#11322).
+  test("a read in flight holds nothing: a heartbeating owner keeps the session, a silent one is freed within 10 s with the read still open", async () => {
+    scenario = await LivenessScenario.start();
+    const session = await scenario.acquire();
+    const read = scenario.startLongCall(session, "observe");
+
+    // Held side: the owner's heartbeats hold the session, not the read.
+    await scenario.idle(3 * NO_HEARTBEAT_BUDGET_MS);
+    expectHeld(session);
+
+    // Released side: the read is still open when the silent owner's session is freed.
+    const silentSince = scenario.timer.now();
+    scenario.dropHeartbeats = true;
+    const releasedAt = await scenario.idleUntilReleased(session, 2 * NO_HEARTBEAT_BUDGET_MS);
+    expect(releasedAt).toBeLessThanOrEqual(silentSince + NO_HEARTBEAT_BUDGET_MS);
+    expect(scenario.releaseOf(session)?.reason).toBe("heartbeat-timeout");
+    expectFreed();
+    await read.settle();
+  });
 });
 
 describe("desktop / IDE tokenless client", () => {
@@ -679,6 +699,26 @@ describe("daemon restart", () => {
 
     const releasedAt = await scenario.idleUntilReleased(session, 2 * NO_HEARTBEAT_BUDGET_MS);
     expect(releasedAt).toBeLessThanOrEqual(restartedAt + NO_HEARTBEAT_BUDGET_MS);
+    expect(scenario.releaseOf(session)?.reason).toBe("rehydration-owner-timeout");
+    expectFreed();
+  });
+
+  // The start sequence restarts the rehydrated owner windows once the socket accepts owners.
+  test("a start slower than the owner window does not spend it: the window runs from when the daemon can hear owners", async () => {
+    scenario = await LivenessScenario.start();
+    const session = await scenario.acquire();
+    await scenario.idle(20_000);
+    await scenario.proxy.close();
+
+    // The new process rehydrates the session, then takes 20 s to open its socket.
+    await scenario.daemonRestart({ startupMs: 2 * NO_HEARTBEAT_BUDGET_MS });
+    const readyAt = scenario.timer.now();
+    // Held side: the owner still gets lease + grace from the moment it could have reconnected.
+    await scenario.idle(4_000);
+    expectHeld(session);
+
+    const releasedAt = await scenario.idleUntilReleased(session, 2 * NO_HEARTBEAT_BUDGET_MS);
+    expect(releasedAt).toBeLessThanOrEqual(readyAt + NO_HEARTBEAT_BUDGET_MS);
     expect(scenario.releaseOf(session)?.reason).toBe("rehydration-owner-timeout");
     expectFreed();
   });

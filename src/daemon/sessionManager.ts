@@ -2755,6 +2755,7 @@ export class SessionManager {
       logger.warn(`Session ${sessionId} already exists, returning existing session`);
       return this.sessions.get(sessionId)!;
     }
+    this.refuseLabelMintOutsidePlanAllocation(sessionId, assignedDevice);
     const activeReleases = Array.from(this.activeReleasePromises)
       .filter((release) => release.session.sessionId === sessionId)
       .map((release) => release.promise);
@@ -9031,6 +9032,68 @@ export class SessionManager {
   }
 
   /**
+   * The one rule on who mints a derived label session (#11602), applied where every session is
+   * created: an id that reads as `${base}:${label}` of a live session is created only by that
+   * base's plan run, through the allocation window {@link openPlanLabelMints} opens. Anything else
+   * that would create it (a bind with or without a connection identity, a stray call) gets the
+   * terminal answer a late label call gets, and holds no device. No fence is raised, so the plan's
+   * allocation can still mint the name. A row being recovered was admitted by
+   * {@link getOrCreateSession}, and an id whose prefix is no live session is a session of its own.
+   */
+  private refuseLabelMintOutsidePlanAllocation(sessionId: string, deviceId: string): void {
+    if (this.planLabelMints.has(sessionId) || this.pendingPersistedRecoveries.has(sessionId)) {
+      return;
+    }
+    const baseSessionId = this.liveBaseOfDerivedId(sessionId);
+    if (baseSessionId === undefined) {
+      return;
+    }
+    logger.warn(
+      `Refused to create session ${sessionId} outside a plan allocation of its base ${baseSessionId}`,
+    );
+    const now = this.sessionNow();
+    throw new TerminalSessionError(sessionId, {
+      sessionId,
+      deviceId,
+      releaseReason: PLAN_AUTO_RELEASE_REASON,
+      releasedAtMs: now,
+      terminal: true,
+      heartbeat: {
+        lastHeartbeatMs: now,
+        hasReceivedHeartbeat: false,
+        timeoutMs: SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS,
+        ageMs: 0,
+      },
+    });
+  }
+
+  /** The live session `sessionId` reads as a `${base}:${label}` of, the longest such prefix. */
+  private liveBaseOfDerivedId(sessionId: string): string | undefined {
+    for (
+      let separatorIndex = sessionId.lastIndexOf(":");
+      separatorIndex > 0;
+      separatorIndex = sessionId.lastIndexOf(":", separatorIndex - 1)
+    ) {
+      const candidate = sessionId.slice(0, separatorIndex);
+      if (this.peekSession(candidate)) {
+        return candidate;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Whether `sessionId` is live and speaks for the same session as `otherSessionId` wherever
+   * ownership is judged: the two are sessions of one plan (#11602). Releases nothing.
+   */
+  isLiveSessionOfSamePlan(sessionId: string, otherSessionId: string): boolean {
+    return (
+      this.peekSession(sessionId) !== null &&
+      this.ownershipSessionUuid(sessionId) === this.ownershipSessionUuid(otherSessionId)
+    );
+  }
+
+  /**
    * Remove and return every derived `${base}:${label}` session ever published for `baseSessionId`
    * (#11091). Unlike the base's `deviceLabels` cache slot, this index survives the base's removal,
    * so a release of the base can still cascade to its derived sessions. Entries may name sessions
@@ -9219,10 +9282,29 @@ export class SessionManager {
    * and for a label whose base is gone.
    */
   private livenessBaseSession(session: Session): Session | undefined {
-    const baseSessionId = resolveOwnershipSessionUuid(session.sessionId, this);
+    const baseSessionId = this.ownershipSessionUuid(session.sessionId);
     return baseSessionId === session.sessionId
       ? undefined
-      : (this.getSession(baseSessionId) ?? undefined);
+      : (this.peekSession(baseSessionId) ?? undefined);
+  }
+
+  /**
+   * The live session under `sessionId` for a lookup that only judges: unlike {@link getSession},
+   * an expired session the scan has not reached is reported gone and is not released here.
+   */
+  peekSession(sessionId: string): Session | null {
+    return this.getSessionInternal(sessionId, false, undefined, false);
+  }
+
+  /**
+   * The session that speaks for `sessionId` wherever ownership is judged or recorded
+   * ({@link resolveOwnershipSessionUuid}), resolved without releasing anything: an expired base
+   * publishes no labels, and its release is left to the scan and the lazy-expiry paths.
+   */
+  ownershipSessionUuid(sessionId: string): string {
+    return resolveOwnershipSessionUuid(sessionId, {
+      getDeviceLabels: (id) => this.peekSession(id)?.cacheData.deviceLabels,
+    });
   }
 
   /** A session's liveness owner as a claim judges it: on the owner's own heartbeats. */

@@ -35,7 +35,8 @@ Usage: scripts/prepush-node.sh [--changed] [--timing]
 Run the Node pull-request gates in fail-fast order. --changed uses the
 repository's affected-unit-test runner; format, typecheck, and lint remain
 full because their repository-wide baselines and boundaries have no safe
-changed-file mode. Tool definitions drift also runs in both modes. --timing
+changed-file mode. Tool definitions drift and the static Fast Validation subset
+also run in both modes. --timing
 forces the unit timing budget gate on every OS.
 EOF
       exit 0
@@ -111,6 +112,24 @@ tool_definitions_drift_guard() {
   return 1
 }
 
+# The tool-free, TypeScript-relevant subset of the CI Fast Validation job
+# (pull_request.yml "Run fast validation checks" + "Run offline lychee link
+# check"), about 10s wall. Boundary checks that `bun run lint` already runs via
+# check-boundaries.sh are not repeated. Shell, Kotlin, XML and docs-syntax
+# checks belong to scripts/prepush-shell.sh and the platform gates.
+FAST_VALIDATION_CHECKS="yaml,schema-copy-drift,bun-version-coherence,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,shared-process-allowlist,workflow-assertion-triggers,mkdocs-nav,docs-assets,env-var-docs,debug-tags,datetime-now-literal,lfs-pointers"
+
+fast_validation_static_checks() {
+  local checks="$FAST_VALIDATION_CHECKS"
+  # CI always has lychee; skip the offline link pass on machines without it.
+  if command -v lychee > /dev/null 2>&1; then
+    checks="${checks},lychee-offline"
+  else
+    echo "lychee not installed; skipping lychee-offline (CI still runs it)." >&2
+  fi
+  bash scripts/all_fast_validate_checks.sh --only "$checks" --max-parallel 4
+}
+
 db_integration_fast_path() {
   local branch_changes worktree_changes rc paths_changed
   branch_changes="$(vcs_changed_files_since_merge_base origin/main)"
@@ -133,6 +152,7 @@ run_gate "typecheck" bun run typecheck
 run_gate "lint" bun run lint
 run_gate "test as-any ratchet" bash scripts/test-as-any-baseline.sh
 run_gate "tool definitions drift" tool_definitions_drift_guard
+run_gate "fast validation static checks" fast_validation_static_checks
 run_gate "repository lint tests" bun test test/lint/
 run_gate "image runtime smoke" bun run test:image:bun
 

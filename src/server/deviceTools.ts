@@ -137,7 +137,8 @@ import {
   type DeviceProvisioner,
 } from "../devices/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
-import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
+import { requestAcquisitionReceipt, type AcquisitionReceipt } from "../daemon/acquisitionReceipt";
+import { acquireUndoneIfUndelivered, undoUndeliveredAcquisition } from "./undeliveredAcquisition";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
 import {
@@ -188,6 +189,7 @@ import {
   getVirtualDeviceLifecycleCoordinator,
   InMemoryVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleIdentity,
   type VirtualDeviceLifecycleLease,
   type VirtualDeviceLifecycleOperation,
 } from "../devices/virtualDeviceLifecycleCoordinator";
@@ -3642,17 +3644,23 @@ export type DeadlineBoundOperation<T> = (
 /**
  * A session bind as a deadline-bound operation: when its request is cancelled or times out while
  * the bind finishes, the caller gets no session id, so what the bind minted is released again
- * (#11565). The pool fills the receipt in while it binds.
+ * (#11565). The pool fills the receipt in while it binds. `bootOf` names the boot the bind is
+ * for: once its session is gone, the device this request cold-booted is stopped on either
+ * platform (#11593). The request still holds the device's lifecycle lease at that point.
  */
 export function bindUndoneIfUndelivered(
   bind: (receipt: AcquisitionReceipt) => Promise<string>,
+  bootOf?: () => DeviceBootResult | undefined,
 ): DeadlineBoundOperation<string> {
-  return async (_signal, undoIfUndelivered) => {
-    const receipt: AcquisitionReceipt = {};
+  return async (signal, undoIfUndelivered) => {
+    // One receipt per acquiring request, so the request-level undo sees what this bind minted.
+    const receipt = requestAcquisitionReceipt() ?? {};
     undoIfUndelivered(async () => {
-      const daemonState = DaemonState.getInstance();
-      if (daemonState.isInitialized()) {
-        await daemonState.getDevicePool().releaseUndeliveredAcquisition(receipt);
+      await undoUndeliveredAcquisition(receipt, signal.reason);
+      const boot = bootOf?.();
+      // A session the undo had to leave in place keeps the device it runs on.
+      if (boot && !initializedDevicePool()?.getDevice(boot.device.deviceId)?.sessionId) {
+        await cancelUnownedColdBoot(boot);
       }
     });
     return await bind(receipt);
@@ -4071,14 +4079,18 @@ export function cancelUnownedColdBoot(
     return undefined;
   }
   const daemonState = DaemonState.getInstance();
-  if (
-    daemonState.isInitialized() &&
-    daemonState.getDevicePool().hasStartedDeviceProcess(boot.device.deviceId, boot.processHandle)
-  ) {
-    logger.info(
-      `[DeviceTools] Cold boot ${boot.device.deviceId} process ownership transferred before cleanup`,
-    );
-    return undefined;
+  const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+  if (devicePool?.hasStartedDeviceProcess(boot.device.deviceId, boot.processHandle)) {
+    // The pool tracks an Android emulator's process from the bind on. That alone is not
+    // ownership: only a session holding the device keeps the emulator this call booted alive,
+    // the same rule an iOS simulator's boot handle already follows (#11593).
+    if (devicePool.getDevice(boot.device.deviceId)?.sessionId) {
+      logger.info(
+        `[DeviceTools] Cold boot ${boot.device.deviceId} process ownership transferred before cleanup`,
+      );
+      return undefined;
+    }
+    devicePool.markIntentionalShutdown(boot.device.deviceId);
   }
   const termination = terminateColdBootProcess(
     boot.processHandle,
@@ -4093,6 +4105,41 @@ export function cancelUnownedColdBoot(
       );
     }
   });
+}
+
+/**
+ * Stop the device a request booted, and delete the one it created, once that request's result
+ * turned out undelivered and its session is gone (#11593). The request's own lifecycle lease is
+ * released by then, so this takes the device's lease again and queues behind any start already
+ * waiting on it; a device some session holds by the time the lease arrives is left to that session.
+ */
+export async function rollBackUndeliveredBoot(
+  boot: DeviceBootResult,
+  identity: VirtualDeviceLifecycleIdentity,
+  deleteCreated?: (lifecycleLease: VirtualDeviceLifecycleLease) => Promise<void>,
+): Promise<void> {
+  if (boot.source !== "cold-boot" && !deleteCreated) {
+    // A device that was already running stays running.
+    return;
+  }
+  const deps = getDeviceToolsDependencies();
+  const lifecycleLease = await deps.lifecycleCoordinator.reserve(identity, {
+    operation: "start",
+    deadlineMs: deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS,
+  });
+  try {
+    const holder = initializedDevicePool()?.getDevice(boot.device.deviceId)?.sessionId;
+    if (holder) {
+      logger.info(
+        `[DeviceTools] Leaving ${boot.device.deviceId} running: session ${holder} acquired it after the cancelled call released it`,
+      );
+      return;
+    }
+    await cancelUnownedColdBoot(boot);
+    await deleteCreated?.(lifecycleLease);
+  } finally {
+    lifecycleLease.release();
+  }
 }
 
 export function clearColdBootShutdownMarker(
@@ -4672,11 +4719,15 @@ export function registerDeviceTools() {
     { defaultEnabled: true, outputSchema: listDevicesOutputSchema, readOnly: true },
   );
 
+  // The acquiring tools are registered as the request-level race sees them: a call whose client
+  // cancelled before the handler answers is undone and fails with the cancellation (#11593).
+  // provisionDevice does the same inside its handler, where its typed cancellation is built.
   ToolRegistry.register(
     "getAndroid",
     "Find or recover an Android AVD and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
     getAndroidSchema,
-    getAndroidHandler,
+    (args, progress, signal) =>
+      acquireUndoneIfUndelivered(signal, () => getAndroidHandler(args, progress, signal)),
     { defaultEnabled: true, supportsProgress: true, transportRecovery: "connect" },
   );
 
@@ -4684,17 +4735,25 @@ export function registerDeviceTools() {
     "getApple",
     "Find or recover an iOS Simulator and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
     getAppleSchema,
-    getAppleHandler,
+    (args, progress, signal) =>
+      acquireUndoneIfUndelivered(signal, () => getAppleHandler(args, progress, signal)),
     { defaultEnabled: true, supportsProgress: true, transportRecovery: "connect" },
   );
 
-  ToolRegistry.register("startDevice", "Start device", startDeviceSchema, startDeviceHandler, {
-    outputSchema: startDeviceOutputSchema,
-    defaultEnabled: true,
-    supportsProgress: true,
-    hidden: true,
-    transportRecovery: "connect",
-  });
+  ToolRegistry.register(
+    "startDevice",
+    "Start device",
+    startDeviceSchema,
+    (args, progress, signal) =>
+      acquireUndoneIfUndelivered(signal, () => startDeviceHandler(args, progress, signal)),
+    {
+      outputSchema: startDeviceOutputSchema,
+      defaultEnabled: true,
+      supportsProgress: true,
+      hidden: true,
+      transportRecovery: "connect",
+    },
+  );
 
   ToolRegistry.register(
     "provisionDevice",

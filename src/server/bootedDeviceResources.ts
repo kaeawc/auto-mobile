@@ -65,7 +65,14 @@ import {
   type IosRunnerCommandRequirements,
 } from "../features/observe/ios/iosRunnerFeatureCommands";
 import { resolveApkChecksum, resolveIpaChecksum } from "../constants/release";
-import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
+import {
+  type DiscoverySource,
+  discoverySourceOutcome,
+  expectingPooledSources,
+  incompleteDiscoverySources,
+  notApplicableDiscoverySources,
+  sourcesForPlatform,
+} from "../utils/discoverySource";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
   AndroidAvdProvenanceCache,
@@ -268,7 +275,27 @@ export interface BootedDevicesResourceContent {
 
 interface PlatformObservation {
   observationComplete: boolean;
+  /**
+   * The tooling behind this observation is not installed on this host (no adb, not macOS, no
+   * Xcode, no devicectl), so "no devices" is exact and retrying cannot change it (#11605).
+   */
+  notApplicable?: true;
   discoveryError?: DeviceDiscoveryError;
+}
+
+/** One source's observation: complete unless the source exists on this host and did not finish. */
+function sourceObservation(
+  discovery: BootedDeviceDiscovery,
+  source: DiscoverySource,
+): PlatformObservation {
+  const outcome = discoverySourceOutcome(discovery, source);
+  return {
+    observationComplete: outcome !== "incomplete",
+    ...(outcome === "not_applicable" ? { notApplicable: true as const } : {}),
+    ...(outcome === "incomplete" && discovery.sourceErrors?.[source]
+      ? { discoveryError: discovery.sourceErrors[source] }
+      : {}),
+  };
 }
 
 type PoolDeviceStatus = "idle" | "assigned" | "error";
@@ -432,13 +459,36 @@ function bootedDiscoveryError(
   discovery: BootedDeviceDiscovery,
   platform: Platform,
 ): DeviceDiscoveryError {
+  // Prefer a real failure: an `unavailable` error is tooling this host does not have, and explains
+  // an incomplete sweep only when a pooled device depends on that tooling.
+  const errors = [
+    discovery.discoveryErrors?.[platform],
+    platform === "ios" ? discovery.sourceErrors?.["ios-physical"] : undefined,
+  ].filter((error) => error !== undefined);
   return (
-    discovery.discoveryErrors?.[platform] ??
-    (platform === "ios" ? discovery.sourceErrors?.["ios-physical"] : undefined) ?? {
+    errors.find((error) => error.code !== "unavailable") ??
+    errors[0] ?? {
       code: "failed",
       message: `${platform === "android" ? "Android" : "iOS"} booted-device discovery did not complete.`,
     }
   );
+}
+
+/** A platform's observation: complete unless one of its sources exists here and did not finish. */
+function platformObservation(
+  discovery: BootedDeviceDiscovery,
+  platform: Platform,
+): PlatformObservation {
+  if (incompleteDiscoverySources(discovery, [platform]).length > 0) {
+    return {
+      observationComplete: false,
+      discoveryError: bootedDiscoveryError(discovery, platform),
+    };
+  }
+  const noneApply =
+    notApplicableDiscoverySources(discovery, [platform]).length ===
+    sourcesForPlatform(platform).length;
+  return { observationComplete: true, ...(noneApply ? { notApplicable: true as const } : {}) };
 }
 
 /**
@@ -452,9 +502,11 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
   const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
   for (const platform of ["android", "ios"] as Platform[]) {
     try {
-      const discovery =
-        await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
       const pool = readDaemonDeviceContext().devicePool;
+      const discovery = expectingPooledSources(
+        await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform),
+        pool?.getAllDevices(),
+      );
       const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
       const normalized =
         platform === "android"
@@ -463,11 +515,7 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
             : aliases.fold(discovery.devices, await aliases.prepare(discovery.devices), new Set())
           : discovery.devices;
       devices.push(...normalized);
-      const complete = sourcesForPlatform(platform).every(
-        (source) =>
-          discovery.succeededSources?.has(source) ?? discovery.succeededPlatforms.has(platform),
-      );
-      if (complete) {
+      if (incompleteDiscoverySources(discovery, [platform]).length === 0) {
         succeededPlatforms.add(platform);
       } else {
         discoveryErrors[platform] = bootedDiscoveryError(discovery, platform);
@@ -917,34 +965,30 @@ function platformDiscoveryResult(input: {
   heldProbeFailure: DeviceDiscoveryError | undefined;
 }): PlatformDiscoveryResult {
   const { platform, devices, discovery, heldProbeFailure } = input;
-  const sourceComplete = (source: DiscoverySource) =>
-    discovery.succeededSources?.has(source) ?? discovery.succeededPlatforms.has(platform);
-  const discoveryComplete = discovery.succeededSources
-    ? sourcesForPlatform(platform).every((source) => discovery.succeededSources!.has(source))
-    : discovery.succeededPlatforms.has(platform);
+  // Discovery completeness is the one classifier's (#11605): tooling that is not installed is not
+  // applicable, never incomplete. A failed held-device probe is an installed tool that failed, so
+  // it makes every source of the platform unknown whatever discovery said.
+  const discoveryComplete = incompleteDiscoverySources(discovery, [platform]).length === 0;
   const complete = discoveryComplete && heldProbeFailure === undefined;
+  const observed = (source: DiscoverySource): PlatformObservation => {
+    const observation = sourceObservation(discovery, source);
+    return heldProbeFailure === undefined
+      ? observation
+      : {
+          observationComplete: false,
+          ...(observation.discoveryError ? { discoveryError: observation.discoveryError } : {}),
+        };
+  };
   return {
     devices,
     succeededPlatforms: complete ? new Set([platform]) : new Set(),
     sourceObservations: Object.fromEntries(
-      sourcesForPlatform(platform).map((source) => [
-        source,
-        {
-          observationComplete: heldProbeFailure === undefined && sourceComplete(source),
-          ...(!sourceComplete(source) && discovery.sourceErrors?.[source]
-            ? { discoveryError: discovery.sourceErrors[source] }
-            : {}),
-        },
-      ]),
+      sourcesForPlatform(platform).map((source) => [source, observed(source)]),
     ),
-    observation: complete
-      ? { observationComplete: true }
-      : {
-          observationComplete: false,
-          discoveryError: discoveryComplete
-            ? heldProbeFailure!
-            : bootedDiscoveryError(discovery, platform),
-        },
+    observation:
+      discoveryComplete && heldProbeFailure !== undefined
+        ? { observationComplete: false, discoveryError: heldProbeFailure }
+        : platformObservation(discovery, platform),
   };
 }
 
@@ -961,10 +1005,13 @@ async function discoverBootedDevicesForPlatform(
   const { resolveDeviceSessionUuid, timer } = options;
   try {
     const deviceManager = PlatformDeviceManagerFactory.getInstance();
-    const rawDiscovery = await deviceManager.getBootedDevicesDetailed(platform, {
-      coalesceInventoryEnrichment: true,
-      signal: getAbortSignal(),
-    });
+    const rawDiscovery = expectingPooledSources(
+      await deviceManager.getBootedDevicesDetailed(platform, {
+        coalesceInventoryEnrichment: true,
+        signal: getAbortSignal(),
+      }),
+      devicePool?.getAllDevices(),
+    );
     getAbortSignal()?.throwIfAborted();
     const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
     // The same lookup the listDevices tool applies, so both surfaces name the same stable AVD.
@@ -1550,17 +1597,14 @@ async function computeBootedDevicesForPlatforms(
           onDiscovery: (known, snapshot) => {
             devices.push(...known);
             pending.delete("discovery");
-            const complete = sourcesForPlatform(platform).every(
-              (source) =>
-                snapshot.succeededSources?.has(source) ?? snapshot.succeededPlatforms.has(platform),
-            );
+            const complete = incompleteDiscoverySources(snapshot, [platform]).length === 0;
             platformObservations[platform] = { observationComplete: complete };
             if (complete) {
               succeededPlatforms.add(platform);
             }
             for (const source of sourcesForPlatform(platform)) {
               sourceObservations[source] = {
-                observationComplete: snapshot.succeededSources?.has(source) ?? complete,
+                observationComplete: discoverySourceOutcome(snapshot, source) !== "incomplete",
               };
             }
           },

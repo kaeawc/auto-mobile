@@ -4803,23 +4803,46 @@ export class SessionManager {
     // handoff reason (or none) it still stores, so a heartbeat or session-info client is not told
     // a session is resumable when a call naming it is refused for good.
     return (
-      this.expiredReleaseFromPersisted(sessionId, persisted)?.releaseReason ??
+      this.expiredReleaseOfUnheldRow(sessionId, persisted)?.releaseReason ??
       persisted.release_reason ??
       undefined
     );
   }
 
   /**
+   * {@link expiredReleaseFromPersisted} for a wire that answers outside admission: undefined while
+   * this daemon is still creating, recovering or releasing the UUID. A caller in flight keeps a
+   * device-restart recovery past the row's idle deadline, and a release in teardown has not
+   * written its reason yet, so the row's deadline alone does not say the session has ended.
+   */
+  private expiredReleaseOfUnheldRow(
+    sessionId: string,
+    persisted: DeviceSession,
+  ): SessionReleaseSnapshot | undefined {
+    if (
+      this.sessions.has(sessionId) ||
+      this.pendingSessionAssignments.has(sessionId) ||
+      this.pendingSessionCreations.has(sessionId) ||
+      this.pendingPersistedRecoveries.has(sessionId) ||
+      this.releasePromises.has(sessionId)
+    ) {
+      return undefined;
+    }
+    return this.expiredReleaseFromPersisted(sessionId, persisted);
+  }
+
+  /**
    * The release of a session whose row ran out its idle or recovery window with no daemon holding
    * it (#11361), for a wire that answers from a snapshot; undefined for a live, terminally
-   * released, still-recoverable or never-issued UUID. Reads only: the row is left as it is.
+   * released, still-recoverable, in-recovery or never-issued UUID. Reads only: the row is left as
+   * it is.
    */
   async getExpiredReleaseSnapshot(sessionId: string): Promise<SessionReleaseSnapshot | undefined> {
     if (this.sessions.has(sessionId) || this.terminalReleaseSnapshots.has(sessionId)) {
       return undefined;
     }
     const persisted = await this.readPersistedSession(sessionId);
-    return persisted && this.expiredReleaseFromPersisted(sessionId, persisted);
+    return persisted && this.expiredReleaseOfUnheldRow(sessionId, persisted);
   }
 
   getTerminalReleaseSnapshot(sessionId: string): SessionReleaseSnapshot | undefined {

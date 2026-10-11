@@ -2171,6 +2171,10 @@ test("an in-flight caller keeps device-restart recovery past the idle window", a
     // The call is in flight, so it is activity: the two-minute idle deadline does not apply.
     await advanceSecondsUntil(timer, 150_000);
     expect(resume.settled()).toBe(false);
+    // The row's idle deadline has passed, but the recovery is still running: a heartbeat or
+    // session-info lookup keeps naming the handoff, never `expired` (#11361).
+    expect(await sessions.getReleasedSessionReason("session")).toMatch(/^device-restart:/);
+    expect(await sessions.getExpiredReleaseSnapshot("session")).toBeUndefined();
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
     timer.advanceTime(1_000);

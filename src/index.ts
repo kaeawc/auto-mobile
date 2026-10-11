@@ -48,6 +48,7 @@ import {
 import {
   installProcessLifecycleHandlers,
   installStdinShutdownHandlers,
+  installStdoutShutdownHandler,
   requestProcessShutdown,
   setFatalProcessHandler,
   setProcessShutdownHandler,
@@ -737,9 +738,10 @@ async function main() {
         });
       }
 
-      // Detect when the MCP client disconnects (stdin closes / pipe breaks).
+      // Detect when the MCP client disconnects (stdin closes / stdout writes fail).
       // This uses the shared lifecycle handler so resources close before exit.
       installStdinShutdownHandlers();
+      installStdoutShutdownHandler();
 
       // Run as MCP server with STDIO transport
       const stdioTransport = new StdioServerTransport();

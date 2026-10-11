@@ -107,7 +107,11 @@ import {
   createDaemonManagedSlotAcquisition,
   type DaemonManagedSlotAcquisitionHandle,
 } from "./managedSlots/daemonManagedSlotAcquisition";
-import type { SlotJournalOwner, SlotRegistry } from "./managedSlots/slotRegistry";
+import type {
+  SlotExecOwnerLiveness,
+  SlotJournalOwner,
+  SlotRegistry,
+} from "./managedSlots/slotRegistry";
 import { SlotJournalInFlight, type SlotJournalRedriveLoop } from "./managedSlots/slotJournal";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import {
@@ -693,6 +697,7 @@ export class Daemon {
   private timer: Timer;
   private managedExecutionRelease: ManagedExecutionRelease | undefined;
   private managedSlotRegistry: Promise<SlotRegistry> | undefined;
+  private managedSlotExecOwnerLiveness: SlotExecOwnerLiveness | undefined;
   /** Journal entries this daemon is driving; shared by the drain and the slot reconciler. */
   private readonly managedSlotJournalInFlight = new SlotJournalInFlight();
   private managedSlotReclaimer: ManagedSlotReclaimerHandle | undefined;
@@ -919,6 +924,7 @@ export class Daemon {
       }),
       timer: this.timer,
       settler: this.managedSlotJournalOwner(),
+      isExecOwnerLive: this.managedSlotOwnerLiveness(),
     });
     this.managedExecutionRelease = release;
     this.sessionManager.onSessionRelease((_sessionId, _deviceId, _reason, snapshot, options) =>
@@ -931,8 +937,23 @@ export class Daemon {
         registry: () => this.openManagedSlotRegistry(),
         registryExists: () => this.managedSlotRegistryExists(),
         timer: this.timer,
+        isExecOwnerLive: this.managedSlotOwnerLiveness(),
       }),
     );
+  }
+
+  /**
+   * Owner liveness as this daemon judges it, shared by the registry, the settlement watcher and the
+   * scope reset so they never disagree. A live execution's slot is in use while this daemon holds
+   * its session, even when the recorded owner is a previous daemon that died with a restart
+   * (#11275); a record this daemon wrote is judged by its session alone (#11339).
+   */
+  private managedSlotOwnerLiveness(): SlotExecOwnerLiveness {
+    this.managedSlotExecOwnerLiveness ??= withLiveExecutionSessions(
+      defaultSlotExecOwnerLiveness,
+      this.sessionManager,
+    );
+    return this.managedSlotExecOwnerLiveness;
   }
 
   /** Start the abandoned-scope sweep (#11174): one hour idle, no live owner → devices deleted. */
@@ -1058,9 +1079,7 @@ export class Daemon {
     }
     const opening = openSqliteSlotRegistry({
       timer: this.timer,
-      // A live execution's slot is in use while this daemon holds its session, even when the
-      // recorded owner is a previous daemon that died with a restart (#11275).
-      isExecOwnerLive: withLiveExecutionSessions(defaultSlotExecOwnerLiveness, this.sessionManager),
+      isExecOwnerLive: this.managedSlotOwnerLiveness(),
     });
     this.managedSlotRegistry = opening;
     // Restart-time recovery (#11242): slots a previous daemon left settling are settled once that

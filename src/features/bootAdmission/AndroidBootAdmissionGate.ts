@@ -224,17 +224,25 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
    * `booted` is the larger of the adb listing (any adb state) and the qemu
    * process count: a booting emulator has a process before adb lists it at all.
    *
-   * `effective` is the larger of two views of the same load, each complete on its own:
-   * the adb listing plus every admitted boot it does not show, and the process table plus
-   * every admitted boot whose own process is not in it. A boot is matched to a process by the
-   * pid it was handed off with (the launcher this daemon spawned, which becomes the qemu
-   * process or is its parent), never by count: a process nobody admitted is another emulator
-   * and is added. Taking the plain process count instead lost an external emulator adb had not
-   * listed whenever an admitted boot had no process yet (#11564).
+   * `effective` is the larger of two views of the same load: the adb listing plus every admitted
+   * boot it does not show, and the process table plus every boot this sample knows whose own
+   * process is not in it. A boot is matched to a process by the pid it was handed off with (the
+   * launcher this daemon spawned, which becomes the qemu process or is its parent), never by
+   * count: a process nobody admitted is another emulator and is added. Taking the plain process
+   * count instead lost an external emulator adb had not listed whenever an admitted boot had no
+   * process yet (#11564).
+   *
+   * The two listings are read at different moments, in no fixed order, so the process view also
+   * adds a boot adb DOES list when the table lacks its process: the table was read before the
+   * boot spawned and adb after it was listed. Leaving it out counted that boot once in each view
+   * beside an external emulator only the table shows, and admitted past the limit (#11588). With
+   * it, each view is at least the emulators it could see plus every boot it could not, whichever
+   * read came first, so neither read has to wait for the other and no re-read is needed.
    *
    * A boot handed off without a pid, or sampled without process ids, counts twice while its
-   * process runs unlisted: fail closed. The emulator client hands off with the pid the moment
-   * the process exists (`spawnUnderBootAdmission`).
+   * process runs, up to and including the decision that first sees it listed: fail closed. The
+   * emulator client hands off with the pid the moment the process exists
+   * (`spawnUnderBootAdmission`).
    */
   private count(
     sample: AndroidCapacitySample,
@@ -260,7 +268,7 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
       inFlight: inFlight.count,
       effective: Math.max(
         listed + inFlight.count,
-        processes + inFlight.count - inFlight.withListedProcess,
+        processes + (inFlight.count - inFlight.withListedProcess) + inFlight.listedWithoutProcess,
       ),
     };
   }

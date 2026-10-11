@@ -128,14 +128,44 @@ describe("BootAdmissionLedger", () => {
     expect(ledger.inFlight(new Set(), undefined, window, listedProcessIds)).toEqual({
       count: 4,
       withListedProcess: 1,
+      listedWithoutProcess: 0,
     });
     expect(
       ledger.inFlight(new Set(["emulator-5554"]), undefined, window, listedProcessIds),
-    ).toEqual({ count: 3, withListedProcess: 0 });
+    ).toEqual({ count: 3, withListedProcess: 0, listedWithoutProcess: 0 });
     // Without listed process ids no boot is matched to a process.
     expect(ledger.inFlight(new Set(), undefined, window)).toEqual({
       count: 4,
       withListedProcess: 0,
+      listedWithoutProcess: 0,
+    });
+  });
+
+  // #11588: the device listing can show a boot the (older) process listing has no process for.
+  test("reports listed boots whose own process the process listing does not show", () => {
+    const ledger = new BootAdmissionLedger(new FakeTimer());
+    ledger.admit().handOff("emulator-5554", 1_000, 501); // listed, process listed
+    ledger.admit().handOff("emulator-5556", 1_000, 502); // listed, process not listed
+    ledger.admit().handOff("emulator-5558", 1_000); // listed, no pid known
+    const endedInWindow = ledger.admit();
+    endedInWindow.handOff("emulator-5560", 1_000, 504);
+    ledger.admit().handOff("emulator-5562", 1_000, 505); // not listed
+    const window = ledger.beginSample();
+    endedInWindow.release();
+    window.close();
+    const listed = new Set(["emulator-5554", "emulator-5556", "emulator-5558", "emulator-5560"]);
+
+    expect(ledger.inFlight(listed, undefined, window, new Set([501, 900]))).toEqual({
+      count: 1,
+      withListedProcess: 0,
+      listedWithoutProcess: 3,
+    });
+    // The listed entries left the ledger with that count: a later sample starts after their
+    // processes did, so its process listing shows them and nothing is added for them.
+    expect(ledger.inFlight(listed, undefined, undefined, new Set([900]))).toEqual({
+      count: 1,
+      withListedProcess: 0,
+      listedWithoutProcess: 0,
     });
   });
 
@@ -148,6 +178,7 @@ describe("BootAdmissionLedger", () => {
     expect(ledger.inFlight(new Set(), undefined, undefined, new Set([501]))).toEqual({
       count: 1,
       withListedProcess: 1,
+      listedWithoutProcess: 0,
     });
     expect(ledger.inFlightCount(new Set(["emulator-5554"]))).toBe(0);
     // Gone from the ledger: a late hand-off does not bring it back.

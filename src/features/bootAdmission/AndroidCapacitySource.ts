@@ -89,6 +89,11 @@ export class CommandAndroidCapacitySource implements AndroidCapacitySource {
     private readonly readTimeoutMs = 5_000,
   ) {}
 
+  /**
+   * The two reads overlap, so either may be the older one: a boot can be listed by adb and be
+   * missing from a process table read before it spawned, or the reverse. The gate's count holds
+   * for both orders (#11588), which keeps a sample as fast as its slower read.
+   */
   async sample(options: { signal?: AbortSignal } = {}): Promise<AndroidCapacitySample> {
     const [serials, processes] = await Promise.all([
       this.readSerials(options.signal),

@@ -9581,9 +9581,13 @@ export class SessionManager {
    * label routing reads this on every `device:`-labelled request, so it must not
    * fire a session-activity write per read. Returns `undefined` for an
    * unknown/expired session or a session with no registered labels.
+   *
+   * It releases nothing either (#11640): every route from a label to its base reads this map, so
+   * a session past its idle deadline publishes no labels and is left to the scan, or to a call
+   * that names it, to release.
    */
   getDeviceLabels(sessionId: string): DeviceLabelMap | undefined {
-    return this.getSession(sessionId)?.cacheData.deviceLabels;
+    return this.peekSession(sessionId)?.cacheData.deviceLabels;
   }
 
   /**

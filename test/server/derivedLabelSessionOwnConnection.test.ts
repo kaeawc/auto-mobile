@@ -15,6 +15,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import { RealToolCallPath } from "../helpers/realToolCallPath";
@@ -45,6 +46,7 @@ function errorText(result: { content?: unknown }): string {
 }
 
 describe("a connection bound to the base session naming its own derived label session", () => {
+  let timer: FakeTimer;
   let manager: SessionManager;
   let pool: DevicePool;
   let tools: RealToolCallPath;
@@ -92,7 +94,7 @@ describe("a connection bound to the base session naming its own derived label se
       spyOn(logger, "warn").mockImplementation(() => {}),
       spyOn(logger, "error").mockImplementation(() => {}),
     ];
-    const timer = new FakeTimer();
+    timer = new FakeTimer();
     manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), () => {
       return new FakeDbWriteBarrier();
     });
@@ -181,6 +183,35 @@ describe("a connection bound to the base session naming its own derived label se
       expect(errorText(await tap(owner, { sessionUuid: "sess-b" }))).toMatch(
         BOUND_TO_OTHER_SESSION,
       );
+    }),
+  );
+
+  test(
+    "its call naming only the label releases nothing of a base past its idle deadline (#11640)",
+    scenario(async () => {
+      const released: string[] = [];
+      manager.onSessionRelease((sessionId) => {
+        released.push(sessionId);
+      });
+      const owner = await connection({ sessionId: "http-owner" });
+      const idleMs = manager.peekSession(BASE)!.sessionTimeoutMs;
+      // The label is used half way through the base's idle window, so only the base runs out.
+      timer.advanceTime(idleMs / 2);
+      expect((await tap(owner, { sessionUuid: DERIVED })).isError).not.toBe(true);
+      timer.advanceTime(idleMs / 2 + 1);
+      expect(manager.peekSession(BASE)).toBeNull();
+
+      // Tool selection and the call's own routing both look the label's base up.
+      const result = await tap(owner, { sessionUuid: DERIVED });
+
+      expect(result.isError).not.toBe(true);
+      expect(released).toEqual([]);
+      expect(manager.hasSession(BASE)).toBe(true);
+      expect(manager.getReleasingSession(BASE)).toBeNull();
+      // The base's own expiry is untouched: a call that names it is still what releases it.
+      expect(manager.getSession(BASE)).toBeNull();
+      await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+      expect(released).toEqual([BASE]);
     }),
   );
 

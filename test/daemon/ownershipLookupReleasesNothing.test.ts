@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
+import { resolveToolSelectionBaseSessionUuid } from "../../src/features/toolSelection/selectionSessionResolver";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -14,6 +15,8 @@ import { asPlanAllocation } from "../helpers/planLabelAllocation";
 // deadline, and that the scan has not reached yet, used to be released by the lookup itself:
 // resolving the label to its base read the base's label map through `getSession`, whose lazy
 // expiry is for a call that names the session, not for a judgement about another one.
+// #11640: the same holds for every other lookup that goes from a label to its base, the one a
+// device tool call naming only the label makes to pick its tool selection included.
 
 const BASE = "sess-a";
 const LABEL = `${BASE}:B`;
@@ -77,6 +80,10 @@ describe("judging ownership of a label whose base has expired but is not yet sca
     "the session that speaks for the label": (w) => w.manager.ownershipSessionUuid(LABEL),
     "whether the label is a session of the base's plan": (w) =>
       w.manager.isLiveSessionOfSamePlan(LABEL, BASE),
+    "the base a tool call naming the label resolves for its tool selection": (w) =>
+      resolveToolSelectionBaseSessionUuid(LABEL, w.manager),
+    "a read of the base's label map": (w) => w.manager.getDeviceLabels(BASE),
+    "the base a label was published under": (w) => w.manager.getBaseSessionOfDerivedLabel(LABEL),
   };
 
   test.each(Object.keys(judgements))("%s neither releases nor stamps the base", async (name) => {
@@ -113,6 +120,9 @@ describe("judging ownership of a label whose base has expired but is not yet sca
     expect(await w.manager.claimLivenessOwnership(LABEL, TOKEN)).toBe("claimed");
     expect(w.manager.peekSession(BASE)).toBeNull();
     expect(w.manager.peekSession(LABEL)?.sessionId).toBe(LABEL);
+    // Every label lookup answers as it does once the base is gone: it publishes no labels.
+    expect(w.manager.getDeviceLabels(BASE)).toBeUndefined();
+    expect(resolveToolSelectionBaseSessionUuid(LABEL, w.manager)).toBe(LABEL);
   });
 
   test("a call that names the expired base itself still releases it lazily", async () => {

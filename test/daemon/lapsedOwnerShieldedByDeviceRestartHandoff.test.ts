@@ -301,4 +301,52 @@ describe("a device restart under a session whose owner already lost its heartbea
     callInFlight = false;
     await assertTerminalWires();
   });
+
+  test.each([5_000, NO_HEARTBEAT_RELEASE_BUDGET_MS + 1])(
+    "shutdown after %d ms silence stays recoverable through teardown with the monitor stopped",
+    async (silenceMs) => {
+      const restoreMs = 3_500;
+      await start(restoreMs);
+      await monitor.stop();
+      await timer.advanceTimeAsync(silenceMs, () => drainMicrotasks(20));
+      const release = manager.releaseSession(SESSION, "daemon-shutdown", true);
+      await drainMicrotasks(100);
+      await timer.advanceTimeAsync(restoreMs, () => drainMicrotasks(50));
+      expect(await release).toBe(DEVICE);
+      expect(await manager.getReleasedSessionReason(SESSION)).toBe("daemon-shutdown");
+      expect(await persistence.getSession!(SESSION)).toMatchObject({
+        status: "released",
+        release_reason: "daemon-shutdown",
+      });
+      expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+      expect(announced).toEqual(["daemon-shutdown"]);
+      expect(reaped).toEqual([]);
+
+      const successor = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+      successor.stopCleanupTimer();
+      const summary = await successor.rehydratePersistedSessions({
+        assignDeviceToSession: async (id, _platform, target) =>
+          (
+            await successor.createSession(
+              id,
+              DEVICE,
+              "android",
+              target?.liveness?.sessionTimeoutMs,
+              target?.liveness?.heartbeatTimeoutMs,
+              target?.stableDeviceId,
+              target?.liveness,
+              target?.initialOwnership,
+            )
+          ).assignedDevice,
+      });
+      expect(summary).toEqual({
+        rehydrated: [SESSION],
+        terminalized: [],
+        skipped: [],
+        timedOut: false,
+      });
+      expect(successor.getSession(SESSION)?.assignedDevice).toBe(DEVICE);
+      expect(await persistence.getSession!(SESSION)).toMatchObject({ status: "active" });
+    },
+  );
 });

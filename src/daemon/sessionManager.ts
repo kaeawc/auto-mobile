@@ -119,6 +119,7 @@ import {
   isTerminalReleaseReason,
   outranksReleaseReason,
   releasedRowStatus,
+  shouldJudgeOwnerLeaseForRelease,
   type SessionReleaseReason,
 } from "./releaseReasons";
 import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
@@ -9877,7 +9878,7 @@ export class SessionManager {
     );
   }
 
-  /** Judge pre-handoff silence only; a live owner's refused release-time heartbeats do not lapse. */
+  /** Judge pre-handoff silence for plan cleanup and device restart only. */
   private judgeOwnerLeaseForRelease(
     session: Session,
     reason: ReleaseReasonState,
@@ -9886,7 +9887,7 @@ export class SessionManager {
   ): boolean {
     if (
       (stage === "commit" && operation?.judgeSuspectOwnerAtCommit !== true) ||
-      isTerminalReleaseReason(reason.value) ||
+      !shouldJudgeOwnerLeaseForRelease(reason.value) ||
       !judgesOwnerHeartbeats(session) ||
       suspectGraceMsFor(session) === 0
     ) {

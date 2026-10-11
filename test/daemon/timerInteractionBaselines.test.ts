@@ -105,6 +105,11 @@ function expectFreed(deviceId: string): void {
 
 describe("cell 1: the idle window alone, and against the heartbeat lease (T2, T2 x T1)", () => {
   test("acquire, control call, 2 min idle with heartbeats continuing: released terminal at the reported idleReleaseAt", async () => {
+    // Literals, so a changed production window fails here and not only by shifting every deadline.
+    expect({ IDLE_WINDOW_MS, NO_HEARTBEAT_BUDGET_MS }).toEqual({
+      IDLE_WINDOW_MS: 120_000,
+      NO_HEARTBEAT_BUDGET_MS: 10_000,
+    });
     scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B] });
     const [, intervalsBefore] = armedTimers(scenario);
     const session = await scenario.acquire();
@@ -195,6 +200,8 @@ describe("cell 2: a held device in a transitional platform state (T3 x T1)", () 
     const released = releasesOf(scenario, session);
     expect(released.map((release) => release.reason)).toEqual(["heartbeat-timeout"]);
     expect(released[0]!.at).toBeLessThanOrEqual(20_000 + NO_HEARTBEAT_BUDGET_MS + SCAN_MS);
+    // Not early either: the 4 s lease and the 4 s suspect grace both run out first.
+    expect(released[0]!.at).toBeGreaterThanOrEqual(20_000 + 4_000 + 4_000);
     expect(await socketVerdict(scenario, session)).toEqual({
       ...TERMINAL,
       reason: "heartbeat-timeout",

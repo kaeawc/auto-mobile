@@ -68,6 +68,21 @@ describe("restart matrix: owner reconnect x shutdown kind x sessions (no call in
             await run.idle(3_000);
             run.ownerAway();
             await run.end(kind);
+            // What the first daemon left behind: a clean stop releases every session as
+            // `daemon-shutdown` (recoverable), a crash writes nothing.
+            const leftBehind = await Promise.all(
+              sessions.map((session) => run.scenario.repository.getSession(session)),
+            );
+            expect(
+              leftBehind.map((row) => [row?.status, row?.release_reason, row?.released_at_ms]),
+            ).toEqual(
+              sessions.map(() =>
+                kind === "clean" ? ["released", "daemon-shutdown", 3_000] : ["active", null, null],
+              ),
+            );
+            expect(run.scenario.releases.map((release) => release.reason)).toEqual(
+              kind === "clean" ? sessions.map(() => "daemon-shutdown") : [],
+            );
             await run.startSuccessor();
             const other = run.scenario.addProxy({ token: "another-client" });
 

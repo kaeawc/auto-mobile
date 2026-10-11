@@ -235,7 +235,8 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
       deviceId: ANDROID.deviceId,
       [DAEMON_OWNED_SESSIONS_PARAM]: expect.arrayContaining([ANDROID.sessionUuid]),
     });
-    expect(client.callToolCalls.at(-1)?.params.sessionUuid).toBeUndefined();
+    // iOS has idled out: the fenced control now names Android's unique held session (#11656).
+    expect(client.callToolCalls.at(-1)?.params.sessionUuid).toBe(ANDROID.sessionUuid);
     expect(await nextTicksHeartbeat()).toEqual([ANDROID.sessionUuid]);
 
     // A pause shorter than the window does not cost the held device.
@@ -444,8 +445,13 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
         CONTROL,
         { ...CONTROL_ARGS, platform: "android" },
         IDLE_WINDOW_MS / 3,
-        IDLE_WINDOW_MS * 2,
+        IDLE_WINDOW_MS - INTERVAL_MS,
       );
+      await timer.advanceTimeAsync(IDLE_WINDOW_MS / 3);
+      // With no echo, both sessions idle out; a platform control reports the release.
+      await expect(
+        proxy.callTool(CONTROL, { ...CONTROL_ARGS, platform: "android" }),
+      ).rejects.toThrow(/released/);
       expect(await nextTicksHeartbeat()).toEqual([]);
     });
 
@@ -457,8 +463,12 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
         CONTROL,
         { ...CONTROL_ARGS, deviceId: ANDROID.deviceId },
         IDLE_WINDOW_MS / 3,
-        IDLE_WINDOW_MS * 2,
+        IDLE_WINDOW_MS - INTERVAL_MS,
       );
+      await timer.advanceTimeAsync(IDLE_WINDOW_MS / 3);
+      await expect(
+        proxy.callTool(CONTROL, { ...CONTROL_ARGS, deviceId: ANDROID.deviceId }),
+      ).rejects.toThrow(/released/);
       expect(await nextTicksHeartbeat()).toEqual([]);
     });
   });
@@ -476,8 +486,21 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
         CONTROL,
         { ...CONTROL_ARGS, ...args },
         IDLE_WINDOW_MS / 3,
-        IDLE_WINDOW_MS * 3,
+        form === "platform" ? IDLE_WINDOW_MS - INTERVAL_MS : IDLE_WINDOW_MS * 3,
       );
+      if (form === "platform") {
+        await timer.advanceTimeAsync(IDLE_WINDOW_MS / 3);
+        // The other binding has expired: platform alone cannot keep choosing this survivor.
+        await expect(proxy.callTool(CONTROL, { ...CONTROL_ARGS, ...args })).rejects.toThrow(
+          /released/,
+        );
+        await callEvery(
+          CONTROL,
+          { ...CONTROL_ARGS, deviceId: PROVISIONED.deviceId },
+          IDLE_WINDOW_MS / 3,
+          IDLE_WINDOW_MS * 2,
+        );
+      }
       expect(await nextTicksHeartbeat()).toEqual([PROVISIONED.sessionUuid]);
 
       // A pause past the window still releases it once the calls stop.

@@ -65,6 +65,7 @@ describe("finalized recording lookup vs derived label sessions", () => {
     setRecordingRequesterResolverForTesting({
       baseSessionUuid: (uuid) => uuid.split(":")[0],
       connectionOwnsDeviceSession: () => false,
+      isDeviceHeld: () => true,
     });
   });
 

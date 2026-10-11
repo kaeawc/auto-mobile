@@ -1146,6 +1146,8 @@ test("omitted display preserves main's routing order without accessing the inven
     await handler({ deviceId: "other", sessionUuid: "one" });
     expect(steps.slice(steps.indexOf("cleanup"), steps.indexOf("readiness") + 1)).toEqual([
       "cleanup",
+      // Refused before the resume, and checked again once it returns (#11651).
+      "owner",
       "resume",
       "owner",
       "existing",

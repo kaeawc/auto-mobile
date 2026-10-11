@@ -333,7 +333,7 @@ function iosScenario(shape: Shape): Scenario {
           return admission.decision.outcome === "refuse" ? "refused" : "admitted";
         }),
       ),
-    // A reader's listing is one an admission must not rest on if it began before its window.
+    // A reader samples in its own ledger window, on a listing begun no earlier than that window.
     read: () => actors.trackRead(gate.describeCapacity()),
     end: (id) => listings.end(id),
     // The simulator is Booted from here on; a listing already running still shows it Shutdown.
@@ -783,7 +783,7 @@ describe("boot capacity gates never admit past the limit in any interleaving (#1
   // checked by hand), but take seconds; this shape already contains every failing order found.
   const shape: Shape = { limit: 1, admitters: 2, startup: "validation" };
   for (const [platform, create, orders] of [
-    ["iOS", iosScenario, 218],
+    ["iOS", iosScenario, 336],
     ["Android", androidScenario, 648],
   ] as const) {
     test(`${platform}: two admissions and a reader against a limit of one`, async () => {

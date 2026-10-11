@@ -33,6 +33,7 @@ test/daemon/anonymousAcquisitionSessionSource.test.ts
 test/daemon/appearanceConfigPerSession.test.ts
 test/daemon/appearanceSocketServer.test.ts
 test/daemon/appearanceSocketServerCharacterization.test.ts
+test/daemon/appearanceSyncHolderRecheck.test.ts
 test/daemon/appearanceSyncOff.test.ts
 test/daemon/appearanceSyncSettingDefaults.test.ts
 test/daemon/autolockProxyHeartbeatIdle.test.ts
@@ -113,6 +114,7 @@ test/daemon/explicitReleaseCutCall.test.ts
 test/daemon/explicitReleaseOfUnrecoveredRestartRow.test.ts
 test/daemon/failuresPushSocketServer.test.ts
 test/daemon/fakeDaemonClientContract.test.ts
+test/daemon/finalizeWaitBudgetContract.test.ts
 test/daemon/findAvailableDaemonPort.test.ts
 test/daemon/forwardLeaseHolders.test.ts
 test/daemon/frameDeviceIdentity.test.ts
@@ -130,6 +132,7 @@ test/daemon/idleDeviceReaper.test.ts
 test/daemon/incumbentOwnerGuard.test.ts
 test/daemon/inputDeviceOwnership.test.ts
 test/daemon/inputHolderChangedTypedRefusal.test.ts
+test/daemon/labelOfEndedBaseRefused.test.ts
 test/daemon/lateRehydrationOwnerToldNotFound.test.ts
 test/daemon/liveDeadlineRegistry.test.ts
 test/daemon/livenessClaimDecision.test.ts
@@ -144,12 +147,14 @@ test/daemon/managedSlots/daemonManagedSlotAcquisition.redrive.test.ts
 test/daemon/managedSlots/defaultFreeDeviceReclaimer.test.ts
 test/daemon/managedSlots/freeDeviceReclaimer.test.ts
 test/daemon/managedSlots/managedExecutionDaemonRestart.test.ts
+test/daemon/managedSlots/managedExecutionRestartScenario.test.ts
 test/daemon/managedSlots/managedSlotAcquisition.test.ts
 test/daemon/managedSlots/managedSlotExclusion.test.ts
 test/daemon/managedSlots/managedSlotLateRehydrationReown.test.ts
 test/daemon/managedSlots/managedSlotReconcilerPorts.test.ts
 test/daemon/managedSlots/poolManagedSlotDeviceStopper.test.ts
 test/daemon/managedSlots/reconciler.test.ts
+test/daemon/managedSlots/resolvedExistingSpec.test.ts
 test/daemon/managedSlots/slotJournal.test.ts
 test/daemon/managedSlots/slotOwnerLiveness.test.ts
 test/daemon/managedSlots/slotRegistryMigrations.test.ts
@@ -159,6 +164,7 @@ test/daemon/managedSlots/slotsPlatformChangeSqliteJournal.test.ts
 test/daemon/managedSlots/slotsRegistryAbsentThenUnreadable.test.ts
 test/daemon/managedSlots/slotsUnresolvedEmulatorIdentityGate.test.ts
 test/daemon/managedSlots/sqliteSlotRegistry.test.ts
+test/daemon/managedSlots/widenedSpecReportsCreationDefaultModel.test.ts
 test/daemon/managerOutputReductionArgs.test.ts
 test/daemon/observationRequestBatch.test.ts
 test/daemon/observerLeaseSleepForgiveness.test.ts
@@ -186,7 +192,9 @@ test/daemon/processGenerationFields.test.ts
 test/daemon/proxyHeartbeatStateMachine.property.test.ts
 test/daemon/proxyLivenessRecovery.test.ts
 test/daemon/proxyReleaseReasonClassification.test.ts
+test/daemon/proxySessionEventLeavesSiblingCallInFlight.test.ts
 test/daemon/proxySignalStopReleasesExecution.test.ts
+test/daemon/readEndReleaseRearmScenario.test.ts
 test/daemon/recycledProcessGeneration.test.ts
 test/daemon/refusalWireContract.test.ts
 test/daemon/refusedRoutingCallExtendsIdle.test.ts
@@ -202,7 +210,9 @@ test/daemon/sessionExpiryProperties.test.ts
 test/daemon/sessionHeartbeatExecutionVetoCeiling.test.ts
 test/daemon/sessionHoldDiagnostics.test.ts
 test/daemon/sessionInfoWallClock.test.ts
+test/daemon/sessionManager.cancelledClientChosenId.test.ts
 test/daemon/sessionManager.displayPin.test.ts
+test/daemon/sessionManager.releaseRowRetry.test.ts
 test/daemon/sessionManager.supersededRowReassertRetry.test.ts
 test/daemon/sessionSuspectGrace.test.ts
 test/daemon/shuttingDownFrameTypedFields.test.ts
@@ -221,6 +231,7 @@ test/daemon/socketServerForwardBudgetTimeoutVsOverload.test.ts
 test/daemon/socketServerProgressDeadlineExtension.test.ts
 test/daemon/socketServerRefusedOwnedRestore.test.ts
 test/daemon/socketServerSessionIdGenerator.test.ts
+test/daemon/socketServerToolCallTransportAlias.test.ts
 test/daemon/socketServerToolUnavailableCode.test.ts
 test/daemon/socketServerTypedRefusal.test.ts
 test/daemon/startupPrologue.test.ts
@@ -231,8 +242,10 @@ test/daemon/swipeOnCancelThroughDaemon.test.ts
 test/daemon/telemetryBackfillBounds.test.ts
 test/daemon/telemetryIdentityTimelineBuckets.test.ts
 test/daemon/testRecordingSocketServerAuth.test.ts
+test/daemon/testRecordingSocketServerReadinessSession.test.ts
 test/daemon/tokenOwnedSessionsLastUsedAt.test.ts
 test/daemon/toolCallActivityLatestDeadline.test.ts
+test/daemon/toolCallDeviceIdentity.test.ts
 test/daemon/unsettledExecutionVeto.test.ts
 test/daemon/unsettledExecutionVetoWallClockStep.test.ts
 test/daemon/videoRecordingSocketServerAuth.test.ts
@@ -419,6 +432,7 @@ test/features/featureFlags/persistedOutputReductionOverrides.test.ts
 test/features/featureFlags/toolDefinitionAffectingFlags.drift.test.ts
 test/features/iosSimFleet/IosBootInstrumentation.test.ts
 test/features/iosSimFleet/capacityCheckFreshListing.test.ts
+test/features/iosSimFleet/capacityCheckSampleBounds.test.ts
 test/features/iosSimFleet/iosBootCapacityGate.test.ts
 test/features/iosSimFleet/iosSimFleet.test.ts
 test/features/memory/MemoryAudit.characterization.test.ts

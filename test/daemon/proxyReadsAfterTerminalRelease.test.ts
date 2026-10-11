@@ -13,6 +13,7 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { readyManagedSlotsResult } from "../helpers/refusalWireFixtures";
 
 // #11483 items 2 and 3 (stdio proxy contract): reads after a terminal release. Owner contract: reads are never
 // refused and never require a session (#10971, docs/using/device-ownership.md "Read and control").
@@ -61,6 +62,8 @@ describe("reads after a terminal release of a result-minted session (#11483)", (
     client = new FakeDaemonClient({
       daemonMethodResults: new Map<string, unknown>([
         ["resources/list", { resources: [{ uri: BOOTED_URI, name: "Booted devices" }] }],
+        ["daemon/capabilities", { capabilities: ["managed-slots/v1"] }],
+        ["daemon/acquireManagedSlots", readyManagedSlotsResult(ANDROID.sessionUuid)],
       ]),
       resourceResult: BOOTED,
       onCallTool: async (name) => {
@@ -103,6 +106,111 @@ describe("reads after a terminal release of a result-minted session (#11483)", (
     for (const spy of spies) {
       spy.mockRestore();
     }
+  });
+
+  async function releaseManagedBinding(): Promise<void> {
+    expect(proxy.getTerminalSessionRelease()).toBeUndefined();
+    const result = await proxy.acquireManagedSlots({
+      contractVersion: 1,
+      managedHostScope: "host",
+      runnerNamespace: "runner",
+      runnerIncarnation: "boot",
+      localSlotCapacity: 1,
+      requests: [
+        {
+          slotIndex: 1,
+          role: "primary",
+          platform: "android",
+          requestedSpec: { runtime: "system-images;android-35;google_apis;arm64-v8a" },
+        },
+      ],
+    });
+    expect(result.outcome).toBe("ready");
+    client.emitNotification(
+      SESSION_RELEASED_NOTIFICATION_METHOD,
+      ANDROID.sessionUuid,
+      "cleanup-expired",
+    );
+    await expect(proxy.callTool("observe", {})).rejects.toBeInstanceOf(
+      DaemonBoundSessionExpiredError,
+    );
+    expect(proxy.getTerminalSessionRelease()).toEqual({
+      sessionUuid: ANDROID.sessionUuid,
+      reason: "cleanup-expired",
+    });
+    const copy = proxy.getTerminalSessionRelease()!;
+    copy.reason = "changed by caller";
+    expect(proxy.getTerminalSessionRelease()?.reason).toBe("cleanup-expired");
+  }
+
+  test("a managed read without a device stays fenced every time after release was reported", async () => {
+    await releaseManagedBinding();
+    const forwardedBefore = client.callToolCalls.length;
+    for (const args of [{}, {}, { deviceId: "" }, { deviceId: " \t" }, { deviceId: 123 }]) {
+      const answer = await proxy.callTool("observe", args).catch((error: unknown) => error);
+      expect(answer).toBeInstanceOf(DaemonBoundSessionExpiredError);
+      expect(answer).toMatchObject({
+        sessionUuid: ANDROID.sessionUuid,
+        reason: "cleanup-expired",
+      });
+    }
+    expect(client.callToolCalls.length).toBe(forwardedBefore);
+  });
+
+  test("a managed read naming a device remains sessionless after release", async () => {
+    await releaseManagedBinding();
+    const forwardedBefore = client.callToolCalls.length;
+    for (const args of [
+      { deviceId: ANDROID.deviceId },
+      { device: { deviceId: ANDROID.deviceId, platform: "android" } },
+    ]) {
+      await expect(proxy.callTool("observe", args)).resolves.toBeDefined();
+      expect(client.callToolCalls.at(-1)?.params.sessionUuid).toBeUndefined();
+    }
+    expect(client.callToolCalls.length).toBe(forwardedBefore + 2);
+  });
+
+  test("a non-managed result-minted read without a device remains sessionless after release", async () => {
+    await proxy.callTool("getAndroid", {});
+    client.emitNotification(
+      SESSION_RELEASED_NOTIFICATION_METHOD,
+      ANDROID.sessionUuid,
+      "cleanup-expired",
+    );
+    await expect(proxy.callTool("observe", {})).rejects.toBeInstanceOf(
+      DaemonConnectionSessionReleasedError,
+    );
+    const forwardedBefore = client.callToolCalls.length;
+    await expect(proxy.callTool("observe", {})).resolves.toBeDefined();
+    expect(client.callToolCalls.at(-1)?.params.sessionUuid).toBeUndefined();
+    expect(client.callToolCalls.length).toBe(forwardedBefore + 1);
+  });
+
+  test("a non-managed startup binding still forwards no-device reads after reporting release", async () => {
+    await proxy.close();
+    const daemonManager = new FakeDaemonManager();
+    daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
+    proxy = new DaemonMcpProxy({
+      initialSessionUuid: ANDROID.sessionUuid,
+      clientFactory: () => client,
+      daemonManager,
+      autoStartDaemon: false,
+      timer,
+      idGenerator: new FakeIdGenerator(),
+    });
+    await proxy.claimInitialSession();
+    client.emitNotification(
+      SESSION_RELEASED_NOTIFICATION_METHOD,
+      ANDROID.sessionUuid,
+      "cleanup-expired",
+    );
+    await expect(proxy.callTool("observe", {})).rejects.toBeInstanceOf(
+      DaemonBoundSessionExpiredError,
+    );
+    const forwardedBefore = client.callToolCalls.length;
+    await expect(proxy.callTool("observe", {})).resolves.toBeDefined();
+    expect(client.callToolCalls.at(-1)?.params.sessionUuid).toBeUndefined();
+    expect(client.callToolCalls.length).toBe(forwardedBefore + 1);
   });
 
   // After an idle release the proxy keeps `resources/list` working (it lists the unbound surface,

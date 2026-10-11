@@ -77,7 +77,16 @@ extension PrototypeNode {
         (children ?? []).map { child in
             let shown = child.visibleWhen.map(holds) ?? true
             let style = child.resolvedStyle(state: state)
-            return "\(shown)|\(Self.describe(style?.width))|\(Self.describe(style?.height))"
+            let bounds = [
+                style?.weight,
+                style?.minWidth,
+                style?.maxWidth,
+                style?.minHeight,
+                style?.maxHeight,
+                style?.aspectRatio,
+            ]
+            .map { $0.map { "\($0)" } ?? "-" }.joined(separator: ",")
+            return "\(shown)|\(Self.describe(style?.width))|\(Self.describe(style?.height))|\(bounds)"
         }
     }
 

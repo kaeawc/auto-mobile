@@ -77,6 +77,7 @@ import {
   readDeviceSessionSuspectRefusal,
   type DeviceSessionSuspectRefusal,
   getDeviceIdFromResult,
+  getDevicePlatformFromResult,
   getActiveDeviceSelectionFromResult,
   getDeviceSessionIdFromResult,
   DEVICE_SESSION_ACQUISITION_TOOLS,
@@ -127,7 +128,7 @@ import { ActionableError, toActionableError } from "../models";
 import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "./managedExecutionLiveness";
 import { acquireManagedSlotsThroughDaemon } from "./managedSlotProxyAcquisition";
 import type { ManagedSlotConfig } from "../models/managedSlotConfig";
-import type { ManagedSlotsResult } from "../models/managedSlotsResult";
+import { managedSlotForSession, type ManagedSlotsResult } from "../models/managedSlotsResult";
 import { DeviceControlTransportError, isReplaySafeToolName } from "./deviceControlTransportFailure";
 import { McpOverloadError, McpTimeoutError } from "./McpTimeoutError";
 import {
@@ -1446,6 +1447,8 @@ export class DaemonMcpProxy {
   private readonly daemonIdleReports = new Map<string, DaemonIdleReport>();
   /** Device each held session runs on, learned from acquisition results and explicit calls. */
   private readonly sessionDeviceIds = new Map<string, string>();
+  /** Platform each acquired session runs on; absent when its result did not describe one. */
+  private readonly sessionPlatforms = new Map<string, "android" | "ios">();
   /**
    * Handovers per affected session. A tool call that names the session first attempts an
    * observation-only resume and returns the structured error only when the daemon still does not
@@ -1873,6 +1876,14 @@ export class DaemonMcpProxy {
   /** The managed slot acquisition result, once {@link acquireManagedSlots} ran. */
   getManagedSlotsResult(): ManagedSlotsResult | undefined {
     return this.managedSlotsResult;
+  }
+
+  /** The terminally released binding, excluding a resumable daemon stall, for reporting surfaces (#11712). */
+  getTerminalSessionRelease(): { sessionUuid: string; reason: string } | undefined {
+    const terminal = this.terminalBoundSession;
+    return terminal && terminal.reason !== DAEMON_STALLED_CODE
+      ? { sessionUuid: terminal.sessionUuid, reason: terminal.reason }
+      : undefined;
   }
 
   /** The sessions this proxy holds for a managed execution (#11176). */
@@ -4357,6 +4368,7 @@ export class DaemonMcpProxy {
     if (this.hasLivenessLifecycleFence()) {
       await this.waitForLivenessRecovery(signal);
     }
+    callerArgs = this.withFencedControlDeviceSession(name, callerArgs);
     this.reportToolSessionLoss(name, callerArgs);
     if (this.stallHandovers.size > 0) {
       await this.resumeStalledSessionNamedBy(callerArgs);
@@ -4615,6 +4627,62 @@ export class DaemonMcpProxy {
     };
   }
 
+  /** A fenced control must name a held session or its known, unique device (#11656). */
+  private withFencedControlDeviceSession(
+    name: string,
+    args: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (
+      this.config.initialSessionUuid ||
+      isDeviceBindingTool(name) ||
+      isDeviceInventoryTool(name) ||
+      name === SET_TOOL_ENABLED_TOOL_NAME ||
+      !this.toolTargetsDevice(name) ||
+      this.isDeviceReadOnlyTool(name)
+    ) {
+      return args;
+    }
+    // A selector call may itself discover the idle release. Fence before resolving its device,
+    // so loss reporting, stall recovery and routing all see the same named survivor.
+    if (!this.terminalBoundSession && this.isBoundSessionReplayExpired()) {
+      this.fenceBoundSessionUuid(this.boundSessionUuid!, "replay-lease-expired");
+    }
+    const terminal = this.terminalBoundSession;
+    if (!terminal) {
+      return args;
+    }
+    const holder = this.sessionUuidFromArgs(args) ?? this.survivingSessionHoldingDevice(args);
+    // The daemon must preserve its default as well: the fenced UUID marks this as one call
+    // on a sibling, even though terminal fencing cleared the proxy's live binding.
+    return holder === undefined
+      ? args
+      : { ...args, sessionUuid: holder, [DAEMON_BOUND_SESSION_PARAM]: terminal.sessionUuid };
+  }
+
+  private survivingSessionHoldingDevice(args: Record<string, unknown>): string | undefined {
+    if (!this.hasImplicitDeviceSelector(args, false) || typeof args.deviceId !== "string") {
+      return undefined;
+    }
+    let holder: string | undefined;
+    for (const id of this.ownedDeviceSessions) {
+      if (id === this.terminalBoundSession?.sessionUuid) {
+        continue;
+      }
+      const deviceId = this.sessionDeviceIds.get(id);
+      // An unknown device might be a second holder: do not guess uniqueness.
+      if (deviceId === undefined) {
+        return undefined;
+      }
+      if (deviceId === args.deviceId) {
+        if (holder !== undefined) {
+          return undefined;
+        }
+        holder = id;
+      }
+    }
+    return holder;
+  }
+
   private prepareToolRoutingArgs(
     name: string,
     callerArgs: Record<string, unknown>,
@@ -4626,17 +4694,22 @@ export class DaemonMcpProxy {
     const isTerminalSessionlessDiscovery =
       this.terminalBoundSession !== undefined &&
       this.sessionUuidFromArgs(callerArgs) === undefined &&
-      (isDeviceInventoryTool(name) || this.isSessionlessReadAfterRelease(name));
+      (isDeviceInventoryTool(name) || this.isSessionlessReadAfterRelease(name, callerArgs));
     const usesDeviceSelector =
       this.toolTargetsDevice(name) &&
-      this.hasImplicitDeviceSelector(callerArgs, name === "setActiveDevice");
+      this.hasImplicitDeviceSelector(callerArgs, name === "setActiveDevice") &&
+      !this.platformSelectorTargetsBoundSession(name, callerArgs);
     const routingArgs =
       name === SET_TOOL_ENABLED_TOOL_NAME
         ? this.withAcquiredDeviceRoute(callerArgs)
         : isSessionAcquisition || isTerminalSessionlessDiscovery
           ? callerArgs
-          : this.withBoundSessionUuid(callerArgs, usesDeviceSelector);
-    const canUseSurvivingSession = this.canUseSurvivingSession(callerArgs, usesDeviceSelector);
+          : this.withBoundSessionUuid(callerArgs, usesDeviceSelector, name);
+    const canUseSurvivingSession = this.canUseSurvivingSession(
+      callerArgs,
+      usesDeviceSelector,
+      name,
+    );
     const forwardedArgs = this.withToolSelectionProfile(
       this.withOwnedSessionCapabilities(
         routingArgs,
@@ -4656,14 +4729,16 @@ export class DaemonMcpProxy {
    * binding is released and one call has been told so, a read-only tool that names no session is
    * forwarded without one: the daemon serves it on its read-only device path. Control tools keep
    * the fence and its reacquire guidance, as does a liveness handover, which every call reports
-   * until the harness acts on it.
+   * until the harness acts on it. A managed execution keeps the fence for reads without a deviceId.
    */
-  private isSessionlessReadAfterRelease(name: string): boolean {
+  private isSessionlessReadAfterRelease(name: string, args: Record<string, unknown>): boolean {
     const terminal = this.terminalBoundSession;
     return (
       terminal !== undefined &&
       this.releaseSurfacedFor === terminal.sessionUuid &&
       !this.stallHandovers.has(terminal.sessionUuid) &&
+      (managedSlotForSession(this.managedSlotsResult, terminal.sessionUuid) === null ||
+        (typeof args.deviceId === "string" && args.deviceId.trim().length > 0)) &&
       this.isDeviceReadOnlyTool(name)
     );
   }
@@ -4776,6 +4851,32 @@ export class DaemonMcpProxy {
     );
   }
 
+  /** A matching platform alone is untargeted only when no other still-held session could match. */
+  private platformSelectorTargetsBoundSession(
+    name: string,
+    args: Record<string, unknown>,
+  ): boolean {
+    const platform = args.platform;
+    const bound = this.boundSessionUuid;
+    if (
+      isDeviceBindingTool(name) ||
+      (platform !== "android" && platform !== "ios") ||
+      typeof args.deviceId === "string" ||
+      this.sessionUuidFromArgs(args) !== undefined ||
+      !bound ||
+      this.terminalBoundSession ||
+      this.sessionPlatforms.get(bound) !== platform
+    ) {
+      return false;
+    }
+    return ![...this.otherHeldSessions.keys()].some(
+      (sessionUuid) =>
+        sessionUuid !== bound &&
+        (this.sessionPlatforms.get(sessionUuid) === undefined ||
+          this.sessionPlatforms.get(sessionUuid) === platform),
+    );
+  }
+
   /**
    * A session this proxy holds under its own token (#10990) is routable beside the startup
    * binding. So is a `${bound}:${label}` name (#11602): whether it is a live label of the bound
@@ -4790,6 +4891,7 @@ export class DaemonMcpProxy {
   private withBoundSessionUuid(
     args: Record<string, unknown>,
     usesDeviceSelector = false,
+    toolName?: string,
   ): Record<string, unknown> {
     // A daemon session released by ordinary heartbeat/idle expiry leaves this
     // remembered binding dangling; replaying its UUID on a later sessionless call
@@ -4798,9 +4900,9 @@ export class DaemonMcpProxy {
     // no forwarded call (explicit or implicit) refreshing the binding, treat it
     // as retired.
     const explicitSessionUuid = this.sessionUuidFromArgs(args);
-    if (!this.canUseSurvivingSession(args, usesDeviceSelector)) {
+    if (!this.canUseSurvivingSession(args, usesDeviceSelector, toolName)) {
       this.throwIfBoundSessionUnavailable(explicitSessionUuid, () =>
-        this.canUseSurvivingSession(args, usesDeviceSelector),
+        this.canUseSurvivingSession(args, usesDeviceSelector, toolName),
       );
     }
     const normalizedArgs =
@@ -4840,6 +4942,7 @@ export class DaemonMcpProxy {
   private canUseSurvivingSession(
     args: Record<string, unknown>,
     usesDeviceSelector: boolean,
+    toolName?: string,
   ): boolean {
     if (!this.terminalBoundSession || this.config.initialSessionUuid) {
       return false;
@@ -4848,7 +4951,13 @@ export class DaemonMcpProxy {
     const liveOwned = [...this.ownedDeviceSessions].filter(
       (id) => id !== this.terminalBoundSession?.sessionUuid,
     );
-    return explicit ? liveOwned.includes(explicit) : liveOwned.length > 0 && usesDeviceSelector;
+    return explicit
+      ? liveOwned.includes(explicit)
+      : liveOwned.length > 0 &&
+          usesDeviceSelector &&
+          (toolName === undefined ||
+            toolName === "setActiveDevice" ||
+            this.isDeviceReadOnlyTool(toolName));
   }
 
   private throwIfBoundSessionUnavailable(
@@ -5473,6 +5582,9 @@ export class DaemonMcpProxy {
     this.claimableSessions.add(sessionId);
     this.ownedDeviceSessions.add(sessionId);
     this.rememberSessionDevice(sessionId, session.deviceId);
+    if (session.platform !== undefined) {
+      this.sessionPlatforms.set(sessionId, session.platform);
+    }
     // Resuming is not use: the held session's idle clock is the daemon's last tool use (#10656).
     this.otherHeldSessions.set(sessionId, { claimSent: false, lastUsedAt: session.lastUsedAt });
     return true;
@@ -6360,7 +6472,7 @@ export class DaemonMcpProxy {
       this.hasImplicitDeviceSelector(args, name === "setActiveDevice");
     this.reportPendingSessionLoss(
       args,
-      !sessionless && !this.canUseSurvivingSession(args, usesDeviceSelector),
+      !sessionless && !this.canUseSurvivingSession(args, usesDeviceSelector, name),
     );
   }
 
@@ -6659,6 +6771,7 @@ export class DaemonMcpProxy {
     this.ownershipReestablishment?.sessionUuids.delete(sessionUuid);
     if (!keepHandover) {
       this.sessionDeviceIds.delete(sessionUuid);
+      this.sessionPlatforms.delete(sessionUuid);
       this.stallHandovers.delete(sessionUuid);
     }
   }
@@ -7230,10 +7343,19 @@ export class DaemonMcpProxy {
       return;
     }
     const mintedSessionUuid = getDeviceSessionIdFromResult(result);
-    if (!mintedSessionUuid || mintedSessionUuid === this.boundSessionUuid) {
+    if (!mintedSessionUuid) {
       return;
     }
-    this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
+    if (mintedSessionUuid !== this.boundSessionUuid) {
+      this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
+    }
+    const platform = getDevicePlatformFromResult(result);
+    if (platform) {
+      this.sessionPlatforms.set(mintedSessionUuid, platform);
+    }
+    if (mintedSessionUuid === this.boundSessionUuid) {
+      return;
+    }
     this.rememberSessionDevice(mintedSessionUuid, getDeviceIdFromResult(result));
     // A prior binding's keeper must not outlive the rebind to a fresh session.
     // (A terminal fence already stopped it; this covers re-acquiring over a live
@@ -7949,6 +8071,7 @@ export class DaemonMcpProxy {
     this.livenessAcks.clear();
     this.daemonIdleReports.clear();
     this.sessionDeviceIds.clear();
+    this.sessionPlatforms.clear();
     this.stallHandovers.clear();
     this.resumedStallNotices.clear();
     this.pendingSessionLosses.clear();

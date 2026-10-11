@@ -8,6 +8,7 @@ import {
 import { DAEMON_SHUTDOWN_TIMEOUT_MS, DAEMON_VERSION } from "../../src/daemon/constants";
 import {
   DaemonMcpProxy,
+  DaemonConnectionSessionReleasedError,
   DaemonToolOutcomeUnknownError,
   RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
 } from "../../src/daemon/daemonMcpProxy";
@@ -129,6 +130,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 //       that binding is terminally released and no acquisition has bound a new one, the call is
 //       refused with that release and nothing reaches the daemon, whatever named calls were in
 //       flight at the release or were answered since.
+//   I10 a control call under the fence reaches a session only if it names that session or that
+//       session's device. A platform alone, an ended device or an unknown device reports the
+//       release and reaches no daemon; a held device reaches exactly its surviving session.
 //
 // "keeper runs" is observed as the keeper's interval being scheduled: it is, exactly while some
 // session the proxy must heartbeat exists.
@@ -159,6 +163,8 @@ type Gone = "terminal" | "recoverable" | "unknown";
  */
 type Birth = "lives" | "reaped" | "released";
 
+type ControlSelector = "platform" | "binding-device" | "held-device" | "ended-device" | "unknown";
+
 type Command =
   | { kind: "acquire"; birth: Birth }
   | { kind: "release"; target: number; gone: Gone; notify: boolean; reason?: string }
@@ -168,6 +174,7 @@ type Command =
    */
   | { kind: "call"; target: number; rejected: boolean; read?: boolean }
   | { kind: "sessionless" }
+  | { kind: "selector-control"; selector: ControlSelector }
   /** The daemon is replaced; nothing listens for `gapMs` in between. */
   | { kind: "daemon-restart"; gapMs: number }
   | { kind: "tick" }
@@ -242,6 +249,19 @@ const command: fc.Arbitrary<Command> = fc.oneof(
   },
   { weight: 4, arbitrary: fc.constant<Command>({ kind: "tick" }) },
   { weight: 2, arbitrary: fc.constant<Command>({ kind: "sessionless" }) },
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      kind: fc.constant("selector-control" as const),
+      selector: fc.constantFrom<ControlSelector>(
+        "platform",
+        "binding-device",
+        "held-device",
+        "ended-device",
+        "unknown",
+      ),
+    }),
+  },
   // Around the tick on which a window opened by the first commands runs out.
   {
     weight: 1,
@@ -261,6 +281,7 @@ const command: fc.Arbitrary<Command> = fc.oneof(
 );
 
 interface SessionModel {
+  deviceId: string;
   /** What the daemon answers for it: live, or gone and how. */
   daemon: "live" | Gone;
   /** The proxy was told it is gone and has not been handed it again since. */
@@ -499,6 +520,7 @@ class World {
     const sessionUuid = `session-${this.nextSession}`;
     this.nextSession += 1;
     this.sessions.set(sessionUuid, {
+      deviceId: `device-${sessionUuid}`,
       daemon: this.nextBirth === "reaped" ? "terminal" : "live",
       told: false,
       deadSince: -1,
@@ -514,7 +536,17 @@ class World {
     this.latestCertain = true;
     this.fenced = undefined;
     return {
-      content: [{ type: "text", text: JSON.stringify({ runtime: { session: { sessionUuid } } }) }],
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            runtime: {
+              deviceId: this.sessions.get(sessionUuid)!.deviceId,
+              session: { sessionUuid },
+            },
+          }),
+        },
+      ],
     };
   }
 
@@ -836,6 +868,69 @@ class World {
     }
   }
 
+  /** I10: selectors cannot let the daemon choose a control target after the binding ends. */
+  async selectorControl(selector: ControlSelector): Promise<void> {
+    const fenced = this.fenced;
+    if (fenced === undefined) {
+      return;
+    }
+    const survivor = [...this.held].find((id) => id !== fenced);
+    const ended = [...this.sessions].find(([, session]) => session.daemon === "terminal")?.[0];
+    const selected =
+      selector === "binding-device"
+        ? fenced
+        : selector === "held-device"
+          ? survivor
+          : selector === "ended-device"
+            ? ended
+            : undefined;
+    const deviceId =
+      selected === undefined ? "unknown-device" : this.sessions.get(selected)!.deviceId;
+    const args = selector === "platform" ? { platform: "android" } : { deviceId };
+    const expected =
+      selector !== "platform" &&
+      selected !== undefined &&
+      selected !== fenced &&
+      this.held.has(selected)
+        ? selected
+        : undefined;
+    const before = this.sessionlessTargets.length;
+    let refusal: unknown;
+    const outcome = await this.whileTimePasses(
+      this.proxy.callTool("tapOn", { text: SESSIONLESS_TEXT, ...args }).then(
+        (result) => result,
+        (error: unknown) => {
+          refusal = error;
+          throw error;
+        },
+      ),
+    );
+    const sent = this.sessionlessTargets.slice(before);
+    if (expected !== undefined) {
+      if (outcome !== "answered" || sent.length !== 1 || sent[0] !== expected) {
+        this.violations.push(
+          `I10: ${JSON.stringify(args)} must reach exactly ${expected}, got ${JSON.stringify(sent)}: ${outcome}`,
+        );
+      } else {
+        this.holds(expected);
+      }
+    } else {
+      const reason = this.sessions.get(fenced)!.endedAs;
+      if (
+        sent.length !== 0 ||
+        !(refusal instanceof DaemonConnectionSessionReleasedError) ||
+        !outcome.includes(reason)
+      ) {
+        this.violations.push(
+          `I10: ${JSON.stringify(args)} must report ${fenced}'s release (${reason}), got ${JSON.stringify(sent)}: ${outcome}`,
+        );
+      }
+    }
+    if (this.fenced !== fenced || this.latest !== undefined) {
+      this.violations.push("I10: a selector control moved the binding or cleared the fence");
+    }
+  }
+
   /** A control call on `sessionUuid` that the daemon admits and does not answer yet. */
   async startCallInFlight(sessionUuid: string): Promise<void> {
     const inFlight: InFlightCall = { sessionUuid, answer: Promise.withResolvers<void>(), sent: 0 };
@@ -1053,6 +1148,8 @@ class World {
       this.pause(step.pauseMs);
     } else if (step.kind === "sessionless") {
       await this.sessionless();
+    } else if (step.kind === "selector-control") {
+      await this.selectorControl(step.selector);
     } else {
       const sessionUuid =
         this.inFlight === undefined ? this.sessionAt(step.target) : this.siblingAt(step.target);
@@ -1713,6 +1810,19 @@ const TICK: Command = { kind: "tick" };
 
 /** The histories of the bugs this state machine had, one per issue item. */
 const REGRESSIONS: ReadonlyArray<readonly [string, readonly Command[]]> = [
+  ...(["platform", "binding-device", "held-device", "ended-device", "unknown"] as const).map(
+    (selector): readonly [string, readonly Command[]] => [
+      `I10: fenced ${selector} control names a held device or reports the release`,
+      [
+        ACQUIRE,
+        ACQUIRE,
+        { kind: "release", target: 1, gone: "terminal", notify: true },
+        { kind: "selector-control", selector },
+        { kind: "sessionless" },
+        TICK,
+      ],
+    ],
+  ),
   [
     "#11656.2 a named call after the latest binding's release does not become the binding",
     [

@@ -39,6 +39,7 @@ import { PLAN_YAML_LOAD_OPTIONS } from "../utils/plan/planYaml";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
+import { readEnvPositiveInteger } from "../utils/envNumbers";
 import type { DaemonRequest } from "./types";
 import {
   DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
@@ -292,17 +293,13 @@ export const DEFAULT_OBSERVE_MCP_TIMEOUT_MS = 90_000;
 export const OBSERVE_MCP_TIMEOUT_ENV_VAR = "AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS";
 export const LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR = "AUTO_MOBILE_OBSERVE_MCP_TIMEOUT_MS";
 
-function resolveEnvTimeoutFloorMs(
+export function resolveEnvTimeoutFloorMs(
   primaryEnvVar: string,
   legacyEnvVar: string,
   fallbackMs: number,
+  env: NodeJS.ProcessEnv = process.env,
 ): number {
-  const raw = process.env[primaryEnvVar] ?? process.env[legacyEnvVar];
-  if (!raw) {
-    return fallbackMs;
-  }
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
+  return readEnvPositiveInteger(primaryEnvVar, legacyEnvVar, { fallback: fallbackMs }, env);
 }
 
 function resolveFixedToolTimeoutFloorMs(toolName: unknown): number | undefined {

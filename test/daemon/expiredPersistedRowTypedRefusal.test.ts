@@ -5,6 +5,8 @@ import {
   TerminalSessionError,
   UnissuedSessionError,
 } from "../../src/daemon/sessionManager";
+import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import type { Database } from "../../src/db/types";
 import { createTestDatabase } from "../db/testDbHelper";
@@ -151,6 +153,102 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
 
     // Read-only admission never recovers; it reports the row as admissible by resolving.
     expect(await refusal(restartedDaemon(), "read-only")).toBeUndefined();
+  });
+
+  /** What `daemon/heartbeat` or `daemon/sessionInfo` answers a client naming the session. */
+  async function wireAnswer(manager: SessionManager, method: string): Promise<unknown> {
+    const registry = new DeviceSessionRegistry();
+    return await handleDaemonRequest(
+      { id: "request-1", type: "daemon_request", method, params: { sessionId: SESSION } },
+      {
+        isInitialized: () => true,
+        getSessionManager: () => manager,
+        getDevicePool: () => {
+          throw new Error("a session-not-found answer never reaches the pool");
+        },
+        getDeviceSessionRegistry: () => registry,
+      },
+    );
+  }
+
+  // The heartbeat and session-info wires answer session-not-found with the recorded reason. A row
+  // past its deadline is ended whatever reason it still stores, so they name `expired` as
+  // admission does: a stored handoff reason would tell the owner's proxy to keep resuming a
+  // session every call is refused for, and no reason at all reads as a never-issued id.
+  for (const method of ["daemon/heartbeat", "daemon/sessionInfo"]) {
+    for (const [label, reason] of [
+      ["a live row whose idle deadline passed", undefined],
+      ["a daemon-shutdown handoff whose recovery window lapsed", "daemon-shutdown"],
+      ["a device-restart handoff whose recovery window lapsed", `device-restart:${DEVICE}`],
+      ["a row the sweep already marked expired", "expired"],
+    ] as const) {
+      test(`${method} names expired for ${label}`, async () => {
+        await seedRow(reason);
+        timer.setCurrentTime(DEADLINE + 1);
+        const manager = restartedDaemon();
+
+        expect(await wireAnswer(manager, method)).toEqual({
+          success: false,
+          error: `Session not found: ${SESSION}`,
+          code: "daemon_session_not_found",
+          releaseReason: "expired",
+        });
+        // Answering is a read: the row is left as it was.
+        expect((await repo.getSession(SESSION))?.release_reason ?? undefined).toBe(reason);
+      });
+    }
+
+    test(`${method} still names a handoff inside its recovery window`, async () => {
+      await seedRow("daemon-shutdown");
+      timer.setCurrentTime(DEADLINE - 1);
+
+      expect(await wireAnswer(restartedDaemon(), method)).toMatchObject({
+        code: "daemon_session_not_found",
+        releaseReason: "daemon-shutdown",
+      });
+    });
+
+    test(`${method} keeps a terminal reason on a row past its deadline`, async () => {
+      await seedRow("heartbeat-timeout");
+      timer.setCurrentTime(DEADLINE + 1);
+
+      expect(await wireAnswer(restartedDaemon(), method)).toMatchObject({
+        code: "daemon_session_not_found",
+        releaseReason: "heartbeat-timeout",
+      });
+    });
+
+    test(`${method} keeps the plain not-found for a never-issued id`, async () => {
+      expect(await wireAnswer(restartedDaemon(), method)).toEqual({
+        success: false,
+        error: `Session not found: ${SESSION}`,
+        code: "daemon_session_not_found",
+      });
+    });
+  }
+
+  test("the expired release snapshot is offered only for a row past its deadline", async () => {
+    await seedRow("daemon-shutdown");
+    timer.setCurrentTime(DEADLINE - 1);
+    const manager = restartedDaemon();
+    expect(await manager.getExpiredReleaseSnapshot(SESSION)).toBeUndefined();
+    expect(await manager.getExpiredReleaseSnapshot("never-issued")).toBeUndefined();
+
+    timer.setCurrentTime(DEADLINE + 1);
+    expect(await manager.getExpiredReleaseSnapshot(SESSION)).toMatchObject({
+      sessionId: SESSION,
+      deviceId: DEVICE,
+      releaseReason: "expired",
+      terminal: true,
+    });
+    expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+  });
+
+  test("a terminally released row is not offered as expired", async () => {
+    await seedRow("heartbeat-timeout");
+    timer.setCurrentTime(DEADLINE + 1);
+
+    expect(await restartedDaemon().getExpiredReleaseSnapshot(SESSION)).toBeUndefined();
   });
 
   test("a never-issued id keeps the untyped not-found answer", async () => {

@@ -1,4 +1,8 @@
 import type { DeviceInfo } from "../models";
+import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
+import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
+import { DEFAULT_ADMISSION_RETRY_AFTER_MS } from "../features/bootAdmission/BootAdmissionGate";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { Timer } from "../utils/SystemTimer";
 import { sequenceBackoff } from "../utils/Backoff";
 import { logger } from "../utils/logger";
@@ -11,6 +15,16 @@ import { logger } from "../utils/logger";
  * including a bare `void` return, is treated as a completed attempt.
  */
 export type AndroidRebootAttemptOutcome = "cancelled" | "succeeded";
+
+/** Admission refused before an emulator existed; this is not a crashed launch (#11691). */
+export function isBootAdmissionRefusal(
+  error: unknown,
+): error is BootCapacityExhaustedError | BootedDeviceDiscoveryIncompleteError {
+  return (
+    error instanceof BootCapacityExhaustedError ||
+    error instanceof BootedDeviceDiscoveryIncompleteError
+  );
+}
 
 export interface AndroidDeviceReboot {
   run(
@@ -47,6 +61,7 @@ export class BoundedAndroidDeviceReboot implements AndroidDeviceReboot {
     private readonly timer: Timer,
     private readonly maxAttempts: number = 2,
     private readonly windowMs: number = DEFAULT_ANDROID_REBOOT_WINDOW_MS,
+    private readonly admissionRecoveryWindowMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
   ) {}
 
   clear(target: Pick<DeviceInfo, "platform" | "name">): void {
@@ -71,11 +86,37 @@ export class BoundedAndroidDeviceReboot implements AndroidDeviceReboot {
     return inWindow;
   }
 
+  /** Retry admission within its own window, separately from the crash backoff. */
+  private async waitForAdmissionRetry(
+    target: DeviceInfo,
+    refusal: BootCapacityExhaustedError | BootedDeviceDiscoveryIncompleteError,
+    deadlineMs: number,
+  ): Promise<boolean> {
+    const remainingMs = Math.max(0, deadlineMs - this.timer.now());
+    const retryAfterMs =
+      "retryAfterMs" in refusal ? refusal.retryAfterMs : DEFAULT_ADMISSION_RETRY_AFTER_MS;
+    logger.warn(
+      `[Android reboot] Restart admission refused for ${target.name}: ${refusal.code}; ` +
+        `boot capacity/discovery retry in ${Math.min(retryAfterMs, remainingMs)}ms`,
+      refusal,
+    );
+    await this.timer.sleep(Math.min(retryAfterMs, remainingMs));
+    if (this.timer.now() >= deadlineMs) {
+      logger.warn(
+        `[Android reboot] Boot capacity/discovery recovery window exhausted for ${target.name}: ${refusal.code}`,
+      );
+      return false;
+    }
+    return true;
+  }
+
   async run(
     target: DeviceInfo,
     reboot: () => Promise<AndroidRebootAttemptOutcome | void>,
   ): Promise<boolean> {
     const targetKey = this.targetKey(target);
+    let admissionDeadlineMs: number | undefined;
+    let retryAdmission = true;
     let attempts = this.attemptsInWindow(targetKey);
     if (attempts.length >= this.maxAttempts) {
       const windowMinutes = Math.max(1, Math.round(this.windowMs / 60_000));
@@ -93,7 +134,7 @@ export class BoundedAndroidDeviceReboot implements AndroidDeviceReboot {
       attempts = this.attemptsInWindow(targetKey);
     }
 
-    while (attempts.length < this.maxAttempts) {
+    while (attempts.length < this.maxAttempts && retryAdmission) {
       const attemptNumber = attempts.length + 1;
       attempts = [...attempts, this.timer.now()];
       this.attemptsByTarget.set(targetKey, attempts);
@@ -108,6 +149,15 @@ export class BoundedAndroidDeviceReboot implements AndroidDeviceReboot {
         }
         return true;
       } catch (error) {
+        if (isBootAdmissionRefusal(error)) {
+          // Like cancellation, admission never touched the emulator: refund this timestamp.
+          attempts = attempts.slice(0, -1);
+          this.attemptsByTarget.set(targetKey, attempts);
+          admissionDeadlineMs ??= this.timer.now() + this.admissionRecoveryWindowMs;
+          retryAdmission = await this.waitForAdmissionRetry(target, error, admissionDeadlineMs);
+          attempts = this.attemptsInWindow(targetKey);
+          continue;
+        }
         logger.warn(
           `[Android reboot] Failed to restart ${target.name} (attempt ${attemptNumber}/${this.maxAttempts}): ${error}`,
           error,

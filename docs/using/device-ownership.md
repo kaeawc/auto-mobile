@@ -345,6 +345,32 @@ keep their existing behavior; screenshot, hierarchy and observe reads never
 pass this control check. A managed connection still controls only its own slot
 devices, after the identity check and before the existing ownership checks.
 
+A tool call may name such a device by either endpoint (#11618). The `deviceId` is
+resolved to the pool's one id for the device before any ownership, managed-slot
+or routing check, so a call naming the Wi-Fi id of a held handset is refused or
+admitted exactly as one naming its USB serial, runs on the same per-device queue,
+and the tool sees the pool's id. The same holds for an emulator's loopback adb
+address (`localhost:5555` for `emulator-5554`), and for every tool that takes a
+device id on every path: `setActiveDevice`, `killDevice`'s `device.deviceId`, a
+`getAndroid`, `getApple` or `startDevice` `deviceId`, plan steps, and a client
+that calls the daemon's MCP endpoint directly. A wireless id a control call names
+before the pool has seen it is identified first (one adb probe, not repeated per
+call); reads use only what the pool already knows.
+
+A failed `adb devices` listing is never read as "no such device". If the listing
+fails while the pool tracks an Android device, a control call naming a wireless
+or TCP address the pool has not seen is refused with the retryable
+`discovery_incomplete`: the address may be a second route to a device a session
+holds. Nothing is sent and the refusal is not use; the next call asks adb again.
+The holder is not affected: a call naming the device by the id `listDevices`
+reports never depends on that listing, and reads still answer. A machine whose
+pool tracks no Android device is refused nothing.
+
+An Android transport the pool cannot identify at all (a wireless phone
+reporting a generic serial, an emulator on a non-loopback `adb connect` address)
+is not an alias of anything: if no session holds it, tool calls on it are allowed
+as before.
+
 ## Daemon restart
 
 The restarted daemon stamps itself as owner of every session it rehydrates (#11114),
@@ -361,6 +387,17 @@ takes the device. A session lost to identity loss at restart is answered as
 recorded first in a crash-safe sidecar (`terminal-release-intents.jsonl` in the
 daemon data directory, `src/daemon/terminalReleaseJournal.ts`), and the restarted
 daemon finishes it before rehydrating, so a released UUID is never revived.
+
+A device-restart handoff reserves the recorded platform and stable device identity for
+its session throughout the recovery window, even while the device is absent and no
+call is waiting. Other sessions' selectors skip it and binding by id is refused;
+reads remain available. The hold ends on successful recovery, any terminal session
+release, the three-minute window ending, or daemon shutdown. An idle expiry inside the
+window ends the hold without another call; tool activity extends that deadline, and a
+call in flight retains the hold through the recovery window. Intentional stops end
+the hold. Concurrent daemon-restart and device-restart holds end independently. Managed slots still
+win, and the reservation does not extend the owner's heartbeat lease. A wiped or
+re-imaged device returning under the same AVD name or UDID remains an identity gap.
 
 ## Planned: device state between owners
 
@@ -382,20 +419,26 @@ releasing.
   (`getAndroid`, `getApple`, `startDevice`) changes the session a connection's
   untargeted calls run on. An explicit `sessionUuid` targets that one call: the
   next call without one still runs on the default (#11347). A connection that has
-  no default yet adopts the first session it names.
+  no default yet adopts the first session it names. A call passing only `platform`
+  matching the default session's device runs on the default when no other session
+  the connection still holds has that platform or an unknown platform. `deviceId`
+  names the target device; a `platform` other than the default's does not use the
+  default.
 - **`scripts/mcp-drive.ts`:** a `getAndroid`/`getApple` step captures the session
   and injects it into later steps; `--session <uuid>` reuses an existing one.
 - **Scripts that run `--cli` calls:** keep the acquiring call's `sessionUuid` and
   pass `--session-uuid` on every later call (see
   `scripts/android/navigation-graph-sdk-event-integration.sh`).
 
-If an agent holds two sessions and its default session ends, its next control
-call without `sessionUuid` is refused with `no_active_device_session`,
-`nextAction: "acquire_new_session"` and the release reason. The default is the
-session its calls without `sessionUuid` go to. Calls that pass the other
-session's `sessionUuid` keep working throughout and do not change the default.
-To continue without naming it each time, call `setActiveDevice` for the surviving
-device or acquire a new session with `getAndroid` or `getApple`.
+If an agent holds two sessions and its default session ends, a control call
+that passes the surviving session's `sessionUuid` or `deviceId` runs on that
+session and does not change the default. A control call with only `platform`,
+a `deviceId` that no surviving session holds (or that the proxy cannot match to
+exactly one surviving session), or no selector is refused with
+`no_active_device_session`, `nextAction: "acquire_new_session"` and the release
+reason. To continue without naming the surviving session or its device each
+time, call `setActiveDevice` for that device or acquire a new session with
+`getAndroid` or `getApple`.
 
 ## Stopping a held device: `killDevice` and `deleteDevice`
 
@@ -448,6 +491,26 @@ Owner decisions 2026-10-09 (#10982):
   writes and selecting or pinning the current device. A later control call still
   performs those steps. A sessionless read on a held device runs no readiness,
   pinning or settings work at all; it uses the read-only path.
+- A sessionless read boots a stopped device only when the call explicitly passes
+  its `deviceId` (owner decision 2026-10-11, follow-up to #11641). The ID names an
+  Android AVD image or an available iOS simulator; it boots only that image and
+  never creates a simulator. Existing boot capacity and admission rules apply.
+- A read without `deviceId` uses an already-running device and never boots or
+  creates one. A `platform` argument alone is not an explicit ID. A stopped
+  device selected earlier with `setActiveDevice`, or cached as the current device,
+  is not named by the call and cannot be booted by that read. A device named only
+  by a session binding follows the existing session readiness path instead of
+  the sessionless read path.
+- If no suitable device is running, a read without `deviceId` answers that there
+  is nothing to read: start one with `startDevice` or `provisionDevice`, or pass a
+  `deviceId`. This is an ordinary actionable no-device error, not an ownership
+  refusal. With `platform: "either"`, an unnamed read can give that answer when
+  at least one platform's discovery completed. An explicit platform still needs
+  its own completed scan. A named stopped device needs completed discovery on
+  its platform; absent tooling on the other platform does not block that match.
+  Incomplete discovery that prevents these decisions remains a retryable
+  `discovery_incomplete` error. Control calls keep their existing device selection
+  and boot behavior.
 - Reads run in their own lane (#10969).
 - A holder's calls that name only a `deviceId` are credited to the MCP connection
   that owns the held session, and admitted as that session. Other connections
@@ -466,9 +529,19 @@ Owner decisions 2026-10-09 (#10982):
 
 - A recording stops and finalizes when its session is released, capped at about
   120 seconds (#10957). This also covers an idle release (#10826).
-- A recording with no owner stops when a session acquires the device (#10961).
 - Recording artifacts stay fetchable by id (#10958).
 - Hiding a desktop or IDE window during a recording does not release the device.
+
+A video start from the connection holding a device belongs to that holding session,
+even when the call omits `sessionUuid`. Starting a test recording on an unheld device
+is refused with `no_active_device_session`; acquire a session on that device first.
+
+An active recording with no owner keeps running when a session acquires its device:
+the acquiring holder adopts it (owner decision 2026-10-11, #11665, replacing #10961).
+Until acquisition it remains stoppable sessionless; afterwards only the holder or
+the connection that acquired its session may stop it. This includes segmented video
+and test recordings. Release finalizes adopted recordings within the existing cap,
+announces their recording ids, and keeps their artifacts fetchable by id (#10958).
 
 ## Retryable acquisition refusals
 
@@ -476,6 +549,11 @@ An acquisition the daemon cannot grant yet is refused with a typed, retryable
 code (owner decision 2026-10-09, #10982): `device_cleanup_in_progress` while the
 device is still being released (#10960), and `device_owned_by_other_daemon` when
 another daemon holds it. Clients may wait and retry.
+
+An exact Android acquisition also waits up to 5 s when adb still lists its
+transport as `offline` or `unauthorized` (#11713). If it stays transitional,
+`device_offline` carries `retryable: true`, `deviceId`, and a 1 s `retryAfterMs`
+hint. The refusal is retryable, and any existing pool entry is left untouched.
 
 Each refusal carries a `retryAfterMs` hint. For `device_cleanup_in_progress` it
 is the time the cleanup can still take (#11360): the rest of a release's bounded

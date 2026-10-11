@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   BOOT_CAPACITY_GATE_ENV,
   BootAdmissionLedger,
@@ -14,6 +16,7 @@ import {
   createBootAdmissionGates,
   describeBootCapacity,
 } from "../../../src/features/bootAdmission/sharedBootAdmissionGates";
+import { parsePsSnapshot } from "../../../src/features/iosSimFleet/psSnapshot";
 import { testOverrides } from "../../../src/utils/testOverrides";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -188,22 +191,68 @@ describe("BootAdmissionLedger", () => {
 });
 
 describe("CommandAndroidCapacitySource", () => {
-  const PS = [
-    "  101     1 3145728  80.0 /sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64 -netdelay none -avd Pixel_9",
-    "  102   101   20480   0.1 /sdk/emulator/crashpad_handler --database=/tmp",
-    "  103     1 2097152  40.0 /opt/sdk/emulator/qemu/linux-x86_64/qemu-system-x86_64-headless -avd Tablet",
-    "  104     1    4096   0.0 /usr/bin/grep qemu-system-aarch64",
-    "  105     1    4096   0.0 /bin/zsh",
-  ].join("\n");
+  // A real `ps -axo pid=,ppid=,rss=,pcpu=,command=` capture with one emulator running, booted
+  // by the daemon in it (see the fixture README).
+  const PS = readFileSync(
+    join(
+      import.meta.dir,
+      "../../fixtures/android-boot-admission/ps-snapshot-one-running-emulator.txt",
+    ),
+    "utf8",
+  );
+  const QEMU_PID = 67978;
+  const DAEMON_PID = 61847;
+  const captured = parsePsSnapshot(PS);
+  const commandOf = (pid: number): string =>
+    captured.rows.find((row) => row.pid === pid)?.command ?? "";
 
-  test("identifies emulator qemu processes by executable name", () => {
-    expect(
-      isEmulatorQemuProcess({
-        command: "/sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64 -avd X",
-      }),
-    ).toBe(true);
+  test("the captured listing parses whole, command lines with spaces included", () => {
+    expect(captured.skipped).toBe(0);
+    expect(captured.rows.map((row) => row.pid)).toEqual([
+      1,
+      347,
+      383,
+      10400,
+      DAEMON_PID,
+      QEMU_PID,
+      68082,
+      68734,
+    ]);
+    // A path with spaces and ` --` arguments is kept verbatim to the end of the line.
+    expect(commandOf(10400)).toStartWith(
+      "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/",
+    );
+    expect(commandOf(10400)).toEndWith("--annotation=ver=154.0.8037.93 --handshake-fd=5");
+    expect(commandOf(QEMU_PID)).toBe(
+      "/Users/dev/Library/Android/sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64-headless -avd amslot-039fd12f-0-g1-5e7e5f80 -no-window -port 5554",
+    );
+  });
+
+  test("identifies the emulator's qemu process and none of its helpers", () => {
+    expect(captured.rows.filter(isEmulatorQemuProcess).map((row) => row.pid)).toEqual([QEMU_PID]);
+    // The emulator's crashpad handler names the qemu pid, and netsimd is the qemu process's child.
+    expect(isEmulatorQemuProcess({ command: commandOf(68082) })).toBe(false);
+    expect(isEmulatorQemuProcess({ command: commandOf(68734) })).toBe(false);
     expect(isEmulatorQemuProcess({ command: "/usr/bin/grep qemu-system-aarch64" })).toBe(false);
     expect(isEmulatorQemuProcess({ command: "/sdk/emulator/emulator -avd X" })).toBe(false);
+  });
+
+  // #11588: `ps` does not quote, and the executable was taken to end at the first " -".
+  test("identifies the qemu process when the SDK path has spaces or a ' -' in it", () => {
+    const sdk = "/Users/dev/Library/Android/sdk";
+    const under = (directory: string): { command: string } => ({
+      command: commandOf(QEMU_PID).replace(sdk, `${directory}/sdk`),
+    });
+
+    expect(isEmulatorQemuProcess(under("/Users/dev/My Tools/Android"))).toBe(true);
+    expect(isEmulatorQemuProcess(under("/Users/dev/OneDrive - Work/Android"))).toBe(true);
+    expect(isEmulatorQemuProcess(under("/opt/android -sdk"))).toBe(true);
+    // Launched with no arguments at all: the command line ends at the executable.
+    expect(
+      isEmulatorQemuProcess({
+        command: `${under("/Users/dev/OneDrive - Work/Android").command.split(" -avd")[0]}`,
+      }),
+    ).toBe(true);
   });
 
   test("samples adb serials, qemu RSS and host totals", async () => {
@@ -222,11 +271,9 @@ describe("CommandAndroidCapacitySource", () => {
 
     expect(await source.sample()).toEqual({
       emulatorSerials: ["emulator-5554"],
-      emulatorProcessRssBytes: [3145728 * 1024, 2097152 * 1024],
-      emulatorProcessIds: [
-        { pid: 101, ppid: 1 },
-        { pid: 103, ppid: 1 },
-      ],
+      emulatorProcessRssBytes: [5947792 * 1024],
+      // The qemu process is the launcher the daemon spawned: its parent is the daemon itself.
+      emulatorProcessIds: [{ pid: QEMU_PID, ppid: DAEMON_PID }],
       host: { totalMemoryBytes: 32 * GIB, cpuCount: 8 },
       errors: [],
     });

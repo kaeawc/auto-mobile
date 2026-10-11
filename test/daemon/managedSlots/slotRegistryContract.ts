@@ -1220,6 +1220,136 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
           sessionUuid: "live-session",
         });
       });
+
+      // #11642: the runner's next incarnation asked while the execution was live, so the scope is
+      // already `invalidating` when the daemon restarts.
+      describe("while the scope is invalidating (#11642)", () => {
+        const BINDING = { generation: 1, stableDeviceId: "avd-1" };
+
+        async function invalidatingAcrossRestart(): Promise<SlotKey> {
+          const key = await liveExecutionAcrossRestart();
+          expect((await registry.ensureScope(SCOPE_A2)).kind).toBe("incarnation_conflict");
+          expect(
+            (await registry.beginScopeInvalidation(key.scopeKey, "incarnation_reset")).kind,
+          ).toBe("invalidating");
+          return key;
+        }
+
+        test("the restarted daemon re-owns its live execution and the transition waits for it", async () => {
+          const key = await invalidatingAcrossRestart();
+          // Unowned, the record names a dead process: any daemon would retire the scope.
+          const reowned = await reowner().reown(["live-session"]);
+
+          expect(reowned.map((slot) => slot.execOwner)).toEqual([
+            { ...AFTER_RESTART, sessionUuid: "live-session" },
+          ]);
+          expect(await registry.completeScopeInvalidation(key.scopeKey)).toMatchObject({
+            kind: "pending",
+            liveOwners: [{ execOwner: { pid: AFTER_RESTART.pid, sessionUuid: "live-session" } }],
+          });
+          // Re-owning neither revives the scope nor touches the binding.
+          expect(await registry.getScope(key.scopeKey)).toMatchObject({
+            state: "invalidating",
+            invalidationReason: "incarnation_reset",
+          });
+          expect(await registry.getAssignment(key)).toMatchObject({ ...BINDING, state: "ready" });
+        });
+
+        test("the transition completes once the re-owned execution ends, and the next incarnation proceeds", async () => {
+          const key = await invalidatingAcrossRestart();
+          await reowner().reown(["live-session"]);
+
+          expect((await registry.releaseExecution(key, "live-session")).released).toBe(true);
+
+          expect(await registry.completeScopeInvalidation(key.scopeKey)).toMatchObject({
+            kind: "invalidated",
+            freedDevices: [{ stableDeviceId: "avd-1" }],
+          });
+          expect(await registry.ensureScope(SCOPE_A2)).toMatchObject({ kind: "ready" });
+          // Nothing is left to re-own in the retired scope.
+          expect(await reowner().reown(["live-session"])).toEqual([]);
+        });
+
+        test("no other session, reservation or superseding claim gets into the invalidating scope", async () => {
+          const key = await invalidatingAcrossRestart();
+          const other = { ...AFTER_RESTART, sessionUuid: "other-session" };
+
+          // The recorded owner's process is dead: in a valid scope each of these would be claimed.
+          expect((await registry.claimExecution(key, BINDING, other)).kind).toBe("scope_not_valid");
+          expect(
+            (
+              await registry.claimExecution(key, BINDING, other, {
+                supersedesSessionUuid: "live-session",
+              })
+            ).kind,
+          ).toBe("scope_not_valid");
+          expect(
+            (
+              await registry.claimExecution(
+                key,
+                BINDING,
+                { ...AFTER_RESTART, sessionUuid: "reserve-next" },
+                { supersedesSessionUuid: "live-session" },
+              )
+            ).kind,
+          ).toBe("scope_not_valid");
+          expect((await registry.getAssignment(key))?.execOwner).toEqual({
+            ...BEFORE_RESTART,
+            sessionUuid: "live-session",
+          });
+
+          // The same session with a stale binding is still a stale binding.
+          expect(
+            (
+              await registry.claimExecution(
+                key,
+                { generation: 2, stableDeviceId: "avd-1" },
+                { ...AFTER_RESTART, sessionUuid: "live-session" },
+              )
+            ).kind,
+          ).toBe("stale_binding");
+        });
+
+        test("an ownerless slot of an invalidating scope cannot be claimed, even by its last session", async () => {
+          const key = await invalidatingAcrossRestart();
+          await registry.releaseExecution(key, "live-session");
+
+          expect(
+            (
+              await registry.claimExecution(key, BINDING, {
+                ...AFTER_RESTART,
+                sessionUuid: "live-session",
+              })
+            ).kind,
+          ).toBe("scope_not_valid");
+          expect(await reowner().reown(["live-session"])).toEqual([]);
+        });
+
+        test("an invalidated scope accepts no claim, the recorded session's included", async () => {
+          const key = await liveExecutionAcrossRestart();
+          timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS + 60_000);
+          // No daemon holds the session and its process is dead: the scope is abandoned through.
+          expect((await registry.markScopeAbandoned(key.scopeKey)).kind).toBe("marked");
+          expect((await registry.completeScopeInvalidation(key.scopeKey)).kind).toBe("invalidated");
+
+          expect(await reowner().reown(["live-session"])).toEqual([]);
+          expect((await registry.getAssignment(key))?.execOwner).toEqual({
+            ...BEFORE_RESTART,
+            sessionUuid: "live-session",
+          });
+        });
+
+        test("a scope marked abandoned before the re-own is not retired under the live session", async () => {
+          const key = await liveExecutionAcrossRestart();
+          timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS + 60_000);
+          // A peer daemon judged the record by its dead process and marked the scope.
+          expect((await registry.markScopeAbandoned(key.scopeKey)).kind).toBe("marked");
+
+          expect(await reowner().reown(["live-session"])).toHaveLength(1);
+
+          expect((await registry.completeScopeInvalidation(key.scopeKey)).kind).toBe("pending");
+        });
+      });
     });
 
     describe("slot journal (#11179)", () => {

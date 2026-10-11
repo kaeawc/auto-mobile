@@ -131,6 +131,7 @@ test/daemon/idleDeviceReaper.test.ts
 test/daemon/incumbentOwnerGuard.test.ts
 test/daemon/inputDeviceOwnership.test.ts
 test/daemon/inputHolderChangedTypedRefusal.test.ts
+test/daemon/labelOfEndedBaseRefused.test.ts
 test/daemon/lateRehydrationOwnerToldNotFound.test.ts
 test/daemon/liveDeadlineRegistry.test.ts
 test/daemon/livenessClaimDecision.test.ts
@@ -145,6 +146,7 @@ test/daemon/managedSlots/daemonManagedSlotAcquisition.redrive.test.ts
 test/daemon/managedSlots/defaultFreeDeviceReclaimer.test.ts
 test/daemon/managedSlots/freeDeviceReclaimer.test.ts
 test/daemon/managedSlots/managedExecutionDaemonRestart.test.ts
+test/daemon/managedSlots/managedExecutionRestartScenario.test.ts
 test/daemon/managedSlots/managedSlotAcquisition.test.ts
 test/daemon/managedSlots/managedSlotExclusion.test.ts
 test/daemon/managedSlots/managedSlotLateRehydrationReown.test.ts
@@ -189,6 +191,7 @@ test/daemon/proxyLivenessRecovery.test.ts
 test/daemon/proxyReleaseReasonClassification.test.ts
 test/daemon/proxySessionEventLeavesSiblingCallInFlight.test.ts
 test/daemon/proxySignalStopReleasesExecution.test.ts
+test/daemon/readEndReleaseRearmScenario.test.ts
 test/daemon/recycledProcessGeneration.test.ts
 test/daemon/refusalWireContract.test.ts
 test/daemon/refusedRoutingCallExtendsIdle.test.ts
@@ -204,7 +207,9 @@ test/daemon/sessionExpiryProperties.test.ts
 test/daemon/sessionHeartbeatExecutionVetoCeiling.test.ts
 test/daemon/sessionHoldDiagnostics.test.ts
 test/daemon/sessionInfoWallClock.test.ts
+test/daemon/sessionManager.cancelledClientChosenId.test.ts
 test/daemon/sessionManager.displayPin.test.ts
+test/daemon/sessionManager.releaseRowRetry.test.ts
 test/daemon/sessionManager.supersededRowReassertRetry.test.ts
 test/daemon/sessionSuspectGrace.test.ts
 test/daemon/shuttingDownFrameTypedFields.test.ts

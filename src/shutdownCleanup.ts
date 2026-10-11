@@ -52,12 +52,14 @@ export interface ShutdownCleanupDeadlineOptions {
  * Keys are in execution order.
  */
 export const DAEMON_SHUTDOWN_STAGE_BUDGET_MS = {
-  "provisioning ingress quiesce": 300,
+  // The control socket's own 1 s wait for in-flight request handlers, plus the margin: no
+  // earlier stage can lend this one time, so its share is its whole bound.
+  "provisioning ingress quiesce": 1_050,
   "provisioning interruption": 300,
   "shutdown release snapshot": 50,
   "forward lease idle releaser": 200,
   "managed execution release": 200,
-  "active capture and iOS CtrlProxy children": 700,
+  "active capture and iOS CtrlProxy children": 500,
   "health check timer": 50,
   "location routes": 50,
   "shutdown monitors": 150,
@@ -73,15 +75,15 @@ export const DAEMON_SHUTDOWN_STAGE_BUDGET_MS = {
   "failures stream socket server": 30,
   "failures push socket server": 30,
   "telemetry push socket server": 30,
-  "WebRTC stream socket server": 300,
-  "video stream socket server": 300,
-  "iOS simulator capture helper pool": 200,
+  "WebRTC stream socket server": 200,
+  "video stream socket server": 200,
+  "iOS simulator capture helper pool": 150,
   "appearance sync scheduler": 25,
   "performance monitor": 25,
   "active HTTP sessions": 150,
   "active HTTP session registry": 25,
   "HTTP server": 100,
-  "active device sessions": 1_800,
+  "active device sessions": 1_500,
   "Unix socket server": 1_100,
   "pending device cleanups": 300,
   "CtrlProxy forwarding leases": 400,
@@ -115,8 +117,9 @@ const NO_DEADLINE_CONTEXT: ShutdownCleanupStageContext = {
  * Given a timer, a stage with a `budgetMs` is also abandoned at its deadline: the timeout is
  * reported with the stage's name and what it was waiting on, and the next stage starts. An
  * abandoned stage is NOT cancelled — its work keeps running until the process exits — so later
- * stages can see it through `unsettledStages()`. A timeout is reported but is not a failure: it
- * does not join the aggregate.
+ * stages can see it through `unsettledStages()`. A stage that finishes late, before the run
+ * ends, is not a failure. One still running when the last stage is done joins the aggregate, so
+ * the process exits non-zero exactly as it did when a wedged stage ran into the process limit.
  */
 export async function runShutdownCleanupStages(
   stages: readonly ShutdownCleanupStage[],
@@ -205,6 +208,14 @@ export async function runShutdownCleanupStages(
         new Error(`Shutdown cleanup stage ${stage.name} exceeded its ${allowedMs}ms deadline`),
       );
     }
+  }
+
+  if (unsettled.size > 0) {
+    failures.push(
+      new Error(
+        `Shutdown cleanup stage(s) still running when shutdown finished: ${[...unsettled.keys()].join(", ")}`,
+      ),
+    );
   }
 
   if (failures.length > 0) {

@@ -99,12 +99,28 @@ async function flush(): Promise<void> {
   }
 }
 
+interface StageRun {
+  finishedAt: number;
+  /** Messages of the errors the run rejected with; empty when it resolved. */
+  failures: string[];
+}
+
 /** Drive fake time until `stop` settles; fails the test instead of hanging if it never does. */
-async function runToCompletion(timer: FakeTimer, stop: Promise<void>): Promise<number> {
+async function runToCompletion(timer: FakeTimer, stop: Promise<void>): Promise<StageRun> {
   let settled = false;
-  const tracked = stop.then(() => {
-    settled = true;
-  });
+  let failures: string[] = [];
+  const tracked = stop.then(
+    () => {
+      settled = true;
+    },
+    (error: unknown) => {
+      settled = true;
+      failures =
+        error instanceof AggregateError
+          ? error.errors.map((cause: unknown) => (cause as Error).message)
+          : [String(error)];
+    },
+  );
   await flush();
   for (let elapsed = 0; !settled && elapsed <= 2 * PROCESS_SHUTDOWN_TIMEOUT_MS; elapsed += 5) {
     timer.advanceTime(5);
@@ -112,7 +128,7 @@ async function runToCompletion(timer: FakeTimer, stop: Promise<void>): Promise<n
   }
   expect(settled).toBe(true);
   await tracked;
-  return timer.now();
+  return { finishedAt: timer.now(), failures };
 }
 
 describe("runShutdownCleanupStages stage deadlines (#11601)", () => {
@@ -121,7 +137,7 @@ describe("runShutdownCleanupStages stage deadlines (#11601)", () => {
     const calls: string[] = [];
     const warnings: string[] = [];
 
-    const finishedAt = await runToCompletion(
+    const { finishedAt, failures } = await runToCompletion(
       timer,
       runShutdownCleanupStages(
         [
@@ -148,14 +164,40 @@ describe("runShutdownCleanupStages stage deadlines (#11601)", () => {
     expect(warnings).toEqual([
       "Shutdown cleanup stage relay timed out after 300ms waiting on capture source stop; continuing shutdown",
     ]);
+    // Work was left running, so the run fails and the process exits non-zero, as it did when
+    // the wedge ran into the process limit.
+    expect(failures).toEqual([
+      `Shutdown cleanup stage(s) still running when shutdown finished: relay`,
+    ]);
   });
 
-  test("a timeout is reported but is not a failure; a later rejection still is", async () => {
+  test("a stage that passes its deadline but finishes before the run ends is not a failure", async () => {
     const timer = new FakeTimer();
-    const failure = new Error("database failed");
-    let aggregate: unknown;
+    const warnings: string[] = [];
 
-    await runToCompletion(
+    const { finishedAt, failures } = await runToCompletion(
+      timer,
+      runShutdownCleanupStages(
+        [
+          { name: "slow", budgetMs: 50, waitingOn: "a finalizer", run: () => timer.sleep(120) },
+          { name: "later", budgetMs: 200, run: () => timer.sleep(150) },
+        ],
+        (message) => warnings.push(message),
+        { timer },
+      ),
+    );
+
+    expect(finishedAt).toBe(200);
+    expect(failures).toEqual([]);
+    expect(warnings).toEqual([
+      "Shutdown cleanup stage slow timed out after 50ms waiting on a finalizer; continuing shutdown",
+    ]);
+  });
+
+  test("a rejection after an abandoned stage is still reported, alongside the stage left running", async () => {
+    const timer = new FakeTimer();
+
+    const { failures } = await runToCompletion(
       timer,
       runShutdownCleanupStages(
         [
@@ -164,19 +206,19 @@ describe("runShutdownCleanupStages stage deadlines (#11601)", () => {
             name: "database",
             budgetMs: 50,
             run: () => {
-              throw failure;
+              throw new Error("database failed");
             },
           },
         ],
         () => {},
         { timer },
-      ).catch((error: unknown) => {
-        aggregate = error;
-      }),
+      ),
     );
 
-    expect(aggregate).toBeInstanceOf(AggregateError);
-    expect((aggregate as AggregateError).errors).toEqual([failure]);
+    expect(failures).toEqual([
+      "database failed",
+      `Shutdown cleanup stage(s) still running when shutdown finished: wedged`,
+    ]);
   });
 
   test("tells later stages which abandoned stages are still running, until they settle", async () => {
@@ -210,6 +252,7 @@ describe("runShutdownCleanupStages stage deadlines (#11601)", () => {
     gate.resolve();
     await stop;
 
+    // It settled before the run ended, so the run itself resolved.
     expect(seen).toEqual([["release"], []]);
   });
 
@@ -375,7 +418,7 @@ describe("daemon shutdown budget table (#11601)", () => {
       const ran: string[] = [];
       const warnings: string[] = [];
 
-      const finishedAt = await runToCompletion(
+      const { finishedAt, failures } = await runToCompletion(
         timer,
         runShutdownCleanupStages(
           tableStages(new Set([wedgedName]), ran),
@@ -389,6 +432,9 @@ describe("daemon shutdown budget table (#11601)", () => {
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toStartWith(`Shutdown cleanup stage ${wedgedName} timed out after `);
       expect(warnings[0]).toEndWith("ms waiting on a fake wedge; continuing shutdown");
+      expect(failures).toEqual([
+        `Shutdown cleanup stage(s) still running when shutdown finished: ${wedgedName}`,
+      ]);
       expect(finishedAt).toBeLessThanOrEqual(limit);
       expect(finishedAt).toBeLessThan(PROCESS_SHUTDOWN_TIMEOUT_MS);
     },
@@ -399,7 +445,7 @@ describe("daemon shutdown budget table (#11601)", () => {
     const ran: string[] = [];
     const warnings: string[] = [];
 
-    const finishedAt = await runToCompletion(
+    const { finishedAt } = await runToCompletion(
       timer,
       runShutdownCleanupStages(
         tableStages(new Set(names), ran),

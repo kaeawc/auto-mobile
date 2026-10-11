@@ -5140,8 +5140,16 @@ export class Daemon {
       shutdownStage("performance monitor", "an in-flight performance sample", () =>
         stopPerformanceMonitor(),
       ),
-      shutdownStage("active HTTP sessions", "streamable HTTP transports closing", (stage) =>
-        this.closeHttpSessionsForShutdown(boundWithinStage(stage, Number.POSITIVE_INFINITY)),
+      shutdownStage("active HTTP sessions", "streamable HTTP transports closing", () =>
+        // No deadline per transport: one that wedges is covered by this stage's deadline, which
+        // also marks the stage as still running for the database stage.
+        runShutdownCleanupStages(
+          Array.from(this.transports, ([sessionId, streamableTransport]) => ({
+            name: `Streamable HTTP session ${sessionId}`,
+            run: () => streamableTransport.close(),
+          })),
+          (message, error) => logger.warn(message, error),
+        ),
       ),
       shutdownStage("active HTTP session registry", "nothing (synchronous)", () =>
         this.clearHttpSessionRegistry(),
@@ -5291,24 +5299,6 @@ export class Daemon {
   /** Remove the forwards this daemon recorded and release its forwarding leases, bounded. */
   private releaseForwardLeases(timeoutMs: number): Promise<void> {
     return AndroidCtrlProxyClient.releaseForwardLeasesForShutdown(this.timer, timeoutMs);
-  }
-
-  /** Close every streamable HTTP transport, the sessions sharing `budgetMs` between them. */
-  private closeHttpSessionsForShutdown(budgetMs: number): Promise<void> {
-    const transports = Array.from(this.transports);
-    const perSessionMs = Number.isFinite(budgetMs)
-      ? Math.floor(budgetMs / Math.max(1, transports.length))
-      : undefined;
-    return runShutdownCleanupStages(
-      transports.map(([sessionId, streamableTransport]) => ({
-        name: `Streamable HTTP session ${sessionId}`,
-        budgetMs: perSessionMs,
-        waitingOn: "its streamable HTTP transport closing",
-        run: () => streamableTransport.close(),
-      })),
-      (message, error) => logger.warn(message, error),
-      { timer: this.timer },
-    );
   }
 
   private clearHttpSessionRegistry(): void {

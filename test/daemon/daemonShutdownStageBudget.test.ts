@@ -42,6 +42,19 @@ interface DaemonTransportInternals {
   transports: Map<string, { close(): Promise<void> }>;
 }
 
+/** stop() for a daemon with a stage that never settles: the messages it rejected with. */
+async function stopLeavingWorkRunning(daemon: Daemon): Promise<string[]> {
+  try {
+    await daemon.stop();
+  } catch (error) {
+    if (error instanceof AggregateError) {
+      return error.errors.map((cause: unknown) => (cause as Error).message);
+    }
+    throw error;
+  }
+  return [];
+}
+
 interface DaemonSocketServerInternals {
   socketServer: {
     liftSessionlessStrokesOn(deviceId: string): void;
@@ -207,8 +220,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
       Object.values(DAEMON_SHUTDOWN_STAGE_BUDGET_MS),
     );
     expect(topLevel?.every((stage) => (stage.waitingOn ?? "").length > 0)).toBe(true);
-    // Both the top-level list and the nested HTTP-session list run against the daemon's timer.
-    expect(timers).toEqual([timer, timer]);
+    expect(timers[0]).toBe(timer);
   });
 
   test("a video relay whose close never settles cannot starve session release, the database close or the pid file (#11601)", async () => {
@@ -237,7 +249,11 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     });
     await sessionManager.createSession("viewer-owner", "emulator-5560", "android");
 
-    await daemon.stop();
+    // The relay is still wedged when the last stage is done: stop() rejects, so the process
+    // exits non-zero as it did when the wedge ran into the process limit.
+    expect(await stopLeavingWorkRunning(daemon)).toEqual([
+      "Shutdown cleanup stage(s) still running when shutdown finished: video stream socket server",
+    ]);
 
     expect(events).toEqual([
       "video:close",
@@ -261,6 +277,38 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     ]);
   });
 
+  test("in-flight control calls keep their full 1 s to finish before any session is released (#11601)", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      new FakeDeviceSessionRepository(),
+    );
+    const events: string[] = [];
+    const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
+      events.push(`release:${sessionId}:${reason}`);
+    });
+    restores.push(unsubscribe);
+    (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      liftSessionlessStrokesOn: () => {},
+      // The control socket waits up to 1 s for in-flight request handlers; this one needs it all.
+      quiesce: async () => {
+        await timer.sleep(1_000);
+        events.push("socket:quiesced");
+      },
+      drainSessionReleaseNotifications: async () => {},
+      close: async () => {},
+    };
+    await daemon.getSessionManager().createSession("busy-session", "emulator-5560", "android");
+
+    await daemon.stop();
+
+    expect(events).toEqual(["socket:quiesced", "release:busy-session:daemon-shutdown"]);
+    expect(warnings.filter((message) => message.startsWith("Shutdown "))).toEqual([]);
+  });
+
   test("an abandoned stage that finishes late is waited for, and the database then closes (#11601)", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -271,15 +319,13 @@ describe("Daemon shutdown stage budget (#11156)", () => {
       new FakeDeviceSessionRepository(),
     );
     const events: string[] = [];
-    // A recording finalizer that outlives its stage: it needs 4 s, far past the stage deadline.
-    const closeSessions = spyOn(
-      daemon as unknown as { closeHttpSessionsForShutdown(budgetMs: number): Promise<void> },
-      "closeHttpSessionsForShutdown",
-    ).mockImplementation(async () => {
-      await timer.sleep(4_000);
-      events.push("straggler:done");
+    // A stage that outlives its deadline by seconds, the way a recording finalizer can.
+    (daemon as unknown as DaemonTransportInternals).transports.set("slow-http", {
+      close: async () => {
+        await timer.sleep(6_000);
+        events.push("straggler:done");
+      },
     });
-    restores.push(() => closeSessions.mockRestore());
     closeDatabase.mockImplementation(async () => {
       events.push("closeDatabase");
     });
@@ -287,9 +333,11 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     await daemon.stop();
 
     expect(events).toEqual(["straggler:done", "closeDatabase"]);
-    expect(timer.now()).toBe(4_000);
+    expect(timer.now()).toBe(6_000);
     expect(warnings.filter((message) => message.startsWith("Shutdown "))).toEqual([
-      expect.stringMatching(/^Shutdown cleanup stage active HTTP sessions timed out after /),
+      expect.stringMatching(
+        /^Shutdown cleanup stage active HTTP sessions timed out after \d+ms waiting on streamable HTTP transports closing; continuing shutdown$/,
+      ),
     ]);
   });
 
@@ -302,49 +350,20 @@ describe("Daemon shutdown stage budget (#11156)", () => {
       timer,
       new FakeDeviceSessionRepository(),
     );
-    // Wedge the stage itself; a single wedged transport is absorbed by its own nested deadline.
-    const closeSessions = spyOn(
-      daemon as unknown as { closeHttpSessionsForShutdown(budgetMs: number): Promise<void> },
-      "closeHttpSessionsForShutdown",
-    ).mockImplementation(() => new Promise<void>(() => {}));
-    restores.push(() => closeSessions.mockRestore());
+    (daemon as unknown as DaemonTransportInternals).transports.set("wedged-http", {
+      close: () => new Promise<void>(() => {}),
+    });
 
-    await daemon.stop();
+    const failures = await stopLeavingWorkRunning(daemon);
 
+    expect(failures).toEqual([
+      "Shutdown cleanup stage(s) still running when shutdown finished: active HTTP sessions",
+    ]);
     expect(closeDatabase).not.toHaveBeenCalled();
     expect(cleanupDaemonFiles).toHaveBeenCalledTimes(1);
     expect(warnings).toContain(
       "Skipping database close because abandoned shutdown stage(s) are still running: active HTTP sessions",
     );
     expect(timer.now()).toBeLessThan(PROCESS_SHUTDOWN_TIMEOUT_MS);
-  });
-
-  test("a wedged streamable HTTP transport is abandoned inside its stage and the database still closes (#11601)", async () => {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const daemon = new Daemon(
-      {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
-    );
-    const closed: string[] = [];
-    const transports = (daemon as unknown as DaemonTransportInternals).transports;
-    transports.set("wedged-http", { close: () => new Promise<void>(() => {}) });
-    transports.set("healthy-http", {
-      close: async () => {
-        closed.push("healthy-http");
-      },
-    });
-
-    await daemon.stop();
-
-    expect(closed).toEqual(["healthy-http"]);
-    expect(closeDatabase).toHaveBeenCalledTimes(1);
-    expect(warnings.filter((message) => message.startsWith("Shutdown cleanup stage "))).toEqual([
-      expect.stringMatching(
-        /^Shutdown cleanup stage Streamable HTTP session wedged-http timed out after \d+ms waiting on its streamable HTTP transport closing; continuing shutdown$/,
-      ),
-    ]);
   });
 });

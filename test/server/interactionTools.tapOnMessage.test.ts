@@ -399,6 +399,47 @@ describe("tapOnHandler (registered handler wiring)", () => {
     expect(message).toContain("now checked");
     expect(message).toContain("(verified)");
   });
+
+  // #11638: the match is promoted to the clickable row, so selectedElement.text is
+  // empty; the label the caller searched for must still appear in the message.
+  test("names the selector label when the promoted row carries no text (#11638)", async () => {
+    setTapOnElementFactory(() => ({
+      execute: async () => fakeResult({ success: true, selectedElement: selected({ text: "" }) }),
+    }));
+
+    const response = await tapOnHandler(fakeDevice, {
+      selector: { text: "Network & internet" },
+      platform: "android",
+    });
+
+    expect(parseMessage(response)).toBe(
+      'Tapped on element (matched text="Network & internet"; 1 match)',
+    );
+  });
+
+  test("names the searched label, not a shared resource id, in the toggle transition (#11638)", async () => {
+    setTapOnElementFactory(() => ({
+      execute: async () =>
+        fakeResult({
+          success: true,
+          element: { checked: "true", bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
+          selectedElement: selected({
+            text: "",
+            resourceId: "com.android.settings:id/switchWidget",
+          }),
+        }),
+    }));
+
+    const response = await tapOnHandler(fakeDevice, {
+      selector: { text: "Wi-Fi" },
+      ensureChecked: false,
+      platform: "android",
+    });
+
+    expect(parseMessage(response)).toStartWith(
+      "Wi-Fi was checked, tapped, now unchecked (verified)",
+    );
+  });
 });
 
 describe("tapAtHandler (registered handler wiring)", () => {

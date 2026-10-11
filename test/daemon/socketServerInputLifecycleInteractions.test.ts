@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { mcpRequestFailureDetails, UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
@@ -342,6 +342,22 @@ describe("(c) order of #9958 ownership refusal and #10006 abort in runTrackedDev
     await expect(
       internals.runTrackedDeviceInput("input/tap", device, operation, abortedSignal()),
     ).rejects.toThrow(/no longer owns device 'emulator-5599'/);
+    expect(operationRuns).toBe(0);
+  });
+
+  test("the refusal for a holder that left after target resolution is typed on the frame (#11351)", async () => {
+    useSessionState(device.deviceId);
+    internals.captureInputTargetOwner(device);
+    rebindAway();
+
+    const error = await internals
+      .runTrackedDeviceInput("input/tap", device, operation)
+      .catch((thrown: unknown) => thrown);
+
+    expect(mcpRequestFailureDetails(error, undefined)).toEqual({
+      code: "session_no_longer_owns_device",
+      retryable: false,
+    });
     expect(operationRuns).toBe(0);
   });
 

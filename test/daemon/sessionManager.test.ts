@@ -2503,8 +2503,9 @@ describe("SessionManager", () => {
       try {
         await manager.createSession("session-1", "emulator-old", "android");
         await manager.claimLivenessOwnership("session-1", "owner-a");
-        // owner-a's lease must lapse or the daemon rejects owner-b's claim (#10050).
-        fakeTimer.advanceTime(getDefaultSessionHeartbeatTimeoutMs() + 1);
+        // owner-a's lease and suspect grace must lapse or the daemon rejects owner-b's claim
+        // (#10050); an accepted claim is its owner's heartbeat, so it holds the grace (#11646).
+        fakeTimer.advanceTime(getDefaultSessionHeartbeatTimeoutMs() + SUSPECT_GRACE_MS + 1);
         repository.deferUpsert = true;
 
         const rebinding = manager.rebindSession("session-1", "emulator-new", "android");

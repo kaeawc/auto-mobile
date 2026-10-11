@@ -73,11 +73,22 @@ export function adbEmulatorSerialLister(
   };
 }
 
-/** The emulator's guest runs in a `qemu-system-<arch>` process (one per running emulator). */
+/** The SDK's own layout: `<sdk>/emulator/qemu/<os>-<arch>/qemu-system-<arch>[-headless]`. */
+const SDK_QEMU_EXECUTABLE = /\/qemu\/[^/\s]+\/qemu-system-[^/\s]*(?:\s|$)/;
+
+/**
+ * The emulator's guest runs in a `qemu-system-<arch>` process (one per running emulator).
+ *
+ * `ps` prints the command line with no quoting, so where the executable path ends is a guess:
+ * it is taken to end before the first ` -`, which keeps a path with spaces whole. A directory
+ * whose name holds ` -` ("OneDrive - Work") cuts that guess short and hid the emulator from the
+ * count (#11588), so a command naming the SDK's qemu executable counts wherever its path was cut.
+ * A wrong guess that way round counts a process that is not an emulator: fail closed.
+ */
 export function isEmulatorQemuProcess(row: Pick<HostProcessRow, "command">): boolean {
   const executable = row.command.split(" -")[0] ?? "";
   const name = executable.slice(executable.lastIndexOf("/") + 1).trim();
-  return name.startsWith("qemu-system-");
+  return name.startsWith("qemu-system-") || SDK_QEMU_EXECUTABLE.test(row.command);
 }
 
 /** Read-only source backed by the adb listing, `ps` and the `os` host totals. */
@@ -89,11 +100,20 @@ export class CommandAndroidCapacitySource implements AndroidCapacitySource {
     private readonly readTimeoutMs = 5_000,
   ) {}
 
+  /**
+   * adb is read first and the process table only once that read has ended (#11588). An emulator
+   * adb lists already has a process, so a table read afterwards shows every emulator the listing
+   * shows that still runs, and the table alone is a floor for the count. Read the other way
+   * round, or overlapping, an emulator started and listed after the table was read and another
+   * one only the table shows are one row in each listing: two emulators counted as one.
+   *
+   * The cost is one `ps` on top of the adb read instead of alongside it: 60 to 120 ms measured
+   * on a loaded macOS host with 1,200 processes.
+   * Each read keeps its own timeout, and a failed adb read still leaves the table to count by.
+   */
   async sample(options: { signal?: AbortSignal } = {}): Promise<AndroidCapacitySample> {
-    const [serials, processes] = await Promise.all([
-      this.readSerials(options.signal),
-      this.readEmulatorProcesses(options.signal),
-    ]);
+    const serials = await this.readSerials(options.signal);
+    const processes = await this.readEmulatorProcesses(options.signal);
     return {
       emulatorSerials: serials.value ?? [],
       emulatorProcessRssBytes: processes.value?.map((row) => row.rssBytes),

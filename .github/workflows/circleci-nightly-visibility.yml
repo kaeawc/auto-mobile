@@ -1,0 +1,35 @@
+---
+# A red CircleCI nightly-macos job is otherwise invisible on GitHub (#11615): CircleCI posts no
+# commit status for its scheduled pipeline. This ubuntu job reads the finished nightly through the
+# CircleCI API (the CIRCLECI_TOKEN secret merge.yml already uses) and opens or updates one
+# tracking issue. No macOS runner is involved and nothing here is a required check.
+name: CircleCI nightly visibility
+
+"on":
+  schedule:
+    # The nightly starts at 00:00 UTC and its macOS jobs run one at a time on a shared slot.
+    - cron: "40 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    name: "Report CircleCI nightly failures"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: Report red CircleCI nightly jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CIRCLECI_TOKEN: ${{ secrets.CIRCLECI_TOKEN }}
+        run: bash scripts/ci/report-circleci-nightly.sh

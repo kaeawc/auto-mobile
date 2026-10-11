@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   BOOT_CAPACITY_GATE_ENV,
   BootAdmissionLedger,
@@ -14,6 +16,7 @@ import {
   createBootAdmissionGates,
   describeBootCapacity,
 } from "../../../src/features/bootAdmission/sharedBootAdmissionGates";
+import { parsePsSnapshot } from "../../../src/features/iosSimFleet/psSnapshot";
 import { testOverrides } from "../../../src/utils/testOverrides";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -128,14 +131,44 @@ describe("BootAdmissionLedger", () => {
     expect(ledger.inFlight(new Set(), undefined, window, listedProcessIds)).toEqual({
       count: 4,
       withListedProcess: 1,
+      listedWithoutProcess: 0,
     });
     expect(
       ledger.inFlight(new Set(["emulator-5554"]), undefined, window, listedProcessIds),
-    ).toEqual({ count: 3, withListedProcess: 0 });
+    ).toEqual({ count: 3, withListedProcess: 0, listedWithoutProcess: 0 });
     // Without listed process ids no boot is matched to a process.
     expect(ledger.inFlight(new Set(), undefined, window)).toEqual({
       count: 4,
       withListedProcess: 0,
+      listedWithoutProcess: 0,
+    });
+  });
+
+  // #11588: the device listing can show a boot the (older) process listing has no process for.
+  test("reports listed boots whose own process the process listing does not show", () => {
+    const ledger = new BootAdmissionLedger(new FakeTimer());
+    ledger.admit().handOff("emulator-5554", 1_000, 501); // listed, process listed
+    ledger.admit().handOff("emulator-5556", 1_000, 502); // listed, process not listed
+    ledger.admit().handOff("emulator-5558", 1_000); // listed, no pid known
+    const endedInWindow = ledger.admit();
+    endedInWindow.handOff("emulator-5560", 1_000, 504);
+    ledger.admit().handOff("emulator-5562", 1_000, 505); // not listed
+    const window = ledger.beginSample();
+    endedInWindow.release();
+    window.close();
+    const listed = new Set(["emulator-5554", "emulator-5556", "emulator-5558", "emulator-5560"]);
+
+    expect(ledger.inFlight(listed, undefined, window, new Set([501, 900]))).toEqual({
+      count: 1,
+      withListedProcess: 0,
+      listedWithoutProcess: 3,
+    });
+    // The listed entries left the ledger with that count: a later sample starts after their
+    // processes did, so its process listing shows them and nothing is added for them.
+    expect(ledger.inFlight(listed, undefined, undefined, new Set([900]))).toEqual({
+      count: 1,
+      withListedProcess: 0,
+      listedWithoutProcess: 0,
     });
   });
 
@@ -148,6 +181,7 @@ describe("BootAdmissionLedger", () => {
     expect(ledger.inFlight(new Set(), undefined, undefined, new Set([501]))).toEqual({
       count: 1,
       withListedProcess: 1,
+      listedWithoutProcess: 0,
     });
     expect(ledger.inFlightCount(new Set(["emulator-5554"]))).toBe(0);
     // Gone from the ledger: a late hand-off does not bring it back.
@@ -157,22 +191,68 @@ describe("BootAdmissionLedger", () => {
 });
 
 describe("CommandAndroidCapacitySource", () => {
-  const PS = [
-    "  101     1 3145728  80.0 /sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64 -netdelay none -avd Pixel_9",
-    "  102   101   20480   0.1 /sdk/emulator/crashpad_handler --database=/tmp",
-    "  103     1 2097152  40.0 /opt/sdk/emulator/qemu/linux-x86_64/qemu-system-x86_64-headless -avd Tablet",
-    "  104     1    4096   0.0 /usr/bin/grep qemu-system-aarch64",
-    "  105     1    4096   0.0 /bin/zsh",
-  ].join("\n");
+  // A real `ps -axo pid=,ppid=,rss=,pcpu=,command=` capture with one emulator running, booted
+  // by the daemon in it (see the fixture README).
+  const PS = readFileSync(
+    join(
+      import.meta.dir,
+      "../../fixtures/android-boot-admission/ps-snapshot-one-running-emulator.txt",
+    ),
+    "utf8",
+  );
+  const QEMU_PID = 67978;
+  const DAEMON_PID = 61847;
+  const captured = parsePsSnapshot(PS);
+  const commandOf = (pid: number): string =>
+    captured.rows.find((row) => row.pid === pid)?.command ?? "";
 
-  test("identifies emulator qemu processes by executable name", () => {
-    expect(
-      isEmulatorQemuProcess({
-        command: "/sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64 -avd X",
-      }),
-    ).toBe(true);
+  test("the captured listing parses whole, command lines with spaces included", () => {
+    expect(captured.skipped).toBe(0);
+    expect(captured.rows.map((row) => row.pid)).toEqual([
+      1,
+      347,
+      383,
+      10400,
+      DAEMON_PID,
+      QEMU_PID,
+      68082,
+      68734,
+    ]);
+    // A path with spaces and ` --` arguments is kept verbatim to the end of the line.
+    expect(commandOf(10400)).toStartWith(
+      "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/",
+    );
+    expect(commandOf(10400)).toEndWith("--annotation=ver=154.0.8037.93 --handshake-fd=5");
+    expect(commandOf(QEMU_PID)).toBe(
+      "/Users/dev/Library/Android/sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64-headless -avd amslot-039fd12f-0-g1-5e7e5f80 -no-window -port 5554",
+    );
+  });
+
+  test("identifies the emulator's qemu process and none of its helpers", () => {
+    expect(captured.rows.filter(isEmulatorQemuProcess).map((row) => row.pid)).toEqual([QEMU_PID]);
+    // The emulator's crashpad handler names the qemu pid, and netsimd is the qemu process's child.
+    expect(isEmulatorQemuProcess({ command: commandOf(68082) })).toBe(false);
+    expect(isEmulatorQemuProcess({ command: commandOf(68734) })).toBe(false);
     expect(isEmulatorQemuProcess({ command: "/usr/bin/grep qemu-system-aarch64" })).toBe(false);
     expect(isEmulatorQemuProcess({ command: "/sdk/emulator/emulator -avd X" })).toBe(false);
+  });
+
+  // #11588: `ps` does not quote, and the executable was taken to end at the first " -".
+  test("identifies the qemu process when the SDK path has spaces or a ' -' in it", () => {
+    const sdk = "/Users/dev/Library/Android/sdk";
+    const under = (directory: string): { command: string } => ({
+      command: commandOf(QEMU_PID).replace(sdk, `${directory}/sdk`),
+    });
+
+    expect(isEmulatorQemuProcess(under("/Users/dev/My Tools/Android"))).toBe(true);
+    expect(isEmulatorQemuProcess(under("/Users/dev/OneDrive - Work/Android"))).toBe(true);
+    expect(isEmulatorQemuProcess(under("/opt/android -sdk"))).toBe(true);
+    // Launched with no arguments at all: the command line ends at the executable.
+    expect(
+      isEmulatorQemuProcess({
+        command: `${under("/Users/dev/OneDrive - Work/Android").command.split(" -avd")[0]}`,
+      }),
+    ).toBe(true);
   });
 
   test("samples adb serials, qemu RSS and host totals", async () => {
@@ -191,14 +271,75 @@ describe("CommandAndroidCapacitySource", () => {
 
     expect(await source.sample()).toEqual({
       emulatorSerials: ["emulator-5554"],
-      emulatorProcessRssBytes: [3145728 * 1024, 2097152 * 1024],
-      emulatorProcessIds: [
-        { pid: 101, ppid: 1 },
-        { pid: 103, ppid: 1 },
-      ],
+      emulatorProcessRssBytes: [5947792 * 1024],
+      // The qemu process is the launcher the daemon spawned: its parent is the daemon itself.
+      emulatorProcessIds: [{ pid: QEMU_PID, ppid: DAEMON_PID }],
       host: { totalMemoryBytes: 32 * GIB, cpuCount: 8 },
       errors: [],
     });
+  });
+
+  // #11588: an emulator adb lists has a process, so a table read after the listing shows it.
+  test("reads the process table only after the adb listing has ended", async () => {
+    const reads: string[] = [];
+    let endAdb: (serials: string[]) => void = () => undefined;
+    const executor = new FakeHostCommandExecutor();
+    executor.executeCommand = async () => {
+      reads.push("ps");
+      return {
+        stdout: PS,
+        stderr: "",
+        toString: () => PS,
+        trim: () => PS.trim(),
+        includes: () => false,
+      };
+    };
+    const source = new CommandAndroidCapacitySource(
+      () => {
+        reads.push("adb started");
+        return new Promise<string[]>((resolve) => {
+          endAdb = (serials) => {
+            reads.push("adb ended");
+            resolve(serials);
+          };
+        });
+      },
+      executor,
+      { totalMemoryBytes: () => 32 * GIB, cpuCount: () => 8 },
+    );
+
+    const sample = source.sample();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(reads).toEqual(["adb started"]);
+    endAdb(["emulator-5554"]);
+
+    expect((await sample).emulatorProcessIds).toEqual([{ pid: QEMU_PID, ppid: DAEMON_PID }]);
+    expect(reads).toEqual(["adb started", "adb ended", "ps"]);
+  });
+
+  test("still reads the process table when the adb listing failed", async () => {
+    const executor = new FakeHostCommandExecutor();
+    executor.setCommandResponse("ps", {
+      stdout: PS,
+      stderr: "",
+      toString: () => PS,
+      trim: () => PS.trim(),
+      includes: (value: string) => PS.includes(value),
+    });
+    const source = new CommandAndroidCapacitySource(
+      async () => {
+        throw new Error("adb unavailable");
+      },
+      executor,
+      { totalMemoryBytes: () => 32 * GIB, cpuCount: () => 8 },
+    );
+
+    const sample = await source.sample();
+
+    expect(sample.serialListingFailed).toBe(true);
+    expect(sample.emulatorProcessIds).toEqual([{ pid: QEMU_PID, ppid: DAEMON_PID }]);
+    expect(sample.errors).toEqual(["adb: adb unavailable"]);
   });
 
   test("reports unreadable sources as errors instead of an empty fleet", async () => {

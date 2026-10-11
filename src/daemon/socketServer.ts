@@ -139,12 +139,14 @@ import { assertToolEnabledForAnySession } from "../features/toolSelection/toolSe
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   admitInputOnHolderSession,
+  InputDeviceOwnedError,
   assertControlNotOnForeignDaemonDevice,
   assertInputNotOnForeignManagedSlotDevice,
   assertInputRequesterHoldsDevice,
   deviceAlreadyAssignedToAnotherSessionError,
   parseInputRequesterSessionUuid,
 } from "./inputDeviceOwnership";
+import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
 import { ToolRegistry } from "../server/toolRegistry";
 import { managedConnectionControlRefusal } from "./managedSlots/managedConnectionScope";
 import { provisionCancellationOutcomes } from "../server/provisionCancellationOutcomes";
@@ -934,7 +936,7 @@ const GESTURE_FRAME_METHODS = {
 } as const;
 
 /** What held the device when a `gestureStart` was admitted (#11541). */
-interface StrokeAdmission {
+export interface StrokeAdmission {
   deviceId: string;
   /** The admitting holder; absent for a start on a device no session held. */
   holderSessionId?: string;
@@ -949,17 +951,28 @@ interface StrokeAdmission {
  * ack: whatever aborted the frame (the typed release or ownership refusal), else that the holder
  * changed.
  */
-function strokeAdmissionEndedError(method: string, admission: StrokeAdmission): unknown {
+export function strokeAdmissionEndedError(method: string, admission: StrokeAdmission): unknown {
   if (admission.signal?.aborted) {
     return admission.signal.reason;
   }
-  return new ActionableError(
-    `${method} on device '${admission.deviceId}' was lifted: ` +
-      (admission.holderSessionId
-        ? `session ${admission.holderSessionId} no longer holds the device`
-        : "a session acquired the device") +
-      " before the stroke's start was acknowledged.",
-  );
+  const { deviceId, holderSessionId } = admission;
+  const lifted = (cause: string) =>
+    `${method} on device '${deviceId}' was lifted: ${cause} before the stroke's start was acknowledged.`;
+  // Typed like the frames that follow the lifted start (#11351): the admitting holder left the
+  // device, or a session now holds a device the sessionless start was admitted on.
+  return holderSessionId
+    ? new SessionNoLongerOwnsDeviceError(
+        holderSessionId,
+        deviceId,
+        lifted(`session ${holderSessionId} no longer holds the device`),
+      )
+    : new InputDeviceOwnedError(
+        method,
+        deviceId,
+        undefined,
+        undefined,
+        lifted("a session acquired the device"),
+      );
 }
 
 /** Timeout for the best-effort cancelling `gestureEnd` issued when a socket owning a gesture closes. */
@@ -7687,7 +7700,9 @@ export class UnixSocketServer {
     if (resolvedOwner !== undefined && resolvedOwner !== sessionUuid) {
       // The target was resolved for `resolvedOwner`, which has since left the device (rebind or
       // release). Running now would drive it as an unowned call or as the next owner's (#9958).
-      throw new ActionableError(
+      throw new SessionNoLongerOwnsDeviceError(
+        resolvedOwner,
+        targetDevice.deviceId,
         `Session ${resolvedOwner} no longer owns device '${targetDevice.deviceId}' (it was rebound ` +
           `or released after this input resolved its target); the input was not sent.`,
       );

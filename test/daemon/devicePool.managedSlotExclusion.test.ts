@@ -17,6 +17,7 @@ import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import { assignManagedSlotDevice } from "./managedSlots/managedSlotFixtures";
 
 // #11174 part b / #11178 part a: a device a managed slot holds is never generic capacity, even
@@ -204,12 +205,14 @@ describe("DevicePool managed-slot exclusion", () => {
 
     const result = (await settle(
       runWithAbortSignal(new AbortController().signal, () =>
-        pool.assignMultipleDevicesByCriteria(
-          ["base", "base:B"].map((sessionId) => ({
-            sessionId,
-            criteria: { platform: "android" as const },
-          })),
-          4_000,
+        asPlanAllocation(sessions, "base", ["base:B"], () =>
+          pool.assignMultipleDevicesByCriteria(
+            ["base", "base:B"].map((sessionId) => ({
+              sessionId,
+              criteria: { platform: "android" as const },
+            })),
+            4_000,
+          ),
         ),
       ),
     )) as Map<string, string>;

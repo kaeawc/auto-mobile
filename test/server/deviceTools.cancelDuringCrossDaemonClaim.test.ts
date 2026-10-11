@@ -267,6 +267,17 @@ describe.each([
       expect([...ownership.held]).toEqual([]);
     };
 
+    /**
+     * #11593: the emulator a failed or cancelled call cold-booted is stopped like a simulator is,
+     * and leaves the pool with its process.
+     */
+    const expectColdBootStopped = (): void => {
+      expect(bootHandle.killed).toBe(true);
+      expect(pool.getDevice(AVD_SERIAL)).toBeNull();
+      expect(sessions.getAllSessions()).toEqual([]);
+      expect([...ownership.held]).toEqual([]);
+    };
+
     test("control: an uncancelled getApple binds its session once the claim is published", async () => {
       const outcome = acquire("getApple", { udid: SIM_UDID });
       await untilClaimsPending(1);
@@ -295,7 +306,12 @@ describe.each([
         await drain();
 
         expect(settled.ok).toBe(false);
-        expectNothingBound(deviceId);
+        if (deviceId === AVD_SERIAL) {
+          expectColdBootStopped();
+        } else {
+          expectNothingBound(deviceId);
+        }
+        expect(bootHandle.killed).toBe(true);
         expect(ownership.released).toEqual([deviceId]);
       },
     );
@@ -322,7 +338,7 @@ describe.each([
       await drain();
 
       expect(payload.sessionId).toBeUndefined();
-      expectNothingBound(AVD_SERIAL);
+      expectColdBootStopped();
     });
 
     test("the acquisition deadline passing during the publish leaves nothing bound either", async () => {
@@ -340,7 +356,7 @@ describe.each([
       ownership.pending[0](true);
       await drain();
 
-      expectNothingBound(AVD_SERIAL);
+      expectColdBootStopped();
     });
 
     test("a device that was already running stays running and idle", async () => {
@@ -365,7 +381,7 @@ describe.each([
       await drain();
 
       expect(settled.ok).toBe(false);
-      expectNothingBound(AVD_SERIAL);
+      expectColdBootStopped();
     });
 
     test("a claim publish that fails releases the session the failed call created", async () => {
@@ -376,7 +392,7 @@ describe.each([
       await drain();
 
       expect(settled.ok).toBe(false);
-      expectNothingBound(AVD_SERIAL);
+      expectColdBootStopped();
     });
 
     test("the session a cancelled repeat call reused stays bound to its owner", async () => {

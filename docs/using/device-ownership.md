@@ -129,6 +129,28 @@ requester of an explicit release is not cut. A derived `<base>:<label>` session
 released alone does not tell its live base session's call that it lost
 ownership: that call gets a plain cancellation (#11386). Heartbeat reap and owner-disconnect releases also cut calls that reached the session through autolock.
 
+### Plan label sessions
+
+A multi-device plan runs each label other than its primary on a derived
+`<base>:<label>` session that its allocation mints. That session lives only as
+long as the plan run (#11572), whichever reason ended it:
+
+- The next plan run under the same base mints the label again, also after the
+  label's device was lost or killed mid-plan (a terminal release) and after a
+  daemon restart.
+- Nothing else does. A call that names a label session that is not live (a late
+  call of the finished run, or a client naming `<base>:<label>` itself) is
+  refused with `session_ownership_lost` and takes no device, where a base
+  session released with `plan-auto-release` would be re-issued by name.
+- It is never rehydrated after a daemon restart, whether its row was live,
+  released by `daemon-shutdown` or waiting out a `device-restart:<device>`: its
+  device is free at once, and the plan's caller gets `daemon_shutting_down`
+  (`retryable: true`) for the interrupted `executePlan` and runs the plan again.
+  While the plan is still running in the same daemon, a label session waiting
+  out a device restart is recovered like any other.
+
+The daemon recognizes these rows by `device_sessions.source = 'plan-label'`.
+
 When two releases of one session race, a terminal reason replaces a
 non-terminal one, and any other terminal reason replaces an idle one, so the
 recorded reason is the most specific.

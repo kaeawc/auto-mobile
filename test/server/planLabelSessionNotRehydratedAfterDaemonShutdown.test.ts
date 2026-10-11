@@ -3,6 +3,8 @@ import {
   cancelAndReleaseSession,
   releaseSessionAndDevice,
 } from "../../src/daemon/releaseSessionAndDevice";
+import { TerminalSessionError } from "../../src/daemon/sessionManager";
+import { deviceRestartReleaseReason } from "../../src/db/deviceSessionRepository";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { executionTracker } from "../../src/server/executionTracker";
@@ -17,23 +19,13 @@ import {
   type PlanSessionHunt,
 } from "../helpers/planSessionHarness";
 
-// Hunt 2026-10-10 (plan sessions). A daemon shutdown while a multi-device plan runs releases
-// every known session with `daemon-shutdown` (daemon.ts `releaseActiveSessionsForShutdown`),
-// including the plan's derived `<base>:B` session. `daemon-shutdown` is a recoverable handoff, so
-// the restarted daemon rehydrates `<base>:B` as a session of its own: it holds label B's device,
-// has no label map and no link to its base (`getBaseSessionOfDerivedLabel` is undefined), and no
-// plan is running. The plan's own auto-release cannot prevent it: its `plan-auto-release` joins the
-// shutdown release already in flight and does not replace the reason.
-//
-// Nothing owns that session: a client heartbeats the session it named (the base), never a label
-// session. So one lease plus grace later the heartbeat monitor reaps `<base>:B` as
-// `rehydration-owner-timeout`, a TERMINAL reason. From then on the caller, told by the retryable
-// shutdown outcome to run its plan again, is refused for good: the base is fine, but label B's
-// UUID is fenced.
-//
-// Owner contracts: derived `<base>:<label>` sessions live only while the plan runs; a daemon
-// shutdown mid-plan is recoverable (the plan can be run again); plan session UUIDs are
-// re-issuable by name.
+// A daemon shutdown while a multi-device plan runs releases every known session with
+// `daemon-shutdown` (daemon.ts `releaseActiveSessionsForShutdown`), including the plan's derived
+// `<base>:B` session. `daemon-shutdown` is a recoverable handoff, but a derived label session
+// lives only as long as its plan run (#11572), and that run ended with the daemon: the restarted
+// daemon rehydrates the caller's own session and never the label session, which would hold label
+// B's device with no label map, no base and no plan, heartbeated by nobody. The caller, told by
+// the retryable shutdown outcome to run its plan again, gets its labels minted by the new run.
 
 describe("daemon shutdown while a multi-device plan runs", () => {
   let hunt: PlanSessionHunt;
@@ -70,9 +62,16 @@ describe("daemon shutdown while a multi-device plan runs", () => {
   };
 
   /** Run the two-device plan as a tracked call and shut the daemon down during its step on B. */
-  const shutDownMidPlan = async (): Promise<void> => {
+  const shutDownMidPlan = async (labelDeviceRestarting = false): Promise<void> => {
     const execution = executionTracker.startExecution("executePlan", "hunt-connection", BASE);
     hunt.setProbeStep(async (_device, signal) => {
+      const { sessionManager, pool } = hunt.daemon();
+      const labelDevice = sessionManager.getSession(LABEL_B)?.assignedDevice;
+      if (labelDeviceRestarting && labelDevice) {
+        // Label B's device went away for a restart first: its session waits out that handoff.
+        const reason = deviceRestartReleaseReason(labelDevice);
+        await releaseSessionAndDevice(sessionManager, pool, labelDevice, LABEL_B, reason);
+      }
       shutDown(hunt.daemon());
       // The shutdown aborted this call; the step unwinds on its next turn.
       await new Promise<void>((resolve) => setImmediate(resolve));
@@ -92,18 +91,40 @@ describe("daemon shutdown while a multi-device plan runs", () => {
     expect((await hunt.persistence.getSession(BASE))?.release_reason).toBe("daemon-shutdown");
   };
 
-  test("the restarted daemon does not bring the plan's label session back to hold a device", async () => {
-    await shutDownMidPlan();
+  test.each([
+    ["a daemon shutdown", false],
+    ["its device restarting", true],
+  ])(
+    "the restarted daemon does not bring back a label session released for %s",
+    async (_why, labelDeviceRestarting) => {
+      await shutDownMidPlan(labelDeviceRestarting);
+      const row = await hunt.persistence.getSession(LABEL_B);
+      const labelDevice = row?.device_id ?? "";
+      const rowReason = labelDeviceRestarting ? `device-restart:${labelDevice}` : "daemon-shutdown";
+      expect([row?.source, row?.release_reason]).toEqual(["plan-label", rowReason]);
 
-    const restarted = await hunt.restartDaemon();
-    const summary = await restarted.sessionManager.rehydratePersistedSessions(restarted.pool);
+      const restarted = await hunt.restartDaemon();
+      const { sessionManager, pool } = restarted;
+      const summary = await sessionManager.rehydratePersistedSessions(pool);
 
-    // The caller's own session is the recoverable one.
-    expect(summary.rehydrated).toContain(BASE);
-    // FAILS: `<base>:B` is rehydrated too and holds IOS-B, with no plan, no label map and no base.
-    expect(restarted.sessionManager.getSession(LABEL_B)).toBeNull();
-    expect(hunt.poolHolder(deviceB.deviceId)).toBeUndefined();
-  });
+      // The caller's own session is the recoverable one.
+      expect(summary.rehydrated).toEqual([BASE]);
+      // `<base>:B` is not: its row stays as the shutdown left it, and its device is free.
+      expect(summary.skipped).toEqual([{ sessionUuid: LABEL_B, reason: "not-recoverable" }]);
+      expect(sessionManager.getSession(LABEL_B)).toBeNull();
+      expect(hunt.poolHolder(labelDevice)).toBeUndefined();
+
+      // Naming the label session does not recover it either: only a plan run mints it.
+      await expect(
+        sessionManager.getOrCreateSession(LABEL_B, pool, "ios", undefined, true),
+      ).rejects.toBeInstanceOf(TerminalSessionError);
+      await expect(sessionManager.getOrCreateSession(LABEL_B, pool, "ios")).rejects.toBeInstanceOf(
+        TerminalSessionError,
+      );
+      expect(hunt.poolHolder(labelDevice)).toBeUndefined();
+      expect((await hunt.persistence.getSession(LABEL_B))?.release_reason).toBe(rowReason);
+    },
+  );
 
   test("the plan can be run again under the same base once the daemon is back", async () => {
     await shutDownMidPlan();
@@ -130,11 +151,12 @@ describe("daemon shutdown while a multi-device plan runs", () => {
       await hunt.timer.advanceTimeAsync(1_000);
     }
     expect(sessionManager.getSession(BASE)?.assignedDevice).toBe(deviceA.deviceId);
+    // Nothing held label B's device meanwhile, and nothing was reaped for it.
+    expect(sessionManager.getTerminalReleaseSnapshot(LABEL_B)).toBeUndefined();
+    expect(restarted.pool.getAllDevices().filter((d) => d.sessionId).length).toBe(1);
 
     const rerun = await hunt.runPlan(twoDevicePlan(["B", "A"]));
 
-    // FAILS: "TerminalSessionError: Session <base>:B is terminal after rehydration-owner-timeout
-    // and cannot be reused. Acquire a new device with getAndroid or getApple."
     expect(rerun.error).toBeUndefined();
     expect(rerun.success).toBe(true);
   });

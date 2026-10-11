@@ -3026,10 +3026,14 @@ export class SessionManager {
    * The narrower startup-rehydration predicate (#11418): an active row, or one released for a
    * recoverable handoff, that has not expired. A `plan-auto-release` row is re-issuable by name
    * but is never rehydrated, so a finished plan's session does not come back to hold its device.
+   * Neither is any row of a plan's derived label session (#11572), live or released for a handoff
+   * (`daemon-shutdown`, `device-restart:`): its plan run ended with the daemon that ran it, so
+   * nothing would own, heartbeat or release it. Its device is free for the next plan run.
    */
   private isRecoverablePersistedSession(persisted: DeviceSession | undefined): boolean {
     return Boolean(
       persisted &&
+      persisted.source !== PLAN_LABEL_SESSION_SOURCE &&
       (!persisted.release_reason || isRecoverableDaemonReleaseReason(persisted.release_reason)) &&
       isRecoverableDeviceSession(persisted, this.sessionNow()),
     );

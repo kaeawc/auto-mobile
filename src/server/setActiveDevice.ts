@@ -314,6 +314,7 @@ async function selectSessionDevice(input: {
   pool.assertDeviceCleanupComplete(args.deviceId);
   // Refused before the resume: resuming re-arms the device's CtrlProxy restart budget and drops
   // its admitted attempt, which a caller that does not hold the device must not do (#11651).
+  pool.assertNotPreparedForOtherRequest(args.deviceId);
   assertDeviceOwner({ device, sessionUuid: args.sessionUuid, sessions });
   await dependencies.resumeCtrlProxy(args.deviceId, device.platform);
   // Checked again: another session may have bound the device while the resume listed devices.
@@ -369,6 +370,13 @@ function admitSessionlessSelection(args: HandlerArgs): void {
   }
 }
 
+function assertNotPreparedForOtherRequest(deviceId: string): void {
+  const daemonState = DaemonState.getInstance();
+  if (daemonState.isInitialized()) {
+    daemonState.getDevicePool().assertNotPreparedForOtherRequest(deviceId);
+  }
+}
+
 async function selectLegacyDevice(input: {
   args: HandlerArgs;
   resumeCtrlProxy: ResumeCtrlProxy;
@@ -386,9 +394,11 @@ async function selectLegacyDevice(input: {
   );
   // A session that acquired the device during readiness cancelled this call: never pin its device.
   signal?.throwIfAborted();
+  assertNotPreparedForOtherRequest(readyDevice.deviceId);
   const resolvedPlatform = args.platform ?? readyDevice.platform;
   await resumeCtrlProxy(readyDevice.deviceId, resolvedPlatform);
   signal?.throwIfAborted();
+  assertNotPreparedForOtherRequest(readyDevice.deviceId);
   if (args.sessionUuid && resolveDirectSessionDevice(args.sessionUuid)) {
     registerDirectSessionDevice(args.sessionUuid, readyDevice);
   }

@@ -324,6 +324,151 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
   );
 
   test.each(platforms)(
+    "%s: reservation during display inventory refuses session selection before resume, then retry binds",
+    async (platform) => {
+      const h = await arrange(platform);
+      let reservation: DeviceReadinessReservation | undefined;
+      let inventoryReads = 0;
+      const reserveDuringRead = async () => {
+        if (++inventoryReads === 1) {
+          reservation = await h.pool.reserveDeviceForReadiness(
+            h.device.deviceId,
+            h.device,
+            undefined,
+            undefined,
+            { mcpSessionId: "client-a" },
+          );
+        }
+      };
+      const select = createSetActiveDeviceHandler({
+        displayInventory: {
+          invalidate: () => {},
+          hydrate: async (device) => {
+            await reserveDuringRead();
+            return {
+              ...device,
+              displays: {
+                panels: [{ key: "main", role: "primary", sizePx: { width: 100, height: 100 } }],
+              },
+            };
+          },
+        },
+        resumeCtrlProxy: async (id) => {
+          h.resumed.push(id);
+        },
+      });
+      const args = {
+        deviceId: h.device.deviceId,
+        sessionUuid: "other-session",
+        __mcpSessionId: "client-b",
+        display: "main",
+      };
+      try {
+        expectPreparationRefusal(await refusal(select(args)), h.device.deviceId);
+        expect(inventoryReads).toBe(1);
+        expect(h.pool.isReservedForReadiness(h.device.deviceId)).toBe(true);
+        expect(h.resumed).toEqual([]);
+        expect(h.manager.getSession("other-session")).toBeNull();
+        expect(h.manager.getDisplayPin("other-session")).toBeUndefined();
+        expect(h.pool.getDevice(h.device.deviceId)?.sessionId).toBeNull();
+      } finally {
+        await reservation?.();
+      }
+      expect(h.pool.isReservedForReadiness(h.device.deviceId)).toBe(false);
+      await select(args);
+      expect(inventoryReads).toBe(2);
+      expect(h.resumed).toEqual([h.device.deviceId]);
+      expect(h.pool.getDevice(h.device.deviceId)?.sessionId).toBe("other-session");
+      expect(h.manager.getDisplayPin("other-session")).toBe("main");
+    },
+  );
+
+  for (const reserveDuring of ["ready", "resume"] as const) {
+    test.each(platforms)(
+      `%s: reservation during legacy ${reserveDuring} refuses sessionless selection before pinning`,
+      async (platform) => {
+        const h = await arrange(platform);
+        const calls: string[] = [];
+        let reservation: DeviceReadinessReservation | undefined;
+        const reserve = async () => {
+          reservation = await h.pool.reserveDeviceForReadiness(
+            h.device.deviceId,
+            h.device,
+            undefined,
+            undefined,
+            { mcpSessionId: "client-a" },
+          );
+        };
+        const select = createSetActiveDeviceHandler({
+          resumeCtrlProxy: async () => {
+            calls.push("resume");
+            if (reserveDuring === "resume") {
+              await reserve();
+            }
+          },
+          legacyDeviceSelection: () => ({
+            getCurrentDevice: () => undefined,
+            getCurrentPlatform: () => undefined,
+            ensureDeviceReady: async () => {
+              calls.push("ready");
+              if (reserveDuring === "ready") {
+                await reserve();
+              }
+              return h.device;
+            },
+            setExplicitDevicePin: () => {
+              calls.push("pin");
+            },
+          }),
+        });
+        try {
+          expectPreparationRefusal(
+            await refusal(select({ deviceId: h.device.deviceId, __mcpSessionId: "client-b" })),
+            h.device.deviceId,
+          );
+          expect(h.pool.isReservedForReadiness(h.device.deviceId)).toBe(true);
+          expect(calls).toEqual(reserveDuring === "ready" ? ["ready"] : ["ready", "resume"]);
+          expect(h.pool.getDevice(h.device.deviceId)?.sessionId).toBeNull();
+        } finally {
+          await reservation?.();
+        }
+      },
+    );
+  }
+
+  test.each(platforms)(
+    "%s: sessionless selection without a reservation resumes and pins once",
+    async (platform) => {
+      const h = await arrange(platform);
+      const calls: string[] = [];
+      const select = createSetActiveDeviceHandler({
+        resumeCtrlProxy: async (id, selectedPlatform) => {
+          expect(id).toBe(h.device.deviceId);
+          expect(selectedPlatform).toBe(platform);
+          calls.push("resume");
+        },
+        legacyDeviceSelection: () => ({
+          getCurrentDevice: () => undefined,
+          getCurrentPlatform: () => undefined,
+          ensureDeviceReady: async () => {
+            calls.push("ready");
+            return h.device;
+          },
+          setExplicitDevicePin: (device) => {
+            expect(device).toBe(h.device);
+            calls.push("pin");
+          },
+        }),
+      });
+      const result = await select({ deviceId: h.device.deviceId, __mcpSessionId: "client-b" });
+      expect(result.isError).not.toBe(true);
+      expect(calls).toEqual(["ready", "resume", "pin"]);
+      expect(h.pool.isReservedForReadiness(h.device.deviceId)).toBe(false);
+      expect(h.pool.getDevice(h.device.deviceId)?.sessionId).toBeNull();
+    },
+  );
+
+  test.each(platforms)(
     "%s: a reservation during resume is refused at bind, then retry binds",
     async (platform) => {
       const h = await arrange(platform);

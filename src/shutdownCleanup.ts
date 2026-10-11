@@ -275,7 +275,9 @@ export function createShutdownDatabaseTail(
     },
     close: closeUnlessStillWriting,
     lateSettle: async (stage) => {
-      if (stage.unsettledStages().length === 0) {
+      // A straggler that finished just after the database stage deferred the close leaves
+      // nothing to wait for, and the close still owed.
+      if (stage.unsettledStages().length === 0 && !closeDeferred) {
         return;
       }
       const allowanceMs = closeDeferred ? DEFERRED_DATABASE_CLOSE_ALLOWANCE_MS : 0;
@@ -323,7 +325,12 @@ export async function runShutdownCleanupStages(
   deadlines?: ShutdownCleanupDeadlineOptions,
 ): Promise<void> {
   const failures: unknown[] = [];
-  const unsettled = new Map<string, { settled: Promise<void>; mayWriteDatabase: boolean }>();
+  // Keyed by the stage object, not its name: two stages may share a name.
+  const unsettled = new Map<
+    ShutdownCleanupStage,
+    { name: string; settled: Promise<void>; mayWriteDatabase: boolean }
+  >();
+  const unsettledNames = (): string[] => [...unsettled.values()].map((entry) => entry.name);
   let sequenceEnded = false;
   // Elapsed time is read from the monotonic clock where the timer has one: a wall-clock step
   // during shutdown must neither consume the budget nor extend it past the process limit.
@@ -364,9 +371,11 @@ export async function runShutdownCleanupStages(
     const timedOut = Symbol("shutdown stage deadline");
     const context: ShutdownCleanupStageContext = {
       remainingMs: () => Math.max(0, deadlineAtMs - elapsedClock()),
-      unsettledStages: () => [...unsettled.keys()],
+      unsettledStages: unsettledNames,
       unsettledDatabaseWriters: () =>
-        [...unsettled].filter(([, entry]) => entry.mayWriteDatabase).map(([name]) => name),
+        [...unsettled.values()]
+          .filter((entry) => entry.mayWriteDatabase)
+          .map((entry) => entry.name),
       waitForUnsettledStages: async (timeoutMs) => {
         if (unsettled.size === 0) {
           return true;
@@ -417,17 +426,21 @@ export async function runShutdownCleanupStages(
       // and, while the run can still say so, fails the shutdown.
       const settled = (work ?? Promise.resolve()).then(
         () => {
-          unsettled.delete(stage.name);
+          unsettled.delete(stage);
         },
         (lateError: unknown) => {
-          unsettled.delete(stage.name);
+          unsettled.delete(stage);
           if (!sequenceEnded) {
             failures.push(lateError);
           }
           reportLateFailure(stage.name, lateError);
         },
       );
-      unsettled.set(stage.name, { settled, mayWriteDatabase: stage.mayWriteDatabase !== false });
+      unsettled.set(stage, {
+        name: stage.name,
+        settled,
+        mayWriteDatabase: stage.mayWriteDatabase !== false,
+      });
       reportFailure(
         `Shutdown cleanup stage ${stage.name} timed out after ${allowedMs}ms` +
           ` waiting on ${stage.waitingOn ?? "its cleanup"}; continuing shutdown`,
@@ -440,7 +453,7 @@ export async function runShutdownCleanupStages(
   if (unsettled.size > 0) {
     failures.push(
       new Error(
-        `Shutdown cleanup stage(s) still running when shutdown finished: ${[...unsettled.keys()].join(", ")}`,
+        `Shutdown cleanup stage(s) still running when shutdown finished: ${unsettledNames().join(", ")}`,
       ),
     );
   }

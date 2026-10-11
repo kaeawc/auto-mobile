@@ -143,6 +143,37 @@ describe("late outcomes of abandoned shutdown stages (#11601)", () => {
     ]);
   });
 
+  test("two abandoned stages that share a name are tracked separately", async () => {
+    const timer = new FakeTimer();
+    const seen: Array<readonly string[]> = [];
+
+    const failures = await settle(
+      timer,
+      runShutdownCleanupStages(
+        [
+          { name: "socket", budgetMs: 50, run: () => timer.sleep(120) },
+          { name: "socket", budgetMs: 50, run: () => neverSettles },
+          {
+            name: "probe",
+            budgetMs: 100,
+            run: async (stage) => {
+              // The first "socket" has finished by now; the second is still running.
+              await timer.sleep(50);
+              seen.push(stage.unsettledStages());
+            },
+          },
+        ],
+        () => {},
+        { timer },
+      ),
+    );
+
+    expect(seen).toEqual([["socket"]]);
+    expect(failures).toEqual([
+      "Shutdown cleanup stage(s) still running when shutdown finished: socket",
+    ]);
+  });
+
   test("only abandoned stages that may write are named as keeping the database open", async () => {
     const timer = new FakeTimer();
     const seen: Array<{ all: readonly string[]; writers: readonly string[] }> = [];
@@ -359,6 +390,45 @@ describe("daemon exit code by when a shutdown stage settles (#11601)", () => {
     expect(outcome.exitedAtMs).toBeLessThanOrEqual(
       PROCESS_SHUTDOWN_TIMEOUT_MS - DAEMON_SHUTDOWN_BUDGET_RESERVE_MS,
     );
+  });
+
+  test("a straggler that finishes between the deferred close and the late settle still gets the database closed", async () => {
+    const timer = new FakeTimer();
+    const database = new FakeShutdownDatabase();
+    const warnings: string[] = [];
+    const tail = createShutdownDatabaseTail({
+      closeDatabase: () => database.close(),
+      drainWrites: () => database.drain(),
+      warn: (message) => warnings.push(message),
+    });
+
+    await settle(
+      timer,
+      runShutdownCleanupStages(
+        [
+          {
+            name: "release",
+            budgetMs: 50,
+            run: async () => {
+              await timer.sleep(180);
+              database.write();
+            },
+          },
+          { name: "database", budgetMs: 50, run: (stage) => tail.close(stage) },
+          // Outlasts the straggler, so nothing is left running when the late settle starts.
+          { name: "logger flush", budgetMs: 200, run: () => timer.sleep(150) },
+          { name: "late settle", budgetMs: 100, run: (stage) => tail.lateSettle(stage) },
+        ],
+        () => {},
+        { timer },
+      ),
+    );
+
+    expect(warnings).toEqual([
+      "Skipping database close because abandoned shutdown stage(s) are still running: release",
+    ]);
+    expect(database.drains).toBe(1);
+    expect(database.closes).toBe(1);
   });
 
   test("a standing reason to keep the database open is honoured and said once", async () => {

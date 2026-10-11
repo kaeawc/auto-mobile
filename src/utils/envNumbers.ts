@@ -23,7 +23,7 @@ const warned = new Set<string>();
  */
 export function readEnvPositiveInteger(
   primaryName: string,
-  legacyName: string,
+  legacyName: string | undefined,
   options: EnvPositiveIntegerOptions,
   env: NodeJS.ProcessEnv = process.env,
   log: EnvNumberLogger = logger,
@@ -36,14 +36,12 @@ export function readEnvPositiveInteger(
 /** Like {@link readEnvPositiveInteger}, but the caller owns the default: undefined when unusable. */
 export function readOptionalEnvPositiveInteger(
   primaryName: string,
-  legacyName: string,
+  legacyName: string | undefined,
   options: Partial<EnvPositiveIntegerOptions> = {},
   env: NodeJS.ProcessEnv = process.env,
   log: EnvNumberLogger = logger,
 ): number | undefined {
-  // The primary name decides whenever it is set, even to an unusable value.
-  const name = env[primaryName] !== undefined ? primaryName : legacyName;
-  const raw = (env[primaryName] ?? env[legacyName] ?? "").trim();
+  const { name, raw } = pickEnvEntry(primaryName, legacyName, env);
   if (raw === "") {
     return undefined;
   }
@@ -53,6 +51,18 @@ export function readOptionalEnvPositiveInteger(
   }
   warnOnce(log, name, raw, options);
   return undefined;
+}
+
+/** The primary name decides whenever it is set, even to an unusable value. */
+function pickEnvEntry(
+  primaryName: string,
+  legacyName: string | undefined,
+  env: NodeJS.ProcessEnv,
+): { name: string; raw: string } {
+  if (env[primaryName] !== undefined || legacyName === undefined) {
+    return { name: primaryName, raw: (env[primaryName] ?? "").trim() };
+  }
+  return { name: legacyName, raw: (env[legacyName] ?? "").trim() };
 }
 
 /** A positive safe integer written as plain base-10 digits, or undefined. */

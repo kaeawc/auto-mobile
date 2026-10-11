@@ -1,4 +1,5 @@
 import { logger } from "./logger";
+import { parseStrictPositiveInteger, readEnvPositiveInteger } from "./envNumbers";
 import { defaultTimer, type Timer } from "./SystemTimer";
 
 export const IOS_SDK_HIERARCHY_SERVER_PORT = 8766;
@@ -55,13 +56,13 @@ export function computeConfiguredScanEnd(
   rangeSizeEnv: string | undefined,
 ): number | undefined {
   if (rangeEndEnv) {
-    const parsedEnd = Number.parseInt(rangeEndEnv, 10);
-    return !Number.isNaN(parsedEnd) && parsedEnd >= basePort ? parsedEnd : undefined;
+    const parsedEnd = parseStrictPositiveInteger(rangeEndEnv.trim());
+    return parsedEnd !== undefined && parsedEnd >= basePort ? parsedEnd : undefined;
   }
 
   if (rangeSizeEnv) {
-    const parsedSize = Number.parseInt(rangeSizeEnv, 10);
-    return !Number.isNaN(parsedSize) && parsedSize > 0 ? basePort + parsedSize - 1 : undefined;
+    const parsedSize = parseStrictPositiveInteger(rangeSizeEnv.trim());
+    return parsedSize !== undefined ? basePort + parsedSize - 1 : undefined;
   }
 
   return undefined;
@@ -410,29 +411,24 @@ export class PortManager {
    */
   public static readonly DEVICE_PORT = 8765;
 
-  private static resolveBasePort(): number {
-    const envValue =
-      process.env.AUTOMOBILE_PORT_RANGE_START ?? process.env.AUTO_MOBILE_PORT_RANGE_START;
-    if (!envValue) {
-      return this.DEFAULT_BASE_PORT;
-    }
-    const parsed = Number.parseInt(envValue, 10);
-    if (Number.isNaN(parsed) || parsed <= 0) {
-      logger.warn(
-        `[PortManager] Invalid port range start '${envValue}', using default ${this.DEFAULT_BASE_PORT}`,
-      );
-      return this.DEFAULT_BASE_PORT;
-    }
-    return parsed;
+  static resolveBasePort(env: NodeJS.ProcessEnv = process.env): number {
+    return readEnvPositiveInteger(
+      "AUTOMOBILE_PORT_RANGE_START",
+      "AUTO_MOBILE_PORT_RANGE_START",
+      { fallback: this.DEFAULT_BASE_PORT },
+      env,
+    );
   }
 
-  private static resolveMaxDevices(): number {
-    const endValue =
-      process.env.AUTOMOBILE_PORT_RANGE_END ?? process.env.AUTO_MOBILE_PORT_RANGE_END;
+  static resolveMaxDevices(
+    env: NodeJS.ProcessEnv = process.env,
+    basePort: number = this.basePort,
+  ): number {
+    const endValue = env.AUTOMOBILE_PORT_RANGE_END ?? env.AUTO_MOBILE_PORT_RANGE_END;
     if (endValue) {
-      const parsedEnd = Number.parseInt(endValue, 10);
-      if (!Number.isNaN(parsedEnd) && parsedEnd >= this.basePort) {
-        return parsedEnd - this.basePort + 1;
+      const parsedEnd = parseStrictPositiveInteger(endValue.trim());
+      if (parsedEnd !== undefined && parsedEnd >= basePort) {
+        return parsedEnd - basePort + 1;
       }
       logger.warn(
         `[PortManager] Invalid port range end '${endValue}', using default ${this.DEFAULT_MAX_DEVICES}`,
@@ -440,13 +436,12 @@ export class PortManager {
       return this.DEFAULT_MAX_DEVICES;
     }
 
-    const sizeValue =
-      process.env.AUTOMOBILE_PORT_RANGE_SIZE ?? process.env.AUTO_MOBILE_PORT_RANGE_SIZE;
+    const sizeValue = env.AUTOMOBILE_PORT_RANGE_SIZE ?? env.AUTO_MOBILE_PORT_RANGE_SIZE;
     if (!sizeValue) {
       return this.DEFAULT_MAX_DEVICES;
     }
-    const parsedSize = Number.parseInt(sizeValue, 10);
-    if (Number.isNaN(parsedSize) || parsedSize <= 0) {
+    const parsedSize = parseStrictPositiveInteger(sizeValue.trim());
+    if (parsedSize === undefined) {
       logger.warn(
         `[PortManager] Invalid port range size '${sizeValue}', using default ${this.DEFAULT_MAX_DEVICES}`,
       );

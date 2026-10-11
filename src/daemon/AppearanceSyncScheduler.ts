@@ -25,7 +25,7 @@ interface AppliedAppearance {
   incarnation?: number;
 }
 
-interface AppearanceSyncDependencies {
+export interface AppearanceSyncDependencies {
   getConfig: typeof getAppearanceConfig;
   resolveMode: typeof resolveAppearanceMode;
   /** Omitted: the scheduler's own targets, the pooled Android devices a session holds. */
@@ -34,6 +34,18 @@ interface AppearanceSyncDependencies {
   isEnabled?: () => boolean;
   applyDeadlineMs?: number;
 }
+
+/**
+ * What the process-wide scheduler reaches the config store, the host (`defaults`/`gsettings`
+ * child processes) and the device (`adb`/`simctl`) through. One shared object, read at each use,
+ * so a test that runs a real daemon can replace that boundary and restore it afterwards.
+ */
+export const defaultAppearanceSyncDependencies: AppearanceSyncDependencies = {
+  getConfig: getAppearanceConfig,
+  resolveMode: resolveAppearanceMode,
+  apply: applyAppearanceToDevice,
+  isEnabled: isAppearanceSyncEnabledFromEnvironment,
+};
 
 export interface AppearanceSyncScope {
   getTargets: () => AppearanceSyncTarget[];
@@ -56,12 +68,7 @@ export class AppearanceSyncScheduler {
 
   constructor(
     timer: Timer = defaultTimer,
-    dependencies: AppearanceSyncDependencies = {
-      getConfig: getAppearanceConfig,
-      resolveMode: resolveAppearanceMode,
-      apply: applyAppearanceToDevice,
-      isEnabled: isAppearanceSyncEnabledFromEnvironment,
-    },
+    dependencies: AppearanceSyncDependencies = defaultAppearanceSyncDependencies,
   ) {
     this.timer = timer;
     this.dependencies = dependencies;

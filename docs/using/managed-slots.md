@@ -205,6 +205,23 @@ connection used for tools and resources:
    `reset-slot-scope --force` reports such a slot as `live_owner`. An explicit
    release whose slot lookup fails is rejected before anything is cancelled or
    released.
+   What tells every daemon on the host that released work is still running is
+   in the registry and names the draining daemon's process: the `settling` mark,
+   or, until that mark lands, the owner record. Before it marks a slot the
+   daemon re-stamps an owner record that still names another process (the
+   previous daemon after a restart, or a second daemon) with itself, so a slot
+   whose mark is owed reads `slot_in_use` from any daemon. Both hold for as long
+   as that process runs, including after it has begun to shut down, and neither
+   outlives it: once the process is gone its work is gone too, the next daemon
+   returns a `settling` slot to `ready` at startup, and the owner record reads
+   dead. A mark whose write was committed although the call failed is read back
+   and treated as written. One window has no registry record: while neither the
+   re-stamp nor the mark of such a foreign record has landed (or the lookup of
+   a session released by heartbeat loss has not), only the draining daemon
+   itself refuses the slot. And an owner record whose clear failed, which the
+   draining daemon itself reads as dead, still names that daemon's process:
+   other daemons on the host answer `slot_in_use` for it until the draining
+   daemon next claims the slot or exits.
    A release clears the execution owner only; the assignment, generation and spec
    are kept, whatever the release reason (explicit, heartbeat loss, idle).
 5. **Reuse.** A new proxy with the same scoped slot and a matching spec reuses
@@ -405,6 +422,11 @@ slot. Only control and lifecycle calls on another slot's device are refused.
   even on the connection's own slot device: it could not boot the device again,
   so a stop would strand the execution. End the execution instead; the next
   acquisition on the slot boots and reuses the device.
+- The same confinement applies to a managed connection's direct socket frames:
+  `input/*`, the device-mutating `ide/*` routes (`force` or not),
+  `ide/setSessionToolEnabled`, `daemon/releaseSession` and
+  `daemon/relinquishDeviceLease` are refused off-slot (#11596). An ordinary
+  connection may still release any session.
 - A managed connection's multi-device plan labels are served only by its own slot
   sessions. Any other label, or one whose declared platform the slot device does
   not match, is refused with `device_outside_managed_slots` before anything is

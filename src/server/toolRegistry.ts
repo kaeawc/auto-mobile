@@ -2936,7 +2936,7 @@ export class ToolRegistryClass {
         });
         signal?.throwIfAborted();
         sessionUuid = resolvedTarget.sessionUuid;
-        if (selectionContext?.execution && !sessionUuid) {
+        if (selectionContext?.execution && !selectionContext.deviceAwareDispatch && !sessionUuid) {
           executionTracker.setResolvedAutolockSessionUuid(
             selectionContext.execution.executionId,
             undefined,
@@ -2947,6 +2947,7 @@ export class ToolRegistryClass {
           // Bind the ROUTING session, not the selection profile, so
           // nested calls re-inject the correct derived routing UUID.
           {
+            deviceAwareDispatch: true,
             routingSessionUuid: resolvedTarget.sessionUuid,
             toolSelectionProfileUuid: selectionContext?.toolSelectionProfileUuid,
             // Handlers read this to stay on their read-only path (observe, snapshotOf).

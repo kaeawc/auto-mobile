@@ -286,6 +286,8 @@ describe("requests during device session release", () => {
         ...before,
         livenessOwnerToken: "new-owner",
         livenessOwnershipClaims: ["new-owner"],
+        // The claim was accepted before the release ended admission: its owner was heard (#11646).
+        hasReceivedHeartbeat: true,
       });
       expect((await persistence.getSession?.(sessionId))?.liveness_owner_token).toBeNull();
       const replacement = await manager.createSession("fresh-session", deviceId, "android");

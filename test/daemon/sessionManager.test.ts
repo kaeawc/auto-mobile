@@ -375,10 +375,13 @@ test("a retry during an unpublished same-UUID resume leaves the new row active",
     await expect(
       manager.releaseSession("racing-session", "allocation-rollback"),
     ).resolves.toBeNull();
-    expect(pending.has("racing-session")).toBe(false);
+    // Still pending while the resume is in flight (#11557): a resume that failed would leave the
+    // row to this release. Publishing ends it.
+    expect(pending.has("racing-session")).toBe(true);
     expect((await persistence.getSession?.("racing-session"))?.status).toBe("active");
     finishUpsert.resolve();
     await expect(resume).resolves.toMatchObject({ assignedDevice: "emulator-new" });
+    expect(pending.has("racing-session")).toBe(false);
     expect(await persistence.getSession?.("racing-session")).toMatchObject({
       status: "active",
       release_reason: null,
@@ -2500,8 +2503,9 @@ describe("SessionManager", () => {
       try {
         await manager.createSession("session-1", "emulator-old", "android");
         await manager.claimLivenessOwnership("session-1", "owner-a");
-        // owner-a's lease must lapse or the daemon rejects owner-b's claim (#10050).
-        fakeTimer.advanceTime(getDefaultSessionHeartbeatTimeoutMs() + 1);
+        // owner-a's lease and suspect grace must lapse or the daemon rejects owner-b's claim
+        // (#10050); an accepted claim is its owner's heartbeat, so it holds the grace (#11646).
+        fakeTimer.advanceTime(getDefaultSessionHeartbeatTimeoutMs() + SUSPECT_GRACE_MS + 1);
         repository.deferUpsert = true;
 
         const rebinding = manager.rebindSession("session-1", "emulator-new", "android");

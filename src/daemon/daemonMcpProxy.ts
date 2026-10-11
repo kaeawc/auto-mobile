@@ -5582,6 +5582,9 @@ export class DaemonMcpProxy {
     this.claimableSessions.add(sessionId);
     this.ownedDeviceSessions.add(sessionId);
     this.rememberSessionDevice(sessionId, session.deviceId);
+    if (session.platform !== undefined) {
+      this.sessionPlatforms.set(sessionId, session.platform);
+    }
     // Resuming is not use: the held session's idle clock is the daemon's last tool use (#10656).
     this.otherHeldSessions.set(sessionId, { claimSent: false, lastUsedAt: session.lastUsedAt });
     return true;

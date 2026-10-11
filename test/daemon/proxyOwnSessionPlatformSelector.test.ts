@@ -7,7 +7,9 @@ import { DaemonClient } from "../../src/daemon/client";
 import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
+  DAEMON_HEARTBEAT_METHOD,
   DAEMON_OWNED_SESSIONS_PARAM,
+  DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_VERSION,
 } from "../../src/daemon/constants";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
@@ -41,12 +43,14 @@ describe("#11714: an unambiguous platform-only call uses its connection's defaul
   let client: FakeDaemonClient;
   let timer: FakeTimer;
   let acquisitions: AcquiredDevice[];
+  let daemonMethodResults: Map<string, unknown>;
   let forwarded: Array<{ name: string; params: Record<string, unknown> }>;
   let spies: Array<ReturnType<typeof spyOn>>;
 
   beforeEach(() => {
     timer = new FakeTimer();
     acquisitions = [];
+    daemonMethodResults = new Map();
     forwarded = [];
     spies = [
       spyOn(DaemonClient, "isAvailable").mockResolvedValue(true),
@@ -54,6 +58,7 @@ describe("#11714: an unambiguous platform-only call uses its connection's defaul
       spyOn(logger, "info").mockImplementation(() => {}),
     ];
     client = new FakeDaemonClient({
+      daemonMethodResults,
       onCallTool: (name, params) => {
         // FakeDaemonClient's built-in recording strips the bound-session marker.
         forwarded.push({ name, params: { ...params } });
@@ -87,6 +92,7 @@ describe("#11714: an unambiguous platform-only call uses its connection's defaul
     const daemonManager = new FakeDaemonManager();
     daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
     proxy = new DaemonMcpProxy({
+      livenessOwnerToken: "stable-owner-token",
       clientFactory: () => client,
       daemonManager,
       autoStartDaemon: false,
@@ -182,6 +188,51 @@ describe("#11714: an unambiguous platform-only call uses its connection's defaul
     expect(lastParams()).not.toHaveProperty("sessionUuid");
     expect(lastParams()).not.toHaveProperty(DAEMON_BOUND_SESSION_PARAM);
   });
+
+  for (const platform of ["ios", "android", undefined] as const) {
+    const label =
+      platform === "ios"
+        ? "a token-resumed ios session permits the android platform call to use its default"
+        : `PIN: a token-resumed session with ${platform ?? "no"} platform keeps the android selector ambiguous`;
+    test(label, async () => {
+      const resumed = "token-resumed-session";
+      daemonMethodResults.set(DAEMON_TOKEN_OWNED_SESSIONS_METHOD, {
+        sessions: [
+          {
+            sessionId: resumed,
+            deviceId: platform === "ios" ? IOS.deviceId : "emulator-5556",
+            ...(platform === undefined ? {} : { platform }),
+            lastUsedAt: timer.now(),
+          },
+        ],
+      });
+      await acquire("getAndroid", ANDROID);
+      expect(client.callDaemonMethodCalls).toContainEqual({
+        method: DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
+        params: { livenessOwnerToken: "stable-owner-token" },
+      });
+      expect(
+        client.callDaemonMethodCalls.find(
+          (call) => call.method === DAEMON_HEARTBEAT_METHOD && call.params.sessionId === resumed,
+        )?.params,
+      ).toMatchObject({ livenessOwnerToken: "stable-owner-token", claimLivenessOwnership: true });
+      await proxy.callTool("tapOn", { platform: "android" });
+      expect(lastParams().platform).toBe("android");
+      if (platform === "ios") {
+        expect(lastParams()).toMatchObject({
+          sessionUuid: ANDROID.sessionUuid,
+          [DAEMON_BOUND_SESSION_PARAM]: ANDROID.sessionUuid,
+        });
+      } else {
+        expect(lastParams()).toHaveProperty(DAEMON_OWNED_SESSIONS_PARAM, [
+          ANDROID.sessionUuid,
+          resumed,
+        ]);
+        expect(lastParams()).not.toHaveProperty("sessionUuid");
+        expect(lastParams()).not.toHaveProperty(DAEMON_BOUND_SESSION_PARAM);
+      }
+    });
+  }
 
   for (const args of [
     { deviceId: ANDROID.deviceId },

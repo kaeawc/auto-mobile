@@ -1350,6 +1350,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         );
         device = await deviceSessionManager.ensureDeviceReady(platform, providedDeviceId, {
           sessionId: sessionUuid,
+          intent: readOnly && !sessionUuid ? "read" : undefined,
           skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
           readiness:
             typeof options.deviceReadiness === "function"

@@ -39,6 +39,7 @@ describe("a sessionless read never readies a device held outside this daemon's s
 
   let reads: Array<{ deviceId: string; readPath: boolean }>;
   let adb: FakeAdbExecutor;
+  let devices: DeviceSessionManager;
   let appearanceApplies: Array<{ deviceId: string; mode: AppearanceMode }>;
   let pool: DevicePool;
   let sessionManager: SessionManager;
@@ -90,7 +91,7 @@ describe("a sessionless read never readies a device held outside this daemon's s
       defaultMode: "auto",
       applyOnConnect: true,
     };
-    const devices = DeviceSessionManager.createInstance(
+    devices = DeviceSessionManager.createInstance(
       new FakeDeviceClientProvider(adb, deviceUtils, new FakeSimctl() as unknown as SimCtlClient, {
         window,
       }),
@@ -216,11 +217,28 @@ describe("a sessionless read never readies a device held outside this daemon's s
     expect(deviceWrites()).toEqual([]);
   });
 
-  test("a read on a device nobody holds still runs readiness", async () => {
+  test("a read on a device nobody holds runs required readiness without preference writes", async () => {
     await call("readProbe", { platform: "android", deviceId: theirs.deviceId });
 
-    // The owner's open question (#11641): unchanged here, pinned so this routing stays narrow.
     expect(reads).toEqual([{ deviceId: theirs.deviceId, readPath: false }]);
+    expect(appearanceApplies).toEqual([]);
+    expect(deviceWrites()).toEqual([]);
+    expect(devices.getCurrentDevice()).toBeUndefined();
+  });
+
+  test("a read leaves the preference writes for a later sessionless control call", async () => {
+    await call("readProbe", { platform: "android", deviceId: theirs.deviceId });
+    expect(appearanceApplies).toEqual([]);
+    expect(deviceWrites()).toEqual([]);
+    expect(devices.getCurrentDevice()).toBeUndefined();
+
+    await call("controlProbe", { platform: "android", deviceId: theirs.deviceId });
     expect(appearanceApplies).toEqual([{ deviceId: theirs.deviceId, mode: "dark" }]);
+    expect(
+      deviceWrites().filter(
+        (command) => command === "shell settings put secure stylus_handwriting_enabled 0",
+      ),
+    ).toHaveLength(1);
+    expect(devices.getCurrentDevice()).toEqual(theirs);
   });
 });

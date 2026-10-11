@@ -17,6 +17,11 @@ import { MANAGED_EXECUTION_SETTLEMENT_CAP_MS } from "../../../src/daemon/managed
 import { SlotScopeReset } from "../../../src/daemon/managedSlots/slotScopeReset";
 import { ManagedExecutionReowner } from "../../../src/daemon/managedSlots/managedExecutionReowner";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { IosSimCapacityGate } from "../../../src/features/iosSimFleet/CapacityGate";
+import { IosSimFleetCostCollector } from "../../../src/features/iosSimFleet/FleetCostCollector";
+import { InMemoryBootDurationHistory } from "../../../src/features/iosSimFleet/BootDurationHistory";
+import { FakeFleetHostSource } from "../../fakes/FakeFleetHostSource";
+import { RegistryManagedSlotExclusion } from "../../../src/daemon/managedSlots/managedSlotExclusion";
 
 export type SlotRegistryFactory = (
   timer: FakeTimer,
@@ -1730,6 +1735,94 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
             execSessionUuid: null,
           },
         ]);
+      });
+
+      test("iOS creation excludes the exact journal name until its UDID is recorded", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        const name = "amslot-12345678-0-g1-attempt";
+        await registry.initSlot(key, { ...INIT, platform: "ios" });
+        const opened = await registry.openSlotJournal(key, {
+          kind: "create",
+          phase: "creating",
+          owner: OWNER_1,
+          target: { ...TARGET, oldStableId: null, oldName: null, newName: name },
+          assignment: {
+            kind: "state",
+            expected: { generation: 0, stableDeviceId: null },
+            state: "provisioning",
+          },
+        });
+        if (opened.kind !== "opened") {
+          throw new Error(`journal not opened: ${opened.kind}`);
+        }
+        const entry = {
+          platform: "ios",
+          stableDeviceId: name,
+          holder: "slot",
+          scopeKey: key.scopeKey,
+          slotIndex: 0,
+          scopeState: null,
+          execSessionUuid: null,
+        };
+        expect(await registry.snapshotManagedDevices()).toEqual([entry]);
+        // Boot admission counts the listed UDID, regardless of the registry's temporary name.
+        const fleet = new FakeFleetHostSource();
+        fleet.inventory = [
+          {
+            udid: "UDID-CREATED",
+            name,
+            state: "Booted",
+            runtime: "iOS-18",
+            isAvailable: true,
+          },
+        ];
+        fleet.snapshot = {
+          takenAtMs: timer.now(),
+          processes: [],
+          resources: {
+            totalMemoryBytes: 16 * 1024 ** 3,
+            cpuCount: 8,
+            loadAverage1m: 0,
+            memoryPressure: "normal",
+          },
+        };
+        const capacity = new IosSimCapacityGate(
+          new IosSimFleetCostCollector(fleet, new InMemoryBootDurationHistory(), timer),
+          timer,
+          { env: { AUTOMOBILE_IOS_SIM_MAX_BOOTED: "1" } },
+        );
+        expect(await capacity.describeCapacity()).toMatchObject({ booted: 1, inFlight: 0 });
+        await expect(capacity.assertCapacityAvailable()).rejects.toMatchObject({
+          code: "capacity_exhausted",
+          details: { booted: 1, externalDevices: ["UDID-CREATED"] },
+        });
+        const exclusion = new RegistryManagedSlotExclusion(async () => registry, timer);
+        await exclusion.refresh();
+        expect(exclusion.holderOf({ platform: "ios", stableIds: [name] })).toEqual(entry);
+        for (const other of ["iPhone user", `${name}-user`, "amslot-12345678-0-g1-other"]) {
+          expect(exclusion.holderOf({ platform: "ios", stableIds: [other] })).toBeUndefined();
+        }
+        expect(
+          await registry.advanceSlotJournal(opened.entry.id, {
+            owner: OWNER_1,
+            expectedPhase: "creating",
+            phase: "created",
+            target: { newStableId: "UDID-CREATED" },
+          }),
+        ).toMatchObject({ kind: "advanced" });
+        expect(await registry.snapshotManagedDevices()).toEqual([
+          { ...entry, stableDeviceId: "UDID-CREATED" },
+        ]);
+        await exclusion.refresh();
+        expect(exclusion.stableIdsFor("ios")).toEqual(new Set(["UDID-CREATED"]));
+        expect(await capacity.describeCapacity()).toMatchObject({ booted: 1, inFlight: 0 });
+        await expect(capacity.assertCapacityAvailable()).rejects.toMatchObject({
+          code: "capacity_exhausted",
+          details: { booted: 1, externalDevices: ["UDID-CREATED"] },
+        });
+        expect(
+          exclusion.holderOf({ platform: "ios", stableIds: ["UDID-CREATED", name] }),
+        ).toMatchObject({ stableDeviceId: "UDID-CREATED" });
       });
 
       test("terminal entries are pruned after the retention window; open ones never are", async () => {

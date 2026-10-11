@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import {
+  RegistryManagedSlotExclusion,
+  runAsManagedSlotReconciler,
+} from "../../src/daemon/managedSlots/managedSlotExclusion";
 import {
   DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE,
   DeviceAssignedToManagedSlotError,
@@ -158,13 +161,75 @@ describe("DevicePool managed-slot exclusion", () => {
     expect(pool.getDevice("SIM-SLOT")?.sessionId).toBeNull();
   });
 
-  test("the slot's own execution session may bind its device", async () => {
-    await assignManagedSlotDevice(registry, "ios", "SIM-SLOT", "runner-a", "slot-exec");
-    await setUp([ios("SIM-SLOT")]);
+  test.each(["SIM-SLOT", "amslot-12345678-0-g1-attempt"])(
+    "the slot's own execution session may bind its device held as %s",
+    async (stableId) => {
+      await assignManagedSlotDevice(registry, "ios", stableId, "runner-a", "slot-exec");
+      await setUp([{ ...ios("SIM-SLOT"), name: stableId }]);
 
-    await pool.bindOrReuseDeviceSession("slot-exec", "SIM-SLOT", "ios");
+      await pool.bindOrReuseDeviceSession("slot-exec", "SIM-SLOT", "ios");
 
-    expect(pool.getDevice("SIM-SLOT")?.sessionId).toBe("slot-exec");
+      expect(pool.getDevice("SIM-SLOT")?.sessionId).toBe("slot-exec");
+    },
+  );
+
+  test("pooled iOS lifecycle gates refuse a creating slot's name but allow its reconciler", async () => {
+    const name = "amslot-12345678-0-g1-attempt";
+    const scope = await registry.ensureScope({
+      managedHostScope: "host",
+      runnerNamespace: "creating",
+      runnerIncarnation: "boot-1",
+    });
+    if (scope.kind !== "ready") {
+      throw new Error(`scope not ready: ${scope.kind}`);
+    }
+    const key = { scopeKey: scope.scope.scopeKey, slotIndex: 0 };
+    await registry.initSlot(key, { role: "app", platform: "ios", requestedSpec: {} });
+    expect(
+      await registry.openSlotJournal(key, {
+        kind: "create",
+        phase: "creating",
+        owner: { daemonId: "creator", pid: 1, processGenerationToken: "fake" },
+        target: {
+          oldStableId: null,
+          oldName: null,
+          newStableId: null,
+          newName: name,
+          requestedSpec: {},
+          resolvedSpec: null,
+          specFingerprint: "fp",
+        },
+        assignment: {
+          kind: "state",
+          expected: { generation: 0, stableDeviceId: null },
+          state: "provisioning",
+        },
+      }),
+    ).toMatchObject({ kind: "opened" });
+    await setUp([]);
+    await expect(
+      pool.assertNotAssignedToManagedSlot({
+        action: "startDevice",
+        deviceId: "SIM-SLOT",
+        platform: "ios",
+        stableIds: [name],
+      }),
+    ).rejects.toMatchObject({ code: DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE, stableId: name });
+    await runAsManagedSlotReconciler(key, () =>
+      pool.assertNotAssignedToManagedSlot({
+        action: "startDevice",
+        deviceId: "SIM-SLOT",
+        platform: "ios",
+        stableIds: [name],
+      }),
+    );
+    await setUp([{ ...ios("SIM-SLOT"), name }]);
+    for (const action of ["killDevice", "deleteDevice", "setActiveDevice"]) {
+      await expect(
+        pool.assertNotAssignedToManagedSlot({ action, deviceId: "SIM-SLOT", platform: "ios" }),
+      ).rejects.toMatchObject({ code: DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE, stableId: name });
+    }
+    expect(pool.getDevice("SIM-SLOT")?.sessionId).toBeNull();
   });
 
   test("an explicit bind names the AVD the caller resolved for a pooled serial", async () => {

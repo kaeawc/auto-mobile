@@ -5186,14 +5186,17 @@ export class DaemonMcpProxy {
    * connection attempt still in flight. A failure leaves the claim unsent for the keeper to retry.
    */
   private async sendResumeClaim(client: DaemonClientLike, sessionUuid: string): Promise<void> {
+    const stopRenewing = this.renewLeaseWhileClaimReplyOutstanding(client, sessionUuid);
     try {
       try {
         this.noteDaemonIdleEvidence(
           sessionUuid,
-          await client.callDaemonMethod(
-            DAEMON_HEARTBEAT_METHOD,
-            this.boundSessionHeartbeatParams(sessionUuid, true, true),
-          ),
+          await client
+            .callDaemonMethod(
+              DAEMON_HEARTBEAT_METHOD,
+              this.boundSessionHeartbeatParams(sessionUuid, true, true),
+            )
+            .finally(stopRenewing),
         );
       } catch (error) {
         throw this.isDaemonSessionNotFoundError(error)
@@ -5204,6 +5207,58 @@ export class DaemonMcpProxy {
     } catch (error) {
       this.handleHeldSessionHeartbeatError(sessionUuid, true, error);
     }
+  }
+
+  /**
+   * Heartbeat `sessionUuid` on the keeper's cadence while a claim sent outside the keeper waits
+   * for its reply (#11646). The daemon accepts a claim on arrival and answers once the ownership
+   * row is written; the accepted claim is the owner's heartbeat, so the lease runs from its
+   * arrival. The establishment and resume claims are awaited before the keeper starts, so without
+   * this a write slower than lease plus grace releases a session whose owner is live. Each renewal
+   * is a plain keeper tick: the daemon stamps the lease when it arrives and answers at once, with
+   * no claim and no policy change. Does nothing while the keeper is running, which then ticks for
+   * the session itself.
+   *
+   * Returns what to call when the reply lands. A claim answered before the first renewal leaves
+   * nothing behind. One that needed renewals gets a last one on the same cadence, so the lease is
+   * renewed between the reply and the keeper's first tick a full interval after it.
+   */
+  private renewLeaseWhileClaimReplyOutstanding(
+    client: DaemonClientLike,
+    sessionUuid: string,
+  ): () => void {
+    let renewed = false;
+    let replied = false;
+    const stop = () => this.timer.clearInterval(renewals);
+    const renewals = this.timer.setInterval(() => {
+      if (this.closing || this.client !== client || !this.isHeldSession(sessionUuid)) {
+        stop();
+        return;
+      }
+      if (replied) {
+        stop();
+      } else if (this.heartbeatKeeperStarted) {
+        return;
+      }
+      renewed = true;
+      void client
+        .callDaemonMethod(DAEMON_HEARTBEAT_METHOD, this.boundSessionHeartbeatParams(sessionUuid))
+        .catch((error: unknown) => {
+          // Expected while the claim is undecided (refused, or the session is gone): the claim's
+          // own reply reports that, and this tick only renews a lease the daemon already granted.
+          logger.debug(
+            `[DaemonMcpProxy] Heartbeat for session ${sessionUuid} behind its pending claim failed: ${errorMessage(error)}`,
+          );
+        });
+    }, this.heartbeatIntervalMs);
+    // Never the reason a closing proxy's process stays up.
+    renewals.unref?.();
+    return () => {
+      replied = true;
+      if (!renewed) {
+        stop();
+      }
+    };
   }
 
   /**
@@ -5249,11 +5304,14 @@ export class DaemonMcpProxy {
     if (!sessionUuid || !this.latestBindingClaimable() || this.closing || !this.client) {
       return;
     }
+    const stopRenewing = this.renewLeaseWhileClaimReplyOutstanding(this.client, sessionUuid);
     try {
-      const ack = await this.client.callDaemonMethod(
-        DAEMON_HEARTBEAT_METHOD,
-        this.boundSessionHeartbeatParams(sessionUuid, true, true),
-      );
+      const ack = await this.client
+        .callDaemonMethod(
+          DAEMON_HEARTBEAT_METHOD,
+          this.boundSessionHeartbeatParams(sessionUuid, true, true),
+        )
+        .finally(stopRenewing);
       if (this.boundSessionUuid === sessionUuid && !this.terminalBoundSession) {
         this.noteDaemonIdleEvidence(sessionUuid, ack);
         this.livenessOwnershipClaimSent = true;

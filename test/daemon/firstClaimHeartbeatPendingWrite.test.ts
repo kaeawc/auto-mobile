@@ -286,6 +286,94 @@ describe("the first (claiming) heartbeat while its ownership write is still pend
   });
 });
 
+describe("a second heartbeat for the session while the first claim's write is pending (#11646)", () => {
+  // The proxy has not seen its claim acknowledged, so a heartbeat it sends meanwhile may carry
+  // the claim again. Either form renews the lease when it arrives; neither starts a second write.
+  test("a repeated claim from the same owner renews the lease on arrival and waits for the one write", async () => {
+    const r = (rig = await setUpRig());
+    let ownershipWrites = 0;
+    const write = r.persistence.recordLivenessOwnership.bind(r.persistence);
+    r.persistence.recordLivenessOwnership = async (sessionUuid, ownerToken) => {
+      ownershipWrites++;
+      await write(sessionUuid, ownerToken);
+    };
+    const gate = gateOwnershipWrite(r.persistence);
+    r.advance(1_000);
+    const first = claimingHeartbeat(r);
+    await settle();
+    const claimedAt = r.manager.getSession(SESSION)?.lastOwnerHeartbeat ?? Number.NaN;
+
+    r.advance(3_000);
+    let secondSettled = false;
+    const second = claimingHeartbeat(r).finally(() => {
+      secondSettled = true;
+    });
+    await settle();
+
+    // Stamped on arrival, 3 s after the claim; the reply waits behind the first claim's write.
+    expect(r.manager.getSession(SESSION)?.lastOwnerHeartbeat).toBe(claimedAt + 3_000);
+    expect(r.manager.getSessionLeaseState(SESSION)?.phase).toBe("live");
+    expect(secondSettled).toBe(false);
+
+    gate.open();
+    expect([(await first).success, (await second).success]).toEqual([true, true]);
+    expect(ownershipWrites).toBe(1);
+    expect(r.manager.hasLivenessOwnership(SESSION, OWNER)).toBe(true);
+  });
+
+  test("another token's claim is refused and leaves the pending claimant's lease alone", async () => {
+    const r = (rig = await setUpRig());
+    const gate = gateOwnershipWrite(r.persistence);
+    r.advance(1_000);
+    const first = claimingHeartbeat(r);
+    await settle();
+    const claimedAt = r.manager.getSession(SESSION)?.lastOwnerHeartbeat;
+
+    r.advance(3_000);
+    const foreign = claimingHeartbeat(r, "other-owner");
+    await settle();
+    expect(r.manager.hasLivenessOwnership(SESSION, OWNER)).toBe(true);
+    expect(r.manager.getSession(SESSION)?.lastOwnerHeartbeat).toBe(claimedAt);
+
+    gate.open();
+    expect((await first).success).toBe(true);
+    expect((await foreign).success).toBe(false);
+    expect(r.manager.hasLivenessOwnership(SESSION, OWNER)).toBe(true);
+  });
+});
+
+describe("a claim the daemon makes for its owner (managed slot hand-off)", () => {
+  // `ManagedSlotAcquisition.handOff` claims for the proxy's token and adopts the managed policy
+  // before the acquisition reply reaches the proxy; the proxy's first heartbeat follows the reply.
+  async function handOff(r: Rig): Promise<void> {
+    expect(await r.manager.claimLivenessOwnership(SESSION, OWNER)).toBe("claimed");
+    await r.manager.adoptManagedExecutionLivenessPolicy(SESSION, { idleTimeoutMs: 600_000 });
+  }
+
+  test("the owner's first heartbeat inside lease plus grace keeps the session", async () => {
+    const r = (rig = await setUpRig());
+    await handOff(r);
+
+    // 6 s after the hand-off the lease has lapsed and the session is suspect, not released.
+    await scans(r, 3);
+    expect(r.manager.getSessionLeaseState(SESSION)?.phase).toBe("suspect");
+    expect((await claimingHeartbeat(r)).success).toBe(true);
+
+    expect(r.manager.getSessionLeaseState(SESSION)?.phase).toBe("live");
+    expect(r.reaped).toEqual([]);
+  });
+
+  test("a hand-off no owner ever heartbeats is released within 10 s", async () => {
+    const r = (rig = await setUpRig());
+    await handOff(r);
+
+    await scans(r, 4);
+    expect(r.reaped).toEqual([]);
+    await r.scanOnTime();
+    expect(r.reaped).toEqual(["heartbeat-timeout"]);
+  });
+});
+
 describe("a returning owner's re-claim of a rehydrated session while its write is pending", () => {
   test("the session is not reaped as rehydration-owner-timeout once the claim was accepted", async () => {
     const r = (rig = await setUpRig("awaiting-owner"));

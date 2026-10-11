@@ -8,6 +8,7 @@ import {
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
   type RecordingSessionCleanupDeps,
+  type RecordingAcquisitionDeps,
 } from "../../src/server/recordingSessionCleanup";
 
 import {
@@ -38,6 +39,10 @@ type ReleaseCallback = Parameters<SessionManager["onSessionRelease"]>[0];
 type UnboundCallback = Parameters<SessionManager["onSessionDeviceUnbound"]>[0];
 
 class FakeSessionManager implements CleanupManager {
+  holders = new Map<string, string>();
+  getSessionForDevice(deviceId: string): string | null {
+    return this.holders.get(deviceId) ?? null;
+  }
   releaseCallbacks: ReleaseCallback[] = [];
   unboundCallbacks: UnboundCallback[] = [];
   pendingCleanups: Array<{ deviceId: string; cleanup: Promise<unknown>; capMs?: number }> = [];
@@ -88,7 +93,7 @@ class FakeSessionManager implements CleanupManager {
 }
 
 /** In-memory recording backend: one active recording per device, like the real manager. */
-class FakeRecordings implements RecordingSessionCleanupDeps {
+class FakeRecordings implements RecordingSessionCleanupDeps, RecordingAcquisitionDeps {
   active = new Map<
     string,
     { recordingId: string; deviceId: string; ownerSessionUuid: string | undefined }
@@ -105,6 +110,23 @@ class FakeRecordings implements RecordingSessionCleanupDeps {
   timer = new FakeTimer();
   incomplete: string[] = [];
   capMs = 120_000;
+
+  adoptVideoRecordings(deviceId: string, sessionId: string): Promise<void> | undefined {
+    const recording = this.active.get(deviceId);
+    if (!recording || recording.ownerSessionUuid !== undefined) {
+      return undefined;
+    }
+    recording.ownerSessionUuid = sessionId;
+    return Promise.resolve();
+  }
+  adoptSegmentedRecordings(_deviceId: string, _sessionId: string): void {}
+  adoptTestRecording(deviceId: string, sessionId: string): boolean {
+    if (!this.isTestRecordingOwnedBy(undefined, deviceId)) {
+      return false;
+    }
+    this.testRecording!.ownerSessionUuid = sessionId;
+    return true;
+  }
 
   start(deviceId: string, ownerSessionUuid: string | undefined): void {
     if (this.active.has(deviceId)) {
@@ -451,68 +473,95 @@ describe("registerRecordingSessionCleanup", () => {
     }
   });
 
-  describe("owner-less recordings on acquisition (#10961)", () => {
-    test("a sessionless recording is stopped when a session acquires the device, then the new owner can start", async () => {
+  describe("owner-less recordings on acquisition (#10961, #11665)", () => {
+    test("the winner adopts exactly once, keeps capture running, and leaves no ownerless recording", async () => {
       const { manager, recordings } = setup();
       const onAcquire = createOwnerlessRecordingAcquisitionCleanup(manager, recordings);
       recordings.start("SIM-1", undefined);
-      expect(() => recordings.start("SIM-1", "session-b")).toThrow("already active");
-
-      onAcquire("SIM-1");
+      manager.holders.set("SIM-1", "session-b");
+      onAcquire("SIM-1", "session-a");
+      expect(recordings.active.get("SIM-1")?.ownerSessionUuid).toBeUndefined();
+      onAcquire("SIM-1", "session-b");
+      onAcquire("SIM-1", "session-b");
       await manager.settle();
 
-      expect(recordings.active.size).toBe(0);
-      // Tracked as acquisition cleanup so the holder's own reuse is not refused (#11041).
+      expect(recordings.active.size).toBe(1);
+      expect(recordings.active.get("SIM-1")?.ownerSessionUuid).toBe("session-b");
+      expect(recordings.activeRecordingIdsForOwner(undefined, "SIM-1")).toEqual([]);
+      expect(recordings.segmentedStops).toEqual([]);
+      expect(recordings.incomplete).toEqual([]);
       expect(manager.pendingCleanups).toHaveLength(0);
       expect(manager.acquisitionCleanups.map((entry) => entry.deviceId)).toEqual(["SIM-1"]);
-      // The same bound as the release-time finalize: cap plus the incomplete-mark grace (#11616).
-      expect(manager.acquisitionCleanups.map((entry) => entry.capMs)).toEqual([125_000]);
-      recordings.start("SIM-1", "session-b");
+      expect(() => recordings.start("SIM-1", "session-b")).toThrow("already active");
     });
 
-    test("a recording owned by a session is left alone", async () => {
+    test("a recording already owned by a session is left alone", async () => {
       const { manager, recordings } = setup();
-      const onAcquire = createOwnerlessRecordingAcquisitionCleanup(manager, recordings);
-      recordings.start("SIM-1", "session-b");
-
-      onAcquire("SIM-1");
+      manager.holders.set("SIM-1", "session-b");
+      recordings.start("SIM-1", "session-a");
+      createOwnerlessRecordingAcquisitionCleanup(manager, recordings)("SIM-1", "session-b");
       await manager.settle();
-
-      expect(recordings.active.has("SIM-1")).toBe(true);
+      expect(recordings.active.get("SIM-1")?.ownerSessionUuid).toBe("session-a");
     });
 
-    test("a sessionless test recording is stopped", async () => {
+    test("a sessionless test recording is adopted without stopping", async () => {
       const { manager, recordings } = setup();
-      const onAcquire = createOwnerlessRecordingAcquisitionCleanup(manager, recordings);
+      manager.holders.set("emulator-5554", "session-a");
       recordings.testRecording = { ownerSessionUuid: undefined, deviceId: "emulator-5554" };
-
-      onAcquire("emulator-5554");
+      createOwnerlessRecordingAcquisitionCleanup(manager, recordings)("emulator-5554", "session-a");
       await manager.settle();
-
+      expect(recordings.isTestRecordingOwnedBy(undefined, "emulator-5554")).toBe(false);
+      expect(recordings.isTestRecordingOwnedBy("session-a", "emulator-5554")).toBe(true);
+      expect(recordings.testStops).toBe(0);
+      manager.release("session-a", "emulator-5554");
+      await manager.settle();
       expect(recordings.testStops).toBe(1);
     });
 
-    test("a stop that never settles is capped like a release-time stop", async () => {
+    test("an adopted recording whose release stop wedges is still capped and announced", async () => {
       const { manager, recordings } = setup();
-      const onAcquire = createOwnerlessRecordingAcquisitionCleanup(manager, recordings);
+      manager.holders.set("SIM-1", "session-a");
       recordings.start("SIM-1", undefined);
+      createOwnerlessRecordingAcquisitionCleanup(manager, recordings)("SIM-1", "session-a");
       recordings.hangStops = true;
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
-        onAcquire("SIM-1");
+        manager.release("session-a", "SIM-1");
+        expect(takeRecordingIdsFinalizedByRelease("session-a")).toEqual(["rec-ownerless"]);
         const done = manager.settle();
         await recordings.timer.advanceTimersByTimeAsync(120_000);
         await done;
         expect(recordings.incomplete).toEqual(["rec-ownerless"]);
+        expect(recordings.active.size).toBe(0);
       } finally {
         warn.mockRestore();
       }
     });
 
-    test("no recordings means no pending cleanup", () => {
+    test("handoff finalizes the first holder's adopted recording rather than inheriting it again", async () => {
       const { manager, recordings } = setup();
-      createOwnerlessRecordingAcquisitionCleanup(manager, recordings)("SIM-1");
+      const onAcquire = createOwnerlessRecordingAcquisitionCleanup(manager, recordings);
+      recordings.start("SIM-1", undefined);
+      manager.holders.set("SIM-1", "session-a");
+      onAcquire("SIM-1", "session-a");
+      manager.release("session-a", "SIM-1");
+      await manager.settle();
+      expect(takeRecordingIdsFinalizedByRelease("session-a")).toEqual(["rec-ownerless"]);
+      expect(recordings.active.size).toBe(0);
+      manager.holders.set("SIM-1", "session-b");
+      onAcquire("SIM-1", "session-b");
+      await manager.settle();
+      expect(recordings.activeRecordingIdsForOwner("session-b", "SIM-1")).toEqual([]);
+      recordings.start("SIM-1", "session-b");
+      expect(recordings.active.get("SIM-1")?.ownerSessionUuid).toBe("session-b");
+    });
+
+    test("no recordings means no acquisition or pending cleanup", () => {
+      const { manager, recordings } = setup();
+      manager.holders.set("SIM-1", "session-b");
+      createOwnerlessRecordingAcquisitionCleanup(manager, recordings)("SIM-1", "session-b");
       expect(manager.acquisitionCleanups).toHaveLength(0);
+      expect(manager.pendingCleanups).toHaveLength(0);
     });
   });
 });

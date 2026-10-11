@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ActionableError, type BootedDevice, type PlanStep } from "../../src/models";
 import {
+  adoptOwnerlessTestRecording,
   getStoppedTestRecording,
   getTestRecordingStatus,
   isTestRecordingOwnedBy,
@@ -77,6 +78,57 @@ const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platfor
 const otherDevice: BootedDevice = { ...device, deviceId: "emulator-5556" };
 
 describe("testRecordingManager ownership", () => {
+  test.each(["starting", "active", "stopping"])(
+    "a direct ownerless %s recording is adopted once and its finalized plan belongs to the holder",
+    async (phase) => {
+      const timer = new FakeTimer();
+      const recorder = new FakeRecorder();
+      recorder.steps = [capturedStep];
+      const pending = startTestRecording(
+        device,
+        timer,
+        new CountingIdGenerator("adopt"),
+        () => recorder,
+      );
+      await Promise.resolve();
+      if (phase !== "starting") {
+        recorder.startGate.resolve();
+        await pending;
+      }
+      let stop: ReturnType<typeof stopTestRecording> | undefined;
+      if (phase === "stopping") {
+        recorder.stopGate = new Deferred();
+        stop = stopTestRecording(undefined, undefined, timer);
+      }
+      try {
+        expect(isTestRecordingOwnedBy(undefined, device.deviceId)).toBe(true);
+        expect(adoptOwnerlessTestRecording(otherDevice.deviceId, "holder")).toBe(false);
+        expect(adoptOwnerlessTestRecording(device.deviceId, "holder")).toBe(true);
+        expect(adoptOwnerlessTestRecording(device.deviceId, "loser")).toBe(false);
+        expect(isTestRecordingOwnedBy(undefined, device.deviceId)).toBe(false);
+        expect(isTestRecordingOwnedBy("holder", device.deviceId)).toBe(true);
+        expect(recorder.stopCount).toBe(phase === "stopping" ? 1 : 0);
+        recorder.startGate.resolve();
+        const started = await pending;
+        recorder.stopGate?.resolve({ steps: recorder.steps, stepCount: 1 });
+        const stopped = await (stop ?? stopTestRecording(undefined, undefined, timer));
+        expect(stopped.recordingId).toBe(started.recordingId);
+        expect(getStoppedTestRecording(started.recordingId, "holder")?.stepCount).toBe(1);
+        expect(getStoppedTestRecording(started.recordingId, "loser")).toBeUndefined();
+        expect(adoptOwnerlessTestRecording(device.deviceId, "next")).toBe(false);
+      } finally {
+        recorder.startGate.resolve();
+        recorder.stopGate?.resolve({ steps: recorder.steps, stepCount: 1 });
+        if (
+          isTestRecordingOwnedBy("holder", device.deviceId) ||
+          isTestRecordingOwnedBy(undefined, device.deviceId)
+        ) {
+          await stopTestRecording(undefined, undefined, timer);
+        }
+      }
+    },
+  );
+
   test("a recording is owned by the session that started it, on its device only", async () => {
     const timer = new FakeTimer();
     const recorder = new FakeRecorder();

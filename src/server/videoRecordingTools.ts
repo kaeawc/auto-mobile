@@ -267,6 +267,16 @@ export async function stopSegmentedVideoRecordingsForDevice(
   }
 }
 
+/** Transfer live ownerless segmented sessions without stopping their rotation timers. */
+export function adoptOwnerlessSegmentedVideoRecordings(
+  deviceId: string,
+  sessionUuid: string,
+): void {
+  for (const [, session] of segmentedSessions.forOwner(undefined, deviceId)) {
+    session.adoptOwnerSession(sessionUuid);
+  }
+}
+
 /** Whether a daemon session owns a timer-driven segmented recording on the device. */
 export function hasSegmentedVideoRecordingsForOwner(
   sessionUuid: string | undefined,

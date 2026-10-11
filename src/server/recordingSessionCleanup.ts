@@ -4,16 +4,19 @@ import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
+  adoptOwnerlessTestRecording,
   isTestRecordingOwnedBy,
   ownedTestRecordingId,
   stopTestRecording,
 } from "./testRecordingManager";
 import {
+  adoptOwnerlessSegmentedVideoRecordings,
   hasSegmentedVideoRecordingsForOwner,
   segmentedVideoRecordingHandlesForOwner,
   stopSegmentedVideoRecordingsForOwner,
 } from "./videoRecordingTools";
 import {
+  adoptOwnerlessActiveVideoRecordings,
   listActiveVideoRecordingIdsForOwner,
   listActiveVideoRecordings,
   listOwnedActiveVideoRecordingIds,
@@ -240,6 +243,19 @@ async function stopOwnedRecordingsWithinCap(
   }
 }
 
+/** Recording acquisition operations; each claims ownership before yielding. */
+export interface RecordingAcquisitionDeps {
+  adoptVideoRecordings(deviceId: string, sessionId: string): Promise<void> | undefined;
+  adoptSegmentedRecordings(deviceId: string, sessionId: string): void;
+  adoptTestRecording(deviceId: string, sessionId: string): boolean;
+}
+
+const defaultRecordingAcquisitionDeps: RecordingAcquisitionDeps = {
+  adoptVideoRecordings: adoptOwnerlessActiveVideoRecordings,
+  adoptSegmentedRecordings: adoptOwnerlessSegmentedVideoRecordings,
+  adoptTestRecording: adoptOwnerlessTestRecording,
+};
+
 /**
  * The longest {@link stopOwnedRecordingsWithinCap} runs: the stop is capped, then force-stopped
  * recordings are marked incomplete within a grace.
@@ -252,28 +268,31 @@ function finalizeSettlesWithinMs(
 }
 
 /**
- * A session acquiring a device stops and finalizes the owner-less (sessionless) recordings on it
- * (#10961), so they cannot keep capturing the new owner's session or block its own recording
- * start. Returns the callback to run where acquisition cancels sessionless executions
- * (#10829); the stop is capped as in {@link RECORDING_FINALIZE_CAP_MS}. It is tracked as
- * acquisition cleanup, not pending device cleanup (#11041): the acquiring holder's own
- * setActiveDevice/startDevice must not be refused, but if the holder releases before the stop
- * settles, the device stays quarantined for the next acquirer.
+ * The successful acquiring holder adopts live ownerless recordings (#11665), replacing
+ * acquisition-time stops (#10961). Keep the existing hook and exported name. Ownership is
+ * claimed synchronously; persistence is tracked as acquisition cleanup so a release cannot
+ * hand the device onward before it settles. A stale/losing acquisition cannot adopt.
  */
 export function createOwnerlessRecordingAcquisitionCleanup(
-  manager: Pick<SessionManager, "registerAcquisitionDeviceCleanup">,
-  deps: RecordingSessionCleanupDeps = defaultRecordingSessionCleanupDeps,
-): (deviceId: string) => void {
-  return (deviceId) => {
-    if (!deps.hasRecordingsToStop(undefined, deviceId)) {
+  manager: Pick<SessionManager, "registerAcquisitionDeviceCleanup" | "getSessionForDevice">,
+  deps: RecordingAcquisitionDeps = defaultRecordingAcquisitionDeps,
+): (deviceId: string, sessionId: string) => void {
+  return (deviceId, sessionId) => {
+    if (manager.getSessionForDevice(deviceId) !== sessionId) {
+      return;
+    }
+    deps.adoptSegmentedRecordings(deviceId, sessionId);
+    deps.adoptTestRecording(deviceId, sessionId);
+    const persistence = deps.adoptVideoRecordings(deviceId, sessionId);
+    if (!persistence) {
       return;
     }
     manager.registerAcquisitionDeviceCleanup(
       deviceId,
-      stopOwnedRecordingsWithinCap(deps, undefined, deviceId),
-      // The same capped stop as a release's, so the same bound: if the holder releases before
-      // it settles, a refused bind must advertise the time left, not the 1 s default (#11616).
-      finalizeSettlesWithinMs(deps, deviceId),
+      attempt(
+        `persist adopted recording ownership for session ${sessionId} on ${deviceId}`,
+        () => persistence,
+      ),
     );
   };
 }

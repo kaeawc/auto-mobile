@@ -244,7 +244,7 @@ let acceptingVideoRecordingStarts = true;
 let inFlightVideoRecordingStarts = 0;
 let videoRecordingStartDrain: { promise: Promise<void>; resolve: () => void } | null = null;
 const inFlightVideoRecordingStartControllers = new Set<AbortController>();
-const startingVideoRecordingDevices = new Set<string>();
+const startingVideoRecordingDevices = new Map<string, StartVideoRecordingRequest>();
 
 // Ten minutes covers the default 30s load + 30s readiness with ample headroom.
 // This is a crash-recovery bound; custom restores exceeding it may outlive the fence.
@@ -571,13 +571,12 @@ function resetVideoRecordingManagerState(): void {
   managerInitializationPromise = undefined;
 }
 
-function beginVideoRecordingStart(
-  deviceId: string,
-  requestSignal?: AbortSignal,
-): {
+function beginVideoRecordingStart(request: StartVideoRecordingRequest): {
   abortSignal: AbortSignal;
   complete(): void;
 } {
+  const deviceId = request.device.deviceId;
+  const requestSignal = request.abortSignal;
   requestSignal?.throwIfAborted();
   if (!acceptingVideoRecordingStarts) {
     throw new ActionableError("Video recording is unavailable while the daemon shuts down.");
@@ -590,7 +589,7 @@ function beginVideoRecordingStart(
   if (startingVideoRecordingDevices.has(deviceId)) {
     throw new ActionableError(`Video recording start already in progress for device ${deviceId}.`);
   }
-  startingVideoRecordingDevices.add(deviceId);
+  startingVideoRecordingDevices.set(deviceId, request);
   inFlightVideoRecordingStarts++;
   const controller = new AbortController();
   inFlightVideoRecordingStartControllers.add(controller);
@@ -1231,10 +1230,52 @@ function applyRecordingDisplayWarning(
   }
 }
 
+/** Publish capture ownership before inserting its row, and preserve adoption during that insert. */
+async function persistStartedVideoRecording(
+  recordingRepository: VideoRecordingRepository,
+  request: StartVideoRecordingRequest,
+  active: ActiveVideoRecording,
+  abortSignal: AbortSignal,
+): Promise<void> {
+  pruneRecordingOwners();
+  const owner = { ownerSessionUuid: request.ownerSessionUuid, deviceId: request.device.deviceId };
+  recordingOwners.set(active.recordingId, owner);
+  const ownerAtInsert = owner.ownerSessionUuid;
+  await recordingRepository.insertRecording({
+    recordingId: active.recordingId,
+    deviceId: request.device.deviceId,
+    platform: request.device.platform,
+    status: "recording",
+    outputName: active.outputName,
+    fileName: active.fileName,
+    filePath: active.outputPath,
+    format: active.config.format,
+    sizeBytes: 0,
+    durationMs: undefined,
+    codec: undefined,
+    createdAt: active.startedAt,
+    startedAt: active.startedAt,
+    endedAt: undefined,
+    lastAccessedAt: active.startedAt,
+    config: active.config,
+    recordedPanel: active.recordedPanel,
+    transitions: active.recordedPanel ? [] : undefined,
+    ownerSessionUuid: ownerAtInsert,
+  });
+  abortSignal.throwIfAborted();
+  // An acquisition during insert may have claimed capture before its row existed.
+  if (owner.ownerSessionUuid !== ownerAtInsert) {
+    await recordingRepository.updateRecording(active.recordingId, {
+      ownerSessionUuid: owner.ownerSessionUuid,
+    });
+  }
+}
+
 export async function startVideoRecording(
   request: StartVideoRecordingRequest,
 ): Promise<ActiveVideoRecording> {
-  const start = beginVideoRecordingStart(request.device.deviceId, request.abortSignal);
+  request = { ...request };
+  const start = beginVideoRecordingStart(request);
   let active: ActiveVideoRecording | undefined;
   try {
     const deps = await getVideoRecordingDependencies();
@@ -1266,33 +1307,7 @@ export async function startVideoRecording(
     start.abortSignal.throwIfAborted();
     applyRecordingDisplayWarning(active, recordingDisplay);
 
-    await recordingRepository.insertRecording({
-      recordingId: active.recordingId,
-      deviceId: request.device.deviceId,
-      platform: request.device.platform,
-      status: "recording",
-      outputName: active.outputName,
-      fileName: active.fileName,
-      filePath: active.outputPath,
-      format: active.config.format,
-      sizeBytes: 0,
-      durationMs: undefined,
-      codec: undefined,
-      createdAt: active.startedAt,
-      startedAt: active.startedAt,
-      endedAt: undefined,
-      lastAccessedAt: active.startedAt,
-      config: active.config,
-      recordedPanel: active.recordedPanel,
-      transitions: active.recordedPanel ? [] : undefined,
-      ownerSessionUuid: request.ownerSessionUuid,
-    });
-    start.abortSignal.throwIfAborted();
-    pruneRecordingOwners();
-    recordingOwners.set(active.recordingId, {
-      ownerSessionUuid: request.ownerSessionUuid,
-      deviceId: request.device.deviceId,
-    });
+    await persistStartedVideoRecording(recordingRepository, request, active, start.abortSignal);
 
     if (recordingDisplay && active.recordedPanel) {
       beginRecordingDisplaySession(
@@ -1650,10 +1665,15 @@ export async function listActiveVideoRecordings(
   filter: { deviceId?: string; platform?: "android" | "ios" } = {},
 ): Promise<VideoRecordingRecord[]> {
   const { recordingRepository } = await getVideoRecordingDependencies();
-  return recordingRepository.listRecordings({
+  const recordings = await recordingRepository.listRecordings({
     status: "recording",
     deviceId: filter.deviceId,
     platform: filter.platform,
+  });
+  // The acquiring holder owns capture immediately, even while its durable update is in flight.
+  return recordings.map((record) => {
+    const owner = recordingOwners.get(record.recordingId);
+    return owner ? { ...record, ownerSessionUuid: owner.ownerSessionUuid } : record;
   });
 }
 
@@ -1673,6 +1693,36 @@ function pruneRecordingOwners(): void {
       recordingOwners.delete(recordingId);
     }
   }
+}
+
+/**
+ * Claim live ownerless captures synchronously, then persist their new owner. Keeping the
+ * in-memory claim before any await lets an immediate release announce these ids (#11665).
+ * Finished archive rows and captures already owned by another holder are untouched.
+ */
+export function adoptOwnerlessActiveVideoRecordings(
+  deviceId: string,
+  sessionUuid: string,
+): Promise<void> | undefined {
+  const starting = startingVideoRecordingDevices.get(deviceId);
+  if (starting && starting.ownerSessionUuid === undefined) {
+    // Reuse the existing startup guard: a capture already admitted before bind must not
+    // publish an ownerless row after this pass, including an in-flight segment rotation.
+    starting.ownerSessionUuid = sessionUuid;
+  }
+  pruneRecordingOwners();
+  const updates: Promise<void>[] = [];
+  for (const [recordingId, owner] of recordingOwners) {
+    if (owner.deviceId === deviceId && owner.ownerSessionUuid === undefined) {
+      owner.ownerSessionUuid = sessionUuid;
+      updates.push(
+        moduleDependencies!.recordingRepository.updateRecording(recordingId, {
+          ownerSessionUuid: sessionUuid,
+        }),
+      );
+    }
+  }
+  return updates.length > 0 ? Promise.all(updates).then(() => undefined) : undefined;
 }
 
 /**

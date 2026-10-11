@@ -31,6 +31,9 @@ import { VideoCaptureFinalizationError, VideoRecorderService } from "../../src/f
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { ProcessTeardownUnconfirmedError } from "../../src/utils/ChildProcessTracker";
 import {
+  adoptOwnerlessActiveVideoRecordings,
+  listActiveVideoRecordingIdsForOwner,
+  listActiveVideoRecordings,
   getLatestVideoRecordingMetadata,
   lookupLatestVideoRecording,
   getVideoRecordingMetadata,
@@ -185,6 +188,70 @@ describe("videoRecordingManager", () => {
   afterAll(async () => {
     cleanup();
     await fsPromises.rm(archiveParent, { recursive: true, force: true });
+  });
+
+  test("a capture in startup publishes the adopting holder rather than an ownerless row", async () => {
+    const pending = Promise.withResolvers<void>();
+    const originalStart = fakeBackend.start.bind(fakeBackend);
+    const started = Promise.withResolvers<void>();
+    const startSpy = spyOn(fakeBackend, "start").mockImplementation(async (config) => {
+      started.resolve();
+      await pending.promise;
+      return originalStart(config);
+    });
+    const capture = startVideoRecording({ device: testDevice });
+    try {
+      await started.promise;
+      await adoptOwnerlessActiveVideoRecordings(testDevice.deviceId, "holder");
+      pending.resolve();
+      const active = await capture;
+      expect(listActiveVideoRecordingIdsForOwner(undefined, testDevice.deviceId)).toEqual([]);
+      expect(listActiveVideoRecordingIdsForOwner("holder", testDevice.deviceId)).toEqual([
+        active.recordingId,
+      ]);
+      expect((await fakeRepository.getRecording(active.recordingId))?.ownerSessionUuid).toBe(
+        "holder",
+      );
+      expect(fakeBackend.stopCalls).toEqual([]);
+    } finally {
+      pending.resolve();
+      await capture;
+      startSpy.mockRestore();
+    }
+  });
+
+  test("acquisition during initial row insertion preserves adoption in memory and persistence", async () => {
+    const inserting = Promise.withResolvers<void>();
+    const insertGate = Promise.withResolvers<void>();
+    const originalInsert = fakeRepository.insertRecording.bind(fakeRepository);
+    const insertSpy = spyOn(fakeRepository, "insertRecording").mockImplementation(
+      async (record) => {
+        inserting.resolve();
+        await insertGate.promise;
+        await originalInsert(record);
+      },
+    );
+    const capture = startVideoRecording({ device: testDevice });
+    try {
+      await inserting.promise;
+      await adoptOwnerlessActiveVideoRecordings(testDevice.deviceId, "holder");
+      insertGate.resolve();
+      const active = await capture;
+      expect((await fakeRepository.getRecording(active.recordingId))?.ownerSessionUuid).toBe(
+        "holder",
+      );
+      expect(
+        (await listActiveVideoRecordings({ deviceId: testDevice.deviceId })).map(
+          (record) => record.ownerSessionUuid,
+        ),
+      ).toEqual(["holder"]);
+      expect(listActiveVideoRecordingIdsForOwner(undefined, testDevice.deviceId)).toEqual([]);
+      expect(fakeBackend.stopCalls).toEqual([]);
+    } finally {
+      insertGate.resolve();
+      await capture;
+      insertSpy.mockRestore();
+    }
   });
 
   const drainAsyncUntil = async (

@@ -195,6 +195,16 @@ function ownableSession(): RecordingSession | null {
   return activeRecording ?? startingRecording?.session ?? stoppingRecording?.session ?? null;
 }
 
+/** Adopt capture still running or starting, including teardown already in flight. */
+export function adoptOwnerlessTestRecording(deviceId: string, sessionUuid: string): boolean {
+  const session = ownableSession();
+  if (!session || session.deviceId !== deviceId || session.ownerSessionUuid !== undefined) {
+    return false;
+  }
+  session.ownerSessionUuid = sessionUuid;
+  return true;
+}
+
 /**
  * Whether the daemon session `sessionUuid` owns the live test recording on `deviceId`;
  * `undefined` asks about an owner-less (sessionless) one.

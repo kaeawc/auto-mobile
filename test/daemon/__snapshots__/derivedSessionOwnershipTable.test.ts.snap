@@ -254,39 +254,11 @@ exports[`a derived label session is judged and recorded as its base an acquisiti
 }
 `;
 
-exports[`a derived label session is judged and recorded as its base a liveness claim, then a restore proving the claimed token: the owner connection 1`] = `
-{
-  "ownership": {
-    "base foreign to conn-other": true,
-    "base foreign to conn-owner": false,
-    "derived foreign to conn-other": true,
-    "derived foreign to conn-owner": false,
-  },
-  "refused": [],
-}
-`;
-
-exports[`a derived label session is judged and recorded as its base a liveness claim, then a restore proving the claimed token: no owner 1`] = `
-{
-  "ownership": {
-    "base foreign to conn-other": false,
-    "base foreign to conn-owner": true,
-    "derived foreign to conn-other": false,
-    "derived foreign to conn-owner": true,
-  },
-  "refused": [],
-}
-`;
-
 exports[`a derived label session is judged and recorded as its base a liveness claim: the owner connection 1`] = `
 {
   "liveness": {
-    "base answers to claimant-liveness-token": true,
-    "base answers to owner-liveness-token": false,
-    "base row's token": "claimant-liveness-token",
-    "derived answers to claimant-liveness-token": true,
-    "derived answers to owner-liveness-token": false,
-    "derived row's token": null,
+    "the base owner's token answers for the base": false,
+    "the claimant's token answers for the named session": true,
   },
   "outcome": "claimed",
 }
@@ -295,12 +267,8 @@ exports[`a derived label session is judged and recorded as its base a liveness c
 exports[`a derived label session is judged and recorded as its base a liveness claim: another connection 1`] = `
 {
   "liveness": {
-    "base answers to claimant-liveness-token": true,
-    "base answers to owner-liveness-token": false,
-    "base row's token": "claimant-liveness-token",
-    "derived answers to claimant-liveness-token": true,
-    "derived answers to owner-liveness-token": false,
-    "derived row's token": null,
+    "the base owner's token answers for the base": false,
+    "the claimant's token answers for the named session": true,
   },
   "outcome": "claimed",
 }
@@ -309,12 +277,8 @@ exports[`a derived label session is judged and recorded as its base a liveness c
 exports[`a derived label session is judged and recorded as its base a liveness claim: no owner 1`] = `
 {
   "liveness": {
-    "base answers to claimant-liveness-token": true,
-    "base answers to owner-liveness-token": false,
-    "base row's token": "claimant-liveness-token",
-    "derived answers to claimant-liveness-token": true,
-    "derived answers to owner-liveness-token": false,
-    "derived row's token": null,
+    "the base owner's token answers for the base": false,
+    "the claimant's token answers for the named session": true,
   },
   "outcome": "claimed",
 }
@@ -328,12 +292,8 @@ exports[`a derived label session is judged and recorded as its base a liveness c
     "state": "live",
   },
   "liveness": {
-    "base answers to claimant-liveness-token": false,
-    "base answers to owner-liveness-token": true,
-    "base row's token": "owner-liveness-token",
-    "derived answers to claimant-liveness-token": false,
-    "derived answers to owner-liveness-token": true,
-    "derived row's token": null,
+    "the base owner's token answers for the base": true,
+    "the claimant's token answers for the named session": false,
   },
   "outcome": "conflict",
 }
@@ -347,12 +307,8 @@ exports[`a derived label session is judged and recorded as its base a liveness c
     "state": "live",
   },
   "liveness": {
-    "base answers to claimant-liveness-token": false,
-    "base answers to owner-liveness-token": true,
-    "base row's token": "owner-liveness-token",
-    "derived answers to claimant-liveness-token": false,
-    "derived answers to owner-liveness-token": true,
-    "derived row's token": null,
+    "the base owner's token answers for the base": true,
+    "the claimant's token answers for the named session": false,
   },
   "outcome": "conflict",
 }
@@ -366,26 +322,28 @@ exports[`a derived label session is judged and recorded as its base a liveness c
     "state": "live",
   },
   "liveness": {
-    "base answers to claimant-liveness-token": false,
-    "base answers to owner-liveness-token": true,
-    "base row's token": "owner-liveness-token",
-    "derived answers to claimant-liveness-token": false,
-    "derived answers to owner-liveness-token": true,
-    "derived row's token": null,
+    "the base owner's token answers for the base": true,
+    "the claimant's token answers for the named session": false,
   },
   "outcome": "conflict",
 }
 `;
 
-exports[`a derived label session is judged and recorded as its base a liveness claim, then a restore proving the claimed token: another connection 1`] = `
+exports[`a derived label session is judged and recorded as its base a liveness claim once the base owner's lease and grace have lapsed: the owner connection 1`] = `
 {
-  "ownership": {
-    "base foreign to conn-other": false,
-    "base foreign to conn-owner": true,
-    "derived foreign to conn-other": false,
-    "derived foreign to conn-owner": true,
-  },
-  "refused": [],
+  "outcome": "claimed",
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a liveness claim once the base owner's lease and grace have lapsed: another connection 1`] = `
+{
+  "outcome": "claimed",
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a liveness claim once the base owner's lease and grace have lapsed: no owner 1`] = `
+{
+  "outcome": "claimed",
 }
 `;
 
@@ -393,12 +351,8 @@ exports[`a derived label session is judged and recorded as its base a tokened he
 {
   "adopted": true,
   "liveness": {
-    "base answers to claimant-liveness-token": true,
-    "base answers to owner-liveness-token": false,
-    "base row's token": "claimant-liveness-token",
-    "derived answers to claimant-liveness-token": true,
-    "derived answers to owner-liveness-token": false,
-    "derived row's token": null,
+    "the base owner's token answers for the base": false,
+    "the claimant's token answers for the named session": true,
   },
 }
 `;
@@ -407,12 +361,8 @@ exports[`a derived label session is judged and recorded as its base a tokened he
 {
   "adopted": true,
   "liveness": {
-    "base answers to claimant-liveness-token": true,
-    "base answers to owner-liveness-token": false,
-    "base row's token": "claimant-liveness-token",
-    "derived answers to claimant-liveness-token": true,
-    "derived answers to owner-liveness-token": false,
-    "derived row's token": null,
+    "the base owner's token answers for the base": false,
+    "the claimant's token answers for the named session": true,
   },
 }
 `;
@@ -421,55 +371,39 @@ exports[`a derived label session is judged and recorded as its base a tokened he
 {
   "adopted": true,
   "liveness": {
-    "base answers to claimant-liveness-token": true,
-    "base answers to owner-liveness-token": false,
-    "base row's token": "claimant-liveness-token",
-    "derived answers to claimant-liveness-token": true,
-    "derived answers to owner-liveness-token": false,
-    "derived row's token": null,
+    "the base owner's token answers for the base": false,
+    "the claimant's token answers for the named session": true,
   },
 }
 `;
 
-exports[`a derived label session is judged and recorded as its base a liveness release by the base owner's token: the owner connection 1`] = `
+exports[`a derived label session is judged and recorded as its base a tokened heartbeat adopting liveness past the base owner's token: the owner connection 1`] = `
 {
+  "adopted": false,
   "liveness": {
-    "base answers to claimant-liveness-token": false,
-    "base answers to owner-liveness-token": false,
-    "base row's token": null,
-    "derived answers to claimant-liveness-token": false,
-    "derived answers to owner-liveness-token": false,
-    "derived row's token": null,
+    "the base owner's token answers for the base": true,
+    "the claimant's token answers for the named session": false,
   },
-  "outcome": "released",
 }
 `;
 
-exports[`a derived label session is judged and recorded as its base a liveness release by the base owner's token: another connection 1`] = `
+exports[`a derived label session is judged and recorded as its base a tokened heartbeat adopting liveness past the base owner's token: another connection 1`] = `
 {
+  "adopted": false,
   "liveness": {
-    "base answers to claimant-liveness-token": false,
-    "base answers to owner-liveness-token": false,
-    "base row's token": null,
-    "derived answers to claimant-liveness-token": false,
-    "derived answers to owner-liveness-token": false,
-    "derived row's token": null,
+    "the base owner's token answers for the base": true,
+    "the claimant's token answers for the named session": false,
   },
-  "outcome": "released",
 }
 `;
 
-exports[`a derived label session is judged and recorded as its base a liveness release by the base owner's token: no owner 1`] = `
+exports[`a derived label session is judged and recorded as its base a tokened heartbeat adopting liveness past the base owner's token: no owner 1`] = `
 {
+  "adopted": false,
   "liveness": {
-    "base answers to claimant-liveness-token": false,
-    "base answers to owner-liveness-token": false,
-    "base row's token": null,
-    "derived answers to claimant-liveness-token": false,
-    "derived answers to owner-liveness-token": false,
-    "derived row's token": null,
+    "the base owner's token answers for the base": true,
+    "the claimant's token answers for the named session": false,
   },
-  "outcome": "released",
 }
 `;
 
@@ -481,12 +415,8 @@ exports[`a derived label session is judged and recorded as its base a claiming h
     "success": true,
   },
   "liveness": {
-    "base answers to claimant-liveness-token": true,
-    "base answers to owner-liveness-token": false,
-    "base row's token": "claimant-liveness-token",
-    "derived answers to claimant-liveness-token": true,
-    "derived answers to owner-liveness-token": false,
-    "derived row's token": null,
+    "the base owner's token answers for the base": false,
+    "the claimant's token answers for the named session": true,
   },
 }
 `;
@@ -499,12 +429,8 @@ exports[`a derived label session is judged and recorded as its base a claiming h
     "success": true,
   },
   "liveness": {
-    "base answers to claimant-liveness-token": true,
-    "base answers to owner-liveness-token": false,
-    "base row's token": "claimant-liveness-token",
-    "derived answers to claimant-liveness-token": true,
-    "derived answers to owner-liveness-token": false,
-    "derived row's token": null,
+    "the base owner's token answers for the base": false,
+    "the claimant's token answers for the named session": true,
   },
 }
 `;
@@ -517,12 +443,8 @@ exports[`a derived label session is judged and recorded as its base a claiming h
     "success": true,
   },
   "liveness": {
-    "base answers to claimant-liveness-token": true,
-    "base answers to owner-liveness-token": false,
-    "base row's token": "claimant-liveness-token",
-    "derived answers to claimant-liveness-token": true,
-    "derived answers to owner-liveness-token": false,
-    "derived row's token": null,
+    "the base owner's token answers for the base": false,
+    "the claimant's token answers for the named session": true,
   },
 }
 `;
@@ -535,12 +457,8 @@ exports[`a derived label session is judged and recorded as its base a claiming h
     "success": false,
   },
   "liveness": {
-    "base answers to claimant-liveness-token": false,
-    "base answers to owner-liveness-token": true,
-    "base row's token": "owner-liveness-token",
-    "derived answers to claimant-liveness-token": false,
-    "derived answers to owner-liveness-token": true,
-    "derived row's token": null,
+    "the base owner's token answers for the base": true,
+    "the claimant's token answers for the named session": false,
   },
 }
 `;
@@ -553,12 +471,8 @@ exports[`a derived label session is judged and recorded as its base a claiming h
     "success": false,
   },
   "liveness": {
-    "base answers to claimant-liveness-token": false,
-    "base answers to owner-liveness-token": true,
-    "base row's token": "owner-liveness-token",
-    "derived answers to claimant-liveness-token": false,
-    "derived answers to owner-liveness-token": true,
-    "derived row's token": null,
+    "the base owner's token answers for the base": true,
+    "the claimant's token answers for the named session": false,
   },
 }
 `;
@@ -571,12 +485,38 @@ exports[`a derived label session is judged and recorded as its base a claiming h
     "success": false,
   },
   "liveness": {
-    "base answers to claimant-liveness-token": false,
-    "base answers to owner-liveness-token": true,
-    "base row's token": "owner-liveness-token",
-    "derived answers to claimant-liveness-token": false,
-    "derived answers to owner-liveness-token": true,
-    "derived row's token": null,
+    "the base owner's token answers for the base": true,
+    "the claimant's token answers for the named session": false,
+  },
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a heartbeat with a token that is not the base owner's: the owner connection 1`] = `
+{
+  "answer": false,
+  "liveness": {
+    "the base owner's token answers for the base": true,
+    "the claimant's token answers for the named session": false,
+  },
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a heartbeat with a token that is not the base owner's: another connection 1`] = `
+{
+  "answer": false,
+  "liveness": {
+    "the base owner's token answers for the base": true,
+    "the claimant's token answers for the named session": false,
+  },
+}
+`;
+
+exports[`a derived label session is judged and recorded as its base a heartbeat with a token that is not the base owner's: no owner 1`] = `
+{
+  "answer": false,
+  "liveness": {
+    "the base owner's token answers for the base": true,
+    "the claimant's token answers for the named session": false,
   },
 }
 `;
@@ -589,12 +529,8 @@ exports[`a derived label session is judged and recorded as its base the base own
     "success": true,
   },
   "liveness": {
-    "base answers to claimant-liveness-token": false,
-    "base answers to owner-liveness-token": true,
-    "base row's token": "owner-liveness-token",
-    "derived answers to claimant-liveness-token": false,
-    "derived answers to owner-liveness-token": true,
-    "derived row's token": null,
+    "the base owner's token answers for the base": true,
+    "the claimant's token answers for the named session": false,
   },
 }
 `;
@@ -607,12 +543,8 @@ exports[`a derived label session is judged and recorded as its base the base own
     "success": true,
   },
   "liveness": {
-    "base answers to claimant-liveness-token": false,
-    "base answers to owner-liveness-token": true,
-    "base row's token": "owner-liveness-token",
-    "derived answers to claimant-liveness-token": false,
-    "derived answers to owner-liveness-token": true,
-    "derived row's token": null,
+    "the base owner's token answers for the base": true,
+    "the claimant's token answers for the named session": false,
   },
 }
 `;
@@ -625,12 +557,8 @@ exports[`a derived label session is judged and recorded as its base the base own
     "success": true,
   },
   "liveness": {
-    "base answers to claimant-liveness-token": false,
-    "base answers to owner-liveness-token": true,
-    "base row's token": "owner-liveness-token",
-    "derived answers to claimant-liveness-token": false,
-    "derived answers to owner-liveness-token": true,
-    "derived row's token": null,
+    "the base owner's token answers for the base": true,
+    "the claimant's token answers for the named session": false,
   },
 }
 `;

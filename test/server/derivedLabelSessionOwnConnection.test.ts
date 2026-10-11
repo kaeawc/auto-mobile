@@ -18,8 +18,8 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { RealToolCallPath } from "../helpers/realToolCallPath";
 
-// #11602: a connection whose MCP server is bound to the base session names its own derived
-// `${base}:${label}` session. The server here is built as the daemon builds one for a client that
+// #11602: a connection whose MCP server is bound to the base session, or to one of its labels,
+// names another live session of the same plan. The server here is built as the daemon builds one for a client that
 // speaks streamable HTTP to it directly (`Daemon` passes `sessionContext` with the transport's
 // session id and `daemonMode: true`): one server for the whole connection, so the binding its
 // first call records is still there for the next. A proxied client never reaches this state: the
@@ -27,6 +27,7 @@ import { RealToolCallPath } from "../helpers/realToolCallPath";
 
 const primary: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
 const labelled: BootedDevice = { name: "Pixel B", deviceId: "emulator-5556", platform: "android" };
+const third: BootedDevice = { name: "Pixel C", deviceId: "emulator-5558", platform: "android" };
 const BASE = "sess-a";
 const DERIVED = `${BASE}:B`;
 const OWNER = "conn-1";
@@ -96,7 +97,7 @@ describe("a connection bound to the base session naming its own derived label se
     });
     manager.stopCleanupTimer();
     const discovery = new FakeDeviceUtils();
-    discovery.setBootedDevices("android", [primary, labelled]);
+    discovery.setBootedDevices("android", [primary, labelled, third]);
     discovery.setBootedDevices("ios", []);
     PlatformDeviceManagerFactory.setInstance(discovery);
     pool = new DevicePool(
@@ -105,9 +106,9 @@ describe("a connection bound to the base session naming its own derived label se
         deviceManager: discovery,
       }),
     );
-    await pool.initializeWithDevices([primary, labelled]);
+    await pool.initializeWithDevices([primary, labelled, third]);
     DaemonState.getInstance().initialize(manager, pool, new DeviceSessionRegistry(timer));
-    tools = new RealToolCallPath([primary, labelled]).install();
+    tools = new RealToolCallPath([primary, labelled, third]).install();
     // OWNER acquires the base, then its plan publishes the label map and allocates label B, as
     // PlanExecutionOrchestrator.allocateDevices does.
     await pool.bindOrReuseDeviceSession(
@@ -201,15 +202,33 @@ describe("a connection bound to the base session naming its own derived label se
     expect(tools.runs.map((run) => run.deviceId)).toEqual([primary.deviceId]);
   });
 
-  // Unchanged by #11602, which only lets a base-bound connection reach its labels.
-  test("a connection bound to the derived session is not let onto its base by the label", async () => {
+  test("once bound to a label it still reaches the plan's other labels and its base", async () => {
+    await pool.assignMultipleDevices([`${BASE}:C`], 1_000, "android");
+    const owner = await connection({ sessionId: "http-owner" });
+    await tap(owner, { sessionUuid: BASE });
+    // A successful call moves the connection's binding to the session it named.
+    await tap(owner, { sessionUuid: DERIVED });
+
+    const sibling = await tap(owner, { sessionUuid: `${BASE}:C` });
+    const base = await tap(owner, { sessionUuid: BASE });
+
+    expect(sibling.isError).not.toBe(true);
+    expect(base.isError).not.toBe(true);
+    expect(tools.runs.map((run) => run.deviceId).slice(2)).toEqual([
+      third.deviceId,
+      primary.deviceId,
+    ]);
+  });
+
+  test("a connection that first named a label reaches the label's base, and nothing else", async () => {
     const label = await connection({ sessionId: "http-label" });
     await tap(label, { sessionUuid: DERIVED });
 
     const result = await tap(label, { sessionUuid: BASE });
 
-    expect(result.isError).toBe(true);
-    expect(errorText(result)).toMatch(BOUND_TO_OTHER_SESSION);
+    expect(result.isError).not.toBe(true);
+    expect(tools.runs.map((run) => run.deviceId)).toEqual([labelled.deviceId, primary.deviceId]);
+    expect(errorText(await tap(label, { sessionUuid: "sess-b" }))).toMatch(BOUND_TO_OTHER_SESSION);
   });
 
   test("the proxied route, a loopback server seeded with the derived session, runs", async () => {

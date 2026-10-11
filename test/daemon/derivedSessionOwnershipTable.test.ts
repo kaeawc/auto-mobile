@@ -142,17 +142,18 @@ const restore = async (w: World, sessionId: string, caller: string, token?: stri
   ownership: ownership(w),
 });
 
-/** Which session holds which liveness owner token, and what each id answers for it (#11602). */
-function liveness({ manager }: World): Record<string, unknown> {
-  const view: Record<string, unknown> = {};
-  for (const id of [BASE, DERIVED]) {
-    const name = id === BASE ? "base" : "derived";
-    view[`${name} row's token`] = manager.getSession(id)?.livenessOwnerToken ?? null;
-    for (const token of [OWNER_TOKEN, CLAIMANT_TOKEN]) {
-      view[`${name} answers to ${token}`] = manager.hasLivenessOwnership(id, token);
-    }
-  }
-  return view;
+/**
+ * What a liveness claim on `sessionId` left behind (#11602): whether the claimant's token now
+ * answers for the session it named, and whether the base owner's token still answers for the base.
+ */
+function liveness({ manager }: World, sessionId: string): Record<string, boolean> {
+  return {
+    "the claimant's token answers for the named session": manager.hasLivenessOwnership(
+      sessionId,
+      CLAIMANT_TOKEN,
+    ),
+    "the base owner's token answers for the base": manager.hasLivenessOwnership(BASE, OWNER_TOKEN),
+  };
 }
 
 /** The daemon's heartbeat ingress, as the proxy and the CLI keeper reach it. */
@@ -211,49 +212,58 @@ const OPERATIONS: Record<string, Operation> = {
     w.pool.releaseMcpSessionBindings(caller);
     return { ...restored, ...(await afterGrace(w)), after: ownership(w) };
   },
+  // #11602: a liveness claim that names a label session is judged as a claim on its base.
   "a liveness claim": async (w, id) => ({
     outcome: await w.manager.claimLivenessOwnership(id, CLAIMANT_TOKEN),
-    liveness: liveness(w),
+    liveness: liveness(w, id),
   }),
   "a liveness claim against the base owner's live lease": async (w, id) => {
     await w.manager.claimLivenessOwnership(BASE, OWNER_TOKEN);
     return {
       outcome: await w.manager.claimLivenessOwnership(id, CLAIMANT_TOKEN),
       hold: w.manager.getOwnerLeaseHold(id) ?? null,
-      liveness: liveness(w),
+      liveness: liveness(w, id),
     };
   },
-  "a liveness claim, then a restore proving the claimed token": async (w, id, caller) => {
-    await w.manager.claimLivenessOwnership(id, CLAIMANT_TOKEN);
-    return restore(w, id, caller, CLAIMANT_TOKEN);
+  "a liveness claim once the base owner's lease and grace have lapsed": async (w, id) => {
+    await w.manager.claimLivenessOwnership(BASE, OWNER_TOKEN);
+    w.timer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
+    return { outcome: await w.manager.claimLivenessOwnership(id, CLAIMANT_TOKEN) };
   },
   "a tokened heartbeat adopting unowned liveness": (w, id) => ({
     adopted: w.manager.claimUnownedLivenessOwnership(id, CLAIMANT_TOKEN),
-    liveness: liveness(w),
+    liveness: liveness(w, id),
   }),
-  "a liveness release by the base owner's token": async (w, id) => {
+  "a tokened heartbeat adopting liveness past the base owner's token": async (w, id) => {
     await w.manager.claimLivenessOwnership(BASE, OWNER_TOKEN);
     return {
-      outcome: await w.manager.releaseLivenessOwnership(id, OWNER_TOKEN),
-      liveness: liveness(w),
+      adopted: w.manager.claimUnownedLivenessOwnership(id, CLAIMANT_TOKEN),
+      liveness: liveness(w, id),
     };
   },
   "a claiming heartbeat": async (w, id) => ({
     answer: await heartbeat(w, id, CLAIMANT_TOKEN, true),
-    liveness: liveness(w),
+    liveness: liveness(w, id),
   }),
   "a claiming heartbeat against the base owner's live lease": async (w, id) => {
     await w.manager.claimLivenessOwnership(BASE, OWNER_TOKEN);
     return {
       answer: await heartbeat(w, id, CLAIMANT_TOKEN, true),
-      liveness: liveness(w),
+      liveness: liveness(w, id),
+    };
+  },
+  "a heartbeat with a token that is not the base owner's": async (w, id) => {
+    await w.manager.claimLivenessOwnership(BASE, OWNER_TOKEN);
+    return {
+      answer: (await heartbeat(w, id, CLAIMANT_TOKEN, false)).success,
+      liveness: liveness(w, id),
     };
   },
   "the base owner's own heartbeat": async (w, id) => {
     await w.manager.claimLivenessOwnership(BASE, OWNER_TOKEN);
     return {
       answer: await heartbeat(w, id, OWNER_TOKEN, false),
-      liveness: liveness(w),
+      liveness: liveness(w, id),
     };
   },
   "resolved as the caller's own session from its device": (w, id, caller) =>
@@ -373,7 +383,7 @@ describe("a derived label session is judged and recorded as its base", () => {
     expect(w.manager.getSession(BASE)?.livenessOwnerToken).toBeUndefined();
   });
 
-  test("a liveness claim on a label published under a label lands on the outermost base", async () => {
+  test("a liveness claim on a label published under a label is judged against the outermost base", async () => {
     const w = await world(OWNER);
     const nested = `${DERIVED}:C`;
     w.manager.setDeviceLabels(DERIVED, { B: DERIVED, C: nested });
@@ -382,19 +392,48 @@ describe("a derived label session is judged and recorded as its base", () => {
 
     expect(await w.manager.claimLivenessOwnership(nested, CLAIMANT_TOKEN)).toBe("conflict");
     expect(await w.manager.claimLivenessOwnership(nested, OWNER_TOKEN)).toBe("claimed");
-    expect(w.manager.getSession(nested)?.livenessOwnerToken).toBeUndefined();
-    expect(w.manager.getSession(DERIVED)?.livenessOwnerToken).toBeUndefined();
   });
 
-  test("a label session whose base is gone answers for itself", async () => {
+  test("a label the base no longer publishes is judged on its own", async () => {
     const w = await world(OWNER);
     await w.manager.claimLivenessOwnership(BASE, OWNER_TOKEN);
-    // The base's entry is removed without the release cascade that takes its labels with it.
     w.manager.setDeviceLabels(BASE, { A: BASE });
 
     expect(await w.manager.claimLivenessOwnership(DERIVED, CLAIMANT_TOKEN)).toBe("claimed");
-    expect(w.manager.getSession(DERIVED)?.livenessOwnerToken).toBe(CLAIMANT_TOKEN);
     expect(w.manager.hasLivenessOwnership(BASE, OWNER_TOKEN)).toBe(true);
+  });
+
+  // The label keeps its own liveness record: the heartbeat path reads and renews the session it
+  // names, so the claim is judged on the base and recorded on the label.
+  test("a claim through a label is recorded on the label and proves nothing about its base", async () => {
+    const w = await world(OWNER);
+
+    expect(await w.manager.claimLivenessOwnership(DERIVED, CLAIMANT_TOKEN)).toBe("claimed");
+
+    expect(w.manager.getSession(DERIVED)?.livenessOwnerToken).toBe(CLAIMANT_TOKEN);
+    expect(w.manager.getSession(BASE)?.livenessOwnerToken).toBeUndefined();
+    expect((await restore(w, DERIVED, OTHER, CLAIMANT_TOKEN)).refused).toEqual([
+      "owned-by-other-connection",
+    ]);
+    expect(w.pool.isSessionOwnedByOtherConnection(BASE, OWNER)).toBe(false);
+  });
+
+  test("the base owner's token on its own label holds the label against another token", async () => {
+    const w = await world(OWNER);
+    await w.manager.claimLivenessOwnership(BASE, OWNER_TOKEN);
+    expect((await heartbeat(w, DERIVED, OWNER_TOKEN, true)).success).toBe(true);
+
+    // The owner heartbeats only the label from here on: the base's own lease lapses.
+    for (let elapsed = 0; elapsed < OWNER_DISCONNECT_GRACE_MS; elapsed += 2_000) {
+      w.timer.advanceTime(2_000);
+      expect((await heartbeat(w, DERIVED, OWNER_TOKEN, false)).success).toBe(true);
+    }
+
+    expect((await heartbeat(w, DERIVED, CLAIMANT_TOKEN, true)).code).toBe(
+      "liveness_owner_conflict",
+    );
+    expect(w.manager.hasLivenessOwnership(DERIVED, OWNER_TOKEN)).toBe(true);
+    expect((await heartbeat(w, DERIVED, OWNER_TOKEN, false)).success).toBe(true);
   });
 
   // #11602: the three cells #11586 left unverified, driven on the real pool and manager.

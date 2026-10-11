@@ -9117,46 +9117,49 @@ export class SessionManager {
    * so a rejected or stale token can be refused without changing any liveness
    * deadline, and a rejected claim leaves the session's owner and policy intact.
    *
-   * A claim naming a derived `${base}:${label}` session is a claim on its base
-   * ({@link livenessOwnershipSession}).
+   * A claim naming a derived `${base}:${label}` session is judged as a claim on its base too
+   * (#11602): it is refused while another token owns the base with a live lease. The label keeps
+   * its own liveness record, which the heartbeat path reads and renews under the label's id.
    */
   async claimLivenessOwnership(
     sessionId: string,
     ownerToken: string,
   ): Promise<LivenessClaimOutcome> {
-    const session = this.livenessOwnershipSession(sessionId);
+    const session = this.getSession(sessionId);
     if (!session) {
       logger.warn(`Cannot claim liveness ownership for session ${sessionId}: not found`);
       return "not-found";
     }
     const mutex = this.livenessOwnershipClaimMutexFor(session);
     return await mutex.runExclusive(async () => {
-      if (this.livenessOwnershipSession(sessionId) !== session) {
+      if (this.getSession(sessionId) !== session) {
         return "not-found";
+      }
+      // Judged with no await before the claim below takes effect.
+      const base = this.livenessBaseSession(session);
+      if (base && this.isForeignLiveOwner(base, ownerToken)) {
+        logger.warn(
+          `Rejected liveness ownership claim for session ${sessionId}: another owner holds a live lease on its base session ${base.sessionId}`,
+        );
+        return "conflict";
       }
       return await this.claimLivenessOwnershipForSession(session, ownerToken);
     });
   }
 
   /**
-   * The live session that carries the liveness owner token of `sessionId` (#11602): itself, or
-   * for a derived `${base}:${label}` session its outermost base, as connection ownership is keyed
-   * (#11586). A label session records no liveness owner of its own, so a claim, an adoption, a
-   * release and the token check that name it are judged and recorded on the base: a foreign
-   * token cannot take a label of a base whose owner holds a live lease, and the base owner's
-   * token speaks for its labels. Null when the named session is not live. A label whose base is
-   * gone is no longer published by anyone, so it is its own.
+   * The live base session of a derived `${base}:${label}` session (#11602): its outermost base, as
+   * connection ownership is keyed (#11586). A liveness claim or adoption naming a label session is
+   * judged against this session's owner as well as the label's own, so a foreign token cannot take
+   * a label of a base whose owner holds it. Undefined for a session that is not a published label,
+   * and for a label whose base is gone.
    */
-  private livenessOwnershipSession(sessionId: string): Session | null {
-    const named = this.getSession(sessionId);
-    if (!named) {
-      return null;
-    }
+  private livenessBaseSession(session: Session): Session | undefined {
     // Each hop is a strict prefix of the last, so this ends.
-    for (let current = sessionId; ;) {
+    for (let current = session.sessionId; ;) {
       const base = resolveToolSelectionBaseSessionUuid(current, this) ?? current;
       if (base === current) {
-        return current === sessionId ? named : this.getSession(current);
+        return current === session.sessionId ? undefined : (this.getSession(current) ?? undefined);
       }
       current = base;
     }
@@ -9167,15 +9170,12 @@ export class SessionManager {
     sessionId: string,
     ownerToken: string,
   ): Promise<LivenessReleaseOutcome> {
-    const session = this.livenessOwnershipSession(sessionId);
+    const session = this.getSession(sessionId);
     if (!session || !this.isAdmittedForAutomation(session)) {
       return "not-found";
     }
     return await this.livenessOwnershipClaimMutexFor(session).runExclusive(async () => {
-      if (
-        this.livenessOwnershipSession(sessionId) !== session ||
-        !this.isAdmittedForAutomation(session)
-      ) {
+      if (this.getSession(sessionId) !== session || !this.isAdmittedForAutomation(session)) {
         return "not-found";
       }
       if (session.livenessOwnerToken === undefined) {
@@ -9191,7 +9191,7 @@ export class SessionManager {
       // Fence an older heartbeat write's failure rollback across the handoff.
       session.activityGeneration++;
       try {
-        await this.deviceSessionRepository.recordLivenessOwnership?.(session.sessionId, null);
+        await this.deviceSessionRepository.recordLivenessOwnership?.(sessionId, null);
       } catch (error) {
         session.livenessOwnerToken = ownerToken;
         if (!this.isAdmittedForAutomation(session)) {
@@ -9279,8 +9279,12 @@ export class SessionManager {
    * a `cli-idle` session, which has no lease.
    */
   getOwnerLeaseHold(sessionId: string): LivenessOwnerHold | undefined {
-    // The lease a claim on this id was judged against: a derived label session's is its base's.
-    const session = this.livenessOwnershipSession(sessionId) ?? this.sessions.get(sessionId);
+    const named = this.sessions.get(sessionId);
+    // A claim on a label session that has no owner of its own was refused for its base's (#11602).
+    const session =
+      named && named.livenessOwnerToken === undefined
+        ? (this.livenessBaseSession(named) ?? named)
+        : named;
     if (!session || session.livenessPolicy === "cli-idle") {
       return undefined;
     }
@@ -9514,20 +9518,25 @@ export class SessionManager {
 
   /** Return whether `ownerToken` is still authorized to refresh the session. */
   hasLivenessOwnership(sessionId: string, ownerToken: string): boolean {
-    return this.livenessOwnershipSession(sessionId)?.livenessOwnerToken === ownerToken;
+    return this.getSession(sessionId)?.livenessOwnerToken === ownerToken;
   }
 
   /**
    * Recover daemon-local liveness ownership after restart without allowing a
    * keeper to replace an owner that was established by this daemon instance.
+   * A derived label session is not adopted past its base's owner either (#11602).
    */
   claimUnownedLivenessOwnership(sessionId: string, ownerToken: string): boolean {
-    const session = this.livenessOwnershipSession(sessionId);
+    const session = this.getSession(sessionId);
     if (
       !session ||
       session.livenessOwnerToken !== undefined ||
       session.livenessOwnershipClaims?.size
     ) {
+      return false;
+    }
+    const baseOwnerToken = this.livenessBaseSession(session)?.livenessOwnerToken;
+    if (baseOwnerToken !== undefined && baseOwnerToken !== ownerToken) {
       return false;
     }
     session.livenessOwnerToken = ownerToken;

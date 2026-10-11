@@ -127,6 +127,7 @@ test/daemon/heartbeatReapUpgradesNonTerminalRelease.test.ts
 test/daemon/heldSessionsLateRehydration.test.ts
 test/daemon/hierarchyStreamDiff.property.test.ts
 test/daemon/hierarchyStreamDiff.test.ts
+test/daemon/ideMutationAfterOwnerLeft.test.ts
 test/daemon/idleDeviceReaper.test.ts
 test/daemon/incumbentOwnerGuard.test.ts
 test/daemon/inputDeviceOwnership.test.ts
@@ -236,6 +237,7 @@ test/daemon/socketServerTypedRefusal.test.ts
 test/daemon/startupPrologue.test.ts
 test/daemon/streamSocketAuth.test.ts
 test/daemon/streamSubscriptionPolicy.test.ts
+test/daemon/strokeSurvivesHolderRebind.test.ts
 test/daemon/swipeOnCancelThroughDaemon.test.ts
 test/daemon/telemetryBackfillBounds.test.ts
 test/daemon/telemetryIdentityTimelineBuckets.test.ts

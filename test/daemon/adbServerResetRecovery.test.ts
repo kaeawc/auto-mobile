@@ -2,7 +2,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
-import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import { drainMicrotasks, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   InMemoryEmulatorLossIncidentStore,
@@ -1728,10 +1728,10 @@ describe("ADB server reset session recovery", () => {
     }
 
     const timer = new FakeTimer();
-    timer.enableAutoAdvance();
     const persistence = new FakeDeviceSessionPersistence();
     const sessionManager = new SessionManager(timer, persistence);
     const manager = new StoppedDeviceManager();
+    // Stop at recovery settlement; auto-advance would also fire the new idle-hold expiry.
     const incidentStore = new TransientCompletionFailureStore(timer);
     let releaseAttempts = 0;
     const releaseReasons: string[] = [];
@@ -1793,7 +1793,11 @@ describe("ADB server reset session recovery", () => {
 
     try {
       await expect(
-        pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, incidentId, captured),
+        settleByFakeEvents(
+          timer,
+          pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, incidentId, captured),
+          { description: "release and incident completion retries" },
+        ),
       ).resolves.toBe("released");
       expect(releaseAttempts).toBe(2);
       expect(incidentStore.completeAttempts).toBe(2);

@@ -388,6 +388,17 @@ recorded first in a crash-safe sidecar (`terminal-release-intents.jsonl` in the
 daemon data directory, `src/daemon/terminalReleaseJournal.ts`), and the restarted
 daemon finishes it before rehydrating, so a released UUID is never revived.
 
+A device-restart handoff reserves the recorded platform and stable device identity for
+its session throughout the recovery window, even while the device is absent and no
+call is waiting. Other sessions' selectors skip it and binding by id is refused;
+reads remain available. The hold ends on successful recovery, any terminal session
+release, the three-minute window ending, or daemon shutdown. An idle expiry inside the
+window ends the hold without another call; tool activity extends that deadline, and a
+call in flight retains the hold through the recovery window. Intentional stops end
+the hold. Concurrent daemon-restart and device-restart holds end independently. Managed slots still
+win, and the reservation does not extend the owner's heartbeat lease. A wiped or
+re-imaged device returning under the same AVD name or UDID remains an identity gap.
+
 ## Planned: device state between owners
 
 Display and system settings a session changed are not yet reset when a different
@@ -408,7 +419,11 @@ releasing.
   (`getAndroid`, `getApple`, `startDevice`) changes the session a connection's
   untargeted calls run on. An explicit `sessionUuid` targets that one call: the
   next call without one still runs on the default (#11347). A connection that has
-  no default yet adopts the first session it names.
+  no default yet adopts the first session it names. A call passing only `platform`
+  matching the default session's device runs on the default when no other session
+  the connection still holds has that platform or an unknown platform. `deviceId`
+  names the target device; a `platform` other than the default's does not use the
+  default.
 - **`scripts/mcp-drive.ts`:** a `getAndroid`/`getApple` step captures the session
   and injects it into later steps; `--session <uuid>` reuses an existing one.
 - **Scripts that run `--cli` calls:** keep the acquiring call's `sessionUuid` and

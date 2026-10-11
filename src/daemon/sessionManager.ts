@@ -110,6 +110,7 @@ import {
   SessionCreationTimeoutError,
   SessionReleasedDuringCreationError,
 } from "./deviceAcquisitionRefusals";
+import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
 import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
 import {
   isExpiryReleaseReason,
@@ -669,30 +670,7 @@ export class SessionTerminalReleaseInProgressError extends ActionableError {
 }
 
 export { SESSION_NO_LONGER_OWNS_DEVICE_CODE, SESSION_REBINDING_CODE };
-
-/**
- * A terminal-release reservation (killDevice) named a device the session no longer holds: the
- * session was rebound or released since the caller resolved it (#11166). Re-resolve the device's
- * current session and retry, rather than release a session that moved on. Serialized with
- * `retryable: false` (#11189): the device's holder changed, so a blind repeat of a destructive
- * kill could stop a device another session now owns.
- */
-export class SessionNoLongerOwnsDeviceError extends ActionableError {
-  readonly code = SESSION_NO_LONGER_OWNS_DEVICE_CODE;
-  readonly retryable = false;
-
-  constructor(
-    readonly sessionUuid: string,
-    readonly deviceId: string,
-  ) {
-    super(
-      `Session ${sessionUuid} no longer owns device ${deviceId} ` +
-        `(code ${SESSION_NO_LONGER_OWNS_DEVICE_CODE}); it was rebound or released. ` +
-        "Re-resolve the device's current session and retry.",
-    );
-    this.name = "SessionNoLongerOwnsDeviceError";
-  }
-}
+export { SessionNoLongerOwnsDeviceError };
 
 /**
  * A terminal-release reservation (killDevice) raced the session's own rebind to another device

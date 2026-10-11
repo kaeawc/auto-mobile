@@ -1599,8 +1599,44 @@ EOF
   install_fake_probe "4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00"
   run_timing_gate_with_recheck_times "0.020 0.020 0.020 0.020 0.020 0.020 0.020 0.020 0.020"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"runner probe slowdown 4.00x after 3 attempt(s) (contended)"* ]]
+  # An under-budget sample is conclusive however contended the runner was: no retry.
+  [[ "$output" == *"runner probe slowdown 4.00x after 1 attempt(s) (contended)"* ]]
+  [[ "$output" != *"attempt 1 of"* ]]
   grep -Fq -- '- Runner probe during re-runs: 4.00x, contended' "$report_dir/unit-timing-budget-summary.md"
+}
+
+@test "timing gate keeps the least-contended attempt, not the first or the fastest" {
+  seed_outlier_report
+  # Run 1 attempts: 130ms at 3.0x, 110ms at 2.0x (least contended), 90ms at 4.0x
+  # (fastest, most contended). Runs 2 and 3 are quiet: 110ms and 20ms.
+  install_fake_probe "3.00 3.00 2.00 2.00 4.00 4.00"
+  run_timing_gate_with_recheck_times "0.130 0.110 0.090 0.110 0.020"
+  [ "$status" -eq 1 ]
+  grep -Fq 're-run samples: 110.00ms / 110.00ms / 20.00ms | median: 110.00ms' \
+    "$BATS_TEST_TMPDIR/timings.recheck.d/failures.txt"
+  [[ "$output" == *"runner probe slowdown 2.00x after 3 attempt(s) (contended)"* ]]
+}
+
+@test "timing gate retry is what clears a contended slow first attempt" {
+  seed_outlier_report
+  # Runs 1 and 2 are each 150ms on a contended first attempt and 20ms on the
+  # quiet retry. Without the retry the median would be 150ms and fail.
+  install_fake_probe "3.00 3.00 1.00 1.00 3.00 3.00 1.00 1.00"
+  run_timing_gate_with_recheck_times "0.150 0.020 0.150 0.020 0.020"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Recheck cleared suite.slow"* ]]
+}
+
+@test "timing gate spends no contention retries when the recheck budget is nearly exhausted" {
+  seed_outlier_report
+  install_fake_probe "4.00 4.00 4.00 4.00 4.00 4.00"
+  BUN_TEST_TIMING_FAKE_ELAPSED_SECONDS=599 run_timing_gate_with_recheck_times "0.150 0.150 0.150"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no contention retry"* ]]
+  [[ "$output" == *"runner probe slowdown 4.00x after 1 attempt(s) (contended)"* ]]
+  # Still verified: a median verdict, not "could not verify".
+  [[ "$output" == *"Test exceeded 100ms: suite.slow (median 150.00ms of 3 isolated runs)"* ]]
+  [[ "$output" != *"Could not verify"* ]]
 }
 
 @test "timing gate does not forgive a 150ms test because the probe reads contended" {

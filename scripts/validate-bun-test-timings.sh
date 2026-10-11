@@ -511,9 +511,10 @@ probe_by_file="$recheck_dir/recheck-probes-by-file.tsv"
 : > "$probe_rows"
 : > "$probe_by_file"
 
-# True when decimal $1 is greater than decimal $2.
+# Prints 1 when decimal $1 is greater than decimal $2, else 0. Called in a command
+# substitution so set -e stays armed (it is not an if/! condition).
 decimal_gt() {
-  awk -v a="$1" -v b="$2" 'BEGIN { exit !(a + 0 > b + 0) }'
+  awk -v a="$1" -v b="$2" 'BEGIN { print (a + 0 > b + 0) ? 1 : 0 }'
 }
 
 decimal_max() {
@@ -540,7 +541,11 @@ recheck_probe_slowdown() {
 
 if [[ "${#recheck_files[@]}" -gt 0 ]]; then
   recheck_index=0
+  recheck_file_pos=0
+  attempt_seconds_total=0
+  attempt_count=0
   for file in "${recheck_files[@]}"; do
+    recheck_file_pos=$((recheck_file_pos + 1))
     elapsed_seconds="$(elapsed_recheck_seconds)"
     if [[ "$elapsed_seconds" -ge "$recheck_budget_seconds" ]]; then
       printf '%s\n' "$file" >> "$unverified_list"
@@ -564,6 +569,7 @@ if [[ "${#recheck_files[@]}" -gt 0 ]]; then
       best_tsv="$recheck_dir/run-best.tsv"
       best_contention=""
       while :; do
+        elapsed_seconds="$(elapsed_recheck_seconds)"
         recheck_report="$recheck_dir/recheck-${recheck_index}.xml"
         recheck_index=$((recheck_index + 1))
         probe_before="$(recheck_probe_slowdown)"
@@ -584,6 +590,9 @@ if [[ "${#recheck_files[@]}" -gt 0 ]]; then
         recheck_status=$?
         set -e
         probe_after="$(recheck_probe_slowdown)"
+        attempt_ended_seconds="$(elapsed_recheck_seconds)"
+        attempt_seconds_total=$((attempt_seconds_total + attempt_ended_seconds - elapsed_seconds))
+        attempt_count=$((attempt_count + 1))
         if [[ "$recheck_status" -eq 124 || "$recheck_status" -eq 137 ]]; then
           # GNU timeout returns 137 if its two-second KILL escalation is needed.
           run_aborted=true
@@ -596,19 +605,39 @@ if [[ "${#recheck_files[@]}" -gt 0 ]]; then
         fi
         testcase_rows "$recheck_report" > "$recheck_dir/run-recheck.tsv"
         attempt_contention="$(decimal_max "$probe_before" "$probe_after")"
-        if [[ "$have_best" != "true" ]] || decimal_gt "$best_contention" "$attempt_contention"; then
+        less_contended="$(decimal_gt "${best_contention:-0}" "$attempt_contention")"
+        attempt_is_contended="$(decimal_gt "$attempt_contention" "$contention_slowdown")"
+        if [[ "$have_best" != "true" || "$less_contended" == 1 ]]; then
           cp "$recheck_dir/run-recheck.tsv" "$best_tsv"
           best_contention="$attempt_contention"
           have_best=true
         fi
-        if ! decimal_gt "$attempt_contention" "$contention_slowdown"; then
+        if [[ "$attempt_is_contended" != 1 ]]; then
+          break
+        fi
+        # An under-budget sample is conclusive however contended the runner was
+        # (contention only inflates timings), so only an over-budget one is retried.
+        if ! awk -F"$field_sep" -v limit="$max_ms" '$4 + 0 > limit + 0 { found = 1 } END { exit !found }' \
+          "$recheck_dir/run-recheck.tsv"; then
           break
         fi
         printf 'Recheck run %d/%d of %s: runner contended (probe %sx before, %sx after; limit %sx); attempt %d of %d.\n' \
           "$((run + 1))" "$recheck_runs" "$file" "$probe_before" "$probe_after" "$contention_slowdown" \
           "$((attempt + 1))" "$((contention_retries + 1))" >&2 || true
-        elapsed_seconds="$(elapsed_recheck_seconds)"
-        if [[ "$attempt" -ge "$contention_retries" || "$elapsed_seconds" -ge "$recheck_budget_seconds" ]]; then
+        if [[ "$attempt" -ge "$contention_retries" ]]; then
+          break
+        fi
+        # Retries must not starve verification: spend one only while the remaining
+        # budget still covers a single attempt (mean attempt time so far, at least
+        # 1s) for every run still to be verified, plus the retry itself.
+        mean_attempt_seconds=$(((attempt_seconds_total + attempt_count - 1) / attempt_count))
+        if [[ "$mean_attempt_seconds" -lt 1 ]]; then
+          mean_attempt_seconds=1
+        fi
+        remaining_single_attempts=$(((recheck_runs - run - 1) + (${#recheck_files[@]} - recheck_file_pos) * recheck_runs))
+        if [[ "$((recheck_budget_seconds - attempt_ended_seconds - mean_attempt_seconds * remaining_single_attempts))" -lt "$mean_attempt_seconds" ]]; then
+          printf 'Recheck run %d/%d of %s: no contention retry; the remaining recheck budget is reserved for verifying the other runs.\n' \
+            "$((run + 1))" "$recheck_runs" "$file" >&2 || true
           break
         fi
         attempt=$((attempt + 1))
@@ -619,7 +648,8 @@ if [[ "${#recheck_files[@]}" -gt 0 ]]; then
       fi
       if [[ "$have_best" == "true" ]]; then
         run_contended=0
-        if decimal_gt "$best_contention" "$contention_slowdown"; then
+        best_is_contended="$(decimal_gt "$best_contention" "$contention_slowdown")"
+        if [[ "$best_is_contended" == 1 ]]; then
           run_contended=1
         fi
         printf '%s\t%s\t%s\t%s\t%s\n' "$file" "$((run + 1))" "$((attempt + 1))" "$best_contention" "$run_contended" >> "$probe_rows"

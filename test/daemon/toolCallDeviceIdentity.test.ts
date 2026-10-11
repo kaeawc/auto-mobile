@@ -225,12 +225,16 @@ describe("canonicalControlCallDeviceId", () => {
 });
 
 describe("the open owner decision for an unidentified, unheld transport", () => {
-  test("tool calls are allowed today where a direct frame's rule would refuse", () => {
+  test("tool calls are allowed today where a direct frame's rule would refuse", async () => {
     const pool = fakePool({ folded: false });
-    // The rule this predicate would switch on does refuse this transport.
-    expect(() =>
-      assertFrameTargetIdentityProven(pool, android(OTHER_WIRELESS), "tapOn", false),
-    ).toThrow(/no proven identity/);
+    // The direct frames' rule refuses this transport while another session holds a device it
+    // could alias (#11596).
+    await expect(
+      assertFrameTargetIdentityProven(pool, android(OTHER_WIRELESS), "tapOn", false, {
+        sessions: [{ sessionId: "holder", assignedDevice: USB, platform: "android" }],
+        requesterSessionUuid: "other",
+      }),
+    ).rejects.toMatchObject({ code: "device_owned_by_other_session" });
 
     expect(mayControlUnheldUnidentifiedTransport()).toBe(true);
     expect(() =>

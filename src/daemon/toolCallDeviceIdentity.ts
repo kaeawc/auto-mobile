@@ -1,7 +1,6 @@
-import type { BootedDevice } from "../models";
+import { ActionableError, type BootedDevice } from "../models";
 import { isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import {
-  assertFrameTargetIdentityProven,
   canonicalFrameDeviceId,
   canonicalizeFrameDiscovery,
   type FrameDeviceIdentityPool,
@@ -161,24 +160,30 @@ function isUnfoldedTransportAddress(pool: ToolCallDeviceIdentityPool, deviceId: 
 }
 
 /**
- * OPEN OWNER DECISION (#11596, #11618): may a control tool call drive an UNHELD device on an
- * Android transport the pool cannot identify (an emulator on a non-loopback `adb connect`
+ * OPEN OWNER DECISION for TOOL CALLS (#11618): may a control tool call drive an UNHELD device on
+ * an Android transport the pool cannot identify (an emulator on a non-loopback `adb connect`
  * address; a wireless phone reporting a generic serial)? The pool cannot prove such a transport is
  * NOT a second route to a device a session holds, and it cannot prove it is one either.
  *
  * Today the MCP ingress allows it, as it always has; a transport the pool CAN prove is an alias of
  * a held device never reaches this question (it was resolved to the held id and refused by the
- * holder check). This predicate is the one place the answer lives for tool calls: returning false
- * makes {@link assertToolTargetIdentityProven} apply the direct frames' rule
- * (`assertFrameTargetIdentityProven`), so frames and tools change together.
+ * holder check). Direct frames were decided in #11596: `assertFrameTargetIdentityProven` refuses
+ * such a transport only while it could alias a device a session or managed slot holds
+ * (`aliasableHeldAndroidDevices`). That rule awaits a managed-slot snapshot and needs the held
+ * sessions, while the tool holder check runs in one synchronous turn, so the tool path has NOT
+ * adopted it: the two paths differ exactly when an unidentifiable transport is named while a
+ * session or slot holds an Android device it could alias (frames refuse, tools allow). This
+ * predicate is the one place the tool-call answer lives.
  */
 export function mayControlUnheldUnidentifiedTransport(): boolean {
   return true;
 }
 
 /**
- * The tool-call side of `assertFrameTargetIdentityProven`, gated on
- * {@link mayControlUnheldUnidentifiedTransport}. A no-op while the owner decision is open.
+ * The tool-call gate behind {@link mayControlUnheldUnidentifiedTransport}; a no-op while it
+ * allows. Were it to refuse, this fails closed on every unheld transport the pool cannot identify
+ * (stricter than the direct frames' held-alias rule) until the tool path adopts
+ * `aliasableHeldAndroidDevices`.
  */
 export function assertToolTargetIdentityProven(
   pool: ToolCallDeviceIdentityPool | undefined,
@@ -189,10 +194,13 @@ export function assertToolTargetIdentityProven(
   if (mayControlUnheldUnidentifiedTransport() || !isAndroidTransportAddressSerial(deviceId)) {
     return;
   }
-  assertFrameTargetIdentityProven(
-    pool,
-    { deviceId, name: deviceId, platform: "android" },
-    toolName,
-    heldBySession,
-  );
+  const device: BootedDevice = { deviceId, name: deviceId, platform: "android" };
+  if (!heldBySession && pool?.isAndroidTransportAssignable?.(device) === false) {
+    throw new ActionableError(
+      `${toolName} refused: Android transport '${deviceId}' has no proven identity, so it ` +
+        "cannot be told apart from a device another session holds; nothing was sent. The device " +
+        "itself is not held under this id: address it by the id its hardware serial or console " +
+        "can be read (its USB serial or emulator-NNNN id), or reconnect it and refresh devices.",
+    );
+  }
 }

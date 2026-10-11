@@ -17,7 +17,7 @@ import { selectableCandidates } from "../../utility/selectionRank";
 import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
 import { captureFidelityTruncationReasons, collectWindowTruncations } from "../truncationReasons";
 import { normalizeQuotes } from "../../utility/TextMatcher";
-import { GENERATED_VIEW_ID_PATTERN } from "../android/StableNodeIdentity";
+import { GENERATED_VIEW_ID_PATTERN, STABLE_VIEW_ID_PREFIX } from "../android/StableNodeIdentity";
 import { isIosKeyboardClass, isIosKeyboardVisible } from "../ios/IosScreenIdentity";
 
 /**
@@ -1401,11 +1401,22 @@ function layoutWarningsEqual(a: unknown, b: unknown): boolean {
   return valuesEqual(withoutDerivedConfidence(a), withoutDerivedConfidence(b));
 }
 
+/**
+ * A capture-derived `s2-…` view id is regenerated whenever a neighbouring
+ * subtree changes, so it is not part of a warning's identity (#11637): the
+ * status bar's gesture-region warning would otherwise read as removed+added on
+ * every tap. Real view ids and resource ids are kept.
+ */
+function stableWarningViewId(warning: LayoutWarning): string | undefined {
+  const viewId = warning.element.viewId;
+  return viewId?.startsWith(STABLE_VIEW_ID_PREFIX) ? undefined : viewId;
+}
+
 /** Layout-warning identity is stable across bounds and confidence churn. */
 function layoutWarningIdentity(warning: LayoutWarning): string {
   return [
     warning.type,
-    warning.element.viewId ?? warning.element.resourceId ?? "",
+    stableWarningViewId(warning) ?? warning.element.resourceId ?? "",
     warning.element.contentDesc ?? warning.element.text ?? "",
   ].join("\0");
 }
@@ -1414,7 +1425,7 @@ function layoutWarningWithoutConfidence(warning: LayoutWarning): Omit<LayoutWarn
   return {
     type: warning.type,
     severity: warning.severity,
-    element: warning.element,
+    element: { ...warning.element, viewId: stableWarningViewId(warning) },
     categories: warning.categories,
     insetTypes: warning.insetTypes,
     sides: warning.sides,

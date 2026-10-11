@@ -975,6 +975,63 @@ describe("diffObserveResult", () => {
     ).toBeUndefined();
   });
 
+  // #11637: a warning on the same node whose only difference is the regenerated
+  // synthetic `s2-` view id (same bounds) is not a change.
+  test("skeleton layout-warning diffs ignore a regenerated synthetic view id (#11637)", () => {
+    const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+    const statusBarWarning = (viewId: string) => ({
+      type: "interaction-in-system-gesture-region",
+      severity: "info",
+      element: { viewId, bounds: { left: 0, top: 0, right: 1080, bottom: 136 } },
+      categories: ["interaction"],
+      insetTypes: ["systemGestures"],
+      sides: ["top"],
+      overflowPx: { top: 10 },
+      insetPx: { top: 24 },
+      overlapPercent: 40,
+      confidence: "medium",
+    });
+
+    const diff = diffObserveResult(
+      obs(node, {
+        layoutWarnings: { scope: "full", warnings: [statusBarWarning("s2-bf13aa90c1d2e3f4")] },
+      }),
+      obs(node, {
+        layoutWarnings: { scope: "full", warnings: [statusBarWarning("s2-9bf0aa90c1d2e3f4")] },
+      }),
+      { layoutWarningsDiffMode: "perEntry" },
+    );
+
+    expect(diff.fields).toBeUndefined();
+  });
+
+  test("skeleton layout-warning diffs still report a moved warning with a synthetic id", () => {
+    const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+    const warningAt = (viewId: string, bottom: number) => ({
+      type: "interaction-in-system-gesture-region",
+      severity: "info",
+      element: { viewId, bounds: { left: 0, top: 0, right: 1080, bottom } },
+      categories: ["interaction"],
+      insetTypes: ["systemGestures"],
+      sides: ["top"],
+      overflowPx: { top: 10 },
+      insetPx: { top: 24 },
+      overlapPercent: 40,
+      confidence: "medium",
+    });
+
+    const diff = diffObserveResult(
+      obs(node, { layoutWarnings: { scope: "full", warnings: [warningAt("s2-aaaa", 136)] } }),
+      obs(node, { layoutWarnings: { scope: "full", warnings: [warningAt("s2-bbbb", 200)] } }),
+      { layoutWarningsDiffMode: "perEntry" },
+    );
+
+    expect(diff.fields!.layoutWarnings).toMatchObject({
+      added: [{ element: { bounds: { bottom: 200 } } }],
+      removed: [{ element: { bounds: { bottom: 136 } } }],
+    });
+  });
+
   test("skeleton added and removed nodes retain compact actionable rows and keys", () => {
     const baseline = obs({
       "resource-id": "root",

@@ -415,13 +415,15 @@ releasing.
   pass `--session-uuid` on every later call (see
   `scripts/android/navigation-graph-sdk-event-integration.sh`).
 
-If an agent holds two sessions and its default session ends, its next control
-call without `sessionUuid` is refused with `no_active_device_session`,
-`nextAction: "acquire_new_session"` and the release reason. The default is the
-session its calls without `sessionUuid` go to. Calls that pass the other
-session's `sessionUuid` keep working throughout and do not change the default.
-To continue without naming it each time, call `setActiveDevice` for the surviving
-device or acquire a new session with `getAndroid` or `getApple`.
+If an agent holds two sessions and its default session ends, a control call
+that passes the surviving session's `sessionUuid` or `deviceId` runs on that
+session and does not change the default. A control call with only `platform`,
+a `deviceId` that no surviving session holds (or that the proxy cannot match to
+exactly one surviving session), or no selector is refused with
+`no_active_device_session`, `nextAction: "acquire_new_session"` and the release
+reason. To continue without naming the surviving session or its device each
+time, call `setActiveDevice` for that device or acquire a new session with
+`getAndroid` or `getApple`.
 
 ## Stopping a held device: `killDevice` and `deleteDevice`
 
@@ -502,6 +504,11 @@ An acquisition the daemon cannot grant yet is refused with a typed, retryable
 code (owner decision 2026-10-09, #10982): `device_cleanup_in_progress` while the
 device is still being released (#10960), and `device_owned_by_other_daemon` when
 another daemon holds it. Clients may wait and retry.
+
+An exact Android acquisition also waits up to 5 s when adb still lists its
+transport as `offline` or `unauthorized` (#11713). If it stays transitional,
+`device_offline` carries `retryable: true`, `deviceId`, and a 1 s `retryAfterMs`
+hint. The refusal is retryable, and any existing pool entry is left untouched.
 
 Each refusal carries a `retryAfterMs` hint. For `device_cleanup_in_progress` it
 is the time the cleanup can still take (#11360): the rest of a release's bounded

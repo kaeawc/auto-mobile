@@ -4796,7 +4796,30 @@ export class SessionManager {
     }
     // Through the recovered-intent overlay so a pending intent reads as released (#11077).
     const persisted = await this.readPersistedSession(sessionId);
-    return persisted?.release_reason ?? undefined;
+    if (!persisted) {
+      return undefined;
+    }
+    // A row past its deadline is answered as admission answers it (#11361): `expired`, whatever
+    // handoff reason (or none) it still stores, so a heartbeat or session-info client is not told
+    // a session is resumable when a call naming it is refused for good.
+    return (
+      this.expiredReleaseFromPersisted(sessionId, persisted)?.releaseReason ??
+      persisted.release_reason ??
+      undefined
+    );
+  }
+
+  /**
+   * The release of a session whose row ran out its idle or recovery window with no daemon holding
+   * it (#11361), for a wire that answers from a snapshot; undefined for a live, terminally
+   * released, still-recoverable or never-issued UUID. Reads only: the row is left as it is.
+   */
+  async getExpiredReleaseSnapshot(sessionId: string): Promise<SessionReleaseSnapshot | undefined> {
+    if (this.sessions.has(sessionId) || this.terminalReleaseSnapshots.has(sessionId)) {
+      return undefined;
+    }
+    const persisted = await this.readPersistedSession(sessionId);
+    return persisted && this.expiredReleaseFromPersisted(sessionId, persisted);
   }
 
   getTerminalReleaseSnapshot(sessionId: string): SessionReleaseSnapshot | undefined {

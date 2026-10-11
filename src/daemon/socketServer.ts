@@ -806,6 +806,7 @@ type McpForwardAttempt<T> =
 interface SocketDaemonStateAccess extends DaemonStateAccess {
   getSessionManager(): ReturnType<DaemonStateAccess["getSessionManager"]> & {
     isReleasedSessionInRestartRecoveryWindow?(sessionId: string): Promise<boolean>;
+    getExpiredReleaseSnapshot?(sessionId: string): Promise<BoundSessionLoss["release"]>;
   };
   getDevicePool(): ReturnType<DaemonStateAccess["getDevicePool"]> & {
     getDevice?(deviceId: string): { autolockSessionId?: string | null } | null | undefined;
@@ -4578,13 +4579,34 @@ export class UnixSocketServer {
         error,
       );
     }
-    const release = this.daemonState.getSessionManager().getTerminalReleaseSnapshot?.(sessionUuid);
+    const release =
+      this.daemonState.getSessionManager().getTerminalReleaseSnapshot?.(sessionUuid) ??
+      (await this.expiredBoundSessionRelease(sessionUuid));
     throw new ReleasedBoundSessionError({
       code: BOUND_SESSION_LOSS_CODE,
       sessionUuid,
       reason: release?.releaseReason ?? "session-not-found",
       ...(release ? { release } : {}),
     });
+  }
+
+  /**
+   * The release of a bound session whose row ran out its window with no daemon holding it
+   * (#11361), so its owner is told `expired` rather than `session-not-found`. Best-effort: a
+   * failed read keeps the fail-closed not-found answer.
+   */
+  private async expiredBoundSessionRelease(
+    sessionUuid: string,
+  ): Promise<BoundSessionLoss["release"]> {
+    try {
+      return await this.daemonState.getSessionManager().getExpiredReleaseSnapshot?.(sessionUuid);
+    } catch (error) {
+      logger.warn(
+        `Unable to read the expired release of bound session ${sessionUuid}: ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
   }
 
   private getRequestArgumentScopeKey(args: unknown): string | undefined {

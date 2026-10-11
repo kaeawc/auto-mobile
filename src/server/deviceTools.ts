@@ -30,6 +30,8 @@ import {
   type SystemUiAnrRecoveryResult,
 } from "./deviceToolsSystemUiAnr";
 import { errorMessage } from "../utils/describeUnknownError";
+import { releaseSessionAndDevice } from "../daemon/releaseSessionAndDevice";
+import { deviceLossCancellationReason } from "../utils/deviceLossCancellationReason";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { terminateColdBootProcess } from "../devices/coldBootProcessTermination";
 import { z } from "zod/v4";
@@ -4108,9 +4110,23 @@ export function liveHolderOtherThanThisRequest(deviceId: string): string | undef
   return ownSessions.includes(holder) ? undefined : holder;
 }
 
+/** Shared by ordinary cancellation and recovery cleanup, which otherwise differs in holder checks. */
+function leavePreviouslyRunningBoot(boot: DeviceBootResult | undefined): boolean {
+  if (!boot || (!boot.runningBeforeCall && boot.source !== "booted")) {
+    return false;
+  }
+  logger.info(
+    `[DeviceTools] Leaving ${boot.device.deviceId} running: it was running before this call`,
+  );
+  return true;
+}
+
 export function cancelUnownedColdBoot(
   boot: DeviceBootResult | undefined,
 ): Promise<void> | undefined {
+  if (leavePreviouslyRunningBoot(boot)) {
+    return undefined;
+  }
   if (boot?.source !== "cold-boot" || !boot.processHandle) {
     return undefined;
   }
@@ -4134,6 +4150,9 @@ export function cancelUnownedColdBoot(
  * still names the session being recovered, so that holder says nothing about the replacement.
  */
 function stopUnownedColdBoot(boot: DeviceBootResult | undefined): Promise<void> | undefined {
+  if (leavePreviouslyRunningBoot(boot)) {
+    return undefined;
+  }
   if (boot?.source !== "cold-boot" || !boot.processHandle) {
     return undefined;
   }
@@ -4177,8 +4196,10 @@ export async function rollBackUndeliveredBoot(
   identity: VirtualDeviceLifecycleIdentity,
   deleteCreated?: (lifecycleLease: VirtualDeviceLifecycleLease) => Promise<void>,
 ): Promise<void> {
-  if (boot.source !== "cold-boot" && !deleteCreated) {
-    // A device that was already running stays running.
+  if (boot.runningBeforeCall || (boot.source !== "cold-boot" && !deleteCreated)) {
+    logger.info(
+      `[DeviceTools] Leaving ${boot.device.deviceId} running: it was running before this call`,
+    );
     return;
   }
   const deps = getDeviceToolsDependencies();
@@ -4460,7 +4481,8 @@ export function assertAndroidBootDidNotEnterRecovery(
 function createRunnerReadinessAttempt(
   input: StartDeviceRunnerReadinessInput,
 ): (candidate: DeviceBootResult) => Promise<void> {
-  return async (candidate) =>
+  return async (candidate) => {
+    input.signal?.throwIfAborted();
     await input.ensureCtrlProxyReady({
       device: candidate.device,
       requestedIdentity: input.requestedIdentity,
@@ -4471,6 +4493,7 @@ function createRunnerReadinessAttempt(
       perf: input.perf,
       signal: input.signal,
     });
+  };
 }
 
 function createSystemUiAnrRebooter(
@@ -4478,8 +4501,11 @@ function createSystemUiAnrRebooter(
   devicePool: DevicePool | undefined,
   recoveryAutolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined,
 ): (candidate: DeviceBootResult) => Promise<SystemUiAnrRecoveryResult> {
-  return async (candidate) =>
-    await rebootAndroidAfterSystemUiAnr({
+  return async (candidate) => {
+    const sessionId = devicePool?.getDevice(candidate.device.deviceId)?.sessionId;
+    const manager = devicePool ? input.daemonState.getSessionManager() : undefined;
+    const session = sessionId ? manager?.getSession(sessionId) : undefined;
+    return await rebootAndroidAfterSystemUiAnr({
       boot: candidate,
       args: input.args,
       bootService: input.bootService,
@@ -4493,6 +4519,37 @@ function createSystemUiAnrRebooter(
       collectColdBootSettlement: input.collectColdBootSettlement,
       publishReplacementReadinessMarker: (replacement) =>
         input.publishRecoveredReadinessMarker?.(replacement),
+      releasePreservedSession: async (replacement) => {
+        if (
+          !devicePool ||
+          !manager ||
+          !sessionId ||
+          devicePool.getDevice(replacement.id) !== replacement ||
+          replacement.sessionId !== sessionId
+        ) {
+          return;
+        }
+        if (session) {
+          await releaseSessionAndDevice(
+            manager,
+            devicePool,
+            replacement.id,
+            sessionId,
+            deviceLossCancellationReason(replacement.id),
+            {
+              release: async () =>
+                await manager.releaseSessionIfOwned(
+                  sessionId,
+                  session,
+                  replacement.id,
+                  deviceLossCancellationReason(replacement.id),
+                ),
+            },
+          );
+        } else {
+          await devicePool.releaseDevice(replacement.id, sessionId);
+        }
+      },
       operations: {
         deviceShutdownTimeoutMs: DEVICE_SHUTDOWN_TIMEOUT_MS,
         runWithinShutdownDeadline,
@@ -4502,6 +4559,7 @@ function createSystemUiAnrRebooter(
         isUnknownAndroidRuntimeName,
       },
     });
+  };
 }
 
 async function prepareRecoveredDeviceForRunnerReadiness(

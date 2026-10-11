@@ -1,5 +1,6 @@
 import { ActionableError } from "../models/ActionableError";
 import type { SessionAccess, SessionExecutionMetadata } from "./sessionManager";
+import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
 import {
   resolveToolSelectionBaseSessionUuid,
   type ToolSelectionSessionManager,
@@ -172,7 +173,10 @@ export async function admitInputOnHolderSession(input: {
     { access: "non-owner-control" },
   );
   if (admitted?.assignedDevice !== deviceId) {
-    throw new ActionableError(
+    // Typed session_no_longer_owns_device (#11351): clients branch on the code, not this wording.
+    throw new SessionNoLongerOwnsDeviceError(
+      holderSessionUuid,
+      deviceId,
       `Session ${holderSessionUuid} no longer holds device '${deviceId}'; the input was not sent.`,
     );
   }

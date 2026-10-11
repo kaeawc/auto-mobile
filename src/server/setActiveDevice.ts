@@ -308,7 +308,11 @@ async function selectSessionDevice(input: {
           inventory: dependencies.displayInventory,
         });
   pool.assertDeviceCleanupComplete(args.deviceId);
+  // Refused before the resume: resuming re-arms the device's CtrlProxy restart budget and drops
+  // its admitted attempt, which a caller that does not hold the device must not do (#11651).
+  assertDeviceOwner({ device, sessionUuid: args.sessionUuid, sessions });
   await dependencies.resumeCtrlProxy(args.deviceId, device.platform);
+  // Checked again: another session may have bound the device while the resume listed devices.
   assertDeviceOwner({ device, sessionUuid: args.sessionUuid, sessions });
   // A request cancelled before the bind changes nothing.
   signal?.throwIfAborted();

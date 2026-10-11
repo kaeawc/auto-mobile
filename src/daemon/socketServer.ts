@@ -123,6 +123,7 @@ import { InputText, type AppendKeyEventValidator } from "../features/action/Inpu
 import { imeActionFailedAfterTextEntered } from "../features/action/imeActionFailedAfterTextEntered";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { DaemonState } from "./daemonState";
+import { canonicalizeToolCallDeviceIds, toolCallNamesDeviceId } from "./toolCallDeviceIdentity";
 import { isDeviceInventoryTool } from "./daemonMcpProxy";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
 import { deviceIncarnationToken } from "../utils/deviceIncarnation";
@@ -1781,6 +1782,28 @@ export class UnixSocketServer {
     );
   }
 
+  /**
+   * A `tools/call` with the device ids it names as the pool's canonical ids (#11618), before the
+   * admission lane, the forward key, the read lane, recovery pinning or the forward itself reads
+   * them: a handset named by its other transport id must serialize, route and be judged as the one
+   * pooled device it is. Cached fold only; the same request when nothing changes. Older socket-state
+   * fakes carry no pool, or none with a fold: their ids pass through as sent.
+   */
+  private withCanonicalToolCallDeviceIds(request: DaemonRequest): DaemonRequest {
+    const args: unknown = request.params?.arguments;
+    if (
+      request.method !== "tools/call" ||
+      !toolCallNamesDeviceId(args) ||
+      !this.daemonState.isInitialized?.()
+    ) {
+      return request;
+    }
+    const canonical = canonicalizeToolCallDeviceIds(this.daemonState.getDevicePool?.(), args);
+    return canonical === args
+      ? request
+      : { ...request, params: { ...request.params, arguments: canonical } };
+  }
+
   private frameDeviceId(request: DaemonRequest): string | undefined {
     const deviceId: unknown = request.params?.arguments?.deviceId;
     return typeof deviceId === "string" ? deviceId : undefined;
@@ -2176,6 +2199,7 @@ export class UnixSocketServer {
     if (handshakeError) {
       return handshakeError;
     }
+    request = this.withCanonicalToolCallDeviceIds(request);
 
     // Notification opt-in is per-socket-session state owned here, not by the
     // daemon request handlers — answer immediately without queueing (issue #3223).

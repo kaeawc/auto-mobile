@@ -284,6 +284,20 @@ keep their existing behavior; screenshot, hierarchy and observe reads never
 pass this control check. A managed connection still controls only its own slot
 devices, after the identity check and before the existing ownership checks.
 
+A tool call may name such a device by either endpoint (#11618). The `deviceId` is
+resolved to the pool's one id for the device before any ownership, managed-slot
+or routing check, so a call naming the Wi-Fi id of a held handset is refused or
+admitted exactly as one naming its USB serial, runs on the same per-device queue,
+and the tool sees the pool's id. The same holds for an emulator's loopback adb
+address (`localhost:5555` for `emulator-5554`), for `setActiveDevice`,
+`killDevice`'s `device.deviceId`, a `startDevice` `deviceId`, and plan steps. A
+wireless id a control call names before the pool has seen it is identified first
+(one adb probe, not repeated per call); reads use only what the pool already
+knows. An Android transport the pool cannot identify at all (a wireless phone
+reporting a generic serial, an emulator on a non-loopback `adb connect` address)
+is not an alias of anything: if no session holds it, tool calls on it are allowed
+as before.
+
 ## Daemon restart
 
 The restarted daemon stamps itself as owner of every session it rehydrates (#11114),

@@ -222,6 +222,7 @@ test/daemon/socketServerForwardBudgetTimeoutVsOverload.test.ts
 test/daemon/socketServerProgressDeadlineExtension.test.ts
 test/daemon/socketServerRefusedOwnedRestore.test.ts
 test/daemon/socketServerSessionIdGenerator.test.ts
+test/daemon/socketServerToolCallTransportAlias.test.ts
 test/daemon/socketServerToolUnavailableCode.test.ts
 test/daemon/socketServerTypedRefusal.test.ts
 test/daemon/startupPrologue.test.ts
@@ -233,6 +234,7 @@ test/daemon/telemetryIdentityTimelineBuckets.test.ts
 test/daemon/testRecordingSocketServerAuth.test.ts
 test/daemon/tokenOwnedSessionsLastUsedAt.test.ts
 test/daemon/toolCallActivityLatestDeadline.test.ts
+test/daemon/toolCallDeviceIdentity.test.ts
 test/daemon/unsettledExecutionVeto.test.ts
 test/daemon/unsettledExecutionVetoWallClockStep.test.ts
 test/daemon/videoRecordingSocketServerAuth.test.ts

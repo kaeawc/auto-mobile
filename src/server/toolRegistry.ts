@@ -46,6 +46,12 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { UnissuedSessionError, type Session, type SessionManager } from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
 import {
+  assertToolTargetIdentityProven,
+  canonicalControlCallDeviceId,
+  canonicalizeToolCallDeviceIds,
+  toolCallNamesDeviceId,
+} from "../daemon/toolCallDeviceIdentity";
+import {
   managedConnectionControlRefusal,
   managedConnectionPlainToolRefusal,
 } from "../daemon/managedSlots/managedConnectionScope";
@@ -495,6 +501,8 @@ interface ExecutionTargetInput {
   options: DeviceAwareToolOptions;
   deviceSessionManager: DeviceSessionManager;
   signal?: AbortSignal;
+  /** The registry's clock; rate-limits the first-sighting transport probe (#11618). */
+  timer?: Timer;
 }
 
 interface ExecutionTargetContext {
@@ -855,6 +863,63 @@ function isDeviceHeld(deviceId: string): boolean {
 }
 
 /**
+ * The call's `deviceId` as the pool's canonical id, resolved ONCE before any holder, managed-slot,
+ * routing, admission or queue decision (#11618): a handset on USB and wireless debugging is one
+ * pooled device held under one id, and a call may name it by either. Everything after this line,
+ * the handler included, sees only the canonical id. A read resolves from the pool's cached fold;
+ * a control call also folds a transport the pool has not seen yet, so a wireless id first named
+ * here cannot slip past the holder of the handset it reaches.
+ */
+function canonicalizeCallDeviceId(input: ExecutionTargetInput): Promise<void> | undefined {
+  const { args, options } = input;
+  if (typeof args?.deviceId !== "string" || !DaemonState.getInstance().isInitialized()) {
+    return undefined;
+  }
+  const pool = DaemonState.getInstance().getDevicePool();
+  const resolvesDevice = options.shouldEnsureDevice ? options.shouldEnsureDevice(args) : true;
+  if (isDeviceReadOnlyCall(options, args) || !resolvesDevice || args.platform === "ios") {
+    args.deviceId = canonicalizeToolCallDeviceIds(pool, { deviceId: args.deviceId }).deviceId;
+    return undefined;
+  }
+  const resolved = canonicalControlCallDeviceId({
+    pool,
+    deviceId: args.deviceId,
+    now: (input.timer ?? defaultTimer).now(),
+    listConnectedDevices: async () =>
+      (
+        await input.deviceSessionManager.detectConnectedPlatformsWithStatus(input.signal, {
+          platform: "android",
+        })
+      ).devices,
+  });
+  if (typeof resolved === "string") {
+    args.deviceId = resolved;
+    return undefined;
+  }
+  return resolved.then((deviceId) => {
+    args.deviceId = deviceId;
+  });
+}
+
+/**
+ * An internal call's arguments (a plan step, a nested tool) with the device ids a PLAIN tool takes
+ * as the pool's canonical ids (#11618): `setActiveDevice`, `killDevice` and `startDevice` never
+ * reach the execution-target resolver, and the managed-slot gate below reads the same arguments.
+ * A device-aware tool resolves its own `deviceId` in the resolver, where a first-seen transport
+ * can be probed.
+ */
+function canonicalPlainInternalCallArgs(
+  tool: RegisteredTool,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  const daemonState = DaemonState.getInstance();
+  if (tool.requiresDevice || !toolCallNamesDeviceId(args) || !daemonState.isInitialized()) {
+    return args;
+  }
+  return canonicalizeToolCallDeviceIds(daemonState.getDevicePool(), args);
+}
+
+/**
  * A deviceId-only call (no sessionUuid, no label) from the MCP connection that acquired the
  * session holding that device runs as that session (#10994): admitted, readied and counted as use
  * like a call naming it. The proxy omits the UUID for selector calls (#6807), so the daemon
@@ -903,6 +968,12 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     this.defaultDeviceRead = sessionlessDeviceReadFor(deviceReadAccess);
   }
   async resolveExecutionTarget(input: ExecutionTargetInput): Promise<ExecutionTargetContext> {
+    // Awaited only when a first-seen transport must be probed: every other call resolves its id
+    // from the pool's cached fold and stays on this turn.
+    const firstSighting = canonicalizeCallDeviceId(input);
+    if (firstSighting) {
+      await firstSighting;
+    }
     adoptHolderConnectionSession(input.args);
     if (
       input.options.sessionlessDeviceRead &&
@@ -2449,10 +2520,13 @@ function assertToolCallerHoldsDevice(
     return;
   }
   const sessionManager = DaemonState.getInstance().getSessionManager();
+  const ownerSessionUuid = sessionManager.getSessionForDevice(deviceId) ?? undefined;
+  // The open owner decision for a transport the pool cannot identify lives behind this call.
+  assertToolTargetIdentityProven(devicePool, deviceId, toolName, ownerSessionUuid !== undefined);
   assertInputRequesterHoldsDevice({
     action: toolName,
     deviceId,
-    ownerSessionUuid: sessionManager.getSessionForDevice(deviceId) ?? undefined,
+    ownerSessionUuid,
     requesterSessionUuid: sessionUuid,
     sessionManager,
     remedy: TOOL_CALL_REMEDY,
@@ -2933,6 +3007,7 @@ export class ToolRegistryClass {
           options,
           deviceSessionManager: this.deviceSessionManager,
           signal,
+          timer: this.timer,
         });
         signal?.throwIfAborted();
         sessionUuid = resolvedTarget.sessionUuid;
@@ -3148,7 +3223,10 @@ export class ToolRegistryClass {
     if (!resolved) {
       throw new ActionableError(`Tool not found: ${tool}`);
     }
-    const invocation = this.createInternalToolInvocationContext(args, options);
+    const invocation = this.createInternalToolInvocationContext(
+      canonicalPlainInternalCallArgs(resolved, args),
+      options,
+    );
     assertInternalCallWithinManagedSlots(resolved.name, invocation);
     refuseInternalControlOnForeignOwnedSession(
       resolved,

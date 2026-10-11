@@ -250,6 +250,43 @@ describe("host appearance sync re-reads the holder immediately before each write
     expect(applied).toEqual([]);
   });
 
+  test("nothing queued behind the last config read can slip between the final check and the write", async () => {
+    const timer = new FakeTimer();
+    const applied: string[] = [];
+    const device = target("emulator-5554", "session-a");
+    let targets = [device];
+    let configReads = 0;
+    const scheduler = new AppearanceSyncScheduler(timer, {
+      isEnabled: () => true,
+      // Not async: the scheduler awaits this very promise, so a reaction registered on it one
+      // microtask later runs directly behind the scheduler's own continuation.
+      getConfig: () => {
+        const read = Promise.resolve(SYNC_ON);
+        configReads += 1;
+        if (configReads === 2) {
+          // The pre-write re-read: the holder is released right behind it.
+          queueMicrotask(() => {
+            void read.then(() => {
+              targets = [];
+            });
+          });
+        }
+        return read;
+      },
+      resolveMode: async () => "dark",
+      apply: async (written) => {
+        applied.push(`${written.deviceId}:${targets.length > 0 ? "held" : "released"}`);
+      },
+    });
+    scheduler.setScope({ getTargets: () => targets });
+
+    await scheduler.syncDevice(device);
+
+    // The write was issued in the turn of the last check, while session-a still held the device.
+    expect(applied).toEqual(["emulator-5554:held"]);
+    await scheduler.stop();
+  });
+
   test("beforeApply is not run for a device its decided holder no longer holds", async () => {
     const { scheduler, applied, held, beforeApplied } = harness({
       configs: { "session-a": SYNC_ON },

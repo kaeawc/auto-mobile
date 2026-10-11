@@ -202,7 +202,7 @@ export class AppearanceSyncScheduler {
    * Apply `mode` to `device` for the holder and config the caller decided under. The decision can
    * be seconds old by the time the write is due: a tick waits up to the apply deadline on each
    * earlier device, and `beforeApply` waits behind the device's pending reset. So the write is
-   * issued only if {@link isStillOwed} says the decision still stands at that moment (#11641).
+   * issued only if {@link applyIfStillOwed} finds the decision still stands at that moment (#11641).
    */
   private async applyToDevice(
     device: AppearanceSyncTarget,
@@ -245,7 +245,15 @@ export class AppearanceSyncScheduler {
     }
   }
 
-  /** Resolves true when the device was written, false when the write was no longer owed. */
+  /**
+   * Resolves true when the device was written, false when the write was no longer owed: the
+   * scheduler stopped, sync was switched off, the session the decision was made for no longer
+   * holds the device, or that session's config no longer asks for the same thing.
+   *
+   * The config re-read is the last await. The stopped flag, the kill switch and the holder are
+   * read after it and the write is issued in that same turn, with no awaited helper in between,
+   * so nothing can change between the last check and the write.
+   */
   private async applyIfStillOwed(
     device: AppearanceSyncTarget,
     mode: AppearanceMode,
@@ -255,24 +263,6 @@ export class AppearanceSyncScheduler {
     if (this.scope?.beforeApply && !this.skipReason(device)) {
       await this.scope.beforeApply(device);
     }
-    if (!(await this.isStillOwed(device, decidedUnder))) {
-      return false;
-    }
-    await this.dependencies.apply(device, mode);
-    return true;
-  }
-
-  /**
-   * Whether the write decided for `device` is still owed right now: the scheduler runs, sync is
-   * not switched off, the session the decision was made for still holds the device, and that
-   * session's config still asks for the same thing. The config read is the only await; the
-   * stopped flag, the kill switch and the holder are read after it, in the same turn as the
-   * caller's write, so nothing can change in between.
-   */
-  private async isStillOwed(
-    device: AppearanceSyncTarget,
-    decidedUnder: AppearanceConfig,
-  ): Promise<boolean> {
     let reason = this.skipReason(device);
     if (!reason) {
       const config = await this.dependencies.getConfig(device.sessionKey);
@@ -286,6 +276,7 @@ export class AppearanceSyncScheduler {
       logger.debug(`[Appearance] Skipping ${device.deviceId}: ${reason} before the apply`);
       return false;
     }
+    await this.dependencies.apply(device, mode);
     return true;
   }
 

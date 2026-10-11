@@ -12,6 +12,7 @@ import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingC
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { VideoRecorderService } from "../../src/features/video";
 import {
+  createVideoStopResponse,
   registerVideoRecordingTools,
   resetSegmentedSessions,
   setSegmentedSessionTimer,
@@ -150,6 +151,45 @@ describe("sessionless videoRecording fan-out reaches a device another session ho
     expect(backend.stopCalls).toHaveLength(1);
   });
 
+  test("an empty admitted target remains an error when another target is skipped", async () => {
+    await expect(handler()(freeDevice, { action: "stop" })).rejects.toThrow(
+      "Failed to stop video recordings: No active video recording found for device.",
+    );
+    expect(backend.stopCalls).toEqual([]);
+  });
+
+  test("only skipped targets with no failures returns a non-error empty response", async () => {
+    const stopped = createVideoStopResponse({
+      results: [],
+      failures: [],
+      evictedRecordingIds: [],
+      manifestPaths: [],
+      highlights: [],
+      stoppedAnySegmented: false,
+      skipped: [
+        {
+          deviceId: heldDevice.deviceId,
+          platform: "android",
+          code: "device_owned_by_other_session",
+          reason: "Device is held by another session.",
+        },
+      ],
+    });
+    expect(stopped.isError).not.toBe(true);
+    const data = JSON.parse(stopped.content[0].text);
+    expect(data.count).toBe(0);
+    expect(data.failures).toBeUndefined();
+    expect(data.skipped).toEqual([
+      {
+        deviceId: heldDevice.deviceId,
+        platform: "android",
+        code: "device_owned_by_other_session",
+        reason: "Device is held by another session.",
+      },
+    ]);
+    expect(backend.stopCalls).toEqual([]);
+  });
+
   test("a connection that acquired the holding session is allowed on the held target", async () => {
     setRecordingRequesterResolverForTesting({
       baseSessionUuid: (id) => id,
@@ -242,11 +282,18 @@ describe("sessionless videoRecording fan-out reaches a device another session ho
     setSegmentedSessionTimer(timer);
     await handler()(heldDevice, { action: "start", sessionUuid: HOLDER, maxDuration: 300 });
     expect(hasSegmentedVideoRecordingsForOwner(HOLDER, heldDevice.deviceId)).toBe(true);
+    await expect(handler()(freeDevice, { action: "stop" })).rejects.toThrow(
+      "No active video recording found for device",
+    );
+    expect(hasSegmentedVideoRecordingsForOwner(HOLDER, heldDevice.deviceId)).toBe(true);
+    expect(backend.stopCalls).toHaveLength(0);
+    const free = await startVideoRecording({ device: freeDevice });
+    await fsPromises.writeFile(free.outputPath, "video");
     const stopped = await response({ action: "stop" });
     expect(stopped.skipped[0].deviceId).toBe(heldDevice.deviceId);
     expect(stopped.skipped[0].code).toBe("device_owned_by_other_session");
     expect(hasSegmentedVideoRecordingsForOwner(HOLDER, heldDevice.deviceId)).toBe(true);
-    expect(backend.stopCalls).toHaveLength(0);
+    expect(backend.stopCalls.map((call) => call.recordingId)).toEqual([free.recordingId]);
   });
 
   test("segmented fan-out start skips the held target before creating any segment", async () => {

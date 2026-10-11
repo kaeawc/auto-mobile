@@ -51,10 +51,19 @@ const free: BootedDevice = { ...device, deviceId: "emulator-5556", name: "Free" 
 
 class DeferredOwnershipRepository extends FakeVideoRecordingRepository {
   gate: Promise<void> | undefined;
+  rejectedUpdatesRemaining = 0;
+  ownershipUpdates = 0;
   override async updateRecording(
     recordingId: string,
     update: Parameters<FakeVideoRecordingRepository["updateRecording"]>[1],
   ): Promise<void> {
+    if (update.ownerSessionUuid !== undefined) {
+      this.ownershipUpdates += 1;
+      if (this.rejectedUpdatesRemaining > 0) {
+        this.rejectedUpdatesRemaining -= 1;
+        throw new Error("ownership write unavailable");
+      }
+    }
     if (update.ownerSessionUuid !== undefined && this.gate) {
       await this.gate;
     }
@@ -138,6 +147,19 @@ describe("ownerless recording acquisition adoption", () => {
       takeRecordingIdsFinalizedByRelease(id);
     }
     timer.reset();
+  });
+
+  test("acquisition retries a rejected ownership write once before completing cleanup", async () => {
+    const recording = await startVideoRecording({ device });
+    repository.rejectedUpdatesRemaining = 1;
+    await manager.createSession("holder", device.deviceId, "android");
+    await manager.drainPendingDeviceCleanups(1_000);
+    expect(repository.ownershipUpdates).toBe(2);
+    expect((await repository.getRecording(recording.recordingId))?.ownerSessionUuid).toBe("holder");
+    expect(
+      await repository.getRecording(recording.recordingId, { ownerSessionUuid: "other" }),
+    ).toBeNull();
+    expect(backend.stopCalls).toEqual([]);
   });
 
   test("two pool acquisitions race: only the committed winner adopts", async () => {

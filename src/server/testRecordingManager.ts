@@ -279,11 +279,27 @@ export async function startTestRecording(
   idGenerator: IdGenerator = defaultIdGenerator,
   recorderFactory: RecorderFactory = (target) => new DualTrackRecorder(target),
   ownerSessionUuid?: string,
+  baseSessionUuid?: (sessionUuid: string) => string,
 ): Promise<TestRecordingStartResult> {
   if (stoppingRecording) {
     await stoppingRecording.promise.catch(() => undefined);
-    return startTestRecording(device, timer, idGenerator, recorderFactory, ownerSessionUuid);
+    return startTestRecording(
+      device,
+      timer,
+      idGenerator,
+      recorderFactory,
+      ownerSessionUuid,
+      baseSessionUuid,
+    );
   }
+
+  const ownerMatches = (existingOwner: string | undefined): boolean =>
+    existingOwner === ownerSessionUuid ||
+    testRecordingOwnerVisible(
+      existingOwner,
+      ownerSessionUuid,
+      baseSessionUuid ?? daemonBaseSessionUuid,
+    );
 
   if (activeRecording) {
     if (activeRecording.deviceId !== device.deviceId) {
@@ -292,7 +308,7 @@ export async function startTestRecording(
           `Stop the existing recording before starting a new one on ${device.deviceId}.`,
       );
     }
-    if (activeRecording.ownerSessionUuid !== ownerSessionUuid) {
+    if (!ownerMatches(activeRecording.ownerSessionUuid)) {
       throw new ActionableError(
         `A recording owned by another session is active on device ${device.deviceId}. Wait for it to stop before starting a recording.`,
       );
@@ -316,7 +332,7 @@ export async function startTestRecording(
           `Stop the existing recording before starting a new one on ${device.deviceId}.`,
       );
     }
-    if (session.ownerSessionUuid !== ownerSessionUuid) {
+    if (!ownerMatches(session.ownerSessionUuid)) {
       throw new ActionableError(
         `A recording owned by another session is active on device ${device.deviceId}. Wait for it to stop before starting a recording.`,
       );

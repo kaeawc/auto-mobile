@@ -1077,7 +1077,7 @@ function appendEvictedRecordingIds(recordingIds: string[], evicted: string[]): v
   }
 }
 
-function createVideoStopResponse(output: {
+export function createVideoStopResponse(output: {
   results: Array<Record<string, unknown>>;
   failures: Array<Record<string, unknown>>;
   evictedRecordingIds: string[];
@@ -1095,7 +1095,7 @@ function createVideoStopResponse(output: {
     stoppedAnySegmented,
     skipped,
   } = output;
-  if (results.length === 0 && skipped.length === 0) {
+  if (results.length === 0 && (failures.length > 0 || skipped.length === 0)) {
     const message =
       failures.length > 0
         ? `Failed to stop video recordings: ${failures.map((failure) => failure.error).join("; ")}`

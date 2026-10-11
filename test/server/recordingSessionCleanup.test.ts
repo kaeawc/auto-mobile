@@ -384,6 +384,88 @@ describe("registerRecordingSessionCleanup", () => {
     expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
   });
 
+  test("a segmented stage settling after the cap cannot stop the same session's replacement test recording", async () => {
+    const timer = new FakeTimer();
+    const manager = new FakeSessionManager();
+    const device = { deviceId: "emulator-5554", platform: "android" as const, name: "Fake" };
+    const wedge = Promise.withResolvers<void>();
+    const stops: string[] = [];
+    let stopAttempts = 0;
+    const lateStage = Promise.withResolvers<void>();
+    const recorder = (id: string) => () => ({
+      stepCount: 1,
+      start: async () => undefined,
+      stop: async () => {
+        stops.push(id);
+        return { steps: [{ tool: "tapOn", params: { text: "OK" } }], stepCount: 1 };
+      },
+    });
+    await setVideoRecordingManagerDependencies({
+      videoRecorderService: new VideoRecorderService({
+        backend: new FakeVideoCaptureBackend(),
+        idGenerator: new FakeIdGenerator(),
+        securePermissions: new FakeSecurePermissions(false),
+        archiveRoot: "/unused/fake-video",
+      }),
+      recordingRepository: new FakeVideoRecordingRepository(),
+      configRepository: new FakeVideoRecordingConfigRepository(),
+      highlightClient: new FakeHighlightClient(),
+      timer,
+      now: () => new Date(timer.now()),
+    });
+    try {
+      const first = await startTestRecording(
+        device,
+        timer,
+        new FakeIdGenerator(["R1"]),
+        recorder("R1"),
+        "session-a",
+      );
+      registerRecordingSessionCleanup(manager, {
+        ...defaultRecordingSessionCleanupDeps,
+        timer,
+        stopSegmentedRecordings: () => wedge.promise,
+        stopTestRecording: async (id) => {
+          stopAttempts += 1;
+          try {
+            await defaultRecordingSessionCleanupDeps.stopTestRecording(id);
+          } finally {
+            if (stopAttempts === 2) {
+              lateStage.resolve();
+            }
+          }
+        },
+      });
+      for (const callback of manager.unboundCallbacks) {
+        callback("session-a", device.deviceId);
+      }
+      const freed = manager.settle();
+      await timer.advanceTimersByTimeAsync(120_000);
+      await freed;
+      expect(stops).toEqual([first.recordingId]);
+      const second = await startTestRecording(
+        device,
+        timer,
+        new FakeIdGenerator(["R2"]),
+        recorder("R2"),
+        "session-a",
+      );
+      expect(second.recordingId).not.toBe(first.recordingId);
+      wedge.resolve();
+      await lateStage.promise;
+      expect(stopAttempts).toBe(2);
+      expect(stops).toEqual([first.recordingId]);
+      expect(getTestRecordingStatus(timer)?.recordingId).toBe(second.recordingId);
+    } finally {
+      wedge.resolve();
+      if (getTestRecordingStatus(timer)) {
+        await stopTestRecording(undefined, undefined, timer);
+      }
+      resetStoppedTestRecordings();
+      resetVideoRecordingManagerDependencies();
+    }
+  });
+
   describe("finalize cap covers every recording (#11041)", () => {
     for (const wedgedStage of ["segmented", "video"] as const) {
       test(`a hung ${wedgedStage} stage stops the real test recorder and marks only unfinished videos incomplete`, async () => {

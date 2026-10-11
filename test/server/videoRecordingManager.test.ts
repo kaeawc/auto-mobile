@@ -190,6 +190,54 @@ describe("videoRecordingManager", () => {
     await fsPromises.rm(archiveParent, { recursive: true, force: true });
   });
 
+  for (const finish of ["completed", "interrupted", "incomplete"] as const) {
+    test(`a failed adoption write is repaired when the recording becomes ${finish}`, async () => {
+      const active = await startVideoRecording({ device: testDevice });
+      const update = fakeRepository.updateRecording.bind(fakeRepository);
+      let rejected = false;
+      const updateSpy = spyOn(fakeRepository, "updateRecording").mockImplementation(
+        async (id, patch) => {
+          if (patch.ownerSessionUuid !== undefined && patch.status === undefined) {
+            rejected = true;
+            throw new Error("ownership write unavailable");
+          }
+          return update(id, patch);
+        },
+      );
+      try {
+        await expect(
+          adoptOwnerlessActiveVideoRecordings(testDevice.deviceId, "holder"),
+        ).rejects.toThrow("ownership write unavailable");
+        expect(rejected).toBe(true);
+        expect(
+          (await fakeRepository.getRecording(active.recordingId))?.ownerSessionUuid,
+        ).toBeUndefined();
+        expect(listActiveVideoRecordingIdsForOwner("holder", testDevice.deviceId)).toEqual([
+          active.recordingId,
+        ]);
+        if (finish === "completed") {
+          await stopVideoRecording(active.recordingId);
+        } else if (finish === "interrupted") {
+          await service.forceStopRecording(active.recordingId);
+          await interruptVideoRecording(active.recordingId);
+        } else {
+          await markVideoRecordingIncomplete(active.recordingId);
+        }
+        const finished = await fakeRepository.getRecording(active.recordingId);
+        expect(finished?.status).toBe(finish);
+        expect(finished?.ownerSessionUuid).toBe("holder");
+        expect(
+          await getVideoRecordingMetadata(active.recordingId, { ownerSessionUuid: "other" }),
+        ).toBeNull();
+        expect(
+          await getVideoRecordingMetadata(active.recordingId, { ownerSessionUuid: "holder" }),
+        ).not.toBeNull();
+      } finally {
+        updateSpy.mockRestore();
+      }
+    });
+  }
+
   test("a capture in startup publishes the adopting holder rather than an ownerless row", async () => {
     const pending = Promise.withResolvers<void>();
     const originalStart = fakeBackend.start.bind(fakeBackend);

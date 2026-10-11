@@ -135,6 +135,7 @@ async function stopOwnedRecordings(
   sessionId: string | undefined,
   deviceId: string,
   stopping: Set<string>,
+  testRecordingId: string | undefined,
 ): Promise<void> {
   // `stopping` starts as every recording the owner has; a stage that finished drops the ids that
   // are no longer active, so only what is still stopping is force-stopped at the cap (#11041).
@@ -177,11 +178,11 @@ async function stopOwnedRecordings(
       }
     },
   );
-  if (deps.isTestRecordingOwnedBy(sessionId, deviceId)) {
+  if (testRecordingId !== undefined && deps.isTestRecordingOwnedBy(sessionId, deviceId)) {
     await attempt(
       `stop test recording of released session ${sessionId ?? "(owner-less)"} on ${deviceId}`,
       async () => {
-        await deps.stopTestRecording();
+        await deps.stopTestRecording(testRecordingId);
         pruneFinalized();
         // The plan is retained by recording id for the owning session (#10958).
         logger.info(
@@ -207,12 +208,15 @@ async function stopOwnedRecordingsWithinCap(
   const testRecordingId = deps.ownedTestRecordingId(sessionId, deviceId);
   const capMs = deps.finalizeCapMs(deviceId);
   try {
-    await raceWithDeadline(stopOwnedRecordings(deps, sessionId, deviceId, stopping), {
-      timer: deps.timer,
-      timeoutMs: capMs,
-      label: `finalize recordings of released session ${sessionId ?? "(owner-less)"}`,
-      timeoutError: () => new FinalizeCapExceeded(),
-    });
+    await raceWithDeadline(
+      stopOwnedRecordings(deps, sessionId, deviceId, stopping, testRecordingId),
+      {
+        timer: deps.timer,
+        timeoutMs: capMs,
+        label: `finalize recordings of released session ${sessionId ?? "(owner-less)"}`,
+        timeoutError: () => new FinalizeCapExceeded(),
+      },
+    );
   } catch (error) {
     if (!(error instanceof FinalizeCapExceeded)) {
       throw error;

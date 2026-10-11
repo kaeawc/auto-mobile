@@ -1464,6 +1464,7 @@ async function stopActiveVideoRecording(
 ): Promise<StopVideoRecordingResult> {
   const { videoRecorderService, recordingRepository, now } = deps;
 
+  const owner = recordingOwners.get(resolvedId);
   let metadata: VideoRecordingMetadata;
   try {
     metadata = await videoRecorderService.stopRecording(resolvedId);
@@ -1537,6 +1538,7 @@ async function stopActiveVideoRecording(
   }
   await recordingRepository.updateRecording(resolvedId, {
     status: "completed",
+    ownerSessionUuid: owner?.ownerSessionUuid,
     outputName: metadata.outputName,
     fileName: metadata.fileName,
     filePath: metadata.filePath,
@@ -1576,6 +1578,7 @@ async function interruptVideoRecordingWithDependencies(
   deps: VideoRecordingManagerDependencies,
 ): Promise<void> {
   const { recordingRepository, now, statFileSize } = deps;
+  const owner = recordingOwners.get(recordingId);
   clearAutoStop(recordingId);
   clearInProgressSizeCap(recordingId);
 
@@ -1597,6 +1600,7 @@ async function interruptVideoRecordingWithDependencies(
 
   await recordingRepository.updateRecording(recordingId, {
     status: "interrupted",
+    ownerSessionUuid: owner?.ownerSessionUuid,
     endedAt,
     lastAccessedAt: endedAt,
     // Through the injected seam, not a direct fs.stat, so an interrupt does no real I/O in tests.
@@ -1622,6 +1626,7 @@ export async function forceStopVideoRecording(recordingId: string): Promise<void
  * reached the host). A row the slow stop has since finished is left as it is.
  */
 export async function markVideoRecordingIncomplete(recordingId: string): Promise<void> {
+  const owner = recordingOwners.get(recordingId);
   const deps = await getVideoRecordingDependencies();
   try {
     await deps.videoRecorderService.forceStopRecording(recordingId);
@@ -1641,6 +1646,7 @@ export async function markVideoRecordingIncomplete(recordingId: string): Promise
   const endedAt = deps.now().toISOString();
   await deps.recordingRepository.updateRecording(recordingId, {
     status: "incomplete",
+    ownerSessionUuid: owner?.ownerSessionUuid,
     endedAt,
     lastAccessedAt: endedAt,
     sizeBytes: await deps.statFileSize(record.filePath),
@@ -1715,10 +1721,18 @@ export function adoptOwnerlessActiveVideoRecordings(
   for (const [recordingId, owner] of recordingOwners) {
     if (owner.deviceId === deviceId && owner.ownerSessionUuid === undefined) {
       owner.ownerSessionUuid = sessionUuid;
+      const { recordingRepository } = moduleDependencies!;
       updates.push(
-        moduleDependencies!.recordingRepository.updateRecording(recordingId, {
-          ownerSessionUuid: sessionUuid,
-        }),
+        recordingRepository
+          .updateRecording(recordingId, {
+            ownerSessionUuid: sessionUuid,
+          })
+          .catch(() =>
+            // Retry the durable claim once; acquisition's attempt logs only the final failure.
+            recordingRepository.updateRecording(recordingId, {
+              ownerSessionUuid: sessionUuid,
+            }),
+          ),
       );
     }
   }

@@ -78,6 +78,65 @@ const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platfor
 const otherDevice: BootedDevice = { ...device, deviceId: "emulator-5556" };
 
 describe("testRecordingManager ownership", () => {
+  for (const phase of ["starting", "active"] as const) {
+    for (const [owner, caller, admitted] of [
+      ["S", "S:label", true],
+      ["S:label", "S", true],
+      ["S:first", "S:second", true],
+      ["S", "other:label", false],
+      [undefined, undefined, true],
+      [undefined, "S", false],
+      ["S", undefined, false],
+    ] as const) {
+      test(`${phase} recording owned by ${owner} ${admitted ? "joins" : "refuses"} caller ${caller}`, async () => {
+        const timer = new FakeTimer();
+        const recorder = new FakeRecorder();
+        recorder.steps = [capturedStep];
+        const ids = new CountingIdGenerator("equivalent");
+        const baseSessionUuid = (uuid: string) => uuid.split(":")[0];
+        const pending = startTestRecording(
+          device,
+          timer,
+          ids,
+          () => recorder,
+          owner,
+          baseSessionUuid,
+        );
+        await Promise.resolve();
+        if (phase === "active") {
+          recorder.startGate.resolve();
+          await pending;
+        }
+        try {
+          const joined = startTestRecording(
+            device,
+            timer,
+            ids,
+            () => {
+              throw new Error("joining must reuse the recorder");
+            },
+            caller,
+            baseSessionUuid,
+          );
+          if (!admitted) {
+            await expect(joined).rejects.toThrow("another session");
+          }
+          recorder.startGate.resolve();
+          const first = await pending;
+          if (admitted) {
+            expect(await joined).toEqual(first);
+          }
+          expect(recorder.startCount).toBe(1);
+          expect(isTestRecordingOwnedBy(owner, device.deviceId)).toBe(true);
+        } finally {
+          recorder.startGate.resolve();
+          await pending;
+          await stopTestRecording(undefined, undefined, timer);
+        }
+      });
+    }
+  }
+
   test.each(["starting", "active", "stopping"])(
     "a direct ownerless %s recording is adopted once and its finalized plan belongs to the holder",
     async (phase) => {
@@ -210,7 +269,7 @@ describe("testRecordingManager startup reservation", () => {
     [undefined, "stranger"],
     ["owner-a", undefined],
     ["owner-a", "owner-b"],
-    ["base:pixel", "base"],
+    ["base:pixel", "base2"],
   ]) {
     test(`active and starting recordings refuse another owner (${owner ?? "ownerless"} / ${stranger ?? "ownerless"})`, async () => {
       const timer = new FakeTimer();

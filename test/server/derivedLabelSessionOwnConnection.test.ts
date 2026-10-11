@@ -194,6 +194,8 @@ describe("a connection bound to the base session naming its own derived label se
         released.push([sessionId, reason]);
       });
       const owner = await connection({ sessionId: "http-owner" });
+      // The connection's first call binds it to the base and starts the base's idle window.
+      await tap(owner, { sessionUuid: BASE });
       const idleMs = manager.peekSession(BASE)!.sessionTimeoutMs;
       // The label is used half way through the base's idle window, so only the base runs out.
       timer.advanceTime(idleMs / 2);

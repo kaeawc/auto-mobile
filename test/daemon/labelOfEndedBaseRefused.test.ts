@@ -4,6 +4,10 @@ import {
   TerminalSessionError,
   type Session,
 } from "../../src/daemon/sessionManager";
+import {
+  DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
+  SUSPECT_GRACE_MS,
+} from "../../src/daemon/sessionLivenessWindows";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -30,7 +34,7 @@ interface World {
   released: Array<[string, string]>;
 }
 
-async function liveBaseAndLabel(): Promise<World> {
+async function liveBaseAndLabel(baseIdleMs = BASE_IDLE_MS): Promise<World> {
   const timer = new FakeTimer();
   const manager = new SessionManager(
     timer,
@@ -42,7 +46,7 @@ async function liveBaseAndLabel(): Promise<World> {
   manager.onSessionRelease((sessionId, _deviceId, reason) => {
     released.push([sessionId, reason]);
   });
-  const base = await manager.createSession(BASE, "emulator-5554", "android", BASE_IDLE_MS);
+  const base = await manager.createSession(BASE, "emulator-5554", "android", baseIdleMs);
   const label = await asPlanAllocation(manager, BASE, [LABEL], () =>
     manager.createSession(LABEL, "emulator-5556", "android", LABEL_IDLE_MS),
   );
@@ -161,5 +165,36 @@ describe("a label whose base is being released for a terminal reason", () => {
     await release;
 
     expect(error.release).toMatchObject({ sessionId: LABEL, releaseReason: "explicit-release" });
+  });
+});
+
+describe("a label whose base lost its owner's heartbeat lease, before the monitor's scan", () => {
+  async function lapsedBaseLease(): Promise<World> {
+    const w = await liveBaseAndLabel(LABEL_IDLE_MS);
+    expect(await w.manager.claimLivenessOwnership(BASE, TOKEN)).toBe("claimed");
+    w.manager.recordHeartbeat(BASE);
+    w.timer.advanceTime(DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS + 1);
+    expect(w.manager.getSessionLeaseState(BASE)?.phase).toBe("lapsed");
+    return w;
+  }
+
+  test("a control call naming it ends the base and gets its heartbeat end", async () => {
+    const w = await lapsedBaseLease();
+
+    const error = await refusal(w.manager.getOrCreateSession(LABEL));
+
+    expect(error.release).toMatchObject({ sessionId: LABEL, releaseReason: "heartbeat-timeout" });
+    expect(w.released).toEqual([[BASE, "heartbeat-timeout"]]);
+  });
+
+  test("a read naming it is admitted and releases nothing", async () => {
+    const w = await lapsedBaseLease();
+
+    const admitted = await w.manager.admitIssuedSessionForAutomation(LABEL, undefined, {
+      access: "read-only",
+    });
+
+    expect(admitted).toBe(w.label);
+    expect(w.released).toEqual([]);
   });
 });

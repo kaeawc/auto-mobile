@@ -44,10 +44,9 @@ any other lookup that goes from a label to its base, the one a device tool call
 naming only `<base>:<name>` makes to route itself and pick its tools included
 (#11640). A base past its idle deadline that the scan has not reached yet
 publishes no labels, and is released by the scan or by a call that names it,
-never by a lookup about its label. Releasing the base releases its label
-sessions with it; in the meantime, at most one scan interval, a label that is
-still inside its own idle window is judged as a session of its own, not as its
-base's (#11640). A device that no session holds takes calls from anyone.
+never by a lookup about its label. The base's end ends its labels (#11640): see
+[Plan label sessions](#plan-label-sessions). A device that no session holds
+takes calls from anyone.
 
 A session's owner is the connection that acquired it, or that restored it after
 a reconnect. Ownership is cooperative: no token is needed, but naming a session's
@@ -203,6 +202,59 @@ long as the plan run (#11572), whichever reason ended it:
   any other.
 
 The daemon recognizes these rows by `device_sessions.source = 'plan-label'`.
+
+#### The base's end ends its labels
+
+A label session is usable only while its base is live (#11640). Once the base
+has ended for a terminal reason, is being released for one, or is past its idle
+deadline and not yet scanned, each of its label sessions is no session to
+anyone, the base's owner included, whatever the label's own idle window says:
+
+- A control call naming the label (a tool call, an `input/*` frame for its
+  device, a plan step) is refused with `session_ownership_lost`, `retryable:
+  false` and `nextAction: "acquire_new_session"`, carrying the label's id and
+  the base's release reason: the recorded one, or the one its expiry is about to
+  record (`lazy-expiry`, or `heartbeat-timeout` when the owner's lease lapsed).
+  A heartbeat or liveness claim for the label is answered "session not found"
+  with that same reason, and claims nothing.
+- A read naming the label is never refused. It is answered without a session,
+  as a read on any session past its idle deadline is.
+- Deciding this releases nothing: it is a read of the base's state, and a
+  lookup about a label still never releases its base. A refused control call is
+  not a lookup. It names a session of the ended plan, so it ends the base the
+  way a call naming the base does, through the base's lazy expiry, and the
+  base's release takes every label with it at once rather than at the next
+  scan. A refused read releases nothing and leaves that to the scan.
+- A base whose owner's heartbeat lease lapsed and that the monitor has not
+  scanned yet answers a control call on its label as it answers one on itself:
+  the base is released with `heartbeat-timeout` and the call gets that terminal
+  refusal, unless a control call still in flight keeps the base, in which case
+  the call gets the retryable `daemon_session_suspect` naming the base.
+- Ending the base ends every live label with the base's own reason (explicit
+  release, idle expiry, heartbeat lapse, owner disconnect, device loss): each
+  label's release is announced under the label's id with that reason, a call
+  still running under the label is cut with `session_ownership_lost` naming the
+  label, and its device is freed once. A base released for a reason that leaves
+  its UUID usable (`plan-auto-release`, a `daemon-shutdown` or
+  `device-restart:<device>` handoff) releases its labels with
+  `plan-auto-release`, as before.
+- A plan whose base ends while it runs fails with the base's end, not with
+  "label is not allocated": the `executePlan` result has `success: false`,
+  `code: "session_ownership_lost"`, `retryable: false`, `nextAction:
+  "acquire_new_session"` and `details.reason` set to the base's release reason,
+  and its failed step's error names that reason.
+
+How long a plan can run on its labels: a step on a label restarts only the
+label's idle window, never the base's. The base's idle window is restarted by
+the start and the end of the `executePlan` call, by each step that runs on the
+plan's primary device, and by any other control call naming the base. What
+keeps the base through a long run of label-only steps is the `executePlan` call
+itself: a call in flight holds its session past the idle deadline until the
+call's request deadline plus 10 seconds (30 minutes past the idle deadline for a
+call with no deadline). So a plan runs on its labels for as long as its own
+request deadline allows (at least 600 seconds for `executePlan`, at most 1800),
+and its base idles out only if the plan is still running after that deadline
+with no step on the primary device in the last idle window.
 
 When two releases of one session race, a terminal reason replaces a
 non-terminal one, and any other terminal reason replaces an idle one, so the

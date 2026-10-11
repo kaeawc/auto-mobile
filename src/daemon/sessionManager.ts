@@ -3646,6 +3646,7 @@ export class SessionManager {
         execution,
         callerExecutionId,
       );
+      await this.refuseLabelCallOnLapsedBaseLease(existing, access, execution, callerExecutionId);
       await this.refreshExistingSessionForAccess(existing, access);
       return existing;
     }
@@ -9580,11 +9581,30 @@ export class SessionManager {
   /**
    * Whether `sessionId` is live and speaks for the same session as `otherSessionId` wherever
    * ownership is judged: the two are sessions of one plan (#11602). Releases nothing.
+   *
+   * A label that ended with that plan's base (#11640) still counts: a connection bound to the
+   * plan is not told the label is some other session, its call goes on to admission and gets the
+   * base's terminal release there.
    */
   isLiveSessionOfSamePlan(sessionId: string, otherSessionId: string): boolean {
     return (
-      this.peekSession(sessionId) !== null &&
-      this.ownershipSessionUuid(sessionId) === this.ownershipSessionUuid(otherSessionId)
+      (this.peekSession(sessionId) !== null &&
+        this.ownershipSessionUuid(sessionId) === this.ownershipSessionUuid(otherSessionId)) ||
+      this.endedWithPlanOf(sessionId, otherSessionId)
+    );
+  }
+
+  /** Whether `sessionId` is a label whose ended base is `otherSessionId` or its base. */
+  private endedWithPlanOf(sessionId: string, otherSessionId: string): boolean {
+    const label = this.sessions.get(sessionId);
+    const ended = label && this.endedBaseOfLabel(label);
+    if (!ended) {
+      return false;
+    }
+    const other = this.sessions.get(otherSessionId);
+    return (
+      otherSessionId === ended.baseSessionId ||
+      (other !== undefined && this.endedBaseOfLabel(other)?.baseSessionId === ended.baseSessionId)
     );
   }
 
@@ -10141,6 +10161,45 @@ export class SessionManager {
     }
     // The release did not finish terminally; never admit the call on the strength of that.
     throw new SessionSuspectError(session.sessionId, 0);
+  }
+
+  /**
+   * A control call naming a plan label whose base lost its owner's heartbeat lease, before the
+   * monitor's scan (#11640): the base's end ends its labels, so the call is answered as a call
+   * naming the base is ({@link refuseControlCallOnLapsedOwnerLease}), which releases the base
+   * unless a control call in flight still keeps it. The terminal answer is given under the
+   * label's id with the base's reason; the retryable one names the base, whose lease it is about.
+   */
+  private async refuseLabelCallOnLapsedBaseLease(
+    label: Session,
+    access: SessionAccess,
+    execution: SessionExecutionMetadata | undefined,
+    unnamedCallerExecutionId: string | undefined,
+  ): Promise<void> {
+    if (access === "read-only" || label.persistenceMetadata?.source !== PLAN_LABEL_SESSION_SOURCE) {
+      return;
+    }
+    const baseSessionId = this.getBaseSessionOfDerivedLabel(label.sessionId);
+    const base = baseSessionId === undefined ? undefined : this.sessions.get(baseSessionId);
+    if (!base || !this.isOwnerLeaseLapsed(base)) {
+      return;
+    }
+    try {
+      await this.refuseControlCallOnLapsedOwnerLease(
+        base,
+        access,
+        execution,
+        unnamedCallerExecutionId,
+      );
+    } catch (error) {
+      if (error instanceof TerminalSessionError) {
+        throw new TerminalSessionError(
+          label.sessionId,
+          this.terminalReleaseAsOfNow(label, error.release.releaseReason),
+        );
+      }
+      throw error;
+    }
   }
 
   /**

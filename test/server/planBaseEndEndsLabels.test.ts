@@ -43,7 +43,10 @@ interface LongPlan {
   call(connection: string, sessionUuid: string): Promise<unknown>;
   /** Runs when the base is expired and unscanned and the label is live, inside the plan's step. */
   whenBaseOutlived(body: () => Promise<void>): void;
-  run(): Promise<PlanRunResult>;
+  /** Replace what each step does after it reached the label's device (1-based step number). */
+  setStep(step: (number: number) => Promise<void>): void;
+  /** Run a three-step plan on label B under a plan call with this request deadline. */
+  run(planDeadlineMs?: number): Promise<PlanRunResult>;
 }
 
 const longPlanOnItsLabel = (body: (plan: LongPlan) => Promise<void>) => async (): Promise<void> => {
@@ -84,16 +87,19 @@ const longPlanOnItsLabel = (body: (plan: LongPlan) => Promise<void>) => async ()
 
     const ran: string[] = [];
     let outlived: () => Promise<void> = async () => undefined;
-    let step = 0;
-    hunt.setProbeStep(async (device) => {
-      ran.push(device.deviceId);
-      if (++step === 1) {
+    let onStep = async (step: number): Promise<void> => {
+      if (step === 1) {
         // Past the plan call's deadline and grace; the next step stamps the label here.
         hunt.timer.advanceTime(PLAN_DEADLINE_MS + DEADLINE_GRACE_MS);
       } else if (step === 2) {
         hunt.timer.advanceTime(baseIdleDeadline - sessionManager.sessionNow() + 1);
         await outlived();
       }
+    };
+    let step = 0;
+    hunt.setProbeStep(async (device) => {
+      ran.push(device.deviceId);
+      await onStep(++step);
     });
 
     await body({
@@ -119,9 +125,12 @@ const longPlanOnItsLabel = (body: (plan: LongPlan) => Promise<void>) => async ()
       whenBaseOutlived: (then) => {
         outlived = then;
       },
-      run: async () => {
+      setStep: (then) => {
+        onStep = then;
+      },
+      run: async (planDeadlineMs = PLAN_DEADLINE_MS) => {
         const planExecution = executionTracker.startExecution("executePlan", OWNER, BASE);
-        const deadline = hunt.timer.now() + PLAN_DEADLINE_MS;
+        const deadline = hunt.timer.now() + planDeadlineMs;
         executionTracker.setExecutionDeadline(planExecution.id, () => deadline);
         try {
           const response: { structuredContent?: PlanRunResult; content: Array<{ text: string }> } =
@@ -165,6 +174,32 @@ const terminalRefusal = async (attempt: Promise<unknown>): Promise<TerminalSessi
   }
   return error;
 };
+
+describe("a plan whose steps run on a label for longer than its base's idle window", () => {
+  test(
+    "runs to the end while its own call's request deadline still holds the base",
+    longPlanOnItsLabel(async (plan) => {
+      const { sessionManager } = plan.hunt.daemon();
+      const idleMs = sessionManager.peekSession(BASE)!.sessionTimeoutMs;
+      const baseStampedAt = sessionManager.peekSession(BASE)!.lastUsedAt;
+      const baseLiveAfterStep: boolean[] = [];
+      plan.setStep(async () => {
+        // Each step stamps the label; nothing stamps the base.
+        plan.hunt.timer.advanceTime(idleMs - 1_000);
+        baseLiveAfterStep.push(sessionManager.peekSession(BASE) !== null);
+      });
+
+      const result = await plan.run(10 * idleMs);
+
+      expect(result.success).toBe(true);
+      expect(plan.ran).toEqual([deviceB.deviceId, deviceB.deviceId, deviceB.deviceId]);
+      // Nearly three idle windows passed without a stamp on the base, which the plan's call held.
+      expect(baseLiveAfterStep).toEqual([true, true, true]);
+      expect(sessionManager.sessionNow() - baseStampedAt).toBeGreaterThan(2 * idleMs);
+      expect(plan.released.filter(([, reason]) => reason !== "plan-auto-release")).toEqual([]);
+    }),
+  );
+});
 
 describe("a plan whose base idles out while its steps run on a label", () => {
   test.each([

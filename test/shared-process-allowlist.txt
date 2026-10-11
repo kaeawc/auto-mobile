@@ -72,6 +72,7 @@ test/daemon/deviceLeaseActivity.test.ts
 test/daemon/deviceLeaseOwnerQuery.test.ts
 test/daemon/devicePool.allocationDiscoveryOutsideMutex.test.ts
 test/daemon/devicePool.androidStartupLeaseOfflineRecovery.test.ts
+test/daemon/devicePool.androidTransportAliases.control.test.ts
 test/daemon/devicePool.bootCapacityRefusal.test.ts
 test/daemon/devicePool.capturedPredicates.test.ts
 test/daemon/devicePool.crossDaemonExplicitBind.test.ts
@@ -113,6 +114,7 @@ test/daemon/failuresPushSocketServer.test.ts
 test/daemon/fakeDaemonClientContract.test.ts
 test/daemon/findAvailableDaemonPort.test.ts
 test/daemon/forwardLeaseHolders.test.ts
+test/daemon/frameDeviceIdentity.test.ts
 test/daemon/freshStartAlreadyBoundRefusal.test.ts
 test/daemon/gatedToolThroughDaemon.test.ts
 test/daemon/gestureOwnership.test.ts

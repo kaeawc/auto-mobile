@@ -1,11 +1,12 @@
-import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
+import type { DaemonResponse } from "../../src/daemon/types";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { InMemoryControlSocket, RawFrameClient } from "../helpers/inMemoryDaemonWire";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
@@ -32,39 +33,6 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
  * FakeTimer; only adb and the device client are fakes.
  */
 
-class FakeSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly responses: DaemonResponse[] = [];
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    callback?.();
-    return true;
-  }
-  end(): this {
-    return this.destroy();
-  }
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
-    }
-    return this;
-  }
-  send(request: DaemonRequest): void {
-    this.emit("data", Buffer.from(`${JSON.stringify(request)}\n`));
-  }
-}
-
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-}
-
 const HOLDER = "holder-session";
 const usb = "R5CT1234ABC";
 const wireless = "adb-R5CT1234ABC-AbCdEf._adb-tls-connect._tcp";
@@ -77,23 +45,20 @@ describe("a direct frame naming a held handset by its other transport id", () =>
   let timer: FakeTimer;
   let sessionManager: SessionManager;
   let pool: DevicePool;
-  let socket: FakeSocket;
-  let internals: Internals;
+  let wire: InMemoryControlSocket;
+  let client: RawFrameClient;
   let manager: FakeDeviceUtils;
+  let adb: FakeAdbExecutor;
   /** The serials the fake device client was built for and driven on. */
   let driven: string[];
+  let reads: string[];
 
   async function send(
     id: string,
     method: string,
     params: Record<string, unknown>,
   ): Promise<DaemonResponse | undefined> {
-    socket.send({ id, type: "mcp_request", method, params });
-    for (let i = 0; i < 8; i++) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    await Promise.all([...internals.activeRequestHandlers]);
-    return socket.responses.find((frame) => frame.id === id);
+    return { id, type: "mcp_response", ...(await client.request(method, params)) };
   }
 
   const tap = (id: string, deviceId: string, extra: Record<string, unknown> = {}) =>
@@ -111,12 +76,18 @@ describe("a direct frame naming a held handset by its other transport id", () =>
     });
 
   /** `pooledRows` is what the pool's refresh saw; later discovery may report more. */
-  async function start(pooledRows: BootedDevice[]): Promise<void> {
+  async function start(pooledRows: BootedDevice[], hold = true): Promise<void> {
+    client?.close();
+    wire?.kill();
+    sessionManager?.stopCleanupTimer();
+    timer?.reset();
+    DaemonState.getInstance().reset();
     driven = [];
+    reads = [];
     timer = new FakeTimer();
     manager = new FakeDeviceUtils();
     manager.setBootedDevices("android", pooledRows);
-    const adb = new FakeAdbExecutor();
+    adb = new FakeAdbExecutor();
     adb.setCommandResponse("getprop ro.serialno", createExecResult(usb, ""));
     adb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
     adb.setCommandResponse("getprop ro.kernel.qemu", createExecResult("0", ""));
@@ -131,10 +102,12 @@ describe("a direct frame naming a held handset by its other transport id", () =>
     );
     await pool.refreshDevices();
     // One handset, however many transports: pooled once, under the USB serial.
-    expect(pool.getAllDevices().map((device) => device.id)).toEqual([usb]);
-    expect(await pool.assignDeviceToSession(HOLDER, "android")).toBe(usb);
-    await sessionManager.createSession(HOLDER, usb, "android", 60_000);
-    expect(sessionManager.getSessionForDevice(usb)).toBe(HOLDER);
+    expect(pool.getAllDevices().map((device) => device.id)).toEqual(pooledRows.length ? [usb] : []);
+    if (hold) {
+      expect(await pool.assignDeviceToSession(HOLDER, "android")).toBe(usb);
+      await sessionManager.createSession(HOLDER, usb, "android", 60_000);
+      expect(sessionManager.getSessionForDevice(usb)).toBe(HOLDER);
+    }
 
     // The direct frames discover through the process device manager: the raw `adb devices` rows.
     PlatformDeviceManagerFactory.setInstance(manager);
@@ -151,6 +124,19 @@ describe("a direct frame naming a held handset by its other transport id", () =>
           },
         }) as unknown as AndroidCtrlProxyClient,
     );
+    spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(
+      (device) =>
+        ({
+          getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
+          requestTapCoordinates: async () => {
+            driven.push(`ios-tap:${device.deviceId}`);
+            return { success: true };
+          },
+          setPreference: async () => {
+            driven.push(`ios-setPreference:${device.deviceId}`);
+          },
+        }) as unknown as IOSCtrlProxyClient,
+    );
     spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
       (device) =>
         ({
@@ -160,23 +146,23 @@ describe("a direct frame naming a held handset by its other transport id", () =>
           },
         }) as unknown as AndroidCtrlProxyManager,
     );
-    const server = new UnixSocketServer(
-      "unused",
-      "http://localhost:0/mcp",
-      {
-        isInitialized: () => true,
-        getSessionManager: () => sessionManager,
-        getDevicePool: () => pool,
-      } as unknown as DaemonStateAccess,
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    wire = InMemoryControlSocket.attach({
       timer,
-      null,
-      // The storage tools are enabled, so the frame reaches the ownership gate.
-      { sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} } },
-    );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
-    socket = new FakeSocket();
-    internals.handleConnection(socket as unknown as Socket);
+      connectionIds: new FakeIdGenerator(),
+      loopback: async () =>
+        ({
+          readResource: async ({ uri }: { uri: string }) => {
+            reads.push(uri);
+            return { contents: [{ uri, mimeType: "image/png", blob: "fake-screenshot" }] };
+          },
+          close: async () => {},
+        }) as unknown as Client,
+      startupOptions: {
+        sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} },
+      },
+    });
+    client = new RawFrameClient("direct", () => wire.connect("direct-connection"));
   }
 
   beforeEach(async () => {
@@ -187,8 +173,11 @@ describe("a direct frame naming a held handset by its other transport id", () =>
   afterEach(() => {
     spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
     spyOn(AndroidCtrlProxyManager, "getInstance").mockRestore();
+    spyOn(IOSCtrlProxyClient, "getInstance").mockRestore();
     PlatformDeviceManagerFactory.reset();
-    socket.destroy();
+    client.close();
+    wire.kill();
+    DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();
     timer.reset();
   });
@@ -276,6 +265,138 @@ describe("a direct frame naming a held handset by its other transport id", () =>
     expect(pool.getAndroidTransportAliases(usb)).toEqual([wireless]);
   });
 
+  const UNPROVEN = { success: false, error: expect.stringContaining("no proven identity") };
+  const identityProbes = () =>
+    adb.getExecutedCommands().filter((command) => command.includes("ro.serialno")).length;
+
+  test("expired but unreleased USB ownership refuses wireless input and IDE mutation", async () => {
+    await start([booted(usb)]);
+    adb.setCommandError("getprop ro.serialno", new Error("device offline"));
+    manager.setBootedDevices("android", [booted(usb), booted(wireless)]);
+    sessionManager.stopCleanupTimer();
+    const holder = sessionManager.getSession(HOLDER)!;
+    timer.advanceTime(holder.expiresAt - timer.now() + 1);
+    expect(sessionManager.getAllSessions()).toEqual([]);
+    expect(sessionManager.getSessionForDevice(usb)).toBe(HOLDER);
+    expect(sessionManager.getHeldDeviceSessions()).toEqual([
+      {
+        deviceId: usb,
+        sessionId: HOLDER,
+        platform: "android",
+        stableDeviceId: holder.stableDeviceId,
+      },
+    ]);
+
+    expect(await tap("expired-usb", usb)).toMatchObject(HELD_BY_OTHER);
+    expect(await tap("expired-wireless", wireless)).toMatchObject(HELD_BY_OTHER);
+    expect(await setKeyValue("expired-wireless-kv", wireless)).toMatchObject(HELD_BY_OTHER);
+    expect(sessionManager.getSessionForDevice(usb)).toBe(HOLDER);
+    expect(driven).toEqual([]);
+  });
+
+  test("the held-device snapshot retains a releasing holder until its reverse-map entry is removed", async () => {
+    await start([booted(usb)]);
+    adb.setCommandError("getprop ro.serialno", new Error("device offline"));
+    manager.setBootedDevices("android", [booted(usb), booted(wireless)]);
+    const holder = sessionManager.getSession(HOLDER)!;
+    const setup = Promise.withResolvers<void>();
+    const trackedSetup = sessionManager.trackSessionSetup(holder, () => setup.promise);
+    const release = sessionManager.releaseSession(HOLDER, "explicit-release");
+    try {
+      expect(sessionManager.getReleasingSession(HOLDER)).toBe(holder);
+      expect(sessionManager.getSessionForDevice(usb)).toBe(HOLDER);
+      expect(sessionManager.getHeldDeviceSessions()).toEqual([
+        {
+          deviceId: usb,
+          sessionId: HOLDER,
+          platform: "android",
+          stableDeviceId: holder.stableDeviceId,
+        },
+      ]);
+      expect(await tap("releasing-wireless", wireless)).toMatchObject(HELD_BY_OTHER);
+      expect(await setKeyValue("releasing-wireless-kv", wireless)).toMatchObject(HELD_BY_OTHER);
+      expect(driven).toEqual([]);
+    } finally {
+      setup.resolve();
+      await trackedSetup;
+      await release;
+    }
+    expect(sessionManager.getSessionForDevice(usb)).toBeNull();
+    expect(sessionManager.getHeldDeviceSessions()).toEqual([]);
+  });
+
+  test("a probe-proven remote emulator dispatches while a physical USB phone is held", async () => {
+    await start([booted(usb)]);
+    const remote = "10.0.0.7:5555";
+    adb.setCommandResponse("getprop ro.kernel.qemu", createExecResult("1", ""));
+    adb.setCommandResponse("getprop ro.boot.qemu.avd_name", createExecResult("Pixel", ""));
+    manager.setBootedDevices("android", [booted(remote)]);
+
+    expect(await tap("remote-emulator", remote)).toMatchObject({ success: true });
+    expect(pool.isAndroidTransportAssignable(booted(remote))).toBe(false);
+    expect(sessionManager.getSessionForDevice(usb)).toBe(HOLDER);
+    expect(driven).toEqual([`tap:${remote}`]);
+  });
+
+  test("a first-seen wireless id whose identity probe fails is refused, not treated as unowned", async () => {
+    await start([booted(usb)]);
+    adb.setCommandError("getprop ro.serialno", new Error("device offline"));
+    manager.setBootedDevices("android", [booted(usb), booted(wireless)]);
+
+    const before = sessionManager.getSession(HOLDER)!;
+    const idle = { lastUsedAt: before.lastUsedAt, expiresAt: before.expiresAt };
+    timer.advanceTime(1000);
+    const tapped = await tap("unproven-tap", wireless);
+    const written = await setKeyValue("unproven-kv", wireless);
+    const service = await send("unproven-svc", "ide/updateService", {
+      platform: "android",
+      deviceId: wireless,
+      force: true,
+    });
+
+    expect(tapped).toMatchObject({
+      ...HELD_BY_OTHER,
+      details: { deviceId: wireless },
+      retryable: false,
+    });
+    expect(written).toMatchObject(HELD_BY_OTHER);
+    expect(service).toMatchObject(HELD_BY_OTHER);
+    expect(sessionManager.getSession(HOLDER)).toMatchObject(idle);
+    expect(driven).toEqual([]);
+  });
+
+  test("a wireless id that answers with the held serial while USB is not listed is refused", async () => {
+    // Only the wireless row is discovered: the probe names the pooled serial, but nothing proves
+    // the two rows are one handset, so the pool leaves the row unproven rather than aliasing it.
+    await start([booted(usb)]);
+    manager.setBootedDevices("android", [booted(wireless)]);
+
+    const sessionless = await tap("lone-wireless", wireless);
+    const unnamed = await send("lone-wireless-unnamed", "input/tap", {
+      platform: "android",
+      x: 1,
+      y: 2,
+    });
+
+    expect(sessionless).toMatchObject(HELD_BY_OTHER);
+    expect(unnamed).toMatchObject(HELD_BY_OTHER);
+    expect(driven).toEqual([]);
+  });
+
+  test("the holder's frames on the pooled id never probe an unprovable wireless row", async () => {
+    await start([booted(usb)]);
+    adb.setCommandError("getprop ro.serialno", new Error("device offline"));
+    manager.setBootedDevices("android", [booted(usb), booted(wireless)]);
+    const before = identityProbes();
+
+    for (const id of ["one", "two", "three"]) {
+      expect(await tap(id, usb, { sessionUuid: HOLDER })).toMatchObject({ success: true });
+    }
+
+    expect(identityProbes()).toBe(before);
+    expect(driven).toEqual([`tap:${usb}`, `tap:${usb}`, `tap:${usb}`]);
+  });
+
   test("a wireless id first seen on an ide/setKeyValue frame is folded before the holder check", async () => {
     await start([booted(usb)]);
     manager.setBootedDevices("android", [booted(usb), booted(wireless)]);
@@ -284,5 +405,94 @@ describe("a direct frame naming a held handset by its other transport id", () =>
 
     expect(driven).toEqual([]);
     expect(response).toMatchObject(HELD_BY_OTHER);
+  });
+  test("unidentifiable input and IDE control dispatch when nothing is held", async () => {
+    await start([], false);
+    adb.setCommandResponse("getprop ro.serialno", createExecResult("unknown", ""));
+    manager.setBootedDevices("android", [booted(wireless)]);
+    expect(await tap("free-tap", wireless)).toMatchObject({ success: true });
+    expect(await setKeyValue("free-kv", wireless)).toMatchObject({ success: true });
+    expect(driven).toEqual([`tap:${wireless}`, `setPreference:${wireless}`]);
+  });
+
+  test("a loopback adb port cannot alias a held different emulator", async () => {
+    await start([], false);
+    await sessionManager.createSession(HOLDER, "emulator-5556", "android", 60_000);
+    adb.setCommandError("getprop ro.serialno", new Error("unreadable"));
+    const target = "localhost:5555";
+    manager.setBootedDevices("android", [booted(target)]);
+    expect(await tap("different-console-tap", target)).toMatchObject({ success: true });
+    expect(await setKeyValue("different-console-kv", target)).toMatchObject({ success: true });
+    expect(driven).toEqual([`tap:${target}`, `setPreference:${target}`]);
+  });
+
+  test("the holder's unresolved alias keeps the untyped error and does not restart idle", async () => {
+    await start([booted(usb)]);
+    adb.setCommandError("getprop ro.serialno", new Error("unreadable"));
+    manager.setBootedDevices("android", [booted(usb), booted(wireless)]);
+    const before = sessionManager.getSession(HOLDER)!;
+    const idle = { lastUsedAt: before.lastUsedAt, expiresAt: before.expiresAt };
+    timer.advanceTime(1000);
+    const tapped = await tap("holder-unresolved", wireless, { sessionUuid: HOLDER });
+    const written = await send("holder-unresolved-kv", "ide/setKeyValue", {
+      platform: "android",
+      deviceId: wireless,
+      appId: "com.example",
+      fileName: "prefs",
+      key: "k",
+      value: "v",
+      type: "STRING",
+      sessionUuid: HOLDER,
+    });
+    expect(tapped).toMatchObject(UNPROVEN);
+    expect(written).toMatchObject(UNPROVEN);
+    expect(tapped?.code).toBeUndefined();
+    expect(written?.code).toBeUndefined();
+    expect(sessionManager.getSession(HOLDER)).toMatchObject(idle);
+    expect(driven).toEqual([]);
+  });
+
+  test("an iOS id shaped like wireless stays unaffected while Android is held", async () => {
+    manager.setBootedDevices("ios", [{ deviceId: wireless, name: "iPhone", platform: "ios" }]);
+    expect(
+      await send("ios-shaped-tap", "input/tap", {
+        platform: "ios",
+        deviceId: wireless,
+        x: 1,
+        y: 2,
+      }),
+    ).toMatchObject({ success: true });
+    expect(
+      await send("ios-shaped-kv", "ide/setKeyValue", {
+        platform: "ios",
+        deviceId: wireless,
+        appId: "com.example",
+        fileName: "prefs",
+        key: "k",
+        value: "v",
+        type: "STRING",
+      }),
+    ).toMatchObject({ success: true });
+    expect(driven).toEqual([`ios-tap:${wireless}`, `ios-setPreference:${wireless}`]);
+  });
+
+  test("a screenshot read of an unidentifiable transport never reaches the control identity check", async () => {
+    await start([booted(usb)]);
+    adb.setCommandError("getprop ro.serialno", new Error("unreadable"));
+    manager.setBootedDevices("android", [booted(wireless)]);
+    const gate = spyOn(pool, "isAndroidTransportAssignable").mockImplementation(() => {
+      throw new Error("Reads must never check control identity");
+    });
+    try {
+      const uri = `automobile:observation/${encodeURIComponent(wireless)}/latest/screenshot`;
+      expect(await send("read-unresolved", "resources/read", { uri })).toMatchObject({
+        success: true,
+      });
+      expect(reads).toEqual([uri]);
+      expect(gate).not.toHaveBeenCalled();
+      expect(driven).toEqual([]);
+    } finally {
+      gate.mockRestore();
+    }
   });
 });

@@ -3,6 +3,8 @@ import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { DeviceAssignedToManagedSlotError } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import type { ManagedDeviceEntry } from "../../src/daemon/managedSlots/slotRegistry";
 import { ManagedConnectionScopes } from "../../src/daemon/managedSlots/managedConnectionScope";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
@@ -80,6 +82,19 @@ describe("direct frames from a managed connection outside its slots", () => {
   let writes: string[];
   let taps: number;
   let toolSelections: string[];
+  let canonicalIds: Map<string, string>;
+  let unidentifiableIds: Set<string>;
+  let discovered: BootedDevice[];
+  let managedSlotHeld: boolean;
+  const slotEntry: ManagedDeviceEntry = {
+    platform: "android",
+    stableDeviceId: slotDevice.deviceId,
+    holder: "slot",
+    scopeKey: "scope-a",
+    slotIndex: 0,
+    scopeState: "valid",
+    execSessionUuid: SLOT_SESSION,
+  };
   let configurable: { mockRestore(): void } | undefined;
 
   async function sendOn(
@@ -112,17 +127,20 @@ describe("direct frames from a managed connection outside its slots", () => {
     writes = [];
     taps = 0;
     toolSelections = [];
+    canonicalIds = new Map();
+    unidentifiableIds = new Set();
+    managedSlotHeld = true;
     const timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     await sessionManager.createSession(SLOT_SESSION, slotDevice.deviceId, "android", 60_000);
     await sessionManager.createSession(GENERIC_SESSION, heldDevice.deviceId, "android", 60_000);
     scopes = new ManagedConnectionScopes();
 
-    const devices = [slotDevice, freeDevice, heldDevice];
+    discovered = [slotDevice, freeDevice, heldDevice];
     PlatformDeviceManagerFactory.setInstance({
-      getBootedDevices: async () => devices,
+      getBootedDevices: async () => discovered,
       getBootedDevicesDetailed: async () => ({
-        devices,
+        devices: discovered,
         succeededPlatforms: new Set(["android", "ios"]),
       }),
     } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
@@ -154,7 +172,29 @@ describe("direct frames from a managed connection outside its slots", () => {
           },
         }) as unknown as AndroidCtrlProxyManager,
     );
-    const fakePool = createFakeDaemonState().getDevicePool();
+    const fakePool = {
+      ...createFakeDaemonState().getDevicePool(),
+      resolveAndroidCanonicalId: (deviceId: string) => canonicalIds.get(deviceId) ?? deviceId,
+      isAndroidTransportAssignable: (device: BootedDevice) =>
+        !unidentifiableIds.has(device.deviceId),
+      androidManagedSlotHold: async (heldDeviceIds: readonly string[]) =>
+        managedSlotHeld && !heldDeviceIds.includes(slotDevice.deviceId)
+          ? { entry: slotEntry }
+          : undefined,
+      assertNotAssignedToManagedSlot: async (input: {
+        action: string;
+        deviceId: string;
+        requesterSessionUuid?: string;
+      }) => {
+        if (
+          managedSlotHeld &&
+          input.deviceId === slotDevice.deviceId &&
+          input.requesterSessionUuid !== SLOT_SESSION
+        ) {
+          throw new DeviceAssignedToManagedSlotError(input.action, input.deviceId, slotEntry);
+        }
+      },
+    };
     const server = new UnixSocketServer(
       "unused",
       "http://localhost:0/mcp",
@@ -349,6 +389,21 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(response).toMatchObject(OUTSIDE_SLOTS);
   });
 
+  test("daemon/relinquishDeviceLease compares the slot device by its pooled canonical id", async () => {
+    canonicalIds.set("192.168.1.20:5555", heldDevice.deviceId);
+    canonicalIds.set("192.168.1.30:5555", slotDevice.deviceId);
+
+    const foreign = await send("lease-alias-foreign", "daemon/relinquishDeviceLease", {
+      deviceId: "192.168.1.20:5555",
+    });
+    const own = await send("lease-alias-own", "daemon/relinquishDeviceLease", {
+      deviceId: "192.168.1.30:5555",
+    });
+
+    expect(foreign).toMatchObject(OUTSIDE_SLOTS);
+    expect(own?.code).not.toBe("device_outside_managed_slots");
+  });
+
   test("reads from the managed connection outside its slots still answer", async () => {
     const info = await send("info", "daemon/sessionInfo", { sessionId: GENERIC_SESSION });
     const sessions = await send("sessions", "daemon/activeSessions", {});
@@ -374,5 +429,68 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(writes).toEqual(["setPreference"]);
     expect(released).toMatchObject({ success: true });
     expect(sessionManager.getSession(GENERIC_SESSION)).toBeNull();
+  });
+  test("outside callers cannot drive an unidentified transport while an idle Android slot is held", async () => {
+    await sessionManager.releaseSession(SLOT_SESSION);
+    await sessionManager.releaseSession(GENERIC_SESSION);
+    const target = "192.168.1.20:5555";
+    unidentifiableIds.add(target);
+    discovered.push({ deviceId: target, name: target, platform: "android" });
+    const tapped = await sendOn(generic, "slot-unknown-tap", "input/tap", {
+      platform: "android",
+      deviceId: target,
+      x: 1,
+      y: 2,
+    });
+    const written = await sendOn(
+      generic,
+      "slot-unknown-kv",
+      "ide/setKeyValue",
+      keyValue(target, { value: "v", type: "STRING" }),
+    );
+    expect(tapped).toMatchObject({
+      success: false,
+      code: "device_assigned_to_managed_slot",
+      retryable: false,
+    });
+    expect(written).toMatchObject({ success: false, code: "device_assigned_to_managed_slot" });
+    expect(taps).toBe(0);
+    expect(writes).toEqual([]);
+  });
+
+  test("a slot's managed connection drives its canonical device", async () => {
+    const tapped = await send("slot-canonical-tap", "input/tap", {
+      platform: "android",
+      deviceId: slotDevice.deviceId,
+      x: 1,
+      y: 2,
+      sessionUuid: SLOT_SESSION,
+    });
+    expect(tapped).toMatchObject({ success: true });
+    expect(taps).toBe(1);
+  });
+
+  test("an unidentified frame with nothing held still passes identity before managed confinement", async () => {
+    await sessionManager.releaseSession(SLOT_SESSION);
+    await sessionManager.releaseSession(GENERIC_SESSION);
+    managedSlotHeld = false;
+    const target = "192.168.1.20:5555";
+    unidentifiableIds.add(target);
+    discovered.push({ deviceId: target, name: target, platform: "android" });
+    const tapped = await send("confined-unknown-tap", "input/tap", {
+      platform: "android",
+      deviceId: target,
+      x: 1,
+      y: 2,
+    });
+    const written = await send(
+      "confined-unknown-kv",
+      "ide/setKeyValue",
+      keyValue(target, { value: "v", type: "STRING" }),
+    );
+    expect(tapped).toMatchObject(OUTSIDE_SLOTS);
+    expect(written).toMatchObject(OUTSIDE_SLOTS);
+    expect(taps).toBe(0);
+    expect(writes).toEqual([]);
   });
 });

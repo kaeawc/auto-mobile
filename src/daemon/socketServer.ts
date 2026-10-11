@@ -149,6 +149,7 @@ import {
 import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
 import { ToolRegistry } from "../server/toolRegistry";
 import {
+  assertFrameTargetIdentityProven,
   canonicalFrameDeviceId,
   canonicalizeFrameDiscovery,
   type CanonicalFrameDiscovery,
@@ -5633,6 +5634,7 @@ export class UnixSocketServer {
     if (!this.daemonState.isInitialized()) {
       return;
     }
+    await this.assertFrameTargetProven(device, action, () => requesterSessionUuid);
     this.assertManagedConnectionControl(ideMutation?.socketSessionId, action, {
       deviceId,
       requesterSessionUuid,
@@ -5821,6 +5823,34 @@ export class UnixSocketServer {
       platform,
       rawDevices,
       deviceId,
+    );
+  }
+
+  /** Refuse unresolved control only when its target could alias a held device; see the helper. */
+  private async assertFrameTargetProven(
+    device: BootedDevice,
+    action: string,
+    requester?: () => string | undefined,
+  ): Promise<void> {
+    if (!this.daemonState.isInitialized()) {
+      return;
+    }
+    const sessionManager = this.daemonState.getSessionManager();
+    await assertFrameTargetIdentityProven(
+      this.daemonState.getDevicePool(),
+      device,
+      action,
+      Boolean(sessionManager.getSessionForDevice?.(device.deviceId)),
+      {
+        sessions: sessionManager.getHeldDeviceSessions
+          ? sessionManager.getHeldDeviceSessions().map(({ deviceId, ...session }) => ({
+              ...session,
+              assignedDevice: deviceId,
+            }))
+          : (sessionManager.getAllSessions?.() ?? []),
+        requester,
+        sessionManager,
+      },
     );
   }
 
@@ -6094,6 +6124,8 @@ export class UnixSocketServer {
       args.deviceId,
       socketSessionId,
       "input/tap",
+      false,
+      input?.requester,
     );
     const gestureResult = await this.runTrackedKeyedDeviceInput(
       request.method,
@@ -6198,6 +6230,8 @@ export class UnixSocketServer {
       args.deviceId,
       socketSessionId,
       "input/swipe",
+      false,
+      input?.requester,
     );
     const gestureResult = await this.runTrackedKeyedDeviceInput(
       request.method,
@@ -6321,6 +6355,8 @@ export class UnixSocketServer {
       args.deviceId,
       socketSessionId,
       method,
+      false,
+      input?.requester,
     );
     let startAdmission: StrokeAdmission | undefined;
     const gestureResult = await this.liftingStrokeOnSessionRefusal(
@@ -6658,6 +6694,7 @@ export class UnixSocketServer {
       socketSessionId,
       "input/typeText",
       args.append,
+      input?.requester,
     );
     let confirmedAppendCharsSent: number | undefined;
     const recordConfirmedAppendCharsSent = (charsSent: number): void => {
@@ -6679,6 +6716,7 @@ export class UnixSocketServer {
                 socketSessionId,
                 "input/typeText",
                 true,
+                input?.requester,
               )
             : targetDevice;
         this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/typeText");
@@ -6760,6 +6798,8 @@ export class UnixSocketServer {
       args.deviceId,
       socketSessionId,
       "input/pressButton",
+      false,
+      input?.requester,
     );
     const buttonResult = await this.runTrackedKeyedDeviceInput(
       request.method,
@@ -6830,6 +6870,8 @@ export class UnixSocketServer {
       args.deviceId,
       socketSessionId,
       "input/key",
+      false,
+      input?.requester,
     );
     const keyResult = await this.runTrackedKeyedDeviceInput(
       request.method,
@@ -7548,6 +7590,7 @@ export class UnixSocketServer {
     socketSessionId: string | undefined,
     action: InputTargetAction,
     bypassAndroidDeviceListCache: boolean = false,
+    requester?: () => string | undefined,
   ): Promise<BootedDevice> {
     const targetDevice = await this.selectInputTargetDevice(
       platform,
@@ -7556,6 +7599,7 @@ export class UnixSocketServer {
       action,
       bypassAndroidDeviceListCache,
     );
+    await this.assertFrameTargetProven(targetDevice, action, requester);
     this.assertManagedConnectionInputTarget(socketSessionId, action, targetDevice.deviceId);
     this.captureInputTargetOwner(targetDevice);
     return targetDevice;

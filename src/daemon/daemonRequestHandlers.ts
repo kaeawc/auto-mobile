@@ -31,6 +31,7 @@ import {
 } from "./types";
 import {
   DeviceLabelMap,
+  type HeldDeviceSession,
   type LivenessClaimOutcome,
   type LivenessReleaseOutcome,
   Session,
@@ -88,6 +89,7 @@ import {
 } from "./sessionReleasedDuringCall";
 import { isExpiryReleaseReason, isTerminalReleaseReason } from "./releaseReasons";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
+import { canonicalFrameDeviceId } from "./frameDeviceIdentity";
 import {
   managedConnectionControlRefusal,
   type ManagedConnectionScopes,
@@ -150,6 +152,8 @@ export interface DaemonStateAccess {
     getReleasingSession?(sessionId: string): Session | null;
     waitForSessionReleaseWithin?(sessionId: string, timeoutMs: number): Promise<boolean>;
     getAllSessions?(): Session[];
+    /** Reverse-map holders, including sessions awaiting or completing release. */
+    getHeldDeviceSessions?(): readonly HeldDeviceSession[];
     getTerminalReleaseSnapshot?(sessionId: string): SessionReleaseSnapshot | undefined;
     /** Why a session this daemon released was released; undefined for a never-issued UUID. */
     getReleasedSessionReason?(sessionId: string): Promise<string | undefined>;
@@ -225,6 +229,8 @@ export interface DaemonStateAccess {
      * has it ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
      */
     assertDeviceActionable?(deviceId: string, purpose: string): void;
+    /** The pooled canonical id for a known Android alias serial (identity otherwise). */
+    resolveAndroidCanonicalId?(deviceId: string): string;
     /** Refuse control of a device a managed slot holds (#11178); see `DevicePool`. */
     assertNotAssignedToManagedSlot?: ManagedSlotInputGate["assertNotAssignedToManagedSlot"];
     /** FUNNEL 1 — fold a discovery observation into pooled identity. */
@@ -1333,7 +1339,11 @@ function managedConnectionLifecycleRefusal(
   const refusal = managedConnectionControlRefusal({
     binding: state.getManagedConnectionScopes?.().get(context.socketSessionId),
     action,
-    deviceId: target.deviceId,
+    // Slot sessions hold the pooled canonical id; the request may name the device by an alias.
+    deviceId:
+      target.deviceId === undefined
+        ? undefined
+        : canonicalFrameDeviceId(state.getDevicePool(), target.deviceId),
     requesterSessionUuid: target.sessionUuid,
     slotDeviceOf: (sessionUuid) => manager.getSession(sessionUuid)?.assignedDevice ?? undefined,
   });

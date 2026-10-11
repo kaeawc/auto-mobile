@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { OWNER_DISCONNECT_GRACE_MS } from "../../src/daemon/ownerDisconnectRelease";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
@@ -18,6 +19,7 @@ import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerSte
 
 const primary: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
 const labelled: BootedDevice = { name: "Pixel B", deviceId: "emulator-5556", platform: "android" };
+const spare: BootedDevice = { name: "Pixel C", deviceId: "emulator-5558", platform: "android" };
 const BASE = "sess-a";
 const DERIVED = `${BASE}:B`;
 const OWNER = "conn-owner";
@@ -34,7 +36,10 @@ const worlds: World[] = [];
 const spies: Array<{ mockRestore(): void }> = [];
 
 /** OWNER's plan: the base on the first device, its label session `B` on the second. */
-async function world(baseOwner: string | undefined): Promise<World> {
+async function world(
+  baseOwner: string | undefined,
+  devices: BootedDevice[] = [primary, labelled],
+): Promise<World> {
   if (spies.length === 0) {
     for (const level of ["info", "warn", "error", "debug"] as const) {
       spies.push(spyOn(logger, level).mockImplementation(() => {}));
@@ -48,7 +53,7 @@ async function world(baseOwner: string | undefined): Promise<World> {
   );
   manager.stopCleanupTimer();
   const discovery = new FakeDeviceUtils();
-  discovery.setBootedDevices("android", [primary, labelled]);
+  discovery.setBootedDevices("android", devices);
   discovery.setBootedDevices("ios", []);
   const pool = new DevicePool(
     createDevicePoolDependencies(manager, "ownership-table-daemon", {
@@ -56,7 +61,7 @@ async function world(baseOwner: string | undefined): Promise<World> {
       deviceManager: discovery,
     }),
   );
-  await pool.initializeWithDevices([primary, labelled]);
+  await pool.initializeWithDevices(devices);
   await bind(pool, BASE, primary.deviceId, baseOwner);
   manager.setDeviceLabels(BASE, buildDeviceLabelMap(["A", "B"], BASE));
   await pool.assignMultipleDevices([DERIVED], 1_000, "android");
@@ -194,6 +199,60 @@ describe("a derived label session is judged and recorded as its base", () => {
     w.pool.releaseMcpSessionBindings(OWNER);
 
     expect(await afterGrace(w)).toEqual({ baseReleased: true });
+  });
+
+  describe("a bind that names a label of the base as the session to create or move", () => {
+    const UNMINTED = `${BASE}:C`;
+    const idleDevice = (w: World): string =>
+      [labelled, spare].find((d) => w.pool.getDevice(d.deviceId)?.sessionId === null)!.deviceId;
+
+    /** The plan's world plus an idle third device, with label C published but not yet allocated. */
+    async function worldWithSpare(): Promise<World> {
+      const w = await world(OWNER, [primary, labelled, spare]);
+      w.manager.setDeviceLabels(BASE, buildDeviceLabelMap(["A", "B", "C"], BASE));
+      return w;
+    }
+
+    test.each([
+      { name: "a label not allocated yet", session: UNMINTED, rebind: false },
+      { name: "a live label, as a rebind", session: DERIVED, rebind: true },
+    ])("another connection is refused and takes nothing: $name", async ({ session, rebind }) => {
+      const w = await worldWithSpare();
+      const before = ownership(w);
+      const idle = idleDevice(w);
+
+      const bound = w.pool.bindOrReuseDeviceSession(
+        session,
+        idle,
+        "android",
+        undefined,
+        undefined,
+        undefined,
+        rebind,
+        undefined,
+        undefined,
+        undefined,
+        OTHER,
+      );
+
+      await expect(bound).rejects.toMatchObject({ code: DEVICE_OWNED_BY_OTHER_SESSION_CODE });
+      expect(ownership(w)).toEqual(before);
+      expect(w.pool.getDevice(idle)?.sessionId).toBeNull();
+      expect(
+        w.pool.resolveOwnedDeviceSessionForMcpSession(OTHER, primary.deviceId),
+      ).toBeUndefined();
+    });
+
+    test("the base's owner may, and stays the owner", async () => {
+      const w = await worldWithSpare();
+      const idle = idleDevice(w);
+
+      expect(await bind(w.pool, UNMINTED, idle, OWNER)).toBe(UNMINTED);
+
+      expect(w.pool.isSessionOwnedByOtherConnection(UNMINTED, OTHER)).toBe(true);
+      expect(w.pool.resolveOwnedDeviceSessionForMcpSession(OWNER, idle)).toBe(UNMINTED);
+      expect(w.pool.isSessionOwnedByOtherConnection(BASE, OWNER)).toBe(false);
+    });
   });
 
   test("a label session published under a label session counts as the outermost base", async () => {

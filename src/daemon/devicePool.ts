@@ -53,6 +53,7 @@ import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
 import {
   deviceAlreadyAssignedToAnotherSessionError,
   deviceAssignedToOtherSessionError,
+  InputDeviceOwnedError,
 } from "./inputDeviceOwnership";
 import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import {
@@ -7833,6 +7834,22 @@ export class DevicePool {
   ): Promise<void> {
     const deviceId = device.id;
     const { allowSessionRebind, expectedExistingSessionDeviceId } = options;
+    // A connection may not mint or rebind a label session of a base another connection owns
+    // (#11586): the bind records its caller as the owner, and a label's owner is its base's.
+    if (
+      caller.mcpSessionId !== undefined &&
+      this.ownershipSessionId(sessionId) !== sessionId &&
+      this.hasConnectedMcpSessionOwner(sessionId, caller.mcpSessionId)
+    ) {
+      throw new InputDeviceOwnedError(
+        "Device acquisition",
+        deviceId,
+        sessionId,
+        undefined,
+        `Session ${sessionId} is a device label of a session another connected client owns, ` +
+          `so device '${deviceId}' cannot be bound to it. Acquire the device under your own session.`,
+      );
+    }
     const assignmentSnapshot = this.snapshotSessionAssignment(device);
     const previousSession = this.sessionManager.getSession(sessionId);
     this.assertExpectedRecoverySession(

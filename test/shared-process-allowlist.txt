@@ -798,6 +798,9 @@ test/scripts/benchmarkThresholds.test.ts
 test/scripts/buildReleaseNotes.test.ts
 test/scripts/checkUtilsImportDirection.test.ts
 test/scripts/ciLfsSkipSmudgePolicy.test.ts
+test/scripts/ciTimeToGreenArgs.test.ts
+test/scripts/ciTimeToGreenFetch.test.ts
+test/scripts/ciTimeToGreenReport.test.ts
 test/scripts/circleciMacosMigrationPolicy.test.ts
 test/scripts/clockSemanticsReport.test.ts
 test/scripts/copyDbRuntimeFiles.test.ts
@@ -831,6 +834,7 @@ test/scripts/optimizeSourcemap.test.ts
 test/scripts/optimizedSourcemapRuntime.test.ts
 test/scripts/oxfmtWorkflow.test.ts
 test/scripts/packedRuntimeAssets.test.ts
+test/scripts/prPathClassification.test.ts
 test/scripts/pullRequestAutoChoreWorkflow.test.ts
 test/scripts/readReleaseRegistry.test.ts
 test/scripts/runnerCalibration.test.ts

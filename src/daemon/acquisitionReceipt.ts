@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { Session } from "./sessionManager";
+import type { Session, SessionCacheData } from "./sessionManager";
 
 /**
  * What one acquisition created, filled in while it runs. A caller whose result never reaches its
@@ -7,6 +7,12 @@ import type { Session } from "./sessionManager";
  * or an already running device owned before the call (#11565, #11593).
  */
 export interface AcquisitionReceipt {
+  /**
+   * The session id this request's client chose itself (`setActiveDevice`), set before anything
+   * is minted. The client knows the id although the call never answers, and names it again on
+   * its retry: a cancellation at any point of the mint must leave the id free to be created.
+   */
+  clientChosenSessionId?: string;
   /**
    * The session this acquisition minted. Absent when it reused or moved an existing one.
    * `activityGeneration` is the session's at the mint: it advances whenever anyone resolves the
@@ -22,11 +28,17 @@ export interface AcquisitionReceipt {
      */
     readonly clientSuppliedId?: boolean;
   };
-  /** The existing session this call moved to `deviceId`, and the device it held before. */
+  /**
+   * The existing session this call moved to `deviceId`, and the device it held before.
+   * `cacheData` is what the session cached for that device when the move began. A rebind discards
+   * it, so moving the session back puts back the part that still describes the device (display
+   * pin, readiness, observation baselines) and not the overrides the rebind already restored.
+   */
   rebound?: {
     readonly session: Session;
     readonly deviceId: string;
     readonly fromDeviceId: string;
+    readonly cacheData: SessionCacheData;
   };
   /**
    * The device this call booted or created. `rollBack` stops what it booted and deletes what it

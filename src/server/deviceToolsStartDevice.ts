@@ -8,6 +8,7 @@ import type { DeviceMatcher } from "../utils/deviceMatcher";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import { DaemonState } from "../daemon/daemonState";
+import { isAnonymousAcquisitionSession } from "../daemon/sessionManager";
 import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
 import { requestAcquisitionReceipt, type AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
@@ -54,6 +55,7 @@ import {
   getStartDevicePool,
   getVerifiedWarmAndroidAvdIdentity,
   initializedDevicePool,
+  liveHolderOtherThanThisRequest,
   prepareStartDeviceRunnerReadiness,
   publishWarmDeviceReady,
   refreshResourcesAfterCommittedBoot,
@@ -237,6 +239,15 @@ async function rollbackCreatedDeviceAfterBoot(
   if (!boot || !createdImage || state.ownershipTransferred || !rollback) {
     return;
   }
+  const otherHolder = liveHolderOtherThanThisRequest(boot.device.deviceId);
+  if (otherHolder) {
+    // Another session selected the device while this call prepared it: it is that session's
+    // device now, and deleting it is as much lifecycle on it as stopping it (#11651).
+    logger.info(
+      `[DeviceTools] Keeping created ${boot.device.platform} device '${createdImage.name}': session ${otherHolder} holds it`,
+    );
+    return;
+  }
   // Stop the emulator before deleting its AVD. prepareDevice would otherwise
   // cancel it only after this rollback; clearing `state.boot` keeps that
   // cancellation from signalling the same process twice.
@@ -330,6 +341,7 @@ const bootAndPrepareDevice = async (
     },
   });
   const exclusions = await startMatchExclusions(args.platform);
+  const deferDeviceIds = devicesHeldByOtherSessions(args);
   perf.startOperation("bootDevice");
   // Establish the (--debug-perf-gated) ambient tracker around the shared
   // acquisition boot attempt (getAndroid/getApple/startDevice), matching
@@ -344,6 +356,7 @@ const bootAndPrepareDevice = async (
         totalDeadlineMs: bootDeadlineMs,
         signal,
         ...exclusions,
+        deferDeviceIds,
       },
       progress ? { report: progress } : undefined,
     ),
@@ -480,6 +493,48 @@ async function startMatchExclusions(platform: "android" | "ios"): Promise<{
     excludeDeviceNames: unionSets(recoveryTargets?.names, managed),
     excludeDeviceIds: recoveryTargets?.serials,
   };
+}
+
+/**
+ * Booted devices of the requested platform that a session this caller could not reuse holds
+ * (#11648), or that another request is still preparing and will bind (#11651). A selector-based
+ * start takes one only when no other booted device satisfies its spec, so an idle match is never
+ * passed over for a refusal. The owner test mirrors the pool bind's: an identified connection
+ * reuses a session it acquired (or routes to by autolock), an anonymous caller one an anonymous
+ * acquisition created.
+ */
+function devicesHeldByOtherSessions(args: StartDeviceArgs): ReadonlySet<string> | undefined {
+  const daemonState = DaemonState.getInstance();
+  const pool = getStartDevicePool(daemonState);
+  if (!pool) {
+    return undefined;
+  }
+  const mcpSessionId = args.__oneShotCli === true ? undefined : args.__mcpSessionId;
+  const sessionManager = daemonState.getSessionManager();
+  const callerMayReuse = (deviceId: string, holderSessionId: string): boolean => {
+    if (mcpSessionId === undefined) {
+      const holder = sessionManager.getSession(holderSessionId);
+      return holder !== null && isAnonymousAcquisitionSession(holder);
+    }
+    return (
+      pool.resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId) === holderSessionId ||
+      pool.resolveAutolockSessionForMcpSession(mcpSessionId, undefined, undefined, deviceId) ===
+        holderSessionId
+    );
+  };
+  // This runs before the request reserves anything itself, so every readiness reservation it
+  // sees belongs to another request.
+  const held = pool
+    .getAllDevices()
+    .filter(
+      (device) =>
+        device.platform === args.platform &&
+        (device.sessionId === null
+          ? pool.isReservedForReadiness(device.id)
+          : !callerMayReuse(device.id, device.sessionId)),
+    )
+    .map((device) => device.id);
+  return held.length > 0 ? new Set(held) : undefined;
 }
 
 /** Undefined when both are empty, so an unrestricted boot request stays unrestricted. */

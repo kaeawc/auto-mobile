@@ -48,6 +48,7 @@ import {
   SessionRecoveryIdentityLossError,
   type RehydrationDeviceReservation,
   type Session,
+  type SessionCacheData,
   type SessionRecoveryTarget,
 } from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
@@ -673,6 +674,19 @@ export interface ShutdownIdentityReservation {
 }
 
 const ALLOCATION_SNAPSHOT_STALE_RETRIES = 3;
+
+/**
+ * The session overrides `SessionManager`'s rebind restores on the device the session leaves. A
+ * session moved back to that device (an undone rebind) no longer has them applied there.
+ */
+const OVERRIDES_A_REBIND_RESTORES = [
+  "keepScreenAwake",
+  "biometricEnrollment",
+  "networkCondition",
+  "clock",
+  "rotation",
+  "screenReader",
+] as const satisfies ReadonlyArray<keyof SessionCacheData>;
 
 /** Bound on the adb state read that decides a recovery reservation's lift (#10074). */
 const ANDROID_OFFLINE_PROBE_TIMEOUT_MS = 10_000;
@@ -7505,7 +7519,11 @@ export class DevicePool {
     return this.shutdownReservationCoordinator.isDeviceUnderShutdownReservation(deviceId);
   }
 
-  private isReservedForReadiness(deviceId: string): boolean {
+  /**
+   * Whether some acquisition is preparing this device right now and has not bound it yet.
+   * Synchronous (no assignment lock): a selector start reads it to prefer another match (#11651).
+   */
+  isReservedForReadiness(deviceId: string): boolean {
     return this.shutdownReservationCoordinator.isReservedForReadiness(deviceId);
   }
 
@@ -8032,6 +8050,8 @@ export class DevicePool {
     const assignmentSnapshot = this.snapshotSessionAssignment(device);
     const previousSession = this.sessionManager.getSession(sessionId);
     const previousDeviceId = previousSession?.assignedDevice;
+    // Copied before the rebind: it replaces the session's cache and its restores edit the old one.
+    const previousCacheData = previousSession ? { ...previousSession.cacheData } : undefined;
     this.assertExpectedRecoverySession(
       previousSession,
       sessionId,
@@ -8064,12 +8084,20 @@ export class DevicePool {
         },
       ),
     );
-    // A rebind keeps an id the client supplied, and a restored session predates this call. A
-    // session moved off another device is recorded with where it was (#11593).
-    if (!allowSessionRebind && previousSession === null) {
-      options.receipt.minted = mintedSession(session, deviceId);
-    } else if (previousDeviceId && previousDeviceId !== deviceId) {
-      options.receipt.rebound = { session, deviceId, fromDeviceId: previousDeviceId };
+    // A restored session predates this call. A session minted under the id its client chose is
+    // recorded as such here, at the commit, so a failure of anything after it (the claim publish
+    // included) takes it back without retiring the id. A session moved off another device is
+    // recorded with where it was (#11593).
+    const clientChosen = options.receipt.clientChosenSessionId === sessionId;
+    if (previousSession === null && (!allowSessionRebind || clientChosen)) {
+      options.receipt.minted = mintedSession(session, deviceId, clientChosen);
+    } else if (previousDeviceId && previousDeviceId !== deviceId && previousCacheData) {
+      options.receipt.rebound = {
+        session,
+        deviceId,
+        fromDeviceId: previousDeviceId,
+        cacheData: previousCacheData,
+      };
     }
     this.recordBindOwnership(caller.mcpSessionId, sessionId);
     this.notifyDeviceStateChanged(device);
@@ -8188,6 +8216,29 @@ export class DevicePool {
         `[DevicePool] Session ${sessionId} stays on ${deviceId}: its previous device ${fromDeviceId} could not take it back: ${errorMessage(error)}`,
         error,
       );
+      return;
+    }
+    // Moving back was a rebind too, and a rebind keeps only the session's routing cache. The
+    // session is on the device that cache described again, so it gets back what still describes
+    // that device: its display pin, its readiness, its observation baselines. The overrides do
+    // not come back: the rebind restored each of them on the device (keep-awake, biometrics,
+    // network, clock, rotation, screen reader), so a cache saying they are applied would stop
+    // the next call from applying them again. Label routing is session-level and survives a
+    // rebind, so whatever it is now stays.
+    if (
+      this.sessionManager.getSession(sessionId) === session &&
+      session.assignedDevice === fromDeviceId
+    ) {
+      const restored: SessionCacheData = {
+        ...rebound.cacheData,
+        ...(session.cacheData.deviceLabels === undefined
+          ? {}
+          : { deviceLabels: session.cacheData.deviceLabels }),
+      };
+      for (const override of OVERRIDES_A_REBIND_RESTORES) {
+        delete restored[override];
+      }
+      session.cacheData = restored;
     }
   }
 

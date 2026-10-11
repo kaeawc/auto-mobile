@@ -110,6 +110,26 @@ import { FakeTimer } from "../fakes/FakeTimer";
 //       and the held sessions are heartbeated there within a lease of the daemon's close, whether
 //       that connection reaches a successor or the same daemon (a restart that was called off).
 //
+// A CALL IN FLIGHT ON A SIBLING (the third property below, #11656): the proxy holds several
+// sessions on its one connection and a control call on one of them is admitted by the daemon and
+// not answered yet, while the events of the first table happen to the OTHER sessions.
+//
+// | event, while a sibling's call is in flight    | effect                                              |
+// | --------------------------------------------- | --------------------------------------------------- |
+// | heartbeat answered not-found that would be    | asked again on the SAME connection: the answer is   |
+// |   asked again on a fresh connection           |   decided as the second ask's, with no reset        |
+// | recoverable handoff announced for the latest  | reclaimed on the same connection: no reset          |
+// |   binding                                     |                                                     |
+// | anything else in the first table              | as there: it is about that session only             |
+//
+//   I8  nothing that happens to one session closes the connection under a call in flight on
+//       another: the call is sent once, gets the daemon's own answer, and every session the proxy
+//       must heartbeat is still heartbeated on every tick meanwhile (I3).
+//   I9  a sessionless control call never reaches a session other than the proxy's binding. While
+//       that binding is terminally released and no acquisition has bound a new one, the call is
+//       refused with that release and nothing reaches the daemon, whatever named calls were in
+//       flight at the release or were answered since.
+//
 // "keeper runs" is observed as the keeper's interval being scheduled: it is, exactly while some
 // session the proxy must heartbeat exists.
 //
@@ -147,6 +167,7 @@ type Command =
    * then answers or rejects, or with `read` a call that is answered without restoring anything.
    */
   | { kind: "call"; target: number; rejected: boolean; read?: boolean }
+  | { kind: "sessionless" }
   /** The daemon is replaced; nothing listens for `gapMs` in between. */
   | { kind: "daemon-restart"; gapMs: number }
   | { kind: "tick" }
@@ -220,6 +241,7 @@ const command: fc.Arbitrary<Command> = fc.oneof(
     }),
   },
   { weight: 4, arbitrary: fc.constant<Command>({ kind: "tick" }) },
+  { weight: 2, arbitrary: fc.constant<Command>({ kind: "sessionless" }) },
   // Around the tick on which a window opened by the first commands runs out.
   {
     weight: 1,
@@ -271,6 +293,23 @@ interface SessionModel {
    * it connected: the proxy may or may not be heartbeating it for the window that started then.
    */
   maybeRehydratingSince?: number;
+}
+
+/** What marks the one call a history keeps in flight (I8). */
+const IN_FLIGHT_TEXT = "Upload";
+/** What marks a control call that names no session (I9). */
+const SESSIONLESS_TEXT = "Sessionless";
+
+interface InFlightCall {
+  sessionUuid: string;
+  /** Resolved when the daemon answers it. */
+  answer: PromiseWithResolvers<void>;
+  /** The connection the daemon admitted it on. */
+  client?: FakeDaemonClient;
+  /** How often it reached the daemon. */
+  sent: number;
+  /** What its caller was answered, once it was. */
+  outcome?: string;
 }
 
 /** A daemon the proxy talks to, with the model of what the proxy must do about each session. */
@@ -334,6 +373,10 @@ class World {
    */
   private disturbed = false;
   rejectNextCall = false;
+  /** I8: the control call the daemon admitted and has not answered yet. */
+  private inFlight: InFlightCall | undefined;
+  /** I9: every target the proxy forwards a sessionless control call to, including no target. */
+  private readonly sessionlessTargets: Array<string | undefined> = [];
   private nextBirth: Birth = "lives";
   private reachable = true;
   private commandsApplied = 0;
@@ -379,9 +422,22 @@ class World {
           .then(() => this.answerHeartbeat(sessionUuid, askedDuring));
       },
       onCallTool: (name, params) => {
-        if (typeof params.sessionUuid === "string") {
-          this.answerCall(name, params.sessionUuid);
+        if (params.text === SESSIONLESS_TEXT) {
+          this.sessionlessTargets.push(
+            typeof params.sessionUuid === "string" ? params.sessionUuid : undefined,
+          );
         }
+        if (typeof params.sessionUuid !== "string") {
+          return undefined;
+        }
+        this.answerCall(name, params.sessionUuid);
+        const inFlight = this.inFlight;
+        if (inFlight === undefined || params.text !== IN_FLIGHT_TEXT) {
+          return undefined;
+        }
+        inFlight.sent += 1;
+        inFlight.client = created;
+        return inFlight.answer.promise;
       },
       toolResultFor: (name, params) =>
         name === "getAndroid"
@@ -402,6 +458,12 @@ class World {
     const close = created.close.bind(created);
     created.close = async () => {
       if (!this.closed && this.reachable && this.client === created && created.isConnected()) {
+        if (this.inFlight?.client === created && this.inFlight.outcome === undefined) {
+          // I8, whatever the model knows about what the proxy holds.
+          this.violations.push(
+            `the connection was closed under the call in flight on ${this.inFlight.sessionUuid}`,
+          );
+        }
         this.ownResets += this.handoffAnnounced ? 0 : 1;
         this.handoffAnnounced = false;
         this.ownReset = this.askAgain ?? "other";
@@ -619,6 +681,11 @@ class World {
     this.latest = sessionUuid;
     this.latestCertain = true;
     this.fenced = undefined;
+    this.holds(sessionUuid);
+  }
+
+  /** An answered control call keeps its session live and held, wherever the binding stays. */
+  private holds(sessionUuid: string): void {
     this.mustBeat.add(sessionUuid);
     this.held.add(sessionUuid);
     this.reholdPreviousBinding();
@@ -710,14 +777,19 @@ class World {
       if (outcome !== "answered") {
         this.expected(`a read naming usable session ${sessionUuid} was refused: ${outcome}`);
       }
-      // Whether the proxy bound a session it was not holding is left open; it holds nothing new.
-      // An answered call naming a session it owns lifts the fence, as a control call does.
-      this.latestCertain &&= this.latest === sessionUuid;
-      this.fenced = undefined;
+      // A read holds nothing new and leaves a binding or a terminal release where it is.
+      // With neither, whether the proxy adopts the named session is left open.
+      if (this.latest === undefined && this.fenced === undefined) {
+        this.latestCertain &&= this.latest === sessionUuid;
+      }
       return;
     }
     if (outcome === "answered") {
-      this.bound(sessionUuid);
+      this.holds(sessionUuid);
+      // A named call adopts only when there is neither a binding nor a terminal release.
+      if (this.latestCertain && this.latest === undefined && this.fenced === undefined) {
+        this.latest = sessionUuid;
+      }
     } else if (outcome.startsWith("Element not found")) {
       // Admitted and rejected: the session is live again, and whether the proxy re-bound it
       // depends on what it held, so the latest binding is no longer certain.
@@ -726,6 +798,90 @@ class World {
     } else {
       this.expected(`a call naming usable session ${sessionUuid} was refused: ${outcome}`);
     }
+  }
+
+  /** I9: a sessionless control call uses only the known live binding, or reports its release. */
+  async sessionless(): Promise<void> {
+    const fenced = this.fenced;
+    const latest = this.latest;
+    if (
+      fenced === undefined &&
+      (!this.latestCertain || latest === undefined || this.sessions.get(latest)?.daemon !== "live")
+    ) {
+      // The binding is in doubt, or gone without the proxy knowing: the model cannot judge it.
+      return;
+    }
+    const sentBefore = this.sessionlessTargets.length;
+    const outcome = await this.whileTimePasses(
+      this.proxy.callTool("tapOn", { text: SESSIONLESS_TEXT }),
+    );
+    const sent = this.sessionlessTargets.slice(sentBefore);
+    if (fenced !== undefined) {
+      const reason = this.sessions.get(fenced)!.endedAs;
+      if (sent.length > 0 || outcome === "answered") {
+        this.expected(
+          `I9: a sessionless control call after ${fenced}'s release reached the daemon ` +
+            `(${JSON.stringify(sent)}) or was answered: ${outcome}`,
+        );
+      }
+      if (!outcome.includes(reason)) {
+        this.expected(
+          `I9: a sessionless control call after ${fenced}'s release (${reason}) lost its reason: ${outcome}`,
+        );
+      }
+    } else if (sent.some((sessionUuid) => sessionUuid !== latest)) {
+      this.expected(
+        `I9: a sessionless control call with binding ${latest} reached ${JSON.stringify(sent)}`,
+      );
+    }
+  }
+
+  /** A control call on `sessionUuid` that the daemon admits and does not answer yet. */
+  async startCallInFlight(sessionUuid: string): Promise<void> {
+    const inFlight: InFlightCall = { sessionUuid, answer: Promise.withResolvers<void>(), sent: 0 };
+    this.inFlight = inFlight;
+    void this.proxy.callTool("tapOn", { sessionUuid, text: IN_FLIGHT_TEXT }).then(
+      () => {
+        inFlight.outcome = "answered";
+      },
+      (error: unknown) => {
+        inFlight.outcome =
+          error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      },
+    );
+    await this.settle();
+  }
+
+  /** The daemon answers the call in flight. I8: its caller gets that answer, for a call sent once. */
+  async finishCallInFlight(): Promise<void> {
+    const inFlight = this.inFlight;
+    if (inFlight === undefined) {
+      return;
+    }
+    const cutShort = inFlight.outcome;
+    inFlight.answer.resolve();
+    await this.settle();
+    this.inFlight = undefined;
+    if (cutShort !== undefined) {
+      this.violations.push(
+        `the call in flight on ${inFlight.sessionUuid} was answered before the daemon answered it: ${cutShort}`,
+      );
+    } else if (inFlight.outcome !== "answered" || inFlight.sent !== 1) {
+      this.violations.push(
+        `the call in flight on ${inFlight.sessionUuid} was sent ${inFlight.sent} time(s) and answered: ${inFlight.outcome}`,
+      );
+    }
+    // The answered named call never moves a binding or lifts a terminal release. With neither
+    // at completion it may adopt the named session, so only that case leaves the binding in doubt.
+    if (this.latest === undefined && this.fenced === undefined) {
+      this.latestCertain = false;
+    }
+  }
+
+  /** The session a command aimed at `index` is about, never the one with the call in flight. */
+  siblingAt(index: number): string | undefined {
+    const siblings = [...this.sessions.keys()].filter((id) => id !== this.inFlight?.sessionUuid);
+    return siblings.length === 0 ? undefined : siblings[index % siblings.length];
   }
 
   async restartDaemon(gapMs: number): Promise<void> {
@@ -895,8 +1051,11 @@ class World {
       }
     } else if (step.kind === "pause") {
       this.pause(step.pauseMs);
+    } else if (step.kind === "sessionless") {
+      await this.sessionless();
     } else {
-      const sessionUuid = this.sessionAt(step.target);
+      const sessionUuid =
+        this.inFlight === undefined ? this.sessionAt(step.target) : this.siblingAt(step.target);
       if (sessionUuid === undefined) {
         return;
       }
@@ -925,6 +1084,154 @@ async function violationsOf(history: readonly Command[]): Promise<string[]> {
   }
   return world.violations;
 }
+
+const TICK_COMMAND: Command = { kind: "tick" };
+
+/** Several sessions on one connection, a control call in flight on one of them (I8). */
+interface SiblingCase {
+  /** Sessions acquired first; the last one is the latest binding. */
+  sessions: 2 | 3;
+  /** Which of them the call is in flight on. */
+  callOn: number;
+  /** What happens to the others meanwhile. */
+  during: Command[];
+}
+
+/** What may happen to a session while its sibling's call is in flight: the first table's events. */
+const siblingCommand: fc.Arbitrary<Command> = fc.oneof(
+  {
+    weight: 3,
+    arbitrary: fc.record({
+      kind: fc.constant("release" as const),
+      target,
+      gone: fc.constant<Gone>("recoverable"),
+      notify: fc.boolean(),
+    }),
+  },
+  {
+    weight: 3,
+    arbitrary: fc.record({
+      kind: fc.constant("release" as const),
+      target,
+      gone: fc.constant<Gone>("unknown"),
+      notify: fc.constant(false),
+    }),
+  },
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      kind: fc.constant("release" as const),
+      target,
+      gone: fc.constant<Gone>("terminal"),
+      notify: fc.boolean(),
+      reason: fc.constantFrom(...ENDING_REASONS),
+    }),
+  },
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      kind: fc.constant("call" as const),
+      target,
+      rejected: fc.boolean(),
+      read: fc.boolean(),
+    }),
+  },
+  { weight: 1, arbitrary: fc.constant<Command>({ kind: "acquire", birth: "lives" }) },
+  { weight: 5, arbitrary: fc.constant<Command>({ kind: "tick" }) },
+  { weight: 2, arbitrary: fc.constant<Command>({ kind: "sessionless" }) },
+);
+
+const siblingCase: fc.Arbitrary<SiblingCase> = fc.record({
+  sessions: fc.constantFrom<2 | 3>(2, 2, 3),
+  callOn: fc.nat({ max: 2 }),
+  during: fc.array(siblingCommand, { minLength: 1, maxLength: 6 }),
+});
+
+async function siblingViolationsOf(sibling: SiblingCase): Promise<string[]> {
+  const world = new World();
+  try {
+    for (let acquired = 0; acquired < sibling.sessions; acquired += 1) {
+      await world.apply({ kind: "acquire", birth: "lives" });
+    }
+    // Every session is acknowledged on the connection before anything happens to one.
+    await world.apply({ kind: "tick" });
+    await world.startCallInFlight(world.sessionAt(sibling.callOn)!);
+    for (const step of sibling.during) {
+      await world.apply(step);
+      if (world.violations.length > 0) {
+        break;
+      }
+    }
+    await world.finishCallInFlight();
+    await world.apply({ kind: "sessionless" });
+    if (world.violations.length === 0) {
+      await world.apply({ kind: "tick" });
+    }
+  } finally {
+    await world.close();
+  }
+  return world.violations;
+}
+
+const SIBLING_REGRESSIONS: ReadonlyArray<readonly [string, SiblingCase]> = [
+  [
+    "the latest binding's terminal release during a held session's call is still reported to the next sessionless call (#11656)",
+    {
+      sessions: 2,
+      callOn: 0,
+      during: [{ kind: "release", target: 0, gone: "terminal", notify: true }, TICK_COMMAND],
+    },
+  ],
+  [
+    "the latest binding's terminal release learned from a heartbeat during a held session's call is still reported to the next sessionless call (#11656)",
+    {
+      sessions: 2,
+      callOn: 0,
+      during: [{ kind: "release", target: 0, gone: "terminal", notify: false }, TICK_COMMAND],
+    },
+  ],
+  [
+    "the latest binding's announced device-restart handoff leaves a held session's call in flight (#11656)",
+    {
+      sessions: 2,
+      callOn: 0,
+      during: [{ kind: "release", target: 0, gone: "recoverable", notify: true }, TICK_COMMAND],
+    },
+  ],
+  [
+    "the latest binding's handoff learned from its heartbeat is asked again on the same connection (#11656)",
+    {
+      sessions: 2,
+      callOn: 0,
+      during: [
+        { kind: "release", target: 0, gone: "recoverable", notify: false },
+        TICK_COMMAND,
+        TICK_COMMAND,
+      ],
+    },
+  ],
+  [
+    "the latest binding's bare not-found is asked again on the same connection (#11656)",
+    {
+      sessions: 2,
+      callOn: 0,
+      during: [{ kind: "release", target: 0, gone: "unknown", notify: false }, TICK_COMMAND],
+    },
+  ],
+  [
+    "a held session's handoff leaves the call in flight on the latest binding (#11656)",
+    {
+      sessions: 3,
+      callOn: 2,
+      during: [
+        { kind: "release", target: 0, gone: "recoverable", notify: true },
+        TICK_COMMAND,
+        { kind: "release", target: 1, gone: "unknown", notify: false },
+        TICK_COMMAND,
+      ],
+    },
+  ],
+];
 
 /** How the daemon answers one call that is in flight when it starts shutting down. */
 type DrainAnswer = "result" | "shutting-down" | "close";
@@ -1407,6 +1714,30 @@ const TICK: Command = { kind: "tick" };
 /** The histories of the bugs this state machine had, one per issue item. */
 const REGRESSIONS: ReadonlyArray<readonly [string, readonly Command[]]> = [
   [
+    "#11656.2 a named call after the latest binding's release does not become the binding",
+    [
+      ACQUIRE,
+      ACQUIRE,
+      TICK,
+      { kind: "release", target: 1, gone: "terminal", notify: true },
+      { kind: "call", target: 0, rejected: false },
+      { kind: "sessionless" },
+      TICK,
+    ],
+  ],
+  [
+    "#11656.2 a named read after the latest binding's release does not become the binding",
+    [
+      ACQUIRE,
+      ACQUIRE,
+      TICK,
+      { kind: "release", target: 1, gone: "terminal", notify: true },
+      { kind: "call", target: 0, rejected: false, read: true },
+      { kind: "sessionless" },
+      TICK,
+    ],
+  ],
+  [
     "#11411.1 the next session is reaped before its first heartbeat",
     [ACQUIRE, TICK, { kind: "acquire", birth: "reaped" }, TICK, TICK],
   ],
@@ -1698,6 +2029,41 @@ describe("proxy heartbeat state machine (property-based)", () => {
   test("the shards replay every generated case", () => {
     // `fc.assert` counts the explicit `examples` inside `numRuns`.
     expect(generated).toHaveLength(RUN_OPTIONS.numRuns);
+  });
+});
+
+describe("a call in flight on a sibling session (property-based)", () => {
+  const SIBLING_RUN_OPTIONS = { seed: 11_656, numRuns: 60 } as const;
+  const SHARDS = 12;
+  const generated: SiblingCase[] = [];
+  beforeAll(() => {
+    fc.assert(
+      fc.property(siblingCase, (sibling) => {
+        generated.push(sibling);
+      }),
+      { ...SIBLING_RUN_OPTIONS, examples: SIBLING_REGRESSIONS.map(([, sibling]) => [sibling]) },
+    );
+  });
+
+  test.each(SIBLING_REGRESSIONS)("%s", async (_name, sibling) => {
+    expect(await siblingViolationsOf(sibling)).toEqual([]);
+  });
+
+  test.each(Array.from({ length: SHARDS }, (_, shard) => shard))(
+    "I8: what happens to one session never closes the connection under another's call (shard %d)",
+    async (shard) => {
+      const size = Math.ceil(generated.length / SHARDS);
+      for (const sibling of generated.slice(shard * size, (shard + 1) * size)) {
+        const violations = await siblingViolationsOf(sibling);
+        if (violations.length > 0) {
+          throw new Error(`${violations.join("; ")} for ${JSON.stringify(sibling)}`);
+        }
+      }
+    },
+  );
+
+  test("the shards replay every generated case", () => {
+    expect(generated).toHaveLength(SIBLING_RUN_OPTIONS.numRuns);
   });
 });
 

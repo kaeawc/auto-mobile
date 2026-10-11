@@ -113,6 +113,7 @@ test/daemon/explicitReleaseCutCall.test.ts
 test/daemon/explicitReleaseOfUnrecoveredRestartRow.test.ts
 test/daemon/failuresPushSocketServer.test.ts
 test/daemon/fakeDaemonClientContract.test.ts
+test/daemon/finalizeWaitBudgetContract.test.ts
 test/daemon/findAvailableDaemonPort.test.ts
 test/daemon/forwardLeaseHolders.test.ts
 test/daemon/frameDeviceIdentity.test.ts
@@ -186,6 +187,7 @@ test/daemon/processGenerationFields.test.ts
 test/daemon/proxyHeartbeatStateMachine.property.test.ts
 test/daemon/proxyLivenessRecovery.test.ts
 test/daemon/proxyReleaseReasonClassification.test.ts
+test/daemon/proxySessionEventLeavesSiblingCallInFlight.test.ts
 test/daemon/proxySignalStopReleasesExecution.test.ts
 test/daemon/recycledProcessGeneration.test.ts
 test/daemon/refusalWireContract.test.ts
@@ -418,6 +420,7 @@ test/features/featureFlags/persistedOutputReductionOverrides.test.ts
 test/features/featureFlags/toolDefinitionAffectingFlags.drift.test.ts
 test/features/iosSimFleet/IosBootInstrumentation.test.ts
 test/features/iosSimFleet/capacityCheckFreshListing.test.ts
+test/features/iosSimFleet/capacityCheckSampleBounds.test.ts
 test/features/iosSimFleet/iosBootCapacityGate.test.ts
 test/features/iosSimFleet/iosSimFleet.test.ts
 test/features/memory/MemoryAudit.characterization.test.ts

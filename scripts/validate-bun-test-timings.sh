@@ -49,6 +49,16 @@ max_ms="${BUN_TEST_MAX_MS:-100}"
 recheck_runs="${BUN_TEST_TIMING_RECHECK_RUNS:-3}"
 recheck_budget_seconds="${BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS:-600}"
 stall_min_offenders="${BUN_TEST_TIMING_STALL_MIN_OFFENDERS:-25}"
+# Contention-aware recheck: each isolated run is bracketed by a calibration probe.
+# A run whose probe slowdown exceeds the threshold is retried (at most
+# BUN_TEST_TIMING_CONTENTION_RETRIES extra times; 0 disables retrying) and the
+# least-contended attempt is kept. Samples are never scaled, so the isolated
+# median still enforces the unscaled budget and a genuinely slow test still fails.
+# BUN_TEST_TIMING_PROBE_COMMAND is a test seam: an executable printing a slowdown.
+contention_slowdown="${BUN_TEST_TIMING_CONTENTION_SLOWDOWN:-1.5}"
+contention_retries="${BUN_TEST_TIMING_CONTENTION_RETRIES:-2}"
+# A shard with at least this many over-budget first samples is reported as contended.
+contended_shard_min="${BUN_TEST_TIMING_CONTENDED_SHARD_MIN:-10}"
 
 # Every one of these is used in Bash arithmetic, where a leading zero means
 # octal: `08` is an arithmetic error and `010` silently means eight. Digit-only
@@ -65,6 +75,15 @@ require_positive_int BUN_TEST_MAX_MS "$max_ms"
 require_positive_int BUN_TEST_TIMING_RECHECK_RUNS "$recheck_runs"
 require_positive_int BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS "$recheck_budget_seconds"
 require_positive_int BUN_TEST_TIMING_STALL_MIN_OFFENDERS "$stall_min_offenders"
+require_positive_int BUN_TEST_TIMING_CONTENDED_SHARD_MIN "$contended_shard_min"
+if [[ ! "$contention_retries" =~ ^(0|[1-9][0-9]*)$ ]]; then
+  echo "BUN_TEST_TIMING_CONTENTION_RETRIES must be a non-negative integer without leading zeros (got '${contention_retries}')." >&2
+  exit 2
+fi
+if [[ ! "$contention_slowdown" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+  echo "BUN_TEST_TIMING_CONTENTION_SLOWDOWN must be a non-negative decimal (got '${contention_slowdown}')." >&2
+  exit 2
+fi
 
 mkdir -p "$(dirname "$report_path")"
 
@@ -362,6 +381,30 @@ if [[ -n "$stall_notice" ]]; then
   echo "$stall_notice" || true
 fi
 
+# The start/end calibration probes bracket a shard but cannot see contention in
+# its middle (they report 1.00x while dozens of tests breach). A shard with many
+# unscaled over-budget first samples is therefore recorded as contended, so a
+# reader of a red run can tell "runner contended" from "test slow".
+contention_notice="$(awk -F"$field_sep" -v budget="$max_ms" -v threshold="$contended_shard_min" '
+  {
+    base = $6
+    sub(/^.*\//, "", base)
+    if (match(base, /^(changed-)?shard-[0-9]+/)) base = substr(base, 1, RLENGTH)
+    if ($4 + 0 > budget + 0) over[base]++
+  }
+  END {
+    for (shard in over) if (over[shard] >= threshold) {
+      printf "%s%s: %d over-budget first samples", (text == "" ? "" : "; "), shard, over[shard]
+      text = "x"
+    }
+    if (text != "") printf "."
+  }
+' "$measured_rows")"
+if [[ -n "$contention_notice" ]]; then
+  contention_notice="Runner contended (>= ${contended_shard_min} over-budget first samples in one shard; start/end probes cannot see mid-run contention) - ${contention_notice} First-sample overruns there say nothing about those tests; only the probe-bracketed isolated median below does."
+  echo "$contention_notice" || true
+fi
+
 # Count only complete identity samples, using each process maximum for same-line
 # siblings just as the final verdict does. Every offender must have a majority.
 file_majority_under_budget() {
@@ -463,6 +506,38 @@ elapsed_recheck_seconds() {
   fi
 }
 
+probe_rows="$recheck_dir/recheck-probes.tsv"
+probe_by_file="$recheck_dir/recheck-probes-by-file.tsv"
+: > "$probe_rows"
+: > "$probe_by_file"
+
+# True when decimal $1 is greater than decimal $2.
+decimal_gt() {
+  awk -v a="$1" -v b="$2" 'BEGIN { exit !(a + 0 > b + 0) }'
+}
+
+decimal_max() {
+  awk -v a="$1" -v b="$2" 'BEGIN { printf "%.2f\n", (a + 0 > b + 0 ? a : b) + 0 }'
+}
+
+# One calibration probe: prints the runner slowdown (>= 1). A probe that fails or
+# prints garbage reads as 1.00, so a broken probe can only skip retries, never
+# loosen the verdict (samples are not scaled).
+recheck_probe_slowdown() {
+  local value=""
+  if [[ -n "${BUN_TEST_TIMING_PROBE_COMMAND:-}" ]]; then
+    value="$("$BUN_TEST_TIMING_PROBE_COMMAND" 2> /dev/null)" || value=""
+  else
+    # shellcheck disable=SC2310 # Deliberate: a probe failure must not exit the gate.
+    value="$(run_with_timeout 15 bun "$ROOT/scripts/lib/runner-calibration.ts" measure 2> /dev/null)" || value=""
+  fi
+  if [[ ! "$value" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    echo "Recheck runner probe returned no usable slowdown; treating it as 1.00x." >&2 || true
+    value=1.00
+  fi
+  decimal_max "$value" 1
+}
+
 if [[ "${#recheck_files[@]}" -gt 0 ]]; then
   recheck_index=0
   for file in "${recheck_files[@]}"; do
@@ -480,42 +555,86 @@ if [[ "${#recheck_files[@]}" -gt 0 ]]; then
         file_complete=false
         break
       fi
-      recheck_report="$recheck_dir/recheck-${recheck_index}.xml"
-      recheck_index=$((recheck_index + 1))
-      # The whole file, so module load and JIT warm-up are amortized the way
-      # the real unit lane amortizes them instead of being billed to one test.
-      # A failing assertion here is the unit lane's business, not the budget's:
-      # report it and keep measuring rather than exiting with a bare status.
-      # Per-test timeouts do not bound a whole file (hooks/many tests can
-      # exceed them). Bound this process by the remaining recheck allowance so
-      # the validator, rather than the CI job timeout, prints the verdict.
-      # Invoke separately so the function is not in an errexit-suppressed condition.
-      set +e
-      run_with_timeout "$((recheck_budget_seconds - elapsed_seconds))" \
-        "${BUN_UNIT_TEST_COMMAND[@]}" \
-        --reporter junit \
-        --reporter-outfile "$recheck_report" \
-        "$file"
-      recheck_status=$?
-      set -e
-      if [[ "$recheck_status" -eq 124 || "$recheck_status" -eq 137 ]]; then
-        # GNU timeout returns 137 if its two-second KILL escalation is needed.
+      # Each attempt is bracketed by a calibration probe. A contended attempt is
+      # retried (bounded) and the least-contended attempt's sample is the run's
+      # sample; the sample itself is never scaled.
+      attempt=0
+      have_best=false
+      run_aborted=false
+      best_tsv="$recheck_dir/run-best.tsv"
+      best_contention=""
+      while :; do
+        recheck_report="$recheck_dir/recheck-${recheck_index}.xml"
+        recheck_index=$((recheck_index + 1))
+        probe_before="$(recheck_probe_slowdown)"
+        # The whole file, so module load and JIT warm-up are amortized the way
+        # the real unit lane amortizes them instead of being billed to one test.
+        # A failing assertion here is the unit lane's business, not the budget's:
+        # report it and keep measuring rather than exiting with a bare status.
+        # Per-test timeouts do not bound a whole file (hooks/many tests can
+        # exceed them). Bound this process by the remaining recheck allowance so
+        # the validator, rather than the CI job timeout, prints the verdict.
+        # Invoke separately so the function is not in an errexit-suppressed condition.
+        set +e
+        run_with_timeout "$((recheck_budget_seconds - elapsed_seconds))" \
+          "${BUN_UNIT_TEST_COMMAND[@]}" \
+          --reporter junit \
+          --reporter-outfile "$recheck_report" \
+          "$file"
+        recheck_status=$?
+        set -e
+        probe_after="$(recheck_probe_slowdown)"
+        if [[ "$recheck_status" -eq 124 || "$recheck_status" -eq 137 ]]; then
+          # GNU timeout returns 137 if its two-second KILL escalation is needed.
+          run_aborted=true
+          break
+        elif [[ "$recheck_status" -ne 0 ]]; then
+          echo "Recheck run ${run} of ${file} did not pass; measuring whatever it reported." >&2
+        fi
+        if [[ ! -f "$recheck_report" ]]; then
+          break
+        fi
+        testcase_rows "$recheck_report" > "$recheck_dir/run-recheck.tsv"
+        attempt_contention="$(decimal_max "$probe_before" "$probe_after")"
+        if [[ "$have_best" != "true" ]] || decimal_gt "$best_contention" "$attempt_contention"; then
+          cp "$recheck_dir/run-recheck.tsv" "$best_tsv"
+          best_contention="$attempt_contention"
+          have_best=true
+        fi
+        if ! decimal_gt "$attempt_contention" "$contention_slowdown"; then
+          break
+        fi
+        printf 'Recheck run %d/%d of %s: runner contended (probe %sx before, %sx after; limit %sx); attempt %d of %d.\n' \
+          "$((run + 1))" "$recheck_runs" "$file" "$probe_before" "$probe_after" "$contention_slowdown" \
+          "$((attempt + 1))" "$((contention_retries + 1))" >&2 || true
+        elapsed_seconds="$(elapsed_recheck_seconds)"
+        if [[ "$attempt" -ge "$contention_retries" || "$elapsed_seconds" -ge "$recheck_budget_seconds" ]]; then
+          break
+        fi
+        attempt=$((attempt + 1))
+      done
+      if [[ "$run_aborted" == "true" ]]; then
         file_complete=false
         break
-      elif [[ "$recheck_status" -ne 0 ]]; then
-        echo "Recheck run ${run} of ${file} did not pass; measuring whatever it reported." >&2
       fi
-      if [[ -f "$recheck_report" ]]; then
-        testcase_rows "$recheck_report" > "$recheck_dir/run-recheck.tsv"
+      if [[ "$have_best" == "true" ]]; then
+        run_contended=0
+        if decimal_gt "$best_contention" "$contention_slowdown"; then
+          run_contended=1
+        fi
+        printf '%s\t%s\t%s\t%s\t%s\n' "$file" "$((run + 1))" "$((attempt + 1))" "$best_contention" "$run_contended" >> "$probe_rows"
         # Log each isolated sample as it lands: the final verdict prints only
         # after every file is rechecked, and a job whose log is lost (#9751)
         # would otherwise show no trace that the median check ran at all.
         awk -F"$field_sep" -v file="$file" -v run="$((run + 1))" -v runs="$recheck_runs" '
           NR == 1 || $4 + 0 > worst { worst = $4 + 0 }
           END { if (NR > 0) printf "Recheck run %d/%d of %s: slowest testcase %.2fms.\n", run, runs, file, worst }
-        ' "$recheck_dir/run-recheck.tsv" >&2 || true
-        cat "$recheck_dir/run-recheck.tsv" >> "$recheck_rows"
-        cat "$recheck_dir/run-recheck.tsv" >> "$file_recheck_rows"
+        ' "$best_tsv" >&2 || true
+        printf 'Recheck run %d/%d of %s: runner probe slowdown %sx after %d attempt(s) (%s).\n' \
+          "$((run + 1))" "$recheck_runs" "$file" "$best_contention" "$((attempt + 1))" \
+          "$([[ "$run_contended" -eq 1 ]] && echo contended || echo quiet)" >&2 || true
+        cat "$best_tsv" >> "$recheck_rows"
+        cat "$best_tsv" >> "$file_recheck_rows"
         if (( recheck_runs % 2 == 1 && run + 1 < recheck_runs )); then
           # Invoke separately to preserve processing errors under errexit.
           set +e
@@ -537,11 +656,19 @@ if [[ "${#recheck_files[@]}" -gt 0 ]]; then
   done
 fi
 
+# Worst accepted probe slowdown per rechecked file, for the verdict summary.
+awk -F"\t" '
+  { if (!($1 in worst) || $4 + 0 > worst[$1]) worst[$1] = $4 + 0; if ($5 == 1) contended[$1] = 1 }
+  END { for (f in worst) printf "%s\037%.2f\037%s\n", f, worst[f], (f in contended ? "contended" : "quiet") }
+' "$probe_rows" > "$probe_by_file"
+
 # Keep awk off the potentially non-blocking CI stdout. Its status still exposes
 # genuine processing errors; the data verdict is recorded separately from output.
 awk -F"$field_sep" \
   -v limit_ms="$max_ms" \
   -v stall_notice="$stall_notice" \
+  -v contention_notice="$contention_notice" \
+  -v probe_file="$probe_by_file" \
   -v early_stopped_file="$early_stopped_list" \
   -v limit_budget="$recheck_budget_seconds" \
   -v verdict_file="$recheck_verdict_file" \
@@ -581,6 +708,7 @@ BEGIN {
   printf "# Unit timing budget summary\n\nBudget: %dms; configured re-runs: %d\n", limit_ms, recheck_runs > summary_file
   if (calibration_note != "") printf "\n%s\n", calibration_note > summary_file
   if (stall_notice != "") printf "\n%s\n", stall_notice > summary_file
+  if (contention_notice != "") printf "\n%s\n", contention_notice > summary_file
 }
 function record(verdict, measured_median,    values, count, sample_index, label_text, safe_label, sample_text) {
   # HTML-escape the label so testcase text cannot become Markdown structure.
@@ -596,6 +724,7 @@ function record(verdict, measured_median,    values, count, sample_index, label_
     sample_text = sample_text (sample_index > 1 ? " / " : "") sprintf("%.2fms", values[sample_index])
   }
   if (!count) printf "none" > summary_file
+  if ($1 in probe_text) printf "\n- Runner probe during re-runs: %s", probe_text[$1] > summary_file
   printf "\n- Completed samples: %d of %d%s\n- Median: %s\n- Verdict: %s\n", runs[key] + 0, recheck_runs, (early_clear ? " (early stop: majority under budget)" : ""), measured_median, verdict > summary_file
   if (verdict ~ /^FAIL/) {
     safe_label = label
@@ -631,6 +760,7 @@ function median(key,    values, count, outer, inner, swap) {
   }
   return (values[count / 2] + values[count / 2 + 1]) / 2.0
 }
+FILENAME == probe_file { probe_text[$1] = $2 "x, " $3; next }
 FILENAME == early_stopped_file { early_stopped[$0] = 1; next }
 FILENAME == rechecked_file { rechecked[$0] = 1; next }
 FILENAME == unverified_file { unverified[$0] = 1; next }
@@ -750,7 +880,7 @@ END {
     printf "Rechecked tests: %d\nCleared tests: %d\nFailing tests: %d\n", rechecked_tests, cleared, failures > failure_counts
   }
 }
-' "$early_stopped_list" "$rechecked_list" "$unverified_list" "$identity_counts" "$recheck_rows" "$offender_rows" > "$recheck_summary"
+' "$probe_by_file" "$early_stopped_list" "$rechecked_list" "$unverified_list" "$identity_counts" "$recheck_rows" "$offender_rows" > "$recheck_summary"
 
 IFS= read -r recheck_verdict < "$recheck_verdict_file"
 # cat handles partial writes/EAGAIN; losing diagnostic stdout must not change

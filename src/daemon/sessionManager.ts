@@ -9516,6 +9516,7 @@ export class SessionManager {
     },
     processedClaims: Set<string>,
   ): Promise<void> {
+    const forgetClaimantHeartbeat = this.markAcceptedClaimantHeartbeating(session);
     try {
       if (this.deviceSessionRepository.recordLivenessOwnership) {
         await this.deviceSessionRepository.recordLivenessOwnership(session.sessionId, ownerToken);
@@ -9526,8 +9527,39 @@ export class SessionManager {
       processedClaims.delete(ownerToken);
       session.livenessOwnerToken = previous.previousOwnerToken;
       session.lastOwnerHeartbeat = previous.previousOwnerHeartbeat;
+      forgetClaimantHeartbeat();
       throw error;
     }
+  }
+
+  /**
+   * An accepted claim is its owner's heartbeat (#11646). The claim arrives on the proxy's first
+   * heartbeat, and the request handler records that heartbeat only after the ownership row write
+   * resolves; until then the monitor would judge the session as one that never heartbeated, or
+   * one still awaiting its rehydrated owner, and release it although its owner is live. The fact
+   * is in-memory and set before the write, so a slow database stays off the heartbeat path
+   * (#11079); the lease itself was stamped with the takeover, and is what the session is judged
+   * on from here. Called only for an accepted claim, so a refused one changes nothing.
+   *
+   * Returns the undo for a claim whose write fails: the session is again as unheard and as
+   * unclaimed as the claim found it. A heartbeat or tool call recorded while the write was
+   * pending moved the activity generation and stands on its own, so the undo leaves it alone.
+   */
+  private markAcceptedClaimantHeartbeating(session: Session): () => void {
+    const { hasReceivedHeartbeat, ownership, awaitingOwnerSince, activityGeneration } = session;
+    session.hasReceivedHeartbeat = true;
+    if (ownership === "awaiting-owner") {
+      session.ownership = "owned";
+      session.awaitingOwnerSince = undefined;
+    }
+    return () => {
+      if (session.activityGeneration !== activityGeneration) {
+        return;
+      }
+      session.hasReceivedHeartbeat = hasReceivedHeartbeat;
+      session.ownership = ownership;
+      session.awaitingOwnerSince = awaitingOwnerSince;
+    };
   }
 
   /** Return whether `ownerToken` is still authorized to refresh the session. */

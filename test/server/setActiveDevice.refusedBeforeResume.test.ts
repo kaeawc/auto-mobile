@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { installFakeCtrlProxyManagers } from "../helpers/hermeticDeviceTools";
 import { maskRealCtrlProxyWebSocketOptIn } from "../helpers/maskRealCtrlProxyWebSocketOptIn";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
@@ -46,7 +46,7 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
   let restoreProviders: () => void;
   let previousFactory: ReturnType<typeof PlatformDeviceManagerFactory.getInstance>;
 
-  beforeEach(async () => {
+  const arrange = async (): Promise<void> => {
     restoreProviders = installFakeCtrlProxyManagers();
     timer = new FakeTimer();
     sessions = new SessionManager(
@@ -81,16 +81,18 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
       sessionUuid: "holder",
     });
     expect(pool.getDevice(device.deviceId)?.sessionId).toBe("holder");
-  });
+  };
 
-  afterEach(async () => {
+  const dispose = async (): Promise<void> => {
     await client.close();
     AndroidCtrlProxyClient.clearInstanceRegistryForTesting();
     sessions.stopCleanupTimer();
     DaemonState.getInstance().reset();
     PlatformDeviceManagerFactory.setInstance(previousFactory);
     restoreProviders();
-  });
+  };
+  beforeEach(arrange);
+  afterEach(dispose);
 
   const budget = (): ForcedRestartBudget =>
     (client as unknown as { forcedRestartBudget: ForcedRestartBudget }).forcedRestartBudget;
@@ -102,6 +104,15 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
         () => undefined,
         (error: unknown) => error,
       );
+
+  // The file's first refusal pays the one-off module and JIT cost of the setActiveDevice path,
+  // which is not part of any scenario: pay it here on a throwaway pool. Every test still
+  // arranges and runs its own scenario in full.
+  beforeAll(async () => {
+    await arrange();
+    await intruderSelects();
+    await dispose();
+  });
 
   test("an exhausted forced-restart budget stays exhausted", async () => {
     for (let attempt = 0; attempt < 3; attempt++) {

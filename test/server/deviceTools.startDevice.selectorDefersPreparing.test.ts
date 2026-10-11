@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import {
@@ -98,6 +98,20 @@ describe("two selector starts racing while the first is still preparing its devi
     registerDeviceTools();
     return { pool, readinessDeviceIds, releaseFirstReadiness, firstReadinessStarted };
   }
+
+  // The file's first start pays the one-off module and JIT cost of the whole startDevice path,
+  // which is not part of any scenario: pay it here on a throwaway pool. Every test still
+  // arranges and runs its own race in full.
+  beforeAll(async () => {
+    const warm: BootedDevice = { name: "warm-up", platform: "android", deviceId: "emulator-5590" };
+    const { releaseFirstReadiness } = await arrange(
+      [warm],
+      [{ name: warm.name, platform: "android", deviceId: warm.deviceId, isRunning: true }],
+    );
+    releaseFirstReadiness();
+    await startDevice({ platform: "android", __mcpSessionId: "warm-up" });
+    cleanup();
+  });
 
   async function startDevice(args: Record<string, unknown>): Promise<any> {
     const result = await ToolRegistry.getTool("startDevice")!.handler(args);

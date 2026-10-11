@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "child_process";
 import { EventEmitter } from "node:events";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -89,7 +89,7 @@ describe("a failed start does not stop the device it booted once another session
   /** Runs while the booting call prepares the runner: after boot, before its bind. */
   let duringReadiness: (() => Promise<void>) | undefined;
 
-  beforeEach(() => {
+  const arrange = (): void => {
     resetDeviceToolsDependencies();
     DaemonState.getInstance().reset();
     clearDirectSessionDevices();
@@ -146,9 +146,9 @@ describe("a failed start does not stop the device it booted once another session
       new DeviceSessionRegistry(timer, idGenerator),
     );
     registerDeviceTools();
-  });
+  };
 
-  afterEach(() => {
+  const dispose = (): void => {
     resetDeviceToolsDependencies();
     DaemonState.getInstance().reset();
     sessions.stopCleanupTimer();
@@ -157,7 +157,9 @@ describe("a failed start does not stop the device it booted once another session
     setDeviceManager(null);
     PlatformDeviceManagerFactory.reset();
     timer.reset();
-  });
+  };
+  beforeEach(arrange);
+  afterEach(dispose);
 
   /** Give deferred cleanup and its grace timers room to run. */
   const drain = async (): Promise<void> => {
@@ -188,6 +190,19 @@ describe("a failed start does not stop the device it booted once another session
     { platform: "android", args: { platform: "android", name: avd.name }, deviceId: AVD_SERIAL },
     { platform: "ios", args: { platform: "ios", deviceId: SIM_UDID }, deviceId: SIM_UDID },
   ] as const;
+
+  // The file's first start pays the one-off module and JIT cost of the whole startDevice path,
+  // which is not part of any scenario: pay it here on a throwaway pool. Every test still
+  // arranges, runs and drains its own scenario in full.
+  beforeAll(async () => {
+    arrange();
+    duringReadiness = async () => {
+      throw new Error("warm-up");
+    };
+    await start(TARGETS[0].args);
+    await drain();
+    dispose();
+  });
 
   /** The spared device is the one booted device: its boot's slot was let go exactly once. */
   const expectSparedAndCountedOnce = async (

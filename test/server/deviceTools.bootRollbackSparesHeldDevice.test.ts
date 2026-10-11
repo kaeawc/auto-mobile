@@ -1,43 +1,43 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "child_process";
 import { EventEmitter } from "node:events";
-import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
-import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { RealBootGatesOverFakeFleet } from "../helpers/realBootGatesOverFakeFleet";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import {
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
-} from "../../../src/server/deviceTools";
-import { setDeviceManager } from "../../../src/server/bootedDeviceResources";
-import { clearDirectSessionDevices } from "../../../src/server/directSessionDeviceRegistry";
-import { createSetActiveDeviceHandler } from "../../../src/server/setActiveDevice";
-import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { DaemonState } from "../../../src/daemon/daemonState";
-import { DevicePool } from "../../../src/daemon/devicePool";
-import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import type { DeviceInfo } from "../../../src/models";
-import { DefaultDeviceMatcher } from "../../../src/utils/deviceMatcher";
-import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
-import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
-import { resetProvisionedDeviceTransportFenceForTests } from "../../../src/utils/provisionedDeviceTransportFence";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
-import { FakeTimer } from "../../fakes/FakeTimer";
+} from "../../src/server/deviceTools";
+import { setDeviceManager } from "../../src/server/bootedDeviceResources";
+import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { ActionableError, type DeviceInfo } from "../../src/models";
+import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { resetProvisionedDeviceTransportFenceForTests } from "../../src/utils/provisionedDeviceTransportFence";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 isolateToolRegistry();
 
 /**
- * HUNT (provisioning-6): a start's readiness reservation keeps its device out of general
- * allocation only; an exact bind (setActiveDevice) by another session is admitted while the
- * booting call is still preparing the runner. When the booting call then fails (runner readiness
- * fails, or its own bind is refused because the other session now holds the device), its cleanup
- * stops the device it booted: `cancelUnownedColdBoot` asks whether the pool tracks ITS process on
- * the device, which is recorded only at its own bind, so a device held by somebody else counts as
- * "unowned" and is killed under the live session that holds it.
+ * A start's readiness reservation keeps its device out of general allocation only; an exact bind
+ * (setActiveDevice) by another session is admitted while the booting call is still preparing the
+ * runner. When the booting call then fails (runner readiness fails, or its own bind is refused
+ * because the other session now holds the device), its cleanup must not stop the device it
+ * booted: lifecycle on a device another live session holds is refused (#11651). With no such
+ * holder the device is stopped as before, so nothing this call booted is left running unheld.
  */
-describe("hunt: a failed start does not stop the device it booted once another session holds it", () => {
+describe("a failed start does not stop the device it booted once another session holds it", () => {
   const AVD_SERIAL = "emulator-5554";
   const SIM_UDID = "AAAAAAAA-1111-4111-8111-AAAAAAAAAAAA";
   const avd: DeviceInfo = {
@@ -85,6 +85,7 @@ describe("hunt: a failed start does not stop the device it booted once another s
   let devices: FakeDeviceUtils;
   let pool: DevicePool;
   let bootHandle: RecordingBootHandle;
+  let gates: RealBootGatesOverFakeFleet;
   /** Runs while the booting call prepares the runner: after boot, before its bind. */
   let duringReadiness: (() => Promise<void>) | undefined;
 
@@ -106,6 +107,8 @@ describe("hunt: a failed start does not stop the device it booted once another s
     });
     devices.setMockChildProcess(avd.name, bootHandle as unknown as ChildProcess);
     devices.setMockChildProcess(simulator.name, bootHandle as unknown as ChildProcess);
+    // Every boot is admitted through the real gates, at a limit of one device a platform.
+    gates = new RealBootGatesOverFakeFleet(devices, timer, 1);
     const idGenerator = new CountingIdGenerator("booter");
     const env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
     setDeviceToolsDependencies({
@@ -113,7 +116,6 @@ describe("hunt: a failed start does not stop the device it booted once another s
       deviceManagerFactory: () => devices,
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
       avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
-      checkBootCapacity: async () => {},
       notifyResourcesChanged: async () => {},
       notifyDeviceInventoryResourcesChanged: async () => {},
       syncInstalledAppResourceRegistry: async () => false,
@@ -187,9 +189,22 @@ describe("hunt: a failed start does not stop the device it booted once another s
     { platform: "ios", args: { platform: "ios", deviceId: SIM_UDID }, deviceId: SIM_UDID },
   ] as const;
 
+  /** The spared device is the one booted device: its boot's slot was let go exactly once. */
+  const expectSparedAndCountedOnce = async (
+    platform: "android" | "ios",
+    deviceId: string,
+  ): Promise<void> => {
+    expect(bootHandle.killed).toBe(false);
+    expect(sessions.getSession("other-session")?.assignedDevice).toBe(deviceId);
+    expect(pool.getDevice(deviceId)?.sessionId).toBe("other-session");
+    expect(gates.admissions.map((admission) => admission.platform)).toEqual([platform]);
+    expect(await gates.capacity(platform)).toEqual({ booted: 1, inFlight: 0 });
+    expect(await gates.admitsOneMoreBoot(platform)).toBe(false);
+  };
+
   test.each(TARGETS)(
     "$platform: runner readiness fails after another session selected the device",
-    async ({ args, deviceId }) => {
+    async ({ platform, args, deviceId }) => {
       duringReadiness = async () => {
         await otherSessionSelects(deviceId);
         throw new Error("automation runner did not become ready");
@@ -198,27 +213,42 @@ describe("hunt: a failed start does not stop the device it booted once another s
       const failure = await start(args);
       await drain();
 
-      expect(failure).toBeInstanceOf(Error);
-      expect(sessions.getSession("other-session")?.assignedDevice).toBe(deviceId);
-      expect(bootHandle.killed).toBe(false);
-      expect(pool.getDevice(deviceId)?.sessionId).toBe("other-session");
+      expect(failure).toBeInstanceOf(ActionableError);
+      expect((failure as Error).message).toContain("automation runner did not become ready");
+      await expectSparedAndCountedOnce(platform, deviceId);
     },
   );
 
-  // Android already spares the device on this path (the refused bind records the boot's process
-  // before it fails, so cleanup sees the holder); iOS does not.
-  test.each(TARGETS.filter(({ platform }) => platform === "ios"))(
+  test.each(TARGETS)(
     "$platform: the booting call loses its bind to another session's selection",
-    async ({ args, deviceId }) => {
+    async ({ platform, args, deviceId }) => {
       duringReadiness = async () => await otherSessionSelects(deviceId);
 
       const failure = await start(args);
       await drain();
 
       expect(failure).toMatchObject({ code: "device_owned_by_other_session" });
-      expect(sessions.getSession("other-session")?.assignedDevice).toBe(deviceId);
-      expect(bootHandle.killed).toBe(false);
-      expect(pool.getDevice(deviceId)?.sessionId).toBe("other-session");
+      await expectSparedAndCountedOnce(platform, deviceId);
+    },
+  );
+
+  test.each(TARGETS)(
+    "$platform: a device the other session let go again is stopped with the failed start",
+    async ({ platform, args, deviceId }) => {
+      duringReadiness = async () => {
+        await otherSessionSelects(deviceId);
+        await sessions.releaseSession("other-session");
+        await pool.releaseDevice(deviceId, "other-session");
+        throw new Error("automation runner did not become ready");
+      };
+
+      const failure = await start(args);
+      await drain();
+
+      expect(failure).toBeInstanceOf(ActionableError);
+      expect(bootHandle.killed).toBe(true);
+      expect(await gates.capacity(platform)).toEqual({ booted: 0, inFlight: 0 });
+      expect(await gates.admitsOneMoreBoot(platform)).toBe(true);
     },
   );
 });

@@ -55,6 +55,7 @@ import {
   getStartDevicePool,
   getVerifiedWarmAndroidAvdIdentity,
   initializedDevicePool,
+  liveHolderOtherThanThisRequest,
   prepareStartDeviceRunnerReadiness,
   publishWarmDeviceReady,
   refreshResourcesAfterCommittedBoot,
@@ -236,6 +237,15 @@ async function rollbackCreatedDeviceAfterBoot(
   const createdImage = boot?.provisioned ? boot.sourceImage : undefined;
   const rollback = createdDeviceRollbackFor(options);
   if (!boot || !createdImage || state.ownershipTransferred || !rollback) {
+    return;
+  }
+  const otherHolder = liveHolderOtherThanThisRequest(boot.device.deviceId);
+  if (otherHolder) {
+    // Another session selected the device while this call prepared it: it is that session's
+    // device now, and deleting it is as much lifecycle on it as stopping it (#11651).
+    logger.info(
+      `[DeviceTools] Keeping created ${boot.device.platform} device '${createdImage.name}': session ${otherHolder} holds it`,
+    );
     return;
   }
   // Stop the emulator before deleting its AVD. prepareDevice would otherwise

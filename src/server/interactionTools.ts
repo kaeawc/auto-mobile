@@ -1824,10 +1824,7 @@ function selectedElementLabel(
 ): string {
   const matched = selectedElement?.matchedElement;
   return (
-    selectedElement?.text ||
-    matched?.text ||
-    matched?.["content-desc"] ||
-    (selectorLabel ?? "")
+    selectedElement?.text || matched?.text || matched?.["content-desc"] || (selectorLabel ?? "")
   );
 }
 
@@ -2310,9 +2307,7 @@ export async function tapOnHandler(
         searchSummary,
         args.ensureChecked,
         args.selector.text ?? args.selector.textAny?.[0],
-      )}${
-        result.warnings?.length ? `. Warning: ${result.warnings.join("; ")}` : ""
-      }`
+      )}${result.warnings?.length ? `. Warning: ${result.warnings.join("; ")}` : ""}`
     : `Failed to tap: ${result.error || "unknown error"}${searchSummary ? ` (${searchSummary})` : ""}`;
   const payload = { message, observation: result.observation, ...result };
   const response: StructuredToolResponse<typeof payload> & { isError?: true } =

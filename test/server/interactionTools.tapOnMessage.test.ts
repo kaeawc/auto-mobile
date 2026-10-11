@@ -404,8 +404,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
   // empty; the label the caller searched for must still appear in the message.
   test("names the selector label when the promoted row carries no text (#11638)", async () => {
     setTapOnElementFactory(() => ({
-      execute: async () =>
-        fakeResult({ success: true, selectedElement: selected({ text: "" }) }),
+      execute: async () => fakeResult({ success: true, selectedElement: selected({ text: "" }) }),
     }));
 
     const response = await tapOnHandler(fakeDevice, {
@@ -437,7 +436,9 @@ describe("tapOnHandler (registered handler wiring)", () => {
       platform: "android",
     });
 
-    expect(parseMessage(response)).toStartWith("Wi-Fi was checked, tapped, now unchecked (verified)");
+    expect(parseMessage(response)).toStartWith(
+      "Wi-Fi was checked, tapped, now unchecked (verified)",
+    );
   });
 });
 

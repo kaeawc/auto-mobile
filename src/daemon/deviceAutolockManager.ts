@@ -17,7 +17,7 @@ import { getDevicePoolTimeoutMs, type Environment } from "./poolConfig";
 import { freshStartAlreadyBoundError } from "./deviceAcquisitionRefusals";
 import type { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import type { Session, SessionExecutionMetadata, SessionManager } from "./sessionManager";
-import { receiptOrNew, type AcquisitionReceipt } from "./acquisitionReceipt";
+import { mintedSession, receiptOrNew, type AcquisitionReceipt } from "./acquisitionReceipt";
 
 /**
  * Result of attaching an autolock session to an MCP session (#11129). `attached-not-persisted`
@@ -370,7 +370,7 @@ export class DeviceAutolockManager {
       owner,
       collectCancellationSettlement,
     );
-    receipt.minted = { session, deviceId };
+    receipt.minted = mintedSession(session, deviceId);
     this.noteStateChanged(device);
 
     logger.info(

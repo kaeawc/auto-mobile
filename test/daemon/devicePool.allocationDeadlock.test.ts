@@ -9,6 +9,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntilQuiescent, settleWithFakeTime } from "../helpers/fakeTimerStepping";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 
 // #9950: two sessions that each hold one device and each run a two-device
 // plan wait on each other's held device. The later request fails fast with a
@@ -51,12 +52,14 @@ for (const criteria of [false, true]) {
     const observe = (ids: string[], timeout = 4_000) => {
       let settled = false;
       const allocation = () =>
-        criteria
-          ? pool.assignMultipleDevicesByCriteria(
-              ids.map((sessionId) => ({ sessionId, criteria: { platform: "android" } })),
-              timeout,
-            )
-          : pool.assignMultipleDevices(ids, timeout, "android");
+        asPlanAllocation(sessions, ids[0], ids, () =>
+          criteria
+            ? pool.assignMultipleDevicesByCriteria(
+                ids.map((sessionId) => ({ sessionId, criteria: { platform: "android" } })),
+                timeout,
+              )
+            : pool.assignMultipleDevices(ids, timeout, "android"),
+        );
       const result = runWithAbortSignal(new AbortController().signal, allocation).then(
         (value: unknown) => {
           settled = true;

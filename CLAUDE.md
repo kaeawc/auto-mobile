@@ -316,10 +316,17 @@ present in the shade; ignoring this flag keeps those children matchable.
 
 # CI failure triage
 
-`pull_request.yml` keeps roll-up gates only for required checks (`IDE Plugin`,
-`iOS Build`, `Shell Tests`); every other job reports directly, and advisory lanes
-never block a merge. Runs from before the `iOS`, `Android`, `Node Tests`, and
-`WebRTC` roll-ups were removed may still show them red. Run
+The `green-main` ruleset requires 22 status checks to merge, not just the three
+roll-up gates. The ruleset is the only authoritative list (deliberately not
+copied here, so it cannot rot): `gh api repos/kaeawc/auto-mobile/rulesets`, then
+`.../rulesets/<id>` and its `required_status_checks` rule. The roll-up gates
+(`IDE Plugin`, `iOS Build`, `Shell Tests`) only give a required context a stable
+name over matrix or skipped jobs; every other required check is an ordinary job
+that reports directly, so read that job. "Advisory" means not in the ruleset: it
+never blocks a merge. Runs from before the `iOS`, `Android`, `Node Tests`, and
+`WebRTC` roll-ups were removed may still show them red.
+`bun scripts/ci/ci-time-to-green.ts` reports time-to-green against the live
+required list. Run
 `bash scripts/ci/classify-failure.sh <run-id>` before retrying or changing code;
 it identifies the specific upstream job and consults
 `scripts/ci/known-flakes.txt`. Do not re-fix documented non-fixes. Before

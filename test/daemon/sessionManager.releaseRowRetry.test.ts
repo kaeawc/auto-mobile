@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   PLAN_AUTO_RELEASE_REASON,
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
   SessionManager,
 } from "../../src/daemon/sessionManager";
 import { fixedBackoff } from "../../src/utils/Backoff";
+import { logger } from "../../src/utils/logger";
 import { BusyRewritePersistence } from "../fakes/BusyRewritePersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -138,6 +139,51 @@ describe("the row of a released session (#11557)", () => {
       device_id: OTHER_DEVICE,
     });
     expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a parked non-terminal release refuses the re-created row without warning or retry (#11129)", async () => {
+    manager.attachDaemonSessionId("daemon-a");
+    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    const gate = Promise.withResolvers<void>();
+    store.park = gate.promise;
+    const releaseWriteSpy = spyOn(store, "markReleased");
+    try {
+      const release = manager.releaseSession(SESSION, "daemon-shutdown");
+      void release.catch(() => undefined);
+      await settleMicrotasks();
+      expect(releaseWriteSpy).toHaveBeenCalledTimes(1);
+      await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+      await expect(release).resolves.toBe(DEVICE);
+      expect(manager.getSession(SESSION)).toBeNull();
+
+      const reissued = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      // Drain the deadline's already-armed retry; recreation makes it obsolete.
+      await timer.advanceTimeAsync(RELEASE_RETRY_DELAY_MS);
+      await settleMicrotasks();
+      expect(releaseWriteSpy).toHaveBeenCalledTimes(1);
+      const reissuedRow = structuredClone(await row());
+      const pendingTimeouts = timer.getPendingTimeoutCount();
+      expect(pendingTimeouts).toBe(0);
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        store.park = undefined;
+        gate.resolve();
+        await settleMicrotasks();
+
+        expect(await row()).toMatchObject({ status: "active", release_reason: null });
+        expect(await row()).toEqual(reissuedRow);
+        expect(manager.getSession(SESSION)).toBe(reissued);
+        expect(warnSpy).not.toHaveBeenCalled();
+        expect(timer.getPendingTimeoutCount()).toBe(pendingTimeouts);
+        expect(releaseWriteSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    } finally {
+      gate.resolve();
+      store.park = undefined;
+      releaseWriteSpy.mockRestore();
+    }
   });
 
   test("a retry its own precondition skipped is still owed, for the generation the row has now", async () => {

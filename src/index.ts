@@ -300,6 +300,7 @@ async function main() {
       process.exit(1);
       return;
     }
+    let ownerGenerationToken: string | undefined;
     // Refuse before any daemon or device work rather than run unmanaged (#11208).
     assertManagedSlotsSupported(managedSlotConfig);
     // Only the STDIO proxy has an execution owner; daemon and CLI calls may run after it exited (#11286).
@@ -309,8 +310,14 @@ async function main() {
       !daemonRequested &&
       managedSlotConfig?.executionOwnerPid !== undefined
     ) {
-      const { isProcessRunning } = await import("./utils/processLiveness");
+      const [{ isProcessRunning }, { defaultLockOwnerGenerationProbe }] = await Promise.all([
+        import("./utils/processLiveness"),
+        import("./daemon/lockOwnerGeneration"),
+      ]);
       assertManagedSlotOwnerRunning(managedSlotConfig, (pid) => isProcessRunning(pid));
+      ownerGenerationToken = defaultLockOwnerGenerationProbe.current(
+        managedSlotConfig.executionOwnerPid,
+      );
     }
     if (daemonRequested && daemonCommand === undefined) {
       const { printUnknownDaemonCommand } = await import("./daemon/cli/runDaemonCommand");
@@ -787,7 +794,12 @@ async function main() {
           // Published first, so shutdown (stdin EOF, SIGTERM) closes it and aborts an acquisition.
           stdioProxy = proxy;
           const managedSlots = managedSlotConfig
-            ? await acquireManagedSlotsBeforeServing(proxy, managedSlotConfig, launchParentPid)
+            ? await acquireManagedSlotsBeforeServing(
+                proxy,
+                managedSlotConfig,
+                launchParentPid,
+                ownerGenerationToken,
+              )
             : undefined;
           const result = createProxyMcpServer({
             proxy,
@@ -839,8 +851,9 @@ async function acquireManagedSlotsBeforeServing(
   proxy: { acquireManagedSlots(config: ManagedSlotConfig): Promise<ManagedSlotsResult> },
   config: ManagedSlotConfig,
   launchParentPid: number,
+  ownerGenerationToken?: string,
 ): Promise<ManagedSlotsResult> {
-  await startExecutionOwnerWatch(launchParentPid, config.executionOwnerPid);
+  await startExecutionOwnerWatch(launchParentPid, config.executionOwnerPid, ownerGenerationToken);
   const result = await proxy.acquireManagedSlots(config);
   const { logger } = await import("./utils/logger");
   logger.info(
@@ -851,20 +864,32 @@ async function acquireManagedSlotsBeforeServing(
 }
 
 /** Watch the managed slot execution's owner (by default the launching parent) (#11176). */
-async function startExecutionOwnerWatch(launchParentPid: number, ownerPid?: number): Promise<void> {
-  const [{ ExecutionOwnerWatch }, { isProcessRunning }, { defaultTimer }] = await Promise.all([
+async function startExecutionOwnerWatch(
+  launchParentPid: number,
+  ownerPid?: number,
+  ownerGenerationToken?: string,
+): Promise<void> {
+  const [
+    { ExecutionOwnerWatch },
+    { isProcessRunning },
+    { defaultTimer },
+    { defaultLockOwnerGenerationProbe },
+  ] = await Promise.all([
     import("./daemon/executionOwnerWatch"),
     import("./utils/processLiveness"),
     import("./utils/SystemTimer"),
+    import("./daemon/lockOwnerGeneration"),
   ]);
   new ExecutionOwnerWatch(
     {
       launchParentPid,
       ownerPid,
+      ownerGenerationToken,
       onOwnerLost: () => requestProcessShutdown("execution-owner-lost"),
     },
     { isProcessRunning: (pid) => isProcessRunning(pid), currentParentPid: () => process.ppid },
     defaultTimer,
+    defaultLockOwnerGenerationProbe,
   ).start();
 }
 

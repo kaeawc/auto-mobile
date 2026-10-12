@@ -140,3 +140,47 @@ setup() {
   [[ "${output}" == *'use private-daemon.ts start'* ]]
   [ ! -f "${COMMAND_LOG}" ]
 }
+
+@test "cli shorthand preserves arguments and requires MT_SERVER" {
+  run bash "${SCRIPT}" --batch-dir "${BATCH}" --daemon 1 cli listDevices 'one two'
+  [ "${status}" -eq 0 ]
+  expected="$(printf '%s\n' '/fake/built entry.js' --cli listDevices 'one two')"
+  [ "$(cat "${COMMAND_LOG}")" = "${expected}" ]
+  rm "${COMMAND_LOG}"
+  printf '%s\n' 'export AUTOMOBILE_AUX_SOCKET_DIR=/fake/aux' 'export AUTOMOBILE_DAEMON_SOCKET_PATH=/fake/socket' 'unset MT_SERVER' > "${BATCH}/daemon1/env.sh"
+  run bash "${SCRIPT}" --batch-dir "${BATCH}" --daemon 1 cli listDevices
+  [ "${status}" -eq 2 ]
+  [ ! -f "${COMMAND_LOG}" ]
+}
+
+@test "cd is opt-in absolute existing directory" {
+  run bash "${SCRIPT}" --batch-dir "${BATCH}" --daemon 1 --cd "${BATCH}" check-env
+  [ "${status}" -eq 0 ]
+  [ "$(tail -n 1 "${COMMAND_LOG}")" = "${BATCH}" ]
+  rm "${COMMAND_LOG}"
+  for dir in relative "${BATCH}/missing"; do
+    run bash "${SCRIPT}" --batch-dir "${BATCH}" --daemon 1 --cd "${dir}" check-env
+    [ "${status}" -eq 2 ]
+    [ ! -f "${COMMAND_LOG}" ]
+  done
+}
+
+@test "help succeeds on stdout without requiring env or executing commands" {
+  for flag in --help -h; do
+    run bash "${SCRIPT}" "${flag}"
+    [ "${status}" -eq 0 ]
+    for word in --batch-dir --daemon --cd daemon cli proxy frame aux Examples:; do
+      [[ "${output}" == *"${word}"* ]]
+    done
+    [ ! -f "${COMMAND_LOG}" ]
+  done
+}
+
+@test "cd preserves shorthand resolution when script was invoked by relative path" {
+  repo="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
+  cd "${repo}"
+  run bash scripts/manual-test/in-daemon-env.sh --batch-dir "${BATCH}" --daemon 1 --cd "${BATCH}" frame send daemon/capabilities
+  [ "${status}" -eq 0 ]
+  expected="$(printf '%s\n' "${repo}/scripts/manual-test/daemon-frame.ts" send daemon/capabilities)"
+  [ "$(cat "${COMMAND_LOG}")" = "${expected}" ]
+}

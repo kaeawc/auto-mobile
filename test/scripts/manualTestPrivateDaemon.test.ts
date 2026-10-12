@@ -20,6 +20,9 @@ const options: PrivateDaemonBatchOptions = {
 };
 function parsed(args: string[]): PrivateDaemonCommand {
   const result = parsePrivateDaemonArgs(args);
+  if ("help" in result) {
+    throw new Error("Unexpected help");
+  }
   if ("error" in result) {
     throw new Error(result.error);
   }
@@ -30,9 +33,38 @@ function fixture() {
   const writes: string[] = [],
     dirs: Array<[string, number]> = [],
     logs: string[] = [];
+  const removes: string[] = [],
+    modes: Array<[string, number]> = [],
+    captures: Array<{
+      command: string;
+      args: string[];
+      env: Record<string, string>;
+      timeoutMs: number;
+    }> = [];
   const launches: Array<{ command: string; args: string[]; env: Record<string, string> }> = [];
   const deps: PrivateDaemonCliDeps = {
     runtimePath: resolve("/fake/runtime"),
+    repoRoot: resolve("/fake/repo"),
+    removeFile: (path) => {
+      removes.push(path);
+      files.delete(path);
+    },
+    chmod: (path, mode) => {
+      modes.push([path, mode]);
+    },
+    runCapture: async (command, args, env, timeoutMs) => {
+      captures.push({ command, args, env, timeoutMs });
+      return {
+        exitCode: 0,
+        stdout:
+          command === "adb"
+            ? "List of devices attached\nemu1 device model:fake\n"
+            : '{"devices":{"runtime":[{"udid":"sim1","name":"fake","state":"Booted"}]}}',
+        stderr: "",
+      };
+    },
+    probeSocket: async () => ({ alive: false, reason: "not running" }),
+    isTcpPortListening: async () => false,
     host: { homeDirs: [resolve("/home/fake")], uid: 4242, canonicalize: resolve },
     env: {
       AUTOMOBILE_MANAGED_SLOT_CONFIG: "inherited",
@@ -66,7 +98,7 @@ function fixture() {
       return { exitCode: 0 };
     },
   };
-  return { files, writes, dirs, logs, launches, deps };
+  return { files, writes, dirs, logs, launches, removes, modes, captures, deps };
 }
 posixTest("parses each command and exact start passthrough", () => {
   expect(
@@ -133,6 +165,11 @@ posixTest("init writes only private manifest/env/0700 dirs, refuses overwrite", 
     join(options.batchDir, "daemon1", "env.sh"),
     join(options.batchDir, "daemon2", "env.sh"),
     join(options.batchDir, "batch.json"),
+    ...[1, 2].flatMap((index) =>
+      ["am", "proxy", "frame", "aux"].map((name) =>
+        join(options.batchDir, "bin", `${name}${index}`),
+      ),
+    ),
   ]);
   expect(f.dirs.every(([, mode]) => mode === 0o700)).toBe(true);
   expect(JSON.parse(f.files.get(join(options.batchDir, "batch.json"))!).specs).toEqual(
@@ -223,4 +260,328 @@ posixTest("tampered specs/default options are refused before a launch", async ()
     await runPrivateDaemonCommand(parsed(["start", "--batch-dir", options.batchDir]), f.deps),
   ).toBe(2);
   expect(f.launches).toEqual([]);
+});
+
+posixTest("successful stop removes pid.txt", async () => {
+  const f = fixture();
+  await runPrivateDaemonCommand({ op: "init", options }, f.deps);
+  const path = derivePrivateDaemonBatch(options)[0].plainPidFilePath;
+  f.files.set(path, "99\n");
+  expect(
+    await runPrivateDaemonCommand(
+      parsed(["stop", "--batch-dir", options.batchDir, "--daemon", "1"]),
+      f.deps,
+    ),
+  ).toBe(0);
+  expect(f.files.has(path)).toBe(false);
+});
+
+import {
+  PRIVATE_DAEMON_COMMANDS,
+  PRIVATE_DAEMON_FLAGS,
+} from "../../scripts/manual-test/privateDaemonHelp";
+import { renderPrivateDaemonWrappers } from "../../scripts/manual-test/privateDaemonWrappers";
+import { PRODUCT_PATH_ENV_VARIABLES } from "../../scripts/manual-test/productPathEnv";
+function initArgs(extra: string[] = []): string[] {
+  return ["init", "--batch-dir", options.batchDir, "--count", "2", "--base-port", "3160", ...extra];
+}
+test("daemon arg tokens are verbatim, scoped, and env assignments are validated", () => {
+  const command = parsed(
+    initArgs([
+      "--daemon-arg",
+      "--",
+      "--daemon-arg=--debug",
+      "--daemon-arg",
+      "2:--tool-call-recording",
+      "--daemon-arg",
+      "session",
+      "--env",
+      "NOTE=global",
+      "--daemon-env",
+      "2:NOTE=local",
+    ]),
+  );
+  if (command.op !== "init") {
+    throw new Error("Expected init");
+  }
+  expect(command.options.daemonArgs).toEqual(["--", "--debug", "session"]);
+  expect(command.options.daemonArgsByDaemon).toEqual({ "2": ["--tool-call-recording"] });
+  expect(command.options.daemonEnv).toEqual({ "2": { NOTE: "local" } });
+  for (const extra of [
+    ["--daemon-env", "3:NOTE=x"],
+    ["--daemon-env", "0:NOTE=x"],
+    ["--daemon-env", "1:NOTE=x", "--daemon-env", "1:NOTE=y"],
+    ["--daemon-env", "1:AUTOMOBILE_DATA_DIR=/fake"],
+    ["--env", "BAD-NAME=x"],
+    ["--daemon-arg", "--port"],
+    ["--daemon-arg=--strict-port=false"],
+    ["--daemon-arg", "2:--port=50"],
+  ]) {
+    expect(parsePrivateDaemonArgs(initArgs(extra))).toHaveProperty("error");
+  }
+});
+posixTest(
+  "recorded args roundtrip through stop and selected restart with one-off extras",
+  async () => {
+    const f = fixture();
+    const recorded = {
+      ...options,
+      daemonArgs: ["--plan-execution-lock-scope", "session"],
+      daemonArgsByDaemon: { "2": ["--tool-call-recording"] },
+      daemonEnv: { "2": { NOTE: "private" } },
+    };
+    await runPrivateDaemonCommand({ op: "init", options: recorded }, f.deps);
+    expect(JSON.parse(f.files.get(join(options.batchDir, "batch.json"))!).options).toEqual(
+      recorded,
+    );
+    const spec = derivePrivateDaemonBatch(recorded)[1];
+    f.files.set(spec.plainPidFilePath, "9\n");
+    await runPrivateDaemonCommand(
+      parsed(["stop", "--batch-dir", options.batchDir, "--daemon", "2"]),
+      f.deps,
+    );
+    f.files.set(spec.plainPidFilePath, "8\n");
+    await runPrivateDaemonCommand(
+      parsed(["start", "--batch-dir", options.batchDir, "--daemon", "2", "--", "--debug"]),
+      f.deps,
+    );
+    expect(f.launches[1].args.slice(3)).toEqual([
+      "--port",
+      "3161",
+      "--strict-port",
+      ...recorded.daemonArgs,
+      "--tool-call-recording",
+      "--debug",
+    ]);
+    expect(f.launches[1].env.NOTE).toBe("private");
+    expect(JSON.parse(f.logs.at(-1)!).args).toEqual(f.launches[1].args.slice(3));
+    expect(f.files.get(spec.plainPidFilePath)).toBe("1234\n");
+  },
+);
+posixTest(
+  "failed stop preserves pid.txt and successful stop tolerates a missing file",
+  async () => {
+    const f = fixture();
+    await runPrivateDaemonCommand({ op: "init", options }, f.deps);
+    const spec = derivePrivateDaemonBatch(options)[0];
+    f.files.set(spec.plainPidFilePath, "22\n");
+    f.deps.runCommand = async () => ({ exitCode: 7 });
+    const stop = parsed(["stop", "--batch-dir", options.batchDir, "--daemon", "1"]);
+    expect(await runPrivateDaemonCommand(stop, f.deps)).toBe(7);
+    expect(f.files.get(spec.plainPidFilePath)).toBe("22\n");
+    expect(f.removes).toEqual([]);
+    f.files.delete(spec.plainPidFilePath);
+    f.deps.runCommand = async () => ({ exitCode: 0 });
+    expect(await runPrivateDaemonCommand(stop, f.deps)).toBe(0);
+  },
+);
+posixTest(
+  "status uses authoritative JSON pid and reports ok stale missing without mutations",
+  async () => {
+    const f = fixture();
+    await runPrivateDaemonCommand({ op: "init", options }, f.deps);
+    f.writes.length = 0;
+    f.dirs.length = 0;
+    const spec = derivePrivateDaemonBatch(options)[0];
+    f.deps.isPidAlive = (pid) => pid === 42;
+    f.deps.probeSocket = async () => ({ alive: true });
+    const command = parsed(["status", "--batch-dir", options.batchDir, "--daemon", "1"]);
+    for (const [txt, json, expectedPid, expectedTxt] of [
+      ["42", 42, 42, "ok"],
+      ["7", 42, 42, "stale"],
+      [undefined, 42, 42, "missing"],
+      ["42", undefined, 42, "ok"],
+      ["7", undefined, 7, "stale"],
+    ] as const) {
+      if (txt) {
+        f.files.set(spec.plainPidFilePath, txt);
+      } else {
+        f.files.delete(spec.plainPidFilePath);
+      }
+      if (json) {
+        f.files.set(spec.pidFilePath, JSON.stringify({ pid: json }));
+      } else {
+        f.files.delete(spec.pidFilePath);
+      }
+      expect(await runPrivateDaemonCommand(command, f.deps)).toBe(0);
+      expect(JSON.parse(f.logs.at(-1)!)).toMatchObject({
+        pid: expectedPid,
+        pidTxt: expectedTxt,
+        socketAlive: true,
+      });
+    }
+    f.deps.probeSocket = async () => ({ alive: false, reason: "dead" });
+    await runPrivateDaemonCommand(command, f.deps);
+    expect(JSON.parse(f.logs.at(-1)!).socketAlive).toBe(false);
+    expect(f.writes).toEqual([]);
+    expect(f.dirs).toEqual([]);
+    expect(f.removes).toEqual([]);
+  },
+);
+posixTest(
+  "status devices reports host and live daemon devices through bounded injected reads",
+  async () => {
+    const f = fixture();
+    await runPrivateDaemonCommand({ op: "init", options }, f.deps);
+    f.writes.length = 0;
+    f.dirs.length = 0;
+    f.deps.isTcpPortListening = async (host, port, timeout) => {
+      expect([host, port, timeout]).toEqual(["127.0.0.1", 5037, 2000]);
+      return true;
+    };
+    f.deps.probeSocket = async (path, probe) =>
+      path === derivePrivateDaemonBatch(options)[1].socketPath
+        ? { alive: false, reason: "dead" }
+        : { alive: true, result: probe?.method ? { devices: [{ deviceId: "emu1" }] } : {} };
+    expect(
+      await runPrivateDaemonCommand(
+        parsed(["status", "--batch-dir", options.batchDir, "--devices"]),
+        f.deps,
+      ),
+    ).toBe(0);
+    expect(f.logs).toHaveLength(3);
+    const inventory = JSON.parse(f.logs[2]);
+    expect(inventory.hostDevices.android[0].deviceId).toBe("emu1");
+    expect(inventory.hostDevices.ios[0].udid).toBe("sim1");
+    expect(inventory.daemonDevices).toEqual({ P1: [{ deviceId: "emu1" }], P2: { error: "dead" } });
+    expect(f.captures.map((call) => [call.command, call.args, call.timeoutMs])).toEqual([
+      ["adb", ["devices", "-l"], 2000],
+      ["xcrun", ["simctl", "list", "devices", "booted", "--json"], 2000],
+    ]);
+    expect(f.captures[0].env.ADB_SERVER_SOCKET).toBe("tcp:127.0.0.1:5037");
+    expect(f.writes).toEqual([]);
+    expect(f.dirs).toEqual([]);
+    expect(f.removes).toEqual([]);
+    expect(f.launches).toEqual([]);
+  },
+);
+posixTest(
+  "status skips absent adb server without invoking adb, and contains simctl errors",
+  async () => {
+    const f = fixture();
+    await runPrivateDaemonCommand({ op: "init", options }, f.deps);
+    const calls: string[] = [];
+    f.deps.runCapture = async (command) => {
+      calls.push(command);
+      throw new Error("missing xcrun");
+    };
+    expect(
+      await runPrivateDaemonCommand(
+        parsed(["status", "--batch-dir", options.batchDir, "--devices"]),
+        f.deps,
+      ),
+    ).toBe(0);
+    expect(calls).toEqual(["xcrun"]);
+    expect(JSON.parse(f.logs.at(-1)!).hostDevices).toEqual({
+      android: { skipped: "no adb server listening" },
+      ios: { skipped: "missing xcrun" },
+    });
+  },
+);
+posixTest("wrapper rendering quotes absolute paths containing spaces", () => {
+  expect(renderPrivateDaemonWrappers("/private/a b", 1, "/repo root")).toEqual({
+    am1: `#!/usr/bin/env bash\nset -euo pipefail\nexec bash '/repo root/scripts/manual-test/in-daemon-env.sh' --batch-dir '/private/a b' --daemon 1 --cd '/repo root' "$@"\n`,
+    ...Object.fromEntries(
+      ["proxy", "frame", "aux"].map((name) => [
+        `${name}1`,
+        `#!/usr/bin/env bash\nset -euo pipefail\nexec bash '/repo root/scripts/manual-test/in-daemon-env.sh' --batch-dir '/private/a b' --daemon 1 ${name} "$@"\n`,
+      ]),
+    ),
+  });
+});
+posixTest("init and wrappers write exactly four executable wrappers per daemon", async () => {
+  const f = fixture();
+  await runPrivateDaemonCommand({ op: "init", options }, f.deps);
+  expect(f.modes).toHaveLength(8);
+  expect(f.modes.every(([, mode]) => mode === 0o755)).toBe(true);
+  f.writes.length = 0;
+  f.modes.length = 0;
+  expect(
+    await runPrivateDaemonCommand(parsed(["wrappers", "--batch-dir", options.batchDir]), f.deps),
+  ).toBe(0);
+  expect(f.writes).toHaveLength(8);
+  expect(f.writes.every((path) => path.startsWith(join(options.batchDir, "bin") + "/"))).toBe(true);
+  expect(f.modes).toHaveLength(8);
+});
+posixTest(
+  "older manifest reports only missing new state defaults; other tampering stays refused",
+  async () => {
+    const f = fixture();
+    await runPrivateDaemonCommand({ op: "init", options }, f.deps);
+    const path = join(options.batchDir, "batch.json"),
+      manifest = JSON.parse(f.files.get(path)!);
+    for (const spec of manifest.specs) {
+      for (const row of PRODUCT_PATH_ENV_VARIABLES.filter(
+        (row) => row.kind === "state" && !row.owner,
+      )) {
+        delete spec.env[row.name];
+      }
+    }
+    f.files.set(path, JSON.stringify(manifest));
+    expect(
+      await runPrivateDaemonCommand(parsed(["status", "--batch-dir", options.batchDir]), f.deps),
+    ).toBe(2);
+    expect(f.logs.at(-1)).toContain(
+      "written by an older harness (missing AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR",
+    );
+    manifest.specs[0].port = 9000;
+    f.files.set(path, JSON.stringify(manifest));
+    await runPrivateDaemonCommand(parsed(["status", "--batch-dir", options.batchDir]), f.deps);
+    expect(f.logs.at(-1)).toContain("Tampered");
+  },
+);
+test("top and subcommand help list parser commands flags and state variables", () => {
+  for (const args of [
+    ["--help"],
+    ["-h"],
+    ["help"],
+    ["init", "--help"],
+    ["status", "--batch-dir", "/private/batch", "--help"],
+  ]) {
+    const result = parsePrivateDaemonArgs(args);
+    if (!("help" in result)) {
+      throw new Error("Expected help");
+    }
+    for (const word of [
+      ...PRIVATE_DAEMON_COMMANDS,
+      ...Object.keys(PRIVATE_DAEMON_FLAGS),
+      ...PRODUCT_PATH_ENV_VARIABLES.filter((row) => row.kind === "state").map((row) => row.name),
+    ]) {
+      expect(result.help).toContain(word);
+    }
+  }
+});
+
+posixTest("wrappers refuse symlink aliases outside batch bin before writing", async () => {
+  const f = fixture();
+  await runPrivateDaemonCommand({ op: "init", options }, f.deps);
+  f.writes.length = 0;
+  f.dirs.length = 0;
+  const target = join(options.batchDir, "bin", "am1");
+  f.deps.host.canonicalize = (path) => (path === target ? "/elsewhere/target" : resolve(path));
+  expect(
+    await runPrivateDaemonCommand(parsed(["wrappers", "--batch-dir", options.batchDir]), f.deps),
+  ).toBe(2);
+  expect(f.writes).toEqual([]);
+  expect(f.dirs).toEqual([]);
+});
+
+posixTest("status contains captured simctl failure and probes configured adb port", async () => {
+  const f = fixture();
+  await runPrivateDaemonCommand({ op: "init", options }, f.deps);
+  f.deps.env.ANDROID_ADB_SERVER_PORT = "5555";
+  const ports: number[] = [];
+  f.deps.isTcpPortListening = async (_host, port) => {
+    ports.push(port);
+    return false;
+  };
+  f.deps.runCapture = async () => ({ exitCode: 1, stdout: "", stderr: "simctl failed" });
+  expect(
+    await runPrivateDaemonCommand(
+      parsed(["status", "--batch-dir", options.batchDir, "--devices"]),
+      f.deps,
+    ),
+  ).toBe(0);
+  expect(ports).toEqual([5555]);
+  expect(JSON.parse(f.logs.at(-1)!).hostDevices.ios).toEqual({ skipped: "simctl failed" });
 });

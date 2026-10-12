@@ -4,6 +4,8 @@ import path, { resolve } from "node:path";
 import ts from "typescript";
 import { moduleExportResolver, resolveModule, toPosixPath } from "./moduleExportResolver";
 
+import { PRODUCT_PATH_ENV_VARIABLES } from "../../scripts/manual-test/productPathEnv";
+
 const ROOT = resolve(import.meta.dir, "../..");
 const NAME = /^(?:AUTOMOBILE_|AUTO_MOBILE_)[A-Z0-9_]+$/;
 
@@ -469,6 +471,31 @@ describe("environment variable documentation", () => {
     markdown = readFileSync(resolve(ROOT, "docs/using/environment-variables.md"), "utf8");
     docs = documentedNames(markdown);
   }, 60_000);
+  test("product path registry covers AST reads without stale rows", () => {
+    const NOT_A_PATH: Record<string, string> = {};
+    const canonical = new Set(
+      [...reads].map((name) => name.replace(/^AUTO_MOBILE_/, "AUTOMOBILE_")),
+    );
+    const registered = new Set(PRODUCT_PATH_ENV_VARIABLES.map((row) => row.name));
+    const missing = [...canonical].filter(
+      (name) =>
+        /_(DIR|PATH|FILE|ROOT|CWD|DERIVED_DATA|OUTPUT|CONFIG)$/.test(name) &&
+        !registered.has(name) &&
+        !NOT_A_PATH[name],
+    );
+    expect(
+      missing,
+      "Add each missing variable to scripts/manual-test/productPathEnv.ts and classify it.",
+    ).toEqual([]);
+    expect(
+      [...registered].filter((name) => !canonical.has(name)),
+      "Remove stale productPathEnv.ts rows.",
+    ).toEqual([]);
+    expect(registered.size).toBe(PRODUCT_PATH_ENV_VARIABLES.length);
+    expect(
+      PRODUCT_PATH_ENV_VARIABLES.filter((row) => row.kind !== "state").every((row) => !!row.reason),
+    ).toBe(true);
+  });
   test("every source read is public documentation or explicitly internal", () => {
     expect(violations(reads, docs, INTERNAL)).toEqual([]);
     expect(Object.values(INTERNAL).every((reason) => reason.length > 0)).toBe(true);

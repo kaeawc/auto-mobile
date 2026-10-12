@@ -6,6 +6,7 @@ import {
 } from "../../src/daemon/managedSlots/managedSlotExclusion";
 import {
   DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE,
+  MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE,
   DeviceAssignedToManagedSlotError,
   ManagedSlotDiscoveryIncompleteError,
 } from "../../src/daemon/managedSlots/managedSlotRefusal";
@@ -296,5 +297,105 @@ describe("DevicePool managed-slot exclusion", () => {
 
     expect(error).toBeInstanceOf(ManagedSlotDiscoveryIncompleteError);
     expect(pool.getDevice("SIM-FREE")?.sessionId).toBeNull();
+  });
+  const failAfterSnapshot = async () => {
+    await pool.managedSlotStableIds("ios");
+    registry.snapshotManagedDevices = async () => {
+      throw new Error("locked");
+    };
+  };
+
+  test("PIN: a never-read failing registry admits an existing holder and refuses an unheld target", async () => {
+    await setUp([ios("SIM-HELD"), ios("SIM-FREE")]);
+    await sessions.createSession("existing", "SIM-HELD", "ios");
+    // Seed control that predates registry discovery without taking a device through its gate.
+    const held = pool.getDevice("SIM-HELD")!;
+    held.sessionId = "existing";
+    held.status = "assigned";
+    registry.snapshotManagedDevices = async () => {
+      throw new Error("registry never readable");
+    };
+    await expect(
+      pool.assertNotAssignedToManagedSlot({
+        action: "tapOn",
+        deviceId: "SIM-HELD",
+        platform: "ios",
+        requesterSessionUuid: "existing",
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      pool.assertNotAssignedToManagedSlot({
+        action: "tapOn",
+        deviceId: "SIM-FREE",
+        platform: "ios",
+      }),
+    ).rejects.toMatchObject({ code: MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE, retryable: true });
+    expect(pool.getDevice("SIM-HELD")?.sessionId).toBe("existing");
+    expect(pool.getDevice("SIM-FREE")?.sessionId).toBeNull();
+  });
+
+  test("a plain caller cannot take a device absent from the retained snapshot", async () => {
+    await setUp([ios("SIM-FREE")]);
+    await failAfterSnapshot();
+    await expect(pool.bindOrReuseDeviceSession("plain", "SIM-FREE", "ios")).rejects.toMatchObject({
+      code: MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE,
+      retryable: true,
+    });
+    expect(pool.getDevice("SIM-FREE")?.sessionId).toBeNull();
+  });
+
+  test("generic allocation refuses retryably after a previously good registry read fails", async () => {
+    await setUp([ios("SIM-FREE")]);
+    await failAfterSnapshot();
+    expect(await assignOne("generic", "ios")).toMatchObject({
+      code: MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE,
+      retryable: true,
+    });
+    expect(pool.getDevice("SIM-FREE")?.sessionId).toBeNull();
+  });
+
+  test("retained known devices still refuse plain callers and admit their execution and reconciler", async () => {
+    const slot = await assignManagedSlotDevice(registry, "ios", "SIM-SLOT", "runner", "exec");
+    await setUp([ios("SIM-SLOT")]);
+    await failAfterSnapshot();
+    const input = { action: "tapOn", deviceId: "SIM-SLOT", platform: "ios" as const };
+    await expect(pool.assertNotAssignedToManagedSlot(input)).rejects.toMatchObject({
+      code: DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE,
+    });
+    await pool.assertNotAssignedToManagedSlot({ ...input, requesterSessionUuid: "exec" });
+    await runAsManagedSlotReconciler(slot, () => pool.assertNotAssignedToManagedSlot(input));
+    await expect(
+      runAsManagedSlotReconciler({ scopeKey: "peer", slotIndex: 0 }, () =>
+        pool.assertNotAssignedToManagedSlot(input),
+      ),
+    ).rejects.toMatchObject({ code: DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE });
+  });
+
+  test("an existing unmanaged holder keeps control and inventory remains available", async () => {
+    await setUp([ios("SIM-FREE")]);
+    await pool.bindOrReuseDeviceSession("existing", "SIM-FREE", "ios");
+    await failAfterSnapshot();
+    await pool.assertNotAssignedToManagedSlot({
+      action: "tapOn",
+      deviceId: "SIM-FREE",
+      platform: "ios",
+      requesterSessionUuid: "existing",
+    });
+    await expect(pool.refreshInventoryOwnership()).resolves.toBeUndefined();
+    expect(pool.getDevice("SIM-FREE")?.sessionId).toBe("existing");
+  });
+
+  test("a peer reconciler cannot take an absent device during a registry outage", async () => {
+    await setUp([ios("SIM-FREE")]);
+    await failAfterSnapshot();
+    await expect(
+      runAsManagedSlotReconciler({ scopeKey: "peer", slotIndex: 0 }, () =>
+        pool.assertNotAssignedToManagedSlot({
+          action: "startDevice",
+          deviceId: "SIM-FREE",
+          platform: "ios",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE, retryable: true });
   });
 });

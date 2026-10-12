@@ -171,7 +171,10 @@ import {
   type ManagedDeviceRef,
   type ManagedSlotExclusion,
 } from "./managedSlots/managedSlotExclusion";
-import { DeviceAssignedToManagedSlotError } from "./managedSlots/managedSlotRefusal";
+import {
+  DeviceAssignedToManagedSlotError,
+  ManagedSlotDiscoveryIncompleteError,
+} from "./managedSlots/managedSlotRefusal";
 import {
   AdbServerResetQuarantine,
   type AdbServerResetQuarantinePoolPort,
@@ -4376,7 +4379,7 @@ export class DevicePool {
     excludedImageIds: Set<string> = new Set(),
   ): Promise<DeviceInfo[]> {
     if (this.managedSlotExclusion) {
-      await this.managedSlotExclusion.refresh();
+      await this.managedSlotExclusion.refresh({ requireCurrent: true });
     }
     const availableImages = await this.deviceManager.listDeviceImages(platform);
     if (availableImages.length === 0) {
@@ -6109,7 +6112,7 @@ export class DevicePool {
   }> {
     if (!recoveryTarget && this.managedSlotExclusion) {
       // Guarded, not awaited unconditionally: an extra tick reorders allocation interleavings.
-      await this.managedSlotExclusion.refresh();
+      await this.managedSlotExclusion.refresh({ requireCurrent: true });
     }
     if (!recoveryTarget && this.tracksForeignOwnership(platform)) {
       return this.tryAssignUnclaimedDevice(sessionId, platform);
@@ -6397,7 +6400,7 @@ export class DevicePool {
    * was ever loaded: callers must not report such devices as free.
    */
   async refreshInventoryOwnership(): Promise<void> {
-    await this.refreshForeignOwnership();
+    await this.refreshForeignOwnership(false);
   }
 
   /** {@link getStats} after {@link refreshInventoryOwnership}: what `availableDevices` surfaces report. */
@@ -6508,7 +6511,7 @@ export class DevicePool {
   }
 
   /** Re-read which idle Android devices other daemons drive, for this allocation pass. */
-  private async refreshForeignOwnership(): Promise<void> {
+  private async refreshForeignOwnership(requireCurrent = true): Promise<void> {
     const idle = (platform: Platform) =>
       this.getDevicesByPlatform(platform)
         .filter((device) => device.sessionId === null)
@@ -6516,7 +6519,7 @@ export class DevicePool {
     await Promise.all([
       this.foreignDeviceOwnership?.refresh(idle("android")),
       this.iosForeignDeviceOwnership?.refresh(idle("ios")),
-      this.managedSlotExclusion?.refresh(),
+      this.managedSlotExclusion?.refresh({ requireCurrent }),
     ]);
   }
 
@@ -8341,7 +8344,7 @@ export class DevicePool {
     }
     if (this.managedSlotExclusion) {
       try {
-        await this.managedSlotExclusion.refresh();
+        await this.managedSlotExclusion.refresh({ requireCurrent: true });
       } catch (error) {
         // Which devices managed slots hold is unknown, and they win: reserve nothing.
         logger.warn(
@@ -10921,23 +10924,53 @@ export class DevicePool {
     if (!this.managedSlotExclusion) {
       return;
     }
-    await this.managedSlotExclusion.refresh({ maxAgeMs: input.maxAgeMs });
-    let refusal = this.managedSlotRefusalFor(input);
+    try {
+      await this.managedSlotExclusion.refresh({ maxAgeMs: input.maxAgeMs, requireCurrent: true });
+      let refusal = this.managedSlotRefusalFor(input);
+      if (
+        refusal &&
+        input.maxAgeMs &&
+        input.requesterSessionUuid &&
+        this.mayForceManagedReread(input)
+      ) {
+        // A cached snapshot can predate the requester's own claim of this slot (#11457). Re-read
+        // with a load that starts after this call before refusing a session, so a fresh execution
+        // is never refused its own device.
+        await this.managedSlotExclusion.refresh({ fresh: true, requireCurrent: true });
+        refusal = this.managedSlotRefusalFor(input);
+      }
+      if (refusal) {
+        throw refusal;
+      }
+    } catch (error) {
+      if (!(error instanceof ManagedSlotDiscoveryIncompleteError)) {
+        throw error;
+      }
+      this.judgeRetainedManagedSnapshot(input, error);
+    }
+  }
+
+  private judgeRetainedManagedSnapshot(
+    input: Parameters<DevicePool["assertNotAssignedToManagedSlot"]>[0],
+    error: ManagedSlotDiscoveryIncompleteError,
+  ): void {
+    const holder = this.managedSlotExclusion?.holderOf(
+      this.managedRefFor(input.deviceId, input.platform, input.stableIds),
+    );
+    if (holder) {
+      const refusal = this.managedSlotRefusalFor(input);
+      if (refusal) {
+        throw refusal;
+      }
+      return;
+    }
     if (
-      refusal &&
-      input.maxAgeMs &&
       input.requesterSessionUuid &&
-      this.mayForceManagedReread(input)
+      this.devices.get(input.deviceId)?.sessionId === input.requesterSessionUuid
     ) {
-      // A cached snapshot can predate the requester's own claim of this slot (#11457). Re-read
-      // with a load that starts after this call before refusing a session, so a fresh execution
-      // is never refused its own device.
-      await this.managedSlotExclusion.refresh({ fresh: true });
-      refusal = this.managedSlotRefusalFor(input);
+      return;
     }
-    if (refusal) {
-      throw refusal;
-    }
+    throw error;
   }
 
   /**
@@ -10948,7 +10981,7 @@ export class DevicePool {
     if (!this.managedSlotExclusion) {
       return new Set();
     }
-    await this.managedSlotExclusion.refresh();
+    await this.managedSlotExclusion.refresh({ requireCurrent: true });
     return this.managedSlotExclusion.stableIdsFor(platform);
   }
 

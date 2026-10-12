@@ -25,4 +25,6 @@ export interface TestRecordingResponse {
   durationMs?: number;
   recording?: TestRecordingStatus;
   error?: string;
+  /** Machine-readable cause of an unsuccessful recording command, when available. */
+  reason?: string;
 }

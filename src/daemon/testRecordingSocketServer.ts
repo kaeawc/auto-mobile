@@ -10,7 +10,9 @@ import {
   getStoppedTestRecording,
   joinInFlightTestRecordingStop,
   stopTestRecording,
+  NoUserInputCapturedError,
 } from "../server/testRecordingManager";
+import { logger } from "../utils/logger";
 import { TestRecordingCommand, TestRecordingResponse } from "./testRecordingSocketTypes";
 import { TEST_RECORDING_SOCKET_CONFIG } from "./daemonFiles";
 import {
@@ -323,9 +325,16 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
     // recordingId-only guard in stopTestRecording is not an ownership check
     // (issue #4752).
     if (request.recordingId) {
-      const joined = await joinInFlightTestRecordingStop(request.recordingId, request.sessionUuid);
-      if (joined) {
-        return this.toStopResponse(joined);
+      try {
+        const joined = await joinInFlightTestRecordingStop(
+          request.recordingId,
+          request.sessionUuid,
+        );
+        if (joined) {
+          return this.toStopResponse(joined);
+        }
+      } catch (error) {
+        return this.toStopFailure(error);
       }
     }
     const active = getTestRecordingStatus();
@@ -353,8 +362,17 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
       device: { deviceId: active.deviceId, platform: active.platform },
       requesterSessionUuid: request.sessionUuid,
     });
-    const result = await stopTestRecording(request.recordingId, request.planName);
-    return this.toStopResponse(result);
+    return stopTestRecording(request.recordingId, request.planName)
+      .then((result) => this.toStopResponse(result))
+      .catch((error: unknown) => this.toStopFailure(error));
+  }
+
+  private toStopFailure(error: unknown): TestRecordingResponse {
+    if (!(error instanceof NoUserInputCapturedError)) {
+      throw error;
+    }
+    logger.warn(`[TestRecording] ${error.message}`, error);
+    return { success: false, error: error.message, reason: error.reason };
   }
 
   private toStopResponse(

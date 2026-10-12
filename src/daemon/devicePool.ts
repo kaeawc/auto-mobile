@@ -929,7 +929,7 @@ export interface OwnerDisconnectOptions {
 }
 
 export interface ManagedExecutionOwnership {
-  automationRefusal(sessionId: string): string | undefined;
+  automationRefusal(sessionId: string): ActionableError | undefined;
 }
 
 export interface DevicePoolDependencies {
@@ -10562,7 +10562,7 @@ export class DevicePool {
   assertSessionReadyForAutomation(sessionId: string): void {
     const ownershipRefusal = this.managedExecutionOwnership?.()?.automationRefusal(sessionId);
     if (ownershipRefusal) {
-      throw new ActionableError(ownershipRefusal);
+      throw ownershipRefusal;
     }
     if (this.adbServerResetQuarantinedSessions.has(sessionId)) {
       const loss = this.recoveringSessionLosses.get(sessionId);

@@ -103,6 +103,8 @@ import {
   DeviceAssignedToManagedSlotError,
   DeviceOutsideManagedSlotsError,
   ManagedSlotDiscoveryIncompleteError,
+  ManagedSlotOwnershipUnconfirmedError,
+  ManagedSlotOwnershipLostError,
 } from "../../src/daemon/managedSlots/managedSlotRefusal";
 import {
   DeviceOutsideBoundSessionError,
@@ -526,6 +528,16 @@ const BUILDERS: readonly FixtureEntry[] = [
           execSessionUuid: null,
         }),
       ),
+  ],
+  [
+    "managed_slot_ownership_unconfirmed",
+    "ManagedSlotOwnershipUnconfirmedError via shapeToolCallError",
+    () => shaped(new ManagedSlotOwnershipUnconfirmedError(SESSION)),
+  ],
+  [
+    "managed_slot_ownership_lost",
+    "ManagedSlotOwnershipLostError via shapeToolCallError",
+    () => shaped(new ManagedSlotOwnershipLostError(SESSION)),
   ],
   [
     "device_outside_managed_slots",
@@ -978,6 +990,8 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
   ["daemon_restart_deferred", () => new DaemonRestartDeferredError("a device operation is active")],
   ["daemon_restart_pending", () => new DaemonRestartPendingError()],
   ["device_outside_bound_session", boundSessionError],
+  ["managed_slot_ownership_unconfirmed", () => new ManagedSlotOwnershipUnconfirmedError(SESSION)],
+  ["managed_slot_ownership_lost", () => new ManagedSlotOwnershipLostError(SESSION)],
   ["capacity_exhausted.ios", () => bootCapacityRefusal("ios") as Error],
   ["discovery_incomplete.ios", iosInventoryIncomplete],
   [

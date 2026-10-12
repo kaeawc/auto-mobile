@@ -4,6 +4,10 @@ import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { drainMicrotasks, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 import { ActionableError } from "../../src/models/ActionableError";
+import {
+  ManagedSlotOwnershipUnconfirmedError,
+  ManagedSlotOwnershipLostError,
+} from "../../src/daemon/managedSlots/managedSlotRefusal";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   InMemoryEmulatorLossIncidentStore,
@@ -1878,10 +1882,10 @@ describe("ADB server reset session recovery", () => {
 });
 
 describe("managed slot ownership automation admission", () => {
-  test("the lazy ownership gate refuses unconfirmed and lost sessions with ActionableError", () => {
+  test("the lazy ownership gate throws typed unconfirmed and lost refusals with pinned payloads", () => {
     const timer = new FakeTimer();
     const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    let refusal: string | undefined;
+    let refusal: ActionableError | undefined;
     const pool = new DevicePool(
       createDevicePoolDependencies(sessions, "daemon-session", {
         timer,
@@ -1890,14 +1894,27 @@ describe("managed slot ownership automation admission", () => {
     );
     try {
       expect(() => pool.assertSessionReadyForAutomation("resumed")).not.toThrow();
-      for (const message of [
-        "Session 'resumed' slot ownership is not recorded for this daemon yet; the managed slot registry is busy. Retry shortly.",
-        "Session 'resumed' no longer owns its managed slot; acquire a new session.",
-      ]) {
-        refusal = message;
-        expect(() => pool.assertSessionReadyForAutomation("resumed")).toThrow(ActionableError);
-        expect(() => pool.assertSessionReadyForAutomation("resumed")).toThrow(message);
-      }
+      const unconfirmed = new ManagedSlotOwnershipUnconfirmedError("resumed");
+      expect(unconfirmed.toPayload()).toEqual({
+        code: "managed_slot_ownership_unconfirmed",
+        sessionUuid: "resumed",
+        retryable: true,
+        retryAfterMs: 2_000,
+      });
+      const lost = new ManagedSlotOwnershipLostError("resumed");
+      expect(lost.toPayload()).toEqual({
+        code: "managed_slot_ownership_lost",
+        sessionUuid: "resumed",
+        retryable: false,
+      });
+      refusal = unconfirmed;
+      expect(() => pool.assertSessionReadyForAutomation("resumed")).toThrow(
+        ManagedSlotOwnershipUnconfirmedError,
+      );
+      refusal = lost;
+      expect(() => pool.assertSessionReadyForAutomation("resumed")).toThrow(
+        ManagedSlotOwnershipLostError,
+      );
       refusal = undefined;
       expect(() => pool.assertSessionReadyForAutomation("resumed")).not.toThrow();
     } finally {

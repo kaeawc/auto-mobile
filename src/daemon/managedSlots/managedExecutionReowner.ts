@@ -15,6 +15,11 @@
  */
 
 import type { BackoffPolicy } from "../../utils/Backoff";
+import type { ActionableError } from "../../models/ActionableError";
+import {
+  ManagedSlotOwnershipLostError,
+  ManagedSlotOwnershipUnconfirmedError,
+} from "./managedSlotRefusal";
 import { DefaultRetryExecutor } from "../../utils/retry/RetryExecutor";
 import type { Timer } from "../../utils/SystemTimer";
 import { MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF } from "./managedExecutionRelease";
@@ -22,6 +27,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import {
   journalOwnersEqual,
+  type ClaimExecutionResult,
   type SlotAssignmentRecord,
   type SlotProcessIdentity,
   type SlotRegistry,
@@ -80,7 +86,7 @@ export class ManagedExecutionReowner {
     }
     this.pruneReleasedSessions();
     if (options?.rehydrated) {
-      this.markRehydrated(sessionUuids);
+      this.markUnconfirmed(sessionUuids);
     }
     const assignments: SlotAssignmentRecord[] = [];
     for (const id of sessionUuids) {
@@ -89,7 +95,7 @@ export class ManagedExecutionReowner {
     return assignments;
   }
 
-  private markRehydrated(ids: readonly string[]): void {
+  private markUnconfirmed(ids: readonly string[]): void {
     for (const id of ids) {
       if (this.isHeld(id) && !this.ownership.has(id)) {
         this.ownership.set(id, "unconfirmed");
@@ -105,17 +111,20 @@ export class ManagedExecutionReowner {
       const attempt = await this.attempt(id);
       this.settleOwnership(id, attempt.outcome);
       if (attempt.outcome === "retry") {
-        this.retryInBackground(id, new Error("stale_binding"));
+        this.retryInBackground(id, new Error("managed slot ownership unconfirmed"));
       }
       return attempt.assignments;
     } catch (error) {
-      if (!this.closed) {
-        logger.warn(
-          `[ManagedSlots] Re-owning managed execution ${id} failed: ${errorMessage(error)}`,
-          error,
-        );
-        this.retryInBackground(id, error);
+      if (this.closed) {
+        // Shutdown has stopped registry work and retained the gate, so this late failure is safe to swallow.
+        logger.debug(`[ManagedSlots] Re-owning managed execution ${id} failed after close`, error);
+        return [];
       }
+      logger.warn(
+        `[ManagedSlots] Re-owning managed execution ${id} failed: ${errorMessage(error)}`,
+        error,
+      );
+      this.retryInBackground(id, error);
       return [];
     }
   }
@@ -124,16 +133,16 @@ export class ManagedExecutionReowner {
     return !this.closed && this.isHeld(id);
   }
 
-  /** Synchronous O(1) automation admission; sessions never marked by rehydration are unaffected. */
-  automationRefusal(sessionUuid: string): string | undefined {
+  /** Synchronous O(1) automation admission for sessions marked by rehydration or foreign-owner evidence. */
+  automationRefusal(sessionUuid: string): ActionableError | undefined {
     if (!this.isHeld(sessionUuid)) {
       return undefined;
     }
     switch (this.ownership.get(sessionUuid)) {
       case "unconfirmed":
-        return `Session '${sessionUuid}' slot ownership is not recorded for this daemon yet; the managed slot registry is busy. Retry shortly.`;
+        return new ManagedSlotOwnershipUnconfirmedError(sessionUuid);
       case "lost":
-        return `Session '${sessionUuid}' no longer owns its managed slot; acquire a new session.`;
+        return new ManagedSlotOwnershipLostError(sessionUuid);
       default:
         return undefined;
     }
@@ -201,7 +210,7 @@ export class ManagedExecutionReowner {
           const result = await this.attempt(id);
           this.settleOwnership(id, result.outcome);
           if (result.outcome === "retry") {
-            throw new Error("stale_binding");
+            throw new Error("managed slot ownership unconfirmed");
           }
         },
         {
@@ -264,12 +273,19 @@ export class ManagedExecutionReowner {
       if (assignment.execOwner && journalOwnersEqual(assignment.execOwner, owner)) {
         continue;
       }
-      const claimed = await registry.claimExecution(
-        { scopeKey: assignment.scopeKey, slotIndex: assignment.slotIndex },
-        { generation: assignment.generation, stableDeviceId: assignment.stableDeviceId },
-        { ...owner, sessionUuid },
-        { supersedesSessionUuid: sessionUuid },
-      );
+      let claimed: ClaimExecutionResult;
+      try {
+        claimed = await registry.claimExecution(
+          { scopeKey: assignment.scopeKey, slotIndex: assignment.slotIndex },
+          { generation: assignment.generation, stableDeviceId: assignment.stableDeviceId },
+          { ...owner, sessionUuid },
+          { supersedesSessionUuid: sessionUuid },
+        );
+      } catch (error) {
+        // The read proved a foreign owner, and a failed write cannot confirm this daemon's fence.
+        this.markUnconfirmed([sessionUuid]);
+        throw error;
+      }
       if (!this.canAttempt(sessionUuid)) {
         break;
       }
@@ -280,6 +296,7 @@ export class ManagedExecutionReowner {
         );
         result.assignments.push(claimed.assignment);
       } else {
+        this.markUnconfirmed([sessionUuid]);
         this.recordRefusal(result, claimed.kind, assignment, sessionUuid);
       }
     }
@@ -299,7 +316,7 @@ export class ManagedExecutionReowner {
         return;
       }
     }
-    if (kind === "stale_binding" && result.outcome !== "lost") {
+    if (kind !== "slot_in_use" && result.outcome !== "lost") {
       result.outcome = "retry";
     }
     logger.warn(

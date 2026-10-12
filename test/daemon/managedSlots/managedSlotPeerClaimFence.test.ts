@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../src/daemon/managedExecutionLiveness";
 import { ManagedExecutionReowner } from "../../../src/daemon/managedSlots/managedExecutionReowner";
+import {
+  ManagedSlotOwnershipLostError,
+  ManagedSlotOwnershipUnconfirmedError,
+} from "../../../src/daemon/managedSlots/managedSlotRefusal";
 import { ManagedExecutionRelease } from "../../../src/daemon/managedSlots/managedExecutionRelease";
 import { SlotJournalInFlight } from "../../../src/daemon/managedSlots/slotJournal";
 import {
@@ -16,7 +20,7 @@ import { openSqliteSlotRegistry } from "../../../src/daemon/managedSlots/sqliteS
 import { exponentialBackoff } from "../../../src/utils/Backoff";
 import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
+import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
 
 const PREVIOUS = { daemonId: "previous", pid: 4100 };
 const OWNER = { daemonId: "current", pid: 4200 };
@@ -215,14 +219,16 @@ describe("rehydrated managed execution peer claim fence", () => {
       faults.busy.claimExecution = 1;
       faults.busy.openSlotJournal = 100;
       const attempt = reowner.reown([S], { rehydrated: true });
-      expect(reowner.automationRefusal(S)).toContain("not recorded");
+      expect(reowner.automationRefusal(S)).toBeInstanceOf(ManagedSlotOwnershipUnconfirmedError);
+      expect(reowner.automationRefusal(S)?.message).toContain("not recorded");
       await attempt;
       expect((await claimAs(PEERS[0]!)).kind).toBe("claimed");
       await advance(10);
       await reowner.whenIdle();
-      expect(reowner.automationRefusal(S)).toContain("no longer owns");
+      expect(reowner.automationRefusal(S)?.message).toContain("no longer owns");
+      expect(reowner.automationRefusal(S)).toBeInstanceOf(ManagedSlotOwnershipLostError);
       await reowner.reown([S]);
-      expect(reowner.automationRefusal(S)).toContain("no longer owns");
+      expect(reowner.automationRefusal(S)?.message).toContain("no longer owns");
       expect(
         warn.mock.calls.filter(([message]) => String(message).includes("no longer owns")),
       ).toHaveLength(1);
@@ -388,7 +394,7 @@ describe("rehydrated managed execution peer claim fence", () => {
         expect((await claimAs(PEERS[0]!)).kind).toBe("claimed");
       };
       await reowner.reown([S], { rehydrated: true });
-      expect(reowner.automationRefusal(S)).toContain("no longer owns");
+      expect(reowner.automationRefusal(S)?.message).toContain("no longer owns");
       expect(timer.getPendingTimeouts()).toEqual([]);
       await reowner.reown([S]);
       expect(warn.mock.calls).toHaveLength(1);
@@ -440,7 +446,7 @@ describe("rehydrated managed execution peer claim fence", () => {
   testWithFreshSlot(
     "non-rehydration failures mark nothing, gate nothing, and retry nothing",
     async () => {
-      faults.busy.claimExecution = 1;
+      faults.busy.findExecutionAssignments = 1;
       expect(await reowner.reown([S])).toEqual([]);
       expect(reowner.automationRefusal(S)).toBeUndefined();
       expect(reowner.automationRefusal("never-rehydrated")).toBeUndefined();
@@ -521,17 +527,139 @@ describe("rehydrated managed execution peer claim fence", () => {
   );
 
   testWithFreshSlot(
-    "slot_not_ready settles the gate and remains unclaimable by peers",
+    "slot_not_ready stays gated through dead-settler recovery and a peer claim, then loses ownership",
     async () => {
       await registry.updateSlotState(key, BINDING, "settling", { settler: PREVIOUS });
       await reowner.reown([S], { rehydrated: true });
-      expect(reowner.automationRefusal(S)).toBeUndefined();
-      expect(timer.getPendingTimeouts()).toEqual([]);
+      expect(reowner.automationRefusal(S)).toBeDefined();
+      expect(timer.getPendingTimeouts()).toEqual([10]);
       for (const pid of PEERS) {
         expect((await claimAs(pid)).kind).toBe("slot_not_ready");
       }
+      judge = viewOf(PEERS[0]!);
+      expect(await registry.recoverSettledSlots(key.scopeKey)).toHaveLength(1);
+      judge = viewOf(OWNER.pid);
+      expect(reowner.automationRefusal(S)).toBeDefined();
+      expect((await claimAs(PEERS[0]!)).kind).toBe("claimed");
+      await advance(10);
+      await reowner.whenIdle();
+      expect(reowner.automationRefusal(S)?.message).toContain("no longer owns");
+      expect(timer.getPendingTimeouts()).toEqual([]);
     },
   );
+
+  testWithFreshSlot("slot_not_ready stays gated until the ready slot is re-owned", async () => {
+    await registry.updateSlotState(key, BINDING, "settling", { settler: PREVIOUS });
+    await reowner.reown([S], { rehydrated: true });
+    expect(reowner.automationRefusal(S)).toBeDefined();
+    await advance(10);
+    await drainUntil(() => timer.getPendingTimeouts()[0] === 20, {
+      description: "the second slot_not_ready attempt to schedule its backoff",
+    });
+    expect(reowner.automationRefusal(S)).toBeDefined();
+    expect(timer.getPendingTimeouts()).toEqual([20]);
+    const assignment = (await registry.getAssignment(key))!;
+    await registry.updateSlotState(key, { ...BINDING, generation: assignment.generation }, "ready");
+    expect(reowner.automationRefusal(S)).toBeDefined();
+    await advance(20);
+    await reowner.whenIdle();
+    expect(reowner.automationRefusal(S)).toBeUndefined();
+    expect(await registry.getAssignment(key)).toMatchObject({
+      execOwner: { ...OWNER, sessionUuid: S },
+    });
+    for (const pid of PEERS) {
+      expect((await claimAs(pid)).kind).toBe("slot_in_use");
+    }
+  });
+
+  testWithFreshSlot(
+    "foreign-owner evidence gates an unmarked failed claim until retry confirms",
+    async () => {
+      faults.busy.claimExecution = 1;
+      await reowner.reown([S]);
+      expect(reowner.automationRefusal(S)).toBeDefined();
+      expect(timer.getPendingTimeouts()).toEqual([10]);
+      await advance(10);
+      await reowner.whenIdle();
+      expect(reowner.automationRefusal(S)).toBeUndefined();
+      for (const pid of PEERS) {
+        expect((await claimAs(pid)).kind).toBe("slot_in_use");
+      }
+    },
+  );
+
+  testWithFreshSlot("foreign-owner evidence gates an unmarked slot_not_ready refusal", async () => {
+    await registry.updateSlotState(key, BINDING, "settling", { settler: PREVIOUS });
+    await reowner.reown([S]);
+    expect(reowner.automationRefusal(S)).toBeDefined();
+    expect(timer.getPendingTimeouts()).toEqual([10]);
+    judge = viewOf(PEERS[0]!);
+    await registry.recoverSettledSlots(key.scopeKey);
+    judge = viewOf(OWNER.pid);
+    expect((await claimAs(PEERS[0]!)).kind).toBe("claimed");
+    await advance(10);
+    await reowner.whenIdle();
+    expect(reowner.automationRefusal(S)?.message).toContain("no longer owns");
+  });
+
+  testWithFreshSlot(
+    "records already naming this daemon never mark an unmarked session",
+    async () => {
+      await registry.claimExecution(
+        key,
+        BINDING,
+        { ...OWNER, sessionUuid: S },
+        { supersedesSessionUuid: S },
+      );
+      faults.busy.claimExecution = 1;
+      await reowner.reown([S]);
+      expect(reowner.automationRefusal(S)).toBeUndefined();
+      expect(faults.calls.claimExecution).toBeUndefined();
+      expect(timer.getPendingTimeouts()).toEqual([]);
+    },
+  );
+
+  testWithFreshSlot(
+    "foreign-owner evidence marks an unmarked slot_in_use refusal lost",
+    async () => {
+      faults.hooks.beforeClaim = async () => {
+        faults.hooks.beforeClaim = undefined;
+        judge = viewOf(PEERS[0]!);
+        try {
+          expect(
+            (
+              await registry.claimExecution(key, BINDING, {
+                daemonId: `peer-${PEERS[0]}`,
+                pid: PEERS[0]!,
+                sessionUuid: `${S2}-${PEERS[0]}`,
+              })
+            ).kind,
+          ).toBe("claimed");
+        } finally {
+          judge = viewOf(OWNER.pid);
+        }
+      };
+      await reowner.reown([S]);
+      expect(reowner.automationRefusal(S)).toBeInstanceOf(ManagedSlotOwnershipLostError);
+      expect(timer.getPendingTimeouts()).toEqual([]);
+      expect(warn.mock.calls).toHaveLength(1);
+    },
+  );
+
+  testWithFreshSlot("an inline failure after close is debug logged without warning", async () => {
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      faults.hooks.afterLookup = () => reowner.close();
+      faults.commitsThenThrows.findExecutionAssignments = 1;
+      await reowner.reown([S], { rehydrated: true });
+      await reowner.whenIdle();
+      expect(warn.mock.calls).toEqual([]);
+      expect(debug.mock.calls).toHaveLength(1);
+      expect(reowner.automationRefusal(S)).toBeDefined();
+    } finally {
+      debug.mockRestore();
+    }
+  });
 
   testWithFreshSlot(
     "a session no longer held drops its gate and stops registry retries",
@@ -574,7 +702,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       expect(reowner.automationRefusal("missing")).toBeDefined();
       await advance(10);
       await reowner.whenIdle();
-      expect(reowner.automationRefusal("missing")).toContain("no longer owns");
+      expect(reowner.automationRefusal("missing")?.message).toContain("no longer owns");
     },
   );
 });

@@ -22,6 +22,7 @@ import {
 } from "../models";
 import {
   assertAndroidImageRunningStateKnown,
+  type BootedDeviceDiscoveryOptions,
   MultiPlatformDeviceManager,
   PHYSICAL_IOS_SCAN_BUDGET_MS,
   waitForDeviceReadyOrCancel,
@@ -1182,6 +1183,90 @@ export class DeviceSessionManager implements DeviceSessionManager {
     return platformDevices.find((device) => device.deviceId === this.explicitDevicePin?.deviceId);
   }
 
+  /** Ownership has been rechecked; now observe boot state while holding the image lease. */
+  private async recheckReadBootImage(
+    image: DeviceInfo,
+    options: DeviceReadyOptions | undefined,
+  ): Promise<BootedDevice | undefined> {
+    if (options?.intent !== "read") {
+      return undefined;
+    }
+    let running: BootedDevice | undefined;
+    if (image.platform === "android") {
+      running = await this.recheckAndroidReadBootImage(image, options);
+    } else {
+      const images = await this.listProvidedReadinessImages("ios", options);
+      const matches = images.filter((candidate) => candidate.deviceId === image.deviceId);
+      const current = matches.length === 1 ? matches[0] : undefined;
+      if (!current || current.isAvailable === false) {
+        throw providedReadTargetNotFound(image.deviceId!, "ios", []);
+      }
+      if (current.isRunning === true) {
+        running = { ...current, deviceId: image.deviceId! };
+      } else if (current.isRunning !== false) {
+        throw providedReadTargetNotFound(image.deviceId!, "ios", []);
+      }
+    }
+    if (running) {
+      await this.verifyDevice(running.deviceId, image.platform, options, running);
+    }
+    return running;
+  }
+
+  private async recheckAndroidReadBootImage(
+    image: DeviceInfo,
+    options: DeviceReadyOptions,
+  ): Promise<BootedDevice | undefined> {
+    // Do not reuse the caller's discovery memo or Android's short device-list cache.
+    const bootedDevices = await this.listBootedAndroidDevicesForSelection({
+      bypassAndroidDeviceListCache: true,
+      signal: options.signal,
+    });
+    options.signal?.throwIfAborted();
+    const images = await this.listProvidedReadinessImages("android", options);
+    const matches = images.filter((candidate) => candidate.name === image.name);
+    const current = matches.length === 1 ? matches[0] : undefined;
+    if (!current) {
+      throw providedReadTargetNotFound(image.name, "android", []);
+    }
+    const running = matchRunningReadTarget(
+      bootedDevices.filter(
+        (device) => isAndroidEmulatorSerial(device.deviceId) && device.name === image.name,
+      ),
+      image.name,
+      "android",
+    );
+    if (running) {
+      return running;
+    }
+    if (current.isRunning === true) {
+      throw new AndroidBootedDeviceDiscoveryIncompleteError(
+        undefined,
+        `Android AVD '${image.name}' is running but its serial could not be resolved yet.`,
+      );
+    }
+    assertAndroidImageRunningStateKnown(current);
+    if (current.isRunning !== false) {
+      throw new AndroidBootedDeviceDiscoveryIncompleteError(
+        undefined,
+        `Cannot safely cold-boot Android AVD '${image.name}': its running state is unknown.`,
+      );
+    }
+    return undefined;
+  }
+
+  private async listBootedAndroidDevicesForSelection(
+    options?: BootedDeviceDiscoveryOptions,
+  ): Promise<BootedDevice[]> {
+    const discovery = await this.deviceUtils.getBootedDevicesDetailed("android", options);
+    options?.signal?.throwIfAborted();
+    // Failed discovery cannot establish absence and admit a cold boot (#11103).
+    if (!discovery.succeededPlatforms.has("android")) {
+      throw new AndroidBootedDeviceDiscoveryIncompleteError(discovery.discoveryErrors?.android);
+    }
+    return discovery.devices;
+  }
+
   private getReadinessScan(
     platform: SomePlatform,
     options?: DeviceReadyOptions,
@@ -2049,14 +2134,8 @@ export class DeviceSessionManager implements DeviceSessionManager {
     const perf = createGlobalPerformanceTracker();
 
     perf.startOperation("listBootedDevices");
-    const discovery = await this.deviceUtils.getBootedDevicesDetailed("android");
+    const allDevices = await this.listBootedAndroidDevicesForSelection();
     perf.endOperation("listBootedDevices");
-    // A failed/timed-out adb listing is not "no devices": refuse rather than
-    // cold-boot an AVD while an attached device may be present (#11103).
-    if (!discovery.succeededPlatforms.has("android")) {
-      throw new AndroidBootedDeviceDiscoveryIncompleteError(discovery.discoveryErrors?.android);
-    }
-    const allDevices = discovery.devices;
 
     if (allDevices.length > 0) {
       // Use the first available device
@@ -2106,6 +2185,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
         if (options?.beforeReadBoot) {
           await options.beforeReadBoot(deviceImage);
           signal.throwIfAborted();
+        }
+        const running = await this.recheckReadBootImage(deviceImage, { ...options, signal });
+        if (running) {
+          return running;
         }
         perf.startOperation("startDevice");
         const childProcess = await runWithAbortSignal(
@@ -2435,6 +2518,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
         if (options?.beforeReadBoot) {
           await options.beforeReadBoot(device);
           signal.throwIfAborted();
+        }
+        const running = await this.recheckReadBootImage(device, { ...options, signal });
+        if (running) {
+          return running;
         }
         perf.startOperation("bootSimulator");
         const bootedDevice = await this.bootIosSimulatorAdmitted(

@@ -1,0 +1,12 @@
+{
+  "surface": "socket-frame",
+  "name": "target_identity_unresolved",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "target_identity_unresolved: Cannot prove whether Android AVD 'Pixel_8_API_35' is already running; AVD name is unavailable for emulator-5554. Retry after identity discovery recovers.",
+    "code": "target_identity_unresolved",
+    "retryable": true
+  }
+}

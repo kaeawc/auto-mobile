@@ -1,0 +1,12 @@
+{
+  "surface": "socket-frame",
+  "name": "daemon_handoff_interrupted",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "Daemon handoff interrupted the in-flight request",
+    "code": "daemon_handoff_interrupted",
+    "retryable": true
+  }
+}

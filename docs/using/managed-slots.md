@@ -467,7 +467,7 @@ slot. Only control and lifecycle calls on another slot's device are refused.
 - A managed connection (a proxy launched with a slot config) that tries to
   control, start, provision or delete anything outside its own slot devices or
   sessions gets the non-retryable `device_outside_managed_slots`, with a reason
-  of `device`, `session` or `tool` (device-acquiring tools are left to slot
+  of `device`, `session`, `tool`, `scope` or `host` (device-acquiring tools are left to slot
   acquisition). Lifecycle tools (`getAndroid`, `getApple`, `startDevice`,
   `provisionDevice`, `killDevice`, `deleteDevice`) are refused with reason `tool`
   even on the connection's own slot device: it could not boot the device again,
@@ -476,8 +476,11 @@ slot. Only control and lifecycle calls on another slot's device are refused.
 - The same confinement applies to a managed connection's direct socket frames:
   `input/*`, the device-mutating `ide/*` routes (`force` or not),
   `ide/setSessionToolEnabled`, `daemon/releaseSession` and
-  `daemon/relinquishDeviceLease` are refused off-slot (#11596). An ordinary
-  connection may still release any session.
+  `daemon/relinquishDeviceLease` are refused off-slot (#11596).
+  `daemon/releaseExecution` is confined to its own slot sessions, and
+  `daemon/resetSlotScope` to its own scope named by all three identity parts.
+  `daemon/refreshDevices` and `ide/setFeatureFlag` are refused (#11596). An
+  ordinary connection may still release any session.
 - A managed connection's multi-device plan labels are served only by its own slot
   sessions. Any other label, or one whose declared platform the slot device does
   not match, is refused with `device_outside_managed_slots` before anything is

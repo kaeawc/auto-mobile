@@ -4614,6 +4614,7 @@ export class DevicePool {
         await this.cancelDeviceSessionExecutions(
           sessionId,
           deviceLossCancellationReason(device.id, incidentId),
+          { excludeExecutionId: this.ambientExecutionIdReader?.getExecutionId() },
         );
       }
       if (isSupersededByNewerIdentity()) {

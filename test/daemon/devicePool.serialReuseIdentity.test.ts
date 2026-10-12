@@ -551,11 +551,22 @@ for (const pin of [
 
 for (const path of ["monitor", "fresh settlement", "refresh"] as const) {
   warmedTest(`${path}: cancels holder executions once before publishing B`, async () => {
-    const calls: Array<{ sessionId: string; reason: string; name?: string }> = [];
-    const h = await setup(original, true, async (sessionId, reason) => {
-      calls.push({ sessionId, reason, name: h.pool.getDevice(original.deviceId)?.name });
-      return 0;
-    });
+    const executionId = path === "monitor" ? undefined : "settling-execution";
+    const calls: Array<{
+      sessionId: string;
+      reason: string;
+      name?: string;
+      options?: { excludeExecutionId?: string };
+    }> = [];
+    const h = await setup(
+      original,
+      true,
+      async (sessionId, reason, options) => {
+        calls.push({ sessionId, reason, name: h.pool.getDevice(original.deviceId)?.name, options });
+        return 0;
+      },
+      { ambientExecutionIdReader: { getExecutionId: () => executionId } },
+    );
     try {
       await h.pool.bindOrReuseDeviceSession("holder", original.deviceId, "android");
       h.manager.bootedDevices = [replacement];
@@ -569,7 +580,12 @@ for (const path of ["monitor", "fresh settlement", "refresh"] as const) {
         await h.pool.settlePooledRuntimeIdentity(original.deviceId);
       }
       expect(calls).toEqual([
-        { sessionId: "holder", reason: "device-disconnected:emulator-5554", name: "AVD-A" },
+        {
+          sessionId: "holder",
+          reason: "device-disconnected:emulator-5554",
+          name: "AVD-A",
+          options: { excludeExecutionId: executionId },
+        },
       ]);
       expect(h.pool.getDevice(original.deviceId)?.name).toBe("AVD-B");
     } finally {

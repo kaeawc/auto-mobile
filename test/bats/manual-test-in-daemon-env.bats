@@ -79,3 +79,33 @@ teardown() {
     [ ! -f "${COMMAND_LOG}" ]
   done
 }
+
+@test "daemon start shorthand refuses the default port policy" {
+  run bash "${SCRIPT}" --batch-dir "${BATCH}" --daemon 1 daemon start
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *'use private-daemon.ts start, which owns --port --strict-port; a restart is stop + start'* ]]
+  [ ! -f "${COMMAND_LOG}" ]
+}
+
+@test "daemon restart shorthand refuses and directs stop plus owned start" {
+  run bash "${SCRIPT}" --batch-dir "${BATCH}" --daemon 1 daemon restart
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *'a restart is stop + start'* ]]
+  [ ! -f "${COMMAND_LOG}" ]
+}
+
+@test "frame shorthand uses repository raw-frame driver and preserves args" {
+  run bash "${SCRIPT}" --batch-dir "${BATCH}" --daemon 1 frame send ide/status '{"a":"one two"}'
+  [ "${status}" -eq 0 ]
+  repo="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
+  expected="$(printf '%s\n' "${repo}/scripts/manual-test/daemon-frame.ts" send ide/status '{"a":"one two"}')"
+  [ "$(cat "${COMMAND_LOG}")" = "${expected}" ]
+}
+
+@test "aux shorthand uses repository auxiliary driver" {
+  run bash "${SCRIPT}" --batch-dir "${BATCH}" --daemon 1 aux recording status --observer
+  [ "${status}" -eq 0 ]
+  repo="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
+  expected="$(printf '%s\n' "${repo}/scripts/manual-test/aux-socket.ts" recording status --observer)"
+  [ "$(cat "${COMMAND_LOG}")" = "${expected}" ]
+}

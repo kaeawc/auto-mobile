@@ -32,6 +32,7 @@ function fixture() {
     logs: string[] = [];
   const launches: Array<{ command: string; args: string[]; env: Record<string, string> }> = [];
   const deps: PrivateDaemonCliDeps = {
+    runtimePath: resolve("/fake/runtime"),
     host: { homeDirs: [resolve("/home/fake")], uid: 4242 },
     env: {
       AUTOMOBILE_MANAGED_SLOT_CONFIG: "inherited",
@@ -163,6 +164,7 @@ posixTest("start uses strict owned port and derived env, writes a plain pid", as
     ),
   ).toBe(0);
   expect(f.launches).toHaveLength(1);
+  expect(f.launches[0].command).toBe(f.deps.runtimePath);
   expect(f.launches[0].args).toEqual([
     options.serverPath,
     "--daemon",
@@ -207,6 +209,7 @@ posixTest("stop only launches isolated daemon stop; status and env never launch"
     f.deps,
   );
   expect(f.launches).toHaveLength(1);
+  expect(f.launches[0].command).toBe(f.deps.runtimePath);
   expect(f.logs.at(-1)).toBe(join(options.batchDir, "daemon1", "env.sh"));
 });
 posixTest("tampered specs/default options are refused before a launch", async () => {

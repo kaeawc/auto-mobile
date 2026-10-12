@@ -37,12 +37,21 @@ case "$1" in
   daemon)
     [[ -n "${MT_SERVER:-}" ]] || fail 'env needs MT_SERVER for daemon shorthand'
     shift
+    case "${1:-}" in
+      start | restart) fail 'use private-daemon.ts start, which owns --port --strict-port; a restart is stop + start' ;;
+    esac
     exec bun "$MT_SERVER" --daemon "$@"
     ;;
-  proxy)
+  proxy | frame | aux)
+    shorthand="$1"
     shift
     repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-    exec bun "${repo_root}/scripts/manual-test/proxy-session.ts" "$@"
+    case "$shorthand" in
+      proxy) script='proxy-session.ts' ;;
+      frame) script='daemon-frame.ts' ;;
+      aux) script='aux-socket.ts' ;;
+    esac
+    exec bun "${repo_root}/scripts/manual-test/${script}" "$@"
     ;;
   *) exec "$@" ;;
 esac

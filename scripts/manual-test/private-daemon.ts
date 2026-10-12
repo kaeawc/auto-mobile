@@ -150,6 +150,7 @@ export function parsePrivateDaemonArgs(argv: string[]): PrivateDaemonCommand | {
   };
 }
 export interface PrivateDaemonCliDeps {
+  runtimePath: string;
   runCommand(
     command: string,
     args: string[],
@@ -287,7 +288,7 @@ export async function runPrivateDaemonCommand(
       if (command.op === "start") {
         args.push("--port", String(spec.port), "--strict-port", ...command.extraFlags);
       }
-      const result = await deps.runCommand("bun", args, env);
+      const result = await deps.runCommand(deps.runtimePath, args, env);
       if (result.exitCode !== 0) {
         return result.exitCode;
       }
@@ -321,6 +322,7 @@ export async function main(): Promise<number> {
     return 2;
   }
   return runPrivateDaemonCommand(parsed, {
+    runtimePath: process.execPath,
     runCommand: async (command, args, env) => {
       const child = spawn(command, args, { env, stdio: "inherit" });
       return new Promise((done, reject) => {

@@ -1,6 +1,8 @@
 import { expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
+  RECLAIM_GUARD_ABANDON_AGE_MS,
+  takeOverExclusiveLock,
   acquireExclusiveLockSteps,
   releaseExclusiveLockSteps,
   tryAcquireExclusiveLock,
@@ -13,6 +15,7 @@ import {
 import { logger } from "../../src/utils/logger";
 import { FakeLockFileSystem } from "../fakes/FakeLockFileSystem";
 import { SeededRandom } from "../fakes/SeededRandom";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const PATH = "/locks/resource.lock";
 const NOW = 20_000;
@@ -58,14 +61,16 @@ class Racer<T> {
 }
 
 function fixture(raw = OLD) {
-  const fs = new FakeLockFileSystem(() => NOW);
+  const clock = new FakeTimer();
+  clock.advanceTime(NOW);
+  const fs = new FakeLockFileSystem(() => clock.now());
   fs.seed(PATH, raw, 0);
   const live = new Set([101, 202, 303, 404]);
   const options = (pid: number): ExclusiveLockOptions => ({
     pid,
     ownerToken: `owner-${pid}`,
     fileSystem: fs,
-    now: () => NOW,
+    now: () => clock.now(),
     isProcessRunning: (owner) => live.has(owner),
     ownerGeneration: {
       current: () => "current-generation",
@@ -73,7 +78,7 @@ function fixture(raw = OLD) {
     },
   });
   const acquire = (pid: number) => new Racer(acquireExclusiveLockSteps(PATH, options(pid)));
-  return { fs, live, options, acquire };
+  return { fs, live, options, acquire, clock };
 }
 
 function pauseAfterJudgement(racer: Racer<boolean>): void {
@@ -351,7 +356,7 @@ test("R1 defence in depth: late legacy fd write before rename is restored withou
   expect(fs.paths()).toEqual([PATH]);
 });
 
-test("fallback ENOTSUP: wx acquire succeeds, genuine create error throws, reclaim cannot rename", () => {
+test("fallback ENOTSUP: wx acquire succeeds, genuine create error throws, guard fallback reclaims exclusively", () => {
   const f = fixture();
   f.fs.unlink(PATH);
   f.fs.linkError = "ENOTSUP";
@@ -366,10 +371,26 @@ test("fallback ENOTSUP: wx acquire succeeds, genuine create error throws, reclai
     expect(f.fs.paths()).toEqual([]);
     f.fs.openError = undefined;
     f.fs.seed(PATH, OLD);
+    expect(f.acquire(303).finish()).toBe(true);
+    exactHolder(f.fs, 303);
+    expect(f.fs.paths()).toEqual([PATH]);
+    f.fs.seed(PATH, OLD);
     const racer = f.acquire(303);
-    expect(racer.finish()).toBe(false);
-    expect(racer.trace.some((step) => step.op === "rename")).toBe(false);
+    const guard = `${prefix(f.fs)}.0`;
+    racer.until((step) => step.op === "stat" && step.path === PATH && f.fs.exists(guard));
+    expect(f.acquire(202).finish()).toBe(false);
     expect(f.fs.readText(PATH)).toBe(OLD);
+    expect(racer.finish()).toBe(true);
+    expect(racer.trace.some((step) => step.op === "openExclusive" && step.path === guard)).toBe(
+      true,
+    );
+    expect(racer.trace.some((step) => step.op === "write")).toBe(true);
+    expect(racer.trace.some((step) => step.op === "close")).toBe(true);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Atomic lock publication failed"),
+      expect.anything(),
+    );
+    exactHolder(f.fs, 303);
     expect(f.fs.paths()).toEqual([PATH]);
   } finally {
     warn.mockRestore();
@@ -437,6 +458,19 @@ function runSchedule(seed: number): void {
     };
   });
   const trace: string[] = [];
+  if (seed % 3 === 0 && kind !== 3) {
+    // A crashed reclaimer's PID is recycled by a live process with no generation evidence.
+    const options: ExclusiveLockOptions = {
+      ...f.options(707),
+      ownerGeneration: { current: () => undefined, compare: () => "different" },
+    };
+    const racer = new Racer(acquireExclusiveLockSteps(PATH, options));
+    const guard = `${prefix(f.fs)}.0`;
+    racer.until((step) => step.op === "stat" && step.path === PATH && f.fs.exists(guard));
+    actors.push({ pid: 707, options, racer, phase: "crashed", attempts: 0 });
+    f.live.add(707);
+    trace.push("707 CRASHED RECLAIMER, PID REUSED WITHOUT GENERATION EVIDENCE");
+  }
   // Start every stale observer before any removal; a fourth actor is also fresh
   // in rows that insert it after the original stale instance has gone.
   for (const actor of actors.slice(0, 3)) {
@@ -502,6 +536,8 @@ function executeSchedule(context: {
   if (actors.every((actor) => actor.phase !== "crashed")) {
     expect(f.fs.paths()).toEqual([]); // Every successful holder voluntarily released.
   }
+  // (d) No stuck state: all actors have finished/crashed before aging abandoned guards.
+  f.clock.advanceTime(RECLAIM_GUARD_ABANDON_AGE_MS + 1);
   f.live.add(505);
   let acquired = false;
   for (let attempt = 0; attempt < 6 && !acquired; attempt++) {
@@ -529,6 +565,9 @@ function checkMutation(actor: Actor, f: ReturnType<typeof fixture>, actors: Acto
   }
 }
 
+// Scope for (a) at most one believer, (b) exact holder bytes, and (c) no foreign
+// removal: the clock never passes the abandonment bound while a LIVE reclaimer
+// holds a guard. Only (d), after every actor has finished/crashed, advances time.
 // One bounded schedule per row keeps each unit below the requested 15 ms budget.
 const SEEDS = [
   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 75, 76, 77,
@@ -641,4 +680,203 @@ test("guard chain: same-PID guard stays LIVE even if an injected liveness check 
   ).toBe(false);
   expect(f.fs.readText(PATH)).toBe(OLD);
   expect(f.fs.paths()).toEqual([PATH, guard].sort());
+});
+
+test("F1: guard reuses the first publication generation, final publication captures freshly", () => {
+  const f = fixture();
+  const samples: string[] = [];
+  const options = {
+    ...f.options(101),
+    ownerGeneration: {
+      current: () => {
+        const token = `generation-${samples.length}`;
+        samples.push(token);
+        return token;
+      },
+      compare: () => "different" as const,
+    },
+  };
+  const racer = new Racer(acquireExclusiveLockSteps(PATH, options));
+  const guard = `${prefix(f.fs)}.0`;
+  racer.until((step) => step.op === "stat" && step.path === PATH && f.fs.exists(guard));
+  expect(samples).toEqual(["generation-0"]);
+  expect(readExclusiveLockContent(guard, f.fs)?.generation).toBe("generation-0");
+  expect(racer.finish()).toBe(true);
+  expect(samples).toEqual(["generation-0", "generation-1"]);
+  expect(readExclusiveLockContent(PATH, f.fs)?.generation).toBe("generation-1");
+});
+
+test("F1: takeover captures once for the guard and freshly for final publication", () => {
+  const f = fixture();
+  const samples: string[] = [];
+  expect(
+    takeOverExclusiveLock(
+      PATH,
+      { pid: 99, token: "stale" },
+      {
+        ...f.options(101),
+        ownerGeneration: {
+          current: () => {
+            const token = `generation-${samples.length}`;
+            samples.push(token);
+            return token;
+          },
+          compare: () => "same",
+        },
+      },
+    ),
+  ).toBe(true);
+  expect(samples).toEqual(["generation-0", "generation-1"]);
+  expect(readExclusiveLockContent(PATH, f.fs)?.generation).toBe("generation-1");
+});
+
+test("F2: leftover private tmp is overwritten on the first free-lock acquire with no litter", () => {
+  const f = fixture();
+  f.fs.unlink(PATH);
+  const racer = f.acquire(101);
+  racer.until((step) => step.op === "writeFile");
+  if (racer.pending.done) {
+    throw new Error("Missing tmp publication");
+  }
+  const tmp = racer.pending.value.path;
+  f.fs.seed(tmp, "crashed-incarnation-with-longer-content");
+  expect(racer.finish()).toBe(true);
+  exactHolder(f.fs, 101);
+  expect(f.fs.paths()).toEqual([PATH]);
+});
+
+function abandonedGuard(legacy = false) {
+  const clock = new FakeTimer();
+  clock.advanceTime(NOW);
+  const fs = new FakeLockFileSystem(() => clock.now());
+  fs.seed(PATH, "99", 0);
+  const options = (pid: number): ExclusiveLockOptions => ({
+    pid,
+    fileSystem: fs,
+    now: () => clock.now(),
+    isProcessRunning: (owner) => owner !== 99,
+    reclaimOwnPid: true,
+  });
+  const guard = `${prefix(fs)}.0`;
+  if (legacy) {
+    fs.linkError = "ENOTSUP";
+  }
+  const crashed = new Racer(acquireExclusiveLockSteps(PATH, options(101)));
+  crashed.until((step) =>
+    legacy
+      ? step.op === "write" && fs.exists(guard)
+      : step.op === "stat" && step.path === PATH && fs.exists(guard),
+  );
+  // Abandon before rename (or legacy write), without unwinding the generator.
+  return {
+    fs,
+    guard,
+    options,
+    setAge: (age: number) => {
+      clock.stepWallClock(NOW + age - clock.now());
+    },
+  };
+}
+
+test.each([101, 202])(
+  "F4 schedule G/F: crashed guard reused PID, retry %d ages out strictly",
+  (pid) => {
+    const f = abandonedGuard();
+    const acquire = () => tryAcquireExclusiveLock(PATH, f.options(pid));
+    for (let attempt = 0; attempt < 20; attempt++) {
+      expect(acquire()).toBe(false);
+    }
+    for (const age of [-1, 0, RECLAIM_GUARD_ABANDON_AGE_MS]) {
+      f.setAge(age);
+      expect(acquire()).toBe(false);
+      expect(f.fs.readText(PATH)).toBe("99");
+    }
+    f.setAge(RECLAIM_GUARD_ABANDON_AGE_MS + 1);
+    expect(acquire()).toBe(true);
+    expect(readExclusiveLockContent(PATH, f.fs)?.pid).toBe(pid);
+    expect(f.fs.paths()).toEqual([PATH]);
+  },
+);
+
+test.each(["same", "unknown"] as const)(
+  "F4: %s generation evidence at and beyond the age bound",
+  (verdict) => {
+    const f = abandonedGuard();
+    f.fs.update(f.guard, "101\nprevious\n\nrecorded");
+    const options = {
+      ...f.options(202),
+      ownerGeneration: { current: () => "current", compare: () => verdict },
+    };
+    f.setAge(RECLAIM_GUARD_ABANDON_AGE_MS);
+    expect(tryAcquireExclusiveLock(PATH, options)).toBe(false);
+    f.setAge(RECLAIM_GUARD_ABANDON_AGE_MS + 1);
+    expect(tryAcquireExclusiveLock(PATH, options)).toBe(verdict === "unknown");
+    if (verdict === "same") {
+      f.setAge(1_000_000_000);
+      expect(tryAcquireExclusiveLock(PATH, options)).toBe(false);
+      expect(f.fs.paths()).toEqual([PATH, f.guard].sort());
+    } else {
+      expect(f.fs.paths()).toEqual([PATH]);
+    }
+  },
+);
+
+test("F4: crashed empty legacy guard is superseded only strictly beyond the bound", () => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    const f = abandonedGuard(true);
+    expect(f.fs.readText(f.guard)).toBe("");
+    f.setAge(RECLAIM_GUARD_ABANDON_AGE_MS);
+    expect(tryAcquireExclusiveLock(PATH, f.options(202))).toBe(false);
+    expect(f.fs.readText(PATH)).toBe("99");
+    f.setAge(RECLAIM_GUARD_ABANDON_AGE_MS + 1);
+    expect(tryAcquireExclusiveLock(PATH, f.options(202))).toBe(true);
+    expect(readExclusiveLockContent(PATH, f.fs)?.pid).toBe(202);
+    expect(f.fs.paths()).toEqual([PATH]);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test.each(["garbage", "0", "101\nprevious\n\nrecorded-without-probe"])(
+  "F4: guard %j without positive generation evidence ages out strictly",
+  (raw) => {
+    const f = abandonedGuard();
+    f.fs.update(f.guard, raw);
+    f.setAge(RECLAIM_GUARD_ABANDON_AGE_MS);
+    expect(tryAcquireExclusiveLock(PATH, f.options(202))).toBe(false);
+    f.setAge(RECLAIM_GUARD_ABANDON_AGE_MS + 1);
+    expect(tryAcquireExclusiveLock(PATH, f.options(202))).toBe(true);
+    expect(f.fs.paths()).toEqual([PATH]);
+  },
+);
+
+test("F4: guard vanishing before its age stat backs off and the next attempt re-evaluates", () => {
+  const f = abandonedGuard();
+  f.setAge(RECLAIM_GUARD_ABANDON_AGE_MS + 1);
+  const racer = new Racer(acquireExclusiveLockSteps(PATH, f.options(202)));
+  racer.until((step) => step.op === "stat" && step.path === f.guard);
+  f.fs.unlink(f.guard);
+  expect(racer.finish()).toBe(false);
+  expect(f.fs.readText(PATH)).toBe("99");
+  expect(tryAcquireExclusiveLock(PATH, f.options(202))).toBe(true);
+  expect(f.fs.paths()).toEqual([PATH]);
+});
+
+test("F2: a private tmp write EEXIST is a warned fallback, only link EEXIST is contention", () => {
+  const f = fixture();
+  f.fs.unlink(PATH);
+  const write = spyOn(f.fs, "writeFile").mockImplementation(() => {
+    throw Object.assign(new Error("tmp write failure"), { code: "EEXIST" });
+  });
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    expect(f.acquire(101).finish()).toBe(true);
+    exactHolder(f.fs, 101);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(f.fs.paths()).toEqual([PATH]);
+  } finally {
+    write.mockRestore();
+    warn.mockRestore();
+  }
 });

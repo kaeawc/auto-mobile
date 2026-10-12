@@ -110,7 +110,11 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   writeFile(path: string, content: string): void {
     this.record("writeFile", path);
-    this.create(path, content);
+    if (this.files.has(path)) {
+      this.update(path, content);
+    } else {
+      this.create(path, content);
+    }
   }
 
   readText(path: string): string {

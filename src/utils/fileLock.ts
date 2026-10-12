@@ -36,11 +36,13 @@ export interface LockOwnerGenerationProbe {
 // Legacy/corrupt ownerless files are reclaimable only after this grace period.
 // Atomic publication never exposes an empty lock; the fallback retains the old window.
 export const OWNERLESS_LOCK_RECLAIM_AGE_MS = 10_000;
+// Guards cover a synchronous burst; tokenless/corrupt crash remnants get the same grace.
+export const RECLAIM_GUARD_ABANDON_AGE_MS = OWNERLESS_LOCK_RECLAIM_AGE_MS;
 
 export interface ExclusiveLockOptions {
   /** Optional synchronous filesystem seam; defaults to node fs. */
   fileSystem?: LockFileSystem;
-  /** Clock for ownerless-lock age checks (defaults to Date.now). */
+  /** Clock for ownerless-lock and abandoned-guard age checks (defaults to Date.now). */
   now?: () => number;
   /** Reclaim ownerless locks strictly older than this bound; defaults to 10 seconds. */
   ownerlessReclaimAgeMs?: number;
@@ -209,14 +211,15 @@ export function* acquireExclusiveLockSteps(
   options: ExclusiveLockOptions = {},
 ): Steps<boolean> {
   const pid = options.pid ?? process.pid;
-  if (yield* writeExclusiveLockFile(lockFilePath, pid, options)) {
+  const first = yield* writeExclusiveLockFile(lockFilePath, pid, options);
+  if (first.acquired) {
     return true;
   }
   const observed = yield* sampleLock(lockFilePath, options.fileSystem ?? nodeLockFileSystem);
   if (!observed || !isReclaimable(observed, options)) {
     return false;
   }
-  return yield* reclaimExclusiveLock(lockFilePath, options, observed);
+  return yield* reclaimExclusiveLock(lockFilePath, options, observed, first.generation);
 }
 
 interface LockSample {
@@ -317,26 +320,22 @@ function isOwnStaleLock(
 function* claimReclaimGuard(
   prefix: string,
   options: ExclusiveLockOptions,
+  generation: string | undefined,
 ): Steps<number | undefined> {
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   const pid = options.pid ?? process.pid;
-  const content = formatLockContent(
-    pid,
-    options.ownerToken,
-    undefined,
-    captureLockOwnerGeneration(options.ownerGeneration, pid),
-  );
+  const content = formatLockContent(pid, options.ownerToken, undefined, generation);
   for (let k = 0; k < 16; k++) {
     const path = `${prefix}.${k}`;
     const published = yield* publishFile(path, content, pid, fileSystem);
-    if (published === "created") {
+    if (
+      published === "created" ||
+      (published === "unsupported" && (yield* writeLegacyLock(path, content, fileSystem)))
+    ) {
       return k;
     }
-    if (published === "unsupported") {
-      return undefined; // No unguarded fallback, even on filesystems without hard links.
-    }
-    const raw = yield* readText(path, fileSystem);
-    if (raw === undefined || isGuardLive(raw, options)) {
+    const guard = yield* sampleLock(path, fileSystem);
+    if (guard === undefined || isGuardLive(guard, options)) {
       return undefined;
     }
   }
@@ -344,28 +343,45 @@ function* claimReclaimGuard(
   return undefined;
 }
 
-function isGuardLive(raw: string, options: ExclusiveLockOptions): boolean {
-  const owner = parseLockContent(raw.trim());
-  if (Number.isNaN(owner.pid)) {
-    return true;
+function isGuardLive(guard: LockSample, options: ExclusiveLockOptions): boolean {
+  const owner = parseLockContent(guard.raw.trim());
+  if (!Number.isNaN(owner.pid)) {
+    // A guard owned by this process is live unless generation evidence disproves it,
+    // or unknown evidence ages out below; reclaimOwnPid alone never supersedes it.
+    if (
+      owner.pid !== (options.pid ?? process.pid) &&
+      !(options.isProcessRunning ?? isProcessRunningWithDebug)(owner.pid)
+    ) {
+      return false;
+    }
+    const verdict = compareLockOwnerGeneration(
+      options.ownerGeneration,
+      owner.pid,
+      owner.generation,
+    );
+    if (verdict !== "unknown") {
+      return verdict === "same"; // Positive OS evidence never ages out a stalled live reclaimer.
+    }
   }
-  // A guard owned by this process is live unless generation evidence disproves it.
-  return (
-    (owner.pid === (options.pid ?? process.pid) ||
-      (options.isProcessRunning ?? isProcessRunningWithDebug)(owner.pid)) &&
-    compareLockOwnerGeneration(options.ownerGeneration, owner.pid, owner.generation) !== "different"
-  );
+  // R3: without positive generation evidence, a LIVE reclaimer suspended beyond this
+  // bound between its under-guard sample and rename can be superseded, then rename a
+  // successor's lock. The post-rename fingerprint check and non-clobbering restore
+  // remain defence in depth. Empty/unparseable legacy guards share this age rule.
+  // Negative age keeps the guard live; a missing/unreadable sample backs off above.
+  const age = (options.now ?? Date.now)() - guard.mtimeMs;
+  return !(age > RECLAIM_GUARD_ABANDON_AGE_MS);
 }
 
 function* reclaimExclusiveLock(
   lockFilePath: string,
   options: ExclusiveLockOptions,
   observed: LockSample,
+  generation: string | undefined,
 ): Steps<boolean> {
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   const pid = options.pid ?? process.pid;
   const prefix = guardPrefix(lockFilePath, observed);
-  const k = yield* claimReclaimGuard(prefix, options);
+  const k = yield* claimReclaimGuard(prefix, options, generation);
   if (k === undefined) {
     return false;
   }
@@ -389,7 +405,7 @@ function* reclaimExclusiveLock(
       // Once removed, this fingerprint cannot pass the path check again.
       yield* cleanupFile(`${prefix}.${lower}`, fileSystem);
     }
-    return yield* writeExclusiveLockFile(lockFilePath, pid, options);
+    return (yield* writeExclusiveLockFile(lockFilePath, pid, options)).acquired;
   } finally {
     yield* cleanupFile(`${prefix}.${k}`, fileSystem);
   }
@@ -528,7 +544,11 @@ function* takeOverLockSteps(
   if (current.pid !== owner.pid || current.token !== owner.token) {
     return false;
   }
-  return yield* reclaimExclusiveLock(path, options, sample);
+  const generation = captureLockOwnerGeneration(
+    options.ownerGeneration,
+    options.pid ?? process.pid,
+  );
+  return yield* reclaimExclusiveLock(path, options, sample, generation);
 }
 
 /**
@@ -654,15 +674,17 @@ function* publishFile(
   fileSystem: LockFileSystem,
 ): Steps<Publication> {
   const tmp = `${path}.${pid}.${++publicationCounter}.tmp`;
+  let linking = false;
   try {
     yield { op: "writeFile", path: tmp };
     fileSystem.writeFile(tmp, content);
     yield { op: "link", path };
+    linking = true;
     fileSystem.link(tmp, path);
     return "created";
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      // Exclusive link/create contention is expected and never overwrites an owner.
+    if (linking && (error as NodeJS.ErrnoException).code === "EEXIST") {
+      // Exclusive link contention is expected and never overwrites an owner.
       logger.debug(`Lock publication contended at ${path}: ${errorMessage(error)}`);
       return "contended";
     }
@@ -677,7 +699,7 @@ function* writeExclusiveLockFile(
   path: string,
   pid: number,
   options: ExclusiveLockOptions,
-): Steps<boolean> {
+): Steps<{ acquired: boolean; generation: string | undefined }> {
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   try {
     yield { op: "mkdir", path: dirname(path) };
@@ -686,9 +708,9 @@ function* writeExclusiveLockFile(
     const content = formatLockContent(pid, options.ownerToken, options.metadata, generation);
     const publication = yield* publishFile(path, content, pid, fileSystem);
     if (publication !== "unsupported") {
-      return publication === "created";
+      return { acquired: publication === "created", generation };
     }
-    return yield* writeLegacyLock(path, content, fileSystem);
+    return { acquired: yield* writeLegacyLock(path, content, fileSystem), generation };
   } catch (error) {
     // Genuine IO failures are not contention (#3623).
     throw toActionableError(error, `Failed to create exclusive lock file at ${path}`);

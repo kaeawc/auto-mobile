@@ -54,7 +54,7 @@ describe("fileLock primitive", () => {
           isProcessRunning: () => true,
         }),
       ).toBe(true);
-      expect(samples).toEqual([old, old, undefined]);
+      expect(samples).toEqual([old, undefined]);
       expect(readExclusiveLockContent(lockPath)?.generation).toBe(probe.token);
     });
 

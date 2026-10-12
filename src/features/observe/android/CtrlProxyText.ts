@@ -29,6 +29,7 @@ export interface SetKeyboardProfileResult {
 }
 
 export interface ImeCommitActionResult extends BaseResult {
+  trace?: string[];
   /** Editor delta captured by the device; internal transport evidence only. */
   insertedText?: string;
   partialApplication?: boolean;
@@ -46,6 +47,11 @@ export function imeCommitUnitFields(
 ): Pick<ImeCommitActionResult, "committedUnits"> {
   const { committedUnits } = result;
   return committedUnits !== undefined && committedUnits > 0 ? { committedUnits } : {};
+}
+
+/** Only the explicit opt-in adds a wire field; older requests keep their exact shape. */
+function imeCommitTraceFields(trace?: boolean): { trace?: true } {
+  return trace === true ? { trace: true } : {};
 }
 
 // Match ImeCommitDriver's inline span boundaries. Only non-terminal spans incur
@@ -333,7 +339,7 @@ export class CtrlProxyText extends SharedTextDelegate {
     timeoutMs: number = imeCommitTimeoutMs(text),
     perf?: PerformanceTracker,
     signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents" | "clearField",
+    ...[delivery, trace]: [delivery?: "commit" | "keyEvents" | "clearField", trace?: boolean]
   ): Promise<ImeCommitActionResult> {
     let dispatchedId: string | undefined;
     let timedOut = false;
@@ -348,6 +354,7 @@ export class CtrlProxyText extends SharedTextDelegate {
           priorImeId,
           ...(delivery === "commit" ? {} : { delivery }),
           timeoutMs: Math.max(1, timeoutMs - 500),
+          ...imeCommitTraceFields(trace),
         },
         timeoutMs,
         perf,

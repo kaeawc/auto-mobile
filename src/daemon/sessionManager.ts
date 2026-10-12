@@ -1539,6 +1539,12 @@ export class SessionManager {
    */
   private readonly persistedRowGenerations = new WeakMap<Session, number>();
   private readonly activityRowRePersists = new SingleFlight<Session, void>();
+  private readonly retiredCreationRows = new WeakSet<Session>();
+  /** A refused creation keeps its announced fence while its conditioned row rollback retries. */
+  private readonly creationRowJournalSnapshots = new WeakMap<
+    SessionReleaseSnapshot,
+    SessionReleaseSnapshot
+  >();
   /** Own superseded releases can land late for this incarnation's entire lifetime (#11557). */
   private readonly supersededReleaseReasons = new WeakMap<Session, Set<string>>();
   /** The row generation a non-terminal release snapshot may overwrite (#11129). */
@@ -2983,13 +2989,14 @@ export class SessionManager {
   /** The claimed incarnation a recovery's upsert is conditioned on, when `row` is a claim. */
   private claimedIncarnation(
     row: DeviceSession | undefined,
-  ): RecoverableRowIncarnation | undefined {
+  ): (RecoverableRowIncarnation & { releaseReason?: string }) | undefined {
     if (!row || !this.claimedRecoverableRows.has(row)) {
       return undefined;
     }
     return {
       rowGeneration: row.stable_identity_generation ?? 0,
       daemonSessionId: row.daemon_session_id ?? null,
+      releaseReason: row.release_reason ?? undefined,
     };
   }
 
@@ -3031,7 +3038,22 @@ export class SessionManager {
   private async persistAndPublishSession(
     session: Session,
     creation?: PendingSessionCreation,
+    claimedRow?: RecoverableRowIncarnation & { releaseReason?: string },
+  ): Promise<Session> {
+    const claimedReleaseReason = claimedRow?.releaseReason;
+    try {
+      return await this.publishSessionCreation(session, creation, claimedRow, claimedReleaseReason);
+    } catch (error) {
+      await this.rollBackFailedCreationRow(session, claimedReleaseReason);
+      throw error;
+    }
+  }
+
+  private async publishSessionCreation(
+    session: Session,
+    creation?: PendingSessionCreation,
     claimedRow?: RecoverableRowIncarnation,
+    claimedReleaseReason?: string,
   ): Promise<Session> {
     // A plan run minting its label writes over the row its previous run left, terminal or not.
     const persistedTerminalRelease = this.planLabelMints.has(session.sessionId)
@@ -3042,10 +3064,10 @@ export class SessionManager {
       throw new TerminalSessionError(session.sessionId, persistedTerminalRelease);
     }
     this.assertCreationNotAbandoned(session, creation);
-    await this.rejectCreationAfterShutdownFence(session, false);
+    await this.rejectCreationAfterShutdownFence(session, false, claimedReleaseReason);
     await this.persistCreatedSession(session, claimedRow);
     await this.retireCreationIfAbandoned(session, creation);
-    await this.rejectCreationAfterShutdownFence(session, true);
+    await this.rejectCreationAfterShutdownFence(session, true, claimedReleaseReason);
     this.assertTerminalReleaseAdmission(session.sessionId, session);
     const terminalRelease = this.terminalReleaseSnapshots.get(session.sessionId);
     if (terminalRelease) {
@@ -3076,6 +3098,59 @@ export class SessionManager {
     return session;
   }
 
+  /** An unpublished creation owns only the generation its upsert wrote, never a successor's row. */
+  private async rollBackFailedCreationRow(
+    session: Session,
+    claimedReleaseReason?: string,
+  ): Promise<void> {
+    const generation = this.persistedRowGenerations.get(session);
+    if (
+      generation === undefined ||
+      this.sessions.get(session.sessionId) === session ||
+      this.retiredCreationRows.has(session) ||
+      this.terminalReleaseSnapshots.has(session.sessionId)
+    ) {
+      return;
+    }
+    this.retiredCreationRows.add(session);
+    const snapshot = this.creationRowRollbackSnapshot(
+      session,
+      claimedReleaseReason ?? "allocation-rollback",
+    );
+    this.captureReleaseRowGeneration(snapshot, generation);
+    await this.persistCreationRollback(snapshot);
+  }
+
+  private async persistCreationRollback(snapshot: SessionReleaseSnapshot): Promise<void> {
+    try {
+      await this.persistSessionRelease(snapshot);
+    } catch (error) {
+      // Persistence already logged the storage failure; rollback remains owed without replacing the caller's error.
+      logger.debug(`[SessionManager] Creation rollback remains owed: ${errorMessage(error)}`);
+      this.trackReleaseDrainWrite(this.retryNonTerminalRowAfterRelease(snapshot));
+    }
+  }
+
+  private creationRowRollbackSnapshot(
+    session: Session,
+    releaseReason: string,
+  ): SessionReleaseSnapshot {
+    const releasedAtMs = this.sessionNow();
+    return {
+      sessionId: session.sessionId,
+      deviceId: session.assignedDevice,
+      releaseReason,
+      releasedAtMs,
+      terminal: false,
+      heartbeat: {
+        lastHeartbeatMs: session.lastHeartbeat,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+        timeoutMs: session.heartbeatTimeoutMs,
+        ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
+      },
+    };
+  }
+
   /**
    * A creation abandoned at its deadline whose write landed afterwards (#10963): its caller was
    * refused and its pool claim rolled back, so it must not publish, and its active row must not
@@ -3103,6 +3178,7 @@ export class SessionManager {
   }
 
   private async retireAbandonedCreation(session: Session): Promise<never> {
+    this.retiredCreationRows.add(session);
     const releasedAtMs = this.sessionNow();
     const snapshot: SessionReleaseSnapshot = {
       sessionId: session.sessionId,
@@ -3134,6 +3210,7 @@ export class SessionManager {
   private async rejectCreationAfterShutdownFence(
     session: Session,
     rowWritten: boolean,
+    claimedReleaseReason?: string,
   ): Promise<void> {
     const cancellation = getAbortSignal();
     if (this.acceptingSessionCreations && !cancellation?.aborted) {
@@ -3157,12 +3234,43 @@ export class SessionManager {
         ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
       },
     };
-    await this.persistTerminalReleaseIfNeeded(snapshot);
+    await this.persistRejectedCreationRow(session, snapshot, rowWritten, claimedReleaseReason);
     this.notifySessionRelease(snapshot);
     if (cancellation?.aborted) {
       cancellation.throwIfAborted();
     }
     throw new DaemonSessionCreationRejectedError(session.sessionId, snapshot);
+  }
+
+  /** Keep the shutdown fence and journal, but only retire the row this unpublished creation wrote. */
+  private async persistRejectedCreationRow(
+    session: Session,
+    fence: SessionReleaseSnapshot,
+    rowWritten: boolean,
+    claimedReleaseReason?: string,
+  ): Promise<void> {
+    this.retiredCreationRows.add(session);
+    this.terminalReleaseSnapshots.set(session.sessionId, fence);
+    this.restartRecoveryActivityAt.delete(session.sessionId);
+    if (!rowWritten) {
+      this.terminalReleaseJournal.record({
+        sessionId: fence.sessionId,
+        reason: fence.releaseReason,
+        at: this.sessionClockToWall(fence.releasedAtMs),
+      });
+      this.terminalReleaseJournal.resolve(fence.sessionId, fence.releaseReason);
+      return;
+    }
+    const rowReason =
+      claimedReleaseReason &&
+      isReissuableByNameReleaseReason(claimedReleaseReason) &&
+      !isRecoverableDaemonReleaseReason(claimedReleaseReason)
+        ? claimedReleaseReason
+        : fence.releaseReason;
+    const rollback = this.creationRowRollbackSnapshot(session, rowReason);
+    this.captureReleaseRowGeneration(rollback, this.persistedRowGenerations.get(session));
+    this.creationRowJournalSnapshots.set(rollback, fence);
+    await this.persistCreationRollback(rollback);
   }
 
   /**
@@ -3185,6 +3293,7 @@ export class SessionManager {
       cancellation.throwIfAborted();
       return;
     }
+    this.retiredCreationRows.add(session);
     const releasedAtMs = this.sessionNow();
     const snapshot: SessionReleaseSnapshot = {
       sessionId: session.sessionId,
@@ -6799,6 +6908,9 @@ export class SessionManager {
     ) {
       return true;
     }
+    if (guard.unlessReleased && row.status === "released") {
+      return true;
+    }
     const reason = row.release_reason;
     if (!reason) {
       return false;
@@ -7567,11 +7679,12 @@ export class SessionManager {
       return false;
     }
     try {
-      if (snapshot.terminal) {
+      const journalSnapshot = this.creationRowJournalSnapshots.get(snapshot) ?? snapshot;
+      if (journalSnapshot.terminal) {
         // Durable before the write is issued: a crash while it is parked must not revive the UUID.
         this.terminalReleaseJournal.record({
           sessionId: snapshot.sessionId,
-          reason: snapshot.releaseReason,
+          reason: journalSnapshot.releaseReason,
           // Read back by the next daemon on its own session clock: stored as wall ms (#11162).
           at: this.sessionClockToWall(snapshot.releasedAtMs),
         });
@@ -7737,6 +7850,10 @@ export class SessionManager {
    * non-terminal one is no longer pending, which also ends its retry (#11557).
    */
   private confirmReleaseWrite(snapshot: SessionReleaseSnapshot): void {
+    const journalSnapshot = this.creationRowJournalSnapshots.get(snapshot);
+    if (journalSnapshot) {
+      this.terminalReleaseJournal.resolve(snapshot.sessionId, journalSnapshot.releaseReason);
+    }
     if (snapshot.terminal) {
       this.terminalReleaseJournal.resolve(snapshot.sessionId, snapshot.releaseReason);
     } else if (this.pendingNonTerminalReleaseSnapshots.get(snapshot.sessionId) === snapshot) {
@@ -11892,9 +12009,14 @@ export class SessionManager {
     session: Session,
     incarnation: Session,
     upsertOptions?: UpsertActiveSessionOptions,
+    upsertSettled?: () => void,
   ): Promise<void> {
-    const write = (options: UpsertActiveSessionOptions | undefined) =>
-      this.deviceSessionRepository.upsertActiveSession(
+    const closeJoinableFlight = () => {
+      upsertSettled?.();
+      upsertSettled = undefined;
+    };
+    const write = (options: UpsertActiveSessionOptions | undefined) => {
+      const statement = this.deviceSessionRepository.upsertActiveSession(
         {
           sessionUuid: session.sessionId,
           deviceId: session.assignedDevice,
@@ -11920,6 +12042,12 @@ export class SessionManager {
         this.sessionNow(),
         options,
       );
+      if (upsertSettled) {
+        // Clear once at the statement boundary, before ownership work or refusal classification.
+        void statement.then(closeJoinableFlight, closeJoinableFlight);
+      }
+      return statement;
+    };
     const guard = upsertOptions?.rewriteOverSupersededRelease;
     let rowGeneration: number | void;
     try {
@@ -12130,19 +12258,43 @@ export class SessionManager {
       logger.debug(`[SessionManager] Activity for released session ${session.sessionId} skipped`);
       return;
     }
-    logger.warn(
+    // A peer sweep racing activity is expected; only an actual storage failure warrants WARN.
+    logger.debug(
       `[SessionManager] Session ${session.sessionId} is live but its row is not active; ` +
         "re-persisting it",
     );
+    const repair = this.rePersistSessionActivity(session);
+    this.trackReleaseDrainWrite(
+      repair.then(
+        () => {},
+        () => {
+          // The activity caller observes the failure; the drain only waits for its writes.
+          logger.debug(`[SessionManager] Activity repair settled for ${session.sessionId}`);
+        },
+      ),
+    );
+    await repair;
+  }
+
+  private async rePersistSessionActivity(session: Session): Promise<void> {
     try {
       // No read decides this: a terminal release can land after any read, and while the upsert
       // awaits its retention prune (this daemon's own release included).
       const writtenDevice = session.assignedDevice;
       await this.activityRowRePersists.run(session, () =>
-        this.persistSession(session, session, {
-          unlessTerminal: true,
-          ...this.guardedRowRewriteOptions([], this.persistedRowGenerations.get(session)),
-        }),
+        this.persistSession(
+          session,
+          session,
+          {
+            unlessTerminal: true,
+            rewriteOverSupersededRelease: {
+              ...this.guardedRowRewriteOptions([], this.persistedRowGenerations.get(session))
+                .rewriteOverSupersededRelease!,
+              unlessReleased: true,
+            },
+          },
+          () => this.activityRowRePersists.delete(session),
+        ),
       );
       if (
         this.isCurrentSession(session) &&

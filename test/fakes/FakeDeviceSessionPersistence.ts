@@ -98,7 +98,8 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       const changed =
         rewrite.expectedRowGeneration !== undefined &&
         existing.stable_identity_generation !== rewrite.expectedRowGeneration;
-      if (terminal || peerOwned || otherOwned || changed) {
+      const released = rewrite.unlessReleased && existing.status === "released";
+      if (terminal || peerOwned || otherOwned || changed || released) {
         throw new DeviceSessionRowNotRewritableError(record.sessionUuid);
       }
     }

@@ -8,6 +8,7 @@ import {
   DeviceSessionRepository,
   DeviceSessionRowChangedError,
   DeviceSessionRowNotReleasableError,
+  DeviceSessionRowNotRewritableError,
   isRecoverableDaemonReleaseReason,
   RECOVERABLE_DAEMON_RELEASE_REASONS,
   type DeviceSessionRecord,
@@ -50,6 +51,49 @@ describe("DeviceSessionRepository", () => {
     clearAutolockEnv();
     await db.destroy();
   });
+
+  test.each(["released", "expired", "active", "missing"] as const)(
+    "activity rewrite refuses only release-statement rows (%s)",
+    async (status) => {
+      const record: DeviceSessionRecord = {
+        sessionUuid: "activity-guard",
+        deviceId: "emulator-5554",
+        platform: "android",
+        daemonSessionId: "daemon-1",
+        createdAtMs: 1_000,
+        lastUsedAtMs: 1_000,
+        expiresAtMs: 61_000,
+        sessionTimeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+        hasReceivedHeartbeat: false,
+      };
+      if (status !== "missing") {
+        await repo.upsertActiveSession(record);
+        if (status !== "active") {
+          await repo.markReleased(record.sessionUuid, status, 1_000, "daemon-shutdown");
+        }
+      }
+      const before = await repo.getSession(record.sessionUuid);
+      const write = repo.upsertActiveSession(record, 1_000, {
+        rewriteOverSupersededRelease: {
+          supersededReasons: [],
+          livePeerDaemonSessionIds: [],
+          ownDaemonSessionId: "daemon-1",
+          unlessReleased: true,
+        },
+      });
+      if (status === "released") {
+        await expect(write).rejects.toBeInstanceOf(DeviceSessionRowNotRewritableError);
+        expect(await repo.getSession(record.sessionUuid)).toEqual(before);
+      } else {
+        await write;
+        expect(await repo.getSession(record.sessionUuid)).toMatchObject({
+          status: "active",
+          release_reason: null,
+        });
+      }
+    },
+  );
 
   test("upserts and updates a device session lifecycle", async () => {
     await repo.upsertActiveSession({

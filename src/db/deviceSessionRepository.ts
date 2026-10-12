@@ -263,6 +263,8 @@ export interface UpsertActiveSessionOptions {
     ownDaemonSessionId?: string;
     /** Activity re-persistence may replace only the generation its incarnation last wrote. */
     expectedRowGeneration?: number;
+    /** Activity repair may revive a swept row, but never a row a release statement wrote. */
+    unlessReleased?: boolean;
   };
 }
 
@@ -635,6 +637,9 @@ export class DeviceSessionRepository {
                     livePeerDaemonSessionIds,
                     rewriteOverSupersededRelease.ownDaemonSessionId,
                   ),
+                  ...(rewriteOverSupersededRelease.unlessReleased
+                    ? [eb("device_sessions.status", "!=", "released")]
+                    : []),
                   ...(expectedRowGeneration === undefined
                     ? []
                     : [

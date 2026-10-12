@@ -74,6 +74,48 @@ function harness(text: string, observation: ObserveResult = field(text)) {
 }
 
 describe("IME failure diagnostics", () => {
+  test.each([
+    ["john_doe@example.com", "johndoe@example.com"],
+    ["user_name", "username"],
+    ["~/Downloads", "/Downloads"],
+    ["it`s", "its"],
+  ])("device success cannot hide a lost literal marker in %s", async (text, insertedText) => {
+    const observation = field("");
+    const h = harness("", observation);
+    h.client.commitViaIme = async () => {
+      observation.viewHierarchy = field(insertedText).viewHierarchy;
+      return { success: true, insertedText };
+    };
+
+    const result = await h.executor.type({ action: "type", text, mode: "ime" });
+
+    expect(result).toMatchObject({
+      success: false,
+      partialApplication: true,
+      imeFailure: { stage: "verification", observedText: insertedText },
+    });
+  });
+
+  test.each([
+    ["*bold*", "bold"],
+    ["john_doe@example.com", "john_doe@example.com"],
+  ])(
+    "device success verifies real formatting or exact literal text in %s",
+    async (text, insertedText) => {
+      const observation = field("");
+      const h = harness("", observation);
+      h.client.commitViaIme = async () => {
+        observation.viewHierarchy = field(insertedText).viewHierarchy;
+        return { success: true, insertedText };
+      };
+
+      const result = await h.executor.type({ action: "type", text, mode: "ime" });
+
+      expect(result.success).toBe(true);
+      expect(result).not.toHaveProperty("imeFailure");
+    },
+  );
+
   test("a password-field read-back mismatch never names the typed or observed value", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

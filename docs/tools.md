@@ -1343,7 +1343,8 @@ When the CtrlProxy APK reports the inserted text, the host compares it with the
 request. Other differences report `partialApplication` with the actual inserted
 text. These editor transformations are allowed:
 
-- NFC spelling; consumed inline format markers (`*`, `_`, `~`, and backticks).
+- NFC spelling; optional delimiters of real inline-format spans in the request
+  (see the grammar below). All other markers are required literal text.
 - A line-start block shortcut consumed or replaced by a list marker.
 - Case and decimal-digit input filters.
 - Input-mask additions of characters that are not letters, digits, or marks.
@@ -1352,6 +1353,42 @@ text. These editor transformations are allowed:
   action. A request ending in two newlines must still show the first; a newline
   missing mid-text fails. CRLF and CR receive no special treatment. For a lone
   `\n`, the inserted text must contain no letter, digit, or mark.
+
+Inline-format spans are evaluated on the request after NFC normalization and
+line-start block-shortcut removal (`/^(>|[-*•+]|\d+[.)]) /gm`), so the `*` in
+`* item` is never a span delimiter. A span is `D content D` with the same
+delimiter on both sides:
+
+- `D` is a backtick (code), `**` (bold), `~~` (strike), `*` (bold), `_` (italic),
+  or `~` (strike). Code fences (` ``` `) keep the looser fallback above.
+- Content has one or more characters, contains no `\n` or occurrence of the
+  delimiter's marker character, and neither starts nor ends with whitespace.
+- Delimiter runs are exact: the opening delimiter is not immediately preceded
+  by the same marker, and the closing delimiter is not immediately followed by
+  it. Thus `***x***`, `__x__`, and ` ``x`` ` contain no span; `**x**` is one
+  double-asterisk span, not a single-asterisk span.
+- The opening delimiter is at the start or follows a character that is not a
+  letter or digit (`[\p{L}\p{N}]`); the closing delimiter is at the end or
+  precedes a character that is not a letter or digit. This applies to all six
+  kinds, so intraword markers are literal.
+- Each kind scans independently left to right over the whole request. Different
+  kinds may nest (`*_x_*` contains both pairs). Every span's delimiter characters
+  are optional, but the number of matched opening characters must equal the
+  number of matched closing characters for that span. `*bold*` may become `bold`
+  or stay `*bold*`, but cannot become `*bold` or `bold*`; `**x**` may become `x`,
+  `*x*`, or stay `**x**`.
+
+Non-code markers inside a backtick code span are literal; a non-code span with either delimiter inside code cannot convert.
+
+For example, `*bold*`, `_italic_`, `~strike~`, and `` `code` `` may lose their
+paired markers. The literal markers in `john_doe@example.com`, `snake_case_name`,
+`2 * 3`, `~/path`, and ``it`s`` must be inserted exactly, subject to the other
+allowances above. Inserted markers are never stripped: they match a request
+token or count as input-mask additions. A plain editor keeping `*bold*` passes,
+as does inserting `*bold* _code_` for `bold code`. Requests containing only the
+four marker characters remain unverifiable and match, since a lone closing
+marker typed by a separate call cannot be predicted. After forgiving a final
+newline, the remaining request goes through this same span-aware comparison.
 
 A submit-and-clear composer also succeeds immediately when the device reports
 success, the inserted text is exactly empty, and the readable focused field is

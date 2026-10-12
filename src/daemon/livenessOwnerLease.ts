@@ -160,6 +160,17 @@ export function ownerLeaseHeartbeat(
   );
 }
 
+/** A minted token's claim lease starts at its bind instant until its owner proves liveness. */
+export function hasMintBoundClaimLease(
+  session: Pick<LeaseSession, "livenessOwnerToken" | "lastOwnerHeartbeat" | "livenessOwnerBoundAt">,
+): session is typeof session & { livenessOwnerBoundAt: number } {
+  return (
+    session.livenessOwnerToken !== undefined &&
+    session.lastOwnerHeartbeat === undefined &&
+    session.livenessOwnerBoundAt !== undefined
+  );
+}
+
 /**
  * Whether the session's lease is judged on its owner's own heartbeats (#11107): an owned session
  * that has heartbeated. `lastHeartbeat` is also stamped by tool calls from any connection, so such
@@ -253,8 +264,25 @@ export function sessionLeaseSnapshot(
 export function sessionOwnerLeaseSnapshot(
   session: LeaseSession,
   now: number,
+  ownerCallInFlight = false,
 ): LivenessOwnerLeaseSnapshot {
-  return { ...sessionLeaseSnapshot(session, now), lastHeartbeat: ownerLeaseHeartbeat(session) };
+  const mintBoundLease = hasMintBoundClaimLease(session);
+  return {
+    ...sessionLeaseSnapshot(session, now),
+    // Mint forgiveness shifts this claim-only clock directly; stallForgivenAt may come from
+    // tool activity, so it cannot defend a silent minter's claim hold.
+    lastHeartbeat: mintBoundLease
+      ? ownerCallInFlight
+        ? now
+        : session.livenessOwnerBoundAt
+      : ownerLeaseHeartbeat(session),
+    graceMs:
+      mintBoundLease &&
+      holdsOwnerHeartbeatLease(session.livenessPolicy) &&
+      session.ownership === "owned"
+        ? SUSPECT_GRACE_MS
+        : suspectGraceMsFor(session),
+  };
 }
 
 /**

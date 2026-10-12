@@ -1753,6 +1753,21 @@ export class UnixSocketServer {
     let deviceId: string | undefined;
     let pending: PendingSocketRequest | undefined;
     let errorCode: number | undefined;
+    let endToolCall = (_delivered?: boolean): void => {};
+    let answerWritten = false;
+    const answerDelivered = (): boolean =>
+      answerWritten && this.clientSockets.get(sessionId) === socket && !socket.destroyed;
+    const writeAnswer = (response: DaemonResponse): void => {
+      if (pending?.terminal) {
+        return;
+      }
+      if (pending) {
+        this.writeTerminalSocketResponse(pending, response, deviceId);
+      } else {
+        this.writeFrame(socket, sessionId, response, undefined, deviceId);
+      }
+      answerWritten = true;
+    };
     try {
       let parsed: unknown;
       try {
@@ -1788,6 +1803,21 @@ export class UnixSocketServer {
       if (this.onFrameTrace) {
         this.traceFrame("frame_parsed", request.id, deviceId);
       }
+      const beginToolCall = (): void => {
+        try {
+          if (request.method === "tools/call" && this.daemonState.isInitialized()) {
+            endToolCall =
+              this.daemonState.getDevicePool().beginMcpToolCall?.(sessionId) ?? endToolCall;
+          }
+        } catch (error) {
+          // #11999: optional tracking may fall back to the existing owner-disconnect grace.
+          logger.warn(
+            `Could not begin MCP tool-call ownership claim: ${errorMessage(error)}`,
+            error,
+          );
+        }
+      };
+      beginToolCall();
       const response = await this.handleRequest(
         sessionId,
         socket,
@@ -1799,7 +1829,7 @@ export class UnixSocketServer {
         },
       );
       if (response) {
-        this.writeTerminalSocketResponse(tracked, response, deviceId);
+        writeAnswer(response);
       } else {
         this.pendingSocketRequests.delete(tracked);
         this.backpressuredSocketIdle.get(socket)?.responseFlushed();
@@ -1819,11 +1849,9 @@ export class UnixSocketServer {
         ...(errorCode === undefined ? {} : { code: errorCode }),
         ...mcpRequestFailureDetails(error, undefined),
       };
-      if (pending) {
-        this.writeTerminalSocketResponse(pending, errorResponse, deviceId);
-      } else {
-        this.writeFrame(socket, sessionId, errorResponse, undefined, deviceId);
-      }
+      writeAnswer(errorResponse);
+    } finally {
+      endToolCall(answerDelivered());
     }
   }
 
@@ -2366,16 +2394,23 @@ export class UnixSocketServer {
           };
         }
 
-        if (request.method === "tools/call") {
-          await this.restoreSelectorSessions(request.params?.arguments, sessionId);
-        }
-        const routeOrPending = this.getMcpForwardRoute(request, sessionId);
-        const initialRoute =
-          routeOrPending instanceof Promise ? await routeOrPending : routeOrPending;
-
-        const mcpRequest = this.mcpRequestSignal(sessionId, ownerSocket, cancellation.signal);
-        activeRequestSignal = mcpRequest.signal;
+        let endOwnerCall: (() => void) | undefined;
+        let disposeMcpRequest = () => {};
         try {
+          if (request.method === "tools/call") {
+            await this.restoreSelectorSessions(request.params?.arguments, sessionId);
+            endOwnerCall = this.beginMcpSessionOwnerCall(
+              request.params?.arguments,
+              sessionId,
+              cancellation.signal,
+            );
+          }
+          const routeOrPending = this.getMcpForwardRoute(request, sessionId);
+          const initialRoute =
+            routeOrPending instanceof Promise ? await routeOrPending : routeOrPending;
+          const mcpRequest = this.mcpRequestSignal(sessionId, ownerSocket, cancellation.signal);
+          disposeMcpRequest = mcpRequest.dispose;
+          activeRequestSignal = mcpRequest.signal;
           const result = await this.runMcpForwardForCurrentRoute(
             initialRoute,
             request,
@@ -2456,7 +2491,8 @@ export class UnixSocketServer {
             result,
           };
         } finally {
-          mcpRequest.dispose();
+          endOwnerCall?.();
+          disposeMcpRequest();
         }
       } catch (error) {
         const failure = this.mcpForwardFailureResponse({
@@ -3246,9 +3282,41 @@ export class UnixSocketServer {
     );
   }
 
+  private beginMcpSessionOwnerCall(
+    args: unknown,
+    socketSessionId: string,
+    signal: AbortSignal,
+  ): (() => void) | undefined {
+    const token = this.ownedSessionsOwnerToken(args);
+    if (token === undefined || !this.isMcpRequestOwnerCurrent(socketSessionId, signal)) {
+      return undefined;
+    }
+    try {
+      if (!this.daemonState.isInitialized()) {
+        return undefined;
+      }
+      const end = this.daemonState
+        .getDevicePool()
+        .beginMcpSessionOwnerCall?.(socketSessionId, token);
+      return () => {
+        try {
+          end?.();
+        } catch (error) {
+          // Optional claim bookkeeping must not replace the tool's result or prevent disposal.
+          logger.warn(`Unable to end MCP session owner call: ${errorMessage(error)}`, error);
+        }
+      };
+    } catch (error) {
+      // Optional claim bookkeeping must not block the tool call.
+      logger.warn(`Unable to begin MCP session owner call: ${errorMessage(error)}`, error);
+      return undefined;
+    }
+  }
+
   private async restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void> {
     const token = this.ownedSessionsOwnerToken(args);
-    if (token !== undefined) {
+    // A queued call must not recreate its closed connection's identity (#11999).
+    if (token !== undefined && this.clientSockets.has(socketSessionId)) {
       try {
         if (this.daemonState.isInitialized()) {
           this.daemonState

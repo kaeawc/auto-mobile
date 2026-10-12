@@ -146,6 +146,18 @@ moveFrame(
   },
 );
 
+const siblingPartial = structuredClone(siblingOverlap);
+const partialNodes = new SearchableHierarchy().project(siblingPartial.viewHierarchy!);
+const partialRemove = partialNodes.find((node) => node.index === siblingRemove.index)!;
+// Only the same item_41 Remove and its CALayer move right, exposing item_40's left strip.
+moveFrame(partialRemove, { left: 340, top: 267, right: 389, bottom: 301 });
+moveFrame(
+  partialNodes.find(
+    (node) => node.parentIndex === partialRemove.index && node.className === "CALayer",
+  )!,
+  { left: 340, top: 267, right: 389, bottom: 301 },
+);
+
 const reverseOptions: TapOnElementOptions = { action: "tap", elementId: "reverse_cart_A" };
 
 afterEach(() => AndroidCtrlProxyClient.resetInstances());
@@ -215,8 +227,29 @@ test("PIN: unobstructed cart_B/item_41 retains its captured centre", async () =>
   expect(points).toEqual([{ x: 346, y: 568 }]);
 });
 
-test("PIN: overlapping siblings inside one scroll container do not imply overlay ownership", async () => {
+test("later-drawn sibling owns the fully covered target without scroll remediation", async () => {
   const { result, points } = await tapOn(siblingOverlap, remove(40));
+  expect(result.success).toBe(false);
+  expect(result.error).toContain('Target "Remove" is covered by "Remove"');
+  expect(result.error).toContain("same scroll container");
+  expect(result.error).not.toContain("swipeOn");
+  expect(points).toEqual([]);
+});
+
+test("earlier-drawn sibling never covers the later-drawn Remove", async () => {
+  const { result, points } = await tapOn(siblingOverlap, remove(41));
+  expect(result.success).toBe(true);
+  expect(points).toEqual([{ x: 346, y: 284 }]);
+});
+
+test("partial later-drawn sibling leaves an exclusively owned tap region", async () => {
+  const { result, points } = await tapOn(siblingPartial, remove(40));
+  expect(result.success).toBe(true);
+  expect(points).toEqual([{ x: 322, y: 284 }]);
+});
+
+test("PIN: Android ignores the same-container sibling overlap", async () => {
+  const { result, points } = await tapOn(siblingOverlap, remove(40), "android");
   expect(result.success).toBe(true);
   expect(points).toEqual([{ x: 346, y: 284 }]);
 });

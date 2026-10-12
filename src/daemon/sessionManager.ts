@@ -92,10 +92,11 @@ import { Mutex } from "async-mutex";
 import { SingleFlight } from "../utils/cache/SingleFlight";
 import { errorMessage } from "../utils/describeUnknownError";
 import { effectiveLastToolActivity, sessionIdleDeadline } from "./sessionClocks";
-import { forgivenLeaseStart, type StallForgivingLeases } from "./stallForgiveness";
+import { forgivenLeaseStart, leaseRunningAt, type StallForgivingLeases } from "./stallForgiveness";
 import { onSessionClock } from "./sessionClockPersistence";
 import {
   judgedLeaseHeartbeat,
+  hasMintBoundClaimLease,
   heartbeatLeasePastGrace,
   judgesOwnerHeartbeats,
   ownerLeaseLiveAt,
@@ -405,7 +406,7 @@ export interface Session {
    * The last time the session's liveness OWNER was alive: its own heartbeats, a recorded
    * ownership claim, or the restore of a persisted owner. Unlike `lastHeartbeat` it is not advanced
    * by tool activity, so a non-owner that merely uses the session cannot keep the owner's lease live
-   * (#10050). Unset until an owner exists; the lease then falls back to `lastHeartbeat`.
+   * (#10050). Unset until owner proof arrives; a mint-bound token uses its bind instant for claims.
    */
   lastOwnerHeartbeat?: number;
   /**
@@ -440,6 +441,12 @@ export interface Session {
    * the token before extending the session.
    */
   livenessOwnerToken?: string;
+  /**
+   * The session-clock instant an acquisition bound the owner token. Non-persisted: it starts
+   * the owner lease for claim judgement while the owner has no heartbeat stamp; it is not a
+   * heartbeat. Cleared with the token it belongs to.
+   */
+  livenessOwnerBoundAt?: number;
   /**
    * Tokens whose explicit ownership claim this daemon has already processed.
    * A client may retry the same claim when its reply is lost; if a newer owner
@@ -808,6 +815,8 @@ type SessionClockExecution = SessionExecutionMetadata & { sessionClockStartTime:
 
 export interface ActiveSessionExecutionQuery {
   startedAtOrBefore?: number;
+  /** Compare the start captured on the session clock, immune to wall-clock steps (#11290). */
+  sessionClockStartedAtOrBefore?: number;
   excludeExecutionId?: string;
   /** Count control calls only: reads never hold idle or owner-disconnect release (#11381). */
   excludeReads?: boolean;
@@ -2163,6 +2172,7 @@ export class SessionManager {
   }
 
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
+  private livenessOwnerCallInFlightReader?: (ownerToken: string) => boolean;
   // No lookup means no known deadline: the veto falls back to the unsettled-execution ceiling.
   private sessionExecutionDeadlineLookup: SessionExecutionDeadlineLookup = () => undefined;
   // No canceller means nothing to abort: only the daemon tracks executions (#10820).
@@ -2661,7 +2671,7 @@ export class SessionManager {
       // returned anyway, and the release's own stage was already reported above.
       logger.debug(`[SessionManager] Forced release of ${sessionId}: ${errorMessage(error)}`);
     });
-    this.trackPendingDeviceCleanup(deviceId, [capped]);
+    this.registerPendingDeviceCleanup(deviceId, capped, SESSION_RELEASE_TEARDOWN_CAP_MS);
     logger.warn(
       `[SessionManager] Forcing the stuck release of session ${sessionId} ` +
         `(stage=${operation.stage ?? "unknown"}, reason=${fence.releaseReason}): the session ` +
@@ -2755,6 +2765,20 @@ export class SessionManager {
    */
   setActiveSessionExecutionChecker(checker: ActiveSessionExecutionChecker): void {
     this.activeSessionExecutionChecker = checker;
+  }
+
+  setLivenessOwnerCallInFlightReader(reader: ((ownerToken: string) => boolean) | undefined): void {
+    this.livenessOwnerCallInFlightReader = reader;
+  }
+
+  /** An owner's completed call restarts only its still-mint-bound claim leases. */
+  restartMintBoundClaimLeases(ownerToken: string): void {
+    const now = this.sessionNow();
+    for (const session of this.sessions.values()) {
+      if (session.livenessOwnerToken === ownerToken && hasMintBoundClaimLease(session)) {
+        session.livenessOwnerBoundAt = Math.max(session.livenessOwnerBoundAt, now);
+      }
+    }
   }
 
   /**
@@ -3763,9 +3787,9 @@ export class SessionManager {
   }
 
   /**
-   * Resolve a session before a new tool execution is accepted. Existing work may
-   * defer expiry cleanup, but it must not let a request that arrived after the
-   * deadline revive an expired session.
+   * Resolve a session before a new tool execution is accepted. A timely control call still in
+   * flight keeps the session in use, so another control call may join it after the idle deadline.
+   * Calls that all began late cannot revive the session by counting each other.
    */
   getSessionForNewExecution(
     sessionId: string,
@@ -3789,13 +3813,15 @@ export class SessionManager {
       return null;
     }
     const startedExecution = execution && this.executionOnSessionClock(execution);
-    if (
-      expireDespiteActiveExecution &&
-      this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution)
-    ) {
-      throw new Error(
-        `Session ${sessionId} expired before this execution began while earlier work is still active.`,
-      );
+    if (expireDespiteActiveExecution) {
+      if (this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution, true)) {
+        return session;
+      }
+      if (this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution)) {
+        throw new Error(
+          `Session ${sessionId} expired before this execution began while earlier work is still active.`,
+        );
+      }
     }
     if (this.shouldExpireSession(session, expireDespiteActiveExecution, startedExecution)) {
       if (!releaseExpired) {
@@ -3847,10 +3873,10 @@ export class SessionManager {
 
   /**
    * The live session a read is admitted under, releasing nothing. A read that arrives after the
-   * idle deadline while an earlier control call still holds the session (#11361) is not admitted
-   * under it and does not get the untyped refusal a late control call gets: this returns null, read-only
-   * admission resolves undefined, and the caller runs the read without a session on the device
-   * {@link deviceHeldForLateRead} names. Any other read past the deadline also gets null here.
+   * idle deadline while any control call or recovery still holds the session (#11361) is not
+   * admitted under it: this returns null, read-only admission resolves undefined, and the caller
+   * runs the read without a session on the device {@link deviceHeldForLateRead} names. Any other
+   * read past the deadline also gets null here.
    */
   private observeSessionForRead(
     sessionId: string,
@@ -3864,8 +3890,8 @@ export class SessionManager {
 
   /**
    * The device of the live session a read named but arrived too late to be admitted under: past
-   * the idle deadline, with an earlier control call still holding the session (#11361). The read runs
-   * sessionless against this device, the one it asked about, rather than whatever device a
+   * the idle deadline, with any control call or recovery still holding the session (#11361).
+   * The read runs sessionless against this device, the one it asked about, rather than whatever device a
    * sessionless call would otherwise select. Undefined in every other case. Reads no device and
    * changes nothing: no release, no refresh, no idle credit.
    */
@@ -9853,7 +9879,8 @@ export class SessionManager {
     logger.info(
       `Network condition TTL elapsed for session ${sessionId}; resetting device ${target.deviceId} to none`,
     );
-    this.trackPendingDeviceCleanup(target.deviceId, [
+    this.registerPendingDeviceCleanup(
+      target.deviceId,
       this.runUnderTeardownShield(async () => [
         {
           pending: this.restoreNetworkConditionOnExpiry(session, target, expectedGeneration),
@@ -9862,7 +9889,8 @@ export class SessionManager {
       ]).then(async (cleanups) => {
         await Promise.all(cleanups);
       }),
-    ]);
+      SESSION_RELEASE_TEARDOWN_CAP_MS,
+    );
   }
 
   /**
@@ -10978,7 +11006,14 @@ export class SessionManager {
     const hold =
       ownerToken === undefined || session.livenessPolicy === "cli-idle"
         ? "none"
-        : livenessLeaseState(sessionOwnerLeaseSnapshot(session, this.sessionNow())).phase;
+        : livenessLeaseState(
+            sessionOwnerLeaseSnapshot(
+              session,
+              this.sessionNow(),
+              hasMintBoundClaimLease(session) &&
+                (this.livenessOwnerCallInFlightReader?.(ownerToken) ?? false),
+            ),
+          ).phase;
     return { ownerToken, hold };
   }
 
@@ -11007,13 +11042,16 @@ export class SessionManager {
       // Tick adoption has no claim history. Fence all keeper ticks before the release write yields.
       session.livenessOwnershipClaims ??= new Set<string>();
       session.livenessOwnershipClaims.add(ownerToken);
+      const previousOwnerBoundAt = session.livenessOwnerBoundAt;
       session.livenessOwnerToken = undefined;
+      session.livenessOwnerBoundAt = undefined;
       // Fence an older heartbeat write's failure rollback across the handoff.
       session.activityGeneration++;
       try {
         await this.deviceSessionRepository.recordLivenessOwnership?.(sessionId, null);
       } catch (error) {
         session.livenessOwnerToken = ownerToken;
+        session.livenessOwnerBoundAt = previousOwnerBoundAt;
         if (!this.isAdmittedForAutomation(session)) {
           return "not-found";
         }
@@ -11041,9 +11079,11 @@ export class SessionManager {
   ): Promise<LivenessClaimOutcome> {
     const previousOwnerToken = session.livenessOwnerToken;
     const previousOwnerHeartbeat = session.lastOwnerHeartbeat;
+    const previousOwnerBoundAt = session.livenessOwnerBoundAt;
     const alreadyProcessed = processedClaims.has(ownerToken);
     processedClaims.add(ownerToken);
     session.livenessOwnerToken = ownerToken;
+    session.livenessOwnerBoundAt = undefined;
     // Stamp the lease in the same step as the takeover, still inside the claim mutex. The
     // request handler records the claimant's heartbeat several awaits later; until then a second
     // foreign claimant would read the previous, lapsed lease and displace this one (#10050).
@@ -11052,7 +11092,7 @@ export class SessionManager {
       await this.persistNewLivenessOwnershipClaim(
         session,
         ownerToken,
-        { previousOwnerToken, previousOwnerHeartbeat },
+        { previousOwnerToken, previousOwnerHeartbeat, previousOwnerBoundAt },
         processedClaims,
       );
     } catch (error) {
@@ -11091,7 +11131,14 @@ export class SessionManager {
     if (!session || session.livenessPolicy === "cli-idle") {
       return undefined;
     }
-    return livenessOwnerHold(sessionOwnerLeaseSnapshot(session, this.sessionNow()));
+    return livenessOwnerHold(
+      sessionOwnerLeaseSnapshot(
+        session,
+        this.sessionNow(),
+        hasMintBoundClaimLease(session) &&
+          (this.livenessOwnerCallInFlightReader?.(session.livenessOwnerToken!) ?? false),
+      ),
+    );
   }
 
   /**
@@ -11431,6 +11478,7 @@ export class SessionManager {
         forgiven++;
         continue;
       }
+      this.forgiveMintBoundClaimLease(session, resumedAt, leaseLostMs, gapBeganAt);
       if (ownerLeaseLiveAt(session, gapBeganAt)) {
         // The lease that is judged (#11162): for a session judged on its owner's heartbeats, a
         // non-owner's tool call must not move the forgiven lease start.
@@ -11463,12 +11511,33 @@ export class SessionManager {
     return forgiven;
   }
 
+  /** Compensate the claim-only mint lease independently of the activity-derived stall floor. */
+  private forgiveMintBoundClaimLease(
+    session: Session,
+    resumedAt: number,
+    leaseLostMs: number,
+    gapBeganAt?: number,
+  ): void {
+    if (
+      hasMintBoundClaimLease(session) &&
+      (gapBeganAt === undefined ||
+        leaseRunningAt(session.livenessOwnerBoundAt, session.heartbeatTimeoutMs, gapBeganAt))
+    ) {
+      session.livenessOwnerBoundAt = forgivenLeaseStart(
+        session.livenessOwnerBoundAt,
+        resumedAt,
+        leaseLostMs,
+      );
+    }
+  }
+
   private async persistNewLivenessOwnershipClaim(
     session: Session,
     ownerToken: string,
     previous: {
       previousOwnerToken: string | undefined;
       previousOwnerHeartbeat: number | undefined;
+      previousOwnerBoundAt: number | undefined;
     },
     processedClaims: Set<string>,
   ): Promise<void> {
@@ -11483,6 +11552,7 @@ export class SessionManager {
       processedClaims.delete(ownerToken);
       session.livenessOwnerToken = previous.previousOwnerToken;
       session.lastOwnerHeartbeat = previous.previousOwnerHeartbeat;
+      session.livenessOwnerBoundAt = previous.previousOwnerBoundAt;
       settleClaimantHeartbeat("undo");
       throw error;
     }
@@ -11544,10 +11614,14 @@ export class SessionManager {
     return true;
   }
 
-  /** Bind acquisition identity only: no heartbeat, claim history or release deadline changes. */
+  /** Bind acquisition identity and its claim-only lease start; no heartbeat or release changes. */
   bindAcquiredLivenessOwnerToken(sessionId: string, ownerToken: string): boolean {
     const session = this.peekSession(sessionId);
-    return session !== null && this.adoptUnownedLivenessOwnerToken(session, ownerToken);
+    if (!session || !this.adoptUnownedLivenessOwnerToken(session, ownerToken)) {
+      return false;
+    }
+    session.livenessOwnerBoundAt = this.sessionNow();
+    return true;
   }
 
   private adoptUnownedLivenessOwnerToken(session: Session, ownerToken: string): boolean {
@@ -11562,7 +11636,41 @@ export class SessionManager {
       return false;
     }
     session.livenessOwnerToken = ownerToken;
+    session.livenessOwnerBoundAt = undefined;
+    this.persistAdoptedLivenessOwnerToken(session);
     return true;
+  }
+
+  private persistAdoptedLivenessOwnerToken(session: Session): void {
+    if (!this.deviceSessionRepository.replaceLivenessOwnership) {
+      return;
+    }
+    void this.getBarrier()
+      .track(() =>
+        this.livenessOwnershipClaimMutexFor(session).runExclusive(async () => {
+          if (
+            this.peekSession(session.sessionId) !== session ||
+            !this.isAdmittedForAutomation(session) ||
+            !session.livenessOwnerToken
+          ) {
+            return;
+          }
+          // Read under the claim mutex: a queued adoption must not restore an older owner.
+          await this.deviceSessionRepository.replaceLivenessOwnership?.(
+            session.sessionId,
+            session.livenessOwnerToken,
+          );
+        }),
+      )
+      .catch((error) => {
+        if (error instanceof DeviceSessionNotActiveError) {
+          // The row may have been released or not yet activated; in-memory adoption still stands.
+          logger.debug("[SessionManager] Adopted liveness owner row is no longer active");
+          return;
+        }
+        // Persistence is best-effort; omit error details because they may contain the token.
+        logger.warn("[SessionManager] Failed to persist adopted liveness ownership");
+      });
   }
 
   /**
@@ -11931,9 +12039,14 @@ export class SessionManager {
     return execution.sessionClockStartTime > idleDeadline;
   }
 
+  /**
+   * A late call while other control work or recovery holds the session. Only a timely control
+   * call admits new control work; the unbounded check preserves the hold without admission.
+   */
   private isLateExecutionWhileEarlierWorkIsActive(
     session: Session,
     execution: SessionClockExecution | undefined,
+    timelyControlOnly = false,
   ): boolean {
     const idleDeadline = sessionIdleDeadline(session);
     return (
@@ -11941,6 +12054,7 @@ export class SessionManager {
       this.sessionNow() > idleDeadline &&
       execution.sessionClockStartTime > idleDeadline &&
       this.activeSessionExecutionChecker(session.sessionId, {
+        ...(timelyControlOnly ? { sessionClockStartedAtOrBefore: idleDeadline } : {}),
         excludeExecutionId: execution.executionId,
         excludeReads: true,
       })

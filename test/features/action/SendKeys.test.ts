@@ -453,6 +453,7 @@ function createTextClient(
     supportsImeKeyEvents: async () => options.supportsImeKeyEvents ?? true,
     supportsImeClearField: async () => true,
     supportsImePasswordCommit: async () => options.supportsImePasswordCommit ?? false,
+    supportsImeInsertedText: async () => true,
     supportsKeyboardProfiles: async () => options.supportsKeyboardProfiles ?? true,
     setKeyboardProfile: async (id) => {
       calls.push(`setKeyboardProfile:${id}`);

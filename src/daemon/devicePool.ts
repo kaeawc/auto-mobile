@@ -109,6 +109,7 @@ import {
 } from "./poolConfig";
 import {
   DeviceSessionRepository,
+  deviceRestartReleaseReason,
   isDeviceRestartReleaseReason,
 } from "../db/deviceSessionRepository";
 import { AndroidDeviceReboot, BoundedAndroidDeviceReboot } from "../devices/androidDeviceReboot";
@@ -645,6 +646,9 @@ export interface PooledDevice {
    */
   identityUnresolved?: boolean;
 
+  /** Trusted identity captured before quarantine; only the old holder's restart handoff may use it. */
+  preQuarantineStableDeviceId?: string;
+
   /**
    * The `BootedDevice.observedAt` of the newest identity observation folded into
    * this entry, when that observation carried one — in EITHER direction: the
@@ -1136,7 +1140,12 @@ export class DevicePool {
    * closed meanwhile already had its bindings released, so recording it then would leave a dead
    * owner that suppresses the owner-disconnect release forever.
    */
-  private readonly mcpBindsInFlight = new Map<string, { pending: number; closed: boolean }>();
+  private readonly mcpBindsInFlight = new Map<
+    string,
+    { pending: number; closed: boolean; toolCalls: number }
+  >();
+  // #11999: only socket tool-call claims can have an answer still awaiting delivery.
+  private readonly mcpSessionUndeliveredMints = new Map<string, Set<string>>();
   private readonly refreshMissingDeviceMisses: Map<string, number>;
   private readonly androidTransportAliases: AndroidTransportAliases;
   private androidAliasObservation = 0;
@@ -1361,6 +1370,7 @@ export class DevicePool {
     managedSlotExclusion,
   }: DevicePoolDependencies) {
     this.sessionManager = sessionManager;
+    this.registerMcpSessionOwnerCallReader();
     this.foreignDeviceOwnership = foreignDeviceOwnership;
     this.iosForeignDeviceOwnership = iosForeignDeviceOwnership;
     this.managedSlotExclusion = managedSlotExclusion;
@@ -1856,7 +1866,7 @@ export class DevicePool {
         stableDeviceIdFor: (device) => this.stableDeviceIdFor(device),
         recordBindOwnership: (client, session, minted) =>
           minted
-            ? this.recordMintedSessionOwnership(client, session)
+            ? this.recordMintedSessionOwnership(client, session, false)
             : this.recordBindOwnership(client, session),
         restoreSessionAssignment: (device, snapshot) =>
           this.restoreSessionAssignment(device, snapshot),
@@ -4541,6 +4551,30 @@ export class DevicePool {
     return present && this.runtimeIdentity.isPooledDeviceIdentityAssignable(device);
   }
 
+  /** A resolved serial reuse hands the old AVD back to its owner without touching the stranger. */
+  private restartReleaseReasonForIdentityReplacement(
+    device: PooledDevice,
+    observation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
+  ): SessionReleaseReason | undefined {
+    const session = device.sessionId && this.sessionManager.getSession(device.sessionId);
+    if (session && this.intentionallyCancelledRecoverySessions.has(session)) {
+      return undefined;
+    }
+    if (
+      !observation ||
+      !this.hasReusableSerial(device) ||
+      observation.platform !== "android" ||
+      this.runtimeIdentity.hasUnresolvedEmulatorName(observation) ||
+      this.matchesRuntimeIdentity(device, observation)
+    ) {
+      return undefined;
+    }
+    const stableDeviceId = this.stableDeviceIdFor(device) ?? device.preQuarantineStableDeviceId;
+    return stableDeviceId !== undefined && stableDeviceId !== observation.name
+      ? deviceRestartReleaseReason(stableDeviceId)
+      : undefined;
+  }
+
   private async releaseSessionForEvictedDevice(
     device: PooledDevice,
     incidentId: string | undefined,
@@ -4568,14 +4602,44 @@ export class DevicePool {
       );
       return false;
     }
-    const released = await this.retrySessionRelease(sessionId, device.id, () =>
+    const releaseReason =
+      this.restartReleaseReasonForIdentityReplacement(device, identityObservation) ??
+      deviceLossCancellationReason(device.id, incidentId);
+    const attempt = () =>
       this.releaseSessionForDisconnectedDevice(
         sessionId,
         device.id,
-        deviceLossCancellationReason(device.id, incidentId),
+        releaseReason,
         () => !isSupersededByNewerIdentity(),
-      ),
-    );
+      );
+    let released: boolean | void = undefined;
+    if (isDeviceRestartReleaseReason(releaseReason)) {
+      // Quarantine normally drains the holder, but shutdown reservations defer it.
+      // Fresh settlement must drain that deferred work before publishing B too.
+      if (
+        !device.identityUnresolved ||
+        this.runtimeIdentity.hasDeferredQuarantineCancellation(device)
+      ) {
+        await this.cancelDeviceSessionExecutions(
+          sessionId,
+          deviceLossCancellationReason(device.id, incidentId),
+          { excludeExecutionId: this.ambientExecutionIdReader?.getExecutionId() },
+        );
+      }
+      if (isSupersededByNewerIdentity()) {
+        return false;
+      }
+      // Use the existing handoff bookkeeping, including rollback when the fenced
+      // release is superseded. Recovery must never stop or boot this reused serial.
+      released = await this.releaseSerialReuseRecoverySession(
+        device,
+        sessionId,
+        releaseReason,
+        attempt,
+      );
+    } else {
+      released = await this.retrySessionRelease(sessionId, device.id, attempt);
+    }
     if (released === false) {
       logger.info(
         `[DevicePool] Aborting session release for ${device.id}: a newer identity observation ` +
@@ -4591,6 +4655,39 @@ export class DevicePool {
     device.sessionId = null;
     this.notifyDeviceStateChanged(device);
     return true;
+  }
+
+  /** Serial reuse is loss of A, with diagnostics but no relaunch of the reused transport. */
+  private async releaseSerialReuseRecoverySession(
+    device: PooledDevice,
+    sessionId: string,
+    releaseReason: SessionReleaseReason,
+    attempt: () => Promise<boolean | void>,
+  ): Promise<boolean | void> {
+    const incidentId = await this.recordEmulatorLossIncident(device.id, "serial-reuse");
+    const result: { released: boolean | void } = { released: undefined };
+    try {
+      await this.releaseDisconnectedRecoverySessionWithRetry(
+        sessionId,
+        device.id,
+        releaseReason,
+        async () => {
+          result.released = await attempt();
+        },
+      );
+      if (result.released === false) {
+        await this.finishEmulatorLossIncident(incidentId, "not-attempted");
+      } else {
+        await this.completeEmulatorLossRecovery(incidentId, "not-attempted", "awaiting-device");
+      }
+      return result.released;
+    } catch (error) {
+      logger.warn(`[DevicePool] Serial-reuse session release failed for ${device.id}`, error);
+      await this.completeEmulatorLossRecovery(incidentId, "exhausted");
+      throw error;
+    } finally {
+      this.settleEmulatorLossIncident(incidentId);
+    }
   }
 
   /** Device-loss releases never reach releaseDevice, the only capture consumer (#11123). */
@@ -5875,11 +5972,11 @@ export class DevicePool {
     // deciding whether this attempt should report pending.
     incident ??= await this.settledRecoveryLossIncident(sessionId, target);
     const failure = this.recoveryFailure(sessionId, target, refreshCompleteness);
-    // Proven serial reuse is terminal even inside the recovery window.
-    if (
-      failure instanceof SessionRecoveryIdentityLossError &&
-      failure.reason === "identity-continuity-lost"
-    ) {
+    // Duplicate exact identities stay terminal. Serial reuse means absence during
+    // a restart handoff, including its absent-target answer after expiry.
+    if (failure instanceof SessionRecoveryIdentityLossError) {
+      // Persisted-only terminalization does not notify the live-session release listener.
+      this.releaseRehydrationReservation(sessionId, true);
       throw failure;
     }
     // Reading diagnostics or discovery can cross the restart deadline. Only
@@ -5963,6 +6060,8 @@ export class DevicePool {
         (candidate) =>
           candidate.session?.sessionUuid === sessionId &&
           candidate.deviceId === target.deviceId &&
+          (candidate.detectionPath !== "serial-reuse" ||
+            candidate.session.state === "awaiting-device") &&
           (candidate.avdName === undefined || candidate.avdName === target.stableDeviceId),
       );
       return incident &&
@@ -8947,7 +9046,12 @@ export class DevicePool {
       };
     }
     if (options.receipt.minted?.session === session) {
-      this.recordMintedSessionOwnership(caller.mcpSessionId, sessionId);
+      this.recordMintedSessionOwnership(
+        caller.mcpSessionId,
+        sessionId,
+        caller.oneShotCli === true,
+        options.receipt.minted.clientSuppliedId === true,
+      );
     } else {
       this.recordBindOwnership(caller.mcpSessionId, sessionId);
     }
@@ -9483,6 +9587,7 @@ export class DevicePool {
         deviceId,
         existingSessionId,
         existingSession.ownership === "awaiting-owner",
+        this.holderReleaseRemainingMs(existingSessionId),
       );
     }
     // A caller that proved it owns the holder (its MCP connection acquired it) may reuse another
@@ -9557,14 +9662,47 @@ export class DevicePool {
     if (!mcpSessionId) {
       return () => {};
     }
-    const bind = this.mcpBindsInFlight.get(mcpSessionId) ?? { pending: 0, closed: false };
+    const bind = this.mcpBindsInFlight.get(mcpSessionId) ?? {
+      pending: 0,
+      closed: false,
+      toolCalls: 0,
+    };
     bind.pending++;
     this.mcpBindsInFlight.set(mcpSessionId, bind);
+    let ended = false;
     return () => {
+      if (ended) {
+        return;
+      }
+      ended = true;
       bind.pending--;
       if (bind.pending === 0 && this.mcpBindsInFlight.get(mcpSessionId) === bind) {
         this.mcpBindsInFlight.delete(mcpSessionId);
       }
+    };
+  }
+
+  /** #11999: retain a connection's close through forwarding and its terminal answer write. */
+  beginMcpToolCall(mcpSessionId: string | undefined): (delivered?: boolean) => void {
+    const endBind = this.beginMcpBind(mcpSessionId);
+    const bind = mcpSessionId === undefined ? undefined : this.mcpBindsInFlight.get(mcpSessionId);
+    if (bind) {
+      bind.toolCalls++;
+    }
+    let ended = false;
+    return (delivered = true) => {
+      if (ended) {
+        return;
+      }
+      ended = true;
+      if (bind && mcpSessionId !== undefined) {
+        bind.toolCalls--;
+        // A delivered answer acknowledges its mints; a closed connection retains none (#11999).
+        if (delivered || bind.closed) {
+          this.mcpSessionUndeliveredMints.delete(mcpSessionId);
+        }
+      }
+      endBind();
     };
   }
 
@@ -9615,15 +9753,65 @@ export class DevicePool {
     this.mcpSessionLivenessOwnerTokens.set(mcpSessionId, token);
   }
 
+  private readonly mcpSessionOwnerCallsInFlight = new Map<string, Map<string, number>>();
+
+  private registerMcpSessionOwnerCallReader(): void {
+    this.sessionManager.setLivenessOwnerCallInFlightReader?.((token) => {
+      for (const calls of this.mcpSessionOwnerCallsInFlight.values()) {
+        if ((calls.get(token) ?? 0) > 0) {
+          return true;
+        }
+      }
+      return false;
+    });
+  }
+
+  /** Only a still-connected caller presenting the mint's token defends its claim lease. */
+  beginMcpSessionOwnerCall(mcpSessionId: string, token: string): () => void {
+    const calls = this.mcpSessionOwnerCallsInFlight.get(mcpSessionId) ?? new Map<string, number>();
+    calls.set(token, (calls.get(token) ?? 0) + 1);
+    this.mcpSessionOwnerCallsInFlight.set(mcpSessionId, calls);
+    let ended = false;
+    return () => {
+      if (ended || this.mcpSessionOwnerCallsInFlight.get(mcpSessionId) !== calls) {
+        return;
+      }
+      ended = true;
+      const pending = (calls.get(token) ?? 0) - 1;
+      if (pending > 0) {
+        calls.set(token, pending);
+      } else {
+        calls.delete(token);
+      }
+      if (calls.size === 0) {
+        this.mcpSessionOwnerCallsInFlight.delete(mcpSessionId);
+      }
+      this.sessionManager.restartMintBoundClaimLeases(token);
+    };
+  }
+
   /** Record a minted session's owner and its acquisition identity in one synchronous commit. */
   private recordMintedSessionOwnership(
     mcpSessionId: string | undefined,
     sessionId: string,
+    oneShotCli: boolean,
+    clientSuppliedId?: boolean,
   ): boolean {
+    const keepsOrdinaryGrace = (): boolean => oneShotCli || clientSuppliedId === true;
     const recorded = this.recordBindOwnership(mcpSessionId, sessionId);
     const token = mcpSessionId && this.mcpSessionLivenessOwnerTokens.get(mcpSessionId);
     if (recorded && token) {
       this.sessionManager.bindAcquiredLivenessOwnerToken(sessionId, token);
+    }
+    if (mcpSessionId !== undefined && !keepsOrdinaryGrace()) {
+      const ownerSessionId = this.ownershipSessionId(sessionId);
+      if (!recorded && !this.hasConnectedMcpSessionOwner(ownerSessionId)) {
+        this.ownerDisconnectRelease.ownerDisconnected(ownerSessionId, mcpSessionId, 0);
+      } else if (recorded && this.mcpBindsInFlight.get(mcpSessionId)?.toolCalls) {
+        const undelivered = this.mcpSessionUndeliveredMints.get(mcpSessionId) ?? new Set<string>();
+        undelivered.add(ownerSessionId);
+        this.mcpSessionUndeliveredMints.set(mcpSessionId, undelivered);
+      }
     }
     return recorded;
   }
@@ -10169,18 +10357,25 @@ export class DevicePool {
 
   /** Drop every socket-scoped route and ownership marker for a disconnected MCP client. */
   releaseMcpSessionBindings(mcpSessionId: string): void {
+    this.mcpSessionOwnerCallsInFlight.delete(mcpSessionId);
     const bindInFlight = this.mcpBindsInFlight.get(mcpSessionId);
     if (bindInFlight) {
       bindInFlight.closed = true;
     }
     const acquired = this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId);
+    const undelivered = this.mcpSessionUndeliveredMints.get(mcpSessionId);
+    this.mcpSessionUndeliveredMints.delete(mcpSessionId);
     this.mcpSessionAcquiredDeviceSessions.delete(mcpSessionId);
     this.mcpSessionLivenessOwnerTokens.delete(mcpSessionId);
     this.autolockManager.releaseMcpSessionBindings(mcpSessionId);
     this.mcpSessionRecoveryDevices.delete(mcpSessionId);
     for (const sessionId of acquired ?? []) {
       if (!this.hasConnectedMcpSessionOwner(sessionId)) {
-        this.ownerDisconnectRelease.ownerDisconnected(sessionId, mcpSessionId);
+        this.ownerDisconnectRelease.ownerDisconnected(
+          sessionId,
+          mcpSessionId,
+          undelivered?.has(sessionId) ? 0 : undefined,
+        );
       }
     }
   }
@@ -10208,6 +10403,16 @@ export class DevicePool {
     const session = this.sessionManager.getSession(ownerSessionId);
     const device = session ? this.devices.get(session.assignedDevice) : undefined;
     return device?.autolockSessionId === ownerSessionId;
+  }
+
+  /** Whether this connection acquired/restored the session or holds its autolock route. */
+  isSessionOwnedByConnection(sessionId: string, mcpSessionId: string | undefined): boolean {
+    return (
+      mcpSessionId !== undefined &&
+      (this.hasAcquiredDeviceSession(mcpSessionId, sessionId) ||
+        this.autolockManager.captureAutolockSessionForMcpSession(mcpSessionId) ===
+          this.ownershipSessionId(sessionId))
+    );
   }
 
   /** Whether a connected MCP client other than `exceptMcpSessionId` owns `namedSessionId`. */
@@ -10256,6 +10461,12 @@ export class DevicePool {
    */
   private clearMcpSessionOwnership(sessionId: string): void {
     this.ownerDisconnectRelease.cancel(sessionId);
+    for (const [mcpSessionId, undelivered] of this.mcpSessionUndeliveredMints) {
+      undelivered.delete(sessionId);
+      if (undelivered.size === 0) {
+        this.mcpSessionUndeliveredMints.delete(mcpSessionId);
+      }
+    }
     for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredDeviceSessions) {
       acquired.delete(sessionId);
       if (acquired.size === 0) {
@@ -10767,7 +10978,8 @@ export class DevicePool {
    * exact target is absent, busy, or replaced at its old transport address,
    * fail immediately rather than allowing retry timing or discovery order to
    * choose another signed device. A device-restart release has a persisted,
-   * bounded grace period for absence. An unresolved emulator identity at any
+   * bounded grace period for absence, including another runtime at its old transport.
+   * An unresolved emulator identity at any
    * serial is not evidence of absence or replacement.
    */
   private recoveryFailure(
@@ -10785,13 +10997,16 @@ export class DevicePool {
     if (exactMatches.length !== 1) {
       const { transportReused, transportIdentityUnresolved, absenceAuthoritative } =
         this.recoveryDiscoveryEvidence(target, platformDevices, refreshCompleteness);
-      if (transportReused || exactMatches.length > 1) {
+      if (exactMatches.length > 1) {
         return new SessionRecoveryIdentityLossError(sessionId, target, "identity-continuity-lost");
+      }
+      if (transportReused) {
+        return this.reusedTransportRecoveryFailure(sessionId, target);
       }
       if (transportIdentityUnresolved) {
         if (
           target.restartRecoveryDeadlineMs === undefined ||
-          this.recoveryNow() < target.restartRecoveryDeadlineMs
+          this.isRestartRecoveryPending(target)
         ) {
           return new DevicePoolError("Recovery target identity is unresolved", true);
         }
@@ -10799,15 +11014,33 @@ export class DevicePool {
       if (!absenceAuthoritative) {
         return new DevicePoolError("Recovery target absence is not yet authoritative", true);
       }
-      if (
-        target.restartRecoveryDeadlineMs !== undefined &&
-        this.recoveryNow() < target.restartRecoveryDeadlineMs
-      ) {
+      if (this.isRestartRecoveryPending(target)) {
         return new DevicePoolError("Recovery target is restarting", true);
       }
       return new SessionRecoveryIdentityLossError(sessionId, target, "target-absent");
     }
     return this.recoveryBusyFailure(sessionId, target, exactMatches[0]);
+  }
+
+  private reusedTransportRecoveryFailure(
+    sessionId: string,
+    target: SessionRecoveryTarget,
+  ): DevicePoolError | SessionRecoveryIdentityLossError {
+    if (this.isRestartRecoveryPending(target)) {
+      return new DevicePoolError("Recovery target is restarting", true);
+    }
+    return new SessionRecoveryIdentityLossError(
+      sessionId,
+      target,
+      target.restartRecoveryDeadlineMs === undefined ? "identity-continuity-lost" : "target-absent",
+    );
+  }
+
+  private isRestartRecoveryPending(target: SessionRecoveryTarget): boolean {
+    return (
+      target.restartRecoveryDeadlineMs !== undefined &&
+      this.recoveryNow() < target.restartRecoveryDeadlineMs
+    );
   }
 
   private recoveryBusyFailure(

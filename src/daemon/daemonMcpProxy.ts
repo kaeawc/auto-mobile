@@ -6194,15 +6194,22 @@ export class DaemonMcpProxy {
 
   /**
    * This proxy's own tick fired later than the lease allows, so its sessions' leases may have
-   * lapsed while it could not heartbeat (#10053). Every session it holds is re-heartbeated with the
-   * same owner token: one the daemon kept as suspect is restored with the same UUID, one it already
-   * released is reported in the `proxy_stalled` handover.
+   * lapsed while it could not heartbeat (#10053). Sessions it still heartbeats (and managed
+   * sessions) are re-heartbeated with the same owner token: one kept as suspect is restored with
+   * the same UUID, one still awaited keeps its window, and one lost is reported in the
+   * `proxy_stalled` handover. A stopped unmanaged session waits for a tool call, never stall recovery.
    */
   private beginProxyStallRecovery(): void {
     logger.warn(
       `[DaemonMcpProxy] Heartbeat tick fired more than ${this.heartbeatLeashMs}ms late; re-heartbeating held sessions`,
     );
     for (const sessionUuid of this.heldSessionUuids()) {
+      if (
+        this.notFoundStopped.has(sessionUuid) &&
+        !this.managedExecutionSessions.has(sessionUuid)
+      ) {
+        continue;
+      }
       this.livenessRecovery.begin(sessionUuid, PROXY_STALLED_CODE);
     }
   }
@@ -6381,16 +6388,22 @@ export class DaemonMcpProxy {
     if (this.isDaemonSessionNotFoundError(error)) {
       // The same decision as any other heartbeat's not-found: an attempt that reached a daemon
       // this proxy just connected to gets that session's first answer on the connection (#11570).
+      const releaseReason = releaseReasonFromError(error);
+      const outcome = this.noteNotFoundAnswer(
+        sessionUuid,
+        attemptedClient,
+        releaseReason,
+        daemonInstanceFromError(error),
+      );
       this.recoveryNotFoundOutcomes.set(sessionUuid, {
-        outcome: this.noteNotFoundAnswer(
-          sessionUuid,
-          attemptedClient,
-          releaseReasonFromError(error),
-          daemonInstanceFromError(error),
-        ),
-        releaseReason: releaseReasonFromError(error),
+        outcome,
+        releaseReason,
       });
-      return "session-gone";
+      return outcome.kind === "awaited" &&
+        (!this.managedExecutionSessions.has(sessionUuid) ||
+          (releaseReason !== undefined && isRecoverableDaemonHandoffReason(releaseReason)))
+        ? "session-awaited"
+        : "session-gone";
     }
     if (!this.isMissingHeartbeatAcknowledgement(error)) {
       // The daemon answered: the session's next answer on this connection is not its first.
@@ -8455,14 +8468,14 @@ export class DaemonMcpProxy {
   }
 
   /**
-   * Close the connection to daemon.
-   *
-   * A process stopped by a signal closes the proxy with the MCP server still open, so nothing has
-   * cancelled the calls in flight (stdin EOF aborts them first). They are cancelled here, before the
-   * managed execution release: the daemon admits `daemon/releaseExecution` in arrival order on this
-   * proxy's socket, behind any call still running there, and the release would otherwise time out
-   * unadmitted and leave the session to the owner-disconnect release (#11642). Each caller is
-   * answered with a typed `DaemonUnavailableError`, never left waiting.
+   * Close the connection to the daemon. Neither a signal nor stdin EOF closes the MCP server, so
+   * nothing else cancels calls in flight; cancel them here for both, before managed execution
+   * release. The daemon admits `daemon/releaseExecution` in arrival order on this proxy's socket,
+   * behind any call still running there; otherwise release would time out unadmitted and leave
+   * the session to the owner-disconnect release (#11642). Each caller is answered with a typed
+   * `DaemonUnavailableError`, never left waiting. Once the stdio client closes its end (stdin EOF
+   * or a stdout write error), `OutputGatedTransport` drops those answers and any notification
+   * instead of writing them (#11951), while the daemon-side release still completes.
    */
   close(): Promise<void> {
     // EOF and signal/transport shutdown may overlap: keep the socket until the same release settles.

@@ -20,7 +20,7 @@ import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
 } from "../../src/daemon/constants";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker, sessionExecutionMetadataOf } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -83,7 +83,13 @@ describe("the idle window counts from the end of the last tool call", () => {
     manager = new SessionManager(timer, persistence);
     inFlight = false;
     releases = [];
-    manager.setActiveSessionExecutionChecker(() => inFlight);
+    manager.setActiveSessionExecutionChecker(
+      (_id, query) =>
+        inFlight &&
+        query?.excludeExecutionId !== "earlier" &&
+        (query?.sessionClockStartedAtOrBefore === undefined ||
+          0 <= query.sessionClockStartedAtOrBefore),
+    );
     manager.onSessionRelease((_sessionId, _deviceId, reason) => {
       releases.push({ at: timer.now(), reason });
     });
@@ -235,43 +241,63 @@ describe("the idle window counts from the end of the last tool call", () => {
     }
   });
 
-  // #10824: a call refused because the session expired while earlier work still runs must not
-  // push the idle deadline out when it ends, or repeated refusals keep the session alive.
-  it("a late call refused while earlier work runs leaves the idle deadline where it was", async () => {
+  it("a late control call joins timely work and the last end restarts the idle window", async () => {
     const tracker = new ExecutionTracker(timer, new FakeIdGenerator());
+    manager.setActiveSessionExecutionChecker((id, query) =>
+      tracker.hasActiveSessionUuidExecutions(id, query),
+    );
     tracker.onSessionExecutionEnded((sessionUuids, end) => {
       for (const sessionUuid of sessionUuids) {
         manager.recordToolCallEnded(sessionUuid, end);
       }
     });
-    await manager.getOrCreateSession(SESSION);
-    inFlight = true;
+    const earlier = tracker.startExecution("tapOn", undefined, SESSION);
+    await manager.admitIssuedSessionForAutomation(SESSION, sessionExecutionMetadataOf(earlier));
+    tracker.markSessionAdmitted(earlier.id);
     const idleDeadline = manager.getAllSessions()[0]!.expiresAt;
     timer.setCurrentTime(idleDeadline + 10_000);
+    const late = tracker.startExecution("tapOn", undefined, SESSION);
 
-    const late = tracker.startExecution("observe", undefined, SESSION);
     await expect(
-      manager.admitIssuedSessionForAutomation(SESSION, {
-        executionId: late.id,
-        startTime: late.startTime,
-      }),
-    ).rejects.toThrow(/expired before this execution began/);
-    tracker.endExecution(late.id);
-    expect(manager.getAllSessions()[0]!.expiresAt).toBe(idleDeadline);
-
-    // The earlier, admitted work ending is use: it restarts the window from its end.
-    const earlier = tracker.startExecution("observe", undefined, SESSION);
-    tracker.markSessionAdmitted(earlier.id);
-    inFlight = false;
+      manager.admitIssuedSessionForAutomation(SESSION, sessionExecutionMetadataOf(late)),
+    ).resolves.toMatchObject({ expiresAt: timer.now() + DEFAULT_SESSION_IDLE_TIMEOUT_MS });
+    tracker.markSessionAdmitted(late.id);
     tracker.endExecution(earlier.id);
-    expect(manager.getAllSessions()[0]!.expiresAt).toBe(
-      timer.now() + DEFAULT_SESSION_IDLE_TIMEOUT_MS,
-    );
+    timer.advanceTime(10_000);
+    tracker.endExecution(late.id);
+    const lastEnd = timer.now();
+    expect(manager.getAllSessions()[0]!.expiresAt).toBe(lastEnd + DEFAULT_SESSION_IDLE_TIMEOUT_MS);
+    timer.setCurrentTime(lastEnd + DEFAULT_SESSION_IDLE_TIMEOUT_MS + 1);
+    await sweep();
+    expect(releases.map((release) => release.reason)).toEqual(["cleanup-expired"]);
+    expect(manager.getTerminalReleaseSnapshot(SESSION)?.releaseReason).toBe("cleanup-expired");
   });
+
+  // #10824 / #11558: a refused or cancelled, unadmitted call is never use.
+  it.each([false, true])(
+    "an unadmitted call ending (cancelled=%s) leaves the idle deadline where it was",
+    async (cancelled) => {
+      const tracker = new ExecutionTracker(timer, new FakeIdGenerator());
+      tracker.onSessionExecutionEnded((sessionUuids, end) => {
+        for (const sessionUuid of sessionUuids) {
+          manager.recordToolCallEnded(sessionUuid, end);
+        }
+      });
+      inFlight = true;
+      const idleDeadline = manager.getAllSessions()[0]!.expiresAt;
+      timer.setCurrentTime(idleDeadline + 10_000);
+      const refused = tracker.startExecution("tapOn", undefined, SESSION);
+      if (cancelled) {
+        await tracker.cancelSessionUuidExecutions(SESSION, "cancelled before admission");
+      }
+      tracker.endExecution(refused.id);
+      expect(manager.getAllSessions()[0]!.expiresAt).toBe(idleDeadline);
+    },
+  );
 
   // #11361 item 3: a read is never refused. One arriving after the idle deadline while earlier
   // work holds the veto is not admitted to the session (it runs sessionless) and changes nothing.
-  it("a late read while earlier work runs is answered sessionless, not refused untyped", async () => {
+  it("a late read while earlier work runs is answered sessionless", async () => {
     await manager.getOrCreateSession(SESSION);
     inFlight = true;
     const idleDeadline = manager.getAllSessions()[0]!.expiresAt;

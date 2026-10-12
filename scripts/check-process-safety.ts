@@ -654,7 +654,7 @@ export function checkProcessSafetySource(
 // Untracked tool environments (e.g. scripts/github/.venv, which the parallel
 // github-python-lock fast check rewrites with `uv sync`) are not repository
 // sources; walking them races that rewrite and fails with ENOENT.
-const SKIPPED_DIRECTORIES = new Set([".venv", "node_modules", "__pycache__"]);
+const SKIPPED_DIRECTORIES = new Set([".venv", "python-venv", "node_modules", "__pycache__"]);
 
 export function candidateFiles(directory: string): string[] {
   return sortedReaddirEntriesSync(directory).flatMap((entry) => {

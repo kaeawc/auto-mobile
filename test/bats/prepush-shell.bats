@@ -825,5 +825,5 @@ FIXTURE
   commit_change "scripts/validate_manual_test_python.sh" "#!/usr/bin/env bash"
   run bash scripts/prepush-shell.sh --base base
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,stdlib-first,manual-test-python' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,manual-test-python' "${FAST_LOG}"
 }

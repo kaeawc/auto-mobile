@@ -1,5 +1,6 @@
 """Bounded fake stdio server using the installed SDK's server API."""
 from __future__ import annotations
+import asyncio
 import os
 import signal
 import threading
@@ -38,6 +39,10 @@ def spam(interval_ms: int, count: int) -> None:
             time.sleep(interval_ms / 1000)
 
 @server.tool()
+def startDevice(platform: str, deviceId: str) -> dict[str, str]:
+    return {"platform": platform, "deviceId": deviceId, "sessionUuid": "fake-session"}
+
+@server.tool()
 def echo(text: str) -> str:
     return text
 
@@ -70,8 +75,11 @@ def close_stdout_after_reply(delay_ms: int = 50) -> str:
     return "closing stdout"
 
 @server.tool()
-def notify_spam(interval_ms: int = 2, count: int = 2000) -> str:
-    threading.Thread(target=spam, args=(interval_ms, count), daemon=True).start()
+async def notify_spam(interval_ms: int = 2, count: int = 2000, start_delay_ms: int = 20) -> str:
+    # Let the SDK send the tool reply before a zero-interval producer floods stdout.
+    asyncio.get_running_loop().call_later(
+        max(0, start_delay_ms) / 1000,
+        lambda: threading.Thread(target=spam, args=(interval_ms, count), daemon=True).start())
     return "spamming"
 
 @server.tool()
@@ -88,6 +96,10 @@ def sendKeys(commands: list[dict[str, Any]], device: str = "") -> dict[str, Any]
 @server.tool()
 def observe(deviceId: str = "", device: str = "") -> dict[str, str]:
     return {"deviceId": deviceId, "device": device, "status": "fake editor focused"}
+
+@server.resource("automobile:devices/booted")
+def booted() -> str:
+    return "fake device booted"
 
 @server.resource("fake://status")
 def status() -> str:

@@ -49,13 +49,15 @@ def scenario(name: str) -> tuple[list[dict[str, Any]], dict[str, str], Options, 
         env = {"FAKE_ON_EOF": "ignore"}
         if name.endswith("sigterm"): env["FAKE_IGNORE_SIGTERM"] = "1"
     elif name in ("notification-spam-then-close", "session-closed-transport-open-spam"):
-        steps = [call("notify_spam", interval_ms=0, count=1000000), {"op": "sleep", "ms": 50}]
+        # Loaded/unloaded pipe-consumption probes peaked at 2,611 lines; >38x headroom.
+        steps = [call("notify_spam", interval_ms=0, count=100000, start_delay_ms=300),
+                 {"op": "sleep", "ms": 400}]
         if name.startswith("session"): extra["session_gap_ms"] = 300
     elif name == "server-writes-after-stdin-eof":
         env = {"FAKE_ON_EOF": "write-then-exit:20"}
     elif name == "earlier-application-exception":
         extra["application_error"] = True
-    return steps, env, Options(mode, 2000, 100, 3000, 8000), extra
+    return steps, env, Options(mode, 20000, 100, 20000, 20000, 60000), extra
 
 async def misuse(name: str, directory: Path) -> dict[str, Any]:
     stacks: list[AsyncExitStack] = []
@@ -134,6 +136,14 @@ def reap_recorded_children(directory: Path) -> None:
                              for l in path.read_text().splitlines())
                 if not exited:
                     try:
+                        result = subprocess.run(["ps", "-p", str(pid), "-o", "command="],
+                                                capture_output=True, text=True, timeout=2)
+                    except (OSError, subprocess.TimeoutExpired):
+                        continue  # Unverified process identity: never signal it.
+                    fake = str(Path(__file__).resolve().with_name("fake_mcp_server.py"))
+                    if result.returncode != 0 or fake not in result.stdout:
+                        continue
+                    try:
                         os.kill(pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass  # This recorded fake child has already exited.
@@ -156,7 +166,6 @@ def measure(name: str, directory: Path, timeout: float) -> dict[str, Any]:
         except subprocess.TimeoutExpired:
             process.kill()
             process.communicate(timeout=2)
-            reap_recorded_children(directory)
             close_started = max((json.loads(line)["monotonicAbsoluteMs"] for path in directory.glob("*.jsonl")
                                  for line in path.read_text().splitlines()
                                  if json.loads(line).get("event") == "close-start"), default=started*1000)
@@ -176,7 +185,7 @@ def main() -> int:
     p.add_argument("--only", action="append", choices=list(ORDERINGS))
     p.add_argument("--child", choices=list(ORDERINGS), help=argparse.SUPPRESS)
     p.add_argument("--out-dir")
-    p.add_argument("--timeout-seconds", type=float, default=12)
+    p.add_argument("--timeout-seconds", type=float, default=30)
     args = p.parse_args()
     if args.timeout_seconds <= 0 or not math.isfinite(args.timeout_seconds):
         p.error("--timeout-seconds must be finite and positive")

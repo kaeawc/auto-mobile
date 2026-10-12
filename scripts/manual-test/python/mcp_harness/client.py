@@ -27,6 +27,7 @@ class Options:
     mid_call_delay_ms: float = 200
     step_timeout_ms: float = 60000
     close_timeout_ms: float = 30000
+    init_timeout_ms: float = 60000
 
 class Choreography(Protocol):
     async def initialized(self) -> None: ...
@@ -43,6 +44,8 @@ class Summary:
     close: CloseResult = field(default_factory=lambda: classify_close(None, 0))
     server_exit_code: int | None = None
     usage_error: str | None = None
+    late_responses: int = 0
+    abandoned_requests: int = 0
 
     @property
     def exit_code(self) -> int:
@@ -52,7 +55,8 @@ class Summary:
         return {"client": self.client, "stepsOk": self.steps_ok, "stepsFailed": self.steps_failed,
                 "firstStepFailure": self.first_step_failure, "retriedAttempts": self.retried_attempts,
                 "close": self.close.json(), "serverExitCode": self.server_exit_code,
-                "exitCode": self.exit_code, "usageError": self.usage_error}
+                "exitCode": self.exit_code, "usageError": self.usage_error,
+                "lateResponses": self.late_responses, "abandonedRequests": self.abandoned_requests}
 
 class Capture:
     def __init__(self) -> None:
@@ -99,12 +103,67 @@ class Capture:
             evidence.record("server-exit", timedOut=True, code=self.process.returncode,
                             elapsedMs=(time.monotonic()-started)*1000)
 
+class Requests:
+    """Retain request tasks independently of the step's bounded wait."""
+    def __init__(self, evidence: Evidence, summary: Summary) -> None:
+        self.evidence, self.summary = evidence, summary
+        self.tasks: dict[asyncio.Task[Any], dict[str, Any]] = {}
+        self.after_close = False
+
+    def add(self, task: asyncio.Task[Any], index: int, attempt: int, timeout_ms: float,
+            in_flight: bool) -> None:
+        self.tasks[task] = {"index": index, "attempt": attempt, "inFlightAtClose": in_flight,
+                            "deadline": time.monotonic() + timeout_ms / 1000, "late": False}
+        task.add_done_callback(self.finished)
+
+    def finished(self, task: asyncio.Task[Any]) -> None:
+        fields = self.tasks.pop(task, None)
+        if fields is None:
+            return
+        late = fields.pop("late")
+        deadline = fields.pop("deadline")
+        if not late:
+            return  # run_step consumes and records an on-time outcome.
+        fields.update(lateByMs=max(0, (time.monotonic()-deadline)*1000), afterClose=self.after_close)
+        try:
+            result = task.result()
+        except BaseException as exc:
+            self.evidence.record("late-exception", **fields, exception=exception_json(exc))
+        else:
+            payload = result.model_dump(mode="json", by_alias=True) if result is not None else None
+            self.evidence.record("late-response", **fields, response=payload)
+            self.summary.late_responses += 1
+
+    def closing(self) -> None:
+        self.after_close = True
+        for fields in self.tasks.values():
+            fields["late"] = True
+
+    async def drain(self) -> None:
+        if not self.tasks:
+            return
+        done, pending = await asyncio.wait(set(self.tasks), timeout=3)
+        for task in done:
+            self.finished(task)
+        for task in pending:
+            fields = self.tasks.pop(task)
+            deadline = fields.pop("deadline")
+            fields.pop("late")
+            task.cancel()
+            self.evidence.record("abandoned", **fields, afterClose=True,
+                                 lateByMs=max(0, (time.monotonic()-deadline)*1000))
+            self.summary.abandoned_requests += 1
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
 async def run_step(session: ClientSession, step: dict[str, Any], index: int, evidence: Evidence,
                    options: Options, summary: Summary, emit: Callable[[dict[str, Any]], None],
-                   in_flight: bool = False) -> dict[str, Any]:
+                   in_flight: bool = False, requests: Requests | None = None) -> dict[str, Any]:
     started = time.monotonic()
     error: str | None = None
     attempts = 0
+    timed_out_attempts = 0
+    requests = requests or Requests(evidence, summary)
     ok = False
     for attempt in range(1, step.get("retries", 0) + 2):
         attempts = attempt
@@ -119,7 +178,15 @@ async def run_step(session: ClientSession, step: dict[str, Any], index: int, evi
                     return await session.list_tools()
                 await asyncio.sleep(step["ms"] / 1000)
                 return None
-            result = await asyncio.wait_for(request(), step.get("timeoutMs", options.step_timeout_ms) / 1000)
+            timeout_ms = step.get("timeoutMs", options.step_timeout_ms)
+            task = asyncio.create_task(request())
+            requests.add(task, index, attempt, timeout_ms, in_flight)
+            done, _ = await asyncio.wait({task}, timeout=timeout_ms / 1000)
+            if not done:
+                requests.tasks[task]["late"] = True
+                timed_out_attempts += 1
+                raise TimeoutError("Request wait timed out; request still pending")
+            result = task.result()
             payload = result.model_dump(mode="json", by_alias=True) if result is not None else None
             ok = not bool(payload.get("isError", False)) if isinstance(payload, dict) else True
             error = None if ok else str(payload)
@@ -128,14 +195,19 @@ async def run_step(session: ClientSession, step: dict[str, Any], index: int, evi
         except BaseException as exc:
             error = f"{type(exc).__name__}: {exc}"
             evidence.record("exception", index=index, attempt=attempt, exception=exception_json(exc),
-                            inFlightAtClose=in_flight)
+                            inFlightAtClose=in_flight,
+                            **({"timedOut": True, "stillPending": True} if isinstance(exc, TimeoutError) and not task.done() else {}))
             if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
-                break
+                if task in requests.tasks:
+                    requests.tasks[task]["late"] = True
+                if in_flight and isinstance(exc, asyncio.CancelledError):
+                    break  # Deliberately cancelled mid-call scenario.
+                raise
         if ok or attempt > step.get("retries", 0):
             break
         await asyncio.sleep(step.get("retryDelayMs", 250) / 1000)
     event = {"client": summary.client, "event": "step", "index": index, "op": step["op"],
-             "label": step.get("label"), "ok": ok, "attempts": attempts,
+             "label": step.get("label"), "ok": ok, "attempts": attempts, "timedOutAttempts": timed_out_attempts,
              "elapsedMs": (time.monotonic()-started)*1000, "error": error[:300] if error else None}
     summary.steps_ok += int(ok)
     summary.steps_failed += int(not ok)
@@ -145,15 +217,15 @@ async def run_step(session: ClientSession, step: dict[str, Any], index: int, evi
     emit(event)
     return event
 
-async def run_client(launch: LaunchSpec, script: Script, evidence: Evidence, options: Options,
+async def _run_client(launch: LaunchSpec, script: Script, evidence: Evidence, options: Options,
                      emit: Callable[[dict[str, Any]], None], choreography: Choreography | None = None,
                      session_gap_ms: float = 0, cancel_in_flight: bool = False,
                      application_error: bool = False, cancel_caller: bool = False) -> Summary:
     summary = Summary(evidence.name)
     capture = Capture()
-    evidence.identity(launch, options.close_mode, script.path)
-    transport = stdio_client(launch.parameters(), errlog := Evidence.open_private(
-        evidence.directory / f"{evidence.name}.server.stderr.log"))
+    requests = Requests(evidence, summary)
+    errlog = None
+    phase = "spawn"
     session: ClientSession | None = None
     transport_entered = session_entered = False
     pending: asyncio.Task[dict[str, Any]] | None = None
@@ -161,13 +233,23 @@ async def run_client(launch: LaunchSpec, script: Script, evidence: Evidence, opt
     close_start = time.monotonic()
     timed_out = False
     async def message_handler(message: Any) -> None:
-        inner = getattr(message, "root", message)
-        if hasattr(inner, "model_dump"):
-            evidence.record("notification", notification=inner.model_dump(mode="json", by_alias=True))
+        request = getattr(message, "request", message)
+        inner = getattr(request, "root", request)
+        if isinstance(inner, Exception):
+            evidence.record("transport-exception", exception=exception_json(inner))
+        elif hasattr(inner, "model_dump"):
+            payload = inner.model_dump(mode="json", by_alias=True)
+            if str(payload.get("method", "")).startswith("notifications/"):
+                evidence.record("notification", notification=payload)
+            else:
+                evidence.record("server-request", method=payload.get("method"), params=payload.get("params"))
     try:
+        evidence.record("spawn-request", command=launch.command, args=launch.args, envKeys=sorted(launch.env))
+        evidence.identity(launch, options.close_mode, script.path)
+        errlog = Evidence.open_private(evidence.directory / f"{evidence.name}.server.stderr.log")
+        transport = stdio_client(launch.parameters(), errlog)
         streams = await capture.enter(transport)
         transport_entered = True
-        evidence.started = time.monotonic()
         evidence.record("spawn", pid=capture.process.pid if capture.process else None,
                         command=launch.command, args=launch.args, envKeys=sorted(launch.env))
         if capture.process is None and options.close_mode != "normal":
@@ -178,14 +260,17 @@ async def run_client(launch: LaunchSpec, script: Script, evidence: Evidence, opt
         session = ClientSession(*streams, **kwargs)
         await session.__aenter__()
         session_entered = True
-        initialized = await asyncio.wait_for(session.initialize(), options.step_timeout_ms / 1000)
+        phase = "initialize"
+        evidence.record("initialize-request")
+        initialized = await asyncio.wait_for(session.initialize(), options.init_timeout_ms / 1000)
         evidence.record("initialize", response=initialized.model_dump(mode="json", by_alias=True))
+        phase = "application"
         if choreography:
             await choreography.initialized()
         last = max((i for i, s in enumerate(script.steps) if s["op"] in ("call", "read")), default=-1)
         for index, step in enumerate(script.steps):
             if options.close_mode == "mid-call" and index == last:
-                pending = asyncio.create_task(run_step(session, step, index, evidence, options, summary, emit, True))
+                pending = asyncio.create_task(run_step(session, step, index, evidence, options, summary, emit, True, requests))
                 if cancel_caller:
                     owner = asyncio.current_task()
                     asyncio.get_running_loop().call_later(options.mid_call_delay_ms / 2000, owner.cancel)
@@ -194,12 +279,12 @@ async def run_client(launch: LaunchSpec, script: Script, evidence: Evidence, opt
                     pending.cancel()
                     await pending
                 break
-            await run_step(session, step, index, evidence, options, summary, emit)
+            await run_step(session, step, index, evidence, options, summary, emit, requests=requests)
         if application_error:
             raise ValueError("Injected earlier application exception")
         if choreography and await choreography.before_close():
             for index, step in enumerate(script.after_peer_closed, len(script.steps)):
-                await run_step(session, step, index, evidence, options, summary, emit)
+                await run_step(session, step, index, evidence, options, summary, emit, requests=requests)
         if options.close_mode == "after-server-exit":
             assert capture.process is not None
             if capture.process.stdin:
@@ -214,11 +299,12 @@ async def run_client(launch: LaunchSpec, script: Script, evidence: Evidence, opt
     except BaseException as exc:
         # Original application/initialization error remains distinct from context cleanup.
         failure = {"class": type(exc).__name__, "message": str(exc)}
-        evidence.record("exception", phase="application", exception=exception_json(exc))
+        evidence.record("exception", phase=phase, exception=exception_json(exc))
         summary.steps_failed += 1
         if summary.first_step_failure is None:
             summary.first_step_failure = failure
     finally:
+        requests.closing()
         close_start = time.monotonic()
         evidence.record("close-start")
         def deadline() -> None:
@@ -257,13 +343,18 @@ async def run_client(launch: LaunchSpec, script: Script, evidence: Evidence, opt
             evidence.record("server-exit", code=summary.server_exit_code, phase="after-close")
         evidence.record("close", **summary.close.json())
         emit({"client": summary.client, "event": "close", **summary.close.json()})
+        await requests.drain()
+        if pending:
+            await asyncio.gather(pending, return_exceptions=True)
+        if errlog:
+            errlog.close()
+    return summary
+
+async def run_client(launch: LaunchSpec, script: Script, evidence: Evidence, options: Options,
+                     emit: Callable[[dict[str, Any]], None], choreography: Choreography | None = None,
+                     **extras: Any) -> Summary:
+    try:
+        return await _run_client(launch, script, evidence, options, emit, choreography, **extras)
+    finally:
         if choreography:
             choreography.closed()
-        if pending and not pending.done():
-            try:
-                await asyncio.wait_for(pending, 3)
-            except BaseException as exc:
-                evidence.record("exception", phase="in-flight-wait", inFlightAtClose=True,
-                                exception=exception_json(exc))
-        errlog.close()
-    return summary

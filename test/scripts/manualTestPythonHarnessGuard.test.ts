@@ -132,3 +132,42 @@ test("malformed input and unknown command return typed refusals", () => {
   }
   expect(runHarnessGuard("unknown", input, deps).ok).toBe(false);
 });
+
+test("invalid stdin is distinguished from daemon-file and unexpected failures", () => {
+  const { deps } = fixture();
+  for (const text of ["no JSON", "[]", "{}"]) {
+    const result = runHarnessGuard("resolve", text, deps);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.message).toStartWith("Invalid guard input: ");
+    }
+  }
+  deps.readFile = () => {
+    throw new Error("secret file failure");
+  };
+  expect(runHarnessGuard("resolve", input, deps)).toEqual({
+    ok: false,
+    message:
+      "Run private-daemon.ts start first; a Python stdio client must not wake a dead daemon.",
+  });
+  deps.readFile = () => '{"pid":123}';
+  deps.isPidAlive = () => {
+    throw new Error("injected probe failure");
+  };
+  expect(runHarnessGuard("resolve", input, deps)).toEqual({
+    ok: false,
+    message: "Guard failed: injected probe failure",
+  });
+});
+
+test("resolve rejects malformed, out-of-range and resident default ports", () => {
+  for (const port of ["3000", "0", "65536", "3.5", "1e3", "-4", " 3160", "3160junk"]) {
+    const { deps } = fixture();
+    deps.env.MT_PORT = port;
+    const result = runHarnessGuard("resolve", input, deps);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.message).toContain("3000");
+    }
+  }
+});

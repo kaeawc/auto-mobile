@@ -3,16 +3,21 @@
   "steps": [
     {
       "op": "call",
-      "tool": "observe",
+      "tool": "startDevice",
       "arguments": {
+        "platform": "${platform}",
         "deviceId": "${deviceId}"
       }
     },
     {
       "op": "call",
+      "tool": "observe",
+      "arguments": {}
+    },
+    {
+      "op": "call",
       "tool": "sendKeys",
       "arguments": {
-        "device": "${deviceId}",
         "commands": [
           {
             "action": "type",
@@ -28,7 +33,6 @@
       "op": "call",
       "tool": "sendKeys",
       "arguments": {
-        "device": "${deviceId}",
         "commands": [
           {
             "action": "type",
@@ -52,7 +56,6 @@
       "op": "call",
       "tool": "sendKeys",
       "arguments": {
-        "device": "${deviceId}",
         "commands": [
           {
             "action": "clear"
@@ -71,7 +74,6 @@
       "op": "call",
       "tool": "sendKeys",
       "arguments": {
-        "device": "${deviceId}",
         "commands": [
           {
             "action": "type",
@@ -88,7 +90,6 @@
       "op": "call",
       "tool": "sendKeys",
       "arguments": {
-        "device": "${deviceId}",
         "commands": [
           {
             "action": "type",
@@ -104,7 +105,6 @@
       "op": "call",
       "tool": "sendKeys",
       "arguments": {
-        "device": "${deviceId}",
         "commands": [
           {
             "action": "type",
@@ -120,7 +120,6 @@
       "op": "call",
       "tool": "sendKeys",
       "arguments": {
-        "device": "${deviceId}",
         "commands": [
           {
             "action": "type",
@@ -135,18 +134,14 @@
     {
       "op": "call",
       "tool": "observe",
-      "arguments": {
-        "deviceId": "${deviceId}"
-      }
+      "arguments": {}
     }
   ],
   "afterPeerClosed": [
     {
       "op": "call",
       "tool": "observe",
-      "arguments": {
-        "deviceId": "${deviceId}"
-      }
+      "arguments": {}
     }
   ]
 }

@@ -96,3 +96,35 @@ MOCK
   [ "$(head -n 1 "${COMMAND_LOG}.interpreters")" = "$MOCK_BIN/custom-python" ]
   grep -Fqx -- '-m pip install --disable-pip-version-check mcp==1.30.0' "$COMMAND_LOG"
 }
+
+@test "symlinked pre-existing venv is refused without interpreter calls" {
+  mkdir -p "$BATS_TEST_TMPDIR/elsewhere/bin"
+  cp "$MOCK_BIN/python3" "$BATS_TEST_TMPDIR/elsewhere/bin/python"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$BATCH/python-venv"
+  run bash "$SCRIPT" --batch-dir "$BATCH"
+  [ "$status" -eq 2 ]
+  [ ! -s "$COMMAND_LOG" ]
+}
+
+@test "plain-file pre-existing venv is refused without interpreter calls" {
+  touch "$BATCH/python-venv"
+  run bash "$SCRIPT" --batch-dir "$BATCH"
+  [ "$status" -eq 2 ]
+  [ ! -s "$COMMAND_LOG" ]
+}
+
+@test "pre-existing venv without executable python is refused" {
+  mkdir -p "$BATCH/python-venv/bin"
+  touch "$BATCH/python-venv/bin/python"
+  run bash "$SCRIPT" --batch-dir "$BATCH"
+  [ "$status" -eq 2 ]
+  [ ! -s "$COMMAND_LOG" ]
+}
+
+@test "validator fails loudly for unavailable Python even with former skip flag" {
+  export MOCK_VERSION_EXIT=1
+  run bash "${SCRIPT%/manual-test/python/setup-venv.sh}/validate_manual_test_python.sh" --skip-unavailable
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'Python 3.11 or newer is required'* ]]
+  [ ! -s "$COMMAND_LOG" ]
+}

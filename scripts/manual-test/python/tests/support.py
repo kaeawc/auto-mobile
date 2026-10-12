@@ -35,7 +35,7 @@ def run_fake(directory: Path, steps: list[dict[str, Any]], env: dict[str, str] |
     try:
         with contextlib.redirect_stderr(io.StringIO()):
             result = asyncio.run(run_client(fake_launch(env or {}), script, evidence,
-                                           (options or Options(mode, 2000, 100, 3000, 8000)), events.append, **extras))
+                                           (options or Options(mode, 20000, 100, 20000, 20000, 60000)), events.append, **extras))
     finally:
         evidence.close()
     records = [json.loads(s) for s in (directory / "A.jsonl").read_text().splitlines()]

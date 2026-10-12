@@ -261,10 +261,10 @@ PY="$B/python-venv/bin/python"
 SCRIPT=scripts/manual-test/python/scripts/observe-then-close.json
 for MODE in normal after-server-exit mid-call sigterm-server kill-server; do
   "$PY" scripts/manual-test/python/mcp_stdio_client.py \
-    --batch-dir "$B" --daemon 1 --script "$SCRIPT" --var deviceId=your-device-id \
+    --batch-dir "$B" --daemon 1 --script "$SCRIPT" --var platform=android --var deviceId=your-device-id \
     --out-dir "$B/python-$MODE" --close-mode "$MODE" \
     --server-exit-wait-ms 5000 --mid-call-delay-ms 200 \
-    --step-timeout-ms 60000 --close-timeout-ms 30000
+    --init-timeout-ms 60000 --step-timeout-ms 60000 --close-timeout-ms 30000
 done
 ```
 
@@ -281,7 +281,8 @@ PY="$B/python-venv/bin/python"
 "$PY" scripts/manual-test/python/two_clients.py \
   --batch-dir "$B" --daemon 1 \
   --script scripts/manual-test/python/scripts/sendkeys-multiline.json \
-  --var-a deviceId=emulator-a --var-b deviceId=emulator-b \
+  --var-a platform=android --var-a deviceId=emulator-a \
+  --var-b platform=android --var-b deviceId=emulator-b \
   --out-dir "$B/python-pair" --lifetimes 5 --close-order a-first --stagger-ms 200 \
   --close-mode-a normal --close-mode-b normal
 ```
@@ -291,8 +292,10 @@ PY="$B/python-venv/bin/python"
 again. `sendkeys-multiline.json` requires an editor already focused on the device.
 It records default multiline typing, repeated type commands in one call, clear
 then type, explicit `mode: "ime"`, three character-at-a-time calls with retries,
-and a final observation. It uses the schema's `deviceId` field for observe and
-`device` field for sendKeys. Retrying a typing error can duplicate text; inspect
+and a final observation. Both scripts first call `startDevice` with required `platform` and explicit
+`deviceId` variables. The stdio proxy binds the returned session and injects it
+into later calls; observe and sendKeys omit `device` and `deviceId` to use that
+binding. `device` is a plan label, not a device id. Retrying a typing error can duplicate text; inspect
 the retained attempts. `--script-a` and `--script-b` can replace `--script` for
 asymmetric traffic. Script keys and operations are strict; `${name}` substitution
 uses `--var` (or `--var-a`/`--var-b`) in string values, including nested arguments.
@@ -312,18 +315,33 @@ PY="$B/python-venv/bin/python"
 "$PY" scripts/manual-test/python/mcp_stdio_client.py --fake-server \
   --fake-env FAKE_ON_EOF=write-then-exit:20 \
   --script scripts/manual-test/python/scripts/sendkeys-multiline.json \
-  --var deviceId=fake-device --out-dir "$B/python-fake"
+  --var platform=android --var deviceId=fake-device --out-dir "$B/python-fake"
 "$PY" scripts/manual-test/python/characterize_close.py
 "$PY" scripts/manual-test/python/characterize_close.py --json --only normal
 ```
 
-The output directory is absolute and created with mode 0700. Evidence includes
-`A.jsonl` (append-only, mode 0600, flush and fsync per record),
+The output directory is absolute and created with mode 0700. Reusing a directory
+containing any named evidence file (or `lifetime-001` for two clients) is a usage
+error before guard checks or spawn; use a new evidence directory. Evidence includes
+`A.jsonl` (append-only, mode 0600, flush per record; fsync per record except
+notifications, which fsync every 100 notification records and always on close),
 `A.identity.json` (Python/platform/package versions, command/args, environment
 **keys only**, close mode, script path and SHA256), and `A.server.stderr.log`.
-JSONL retains spawn pid, initialization, request before every attempt, full
+JSONL writes `spawn-request` (command, args and environment keys) before launch
+and `initialize-request` before initialization, retaining evidence even when
+spawn fails (`exception` with `phase: "spawn"`). It retains spawn pid,
+initialization, request before every attempt, full
 `model_dump(mode="json", by_alias=True)` response or exception, notifications
-when the SDK offers a handler, server exit status/timing, and close. Exceptions
+when the SDK offers a handler, `server-request` method/params,
+`transport-exception` details, server exit status/timing, and close. Step timeouts
+bound only the wait: a timed-out attempt records `timedOut: true` and
+`stillPending: true`, counts as failed, and may retry while its request continues.
+The eventual full result is a `late-response` or `late-exception` with the same
+index/attempt and `lateByMs`. After context exit pending requests get a bounded
+three-second wait with `afterClose: true`; remaining tasks are cancelled and
+recorded as `abandoned`. Summaries count `lateResponses` and `abandonedRequests`;
+step stdout includes `timedOutAttempts`. Initialization has its own
+`--init-timeout-ms` deadline (default 60000), independent of step timeouts. Exceptions
 include flattened exception-group leaves and full tracebacks; close tracebacks
 also go to stderr. Per-step stdout JSON is compact and truncates error text at
 300 characters. Original step/application failures and close failures remain
@@ -335,41 +353,49 @@ Exit codes: **0** means every step passed and `CLOSE_OK`; **1** means a step
 failed and close succeeded; **3** means close raised or hung; **2** means usage or
 guard refusal. For multiple lifetimes precedence is 2, then 3, then 1, then 0.
 A close result classifies transport failures, cancel-scope misuse, server-gone,
-timeout, or other exceptions. An earlier failure is never replaced by cleanup.
+timeout, or other exceptions. An earlier failure is never replaced by cleanup. Cancellation, KeyboardInterrupt
+and SystemExit persist the attempt exception and stop the remaining steps,
+record the application failure once, then close and write a summary; a cancelled
+run with `CLOSE_OK` exits 1. Deliberate mid-call cancellation remains a scenario.
 
 `characterize_close.py` measures every ordering in a fresh child interpreter,
-with a hard timeout (default 12 seconds). A hang is `CLOSE_HANG`; it terminates
-that interpreter by pid and kills only fake-server pids from its spawn evidence.
+with a hard timeout (default 30 seconds). A hang is `CLOSE_HANG`; it terminates
+that interpreter by pid and kills only recorded spawn pids whose command line
+still contains the absolute bundled fake-server path; unverified pids are skipped.
 It prints identity plus a Markdown table, or machine JSON with `--json`;
 `--only` selects smoke scenarios. It exits 0 regardless of measured close
 outcomes. JSON annotates expected outcomes from the same SDK-major table used
 by tests; measured outcomes are never rewritten to fit expectations. Evidence
 is under `scratch/pyharness/characterize-*` unless `--out-dir` is supplied.
 
-The driver's fake-server probes on Python 3.11.10 / anyio 4.15.1 established the
-following baseline. `RAISED` means leaving `stdio_client` raised, separately from
-any call failure. Timing is approximate; rerun characterization with the
-installed SDK to measure local results.
+The harness's own fake-server runs on Python 3.11.10, anyio 4.15.1 and pydantic
+2.14.1 measured these outcomes with mcp 2.3.0 and 1.30.0. The table is regenerated
+with `characterize_close.py`; `CLOSE_RAISED` describes context cleanup separately
+from application errors. `notification-spam-then-close` on 1.x is timing
+dependent: a slow notification interval sometimes closes cleanly.
 
-| Ordering                                                 | mcp 2.3.0                       | mcp 1.30.0                                       | Avoidable by |
-| -------------------------------------------------------- | ------------------------------- | ------------------------------------------------ | ------------ |
-| Normal close after completed calls                       | CLOSE_OK                        | CLOSE_OK                                         | none needed  |
-| Server exits after reply; client idles then closes       | CLOSE_OK                        | CLOSE_OK                                         | none needed  |
-| Server exits; client calls again then closes             | Call: MCPError, close: CLOSE_OK | Call fails; close OK or ExceptionGroup[McpError] | none needed  |
-| Server exits during a call                               | Call: MCPError, close: CLOSE_OK | Call: McpError, close: CLOSE_OK                  | none needed  |
-| In-flight call cancelled, then close                     | CLOSE_OK (~2.6 s)               | CLOSE_OK (~3.8 s)                                | none needed  |
-| Contexts left with a much-later call in flight           | CLOSE_OK                        | CLOSE_OK                                         | none needed  |
-| SIGTERM / SIGKILL server then close                      | CLOSE_OK                        | CLOSE_OK                                         | none needed  |
-| Server closes stdout, stays alive                        | CLOSE_OK                        | CLOSE_OK                                         | none needed  |
-| Server ignores stdin EOF                                 | CLOSE_OK (~2.4 s, SIGTERM)      | CLOSE_OK (~2.4 s)                                | server       |
-| Server ignores stdin EOF and SIGTERM                     | CLOSE_OK (~4.4 s, SIGKILL)      | CLOSE_OK (~4.3 s)                                | server       |
-| Notifications continuously while closing                 | CLOSE_OK                        | RAISED ExceptionGroup[anyio.BrokenResourceError] | SDK          |
-| More stdout messages after stdin EOF                     | CLOSE_OK                        | RAISED ExceptionGroup[anyio.BrokenResourceError] | server       |
-| In-flight response ~200 ms into close window             | CLOSE_OK                        | RAISED ExceptionGroup[anyio.BrokenResourceError] | SDK          |
-| Session exited, transport open, notifications arrive     | CLOSE_OK                        | RAISED ExceptionGroup[anyio.BrokenResourceError] | SDK          |
-| Two clients in own tasks, overlapping independent closes | CLOSE_OK                        | CLOSE_OK                                         | none needed  |
-| Two AsyncExitStacks closed non-LIFO from one task        | RuntimeError: cancel scope      | RuntimeError: cancel scope                       | client       |
-| Contexts closed in a different task                      | Hang / RuntimeError             | RuntimeError: cancel scope                       | client       |
+| Ordering                           | mcp 2.3.0 outcome | mcp 1.30.0 outcome | leaf classes on 1.30.0                                       | Avoidable by |
+| ---------------------------------- | ----------------- | ------------------ | ------------------------------------------------------------ | ------------ |
+| normal                             | CLOSE_OK          | CLOSE_OK           | —                                                            | none needed  |
+| server-exits-then-idle-close       | CLOSE_OK          | CLOSE_OK           | —                                                            | none needed  |
+| server-exits-then-call             | CLOSE_OK          | CLOSE_OK           | —                                                            | none needed  |
+| server-exits-during-call           | CLOSE_OK          | CLOSE_OK           | —                                                            | none needed  |
+| mid-call-cancel                    | CLOSE_OK          | CLOSE_OK           | —                                                            | none needed  |
+| mid-call-leave-contexts            | CLOSE_OK          | CLOSE_OK           | —                                                            | none needed  |
+| sigterm-then-close                 | CLOSE_OK          | CLOSE_OK           | —                                                            | none needed  |
+| sigkill-then-close                 | CLOSE_OK          | CLOSE_OK           | —                                                            | none needed  |
+| server-closes-stdout-then-close    | CLOSE_OK          | CLOSE_OK           | —                                                            | none needed  |
+| server-ignores-stdin-eof           | CLOSE_OK          | CLOSE_OK           | —                                                            | server       |
+| server-ignores-eof-and-sigterm     | CLOSE_OK          | CLOSE_OK           | —                                                            | server       |
+| notification-spam-then-close       | CLOSE_OK          | CLOSE_RAISED       | anyio.BrokenResourceError                                    | SDK          |
+| server-writes-after-stdin-eof      | CLOSE_OK          | CLOSE_RAISED       | anyio.BrokenResourceError                                    | server       |
+| late-response-after-leave          | CLOSE_OK          | CLOSE_RAISED       | anyio.BrokenResourceError                                    | SDK          |
+| session-closed-transport-open-spam | CLOSE_OK          | CLOSE_RAISED       | asyncio.exceptions.CancelledError, anyio.BrokenResourceError | SDK          |
+| two-clients-own-tasks              | CLOSE_OK          | CLOSE_OK           | —                                                            | none needed  |
+| two-clients-exit-stack-non-lifo    | CLOSE_RAISED      | CLOSE_RAISED       | builtins.RuntimeError                                        | client       |
+| close-in-other-task                | CLOSE_HANG        | CLOSE_RAISED       | builtins.RuntimeError                                        | client       |
+| earlier-application-exception      | CLOSE_OK          | CLOSE_OK           | —                                                            | none needed  |
+| caller-cancellation                | CLOSE_OK          | CLOSE_OK           | —                                                            | none needed  |
 
 In 1.x, after the session closes its read stream, any further stdout line makes
 the transport reader send into a stream with no receiver. That raises
@@ -402,3 +428,5 @@ A product fix, **not made here**, would stop stdout writes on EOF before any
 awaited cleanup: close the MCP server/transport, or gate every send on a client
 input-closed flag, then release sessions and exit. That makes the server safe
 for every SDK line; a 1.x client cannot prevent the transport error by itself.
+
+The Python check runs when `scripts/manual-test/python/` or the validator changes (path-selected in `scripts/prepush-shell.sh`) and locally via `bash scripts/all_fast_validate_checks.sh --only manual-test-python`.

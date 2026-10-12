@@ -8,17 +8,27 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, Callable, TextIO
 from .launch import LaunchSpec
+from .script import UsageError
 
 class Evidence:
-    def __init__(self, directory: Path, name: str) -> None:
+    def __init__(self, directory: Path, name: str, fsync: Callable[[int], None] = os.fsync) -> None:
+        self.require_new(directory, name)
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.directory = directory
         self.name = name
         self.started = time.monotonic()
         self.seq = 0
+        self.fsync = fsync
+        self.notifications_since_fsync = 0
         self.file = self.open_private(directory / f"{name}.jsonl")
+
+    @staticmethod
+    def require_new(directory: Path, name: str) -> None:
+        if any((directory / f"{name}.{suffix}").exists() or (directory / f"{name}.{suffix}").is_symlink()
+               for suffix in ("jsonl", "identity.json", "server.stderr.log")):
+            raise UsageError("Evidence already exists; use a new evidence directory")
 
     @staticmethod
     def open_private(path: Path, append: bool = True) -> TextIO:
@@ -34,7 +44,12 @@ class Evidence:
                                    "monotonicAbsoluteMs": now * 1000, "client": self.name,
                                    "event": event, **fields}, ensure_ascii=False) + "\n")
         self.file.flush()
-        os.fsync(self.file.fileno())
+        if event == "notification":
+            self.notifications_since_fsync += 1
+            if self.notifications_since_fsync < 100:
+                return
+        self.fsync(self.file.fileno())
+        self.notifications_since_fsync = 0
 
     def identity(self, launch: LaunchSpec, mode: str, script_path: Path) -> None:
         value = {"python": sys.version, "platform": platform.platform(),
@@ -46,7 +61,12 @@ class Evidence:
         with self.open_private(path, append=False) as f:
             f.write(json.dumps(value, indent=2) + "\n")
             f.flush()
-            os.fsync(f.fileno())
+            self.fsync(f.fileno())
 
     def close(self) -> None:
-        self.file.close()
+        if not self.file.closed:
+            try:
+                self.file.flush()
+                self.fsync(self.file.fileno())
+            finally:
+                self.file.close()

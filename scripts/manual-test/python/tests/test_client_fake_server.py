@@ -52,6 +52,8 @@ class FakeClientTests(unittest.TestCase):
                 result, records, _ = run_fake(Path(tmp), steps, env, options.close_mode, **extra)
                 self.assertIn(result.close.status, ORDERINGS[name].expected[major])
                 self.assertTrue(any(r["event"] == "server-exit" for r in records))
+                if name in ("notification-spam-then-close", "session-closed-transport-open-spam"):
+                    self.assertEqual(result.steps_failed, 0, result.json())
                 if name == "late-response-after-leave":
                     self.assertTrue(any(r.get("inFlightAtClose") for r in records))
                 if major == 1 and name in ("late-response-after-leave", "notification-spam-then-close", "server-writes-after-stdin-eof", "session-closed-transport-open-spam"):

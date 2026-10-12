@@ -10,6 +10,7 @@ import {
 import { privateHarnessEnvRefusal } from "../harnessEnv";
 import { deviceStartGuardRefusal } from "../deviceStartGuard";
 import { isProcessRunning } from "../../../src/utils/processLiveness";
+import { DEFAULT_DAEMON_PORT } from "../../../src/daemon/constants";
 import { errorMessage } from "../../../src/utils/describeUnknownError";
 
 export interface HarnessGuardDeps {
@@ -39,7 +40,13 @@ export function runHarnessGuard(
     if (command !== "resolve" && command !== "check-calls") {
       return { ok: false, message: "Expected resolve or check-calls." };
     }
-    const input = inputSchema.parse(JSON.parse(stdinText));
+    let input: z.infer<typeof inputSchema>;
+    try {
+      input = inputSchema.parse(JSON.parse(stdinText));
+    } catch (error) {
+      // Convert invalid input into the CLI's typed usage refusal.
+      return { ok: false, message: `Invalid guard input: ${errorMessage(error)}` };
+    }
     const env = privateClientEnvironment(deps.env, {});
     if (command === "resolve") {
       // Inspect inherited overrides before the shared client sanitizer removes them.
@@ -48,15 +55,37 @@ export function runHarnessGuard(
       if (refusal) {
         return { ok: false, message: refusal };
       }
-      const pidText = deps.readFile(env.AUTOMOBILE_DAEMON_PID_FILE_PATH);
-      const parsedPid = pidSchema.safeParse(JSON.parse(pidText));
-      if (!parsedPid.success || !deps.isPidAlive(parsedPid.data.pid)) {
+      const port = env.MT_PORT;
+      if (
+        !port ||
+        !/^[0-9]+$/.test(port) ||
+        Number(port) < 1 ||
+        Number(port) > 65535 ||
+        Number(port) === DEFAULT_DAEMON_PORT
+      ) {
+        return {
+          ok: false,
+          message: `MT_PORT must be a decimal integer in 1..65535 away from resident default port ${DEFAULT_DAEMON_PORT}.`,
+        };
+      }
+      if (!env.MT_DAEMON?.trim()) {
+        return { ok: false, message: "Private harness env requires MT_DAEMON." };
+      }
+      let pid: number;
+      try {
+        const parsedPid = pidSchema.safeParse(
+          JSON.parse(deps.readFile(env.AUTOMOBILE_DAEMON_PID_FILE_PATH)),
+        );
+        if (!parsedPid.success) {
+          return { ok: false, message: daemonRefusal };
+        }
+        pid = parsedPid.data.pid;
+      } catch {
+        // File read/parse failures deliberately reveal only the start-first refusal.
         return { ok: false, message: daemonRefusal };
       }
-      for (const key of ["MT_DAEMON", "MT_PORT"]) {
-        if (!env[key]?.trim()) {
-          return { ok: false, message: `Private harness env requires ${key}.` };
-        }
+      if (!deps.isPidAlive(pid)) {
+        return { ok: false, message: daemonRefusal };
       }
     }
     for (const [index, call] of input.calls.entries()) {
@@ -87,7 +116,7 @@ export function runHarnessGuard(
     // The CLI boundary reports this typed refusal on stderr before spawning anything.
     return {
       ok: false,
-      message: `${daemonRefusal} Guard input/read failed: ${errorMessage(error)}`,
+      message: `Guard failed: ${errorMessage(error)}`,
     };
   }
 }

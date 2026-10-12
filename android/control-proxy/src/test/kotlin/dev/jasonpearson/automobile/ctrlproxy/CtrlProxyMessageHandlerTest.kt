@@ -78,6 +78,38 @@ class CtrlProxyMessageHandlerTest {
   // ---------------------------------------------------------------------------
 
   @Test
+  fun `dispatches IME trace opt in without changing older action delegation`() = runTest {
+    val traceFlags = mutableListOf<Boolean>()
+    val tracedActions =
+      object : CtrlProxyActions by actions {
+        override fun requestCommitText(
+          requestId: String?,
+          text: String,
+          priorImeId: String?,
+          delivery: ImeTextDelivery,
+          timeoutMs: Long?,
+          trace: Boolean,
+        ) {
+          traceFlags.add(trace)
+          actions.requestCommitText(requestId, text, priorImeId, delivery, timeoutMs)
+        }
+      }
+    val tracedHandler = CtrlProxyMessageHandler(tracedActions)
+    for (suffix in listOf("", ",\"trace\":true")) {
+      tracedHandler.handleMessage(
+        json.decodeFromString<WebSocketRequest>(
+          """{"type":"request_commit_text","text":"value"$suffix}""",
+        ),
+      )
+    }
+    assertEquals(listOf(false, true), traceFlags)
+    assertEquals(
+      "requestCommitText" to listOf<Any?>(null, "value", null, ImeTextDelivery.COMMIT, null),
+      lastCall,
+    )
+  }
+
+  @Test
   fun `dispatches request_hierarchy`() = runTest {
     dispatch("""{"type":"request_hierarchy","requestId":"h1","disableAllFiltering":true}""")
     assertEquals("requestHierarchy" to listOf<Any?>(true, "h1"), lastCall)

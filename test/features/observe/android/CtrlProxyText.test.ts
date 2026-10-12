@@ -1155,3 +1155,76 @@ describe("semantic IME dispatch outcomes", () => {
     },
   );
 });
+
+describe("IME commit trace wire response", () => {
+  test.each([
+    { optIn: true, wire: ["seq=1 t=0 event=complete"], expected: ["seq=1 t=0 event=complete"] },
+    { optIn: undefined, wire: undefined, expected: undefined },
+    { optIn: false, wire: undefined, expected: undefined },
+    { optIn: true, wire: "invalid", expected: undefined },
+    { optIn: true, wire: ["valid", 3], expected: undefined },
+    {
+      optIn: true,
+      wire: Array.from({ length: 300 }, (_, i) => String(i)),
+      expected: Array.from({ length: 256 }, (_, i) => String(i + 44)),
+    },
+  ])("validates trace arrays for opt-in=$optIn", async ({ optIn, wire, expected }) => {
+    const timer = new FakeTimer();
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    fakeAdb.setScreenState(true);
+    const device: BootedDevice = {
+      deviceId: "trace-wire-fake",
+      platform: "android",
+      isEmulator: true,
+      name: "Fake",
+    };
+    let socket: CapturingWebSocket | null = null;
+    const client = AndroidCtrlProxyClient.createForTesting(
+      device,
+      fakeAdb,
+      (url) => {
+        socket = new CapturingWebSocket(url, "none", 0, timer);
+        return socket;
+      },
+      timer,
+    );
+    try {
+      expect(await client.ensureConnected()).toBe(true);
+      if (!socket) {
+        throw new Error("Expected fake socket");
+      }
+      await waitForSocketOpen(socket);
+      const promise = client.commitViaIme(
+        "value",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        optIn,
+      );
+      const request = await waitForRequest(socket, "request_commit_text");
+      expect("trace" in request).toBe(optIn === true);
+      if (optIn) {
+        expect(request.trace).toBe(true);
+      }
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "commit_text_result",
+          timestamp: 1,
+          requestId: request.requestId,
+          success: true,
+          totalTimeMs: 3,
+          ...(wire !== undefined ? { trace: wire } : {}),
+        }),
+      );
+      const result = await promise;
+      expect(result.trace).toEqual(expected);
+      expect("trace" in result).toBe(expected !== undefined);
+    } finally {
+      await client.close();
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    }
+  });
+});

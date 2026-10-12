@@ -58,6 +58,7 @@ data class ImeCommitResult(
   // Incremented before dispatch: the final unit may only have been partially applied.
   val committedUnits: Int = 0,
   val insertedText: String? = null,
+  val trace: List<String>? = null,
 )
 
 /**
@@ -69,7 +70,25 @@ data class ImeCommitResult(
 class ImeCommitDriver(
   private val sink: ImeCommitSink,
   private val splitGraphemes: (String) -> List<String> = ImeGraphemes::split,
+  private val trace: ImeDriverTrace = ImeDriverTrace.NONE,
 ) {
+  // Kotlin trailing lambdas bind only to the last parameter: retain the original overload.
+  constructor(
+    sink: ImeCommitSink,
+    splitGraphemes: (String) -> List<String>,
+  ) : this(sink, splitGraphemes, ImeDriverTrace.NONE)
+
+  private var terminalDecisionTraced = false
+
+  private fun record(event: String, vararg fields: Pair<String, Any?>) {
+    if (
+      event == "decision" &&
+        fields.any { it.first == "kind" && (it.second == "fail" || it.second == "succeed") }
+    )
+      terminalDecisionTraced = true
+    runCatching { trace.record(event, fields) }
+  }
+
   private var completed = false
   private var committedUnits = 0
   private var completion: ((ImeCommitResult) -> Unit)? = null
@@ -77,6 +96,7 @@ class ImeCommitDriver(
   private var hardDeadlineMs = Long.MAX_VALUE
   private var insertedText: (() -> String?)? = null
   private var reportInsertedText = true
+  private var secureInput = false
 
   /**
    * Stops scheduled polls and reports the outcome exactly once before the caller restores the IME.
@@ -103,6 +123,19 @@ class ImeCommitDriver(
       if (!reportInsertedText) null
       else outcome.insertedText ?: if (readDelta) insertedText?.invoke() else null
     restoreIfNeeded(restoreId)
+    if (!terminalDecisionTraced)
+      record(
+        "decision",
+        "kind" to if (outcome.success) "succeed" else "fail",
+        "reason" to if (outcome.success) null else failureCode(outcome.error),
+      )
+    record(
+      "complete",
+      "success" to outcome.success,
+      "partial" to outcome.partialApplication,
+      "committedUnits" to committedUnits,
+      "code" to if (outcome.success) "ok" else failureCode(outcome.error),
+    )
     completion?.invoke(outcome.copy(committedUnits = committedUnits, insertedText = delta))
   }
 
@@ -132,7 +165,9 @@ class ImeCommitDriver(
       return
     }
 
-    if (sink.editorInputType() == null) {
+    val inputType = sink.editorInputType()
+    secureInput = isPasswordInput(inputType)
+    if (inputType == null) {
       complete(failure("No active input connection"))
       return
     }
@@ -198,7 +233,15 @@ class ImeCommitDriver(
 
     private fun checkpoint(next: () -> Unit): Boolean {
       if (!canContinue()) return false
-      if (sink.connectionGeneration() != generation) {
+      val currentGeneration = sink.connectionGeneration()
+      if (currentGeneration != generation) {
+        record(
+          "reconcileStarted",
+          "reason" to "generationChanged",
+          "postDispatch" to postDispatch,
+          "fromGen" to generation,
+          "toGen" to currentGeneration,
+        )
         val waitMs =
           if (postDispatch) FINAL_VERIFY_ATTEMPTS * POLL_INTERVAL_MS
           else CtrlProxyIme.INPUT_CONNECTION_TIMEOUT_MS
@@ -221,7 +264,8 @@ class ImeCommitDriver(
 
     private fun editorDelta(now: String?): String? = editorDelta(baseline, now)
 
-    private fun succeed(delta: String? = null) {
+    private fun succeed(delta: String? = null, decisionTraced: Boolean = false) {
+      if (!decisionTraced) record("decision", "kind" to "succeed")
       // Null is deliberate evidence of an unverifiable commit, not a request for another read.
       complete(ImeCommitResult(true, null, insertedText = delta), readDelta = false)
     }
@@ -232,7 +276,11 @@ class ImeCommitDriver(
       when {
         currentIdentity == null -> pollReconnect(waitDeadlineMs, next)
         currentIdentity != identity -> {
-          if (postDispatch) succeed() else complete(failure(DISCONNECTED_ERROR))
+          if (postDispatch) succeed()
+          else {
+            record("decision", "kind" to "fail", "reason" to "identityChanged")
+            complete(failure(DISCONNECTED_ERROR))
+          }
         }
         baseline == null -> applyReconciliation(null, next)
         else -> reconcileReadBack(waitDeadlineMs, next)
@@ -242,9 +290,14 @@ class ImeCommitDriver(
     private fun pollReconnect(waitDeadlineMs: Long, next: () -> Unit) {
       val remaining = minOf(waitDeadlineMs, effectiveDeadlineMs()) - sink.nowMs()
       if (remaining <= 0) {
-        if (postDispatch) succeed() else complete(failure(DISCONNECTED_ERROR))
+        if (postDispatch) succeed()
+        else {
+          record("decision", "kind" to "fail", "reason" to "disconnected")
+          complete(failure(DISCONNECTED_ERROR))
+        }
         return
       }
+      record("reconcileWait", "reason" to "identityNull")
       sink.postDelayed(minOf(CtrlProxyIme.INPUT_CONNECTION_POLL_MS, remaining)) {
         reconnect(waitDeadlineMs, next)
       }
@@ -258,6 +311,7 @@ class ImeCommitDriver(
         return
       }
       if (now == null && !postDispatch && sink.nowMs() < waitDeadlineMs) {
+        record("reconcileWait", "reason" to "readNull")
         sink.postDelayed(
           minOf(CtrlProxyIme.INPUT_CONNECTION_POLL_MS, waitDeadlineMs - sink.nowMs()),
         ) {
@@ -269,17 +323,48 @@ class ImeCommitDriver(
     }
 
     private fun applyReconciliation(now: String?, next: () -> Unit) {
+      val startedByRestart = sink.startedByRestart()
+      val expected = dispatched.map { it.text }
+      val lastResumeConfirmed = dispatched.indexOfLast { it.requestPosition <= lastResumePosition }
       val decision =
         reconcileDecision(
           postDispatch,
-          sink.startedByRestart(),
+          startedByRestart,
           baseline,
           now,
-          dispatched.map { it.text },
+          expected,
           // Express the last resent request position in the remaining expectation's indices.
-          dispatched.indexOfLast { it.requestPosition <= lastResumePosition },
+          lastResumeConfirmed,
         )
       generation = sink.connectionGeneration()
+      val delta = editorDelta(now)
+      val confirmed = delta?.let { confirmedUnits(it, expected) }
+      record(
+        "readBack",
+        "baselineLength" to if (secureInput) null else baseline?.length,
+        "nowLength" to if (secureInput) null else now?.length,
+        "nowNull" to if (now == null) true else null,
+        "deltaLength" to if (secureInput) null else delta?.length,
+        "dispatchedCount" to dispatched.size,
+        "confirmed" to (confirmed ?: "none"),
+        "startedByRestart" to startedByRestart,
+        "postDispatch" to postDispatch,
+        "lastResumeConfirmed" to lastResumeConfirmed,
+        "secure" to if (secureInput) true else null,
+      )
+      record(
+        "decision",
+        "kind" to
+          when (decision) {
+            Reconciliation.Continue -> "continue"
+            is Reconciliation.DropRejected -> "dropRejected"
+            is Reconciliation.Resume -> "resume"
+            is Reconciliation.Fail -> "fail"
+            is Reconciliation.Succeed -> "succeed"
+          },
+        "confirmed" to confirmed,
+        "reason" to if (decision is Reconciliation.Fail) failureCode(decision.error) else null,
+      )
       when (decision) {
         Reconciliation.Continue -> next()
         is Reconciliation.DropRejected -> {
@@ -289,7 +374,7 @@ class ImeCommitDriver(
         is Reconciliation.Resume -> reconcileMissingUnit(decision.confirmed, now, next)
         is Reconciliation.Fail ->
           complete(failure(decision.error).copy(insertedText = decision.delta))
-        is Reconciliation.Succeed -> succeed(decision.delta)
+        is Reconciliation.Succeed -> succeed(decision.delta, decisionTraced = true)
       }
     }
 
@@ -304,6 +389,7 @@ class ImeCommitDriver(
 
     private fun dropRejected(confirmed: Int, now: String?) {
       val rejected = dispatched[confirmed]
+      record("dropRejected", "index" to rejected.requestPosition)
       rejectedUnitTexts.add(rejected.text)
       // Only recovered losses consume the budget. Each request position is still resent at
       // most once (lastResumePosition is monotonic), bounding rejected resends by unit count.
@@ -314,6 +400,7 @@ class ImeCommitDriver(
     private fun resumeFrom(confirmed: Int, now: String?) {
       val applied = requireNotNull(editorDelta(now))
       if (resumes >= MAX_RESUMES) {
+        record("decision", "kind" to "fail", "reason" to "resumeLimit", "confirmed" to confirmed)
         complete(
           failure("Editor restarted its input connection during IME commit; resume limit exceeded")
             .copy(insertedText = applied),
@@ -322,6 +409,7 @@ class ImeCommitDriver(
       }
       resumes++
       val requestPosition = dispatched[confirmed].requestPosition
+      record("resend", "index" to requestPosition, "resumes" to resumes)
       lastResumePosition = requestPosition
       retainConfirmed(confirmed, now)
       dispatchedPosition = requestPosition
@@ -455,6 +543,13 @@ class ImeCommitDriver(
         val unit = units[unitIndex]
         // A false return can follow an applied prefix: count conservatively before dispatch.
         committedUnits++
+        record(
+          "unitDispatched",
+          "index" to dispatchedPosition,
+          "kind" to if (secureInput) null else unitKind(unit),
+          "length" to if (secureInput) null else unit.length,
+          "secure" to if (secureInput) true else null,
+        )
         dispatched.add(ExpectedUnit(unit, dispatchedPosition++))
         if (!sink.commitChar(unit)) {
           complete(failure("Input connection lost during commit"))
@@ -485,13 +580,22 @@ class ImeCommitDriver(
   private fun isWordUnit(unit: String): Boolean =
     unit.isNotEmpty() && unit.codePoints().allMatch { Character.isLetterOrDigit(it) }
 
+  private fun unitKind(unit: String): String =
+    when {
+      unit == "\n" -> "newline"
+      unit == " " -> "space"
+      isWordUnit(unit) -> "word"
+      unit.length == 1 && unit[0] in '!'..'~' -> "punct"
+      else -> "other"
+    }
+
   private fun sendKeyEvents(text: String, deadlineMs: Long, isCancelled: () -> Boolean) {
     val units = splitGraphemes(text)
     if (!runCatching { sink.supportsKeyEvents(units) }.getOrDefault(false)) {
       complete(failure("IME key events cannot represent this text; use mode ime for text commit"))
       return
     }
-    for (unit in units) {
+    for ((index, unit) in units.withIndex()) {
       if (completed) return
       if (isCancelled()) {
         complete(failure("IME key events cancelled"))
@@ -503,6 +607,14 @@ class ImeCommitDriver(
       }
       // A down event may have reached the editor even if the paired sequence reports failure.
       committedUnits++
+      record(
+        "unitDispatched",
+        "index" to index,
+        "kind" to if (secureInput) null else unitKind(unit),
+        "length" to if (secureInput) null else unit.length,
+        "delivery" to if (secureInput) null else "keyEvents",
+        "secure" to if (secureInput) true else null,
+      )
       if (!runCatching { sink.sendKeyEventUnit(unit) }.getOrDefault(false)) {
         complete(failure("Input connection lost during IME key events"))
         return
@@ -603,6 +715,25 @@ class ImeCommitDriver(
     private const val NONE_APPLIED_ERROR =
       "Editor restarted its input connection during IME commit; none of the dispatched text is in the editor"
 
+    private fun failureCode(error: String?): String =
+      when (error) {
+        NONE_APPLIED_ERROR -> "noneApplied"
+        DISCONNECTED_ERROR -> "disconnected"
+        SYNC_LOST_ERROR -> "syncLost"
+        "Editor restarted its input connection during IME commit; resume limit exceeded" ->
+          "resumeLimit"
+        "IME commit cancelled",
+        "IME key events cancelled" -> "cancelled"
+        "IME commit deadline exceeded",
+        "IME key event deadline exceeded" -> "deadline"
+        "No active input connection" -> "noConnection"
+        "Input connection lost during commit",
+        "Input connection lost during IME key events",
+        "Input connection lost while finishing composition" -> "connectionLost"
+        "IME key events cannot represent this text; use mode ime for text commit" -> "unsupported"
+        else -> "other"
+      }
+
     private fun editorDelta(baseline: String?, now: String?): String? =
       if (
         baseline != null && now != null && now.length < EDITOR_READ_CAP && now.startsWith(baseline)
@@ -648,7 +779,7 @@ class ImeCommitDriver(
       }
     }
 
-    private fun isPasswordInput(inputType: Int?): Boolean {
+    internal fun isPasswordInput(inputType: Int?): Boolean {
       if (inputType == null) return false
       val variation = inputType and InputType.TYPE_MASK_VARIATION
       return when (inputType and InputType.TYPE_MASK_CLASS) {

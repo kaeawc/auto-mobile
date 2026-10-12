@@ -159,6 +159,7 @@ describe("CtrlProxy command support", () => {
         "ime_clear_field_v1",
         "ime_password_commit_v1",
         "ime_inserted_text_v1",
+        "ime_commit_trace_v1",
         "put_prototype_asset",
         "remove_prototype_asset",
       ]),

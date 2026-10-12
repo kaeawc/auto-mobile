@@ -224,6 +224,7 @@ function harness(platform: Platform, running: boolean, capacity = false, incompl
     capacityError,
     iosManager,
     androidManager,
+    handledDevices: [] as BootedDevice[],
     runs: [] as Array<{ deviceId: string; sessionUuid: unknown; readPath: boolean }>,
   };
 }
@@ -288,6 +289,7 @@ beforeAll(async () => {
         description,
         schema,
         async (device, args) => {
+          h!.handledDevices.push(device);
           h!.runs.push({
             deviceId: device.deviceId,
             sessionUuid: args.sessionUuid,
@@ -822,6 +824,12 @@ test("a serial acquired during discovery is rechecked before readiness", async (
   Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
   DaemonState.getInstance().initialize(slotOwner.sessions, slotOwner.pool);
   let acquired = false;
+  let listings = 0;
+  const listedDevice = { ...h.device, name: "Funnelled_Pixel" };
+  statusListing = async () => {
+    listings++;
+    return { devices: [listedDevice], scanned: { android: true, ios: true } };
+  };
   h.detect.mockImplementation(async () => {
     acquired = true;
     return { devices: h!.devices, scanned: { android: true, ios: true } };
@@ -838,6 +846,9 @@ test("a serial acquired during discovery is rechecked before readiness", async (
     expect(h.runs).toEqual([
       { deviceId: h.device.deviceId, sessionUuid: undefined, readPath: true },
     ]);
+    expect(listings).toBe(1);
+    expect(h.handledDevices).toEqual([listedDevice]);
+    expect(h.handledDevices[0]).toBe(listedDevice);
     expect(h.detect).toHaveBeenCalledTimes(1);
     expect(h.ensure).not.toHaveBeenCalled();
     expect(h.verify).not.toHaveBeenCalled();
@@ -1163,9 +1174,10 @@ function reserveReadTarget(platform: Platform, id: string): void {
 
 async function onePlatformDecision(
   platform: Platform,
-  name: "observe" | "listApps",
+  name: "observe" | "listApps" | "getDeviceState",
   scenario: "stopped" | "unknown" | "reserved" | "running",
   requested?: "either",
+  failedOther = false,
 ): Promise<{ decision: string; listings: number }> {
   useFakeReadRetryTimer();
   h = harness(platform, scenario === "running");
@@ -1181,7 +1193,11 @@ async function onePlatformDecision(
     return {
       devices: h!.devices,
       scanned,
-      discoveryErrors: { [other]: { code: "unavailable", message: "tooling absent" } },
+      discoveryErrors: {
+        [other]: failedOther
+          ? { code: "failed", message: other === "android" ? "adb died" : "simctl died" }
+          : { code: "unavailable", message: "tooling absent" },
+      },
     };
   };
   const id =
@@ -1202,6 +1218,12 @@ async function onePlatformDecision(
       }),
   ).catch((error: unknown) => error);
   const result = await settleByFakeEvents(retryTimer, outcome, { description: scenario });
+  expect(retryTimer.getPendingTimeoutCount()).toBe(0);
+  expect(retryTimer.getPendingSleepCount()).toBe(0);
+  if (!failedOther || name === "observe" || scenario === "reserved") {
+    expect(retryTimer.now()).toBe(failedOther ? 1000 : 0);
+    expect(retryTimer.getSleepCallCount()).toBe(failedOther ? 2 : 0);
+  }
   let decision: string;
   if (scenario === "reserved") {
     expect(result).toMatchObject({ code: "device_owned_by_other_session", retryAfterMs: 500 });
@@ -1210,19 +1232,39 @@ async function onePlatformDecision(
     expect(h.boots).toEqual([]);
     expect(h.simctl.getMethodCalls("bootSimulator")).toEqual([]);
     decision = "device_owned_by_other_session";
-  } else if (scenario === "unknown") {
+  } else if (scenario === "unknown" || (failedOther && name === "observe")) {
     // The normal readiness path on main cannot prove absence on an incomplete either scan.
     expect(result).toMatchObject({ code: "discovery_incomplete", platform: other });
+    expect(h.runs).toEqual([]);
+    expect(h.boots).toEqual([]);
+    expect(h.simctl.getMethodCalls("bootSimulator")).toEqual([]);
+    if (failedOther && name === "observe") {
+      expect(h.ensure).not.toHaveBeenCalled();
+    }
     decision = "discovery_incomplete";
   } else {
+    expect(result).not.toBeInstanceOf(Error);
     expect(h.runs).toHaveLength(1);
     decision = `device:${h.runs[0].deviceId};boots:${h.boots.length + h.simctl.getMethodCalls("bootSimulator").length}`;
     expect(decision).toBe(`device:${h.device.deviceId};boots:${scenario === "stopped" ? 1 : 0}`);
+    expect(h.runs[0].sessionUuid).toBeUndefined();
+    expect(h.ensure).toHaveBeenCalledTimes(name === "observe" && scenario === "running" ? 0 : 1);
   }
-  expect(retryTimer.now()).toBe(0);
-  expect(retryTimer.getPendingTimeoutCount()).toBe(0);
-  expect(retryTimer.getPendingSleepCount()).toBe(0);
-  expect(retryTimer.getSleepCallCount()).toBe(0);
+  expect(daemon.sessions.getAllSessions()).toEqual([]);
+  expect(h.manager.getCurrentDevice()).toBeUndefined();
+  expect(h.manager.getCurrentPlatform()).toBeUndefined();
+  expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+  expect(h.apply).not.toHaveBeenCalled();
+  expect(h.getConfig).not.toHaveBeenCalled();
+  expect(
+    h.adb.getExecutedCommands().filter((c) => /settings (put|delete)|cmd uimode/.test(c)),
+  ).toEqual([]);
+  if (failedOther) {
+    if (name === "observe" || scenario === "reserved") {
+      expect(listings).toBe(3);
+    }
+    return { decision, listings };
+  }
   expect(listings).toBe(
     scenario === "reserved"
       ? name === "observe"
@@ -1233,6 +1275,19 @@ async function onePlatformDecision(
         : 0,
   );
   return { decision, listings };
+}
+
+for (const platform of ["android", "ios"] as const) {
+  for (const requested of [undefined, "either"] as const) {
+    for (const name of ["listApps", "getDeviceState", "observe"] as const) {
+      test(`${platform} failed-other stopped ${name}, platform=${requested ?? "absent"}`, async () => {
+        await onePlatformDecision(platform, name, "stopped", requested, true);
+      });
+    }
+    test(`${platform} failed-other reserved listApps, platform=${requested ?? "absent"}`, async () => {
+      await onePlatformDecision(platform, "listApps", "reserved", requested, true);
+    });
+  }
 }
 
 for (const platform of ["android", "ios"] as const) {

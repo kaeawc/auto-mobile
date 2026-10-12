@@ -938,21 +938,35 @@ async function findRunningExplicitReadTarget(
   platform: SomePlatform,
   getConnectedPlatforms: (refresh?: boolean) => Promise<ConnectedPlatformScan>,
   alreadyChecked: boolean,
-): Promise<BootedDevice | undefined> {
+): Promise<{ device: BootedDevice; fromListing: boolean } | undefined> {
   const scan = await getConnectedPlatforms();
   const exact = scan.devices.find(
     (device) =>
       device.deviceId === input.args.deviceId &&
       (platform === "either" || device.platform === platform),
   );
-  if (exact || alreadyChecked) {
-    return exact;
+  if (exact) {
+    return { device: exact, fromListing: false };
   }
-  const running = await withReadRestartReservation(input, input.args.deviceId, () =>
-    read.findRunning
-      ? read.findRunning(input.args.deviceId, input.signal, platform)
-      : Promise.resolve(matchRunningReadTarget(scan.devices, input.args.deviceId, platform)),
-  );
+  if (alreadyChecked) {
+    return undefined;
+  }
+  let running: BootedDevice | undefined;
+  try {
+    running = await withReadRestartReservation(input, input.args.deviceId, () =>
+      read.findRunning
+        ? read.findRunning(input.args.deviceId, input.signal, platform)
+        : Promise.resolve(matchRunningReadTarget(scan.devices, input.args.deviceId, platform)),
+    );
+  } catch (error) {
+    input.signal?.throwIfAborted();
+    if (!(error instanceof BootedDeviceDiscoveryIncompleteError)) {
+      throw error;
+    }
+    // Readiness re-judges discovery per platform and never boots an unknown-state image.
+    logger.debug("[ToolRegistry] Running read target unproven; deferring to readiness", error);
+    return undefined;
+  }
   if (
     running &&
     !scan.devices.some(
@@ -962,7 +976,7 @@ async function findRunningExplicitReadTarget(
     // Fresh Android bypass discovery publishes the ADB cache; discard only the stale call memo.
     await getConnectedPlatforms(true);
   }
-  return running;
+  return running ? { device: running, fromListing: !!read.findRunning } : undefined;
 }
 
 function isDeviceReadOnlyCall(options: DeviceAwareToolOptions, args: unknown): boolean {
@@ -1711,7 +1725,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
             readinessTarget,
           );
         }
-        const runningReadTarget =
+        const runningReadMatch =
           readOnly && !sessionUuid && providedDeviceId
             ? await findRunningExplicitReadTarget(
                 input,
@@ -1721,6 +1735,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
                 runningReadAlreadyChecked,
               )
             : undefined;
+        const runningReadTarget = runningReadMatch?.device;
         readinessTarget = runningReadTarget?.deviceId ?? readinessTarget;
         // Discovery awaits: recheck the given identity and any running alias, even on absence.
         const lateHeldReadTarget =
@@ -1736,7 +1751,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
             input,
             options.sessionlessDeviceRead ?? this.defaultDeviceRead,
             lateHeldReadTarget,
-            runningReadTarget,
+            runningReadMatch?.fromListing ? runningReadTarget : undefined,
           );
         }
         // Check and mark in one turn, before readiness: a session acquiring the target while

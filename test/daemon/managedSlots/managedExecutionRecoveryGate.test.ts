@@ -14,6 +14,7 @@ import { logger } from "../../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceSessionRepository } from "../../fakes/FakeDeviceSessionRepository";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
+import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
 
@@ -241,6 +242,7 @@ describe("managed execution recovery is gated before publication", () => {
       new FakeInstalledAppsRepository(),
       timer,
       new FakeDeviceSessionRepository(),
+      new FakeIdGenerator(),
     );
     managers.push(daemon.getSessionManager());
     // Replace only the session persistence boundary; keep the real constructor's recovery listener.
@@ -271,6 +273,7 @@ describe("managed execution recovery is gated before publication", () => {
       new FakeInstalledAppsRepository(),
       timer,
       new FakeDeviceSessionRepository(),
+      new FakeIdGenerator(),
     );
     const original = daemon.getSessionManager();
     managers.push(original);
@@ -321,6 +324,7 @@ describe("managed execution recovery is gated before publication", () => {
         new FakeInstalledAppsRepository(),
         timer,
         new FakeDeviceSessionRepository(),
+        new FakeIdGenerator(),
       );
       managers.push(daemon.getSessionManager());
       const installed = Reflect.get(daemon.getSessionManager(), "managedExecutionRecoveryListener");

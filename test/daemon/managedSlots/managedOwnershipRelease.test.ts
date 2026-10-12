@@ -18,7 +18,7 @@ import { sessionOwnershipLostPayload } from "../../../src/server/deviceSessionRe
 import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { drainMicrotasks, settleWithFakeTime } from "../../helpers/fakeTimerStepping";
+import { drainMicrotasks, drainUntil, settleWithFakeTime } from "../../helpers/fakeTimerStepping";
 
 const SESSION = "recovering-session";
 const DEVICE = "fake-managed-device";
@@ -64,6 +64,14 @@ async function harness() {
         writes.push("restore");
       },
     }),
+    undefined,
+    {
+      rotation: () => ({
+        restore: async () => {
+          writes.push("rotation");
+        },
+      }),
+    },
   );
   manager.stopCleanupTimer();
   await manager.createSession(SESSION, DEVICE, "android");
@@ -126,6 +134,7 @@ async function harness() {
     timer,
     retryBackoff: fixedBackoff(2_000),
     isSessionHeld: (id) => manager.isLiveManagedExecutionSession(id),
+    isSessionPresent: (id) => manager.hasSession(id) || manager.getReleasingSession(id) !== null,
     deviceOf: () => DEVICE,
     onOwnershipLost: (id) => {
       lost.push(id);
@@ -432,5 +441,137 @@ describe("managed ownership release", () => {
       reowner.close();
       warn.mockRestore();
     }
+  });
+  test("an idle-expired lost session retains its gate and skips all device teardown", async () => {
+    const h = await harness();
+    await registry.releaseExecution(h.key, SESSION);
+    await registry.claimExecution(h.key, h.binding, PEER);
+    await h.reowner.reown([SESSION], { rehydrated: true });
+    const session = h.manager.getSession(SESSION)!;
+    h.timer.setCurrentTime(session.expiresAt + 1);
+    expect(h.reowner.ownershipState(SESSION)).toBe("lost");
+    expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
+    expect(h.reowner.releaseDeviceHold(SESSION)).toEqual({ skipDeviceWrites: true });
+    await h.manager.releaseSession(SESSION, "managed-slot-ownership-lost", true);
+    await h.drain.whenIdle();
+    expect(h.writes).toEqual([]);
+    expect(h.reowner.ownershipState(SESSION)).toBeUndefined();
+    expect(h.manager.getTerminalReleaseSnapshot(SESSION)?.releaseReason).toBe(
+      "managed-slot-ownership-lost",
+    );
+  });
+
+  test.each(["retry-tick", "gate-check", "none"] as const)(
+    "idle expiry preserves the release gate after %s",
+    async (trigger) => {
+      for (const proof of ["cap", "confirmed"] as const) {
+        const h = await harness();
+        h.behavior.busy = true;
+        await h.reowner.reown([SESSION], { rehydrated: true });
+        const session = h.manager.getSession(SESSION)!;
+        h.manager.setRotation(session, { accelerometerRotation: 1, userRotation: 0 });
+        h.timer.setCurrentTime(session.expiresAt + 1);
+        if (trigger === "retry-tick") {
+          h.timer.advanceTime(2_000);
+          await drainMicrotasks(40);
+        } else if (trigger === "gate-check") {
+          expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
+        }
+        expect(h.manager.isLiveManagedExecutionSession(SESSION)).toBe(false);
+        const release = h.manager.releaseSession(SESSION, "idle-timeout", true);
+        await drainMicrotasks(40);
+        expect(h.writes).toEqual([]);
+        expect(h.reowner.isReleaseHeld(SESSION)).toBe(true);
+        expect(h.reowner.ownershipState(SESSION)).toBe("unconfirmed");
+        if (proof === "cap") {
+          h.timer.advanceTime(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS);
+        } else {
+          h.reowner.confirmOwnership(SESSION);
+        }
+        await release;
+        await h.drain.whenIdle();
+        expect(h.writes).toEqual(proof === "cap" ? [] : ["restore", "rotation"]);
+        expect(h.manager.hasSession(SESSION)).toBe(false);
+        expect(h.reowner.ownershipState(SESSION)).toBeUndefined();
+        await h.reowner.whenIdle();
+        for (const field of [
+          "ownership",
+          "recoveredSessions",
+          "recovering",
+          "episodes",
+          "attempts",
+          "background",
+          "releaseHolds",
+        ]) {
+          expect(Reflect.get(h.reowner, field).size).toBe(0);
+        }
+      }
+    },
+  );
+
+  test.each(["gate-check", "retry-tick"] as const)(
+    "%s superseded release stays gated and retries until a claim lands",
+    async (end) => {
+      const h = await harness();
+      h.behavior.busy = true;
+      await h.reowner.reown([SESSION], { rehydrated: true });
+      const release = h.manager.releaseSessionUnlessSuperseded(
+        SESSION,
+        "explicit-release",
+        () => false,
+      );
+      await drainMicrotasks(40);
+      // Admission checks during releasing must not prune the mark.
+      expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
+      if (end === "retry-tick") {
+        h.timer.advanceTime(2_000);
+        await drainMicrotasks(60);
+        expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
+        h.timer.advanceTime(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 2_000);
+      } else {
+        h.timer.advanceTime(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS);
+      }
+      expect(await release).toEqual({ superseded: true });
+      expect(h.manager.hasSession(SESSION)).toBe(true);
+      expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
+      h.behavior.busy = false;
+      await drainMicrotasks(40);
+      h.timer.advanceTime(2_000);
+      await drainUntil(() => h.confirmed.length > 0, {
+        description: "claim after superseded release",
+      });
+      expect(h.confirmed).toEqual([SESSION]);
+      expect(h.reowner.automationRefusal(SESSION)).toBeUndefined();
+      expect(h.writes).toEqual([]);
+    },
+  );
+
+  test("a confirmed session can re-register and re-stamp a later foreign owner", async () => {
+    const h = await harness();
+    expect(await h.reowner.reown([SESSION], { rehydrated: true })).toHaveLength(1);
+    await registry.releaseExecution(h.key, SESSION);
+    await registry.claimExecution(h.key, h.binding, { ...PREVIOUS, sessionUuid: SESSION });
+    expect(await h.reowner.reown([SESSION])).toHaveLength(1);
+    expect((await registry.getAssignment(h.key))?.execOwner?.daemonId).toBe(OWNER.daemonId);
+  });
+
+  test("later foreign-owner refusal gates a confirmed session again; loss ignores confirmed and untracked sessions", async () => {
+    const h = await harness();
+    await h.reowner.reown([SESSION], { rehydrated: true });
+    h.reowner.loseOwnership(SESSION);
+    h.reowner.loseOwnership("untracked");
+    expect(h.lost).toEqual([]);
+    expect(h.reowner.automationRefusal(SESSION)).toBeUndefined();
+    await registry.releaseExecution(h.key, SESSION);
+    await registry.claimExecution(h.key, h.binding, { ...PREVIOUS, sessionUuid: SESSION });
+    h.behavior.busy = true;
+    await h.reowner.reown([SESSION]);
+    expect(h.reowner.ownershipState(SESSION)).toBe("unconfirmed");
+    expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
+    h.behavior.busy = false;
+    await drainMicrotasks(40);
+    h.timer.advanceTime(2_000);
+    await drainUntil(() => h.confirmed.length === 2, { description: "second ownership episode" });
+    expect(h.reowner.automationRefusal(SESSION)).toBeUndefined();
   });
 });

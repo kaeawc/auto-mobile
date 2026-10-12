@@ -51,8 +51,10 @@ export interface ManagedExecutionReownerDependencies {
   owner: () => SlotProcessIdentity;
   timer?: Timer;
   retryBackoff?: BackoffPolicy;
-  /** Absent: keep marked sessions. */
+  /** Live admission for new re-owns; pending holds and present unconfirmed sessions also retry. */
   isSessionHeld?: (sessionUuid: string) => boolean;
+  /** Object retention, independent of expiry/fences/releases. Absent: use isSessionHeld. */
+  isSessionPresent?: (sessionUuid: string) => boolean;
   onOwnershipConfirmed?: (sessionUuid: string) => void;
   onOwnershipLost?: (sessionUuid: string) => void;
   /** Captured before release hides the session, for an unknown-ownership state-drop diagnostic. */
@@ -83,7 +85,6 @@ export class ManagedExecutionReowner {
   private readonly background = new Map<string, Promise<void>>();
   private readonly closing = new AbortController();
   private readonly releaseHolds = new Map<string, ReleaseHold>();
-  private readonly resolvedSessions = new Set<string>();
   private readonly episodes = new Map<
     string,
     { attempts: number; warned: boolean; stop: AbortController }
@@ -124,7 +125,7 @@ export class ManagedExecutionReowner {
     if (this.closed || this.deps.registryExists?.() === false || this.recovering.has(sessionUuid)) {
       return;
     }
-    this.isHeld(sessionUuid);
+    this.isPresent(sessionUuid);
     this.recovering.set(sessionUuid, recovered);
     this.recoveredSessions.add(sessionUuid);
     this.ownership.set(sessionUuid, "unconfirmed");
@@ -139,20 +140,21 @@ export class ManagedExecutionReowner {
         // Failed creation publishes no usable session; the creation path reports the failure.
         logger.debug(`[ManagedSlots] Recovery of ${sessionUuid} failed before re-owning`, error);
         this.recovering.delete(sessionUuid);
-        this.isHeld(sessionUuid);
+        this.isPresent(sessionUuid);
       },
     );
   }
 
   ownershipState(sessionUuid: string): OwnershipState | undefined {
-    return this.isHeld(sessionUuid) || this.recovering.has(sessionUuid)
-      ? this.ownership.get(sessionUuid)
-      : undefined;
+    return this.isPresent(sessionUuid) ? this.ownership.get(sessionUuid) : undefined;
   }
 
-  /** Keep re-owning a releasing session until host-visible ownership is known or the cap passes. */
+  /** A hold ends at proof or its cap; unresolved ownership keeps retrying while the object exists. */
   releaseDeviceHold(sessionUuid: string): ReleaseDeviceHold | undefined {
     // The manager has validated this release's identity. A reap may already hide its live lease.
+    if (this.deps.isSessionPresent && !this.isPresent(sessionUuid)) {
+      return undefined;
+    }
     const state = this.ownership.get(sessionUuid);
     if (state === "lost") {
       return { skipDeviceWrites: true };
@@ -186,9 +188,14 @@ export class ManagedExecutionReowner {
     return this.releaseHolds.has(sessionUuid);
   }
 
-  /** A drain's landed owner stamp or settling fence is the same ownership proof as re-owning. */
+  /** A drain confirms only a stamp or a settling record that still names this session. */
   confirmOwnership(sessionUuid: string): void {
     this.settleOwnership(sessionUuid, "confirmed");
+  }
+
+  /** A peer's live execution proves loss only for a currently unconfirmed session. */
+  loseOwnership(sessionUuid: string): void {
+    this.settleOwnership(sessionUuid, "lost");
   }
 
   private resolveHold(id: string, outcome: HoldOutcome): void {
@@ -198,8 +205,6 @@ export class ManagedExecutionReowner {
     }
     (this.deps.timer ?? defaultTimer).clearTimeout(hold.timeout);
     this.releaseHolds.delete(id);
-    this.resolvedSessions.add(id);
-    this.episodes.get(id)?.stop.abort();
     hold.resolve(outcome);
   }
 
@@ -236,7 +241,7 @@ export class ManagedExecutionReowner {
 
   private markUnconfirmed(ids: readonly string[]): void {
     for (const id of ids) {
-      if (!this.resolvedSessions.has(id) && this.isHeld(id) && !this.ownership.has(id)) {
+      if (this.isPresent(id) && !this.ownership.has(id)) {
         this.ownership.set(id, "unconfirmed");
       }
     }
@@ -246,15 +251,19 @@ export class ManagedExecutionReowner {
     if (!this.canAttempt(id) || this.ownership.get(id) === "lost") {
       return [];
     }
+    const episode = this.episode(id);
     try {
       const attempt = await this.attempt(id);
+      if (!this.canAttempt(id, episode.stop.signal)) {
+        return [];
+      }
       this.settleOwnership(id, attempt.outcome);
       if (attempt.outcome === "retry") {
         this.retryInBackground(id, new Error("managed slot ownership unconfirmed"));
       }
       return attempt.assignments;
     } catch (error) {
-      if (!this.canAttempt(id)) {
+      if (!this.canAttempt(id, episode.stop.signal)) {
         // A closed or resolved episode cannot act on a late registry result.
         logger.debug(
           `[ManagedSlots] Re-owning managed execution ${id} failed after resolution or close`,
@@ -272,10 +281,8 @@ export class ManagedExecutionReowner {
     }
   }
 
-  private canAttempt(id: string): boolean {
-    return (
-      !this.closed && !this.resolvedSessions.has(id) && !this.recovering.has(id) && this.isHeld(id)
-    );
+  private canAttempt(id: string, stopped?: AbortSignal): boolean {
+    return !this.closed && !stopped?.aborted && !this.recovering.has(id) && this.isHeld(id);
   }
 
   /** Synchronous O(1) automation admission for sessions marked by rehydration or foreign-owner evidence. */
@@ -303,6 +310,7 @@ export class ManagedExecutionReowner {
   }
 
   async whenIdle(): Promise<void> {
+    this.pruneReleasedSessions();
     while (this.background.size > 0 || this.attempts.size > 0 || this.releaseHolds.size > 0) {
       await Promise.allSettled([
         ...this.background.values(),
@@ -312,17 +320,29 @@ export class ManagedExecutionReowner {
     }
   }
 
+  /** Admission is live, except ownership recovery must outlive a release's hold cap. */
   private isHeld(id: string): boolean {
-    if (this.releaseHolds.has(id) || this.deps.isSessionHeld?.(id) !== false) {
+    return (
+      this.isPresent(id) &&
+      (this.releaseHolds.has(id) ||
+        this.deps.isSessionHeld?.(id) !== false ||
+        (this.deps.isSessionPresent !== undefined && this.ownership.get(id) === "unconfirmed"))
+    );
+  }
+
+  /** Prune only absent objects, never an expired, fenced or releasing session. */
+  private isPresent(id: string): boolean {
+    if (this.releaseHolds.has(id) || this.recovering.has(id)) {
       return true;
     }
-    if (!this.recovering.has(id)) {
-      this.ownership.delete(id);
-      this.recoveredSessions.delete(id);
-      this.resolvedSessions.delete(id);
-      this.episodes.get(id)?.stop.abort();
-      this.episodes.delete(id);
+    const present = this.deps.isSessionPresent ?? this.deps.isSessionHeld;
+    if (present?.(id) !== false) {
+      return true;
     }
+    this.ownership.delete(id);
+    this.recoveredSessions.delete(id);
+    this.episodes.get(id)?.stop.abort();
+    this.episodes.delete(id);
     return false;
   }
 
@@ -330,20 +350,14 @@ export class ManagedExecutionReowner {
     for (const id of new Set([
       ...this.ownership.keys(),
       ...this.recoveredSessions,
-      ...this.resolvedSessions,
       ...this.episodes.keys(),
     ])) {
-      this.isHeld(id);
+      this.isPresent(id);
     }
   }
 
   private settleOwnership(id: string, outcome: ReownAttempt["outcome"]): void {
-    if (
-      this.closed ||
-      this.resolvedSessions.has(id) ||
-      !this.isHeld(id) ||
-      this.ownership.get(id) !== "unconfirmed"
-    ) {
+    if (this.closed || !this.isPresent(id) || this.ownership.get(id) !== "unconfirmed") {
       return;
     }
     if (outcome === "confirmed") {
@@ -352,8 +366,8 @@ export class ManagedExecutionReowner {
         `[ManagedSlots] Session ${id} ownership confirmed after ${this.episode(id).attempts} attempts; re-owned by daemon ${this.deps.owner().daemonId}.`,
       );
       this.resolveHold(id, "teardown");
-      this.resolvedSessions.add(id);
       this.episodes.get(id)?.stop.abort();
+      this.episodes.delete(id);
       this.notifyOwnership(id, "confirmed");
     }
     if (outcome === "lost") {
@@ -436,7 +450,7 @@ export class ManagedExecutionReowner {
     }
     const episode = this.episode(id);
     episode.attempts++;
-    const work = raceWithDeadline(this.reownSession(id), {
+    const work = raceWithDeadline(this.reownSession(id, episode.stop.signal), {
       timer: this.deps.timer ?? defaultTimer,
       signal: AbortSignal.any([this.closing.signal, episode.stop.signal]),
       label: `Re-owning session ${id}`,
@@ -447,13 +461,13 @@ export class ManagedExecutionReowner {
     return work;
   }
 
-  private async reownSession(sessionUuid: string): Promise<ReownAttempt> {
+  private async reownSession(sessionUuid: string, stopped: AbortSignal): Promise<ReownAttempt> {
     const result: ReownAttempt = { assignments: [], outcome: "confirmed" };
-    if (!this.canAttempt(sessionUuid)) {
+    if (!this.canAttempt(sessionUuid, stopped)) {
       return result;
     }
     const registry = await this.deps.registry();
-    if (!this.canAttempt(sessionUuid)) {
+    if (!this.canAttempt(sessionUuid, stopped)) {
       return result;
     }
     const found = await registry.findExecutionAssignments(sessionUuid);
@@ -462,7 +476,7 @@ export class ManagedExecutionReowner {
     }
     const owner = this.deps.owner();
     for (const assignment of found) {
-      if (!this.canAttempt(sessionUuid)) {
+      if (!this.canAttempt(sessionUuid, stopped)) {
         break;
       }
       if (assignment.execOwner && journalOwnersEqual(assignment.execOwner, owner)) {
@@ -478,10 +492,12 @@ export class ManagedExecutionReowner {
         );
       } catch (error) {
         // The read proved a foreign owner, and a failed write cannot confirm this daemon's fence.
-        this.markUnconfirmed([sessionUuid]);
+        if (this.canAttempt(sessionUuid, stopped)) {
+          this.markUnconfirmed([sessionUuid]);
+        }
         throw error;
       }
-      if (!this.canAttempt(sessionUuid)) {
+      if (!this.canAttempt(sessionUuid, stopped)) {
         break;
       }
       if (claimed.kind === "claimed") {

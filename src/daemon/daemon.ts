@@ -978,6 +978,7 @@ export class Daemon {
       ownership: {
         isReleaseHeld: (id) => this.managedExecutionReowner?.isReleaseHeld(id) ?? false,
         confirmOwnership: (id) => this.managedExecutionReowner?.confirmOwnership(id),
+        loseOwnership: (id) => this.managedExecutionReowner?.loseOwnership(id),
       },
     });
     this.managedExecutionRelease = release;
@@ -1114,6 +1115,8 @@ export class Daemon {
       owner: () => this.managedSlotJournalOwner(),
       timer: this.timer,
       isSessionHeld: (id) => this.sessionManager.isLiveManagedExecutionSession(id),
+      isSessionPresent: (id) =>
+        this.sessionManager.hasSession(id) || this.sessionManager.getReleasingSession(id) !== null,
       deviceOf: (id) =>
         this.sessionManager.getHeldDeviceSessions().find((session) => session.sessionId === id)
           ?.deviceId ?? null,

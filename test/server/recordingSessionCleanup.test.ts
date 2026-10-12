@@ -66,7 +66,12 @@ class FakeSessionManager implements CleanupManager {
     this.acquisitionCleanups.push({ deviceId, cleanup, capMs });
   }
 
-  release(sessionId: string, deviceId: string, upgradeOnly = false): void {
+  release(
+    sessionId: string,
+    deviceId: string,
+    upgradeOnly = false,
+    deviceIdentityReplaced = false,
+  ): void {
     for (const callback of this.releaseCallbacks) {
       callback(
         sessionId,
@@ -80,7 +85,7 @@ class FakeSessionManager implements CleanupManager {
           terminal: false,
           heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
         },
-        { upgradeOnly },
+        { upgradeOnly, deviceIdentityReplaced },
       );
     }
   }
@@ -220,6 +225,20 @@ describe("registerRecordingSessionCleanup", () => {
     for (const sessionId of ["session-a", "session-b", "session-c"]) {
       takeRecordingIdsFinalizedByRelease(sessionId);
     }
+  });
+
+  test("a no-device release sends no recording stop and registers no pending cleanup", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+    recordings.deviceGestureRecording = { ownerSessionUuid: "session-a", deviceId: "SIM-1" };
+    manager.release("session-a", "SIM-1", false, true);
+    await manager.settle();
+    expect(manager.pendingCleanups).toEqual([]);
+    expect(recordings.segmentedStops).toEqual([]);
+    expect(recordings.testStops).toBe(0);
+    expect(recordings.active.size).toBe(1);
+    expect(recordings.deviceGestureRecording).not.toBeNull();
+    expect(takeRecordingIdsFinalizedByRelease("session-a")).toEqual([]);
   });
 
   test("idle release stops the owner's recording and the next owner can start one", async () => {

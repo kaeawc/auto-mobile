@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { SessionManager } from "../../../src/daemon/sessionManager";
+import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
+import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
 import { ManagedExecutionReowner } from "../../../src/daemon/managedSlots/managedExecutionReowner";
 import { ManagedSlotOwnershipUnconfirmedError } from "../../../src/daemon/managedSlots/managedSlotRefusal";
 import { ManagedExecutionRelease } from "../../../src/daemon/managedSlots/managedExecutionRelease";
@@ -31,13 +34,19 @@ const SCOPE = {
   runnerNamespace: "peer-view",
   runnerIncarnation: "boot-1",
 };
-type FaultStep = "findExecutionAssignments" | "claimExecution" | "openSlotJournal";
+type FaultStep =
+  | "findExecutionAssignments"
+  | "claimExecution"
+  | "openSlotJournal"
+  | "getAssignment"
+  | "updateSlotState";
 
 /** Fault injection applies only through the draining daemon's connection. */
 function makeFaults(registry: SlotRegistry) {
   const busy: Partial<Record<FaultStep, number>> = {};
   const commitsThenThrows: Partial<Record<FaultStep, number>> = {};
   const calls: Partial<Record<FaultStep, number>> = {};
+  const hooks: { afterFind?: () => Promise<void> } = {};
   const faulty = new Proxy(registry, {
     get(target, property) {
       const value: unknown = Reflect.get(target, property, target);
@@ -52,6 +61,9 @@ function makeFaults(registry: SlotRegistry) {
           throw new Error("SQLITE_BUSY: database is locked");
         }
         const result: unknown = await Reflect.apply(value, target, args);
+        if (property === "findExecutionAssignments") {
+          await hooks.afterFind?.();
+        }
         if ((commitsThenThrows[step] ?? 0) > 0) {
           commitsThenThrows[step]! -= 1;
           throw new Error("SQLITE_BUSY: acknowledgment lost after commit");
@@ -60,7 +72,7 @@ function makeFaults(registry: SlotRegistry) {
       };
     },
   });
-  return { faulty, busy, commitsThenThrows, calls };
+  return { faulty, busy, commitsThenThrows, calls, hooks };
 }
 
 describe("managed execution release peer view", () => {
@@ -76,6 +88,8 @@ describe("managed execution release peer view", () => {
   let livePids: Set<number>;
   let active: boolean;
   const reservations = new InFlightSlotReservations();
+  let confirmations: string[];
+  let losses: string[];
 
   function viewOf(pid: number): SlotExecOwnerLiveness {
     return withLiveExecutionSessions(
@@ -91,8 +105,14 @@ describe("managed execution release peer view", () => {
     );
   }
 
-  async function setUp(owner: typeof OWNER | typeof PREVIOUS = OWNER): Promise<void> {
+  async function setUp(
+    owner: typeof OWNER | typeof PREVIOUS = OWNER,
+    journaled = true,
+  ): Promise<void> {
     timer = new FakeTimer();
+    reowner = undefined;
+    confirmations = [];
+    losses = [];
     liveSessions = new Set([SESSION]);
     livePids = new Set([OWNER.pid, PEER.pid]);
     active = true;
@@ -132,7 +152,7 @@ describe("managed execution release peer view", () => {
     expect(claimed.kind).toBe("claimed");
     drain = new ManagedExecutionRelease({
       registry: async () => faults.faulty,
-      journal: { inFlight: new SlotJournalInFlight() },
+      journal: journaled ? { inFlight: new SlotJournalInFlight() } : undefined,
       settler: OWNER,
       timer,
       drainBudgetMs: 1,
@@ -142,6 +162,17 @@ describe("managed execution release peer view", () => {
       registryRetryBackoff: exponentialBackoff({ initialDelayMs: 1, maxDelayMs: 1 }),
       isExecOwnerLive: viewOf(OWNER.pid),
       ownerHolds: reservations,
+      ownership: {
+        isReleaseHeld: (id) => reowner?.isReleaseHeld(id) ?? false,
+        confirmOwnership: (id) => {
+          confirmations.push(id);
+          reowner?.confirmOwnership(id);
+        },
+        loseOwnership: (id) => {
+          losses.push(id);
+          reowner?.loseOwnership(id);
+        },
+      },
       work: {
         cancelDeviceSessionExecutions: async () => 1,
         waitForDeviceSessionExecutionsToEnd: async () => !active,
@@ -175,9 +206,10 @@ describe("managed execution release peer view", () => {
     name: string,
     run: () => Promise<void>,
     owner: typeof OWNER | typeof PREVIOUS = OWNER,
+    journaled = true,
   ): void {
     describe("shared SQLite slot fixture", () => {
-      beforeAll(() => setUp(owner));
+      beforeAll(() => setUp(owner, journaled));
       afterAll(tearDown);
       test(name, run);
     });
@@ -194,6 +226,123 @@ describe("managed execution release peer view", () => {
 
   function expectPeerRefused(kind: string): void {
     expect(["slot_in_use", "slot_not_ready"]).toContain(kind);
+  }
+
+  for (const journaled of [true, false]) {
+    testWithFreshSlot(
+      `a peer claim between lookup and settling is loss, never ownership proof (journal=${journaled})`,
+      async () => {
+        faults.busy.claimExecution = 1;
+        const lost: string[] = [];
+        reowner = new ManagedExecutionReowner({
+          registry: async () => faults.faulty,
+          owner: () => OWNER,
+          timer,
+          isSessionHeld: () => true,
+          onOwnershipLost: (id) => lost.push(id),
+        });
+        await reowner.reown([SESSION], { rehydrated: true });
+        const hold = reowner.releaseDeviceHold(SESSION);
+        expect(hold && "settled" in hold).toBe(true);
+        if (!hold || !("settled" in hold)) {
+          throw new Error("expected pending hold");
+        }
+        const writes: string[] = [];
+        const manager = new SessionManager(
+          timer,
+          new FakeDeviceSessionPersistence(),
+          () => new FakeDbWriteBarrier(),
+          () => ({
+            restore: async () => {
+              writes.push("restore");
+            },
+          }),
+        );
+        manager.stopCleanupTimer();
+        await manager.createSession(SESSION, DEVICE, "android");
+        manager.setKeepScreenAwake(SESSION, { applied: true });
+        manager.setReleaseDeviceHold((id) => reowner?.releaseDeviceHold(id));
+        const release = manager.releaseSession(SESSION);
+        let peerClaimKind = "";
+        faults.hooks.afterFind = async () => {
+          faults.hooks.afterFind = undefined;
+          peerClaimKind = (await peerClaim()).kind;
+        };
+        await drain.releaseExecution(SESSION);
+        expect(peerClaimKind).toBe("claimed");
+        expect(confirmations).toEqual([]);
+        expect(losses).toEqual([SESSION]);
+        expect(await hold.settled).toBe("skip-device-writes");
+        await release;
+        expect(writes).toEqual([]);
+        expect(lost).toEqual([SESSION]);
+        reowner.loseOwnership(SESSION);
+        expect(lost).toEqual([SESSION]);
+        expect(reowner.ownershipState(SESSION)).toBe("lost");
+        // The pre-existing mark still lands on the peer; it is never ownership proof.
+        expect(await peerRegistry.getAssignment(key)).toMatchObject({
+          state: "settling",
+          execOwner: { sessionUuid: PEER_SESSION },
+        });
+      },
+      PREVIOUS,
+      journaled,
+    );
+
+    testWithFreshSlot(
+      `a thrown post-mark read is no ownership proof (journal=${journaled})`,
+      async () => {
+        faults.busy.claimExecution = 1_000;
+        reowner = new ManagedExecutionReowner({
+          registry: async () => faults.faulty,
+          owner: () => OWNER,
+          timer,
+          isSessionHeld: () => true,
+        });
+        await reowner.reown([SESSION], { rehydrated: true });
+        const hold = reowner.releaseDeviceHold(SESSION);
+        if (!hold || !("settled" in hold)) {
+          throw new Error("expected pending hold");
+        }
+        // The mark commits, loses its acknowledgment, and cannot be read back yet.
+        faults.commitsThenThrows[journaled ? "openSlotJournal" : "updateSlotState"] = 1;
+        faults.busy.getAssignment = 1_000;
+        await drain.releaseExecution(SESSION);
+        expect(await peerRegistry.getAssignment(key)).toMatchObject({ state: "settling" });
+        expect(confirmations).toEqual([]);
+        expect(losses).toEqual([]);
+        expect(reowner.isReleaseHeld(SESSION)).toBe(true);
+        expect(reowner.ownershipState(SESSION)).toBe("unconfirmed");
+        reowner.close();
+        expect(await hold.settled).toBe("skip-device-writes");
+      },
+      PREVIOUS,
+      journaled,
+    );
+
+    testWithFreshSlot(
+      `a settling mark still naming the session confirms ownership (journal=${journaled})`,
+      async () => {
+        faults.busy.claimExecution = 1_000;
+        reowner = new ManagedExecutionReowner({
+          registry: async () => faults.faulty,
+          owner: () => OWNER,
+          timer,
+          isSessionHeld: () => true,
+        });
+        await reowner.reown([SESSION], { rehydrated: true });
+        const hold = reowner.releaseDeviceHold(SESSION);
+        if (!hold || !("settled" in hold)) {
+          throw new Error("expected pending hold");
+        }
+        await drain.releaseExecution(SESSION);
+        expect(confirmations).toEqual([SESSION]);
+        expect(losses).toEqual([]);
+        expect(await hold.settled).toBe("teardown");
+      },
+      PREVIOUS,
+      journaled,
+    );
   }
 
   testWithFreshSlot(

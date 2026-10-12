@@ -197,69 +197,6 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     expect(sessionManager.getSessionForDevice(held.deviceId)).toBe(agent);
   });
 
-  test.each([
-    { state: "unconfirmed", article: "an" },
-    { state: "lost", article: "a" },
-  ] as const)(
-    "$article $state managed session read watches without admission, readiness or use",
-    async ({ state }) => {
-      const recovered = Promise.withResolvers<void>();
-      reowner = new ManagedExecutionReowner({
-        registry: async () => ({
-          findExecutionAssignments: async () => [],
-          claimExecution: async () => {
-            throw new Error("must not claim");
-          },
-        }),
-        owner: () => ({ daemonId: "test", pid: 1 }),
-        timer,
-      });
-      if (state === "unconfirmed") {
-        reowner.noteRecovering(agent, recovered.promise);
-      } else {
-        await reowner.reown([agent], { rehydrated: true });
-      }
-      const admission = spyOn(sessionManager, "admitIssuedSessionForAutomation");
-      const mark = spyOn(executionTracker, "markSessionAdmitted");
-      try {
-        await call("readProbe", { sessionUuid: agent });
-        expect(reads).toEqual([
-          { deviceId: held.deviceId, readPath: true, sessionUuid: undefined },
-        ]);
-        expectNoReadiness();
-        expect(admission).not.toHaveBeenCalled();
-        expect(mark).not.toHaveBeenCalled();
-      } finally {
-        admission.mockRestore();
-        mark.mockRestore();
-        recovered.resolve();
-      }
-    },
-  );
-
-  test("gated control keeps its unconfirmed refusal and a foreign read keeps its explicit target", async () => {
-    const recovered = Promise.withResolvers<void>();
-    reowner = new ManagedExecutionReowner({
-      registry: async () => {
-        throw new Error("must not open");
-      },
-      owner: () => ({ daemonId: "test", pid: 1 }),
-      timer,
-    });
-    reowner.noteRecovering(agent, recovered.promise);
-    ToolRegistry.registerDeviceAware("controlProbe", "Control probe", probeSchema, async () => ({
-      success: true,
-    }));
-    expect(await outcome("controlProbe", { sessionUuid: agent })).toBeInstanceOf(
-      ManagedSlotOwnershipUnconfirmedError,
-    );
-    await call("readProbe", { sessionUuid: agent, deviceId: free.deviceId });
-    expect(reads).toEqual([{ deviceId: free.deviceId, readPath: true, sessionUuid: undefined }]);
-    expectNoReadiness();
-    reowner.close();
-    recovered.resolve();
-  });
-
   test("a sessionless read with no deviceId that would land on a held device watches it", async () => {
     devices.setConnectedDevices([held]);
     await call("readProbe", { platform: "android" });
@@ -361,6 +298,69 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
 
     expect((error as Error).message).toContain("observer-session");
     expect(audited).toEqual([]);
+  });
+
+  test.each([
+    { state: "unconfirmed", article: "an" },
+    { state: "lost", article: "a" },
+  ] as const)(
+    "$article $state managed session read watches without admission, readiness or use",
+    async ({ state }) => {
+      const recovered = Promise.withResolvers<void>();
+      reowner = new ManagedExecutionReowner({
+        registry: async () => ({
+          findExecutionAssignments: async () => [],
+          claimExecution: async () => {
+            throw new Error("must not claim");
+          },
+        }),
+        owner: () => ({ daemonId: "test", pid: 1 }),
+        timer,
+      });
+      if (state === "unconfirmed") {
+        reowner.noteRecovering(agent, recovered.promise);
+      } else {
+        await reowner.reown([agent], { rehydrated: true });
+      }
+      const admission = spyOn(sessionManager, "admitIssuedSessionForAutomation");
+      const mark = spyOn(executionTracker, "markSessionAdmitted");
+      try {
+        await call("readProbe", { sessionUuid: agent });
+        expect(reads).toEqual([
+          { deviceId: held.deviceId, readPath: true, sessionUuid: undefined },
+        ]);
+        expectNoReadiness();
+        expect(admission).not.toHaveBeenCalled();
+        expect(mark).not.toHaveBeenCalled();
+      } finally {
+        admission.mockRestore();
+        mark.mockRestore();
+        recovered.resolve();
+      }
+    },
+  );
+
+  test("gated control keeps its unconfirmed refusal and a foreign read keeps its explicit target", async () => {
+    const recovered = Promise.withResolvers<void>();
+    reowner = new ManagedExecutionReowner({
+      registry: async () => {
+        throw new Error("must not open");
+      },
+      owner: () => ({ daemonId: "test", pid: 1 }),
+      timer,
+    });
+    reowner.noteRecovering(agent, recovered.promise);
+    ToolRegistry.registerDeviceAware("controlProbe", "Control probe", probeSchema, async () => ({
+      success: true,
+    }));
+    expect(await outcome("controlProbe", { sessionUuid: agent })).toBeInstanceOf(
+      ManagedSlotOwnershipUnconfirmedError,
+    );
+    await call("readProbe", { sessionUuid: agent, deviceId: free.deviceId });
+    expect(reads).toEqual([{ deviceId: free.deviceId, readPath: true, sessionUuid: undefined }]);
+    expectNoReadiness();
+    reowner.close();
+    recovered.resolve();
   });
 
   describe("a session whose row expired while the daemon was down (#11361)", () => {

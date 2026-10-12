@@ -242,10 +242,12 @@ export interface ManagedExecutionReleaseOptions {
   ownership?: {
     isReleaseHeld(sessionId: string): boolean;
     confirmOwnership(sessionId: string): void;
+    loseOwnership?(sessionId: string): void;
   };
 }
 
 interface MarkedSlot {
+  execOwner: SlotAssignmentRecord["execOwner"];
   key: SlotKey;
   generation: number;
   stableDeviceId: string | null;
@@ -630,7 +632,9 @@ export class ManagedExecutionRelease {
         marks.owed.push(held[index]);
       } else if (result.value) {
         marks.marked.push(result.value);
-        this.options.ownership?.confirmOwnership(sessionId);
+        if (result.value.execOwner?.sessionUuid === sessionId) {
+          this.options.ownership?.confirmOwnership(sessionId);
+        }
       }
     });
   }
@@ -673,6 +677,9 @@ export class ManagedExecutionRelease {
           { ...self, sessionUuid: sessionId },
           { supersedesSessionUuid: sessionId },
         );
+        if (claimed.kind === "slot_in_use") {
+          this.options.ownership?.loseOwnership?.(sessionId);
+        }
         return claimed.kind === "claimed";
       }),
     );
@@ -761,6 +768,7 @@ export class ManagedExecutionRelease {
     // Entering the fence bumped the generation; the watcher restores under the new one.
     return {
       key,
+      execOwner: updated.assignment.execOwner,
       generation: updated.assignment.generation,
       stableDeviceId: updated.assignment.stableDeviceId,
     };
@@ -792,6 +800,7 @@ export class ManagedExecutionRelease {
     }
     const marked: MarkedSlot = {
       key,
+      execOwner: current.execOwner,
       generation: current.generation,
       stableDeviceId: current.stableDeviceId,
     };
@@ -912,6 +921,7 @@ export class ManagedExecutionRelease {
       // Entering the fence bumped the generation; the watcher restores under the new one.
       return {
         key,
+        execOwner: opened.assignment.execOwner,
         generation: opened.assignment.generation,
         stableDeviceId: opened.assignment.stableDeviceId,
         journalEntryId: opened.entry.id,

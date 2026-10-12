@@ -206,6 +206,31 @@ describe("session release device ownership hold", () => {
     expect(manager.hasDeviceCleanupInProgress(DEVICE)).toBe(false);
   });
 
+  test("forcing a release already marked no-device preserves the option for listeners", async () => {
+    const { manager, writes, persistence } = await harness();
+    const persist = Promise.withResolvers<void>();
+    const original = persistence.markReleased.bind(persistence);
+    persistence.markReleased = async (...args) => {
+      await persist.promise;
+      return original(...args);
+    };
+    const options: boolean[] = [];
+    manager.onSessionRelease((_id, _device, _reason, _snapshot, releaseOptions) => {
+      options.push(releaseOptions.deviceIdentityReplaced === true);
+    });
+    const release = manager.releaseSession(SESSION, "explicit-release", false, undefined, {
+      deviceIdentityReplaced: true,
+    });
+    await drainMicrotasks(40);
+    expect(manager.forceStuckRelease(SESSION)).toBeDefined();
+    persist.resolve();
+    await release;
+    await drainMicrotasks(40);
+    expect(options.length).toBeGreaterThan(0);
+    expect(options.every(Boolean)).toBe(true);
+    expect(writes).toEqual([]);
+  });
+
   test("joined releases share one resolver and receive the terminal loss reason", async () => {
     const { manager, writes } = await harness();
     const hold = Promise.withResolvers<"teardown" | "skip-device-writes">();

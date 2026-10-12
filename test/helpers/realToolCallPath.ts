@@ -115,8 +115,16 @@ export class RealToolCallPath {
         ({
           bindSession: () => undefined,
           getScreenScaleMetadata: () => null,
-          requestTapCoordinates: async () => ({ success: true }),
-          setPreference: async () => {
+          requestTapCoordinates: async (
+            ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+          ) => {
+            args[6]?.();
+            return { success: true };
+          },
+          setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+            if (typeof args[5] === "object") {
+              args[5].onDispatch?.();
+            }
             this.ctrlProxyWrites.push("setPreference");
             return { success: true };
           },

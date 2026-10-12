@@ -155,11 +155,17 @@ beforeEach(() => {
     () =>
       ({
         getScreenScaleMetadata: () => null,
-        requestTapCoordinates: async () => {
+        requestTapCoordinates: async (
+          ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+        ) => {
+          args[6]?.();
           deviceCalls.push("tap");
           return { success: true };
         },
-        setPreference: async () => {
+        setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+          if (typeof args[5] === "object") {
+            args[5].onDispatch?.();
+          }
           deviceCalls.push("setPreference");
           return { success: true };
         },

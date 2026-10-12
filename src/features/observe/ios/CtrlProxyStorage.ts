@@ -6,12 +6,15 @@
  * Uses the same wire protocol message types as the Android delegate.
  */
 
+import WebSocket from "ws";
 import { getAbortSignal } from "../../../utils/AbortContext";
 import { logger } from "../../../utils/logger";
 import { mapStorageSdkError } from "../../../server/storageSdkErrors";
 import { ActionableError } from "../../../models/ActionableError";
 import type { DelegateContext } from "./types";
+import { normalizeStorageWriteOptions } from "../../storage/storageTypes";
 import type {
+  StorageWriteOptions,
   PreferenceStoreResolution,
   PreferenceFile,
   KeyValueEntry,
@@ -213,6 +216,20 @@ export class CtrlProxyStorage {
     return result.found && result.entry ? result.entry : null;
   }
 
+  /** All three writes share the synchronous open-socket send and its admission hook. */
+  private sendWrite(message: string, onDispatch?: () => void): void {
+    const ws = this.context.getWebSocket();
+    // Preserve the missing-socket path: its pending request still settles as before.
+    if (!ws) {
+      return;
+    }
+    if (ws.readyState !== WebSocket.OPEN) {
+      throw new Error("WebSocket not connected");
+    }
+    ws.send(message);
+    onDispatch?.();
+  }
+
   /**
    * Set a preference value.
    *
@@ -221,7 +238,7 @@ export class CtrlProxyStorage {
    * @param key - The key to set
    * @param value - The value to set (serialized as string, or null)
    * @param type - The type of the value
-   * @param timeoutMs - Maximum time to wait for response in milliseconds
+   * @param timeoutMsOrOptions - Response timeout or timeout and successful-send hook
    */
   async setPreference(
     packageName: string,
@@ -229,8 +246,9 @@ export class CtrlProxyStorage {
     key: string,
     value: string | null,
     type: KeyValueType,
-    timeoutMs: number = 5000,
+    timeoutMsOrOptions?: number | StorageWriteOptions,
   ): Promise<PreferenceStoreResolution | undefined> {
+    const { timeoutMs, onDispatch } = normalizeStorageWriteOptions(timeoutMsOrOptions);
     const startTime = this.context.timer.now();
 
     if (!(await this.context.ensureConnected())) {
@@ -265,8 +283,7 @@ export class CtrlProxyStorage {
       ...(mutationToken ? { mutationToken } : {}),
     });
 
-    const ws = this.context.getWebSocket();
-    ws?.send(message);
+    this.sendWrite(message, onDispatch);
     logger.debug(
       `[CTRL_PROXY_IOS] Sent set_preference request (requestId: ${requestId}, fileName: ${fileName}, key: ${key})`,
     );
@@ -288,14 +305,15 @@ export class CtrlProxyStorage {
    * @param packageName - Target app bundle identifier
    * @param fileName - Suite name
    * @param key - The key to remove
-   * @param timeoutMs - Maximum time to wait for response in milliseconds
+   * @param timeoutMsOrOptions - Response timeout or timeout and successful-send hook
    */
   async removePreference(
     packageName: string,
     fileName: string,
     key: string,
-    timeoutMs: number = 5000,
+    timeoutMsOrOptions?: number | StorageWriteOptions,
   ): Promise<PreferenceStoreResolution | undefined> {
+    const { timeoutMs, onDispatch } = normalizeStorageWriteOptions(timeoutMsOrOptions);
     const startTime = this.context.timer.now();
 
     if (!(await this.context.ensureConnected())) {
@@ -328,8 +346,7 @@ export class CtrlProxyStorage {
       ...(mutationToken ? { mutationToken } : {}),
     });
 
-    const ws = this.context.getWebSocket();
-    ws?.send(message);
+    this.sendWrite(message, onDispatch);
     logger.debug(
       `[CTRL_PROXY_IOS] Sent remove_preference request (requestId: ${requestId}, fileName: ${fileName}, key: ${key})`,
     );
@@ -346,13 +363,14 @@ export class CtrlProxyStorage {
    *
    * @param packageName - Target app bundle identifier
    * @param fileName - Suite name to clear
-   * @param timeoutMs - Maximum time to wait for response in milliseconds
+   * @param timeoutMsOrOptions - Response timeout or timeout and successful-send hook
    */
   async clearPreferenceStore(
     packageName: string,
     fileName: string,
-    timeoutMs: number = 5000,
+    timeoutMsOrOptions?: number | StorageWriteOptions,
   ): Promise<PreferenceStoreResolution | undefined> {
+    const { timeoutMs, onDispatch } = normalizeStorageWriteOptions(timeoutMsOrOptions);
     const startTime = this.context.timer.now();
 
     if (!(await this.context.ensureConnected())) {
@@ -384,8 +402,7 @@ export class CtrlProxyStorage {
       ...(mutationToken ? { mutationToken } : {}),
     });
 
-    const ws = this.context.getWebSocket();
-    ws?.send(message);
+    this.sendWrite(message, onDispatch);
     logger.debug(
       `[CTRL_PROXY_IOS] Sent clear_preferences request (requestId: ${requestId}, fileName: ${fileName})`,
     );

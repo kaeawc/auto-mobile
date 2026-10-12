@@ -145,14 +145,25 @@ export function createDirectFrameRig(
         called(cancel === true ? "cancel" : "end");
         return (await client.requestGestureEnd?.()) ?? { success: true };
       },
-      setPreference: async (...args: unknown[]) => {
+      setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+        if (typeof args[5] === "object") {
+          args[5].onDispatch?.();
+        }
         called("setPreference");
         await client.setPreference?.(...args);
       },
-      removePreference: async () => {
+      removePreference: async (...args: Parameters<AndroidCtrlProxyClient["removePreference"]>) => {
+        if (typeof args[3] === "object") {
+          args[3].onDispatch?.();
+        }
         called("removePreference");
       },
-      clearPreferenceStore: async (...args: unknown[]) => {
+      clearPreferenceStore: async (
+        ...args: Parameters<AndroidCtrlProxyClient["clearPreferenceStore"]>
+      ) => {
+        if (typeof args[2] === "object") {
+          args[2].onDispatch?.();
+        }
         called("clearPreferenceStore");
         await client.clearPreferenceStore?.(...args);
       },

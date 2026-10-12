@@ -113,12 +113,46 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
             : [androidDevice, iosDevice],
     } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
 
-    androidSetPreference = mock(async () => {});
-    androidRemovePreference = mock(async () => {});
-    androidClearPreferenceStore = mock(async () => {});
-    iosSetPreference = mock(async () => {});
-    iosRemovePreference = mock(async () => {});
-    iosClearPreferenceStore = mock(async () => {});
+    androidSetPreference = mock(
+      async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+        if (typeof args[5] === "object") {
+          args[5].onDispatch?.();
+        }
+      },
+    );
+    androidRemovePreference = mock(
+      async (...args: Parameters<AndroidCtrlProxyClient["removePreference"]>) => {
+        if (typeof args[3] === "object") {
+          args[3].onDispatch?.();
+        }
+      },
+    );
+    androidClearPreferenceStore = mock(
+      async (...args: Parameters<AndroidCtrlProxyClient["clearPreferenceStore"]>) => {
+        if (typeof args[2] === "object") {
+          args[2].onDispatch?.();
+        }
+      },
+    );
+    iosSetPreference = mock(async (...args: Parameters<IOSCtrlProxyClient["setPreference"]>) => {
+      if (typeof args[5] === "object") {
+        args[5].onDispatch?.();
+      }
+    });
+    iosRemovePreference = mock(
+      async (...args: Parameters<IOSCtrlProxyClient["removePreference"]>) => {
+        if (typeof args[3] === "object") {
+          args[3].onDispatch?.();
+        }
+      },
+    );
+    iosClearPreferenceStore = mock(
+      async (...args: Parameters<IOSCtrlProxyClient["clearPreferenceStore"]>) => {
+        if (typeof args[2] === "object") {
+          args[2].onDispatch?.();
+        }
+      },
+    );
 
     originalAndroidGetInstance = AndroidCtrlProxyClient.getInstance;
     originalIosGetInstance = IOSCtrlProxyClient.getInstance;
@@ -170,9 +204,30 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
 
   test("iOS IDE mutations preserve resolved stores and set override warnings", async () => {
     const resolution = { resolvedStore: "custom-suite", effectiveValueDiffers: true };
-    iosSetPreference.mockImplementation(async () => resolution);
-    iosRemovePreference.mockImplementation(async () => resolution);
-    iosClearPreferenceStore.mockImplementation(async () => resolution);
+    iosSetPreference.mockImplementation(
+      async (...args: Parameters<IOSCtrlProxyClient["setPreference"]>) => {
+        if (typeof args[5] === "object") {
+          args[5].onDispatch?.();
+        }
+        return resolution;
+      },
+    );
+    iosRemovePreference.mockImplementation(
+      async (...args: Parameters<IOSCtrlProxyClient["removePreference"]>) => {
+        if (typeof args[3] === "object") {
+          args[3].onDispatch?.();
+        }
+        return resolution;
+      },
+    );
+    iosClearPreferenceStore.mockImplementation(
+      async (...args: Parameters<IOSCtrlProxyClient["clearPreferenceStore"]>) => {
+        if (typeof args[2] === "object") {
+          args[2].onDispatch?.();
+        }
+        return resolution;
+      },
+    );
     const params = {
       platform: "ios",
       deviceId: iosDevice.deviceId,
@@ -233,6 +288,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
       "theme",
       "dark",
       "STRING",
+      { onDispatch: expect.any(Function) },
     );
     expect(androidSetPreference).not.toHaveBeenCalled();
   });
@@ -249,7 +305,9 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(iosRemovePreference).toHaveBeenCalledWith("com.example.app", "prefs", "theme");
+    expect(iosRemovePreference).toHaveBeenCalledWith("com.example.app", "prefs", "theme", {
+      onDispatch: expect.any(Function),
+    });
     expect(iosSetPreference).not.toHaveBeenCalled();
   });
 
@@ -263,7 +321,9 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(iosRemovePreference).toHaveBeenCalledWith("com.example.app", "prefs", "theme");
+    expect(iosRemovePreference).toHaveBeenCalledWith("com.example.app", "prefs", "theme", {
+      onDispatch: expect.any(Function),
+    });
     expect(androidRemovePreference).not.toHaveBeenCalled();
   });
 
@@ -276,7 +336,9 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(iosClearPreferenceStore).toHaveBeenCalledWith("com.example.app", "prefs");
+    expect(iosClearPreferenceStore).toHaveBeenCalledWith("com.example.app", "prefs", {
+      onDispatch: expect.any(Function),
+    });
     expect(androidClearPreferenceStore).not.toHaveBeenCalled();
   });
 
@@ -297,6 +359,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
       "theme",
       "dark",
       "STRING",
+      { onDispatch: expect.any(Function) },
     );
     expect(iosSetPreference).not.toHaveBeenCalled();
   });
@@ -365,7 +428,9 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(iosRemovePreference).toHaveBeenCalledWith("com.example.app", "prefs", "tags");
+    expect(iosRemovePreference).toHaveBeenCalledWith("com.example.app", "prefs", "tags", {
+      onDispatch: expect.any(Function),
+    });
     expect(iosSetPreference).not.toHaveBeenCalled();
   });
 
@@ -468,21 +533,37 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
 
     function useAndroidClientThrowing(overrides: Partial<Record<string, () => Promise<void>>>) {
       AndroidCtrlProxyClient.getInstance = mock(() => ({
-        setPreference:
-          overrides.setPreference ??
-          (async () => {
-            throw new Error(INSPECTION_DISABLED);
-          }),
-        removePreference:
-          overrides.removePreference ??
-          (async () => {
-            throw new Error(INSPECTION_DISABLED);
-          }),
-        clearPreferenceStore:
-          overrides.clearPreferenceStore ??
-          (async () => {
-            throw new Error(INSPECTION_DISABLED);
-          }),
+        setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+          if (typeof args[5] === "object") {
+            args[5].onDispatch?.();
+          }
+          if (overrides.setPreference) {
+            return overrides.setPreference();
+          }
+          throw new Error(INSPECTION_DISABLED);
+        },
+        removePreference: async (
+          ...args: Parameters<AndroidCtrlProxyClient["removePreference"]>
+        ) => {
+          if (typeof args[3] === "object") {
+            args[3].onDispatch?.();
+          }
+          if (overrides.removePreference) {
+            return overrides.removePreference();
+          }
+          throw new Error(INSPECTION_DISABLED);
+        },
+        clearPreferenceStore: async (
+          ...args: Parameters<AndroidCtrlProxyClient["clearPreferenceStore"]>
+        ) => {
+          if (typeof args[2] === "object") {
+            args[2].onDispatch?.();
+          }
+          if (overrides.clearPreferenceStore) {
+            return overrides.clearPreferenceStore();
+          }
+          throw new Error(INSPECTION_DISABLED);
+        },
       })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     }
 

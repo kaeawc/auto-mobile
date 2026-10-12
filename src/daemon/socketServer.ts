@@ -206,7 +206,11 @@ import { canonicalPixelsToPoints } from "./canonicalPixels";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { indeterminateTapError } from "../features/action/coordinateTapDispatch";
 import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
-import type { KeyValueType, PreferenceStoreResolution } from "../features/storage/storageTypes";
+import type {
+  KeyValueType,
+  PreferenceStoreResolution,
+  StorageWriteOptions,
+} from "../features/storage/storageTypes";
 import type {
   AppendTextFailureSource,
   BootedDevice,
@@ -914,8 +918,9 @@ interface IdeMutationCall {
   /** The holder's session admission passed for `execution`: its dispatch will be session use. */
   admit(execution: ActiveExecution): void;
   /**
-   * The route passed every pre-dispatch check and is about to act on the device: only now is the
-   * holder's call use of its session (#11596). A route refused before this point ends unstamped.
+   * The SDK write was sent successfully, or the direct-file fallback passed its abort check and
+   * is about to act on the device: only now is the holder's call session use (#11596, #11750).
+   * A route refused or cancelled while connecting ends unstamped.
    */
   dispatching(): void;
   /** The socket session that sent the frame: a managed connection mutates only its slot devices. */
@@ -925,7 +930,8 @@ interface IdeMutationCall {
 /**
  * One `input/*` frame's device work. It calls `dispatching` once every pre-dispatch check passed
  * (owner still there, current frame context, budget left, coordinates in bounds), immediately
- * before it acts on the device: only then is the frame use of the holder's session (#11596).
+ * at the successful send for tap/swipe, or before device work for the other input routes: only
+ * then is the frame use of the holder's session (#11596, #11750).
  * `runTrackedDeviceInput` always supplies it; it is absent only when a test drives a handler
  * without that funnel.
  */
@@ -1009,7 +1015,8 @@ const OWNED_GESTURE_CANCEL_TIMEOUT_MS = 5000;
 /**
  * The narrow key-value mutation surface the `ide/*` handlers need from a
  * platform CtrlProxy client. Both AndroidCtrlProxyClient and IOSCtrlProxyClient
- * satisfy it structurally (#4708).
+ * satisfy it structurally (#4708). Storage writes notify onDispatch synchronously after a
+ * successful socket send; connecting, cancellation and send failures are not session use.
  */
 interface KeyValueMutationClient {
   setPreference(
@@ -1018,15 +1025,18 @@ interface KeyValueMutationClient {
     key: string,
     value: string,
     type: KeyValueType,
+    timeoutMsOrOptions?: number | StorageWriteOptions,
   ): Promise<PreferenceStoreResolution | void>;
   removePreference(
     packageName: string,
     fileName: string,
     key: string,
+    timeoutMsOrOptions?: number | StorageWriteOptions,
   ): Promise<PreferenceStoreResolution | void>;
   clearPreferenceStore(
     packageName: string,
     fileName: string,
+    timeoutMsOrOptions?: number | StorageWriteOptions,
   ): Promise<PreferenceStoreResolution | void>;
 }
 
@@ -5553,7 +5563,7 @@ export class UnixSocketServer {
             fileName,
             {
               dispatching: () => ideMutation?.dispatching(),
-              viaSdk: () => client.removePreference(appId, fileName, key),
+              viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
               viaDirectFile: (adb) =>
                 removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
             },
@@ -5572,7 +5582,8 @@ export class UnixSocketServer {
             fileName,
             {
               dispatching: () => ideMutation?.dispatching(),
-              viaSdk: () => client.setPreference(appId, fileName, key, value, type),
+              viaSdk: (onDispatch) =>
+                client.setPreference(appId, fileName, key, value, type, { onDispatch }),
               viaDirectFile: (adb) =>
                 setAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key, value, type),
             },
@@ -5620,7 +5631,7 @@ export class UnixSocketServer {
           fileName,
           {
             dispatching: () => ideMutation?.dispatching(),
-            viaSdk: () => client.removePreference(appId, fileName, key),
+            viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
             viaDirectFile: (adb) =>
               removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
           },
@@ -5662,7 +5673,7 @@ export class UnixSocketServer {
           fileName,
           {
             dispatching: () => ideMutation?.dispatching(),
-            viaSdk: () => client.clearPreferenceStore(appId, fileName),
+            viaSdk: (onDispatch) => client.clearPreferenceStore(appId, fileName, { onDispatch }),
             viaDirectFile: (adb) =>
               clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
           },
@@ -5992,6 +6003,8 @@ export class UnixSocketServer {
    * `adb shell run-as` XML edit the MCP `setKeyValue`/`removeKeyValue`/`clearKeyValueFile`
    * tools use — so the desktop Storage pane can write/delete/clear even when inspection is
    * off, exactly like the MCP path. iOS has no on-device XML fallback, so `viaSdk` runs alone.
+   * Stamps session use once: from the SDK successful-send hook, or immediately after the
+   * fallback abort check before direct-file work. Connecting alone never stamps.
    * Returns the SDK resolution and whether the fallback ran, for store and warning reporting.
    */
   private async runIdeKeyValueMutation(
@@ -6001,17 +6014,24 @@ export class UnixSocketServer {
     fileName: string,
     mutation: {
       dispatching: () => void;
-      viaSdk: () => Promise<PreferenceStoreResolution | void>;
+      viaSdk: (onDispatch: () => void) => Promise<PreferenceStoreResolution | void>;
       viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>;
     },
   ): Promise<{
     usedDirectFileFallback: boolean;
     resolution: PreferenceStoreResolution | undefined;
   }> {
+    let dispatched = false;
+    const onDispatch = () => {
+      if (dispatched) {
+        return;
+      }
+      dispatched = true;
+      mutation.dispatching();
+    };
     if (platform !== "android") {
       getAbortSignal()?.throwIfAborted();
-      mutation.dispatching();
-      const resolution = (await mutation.viaSdk()) || undefined;
+      const resolution = (await mutation.viaSdk(onDispatch)) || undefined;
       return { usedDirectFileFallback: false, resolution };
     }
     let resolution: PreferenceStoreResolution | undefined;
@@ -6021,12 +6041,12 @@ export class UnixSocketServer {
       () => this.adbClientFactory.create(device),
       async () => {
         getAbortSignal()?.throwIfAborted();
-        mutation.dispatching();
-        resolution = (await mutation.viaSdk()) || undefined;
+        resolution = (await mutation.viaSdk(onDispatch)) || undefined;
       },
       // The ide/* params carry no userId, so an ambiguous-user error cannot say "pass userId".
       (adb) => {
         getAbortSignal()?.throwIfAborted();
+        onDispatch();
         return mutation.viaDirectFile(adb).catch(rethrowForRouteWithoutUserId);
       },
     );
@@ -6245,7 +6265,6 @@ export class UnixSocketServer {
             [args.x, args.y],
             client.getScreenScaleMetadata?.() ?? null,
           );
-          dispatching?.();
           // The signal reaches the send step itself, so an owner that went away while the client
           // was still connecting never has its tap written to the device (#10006).
           return await this.dispatchFencedInput("Tap", signal, (onDispatch) =>
@@ -6256,7 +6275,10 @@ export class UnixSocketServer {
               remainingTimeoutMs,
               undefined,
               args.frameContext,
-              onDispatch,
+              () => {
+                onDispatch();
+                dispatching?.();
+              },
               signal,
             ),
           );
@@ -6278,17 +6300,16 @@ export class UnixSocketServer {
         );
         // The scale probe awaited the runner; the owner may have left meanwhile.
         assertSocketInputNotAborted(signal);
-        dispatching?.();
-        return args.frameContext === undefined
-          ? await iosClient.requestTapCoordinates(x, y, args.duration, gestureTimeoutMs)
-          : await iosClient.requestTapCoordinates(
-              x,
-              y,
-              args.duration,
-              gestureTimeoutMs,
-              undefined,
-              args.frameContext,
-            );
+        return await iosClient.requestTapCoordinates(
+          x,
+          y,
+          args.duration,
+          gestureTimeoutMs,
+          undefined,
+          args.frameContext,
+          undefined,
+          dispatching,
+        );
       },
       this.inputDeviceGate(
         request.method,
@@ -6347,7 +6368,6 @@ export class UnixSocketServer {
 
         if (args.platform === "android") {
           const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
-          dispatching?.();
           return await this.dispatchFencedInput("Swipe", signal, (onDispatch) =>
             client.requestSwipe(
               args.startX,
@@ -6358,7 +6378,10 @@ export class UnixSocketServer {
               remainingTimeoutMs,
               undefined,
               args.frameContext,
-              onDispatch,
+              () => {
+                onDispatch();
+                dispatching?.();
+              },
               signal,
             ),
           );
@@ -6377,29 +6400,19 @@ export class UnixSocketServer {
           "handleInputSwipe",
         );
         assertSocketInputNotAborted(signal);
-        dispatching?.();
-        return args.frameContext === undefined
-          ? await client.requestDrag(
-              startX,
-              startY,
-              endX,
-              endY,
-              0,
-              args.durationMs,
-              0,
-              gestureTimeoutMs,
-            )
-          : await client.requestDrag(
-              startX,
-              startY,
-              endX,
-              endY,
-              0,
-              args.durationMs,
-              0,
-              gestureTimeoutMs,
-              args.frameContext,
-            );
+        return await client.requestDrag(
+          startX,
+          startY,
+          endX,
+          endY,
+          0,
+          args.durationMs,
+          0,
+          gestureTimeoutMs,
+          args.frameContext,
+          undefined,
+          dispatching,
+        );
       },
       this.inputDeviceGate(
         request.method,

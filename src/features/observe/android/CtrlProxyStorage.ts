@@ -27,7 +27,9 @@ import {
   SDK_CAPABILITIES_USER_ID_CAPABILITY,
   serializeCtrlProxyRequest,
 } from "./ctrlProxyProtocol";
+import { normalizeStorageWriteOptions } from "../../storage/storageTypes";
 import type {
+  StorageWriteOptions,
   PreferenceFile,
   KeyValueEntry,
   KeyValueType,
@@ -671,7 +673,7 @@ export class CtrlProxyStorage {
    * @param key - The key to set
    * @param value - The value to set (serialized as string, or null)
    * @param type - The type of the value (STRING, INT, LONG, FLOAT, BOOLEAN, STRING_SET)
-   * @param timeoutMs - Maximum time to wait for response in milliseconds
+   * @param timeoutMsOrOptions - Response timeout or timeout and successful-send hook
    */
   async setPreference(
     packageName: string,
@@ -679,8 +681,9 @@ export class CtrlProxyStorage {
     key: string,
     value: string | null,
     type: KeyValueType,
-    timeoutMs: number = 5000,
+    timeoutMsOrOptions?: number | StorageWriteOptions,
   ): Promise<void> {
+    const { timeoutMs, onDispatch } = normalizeStorageWriteOptions(timeoutMsOrOptions);
     const startTime = this.context.timer.now();
 
     try {
@@ -722,6 +725,7 @@ export class CtrlProxyStorage {
         }),
       );
       ws.send(message);
+      onDispatch?.();
       logger.debug(
         `[CTRL_PROXY] Sent set_preference request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName}, key: ${key})`,
       );
@@ -747,14 +751,15 @@ export class CtrlProxyStorage {
    * @param packageName - The package name of the app
    * @param fileName - Name of the preference file
    * @param key - The key to remove
-   * @param timeoutMs - Maximum time to wait for response in milliseconds
+   * @param timeoutMsOrOptions - Response timeout or timeout and successful-send hook
    */
   async removePreference(
     packageName: string,
     fileName: string,
     key: string,
-    timeoutMs: number = 5000,
+    timeoutMsOrOptions?: number | StorageWriteOptions,
   ): Promise<void> {
+    const { timeoutMs, onDispatch } = normalizeStorageWriteOptions(timeoutMsOrOptions);
     const startTime = this.context.timer.now();
 
     try {
@@ -789,6 +794,7 @@ export class CtrlProxyStorage {
         ctrlProxyRequests.removePreference({ requestId, packageName, fileName, key }),
       );
       ws.send(message);
+      onDispatch?.();
       logger.debug(
         `[CTRL_PROXY] Sent remove_preference request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName}, key: ${key})`,
       );
@@ -813,13 +819,14 @@ export class CtrlProxyStorage {
    *
    * @param packageName - The package name of the app
    * @param fileName - Name of the preference file to clear
-   * @param timeoutMs - Maximum time to wait for response in milliseconds
+   * @param timeoutMsOrOptions - Response timeout or timeout and successful-send hook
    */
   async clearPreferenceStore(
     packageName: string,
     fileName: string,
-    timeoutMs: number = 5000,
+    timeoutMsOrOptions?: number | StorageWriteOptions,
   ): Promise<void> {
+    const { timeoutMs, onDispatch } = normalizeStorageWriteOptions(timeoutMsOrOptions);
     const startTime = this.context.timer.now();
 
     try {
@@ -856,6 +863,7 @@ export class CtrlProxyStorage {
         ctrlProxyRequests.clearPreferences({ requestId, packageName, fileName }),
       );
       ws.send(message);
+      onDispatch?.();
       logger.debug(
         `[CTRL_PROXY] Sent clear_preferences request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName})`,
       );

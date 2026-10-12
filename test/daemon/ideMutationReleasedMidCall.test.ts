@@ -176,8 +176,16 @@ describe("idle release while the holder's device call is in flight", () => {
       () =>
         ({
           getScreenScaleMetadata: () => null,
-          requestTapCoordinates: deviceCall,
-          setPreference: async () => {
+          requestTapCoordinates: (
+            ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+          ) => {
+            args[6]?.();
+            return deviceCall();
+          },
+          setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+            if (typeof args[5] === "object") {
+              args[5].onDispatch?.();
+            }
             await deviceCall();
           },
         }) as unknown as AndroidCtrlProxyClient,

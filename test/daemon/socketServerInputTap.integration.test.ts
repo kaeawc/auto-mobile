@@ -55,7 +55,12 @@ describe("UnixSocketServer input/tap", () => {
   });
 
   test("routes Android coordinate taps without forwarding through tools/call", async () => {
-    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const requestTapCoordinates = mock(
+      async (...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>) => {
+        args[6]?.();
+        return { success: true };
+      },
+    );
     const createMcpClient = mock(async () => {
       throw new Error("input/tap should not create an MCP client");
     });
@@ -113,7 +118,12 @@ describe("UnixSocketServer input/tap", () => {
   // or without a session ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863)
   // review).
   test("refuses a sessionless tap on a serial whose pooled identity is quarantined", async () => {
-    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const requestTapCoordinates = mock(
+      async (...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>) => {
+        args[6]?.();
+        return { success: true };
+      },
+    );
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       requestTapCoordinates,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
@@ -185,7 +195,12 @@ describe("UnixSocketServer input/tap", () => {
   });
 
   test("rejects Android tap coordinates outside known canonical pixel bounds", async () => {
-    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const requestTapCoordinates = mock(
+      async (...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>) => {
+        args[6]?.();
+        return { success: true };
+      },
+    );
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       requestTapCoordinates,
       getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 1080, pixelHeight: 2340 }),
@@ -224,7 +239,12 @@ describe("UnixSocketServer input/tap", () => {
   test("LEGACY iOS tap: probe SUCCEEDS with no metadata -> pass through unchanged", async () => {
     // The probe returns a hierarchy (success) but it carries no scale metadata: a genuine pre-#4548
     // runner. The control client never got px bounds, so it sends points — pass through, no divide.
-    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const requestTapCoordinates = mock(
+      async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
+        args[7]?.();
+        return { success: true };
+      },
+    );
     const fetchHierarchy = mock(async () => ({ hierarchy: {} }));
     IOSCtrlProxyClient.getInstance = mock(() => ({
       requestTapCoordinates,
@@ -250,11 +270,25 @@ describe("UnixSocketServer input/tap", () => {
     expect(response.success).toBe(true);
     expect(response.result).toMatchObject({ coordinates: { x: -50, y: 999999 } });
     expect(fetchHierarchy).toHaveBeenCalledTimes(1); // it probed to learn the scale first
-    expect(requestTapCoordinates).toHaveBeenCalledWith(-50, 999999, undefined, 30_000);
+    expect(requestTapCoordinates).toHaveBeenCalledWith(
+      -50,
+      999999,
+      undefined,
+      30_000,
+      undefined,
+      undefined,
+      undefined,
+      expect.any(Function),
+    );
   });
 
   test("rejects an Android frameContext without a matching device observation", async () => {
-    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const requestTapCoordinates = mock(
+      async (...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>) => {
+        args[6]?.();
+        return { success: true };
+      },
+    );
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       requestTapCoordinates,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
@@ -281,7 +315,12 @@ describe("UnixSocketServer input/tap", () => {
   });
 
   test("iOS tap: a confirmed-legacy device probes only ONCE across consecutive taps (#4549 D)", async () => {
-    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const requestTapCoordinates = mock(
+      async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
+        args[7]?.();
+        return { success: true };
+      },
+    );
     const fetchHierarchy = mock(async () => ({ hierarchy: {} })); // success, no metadata => legacy
     IOSCtrlProxyClient.getInstance = mock(() => ({
       requestTapCoordinates,
@@ -315,7 +354,12 @@ describe("UnixSocketServer input/tap", () => {
   });
 
   test("iOS tap: a FAILED probe (no hierarchy) rejects the input instead of assuming legacy (#4549 C)", async () => {
-    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const requestTapCoordinates = mock(
+      async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
+        args[7]?.();
+        return { success: true };
+      },
+    );
     const fetchHierarchy = mock(async () => null); // not connected / timed out -> FAILURE
     IOSCtrlProxyClient.getInstance = mock(() => ({
       requestTapCoordinates,
@@ -344,7 +388,12 @@ describe("UnixSocketServer input/tap", () => {
   });
 
   test("iOS tap: a THROWN probe rejects the input (#4549 C)", async () => {
-    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const requestTapCoordinates = mock(
+      async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
+        args[7]?.();
+        return { success: true };
+      },
+    );
     const fetchHierarchy = mock(async () => {
       throw new Error("ws disconnected");
     });
@@ -377,7 +426,12 @@ describe("UnixSocketServer input/tap", () => {
   test("iOS tap: the scale probe is charged against the gesture budget (#4549 B)", async () => {
     // The probe consumes 20s of the 30s budget; the gesture must get only the ~10s remainder, not a
     // fresh 30s (which would let probe + gesture run ~2x the declared budget).
-    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const requestTapCoordinates = mock(
+      async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
+        args[7]?.();
+        return { success: true };
+      },
+    );
     let scale: { nativeScale: number; pixelWidth: number; pixelHeight: number } | null = null;
     const fetchHierarchy = mock(async () => {
       fakeTimer.advanceTime(20_000);
@@ -406,11 +460,25 @@ describe("UnixSocketServer input/tap", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(requestTapCoordinates).toHaveBeenCalledWith(200, 300, undefined, 10_000);
+    expect(requestTapCoordinates).toHaveBeenCalledWith(
+      200,
+      300,
+      undefined,
+      10_000,
+      undefined,
+      undefined,
+      undefined,
+      expect.any(Function),
+    );
   });
 
   test("iOS tap: a probe that consumes the whole budget fails with a timeout, not a full-budget gesture (#4549 B)", async () => {
-    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const requestTapCoordinates = mock(
+      async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
+        args[7]?.();
+        return { success: true };
+      },
+    );
     let scale: { nativeScale: number } | null = null;
     const fetchHierarchy = mock(async () => {
       fakeTimer.advanceTime(31_000); // exceeds the 30s budget
@@ -446,7 +514,12 @@ describe("UnixSocketServer input/tap", () => {
     // The control client renders a px frame (#4549) and sends the tap in PIXELS; the daemon divides
     // EXACTLY by nativeScale so the XCUITest runner receives (fractional) points and the tap lands
     // at the same physical location. 1169/3 = 389.666..., 2531/3 = 843.666....
-    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const requestTapCoordinates = mock(
+      async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
+        args[7]?.();
+        return { success: true };
+      },
+    );
     IOSCtrlProxyClient.getInstance = mock(() => ({
       requestTapCoordinates,
       getScreenScaleMetadata: () => ({ nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 }),
@@ -476,7 +549,12 @@ describe("UnixSocketServer input/tap", () => {
   });
 
   test("iOS tap rejects coordinates outside bounds learned by the scale probe", async () => {
-    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const requestTapCoordinates = mock(
+      async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
+        args[7]?.();
+        return { success: true };
+      },
+    );
     let scale: { nativeScale: number; pixelWidth: number; pixelHeight: number } | null = null;
     const fetchHierarchy = mock(async () => {
       scale = { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 };
@@ -513,7 +591,12 @@ describe("UnixSocketServer input/tap", () => {
     // Startup window: the control client's first tap arrives before the daemon received any
     // hierarchy, so #4548 receipt-based retention has not run and getScreenScaleMetadata() is null.
     // The daemon fetches a hierarchy (populating the scale via receipt), then converts.
-    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const requestTapCoordinates = mock(
+      async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
+        args[7]?.();
+        return { success: true };
+      },
+    );
     let scale: { nativeScale: number; pixelWidth: number; pixelHeight: number } | null = null;
     const fetchHierarchy = mock(async () => {
       // Simulate #4548 receipt-based retention populating the scale during the fetch. The probe
@@ -545,11 +628,25 @@ describe("UnixSocketServer input/tap", () => {
     expect(response.success).toBe(true);
     expect(fetchHierarchy).toHaveBeenCalledTimes(1);
     // 600/3 = 200, 900/3 = 300 — NOT dispatched as 600/900 points (which would tap at 1/3 scale).
-    expect(requestTapCoordinates).toHaveBeenCalledWith(200, 300, undefined, 30_000);
+    expect(requestTapCoordinates).toHaveBeenCalledWith(
+      200,
+      300,
+      undefined,
+      30_000,
+      undefined,
+      undefined,
+      undefined,
+      expect.any(Function),
+    );
   });
 
   test("rejects an iOS frameContext without a matching device observation", async () => {
-    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const requestTapCoordinates = mock(
+      async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
+        args[7]?.();
+        return { success: true };
+      },
+    );
     IOSCtrlProxyClient.getInstance = mock(() => ({
       requestTapCoordinates,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
@@ -576,7 +673,12 @@ describe("UnixSocketServer input/tap", () => {
   });
 
   test("uses the socket autolock device when deviceId is omitted", async () => {
-    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const requestTapCoordinates = mock(
+      async (...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>) => {
+        args[6]?.();
+        return { success: true };
+      },
+    );
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       requestTapCoordinates,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;

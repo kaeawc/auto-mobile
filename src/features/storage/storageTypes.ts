@@ -167,3 +167,19 @@ export interface PreferenceStoreResolution {
   resolvedStore?: string;
   effectiveValueDiffers?: boolean;
 }
+
+/** Optional storage write timeout and successful-send notification. */
+export interface StorageWriteOptions {
+  timeoutMs?: number;
+  /** Invoked synchronously right after ws.send() succeeds. */
+  onDispatch?: () => void;
+}
+
+/** Preserve positional timeouts and the storage write default on both platforms. */
+export function normalizeStorageWriteOptions(
+  timeoutMsOrOptions: number | StorageWriteOptions = {},
+): StorageWriteOptions & { timeoutMs: number } {
+  const options =
+    typeof timeoutMsOrOptions === "number" ? { timeoutMs: timeoutMsOrOptions } : timeoutMsOrOptions;
+  return { ...options, timeoutMs: options.timeoutMs ?? 5000 };
+}

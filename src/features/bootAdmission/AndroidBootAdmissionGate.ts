@@ -3,7 +3,11 @@ import type { BootAdmission } from "../../models/BootAdmission";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
-import type { AndroidCapacitySample, AndroidCapacitySource } from "./AndroidCapacitySource";
+import type {
+  AndroidCapacitySample,
+  AndroidCapacitySource,
+  ProcessTableFailure,
+} from "./AndroidCapacitySource";
 import {
   assertBootCapacityGranted,
   atCapacityDecision,
@@ -67,6 +71,9 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     PublishedBootAdmission,
     Pick<HostBootAdmissionRecord, "deviceId" | "handedOffUntilMs"> & { pendingRemoval?: boolean }
   >();
+  private lastProcessTableFailure: ProcessTableFailure | undefined;
+  private admissionsWithoutProcessTable = 0;
+  private lastAdmissionWithoutProcessTableAtMs: number | undefined;
   private warnedLimit: string | undefined;
   /** Serials of emulators this process launched through an admission. */
   private readonly startedSerials = new Set<string>();
@@ -94,6 +101,7 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     let admitted: LedgerAdmission | undefined;
     let published: PublishedBootAdmission | undefined;
     let peers: HostBootAdmissionRecord[] = [];
+    let admissionSample: AndroidCapacitySample | undefined;
     const run = () =>
       admitBootNow<AndroidCapacitySample, AndroidAdmissionDecision>({
         timer: this.timer,
@@ -102,8 +110,14 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
         sampleTimeoutMs: Math.min(request.timeoutMs, DEFAULT_SAMPLE_TIMEOUT_MS),
         label: "Android emulator capacity",
         sample: async () => {
+          const sampleDeadlineMs =
+            this.timer.now() + Math.min(request.timeoutMs, DEFAULT_SAMPLE_TIMEOUT_MS) - 500;
           const before = this.readPeers();
-          const sample = await this.sampleKnownCount({ signal: request.signal });
+          const sample = await this.sampleKnownCount({
+            signal: request.signal,
+            deadlineMs: sampleDeadlineMs,
+          });
+          admissionSample = sample;
           peers = this.unionPeers(before, this.readPeers());
           return sample;
         },
@@ -135,6 +149,9 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     if (!ledgerAdmission) {
       // admitBootNow returns without refusing only after calling `admit`.
       throw new ActionableError(`Boot admission for AVD '${request.avdName}' ended without a slot`);
+    }
+    if (admissionSample?.processTableFailure) {
+      this.recordAdmissionWithoutProcessTable(request.avdName, admissionSample);
     }
     const handedOffSerials = new Set<string>();
     let released = false;
@@ -191,6 +208,41 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
       limit: this.limitsFor(sample).maxBooted,
       booted: counts.booted,
       inFlight: counts.inFlight,
+      ...this.describeProcessTable(sample),
+    };
+  }
+
+  private recordAdmissionWithoutProcessTable(avdName: string, sample: AndroidCapacitySample): void {
+    const failure = sample.processTableFailure!;
+    this.admissionsWithoutProcessTable += 1;
+    this.lastAdmissionWithoutProcessTableAtMs = this.timer.now();
+    const message = `[BootAdmission] Admitted AVD '${avdName}' on adb-only count ${sample.emulatorSerials.length}: ${failure.reason}, attempts=${failure.attempts}: ${failure.detail}`;
+    if (failure.reason === "unsupported-platform") {
+      // Windows normally counts from adb because the platform has no ps.
+      logger.debug(message);
+    } else {
+      logger.warn(message);
+    }
+  }
+
+  private describeProcessTable(
+    sample: AndroidCapacitySample,
+  ): Pick<BootCapacitySnapshot, "processTable"> {
+    const failure = sample.processTableFailure ?? this.lastProcessTableFailure;
+    if (!failure || (!sample.processTableFailure && this.admissionsWithoutProcessTable === 0)) {
+      return {};
+    }
+    return {
+      processTable: {
+        unavailable: sample.processTableFailure !== undefined,
+        reason: failure.reason,
+        detail: failure.detail,
+        attempts: failure.attempts,
+        admissionsWithoutProcessTable: this.admissionsWithoutProcessTable,
+        ...(this.lastAdmissionWithoutProcessTableAtMs !== undefined
+          ? { lastAdmissionWithoutProcessTableAtMs: this.lastAdmissionWithoutProcessTableAtMs }
+          : {}),
+      },
     };
   }
 
@@ -220,8 +272,15 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
    */
   private async sampleKnownCount(options: {
     signal?: AbortSignal;
+    deadlineMs?: number;
   }): Promise<AndroidCapacitySample> {
-    const sample = await this.source.sample(options);
+    const sample = await this.source.sample({
+      ...options,
+      deadlineMs: options.deadlineMs ?? this.timer.now() + DEFAULT_SAMPLE_TIMEOUT_MS - 500,
+    });
+    if (sample.processTableFailure) {
+      this.lastProcessTableFailure = sample.processTableFailure;
+    }
     if (sample.errors.length === 0) {
       return sample;
     }

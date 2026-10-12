@@ -1,3 +1,4 @@
+import { launchProcessLiveness } from "./transitionalAdbBindWait";
 import { captureAutolockPolicy } from "./deviceAutolockPolicy";
 import { heldDeviceBindRefusal, InputDeviceOwnedError } from "./inputDeviceOwnership";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
@@ -200,6 +201,7 @@ export class DeviceAutolockManager {
       deviceId,
       readinessReservationOwners,
       sourceImage: verifiedAndroidAvdIdentity ?? sourceImage,
+      isLaunchProcessAlive: launchProcessLiveness(childProcess),
       unavailableMessage: this.unavailableMessage(deviceId),
       platform,
       operation: (snapshot) =>

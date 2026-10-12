@@ -1,3 +1,4 @@
+import type { DeviceAutolockChildProcess as ChildProcess } from "./devicePool";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { BackoffPolicy } from "../utils/Backoff";
 import { TransitionalWaitBudget } from "../utils/TransitionalWaitBudget";
@@ -9,6 +10,14 @@ import { isTransitionalAdbState } from "./disconnectMonitor";
 
 export const TRANSITIONAL_ADB_BIND_WAIT_BUDGET_MS = 5_000;
 
+export function launchProcessLiveness(
+  childProcess: ChildProcess | null | undefined,
+): (() => boolean) | undefined {
+  return childProcess
+    ? () => childProcess.exitCode === null && childProcess.signalCode === null
+    : undefined;
+}
+
 interface TransitionalAdbBindWaitPorts {
   timer: Timer;
   probe?: PlatformDeviceManager["getAndroidListedDeviceStates"];
@@ -16,6 +25,7 @@ interface TransitionalAdbBindWaitPorts {
   getSignal: () => AbortSignal | undefined;
   backoff?: BackoffPolicy;
   holdAbsenceAfterTransitional?: boolean;
+  isLaunchProcessAlive?: () => boolean;
 }
 
 /** One exact discovery's wait state; each delay requires an entirely fresh pool snapshot. */
@@ -61,18 +71,29 @@ export class TransitionalAdbBindWait {
     }
     signal?.throwIfAborted();
     if (state === undefined) {
-      // A transport may disappear briefly between offline and device during an adb reconnect.
-      return this.ports.holdAbsenceAfterTransitional && this.observedTransitional
-        ? await this.budget.waitForNextAttempt()
-        : false;
+      return this.waitForAbsentTransport();
     }
     if (!isTransitionalAdbState(state)) {
-      return false;
+      // A live launch's transport returned after the caller captured an absent row.
+      return this.ports.isLaunchProcessAlive?.() ? await this.budget.waitForNextAttempt() : false;
     }
     this.observedTransitional = true;
     if (!(await this.budget.waitForNextAttempt())) {
       throw new DeviceTransportOfflineError(this.deviceId, state);
     }
     return true;
+  }
+
+  private async waitForAbsentTransport(): Promise<boolean> {
+    if (this.ports.isLaunchProcessAlive?.()) {
+      if (!(await this.budget.waitForNextAttempt())) {
+        throw new DeviceTransportOfflineError(this.deviceId, undefined);
+      }
+      return true;
+    }
+    // A transport may disappear briefly between offline and device during an adb reconnect.
+    return this.ports.holdAbsenceAfterTransitional && this.observedTransitional
+      ? await this.budget.waitForNextAttempt()
+      : false;
   }
 }

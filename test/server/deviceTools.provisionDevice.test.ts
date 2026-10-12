@@ -41,6 +41,8 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { ChildProcess } from "node:child_process";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeDeviceResourceController } from "../fakes/FakeDeviceResourceController";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -4293,6 +4295,47 @@ describe("provisionDevice handler", () => {
   // persisted as `platform_command_failed`, so a controller that retries on
   // `timeout` but treats `platform_command_failed` as terminal gave up on a
   // purely time-based failure.
+  for (const kind of ["deadline", "platform-fault", "created-deadline"] as const) {
+    test(`provision first-boot cleanup: ${kind}`, async () => {
+      const timer = new FakeTimer();
+      configureProvisionBootAndTeardown(deviceManager, "android");
+      const child = new FakeChildProcess(timer);
+      const kill = spyOn(child, "kill").mockImplementation(() => {
+        child.exitCode = 0;
+        child.emit("exit", 0, null);
+        return true;
+      });
+      const provisioned = provisionedTestDevice("android", kind === "created-deadline");
+      deviceManager.setDeviceImages("android", [provisioned.device]);
+      deviceManager.setMockChildProcess(provisioned.device.name, child as unknown as ChildProcess);
+      exactProvisioner.provision = async () => provisioned;
+      setDeviceToolsDependencies({
+        timer,
+        ensureCtrlProxyReady: async () => {
+          throw new RunnerReadinessError(
+            "runner failure",
+            false,
+            kind !== "platform-fault",
+            "runner-connect",
+          );
+        },
+      });
+      try {
+        const response = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+        expect(response).toMatchObject({
+          success: false,
+          error: {
+            code: kind === "platform-fault" ? "platform_command_failed" : "timeout",
+            retryable: kind !== "platform-fault",
+          },
+        });
+        expect(kill).toHaveBeenCalledTimes(kind === "deadline" ? 0 : 1);
+      } finally {
+        kill.mockRestore();
+      }
+    });
+  }
+
   test("reports an exhausted readiness budget as a timeout", async () => {
     deviceManager.setBootedDevices("android", [
       { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },

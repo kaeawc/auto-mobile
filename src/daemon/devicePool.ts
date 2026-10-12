@@ -6,7 +6,7 @@ import {
   type AcquisitionReceipt,
   type DeferredRebindCleanup,
 } from "./acquisitionReceipt";
-import { TransitionalAdbBindWait } from "./transitionalAdbBindWait";
+import { TransitionalAdbBindWait, launchProcessLiveness } from "./transitionalAdbBindWait";
 import type { SessionReleaseReason } from "./releaseReasons";
 import type { Environment } from "./poolConfig";
 import {
@@ -734,6 +734,7 @@ export interface TargetDeviceDiscoveryOptions {
   sessionId?: string;
   readinessReservationOwners?: ReadonlySet<symbol>;
   sourceImage?: DeviceInfo;
+  isLaunchProcessAlive?: () => boolean;
   unavailableMessage: string;
   platform: Platform;
   operation: (snapshot: TargetDeviceDiscoverySnapshot) => Promise<string | undefined>;
@@ -8466,6 +8467,7 @@ export class DevicePool {
       sessionId,
       readinessReservationOwners,
       sourceImage: verifiedAndroidAvdIdentity ?? sourceImage,
+      isLaunchProcessAlive: launchProcessLiveness(childProcess),
       unavailableMessage: `Device '${deviceId}' is not available in the device pool.`,
       platform,
       operation: async (snapshot) => {
@@ -8980,6 +8982,7 @@ export class DevicePool {
     sessionId,
     readinessReservationOwners,
     sourceImage,
+    isLaunchProcessAlive,
     unavailableMessage,
     platform,
     operation,
@@ -8991,6 +8994,7 @@ export class DevicePool {
       probe: this.deviceManager.getAndroidListedDeviceStates?.bind(this.deviceManager),
       probeTimeoutMs: ANDROID_OFFLINE_PROBE_TIMEOUT_MS,
       getSignal: getAbortSignal,
+      isLaunchProcessAlive,
     });
     while (true) {
       throwIfRequestAborted();

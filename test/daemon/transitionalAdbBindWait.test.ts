@@ -10,6 +10,85 @@ const id = "emulator-5560";
 const offline = () => new Map([[id, "offline"]]);
 
 describe("transitional adb bind wait", () => {
+  test("a live launch holds initial absence and refuses truthfully at the bounded deadline", async () => {
+    const timer = new FakeTimer();
+    const wait = new TransitionalAdbBindWait(id, {
+      timer,
+      getSignal: () => undefined,
+      probeTimeoutMs: 10000,
+      backoff: fixedBackoff(5000),
+      probe: async () => new Map(),
+      isLaunchProcessAlive: () => true,
+    });
+    const pending = wait.waitIfTransitional();
+    await drainUntilQuiescent(timer);
+    expect(timer.getPendingTimeouts()).toEqual([5000]);
+    timer.advanceTime(5000);
+    expect(await pending).toBe(true);
+    await expect(wait.waitIfTransitional()).rejects.toMatchObject({
+      code: "device_offline",
+      retryable: true,
+      retryAfterMs: 1000,
+      message: `The emulator process this request started for device '${id}' is still running but adb does not list its transport yet (code device_offline); it was not bound. Retry in about 1000ms.`,
+    });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test.each([undefined, () => false])(
+    "absent transport without a live launch stays absent (%s)",
+    async (isLaunchProcessAlive) => {
+      const timer = new FakeTimer();
+      const wait = new TransitionalAdbBindWait(id, {
+        timer,
+        getSignal: () => undefined,
+        probeTimeoutMs: 10000,
+        probe: async () => new Map(),
+        isLaunchProcessAlive,
+      });
+      expect(await wait.waitIfTransitional()).toBe(false);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+
+  test("stale listing with a live launch waits once for a present transport within budget", async () => {
+    const timer = new FakeTimer();
+    const wait = new TransitionalAdbBindWait(id, {
+      timer,
+      getSignal: () => undefined,
+      probeTimeoutMs: 10000,
+      backoff: fixedBackoff(5000),
+      probe: async () => new Map([[id, "device"]]),
+      isLaunchProcessAlive: () => true,
+    });
+    const pending = wait.waitIfTransitional();
+    await drainUntilQuiescent(timer);
+    expect(timer.getPendingTimeouts()).toEqual([5000]);
+    timer.advanceTime(5000);
+    expect(await pending).toBe(true);
+    expect(await wait.waitIfTransitional()).toBe(false);
+    expect(timer.now()).toBe(5000);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("stale listing wait with a live launch is abortable", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const wait = new TransitionalAdbBindWait(id, {
+      timer,
+      getSignal: () => controller.signal,
+      probeTimeoutMs: 10000,
+      probe: async () => new Map([[id, "device"]]),
+      isLaunchProcessAlive: () => true,
+    });
+    const pending = wait.waitIfTransitional();
+    await drainUntilQuiescent(timer);
+    expect(timer.getPendingTimeouts()).toEqual([100]);
+    const reason = new DOMException("cancel stale snapshot wait", "AbortError");
+    controller.abort(reason);
+    await expect(pending).rejects.toBe(reason);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("uses exponential delays in order and stops at the total budget", async () => {
     const timer = new FakeTimer();
     const timeouts: number[] = [];

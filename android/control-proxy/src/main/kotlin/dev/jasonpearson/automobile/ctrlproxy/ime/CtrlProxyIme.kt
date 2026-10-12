@@ -78,27 +78,42 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   internal fun traceSnapshot(): List<String> = traceRecorder.snapshot()
 
   private fun recordTrace(event: String, vararg fields: Pair<String, Any?>) {
-    traceRecorder.record(
-      event,
-      "gen" to inputConnectionGeneration,
-      "commitActive" to (activeDriver != null),
-      "commit" to if (activeDriver != null) commitGeneration else null,
-      *fields,
-    )
+    runCatching {
+      traceRecorder.record(
+        event,
+        "gen" to inputConnectionGeneration,
+        "commitActive" to (activeDriver != null),
+        "commit" to if (activeDriver != null) commitGeneration else null,
+        *fields,
+      )
+    }
   }
 
-  private fun traceCallback(event: String, vararg fields: Pair<String, Any?>) {
-    val connection = currentInputConnection
-    val identity = connection?.let(System::identityHashCode)
-    if (identity != tracedConnectionIdentity) {
-      recordTrace(
-        "connectionReplaced",
-        "hadConnection" to (tracedConnectionIdentity != null),
-        "hasConnection" to (connection != null),
-      )
-      tracedConnectionIdentity = identity
+  private fun traceCallback(
+    event: String,
+    vararg fields: Pair<String, Any?>,
+    editorInfo: EditorInfo? = null,
+  ) {
+    runCatching {
+      val connection = currentInputConnection
+      val identity = connection?.let(System::identityHashCode)
+      if (identity != tracedConnectionIdentity) {
+        recordTrace(
+          "connectionReplaced",
+          "hadConnection" to (tracedConnectionIdentity != null),
+          "hasConnection" to (connection != null),
+        )
+        tracedConnectionIdentity = identity
+      }
+      when {
+        event == "onStartInput" || event == "onStartInputView" ->
+          recordTrace(event, *fields, *editorFields(editorInfo))
+        event == "onUpdateSelection" &&
+          ImeCommitDriver.isPasswordInput(currentInputEditorInfo?.inputType) ->
+          recordTrace(event, "secure" to true)
+        else -> recordTrace(event, *fields)
+      }
     }
-    recordTrace(event, *fields)
   }
 
   private fun editorFields(info: EditorInfo?): Array<Pair<String, Any?>> =
@@ -174,7 +189,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
     super.onStartInputView(info, restarting)
     moveLifecycleTo(Lifecycle.State.RESUMED)
-    traceCallback("onStartInputView", "restarting" to restarting, *editorFields(info))
+    traceCallback("onStartInputView", "restarting" to restarting, editorInfo = info)
   }
 
   override fun onFinishInputView(finishingInput: Boolean) {
@@ -200,7 +215,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         )
         .joinToString("") { value -> if (value == null) "-1:" else "${value.length}:$value" }
     }
-    traceCallback("onStartInput", "restarting" to restarting, *editorFields(attribute))
+    traceCallback("onStartInput", "restarting" to restarting, editorInfo = attribute)
     isInputStarted = true
     if (attribute != null) {
       uiState =
@@ -307,11 +322,12 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
             },
         )
       activeDriver = driver
+      val secureInput = ImeCommitDriver.isPasswordInput(currentInputEditorInfo?.inputType)
       recordTrace(
         "commitStart",
         "delivery" to delivery.name,
-        "units" to ImeGraphemes.split(text).size,
-        "textLength" to text.length,
+        "textLength" to if (secureInput) null else text.length,
+        "secure" to if (secureInput) true else null,
       )
       val restoreId = priorImeId?.takeUnless { it == ownImeId() }
       rememberRestore(driver, restoreId)

@@ -96,6 +96,7 @@ class ImeCommitDriver(
   private var hardDeadlineMs = Long.MAX_VALUE
   private var insertedText: (() -> String?)? = null
   private var reportInsertedText = true
+  private var secureInput = false
 
   /**
    * Stops scheduled polls and reports the outcome exactly once before the caller restores the IME.
@@ -164,7 +165,9 @@ class ImeCommitDriver(
       return
     }
 
-    if (sink.editorInputType() == null) {
+    val inputType = sink.editorInputType()
+    secureInput = isPasswordInput(inputType)
+    if (inputType == null) {
       complete(failure("No active input connection"))
       return
     }
@@ -338,15 +341,16 @@ class ImeCommitDriver(
       val confirmed = delta?.let { confirmedUnits(it, expected) }
       record(
         "readBack",
-        "baselineLength" to baseline?.length,
-        "nowLength" to now?.length,
+        "baselineLength" to if (secureInput) null else baseline?.length,
+        "nowLength" to if (secureInput) null else now?.length,
         "nowNull" to if (now == null) true else null,
-        "deltaLength" to delta?.length,
+        "deltaLength" to if (secureInput) null else delta?.length,
         "dispatchedCount" to dispatched.size,
         "confirmed" to (confirmed ?: "none"),
         "startedByRestart" to startedByRestart,
         "postDispatch" to postDispatch,
         "lastResumeConfirmed" to lastResumeConfirmed,
+        "secure" to if (secureInput) true else null,
       )
       record(
         "decision",
@@ -542,8 +546,9 @@ class ImeCommitDriver(
         record(
           "unitDispatched",
           "index" to dispatchedPosition,
-          "kind" to unitKind(unit),
-          "length" to unit.length,
+          "kind" to if (secureInput) null else unitKind(unit),
+          "length" to if (secureInput) null else unit.length,
+          "secure" to if (secureInput) true else null,
         )
         dispatched.add(ExpectedUnit(unit, dispatchedPosition++))
         if (!sink.commitChar(unit)) {
@@ -605,9 +610,10 @@ class ImeCommitDriver(
       record(
         "unitDispatched",
         "index" to index,
-        "kind" to unitKind(unit),
-        "length" to unit.length,
-        "delivery" to "keyEvents",
+        "kind" to if (secureInput) null else unitKind(unit),
+        "length" to if (secureInput) null else unit.length,
+        "delivery" to if (secureInput) null else "keyEvents",
+        "secure" to if (secureInput) true else null,
       )
       if (!runCatching { sink.sendKeyEventUnit(unit) }.getOrDefault(false)) {
         complete(failure("Input connection lost during IME key events"))
@@ -725,7 +731,7 @@ class ImeCommitDriver(
         "Input connection lost during IME key events",
         "Input connection lost while finishing composition" -> "connectionLost"
         "IME key events cannot represent this text; use mode ime for text commit" -> "unsupported"
-        else -> "cancelled"
+        else -> "other"
       }
 
     private fun editorDelta(baseline: String?, now: String?): String? =

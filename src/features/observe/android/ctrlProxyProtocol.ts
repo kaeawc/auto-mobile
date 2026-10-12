@@ -1265,10 +1265,6 @@ export function normalizeCtrlProxyMilliseconds(
  * JSON.stringify omits undefined fields and preserves explicit nulls.
  */
 export function serializeCtrlProxyRequest(request: CtrlProxyRequest): string {
-  if (request.type === "request_commit_text" && request.trace === true) {
-    const { trace, ...legacyFields } = request;
-    return JSON.stringify(normalizeCtrlProxyMilliseconds(request.type, { ...legacyFields, trace }));
-  }
   return JSON.stringify(normalizeCtrlProxyMilliseconds(request.type, { ...request }));
 }
 

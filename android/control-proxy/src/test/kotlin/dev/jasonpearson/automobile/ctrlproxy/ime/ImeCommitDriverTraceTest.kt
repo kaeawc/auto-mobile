@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.ime
 
+import android.text.InputType
 import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -14,8 +15,13 @@ class ImeCommitDriverTraceTest {
     val calls: List<String>,
   )
 
-  private fun replay(scenario: String, traced: Boolean): Replay {
-    val sink = ImeCommitDriverTest.FakeImeCommitSink(1)
+  private fun replay(
+    scenario: String,
+    traced: Boolean,
+    inputType: Int = InputType.TYPE_CLASS_TEXT,
+    text: String = if (scenario == "keys") "A !" else TEXT,
+  ): Replay {
+    val sink = ImeCommitDriverTest.FakeImeCommitSink(inputType)
     sink.editorText = BASELINE
     if (scenario == "resume") {
       sink.beforeCommit = { index -> if (index == 3) sink.stale = true }
@@ -129,21 +135,24 @@ class ImeCommitDriverTraceTest {
       )
     var result: ImeCommitResult? = null
     driver.commit(
-      if (scenario == "keys") "A !" else TEXT,
+      text,
       "prior",
       delivery = if (scenario == "keys") ImeTextDelivery.KEY_EVENTS else ImeTextDelivery.COMMIT,
     ) {
       result = it
     }
+    if (scenario == "cancel") driver.cancel("IME commit superseded by another request")
     sink.drain()
     return Replay(sink, requireNotNull(result), recorder.snapshot(), calls)
   }
 
   @Test
   fun `all scenarios preserve sink effects and result without text in diagnostics`() {
-    for (scenario in listOf("plain", "resume", "consume", "keys")) {
-      val plain = replay(scenario, false)
-      val traced = replay(scenario, true)
+    for ((scenario, inputType) in
+      listOf("plain", "resume", "consume", "keys").map { it to InputType.TYPE_CLASS_TEXT } +
+        listOf("resume" to PASSWORD_TYPES.first(), "keys" to PASSWORD_TYPES.first())) {
+      val plain = replay(scenario, false, inputType)
+      val traced = replay(scenario, true, inputType)
       assertEquals(plain.calls, traced.calls)
       assertEquals(plain.result, traced.result)
       assertEquals(plain.sink.committedChars, traced.sink.committedChars)
@@ -241,7 +250,62 @@ class ImeCommitDriverTraceTest {
     )
   }
 
+  @Test
+  fun `password dispatch hides unit structure for commit and key events`() {
+    for (inputType in PASSWORD_TYPES) {
+      for (scenario in listOf("plain", "keys")) {
+        val replay = replay(scenario, true, inputType, "Ab1!x Y")
+        assertTrue(replay.result.success)
+        val dispatched = replay.lines.filter { it.contains("event=unitDispatched") }
+        assertEquals(7, dispatched.size)
+        for ((index, line) in dispatched.withIndex()) {
+          assertTrue(line.endsWith("index=$index secure=true"))
+          assertFalse(line.contains("kind="))
+          assertFalse(line.contains("length="))
+        }
+      }
+    }
+  }
+
+  @Test
+  fun `password restart read back hides text lengths`() {
+    val lines = replay("resume", true, PASSWORD_TYPES.first(), "Ab1!x Y").lines
+    val readBack = lines.filter { it.contains("event=readBack") }
+    assertTrue(readBack.isNotEmpty())
+    for (line in readBack) {
+      assertTrue(line.contains("secure=true"))
+      for (field in listOf("baselineLength=", "nowLength=", "deltaLength=")) assertFalse(
+        line.contains(field),
+      )
+      for (field in
+        listOf(
+          "dispatchedCount=",
+          "confirmed=",
+          "startedByRestart=",
+          "postDispatch=",
+          "lastResumeConfirmed=",
+        )) assertTrue(
+        line.contains(field),
+      )
+    }
+  }
+
+  @Test
+  fun `unknown cancellation reason records other without error prose`() {
+    val replay = replay("cancel", true)
+    assertFalse(replay.result.success)
+    assertTrue(replay.lines.last().endsWith("code=other"))
+    assertTrue(replay.lines.all { !it.contains("superseded") })
+  }
+
   companion object {
+    private val PASSWORD_TYPES =
+      listOf(
+        InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD,
+        InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+        InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+        InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD,
+      )
     private const val TEXT = "Zq7Xw9 Kp4\nVb2"
     private const val BASELINE = "BaselineSecret"
     private val LINE = Regex("^seq=\\d+ t=\\d+ event=[A-Za-z]+( [A-Za-z]+=[A-Za-z0-9_.:-]+)*$")

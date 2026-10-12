@@ -1829,7 +1829,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     );
     const traceState = this.imeTraceContext.getStore();
     if (trace && traceState && result.imeTrace !== undefined) {
-      traceState.lines = [...(traceState.lines ?? []), ...result.imeTrace];
+      traceState.lines = [...new Set([...(traceState.lines ?? []), ...result.imeTrace])].slice(
+        -512,
+      );
     }
     return result;
   }

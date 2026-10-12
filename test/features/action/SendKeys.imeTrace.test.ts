@@ -97,6 +97,47 @@ describe("IME trace opt-in", () => {
     expect(result.imeTrace).toEqual(["clear", "commit"]);
   });
 
+  test("overlapping clear and commit snapshots keep each line once in order", async () => {
+    setDebugModeEnabled(true);
+    const h = harness("hello");
+    const clearLines = ["seq=1 t=0 event=commitStart", "seq=2 t=0 event=complete"];
+    const commitLines = ["seq=3 t=0 event=commitStart", "seq=4 t=0 event=complete"];
+    h.client.supportsImeTrace = async () => true;
+    h.client.commitViaIme = async (_text, _prior, _signal, delivery) => ({
+      success: true,
+      insertedText: delivery === "clearField" ? "" : "hello",
+      imeTrace: delivery === "clearField" ? clearLines : [...clearLines, ...commitLines],
+    });
+    const result = await h.executor.type({
+      action: "type",
+      text: "hello",
+      mode: "ime",
+      operation: "replace",
+    });
+    expect(result.success).toBe(true);
+    expect(result.imeTrace).toEqual([...clearLines, ...commitLines]);
+  });
+
+  test("merged snapshots keep only the last 512 unique lines", async () => {
+    setDebugModeEnabled(true);
+    const h = harness("hello");
+    const lines = Array.from({ length: 600 }, (_, index) => `seq=${index + 1} t=0 event=complete`);
+    h.client.supportsImeTrace = async () => true;
+    h.client.commitViaIme = async (_text, _prior, _signal, delivery) => ({
+      success: true,
+      insertedText: delivery === "clearField" ? "" : "hello",
+      imeTrace: delivery === "clearField" ? lines.slice(0, 350) : lines.slice(300),
+    });
+    const result = await h.executor.type({
+      action: "type",
+      text: "hello",
+      mode: "ime",
+      operation: "replace",
+    });
+    expect(result.success).toBe(true);
+    expect(result.imeTrace).toEqual(lines.slice(-512));
+  });
+
   test.each(["command", "span"] as const)(
     "%s restoration failure preserves the trace",
     async (path) => {

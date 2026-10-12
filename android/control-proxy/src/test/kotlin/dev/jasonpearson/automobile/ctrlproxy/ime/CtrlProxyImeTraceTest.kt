@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.ime
 
+import android.inputmethodservice.InputMethodService
 import android.os.Looper
 import android.text.InputType
 import android.view.inputmethod.EditorInfo
@@ -112,6 +113,46 @@ class CtrlProxyImeTraceTest {
     val size = service.traceSnapshot().size
     service.onUpdateSelection(0, 0, 1, 1, -1, -1)
     assertEquals(size, service.traceSnapshot().size)
+  }
+
+  @Test
+  fun `password selection and commit start omit positions and text length`() {
+    val service = Robolectric.buildService(CtrlProxyIme::class.java).create().get()
+    val info =
+      EditorInfo().apply {
+        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+      }
+    val inputMethod = service.onCreateInputMethodInterface() as InputMethodService.InputMethodImpl
+    inputMethod.startInput(null, info)
+    assertEquals(info, service.currentInputEditorInfo)
+    var cancelled = false
+    var result: ImeCommitResult? = null
+    service.commitText(SECRET, null, isCancelled = { cancelled }, trace = true) { result = it }
+    shadowOf(Looper.getMainLooper()).idle()
+    service.onUpdateSelection(0, 0, 1, 1, -1, -1)
+    val selection = service.traceSnapshot().last()
+    assertTrue(selection.contains("event=onUpdateSelection"))
+    assertTrue(selection.endsWith("secure=true"))
+    for (field in
+      listOf(
+        "oldSelStart=",
+        "oldSelEnd=",
+        "newSelStart=",
+        "newSelEnd=",
+        "candidatesStart=",
+        "candidatesEnd=",
+      )) assertFalse(
+      selection.contains(field),
+    )
+    val start = service.traceSnapshot().single { it.contains("event=commitStart") }
+    assertTrue(start.contains("secure=true"))
+    assertFalse(start.contains("textLength="))
+    assertFalse(start.contains("units="))
+    cancelled = true
+    shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(50))
+    val finish = requireNotNull(result).trace!!.last()
+    assertTrue(finish.contains("event=commitFinish"))
+    assertFalse(finish.contains("insertedLength="))
   }
 
   @Test

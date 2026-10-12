@@ -1088,8 +1088,8 @@ test("IME trace opt-in serializes after the timeout", () => {
       type: "request_commit_text",
       requestId: "trace-1",
       text: "value",
-      trace: true,
       timeoutMs: 1500,
+      trace: true,
     }),
   ).toBe(
     '{"type":"request_commit_text","requestId":"trace-1","text":"value","timeoutMs":1500,"trace":true}',

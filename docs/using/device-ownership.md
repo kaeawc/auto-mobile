@@ -185,6 +185,11 @@ in a failed daemon-socket response, and beside `reason` as `idle` in the
 means the row's idle deadline passed with no daemon holding the session: time the daemon was
 down counts toward the window, and no heartbeat was judged during it.
 
+The proxy also retires its own idle binding. A daemon-confirmed idle end uses
+`cleanup-expired`. An end known only from the proxy's clock uses `replay-lease-expired`
+with `idle: true`. This reason is proxy-local: the daemon session may still be live or
+have ended otherwise. The daemon's reason replaces it when a session-released notification arrives.
+
 A call still running when its session is released (heartbeat reap, idle sweep,
 owner disconnect or explicit release) is cut and answered with
 `session_ownership_lost`, `retryable: false` and `nextAction:

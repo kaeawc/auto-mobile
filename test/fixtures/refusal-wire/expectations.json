@@ -628,6 +628,14 @@
         "retryable": true,
         "acquireNewSession": false
       }
+    },
+    "no_active_device_session.replay_lease_expired": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "no_active_device_session",
+        "retryable": false,
+        "acquireNewSession": true
+      }
     }
   }
 }

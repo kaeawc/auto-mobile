@@ -146,6 +146,8 @@ import {
   isRecoverableDaemonHandoffReason,
   sessionReleaseReasonFamily,
   SESSION_NOT_FOUND_REASON,
+  IDLE_WINDOW_RELEASE_REASON,
+  REPLAY_LEASE_EXPIRED_REASON,
 } from "./releaseReasons";
 import { daemonProcessOptions, daemonReuseOptions } from "./daemonOptionScopes";
 import {
@@ -4829,7 +4831,7 @@ export class DaemonMcpProxy {
     // A selector call may itself discover the idle release. Fence before resolving its device,
     // so loss reporting, stall recovery and routing all see the same named survivor.
     if (!this.terminalBoundSession && this.isBoundSessionReplayExpired()) {
-      this.fenceBoundSessionUuid(this.boundSessionUuid!, "replay-lease-expired");
+      this.retireIdleBinding(this.boundSessionUuid!);
     }
     const terminal = this.terminalBoundSession;
     if (!terminal) {
@@ -5204,7 +5206,7 @@ export class DaemonMcpProxy {
     if (!this.isBoundSessionReplayExpired()) {
       return;
     }
-    this.fenceBoundSessionUuid(this.boundSessionUuid!, "replay-lease-expired");
+    this.retireIdleBinding(this.boundSessionUuid!);
     // The latest binding idled out, but a selector call may still reach another live session
     // this proxy holds (#10692): only the idle binding is retired, not the caller's device.
     if (survivingSessionUsable?.()) {
@@ -5478,6 +5480,14 @@ export class DaemonMcpProxy {
     this.recoverableBoundSessionHandoffIsDeviceRestart = false;
   }
 
+  private retireIdleBinding(sessionUuid: string): void {
+    // CLI idle declaration stops the keeper and closes without recording its ack or another call.
+    const reason = this.daemonIdleReports.has(sessionUuid)
+      ? IDLE_WINDOW_RELEASE_REASON
+      : REPLAY_LEASE_EXPIRED_REASON;
+    this.fenceBoundSessionUuid(sessionUuid, reason);
+  }
+
   private fenceBoundSessionUuid(
     sessionUuid: string,
     reason: string,
@@ -5527,7 +5537,7 @@ export class DaemonMcpProxy {
    */
   private discoveryAfterResultMintRelease(): boolean {
     if (!this.terminalBoundSession && this.isBoundSessionReplayExpired()) {
-      this.fenceBoundSessionUuid(this.boundSessionUuid!, "replay-lease-expired");
+      this.retireIdleBinding(this.boundSessionUuid!);
     }
     const terminal = this.terminalBoundSession;
     if (!terminal) {
@@ -7231,7 +7241,7 @@ export class DaemonMcpProxy {
       !this.terminalBoundSession &&
       this.isBoundSessionReplayExpired()
     ) {
-      this.fenceBoundSessionUuid(sessionUuid, "replay-lease-expired");
+      this.retireIdleBinding(sessionUuid);
     }
   }
 

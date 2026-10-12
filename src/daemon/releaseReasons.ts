@@ -217,7 +217,11 @@ export function isExpiryReleaseReason(reason: string): reason is SessionReleaseR
 
 /** Whether the session ran out its idle window (see {@link SessionReleaseReasonTraits.idle}). */
 export function isIdleReleaseReason(reason: string): boolean {
-  return sessionReleaseReasonTraits(reason).idle;
+  return (
+    sessionReleaseReasonTraits(reason).idle ||
+    (Object.hasOwn(PROXY_BINDING_END_TRAITS, reason) &&
+      PROXY_BINDING_END_TRAITS[reason as keyof typeof PROXY_BINDING_END_TRAITS].idle)
+  );
 }
 
 /**
@@ -235,6 +239,29 @@ export function isRecoverableDaemonReleaseReason(reason: string): boolean {
 
 /** Stable proxy fallback when a definitive loss answer names no daemon release reason. */
 export const SESSION_NOT_FOUND_REASON = "session-not-found";
+
+/**
+ * This connection's idle replay lease ended on the proxy's clock. This reason is proxy-local:
+ * the daemon session may still be live or may have ended otherwise. A session-released
+ * notification replaces it with the daemon's reason once that notification arrives.
+ */
+export const REPLAY_LEASE_EXPIRED_REASON = "replay-lease-expired";
+
+/** Binding ends invented by the proxy without a daemon release reason; never persisted. */
+const PROXY_BINDING_END_TRAITS: Readonly<
+  Record<
+    | typeof REPLAY_LEASE_EXPIRED_REASON
+    | typeof SESSION_NOT_FOUND_REASON
+    | "liveness-owner-conflict"
+    | "released",
+    Pick<SessionReleaseReasonTraits, "idle">
+  >
+> = {
+  [REPLAY_LEASE_EXPIRED_REASON]: { idle: true },
+  [SESSION_NOT_FOUND_REASON]: { idle: false },
+  "liveness-owner-conflict": { idle: false },
+  released: { idle: false },
+};
 
 /** Only daemon handoffs can rehydrate without restarting the managed execution's device. */
 export function isRecoverableDaemonHandoffReason(reason: string): boolean {

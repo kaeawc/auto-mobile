@@ -405,7 +405,7 @@ export interface Session {
    * The last time the session's liveness OWNER was alive: its own heartbeats, a recorded
    * ownership claim, or the restore of a persisted owner. Unlike `lastHeartbeat` it is not advanced
    * by tool activity, so a non-owner that merely uses the session cannot keep the owner's lease live
-   * (#10050). Unset until an owner exists; the lease then falls back to `lastHeartbeat`.
+   * (#10050). Unset until owner proof arrives; a mint-bound token uses its bind instant for claims.
    */
   lastOwnerHeartbeat?: number;
   /**
@@ -440,6 +440,12 @@ export interface Session {
    * the token before extending the session.
    */
   livenessOwnerToken?: string;
+  /**
+   * The session-clock instant an acquisition bound the owner token. Non-persisted: it starts
+   * the owner lease for claim judgement while the owner has no heartbeat stamp; it is not a
+   * heartbeat. Cleared with the token it belongs to.
+   */
+  livenessOwnerBoundAt?: number;
   /**
    * Tokens whose explicit ownership claim this daemon has already processed.
    * A client may retry the same claim when its reply is lost; if a newer owner
@@ -11007,13 +11013,16 @@ export class SessionManager {
       // Tick adoption has no claim history. Fence all keeper ticks before the release write yields.
       session.livenessOwnershipClaims ??= new Set<string>();
       session.livenessOwnershipClaims.add(ownerToken);
+      const previousOwnerBoundAt = session.livenessOwnerBoundAt;
       session.livenessOwnerToken = undefined;
+      session.livenessOwnerBoundAt = undefined;
       // Fence an older heartbeat write's failure rollback across the handoff.
       session.activityGeneration++;
       try {
         await this.deviceSessionRepository.recordLivenessOwnership?.(sessionId, null);
       } catch (error) {
         session.livenessOwnerToken = ownerToken;
+        session.livenessOwnerBoundAt = previousOwnerBoundAt;
         if (!this.isAdmittedForAutomation(session)) {
           return "not-found";
         }
@@ -11041,9 +11050,11 @@ export class SessionManager {
   ): Promise<LivenessClaimOutcome> {
     const previousOwnerToken = session.livenessOwnerToken;
     const previousOwnerHeartbeat = session.lastOwnerHeartbeat;
+    const previousOwnerBoundAt = session.livenessOwnerBoundAt;
     const alreadyProcessed = processedClaims.has(ownerToken);
     processedClaims.add(ownerToken);
     session.livenessOwnerToken = ownerToken;
+    session.livenessOwnerBoundAt = undefined;
     // Stamp the lease in the same step as the takeover, still inside the claim mutex. The
     // request handler records the claimant's heartbeat several awaits later; until then a second
     // foreign claimant would read the previous, lapsed lease and displace this one (#10050).
@@ -11052,7 +11063,7 @@ export class SessionManager {
       await this.persistNewLivenessOwnershipClaim(
         session,
         ownerToken,
-        { previousOwnerToken, previousOwnerHeartbeat },
+        { previousOwnerToken, previousOwnerHeartbeat, previousOwnerBoundAt },
         processedClaims,
       );
     } catch (error) {
@@ -11457,6 +11468,7 @@ export class SessionManager {
     previous: {
       previousOwnerToken: string | undefined;
       previousOwnerHeartbeat: number | undefined;
+      previousOwnerBoundAt: number | undefined;
     },
     processedClaims: Set<string>,
   ): Promise<void> {
@@ -11471,6 +11483,7 @@ export class SessionManager {
       processedClaims.delete(ownerToken);
       session.livenessOwnerToken = previous.previousOwnerToken;
       session.lastOwnerHeartbeat = previous.previousOwnerHeartbeat;
+      session.livenessOwnerBoundAt = previous.previousOwnerBoundAt;
       settleClaimantHeartbeat("undo");
       throw error;
     }
@@ -11532,10 +11545,14 @@ export class SessionManager {
     return true;
   }
 
-  /** Bind acquisition identity only: no heartbeat, claim history or release deadline changes. */
+  /** Bind acquisition identity and its claim-only lease start; no heartbeat or release changes. */
   bindAcquiredLivenessOwnerToken(sessionId: string, ownerToken: string): boolean {
     const session = this.peekSession(sessionId);
-    return session !== null && this.adoptUnownedLivenessOwnerToken(session, ownerToken);
+    if (!session || !this.adoptUnownedLivenessOwnerToken(session, ownerToken)) {
+      return false;
+    }
+    session.livenessOwnerBoundAt = this.sessionNow();
+    return true;
   }
 
   private adoptUnownedLivenessOwnerToken(session: Session, ownerToken: string): boolean {
@@ -11550,6 +11567,7 @@ export class SessionManager {
       return false;
     }
     session.livenessOwnerToken = ownerToken;
+    session.livenessOwnerBoundAt = undefined;
     return true;
   }
 

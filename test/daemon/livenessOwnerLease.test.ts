@@ -5,6 +5,13 @@ import {
   isLivenessOwnerLeaseLive,
   livenessLeaseState,
   sessionLeaseSnapshot,
+  ownerLeaseHeartbeat,
+  sessionOwnerLeaseSnapshot,
+  sessionJudgedLeaseSnapshot,
+  judgedLeaseHeartbeat,
+  judgesOwnerHeartbeats,
+  ownerLeaseLiveAt,
+  type LeaseSession,
   suspectGraceMsFor,
   type LivenessOwnerLeaseSnapshot,
 } from "../../src/daemon/livenessOwnerLease";
@@ -101,5 +108,93 @@ describe("suspect grace window (#10051)", () => {
     expect(livenessLeaseState(sessionLeaseSnapshot(session, 55_000)).phase).toBe("live");
     // A heartbeat after the resume point wins over the forgiveness floor.
     expect(effectiveLastHeartbeat({ ...session, lastHeartbeat: 52_000 })).toBe(52_000);
+  });
+});
+
+describe("mint-bound claim-only lease start", () => {
+  const mint = {
+    lastHeartbeat: 9_000,
+    livenessOwnerBoundAt: 0,
+    livenessOwnerToken: "minter",
+    heartbeatTimeoutMs: 4_000,
+    livenessPolicy: "heartbeat",
+    hasReceivedHeartbeat: false,
+    ownership: "owned",
+  } satisfies LeaseSession;
+
+  test("owner lease uses mint at zero, then owner proof, with the later stall floor", () => {
+    expect(ownerLeaseHeartbeat(mint)).toBe(0);
+    expect(ownerLeaseHeartbeat({ ...mint, lastOwnerHeartbeat: 2_000 })).toBe(2_000);
+    expect(ownerLeaseHeartbeat({ ...mint, lastOwnerHeartbeat: 0 })).toBe(0);
+    expect(ownerLeaseHeartbeat({ ...mint, stallForgivenAt: 10_000 })).toBe(10_000);
+    expect(
+      ownerLeaseHeartbeat({ ...mint, lastOwnerHeartbeat: 12_000, stallForgivenAt: 10_000 }),
+    ).toBe(12_000);
+    expect(ownerLeaseHeartbeat({ ...mint, livenessOwnerBoundAt: undefined })).toBe(9_000);
+  });
+
+  test("claim-only mint grace ends at the same strict lease-plus-grace boundary", () => {
+    expect(sessionOwnerLeaseSnapshot(mint, 8_000)).toEqual({
+      now: 8_000,
+      lastHeartbeat: 0,
+      heartbeatTimeoutMs: 4_000,
+      livenessPolicy: "heartbeat",
+      graceMs: SUSPECT_GRACE_MS,
+    });
+    expect(livenessLeaseState(sessionOwnerLeaseSnapshot(mint, 8_000)).phase).toBe("suspect");
+    expect(livenessLeaseState(sessionOwnerLeaseSnapshot(mint, 8_001)).phase).toBe("lapsed");
+  });
+
+  test("mint grace requires an owner token, a mint start, an owned session and owner-lease policy", () => {
+    expect(sessionOwnerLeaseSnapshot({ ...mint, livenessOwnerToken: undefined }, 0).graceMs).toBe(
+      0,
+    );
+    expect(sessionOwnerLeaseSnapshot({ ...mint, livenessOwnerBoundAt: undefined }, 0).graceMs).toBe(
+      0,
+    );
+    expect(sessionOwnerLeaseSnapshot({ ...mint, ownership: "awaiting-owner" }, 0).graceMs).toBe(0);
+    expect(sessionOwnerLeaseSnapshot({ ...mint, livenessPolicy: "cli-idle" }, 0).graceMs).toBe(0);
+    expect(
+      sessionOwnerLeaseSnapshot({ ...mint, livenessPolicy: "managed-execution" }, 0).graceMs,
+    ).toBe(SUSPECT_GRACE_MS);
+    expect(sessionOwnerLeaseSnapshot({ ...mint, lastOwnerHeartbeat: 2_000 }, 0).graceMs).toBe(0);
+    expect(
+      sessionOwnerLeaseSnapshot(
+        { ...mint, lastOwnerHeartbeat: 2_000, hasReceivedHeartbeat: true },
+        0,
+      ).graceMs,
+    ).toBe(SUSPECT_GRACE_MS);
+  });
+
+  test("mint start changes no reaper, suspect, raw-heartbeat or stall-eligibility judgement", () => {
+    const unbound = { ...mint, livenessOwnerToken: undefined, livenessOwnerBoundAt: undefined };
+    expect(suspectGraceMsFor(mint)).toBe(0);
+    expect(judgesOwnerHeartbeats(mint)).toBe(false);
+    expect(effectiveLastHeartbeat(mint)).toBe(9_000);
+    expect(judgedLeaseHeartbeat(mint)).toBe(judgedLeaseHeartbeat(unbound));
+    expect(sessionLeaseSnapshot(mint, 12_000)).toEqual(sessionLeaseSnapshot(unbound, 12_000));
+    expect(sessionJudgedLeaseSnapshot(mint, 12_000)).toEqual(
+      sessionJudgedLeaseSnapshot(unbound, 12_000),
+    );
+    expect(ownerLeaseLiveAt(mint, 12_000)).toBe(ownerLeaseLiveAt(unbound, 12_000));
+    expect(ownerLeaseLiveAt(mint, 13_001)).toBe(false);
+  });
+
+  test("owner proof ignores a newer mint start in every existing owner-heartbeat reader", () => {
+    const proved = {
+      ...mint,
+      livenessOwnerBoundAt: 20_000,
+      lastOwnerHeartbeat: 2_000,
+      hasReceivedHeartbeat: true,
+    };
+    const withoutMint = { ...proved, livenessOwnerBoundAt: undefined };
+    expect(ownerLeaseHeartbeat(proved)).toBe(2_000);
+    expect(judgedLeaseHeartbeat(proved)).toBe(judgedLeaseHeartbeat(withoutMint));
+    expect(sessionOwnerLeaseSnapshot(proved, 12_000)).toEqual(
+      sessionOwnerLeaseSnapshot(withoutMint, 12_000),
+    );
+    expect(sessionJudgedLeaseSnapshot(proved, 12_000)).toEqual(
+      sessionJudgedLeaseSnapshot(withoutMint, 12_000),
+    );
   });
 });

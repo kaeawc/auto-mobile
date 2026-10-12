@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
@@ -69,7 +69,12 @@ class FakeSessionManager implements CleanupManager {
     this.acquisitionCleanups.push({ deviceId, cleanup, capMs });
   }
 
-  release(sessionId: string, deviceId: string, upgradeOnly = false): void {
+  release(
+    sessionId: string,
+    deviceId: string,
+    upgradeOnly = false,
+    deviceIdentityReplaced = false,
+  ): void {
     for (const callback of this.releaseCallbacks) {
       callback(
         sessionId,
@@ -83,7 +88,7 @@ class FakeSessionManager implements CleanupManager {
           terminal: false,
           heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
         },
-        { upgradeOnly },
+        { upgradeOnly, deviceIdentityReplaced },
       );
     }
   }
@@ -101,6 +106,14 @@ class FakeRecordings implements RecordingSessionCleanupDeps, RecordingAcquisitio
     string,
     { recordingId: string; deviceId: string; ownerSessionUuid: string | undefined }
   >();
+  abandoned: string[] = [];
+  abandonFailure: Error | undefined;
+  async abandonRecordingsOnReplacedDevice(sessionId: string, deviceId: string): Promise<void> {
+    this.abandoned.push(`${sessionId}@${deviceId}`);
+    if (this.abandonFailure) {
+      throw this.abandonFailure;
+    }
+  }
   segmentedStops: string[] = [];
   deviceGestureRecording: { ownerSessionUuid: string | undefined; deviceId: string } | null = null;
   testStops = 0;
@@ -231,6 +244,71 @@ describe("registerRecordingSessionCleanup", () => {
     }
   });
 
+  afterEach(() => {
+    for (const sessionId of ["session-a", "session-b", "session-c"]) {
+      takeRecordingIdsFinalizedByRelease(sessionId);
+    }
+  });
+
+  test("replaced release abandons only on the host without quarantining the serial", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("emulator-5554", "session-a");
+    recordings.segmentedIds = ["segment-a"];
+    recordings.deviceGestureRecording = {
+      ownerSessionUuid: "session-a",
+      deviceId: "emulator-5554",
+    };
+    const stopVideo = spyOn(recordings, "stopVideoRecording");
+    const stopSegments = spyOn(recordings, "stopSegmentedRecordings");
+    const stopGestures = spyOn(recordings, "stopDeviceGestureRecording");
+    const incomplete = spyOn(recordings, "markVideoRecordingIncomplete");
+    try {
+      manager.release("session-a", "emulator-5554", false, true);
+      await drainUntilQuiescent(recordings.timer);
+      expect(recordings.abandoned).toEqual(["session-a@emulator-5554"]);
+      expect(manager.pendingCleanups).toEqual([]);
+      expect(stopVideo).not.toHaveBeenCalled();
+      expect(stopSegments).not.toHaveBeenCalled();
+      expect(stopGestures).not.toHaveBeenCalled();
+      expect(incomplete).not.toHaveBeenCalled();
+      expect(takeRecordingIdsFinalizedByRelease("session-a")).toEqual([
+        "rec-session-a",
+        "segment-a",
+        "test-session-a",
+      ]);
+    } finally {
+      stopVideo.mockRestore();
+      stopSegments.mockRestore();
+      stopGestures.mockRestore();
+      incomplete.mockRestore();
+    }
+  });
+
+  test("upgrade-only replaced release does no recording work", () => {
+    const { manager, recordings } = setup();
+    recordings.start("emulator-5554", "session-a");
+    manager.release("session-a", "emulator-5554", true, true);
+    expect(recordings.abandoned).toEqual([]);
+    expect(manager.pendingCleanups).toEqual([]);
+    expect(takeRecordingIdsFinalizedByRelease("session-a")).toEqual([]);
+  });
+
+  test("a rejected host-only abandon is warned without escaping the release listener", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("emulator-5554", "session-a");
+    recordings.abandonFailure = new Error("host reap failed");
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(() => manager.release("session-a", "emulator-5554", false, true)).not.toThrow();
+      await drainUntilQuiescent(recordings.timer);
+      expect(warn.mock.calls.flat().map(String).join(" ")).toContain("host reap failed");
+      expect(manager.pendingCleanups).toEqual([]);
+      takeRecordingIdsFinalizedByRelease("session-a");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("idle release stops the owner's recording and the next owner can start one", async () => {
     const { manager, recordings } = setup();
     recordings.start("SIM-1", "session-a");
@@ -328,6 +406,99 @@ describe("registerRecordingSessionCleanup", () => {
     await manager.settle();
 
     expect(recordings.segmentedStops).toEqual(["session-a@SIM-1"]);
+  });
+
+  test("release stops an owned video listed only after the initial ownership snapshot", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+    const snapshot = spyOn(recordings, "activeRecordingIdsForOwner").mockReturnValue([]);
+    const stop = spyOn(recordings, "stopVideoRecording");
+    try {
+      manager.release("session-a", "SIM-1");
+      await manager.settle();
+
+      expect(stop).toHaveBeenCalledWith("rec-session-a");
+      expect(recordings.active.size).toBe(0);
+      expect(recordings.incomplete).toEqual([]);
+      expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      snapshot.mockRestore();
+      stop.mockRestore();
+    }
+  });
+
+  test("a video discovered before the cap is included in cap teardown and retries", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+    recordings.hangStops = true;
+    recordings.teardownRetryBudgetMs = 2_000;
+    const snapshot = spyOn(recordings, "activeRecordingIdsForOwner")
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([]);
+    const force = spyOn(recordings, "markVideoRecordingIncomplete").mockRejectedValue(
+      new Error("capture retained"),
+    );
+    const stop = spyOn(recordings, "stopVideoRecording");
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      manager.release("session-a", "SIM-1");
+      await drainUntilQuiescent(recordings.timer);
+      expect(stop).toHaveBeenCalledWith("rec-session-a");
+      await recordings.timer.advanceTimeAsync(120_000, () => drainUntilQuiescent(recordings.timer));
+      expect(force).toHaveBeenCalledWith("rec-session-a");
+      await recordings.timer.advanceTimeAsync(2_000, () => drainUntilQuiescent(recordings.timer));
+      await manager.settle();
+
+      expect(recordings.giveUps).toEqual([
+        {
+          deviceId: "SIM-1",
+          sessionId: "session-a",
+          recordingIds: ["rec-session-a"],
+          attempts: 1,
+          budgetMs: 2_000,
+        },
+      ]);
+      expect(force).toHaveBeenCalledTimes(2);
+      expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      snapshot.mockRestore();
+      force.mockRestore();
+      stop.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  test("a segmented stage settling after the cap leaves a same-session video started after the cap running", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+    const wedge = Promise.withResolvers<void>();
+    const segments = spyOn(recordings, "stopSegmentedRecordings").mockReturnValue(wedge.promise);
+    const stop = spyOn(recordings, "stopVideoRecording");
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      manager.release("session-a", "SIM-1");
+      await recordings.timer.advanceTimersByTimeAsync(120_000);
+      await manager.settle();
+      expect(recordings.incomplete).toEqual(["rec-session-a"]);
+      recordings.active.set("SIM-1", {
+        recordingId: "replacement-a",
+        deviceId: "SIM-1",
+        ownerSessionUuid: "session-a",
+      });
+
+      wedge.resolve();
+      await drainUntilQuiescent(recordings.timer);
+
+      expect(stop).not.toHaveBeenCalled();
+      expect(recordings.active.get("SIM-1")?.recordingId).toBe("replacement-a");
+      expect(recordings.incomplete).toEqual(["rec-session-a"]);
+      expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      wedge.resolve();
+      segments.mockRestore();
+      stop.mockRestore();
+      warn.mockRestore();
+    }
   });
 
   test("release stops the owner's device gesture recording", async () => {
@@ -618,6 +789,9 @@ describe("registerRecordingSessionCleanup", () => {
           });
           manager.release("session-a", device.deviceId);
           const done = manager.settle();
+          // Park in the selected wedged stage before advancing to the cap boundary.
+          await drainUntilQuiescent(timer);
+          expect(segmentActive).toBe(wedgedStage === "segmented");
           await timer.advanceTimersByTimeAsync(120_000);
           await done;
           // Preserve the all-recordings coverage, and distinguish actual test teardown from

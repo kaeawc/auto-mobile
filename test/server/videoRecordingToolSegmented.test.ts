@@ -31,6 +31,8 @@ import {
   setSegmentedSessionTimer,
   setVideoRecordingDeviceDetectorForTesting,
   stopSegmentedVideoRecordingsForOwner,
+  finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice,
+  segmentedVideoRecordingHandlesForOwner,
 } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
@@ -189,6 +191,64 @@ describe("videoRecording tool segmentation branch", () => {
   });
 
   const handler = () => ToolRegistry.getTool("videoRecording")!.deviceAwareHandler!;
+
+  test("replaced-device finalize retains two completed segments and writes their manifest once", async () => {
+    const rollbacks: Array<[string, { deviceWide?: boolean; hostOnly?: boolean } | undefined]> = [];
+    writeFileSpy = spyOn(fsPromises, "writeFile").mockResolvedValue(undefined);
+    setSegmentedSessionRecordingDependencies({
+      startVideoRecording: async ({ outputName }) => {
+        const id = outputName ?? "segment";
+        segmentStarts.push(id);
+        return makeSegmentRecording(id, outputName);
+      },
+      stopVideoRecording: async (id = "missing") => {
+        segmentStops.push(id);
+        return { metadata: makeSegmentMetadata(id), evictedRecordingIds: [] };
+      },
+      rollbackVideoRecordingStart: async (id, options) => {
+        rollbacks.push([id, options]);
+      },
+    });
+    const start = parse(
+      await handler()(androidDevice, {
+        action: "start",
+        deviceId: androidDevice.deviceId,
+        maxDuration: 600,
+        outputName: "host-only",
+        sessionUuid: "session-a",
+      }),
+    );
+    const handle = (start.recordings as Array<{ recordingId: string }>)[0].recordingId;
+    for (const count of [2, 3]) {
+      segmentTimer.advanceTime(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS);
+      await waitFor(() => segmentStarts.length === count, `segment ${count}`);
+    }
+    const stopsBefore = segmentStops.length;
+    await Promise.all([
+      finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice("session-a", androidDevice.deviceId),
+      finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice("session-a", androidDevice.deviceId),
+    ]);
+    expect(rollbacks).toEqual([["host-only-seg2", { deviceWide: false, hostOnly: true }]]);
+    expect(segmentStops).toHaveLength(stopsBefore);
+    expect(segmentedVideoRecordingHandlesForOwner("session-a", androidDevice.deviceId)).toEqual([]);
+    expect(writeFileSpy).toHaveBeenCalledTimes(1);
+    const manifest = JSON.parse(String(writeFileSpy.mock.calls[0][1]));
+    expect(
+      manifest.segments.map((segment: { recordingId: string }) => segment.recordingId),
+    ).toEqual(["host-only", "host-only-seg1"]);
+    const stopped = parse(
+      await handler()(androidDevice, {
+        action: "stop",
+        recordingId: handle,
+        sessionUuid: "session-a",
+      }),
+    );
+    expect(
+      (stopped.recordings as Array<{ recordingId: string }>).map((segment) => segment.recordingId),
+    ).toEqual(["host-only", "host-only-seg1"]);
+    expect(writeFileSpy).toHaveBeenCalledTimes(1);
+    expect(segmentStops).toHaveLength(stopsBefore);
+  });
 
   test.each([0.4, 0.5, 0.999])(
     "the tool schema rejects fractional FPS %p before capture",

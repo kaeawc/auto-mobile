@@ -46,6 +46,7 @@ export class DisplayGeometryTracker {
   private refreshChain: Promise<void> = Promise.resolve();
   /** Bumped per accepted push; a refresh from an older push is superseded and discarded. */
   private generation = 0;
+  private disposed = false;
 
   constructor(
     readonly timeline: ScreenGeometryTimeline,
@@ -53,8 +54,14 @@ export class DisplayGeometryTracker {
     private readonly timer: Timer,
   ) {}
 
+  /** Stop all future device reads and ignore results already on the wire. */
+  dispose(): void {
+    this.disposed = true;
+    this.refreshChain = Promise.resolve();
+  }
+
   handleTransition(event: DisplayChange): void {
-    if (event.displayId !== PRIMARY_DISPLAY_ID || event.change === "removed") {
+    if (this.disposed || event.displayId !== PRIMARY_DISPLAY_ID || event.change === "removed") {
       return;
     }
     const at = this.timer.now();
@@ -87,7 +94,20 @@ export class DisplayGeometryTracker {
    * caller can report the geometry as unconfirmed instead of silently trusting it.
    */
   async verifyAtStop(): Promise<string | undefined> {
-    const actual = await this.probe.readRotation();
+    if (this.disposed) {
+      return undefined;
+    }
+    const actual = await this.probe.readRotation().then(undefined, (error: unknown) => {
+      if (!this.disposed) {
+        throw error;
+      }
+      // A cancelled read cannot confirm geometry; its late failure is safe to ignore.
+      logger.debug("[DisplayGeometryTracker] Cancelled stop-time geometry read failed", error);
+      return null;
+    });
+    if (this.disposed) {
+      return undefined;
+    }
     if (actual === null) {
       throw new Error("WindowManager did not report a display rotation at stop");
     }
@@ -99,14 +119,17 @@ export class DisplayGeometryTracker {
   }
 
   private async refresh(at: number, rotationKnown: boolean, generation: number): Promise<void> {
-    if (generation !== this.generation) {
+    if (this.disposed || generation !== this.generation) {
       // A newer push is queued behind this one and re-reads everything; applying this
       // older size now would briefly shadow the newer rotation with a stale geometry.
       return;
     }
     const rotation = rotationKnown ? undefined : await this.readRotationOrNull();
+    if (this.disposed) {
+      return;
+    }
     const display = await this.readSizeOrNull();
-    if (generation !== this.generation) {
+    if (this.disposed || generation !== this.generation) {
       return;
     }
     this.timeline.apply({ rotation, display }, at);

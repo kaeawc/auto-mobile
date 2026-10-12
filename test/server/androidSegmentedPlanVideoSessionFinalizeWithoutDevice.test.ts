@@ -38,7 +38,9 @@ async function sessionWithTwoCompletedAndOneActive() {
     metadata: metadata(id ?? "missing"),
     evictedRecordingIds: [],
   }));
-  const rollback = mock(async (_id: string, _options?: { deviceWide?: boolean }) => {});
+  const rollback = mock(
+    async (_id: string, _options?: { deviceWide?: boolean; hostOnly?: boolean }) => {},
+  );
   const session = new AndroidSegmentedPlanVideoSession({
     device,
     outputNamePrefix: "plan",
@@ -79,6 +81,17 @@ describe("AndroidSegmentedPlanVideoSession.finalizeWithoutDevice", () => {
     const warnings = result.metadata.flatMap((entry) => entry.warnings ?? []).join(" ");
     expect(warnings).toContain("id-plan-seg2");
     expect(warnings).toContain("own time limit");
+  });
+
+  test("replaced-device finalize keeps host segments and abandons the active segment host-only", async () => {
+    const { session, stop, rollback } = await sessionWithTwoCompletedAndOneActive();
+    const result = await session.finalizeWithoutDevice({ hostOnly: true });
+    expect(result.recordingIds).toEqual(["id-plan", "id-plan-seg1"]);
+    expect(rollback.mock.calls).toEqual([["id-plan-seg2", { deviceWide: false, hostOnly: true }]]);
+    expect(stop).not.toHaveBeenCalled();
+    const warnings = result.metadata.flatMap((entry) => entry.warnings ?? []).join(" ");
+    expect(warnings).toContain("device identity was replaced");
+    expect(warnings).not.toContain("own time limit");
   });
 
   test("abort() still rolls back every segment, completed ones included", async () => {

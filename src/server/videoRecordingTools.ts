@@ -196,6 +196,21 @@ const segmentedSessions = (() => {
     ): Promise<StoppedSegmentedSession> {
       const result = await session.stop();
       byHandle.delete(handle);
+      return this.rememberFinished(handle, session, result);
+    },
+    async finalizeReplacedAndRemove(
+      handle: string,
+      session: AndroidSegmentedPlanVideoSession,
+    ): Promise<StoppedSegmentedSession> {
+      byHandle.delete(handle);
+      const result = await session.finalizeWithoutDevice({ hostOnly: true });
+      return this.rememberFinished(handle, session, result);
+    },
+    async rememberFinished(
+      handle: string,
+      session: AndroidSegmentedPlanVideoSession,
+      result: SegmentedSessionResult,
+    ): Promise<StoppedSegmentedSession> {
       const { segments, manifestPath } = await persistSegmentedResult(handle, result);
       const stopped = { sessionId: handle, segments, manifestPath, highlights: result.highlights };
       finished.set(handle, { owner: session.ownerSession, deviceId: session.deviceId, stopped });
@@ -309,6 +324,24 @@ export async function stopSegmentedVideoRecordingsForOwner(
     } catch (error) {
       logger.warn(
         `[VideoRecording] Failed to finalize segmented session ${handle} of released session ` +
+          `${sessionUuid} on device ${deviceId}: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+}
+
+/** Preserve completed host segments without addressing a replaced device serial. */
+export async function finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice(
+  sessionUuid: string,
+  deviceId: string,
+): Promise<void> {
+  for (const [handle, session] of segmentedSessions.forOwner(sessionUuid, deviceId)) {
+    try {
+      await segmentedSessions.finalizeReplacedAndRemove(handle, session);
+    } catch (error) {
+      logger.warn(
+        `[VideoRecording] Failed to finalize host segments ${handle} of replaced-device session ` +
           `${sessionUuid} on device ${deviceId}: ${errorMessage(error)}`,
         error,
       );

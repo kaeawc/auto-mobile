@@ -13,11 +13,13 @@ import {
 import {
   adoptOwnerlessSegmentedVideoRecordings,
   hasSegmentedVideoRecordingsForOwner,
+  finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice,
   segmentedVideoRecordingHandlesForOwner,
   stopSegmentedVideoRecordingsForOwner,
 } from "./videoRecordingTools";
 import {
   adoptOwnerlessActiveVideoRecordings,
+  abandonVideoRecordingOnReplacedDevice,
   listActiveVideoRecordingIdsForOwner,
   listActiveVideoRecordings,
   listOwnedActiveVideoRecordingIds,
@@ -36,20 +38,24 @@ export interface RecordingTeardownGiveUp {
   budgetMs: number;
 }
 
-const recorderRecoveryNeeded = new Map<string, RecordingTeardownGiveUp>();
+const recorderRecoveryNeeded = new Map<string, RecordingTeardownGiveUp[]>();
 
 /** A late stop clears recovery only when every original capture has released ownership. */
 export function recordingTeardownRecoveryNeeded(
   deviceId: string,
 ): RecordingTeardownGiveUp | undefined {
-  const giveUp = recorderRecoveryNeeded.get(deviceId);
-  if (!giveUp) {
+  const giveUps = recorderRecoveryNeeded.get(deviceId);
+  if (!giveUps) {
     return undefined;
   }
   const active = new Set(listOwnedActiveVideoRecordingIds());
-  const gestureId = ownedDeviceGestureRecordingId(giveUp.sessionId, deviceId);
-  if (giveUp.recordingIds.some((id) => active.has(id) || id === gestureId)) {
-    return giveUp;
+  const retained = giveUps.filter((giveUp) => {
+    const gestureId = ownedDeviceGestureRecordingId(giveUp.sessionId, deviceId);
+    return giveUp.recordingIds.some((id) => active.has(id) || id === gestureId);
+  });
+  if (retained.length > 0) {
+    recorderRecoveryNeeded.set(deviceId, retained);
+    return retained[0];
   }
   recorderRecoveryNeeded.delete(deviceId);
   return undefined;
@@ -79,6 +85,8 @@ function defaultFinalizeCapMs(deviceId: string): number {
 
 /** The recording operations session cleanup needs, injectable so tests need no device or DB. */
 export interface RecordingSessionCleanupDeps {
+  /** Finalize only host state; the serial now belongs to a different device. */
+  abandonRecordingsOnReplacedDevice(sessionId: string, deviceId: string): Promise<void>;
   /** Synchronous pre-check: false means the release has no recording work and stays a no-op. */
   hasRecordingsToStop(sessionId: string | undefined, deviceId: string): boolean;
   /** Finalize timer-driven segmented sessions the session owns on the device. */
@@ -111,6 +119,7 @@ export interface RecordingSessionCleanupDeps {
 }
 
 export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
+  abandonRecordingsOnReplacedDevice,
   hasRecordingsToStop: (sessionId, deviceId) =>
     listOwnedActiveVideoRecordingIds().length > 0 ||
     hasSegmentedVideoRecordingsForOwner(sessionId, deviceId) ||
@@ -144,9 +153,40 @@ export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
   }),
   teardownRetryBudgetMs: RECORDING_TEARDOWN_RETRY_BUDGET_MS,
   markDeviceNeedsRecorderRecovery: (giveUp) => {
-    recorderRecoveryNeeded.set(giveUp.deviceId, giveUp);
+    const giveUps = recorderRecoveryNeeded.get(giveUp.deviceId) ?? [];
+    giveUps.push(giveUp);
+    recorderRecoveryNeeded.set(giveUp.deviceId, giveUps);
   },
 };
+
+async function abandonRecordingsOnReplacedDevice(
+  sessionId: string,
+  deviceId: string,
+): Promise<void> {
+  await logHostOnlyAbandonFailure(() =>
+    finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice(sessionId, deviceId),
+  );
+  for (const recordingId of listActiveVideoRecordingIdsForOwner(sessionId, deviceId)) {
+    await logHostOnlyAbandonFailure(() => abandonVideoRecordingOnReplacedDevice(recordingId));
+  }
+  const gestureId = ownedDeviceGestureRecordingId(sessionId, deviceId);
+  if (gestureId !== undefined) {
+    await logHostOnlyAbandonFailure(() =>
+      stopDeviceGestureRecording(gestureId, undefined, undefined, { hostOnly: true }),
+    );
+  }
+}
+
+async function logHostOnlyAbandonFailure(abandon: () => Promise<unknown>): Promise<void> {
+  try {
+    await abandon();
+  } catch (error) {
+    logger.warn(
+      `[RecordingSessionCleanup] Host-only recording cleanup failed: ${errorMessage(error)}`,
+      error,
+    );
+  }
+}
 
 /**
  * Recording ids captured at release time, per released session. Captured inside the release
@@ -180,17 +220,26 @@ async function attempt(description: string, work: () => Promise<void>): Promise<
   }
 }
 
+interface RecordingFinalizeStageState {
+  stopping: Set<string>;
+  capExpired: boolean;
+}
+
 /** `sessionId` undefined selects the owner-less recordings on the device (#10961). */
 async function stopOwnedRecordings(
   deps: RecordingSessionCleanupDeps,
   sessionId: string | undefined,
   deviceId: string,
-  stopping: Set<string>,
+  state: RecordingFinalizeStageState,
   deviceGestureRecordingId: string | undefined,
 ): Promise<void> {
+  const { stopping } = state;
   // `stopping` starts as every recording the owner has; a stage that finished drops the ids that
   // are no longer active, so only what is still stopping is force-stopped at the cap (#11041).
   const pruneFinalized = (): void => {
+    if (state.capExpired) {
+      return;
+    }
     const stillActive = new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId));
     for (const recordingId of stopping) {
       if (!stillActive.has(recordingId)) {
@@ -210,14 +259,19 @@ async function stopOwnedRecordings(
     async () => {
       const active = await deps.listActiveVideoRecordings(deviceId);
       for (const { recordingId, ownerSessionUuid } of active) {
-        if (ownerSessionUuid !== sessionId || !stopping.has(recordingId)) {
+        if (ownerSessionUuid !== sessionId || (state.capExpired && !stopping.has(recordingId))) {
           continue;
+        }
+        if (!state.capExpired) {
+          stopping.add(recordingId);
         }
         await attempt(
           `stop video recording ${recordingId} of released session ${sessionId ?? "(owner-less)"}`,
           async () => {
             await deps.stopVideoRecording(recordingId);
-            stopping.delete(recordingId);
+            if (!state.capExpired) {
+              stopping.delete(recordingId);
+            }
             // The finalized file stays in the recording store, readable by its owner via
             // owner-scoped video recording lookups.
             logger.info(
@@ -258,17 +312,26 @@ async function stopOwnedRecordingsWithinCap(
 ): Promise<void> {
   // Every recording the owner has, up front: single-file, segmented and the device gesture recording, so
   // the cap force-stops all of them rather than only the one mid-stop (#11041).
-  const stopping = new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId));
+  const state: RecordingFinalizeStageState = {
+    stopping: new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId)),
+    capExpired: false,
+  };
+  let originalIds: string[] = [];
   const deviceGestureRecordingId = deps.ownedDeviceGestureRecordingId(sessionId, deviceId);
   const capMs = deps.finalizeCapMs(deviceId);
   try {
     await raceWithDeadline(
-      stopOwnedRecordings(deps, sessionId, deviceId, stopping, deviceGestureRecordingId),
+      stopOwnedRecordings(deps, sessionId, deviceId, state, deviceGestureRecordingId),
       {
         timer: deps.timer,
         timeoutMs: capMs,
         label: `finalize recordings of released session ${sessionId ?? "(owner-less)"}`,
         timeoutError: () => new FinalizeCapExceeded(),
+        onTimeout: () => {
+          // Freeze eligibility in the timer callback, before the detached stage can resume.
+          state.capExpired = true;
+          originalIds = [...state.stopping];
+        },
       },
     );
   } catch (error) {
@@ -277,12 +340,11 @@ async function stopOwnedRecordingsWithinCap(
     }
     logger.warn(
       `[recording] Finalizing recordings of released session ${sessionId ?? "(owner-less)"} on ${deviceId} exceeded ${capMs}ms; ` +
-        `force-stopping ${[...stopping].join(", ") || "none"} and marking incomplete`,
+        `force-stopping ${originalIds.join(", ") || "none"} and marking incomplete`,
     );
     // The video incomplete handler cannot stop a test recorder. Start this independently
     // of the wedged stage, by its captured owner id, so it cannot stop a replacement recorder.
-    await forceStopOwnedRecordings(deps, [...stopping], deviceGestureRecordingId);
-    const originalIds = [...stopping];
+    await forceStopOwnedRecordings(deps, originalIds, deviceGestureRecordingId);
     if (unconfirmedRecordingIds(deps, sessionId, deviceId, originalIds).length === 0) {
       return;
     }
@@ -529,6 +591,12 @@ export function registerRecordingSessionCleanup(
       const ids = [...new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId))];
       if (ids.length > 0) {
         idsCapturedAtRelease.set(sessionId, ids);
+      }
+      if (releaseOptions?.deviceIdentityReplaced) {
+        void logHostOnlyAbandonFailure(() =>
+          deps.abandonRecordingsOnReplacedDevice(sessionId, deviceId),
+        );
+        return;
       }
       cleanup(sessionId, deviceId);
     }

@@ -232,6 +232,30 @@ describe("recording teardown ownership", () => {
     return giveUps;
   };
 
+  test("recovery retains the oldest owned give-up when a later give-up on the same device settles", async () => {
+    const first = await start();
+    // A retained capture can coexist with a later owner-less capture on the reused serial.
+    const second = await service.startRecording({ device });
+    const giveUp = (sessionId: string | undefined, recordingId: string) => ({
+      deviceId: device.deviceId,
+      sessionId,
+      recordingIds: [recordingId],
+      attempts: 1,
+      budgetMs: 4_000,
+    });
+    const older = giveUp("session-a", first.recordingId);
+    const newer = giveUp(undefined, second.recordingId);
+    defaultRecordingSessionCleanupDeps.markDeviceNeedsRecorderRecovery(older);
+    defaultRecordingSessionCleanupDeps.markDeviceNeedsRecorderRecovery(newer);
+
+    expect(recordingCleanup.recordingTeardownRecoveryNeeded(device.deviceId)).toEqual(older);
+    await service.forceStopRecording(second.recordingId);
+    expect(recordingCleanup.recordingTeardownRecoveryNeeded(device.deviceId)).toEqual(older);
+    expect(service.listActiveRecordingIds()).toEqual([first.recordingId]);
+    await markVideoRecordingIncomplete(first.recordingId);
+    expect(recordingCleanup.recordingTeardownRecoveryNeeded(device.deviceId)).toBeUndefined();
+  });
+
   test("repeated rejection gives up exactly at the budget with typed recovery and no cleanup timers", async () => {
     const active = await start();
     const giveUps = registerRetries([1_000, 2_000, 8_000]);

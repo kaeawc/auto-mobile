@@ -168,6 +168,11 @@ export interface ForceStopOptions {
    * Defaults to `true`, the historical device-wide cleanup.
    */
   deviceWide?: boolean;
+  /**
+   * Stop only the directly owned host process. Do not create an ADB executor or
+   * signal or clean up anything on the device.
+   */
+  hostOnly?: boolean;
 }
 
 export interface VideoCaptureBackend {
@@ -513,8 +518,8 @@ export class VideoRecorderService {
     return error;
   }
 
-  async forceStopRecording(recordingId: string): Promise<void> {
-    await this.forceStopOrDiscardRecording(recordingId, false);
+  async forceStopRecording(recordingId: string, options?: ForceStopOptions): Promise<void> {
+    await this.forceStopOrDiscardRecording(recordingId, false, options);
   }
 
   async discardRecording(recordingId: string, options?: ForceStopOptions): Promise<void> {

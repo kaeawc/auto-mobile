@@ -1,4 +1,5 @@
 import type {
+  ForceStopOptions,
   RecordingHandle,
   RecordingResult,
   VideoCaptureBackend,
@@ -13,6 +14,7 @@ export class FakeVideoCaptureBackend implements VideoCaptureBackend {
   readonly startCalls: VideoCaptureConfig[] = [];
   readonly stopCalls: RecordingHandle[] = [];
   readonly forceStopCalls: RecordingHandle[] = [];
+  readonly forceStopOptionsCalls: Array<ForceStopOptions | undefined> = [];
   /** The exact handle objects returned by start(), for identity assertions. */
   readonly startResults: RecordingHandle[] = [];
   private stopResolvers: Array<(handle: RecordingHandle) => void> = [];
@@ -85,8 +87,9 @@ export class FakeVideoCaptureBackend implements VideoCaptureBackend {
     return baseResult;
   }
 
-  async forceStop(handle: RecordingHandle): Promise<void> {
+  async forceStop(handle: RecordingHandle, options?: ForceStopOptions): Promise<void> {
     this.forceStopCalls.push(handle);
+    this.forceStopOptionsCalls.push(options);
     const failure = this.forceStopFailures.shift();
     if (failure) {
       throw failure;

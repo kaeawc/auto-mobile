@@ -413,7 +413,17 @@ export class AndroidSegmentedPlanVideoSession {
    * reap, our own temp file, and our rows), and completed segments, which are already
    * on the host, are returned exactly as {@link finalize} would return them.
    */
-  async finalizeWithoutDevice(): Promise<SegmentedSessionResult> {
+  async finalizeWithoutDevice(options?: { hostOnly?: boolean }): Promise<SegmentedSessionResult> {
+    if (this.stopPromise) {
+      return this.stopPromise;
+    }
+    this.stopPromise = this.finalizeWithoutDeviceInternal(options);
+    return this.stopPromise;
+  }
+
+  private async finalizeWithoutDeviceInternal(options?: {
+    hostOnly?: boolean;
+  }): Promise<SegmentedSessionResult> {
     this.stopping = true;
     this.timerDriven = false;
     this.clearTimers();
@@ -427,13 +437,20 @@ export class AndroidSegmentedPlanVideoSession {
       ]),
     ).toReversed();
     const results = await Promise.allSettled(
-      discardIds.map((id) => this.rollbackVideoRecordingStartFn(id, { deviceWide: false })),
+      discardIds.map((id) =>
+        this.rollbackVideoRecordingStartFn(id, {
+          deviceWide: false,
+          ...(options?.hostOnly ? { hostOnly: true } : {}),
+        }),
+      ),
     );
     results.forEach((result, index) => {
       this.rememberWarning(
         result.status === "rejected"
           ? `Failed to discard segment ${discardIds[index]} after the device was released: ${errorMessage(result.reason)}`
-          : `Segment ${discardIds[index]} was discarded because the plan's device was released; its device-side recorder may run until its own time limit`,
+          : options?.hostOnly
+            ? `Segment ${discardIds[index]} was discarded on the host because the device identity was replaced; no commands were sent to the replacement device`
+            : `Segment ${discardIds[index]} was discarded because the plan's device was released; its device-side recorder may run until its own time limit`,
       );
     });
     this.activeRecordingId = undefined;

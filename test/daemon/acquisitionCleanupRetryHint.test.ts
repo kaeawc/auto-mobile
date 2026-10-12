@@ -58,6 +58,7 @@ class WedgedRecordings implements RecordingSessionCleanupDeps, RecordingAcquisit
   hasRecordingsToStop(): boolean {
     return this.active.size > 0;
   }
+  async abandonRecordingsOnReplacedDevice(): Promise<void> {}
   async stopSegmentedRecordings(): Promise<void> {}
   async listActiveVideoRecordings() {
     return [...this.active].map(([recordingId, ownerSessionUuid]) => ({

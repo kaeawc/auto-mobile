@@ -28,7 +28,7 @@ import type { ProgressCallback } from "./toolRegistry";
 import {
   acceptancePresentationOrder,
   acquisitionLifecycleTimeoutError,
-  cancelUnownedColdBoot,
+  cancelUnownedColdBootUnlessRetryable,
   describeStartDeviceRequest,
   getAndroidSchema,
   getAppleSchema,
@@ -491,6 +491,7 @@ async function prepareDevice(
   };
   const releaseReadinessReservations: DeviceReadinessReservation[] = [];
   let preparationFailed = false;
+  let coordinatedSignal = signal;
   let lifecycleReservations:
     | Awaited<ReturnType<typeof reserveStartDeviceLifecycleReservations>>
     | undefined;
@@ -509,7 +510,7 @@ async function prepareDevice(
     const coordinatedSignals = [signal, lifecycleReservations.lifecycleLease.signal].filter(
       (candidate): candidate is AbortSignal => candidate !== undefined,
     );
-    const coordinatedSignal =
+    coordinatedSignal =
       coordinatedSignals.length === 1 ? coordinatedSignals[0] : AbortSignal.any(coordinatedSignals);
     setAcquisitionStage(budgets, "validating the requested device identifiers");
     // Reject a contradictory Android avdName + deviceId pair before booting,
@@ -547,7 +548,7 @@ async function prepareDevice(
     preparationFailed = true;
     perf.end();
     if (!state.ownershipTransferred) {
-      const settlement = cancelUnownedColdBoot(state.boot);
+      const settlement = cancelUnownedColdBootUnlessRetryable(state.boot, error, coordinatedSignal);
       if (settlement) {
         state.coldBootSettlements.push(settlement);
       }

@@ -140,31 +140,30 @@ describe("WebpBinaryResolver", () => {
   test.each(["AUTOMOBILE_DATA_DIR", "AUTO_MOBILE_DATA_DIR"])(
     "downloads under %s without touching the home cache",
     async (variable) => {
-      const dataDir = path.join(ROOT, "private-data");
+      const dataDir = path.resolve(ROOT, "private-data");
       await expectDownloadCache({ PATH: "", [variable]: dataDir }, path.join(dataDir, "libwebp"));
     },
-    15,
   );
 
   test("resolves the default cache lazily after environment finalization", async () => {
     const env: NodeJS.ProcessEnv = { PATH: "" };
-    const dataDir = path.join(ROOT, "late-data");
+    const dataDir = path.resolve(ROOT, "late-data");
     await expectDownloadCache(env, path.join(dataDir, "libwebp"), undefined, () => {
       env.AUTOMOBILE_DATA_DIR = dataDir;
     });
-  }, 15);
+  });
 
   test("explicit cacheDir wins over AUTOMOBILE_DATA_DIR", async () => {
     await expectDownloadCache(
-      { PATH: "", AUTOMOBILE_DATA_DIR: path.join(ROOT, "private-data") },
+      { PATH: "", AUTOMOBILE_DATA_DIR: path.resolve(ROOT, "private-data") },
       CACHE_DIR,
       CACHE_DIR,
     );
-  }, 15);
+  });
 
   test("keeps the home cache default without data directory overrides", async () => {
     await expectDownloadCache({ PATH: "" }, path.join(resolveAutoMobileBaseDir({}), "libwebp"));
-  }, 15);
+  });
 
   test("prefers cwebp and dwebp environment overrides", async () => {
     const fileSystem = new FakeWebpBinaryFileSystem();

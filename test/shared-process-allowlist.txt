@@ -250,7 +250,6 @@ test/daemon/strokeSurvivesHolderRebind.test.ts
 test/daemon/swipeOnCancelThroughDaemon.test.ts
 test/daemon/telemetryBackfillBounds.test.ts
 test/daemon/telemetryIdentityTimelineBuckets.test.ts
-test/daemon/testRecordingSocketServerAuth.test.ts
 test/daemon/testRecordingSocketServerReadinessSession.test.ts
 test/daemon/tokenOwnedSessionsLastUsedAt.test.ts
 test/daemon/toolCallActivityLatestDeadline.test.ts
@@ -1046,7 +1045,6 @@ test/server/system-tray/notificationHints.test.ts
 test/server/talkBackReleaseDuringFocusNavigation.test.ts
 test/server/telephonyTools.test.ts
 test/server/templates/list.test.ts
-test/server/testRecordingManager.test.ts
 test/server/toolCallDispatch.test.ts
 test/server/toolEnvelopePayload.classification.test.ts
 test/server/toolEnvelopePayload.property.test.ts

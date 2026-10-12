@@ -1,3 +1,4 @@
+import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { describe, expect, test } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import type { DaemonClientLike } from "../../src/daemon/client";
@@ -104,7 +105,7 @@ describe("liveness recovery vs a replacement daemon that has not materialized th
 
       await expect(restart.proxy.callTool("observe", {})).resolves.toBeDefined();
       expect(restart.replacementDaemon.callToolCalls).toEqual([
-        { toolName: "observe", params: { sessionUuid: SESSION } },
+        { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: SESSION }, "fake-1") },
       ]);
     } finally {
       await restart.proxy.close();
@@ -133,7 +134,7 @@ describe("liveness recovery vs a replacement daemon that has not materialized th
       );
       expect(outcome).toBe("forwarded");
       expect(restart.replacementDaemon.callToolCalls).toEqual([
-        { toolName: "observe", params: { sessionUuid: SESSION } },
+        { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: SESSION }, "fake-1") },
       ]);
 
       // Once restored, the keeper heartbeats it again.

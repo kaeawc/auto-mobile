@@ -295,7 +295,9 @@ A managed-execution session uses the `managed-execution` liveness policy:
 - **Execution owner.** The proxy checks every second that its owner (by default
   the parent process that launched it, or `executionOwnerPid`) is running and,
   for the default owner, that it has not been re-parented. Either loss shuts the
-  proxy down and releases its sessions. Stdin EOF ends the execution the same
+  proxy down and releases its sessions. The owner is identified by PID plus OS process
+  start identity where readable, so a reused PID counts as the owner having exited;
+  where that identity cannot be read, the PID alone is used. Stdin EOF ends the execution the same
   way. If the proxy is killed outright, the ~10 s no-heartbeat release applies.
   Limit: with the default owner, a launch parent pid of 1 is treated as already
   orphaned and a parent pid of 0 (for example `docker exec`) as exited. When the

@@ -13,6 +13,7 @@ import {
   ANDROID_MAX_BOOTED_ENV,
 } from "../../src/features/bootAdmission/AndroidBootAdmissionGate";
 import { ActionableError, type BootedDevice } from "../../src/models";
+import { fixedBackoff } from "../../src/utils/Backoff";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeAndroidCapacitySource } from "../fakes/FakeAndroidCapacitySource";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -366,6 +367,29 @@ describe("device restart reserves the entire recovery window", () => {
       expect(terminalNotices).toBe(0);
     });
   }
+  test("a live peer's later release timestamp cannot extend the pool's recovery window", async () => {
+    sessions.attachLiveDaemonSessionIds(() => new Set([DAEMON_A, DAEMON_B]));
+    const handoffAt = timer.now();
+    await handoff();
+    const row = (await persistence.getSession(HOLDER))!;
+    await persistence.claimRecoverableSession(
+      HOLDER,
+      { rowGeneration: row.stable_identity_generation!, daemonSessionId: DAEMON_A },
+      DAEMON_B,
+    );
+    row.released_at_ms = handoffAt + 60_000;
+    await advance(120_000);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+    await advance(59_999);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+    await advance(1);
+    expect(timer.now()).toBe(handoffAt + DEVICE_RESTART_RECOVERY_WINDOW_MS);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+    expect(row).toMatchObject({
+      daemon_session_id: DAEMON_B,
+      release_reason: `device-restart:${SIM.name}`,
+    });
+  });
   test("a peer claim racing the expiry write keeps the live peer's hold without a terminal notice", async () => {
     sessions.attachLiveDaemonSessionIds(() => new Set([DAEMON_A, DAEMON_B]));
     await handoff();
@@ -445,6 +469,69 @@ describe("device restart reserves the entire recovery window", () => {
       expect(internals.rehydrationReservations.has(HOLDER)).toBe(false);
       expect((await persistence.getSession(HOLDER))?.release_reason).toBe("expired");
     } finally {
+      keepAwakeGate.resolve();
+      await releasing;
+    }
+  });
+  test("a failed forced restart release retries its fence, resolves persistence and expires at idle", async () => {
+    const android: BootedDevice = {
+      deviceId: "emulator-5554",
+      name: "restart-avd",
+      platform: "android",
+    };
+    await setup([android]);
+    sessions.setTerminalReleaseRetryBackoff(fixedBackoff(1_000));
+    sessions.setKeepScreenAwake(HOLDER, { applied: true, method: "settings" });
+    const idleDeadline = sessions.getSession(HOLDER)!.expiresAt;
+    let releasePersisted: Promise<void> | undefined;
+    let persisted = false;
+    sessions.onSessionRelease((_id, _device, reason, _snapshot, options) => {
+      if (reason.startsWith("device-restart:")) {
+        releasePersisted = options.releasePersisted;
+        void releasePersisted?.then(() => {
+          persisted = true;
+        });
+      }
+    });
+    const releasing = internals.releaseDisconnectedRecoverySessionWithRetry(
+      HOLDER,
+      android.deviceId,
+      `device-restart:${android.name}`,
+    );
+    try {
+      await drainUntil(() => keepAwakeStarted, {
+        description: "parked restart teardown before failed forced write",
+      });
+      persistence.failure = "release";
+      expect(sessions.forceStuckRelease(HOLDER)?.stage).toBe("teardown");
+      await drainMicrotasks(40);
+      expect(await persistence.getSession(HOLDER)).toMatchObject({
+        status: "active",
+        release_reason: null,
+      });
+      expect(releasePersisted).toBeDefined();
+      expect(persisted).toBe(false);
+      persistence.failure = null;
+      await advance(999);
+      expect(persisted).toBe(false);
+      await advance(1);
+      expect(await persistence.getSession(HOLDER)).toMatchObject({
+        status: "released",
+        release_reason: `device-restart:${android.name}`,
+      });
+      expect(persisted).toBe(true);
+      expect(internals.rehydrationReservations.get(HOLDER)?.releasePersistence).toBeUndefined();
+      // Keep teardown parked until the retry has proved it resolves the shared fence promise.
+      keepAwakeGate.resolve();
+      await releasing;
+      await pool.releaseDevice(android.deviceId, HOLDER);
+      await advance(idleDeadline - timer.now() - 1);
+      expect(pool.genericAvailability(android.deviceId)).toBe("reserved");
+      await advance(1);
+      expect(pool.genericAvailability(android.deviceId)).toBe("free");
+      expect((await persistence.getSession(HOLDER))?.release_reason).toBe("expired");
+    } finally {
+      persistence.failure = null;
       keepAwakeGate.resolve();
       await releasing;
     }

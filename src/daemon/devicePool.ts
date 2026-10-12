@@ -2596,9 +2596,10 @@ export class DevicePool {
   }
 
   /**
-   * Mark the stop and end only a reserving session's own device-restart handoff. Callers without
-   * its session id leave the hold to resume, terminal release, idle expiry or the 180 s window;
-   * an intentional stop never ends the daemon-restart batch's source.
+   * Mark the stop; naming the reserving session drops its device-restart handoff source. No
+   * lifecycle tool names that session yet, so those stops leave the hold to recovery, terminal
+   * release, idle expiry or the 180 s window. An intentional stop never ends the daemon-restart
+   * batch's source.
    */
   markIntentionalShutdown(deviceId: string, stoppingSessionId?: string): void {
     const resetReservation = Array.from(this.adbServerResetRecoveryReservations.values()).find(
@@ -8020,13 +8021,19 @@ export class DevicePool {
     target: RehydrationDeviceReservation["target"],
   ): Promise<void> {
     const deadline = await this.sessionManager.expireRestartRecoveryReservation(sessionId);
-    if (this.rehydrationReservations.get(sessionId) !== target) {
+    const current = this.rehydrationReservations.get(sessionId);
+    if (!current || current !== target) {
       return;
     }
     if (deadline === undefined) {
       this.releaseDeviceRestartReservation(sessionId);
     } else {
-      this.scheduleDeviceRestartReservationExpiry(sessionId, deadline);
+      this.scheduleDeviceRestartReservationExpiry(
+        sessionId,
+        current.recoveryWindowEndMs === undefined
+          ? deadline
+          : Math.min(deadline, current.recoveryWindowEndMs),
+      );
     }
   }
 

@@ -2669,7 +2669,7 @@ export class SessionManager {
    * Write a forced release's row in the background, tracked by the shutdown drain. A terminal
    * write that fails falls back to the terminal-write retry (#10959); one that times out is
    * already retried by the late-write tracker if it then fails. A non-terminal write that fails
-   * is kept as a pending non-terminal release by {@link persistSessionRelease}.
+   * stays pending in {@link persistSessionRelease} and is handed to the existing row retry.
    */
   private persistForcedReleaseFence(fence: SessionReleaseSnapshot): void {
     const write = this.persistSessionRelease(fence).then(
@@ -2681,6 +2681,8 @@ export class SessionManager {
         );
         if (fence.terminal && !(error instanceof SessionReleasePersistTimeoutError)) {
           this.scheduleTerminalReleaseRetry(fence);
+        } else if (!fence.terminal && !(error instanceof SessionReleasePersistTimeoutError)) {
+          this.trackReleaseDrainWrite(this.retryNonTerminalRowAfterRelease(fence));
         }
       },
     );

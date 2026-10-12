@@ -36,7 +36,7 @@ const DEVICE = "emulator-5554";
 const OWNER = "managed-proxy-token";
 const MINUTE = 60_000;
 /** Idle expiry is released by whichever sweep sees it first: a lookup or the periodic cleanup. */
-const IDLE_EXPIRY_REASONS = ["lazy-expiry", "cleanup-expired"];
+const IDLE_EXPIRY_REASONS = ["cleanup-expired"];
 
 describe("managed-execution idle window resolution", () => {
   test("defaults to the 2-minute idle window", () => {

@@ -8,8 +8,8 @@ import { warmedTests } from "../helpers/warmedTests";
 // window -> the stdio proxy's reconnect and re-claim -> the first control call. Each scenario is a
 // real Daemon over the real SQLite repository, the real control socket and the real stdio proxy
 // (see test/helpers/daemonRestartScenario.ts). The contracts asserted at each step:
-// - a session held at shutdown comes back to the SAME owner when it returns within lease + grace
-//   (4 s + 4 s, scan 2 s), and is released terminally (`rehydration-owner-timeout`) when it does not;
+// - an ordinary proxy reconnecting inside recovery reclaims its session; after handover a new
+//   daemon requires an explicit call naming the session, so a passive return still times out;
 // - the device stays held (not lendable, not counted idle) through the window on every inventory
 //   surface, and is free right after the window lapses;
 // - a control call in flight at shutdown is answered, and what the proxy tells its caller agrees
@@ -108,8 +108,10 @@ describe("restart matrix: owner reconnect x shutdown kind x sessions (no call in
               }
             }
 
-            const returnedInTime = returnsAtMs !== undefined && returnsAtMs < 8_000;
-            if (returnedInTime) {
+            // At 7 s recovery has handed over. An ordinary proxy's pinned probe sees the new
+            // process and stops: reconnecting alone cannot reclaim before the owner timeout.
+            const returnedInsideRecovery = returnsAtMs === 1_000;
+            if (returnedInsideRecovery) {
               expect(lapsedAt).toBeUndefined();
               for (const session of sessions) {
                 expect(await run.ownerControlCall(session)).toBe("ok");
@@ -117,7 +119,7 @@ describe("restart matrix: owner reconnect x shutdown kind x sessions (no call in
               expect(run.scenario.driven.map((ran) => ran.sessionUuid)).toEqual(sessions);
               return;
             }
-            if (returnsAtMs === undefined) {
+            if (returnsAtMs === undefined || returnsAtMs === 7_000) {
               expect(lapsedAt).toBe(RELEASED_BY_MS);
             }
             run.ownerReturns();

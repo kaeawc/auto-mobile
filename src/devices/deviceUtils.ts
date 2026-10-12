@@ -13,6 +13,7 @@ export type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecu
 import { DeviceInfo, ActionableError, SomePlatform, BootedDevice, Platform } from "../models";
 import { toActionableError } from "../models/ActionableError";
 import type { TransitionalSimulator } from "../models/TransitionalSimulator";
+import { AndroidBootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -57,7 +58,8 @@ const READINESS_ABORT_SETTLEMENT_GRACE_MS = 0;
  */
 export function assertAndroidImageRunningStateKnown(image: DeviceInfo): void {
   if (image.platform === "android" && image.isRunningStateKnown === false) {
-    throw new ActionableError(
+    throw new AndroidBootedDeviceDiscoveryIncompleteError(
+      undefined,
       `Cannot safely cold-boot Android AVD '${image.name}': its running state is unknown.`,
     );
   }

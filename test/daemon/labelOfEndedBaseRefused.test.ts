@@ -84,7 +84,7 @@ describe("a label whose base is past its idle deadline and not yet scanned", () 
     expect(error.release).toMatchObject({
       sessionId: LABEL,
       deviceId: "emulator-5556",
-      releaseReason: "lazy-expiry",
+      releaseReason: "cleanup-expired",
       terminal: true,
     });
     // Refused, so not use: the label's idle window is where it was.
@@ -97,7 +97,7 @@ describe("a label whose base is past its idle deadline and not yet scanned", () 
     await refusal(w.manager.getOrCreateSession(LABEL));
     await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
 
-    expect(w.released).toEqual([[BASE, "lazy-expiry"]]);
+    expect(w.released).toEqual([[BASE, "cleanup-expired"]]);
     expect(w.manager.hasSession(BASE)).toBe(false);
   });
 
@@ -179,8 +179,8 @@ describe("a label whose base is past its idle deadline and not yet scanned", () 
     );
     await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
     expect(error.sessionUuid).toBe(LABEL);
-    expect(error.release.releaseReason).toBe("lazy-expiry");
-    expect(w.released).toEqual([[BASE, "lazy-expiry"]]);
+    expect(error.release.releaseReason).toBe("cleanup-expired");
+    expect(w.released).toEqual([[BASE, "cleanup-expired"]]);
     expect(w.label).toEqual(before);
   });
 

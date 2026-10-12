@@ -15,7 +15,10 @@ import {
 } from "../../src/daemon/sessionManager";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import { decideOwnershipChange } from "../../src/daemon/streamSubscriptionPolicy";
-import { LIVE_OWNER_HANDOFF_ALLOWANCE_MS } from "../../src/daemon/proxyLivenessRecovery";
+import {
+  LIVE_OWNER_HANDOFF_ALLOWANCE_MS,
+  type LivenessHandover,
+} from "../../src/daemon/proxyLivenessRecovery";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import {
   UNSETTLED_EXECUTION_DEADLINE_GRACE_MS,
@@ -26,6 +29,7 @@ import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
 import { OWNER_DISCONNECT_GRACE_MS } from "../../src/daemon/ownerDisconnectRelease";
+import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
 import { AppearanceSyncScheduler } from "../../src/daemon/AppearanceSyncScheduler";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import type { AppearanceConfig } from "../../src/models";
@@ -54,7 +58,7 @@ import {
 // heartbeats keep arriving, and a call in flight is never released. Each row names the issue
 // whose fix flips it.
 
-const IDLE_REASONS = ["cleanup-expired", "lazy-expiry"];
+const IDLE_REASONS = ["cleanup-expired"];
 // A `cli-idle` session is reaped by the heartbeat monitor on its own idle clock.
 const CLI_IDLE_REASONS = [...IDLE_REASONS, "cli-idle-timeout"];
 // Emulator serials: tool calls run the real session setup, which probes a non-emulator serial
@@ -458,7 +462,7 @@ describe("a stream subscriber on a held device (#10840)", () => {
       {
         at: releasedAt!,
         sessionId: session,
-        reason: expect.stringMatching(/^(cleanup-expired|lazy-expiry)$/),
+        reason: "cleanup-expired",
       },
     ]);
     expect(subscriberDecision(session)).toEqual({ action: "end", reason: "session_ended" });
@@ -818,7 +822,7 @@ describe("host sleep longer than the idle window (#10661)", () => {
       expect(releasedAt! - sleptAt).toBeLessThanOrEqual(
         IDLE_WINDOW_MS + SUSPECT_GRACE_MS + 2 * SCAN_MS + RELEASE_SLACK_MS,
       );
-      expect(["lazy-expiry", "cleanup-expired"]).toContain(scenario.releaseOf(session)?.reason);
+      expect(["cleanup-expired"]).toContain(scenario.releaseOf(session)?.reason);
       expectFreed();
     });
   }
@@ -2030,6 +2034,35 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
       daemonId: scenario.daemonId,
       sessionUuid: session,
     });
+  });
+
+  test("a managed execution reclaims within one keeper interval after a 20 s daemon restart beyond recovery (#11901)", async () => {
+    scenario = await LivenessScenario.start({ managedSlots: true });
+    const session = await scenario.acquire();
+    await scenario.holdAsManagedExecution(session);
+    await scenario.proxy.holdManagedExecutionSession(session);
+    const handovers: LivenessHandover[] = [];
+    scenario.proxy.onLivenessHandover((handover) => handovers.push(handover));
+    await scenario.idle(KEEPER_INTERVAL_MS);
+    expect(scenario.heartbeatsBySession.get(session)).toBeGreaterThan(0);
+    expect(scenario.daemon.manager.getSession(session)?.livenessOwnerToken).toBe(OWNER_TOKEN);
+
+    // Start rehydrates the execution before binding; the proxy spends its three recovery
+    // attempts against a dead socket. Only its keeper can reclaim once the new process answers.
+    await scenario.daemonRestart({ startupMs: 20_000 });
+    expect(handovers).toMatchObject([{ code: "daemon_stalled", attempts: 3 }]);
+    expect(scenario.daemon.manager.getSession(session)?.ownership).toBe("awaiting-owner");
+    await scenario.idle(KEEPER_INTERVAL_MS);
+    expect(scenario.daemon.manager.getSession(session)).toMatchObject({
+      ownership: "owned",
+      livenessOwnerToken: OWNER_TOKEN,
+    });
+
+    await scenario.idle(5 * DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS);
+    expect(scenario.releases).toEqual([]);
+    expectHeld(session);
+    await scenario.toolCall(session);
+    expect(scenario.driven.at(-1)?.sessionUuid).toBe(session);
   });
 
   test("a managed execution whose session finishes rehydrating after the startup deadline is re-owned when it does", async () => {

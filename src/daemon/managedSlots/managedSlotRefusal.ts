@@ -104,7 +104,12 @@ export class DeviceOutsideManagedSlotsError extends ActionableError {
     readonly action: string,
     readonly reason: ManagedConnectionRefusalReason,
     readonly scopeKey: string,
-    readonly target: { deviceId?: string; sessionUuid?: string; deviceLabel?: string } = {},
+    readonly target: {
+      deviceId?: string;
+      sessionUuid?: string;
+      deviceLabel?: string;
+      platform?: string;
+    } = {},
   ) {
     super(
       `${action} refused: this managed connection controls only its own slot devices ` +
@@ -125,6 +130,7 @@ export class DeviceOutsideManagedSlotsError extends ActionableError {
       ...(this.target.deviceId === undefined ? {} : { deviceId: this.target.deviceId }),
       ...(this.target.sessionUuid === undefined ? {} : { sessionUuid: this.target.sessionUuid }),
       ...(this.target.deviceLabel === undefined ? {} : { deviceLabel: this.target.deviceLabel }),
+      ...(this.target.platform === undefined ? {} : { platform: this.target.platform }),
       retryable: false,
     };
   }
@@ -132,7 +138,7 @@ export class DeviceOutsideManagedSlotsError extends ActionableError {
 
 function managedConnectionRefusalDetail(
   reason: ManagedConnectionRefusalReason,
-  target: { deviceId?: string; sessionUuid?: string; deviceLabel?: string },
+  target: { deviceId?: string; sessionUuid?: string; deviceLabel?: string; platform?: string },
 ): string {
   switch (reason) {
     case "scope":
@@ -140,7 +146,9 @@ function managedConnectionRefusalDetail(
     case "host":
       return "It changes state shared by every connection of this daemon.";
     case "device":
-      return `Device '${target.deviceId}' is not one of its slot devices.`;
+      return target.deviceId === undefined && target.platform !== undefined
+        ? `None of its slot devices is an ${target.platform} device; name a device by deviceId to read one outside its slots.`
+        : `Device '${target.deviceId}' is not one of its slot devices.`;
     case "session":
       return `Session ${target.sessionUuid} is not one of its slot sessions.`;
     case "tool":

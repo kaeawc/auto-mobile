@@ -1,6 +1,28 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { isUnitTestPath } from "./realDeviceToolSpawnGuard";
+
+export const DB_PATH_OVERRIDE_ENV_KEYS = [
+  "AUTOMOBILE_DB_PATH",
+  "AUTO_MOBILE_DB_PATH",
+  "AUTOMOBILE_DB_DIR",
+  "AUTO_MOBILE_DB_DIR",
+] as const;
+
+/** Pure env transformation: only unit entrypoints discard inherited DB overrides. */
+export function withoutInheritedDatabaseOverrides(
+  env: NodeJS.ProcessEnv,
+  entrypoint: string,
+): NodeJS.ProcessEnv {
+  const isolated = { ...env };
+  if (isUnitTestPath(entrypoint)) {
+    for (const key of DB_PATH_OVERRIDE_ENV_KEYS) {
+      delete isolated[key];
+    }
+  }
+  return isolated;
+}
 
 const DIRECTORY_OVERRIDES = [
   ["AUTOMOBILE_DATA_DIR", "AUTO_MOBILE_DATA_DIR", "data"],
@@ -31,8 +53,18 @@ export function isolatedTestDirectoryEnv(env: NodeJS.ProcessEnv, root: string): 
   return isolated;
 }
 
-// Only Node built-ins precede this setup. In particular, do not import production
+// Only Node built-ins and the import-free test-path predicate precede this setup.
+// In particular, do not import production
 // modules here: logger and daemon constants can bind paths during module evaluation.
+// Under --isolate, Bun.main and the inherited env reset for each file. Otherwise this
+// decision applies to the process's first file; CI never mixes unit and integration files.
+// Tests can still opt into their own DB after this preload (#11923).
+const databaseEnv = withoutInheritedDatabaseOverrides(process.env, Bun.main);
+for (const key of DB_PATH_OVERRIDE_ENV_KEYS) {
+  if (!(key in databaseEnv)) {
+    delete process.env[key];
+  }
+}
 export const testDirectoryRoot = mkdtempSync(path.join(os.tmpdir(), "am-test-"));
 for (const [, , child] of DIRECTORY_OVERRIDES) {
   mkdirSync(path.join(testDirectoryRoot, child), { mode: 0o700 });

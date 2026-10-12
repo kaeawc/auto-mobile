@@ -13,7 +13,7 @@ import {
 // SessionManager.recordHeartbeat by hand, which hid the real cadence and never asserted why the
 // device was released (#10667, #10705).
 
-const IDLE_REASONS = ["cleanup-expired", "lazy-expiry"];
+const IDLE_REASONS = ["cleanup-expired"];
 
 describe("autolock idle release with a heartbeating stdio proxy (#10658)", () => {
   let scenario: LivenessScenario;

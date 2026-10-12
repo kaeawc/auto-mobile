@@ -137,8 +137,10 @@ export function getTempDir(subdirectory: string): string {
  * the same default ADB server must instead coordinate through one path. A
  * locked-down service account can configure that path with
  * `AUTOMOBILE_COORDINATION_DIR` (or `AUTO_MOBILE_COORDINATION_DIR`). Its
- * default comes from the OS account rather than the ambient `HOME`, which may
- * be isolated per agent despite a shared ADB server.
+ * default root is `os.userInfo().homedir`, which under Bun (the daemon runtime)
+ * follows the `HOME` the process started with. Daemons started with different
+ * `HOME` values do not share this directory and must be given the same
+ * `AUTOMOBILE_COORDINATION_DIR` / `AUTO_MOBILE_COORDINATION_DIR` override.
  */
 export function getSharedAutoMobileDir(
   subdirectory: string,
@@ -168,8 +170,12 @@ export function getSharedAutoMobileDir(
  * its devices even when they use different coordination directories, so state
  * that must keep them off each other's devices lives under one root keyed by the
  * server (see `adbServerScope`): `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR` (or
- * `AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR`) when set, else the OS account
- * home's `.auto-mobile/adb-servers`. Every daemon on one server must agree on it.
+ * `AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR`) when set, else
+ * `os.userInfo().homedir`'s `.auto-mobile/adb-servers`. Under Bun (the daemon
+ * runtime), that home follows the `HOME` the process started with. Daemons
+ * started with different `HOME` values do not share this directory and must be
+ * given the same `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR` /
+ * `AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR` override.
  */
 export function getAdbServerScopedAutoMobileDir(
   serverScope: string,

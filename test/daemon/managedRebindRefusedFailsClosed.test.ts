@@ -69,6 +69,79 @@ describe("managed proxy re-bind after its slot session ended (#11399)", () => {
       slotDeviceOf: (sessionUuid) => sessionManager.getSession(sessionUuid)?.assignedDevice,
     });
 
+  test("the owner releases its live execution after a refused rebind, while other methods stay confined", async () => {
+    const drained: string[] = [];
+    state.getManagedExecutionRelease = () => ({
+      releaseExecution: async (sessionId) => {
+        drained.push(sessionId);
+        return {
+          sessionId,
+          outcome: "reusable_for_this_slot",
+          settlement: "confirmed",
+          alreadyReleased: false,
+          cancellationRequested: 0,
+          releaseForced: false,
+          device: null,
+          slots: [],
+          slotFailures: [],
+        };
+      },
+    });
+    scopes.unbind(OLD_SOCKET);
+    const rebind = await handleDaemonRequest(
+      {
+        id: "rebind",
+        type: "daemon_request",
+        method: DAEMON_REGISTER_SESSION_METHOD,
+        params: {
+          sessionId: SLOT_SESSION,
+          clientName: "managed-proxy",
+          managedSlots: {
+            scopeKey: SCOPE,
+            sessionUuids: [SLOT_SESSION, "00000000-0000-4000-8000-000000000002"],
+            livenessOwnerToken: TOKEN,
+          },
+        },
+      },
+      state,
+      undefined,
+      undefined,
+      { socketSessionId: NEW_SOCKET },
+    );
+    expect(rebind).toMatchObject({ success: false, code: "managed_slot_registration_refused" });
+    expect(scopes.get(NEW_SOCKET)?.sessionUuids.size).toBe(0);
+    for (const tool of ["getAndroid", "getApple", "startDevice", "provisionDevice"]) {
+      expect(acquisitionRefusal(NEW_SOCKET, tool)).toBeInstanceOf(DeviceOutsideManagedSlotsError);
+    }
+    const sessionRelease = await handleDaemonRequest(
+      {
+        id: "session",
+        type: "daemon_request",
+        method: "daemon/releaseSession",
+        params: { sessionId: SLOT_SESSION },
+      },
+      state,
+      undefined,
+      undefined,
+      { socketSessionId: NEW_SOCKET },
+    );
+    expect(sessionRelease).toMatchObject({ success: false, code: "device_outside_managed_slots" });
+    const executionRelease = await handleDaemonRequest(
+      {
+        id: "execution",
+        type: "daemon_request",
+        method: "daemon/releaseExecution",
+        params: { sessionId: SLOT_SESSION, livenessOwnerToken: TOKEN },
+      },
+      state,
+      undefined,
+      undefined,
+      { socketSessionId: NEW_SOCKET },
+    );
+    expect(executionRelease).toMatchObject({ success: true });
+    expect(drained).toEqual([SLOT_SESSION]);
+  });
+
   test("the reconnected socket stays confined: device-acquiring tools are still refused", async () => {
     // The execution's session ends (idle release, heartbeat loss); the proxy keeps running.
     await sessionManager.releaseSession(SLOT_SESSION);

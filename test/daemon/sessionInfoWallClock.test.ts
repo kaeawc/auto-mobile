@@ -72,7 +72,7 @@ describe("session reports in wall-clock ms after a wall step (#11243)", () => {
         success: false,
         error: `Session not found: ${labelId}`,
         code: DAEMON_SESSION_NOT_FOUND_CODE,
-        releaseReason: "lazy-expiry",
+        releaseReason: "cleanup-expired",
         idle: true,
       });
       await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);

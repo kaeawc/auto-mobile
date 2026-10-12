@@ -10,6 +10,7 @@ import * as slotJournal002 from "./migrations/2026_10_09_002_slot_journal";
 import * as freeDeviceDeletion004 from "./migrations/2026_10_12_004_free_device_deletion";
 import * as freeDeviceDeletionFailedDeletes005 from "./migrations/2026_10_13_005_free_device_deletion_failed_deletes";
 import * as freeDeviceStop003 from "./migrations/2026_10_10_003_free_device_stop_state";
+import * as sessionBroker006 from "./migrations/2026_10_15_006_session_broker";
 
 /**
  * The slot registry's own migration set (#11174). Statically imported rather than read from a
@@ -23,6 +24,7 @@ export const SLOT_REGISTRY_MIGRATIONS: Readonly<Record<string, Migration>> = {
   "2026_10_10_003_free_device_stop_state": freeDeviceStop003,
   "2026_10_12_004_free_device_deletion": freeDeviceDeletion004,
   "2026_10_13_005_free_device_deletion_failed_deletes": freeDeviceDeletionFailedDeletes005,
+  "2026_10_15_006_session_broker": sessionBroker006,
 };
 
 export const slotRegistryMigrationProvider: MigrationProvider = {

@@ -60,6 +60,7 @@ import { logger, type Logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { UnissuedSessionError, type Session, type SessionManager } from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
+import { assertSessionBrokerToolCall } from "./sessionBrokerToolGate";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import {
@@ -3595,7 +3596,10 @@ export class ToolRegistryClass {
       name,
       description,
       schema,
-      handler,
+      handler: async (args, progress, signal) => {
+        await assertSessionBrokerToolCall(name, false, args);
+        return handler(args, progress, signal);
+      },
       defaultEnabled: options.defaultEnabled ?? true,
       defaultDeclared: options.defaultEnabled !== undefined,
       supportsProgress: options.supportsProgress ?? false,
@@ -3674,6 +3678,7 @@ export class ToolRegistryClass {
         typeof handlerArgs.sessionUuid === "string" ? handlerArgs.sessionUuid : undefined;
 
       try {
+        await assertSessionBrokerToolCall(name, true, handlerArgs);
         const resolvedTarget = await this.executionTargetResolver.resolveExecutionTarget({
           name,
           args: handlerArgs,
@@ -3774,18 +3779,12 @@ export class ToolRegistryClass {
           }),
         );
       } finally {
-        void Promise.resolve()
-          .then(() =>
-            this.toolCallRepository.recordToolCall({
-              toolName: name,
-              timestamp: toolCallTimestamp,
-              sessionUuid,
-              durationMs: toolDurationMs ?? this.timer.now() - toolStartMs,
-            }),
-          )
-          .catch((error: unknown) => {
-            logger.warn(`[ToolRegistry] Failed to record tool call for ${name}: ${error}`);
-          });
+        this.recordCompletedCall(
+          name,
+          toolCallTimestamp,
+          sessionUuid,
+          toolDurationMs ?? this.timer.now() - toolStartMs,
+        );
       }
     };
 
@@ -3811,6 +3810,26 @@ export class ToolRegistryClass {
       appUiResourceUri: options.appUiResourceUri,
       ...deviceReadOnlyMetadata(options.deviceReadOnly, options.deviceReadOnlyArgs),
     });
+  }
+
+  private recordCompletedCall(
+    name: string,
+    timestamp: string,
+    sessionUuid: string | undefined,
+    durationMs: number,
+  ): void {
+    void Promise.resolve()
+      .then(() =>
+        this.toolCallRepository.recordToolCall({
+          toolName: name,
+          timestamp,
+          sessionUuid,
+          durationMs,
+        }),
+      )
+      .catch((error: unknown) => {
+        logger.warn(`[ToolRegistry] Failed to record tool call for ${name}: ${error}`);
+      });
   }
 
   // Get all registered tools
@@ -3928,6 +3947,11 @@ export class ToolRegistryClass {
     const invocation = this.createInternalToolInvocationContext(
       callArgs instanceof Promise ? await callArgs : callArgs,
       options,
+    );
+    await assertSessionBrokerToolCall(
+      resolved.name,
+      resolved.requiresDevice === true,
+      invocation.args,
     );
     assertInternalCallWithinManagedSlots(resolved.name, invocation);
     refuseInternalControlOnForeignOwnedSession(

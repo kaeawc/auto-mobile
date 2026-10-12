@@ -95,7 +95,16 @@ import {
   defaultSlotExecOwnerLiveness,
   withLiveExecutionSessions,
 } from "./managedSlots/slotOwnerLiveness";
-import { openSqliteSlotRegistry, slotRegistryFileExists } from "./managedSlots/sqliteSlotRegistry";
+import {
+  openSqliteSlotRegistry,
+  slotRegistryFileExists,
+  type SqliteSlotRegistry,
+} from "./managedSlots/sqliteSlotRegistry";
+import { openSessionBrokerService, type SessionBrokerService } from "./sessionBroker/service";
+import {
+  readSessionBrokerHostConfig,
+  SESSION_BROKER_HOST_CONFIG_ENV,
+} from "./sessionBroker/hostConfig";
 import { SlotScopeReset } from "./managedSlots/slotScopeReset";
 import { ManagedExecutionReowner } from "./managedSlots/managedExecutionReowner";
 import {
@@ -171,7 +180,7 @@ import {
 } from "../features/observe/shared/ctrlProxyForwardLeaseOwnership";
 import { statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { dirname, isAbsolute } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import {
@@ -757,7 +766,11 @@ export class Daemon {
   private deviceSessionRepository: DeviceSessionRepository;
   private timer: Timer;
   private managedExecutionRelease: ManagedExecutionRelease | undefined;
-  private managedSlotRegistry: Promise<SlotRegistry> | undefined;
+  private managedSlotRegistry: Promise<SqliteSlotRegistry> | undefined;
+  private sessionBrokerService: SessionBrokerService | undefined;
+  private readonly sessionBrokerConfigPath = process.env[SESSION_BROKER_HOST_CONFIG_ENV]
+    ? resolve(process.env[SESSION_BROKER_HOST_CONFIG_ENV]!)
+    : undefined;
   private managedSlotExecOwnerLiveness: SlotExecOwnerLiveness | undefined;
   /** Journal entries this daemon is driving; shared by the drain and the slot reconciler. */
   private readonly managedSlotJournalInFlight = new SlotJournalInFlight();
@@ -970,6 +983,7 @@ export class Daemon {
       this.deviceSessionRegistry,
       this.observerSessionRegistry,
     );
+    DaemonState.getInstance().setSessionBrokerMode(this.sessionBrokerConfigPath !== undefined);
     this.installManagedExecutionRelease();
     this.installManagedSlotAcquisition();
 
@@ -1032,6 +1046,10 @@ export class Daemon {
 
   /** Start the abandoned-scope sweep (#11174): one hour idle, no live owner → devices deleted. */
   private startManagedSlotReclaimer(): void {
+    if (this.sessionBrokerConfigPath) {
+      // Ordinary session return and broker LRU eviction own this private inventory.
+      return;
+    }
     this.managedSlotReclaimer ??= this.managedSlotReclaimerFactory({
       registry: () => this.openManagedSlotRegistry(),
       registryExists: () => this.managedSlotRegistryExists(),
@@ -1177,7 +1195,7 @@ export class Daemon {
     }
   }
 
-  private openManagedSlotRegistry(): Promise<SlotRegistry> {
+  private openManagedSlotRegistry(): Promise<SqliteSlotRegistry> {
     if (this.managedSlotRegistry) {
       return this.managedSlotRegistry;
     }
@@ -1192,7 +1210,12 @@ export class Daemon {
       (registry) => {
         void this.managedExecutionRelease?.recoverSettledSlots();
         const acquisition = this.managedSlotAcquisition;
-        if (acquisition && !this.managedSlotRedrive && process.env.NODE_ENV !== "test") {
+        if (
+          acquisition &&
+          !this.sessionBrokerConfigPath &&
+          !this.managedSlotRedrive &&
+          process.env.NODE_ENV !== "test"
+        ) {
           this.managedSlotRedrive = acquisition.startJournalRedrive(registry);
         }
       },
@@ -1212,6 +1235,9 @@ export class Daemon {
 
   /** Stop the drain's settlement watchers and close the slot registry if this daemon opened it. */
   private async closeManagedExecutionRelease(): Promise<void> {
+    await this.sessionBrokerService?.close();
+    this.sessionBrokerService = undefined;
+    DaemonState.getInstance().setSessionBrokerService(undefined);
     this.managedExecutionRelease?.close();
     this.managedExecutionReowner?.close();
     this.managedSlotReclaimer?.stop();
@@ -1237,6 +1263,40 @@ export class Daemon {
         `[Daemon] Closing the managed slot registry failed: ${errorMessage(error)}`,
         error,
       );
+    }
+  }
+
+  private async installSessionBroker(): Promise<void> {
+    if (!this.sessionBrokerConfigPath || this.sessionBrokerService) {
+      return;
+    }
+    const acquisition = this.managedSlotAcquisition;
+    const release = this.managedExecutionRelease;
+    if (!acquisition || !release) {
+      throw new ActionableError(
+        "Session broker requires the provider's native ownership and cleanup machinery",
+      );
+    }
+    const registry = await this.openManagedSlotRegistry();
+    const config = await readSessionBrokerHostConfig(this.sessionBrokerConfigPath);
+    this.sessionBrokerService = await openSessionBrokerService({
+      config,
+      registry,
+      acquisition: acquisition.acquisition,
+      release,
+      journal: acquisition.journalFor(registry),
+      owner: this.managedSlotJournalOwner(),
+      timer: this.timer,
+      sessionIsLive: (sessionUuid) => this.sessionManager.peekSession(sessionUuid) !== null,
+      liveSessionIds: () =>
+        this.sessionManager
+          .getAllSessions()
+          .map((session) => this.sessionManager.ownershipSessionUuid(session.sessionId)),
+    });
+    DaemonState.getInstance().setSessionBrokerService(this.sessionBrokerService);
+    // No generic journal work starts before the exclusive host lock and inventory checks.
+    if (!this.managedSlotRedrive && process.env.NODE_ENV !== "test") {
+      this.managedSlotRedrive = acquisition.startJournalRedrive(registry);
     }
   }
 
@@ -1857,6 +1917,10 @@ export class Daemon {
       } catch (error) {
         logger.warn(`[Daemon] Session rehydration failed; continuing startup: ${error}`);
       }
+
+      // A session-only provider resolves prior ownership before exposing its socket or warming
+      // runners for sessions that recovery will abandon.
+      await this.installSessionBroker();
 
       // Rehydrated sessions are now owned here and can safely warm their runners.
       await startupBenchmark.runPhase("iosServices", () => this.initializeIosServices());

@@ -1,0 +1,265 @@
+import { ActionableError, toActionableError } from "../../models/ActionableError";
+import {
+  readAndroidSessionDeviceCatalog,
+  readIosSessionDeviceCatalog,
+} from "../../devices/sessionCatalog";
+import type { SessionDeviceCatalog } from "../../devices/sessionRequirements";
+import {
+  listDevices,
+  listInstalledSystemImages,
+} from "../../utils/android-cmdline-tools/avdmanager";
+import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../../utils/fileLock";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
+import type { Timer } from "../../utils/SystemTimer";
+import { defaultLockOwnerGenerationProbe } from "../lockOwnerGeneration";
+import type { ManagedSlotAcquisition } from "../managedSlots/managedSlotAcquisition";
+import type { ManagedExecutionRelease } from "../managedSlots/managedExecutionRelease";
+import type { ManagedSlotJournal } from "../managedSlots/slotJournal";
+import {
+  defaultSlotRegistryPath,
+  type SqliteSlotRegistry,
+} from "../managedSlots/sqliteSlotRegistry";
+import { computeSlotScopeKey, type SlotProcessIdentity } from "../managedSlots/slotRegistry";
+import { SessionBroker } from "./broker";
+import { ManagedDevicePort } from "./managedDevicePort";
+import { SESSION_BROKER_SCOPE, type SessionBrokerHostConfig } from "./hostConfig";
+
+export interface SessionBrokerHostLock {
+  acquire(): void;
+  release(): void;
+}
+
+/** Existing PID/generation lock primitive, held for the lifetime of the broker service. */
+export function sessionBrokerHostLock(
+  owner: SlotProcessIdentity,
+  path = `${defaultSlotRegistryPath()}.session-broker.lock`,
+): SessionBrokerHostLock {
+  return {
+    acquire: () => {
+      if (
+        !tryAcquireExclusiveLock(path, {
+          pid: owner.pid,
+          ownerToken: owner.daemonId,
+          ownerGeneration: defaultLockOwnerGenerationProbe,
+        })
+      ) {
+        throw new ActionableError(
+          "Another provider owns session-broker execution on this host; stop it before starting a replacement",
+        );
+      }
+    },
+    release: () => releaseExclusiveLock(path, owner.pid, owner.daemonId),
+  };
+}
+
+export interface OpenSessionBrokerServiceOptions {
+  config: SessionBrokerHostConfig;
+  registry: SqliteSlotRegistry;
+  acquisition: Pick<ManagedSlotAcquisition, "acquire">;
+  release: Pick<ManagedExecutionRelease, "releaseExecution">;
+  journal: Pick<ManagedSlotJournal, "owner" | "redriveSlot">;
+  owner: SlotProcessIdentity;
+  timer: Timer;
+  sessionIsLive: (sessionUuid: string) => boolean;
+  /** Already rehydrated base sessions; generic work must be drained before opting in. */
+  liveSessionIds?: () => readonly string[];
+  /** Tests supply a fake host lock; production shares the registry's physical namespace. */
+  hostLock?: SessionBrokerHostLock;
+  catalog?: (platform: "ios" | "android", signal?: AbortSignal) => Promise<SessionDeviceCatalog>;
+}
+
+function nativeCatalogReader(config: SessionBrokerHostConfig) {
+  const ios = new SimCtlClient(null);
+  return (platform: "ios" | "android", signal?: AbortSignal): Promise<SessionDeviceCatalog> => {
+    if (platform === "ios") {
+      return readIosSessionDeviceCatalog(ios, {
+        signal,
+        classifications: config.iosClassifications,
+      });
+    }
+    return readAndroidSessionDeviceCatalog(
+      {
+        listDevices: (signal) => listDevices(undefined, signal),
+        listInstalledSystemImages: (filter, signal) =>
+          listInstalledSystemImages(filter, undefined, signal),
+      },
+      { profileArchetypes: config.androidProfileArchetypes },
+      { signal },
+    );
+  };
+}
+
+/**
+ * Opens one exclusive host service using the existing native assignment/journal authority.
+ * Legacy slot/free-pool inventory must be drained before opting in; it cannot disappear from cap
+ * accounting merely because it was created by another allocation path.
+ */
+export async function openSessionBrokerService(
+  options: OpenSessionBrokerServiceOptions,
+): Promise<SessionBrokerService> {
+  const lock = options.hostLock ?? sessionBrokerHostLock(options.owner);
+  lock.acquire();
+  try {
+    const scopeKey = computeSlotScopeKey(SESSION_BROKER_SCOPE);
+    await assertBrokerInventoryOwned(options.registry, scopeKey);
+    await assertBrokerSessionsOwned(options, scopeKey);
+    const scope = await options.registry.ensureScope(SESSION_BROKER_SCOPE);
+    if (scope.kind !== "ready") {
+      throw new ActionableError(
+        `Session broker's private ownership scope is unavailable: ${scope.kind}`,
+      );
+    }
+    const devices = new ManagedDevicePort({
+      scope: SESSION_BROKER_SCOPE,
+      managedSlotAcquisition: options.acquisition,
+      managedExecutionRelease: options.release,
+      registry: options.registry,
+      managedSlotJournal: options.journal,
+    });
+    if (options.config.reuseCleanDevices) {
+      throw new ActionableError(
+        "Native clean-baseline reuse is not yet qualified; use zero-pooling mode for this milestone",
+      );
+    }
+    const broker = new SessionBroker({
+      store: options.registry.sessionBrokerStore(scopeKey),
+      devices,
+      owner: options.owner,
+      limits: options.config.limits,
+      catalog: options.catalog ?? nativeCatalogReader(options.config),
+      defaults: (platform) => {
+        const defaults = options.config.defaults[platform];
+        if (!defaults) {
+          throw new ActionableError(
+            `Session-broker execution is not configured for ${platform} on this host`,
+          );
+        }
+        return defaults;
+      },
+      sessionIsLive: options.sessionIsLive,
+    });
+    await broker.recover();
+    const service = new SessionBrokerService(broker, scopeKey, lock, options.timer);
+    service.start();
+    return service;
+  } catch (error) {
+    lock.release();
+    throw toActionableError(error, "Session broker startup failed");
+  }
+}
+
+async function assertBrokerSessionsOwned(
+  options: OpenSessionBrokerServiceOptions,
+  scopeKey: string,
+): Promise<void> {
+  const live = options.liveSessionIds?.() ?? [];
+  if (live.length === 0) {
+    return;
+  }
+  const requests = await options.registry.sessionBrokerStore(scopeKey).listRequests();
+  const known = new Set(
+    requests.flatMap((request) => (request.sessionId ? [request.sessionId] : [])),
+  );
+  // A create can have claimed native ownership before the broker's active receipt committed.
+  for (const device of await options.registry.snapshotManagedDevices()) {
+    if (device.scopeKey === scopeKey && device.execSessionUuid) {
+      known.add(device.execSessionUuid);
+    }
+  }
+  if (live.some((session) => !known.has(session))) {
+    throw new ActionableError(
+      "Session-broker mode requires prior generic sessions to be drained before startup",
+    );
+  }
+}
+
+async function assertBrokerInventoryOwned(
+  registry: SqliteSlotRegistry,
+  scopeKey: string,
+): Promise<void> {
+  const resources = await registry.sessionBrokerStore(scopeKey).listResources();
+  const occupied = new Set(
+    resources
+      .filter((resource) => resource.state !== "destroyed")
+      .map((resource) => resource.allocationIndex),
+  );
+  const foreign = (await registry.snapshotManagedDevices()).some(
+    (device) =>
+      device.scopeKey !== scopeKey ||
+      device.holder !== "slot" ||
+      device.slotIndex === null ||
+      !occupied.has(device.slotIndex),
+  );
+  const foreignJournal = (await registry.listOpenSlotJournal()).some(
+    (entry) => entry.scopeKey !== scopeKey || !occupied.has(entry.slotIndex),
+  );
+  if (foreign || foreignJournal) {
+    throw new ActionableError(
+      "Session-broker mode requires prior or unaccounted managed allocations to be drained; existing inventory remains untouched",
+    );
+  }
+}
+
+/** Explicit owner of the recovery loop, including interruptible idle waiting and a joined stop. */
+export class SessionBrokerService {
+  private stopped = false;
+  private running: Promise<void> | undefined;
+  private closing: Promise<void> | undefined;
+  private wake: (() => void) | undefined;
+
+  constructor(
+    readonly broker: SessionBroker,
+    readonly scopeKey: string,
+    private readonly lock: SessionBrokerHostLock,
+    private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout">,
+  ) {}
+
+  start(): void {
+    this.running ??= this.loop();
+  }
+
+  close(): Promise<void> {
+    this.closing ??= this.stop();
+    return this.closing;
+  }
+
+  private async stop(): Promise<void> {
+    this.stopped = true;
+    this.wake?.();
+    await this.running;
+    await this.broker.close();
+    // Keep ownership if broker shutdown throws: the process's eventual exit makes the lock
+    // reclaimable, whereas releasing it early could admit a successor over unfinished work.
+    this.lock.release();
+  }
+
+  private async loop(): Promise<void> {
+    while (!this.stopped) {
+      await this.wait();
+      if (this.stopped) {
+        return;
+      }
+      try {
+        await this.broker.recover();
+      } catch (error) {
+        logger.warn(`Session broker recovery remains pending: ${errorMessage(error)}`);
+      }
+    }
+  }
+
+  private wait(): Promise<void> {
+    return new Promise((resolve) => {
+      const done = () => {
+        this.wake = undefined;
+        resolve();
+      };
+      const timeout = this.timer.setTimeout(done, 5_000);
+      this.wake = () => {
+        this.timer.clearTimeout(timeout);
+        done();
+      };
+    });
+  }
+}

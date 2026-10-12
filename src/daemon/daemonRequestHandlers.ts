@@ -1,4 +1,13 @@
 import { toActionableError } from "../models/ActionableError";
+import type { SessionBrokerService } from "./sessionBroker/service";
+import type { SessionBrokerProtocolErrorCode } from "../models/sessionBrokerResult";
+import { SESSION_BROKER_CAPABILITY } from "./sessionBroker/hostConfig";
+import {
+  bindBrokerRegistration,
+  handlePrepareBrokerSession,
+  handleBrokerSessionStatus,
+  handleReleaseBrokerSession,
+} from "./sessionBroker/handlers";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import type { ManagedSlotInputGate } from "./inputDeviceOwnership";
 import { isSessionReleasing } from "./sessionReleaseState";
@@ -135,6 +144,8 @@ const DAEMON_PROCESS_INSTANCE = `${process.pid}:${performance.timeOrigin}`;
 
 export interface DaemonStateAccess {
   isInitialized(): boolean;
+  isSessionBrokerMode?(): boolean;
+  getSessionBrokerService?(): SessionBrokerService | undefined;
   /** Overrides this process's {@link DAEMON_PROCESS_INSTANCE} (tests). */
   getDaemonInstance?(): string;
   /** Overrides the production lease-activity sources (tests). */
@@ -302,6 +313,7 @@ export type DaemonMethodResult = {
     | typeof DAEMON_INSTANCE_CHANGED_CODE
     /** `daemon/acquireManagedSlots` refusals before any mutation (#11173). */
     | ManagedSlotConfigErrorCode
+    | SessionBrokerProtocolErrorCode
     /** `daemon/registerSession` managed-connection refusals (#11178). */
     | typeof DEVICE_OUTSIDE_MANAGED_SLOTS_CODE
     | typeof DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE
@@ -318,6 +330,13 @@ export interface ListedDeviceSessionRecord extends DeviceSessionRecord {
 const registerSessionParams = z.object({
   sessionId: z.string().max(MAX_OBSERVER_SESSION_ID_LENGTH).uuid(),
   clientName: z.string().max(MAX_OBSERVER_CLIENT_NAME_LENGTH).trim().min(1),
+  sessionBroker: z
+    .object({
+      requestId: z.string().min(1),
+      livenessOwnerToken: z.string().min(1),
+    })
+    .strict()
+    .optional(),
   /**
    * A managed slot proxy re-binding its connection after a socket reconnect (#11178): the slot
    * sessions it holds, proven by the liveness owner token they were claimed for.
@@ -622,18 +641,10 @@ async function handleRegisterSession(
   if (!parsed.success) {
     return { success: false, error: `Invalid registerSession parameters: ${parsed.error.message}` };
   }
-  const { sessionId, clientName, managedSlots } = parsed.data;
-  const refusal = await managedConnectionRegistrationRefusal(
-    state,
-    context.socketSessionId,
-    sessionId,
-    managedSlots,
-  );
+  const { sessionId, clientName } = parsed.data;
+  const refusal = await bindExecutionRegistration(state, parsed.data, context);
   if (refusal) {
     return refusal;
-  }
-  if (managedSlots) {
-    await reownManagedSlots(state, managedSlots);
   }
   const manager = state.getSessionManager();
   const draining = await releaseDrainRefusal(manager, sessionId);
@@ -679,6 +690,41 @@ function observerSessionRegistration(
     : { success: false, error: registration.error };
 }
 
+async function bindExecutionRegistration(
+  state: DaemonStateAccess,
+  registration: z.infer<typeof registerSessionParams>,
+  context: DaemonRequestContext,
+): Promise<DaemonMethodResult | undefined> {
+  const { sessionId, managedSlots, sessionBroker } = registration;
+  if (sessionBroker) {
+    if (managedSlots) {
+      return { success: false, error: "A registration cannot select both acquisition contracts" };
+    }
+    const brokerRefusal = await bindBrokerRegistration(
+      state,
+      sessionId,
+      sessionBroker,
+      context.socketSessionId,
+    );
+    if (brokerRefusal) {
+      return brokerRefusal;
+    }
+  }
+  const refusal = await managedConnectionRegistrationRefusal(
+    state,
+    context.socketSessionId,
+    sessionId,
+    managedSlots,
+  );
+  if (refusal) {
+    return refusal;
+  }
+  if (managedSlots) {
+    await reownManagedSlots(state, managedSlots);
+  }
+  return undefined;
+}
+
 /** Who sent a socket daemon request. */
 export interface DaemonRequestContext {
   /** The requesting socket session (the `__mcpSessionId` its forwarded tool calls carry). */
@@ -710,9 +756,10 @@ export async function handleDaemonRequest(
           INPUT_TYPE_TEXT_APPEND_CAPABILITY,
           INPUT_GESTURE_STREAM_CAPABILITY,
           DAEMON_REGISTER_SESSION_METHOD,
-          ...(MANAGED_SLOTS_PROXY_WIRED
+          ...(MANAGED_SLOTS_PROXY_WIRED && !state.isSessionBrokerMode?.()
             ? [MANAGED_SLOTS_V1_CAPABILITY, MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY]
             : []),
+          ...(state.isSessionBrokerMode?.() ? [SESSION_BROKER_CAPABILITY] : []),
         ],
       },
     };
@@ -739,6 +786,17 @@ type InitializedDaemonMethodHandler = (
 /** Socket daemon methods served once the daemon is initialized, by method name. */
 const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonMethodHandler> =
   new Map<string, InitializedDaemonMethodHandler>([
+    [
+      "daemon/prepareSession",
+      (request, state, _executions, signal, context) =>
+        handlePrepareBrokerSession(request, state, signal, context.socketSessionId),
+    ],
+    [
+      "daemon/sessionRequestStatus",
+      (request, state, _executions, _signal, context) =>
+        handleBrokerSessionStatus(request, state, context.socketSessionId),
+    ],
+    ["daemon/releaseBrokerSession", (request, state) => handleReleaseBrokerSession(request, state)],
     [DAEMON_REGISTER_SESSION_METHOD, handleRegisterSession],
     [DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD, handleReleaseLivenessOwnership],
     [DAEMON_HEARTBEAT_METHOD, handleHeartbeat],
@@ -784,6 +842,17 @@ async function handleInitializedDaemonRequest(
   context: DaemonRequestContext,
 ): Promise<DaemonMethodResult> {
   const handler = INITIALIZED_DAEMON_METHOD_HANDLERS.get(request.method);
+  if (
+    state.isSessionBrokerMode?.() &&
+    (request.method === DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD ||
+      request.method === DAEMON_RESET_SLOT_SCOPE_METHOD)
+  ) {
+    return {
+      success: false,
+      code: "session_broker_exclusive",
+      error: "Session-broker mode owns device allocation; request and release a session instead",
+    };
+  }
   if (!handler) {
     return {
       success: false,

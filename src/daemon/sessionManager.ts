@@ -92,10 +92,11 @@ import { Mutex } from "async-mutex";
 import { SingleFlight } from "../utils/cache/SingleFlight";
 import { errorMessage } from "../utils/describeUnknownError";
 import { effectiveLastToolActivity, sessionIdleDeadline } from "./sessionClocks";
-import { forgivenLeaseStart, type StallForgivingLeases } from "./stallForgiveness";
+import { forgivenLeaseStart, leaseRunningAt, type StallForgivingLeases } from "./stallForgiveness";
 import { onSessionClock } from "./sessionClockPersistence";
 import {
   judgedLeaseHeartbeat,
+  hasMintBoundClaimLease,
   heartbeatLeasePastGrace,
   judgesOwnerHeartbeats,
   ownerLeaseLiveAt,
@@ -11442,6 +11443,7 @@ export class SessionManager {
         forgiven++;
         continue;
       }
+      this.forgiveMintBoundClaimLease(session, resumedAt, leaseLostMs, gapBeganAt);
       if (ownerLeaseLiveAt(session, gapBeganAt)) {
         // The lease that is judged (#11162): for a session judged on its owner's heartbeats, a
         // non-owner's tool call must not move the forgiven lease start.
@@ -11472,6 +11474,26 @@ export class SessionManager {
       );
     }
     return forgiven;
+  }
+
+  /** Compensate the claim-only mint lease independently of the activity-derived stall floor. */
+  private forgiveMintBoundClaimLease(
+    session: Session,
+    resumedAt: number,
+    leaseLostMs: number,
+    gapBeganAt?: number,
+  ): void {
+    if (
+      hasMintBoundClaimLease(session) &&
+      (gapBeganAt === undefined ||
+        leaseRunningAt(session.livenessOwnerBoundAt, session.heartbeatTimeoutMs, gapBeganAt))
+    ) {
+      session.livenessOwnerBoundAt = forgivenLeaseStart(
+        session.livenessOwnerBoundAt,
+        resumedAt,
+        leaseLostMs,
+      );
+    }
   }
 
   private async persistNewLivenessOwnershipClaim(

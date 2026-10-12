@@ -11,6 +11,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { daemonHeartbeatHandler } from "../helpers/daemonHeartbeatHandler";
 import { warmedTests } from "../helpers/warmedTests";
+import { logger } from "../../src/utils/logger";
 
 const managers: SessionManager[] = [];
 const monitors: SessionHeartbeatMonitor[] = [];
@@ -235,13 +236,178 @@ for (const controlInFlight of [false, true]) {
 }
 
 test("CLI mint holds nothing against a successor claim", async () => {
-  const { manager, heartbeat } = setup();
+  const { timer, manager, heartbeat } = setup();
   const session = await manager.createSession("S", "device", "android");
   session.livenessPolicy = "cli-idle";
   expect(manager.bindAcquiredLivenessOwnerToken("S", "minter")).toBe(true);
+  timer.setCurrentTime(2_000);
+  expect(manager.forgiveDaemonStall(2_000, 500, 500, 1_000)).toBe(1);
+  expect(session.livenessOwnerBoundAt).toBe(0);
   expect(manager.getOwnerLeaseHold("S")).toBeUndefined();
   await expect(heartbeat("S", "successor")).resolves.toBeDefined();
 });
+
+test("rolled-back successor claim preserves activity-based reaping and admission, but not the minter claim hold", async () => {
+  const { timer, persistence, manager } = setup();
+  const session = await manager.createSession("S", "device", "android");
+  timer.setCurrentTime(1_000);
+  expect(manager.bindAcquiredLivenessOwnerToken("S", "minter")).toBe(true);
+  timer.setCurrentTime(12_000);
+  const write = spyOn(persistence, "recordLivenessOwnership").mockImplementation(async () => {
+    manager.recordToolCallEnded("S");
+    throw new Error("write failed");
+  });
+  try {
+    await expect(manager.claimLivenessOwnership("S", "successor")).rejects.toThrow("write failed");
+  } finally {
+    write.mockRestore();
+  }
+  expect(session.livenessOwnerToken).toBe("minter");
+  expect(session.livenessOwnerBoundAt).toBe(1_000);
+  expect(session.lastOwnerHeartbeat).toBeUndefined();
+  expect(session.hasReceivedHeartbeat).toBe(true);
+  expect(manager.judgedLeaseHeartbeat(session)).toBe(12_000);
+  expect(manager.getSessionLeaseState("S")).toEqual({ phase: "live", remainingMs: 4_000 });
+  expect(manager.ownerLeaseAwaitsReap("S")).toBe(false);
+  await expect(manager.getOrCreateSession("S")).resolves.toBe(session);
+  expect(manager.getOwnerLeaseHold("S")?.state).toBe("lapsed");
+  await expect(manager.claimLivenessOwnership("S", "successor")).resolves.toBe("claimed");
+  expect(session.livenessOwnerToken).toBe("successor");
+});
+
+test("late stall cannot re-arm a silent minter claim hold through tool activity", async () => {
+  const { timer, manager, heartbeat } = setup();
+  const session = await manager.createSession("S", "device", "android");
+  expect(manager.bindAcquiredLivenessOwnerToken("S", "minter")).toBe(true);
+  for (let at = 3_000; at <= 18_000; at += 3_000) {
+    timer.setCurrentTime(at);
+    manager.recordToolCallEnded("S");
+  }
+  timer.setCurrentTime(20_000);
+  const lapsed = { state: "lapsed", remainingMs: 0, holdRemainingMs: 0 };
+  expect(manager.getOwnerLeaseHold("S")).toEqual(lapsed);
+  expect(manager.forgiveDaemonStall(20_000, 1_000, 0, 19_000)).toBe(1);
+  expect(session.stallForgivenAt).toBe(19_000);
+  expect(session.livenessOwnerBoundAt).toBe(0);
+  expect(session.hasReceivedHeartbeat).toBe(false);
+  expect(manager.getOwnerLeaseHold("S")).toEqual(lapsed);
+  await expect(heartbeat("S", "successor")).resolves.toBeDefined();
+});
+
+for (const claimAt of [8_001, 12_001, 120_000]) {
+  test(`stalls every 6 s with activity every 3 s cannot defend a silent minter at ${claimAt} ms`, async () => {
+    const { timer, manager, heartbeat } = setup();
+    const session = await manager.createSession("S", "device", "android");
+    expect(manager.bindAcquiredLivenessOwnerToken("S", "minter")).toBe(true);
+    for (let at = 3_000; at <= claimAt; at += 3_000) {
+      timer.setCurrentTime(at);
+      manager.recordToolCallEnded("S");
+      if (at % 6_000 === 0) {
+        manager.forgiveDaemonStall(at, 1_000, 0, at - 1_000);
+      }
+    }
+    timer.setCurrentTime(claimAt);
+    // The first gap begins at 5 s, after the mint's 4 s lease; none may extend it.
+    expect(session.livenessOwnerBoundAt).toBe(0);
+    expect(session.hasReceivedHeartbeat).toBe(false);
+    expect(manager.getOwnerLeaseHold("S")?.state).toBe("lapsed");
+    await expect(heartbeat("S", "successor")).resolves.toBeDefined();
+  });
+}
+
+for (const activity of [false, true]) {
+  for (const gapBeganAt of [3_000, undefined]) {
+    for (const sleptMs of [0, 1_000]) {
+      test(`running mint stall shifts claim boundary exactly, activity ${activity}, gap ${gapBeganAt}, sleep ${sleptMs}`, async () => {
+        const { timer, manager, heartbeat } = setup();
+        const session = await manager.createSession("S", "device", "android");
+        timer.setCurrentTime(1_000);
+        expect(manager.bindAcquiredLivenessOwnerToken("S", "minter")).toBe(true);
+        timer.setCurrentTime(3_000);
+        if (activity) {
+          manager.recordToolCallEnded("S");
+        }
+        timer.setCurrentTime(4_000);
+        expect(manager.forgiveDaemonStall(4_000, 1_000 - sleptMs, sleptMs, gapBeganAt)).toBe(1);
+        const holdEnd = 2_000 + session.heartbeatTimeoutMs + SUSPECT_GRACE_MS;
+        timer.setCurrentTime(holdEnd);
+        await expect(heartbeat("S", "successor")).rejects.toThrow(
+          "owned by another liveness owner",
+        );
+        expect(manager.getOwnerLeaseHold("S")).toEqual({
+          state: "suspect",
+          remainingMs: 0,
+          holdRemainingMs: 0,
+        });
+        timer.setCurrentTime(holdEnd + 1);
+        await expect(heartbeat("S", "successor")).resolves.toBeDefined();
+      });
+    }
+  }
+}
+
+test("successive stalls extend only gaps that began while the shifted mint lease was running", async () => {
+  const { timer, manager, heartbeat } = setup();
+  const session = await manager.createSession("S", "device", "android");
+  expect(manager.bindAcquiredLivenessOwnerToken("S", "minter")).toBe(true);
+  for (let at = 3_000; at <= 120_000; at += 3_000) {
+    timer.setCurrentTime(at);
+    manager.recordToolCallEnded("S");
+    manager.forgiveDaemonStall(at, 1_000, 0, at - 1_000);
+  }
+  // Starts at 2 s and 5 s were live (the second at the shifted lease's boundary).
+  // The gap at 8 s and all later gaps began after the shifted 6 s lease deadline.
+  expect(session.livenessOwnerBoundAt).toBe(2_000);
+  expect(session.hasReceivedHeartbeat).toBe(false);
+  expect(manager.getOwnerLeaseHold("S")?.state).toBe("lapsed");
+  await expect(heartbeat("S", "successor")).resolves.toBeDefined();
+});
+
+test("mint stall shifts only lost time and caps the claim start at resume", async () => {
+  const { timer, manager } = setup();
+  const session = await manager.createSession("S", "device", "android");
+  timer.setCurrentTime(1_000);
+  expect(manager.bindAcquiredLivenessOwnerToken("S", "minter")).toBe(true);
+  timer.setCurrentTime(4_000);
+  manager.forgiveDaemonStall(4_000, 500, 0, 3_000);
+  expect(session.livenessOwnerBoundAt).toBe(1_500);
+  manager.forgiveDaemonStall(4_000, 10_000, 0, 3_000);
+  expect(session.livenessOwnerBoundAt).toBe(4_000);
+});
+
+for (const gapBeganAt of [3_000, 19_000, undefined]) {
+  test(`mint forgiveness preserves every existing write, return and log count, gap ${gapBeganAt}`, async () => {
+    const minted = setup();
+    const ownerless = setup();
+    const mint = await minted.manager.createSession("S", "device", "android");
+    const other = await ownerless.manager.createSession("S", "device", "android");
+    minted.timer.setCurrentTime(1_000);
+    expect(minted.manager.bindAcquiredLivenessOwnerToken("S", "minter")).toBe(true);
+    const resumedAt = gapBeganAt === 19_000 ? 20_000 : 4_000;
+    for (const { timer, manager } of [minted, ownerless]) {
+      timer.setCurrentTime(resumedAt - 2_000);
+      manager.recordToolCallEnded("S");
+      manager.getSession("S")!.awaitingOwnerSince = 500;
+      timer.setCurrentTime(resumedAt);
+    }
+    const log = spyOn(logger, "info").mockImplementation(() => {});
+    try {
+      const result = minted.manager.forgiveDaemonStall(resumedAt, 500, 500, gapBeganAt);
+      const mintLogs = log.mock.calls.map(([message]) => message);
+      log.mockClear();
+      expect(ownerless.manager.forgiveDaemonStall(resumedAt, 500, 500, gapBeganAt)).toBe(result);
+      expect(result).toBe(1);
+      expect(log.mock.calls.map(([message]) => message)).toEqual(mintLogs);
+      expect(mintLogs).toHaveLength(1);
+      expect(unchangedClocks(mint)).toEqual(unchangedClocks(other));
+      expect(mint.awaitingOwnerSince).toBe(other.awaitingOwnerSince);
+      expect(mint.stallForgivenAt).toBe(resumedAt - 1_000);
+      expect(mint.awaitingOwnerSince).toBe(1_500);
+    } finally {
+      log.mockRestore();
+    }
+  });
+}
 
 test("never-heartbeated CLI mint releases only past its idle timeout", async () => {
   const { timer, manager } = setup();

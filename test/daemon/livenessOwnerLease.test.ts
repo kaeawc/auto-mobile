@@ -122,15 +122,45 @@ describe("mint-bound claim-only lease start", () => {
     ownership: "owned",
   } satisfies LeaseSession;
 
-  test("owner lease uses mint at zero, then owner proof, with the later stall floor", () => {
-    expect(ownerLeaseHeartbeat(mint)).toBe(0);
+  test("owner heartbeat ignores mint at zero and uses owner proof with the later stall floor", () => {
+    expect(ownerLeaseHeartbeat(mint)).toBe(9_000);
     expect(ownerLeaseHeartbeat({ ...mint, lastOwnerHeartbeat: 2_000 })).toBe(2_000);
     expect(ownerLeaseHeartbeat({ ...mint, lastOwnerHeartbeat: 0 })).toBe(0);
     expect(ownerLeaseHeartbeat({ ...mint, stallForgivenAt: 10_000 })).toBe(10_000);
     expect(
       ownerLeaseHeartbeat({ ...mint, lastOwnerHeartbeat: 12_000, stallForgivenAt: 10_000 }),
     ).toBe(12_000);
-    expect(ownerLeaseHeartbeat({ ...mint, livenessOwnerBoundAt: undefined })).toBe(9_000);
+    const withoutMint = { ...mint, livenessOwnerBoundAt: undefined };
+    expect(ownerLeaseHeartbeat(withoutMint)).toBe(9_000);
+  });
+
+  test("rolled-back heartbeating claimant keeps every non-claim judgement on the activity clock", () => {
+    const rolledBack = { ...mint, hasReceivedHeartbeat: true, lastHeartbeat: 12_000 };
+    for (const stallForgivenAt of [undefined, 13_000]) {
+      const session = { ...rolledBack, stallForgivenAt };
+      const withoutMint = { ...session, livenessOwnerBoundAt: undefined };
+      const expectedHeartbeat = stallForgivenAt ?? 12_000;
+      expect(judgesOwnerHeartbeats(session)).toBe(true);
+      expect(ownerLeaseHeartbeat(session)).toBe(expectedHeartbeat);
+      expect(judgedLeaseHeartbeat(session)).toBe(expectedHeartbeat);
+      expect(sessionLeaseSnapshot(session, 12_000)).toEqual(
+        sessionLeaseSnapshot(withoutMint, 12_000),
+      );
+      expect(sessionJudgedLeaseSnapshot(session, 12_000)).toEqual(
+        sessionJudgedLeaseSnapshot(withoutMint, 12_000),
+      );
+      expect(ownerLeaseLiveAt(session, 12_000)).toBe(ownerLeaseLiveAt(withoutMint, 12_000));
+      expect(sessionOwnerLeaseSnapshot(session, 12_000).lastHeartbeat).toBe(0);
+    }
+  });
+
+  test("mint claim snapshot ignores an activity-derived stall floor", () => {
+    expect(sessionOwnerLeaseSnapshot({ ...mint, stallForgivenAt: 19_000 }, 20_000)).toEqual(
+      sessionOwnerLeaseSnapshot(mint, 20_000),
+    );
+    expect(
+      sessionOwnerLeaseSnapshot({ ...mint, livenessOwnerToken: undefined }, 20_000).lastHeartbeat,
+    ).toBe(9_000);
   });
 
   test("claim-only mint grace ends at the same strict lease-plus-grace boundary", () => {

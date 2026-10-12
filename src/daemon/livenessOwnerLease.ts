@@ -149,18 +149,25 @@ export function effectiveLastHeartbeat(
  * call, so a client that merely names the session (a second harness, or a restarted proxy that has
  * not claimed it yet) would keep the owner's lease looking live for as long as it kept working. The
  * owner lease is therefore read from `lastOwnerHeartbeat`, which only the owner's own heartbeats and
- * a recorded claim advance. Before that proof arrives, a mint-bound token's lease starts at its
- * bind instant. Sessions with neither owner proof nor a mint bind fall back to `lastHeartbeat`.
+ * a recorded claim advance. A session that never had an owner stamp falls back to `lastHeartbeat`.
  */
 export function ownerLeaseHeartbeat(
-  session: Pick<
-    LeaseSession,
-    "lastHeartbeat" | "lastOwnerHeartbeat" | "livenessOwnerBoundAt" | "stallForgivenAt"
-  >,
+  session: Pick<LeaseSession, "lastHeartbeat" | "lastOwnerHeartbeat" | "stallForgivenAt">,
 ): number {
   return Math.max(
-    session.lastOwnerHeartbeat ?? session.livenessOwnerBoundAt ?? session.lastHeartbeat,
+    session.lastOwnerHeartbeat ?? session.lastHeartbeat,
     session.stallForgivenAt ?? Number.NEGATIVE_INFINITY,
+  );
+}
+
+/** A minted token's claim lease starts at its bind instant until its owner proves liveness. */
+export function hasMintBoundClaimLease(
+  session: Pick<LeaseSession, "livenessOwnerToken" | "lastOwnerHeartbeat" | "livenessOwnerBoundAt">,
+): session is typeof session & { livenessOwnerBoundAt: number } {
+  return (
+    session.livenessOwnerToken !== undefined &&
+    session.lastOwnerHeartbeat === undefined &&
+    session.livenessOwnerBoundAt !== undefined
   );
 }
 
@@ -258,13 +265,12 @@ export function sessionOwnerLeaseSnapshot(
   session: LeaseSession,
   now: number,
 ): LivenessOwnerLeaseSnapshot {
-  const mintBoundLease =
-    session.livenessOwnerToken !== undefined &&
-    session.lastOwnerHeartbeat === undefined &&
-    session.livenessOwnerBoundAt !== undefined;
+  const mintBoundLease = hasMintBoundClaimLease(session);
   return {
     ...sessionLeaseSnapshot(session, now),
-    lastHeartbeat: ownerLeaseHeartbeat(session),
+    // Mint forgiveness shifts this claim-only clock directly; stallForgivenAt may come from
+    // tool activity, so it cannot defend a silent minter's claim hold.
+    lastHeartbeat: mintBoundLease ? session.livenessOwnerBoundAt : ownerLeaseHeartbeat(session),
     graceMs:
       mintBoundLease &&
       holdsOwnerHeartbeatLease(session.livenessPolicy) &&

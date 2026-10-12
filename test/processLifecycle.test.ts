@@ -81,6 +81,120 @@ async function flushUntilExit(fakeProcess: FakeProcess): Promise<void> {
   }
 }
 
+describe("synchronous stdio client-gone callbacks", () => {
+  const cases = ["stdin end", "stdin close", "stdin error", "stdout error"] as const;
+
+  function installCallback(
+    lifecycle: ProcessLifecycleHandlers,
+    source: FakeStdin,
+    event: (typeof cases)[number],
+    callback?: () => void,
+  ): void {
+    if (event === "stdout error") {
+      lifecycle.installStdoutShutdownHandler(source, callback);
+    } else {
+      lifecycle.installStdinShutdownHandlers(source, callback);
+    }
+  }
+
+  function emit(source: FakeStdin, event: (typeof cases)[number]): void {
+    if (event.endsWith("error")) {
+      source.emit("error", new Error("stream failed"));
+    } else if (event === "stdin end") {
+      source.emit("end");
+    } else {
+      source.emit("close");
+    }
+  }
+
+  test.each(cases)("%s callback runs synchronously before cleanup starts", async (event) => {
+    const fakeProcess = new FakeProcess();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, new FakeTimer());
+    const source = new FakeStdin();
+    const order: string[] = [];
+    installCallback(lifecycle, source, event, () => {
+      order.push("client gone");
+    });
+    lifecycle.setShutdownHandler(() => {
+      order.push("cleanup");
+    });
+    emit(source, event);
+    expect(order[0]).toBe("client gone");
+    await flushUntilExit(fakeProcess);
+    expect(order).toEqual(["client gone", "cleanup"]);
+    expect(fakeProcess.exitCodes).toEqual([0]);
+  });
+
+  test.each(cases)("%s callback still runs during signal shutdown", async (event) => {
+    const fakeProcess = new FakeProcess();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, new FakeTimer());
+    const source = new FakeStdin();
+    const cleanup = Promise.withResolvers<void>();
+    let callbacks = 0;
+    let shutdowns = 0;
+    lifecycle.install();
+    lifecycle.setShutdownHandler(() => {
+      shutdowns++;
+      return cleanup.promise;
+    });
+    installCallback(lifecycle, source, event, () => {
+      callbacks++;
+    });
+    fakeProcess.emit("SIGTERM");
+    await flushMicrotasks();
+    emit(source, event);
+    expect(callbacks).toBe(1);
+    expect(shutdowns).toBe(1);
+    cleanup.resolve();
+    await flushUntilExit(fakeProcess);
+    expect(fakeProcess.exitCodes).toEqual([0]);
+  });
+
+  test.each(cases)("%s throwing callback is logged and cannot block shutdown", async (event) => {
+    const fakeProcess = new FakeProcess();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, new FakeTimer());
+    const source = new FakeStdin();
+    const error = new Error("client-gone callback failed");
+    const emergencyLog = spyOn(process.stderr, "write").mockImplementation(() => true);
+    const shutdowns: string[] = [];
+    try {
+      installCallback(lifecycle, source, event, () => {
+        throw error;
+      });
+      lifecycle.setShutdownHandler((signal) => {
+        shutdowns.push(signal);
+      });
+      emit(source, event);
+      await flushUntilExit(fakeProcess);
+      expect(emergencyLog).toHaveBeenCalled();
+      expect(
+        emergencyLog.mock.calls.some(([message]) =>
+          String(message).includes("client-gone callback"),
+        ),
+      ).toBe(true);
+      expect(shutdowns).toEqual([event.startsWith("stdin") ? "stdin" : "stdout"]);
+      expect(fakeProcess.exitCodes).toEqual([0]);
+    } finally {
+      emergencyLog.mockRestore();
+    }
+  });
+
+  test.each(cases)("%s without a callback retains the same shutdown", async (event) => {
+    const fakeProcess = new FakeProcess();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, new FakeTimer());
+    const source = new FakeStdin();
+    const shutdowns: string[] = [];
+    installCallback(lifecycle, source, event);
+    lifecycle.setShutdownHandler((signal) => {
+      shutdowns.push(signal);
+    });
+    emit(source, event);
+    await flushUntilExit(fakeProcess);
+    expect(shutdowns).toEqual([event.startsWith("stdin") ? "stdin" : "stdout"]);
+    expect(fakeProcess.exitCodes).toEqual([0]);
+  });
+});
+
 describe("stdio write errors (#11710)", () => {
   test.each(["EPIPE", "EIO"])("stdout %s shuts down once and exits cleanly", async (code) => {
     const fakeProcess = new FakeProcess();

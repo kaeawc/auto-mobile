@@ -6387,17 +6387,20 @@ export class DaemonMcpProxy {
     if (this.isDaemonSessionNotFoundError(error)) {
       // The same decision as any other heartbeat's not-found: an attempt that reached a daemon
       // this proxy just connected to gets that session's first answer on the connection (#11570).
+      const releaseReason = releaseReasonFromError(error);
       const outcome = this.noteNotFoundAnswer(
         sessionUuid,
         attemptedClient,
-        releaseReasonFromError(error),
+        releaseReason,
         daemonInstanceFromError(error),
       );
       this.recoveryNotFoundOutcomes.set(sessionUuid, {
         outcome,
-        releaseReason: releaseReasonFromError(error),
+        releaseReason,
       });
-      return outcome.kind === "awaited" && !this.managedExecutionSessions.has(sessionUuid)
+      return outcome.kind === "awaited" &&
+        (!this.managedExecutionSessions.has(sessionUuid) ||
+          (releaseReason !== undefined && isRecoverableDaemonHandoffReason(releaseReason)))
         ? "session-awaited"
         : "session-gone";
     }
@@ -8464,14 +8467,14 @@ export class DaemonMcpProxy {
   }
 
   /**
-   * Close the connection to daemon.
-   *
-   * A process stopped by a signal closes the proxy with the MCP server still open, so nothing has
-   * cancelled the calls in flight (stdin EOF aborts them first). They are cancelled here, before the
-   * managed execution release: the daemon admits `daemon/releaseExecution` in arrival order on this
-   * proxy's socket, behind any call still running there, and the release would otherwise time out
-   * unadmitted and leave the session to the owner-disconnect release (#11642). Each caller is
-   * answered with a typed `DaemonUnavailableError`, never left waiting.
+   * Close the connection to the daemon. Neither a signal nor stdin EOF closes the MCP server, so
+   * nothing else cancels calls in flight; cancel them here for both, before managed execution
+   * release. The daemon admits `daemon/releaseExecution` in arrival order on this proxy's socket,
+   * behind any call still running there; otherwise release would time out unadmitted and leave
+   * the session to the owner-disconnect release (#11642). Each caller is answered with a typed
+   * `DaemonUnavailableError`, never left waiting. Once the stdio client closes its end (stdin EOF
+   * or a stdout write error), `OutputGatedTransport` drops those answers and any notification
+   * instead of writing them (#11951), while the daemon-side release still completes.
    */
   close(): Promise<void> {
     // EOF and signal/transport shutdown may overlap: keep the socket until the same release settles.

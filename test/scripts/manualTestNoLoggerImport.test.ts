@@ -10,14 +10,19 @@ import {
 } from "../../scripts/manual-test/harnessLogSink";
 
 const root = resolve(import.meta.dir, "../../scripts/manual-test");
-const entries = ["private-daemon.ts", "daemon-frame.ts", "aux-socket.ts", "proxy-session.ts"];
+const entries = [
+  "private-daemon.ts",
+  "daemon-frame.ts",
+  "aux-socket.ts",
+  "proxy-session.ts",
+  "python/harness-guard.ts",
+];
 let imports: ReadonlyMap<string, readonly string[]>;
 beforeAll(() => {
   // AST parsing is an immutable suite fixture; per-test assertions do no filesystem work.
   imports = new Map(
-    readdirSync(root)
-      .filter((name) => name.endsWith(".ts"))
-      .map((name) => {
+    [...new Set([...readdirSync(root).filter((name) => name.endsWith(".ts")), ...entries])].map(
+      (name) => {
         const ast = ts.createSourceFile(
           name,
           readFileSync(resolve(root, name), "utf8"),
@@ -30,7 +35,8 @@ beforeAll(() => {
             ts.isStringLiteral(node.moduleSpecifier) ? node.moduleSpecifier.text : "",
           );
         return [name, Object.freeze(modules)] as const;
-      }),
+      },
+    ),
   );
 });
 test("no harness module directly imports the product logger", () => {
@@ -44,7 +50,9 @@ test("no harness module directly imports the product logger", () => {
 });
 test("every entry imports the isolated sink first and the sink has no src imports", () => {
   for (const entry of entries) {
-    expect(imports.get(entry)?.[0]).toBe("./harnessLogSink");
+    expect(imports.get(entry)?.[0]).toBe(
+      entry.startsWith("python/") ? "../harnessLogSink" : "./harnessLogSink",
+    );
   }
   expect(imports.get("harnessLogSink.ts")?.some((name) => name.includes("src/"))).toBe(false);
 });

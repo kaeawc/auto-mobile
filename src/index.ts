@@ -140,6 +140,7 @@ async function main() {
   }
 
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
+  const { OutputGatedTransport } = await import("./server/outputGatedTransport");
   const { createMcpServer, registerMcpTools } = await import("./server");
   const { createDaemonMcpProxy, createProxyMcpServer } = await import("./server/proxyServer");
   const { logger, LogLevel } = await import("./utils/logger");
@@ -745,13 +746,15 @@ async function main() {
         });
       }
 
+      // Run as MCP server with STDIO transport.
+      const stdioTransport = new OutputGatedTransport(new StdioServerTransport());
       // Detect when the MCP client disconnects (stdin closes / stdout writes fail).
       // This uses the shared lifecycle handler so resources close before exit.
-      installStdinShutdownHandlers();
-      installStdoutShutdownHandler();
+      installStdinShutdownHandlers(process.stdin, () => stdioTransport.stopSending("stdin closed"));
+      installStdoutShutdownHandler(process.stdout, () =>
+        stdioTransport.stopSending("stdout write failed"),
+      );
 
-      // Run as MCP server with STDIO transport
-      const stdioTransport = new StdioServerTransport();
       // A managed slot proxy reads stdin from the start, so EOF during its acquisition shuts it
       // down (aborting the acquisition), while initialize waits for the acquisition's result.
       const earlyTransport =

@@ -59,9 +59,10 @@ export class EmulatorLossIncidentLedger {
         detectionPath === "watched-process-exit"
           ? await this.pool.getProcessOutputTail(deviceId)?.finalize()
           : this.pool.getProcessOutputTail(deviceId)?.snapshot();
+      const avdName = this.incidentAvdName(device, detectionPath);
       const incident = await this.emulatorLossIncidentStore.open({
         deviceId,
-        ...(device.avdName ? { avdName: device.avdName } : {}),
+        ...(avdName ? { avdName } : {}),
         detectionPath,
         ...(processExit ? { processExit } : {}),
         ...(outputTail ? { outputTail } : {}),
@@ -80,6 +81,17 @@ export class EmulatorLossIncidentLedger {
       );
       return undefined;
     }
+  }
+
+  private incidentAvdName(
+    device: PooledDevice,
+    detectionPath: EmulatorLossDetectionPath,
+  ): string | undefined {
+    // Serial reuse records the old runtime, including discovery-only identities
+    // hidden by quarantine. This is the identity used by its restart release.
+    return detectionPath === "serial-reuse"
+      ? (device.avdName ?? device.preQuarantineStableDeviceId ?? device.name)
+      : device.avdName;
   }
 
   private captureEmulatorLossSession(

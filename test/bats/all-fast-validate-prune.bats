@@ -65,6 +65,7 @@ teardown() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *$'claude-plugin\tscripts/claude/validate_plugin.sh'* ]]
+  [[ "$output" == *$'manual-test-python\tscripts/validate_manual_test_python.sh'* ]]
   [[ "$output" == *$'pipefail-grep-q\tscripts/shellcheck/validate_shell_pipefail_grepq.sh'* ]]
   while IFS=$'\t' read -r name script_path; do
     [[ -n "$name" ]]

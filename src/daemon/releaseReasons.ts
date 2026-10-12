@@ -39,6 +39,12 @@ export interface SessionReleaseReasonTraits {
    * these rows on its own, so a finished plan's session is not resurrected to reserve its device.
    */
   readonly reissuableByName: boolean;
+  /**
+   * The row's latest incarnation was released before it was handed out to a caller. This
+   * includes a failed recovery or re-issue rolled back before returning, even if an earlier
+   * incarnation was live. Its stored creation deadline never turns this release into idle expiry.
+   */
+  readonly releasedBeforeHandout: boolean;
 }
 
 /** Every literal session release reason. */
@@ -83,6 +89,11 @@ const NOT_TERMINAL: SessionReleaseReasonTraits = {
   terminal: false,
   recoverable: false,
   reissuableByName: false,
+  releasedBeforeHandout: false,
+};
+const RELEASED_BEFORE_HANDOUT: SessionReleaseReasonTraits = {
+  ...NOT_TERMINAL,
+  releasedBeforeHandout: true,
 };
 const TERMINAL: SessionReleaseReasonTraits = { ...NOT_TERMINAL, terminal: true };
 const TERMINAL_EXPIRY: SessionReleaseReasonTraits = { ...TERMINAL, expiry: true };
@@ -134,9 +145,9 @@ export const SESSION_RELEASE_REASON_TRAITS: Readonly<
   /** The session's creation was cancelled before it was handed out. */
   "session-creation-cancelled": TERMINAL,
   /** A creation abandoned at its deadline (#10963); the UUID may be created again. */
-  "session-creation-timeout": NOT_TERMINAL,
+  "session-creation-timeout": RELEASED_BEFORE_HANDOUT,
   /** An allocation rolled back before the session was handed out. */
-  "allocation-rollback": NOT_TERMINAL,
+  "allocation-rollback": RELEASED_BEFORE_HANDOUT,
   /**
    * Plan cleanup frees devices; the base and label UUIDs may be issued again by name (a later plan
    * under the same UUID), but a restarted daemon does not rehydrate the finished plan's session.
@@ -161,7 +172,7 @@ export const SESSION_RELEASE_REASON_FAMILY_TRAITS: Readonly<
   /** The session's device disconnected (with an optional `;incident=` id). */
   "device-disconnected:": TERMINAL,
   /** The device disconnected while the session was still being created. */
-  "device-disconnected-during-session-create:": NOT_TERMINAL,
+  "device-disconnected-during-session-create:": RELEASED_BEFORE_HANDOUT,
   /** The device restarted; the restarted daemon may rehydrate the session onto it. */
   "device-restart:": RECOVERABLE_HANDOFF,
 };

@@ -21,6 +21,8 @@ export interface ManagedDeviceRef {
 export interface ManagedSlotRefreshOptions {
   /** Reuse a snapshot younger than this. 0 (the default) always re-reads the registry. */
   maxAgeMs?: number;
+  /** Refuse a failed read even when the last good snapshot is retained. */
+  requireCurrent?: boolean;
   /**
    * Run a load that starts after this call, never joining one already in flight (which may have
    * read the registry before the caller's own change). Concurrent fresh calls share one load.
@@ -34,7 +36,7 @@ export interface ManagedSlotRefreshOptions {
  *
  * Lookups are synchronous against the last snapshot so the pool's hot path stays synchronous;
  * callers refresh first. An unreadable registry keeps the last good snapshot; when none was ever
- * loaded, refresh throws {@link ManagedSlotDiscoveryIncompleteError} instead of reporting "free".
+ * loaded, or requireCurrent is requested, refresh throws {@link ManagedSlotDiscoveryIncompleteError} instead of reporting "free".
  */
 export interface ManagedSlotExclusion {
   refresh(options?: ManagedSlotRefreshOptions): Promise<void>;
@@ -151,44 +153,57 @@ export class RegistryManagedSlotExclusion implements ManagedSlotExclusion {
   ) {}
 
   async refresh(options: ManagedSlotRefreshOptions = {}): Promise<void> {
-    if (options.fresh) {
-      await this.refreshFresh();
+    if (!options.fresh && this.snapshotIsYoung(options.maxAgeMs ?? 0)) {
       return;
     }
-    const maxAgeMs = options.maxAgeMs ?? 0;
-    if (
+    try {
+      await (options.fresh ? this.refreshFresh() : this.loadShared());
+    } catch (error) {
+      if (
+        options.requireCurrent ||
+        this.snapshot?.kind !== "loaded" ||
+        !(error instanceof ManagedSlotDiscoveryIncompleteError)
+      ) {
+        throw error;
+      }
+      // Inventory and streams may keep using the retained snapshot after an unreadable registry.
+      logger.debug(`[ManagedSlots] Using retained exclusion snapshot: ${errorMessage(error)}`);
+    }
+  }
+
+  private snapshotIsYoung(maxAgeMs: number): boolean {
+    return (
       maxAgeMs > 0 &&
       this.snapshot !== undefined &&
       this.snapshot.kind !== "unreadable" &&
       this.timer.now() - this.snapshot.loadedAtMs < maxAgeMs
-    ) {
-      return;
-    }
+    );
+  }
+
+  private loadShared(): Promise<void> {
     this.inFlight ??= this.load().finally(() => {
       this.inFlight = undefined;
     });
-    await this.inFlight;
+    return this.inFlight;
   }
 
   private freshWaiter: Promise<void> | undefined;
 
   private refreshFresh(): Promise<void> {
-    // While a waiter is still queued behind an older load, its own load has not started, so a
-    // later caller can share it; once it starts, a newcomer must queue a new one.
+    // Queued fresh callers share a load that has not started; later calls queue a new load.
     if (this.freshWaiter) {
       return this.freshWaiter;
     }
     const older = this.inFlight;
     if (!older) {
-      return this.refresh();
+      return this.loadShared();
     }
-    const waiter = older
-      // The older load's failure is its callers' concern; this one reads again.
-      .catch(() => undefined)
-      .then(() => {
-        this.freshWaiter = undefined;
-        return this.refresh();
-      });
+    const next = () => {
+      this.freshWaiter = undefined;
+      return this.loadShared();
+    };
+    // The older load's outcome belongs to its callers; this call always reads again.
+    const waiter = older.then(next, next);
     this.freshWaiter = waiter;
     return waiter;
   }
@@ -229,10 +244,10 @@ export class RegistryManagedSlotExclusion implements ManagedSlotExclusion {
           `[ManagedSlots] Registry unreadable; keeping the last snapshot: ${errorMessage(error)}`,
           error,
         );
-        return;
+      } else {
+        // Never read successfully: unknown is never free, even if an earlier refresh saw it absent.
+        this.snapshot = { kind: "unreadable" };
       }
-      // Never read successfully: unknown is never free, even if an earlier refresh saw it absent.
-      this.snapshot = { kind: "unreadable" };
       throw new ManagedSlotDiscoveryIncompleteError(errorMessage(error));
     }
     const byDevice = new Map<string, ManagedDeviceEntry>();

@@ -1248,6 +1248,21 @@ describe("decideNotFoundAnswer", () => {
     ...overrides,
   });
   const STOPPED: NotFoundAnswerOutcome = { kind: "stopped" };
+  test.each([false, true])(
+    "a named pre-fence idle end overrides establishment (other daemon: %s)",
+    (answeredByOtherDaemon) => {
+      const establishing = facts({ establishes: true, answeredByOtherDaemon, mayAskAgain: true });
+      expect(decideNotFoundAnswer({ ...establishing, releaseReason: "cleanup-expired" })).toEqual({
+        kind: "ended",
+        reason: "cleanup-expired",
+      });
+      expect(decideNotFoundAnswer(establishing)).toEqual({
+        kind: "awaited",
+        windowSince: NOW,
+        handoff: UNREHYDRATED_HANDOFF,
+      });
+    },
+  );
   /** Every state a session that has had a window for `handoffs` can be in. */
   const statesWith = (handoffs: readonly string[]): Array<Partial<NotFoundAnswerFacts>> =>
     [NOW, NOW - 1, NOW - W + 1, NOW - W, NOW - 10 * W].flatMap((windowSince) =>

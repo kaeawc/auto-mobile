@@ -1,4 +1,5 @@
 import type { SessionManager } from "../daemon/sessionManager";
+import { registerBoundedAcquisitionCleanup } from "../utils/boundedAcquisitionCleanup";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -249,12 +250,14 @@ async function stopOwnedRecordingsWithinCap(
 
 /** Recording acquisition operations; each claims ownership before yielding. */
 export interface RecordingAcquisitionDeps {
+  timer: Pick<Timer, "setTimeout" | "clearTimeout">;
   adoptVideoRecordings(deviceId: string, sessionId: string): Promise<void> | undefined;
   adoptSegmentedRecordings(deviceId: string, sessionId: string): void;
   adoptTestRecording(deviceId: string, sessionId: string): boolean;
 }
 
 const defaultRecordingAcquisitionDeps: RecordingAcquisitionDeps = {
+  timer: defaultTimer,
   adoptVideoRecordings: adoptOwnerlessActiveVideoRecordings,
   adoptSegmentedRecordings: adoptOwnerlessSegmentedVideoRecordings,
   adoptTestRecording: adoptOwnerlessTestRecording,
@@ -275,7 +278,8 @@ function finalizeSettlesWithinMs(
  * The successful acquiring holder adopts live ownerless recordings (#11665), replacing
  * acquisition-time stops (#10961). Keep the existing hook and exported name. Ownership is
  * claimed synchronously; persistence is tracked as acquisition cleanup so a release cannot
- * hand the device onward before it settles. A stale/losing acquisition cannot adopt.
+ * hand the device onward before it settles or the ownership-write cap expires. A stale/losing
+ * acquisition cannot adopt; the holder's own reuse remains available while persistence runs.
  */
 export function createOwnerlessRecordingAcquisitionCleanup(
   manager: Pick<SessionManager, "registerAcquisitionDeviceCleanup" | "getSessionForDevice">,
@@ -291,13 +295,11 @@ export function createOwnerlessRecordingAcquisitionCleanup(
     if (!persistence) {
       return;
     }
-    manager.registerAcquisitionDeviceCleanup(
-      deviceId,
-      attempt(
-        `persist adopted recording ownership for session ${sessionId} on ${deviceId}`,
-        () => persistence,
-      ),
-    );
+    registerBoundedAcquisitionCleanup(manager, deviceId, persistence, {
+      timer: deps.timer,
+      capMs: INCOMPLETE_MARK_GRACE_MS,
+      label: `persist adopted recording ownership for session ${sessionId}`,
+    });
   };
 }
 

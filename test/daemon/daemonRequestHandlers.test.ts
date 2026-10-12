@@ -194,43 +194,53 @@ describe("handleDaemonRequest", () => {
     });
   });
 
-  test("rejects a heartbeat when release completes while its ownership claim awaits", async () => {
-    const sessionId = "claim-release-race";
-    await sessionManager.createSession(sessionId, "device", "android");
-    const state = new FakeDaemonState(
-      sessionManager,
-      new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
-    );
-    const claim = Promise.withResolvers<LivenessClaimOutcome>();
-    const ownership = spyOn(sessionManager, "claimLivenessOwnership").mockImplementation(
-      () => claim.promise,
-    );
-    const heartbeat = spyOn(sessionManager, "recordHeartbeat");
-    try {
-      const response = handleDaemonRequest(
-        buildRequest("daemon/heartbeat", {
-          sessionId,
-          livenessOwnerToken: "owner",
-          claimLivenessOwnership: true,
-        }),
-        state,
+  test.each([false, true])(
+    "claim-release race reports the daemon instance only when asked (%s)",
+    async (reportDaemonInstance) => {
+      const sessionId = "claim-release-race";
+      await sessionManager.createSession(sessionId, "device", "android");
+      const state = new FakeDaemonState(
+        sessionManager,
+        new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
       );
-      expect(ownership).toHaveBeenCalledTimes(1);
-      await sessionManager.releaseSession(sessionId);
-      claim.resolve("claimed");
-      // The finished release is named, as it is for a heartbeat that arrives after it (#11646).
-      expect(await response).toEqual({
-        success: false,
-        error: `Session not found: ${sessionId}`,
-        code: DAEMON_SESSION_NOT_FOUND_CODE,
-        releaseReason: "explicit-release",
-      });
-      expect(heartbeat).not.toHaveBeenCalled();
-    } finally {
-      ownership.mockRestore();
-      heartbeat.mockRestore();
-    }
-  });
+      const claim = Promise.withResolvers<LivenessClaimOutcome>();
+      const ownership = spyOn(sessionManager, "claimLivenessOwnership").mockImplementation(
+        () => claim.promise,
+      );
+      const heartbeat = spyOn(sessionManager, "recordHeartbeat");
+      try {
+        const response = handleDaemonRequest(
+          buildRequest("daemon/heartbeat", {
+            sessionId,
+            reportDaemonInstance,
+            livenessOwnerToken: "owner",
+            claimLivenessOwnership: true,
+          }),
+          {
+            ...state,
+            isInitialized: () => true,
+            getSessionManager: () => sessionManager,
+            getDaemonInstance: () => "daemon-race",
+          },
+        );
+        expect(ownership).toHaveBeenCalledTimes(1);
+        await sessionManager.releaseSession(sessionId);
+        claim.resolve("claimed");
+        // The finished release is named, as it is for a heartbeat that arrives after it (#11646).
+        expect(await response).toEqual({
+          success: false,
+          error: `Session not found: ${sessionId}`,
+          code: DAEMON_SESSION_NOT_FOUND_CODE,
+          releaseReason: "explicit-release",
+          ...(reportDaemonInstance ? { daemonInstance: "daemon-race" } : {}),
+        });
+        expect(heartbeat).not.toHaveBeenCalled();
+      } finally {
+        ownership.mockRestore();
+        heartbeat.mockRestore();
+      }
+    },
+  );
 
   test("returns error when daemon is not initialized", async () => {
     const state = new FakeDaemonState(null, null);
@@ -1023,6 +1033,53 @@ describe("handleDaemonRequest", () => {
         code: DAEMON_SESSION_NOT_FOUND_CODE,
         releaseReason: "heartbeat-timeout",
       });
+    },
+  );
+
+  test.each([false, true])(
+    "not-found heartbeat reports its instance only when asked (%s)",
+    async (released) => {
+      const sessionId = "instance-not-found";
+      if (released) {
+        await sessionManager.createSession(sessionId, "device", "android");
+        await sessionManager.releaseSession(sessionId, "heartbeat-timeout");
+      }
+      const state: DaemonStateAccess = {
+        isInitialized: () => true,
+        getSessionManager: () => sessionManager,
+        getDevicePool: () => new FakeDevicePool({ total: 0, idle: 0, assigned: 0, error: 0 }),
+        getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
+        getDaemonInstance: () => "daemon-not-found",
+      };
+      const legacy = {
+        success: false,
+        error: `Session not found: ${sessionId}`,
+        code: DAEMON_SESSION_NOT_FOUND_CODE,
+        ...(released ? { releaseReason: "heartbeat-timeout" } : {}),
+      };
+      for (const reportDaemonInstance of [undefined, false, true]) {
+        expect(
+          await handleDaemonRequest(
+            buildRequest("daemon/heartbeat", {
+              sessionId,
+              ...(reportDaemonInstance === undefined ? {} : { reportDaemonInstance }),
+            }),
+            state,
+          ),
+        ).toEqual({
+          ...legacy,
+          ...(reportDaemonInstance ? { daemonInstance: "daemon-not-found" } : {}),
+        });
+      }
+      expect(
+        await handleDaemonRequest(
+          buildRequest("daemon/sessionInfo", {
+            sessionId,
+            reportDaemonInstance: true,
+          }),
+          state,
+        ),
+      ).toEqual(legacy);
     },
   );
 

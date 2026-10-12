@@ -77,6 +77,8 @@ export interface DaemonResponse {
    * never issued. Additive: older clients ignore it.
    */
   releaseReason?: string;
+  /** With a session-not-found heartbeat answer that asked for it: the answering process. Additive. */
+  daemonInstance?: string;
   /** With `releaseReason`: the session was released by its idle window (#10832). Additive. */
   idle?: true;
   /** Rejected before any device operation was admitted. */
@@ -200,6 +202,17 @@ export function releaseReasonFromError(error: unknown): string | undefined {
   }
   const { releaseReason } = error;
   return typeof releaseReason === "string" && releaseReason.length > 0 ? releaseReason : undefined;
+}
+
+/** The process instance reported by a heartbeat's not-found answer, when non-empty. */
+export function daemonInstanceFromError(error: unknown): string | undefined {
+  if (error === null || typeof error !== "object" || !("daemonInstance" in error)) {
+    return undefined;
+  }
+  const { daemonInstance } = error;
+  return typeof daemonInstance === "string" && daemonInstance.length > 0
+    ? daemonInstance
+    : undefined;
 }
 
 export { isIdleReleaseReason };

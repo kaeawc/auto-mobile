@@ -2219,7 +2219,8 @@ were all skipped fails with an error that lists them.
 names the exported plan.
 
 Test recordings capture input made on the device itself: touches on its touch
-screen or emulator window, and text changes in input fields. Taps, swipes and
+screen or emulator window, and text changes in input fields. A text change is recorded whatever produced it,
+so text typed by a tool becomes a `sendKeys` step. Taps, swipes and
 other gestures sent through AutoMobile tools (`tapAt`, `tapOn`, `swipeOn`, etc.)
 or `adb shell input` are injected and are not recorded by design; use
 `recordSteps` to record tool calls. Recording status always reports

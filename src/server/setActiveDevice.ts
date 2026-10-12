@@ -1,3 +1,8 @@
+import { isTypedToolRefusal } from "./shapeToolCallError";
+import { TransitionalAdbBindWait } from "../daemon/transitionalAdbBindWait";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
+import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import { DaemonState } from "../daemon/daemonState";
 import type { DevicePool, PooledDevice } from "../daemon/devicePool";
@@ -61,9 +66,58 @@ export interface LegacyDeviceSelection {
 
 interface SetActiveDeviceDependencies {
   displayInventory?: DisplayInventoryProvider;
+  transportWait?: {
+    timer: Timer;
+    probe?: PlatformDeviceManager["getAndroidListedDeviceStates"];
+    probeTimeoutMs?: number;
+  };
   resumeCtrlProxy: ResumeCtrlProxy;
   /** Defaults to the process-wide DeviceSessionManager. */
   legacyDeviceSelection?: () => LegacyDeviceSelection;
+}
+
+// Matches the pool's unexported ANDROID_OFFLINE_PROBE_TIMEOUT_MS.
+const ANDROID_OFFLINE_PROBE_TIMEOUT_MS = 10_000;
+
+type TransportAttempt = <T>(attempt: () => Promise<T>) => Promise<T>;
+
+function transitionalTransportAttempt(
+  args: HandlerArgs,
+  dependencies: SetActiveDeviceDependencies,
+  signal: AbortSignal | undefined,
+): TransportAttempt {
+  const ports = dependencies.transportWait;
+  const wait = new TransitionalAdbBindWait(args.deviceId, {
+    timer: ports?.timer ?? defaultTimer,
+    probeTimeoutMs: ports?.probeTimeoutMs ?? ANDROID_OFFLINE_PROBE_TIMEOUT_MS,
+    getSignal: () => signal,
+    holdAbsenceAfterTransitional: true,
+    probe: ports
+      ? ports.probe
+      : async (ids, options) => {
+          const manager = PlatformDeviceManagerFactory.getInstance();
+          return (await manager.getAndroidListedDeviceStates?.(ids, options)) ?? new Map();
+        },
+  });
+  return async (attempt) => {
+    for (;;) {
+      signal?.throwIfAborted();
+      try {
+        return await attempt();
+      } catch (error) {
+        signal?.throwIfAborted();
+        if (
+          args.platform === "ios" ||
+          isIosUdid(args.deviceId) ||
+          isTypedToolRefusal(error) ||
+          error instanceof DisplayPinNeedsSessionError ||
+          !(await wait.waitIfTransitional())
+        ) {
+          throw error;
+        }
+      }
+    }
+  };
 }
 
 /** Preserve the existing MCP-owned autolock resolution and explicit UUID precedence. */
@@ -294,11 +348,14 @@ async function selectSessionDevice(input: {
   receipt: AcquisitionReceipt;
   signal: AbortSignal | undefined;
   rememberPrior: (prior: PriorSelection) => void;
+  transportAttempt: TransportAttempt;
 }): Promise<boolean> {
   const { args, dependencies, receipt, signal, rememberPrior } = input;
   const sessions = DaemonState.getInstance().getSessionManager();
   const pool = DaemonState.getInstance().getDevicePool();
-  const device = await requestedPoolDevice(pool, args.deviceId, args.platform);
+  const device = await input.transportAttempt(() =>
+    requestedPoolDevice(pool, args.deviceId, args.platform),
+  );
   // A device another request is still preparing is refused before anything touches it (#11651).
   pool.assertNotPreparedForOtherRequest(args.deviceId);
   const hadDisplayPin = sessions.getDisplayPin(args.sessionUuid) !== undefined;
@@ -382,15 +439,18 @@ async function selectLegacyDevice(input: {
   resumeCtrlProxy: ResumeCtrlProxy;
   sessions: LegacyDeviceSelection;
   signal?: AbortSignal;
+  transportAttempt: TransportAttempt;
 }): Promise<void> {
   const { args, resumeCtrlProxy, sessions, signal } = input;
   const previousDevice = sessions.getCurrentDevice();
   const previousPlatform = sessions.getCurrentPlatform();
   // #5870: "either" lets deviceId disambiguate when platform is omitted.
-  const readyDevice = await sessions.ensureDeviceReady(
-    args.platform ?? "either",
-    args.deviceId,
-    signal ? { signal } : undefined,
+  const readyDevice = await input.transportAttempt(() =>
+    sessions.ensureDeviceReady(
+      args.platform ?? "either",
+      args.deviceId,
+      signal ? { signal } : undefined,
+    ),
   );
   // A session that acquired the device during readiness cancelled this call: never pin its device.
   signal?.throwIfAborted();
@@ -428,6 +488,7 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
     dependencies.legacyDeviceSelection ?? (() => DeviceSessionManager.getInstance());
   return async (args: HandlerArgs, _progress?: unknown, signal?: AbortSignal) => {
     const mcpSessionId = args.__mcpSessionId;
+    const transportAttempt = transitionalTransportAttempt(args, dependencies, signal);
     let prior: PriorSelection | undefined;
     try {
       const selectedAutolockSession = resolveAutolockSelection(args);
@@ -446,6 +507,7 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
             dependencies,
             receipt,
             signal,
+            transportAttempt,
             rememberPrior: (selection) => {
               prior = selection;
             },
@@ -456,6 +518,7 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
             resumeCtrlProxy: dependencies.resumeCtrlProxy,
             sessions: legacyDeviceSelection(),
             signal,
+            transportAttempt,
           });
         }
         if (selectedAutolockSession) {
@@ -483,6 +546,7 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
         restorePriorDisplayPin(prior);
       }
       logger.error("Failed to set active device:", error);
+      signal?.throwIfAborted();
       throw toActionableError(error, "Failed to set active device");
     }
   };

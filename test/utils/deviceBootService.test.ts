@@ -498,10 +498,19 @@ describe("DeviceBootService", () => {
     devices.setDeviceImages("android", [unknownLivenessImage]);
     matcher.setImageResult(unknownLivenessImage);
 
-    await expect(service(devices, matcher).boot({ platform: "android" })).rejects.toThrow(
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const pending = service(devices, matcher, undefined, timer).boot({ platform: "android" });
+    await expect(pending).rejects.toMatchObject({ code: "discovery_incomplete", retryable: true });
+    await expect(pending).rejects.toBeInstanceOf(AndroidBootedDeviceDiscoveryIncompleteError);
+    await expect(pending).rejects.toThrow(
       "Cannot safely cold-boot Android AVD 'Pixel_9_API_35': its running state is unknown.",
     );
 
+    expect(timer.now()).toBe(5000);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(devices.getListDeviceImagesCalls()).toHaveLength(9);
+    expect(devices.wasMethodCalled("startDevice")).toBe(false);
     expect(devices.getExecutedOperations()).not.toContain("startDevice:Pixel_9_API_35:180000");
   });
 
@@ -3375,5 +3384,86 @@ describe("DeviceBootService", () => {
 
       await expect(boot).rejects.toBe(explicitReason);
     });
+  });
+});
+
+describe("transitional Android image discovery", () => {
+  function arrange(timeoutMs = 180000) {
+    const devices = new FakeDeviceUtils();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const unknown = { ...image, isRunningStateKnown: false };
+    devices.setDeviceImages("android", [unknown]);
+    const matcher = new FakeDeviceMatcher();
+    matcher.setImageResult(unknown);
+    const boot = () =>
+      service(devices, matcher, undefined, timer).boot({ platform: "android", timeoutMs });
+    return { devices, timer, boot };
+  }
+
+  it("re-lists unknown state before cold-booting exactly once with the refreshed image", async () => {
+    const h = arrange();
+    const refreshed = { ...image, isRunningStateKnown: true, osVersion: "36" };
+    const list = h.devices.listDeviceImages.bind(h.devices);
+    h.devices.listDeviceImages = async (platform, signal) => {
+      if (h.devices.getListDeviceImagesCalls().length === 1) {
+        h.devices.setDeviceImages("android", [refreshed]);
+      }
+      return list(platform, signal);
+    };
+    const result = await h.boot();
+    expect(result.sourceImage).toBe(refreshed);
+    expect(h.devices.getExecutedOperations()).toEqual([
+      "listDeviceImages:android",
+      "getBootedDevices:android",
+      "getBootedDevices:android",
+      "listDeviceImages:android",
+      "startDevice:Pixel_9_API_35:179900",
+      "waitForDeviceReady:Pixel_9_API_35:179900",
+    ]);
+    expect(h.devices.getListDeviceImagesCalls()[1].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("refuses a re-listed AVD that turned out to be running", async () => {
+    const h = arrange();
+    const list = h.devices.listDeviceImages.bind(h.devices);
+    h.devices.listDeviceImages = async (platform, signal) => {
+      if (h.devices.getListDeviceImagesCalls().length === 1) {
+        h.devices.setDeviceImages("android", [{ ...image, isRunning: true }]);
+      }
+      return list(platform, signal);
+    };
+    await expect(h.boot()).rejects.toMatchObject({
+      code: "discovery_incomplete",
+      retryable: true,
+      message: expect.stringContaining("turned out to be running"),
+    });
+    expect(h.devices.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  it("caps unknown-state waiting to the request's smaller remaining budget", async () => {
+    const h = arrange(350);
+    await expect(h.boot()).rejects.toMatchObject({ code: "discovery_incomplete", retryable: true });
+    expect(h.timer.now()).toBe(350);
+    expect(h.devices.wasMethodCalled("startDevice")).toBe(false);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  it("refuses an AVD that disappears during the discovery wait", async () => {
+    const h = arrange();
+    const list = h.devices.listDeviceImages.bind(h.devices);
+    h.devices.listDeviceImages = async (platform, signal) => {
+      if (h.devices.getListDeviceImagesCalls().length === 1) {
+        h.devices.setDeviceImages("android", []);
+      }
+      return list(platform, signal);
+    };
+    await expect(h.boot()).rejects.toMatchObject({
+      code: "discovery_incomplete",
+      retryable: true,
+      message:
+        "Cannot safely cold-boot Android AVD 'Pixel_9_API_35': its running state is unknown.",
+    });
+    expect(h.devices.wasMethodCalled("startDevice")).toBe(false);
   });
 });

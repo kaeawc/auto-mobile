@@ -1,3 +1,4 @@
+import { TransitionalWaitBudget } from "../utils/TransitionalWaitBudget";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import {
   awaitTerminationWithinRequest,
@@ -1419,6 +1420,45 @@ export class DeviceBootService {
     adoptAfterLease: AdoptAfterLease = "never",
   ): Promise<DeviceBootResult> {
     context.deviceLabel = image.deviceId ? `${image.name} (${image.deviceId})` : image.name;
+    if (image.isRunningStateKnown === false) {
+      const recheckRunningState = async (): Promise<DeviceInfo> => {
+        if (image.platform !== "android") {
+          return image;
+        }
+        const wait = new TransitionalWaitBudget({
+          timer: this.timer,
+          getSignal: () => context.signal,
+          budgetMs: Math.min(5_000, Math.max(0, context.deadlineMs - this.timer.now())),
+        });
+        while (await wait.waitForNextAttempt()) {
+          // Unknown liveness can clear when an unrelated emulator finishes shutting down.
+          if (context.deadlineMs <= this.timer.now()) {
+            break;
+          }
+          const images = await this.runPhase(
+            context,
+            "rechecking Android image running state",
+            (signal) => this.dependencies.deviceManager.listDeviceImages("android", signal),
+          );
+          const refreshed = images.find((candidate) => candidate.name === image.name);
+          if (!refreshed) {
+            break;
+          }
+          if (refreshed.isRunningStateKnown === false) {
+            continue;
+          }
+          if (refreshed.isRunning) {
+            throw new AndroidBootedDeviceDiscoveryIncompleteError(
+              undefined,
+              `Cannot safely cold-boot Android AVD '${image.name}': it turned out to be running. Retry the request.`,
+            );
+          }
+          return refreshed;
+        }
+        return image;
+      };
+      image = await recheckRunningState();
+    }
     assertAndroidImageRunningStateKnown(image);
     if (image.platform === "ios" && !image.deviceId) {
       throw new ActionableError("iOS simulator deviceId (UDID) is required to start a simulator.");

@@ -1,3 +1,4 @@
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -405,5 +406,132 @@ describe("killDevice on a device another daemon holds (#11200)", () => {
     expect(manager.killed).toEqual([phone.deviceId]);
     expect(ownership.claims).toEqual([phone.deviceId]);
     expect(ownership.releases).toEqual([phone.deviceId]);
+  });
+});
+
+describe("already-dead Android shutdown ownership", () => {
+  const device: BootedDevice = {
+    deviceId: "emulator-5554",
+    name: "Pixel",
+    platform: "android",
+    isEmulator: true,
+  };
+  let sessions: SessionManager | undefined;
+
+  afterEach(() => {
+    sessions?.stopCleanupTimer();
+    sessions = undefined;
+    AndroidCtrlProxyClient.resetInstances();
+    ToolRegistry.clearTools();
+    expect(ToolRegistry.getTool("killDevice")).toBeUndefined();
+    resetDeviceToolsDependencies();
+    resetVideoRecordingManagerDependencies();
+    DaemonState.getInstance().reset();
+    expect(DaemonState.getInstance().isInitialized()).toBe(false);
+  });
+
+  async function arrange() {
+    const timer = new FakeTimer();
+    const manager = new FakeDeviceUtils();
+    const order: string[] = [];
+    manager.killDevice = async () => {
+      order.push("kill-dead");
+      throw new Error("adb: device 'emulator-5554' not found");
+    };
+    await setVideoRecordingManagerDependencies({
+      videoRecorderService: {} as never,
+      recordingRepository: { listRecordings: async () => [] } as never,
+      configRepository: {} as never,
+      highlightClient: {} as never,
+      timer,
+      now: () => new Date(0),
+    });
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => manager,
+      timer,
+      lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      stopPerformanceMonitoring: () => {},
+    });
+    sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    sessions.stopCleanupTimer();
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessions, "dead-shutdown-pin", {
+        timer,
+        deviceManager: manager,
+      }),
+    );
+    await pool.initializeWithDevices([device]);
+    DaemonState.getInstance().initialize(sessions, pool);
+    manager.setBootedDevices("android", [device]);
+    await pool.bindOrReuseDeviceSession("holder", device.deviceId, "android");
+    manager.setBootedDevices("android", []);
+    expect(pool.getDevice(device.deviceId)?.sessionId).toBe("holder");
+    const reserve = pool.reserveDeviceForShutdown.bind(pool);
+    const reserveSpy = spyOn(pool, "reserveDeviceForShutdown").mockImplementation(
+      (id, signal, client, assertHolder, foreignClaim) =>
+        reserve(
+          id,
+          signal,
+          client,
+          () => {
+            order.push("holder-check");
+            expect(assertHolder).toBeDefined();
+            assertHolder!();
+          },
+          foreignClaim,
+        ),
+    );
+    const release = sessions.releaseSessionIfOwned.bind(sessions);
+    const releaseSpy = spyOn(sessions, "releaseSessionIfOwned").mockImplementation((...args) => {
+      order.push(`release:${args[3]}`);
+      return release(...args);
+    });
+    const retirementSpy = spyOn(pool, "retireDeviceForShutdown");
+    registerDeviceTools();
+    return { pool, order, reserveSpy, releaseSpy, retirementSpy };
+  }
+
+  test("the holder's kill of a dead emulator checks ownership before terminal device-killed release", async () => {
+    const h = await arrange();
+    try {
+      const response = await ToolRegistry.getTool("killDevice")!.handler({
+        device,
+        sessionUuid: "holder",
+      });
+      expect(JSON.parse(response.content[0].text)).toMatchObject({
+        success: false,
+        error: { code: "device_already_stopped" },
+      });
+      expect(h.order).toEqual(["holder-check", "kill-dead", "release:device-killed"]);
+      expect(sessions?.getSession("holder")).toBeNull();
+      expect(h.releaseSpy).toHaveBeenCalledTimes(1);
+      expect(h.pool.getDevice(device.deviceId)).toBeNull();
+    } finally {
+      h.reserveSpy.mockRestore();
+      h.releaseSpy.mockRestore();
+      h.retirementSpy.mockRestore();
+    }
+  });
+
+  test("a non-holder cannot release or retire the dead emulator's holder", async () => {
+    const h = await arrange();
+    try {
+      await expect(
+        ToolRegistry.getTool("killDevice")!.handler({ device, sessionUuid: "other" }),
+      ).rejects.toMatchObject({ code: "device_owned_by_other_session" });
+      expect(h.order).toEqual([]);
+      expect(h.releaseSpy).not.toHaveBeenCalled();
+      expect(h.retirementSpy).not.toHaveBeenCalled();
+      expect(sessions?.getSession("holder")?.assignedDevice).toBe(device.deviceId);
+      expect(h.pool.getDevice(device.deviceId)).toBeDefined();
+      expect(h.pool.isUnderShutdownReservation(device.deviceId)).toBe(false);
+    } finally {
+      h.reserveSpy.mockRestore();
+      h.releaseSpy.mockRestore();
+      h.retirementSpy.mockRestore();
+    }
   });
 });

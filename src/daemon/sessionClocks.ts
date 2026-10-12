@@ -18,10 +18,11 @@ export const SESSION_ACTIVITY_CLOCKS = [
   "idleStallForgivenAt",
 ] as const satisfies readonly (keyof Session)[];
 
-/** Session liveness clocks: timestamps of the owner's last proof of life. */
+/** Session liveness clocks: owner proof, claim-only mint lease start, and stall forgiveness. */
 export const SESSION_LIVENESS_CLOCKS = [
   "lastHeartbeat",
   "lastOwnerHeartbeat",
+  "livenessOwnerBoundAt",
   "stallForgivenAt",
   "hasReceivedHeartbeat",
 ] as const satisfies readonly (keyof Session)[];

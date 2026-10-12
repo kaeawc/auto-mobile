@@ -5,6 +5,7 @@ import { DAEMON_ONE_SHOT_CLI_PARAM, DAEMON_VERSION } from "../../src/daemon/cons
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 
 async function forwardedParams(
   oneShotCli: boolean | undefined,
@@ -46,7 +47,7 @@ describe("DaemonMcpProxy one-shot CLI marker (#11096)", () => {
           deviceId: "emulator-5554",
           [DAEMON_ONE_SHOT_CLI_PARAM]: true,
         }),
-      ).toEqual({ deviceId: "emulator-5554" });
+      ).toEqual(withProxyOwnerToken({ deviceId: "emulator-5554" }));
     },
   );
 });

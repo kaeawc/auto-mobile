@@ -173,6 +173,7 @@ async function harness(
         }),
       },
       androidImageCatalog: { listInstalledPackages: async () => [ANDROID_RUNTIME] },
+      androidProfileCatalog: { listProfileIds: async () => ["pixel_9"] },
       iosRuntimeCatalog: {
         getRuntimesChecked: async () => {
           throw new Error("catalog not scripted");

@@ -350,6 +350,11 @@ Matching is declarative, per slot, and the result reports a `disposition` of
 - Generic `provisionDevice` keeps its existing `identity_conflict` behavior;
   destructive mismatch replacement exists only for managed slots.
 
+Before deleting or creating a device, Android hardware profiles (including creation defaults)
+are checked against `avdmanager list device`: an unknown profile returns non-retryable
+`spec_unsupported`, and an unreadable catalog returns retryable `discovery_incomplete`.
+Reuse and adoption do not require this creation-only catalog check.
+
 Created devices are named `amslot-<scope prefix>-<slot>-g<n>-<suffix>`; treat
 the name as opaque. The `g<n>` number tracks the journal entry, not a per-slot
 count (the acceptance run saw `g1` then `g4` after one replacement).

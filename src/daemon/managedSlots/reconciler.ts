@@ -164,6 +164,11 @@ export type ManagedSpecResolution =
   /** The spec could not be resolved yet (an unreadable catalog); retryable, nothing changed. */
   | { kind: "unresolved"; message: string };
 
+export type ManagedSpecCreatability =
+  | { kind: "creatable" }
+  | { kind: "unsupported"; code: "spec_unsupported" | "runtime_incompatible"; message: string }
+  | { kind: "unresolved"; message: string };
+
 /** Validates and resolves a spec before any destructive work. */
 export interface ManagedSpecResolver {
   resolve(
@@ -171,6 +176,12 @@ export interface ManagedSpecResolver {
     spec: ManagedSlotRequestedSpec,
     options: { signal?: AbortSignal },
   ): Promise<ManagedSpecResolution>;
+  /** Checks creation-only prerequisites without blocking reuse or adoption. */
+  checkCreatable?(
+    platform: SlotPlatform,
+    resolvedSpec: ResolvedExactDeviceSpecification,
+    options: { signal?: AbortSignal },
+  ): Promise<ManagedSpecCreatability>;
 }
 
 export interface ManagedSlotProvisionRequest {
@@ -564,6 +575,10 @@ export interface ManagedAndroidImageCatalog {
   listInstalledPackages(signal?: AbortSignal): Promise<string[]>;
 }
 
+export interface ManagedAndroidProfileCatalog {
+  listProfileIds(signal?: AbortSignal): Promise<string[]>;
+}
+
 export interface DefaultManagedSpecResolverOptions {
   /** Profile created for an Android spec that omits `deviceType`. */
   androidDefaultDeviceType?: string;
@@ -572,6 +587,7 @@ export interface DefaultManagedSpecResolverOptions {
    * `spec_unsupported` before anything is created, instead of surfacing avdmanager's raw text.
    */
   androidImageCatalog?: ManagedAndroidImageCatalog;
+  androidProfileCatalog?: ManagedAndroidProfileCatalog;
 }
 
 /**
@@ -590,6 +606,7 @@ export interface DefaultManagedSpecResolverOptions {
 export class DefaultManagedSpecResolver implements ManagedSpecResolver {
   private readonly androidDefaultDeviceType: string;
   private readonly androidImageCatalog?: ManagedAndroidImageCatalog;
+  private readonly androidProfileCatalog?: ManagedAndroidProfileCatalog;
 
   constructor(
     private readonly iosRuntimeCatalog?: ExactIosRuntimeCatalog,
@@ -598,6 +615,38 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     this.androidDefaultDeviceType =
       options.androidDefaultDeviceType ?? MANAGED_SLOT_DEFAULT_ANDROID_DEVICE_TYPE;
     this.androidImageCatalog = options.androidImageCatalog;
+    this.androidProfileCatalog = options.androidProfileCatalog;
+  }
+
+  async checkCreatable(
+    platform: SlotPlatform,
+    resolvedSpec: ResolvedExactDeviceSpecification,
+    options: { signal?: AbortSignal },
+  ): Promise<ManagedSpecCreatability> {
+    if (platform !== "android" || !this.androidProfileCatalog) {
+      return { kind: "creatable" };
+    }
+    let profileIds: string[];
+    try {
+      profileIds = await this.androidProfileCatalog.listProfileIds(options.signal);
+    } catch (error) {
+      logger.warn(
+        `[ManagedSlots] Android profile catalog unreadable: ${errorMessage(error)}`,
+        error,
+      );
+      return {
+        kind: "unresolved",
+        message: `The Android hardware profile catalog could not be read: ${errorMessage(error)}`,
+      };
+    }
+    if (profileIds.includes(resolvedSpec.deviceType)) {
+      return { kind: "creatable" };
+    }
+    return {
+      kind: "unsupported",
+      code: "spec_unsupported",
+      message: `Android hardware profile '${resolvedSpec.deviceType}' is not available on this host. List valid profile IDs with avdmanager list device.`,
+    };
   }
 
   async resolve(
@@ -975,6 +1024,7 @@ interface ReconcileContext {
   resolvedSpec: ManagedSlotResolvedSpec;
   fingerprint: ManagedSlotSpecFingerprint;
   evidence: ManagedSlotReconcileEvidence;
+  creatabilityChecked?: boolean;
 }
 
 type ReadyResult = Extract<ManagedSlotReconcileResult, { outcome: "ready" }>;
@@ -1313,6 +1363,7 @@ export class ManagedSlotReconciler {
       }
       // Removed out of band: complete discovery proves absence, so nothing is left to delete.
       evidence.assignedMissing = true;
+      await this.assertCreatable(context);
       const moved = await this.emptyOnRequestedPlatform(context, assignment);
       return await this.createAndCommit(context, moved, "created");
     }
@@ -1610,6 +1661,9 @@ export class ManagedSlotReconciler {
   ): Promise<ReadyResult> {
     const { request } = context;
     this.checkBudget(request);
+    if (replacing === undefined) {
+      await this.assertCreatable(context);
+    }
     // A replacement asserted capacity before deleting, counting the slot its old device frees;
     // asking again here could refuse after the deletion while that device is still being counted.
     if (!options.capacityAsserted) {
@@ -1840,6 +1894,8 @@ export class ManagedSlotReconciler {
   ): Promise<ReadyResult> {
     const { request, evidence } = context;
     const oldId = assignment.stableDeviceId!;
+    // The slow catalog read must not sit between the claim checks and the journal open.
+    await this.assertCreatable(context);
     await this.assertReplaceable(request, assignment, device, inventoryComplete);
     // Journal the accepted deletion together with `replacing`: from here on, an interruption is
     // redriven against this exact device and binding.
@@ -1960,6 +2016,29 @@ export class ManagedSlotReconciler {
   }
 
   // --- shared steps ----------------------------------------------------------------------------
+
+  /** Successful creation checks are shared by all steps of this reconcile only. */
+  private async assertCreatable(context: ReconcileContext): Promise<void> {
+    if (context.creatabilityChecked) {
+      return;
+    }
+    const { request } = context;
+    const result = await this.deps.resolver.checkCreatable?.(
+      request.platform,
+      // Creation paths retain resolve()'s exact spec; only reuse/adopt can widen this type.
+      context.resolvedSpec as ResolvedExactDeviceSpecification,
+      { signal: request.signal },
+    );
+    // Cancellation or expiry while discovery was pending wins over its result.
+    this.checkBudget(request);
+    if (result?.kind === "unsupported") {
+      throw new ReconcileAbort(failure(result.code, result.message));
+    }
+    if (result?.kind === "unresolved") {
+      throw new ReconcileAbort(failure("discovery_incomplete", result.message));
+    }
+    context.creatabilityChecked = true;
+  }
 
   /** Sessions this daemon holds on `device` (none when the claims port cannot tell). */
   private sessionsOn(device: DeviceInfo): string[] {

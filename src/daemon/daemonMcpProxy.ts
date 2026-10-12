@@ -1626,6 +1626,8 @@ export class DaemonMcpProxy {
         reason: string;
         fromResultMint: boolean;
         release?: SessionReleaseSnapshot;
+        /** First reported managed stall loss; lives and clears with this terminal binding. */
+        reportedStallLossReason?: string;
       }
     | undefined;
   /** A recoverable daemon release needs a replacement transport, not a UUID fence. */
@@ -2756,10 +2758,17 @@ export class DaemonMcpProxy {
     ) {
       this.fenceBoundSessionUuid(
         releasedSessionUuid,
-        notification.reason ?? "released",
+        this.reasonForReleaseNotification(releasedSessionUuid, notification.reason),
         notification.release,
       );
     }
+  }
+
+  private reasonForReleaseNotification(sessionUuid: string, reason?: string): string {
+    const terminal = this.terminalBoundSession;
+    const reported =
+      terminal?.sessionUuid === sessionUuid ? terminal.reportedStallLossReason : undefined;
+    return reported ?? reason ?? "released";
   }
 
   /**
@@ -6512,7 +6521,10 @@ export class DaemonMcpProxy {
     }
     if (this.isDefinitiveSessionLoss(error)) {
       const releaseReason = releaseReasonFromError(error);
-      if (this.awaitManagedReclaimNotFound(record, error)) {
+      if (
+        record.managedReclaimSince !== undefined &&
+        this.awaitManagedReclaimNotFound(sessionUuid, record, error)
+      ) {
         // The successor may not have rehydrated this session yet; keep the same probe cadence.
         logger.debug(
           `[DaemonMcpProxy] Managed session ${sessionUuid} is still awaiting rehydration`,
@@ -6531,16 +6543,26 @@ export class DaemonMcpProxy {
   }
 
   /** Await only rehydratable not-found answers, within one window per answering process. */
-  private awaitManagedReclaimNotFound(record: StallHandoverRecord, error: unknown): boolean {
+  private awaitManagedReclaimNotFound(
+    sessionUuid: string,
+    record: StallHandoverRecord,
+    error: unknown,
+  ): boolean {
     const releaseReason = releaseReasonFromError(error);
     if (
-      record.managedReclaimSince === undefined ||
+      !this.managedExecutionSessions.has(sessionUuid) ||
+      record.handover.code !== DAEMON_STALLED_CODE ||
       isLivenessOwnershipLostError(error) ||
+      isLivenessOwnerConflictError(error) ||
       !this.isDaemonSessionNotFoundError(error) ||
       (releaseReason !== undefined && !isRecoverableDaemonHandoffReason(releaseReason))
     ) {
       return false;
     }
+    // An unpinned not-found proves the daemon answered but has not rehydrated this execution.
+    record.managedReclaimSince ??= this.timer.now();
+    record.probeDaemonInstance = undefined;
+    this.stallResumeProbe.start();
     const daemonInstance = daemonInstanceFromError(error);
     const window = record.managedNotFoundWindow;
     if (!window || (daemonInstance !== undefined && daemonInstance !== window.daemonInstance)) {
@@ -6633,7 +6655,10 @@ export class DaemonMcpProxy {
     try {
       ack = await this.sendStalledSessionResumeHeartbeat(sessionUuid);
     } catch (error) {
-      if (this.isDefinitiveSessionLoss(error)) {
+      if (
+        this.isDefinitiveSessionLoss(error) &&
+        !this.awaitManagedReclaimNotFound(sessionUuid, record, error)
+      ) {
         this.endLostSessionHandover(sessionUuid, releaseReasonFromError(error));
         this.reportPendingSessionLoss(args);
         return;
@@ -6717,8 +6742,17 @@ export class DaemonMcpProxy {
     }
     this.ownedDeviceSessions.delete(sessionUuid);
     this.claimableSessions.delete(sessionUuid);
-    if (this.terminalBoundSession?.sessionUuid === sessionUuid) {
-      this.terminalBoundSession.reason = releaseReason;
+    this.recordTerminalStallLoss(sessionUuid, releaseReason);
+  }
+
+  private recordTerminalStallLoss(sessionUuid: string, releaseReason: string): void {
+    const terminal = this.terminalBoundSession;
+    if (terminal?.sessionUuid !== sessionUuid) {
+      return;
+    }
+    terminal.reason = releaseReason;
+    if (this.managedExecutionSessions.has(sessionUuid)) {
+      terminal.reportedStallLossReason = releaseReason;
     }
   }
 

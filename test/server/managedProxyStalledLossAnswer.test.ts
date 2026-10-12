@@ -274,6 +274,8 @@ test.each(["heartbeat-timeout", "session-not-found"] as const)(
       expect(proxy.getTerminalSessionRelease()).toEqual({ sessionUuid: SESSION, reason });
       const later = await callTool("tapOn", { text: "OK" });
       expect(JSON.parse(later.content[0].text).error).toEqual(error);
+      // Reads naming a deviceId still go through, sessionless.
+      await expectNextReadForwardedSessionless(callTool);
     });
   },
 );

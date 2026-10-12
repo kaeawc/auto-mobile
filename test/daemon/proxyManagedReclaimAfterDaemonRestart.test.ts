@@ -600,6 +600,111 @@ test("reasonless not-found stops reclaiming at the existing window and delivers 
   });
 });
 
+test("a release notification after a reasonless reclaim loss preserves the reported reason", async () => {
+  await withManagedServer(async (assertLoss) => {
+    await handedOver();
+    await s.restart(false);
+    await s.advance(INTERVAL);
+    await s.advance(RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS + INTERVAL);
+    expect(s.proxy.getTerminalSessionRelease()?.reason).toBe("session-not-found");
+    const client = s.clients.at(-1)!;
+    expect(client.isConnected()).toBe(true);
+    client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, SESSION, RELEASE_REASON);
+    await assertLoss("session-not-found");
+  });
+});
+
+test.each(["daemon-shutdown", "daemon-restart", undefined])(
+  "a named resume awaits %s not-found during managed reclaim",
+  async (reason) => {
+    await handedOver();
+    await s.restart(false);
+    if (reason !== undefined) {
+      await s.rehydrate();
+      await s.manager.releaseSession(SESSION, reason);
+    }
+    await s.advance(INTERVAL);
+    await expect(s.proxy.callTool("observe", { sessionUuid: SESSION })).rejects.toMatchObject({
+      handover: { code: "daemon_stalled" },
+    });
+    expect(s.handovers.map(({ handover }) => handover.code)).toEqual(["daemon_stalled"]);
+    expect(s.proxy.getTerminalSessionRelease()).toBeUndefined();
+    await s.rehydrate();
+    await s.advance(INTERVAL);
+    expect(s.manager.getSession(SESSION)?.livenessOwnerToken).toBe(TOKEN);
+    expect(s.manager.getSession(SESSION)?.ownership).toBe("owned");
+    expect(parsed(await s.proxy.callTool("observe", { sessionUuid: SESSION }))[0].observed).toBe(
+      SESSION,
+    );
+  },
+);
+
+test.each(["daemon-shutdown", "daemon-restart", undefined])(
+  "a named %s not-found starts managed reclaim before the pinned probe",
+  async (reason) => {
+    await handedOver();
+    await s.restart(false);
+    if (reason !== undefined) {
+      await s.rehydrate();
+      await s.manager.releaseSession(SESSION, reason);
+    }
+    await expect(s.proxy.callTool("observe", { sessionUuid: SESSION })).rejects.toMatchObject({
+      handover: { code: "daemon_stalled" },
+    });
+    expect(s.handovers.map(({ handover }) => handover.code)).toEqual(["daemon_stalled"]);
+    expect(s.proxy.getTerminalSessionRelease()).toBeUndefined();
+    const calls = s.heartbeats.length;
+    await s.rehydrate();
+    await s.advance(INTERVAL);
+    expect(s.heartbeats.slice(calls).map(({ params }) => params.expectedDaemonInstance)).toEqual([
+      undefined,
+    ]);
+    expect(s.manager.getSession(SESSION)?.livenessOwnerToken).toBe(TOKEN);
+    expect(s.manager.getSession(SESSION)?.ownership).toBe("owned");
+    expect(parsed(await s.proxy.callTool("observe", { sessionUuid: SESSION }))[0].observed).toBe(
+      SESSION,
+    );
+  },
+);
+
+test.each(["heartbeat-timeout", "device-restart:emulator-5554"])(
+  "PIN: a named %s not-found ends managed reclaim on that call",
+  async (reason) => {
+    await withManagedServer(async (assertLoss) => {
+      await handedOver();
+      await s.restart(false);
+      await s.advance(INTERVAL);
+      await s.rehydrate();
+      await s.manager.releaseSession(SESSION, reason);
+      await expect(s.proxy.callTool("observe", { sessionUuid: SESSION })).rejects.toMatchObject({
+        handover: { code: "proxy_stalled", releaseReasons: { [SESSION]: reason } },
+      });
+      await assertLoss(reason);
+    });
+  },
+);
+
+test("a named not-found shares the probe's window and ends at its deadline", async () => {
+  await withManagedServer(async (assertLoss) => {
+    await handedOver();
+    await s.restart(false);
+    const returnedAt = s.timer.now();
+    await s.advance(INTERVAL);
+    const firstAnswerAt = s.heartbeats.find(
+      ({ at, params }) => at >= returnedAt && params.expectedDaemonInstance === undefined,
+    )!.at;
+    await s.advance(firstAnswerAt + RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS - s.timer.now() - 1);
+    await expect(s.proxy.callTool("observe", { sessionUuid: SESSION })).rejects.toMatchObject({
+      handover: { code: "daemon_stalled" },
+    });
+    await s.advance(1);
+    await expect(s.proxy.callTool("observe", { sessionUuid: SESSION })).rejects.toMatchObject({
+      handover: { code: "proxy_stalled", releaseReasons: { [SESSION]: "session-not-found" } },
+    });
+    await assertLoss("session-not-found");
+  });
+});
+
 test.each(["daemon-shutdown", "daemon-restart"] as const)(
   "%s not-found during reclaim waits for rehydration",
   async (reason) => {

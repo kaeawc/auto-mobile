@@ -39,13 +39,11 @@ beforeEach(() => {
     AUTOMOBILE_COORDINATION_DIR: join(homeDir, "coordination-1"),
     AUTOMOBILE_DATA_DIR: join(homeDir, "data-1"),
     AUTOMOBILE_DB_DIR: join(homeDir, "db-1"),
-    HOME: join(homeDir, "env-home-1"),
   };
   secondEnv = {
     AUTOMOBILE_COORDINATION_DIR: join(homeDir, "coordination-2"),
     AUTOMOBILE_DATA_DIR: join(homeDir, "data-2"),
     AUTOMOBILE_DB_DIR: join(homeDir, "db-2"),
-    HOME: join(homeDir, "env-home-2"),
   };
 });
 
@@ -62,7 +60,7 @@ function gate(pid: number, daemonEnv: NodeJS.ProcessEnv): AndroidBootAdmissionGa
   });
 }
 
-test("registry ignores general coordination, data, database, and HOME overrides", () => {
+test("registry ignores general coordination, data and database directory overrides", () => {
   const expected = join(
     homeDir,
     ".auto-mobile",
@@ -73,6 +71,25 @@ test("registry ignores general coordination, data, database, and HOME overrides"
   );
   expect(androidBootAdmissionRegistryDirectory(firstEnv, homeDir)).toBe(expected);
   expect(androidBootAdmissionRegistryDirectory(secondEnv, homeDir)).toBe(expected);
+});
+
+test("default root follows the resolved home directory", () => {
+  const otherHomeDir = join(homeDir, "other-home");
+  for (const resolvedHomeDir of [homeDir, otherHomeDir]) {
+    expect(androidBootAdmissionRegistryDirectory(firstEnv, resolvedHomeDir)).toBe(
+      join(
+        resolvedHomeDir,
+        ".auto-mobile",
+        "adb-servers",
+        adbServerScope(firstEnv),
+        "boot-admissions",
+        "android",
+      ),
+    );
+  }
+  expect(androidBootAdmissionRegistryDirectory(firstEnv, homeDir)).not.toBe(
+    androidBootAdmissionRegistryDirectory(firstEnv, otherHomeDir),
+  );
 });
 
 test("registry is scoped to the adb server under the documented override root", () => {

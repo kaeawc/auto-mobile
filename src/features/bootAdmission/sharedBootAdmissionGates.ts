@@ -32,8 +32,9 @@ const ADB_LISTING_TIMEOUT_MS = 5_000;
  * Where the Android boot-admission lock and records live: one directory per adb server
  * (`adbServerScope`), under the adb-server coordination root. It ignores
  * AUTOMOBILE_COORDINATION_DIR and the data directory, so daemons that share an adb server share
- * one boot limit; AUTOMOBILE_ADB_SERVER_COORDINATION_DIR is the only override, and daemons given
- * different values do NOT share admissions (#11903).
+ * one boot limit. The root is AUTOMOBILE_ADB_SERVER_COORDINATION_DIR when set, else the home
+ * directory getAdbServerScopedAutoMobileDir resolves (which follows HOME under Bun). Daemons
+ * that resolve different roots do NOT share admissions (#11903).
  */
 export function androidBootAdmissionRegistryDirectory(
   env: NodeJS.ProcessEnv = process.env,

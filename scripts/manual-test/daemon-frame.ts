@@ -315,17 +315,7 @@ export class FrameRpc {
     this.decoder = new LineDecoder(maxFrameBytes, "Control response");
     this.startedAt = deps.timer.now();
     connection.onData((chunk) => {
-      if (this.failure) {
-        return;
-      }
-      let lines: string[];
-      try {
-        lines = this.decoder.push(chunk);
-      } catch (error) {
-        this.fail(error instanceof Error ? error : new Error(errorMessage(error)));
-        connection.destroy();
-        return;
-      }
+      const { lines, overflow } = this.decoder.push(chunk);
       for (const line of lines) {
         deps.out(`[${deps.timer.now() - this.startedAt}ms] ${line}`);
         try {
@@ -343,6 +333,10 @@ export class FrameRpc {
         } catch (error) {
           this.fail(new Error(`Invalid control JSON: ${errorMessage(error)}`));
         }
+      }
+      if (overflow) {
+        this.fail(overflow);
+        connection.destroy();
       }
     });
     connection.onClose((error) => this.fail(error ?? new Error("Control socket closed.")));

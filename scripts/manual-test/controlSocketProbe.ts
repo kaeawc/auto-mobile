@@ -73,13 +73,7 @@ export async function probeControlSocket(
           if (settled) {
             return;
           }
-          let lines: string[];
-          try {
-            lines = decoder.push(chunk);
-          } catch (error) {
-            finish({ alive: false, reason: errorMessage(error) });
-            return;
-          }
+          const { lines, overflow } = decoder.push(chunk);
           for (const line of lines) {
             try {
               const response = responseSchema.safeParse(JSON.parse(line));
@@ -89,6 +83,9 @@ export async function probeControlSocket(
             } catch (error) {
               // Non-JSON lines cannot prove a matching daemon response.
             }
+          }
+          if (overflow) {
+            finish({ alive: false, reason: errorMessage(overflow) });
           }
         });
         connection.write(

@@ -20,17 +20,15 @@ import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 /** Must equal `PrototypeAgentProtocol.protocolVersion` in the agent. */
 export const PROTOTYPE_AGENT_PROTOCOL_VERSION = 1;
 /**
- * Agent-to-host status() (PrototypeModel.swift) and wireObject() (PrototypeSession.swift)
- * include the whole state. PrototypeStateValidator caps non-state + state JSON at
- * MAX_PROTOTYPE_SPEC_BYTES (1 MiB). JSONSerialization may double slash bytes (\/),
- * making the state roughly 2 MiB on the wire. The contract's explicit emit-action
- * payload budget is 4096 bytes, but change events also copy changed state values
- * into payload (PrototypeSession.emitStateChange). The 4 MiB client ceiling allows
- * another state-sized budget for that copy and pages/assets/appearance/envelopes;
- * it is a hard bound, not a guarantee of 2x spare headroom for every event.
+ * Status and events carry state capped at MAX_PROTOTYPE_SPEC_BYTES (1 MiB) by
+ * PrototypeStateValidator's JSONEncoder without slash escaping. JSONSerialization
+ * doubles slash bytes on the wire: up to ~2 MiB of state. A single-key change
+ * copies its value into payload (~4 MiB total); multi-key test-hook changes also
+ * repeat keys in payload.keys and payload.values (~6 MiB). The 8 MiB ceiling is
+ * above every case, with room for pages/assets/appearance and the event envelope.
  * The agent's 64 MiB inbound budget is for host-to-agent screenshot assets.
  */
-export const PROTOTYPE_AGENT_CLIENT_MAX_FRAME_BYTES = 4 * MAX_PROTOTYPE_SPEC_BYTES;
+export const PROTOTYPE_AGENT_CLIENT_MAX_FRAME_BYTES = 8 * MAX_PROTOTYPE_SPEC_BYTES;
 
 export class PrototypeAgentFrameTooLargeError extends ActionableError {
   constructor(readonly limitBytes: number) {

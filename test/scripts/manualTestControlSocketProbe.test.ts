@@ -115,3 +115,15 @@ test("oversized probe answer returns a bounded diagnostic failure", async () => 
   });
   expect(f.timer.getPendingTimeoutCount()).toBe(0);
 });
+
+test("matching response before overflow in the same chunk proves the daemon alive", async () => {
+  const f = fixture();
+  f.connection.silent = true;
+  const pending = probeControlSocket("/fake/socket", f.deps, { maxFrameBytes: 64 });
+  await drainUntilQuiescent(f.timer);
+  const line = JSON.stringify({ id: f.connection.frames[0].id, success: true, result: {} });
+  f.connection.data(Buffer.from(line + "\n" + "x".repeat(65)));
+  expect(await pending).toEqual({ alive: true, result: {} });
+  expect(f.connection.ended).toBe(true);
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
+});

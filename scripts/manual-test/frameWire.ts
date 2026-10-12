@@ -39,29 +39,36 @@ export class LineDecoder {
   private readonly framer: LineFramer;
   private lines: string[] = [];
   private firstLineComplete = false;
+  private overflow?: HarnessFrameTooLargeError;
   constructor(maxFrameBytes: number, subject = "Harness response") {
     this.framer = new LineFramer(maxFrameBytes, {
       onLine: (line) => this.lines.push(line),
       onOverflow: () => {
-        throw new HarnessFrameTooLargeError(maxFrameBytes, subject);
+        this.overflow = new HarnessFrameTooLargeError(maxFrameBytes, subject);
       },
     });
   }
-  push(chunk: Buffer | string): string[] {
+  push(chunk: Buffer | string): { lines: string[]; overflow?: HarnessFrameTooLargeError } {
     this.lines = [];
     this.framer.push(chunk);
-    return this.lines;
+    return { lines: this.lines, overflow: this.overflow };
   }
   /** Scan only incoming bytes: partial acknowledgement bytes remain solely in LineFramer. */
-  pushFirst(chunk: Buffer): { line?: string; raw: Buffer } {
-    if (this.framer.hasOverflowed) {
-      return { raw: Buffer.alloc(0) };
+  pushFirst(chunk: Buffer): { line?: string; raw: Buffer; overflow?: HarnessFrameTooLargeError } {
+    if (this.overflow) {
+      return { raw: Buffer.alloc(0), overflow: this.overflow };
     }
     if (this.firstLineComplete) {
       return { raw: chunk };
     }
     const newline = chunk.indexOf(0x0a);
-    const [line] = this.push(newline < 0 ? chunk : chunk.subarray(0, newline + 1));
+    const {
+      lines: [line],
+      overflow,
+    } = this.push(newline < 0 ? chunk : chunk.subarray(0, newline + 1));
+    if (overflow) {
+      return { raw: Buffer.alloc(0), overflow };
+    }
     if (newline < 0) {
       return { raw: Buffer.alloc(0) };
     }

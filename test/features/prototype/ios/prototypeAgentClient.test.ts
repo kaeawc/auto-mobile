@@ -7,6 +7,7 @@ import {
   PrototypeAgentFrameTooLargeError,
   type PrototypeAgentClient,
 } from "../../../../src/features/prototype/ios/prototypeAgentClient";
+import { MAX_PROTOTYPE_SPEC_BYTES } from "../../../../src/features/prototype/prototypeSpec";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import { CountingIdGenerator } from "../../../../src/utils/IdGenerator";
 import {
@@ -266,11 +267,9 @@ describe("PrototypeAgentClient after the handshake", () => {
   });
 });
 
-import { MAX_PROTOTYPE_SPEC_BYTES } from "../../../../src/features/prototype/prototypeSpec";
-
 describe("prototype inbound frame bounds", () => {
-  test("default is four times the spec byte budget", () => {
-    expect(PROTOTYPE_AGENT_CLIENT_MAX_FRAME_BYTES).toBe(4 * MAX_PROTOTYPE_SPEC_BYTES);
+  test("default is eight times the spec byte budget", () => {
+    expect(PROTOTYPE_AGENT_CLIENT_MAX_FRAME_BYTES).toBe(8 * MAX_PROTOTYPE_SPEC_BYTES);
   });
   test("overflow rejects all requests, closes once and ignores later chunks", async () => {
     const limit = Buffer.byteLength(JSON.stringify(helloResult()));

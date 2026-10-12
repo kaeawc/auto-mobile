@@ -453,3 +453,23 @@ for (const kind of ["video", "recording"] as const) {
     },
   );
 }
+
+posixTest("video ack keeps trailing binary outside the tiny frame budget", async () => {
+  const f = fixture();
+  const ack = '{"type":"video_stream_response","success":true}';
+  f.deps.maxFrameBytes = Buffer.byteLength(ack);
+  const binary = Buffer.alloc(f.deps.maxFrameBytes + 1, 255);
+  binary[1] = 10;
+  f.aux.respond = () => {
+    f.aux.data(Buffer.concat([Buffer.from(ack + "\n"), binary]));
+    f.aux.close();
+  };
+  expect(await runAuxSocket(parsed(["video", '{"action":"subscribe"}']), f.deps)).toBe(0);
+  expect(f.out[0]).toBe(ack);
+  expect(JSON.parse(f.out[1])).toMatchObject({
+    ack: { success: true },
+    bytesAfterAck: binary.length,
+    closedBy: "server",
+  });
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
+});

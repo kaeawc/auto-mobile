@@ -245,22 +245,18 @@ async function recording(
       if (settled) {
         return;
       }
-      let line: string | undefined;
-      try {
-        ({ line } = decoder.pushFirst(chunk));
-      } catch (error) {
-        finish(error instanceof Error ? error : new Error(errorMessage(error)));
-        return;
+      const { line, overflow } = decoder.pushFirst(chunk);
+      if (line !== undefined) {
+        deps.out(line);
+        try {
+          const response: DeviceGestureRecordingResponse = JSON.parse(line);
+          finish(undefined, response.success === true ? 0 : 1);
+        } catch (error) {
+          finish(new Error(`Invalid recording response: ${errorMessage(error)}`));
+        }
       }
-      if (line === undefined || settled) {
-        return;
-      }
-      deps.out(line);
-      try {
-        const response: DeviceGestureRecordingResponse = JSON.parse(line);
-        finish(undefined, response.success === true ? 0 : 1);
-      } catch (error) {
-        finish(new Error(`Invalid recording response: ${errorMessage(error)}`));
+      if (overflow) {
+        finish(overflow);
       }
     });
     try {
@@ -319,29 +315,24 @@ async function video(
         bytesAfterAck += chunk.length;
         return;
       }
-      let line: string | undefined;
-      let raw: Buffer;
-      try {
-        ({ line, raw } = decoder.pushFirst(chunk));
-      } catch (error) {
-        finish("server", error instanceof Error ? error : new Error(errorMessage(error)));
-        return;
-      }
-      if (line === undefined) {
-        return;
-      }
-      deps.out(line);
-      try {
-        ack = JSON.parse(line) as VideoStreamSocketResponse;
-        bytesAfterAck += raw.length;
-        deps.timer.clearTimeout(timeout);
-        if (ack.success !== true) {
-          finish("server");
-          return;
+      const { line, raw, overflow } = decoder.pushFirst(chunk);
+      if (line !== undefined) {
+        deps.out(line);
+        try {
+          ack = JSON.parse(line) as VideoStreamSocketResponse;
+          bytesAfterAck += raw.length;
+          deps.timer.clearTimeout(timeout);
+          if (ack.success !== true) {
+            finish("server");
+            return;
+          }
+          hold = deps.timer.setTimeout(() => finish("hold"), command.holdMs);
+        } catch (error) {
+          finish("server", new Error(`Invalid video ack: ${errorMessage(error)}`));
         }
-        hold = deps.timer.setTimeout(() => finish("hold"), command.holdMs);
-      } catch (error) {
-        finish("server", new Error(`Invalid video ack: ${errorMessage(error)}`));
+      }
+      if (overflow) {
+        finish("server", overflow);
       }
     });
     try {

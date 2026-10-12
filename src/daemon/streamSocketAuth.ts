@@ -1,3 +1,5 @@
+import { InputDeviceOwnedError } from "./inputDeviceOwnership";
+import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
 import type { StreamSubscriptionIdentity } from "./streamSubscriptionPolicy";
 import type { ObserverSessionStore } from "./observerSessionRegistry";
 import { isSessionReleasing } from "./sessionReleaseState";
@@ -80,6 +82,28 @@ export function authorizeResolvedDevice(
   options: StreamAuthorizeInput & { deviceId: string },
 ): void {
   authenticator.authorize(options);
+}
+
+/** Only ownership refusals from stream authorization are exposed on auxiliary response frames. */
+export function streamAuthRefusalFields(error: unknown):
+  | {
+      code: InputDeviceOwnedError["code"] | SessionNoLongerOwnsDeviceError["code"];
+      retryable: boolean;
+      deviceId: string;
+      retryAfterMs?: number;
+    }
+  | {} {
+  if (error instanceof InputDeviceOwnedError || error instanceof SessionNoLongerOwnsDeviceError) {
+    return {
+      code: error.code,
+      retryable: error.retryable,
+      deviceId: error.deviceId,
+      ...(error instanceof InputDeviceOwnedError && typeof error.retryAfterMs === "number"
+        ? { retryAfterMs: error.retryAfterMs }
+        : {}),
+    };
+  }
+  return {};
 }
 
 function authEnforced(env: NodeJS.ProcessEnv): boolean {
@@ -233,7 +257,9 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
     const owner = sessionManager.getSessionForDevice(deviceId) ?? undefined;
     if (!owner) {
       if (requireOwnership) {
-        throw new ActionableError(
+        throw new SessionNoLongerOwnsDeviceError(
+          baseSessionUuid,
+          deviceId,
           `${this.operation} rejected: device ${deviceId} is no longer owned by session ${baseSessionUuid}.`,
         );
       }
@@ -241,7 +267,11 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
     }
     const ownerBase = resolveToolSelectionBaseSessionUuid(owner, sessionManager) ?? owner;
     if (ownerBase !== baseSessionUuid) {
-      throw new ActionableError(
+      throw new InputDeviceOwnedError(
+        this.operation,
+        deviceId,
+        baseSessionUuid,
+        undefined,
         `${this.operation} rejected: device ${deviceId} is bound to a different daemon session; ` +
           `a subscriber cannot attach to another session's capture without authorization.`,
       );

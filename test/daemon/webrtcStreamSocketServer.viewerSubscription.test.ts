@@ -1,3 +1,4 @@
+import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -1198,4 +1199,24 @@ test("device owner renewing a viewer lease can replace capture parameters", asyn
   expect(owner).toMatchObject({ success: true, subscriptionKind: "owner" });
   expect(h.captureHints.at(-1)?.bitrateBps).toBe(999000);
   expect(h.sources[0].stopped).toBe(true);
+});
+
+test("stream ownership refusals carry code and errorCode on the response wire", async () => {
+  const h = harness({
+    authenticator: {
+      authorize: () => {
+        throw new InputDeviceOwnedError("webrtc", "emu", "a");
+      },
+    },
+  });
+  const socket = new FakeSocket();
+  await h.server.line(socket, { action: "start", sessionUuid: "a", deviceId: "emu" });
+  await flush();
+  expect(socket.getWrittenMessages()[0]).toMatchObject({
+    success: false,
+    code: "device_owned_by_other_session",
+    errorCode: "device_owned_by_other_session",
+    retryable: false,
+    deviceId: "emu",
+  });
 });

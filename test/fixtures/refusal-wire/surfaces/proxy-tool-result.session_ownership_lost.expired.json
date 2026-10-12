@@ -1,0 +1,14 @@
+{
+  "surface": "proxy-tool-result",
+  "name": "session_ownership_lost.expired",
+  "builder": "createProxyMcpServer tools/call via resolveCallToolErrorResult",
+  "payload": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"code\":\"session_ownership_lost\",\"message\":\"Session ownership lost for 11111111-2222-4333-8444-555555555555: explicit-release. Call getAndroid or getApple to acquire a new device session.\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"reason\":\"explicit-release\",\"retryable\":false,\"nextAction\":\"acquire_new_session\",\"recovery\":{\"action\":\"acquire_replacement_session\",\"tools\":[\"getAndroid\",\"getApple\"]}}}"
+      }
+    ],
+    "isError": true
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "surface": "provision-envelope",
+  "name": "device_offline.readiness",
+  "builder": "registered provisionDevice handler via provisionDeviceErrorResponse",
+  "payload": {
+    "success": false,
+    "message": "Failed to provision android device 'phone-api-36-a': startDevice automation runner readiness failed: platform=android requested=[platform=android name=phone-api-36-a] resolved=[phone-api-36-a (emulator-5554)] phase=runner-setup attempts=1 remainingBudgetMs=480000 packageCompatibilityElapsedMs=0 runnerSetupElapsedMs=0: device offline",
+    "error": {
+      "code": "device_offline",
+      "message": "Failed to provision android device 'phone-api-36-a': startDevice automation runner readiness failed: platform=android requested=[platform=android name=phone-api-36-a] resolved=[phone-api-36-a (emulator-5554)] phase=runner-setup attempts=1 remainingBudgetMs=480000 packageCompatibilityElapsedMs=0 runnerSetupElapsedMs=0: device offline",
+      "retryable": true,
+      "providerCode": "adb_device_offline",
+      "readinessPhase": "runner-setup",
+      "attempt": 1,
+      "deviceId": "emulator-5554",
+      "daemonBuild": "0.0.84+fixture-build"
+    },
+    "lifecycle": {
+      "state": "no_device_created",
+      "phase": "provisioning",
+      "reason": {
+        "code": "device_offline",
+        "message": "Failed to provision android device 'phone-api-36-a': startDevice automation runner readiness failed: platform=android requested=[platform=android name=phone-api-36-a] resolved=[phone-api-36-a (emulator-5554)] phase=runner-setup attempts=1 remainingBudgetMs=480000 packageCompatibilityElapsedMs=0 runnerSetupElapsedMs=0: device offline",
+        "retryable": true,
+        "providerCode": "adb_device_offline",
+        "readinessPhase": "runner-setup",
+        "attempt": 1,
+        "deviceId": "emulator-5554",
+        "daemonBuild": "0.0.84+fixture-build"
+      }
+    },
+    "recovery": {
+      "schemaVersion": 2,
+      "boundary": "readiness_failure",
+      "phaseReached": "provisioning",
+      "outcomes": {
+        "deviceCreation": "not_created",
+        "settlement": "not_applicable"
+      },
+      "cleanup": {
+        "status": "unnecessary"
+      },
+      "originalError": {
+        "code": "device_offline",
+        "message": "Failed to provision android device 'phone-api-36-a': startDevice automation runner readiness failed: platform=android requested=[platform=android name=phone-api-36-a] resolved=[phone-api-36-a (emulator-5554)] phase=runner-setup attempts=1 remainingBudgetMs=480000 packageCompatibilityElapsedMs=0 runnerSetupElapsedMs=0: device offline"
+      },
+      "nextAction": {
+        "action": "retry",
+        "reason": "No device is left half-provisioned by this request; a retry starts a fresh provision and adopts the device if it exists.",
+        "automaticRetrySafe": true
+      },
+      "freshness": {
+        "observedAtMs": 0,
+        "daemonBuild": "0.0.84+fixture-build",
+        "source": "snapshot"
+      }
+    }
+  }
+}

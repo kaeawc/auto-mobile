@@ -1,3 +1,4 @@
+import { streamAuthRefusalFields } from "../streamSocketAuth";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { Socket } from "node:net";
 import { logger } from "../../utils/logger";
@@ -21,7 +22,13 @@ export interface SubscriptionResponse {
   error?: string;
   timestamp?: number;
   subscriptionId?: string;
-  code?: "BACKFILL_QUEUE_OVERFLOW" | "DEVICE_SESSION_SUPERSEDED_BY_RESTORE" | "SESSION_ENDED";
+  code?:
+    | "BACKFILL_QUEUE_OVERFLOW"
+    | "DEVICE_SESSION_SUPERSEDED_BY_RESTORE"
+    | "SESSION_ENDED"
+    | "device_owned_by_other_session"
+    | "session_no_longer_owns_device";
+  retryable?: boolean;
 }
 
 const MAX_BACKFILL_QUEUE = 1_000;
@@ -207,6 +214,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
         type: "error",
         success: false,
         error: errorMessage(error),
+        ...streamAuthRefusalFields(error),
         ...deviceSessionErrorFields(error),
       };
       this.sendJson(socket, errorResponse);

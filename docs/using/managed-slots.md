@@ -277,6 +277,7 @@ A managed-execution session uses the `managed-execution` liveness policy:
 - **Idle release is terminal.** As for every session, the session UUID ends with
   the idle release. A call on the managed connection after it is answered with
   `managed_execution_ended` (`nextAction: relaunch_execution`, the release reason,
+  `idle: true` beside the reason,
   `slotIndex` and `assignmentGeneration`; no recovery tools). Reads that name a
   non-blank string `deviceId` still work; a read without one (including a
   `device` label alone) is answered with
@@ -446,7 +447,7 @@ The initialize capability is a snapshot at connect. Resource reads add
 | `outcome`                | `"ready"` or `"failed"`.                                                                                                                                                                                                                                                                                                                                   |
 | `idleTimeoutMs`          | The idle window the sessions are held with.                                                                                                                                                                                                                                                                                                                |
 | `slots[]`                | Per slot: `slotIndex`, `role`, `platform`, `assignmentGeneration`, `device` (`stableId`, `transportId`, `name`), `sessionUuid`, `requestedSpec`, `resolvedSpec`, `specFingerprint` (`version`, `hash`), `disposition`, `readiness` (`mode`, `status`), `lifecycle` (provision timing and the reconciler's decision trail), and `failure` on a failed slot. |
-| `slots[].executionEnded` | Optional `{ reason: string, nextAction: "relaunch_execution" }`, present only in the `automobile:managed-slots` resource after that slot's session was terminally released.                                                                                                                                                                                |
+| `slots[].executionEnded` | Optional `{ reason: string, idle?: true, nextAction: "relaunch_execution" }`, present only in the `automobile:managed-slots` resource after that slot's session was terminally released; `idle` is true after an idle release and absent otherwise.                                                                                                        |
 | `failure`                | Scope- or transport-level failure: `code`, `retryable`, `message`, `nextAction`. Per-slot failures sit on the slot entry.                                                                                                                                                                                                                                  |
 
 If acquisition fails, the proxy still serves MCP: `initialize` reports outcome

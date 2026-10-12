@@ -60,7 +60,7 @@ import {
   managedSlotForSession,
   type ManagedSlotsResult,
 } from "../models/managedSlotsResult";
-import { SESSION_NOT_FOUND_REASON } from "../daemon/releaseReasons";
+import { idleReleaseField, SESSION_NOT_FOUND_REASON } from "../daemon/releaseReasons";
 
 const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
 const ACCEPTANCE_DISCOVERY_ORDER_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER";
@@ -239,6 +239,7 @@ export function noActiveDeviceSessionPayload(
       code: "no_active_device_session",
       message: error.message,
       reason: error.reason,
+      ...idleReleaseField(error.reason),
       ...terminalSessionRefusalFields(),
     },
   };
@@ -545,7 +546,11 @@ export function managedSlotsResourceView(
       slot.sessionUuid === ended.sessionUuid
         ? {
             ...slot,
-            executionEnded: { reason: ended.reason, nextAction: RELAUNCH_EXECUTION_NEXT_ACTION },
+            executionEnded: {
+              reason: ended.reason,
+              ...idleReleaseField(ended.reason),
+              nextAction: RELAUNCH_EXECUTION_NEXT_ACTION,
+            },
           }
         : slot,
     ),

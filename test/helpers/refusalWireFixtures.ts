@@ -424,6 +424,14 @@ const BUILDERS: readonly FixtureEntry[] = [
       ) as RefusalWireResult,
   ],
   [
+    "no_active_device_session.released_cleanup_expired",
+    "noActiveDeviceSessionResult",
+    () =>
+      noActiveDeviceSessionResult(
+        driven(new DaemonConnectionSessionReleasedError("cleanup-expired")),
+      ) as RefusalWireResult,
+  ],
+  [
     "ambiguous_session_selector",
     "ambiguousSessionSelectorResult",
     () =>
@@ -443,6 +451,12 @@ const BUILDERS: readonly FixtureEntry[] = [
       jsonResult(
         managedEndedPayload(readyManagedSlotsResult(SESSION), SESSION, "heartbeat_timeout"),
       ),
+  ],
+  [
+    "managed_execution_ended.released_cleanup_expired",
+    "managedEndedPayload",
+    () =>
+      jsonResult(managedEndedPayload(readyManagedSlotsResult(SESSION), SESSION, "cleanup-expired")),
   ],
   [
     "session_terminal_release_in_progress",

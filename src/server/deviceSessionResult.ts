@@ -104,6 +104,7 @@ export function managedExecutionEndedPayload({
         "device calls are refused until the runner relaunches the execution; reads that name a deviceId still work.",
       ...(sessionUuid === undefined ? {} : { sessionUuid }),
       reason,
+      ...idleReleaseField(reason),
       retryable: false as const,
       nextAction: RELAUNCH_EXECUTION_NEXT_ACTION,
       ...(slot

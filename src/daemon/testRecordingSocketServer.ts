@@ -10,7 +10,9 @@ import {
   getStoppedTestRecording,
   joinInFlightTestRecordingStop,
   stopTestRecording,
+  NoUserInputCapturedError,
 } from "../server/testRecordingManager";
+import { logger } from "../utils/logger";
 import { TestRecordingCommand, TestRecordingResponse } from "./testRecordingSocketTypes";
 import { TEST_RECORDING_SOCKET_CONFIG } from "./daemonFiles";
 import {
@@ -353,8 +355,15 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
       device: { deviceId: active.deviceId, platform: active.platform },
       requesterSessionUuid: request.sessionUuid,
     });
-    const result = await stopTestRecording(request.recordingId, request.planName);
-    return this.toStopResponse(result);
+    return stopTestRecording(request.recordingId, request.planName)
+      .then((result) => this.toStopResponse(result))
+      .catch((error: unknown) => {
+        if (!(error instanceof NoUserInputCapturedError)) {
+          throw error;
+        }
+        logger.warn(`[TestRecording] ${error.message}`, error);
+        return { success: false, error: error.message, reason: error.reason };
+      });
   }
 
   private toStopResponse(

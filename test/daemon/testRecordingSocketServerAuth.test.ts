@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { TestRecordingSocketServer } from "../../src/daemon/testRecordingSocketServer";
 import {
   SessionScopedStreamAuthenticator,
@@ -12,6 +12,8 @@ import {
   getTestRecordingStatus,
   startTestRecording,
   stopTestRecording,
+  resetStoppedTestRecordings,
+  TEST_RECORDING_USER_INPUT_ONLY_NOTICE,
 } from "../../src/server/testRecordingManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -27,6 +29,55 @@ class TestableServer extends TestRecordingSocketServer {
     return this.handleRequest(request);
   }
 }
+
+describe("TestRecordingSocketServer user-input capture contract (#11919)", () => {
+  const timer = new FakeTimer();
+  const server = new TestableServer(
+    undefined,
+    timer,
+    { authorize: () => {} },
+    { assertDeviceActionable: () => {} },
+    undefined,
+    async () => {},
+  );
+
+  afterEach(async () => {
+    if (getTestRecordingStatus(timer)) {
+      await stopTestRecording(undefined, "cleanup", timer).catch(() => undefined);
+    }
+    resetStoppedTestRecordings();
+  });
+
+  test.each(["status", "stop"] as const)(
+    "%s explains the user-input-only capture scope",
+    async (command) => {
+      const active = await startTestRecording(
+        { deviceId: "fake-recording", name: "Fake", platform: "android" },
+        timer,
+        new CountingIdGenerator(),
+        () => ({
+          start: async () => {},
+          stop: async () => ({ steps: [], stepCount: 0 }),
+          stepCount: 0,
+        }),
+      );
+      const response = await server.invoke({ command, recordingId: active.recordingId });
+      if (command === "status") {
+        expect(response.recording).toMatchObject({
+          captureScope: "user-input",
+          notice: TEST_RECORDING_USER_INPUT_ONLY_NOTICE,
+          eventCount: 0,
+        });
+      } else {
+        expect(response).toEqual({
+          success: false,
+          reason: "no_user_input_captured",
+          error: "No recorded interactions were captured. " + TEST_RECORDING_USER_INPUT_ONLY_NOTICE,
+        });
+      }
+    },
+  );
+});
 
 function recordingAuthenticator(
   calls: Array<{ sessionUuid?: string; deviceId?: string }>,

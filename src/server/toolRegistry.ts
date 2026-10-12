@@ -1,4 +1,3 @@
-import { AmbiguousDeviceTargetError } from "./ambiguousDeviceTargetRefusal";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import {
   explicitReadTargetPlatform,
@@ -16,6 +15,7 @@ import type { NavigationToolCallHandle } from "../utils/interfaces/NavigationGra
 import { runSessionDisplayPin } from "./sessionDisplayPin";
 import { toActionableError } from "../models/ActionableError";
 import { DeviceOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
+import { AmbiguousDeviceTargetError } from "./ambiguousDeviceTargetRefusal";
 import {
   clearToolTransportRecovery,
   setToolTransportRecovery,

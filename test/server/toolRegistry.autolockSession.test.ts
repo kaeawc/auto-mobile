@@ -1,6 +1,6 @@
 import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { ActionableError, BootedDevice } from "../../src/models";
@@ -12,6 +12,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { McpTestFixture } from "../fixtures/mcpTestFixture";
 
 let policyReads = 0;
 const env = new Proxy<Record<string, string | undefined>>(
@@ -63,6 +65,18 @@ describe("ToolRegistry autolock session enforcement", () => {
     expect(tool).toBeDefined();
     return tool!;
   }
+
+  beforeAll(async () => {
+    // Warm the shared server module and tool registration, independent of autolock scenarios.
+    const restore = installHermeticServerFixture();
+    const warm = new McpTestFixture();
+    try {
+      await warm.setup();
+    } finally {
+      await warm.teardown();
+      restore();
+    }
+  });
 
   beforeEach(() => {
     ToolRegistry.clearTools();

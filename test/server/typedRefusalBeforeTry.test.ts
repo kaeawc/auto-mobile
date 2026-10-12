@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
@@ -21,6 +21,8 @@ import { ExecutionTrackerPlanExecutionLock } from "../../src/server/PlanExecutio
 import { executionTracker } from "../../src/server/executionTracker";
 import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
 import { SessionReleasedDuringCreationError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
+import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
 import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -207,6 +209,76 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
     } finally {
       restore();
       unsubscribe();
+    }
+  });
+
+  test("a release cutting real creation wins and withdraws admission through dispatch", async () => {
+    const sessionUuid = "released-during-call-creation";
+    const release = new SessionReleasedDuringCallError(sessionUuid, "explicit-release");
+    const timer = new FakeTimer();
+    const persistence = new FakeDeviceSessionPersistence();
+    await persistence.upsertActiveSession({
+      sessionUuid,
+      deviceId: iosDevice.deviceId,
+      platform: "ios",
+      createdAtMs: timer.now(),
+      lastUsedAtMs: timer.now(),
+      expiresAtMs: timer.now() + 60_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: true,
+    });
+    const sessionManager = new SessionManager(timer, persistence);
+    sessionManager.stopCleanupTimer();
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "released-creation-dispatch", {
+        timer,
+        deviceManager: new FakeDeviceUtils(),
+      }),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const ends: { admitted: boolean }[] = [];
+    const unsubscribe = executionTracker.onSessionExecutionEnded((_sessions, end) =>
+      ends.push(end),
+    );
+    const admission = spyOn(executionTracker, "markSessionAdmitted");
+    const assign = spyOn(pool, "assignDeviceToSession").mockImplementation(async (uuid) => {
+      // Real recovery was admitted, but assignment never publishes a session.
+      expect(uuid).toBe(sessionUuid);
+      expect(admission).toHaveBeenCalledTimes(1);
+      expect(await executionTracker.cancelSessionUuidExecutions(uuid, release)).toBe(1);
+      return iosDevice.deviceId;
+    });
+    try {
+      ToolRegistry.registerDeviceAware(
+        PROBE_TOOL,
+        "creation",
+        z.object({ sessionUuid: z.string() }),
+        async () => ({ content: [] }),
+      );
+      fixture = new McpTestFixture({ daemonMode: true });
+      await fixture.setup();
+      const result = await fixture.client.callTool({
+        name: PROBE_TOOL,
+        arguments: { sessionUuid },
+      });
+      expect(assign).toHaveBeenCalledTimes(1);
+      expect(sessionManager.getSession(sessionUuid)).toBeNull();
+      expect(result.isError).toBe(true);
+      expect(result.content).toEqual([
+        { type: "text", text: JSON.stringify(sessionReleasedDuringCallPayload(release)) },
+      ]);
+      expect(wire(result)).toMatchObject({
+        error: { code: "session_ownership_lost", reason: "explicit-release" },
+      });
+      expect(routedSessionUuidFromResult(result)).toBeUndefined();
+      expect(result).not.toHaveProperty("_meta");
+      expect(ends).toEqual([{ admitted: false }]);
+    } finally {
+      assign.mockRestore();
+      admission.mockRestore();
+      unsubscribe();
+      sessionManager.stopCleanupTimer();
     }
   });
 

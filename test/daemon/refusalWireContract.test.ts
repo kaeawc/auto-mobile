@@ -1,5 +1,3 @@
-import * as planLockRefusal from "../../src/server/planExecutionInProgressRefusal";
-import * as ambiguousTargetRefusal from "../../src/server/ambiguousDeviceTargetRefusal";
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
@@ -42,6 +40,8 @@ import * as inputOwnership from "../../src/daemon/inputDeviceOwnership";
 import * as managedSlotRefusals from "../../src/daemon/managedSlots/managedSlotRefusal";
 import * as bootCapacity from "../../src/models/BootCapacityExhaustedError";
 import * as boundSessionRefusal from "../../src/server/deviceOutsideBoundSessionRefusal";
+import * as planLockRefusal from "../../src/server/planExecutionInProgressRefusal";
+import * as ambiguousTargetRefusal from "../../src/server/ambiguousDeviceTargetRefusal";
 import * as daemonTypes from "../../src/daemon/types";
 import * as daemonConstants from "../../src/daemon/constants";
 import * as mcpTimeouts from "../../src/daemon/McpTimeoutError";

@@ -17,6 +17,7 @@ public enum CommandError: LocalizedError, Sendable {
     case missingParameter(String)
     case invalidParameter(String, String)
     case executionFailed(String)
+    case hierarchyCaptureFailed(reason: String)
     case gestureBoundExceeded(command: String, phase: String, boundMs: Int64, elapsedMs: Int64)
     case queryBoundExceeded(command: String, boundMs: Int64, elapsedMs: Int64)
     case deadlineExceeded(command: String, deadlineMs: Int64, gestureCompleted: Bool)
@@ -32,6 +33,8 @@ public enum CommandError: LocalizedError, Sendable {
         case .gestureBoundExceeded:
             // The XCUITest call is still running and can still land: the outcome is unknown.
             return "gesture_bound_exceeded"
+        case .hierarchyCaptureFailed:
+            return "hierarchy_capture_failed"
         case .unknownCommand, .missingParameter, .invalidParameter, .executionFailed,
              .queryBoundExceeded:
             return nil
@@ -50,6 +53,8 @@ public enum CommandError: LocalizedError, Sendable {
             return "Invalid value '\(value)' for parameter '\(param)'"
         case let .executionFailed(reason):
             return "Command execution failed: \(reason)"
+        case let .hierarchyCaptureFailed(reason):
+            return "Could not capture the view hierarchy to validate the frame context; the gesture was not sent: \(reason)"
         case let .gestureBoundExceeded(command, phase, boundMs, elapsedMs):
             return "Command \(command) exceeded execution bound \(boundMs)ms in phase \(phase) after \(elapsedMs)ms; XCUITest call is still executing and the runner stays busy until it returns"
         case let .queryBoundExceeded(command, boundMs, elapsedMs):

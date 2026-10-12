@@ -304,6 +304,19 @@ from the `Live Idle Release` workflow
 (`.github/workflows/live-idle-release.yml`, dispatch plus an advisory nightly run); it never runs
 on pull requests.
 
+**Device-ownership read oracle (owner decision 2026-10-12, #11964):**
+
+A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
+A sessionless read that names a running device nobody holds may ready it in order to answer: on Android it may
+install the CtrlProxy APK, write the accessibility settings, and force-stop and rebind the service; on an iOS
+simulator it may install and launch the runner. The exception never applies to a device held, slot-assigned or
+reserved by another session: those reads use what is already installed and never run readiness.
+
+A sessionless read installing/enabling CtrlProxy or launching the iOS runner on an
+unheld running device is expected. Any readiness manager operation or ADB write
+on a held, slot-assigned or reserved device is a defect. See
+[the per-tool readiness table](../../docs/using/device-ownership.md#which-read-tools-ready-an-unheld-device).
+
 **Desktop / IDE idle-release checklist (manual; run with the desktop app against a
 private daemon with a short `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS`):**
 

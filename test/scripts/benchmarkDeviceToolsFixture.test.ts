@@ -11,6 +11,10 @@ import { registerObserveTools } from "../../src/server/observeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
 
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
+
 const device: BootedDevice = {
   name: "benchmark-mock-device",
   platform: "android",

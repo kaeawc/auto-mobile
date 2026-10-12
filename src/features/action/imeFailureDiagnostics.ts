@@ -222,6 +222,40 @@ export function imeCommitExceptionResult(
   };
 }
 
+/** Called only after a focused, readable editor confirms that delta verification is possible. */
+export function verifyImeInsertedText(
+  result: TextActionResult,
+  text: string,
+  context: { focusedFieldClass?: string | null; passwordField?: boolean } = {},
+): TextActionResult {
+  const { insertedText } = result;
+  if (
+    insertedText === undefined ||
+    text.length === 0 ||
+    imeCommitSuffixMatches(insertedText, text) !== false ||
+    imeCommitSubsequenceMatches(insertedText, text)
+  ) {
+    return result;
+  }
+  const failure = withImeFailure(
+    {
+      ...result,
+      success: false,
+      partialApplication: true,
+      error: context.passwordField
+        ? `IME partial commit: sent ${passwordTextPlaceholder(text)} but the editor inserted a different value`
+        : `IME partial commit: sent ${JSON.stringify(text)} but the editor inserted ${JSON.stringify(insertedText)}`,
+    },
+    text,
+    "verification",
+    {
+      focusedFieldClass: context.focusedFieldClass,
+      observedText: context.passwordField ? undefined : insertedText,
+    },
+  );
+  return context.passwordField ? redactPasswordImeFailure(failure, text) : failure;
+}
+
 interface ImeVerification {
   timer: Timer;
   settleMs: number;
@@ -351,6 +385,13 @@ async function verifyImeCommitReadBack(
       }
       if (observedText === undefined) {
         return result;
+      }
+      const deltaVerified = verifyImeInsertedText(result, text, {
+        focusedFieldClass: context.focusedFieldClass,
+        passwordField: verification.passwordField,
+      });
+      if (deltaVerified !== result) {
+        return deltaVerified;
       }
       const suffixMatches = imeCommitSuffixMatches(observedText, text);
       // Editors can consume markers or add prefixes across multiple segments.

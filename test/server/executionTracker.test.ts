@@ -1,3 +1,4 @@
+import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { describe, expect, test } from "bun:test";
 import { ExecutionTracker, type ExecutionScopeOptions } from "../../src/server/executionTracker";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
@@ -481,6 +482,52 @@ describe("ExecutionTracker", function () {
     expect(tracker.hasActiveSessionExecutions("session-id", { startedAtOrBefore: 5 })).toBe(false);
   });
 
+  test.each(["explicit", "resolved", "provisional"] as const)(
+    "session-clock start queries filter %s membership across a wall step",
+    (membership) => {
+      const timer = new FakeTimer();
+      const tracker = new ExecutionTracker(timer, new FakeIdGenerator());
+      tracker.setSessionClockOffsetProvider(
+        (wallNow = timer.now()) => timer.monotonicNow() - wallNow,
+      );
+      tracker.setAutolockSessionResolver({ autolockSessionForMcpSession: () => "holder" });
+      const start = () => {
+        const call = tracker.startExecution(
+          "tapOn",
+          undefined,
+          membership === "explicit" ? "holder" : undefined,
+          undefined,
+          membership === "provisional" ? "holder" : undefined,
+        );
+        if (membership === "resolved") {
+          tracker.setResolvedAutolockSessionUuid(call.id, "holder");
+        }
+        return call;
+      };
+      timer.advanceTime(5);
+      const timely = start();
+      timer.stepWallClock(-3_600_000);
+      timer.advanceTime(1);
+      const late = start();
+      const active = (excludeExecutionId?: string) =>
+        membership === "explicit"
+          ? tracker.hasActiveSessionUuidExecutions("holder", {
+              sessionClockStartedAtOrBefore: 5,
+              excludeExecutionId,
+              excludeReads: true,
+            })
+          : tracker.hasActiveAutolockSessionExecutions("holder", {
+              sessionClockStartedAtOrBefore: 5,
+              excludeExecutionId,
+              excludeReads: true,
+            });
+      expect(active(late.id)).toBe(true);
+      expect(active(timely.id)).toBe(false);
+      tracker.markDeviceReadCall(timely.id, timely.toolName);
+      expect(active()).toBe(false);
+    },
+  );
+
   test("tracks an implicit execution under its resolved autolock session", function () {
     const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
     const execution = tracker.startExecution("tapOn", "mcp-session");
@@ -868,4 +915,58 @@ describe("ExecutionTracker session-clock offset (#11576)", () => {
 
     expect(tracker.getSessionClockStartTime(call.id)).toBe(sessionNow);
   });
+});
+
+for (const controlOrder of ["none", "before read", "after read"] as const) {
+  test(`read readiness cancellation preserves execution and control marks: ${controlOrder}`, () => {
+    const tracker = new ExecutionTracker(
+      new FakeTimer(),
+      new FakeIdGenerator(["read", "excluded"]),
+    );
+    const execution = tracker.startExecution("observe");
+    const excluded = tracker.startExecution("observe");
+    const readiness = new AbortController();
+    const excludedReadiness = new AbortController();
+    const deviceId = "emulator-5556";
+    if (controlOrder === "before read") {
+      tracker.markSessionlessDeviceUse(execution.id, deviceId);
+    }
+    tracker.markSessionlessReadReadiness(execution.id, deviceId, readiness);
+    tracker.markSessionlessReadReadiness(excluded.id, deviceId, excludedReadiness);
+    if (controlOrder === "after read") {
+      tracker.markSessionlessDeviceUse(execution.id, deviceId);
+    }
+    expect(execution.sessionlessDeviceUse).toEqual(new Set([deviceId]));
+    expect(tracker.cancelSessionlessDeviceUse(deviceId, { excludeExecutionId: excluded.id })).toBe(
+      1,
+    );
+    expect(excludedReadiness.signal.aborted).toBe(false);
+    expect(excluded.abortController.signal.aborted).toBe(false);
+    if (controlOrder === "none") {
+      expect(readiness.signal.aborted).toBe(true);
+      expect(execution.abortController.signal.aborted).toBe(false);
+    } else {
+      expect(execution.abortController.signal.reason).toBeInstanceOf(InputDeviceOwnedError);
+    }
+    expect(tracker.cancelSessionlessDeviceUse(deviceId, { excludeExecutionId: excluded.id })).toBe(
+      0,
+    );
+    tracker.unmarkSessionlessReadReadiness(execution.id, deviceId, readiness);
+    expect(execution.sessionlessDeviceUse?.has(deviceId)).toBe(controlOrder !== "none");
+    tracker.endExecution(execution.id);
+    tracker.endExecution(excluded.id);
+  });
+}
+
+test("removing a nested readiness mark never removes or downgrades its control mark", () => {
+  const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["control"]));
+  const execution = tracker.startExecution("rotate");
+  const readiness = new AbortController();
+  tracker.markSessionlessDeviceUse(execution.id, "emulator-5556");
+  tracker.markSessionlessReadReadiness(execution.id, "emulator-5556", readiness);
+  tracker.unmarkSessionlessReadReadiness(execution.id, "emulator-5556", readiness);
+  expect(execution.sessionlessDeviceUse).toEqual(new Set(["emulator-5556"]));
+  expect(tracker.cancelSessionlessDeviceUse("emulator-5556")).toBe(1);
+  expect(execution.abortController.signal.reason).toBeInstanceOf(InputDeviceOwnedError);
+  tracker.endExecution(execution.id);
 });

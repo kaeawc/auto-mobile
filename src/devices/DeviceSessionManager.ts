@@ -387,7 +387,9 @@ export interface DeviceReadyOptions {
   sessionId?: string;
   /**
    * What the caller will do with the device. A `read` gets only the readiness reading needs: no
-   * current-device pin, no appearance or settings write (#11641). Defaults to `control`.
+   * current-device pin or appearance write (#11641). Defaults to `control`.
+   * A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
+   * (owner decision 2026-10-12, #11964). Android readiness may write CtrlProxy accessibility settings.
    * A read may boot only the `deviceId` supplied on this call, after alias resolution.
    * Platform-only selection, a setActiveDevice pin, and a cached current device are not
    * explicit IDs. Session-bound calls keep control readiness (toolRegistry does not mark them read).
@@ -395,6 +397,8 @@ export interface DeviceReadyOptions {
   intent?: "read" | "control";
   /** Last read ownership check after image discovery, before any lifecycle or boot work. */
   beforeReadBoot?: (image: DeviceInfo) => Promise<void>;
+  /** Resolved read identity check before runner resume or verification. */
+  beforeReadReadiness?: (device: BootedDevice) => Promise<void>;
   skipCtrlProxyDownload?: boolean;
   signal?: AbortSignal;
   /** Reuses device discovery already started by the current target resolution. */
@@ -912,7 +916,9 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
 
     // A cancelled call (e.g. another session acquired the device, #10905) stops before each
-    // device-mutating step: the current-device pin and the settings writes.
+    // control-only step: the current-device pin, appearance and stylus settings writes.
+    // A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
+    // (owner decision 2026-10-12, #11964). CtrlProxy accessibility settings are part of readiness above.
     options?.signal?.throwIfAborted();
     if (options?.intent !== "read") {
       this.setCurrentDevice(selectedDevice, resolvedPlatform);
@@ -1211,11 +1217,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
       }
     }
     if (running) {
-      if (image.platform === "android") {
-        AndroidCtrlProxyClient.resumeAfterDeviceStart(running.deviceId);
-      } else {
-        IOSCtrlProxyClient.resumeAfterDeviceStart(running.deviceId);
-      }
+      await options.beforeReadReadiness?.(running);
+      options.signal?.throwIfAborted();
+      const client = { android: AndroidCtrlProxyClient, ios: IOSCtrlProxyClient }[image.platform];
+      client.resumeAfterDeviceStart(running.deviceId);
       await this.verifyDevice(running.deviceId, image.platform, options, running);
     }
     return running;
@@ -2230,6 +2235,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
           throw new ActionableError(`Failed to start Android emulator ${deviceImage}.`);
         }
 
+        if (options?.intent === "read") {
+          await options.beforeReadReadiness?.(newDevice);
+          signal.throwIfAborted();
+        }
         AndroidCtrlProxyClient.resumeAfterDeviceStart(newDevice.deviceId!);
         perf.startOperation("verifyDevice");
         await this.verifyAndroidDevice(newDevice.deviceId!, { ...options, signal }, newDevice);

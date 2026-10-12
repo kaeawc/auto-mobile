@@ -608,6 +608,10 @@ export interface PooledDevice {
    *   observed disappearance. A disagreement NEVER lifts the quarantine on the
    *   old entry by itself.
    *
+   * Membership is settled by the refresh sweep, assignment liveness, and the
+   * explicit single-serial start / disconnect-monitor settlement paths. FUNNEL 1
+   * itself remains membership-free so callers may hold the assignment mutex.
+   *
    * The five consumers that read this state:
    *
    * 1. **Assignment** — the shared gate
@@ -744,6 +748,7 @@ export interface TargetDeviceDiscoveryOptions {
   readinessReservationOwners?: ReadonlySet<symbol>;
   sourceImage?: DeviceInfo;
   isLaunchProcessAlive?: () => boolean;
+  expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">;
   unavailableMessage: string;
   platform: Platform;
   operation: (snapshot: TargetDeviceDiscoverySnapshot) => Promise<string | undefined>;
@@ -816,6 +821,13 @@ export interface DeviceSessionExecutionCanceller {
  * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
  */
 export interface DiscoveryReconcileOptions {
+  /**
+   * Only the disconnect-monitor tick sets this. After the membership-free FUNNEL 1
+   * pass, the pool settles membership (under the assignment mutex) for each Android
+   * observation whose RESOLVED name disagrees with the pooled entry on that serial.
+   * The caller must NOT hold the assignment mutex.
+   */
+  readonly settleMembership?: boolean;
   /** The execution that performed this discovery; exempt from quarantine cancellation. */
   readonly excludeExecutionId?: string;
   /**
@@ -1124,7 +1136,12 @@ export class DevicePool {
    * closed meanwhile already had its bindings released, so recording it then would leave a dead
    * owner that suppresses the owner-disconnect release forever.
    */
-  private readonly mcpBindsInFlight = new Map<string, { pending: number; closed: boolean }>();
+  private readonly mcpBindsInFlight = new Map<
+    string,
+    { pending: number; closed: boolean; toolCalls: number }
+  >();
+  // #11999: only socket tool-call claims can have an answer still awaiting delivery.
+  private readonly mcpSessionUndeliveredMints = new Map<string, Set<string>>();
   private readonly refreshMissingDeviceMisses: Map<string, number>;
   private readonly androidTransportAliases: AndroidTransportAliases;
   private androidAliasObservation = 0;
@@ -1844,7 +1861,7 @@ export class DevicePool {
         stableDeviceIdFor: (device) => this.stableDeviceIdFor(device),
         recordBindOwnership: (client, session, minted) =>
           minted
-            ? this.recordMintedSessionOwnership(client, session)
+            ? this.recordMintedSessionOwnership(client, session, false)
             : this.recordBindOwnership(client, session),
         restoreSessionAssignment: (device, snapshot) =>
           this.restoreSessionAssignment(device, snapshot),
@@ -4614,7 +4631,8 @@ export class DevicePool {
     return this.missingDeviceLiveness.shouldValidatePooledDevicePresence(device);
   }
 
-  private hasReusableSerial(device: PooledDevice): boolean {
+  /** Whether this pooled entry uses an Android emulator serial that can be reassigned. */
+  hasReusableSerial(device: PooledDevice): boolean {
     return this.missingDeviceLiveness.hasReusableSerial(device);
   }
 
@@ -8655,6 +8673,7 @@ export class DevicePool {
       readinessReservationOwners,
       sourceImage: verifiedAndroidAvdIdentity ?? sourceImage,
       isLaunchProcessAlive: launchProcessLiveness(childProcess),
+      expectedIdentity,
       unavailableMessage: `Device '${deviceId}' is not available in the device pool.`,
       platform,
       operation: async (snapshot) => {
@@ -8933,7 +8952,12 @@ export class DevicePool {
       };
     }
     if (options.receipt.minted?.session === session) {
-      this.recordMintedSessionOwnership(caller.mcpSessionId, sessionId);
+      this.recordMintedSessionOwnership(
+        caller.mcpSessionId,
+        sessionId,
+        caller.oneShotCli === true,
+        options.receipt.minted.clientSuppliedId === true,
+      );
     } else {
       this.recordBindOwnership(caller.mcpSessionId, sessionId);
     }
@@ -9174,6 +9198,7 @@ export class DevicePool {
     readinessReservationOwners,
     sourceImage,
     isLaunchProcessAlive,
+    expectedIdentity,
     unavailableMessage,
     platform,
     operation,
@@ -9186,6 +9211,8 @@ export class DevicePool {
       probeTimeoutMs: ANDROID_OFFLINE_PROBE_TIMEOUT_MS,
       getSignal: getAbortSignal,
       isLaunchProcessAlive,
+      hasResolvedRuntime:
+        expectedIdentity?.platform === "android" && expectedIdentity.deviceId === deviceId,
     });
     while (true) {
       throwIfRequestAborted();
@@ -9466,6 +9493,7 @@ export class DevicePool {
         deviceId,
         existingSessionId,
         existingSession.ownership === "awaiting-owner",
+        this.holderReleaseRemainingMs(existingSessionId),
       );
     }
     // A caller that proved it owns the holder (its MCP connection acquired it) may reuse another
@@ -9540,14 +9568,47 @@ export class DevicePool {
     if (!mcpSessionId) {
       return () => {};
     }
-    const bind = this.mcpBindsInFlight.get(mcpSessionId) ?? { pending: 0, closed: false };
+    const bind = this.mcpBindsInFlight.get(mcpSessionId) ?? {
+      pending: 0,
+      closed: false,
+      toolCalls: 0,
+    };
     bind.pending++;
     this.mcpBindsInFlight.set(mcpSessionId, bind);
+    let ended = false;
     return () => {
+      if (ended) {
+        return;
+      }
+      ended = true;
       bind.pending--;
       if (bind.pending === 0 && this.mcpBindsInFlight.get(mcpSessionId) === bind) {
         this.mcpBindsInFlight.delete(mcpSessionId);
       }
+    };
+  }
+
+  /** #11999: retain a connection's close through forwarding and its terminal answer write. */
+  beginMcpToolCall(mcpSessionId: string | undefined): (delivered?: boolean) => void {
+    const endBind = this.beginMcpBind(mcpSessionId);
+    const bind = mcpSessionId === undefined ? undefined : this.mcpBindsInFlight.get(mcpSessionId);
+    if (bind) {
+      bind.toolCalls++;
+    }
+    let ended = false;
+    return (delivered = true) => {
+      if (ended) {
+        return;
+      }
+      ended = true;
+      if (bind && mcpSessionId !== undefined) {
+        bind.toolCalls--;
+        // A delivered answer acknowledges its mints; a closed connection retains none (#11999).
+        if (delivered || bind.closed) {
+          this.mcpSessionUndeliveredMints.delete(mcpSessionId);
+        }
+      }
+      endBind();
     };
   }
 
@@ -9602,11 +9663,24 @@ export class DevicePool {
   private recordMintedSessionOwnership(
     mcpSessionId: string | undefined,
     sessionId: string,
+    oneShotCli: boolean,
+    clientSuppliedId?: boolean,
   ): boolean {
+    const keepsOrdinaryGrace = (): boolean => oneShotCli || clientSuppliedId === true;
     const recorded = this.recordBindOwnership(mcpSessionId, sessionId);
     const token = mcpSessionId && this.mcpSessionLivenessOwnerTokens.get(mcpSessionId);
     if (recorded && token) {
       this.sessionManager.bindAcquiredLivenessOwnerToken(sessionId, token);
+    }
+    if (mcpSessionId !== undefined && !keepsOrdinaryGrace()) {
+      const ownerSessionId = this.ownershipSessionId(sessionId);
+      if (!recorded && !this.hasConnectedMcpSessionOwner(ownerSessionId)) {
+        this.ownerDisconnectRelease.ownerDisconnected(ownerSessionId, mcpSessionId, 0);
+      } else if (recorded && this.mcpBindsInFlight.get(mcpSessionId)?.toolCalls) {
+        const undelivered = this.mcpSessionUndeliveredMints.get(mcpSessionId) ?? new Set<string>();
+        undelivered.add(ownerSessionId);
+        this.mcpSessionUndeliveredMints.set(mcpSessionId, undelivered);
+      }
     }
     return recorded;
   }
@@ -9680,12 +9754,121 @@ export class DevicePool {
     return runtimeReplaced;
   }
 
-  reconcileDiscoveryObservation(
+  /** Fresh, single-serial membership settlement before a start claims its runtime. */
+  async settlePooledRuntimeIdentity(
+    deviceId: string,
+    options: { platform?: Platform; signal?: AbortSignal; totalDeadlineMs?: number } = {},
+  ): Promise<"no-entry" | "matched" | "replaced" | "unsettled"> {
+    const { signal = getAbortSignal() } = options;
+    const assertNotAborted = () => {
+      signal?.throwIfAborted();
+      throwIfRequestAborted();
+    };
+    assertNotAborted();
+    const pooled = this.devices.get(deviceId);
+    if (!pooled) {
+      return "no-entry";
+    }
+    if (!this.hasReusableSerial(pooled)) {
+      return "unsettled";
+    }
+    const platform = options.platform ?? pooled.platform;
+    const deadlineMs = Math.min(
+      options.totalDeadlineMs ?? Infinity,
+      this.timer.now() + ANDROID_OFFLINE_PROBE_TIMEOUT_MS,
+    );
+    let discovery: BootedDeviceDiscovery;
+    try {
+      discovery = await raceWithDeadline(() => this.takeFreshPresenceDiscovery(platform), {
+        timer: this.timer,
+        signal,
+        timeoutMs: Math.max(0, deadlineMs - this.timer.now()),
+        label: "Pooled runtime identity discovery",
+        timeoutError: () => new BootedDeviceDiscoveryIncompleteError(platform, undefined),
+      });
+    } catch (error) {
+      assertNotAborted();
+      logger.warn(`Pooled runtime identity discovery failed for ${deviceId}`, error);
+      return "unsettled";
+    }
+    assertNotAborted();
+    if (!didSourceSucceedForDevice(discovery, platform, deviceId)) {
+      return "unsettled";
+    }
+    const observation = discovery.devices.find((device) => device.deviceId === deviceId);
+    if (!observation) {
+      return "unsettled";
+    }
+    return raceWithDeadline(
+      () => this.settleObservedPooledRuntimeIdentity(observation, signal, deadlineMs),
+      {
+        timer: this.timer,
+        signal,
+        timeoutMs: Math.max(0, deadlineMs - this.timer.now()),
+        label: "Pooled runtime identity settlement",
+        timeoutError: () => new BootedDeviceDiscoveryIncompleteError(platform, undefined),
+      },
+    );
+  }
+
+  /** Monitor-only membership pass over evidence already folded through FUNNEL 1. */
+  private async settleObservedRuntimeIdentities(devices: readonly BootedDevice[]): Promise<void> {
+    for (const observation of devices) {
+      const pooled = this.devices.get(observation.deviceId);
+      if (
+        observation.platform === "android" &&
+        pooled &&
+        this.hasReusableSerial(pooled) &&
+        !this.runtimeIdentity.hasUnresolvedEmulatorName(observation) &&
+        !this.matchesRuntimeIdentity(pooled, observation)
+      ) {
+        await this.settleObservedPooledRuntimeIdentity(observation);
+      }
+    }
+  }
+
+  private settleObservedPooledRuntimeIdentity(
+    observation: BootedDevice,
+    signal = getAbortSignal(),
+    deadlineMs = Infinity,
+  ): Promise<"no-entry" | "matched" | "replaced" | "unsettled"> {
+    return this.assignmentMutex.runExclusive(async () => {
+      signal?.throwIfAborted();
+      throwIfRequestAborted();
+      const current = this.devices.get(observation.deviceId);
+      if (!current) {
+        return "no-entry";
+      }
+      if (
+        !this.hasReusableSerial(current) ||
+        this.timer.now() >= deadlineMs ||
+        this.runtimeIdentity.hasUnresolvedEmulatorName(observation) ||
+        this.runtimeIdentity.comparePooledIdentityEvidence(current, observation) === "stale"
+      ) {
+        return "unsettled";
+      }
+      if (await this.foldObservationIntoPooledEntry(current, observation, "refresh")) {
+        return "replaced";
+      }
+      const settled = this.devices.get(observation.deviceId);
+      return !settled
+        ? "no-entry"
+        : this.matchesRuntimeIdentity(settled, observation) && !settled.identityUnresolved
+          ? "matched"
+          : "unsettled";
+    });
+  }
+
+  async reconcileDiscoveryObservation(
     devices: readonly BootedDevice[],
     source: string,
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
-    return this.runtimeIdentity.reconcileDiscoveryObservation(devices, source, options);
+    const { settleMembership, ...identityOptions } = options;
+    await this.runtimeIdentity.reconcileDiscoveryObservation(devices, source, identityOptions);
+    if (settleMembership === true && !options.signal?.aborted) {
+      await this.settleObservedRuntimeIdentities(devices);
+    }
   }
 
   /** Explicit routing state shared with adb clients; no process-global alias cache. */
@@ -10048,13 +10231,19 @@ export class DevicePool {
       bindInFlight.closed = true;
     }
     const acquired = this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId);
+    const undelivered = this.mcpSessionUndeliveredMints.get(mcpSessionId);
+    this.mcpSessionUndeliveredMints.delete(mcpSessionId);
     this.mcpSessionAcquiredDeviceSessions.delete(mcpSessionId);
     this.mcpSessionLivenessOwnerTokens.delete(mcpSessionId);
     this.autolockManager.releaseMcpSessionBindings(mcpSessionId);
     this.mcpSessionRecoveryDevices.delete(mcpSessionId);
     for (const sessionId of acquired ?? []) {
       if (!this.hasConnectedMcpSessionOwner(sessionId)) {
-        this.ownerDisconnectRelease.ownerDisconnected(sessionId, mcpSessionId);
+        this.ownerDisconnectRelease.ownerDisconnected(
+          sessionId,
+          mcpSessionId,
+          undelivered?.has(sessionId) ? 0 : undefined,
+        );
       }
     }
   }
@@ -10130,6 +10319,12 @@ export class DevicePool {
    */
   private clearMcpSessionOwnership(sessionId: string): void {
     this.ownerDisconnectRelease.cancel(sessionId);
+    for (const [mcpSessionId, undelivered] of this.mcpSessionUndeliveredMints) {
+      undelivered.delete(sessionId);
+      if (undelivered.size === 0) {
+        this.mcpSessionUndeliveredMints.delete(mcpSessionId);
+      }
+    }
     for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredDeviceSessions) {
       acquired.delete(sessionId);
       if (acquired.size === 0) {

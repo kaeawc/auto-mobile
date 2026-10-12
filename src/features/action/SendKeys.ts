@@ -57,6 +57,7 @@ import {
   imeFailureFields,
   imeCommitExceptionResult,
   IME_PASSWORD_COMMIT_UNAVAILABLE_ERROR,
+  IME_INSERTED_TEXT_UNAVAILABLE_WARNING,
   LEGACY_IME_PASSWORD_REFUSAL,
   passwordTextPlaceholder,
   redactPasswordImeFailure,
@@ -472,6 +473,8 @@ interface SendKeysRouting extends SendKeysFocusOptions {
 }
 
 export type TextActionResult = {
+  /** Internal device read-back evidence; omitted from public command results. */
+  insertedText?: string;
   success: boolean;
   retryable?: boolean;
   warning?: string;
@@ -511,6 +514,8 @@ export interface SendKeysTextClient {
   supportsImeClearField(): Promise<boolean>;
   /** CtrlProxy commits (and clears) through the IME into password fields. */
   supportsImePasswordCommit(): Promise<boolean>;
+  /** Reports the editor delta on commit_text_result when it can be read safely. */
+  supportsImeInsertedText(): Promise<boolean>;
   supportsKeyboardProfiles(): Promise<boolean>;
   setKeyboardProfile(
     id: string,
@@ -1840,6 +1845,41 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return this.clearEventOnlyForReplace(textLength, signal, display);
   }
 
+  private async imeInsertedTextWarning(
+    result: TextActionResult,
+    text: string,
+    routing: ImeCommitRouting,
+    mode: "ime" | "imeKeyEvents",
+  ): Promise<string | undefined> {
+    if (
+      !result.success ||
+      mode !== "ime" ||
+      text.length === 0 ||
+      routing.passwordField ||
+      this.typingPasswordField ||
+      result.insertedText !== undefined
+    ) {
+      return undefined;
+    }
+    let supported = true;
+    try {
+      supported = await this.textClient.supportsImeInsertedText();
+    } catch (error) {
+      this.checkAbort(routing.signal, error);
+      // An optional capability probe cannot invalidate an acknowledged, verified commit.
+      logger.warn(
+        `[SendKeys] IME inserted-text capability probe failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    this.checkAbort(routing.signal);
+    if (supported) {
+      return undefined;
+    }
+    logger.warn(IME_INSERTED_TEXT_UNAVAILABLE_WARNING);
+    return IME_INSERTED_TEXT_UNAVAILABLE_WARNING;
+  }
+
   private async performImeCommit(
     text: string,
     operation: SendKeysOperation,
@@ -1888,7 +1928,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       // Identity means the sync-loss read-back did not apply or could not confirm the text.
       if (syncConfirmed !== result) {
         return {
-          outcome: { ...this.withTextWarnings(syncConfirmed, [clearWarning]), resolvedMode: mode },
+          outcome: {
+            ...this.withTextWarnings(syncConfirmed, [
+              clearWarning,
+              await this.imeInsertedTextWarning(syncConfirmed, text, routing, mode),
+            ]),
+            resolvedMode: mode,
+          },
           safeToRestore: progress.safeToRestore,
         };
       }
@@ -1896,7 +1942,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         const verifiedResult = await this.verifyImeCommit(result, text, routing, operation);
         return {
           outcome: {
-            ...this.withTextWarnings(this.describeImeCommitFailure(verifiedResult), [clearWarning]),
+            ...this.withTextWarnings(this.describeImeCommitFailure(verifiedResult), [
+              clearWarning,
+              await this.imeInsertedTextWarning(verifiedResult, text, routing, mode),
+            ]),
             resolvedMode: mode,
           },
           safeToRestore: progress.safeToRestore,
@@ -1910,7 +1959,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
                 operation === "replace" ? markPartialAfterMutation(result) : result,
                 text,
                 "commit",
-                { focusedFieldClass: routing.focusedFieldClass },
+                this.imeCommitDiagnosticContext(result, routing),
               ),
             ),
             [clearWarning],
@@ -1947,6 +1996,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         safeToRestore: progress.safeToRestore,
       };
     }
+  }
+
+  private imeCommitDiagnosticContext(result: TextActionResult, routing: ImeCommitRouting) {
+    return {
+      focusedFieldClass: routing.focusedFieldClass,
+      observedText: routing.passwordField ? undefined : result.insertedText,
+    };
   }
 
   private verifyImeCommit(
@@ -1992,7 +2048,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       focusError: ANDROID_TYPE_FOCUSED_INPUT_ERROR,
       passwordField: routing.passwordField,
       // Explicit modes skip the pre-type observe; the read-back still shows a password field.
-      isPasswordField: focusedFieldIsPassword,
+      isPasswordField: (observation) => {
+        const password = focusedFieldIsPassword(observation);
+        this.typingPasswordField ||= password;
+        return password;
+      },
     };
   }
 
@@ -3264,6 +3324,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         supportsImeKeyEvents: async () => client.supportsCommand("ime_key_events_v1"),
         supportsImeClearField: async () => client.supportsCommand("ime_clear_field_v1"),
         supportsImePasswordCommit: async () => client.supportsCommand("ime_password_commit_v1"),
+        supportsImeInsertedText: async () => client.supportsCommand("ime_inserted_text_v1"),
         supportsKeyboardProfiles: async () =>
           client.supportsCommand("request_set_keyboard_profile"),
         setKeyboardProfile: async (id) => client.setKeyboardProfile(id),
@@ -3283,6 +3344,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             ...(result.sessionUnsafe ? { sessionUnsafe: true } : {}),
             ...(result.transportFailure ? { imeFailureStage: "transport" as const } : {}),
             ...imeCommitUnitFields(result),
+            ...(result.insertedText !== undefined ? { insertedText: result.insertedText } : {}),
           };
         },
       };
@@ -3318,6 +3380,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       supportsImeKeyEvents: async () => false,
       supportsImeClearField: async () => false,
       supportsImePasswordCommit: async () => false,
+      supportsImeInsertedText: async () => false,
       supportsKeyboardProfiles: async () => false,
       setKeyboardProfile: async () => ({
         success: false,

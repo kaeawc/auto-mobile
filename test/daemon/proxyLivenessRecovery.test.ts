@@ -261,6 +261,21 @@ describe("LivenessRecovery states", () => {
     expect(h.recovery.busyEpisode()).not.toBe(first);
   });
 
+  test.each([DAEMON_STALLED_CODE, PROXY_STALLED_CODE])(
+    "%s: a session-awaited answer ends recovery without a handover",
+    async (code) => {
+      const h = harness({ outcomeFor: () => "session-awaited" });
+      h.recovery.begin("awaited", code);
+      await h.timer.advanceTimeAsync(20_000);
+
+      expect(h.gone).toEqual(["awaited"]);
+      expect(h.attempts).toHaveLength(1);
+      expect(h.recovered).toEqual([]);
+      expect(h.handovers).toEqual([]);
+      expect(h.recovery.isRecovering("awaited")).toBe(false);
+    },
+  );
+
   test("daemon_stalled: a session the daemon says is gone is dropped, not handed over", async () => {
     const h = harness({
       outcomeFor: (session) => (session === "gone" ? "session-gone" : "acknowledged"),
@@ -273,27 +288,6 @@ describe("LivenessRecovery states", () => {
     expect(h.recovered.map((r) => r.sessionUuid)).toEqual(["alive"]);
     expect(h.handovers).toEqual([]);
   });
-
-  test.each([PROXY_STALLED_CODE, DAEMON_STALLED_CODE])(
-    "%s: an awaited session applies its not-found decision once and ends recovery",
-    async (code) => {
-      const h = harness({ outcomeFor: () => "session-awaited" });
-      try {
-        h.recovery.begin("awaited", code);
-        await h.timer.advanceTimeAsync(20_000);
-        expect(h.gone).toEqual(["awaited"]);
-        expect(h.handovers).toEqual([]);
-        expect(h.recovered).toEqual([]);
-        expect(h.recovery.isRecovering("awaited")).toBe(false);
-        await h.timer.advanceTimeAsync(20_000);
-        expect(h.attempts).toHaveLength(1);
-        expect(h.gone).toEqual(["awaited"]);
-        expect(h.handovers).toEqual([]);
-      } finally {
-        h.recovery.stop();
-      }
-    },
-  );
 
   test("proxy_stalled: lost sessions and their devices are listed in one handover", async () => {
     const h = harness({

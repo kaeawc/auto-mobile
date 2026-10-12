@@ -6193,15 +6193,22 @@ export class DaemonMcpProxy {
 
   /**
    * This proxy's own tick fired later than the lease allows, so its sessions' leases may have
-   * lapsed while it could not heartbeat (#10053). Every session it holds is re-heartbeated with the
-   * same owner token: one the daemon kept as suspect is restored with the same UUID, one it already
-   * released is reported in the `proxy_stalled` handover.
+   * lapsed while it could not heartbeat (#10053). Sessions it still heartbeats (and managed
+   * sessions) are re-heartbeated with the same owner token: one kept as suspect is restored with
+   * the same UUID, one still awaited keeps its window, and one lost is reported in the
+   * `proxy_stalled` handover. A stopped unmanaged session waits for a tool call, never stall recovery.
    */
   private beginProxyStallRecovery(): void {
     logger.warn(
       `[DaemonMcpProxy] Heartbeat tick fired more than ${this.heartbeatLeashMs}ms late; re-heartbeating held sessions`,
     );
     for (const sessionUuid of this.heldSessionUuids()) {
+      if (
+        this.notFoundStopped.has(sessionUuid) &&
+        !this.managedExecutionSessions.has(sessionUuid)
+      ) {
+        continue;
+      }
       this.livenessRecovery.begin(sessionUuid, PROXY_STALLED_CODE);
     }
   }
@@ -6380,23 +6387,19 @@ export class DaemonMcpProxy {
     if (this.isDaemonSessionNotFoundError(error)) {
       // The same decision as any other heartbeat's not-found: an attempt that reached a daemon
       // this proxy just connected to gets that session's first answer on the connection (#11570).
-      const releaseReason = releaseReasonFromError(error);
       const outcome = this.noteNotFoundAnswer(
         sessionUuid,
         attemptedClient,
-        releaseReason,
+        releaseReasonFromError(error),
         daemonInstanceFromError(error),
       );
-      this.recoveryNotFoundOutcomes.set(sessionUuid, { outcome, releaseReason });
-      if (
-        this.managedExecutionSessions.has(sessionUuid) &&
-        releaseReason !== undefined &&
-        isRecoverableDaemonHandoffReason(releaseReason) &&
-        outcome.kind === "awaited"
-      ) {
-        return "session-awaited";
-      }
-      return "session-gone";
+      this.recoveryNotFoundOutcomes.set(sessionUuid, {
+        outcome,
+        releaseReason: releaseReasonFromError(error),
+      });
+      return outcome.kind === "awaited" && !this.managedExecutionSessions.has(sessionUuid)
+        ? "session-awaited"
+        : "session-gone";
     }
     if (!this.isMissingHeartbeatAcknowledgement(error)) {
       // The daemon answered: the session's next answer on this connection is not its first.

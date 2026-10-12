@@ -19,6 +19,7 @@ import {
 } from "../../src/server/deviceTools";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import type { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -82,6 +83,8 @@ const resolveWithFakeTimer = async <T>(
 
   return result as T;
 };
+
+isolateToolRegistry();
 
 describe("listDevices tool (#5870)", () => {
   let fakeDeviceUtils: FakeDeviceUtils;

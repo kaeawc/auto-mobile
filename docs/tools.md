@@ -959,6 +959,15 @@ the call is a session observe, and `deviceId` must match that session's device.
 
 #### Reading a device you do not own (`deviceId`)
 
+A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
+A sessionless read that names a running device nobody holds may ready it in order to answer: on Android it may
+install the CtrlProxy APK, write the accessibility settings, and force-stop and rebind the service; on an iOS
+simulator it may install and launch the runner. The exception never applies to a device held, slot-assigned or
+reserved by another session: those reads use what is already installed and never run readiness.
+(Owner decision 2026-10-12, #11964.) See
+[Which read tools ready an unheld device](using/device-ownership.md#which-read-tools-ready-an-unheld-device)
+for the per-platform registry readiness table and `observe`'s separate service-start path.
+
 A session-less deviceId read may start the hierarchy service on an **unowned**
 booted device when its initial connection fails. It uses the session acquisition
 setup (including `--skip-ctrl-proxy-download`) within the read's own hierarchy
@@ -2599,8 +2608,10 @@ empty string, or use `"Standard"` for the app's standard store. For example:
 ```
 
 On simulators, reads and writes use the embedded AutoMobile SDK only when an
-existing runner connection is open, with storage inspection enabled. These tools
-never start a runner. SDK requests are bounded to 2.5 seconds. An SDK missing key
+existing runner connection is open, with storage inspection enabled. Storage access
+itself never starts a runner; tool target resolution may run the readiness described in
+[Reading a device you do not own](#reading-a-device-you-do-not-own-deviceid).
+SDK requests are bounded to 2.5 seconds. An SDK missing key
 is authoritative. Reads may fall back after a recognized SDK timeout, transport
 loss, missing route, or inspection-disabled response. Unknown faults, app mismatch,
 and mutation refusals surface as errors.

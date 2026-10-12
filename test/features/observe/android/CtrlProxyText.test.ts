@@ -11,6 +11,7 @@ import {
   imeCommitSegmentCount,
   imeCommitSubsequenceMatches,
   imeCommitSuffixMatches,
+  imeInsertedTextMatches,
   imeCommitTimeoutMs,
 } from "../../../../src/features/observe/android/CtrlProxyText";
 import type { DelegateContext } from "../../../../src/features/observe/android/types";
@@ -60,6 +61,58 @@ async function waitForSent(sent: Record<string, unknown>[], count: number): Prom
 }
 
 describe("Android CtrlProxyText", () => {
+  test.each([
+    ["hello", "hello", true],
+    ["e\u0301", "é", true],
+    ["é", "e\u0301", true],
+    ["bold code", "*bold* `code`", true],
+    ["*bold* _code_", "bold code", true],
+    ["x", "**x**", true],
+    ["x", "~~x~~", true],
+    ["x", "~x~", true],
+    ["anything", "*_~`", true],
+    ["anything", "```", true],
+    ["• item", "- item", true],
+    ["item", "* item", true],
+    ["> item", "item", true],
+    ["item\nnext", "1. item\n2) next", true],
+    ["+ item\n• next", "- item\n> next", true],
+    ["HELLO", "hello", true],
+    ["STRASSE", "straße", true],
+    ["straße", "STRASSE", true],
+    ["١٢٣", "123", true],
+    ["123", "१२३", true],
+    ["𝟙𝟚𝟛", "123", true],
+    ["İ", "i", false],
+    ["i\u0307", "İ", false],
+    ["hi name there suffix", "hi @name there", true],
+    ["prefix name there", "@name there", true],
+    ["prefix code suffix", "```code```", true],
+    ["onetwo three", "one\ntwo three", false],
+    ["one\ntwothree", "one\ntwo three", false],
+    ["hi there", "hi, there", false],
+    ["prefix hello", "hello", false],
+    ["hello suffix", "hello", false],
+    [" hello", "hello", true],
+    ["hello ", "hello", true],
+    ["hi, there!", "hi, there", true],
+    ["one\n\ntwo", "one\ntwo", true],
+    ["one - item", "one item", true],
+    ["(555) 123-4567", "5551234567", true],
+    ["4111 1111 1111 1111", "4111111111111111", true],
+    ["12/25", "1225", true],
+    ["(12) 34", "12 34", true],
+    [" a b", "a b", true],
+    ["007", "7", false],
+    ["hi name", "hi@name ", false],
+    ["prefix code", "`code`", false],
+  ] as const)(
+    "checks inserted IME delta transformations: inserted=%s sent=%s",
+    (inserted, text, matches) => {
+      expect(imeInsertedTextMatches(inserted, text)).toBe(matches);
+    },
+  );
+
   test.each([
     ["١٢٣", "123"],
     ["१२३", "123"],
@@ -472,6 +525,27 @@ describe("Android CtrlProxyText", () => {
       });
 
       socket.sentMessages.length = 0;
+      for (const insertedText of ["value", 123, null]) {
+        const promise = textDelegate.commitViaIme("value", "prior-ime");
+        const nextRequest = await waitForRequest(socket, "request_commit_text");
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "commit_text_result",
+            timestamp: 1,
+            requestId: nextRequest.requestId,
+            success: true,
+            insertedText,
+          }),
+        );
+        const result = await promise;
+        if (typeof insertedText === "string") {
+          expect(result).toHaveProperty("insertedText", insertedText);
+        } else {
+          expect(result).not.toHaveProperty("insertedText");
+        }
+        socket.sentMessages.length = 0;
+      }
+
       const eventPromise = textDelegate.commitViaIme(
         "Ab!",
         "prior-ime",

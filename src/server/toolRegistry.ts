@@ -165,7 +165,12 @@ import {
 } from "./foreignOwnedSessionRefusal";
 import { nonBlankSessionUuid } from "./planCallerIdentity";
 import { deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
-import { getAbortSignal, isClientCancelled, runWithAbortSignal } from "../utils/AbortContext";
+import {
+  combineAbortSignals,
+  getAbortSignal,
+  isClientCancelled,
+  runWithAbortSignal,
+} from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { executionTracker } from "./executionTracker";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
@@ -462,6 +467,8 @@ interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions {
    * read-only device path (`sessionlessDeviceRead`, or the registry's default): the target is
    * resolved from the booted-device list, with no readiness (no CtrlProxy setup, no current-device
    * pin, no settings writes), no navigation recording and no audit (#10830).
+   * A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
+   * (owner decision 2026-10-12, #11964)
    */
   deviceReadOnly?: boolean | ((args: T) => boolean);
   /** Read an explicit device id without acquiring or changing a device session. */
@@ -860,8 +867,11 @@ async function resolveStoppedReservedRead(
 }
 
 class ReadTargetBecameHeld extends Error {
-  constructor(readonly deviceId: string) {
-    super("read target became held before boot");
+  constructor(
+    readonly deviceId: string,
+    readonly device?: BootedDevice,
+  ) {
+    super("read target became held before readiness");
   }
 }
 
@@ -902,7 +912,7 @@ async function recheckReadBootTarget(
   input.signal?.throwIfAborted();
 }
 
-/** Unmark readiness before taking a late read-only exit; no boot has happened at this seam. */
+/** A late acquisition cancels readiness, then the read watches the resolved device. */
 async function ensureReadTargetOrWatch(
   input: ExecutionTargetInput,
   platform: SomePlatform,
@@ -914,26 +924,84 @@ async function ensureReadTargetOrWatch(
   | { device: BootedDevice; watched?: undefined }
   | { watched: ExecutionTargetContext; device?: undefined }
 > {
-  try {
+  if (options.intent !== "read") {
     return {
-      device: await input.deviceSessionManager.ensureDeviceReady(platform, providedDeviceId, {
-        ...options,
-        beforeReadBoot:
-          options.intent === "read" && providedDeviceId
-            ? (image) => recheckReadBootTarget(input, image)
-            : undefined,
-      }),
+      device: await input.deviceSessionManager.ensureDeviceReady(
+        platform,
+        providedDeviceId,
+        options,
+      ),
     };
+  }
+  const readiness = new AbortController();
+  const executionId = input.args.__executionId;
+  let markedTarget = readinessTarget;
+  let resolvedDevice: BootedDevice | undefined;
+  const mark = (deviceId: string) => {
+    if (typeof executionId === "string") {
+      executionTracker.markSessionlessReadReadiness(executionId, deviceId, readiness);
+      if (markedTarget && markedTarget !== deviceId) {
+        executionTracker.unmarkSessionlessReadReadiness(executionId, markedTarget, readiness);
+      }
+    }
+    markedTarget = deviceId;
+  };
+  const unmark = () => {
+    if (typeof executionId === "string" && markedTarget) {
+      executionTracker.unmarkSessionlessReadReadiness(executionId, markedTarget, readiness);
+    }
+  };
+  if (readinessTarget) {
+    mark(readinessTarget);
+  }
+  const combinedSignal = combineAbortSignals(options.signal, readiness.signal);
+  try {
+    const device = await runWithAbortSignal(combinedSignal, () =>
+      input.deviceSessionManager.ensureDeviceReady(platform, providedDeviceId, {
+        ...options,
+        signal: combinedSignal,
+        beforeReadBoot: providedDeviceId
+          ? (image) => recheckReadBootTarget(input, image)
+          : undefined,
+        beforeReadReadiness: async (device) => {
+          resolvedDevice = device;
+          mark(device.deviceId);
+          const held = await findHeldReadIdentity(input, [device.deviceId], device.platform);
+          if (held) {
+            throw new ReadTargetBecameHeld(held, device);
+          }
+          input.signal?.throwIfAborted();
+          readiness.signal.throwIfAborted();
+        },
+      }),
+    );
+    input.signal?.throwIfAborted();
+    if (readiness.signal.aborted) {
+      unmark();
+      return { watched: await resolveSessionlessDeviceRead(input, read, device.deviceId, device) };
+    }
+    return { device };
   } catch (error) {
-    if (!(error instanceof ReadTargetBecameHeld)) {
-      throw error;
+    input.signal?.throwIfAborted();
+    if (error instanceof ReadTargetBecameHeld) {
+      // Expected late ownership verdict: readiness becomes a read-only lookup.
+      logger.debug("[ToolRegistry] Read target acquired before readiness", error);
+      unmark();
+      return {
+        watched: await resolveSessionlessDeviceRead(input, read, error.deviceId, error.device),
+      };
     }
-    // Expected late ownership verdict: turn readiness into a read-only lookup.
-    const executionId = input.args.__executionId;
-    if (typeof executionId === "string" && readinessTarget) {
-      executionTracker.unmarkSessionlessDeviceUse(executionId, readinessTarget);
+    if (readiness.signal.aborted && markedTarget) {
+      // Acquisition cancels only readiness; watching the holder remains authorized.
+      logger.debug("[ToolRegistry] Read readiness cancelled by acquisition", error);
+      unmark();
+      return {
+        watched: await resolveSessionlessDeviceRead(input, read, markedTarget, resolvedDevice),
+      };
     }
-    return { watched: await resolveSessionlessDeviceRead(input, read, error.deviceId) };
+    throw error;
+  } finally {
+    unmark();
   }
 }
 
@@ -1039,10 +1107,14 @@ function multipleDevicesError(
 
 /**
  * Whether a sessionless READ's target is someone else's (#11641): a local session or autolock
- * holder, a managed slot (idle or not), or a device another daemon claims. Such a read watches the
+ * holder, a managed slot (idle or not), a restart reservation, or a device another daemon claims.
+ * Such a read watches the
  * device through the read-only path and is never refused; readiness (the current-device pin,
- * appearance and settings writes) is the holder's alone. The slot and foreign-daemon verdicts are
- * the pool gates a control call is refused by, with their one-second snapshots. An ownership state
+ * appearance and settings writes) on a held target is the holder's alone.
+ * A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
+ * (owner decision 2026-10-12, #11964)
+ * The slot and foreign-daemon verdicts are the pool gates a control call is refused by,
+ * with their one-second snapshots. An ownership state
  * that cannot be read counts as held: a read must not risk writing to someone else's device.
  * False outside daemon mode, where nothing can hold a device.
  */
@@ -1735,6 +1807,8 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // settings work on the holder's device (#10830, #10970). The holder may also be a managed
         // slot or another daemon (#11641). Check the raw id before discovery: a slot may know
         // only the AVD name, and a held serial needs no discovery scan.
+        // A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
+        // (owner decision 2026-10-12, #11964)
         if (
           readOnly &&
           !sessionUuid &&
@@ -1797,7 +1871,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         }
         assertToolCallerHoldsDevice(name, readOnly, readinessTarget, sessionUuid, autolockEnabled);
         options.assertHeldDeviceStart?.(readinessTarget, sessionUuid);
-        if (readinessTarget && execution && !sessionUuid) {
+        if (readinessTarget && execution && !sessionUuid && !readOnly) {
           executionTracker.markSessionlessDeviceUse(execution.executionId, readinessTarget);
         }
         logger.info(
@@ -1809,6 +1883,8 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           runningReadTarget?.deviceId ?? providedDeviceId,
           {
             sessionId: sessionUuid,
+            // A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
+            // (owner decision 2026-10-12, #11964)
             intent: readOnly && !sessionUuid ? "read" : undefined,
             skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
             readiness:
@@ -1825,9 +1901,8 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           return readinessResult.watched;
         }
         device = readinessResult.device;
-        if (readinessTarget && execution && (readOnly || readinessTarget !== device.deviceId)) {
-          // Readiness settled elsewhere: the post-resolution check below marks that device. A read
-          // is unmarked once ready: watching is allowed on a held device.
+        if (readinessTarget && execution && !readOnly && readinessTarget !== device.deviceId) {
+          // Control readiness settled elsewhere: the post-resolution check marks that device.
           executionTracker.unmarkSessionlessDeviceUse(execution.executionId, readinessTarget);
         }
         // Discovery re-stamps observedAt; the serial/UDID stays stable until

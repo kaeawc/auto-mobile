@@ -14,8 +14,14 @@ import {
   applicationWindowCoverIndex,
   isFullyCoveredByApplicationWindow,
   ownPrototypeNodeSources,
+  uniqueBySource,
+  contains,
   type ApplicationWindowCoverIndex,
 } from "../ApplicationWindowCover";
+import {
+  clipIosTapBoundsToScrollAncestors,
+  resolveIosOwnedTapPoint,
+} from "../../action/iosTapTargetOwnership";
 import { visibleTapBounds } from "../../utility/ElementGeometry";
 import { PROTOTYPE_LAYOUT_KINDS } from "../ownWindowFocus";
 import type { Element } from "../../../models/Element";
@@ -43,6 +49,7 @@ import {
 } from "../android/ImeKeycapIds";
 import {
   IOS_KEYBOARD_MIN_VISIBLE_HEIGHT,
+  IOS_KEYBOARD_CONTAINER_CLASSES,
   clipRectToScreen,
   usableScreenExtent,
 } from "../ios/IosScreenIdentity";
@@ -909,6 +916,10 @@ type Bounds = SkeletonElement["bounds"];
 /** A detected keyboard's measured rectangle and its window position. */
 export interface ImeOccluder {
   bounds: Bounds;
+  /** Docked iOS container chrome starts above the measured key union. */
+  chromeTop?: number;
+  /** Valid adjacent assistant subtree; its members keep the key-union cover. */
+  assistantBar?: { bounds: Bounds; group: number; spanEnter: number; spanExit: number };
   group?: number;
   windowRank?: number;
   spanEnter: number;
@@ -951,7 +962,64 @@ export function getImeOccluder(elements: ObserveElements): ImeOccluder | undefin
     windowRank: provenance?.windowRank,
     spanEnter: ime.spanEnter,
     spanExit: ime.spanExit,
+    ...(ime.package === "com.apple.keyboard" ? iosKeyboardChrome(elements, ime) : {}),
   };
+}
+
+/** Use the capture's container and adjacent assistant, never an app-sized inputView wrapper. */
+function iosKeyboardChrome(elements: ObserveElements, ime: ImeWindow): Partial<ImeOccluder> {
+  const nodes = getSearchableEntries(elements) ?? [];
+  const container = nodes.find(
+    (node) =>
+      node.rootGroup === ime.group &&
+      IOS_KEYBOARD_CONTAINER_CLASSES.has(node.className ?? "") &&
+      node.bounds &&
+      Object.values(node.bounds).every(Number.isFinite) &&
+      node.bounds.bottom > node.bounds.top,
+  );
+  if (!container?.bounds) {
+    return {};
+  }
+  const assistant = [...allElements(elements), ...getUncollectedWrappers(elements)].find(
+    (element) => {
+      const provenance = getElementProvenance(element);
+      const bounds = element.bounds;
+      return (
+        element["resource-id"] === "SystemInputAssistantView" &&
+        provenance?.group === ime.group &&
+        Object.values(bounds).every(Number.isFinite) &&
+        bounds.bottom > bounds.top &&
+        Math.abs(bounds.bottom - container.bounds!.top) <= 1
+      );
+    },
+  );
+  const provenance = assistant && getElementProvenance(assistant);
+  return {
+    chromeTop: container.bounds.top,
+    ...(assistant && provenance
+      ? {
+          assistantBar: {
+            bounds: boundsTuple(assistant)!,
+            group: provenance.group,
+            spanEnter: provenance.enter,
+            spanExit: provenance.exit,
+          },
+        }
+      : {}),
+  };
+}
+
+function isAssistantBarMember(
+  provenance: ElementProvenance | undefined,
+  ime: ImeOccluder,
+): boolean {
+  const bar = ime.assistantBar;
+  return (
+    !!bar &&
+    provenance?.group === bar.group &&
+    provenance.enter >= bar.spanEnter &&
+    provenance.exit <= bar.spanExit
+  );
 }
 
 /** Window frames own touches; legacy captures fall back to measured IME members. */
@@ -984,8 +1052,13 @@ export function getIosImeOccluder(
   ) {
     return occluder;
   }
-  // Docked iOS key bounds omit the bottom emoji/dictation strip and side margins.
-  return { ...occluder, bounds: [0, occluder.bounds[1], screenSize.width, screenSize.height] };
+  // Docked keys omit container chrome, assistant bar, side margins and the bottom strip.
+  const bar = occluder.assistantBar;
+  const top =
+    bar && bar.bounds[2] - bar.bounds[0] >= screenSize.width * 0.9
+      ? Math.min(occluder.chromeTop ?? occluder.bounds[1], bar.bounds[1])
+      : (occluder.chromeTop ?? occluder.bounds[1]);
+  return { ...occluder, bounds: [0, top, screenSize.width, screenSize.height] };
 }
 
 /** Clip shared iOS action geometry to the screen; parked keyboards have no visible rectangle. */
@@ -1057,11 +1130,19 @@ export function getImeOccluderForElement(
   if (!ime || !occluder) {
     return undefined;
   }
-  const match = allElements(elements).find((candidate) => isSameHierarchyNode(candidate, element));
+  const candidates = occluder.assistantBar
+    ? [...allElements(elements), ...getUncollectedWrappers(elements)]
+    : allElements(elements);
+  const match = candidates.find((candidate) => isSameHierarchyNode(candidate, element));
   if (match && isImeKeycap(match, ime)) {
     return undefined;
   }
-  return isBelowImeWindow(match && getElementProvenance(match), occluder) ? occluder : undefined;
+  const provenance = match && getElementProvenance(match);
+  if (isAssistantBarMember(provenance, occluder)) {
+    // Predictions are keyboard chrome themselves; only the original key union covers them.
+    return { ...occluder, chromeTop: undefined, assistantBar: undefined };
+  }
+  return isBelowImeWindow(provenance, occluder) ? occluder : undefined;
 }
 
 /**
@@ -1445,6 +1526,7 @@ function coveringImeOccluder(
 function markAppRowsCoveredByIme(
   kept: SkeletonAccumulator[],
   occluder: ImeOccluder | undefined,
+  measured?: ImeOccluder,
 ): void {
   if (!occluder) {
     return;
@@ -1453,7 +1535,11 @@ function markAppRowsCoveredByIme(
     if (!isBelowImeWindow(acc.provenance, occluder)) {
       continue;
     }
-    if (tapPointOutsideIme(acc.bounds, occluder.bounds) !== null) {
+    const cover: Bounds =
+      measured && isAssistantBarMember(acc.provenance, occluder)
+        ? [occluder.bounds[0], measured.bounds[1], occluder.bounds[2], occluder.bounds[3]]
+        : occluder.bounds;
+    if (tapPointOutsideIme(acc.bounds, cover) !== null) {
       continue;
     }
     // Every advertised action on a fully covered row requires a coordinate or
@@ -1499,6 +1585,64 @@ function markAppRowsCoveredByApplicationWindow(
   }
 }
 
+/** Reuse tapOn's scroll clipping and ownership verdict for iOS app affordances. */
+function markIosRowsRefusedByTap(
+  kept: SkeletonAccumulator[],
+  elements: ObserveElements,
+  viewport: ObserveResult["screenSize"] | undefined,
+): void {
+  const nodes = getSearchableEntries(elements);
+  if (!nodes) {
+    return;
+  }
+  const bySource = new Map(uniqueBySource(nodes).map((node) => [node.source, node]));
+  for (const acc of kept) {
+    if (acc.occluded || !acc.target || acc.affordances.size === 0) {
+      continue;
+    }
+    const source = getHierarchyNodeSource(acc.target);
+    const target = source && bySource.get(source);
+    if (!target || isImeKeyEntry(target) || acc.provenance?.keyboardPackage) {
+      continue;
+    }
+    if (iosRowRefusedByTap(acc, nodes, target, viewport)) {
+      acc.affordances.clear();
+      acc.occluded = true;
+    }
+  }
+}
+
+function iosRowRefusedByTap(
+  acc: SkeletonAccumulator,
+  nodes: readonly SearchableEntry[],
+  target: SearchableEntry,
+  screen: ObserveResult["screenSize"] | undefined,
+): boolean {
+  const [left, top, right, bottom] = acc.bounds;
+  const screenBounds = visibleTapBounds({ left, top, right, bottom }, screen);
+  if (!screenBounds) {
+    return false;
+  }
+  const visibleBounds = clipIosTapBoundsToScrollAncestors(nodes, target, screenBounds);
+  if (!visibleBounds) {
+    return true;
+  }
+  const point = {
+    x: Math.floor((visibleBounds.left + visibleBounds.right) / 2),
+    y: Math.floor((visibleBounds.top + visibleBounds.bottom) / 2),
+  };
+  return !!resolveIosOwnedTapPoint({
+    nodes,
+    target,
+    matched: [target],
+    screen,
+    visibleBounds,
+    candidates: [point],
+    isValid: (candidate): candidate is { x: number; y: number } =>
+      candidate !== null && contains(visibleBounds, candidate.x, candidate.y),
+  }).coveredBy;
+}
+
 /**
  * Project the flattened `elements` block into the actionable `skeleton` and
  * informational `context` arrays (issue #6221 item 1): merge + dedup the
@@ -1511,6 +1655,7 @@ export function projectSkeleton(
   elements: ObserveElements,
   viewport?: Pick<ObserveResult["screenSize"], "width" | "height">,
   androidHierarchy?: ViewHierarchyResult,
+  options?: { ios?: boolean },
 ): SkeletonProjectionResult {
   const ime = detectImeWindow(elements);
   const prototypeSources = ownPrototypeNodeSources(androidHierarchy);
@@ -1528,7 +1673,10 @@ export function projectSkeleton(
   const occluder = ime ? getImeOccluder(elements) : undefined;
   // A parked iOS keyboard is neither a covering rectangle nor a reportable keyboard.
   const iosIme = resolveIosImeState(ime, occluder, viewport);
-  markAppRowsCoveredByIme(kept, coveringImeOccluder(ime, occluder, iosIme));
+  markAppRowsCoveredByIme(kept, coveringImeOccluder(ime, occluder, iosIme), occluder);
+  if (options?.ios) {
+    markIosRowsRefusedByTap(kept, elements, viewport);
+  }
   markAppRowsCoveredByApplicationWindow(kept, androidHierarchy, viewport);
   const actionable = kept.filter((acc) => acc.affordances.size > 0);
   const nonActionable = kept.filter((acc) => acc.affordances.size === 0);

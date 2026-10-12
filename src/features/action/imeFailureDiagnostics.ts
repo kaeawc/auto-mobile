@@ -9,6 +9,7 @@ import type { TextActionResult } from "./SendKeys";
 import {
   imeCommitSubsequenceMatches,
   imeCommitSuffixMatches,
+  imeInsertedTextMatches,
 } from "../observe/android/CtrlProxyText";
 
 export interface ImeFailureDiagnostic {
@@ -98,6 +99,10 @@ export const IME_EDITOR_SYNC_LOST_ERROR = "Input connection lost while syncing e
 
 export const IME_EDITOR_SYNC_LOST_CONFIRMED_WARNING =
   "The IME editor sync was lost after every unit was dispatched; a focused-field read-back confirmed the text.";
+
+export const IME_INSERTED_TEXT_UNAVAILABLE_WARNING =
+  "The installed control-proxy APK is older than this AutoMobile host and does not report the text the editor inserted, " +
+  "so this commit was verified only by a weaker whole-field check. Update the control-proxy APK.";
 
 // Exact messages emitted before any commit in the current CtrlProxy protocol.
 // Unknown/older errors remain conservative; a zero/absent dispatch count proves nothing.
@@ -220,6 +225,39 @@ export function imeCommitExceptionResult(
       { focusedFieldClass },
     ),
   };
+}
+
+/** Called only after a focused, readable editor confirms that delta verification is possible. */
+export function verifyImeInsertedText(
+  result: TextActionResult,
+  text: string,
+  context: { focusedFieldClass?: string | null; passwordField?: boolean } = {},
+): TextActionResult {
+  const { insertedText } = result;
+  if (
+    insertedText === undefined ||
+    text.length === 0 ||
+    imeInsertedTextMatches(insertedText, text)
+  ) {
+    return result;
+  }
+  const failure = withImeFailure(
+    {
+      ...result,
+      success: false,
+      partialApplication: true,
+      error: context.passwordField
+        ? `IME partial commit: sent ${passwordTextPlaceholder(text)} but the editor inserted a different value`
+        : `IME partial commit: sent ${JSON.stringify(text)} but the editor inserted ${JSON.stringify(insertedText)}`,
+    },
+    text,
+    "verification",
+    {
+      focusedFieldClass: context.focusedFieldClass,
+      observedText: context.passwordField ? undefined : insertedText,
+    },
+  );
+  return context.passwordField ? redactPasswordImeFailure(failure, text) : failure;
 }
 
 interface ImeVerification {
@@ -351,6 +389,13 @@ async function verifyImeCommitReadBack(
       }
       if (observedText === undefined) {
         return result;
+      }
+      const deltaVerified = verifyImeInsertedText(result, text, {
+        focusedFieldClass: context.focusedFieldClass,
+        passwordField: verification.passwordField,
+      });
+      if (deltaVerified !== result) {
+        return deltaVerified;
       }
       const suffixMatches = imeCommitSuffixMatches(observedText, text);
       // Editors can consume markers or add prefixes across multiple segments.

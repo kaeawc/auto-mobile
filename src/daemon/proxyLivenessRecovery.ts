@@ -356,8 +356,7 @@ export function livenessResumedNotice(
 /**
  * - `acknowledged`: the daemon answered the heartbeat; the session is live (or restored).
  * - `session-gone`: the daemon answered that it does not know the session.
- * - `session-awaited`: the daemon answered not-found, but the proxy's decision keeps awaiting
- *   the session inside its recoverable handoff window.
+ * - `session-awaited`: the daemon does not know the session, and its owner is still waiting for it.
  * - `superseded`: the daemon answered that another token now owns the session's liveness, so this
  *   proxy was displaced while it could not heartbeat.
  * - `unreachable`: no acknowledgement (error or the attempt's time slot ran out).
@@ -401,10 +400,9 @@ export interface LivenessRecoveryDeps {
     restoredAfterLapse: boolean;
   }): void;
   /**
-   * The daemon answered not-found for a `daemon_stalled` session or an awaited managed session.
-   * That alone is not proof of loss:
-   * a replacement daemon answers the same for a persisted session it has not materialised yet, so
-   * the owner decides by the release reason whether to fence it (#11411).
+   * The daemon answered not-found for a `daemon_stalled` session, or `session-awaited` for either
+   * stall code. That alone is not proof of loss: a replacement daemon answers the same for a
+   * persisted session it has not materialised yet, so the owner applies its decision (#11411).
    */
   onSessionGone(sessionUuid: string, code: LivenessStallCode): void;
   onHandover(handover: LivenessHandover): void;

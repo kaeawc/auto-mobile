@@ -22,7 +22,7 @@ import { assignManagedSlotDevice } from "./managedSlotFixtures";
 
 // #11174 part c: a scope idle for an hour with no live owner or settler is abandoned and its devices
 // are deleted through the slot journal (#11179), so a crash mid-delete is redriven. A revive of the
-// same incarnation wins any race, and valid scopes are never touched.
+// same incarnation keeps unjournaled devices; accepted journaled deletes always complete.
 
 const SCOPE_A = {
   managedHostScope: "host",
@@ -190,10 +190,10 @@ describe("AbandonedScopeReclaimer", () => {
     });
   });
 
-  test("a revive racing the fence rolls the entry back and restores the slot", async () => {
+  test("a revive just before the journal opens keeps the binding without an entry or fence", async () => {
     const key = await idleSlot("UDID-A");
+    const before = await registry.getAssignment(key);
     abandonAll();
-    // The revive lands right after the journal entry (and its fence) is opened.
     const racing = new Proxy(registry, {
       get(target, property, receiver) {
         const value: unknown = Reflect.get(target, property, receiver);
@@ -201,9 +201,8 @@ describe("AbandonedScopeReclaimer", () => {
           return typeof value === "function" ? value.bind(target) : value;
         }
         return async (...args: Parameters<SlotRegistry["openSlotJournal"]>) => {
-          const opened = await target.openSlotJournal(...args);
           await target.ensureScope(SCOPE_A);
-          return opened;
+          return target.openSlotJournal(...args);
         };
       },
     });
@@ -212,11 +211,46 @@ describe("AbandonedScopeReclaimer", () => {
 
     expect(report.skipped).toEqual([{ ...key, reason: "scope_revived" }]);
     expect(deleter.calls).toEqual([]);
-    expect(await registry.listOpenSlotJournal()).toEqual([]);
-    expect(await registry.getAssignment(key)).toMatchObject({
-      stableDeviceId: "UDID-A",
-      state: "ready",
+    expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+    expect(await registry.getSlotJournal(1)).toBeNull();
+    expect(await registry.getAssignment(key)).toEqual(before);
+  });
+
+  test("a revive just after the journal opens completes the delete in the same sweep", async () => {
+    const key = await idleSlot("UDID-A");
+    abandonAll();
+    let entryId: number | undefined;
+    const racing = new Proxy(registry, {
+      get(target, property, receiver) {
+        const value: unknown = Reflect.get(target, property, receiver);
+        if (property !== "openSlotJournal" || typeof value !== "function") {
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return async (...args: Parameters<SlotRegistry["openSlotJournal"]>) => {
+          const opened = await target.openSlotJournal(...args);
+          if (opened.kind === "opened") {
+            entryId = opened.entry.id;
+            await target.ensureScope(SCOPE_A);
+          }
+          return opened;
+        };
+      },
     });
+
+    const report = await reclaimer("daemon-1", racing).sweep();
+
+    expect(report.deleted).toEqual([{ ...key, platform: "ios", stableDeviceId: "UDID-A" }]);
+    expect(report.skipped).toEqual([]);
+    expect(deleter.stableIds()).toEqual(["UDID-A"]);
+    expect(inventory.has("UDID-A")).toBe(false);
+    expect(await registry.getScope(key.scopeKey)).toMatchObject({ state: "valid" });
+    expect(await registry.getAssignment(key)).toMatchObject({
+      stableDeviceId: null,
+      state: "provisioning",
+    });
+    expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+    expect(entryId).toBeDefined();
+    expect(await registry.getSlotJournal(entryId!)).toMatchObject({ phase: "committed" });
   });
 
   test("a revive during the deletion cannot claim the device and then finds an empty slot", async () => {

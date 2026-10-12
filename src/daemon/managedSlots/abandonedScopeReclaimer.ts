@@ -1,29 +1,26 @@
 /**
  * Abandoned managed-slot scope reclamation (#11174 part c, epic #11172).
  *
- * Owner decisions 2026-10-09: a scope with no activity (acquisition or execution release) and no
- * live execution owner or settler for one hour is abandoned and its devices may be deleted (Q3); if
- * the same incarnation returns, the scope is revived, surviving devices are reused and deleted ones
- * recreated by the reconciler.
+ * Owner decision 2026-10-12 (#11545): a returning incarnation revives its scope and reuses
+ * unjournaled devices. Already journaled deletes, even blocked ones, always complete first;
+ * the reconciler then creates a new device with a later generation.
  *
  * A periodic daemon sweep, on the injected timer:
  *
  * 1. Marks every valid scope idle past the threshold as abandoned (`invalidating`, reason
  *    `abandoned`). The registry re-checks activity, live owners and settlers atomically.
- * 2. For every slot of a scope still abandoned that holds a device and no fencing state, opens a
- *    journal entry (#11179) for a delete-only replacement: `replace` in phase `deleting` with no new
- *    device, anchored by fencing the slot `replacing` (generation + 1, refused while a live execution
- *    owns it). If the scope was revived in the meantime, the entry is rolled back and the slot
- *    restored. Otherwise the journal deletes and verifies absence of the recorded device and records
- *    the empty slot in the same transaction; a revived scope's next acquisition recreates it.
+ * 2. Atomically checks that the scope is still abandoned and opens a delete-only journal entry
+ *    (#11179), fencing the slot `replacing` (generation + 1, refused for a live execution owner).
+ *    A revive committed before the entry keeps the device without a fence. After the entry commits,
+ *    the journal deletes, verifies absence and records the empty slot, even if the scope revives.
  * 3. Slots of abandoned scopes that already carry unfinished journaled work, or a fencing state
  *    (`replacing`, `settling`, `cleanup_pending`), are handed to the journal's redrive, which adopts
  *    entries of dead owners, honours backoff and settlers, and never repeats completed destructive
  *    work. A crash mid-delete therefore leaves an open entry that the next sweep (or the slot's next
  *    acquisition) redrives to convergence.
  *
- * Devices of valid scopes are never touched: the sweep reads only abandoned scopes, and every delete
- * runs through the journal, which deletes only while the slot still holds the entry's exact binding.
+ * New deletes are accepted only for abandoned scopes. Accepted journaled deletes complete even
+ * after revival, and only while the slot still holds the entry's exact binding.
  */
 
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -32,12 +29,12 @@ import type { Timer } from "../../utils/SystemTimer";
 import type { ManagedSlotJournal } from "./slotJournal";
 import {
   FENCING_SLOT_STATES,
+  isAbandonedScope,
   type AbandonmentQuery,
   type SlotAssignmentRecord,
   type SlotKey,
   type SlotPlatform,
   type SlotRegistry,
-  type SlotScopeRecord,
 } from "./slotRegistry";
 
 /** How often the daemon looks for abandoned scopes. Abandonment itself takes an hour. */
@@ -49,7 +46,6 @@ export type AbandonedScopeReclaimRegistry = Pick<
   | "markScopeAbandoned"
   | "listAbandonedScopes"
   | "listAssignments"
-  | "getScope"
   | "getAssignment"
   | "listOpenSlotJournal"
   | "openSlotJournal"
@@ -96,10 +92,6 @@ export interface AbandonedScopeReclaimerOptions {
 
 function emptyReport(): AbandonedScopeSweepReport {
   return { marked: [], deleted: [], blocked: [], skipped: [] };
-}
-
-function isAbandoned(scope: SlotScopeRecord | null): boolean {
-  return scope?.state === "invalidating" && scope.invalidationReason === "abandoned";
 }
 
 function keyOf(slot: SlotKey): SlotKey {
@@ -158,6 +150,9 @@ export class AbandonedScopeReclaimer {
       }
     }
     for (const scope of await registry.listAbandonedScopes()) {
+      if (!isAbandonedScope(scope)) {
+        continue;
+      }
       for (const slot of await registry.listAssignments(scope.scopeKey)) {
         await this.reclaimSlot(registry, journal, slot, report);
       }
@@ -184,6 +179,7 @@ export class AbandonedScopeReclaimer {
     }
     const opened = await registry.openSlotJournal(key, {
       kind: "replace",
+      requireAbandonedScope: true,
       phase: "deleting",
       target: {
         oldStableId: slot.stableDeviceId,
@@ -202,17 +198,10 @@ export class AbandonedScopeReclaimer {
       },
     });
     if (opened.kind !== "opened") {
-      report.skipped.push({ ...key, reason: opened.kind });
-      return;
-    }
-    // The fence is in place; a revive that landed before it keeps its device.
-    if (!isAbandoned(await registry.getScope(slot.scopeKey))) {
-      await journal.advance(opened.entry, {
-        expectedPhase: "deleting",
-        phase: "rolled_back",
-        assignment: { kind: "state", expected: opened.entry.binding, state: slot.state },
+      report.skipped.push({
+        ...key,
+        reason: opened.kind === "scope_not_abandoned" ? "scope_revived" : opened.kind,
       });
-      report.skipped.push({ ...key, reason: "scope_revived" });
       return;
     }
     await this.drive(registry, journal, slot, slot.stableDeviceId, report);

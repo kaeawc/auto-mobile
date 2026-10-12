@@ -1412,6 +1412,103 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       // Entering `replacing` is a fence: it bumps the generation (#11242).
       const FENCED = { generation: 2, stableDeviceId: "avd-1" };
 
+      test("an abandoned-scope delete opens and fences atomically", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        await abandon(key.scopeKey);
+        const opened = await registry.openSlotJournal(key, {
+          kind: "replace",
+          phase: "deleting",
+          owner: OWNER_1,
+          target: TARGET,
+          requireAbandonedScope: true,
+          assignment: { kind: "state", expected: BOUND, state: "replacing" },
+        });
+        expect(opened).toMatchObject({
+          kind: "opened",
+          assignment: { state: "replacing", generation: 2 },
+        });
+      });
+
+      for (const revived of [true, false]) {
+        test(`an abandoned-scope delete refuses a ${revived ? "revived" : "never-abandoned"} scope without writes`, async () => {
+          const key = { scopeKey: await readyScope(), slotIndex: 0 };
+          await boundSlot(key, "avd-1");
+          if (revived) {
+            await abandon(key.scopeKey);
+            expect(await registry.ensureScope(SCOPE_A1)).toMatchObject({ revived: true });
+          }
+          const before = await registry.getAssignment(key);
+          const scope = await registry.getScope(key.scopeKey);
+          const refused = await registry.openSlotJournal(key, {
+            kind: "replace",
+            phase: "deleting",
+            owner: OWNER_1,
+            target: TARGET,
+            requireAbandonedScope: true,
+            assignment: { kind: "state", expected: BOUND, state: "replacing" },
+          });
+          expect(refused).toEqual({ kind: "scope_not_abandoned", scope });
+          expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+          expect(await registry.getSlotJournal(1)).toBeNull();
+          expect(await registry.getAssignment(key)).toEqual(before);
+        });
+      }
+
+      test("without the abandonment precondition a valid scope still opens a delete", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        const entry = await openReplace(key);
+        expect(entry.phase).toBe("deleting");
+        expect(await registry.getAssignment(key)).toMatchObject({
+          state: "replacing",
+          generation: 2,
+        });
+      });
+
+      for (const reset of [true, false]) {
+        test(`an abandoned-scope delete refuses a ${reset ? "reset" : "missing"} scope before changing assignments`, async () => {
+          const key = { scopeKey: reset ? await readyScope() : "missing-scope", slotIndex: 0 };
+          if (reset) {
+            await boundSlot(key, "avd-1");
+            await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
+          }
+          const before = await registry.getAssignment(key);
+          expect(
+            await registry.openSlotJournal(key, {
+              kind: "replace",
+              phase: "deleting",
+              owner: OWNER_1,
+              target: TARGET,
+              requireAbandonedScope: true,
+              assignment: { kind: "state", expected: BOUND, state: "replacing" },
+            }),
+          ).toEqual({ kind: "scope_not_abandoned", scope: await registry.getScope(key.scopeKey) });
+          expect(await registry.getAssignment(key)).toEqual(before);
+          expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+          expect(await registry.getSlotJournal(1)).toBeNull();
+        });
+      }
+
+      test("existing open work takes precedence over the abandonment precondition", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        const entry = await openReplace(key);
+        const before = await registry.getAssignment(key);
+        expect(
+          await registry.openSlotJournal(key, {
+            kind: "replace",
+            phase: "deleting",
+            owner: OWNER_2,
+            target: TARGET,
+            requireAbandonedScope: true,
+            assignment: { kind: "state", expected: BOUND, state: "replacing" },
+          }),
+        ).toEqual({ kind: "journal_open", entry });
+        expect(await registry.getAssignment(key)).toEqual(before);
+        expect(await registry.listOpenSlotJournal(key)).toEqual([entry]);
+      });
+
       async function openReplace(key: SlotKey) {
         const opened = await registry.openSlotJournal(key, {
           kind: "replace",

@@ -756,12 +756,26 @@ is the time the cleanup can still take (#11360): the rest of a release's bounded
 teardown, or the rest of a recording finalize's cap (120 s plus a 5 s grace),
 whether that finalize started at its session's release or when a session
 acquired a device with an owner-less recording on it (#11616). Cleanup with no
-cap of its own advertises a 1 s polling hint. `device_shutting_down` always
+cap of its own is manager-capped at 10 s only for release/unbound network-state
+push, location route stop, mock-location clear, and late-set clear, starting
+when its holder leaves. At the cap the manager abandons it, warns about possible
+leftover state, and frees the device from that cleanup's quarantine. Downloads
+staging, `putAppFile` to `user_files`, registrations with no bound, and internal
+release-teardown, late-setup, and rebind-restore transfers stay uncapped here
+and contribute no bound (a 1 s polling hint when nothing else bounds cleanup).
+Trusted numeric caps remain owned by recording finalize, held-plan app cleanup,
+forced stuck release, network-condition TTL restore, deferred rebind gates, and
+bounded acquisition cleanups. An in-flight release
+advertises the stuck deadline plus one heartbeat-monitor interval plus 10 s
+quarantine (52 s with the default interval); the monitor only forces releases
+it tracks, while terminal explicit releases rely on their own bounded stages.
+`device_shutting_down` always
 advertises 2 s: a shutdown reservation is held across several separately bounded
 steps (stop, wait for the device to disappear, restart handoff) and records no
 deadline of its own, so there is no remaining time to report. The test runners
 wait `max(30 s, min(waited + retryAfterMs, 150 s))` in total, so a hint without a
-bound gets their 30 s floor, which is one shutdown step's own timeout.
+remaining-time bound still re-extends the wait with every usable hint, up to the
+150 s total cap. The 30 s floor alone applies only with no usable hint.
 The MCP proxy (and the CLI through it) re-polls a `device_cleanup_in_progress`
 bind on a short growing backoff within its 150 s wait budget, treating the hint
 as an upper bound on each step so early cleanup is noticed on the next poll (#11900).

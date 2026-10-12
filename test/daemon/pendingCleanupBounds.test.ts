@@ -1,0 +1,482 @@
+import { afterEach, expect, spyOn, test } from "bun:test";
+import {
+  SessionManager,
+  SESSION_RELEASE_TEARDOWN_CAP_MS,
+  getSessionReleaseCleanupWorstCaseMs,
+} from "../../src/daemon/sessionManager";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { DeviceCleanupInProgressError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { registerNetworkStateSessionCleanup } from "../../src/server/networkStateSessionCleanup";
+import { NetworkState } from "../../src/server/NetworkState";
+import { MockLocationClearRegistry } from "../../src/features/utility/MockLocationClear";
+import {
+  LocationRouteRegistry,
+  registerLocationRouteSessionCleanup,
+} from "../../src/features/utility/LocationRoutePlayer";
+import { createSessionLocationAppliedCallback } from "../../src/server/sessionLocation";
+import { logger } from "../../src/utils/logger";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import {
+  SessionHeartbeatMonitor,
+  STUCK_REAP_WARN_MS,
+} from "../../src/daemon/SessionHeartbeatMonitor";
+import {
+  DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
+  getSessionHeartbeatCheckIntervalMs,
+} from "../../src/daemon/sessionLivenessWindows";
+import { forceStuckSessionRelease } from "../../src/daemon/releaseSessionAndDevice";
+import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
+
+const device = {
+  deviceId: "12345678-1234-1234-1234-123456789ABC",
+  name: "iPhone",
+  platform: "ios" as const,
+};
+const android = { deviceId: "emulator-5554", name: "Pixel", platform: "android" as const };
+const cap = SESSION_RELEASE_TEARDOWN_CAP_MS;
+const dispose: (() => void)[] = [];
+afterEach(() => {
+  for (const cleanup of dispose.splice(0).reverse()) {
+    cleanup();
+  }
+});
+
+function harness(persistence = new FakeDeviceSessionPersistence()) {
+  const timer = new FakeTimer();
+  timer.setCurrentTime(1_000_000);
+  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+  const pool = new DevicePool(
+    createDevicePoolDependencies(manager, "cleanup-bounds", {
+      timer,
+      deviceManager: new FakeDeviceUtils(),
+    }),
+  );
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  dispose.push(() => {
+    manager.stopCleanupTimer();
+    timer.reset();
+    warn.mockRestore();
+  });
+  return { timer, manager, pool, warn };
+}
+type Harness = ReturnType<typeof harness>;
+const flush = () => drainMicrotasks(100);
+
+async function bounded(h: Harness, deviceId: string, name: string, leftover: string) {
+  expect(h.manager.getDeviceCleanupRetryAfterMs(deviceId)).toBe(cap);
+  expect(() => h.pool.assertDeviceCleanupComplete(deviceId)).toThrow(DeviceCleanupInProgressError);
+  try {
+    h.pool.assertDeviceCleanupComplete(deviceId);
+  } catch (error) {
+    expect(error).toBeInstanceOf(DeviceCleanupInProgressError);
+    expect((error as DeviceCleanupInProgressError).retryAfterMs).toBe(cap);
+  }
+  await h.timer.advanceTimeAsync(cap - 1, flush);
+  expect(() => h.pool.assertDeviceCleanupComplete(deviceId)).toThrow(DeviceCleanupInProgressError);
+  expect(h.warn).not.toHaveBeenCalled();
+  await h.timer.advanceTimeAsync(1, flush);
+  expect(h.manager.hasDeviceCleanupInProgress(deviceId)).toBe(false);
+  expect(() => h.pool.assertDeviceCleanupComplete(deviceId)).not.toThrow();
+  expect(h.warn).toHaveBeenCalledTimes(1);
+  const warning = String(h.warn.mock.calls[0][0]);
+  for (const text of [name, deviceId, String(cap), leftover]) {
+    expect(warning).toContain(text);
+  }
+}
+
+test("release network push has a truthful bound and a single abandonment warning", async () => {
+  const h = harness();
+  const state = new NetworkState({ timer: h.timer, notifier: { notifyResourceUpdated: () => {} } });
+  registerNetworkStateSessionCleanup(h.manager, {
+    state: () => state,
+    pusher: { push: () => new Promise<void>(() => {}) },
+  });
+  await h.manager.createSession("old", android.deviceId, "android");
+  state.addMock(
+    android.deviceId,
+    {
+      host: "example.com",
+      path: "/",
+      method: "*",
+      limit: null,
+      statusCode: 500,
+      responseHeaders: {},
+      responseBody: "",
+      contentType: "text/plain",
+    },
+    "old",
+  );
+  await h.manager.releaseSession("old");
+  await bounded(
+    h,
+    android.deviceId,
+    "push cleared network state",
+    "the released session's network mock rules and error simulation",
+  );
+});
+
+test("bound-less registration keeps the default hint and quarantine past 10 seconds", async () => {
+  const h = harness();
+  const raw = Promise.withResolvers<void>();
+  h.manager.registerPendingDeviceCleanup(device.deviceId, raw.promise);
+  expect(h.manager.getDeviceCleanupRetryAfterMs(device.deviceId)).toBe(1_000);
+  await h.timer.advanceTimeAsync(cap + 1, flush);
+  expect(h.manager.getDeviceCleanupRetryAfterMs(device.deviceId)).toBe(1_000);
+  expect(() => h.pool.assertDeviceCleanupComplete(device.deviceId)).toThrow(
+    DeviceCleanupInProgressError,
+  );
+  expect(h.warn).not.toHaveBeenCalled();
+  raw.resolve();
+  await flush();
+  expect(h.manager.hasDeviceCleanupInProgress(device.deviceId)).toBe(false);
+});
+
+for (const late of [false, true]) {
+  test(`${late ? "late-set" : "release"} mock-location clear stops dispatching at the cap`, async () => {
+    const h = harness();
+    let calls = 0;
+    let signal: AbortSignal | undefined;
+    let hung = true;
+    const clears = new MockLocationClearRegistry({
+      timer: h.timer,
+      simctlFactory: () => ({
+        executeCommandArgs: (_args, _timeout, abort) => {
+          calls++;
+          signal = abort;
+          return hung ? new Promise<string>(() => {}) : Promise.resolve("");
+        },
+      }),
+    });
+    registerLocationRouteSessionCleanup(h.manager, {
+      registry: new LocationRouteRegistry(h.timer),
+      mockLocationClears: clears,
+    });
+    await h.manager.createSession("old", device.deviceId, "ios");
+    const applied = createSessionLocationAppliedCallback({
+      sessionManager: h.manager,
+      sessionUuid: "old",
+      device,
+      mockLocationClears: clears,
+    });
+    if (!late) {
+      clears.markSet("old", device);
+    }
+    await h.manager.releaseSession("old");
+    if (late) {
+      applied!();
+    }
+    await flush();
+    expect(h.manager.getDeviceCleanupRetryAfterMs(device.deviceId)).toBe(cap);
+    expect(() => h.pool.assertDeviceCleanupComplete(device.deviceId)).toThrow(
+      DeviceCleanupInProgressError,
+    );
+    try {
+      h.pool.assertDeviceCleanupComplete(device.deviceId);
+    } catch (error) {
+      expect(error).toBeInstanceOf(DeviceCleanupInProgressError);
+      expect((error as DeviceCleanupInProgressError).retryAfterMs).toBe(cap);
+    }
+    // Keep the first attempt parked until just before abandonment; its own 5s
+    // attempt timer would otherwise warn about failure independently of the cap.
+    h.timer.advanceTime(cap - 1);
+    expect(h.manager.getDeviceCleanupRetryAfterMs(device.deviceId)).toBe(1);
+    expect(() => h.pool.assertDeviceCleanupComplete(device.deviceId)).toThrow(
+      DeviceCleanupInProgressError,
+    );
+    expect(h.warn).not.toHaveBeenCalled();
+    h.timer.advanceTime(1);
+    await flush();
+    expect(signal?.aborted).toBe(true);
+    expect(h.manager.hasDeviceCleanupInProgress(device.deviceId)).toBe(false);
+    expect(() => h.pool.assertDeviceCleanupComplete(device.deviceId)).not.toThrow();
+    expect(h.warn).toHaveBeenCalledTimes(1);
+    expect(String(h.warn.mock.calls[0][0])).toContain("clear mock location");
+    expect(String(h.warn.mock.calls[0][0])).toContain(device.deviceId);
+    expect(String(h.warn.mock.calls[0][0])).toContain(String(cap));
+    expect(String(h.warn.mock.calls[0][0])).toContain("the released session's simulated location");
+    const abandonedCalls = calls;
+    await h.timer.advanceTimeAsync(cap, flush);
+    expect(calls).toBe(abandonedCalls);
+    expect(h.warn).toHaveBeenCalledTimes(1);
+    hung = false;
+    await h.manager.createSession("next", device.deviceId, "ios");
+    clears.markSet("next", device);
+    await h.manager.releaseSession("next");
+    await flush();
+    expect(calls).toBe(abandonedCalls + 1);
+    expect(h.manager.hasDeviceCleanupInProgress(device.deviceId)).toBe(false);
+  });
+}
+
+test("a descriptor cap waits for the live holder and starts at release", async () => {
+  const h = harness();
+  await h.manager.createSession("old", device.deviceId, "ios");
+  h.manager.registerPendingDeviceCleanup(device.deviceId, new Promise<void>(() => {}), {
+    name: "holder cleanup",
+    leftover: "simulated state",
+  });
+  await h.timer.advanceTimeAsync(cap * 2, flush);
+  expect(h.manager.hasDeviceCleanupInProgress(device.deviceId)).toBe(true);
+  expect(h.manager.getDeviceCleanupRetryAfterMs(device.deviceId)).toBe(cap);
+  expect(h.warn).not.toHaveBeenCalled();
+  await h.manager.releaseSession("old");
+  await bounded(h, device.deviceId, "holder cleanup", "simulated state");
+});
+
+for (const acquisition of [false, true]) {
+  for (const shortFirst of [false, true]) {
+    test(`${acquisition ? "acquisition" : "pending"} drops each settled bound (${shortFirst ? "short" : "long"} settles first)`, async () => {
+      const h = harness();
+      const first = Promise.withResolvers<void>();
+      const second = Promise.withResolvers<void>();
+      const register = acquisition
+        ? h.manager.registerAcquisitionDeviceCleanup.bind(h.manager)
+        : h.manager.registerPendingDeviceCleanup.bind(h.manager);
+      register(device.deviceId, first.promise, shortFirst ? 5_000 : 60_000);
+      // Acquisition work retains its own numeric cap; only pending listeners are manager capped.
+      register(
+        device.deviceId,
+        second.promise,
+        shortFirst ? 60_000 : acquisition ? cap : { name: "second cleanup", leftover: "state" },
+      );
+      await h.timer.advanceTimeAsync(1_000, flush);
+      first.resolve();
+      await flush();
+      expect(h.manager.getDeviceCleanupRetryAfterMs(device.deviceId)).toBe(
+        shortFirst ? 59_000 : 9_000,
+      );
+      await h.timer.advanceTimeAsync(4_000, flush);
+      expect(h.manager.getDeviceCleanupRetryAfterMs(device.deviceId)).toBe(
+        shortFirst ? 55_000 : 5_000,
+      );
+      second.resolve();
+      await flush();
+      expect(h.manager.hasDeviceCleanupInProgress(device.deviceId)).toBe(false);
+    });
+  }
+}
+
+test("throwing abandonment still frees the device", async () => {
+  const h = harness();
+  h.manager.registerPendingDeviceCleanup(device.deviceId, new Promise<void>(() => {}), {
+    name: "broken cleanup",
+    leftover: "dirty state",
+    abandon: () => {
+      throw new Error("broken fence");
+    },
+  });
+  await h.timer.advanceTimeAsync(cap, flush);
+  expect(h.manager.hasDeviceCleanupInProgress(device.deviceId)).toBe(false);
+  expect(h.warn).toHaveBeenCalledTimes(2); // Fence failure and the single abandonment warning.
+});
+
+for (const marked of [false, true]) {
+  test(`a late set on a new holder ${marked ? "preserves" : "creates"} its marker until release`, async () => {
+    const h = harness();
+    let calls = 0;
+    const clears = new MockLocationClearRegistry({
+      timer: h.timer,
+      simctlFactory: () => ({
+        executeCommandArgs: async () => {
+          calls++;
+          return "";
+        },
+      }),
+    });
+    registerLocationRouteSessionCleanup(h.manager, {
+      registry: new LocationRouteRegistry(h.timer),
+      mockLocationClears: clears,
+    });
+    await h.manager.createSession("old", device.deviceId, "ios");
+    const applied = createSessionLocationAppliedCallback({
+      sessionManager: h.manager,
+      sessionUuid: "old",
+      device,
+      mockLocationClears: clears,
+    });
+    await h.manager.releaseSession("old");
+    await h.manager.createSession("next", device.deviceId, "ios");
+    if (marked) {
+      clears.markSet("next", device);
+    }
+    applied!();
+    await flush();
+    expect(calls).toBe(0);
+    expect(h.warn).toHaveBeenCalledTimes(1);
+    expect(String(h.warn.mock.calls[0][0])).toContain("next");
+    clears.abandonClear("old", device.deviceId);
+    expect(clears.clearAfter("old", device.deviceId, Promise.resolve())).toBeNull();
+    await h.manager.releaseSession("next");
+    await flush();
+    expect(calls).toBe(1);
+  });
+}
+
+test("a monitor-tracked wedged release advertises the whole forced-release worst case", async () => {
+  class ParkedPersistence extends FakeDeviceSessionPersistence {
+    gate: Promise<void> | undefined;
+    override async upsertActiveSession(record: DeviceSessionRecord) {
+      await this.gate;
+      await super.upsertActiveSession(record);
+    }
+  }
+  const persistence = new ParkedPersistence();
+  const h = harness(persistence);
+  await h.manager.createSession("old", android.deviceId, "android");
+  persistence.gate = new Promise<void>(() => {});
+  void h.manager.rebindSession("old", "emulator-5556", "android");
+  await flush();
+  void h.manager.releaseSession("old", "plan-auto-release");
+  await flush();
+  const monitor = new SessionHeartbeatMonitor(
+    h.manager,
+    () => false,
+    async (id, reason) => {
+      await h.manager.releaseSession(id, reason);
+    },
+    h.timer,
+    {
+      forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id),
+    },
+  );
+  dispose.push(() => {
+    void monitor.stop();
+  });
+  const interval = getSessionHeartbeatCheckIntervalMs();
+  expect(interval).toBe(DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
+  const worst = getSessionReleaseCleanupWorstCaseMs();
+  expect(worst).toBe(STUCK_REAP_WARN_MS + interval + cap);
+  expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(worst);
+  expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).toThrow(
+    DeviceCleanupInProgressError,
+  );
+  await h.timer.advanceTimeAsync(15_000, flush);
+  expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(worst - 15_000);
+  await monitor.tick();
+  // Exercise the inclusive upper endpoint of the next-scan allowance. The real
+  // scan, not a hand-triggered force, must start the 10s quarantine at this point.
+  await h.timer.advanceTimeAsync(STUCK_REAP_WARN_MS + interval - 15_000, flush);
+  await monitor.tick();
+  await flush();
+  expect(h.manager.getSessionForDevice(android.deviceId)).toBeNull();
+  expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(cap);
+  await h.timer.advanceTimeAsync(cap - 1, flush);
+  expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).toThrow(
+    DeviceCleanupInProgressError,
+  );
+  await h.timer.advanceTimeAsync(1, flush);
+  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
+  expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).not.toThrow();
+});
+
+test("abandoned descriptor absorbs a late rejection without another warning", async () => {
+  const h = harness();
+  const raw = Promise.withResolvers<void>();
+  let abandoned = false;
+  h.manager.registerPendingDeviceCleanup(device.deviceId, raw.promise, {
+    name: "late failure cleanup",
+    leftover: "unfinished state",
+    abandon: () => {
+      abandoned = true;
+    },
+  });
+  await bounded(h, device.deviceId, "late failure cleanup", "unfinished state");
+  expect(abandoned).toBe(true);
+  raw.reject(new Error("late failure"));
+  await flush();
+  expect(h.warn).toHaveBeenCalledTimes(1);
+});
+
+test("numeric pending bounds remain trusted and retain the deferred gate's raw identity", async () => {
+  const h = harness();
+  const ownGate = Promise.withResolvers<void>();
+  h.manager.registerPendingDeviceCleanup(device.deviceId, ownGate.promise, cap);
+  expect(h.manager.getPendingDeviceCleanup(device.deviceId, ownGate.promise)).toBeNull();
+  const other = Promise.withResolvers<void>();
+  h.manager.registerPendingDeviceCleanup(device.deviceId, other.promise);
+  const joined = h.manager.getPendingDeviceCleanup(device.deviceId, ownGate.promise);
+  expect(joined).not.toBeNull();
+  other.resolve();
+  await joined;
+  await h.timer.advanceTimeAsync(cap + 1, flush);
+  expect(h.manager.hasDeviceCleanupInProgress(device.deviceId)).toBe(true);
+  expect(h.manager.getDeviceCleanupRetryAfterMs(device.deviceId)).toBe(1_000);
+  expect(h.warn).not.toHaveBeenCalled();
+  ownGate.resolve();
+  await flush();
+  expect(h.manager.hasDeviceCleanupInProgress(device.deviceId)).toBe(false);
+});
+
+test("internal hung setup transfer stays uncapped with the default polling hint", async () => {
+  const h = harness();
+  const session = await h.manager.createSession("old", android.deviceId, "android");
+  const gate = Promise.withResolvers<void>();
+  const setup = h.manager.trackSessionSetup(session, () => gate.promise);
+  await flush();
+  const release = h.manager.releaseSession("old", "released", true);
+  await flush();
+  await h.timer.advanceTimeAsync(1_000, flush);
+  await release;
+  expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(1_000);
+  await h.timer.advanceTimeAsync(cap + 1, flush);
+  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(true);
+  expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(1_000);
+  expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).toThrow(
+    DeviceCleanupInProgressError,
+  );
+  gate.resolve();
+  await setup;
+  await flush();
+  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
+});
+
+test("the env-resolved monitor interval is shared by the manager release bound", async () => {
+  const key = "AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS";
+  const previous = process.env[key];
+  dispose.push(() => {
+    if (previous === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = previous;
+    }
+  });
+  process.env[key] = "7000";
+  expect(getSessionHeartbeatCheckIntervalMs()).toBe(7_000);
+  class ParkedPersistence extends FakeDeviceSessionPersistence {
+    gate: Promise<void> | undefined;
+    override async upsertActiveSession(record: DeviceSessionRecord) {
+      await this.gate;
+      await super.upsertActiveSession(record);
+    }
+  }
+  const persistence = new ParkedPersistence();
+  const h = harness(persistence);
+  await h.manager.createSession("old", android.deviceId, "android");
+  persistence.gate = new Promise<void>(() => {});
+  void h.manager.rebindSession("old", "emulator-5556", "android");
+  await flush();
+  void h.manager.releaseSession("old", "plan-auto-release");
+  await flush();
+  const monitor = new SessionHeartbeatMonitor(
+    h.manager,
+    () => false,
+    async () => {},
+    h.timer,
+  );
+  monitor.start();
+  dispose.push(() => {
+    void monitor.stop();
+  });
+  expect(h.timer.getPendingIntervals()).toContain(7_000);
+  // The manager resolves the env when reading a hint; daemon construction uses
+  // this same resolver for the monitor's default configuration.
+  expect(getSessionReleaseCleanupWorstCaseMs()).toBe(STUCK_REAP_WARN_MS + 7_000 + cap);
+  expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(
+    getSessionReleaseCleanupWorstCaseMs(),
+  );
+});

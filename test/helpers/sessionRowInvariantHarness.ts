@@ -346,22 +346,10 @@ export async function runSessionRowInterleaving(
   let drained = false;
   /** One of this daemon's releases of the id was terminal: no incarnation may follow it. */
   let ownTerminal = false;
-  /**
-   * The peer wrote a terminal row. It ends whichever incarnation holds the id (`decisive`) unless
-   * a write of this daemon that no statement conditions replaces it first: a superseded release's
-   * terminal row with the rewrite that follows it, or a rebind's row (`overwritable`; the row
-   * cannot tell the two daemons' terminal releases apart, see #11557). Then either outcome stands.
-   */
-  let peerTerminal: "none" | "decisive" | "overwritable" = "none";
-  let deviceLossReleasesInFlight = 0;
+  /** A peer's terminal row ends the UUID, regardless of our parked writes. */
+  let peerTerminal: "none" | "decisive" = "none";
   /** The peer issued the released name itself: the row is its session's from then on. */
   let peerOwns = false;
-  /**
-   * The peer issued the name while a write of this daemon that no statement conditions was still
-   * parked: a superseded release's terminal row (#11129), or the live-row rewrite that follows
-   * it. It lands on the peer's row: open in #11557, and not judged here.
-   */
-  let peerRowUnderParkedWrite = false;
   const live = () => manager.getSession(sessionId);
   /** The id was issued again: what follows is asked of, and announced for, the new incarnation. */
   const adoptIncarnation = (): void => {
@@ -369,7 +357,7 @@ export async function runSessionRowInterleaving(
     if (!session || session === current.session) {
       return;
     }
-    if (ownTerminal) {
+    if (ownTerminal || peerTerminal === "decisive") {
       violations.push(`incarnation ${current.index + 1} was issued after a terminal release`);
     }
     previous = current;
@@ -434,10 +422,6 @@ export async function runSessionRowInterleaving(
   const deviceLossRelease = (supersededAfterMs: number | undefined): void => {
     const mine = current;
     let superseded = false;
-    if (peerTerminal === "decisive") {
-      peerTerminal = "overwritable";
-    }
-    deviceLossReleasesInFlight++;
     if (supersededAfterMs !== undefined) {
       // The terminal write is wedged past the release deadline and lands under the live session.
       repository.nextReleaseDelayMs =
@@ -462,16 +446,9 @@ export async function runSessionRowInterleaving(
             }
             throw error;
           },
-        )
-        .finally(() => {
-          deviceLossReleasesInFlight--;
-        }),
+        ),
     );
   };
-
-  /** A write of this daemon is under way that would replace a peer's terminal row unread. */
-  const unconditionedWriteUnderWay = (): boolean =>
-    rebinding || deviceLossReleasesInFlight > 0 || repository.terminalWritesInFlight > 0;
 
   const releaseOrRecordFailure = async (reason: ReleaseReason): Promise<void> => {
     const mine = current;
@@ -524,7 +501,7 @@ export async function runSessionRowInterleaving(
       case "peer-terminal-row": {
         await peer.markReleased(sessionId, "released", now, PEER_TERMINAL_REASON);
         if ((await peer.getSession(sessionId))?.release_reason === PEER_TERMINAL_REASON) {
-          peerTerminal = unconditionedWriteUnderWay() ? "overwritable" : "decisive";
+          peerTerminal = "decisive";
           repository.log.push(`the peer's terminal row landed (${peerTerminal})`);
         }
         return;
@@ -587,8 +564,6 @@ export async function runSessionRowInterleaving(
           return;
         }
         peerOwns = true;
-        peerRowUnderParkedWrite =
-          repository.terminalWritesInFlight > 0 || repository.upsertsInFlight > 0;
         repository.log.push("the peer issued the name: the row is its session's");
         return;
       }
@@ -620,9 +595,6 @@ export async function runSessionRowInterleaving(
         const session = live();
         if (session && !rebinding) {
           rebinding = true;
-          if (peerTerminal === "decisive") {
-            peerTerminal = "overwritable";
-          }
           const target = DEVICES.find((device) => device !== session.assignedDevice)!;
           background(
             `rebind to ${target}`,
@@ -809,13 +781,10 @@ export async function runSessionRowInterleaving(
     const rowState = `${row?.status}/${row?.release_reason ?? "none"}/${row?.device_id}`;
     if (extended && peerOwns) {
       // The peer issued the released name: nothing this daemon still had in flight changes it.
-      if (
-        !peerRowUnderParkedWrite &&
-        (row?.status !== "active" || row.daemon_session_id !== PEER_DAEMON)
-      ) {
+      if (row?.status !== "active" || row.daemon_session_id !== PEER_DAEMON) {
         violations.push(`${moment}: the peer's session row is ${rowState}`);
       }
-      if (session && !peerRowUnderParkedWrite) {
+      if (session) {
         violations.push(`${moment}: the session is live here and at the peer`);
       }
       return;
@@ -853,9 +822,7 @@ export async function runSessionRowInterleaving(
       violations.push(`${moment}: the session is gone and no release was announced`);
     }
     // (iii) A terminally released UUID stays terminal in the row.
-    if (extended && !ownTerminal && peerTerminal === "overwritable") {
-      // Either daemon's write may have been the last: both outcomes are consistent rows.
-    } else if (
+    if (
       extended
         ? ownTerminal || peerTerminal === "decisive"
         : current.notified.some(isTerminalReleaseReason)
@@ -948,10 +915,8 @@ export async function runSessionRowInterleaving(
     // joins it (a non-terminal reason gives way to `daemon-shutdown`), and the row it first wrote
     // may still be what a write in flight leaves: the session was not live, so either row stands.
     const handedOffAfterRelease = !liveAtShutdown && lastReason === SHUTDOWN_RELEASE;
-    const eitherOutcome =
-      !ownTerminal &&
-      (peerTerminal === "overwritable" || handedOffAfterRelease || issuingAtShutdown);
-    const unjudged = eitherOutcome || (peerOwns && peerRowUnderParkedWrite);
+    const eitherOutcome = !ownTerminal && (handedOffAfterRelease || issuingAtShutdown);
+    const unjudged = eitherOutcome;
 
     repository.log.push("-- restart");
     const store = new DeviceSessionRepository(db, timer);

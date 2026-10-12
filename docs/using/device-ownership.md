@@ -612,6 +612,9 @@ steps (stop, wait for the device to disappear, restart handoff) and records no
 deadline of its own, so there is no remaining time to report. The test runners
 wait `max(30 s, min(waited + retryAfterMs, 150 s))` in total, so a hint without a
 bound gets their 30 s floor, which is one shutdown step's own timeout.
+The MCP proxy (and the CLI through it) re-polls a `device_cleanup_in_progress`
+bind on a short growing backoff within its 150 s wait budget, treating the hint
+as an upper bound on each step so early cleanup is noticed on the next poll (#11900).
 
 A `setActiveDevice` on a device another request is still preparing (booted or
 picked, runner not ready, no session bound yet) is refused with

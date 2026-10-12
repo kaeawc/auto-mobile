@@ -58,6 +58,302 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     );
   }
 
+  test("successful own-row release and guarded rebind use the unguarded microtask budget", async () => {
+    manager.attachDaemonSessionId("daemon-1");
+    const unguarded = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+    unguarded.stopCleanupTimer();
+    try {
+      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      await unguarded.createSession("unguarded", DEVICE, "android", IDLE_WINDOW_MS);
+      for (const operation of ["rebind", "release"] as const) {
+        let turn = 0;
+        let guardedTurn: number | undefined;
+        let unguardedTurn: number | undefined;
+        const guardedWrite =
+          operation === "release"
+            ? manager.releaseSession(SESSION, "plan-auto-release")
+            : manager.rebindSession(SESSION, "emulator-5556", "android");
+        const unguardedWrite =
+          operation === "release"
+            ? unguarded.releaseSession("unguarded", "plan-auto-release")
+            : unguarded.rebindSession("unguarded", "emulator-5556", "android");
+        const writes = [
+          guardedWrite.then(() => {
+            guardedTurn = turn;
+          }),
+          unguardedWrite.then(() => {
+            unguardedTurn = turn;
+          }),
+        ];
+        // A ceiling prevents a hung write from spinning; the expected budget is comparative.
+        while ((guardedTurn === undefined || unguardedTurn === undefined) && turn < 200) {
+          await Promise.resolve();
+          turn++;
+        }
+        expect(guardedTurn).toBeDefined();
+        expect(unguardedTurn).toBeDefined();
+        expect({ operation, turn: guardedTurn }).toEqual({ operation, turn: unguardedTurn });
+        await Promise.all(writes);
+      }
+    } finally {
+      unguarded.stopCleanupTimer();
+    }
+  });
+
+  test.each(["release", "rebind", "activity"])(
+    "an own-row %s never discovers live daemons",
+    async (write) => {
+      manager.attachDaemonSessionId("daemon-1");
+      let discoveries = 0;
+      manager.attachLiveDaemonSessionIds(() => {
+        discoveries++;
+        throw new Error("unexpected PID-file discovery");
+      });
+      const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      if (write === "release") {
+        await manager.releaseSession(SESSION, "daemon-shutdown");
+        expect(await store.getSession?.(SESSION)).toMatchObject({
+          release_reason: "daemon-shutdown",
+        });
+      } else if (write === "rebind") {
+        await manager.rebindSession(SESSION, "emulator-5556", "android");
+        expect(session.assignedDevice).toBe("emulator-5556");
+      } else {
+        await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+        timer.advanceTime(1);
+        expect(await refresh()).toBe("refreshed");
+        expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
+      }
+      expect(discoveries).toBe(0);
+    },
+  );
+
+  test.each(["release", "rebind", "activity"])(
+    "a dead-owner %s discovers once and writes",
+    async (write) => {
+      manager.attachDaemonSessionId("daemon-1");
+      let discoveries = 0;
+      manager.attachLiveDaemonSessionIds(() => {
+        discoveries++;
+        return new Set(["daemon-1"]);
+      });
+      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      const row = (await store.getSession?.(SESSION))!;
+      store.seed({
+        ...row,
+        daemon_session_id: "dead",
+        ...(write === "activity"
+          ? {
+              status: "expired" as const,
+              release_reason: "daemon-restart",
+            }
+          : {}),
+      });
+      if (write === "release") {
+        await manager.releaseSession(SESSION, "explicit-release");
+        expect(await store.getSession?.(SESSION)).toMatchObject({
+          release_reason: "explicit-release",
+        });
+      } else if (write === "rebind") {
+        await manager.rebindSession(SESSION, "emulator-5556", "android");
+        expect(await store.getSession?.(SESSION)).toMatchObject({ device_id: "emulator-5556" });
+      } else {
+        timer.advanceTime(1);
+        expect(await refresh()).toBe("refreshed");
+        expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
+      }
+      expect(discoveries).toBe(1);
+    },
+  );
+
+  test("failed fallback discovery keeps terminal intent journaled and retried", async () => {
+    manager.attachDaemonSessionId("daemon-1");
+    const files = new FakeTerminalReleaseJournalFileSystem();
+    const journalPath = terminalReleaseJournalPath("/data", "daemon-1");
+    manager.attachTerminalReleaseJournal(
+      createDaemonTerminalReleaseJournal({
+        dataDir: "/data",
+        daemonSessionId: "daemon-1",
+        liveDaemonSessionIds: new Set(["daemon-1"]),
+        fileSystem: files,
+      }),
+    );
+    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    store.seed({ ...(await store.getSession?.(SESSION))!, daemon_session_id: "dead" });
+    let fails = true;
+    manager.attachLiveDaemonSessionIds(() => {
+      if (fails) {
+        throw new Error("PID-file discovery failed");
+      }
+      return new Set(["daemon-1"]);
+    });
+    let land!: () => void;
+    store.park = new Promise<void>((resolve) => {
+      land = resolve;
+    });
+    const released = manager.releaseSession(SESSION, "explicit-release");
+    await settleMicrotasks();
+    await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+    await released;
+    store.park = undefined;
+    land();
+    await settleMicrotasks();
+    expect(files.files.get(journalPath)).toContain("explicit-release");
+    expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
+    expect(timer.getPendingTimeouts()).toContain(TERMINAL_RETRY_DELAY_MS);
+    fails = false;
+    await timer.advanceTimeAsync(TERMINAL_RETRY_DELAY_MS);
+    await settleMicrotasks();
+    expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: "explicit-release" });
+    expect(files.files.get(journalPath) ?? "").not.toContain("explicit-release");
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test.each(["rebind", "activity"])(
+    "failed fallback discovery on %s never ends a held session",
+    async (write) => {
+      manager.attachDaemonSessionId("daemon-1");
+      const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      const before = {
+        ...(await store.getSession?.(SESSION))!,
+        daemon_session_id: "peer",
+        ...(write === "activity"
+          ? { status: "expired" as const, release_reason: "daemon-restart" }
+          : {}),
+      };
+      store.seed(structuredClone(before));
+      manager.attachLiveDaemonSessionIds(() => {
+        throw new Error("PID-file discovery failed");
+      });
+      if (write === "rebind") {
+        await expect(manager.rebindSession(SESSION, "emulator-5556", "android")).rejects.toThrow(
+          "PID-file discovery failed",
+        );
+      } else {
+        timer.advanceTime(1);
+        expect(await refresh()).toBe("SessionActivityPersistenceError");
+      }
+      expect(manager.getSession(SESSION)).toBe(session);
+      expect(session.assignedDevice).toBe(DEVICE);
+      expect(await store.getSession?.(SESSION)).toEqual(before);
+      expect(releases).toEqual([]);
+    },
+  );
+
+  test.each(["release", "rebind", "activity"])(
+    "an owner handed back after the first %s miss is written without discovery",
+    async (write) => {
+      manager.attachDaemonSessionId("daemon-1");
+      let discoveries = 0;
+      manager.attachLiveDaemonSessionIds(() => {
+        discoveries++;
+        return new Set(["peer"]);
+      });
+      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      const own = (await store.getSession?.(SESSION))!;
+      const changeOwner = async () => {
+        store.seed({ ...own, daemon_session_id: "peer" });
+        store.afterRefusedUpsert = () => {
+          store.seed(own);
+        };
+      };
+      if (write === "release") {
+        store.seed({ ...own, daemon_session_id: "peer" });
+        store.afterRefusedRelease = () => {
+          store.seed(own);
+        };
+        await manager.releaseSession(SESSION, "explicit-release");
+        expect(await store.getSession?.(SESSION)).toMatchObject({
+          release_reason: "explicit-release",
+        });
+      } else if (write === "rebind") {
+        store.duringPlainUpsert = changeOwner;
+        await manager.rebindSession(SESSION, "emulator-5556", "android");
+        expect(await store.getSession?.(SESSION)).toMatchObject({ device_id: "emulator-5556" });
+      } else {
+        await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+        store.duringActivityUpsert = changeOwner;
+        timer.advanceTime(1);
+        expect(await refresh()).toBe("refreshed");
+        expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
+      }
+      expect(discoveries).toBe(0);
+    },
+  );
+
+  test("two misses on a still-writable row are transient, and a later rebind lands", async () => {
+    manager.attachDaemonSessionId("daemon-1");
+    manager.attachLiveDaemonSessionIds(() => {
+      throw new Error("unexpected discovery");
+    });
+    const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    store.refuseGuardedUpserts = 2;
+    await expect(manager.rebindSession(SESSION, "emulator-5556", "android")).rejects.toThrow(
+      "two statement misses",
+    );
+    expect(store.refuseGuardedUpserts).toBe(0);
+    expect(manager.getSession(SESSION)).toBe(session);
+    expect(session.assignedDevice).toBe(DEVICE);
+    expect(releases).toEqual([]);
+    await manager.rebindSession(SESSION, "emulator-5556", "android");
+    expect(session.assignedDevice).toBe("emulator-5556");
+  });
+
+  test("two writable terminal-write misses keep journal intent owed until retry lands", async () => {
+    manager.attachDaemonSessionId("daemon-1");
+    const files = new FakeTerminalReleaseJournalFileSystem();
+    const journalPath = terminalReleaseJournalPath("/data", "daemon-1");
+    manager.attachTerminalReleaseJournal(
+      createDaemonTerminalReleaseJournal({
+        dataDir: "/data",
+        daemonSessionId: "daemon-1",
+        liveDaemonSessionIds: new Set(["daemon-1"]),
+        fileSystem: files,
+      }),
+    );
+    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    store.refuseGuardedReleaseWrites = 2;
+    let land!: () => void;
+    store.park = new Promise<void>((resolve) => {
+      land = resolve;
+    });
+    const release = manager.releaseSession(SESSION, "explicit-release");
+    await settleMicrotasks();
+    await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+    await release;
+    store.park = undefined;
+    land();
+    await settleMicrotasks();
+    expect(store.refuseGuardedReleaseWrites).toBe(0);
+    expect(files.files.get(journalPath)).toContain("explicit-release");
+    expect(timer.getPendingTimeouts()).toContain(TERMINAL_RETRY_DELAY_MS);
+    expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
+    await timer.advanceTimeAsync(TERMINAL_RETRY_DELAY_MS);
+    await settleMicrotasks();
+    expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: "explicit-release" });
+    expect(files.files.get(journalPath) ?? "").not.toContain("explicit-release");
+  });
+
+  test.each(["expired", "daemon-restart"])(
+    "concurrent activity re-persists on a %s row both succeed",
+    async (reason) => {
+      manager.attachDaemonSessionId("daemon-1");
+      const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      await store.markReleased(SESSION, "expired", timer.now(), reason);
+      timer.advanceTime(1);
+      store.activityUpserts = 0;
+      expect(await Promise.all([refresh(), refresh()])).toEqual(["refreshed", "refreshed"]);
+      expect(store.activityUpserts).toBeGreaterThanOrEqual(1);
+      expect(store.activityUpserts).toBeLessThanOrEqual(2);
+      expect(await store.getSession?.(SESSION)).toMatchObject({
+        status: "active",
+        device_id: DEVICE,
+      });
+      expect(manager.getSession(SESSION)).toBe(session);
+      expect(releases).toEqual([]);
+    },
+  );
+
   /**
    * A device-loss release is superseded while its terminal write is parked; the write then lands
    * late, under the session that lives on, and the rewrite of the live row fails `failures` times.
@@ -85,6 +381,328 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     expect(manager.getSession(SESSION)).not.toBeNull();
     timer.advanceTime(1);
   }
+
+  test.each(["terminal", "active-peer"])(
+    "a parked terminal write preserves the peer's %s row",
+    async (shape) => {
+      manager.attachDaemonSessionId("daemon-1");
+      manager.attachLiveDaemonSessionIds(() => new Set(["daemon-1", "daemon-peer"]));
+      const landReleaseWrite = await supersededReleaseWithParkedWrite();
+      const before = {
+        ...(await store.getSession?.(SESSION))!,
+        daemon_session_id: "daemon-peer",
+        ...(shape === "terminal"
+          ? { status: "released" as const, release_reason: "explicit-release" }
+          : {}),
+      };
+      store.seed(structuredClone(before));
+
+      landReleaseWrite();
+      await settleMicrotasks();
+      await timer.advanceTimeAsync(RETRY_DELAY_MS * 4);
+      await settleMicrotasks();
+
+      expect(await store.getSession?.(SESSION)).toEqual(before);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(manager.getSession(SESSION)).not.toBeNull();
+      expect(releases).toEqual([]);
+      if (shape === "terminal") {
+        timer.advanceTime(1);
+        expect(await refresh()).toBe("TerminalSessionError");
+        expect(manager.getSession(SESSION)).toBeNull();
+        expect(releases).toEqual(["explicit-release"]);
+        expect(await store.getSession?.(SESSION)).toEqual(before);
+      }
+    },
+  );
+
+  test.each(["terminal", "active-peer"])(
+    "a rebind refused over the peer's %s row never publishes its binding",
+    async (shape) => {
+      manager.attachDaemonSessionId("daemon-1");
+      manager.attachLiveDaemonSessionIds(() => new Set(["daemon-1", "daemon-peer"]));
+      const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      const before = {
+        ...(await store.getSession?.(SESSION))!,
+        daemon_session_id: "daemon-peer",
+        ...(shape === "terminal"
+          ? { status: "released" as const, release_reason: "explicit-release" }
+          : {}),
+      };
+      store.duringPlainUpsert = async () => {
+        store.seed(structuredClone(before));
+      };
+
+      await expect(
+        manager.rebindSession(SESSION, "emulator-5556", "android"),
+      ).rejects.toHaveProperty(
+        "name",
+        shape === "terminal" ? "TerminalSessionError" : "DeviceSessionRowNotRewritableError",
+      );
+
+      expect(session.assignedDevice).toBe(DEVICE);
+      expect(manager.getSessionForDevice("emulator-5556")).toBeNull();
+      expect(await store.getSession?.(SESSION)).toEqual(before);
+      expect(manager.getSession(SESSION)).toBe(shape === "terminal" ? null : session);
+      expect(releases).toEqual(shape === "terminal" ? ["explicit-release"] : []);
+    },
+  );
+
+  test("a busy rebind keeps its old binding and a retry without a peer lands", async () => {
+    const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    store.failPlainUpserts = 1;
+    await expect(manager.rebindSession(SESSION, "emulator-5556", "android")).rejects.toThrow(
+      "SQLITE_BUSY",
+    );
+    expect(manager.getSession(SESSION)).toBe(session);
+    expect(session.assignedDevice).toBe(DEVICE);
+    expect(await store.getSession?.(SESSION)).toMatchObject({
+      device_id: DEVICE,
+      status: "active",
+    });
+    expect(releases).toEqual([]);
+    await manager.rebindSession(SESSION, "emulator-5556", "android");
+    expect(session.assignedDevice).toBe("emulator-5556");
+    expect(await store.getSession?.(SESSION)).toMatchObject({
+      device_id: "emulator-5556",
+      status: "active",
+    });
+  });
+
+  test.each(["explicit-release", "device-killed"])(
+    "a committed terminal upgrade replaces its own earlier reason with %s",
+    async (reason) => {
+      const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      let land!: () => void;
+      store.park = new Promise<void>((resolve) => {
+        land = resolve;
+      });
+      const releasing = manager.releaseSession(SESSION, "cli-idle-timeout");
+      await settleMicrotasks();
+      const upgrading = manager.releaseSessionIfOwned(SESSION, session, DEVICE, reason);
+      await settleMicrotasks();
+      store.park = undefined;
+      land();
+      await Promise.all([releasing, upgrading]);
+      expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: reason });
+      expect(manager.getSession(SESSION)).toBeNull();
+    },
+  );
+
+  test("a finalized terminal reason is upgraded to device-killed in the row too", async () => {
+    const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    let upgraded: Promise<unknown> | undefined;
+    manager.onSessionRelease((_id, _device, reason) => {
+      if (reason === "explicit-release") {
+        void Promise.resolve()
+          .then(() => {})
+          .then(() => {})
+          .then(() => {
+            upgraded = manager.releaseSessionIfOwned(SESSION, session, DEVICE, "device-killed");
+          });
+      }
+    });
+    await manager.releaseSession(SESSION, "explicit-release");
+    await settleMicrotasks();
+    await upgraded;
+    expect(upgraded).toBeDefined();
+    expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: "device-killed" });
+    expect(releases).toEqual(["explicit-release", "device-killed"]);
+  });
+
+  test("a refused superseded release owes no live rewrite", async () => {
+    manager.attachDaemonSessionId("daemon-1");
+    manager.attachLiveDaemonSessionIds(() => new Set(["daemon-1", "daemon-peer"]));
+    const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    let land!: () => void;
+    store.park = new Promise<void>((resolve) => {
+      land = resolve;
+    });
+    let superseded = false;
+    const released = manager.releaseSessionUnlessSuperseded(
+      SESSION,
+      DEVICE_LOSS,
+      () => !superseded,
+    );
+    await settleMicrotasks();
+    const before = {
+      ...(await store.getSession?.(SESSION))!,
+      status: "released" as const,
+      release_reason: DEVICE_LOSS,
+      daemon_session_id: "daemon-peer",
+    };
+    store.seed(structuredClone(before));
+    superseded = true;
+    store.park = undefined;
+    store.plainUpserts = 0;
+    land();
+    expect(await released).toEqual({ superseded: true });
+    expect(store.plainUpserts).toBe(0);
+    expect(await store.getSession?.(SESSION)).toEqual(before);
+    expect(manager.getSession(SESSION)).toBe(session);
+    expect(releases).toEqual([]);
+  });
+
+  test("the shutdown drain joins a refused rebind's terminal adoption", async () => {
+    await supersededReleaseWithFailingRewrite(1);
+    let land!: () => void;
+    store.duringPlainUpsert = () =>
+      new Promise<void>((resolve) => {
+        land = resolve;
+      });
+    const rebound = manager.rebindSession(SESSION, "emulator-5556", "android").then(
+      () => "rebound",
+      (error: unknown) => (error instanceof Error ? error.name : String(error)),
+    );
+    await settleMicrotasks();
+    store.seed({
+      ...(await store.getSession?.(SESSION))!,
+      status: "released",
+      release_reason: "explicit-release",
+    });
+    let drained = false;
+    const drain = manager.drainReleasePromises(1_000).then((result) => {
+      drained = true;
+      return result;
+    });
+    await settleMicrotasks();
+    let landRelease!: () => void;
+    store.park = new Promise<void>((resolve) => {
+      landRelease = resolve;
+    });
+    land();
+    await settleMicrotasks();
+    expect(drained).toBe(false);
+    store.park = undefined;
+    landRelease();
+    expect(await rebound).toBe("TerminalSessionError");
+    expect(await drain).toBe(true);
+    expect(manager.getSession(SESSION)).toBeNull();
+    expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: "explicit-release" });
+  });
+
+  test("a current activity refusal over a live peer preserves the held session", async () => {
+    manager.attachDaemonSessionId("daemon-1");
+    manager.attachLiveDaemonSessionIds(() => new Set(["daemon-1", "daemon-peer"]));
+    const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    await store.markReleased(SESSION, "released", timer.now(), "daemon-restart");
+    const before = { ...(await store.getSession?.(SESSION))!, daemon_session_id: "daemon-peer" };
+    store.seed(structuredClone(before));
+    timer.advanceTime(1);
+    expect(await refresh()).toBe("SessionActivityPersistenceError");
+    expect(await store.getSession?.(SESSION)).toEqual(before);
+    expect(manager.getSession(SESSION)).toBe(session);
+    expect(releases).toEqual([]);
+  });
+
+  test.each(["peer", "this-daemon"])(
+    "an old parked activity re-persist preserves a name re-issued by %s",
+    async (owner) => {
+      manager.attachDaemonSessionId("daemon-1");
+      manager.attachLiveDaemonSessionIds(() => new Set(["daemon-1", "daemon-peer"]));
+      const old = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+      let land!: () => void;
+      let parked = false;
+      store.duringActivityUpsert = () => {
+        parked = true;
+        return new Promise<void>((resolve) => {
+          land = resolve;
+        });
+      };
+      timer.advanceTime(1);
+      const activity = refresh();
+      await settleMicrotasks();
+      expect(parked).toBe(true);
+      await manager.releaseSession(SESSION, "plan-auto-release");
+      let replacement;
+      if (owner === "peer") {
+        await store.upsertActiveSession({
+          sessionUuid: SESSION,
+          deviceId: "peer-device",
+          platform: "android",
+          daemonSessionId: "daemon-peer",
+          createdAtMs: timer.now(),
+          lastUsedAtMs: timer.now(),
+          expiresAtMs: timer.now() + IDLE_WINDOW_MS,
+          sessionTimeoutMs: IDLE_WINDOW_MS,
+          heartbeatTimeoutMs: IDLE_WINDOW_MS,
+          hasReceivedHeartbeat: true,
+        });
+      } else {
+        replacement = await manager.createSession(
+          SESSION,
+          "emulator-5556",
+          "android",
+          IDLE_WINDOW_MS,
+        );
+        expect(replacement).not.toBe(old);
+      }
+      const before = structuredClone(await store.getSession?.(SESSION));
+      land();
+      await activity;
+      await settleMicrotasks();
+      await timer.advanceTimeAsync(RETRY_DELAY_MS * 4);
+      await settleMicrotasks();
+
+      expect(await store.getSession?.(SESSION)).toEqual(before);
+      expect(manager.getSession(SESSION)).toBe(replacement ?? null);
+      expect(releases).toEqual(["plan-auto-release"]);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+
+  test("a busy activity re-persist keeps the held session and its next write lands without a peer", async () => {
+    const session = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+    store.failActivityUpserts = 1;
+    timer.advanceTime(1);
+    expect(await refresh()).toBe("SessionActivityPersistenceError");
+    expect(manager.getSession(SESSION)).toBe(session);
+    expect(releases).toEqual([]);
+    expect(await store.getSession?.(SESSION)).toMatchObject({
+      status: "expired",
+      release_reason: "daemon-restart",
+    });
+    expect(await refresh()).toBe("refreshed");
+    expect(await store.getSession?.(SESSION)).toMatchObject({
+      status: "active",
+      release_reason: null,
+      device_id: DEVICE,
+    });
+  });
+
+  test("failed live-daemon discovery leaves the rewrite owed until guarded discovery succeeds", async () => {
+    manager.attachDaemonSessionId("daemon-1");
+    const landReleaseWrite = await supersededReleaseWithParkedWrite();
+    let discoveryFails = true;
+    manager.attachLiveDaemonSessionIds(() => {
+      if (discoveryFails) {
+        throw new Error("PID-file discovery failed");
+      }
+      return new Set(["daemon-1", "daemon-peer"]);
+    });
+
+    landReleaseWrite();
+    await settleMicrotasks();
+
+    expect(store.plainUpserts).toBe(0);
+    expect(await store.getSession?.(SESSION)).toMatchObject({ release_reason: DEVICE_LOSS });
+    expect(manager.getSession(SESSION)).not.toBeNull();
+    expect(releases).toEqual([]);
+    expect(timer.getPendingTimeouts()).toContain(RETRY_DELAY_MS);
+    discoveryFails = false;
+    await timer.advanceTimeAsync(RETRY_DELAY_MS);
+    await settleMicrotasks();
+    expect(store.plainUpserts).toBe(1);
+    expect(await store.getSession?.(SESSION)).toMatchObject({
+      status: "active",
+      release_reason: null,
+    });
+    expect(manager.getSession(SESSION)).not.toBeNull();
+    expect(releases).toEqual([]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
 
   test("one transient failure does not end the live session, and the rewrite is retried", async () => {
     await supersededReleaseWithFailingRewrite(1);

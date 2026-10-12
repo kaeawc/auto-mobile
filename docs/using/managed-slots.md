@@ -196,7 +196,14 @@ connection used for tools and resources:
    holds (`managed_slot_registration_refused`, a protocol answer rather than a
    device-tool refusal). A daemon restart does not end the execution: its session
    is rehydrated, the proxy re-binds, and the restarted daemon records itself as
-   the slot's owner. While the session is live, a duplicate proxy still gets
+   the slot's owner. While the daemon is away, tool calls answer `daemon_stalled`
+   after automatic recovery is exhausted. The proxy keeps probing every heartbeat
+   interval, however long the daemon was away, and reclaims the rehydrated session
+   when the restarted daemon answers; the next call carries `daemon_restart_resumed`.
+   The restarted daemon waits lease + suspect grace (about 8 s) for the owner.
+   If the session is released instead, `managed_execution_ended.reason` names the
+   daemon's release reason, the same value `daemon session-info` shows as
+   `releaseReason`. While the session is live, a duplicate proxy still gets
    `slot_in_use` and the scope is never treated as abandoned.
 4. **Drain and release.** When the execution ends (stdin EOF, cancellation or
    owner loss) the proxy releases its sessions with a bounded wait

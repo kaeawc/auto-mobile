@@ -359,10 +359,150 @@ describe("#11714: an unambiguous platform-only call uses its connection's defaul
     });
   });
 
-  test("6 PIN: the older android platform stays implicit beside the ios default", async () => {
+  test("6: the older android platform uses its held session beside the ios default", async () => {
     await acquire("getAndroid", ANDROID);
     await acquire("getApple", IOS);
     await proxy.callTool("homeScreen", { platform: "android" });
+    expect(lastParams()).toMatchObject({
+      platform: "android",
+      sessionUuid: ANDROID.sessionUuid,
+      [DAEMON_BOUND_SESSION_PARAM]: IOS.sessionUuid,
+      [DAEMON_OWNED_SESSIONS_PARAM]: [IOS.sessionUuid, ANDROID.sessionUuid],
+    });
+  });
+
+  for (const name of ["homeScreen", "observe"]) {
+    for (const flipDefault of [false, true]) {
+      test(`${name} routes each own platform with ${flipDefault ? "android" : "ios"} default`, async () => {
+        await acquire("getAndroid", ANDROID);
+        await acquire("getApple", IOS);
+        if (flipDefault) {
+          const original = client.callTool.bind(client);
+          spies.push(
+            spyOn(client, "callTool").mockImplementation(async (...args) => {
+              if (args[0] !== "setActiveDevice") {
+                return original(...args);
+              }
+              forwarded.push({ name: args[0], params: { ...args[1] } });
+              return { content: [{ type: "text", text: JSON.stringify(ANDROID) }] };
+            }),
+          );
+          await proxy.callTool("setActiveDevice", { platform: "android" });
+          expect(lastParams()).not.toHaveProperty("sessionUuid");
+        }
+        const bound = flipDefault ? ANDROID : IOS;
+        const sibling = flipDefault ? IOS : ANDROID;
+        const args = { platform: sibling.platform };
+        await proxy.callTool(name, { ...args, sessionUuid: sibling.sessionUuid });
+        const explicit = lastParams();
+        await proxy.callTool(name, args);
+        expect(lastParams()).toEqual(explicit);
+        expect(lastParams()).toMatchObject({
+          sessionUuid: sibling.sessionUuid,
+          [DAEMON_BOUND_SESSION_PARAM]: bound.sessionUuid,
+          [DAEMON_OWNED_SESSIONS_PARAM]: [bound.sessionUuid, sibling.sessionUuid],
+        });
+        await proxy.callTool(name, {});
+        const untargeted = lastParams();
+        await proxy.callTool(name, { platform: bound.platform });
+        expect(lastParams()).toEqual({ ...untargeted, platform: bound.platform });
+        expect(lastParams()).toMatchObject({
+          sessionUuid: bound.sessionUuid,
+          [DAEMON_BOUND_SESSION_PARAM]: bound.sessionUuid,
+        });
+        expect(lastParams()).not.toHaveProperty(DAEMON_OWNED_SESSIONS_PARAM);
+        await proxy.callTool("homeScreen", {});
+        expect(lastParams().sessionUuid).toBe(bound.sessionUuid);
+      });
+    }
+  }
+
+  for (const iosDefault of [false, true]) {
+    test(`${iosDefault ? "PIN: " : ""}three known sessions select ios and keep android ambiguity with ${iosDefault ? "ios" : "android"} default`, async () => {
+      const second = { ...ANDROID, sessionUuid: "second-android", deviceId: "emulator-5556" };
+      await acquire("getAndroid", ANDROID);
+      await acquire(iosDefault ? "getAndroid" : "getApple", iosDefault ? second : IOS);
+      await acquire(iosDefault ? "getApple" : "getAndroid", iosDefault ? IOS : second);
+      const bound = iosDefault ? IOS : second;
+      for (const name of ["homeScreen", "observe"]) {
+        await proxy.callTool(name, { platform: "ios" });
+        expect(lastParams()).toMatchObject({
+          platform: "ios",
+          sessionUuid: IOS.sessionUuid,
+          [DAEMON_BOUND_SESSION_PARAM]: bound.sessionUuid,
+        });
+      }
+      const before = forwarded.length;
+      const refusal = await proxy.callTool("homeScreen", { platform: "android" }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(refusal).toBeInstanceOf(DaemonAmbiguousSessionSelectorError);
+      expect(refusal).toMatchObject({
+        candidates: iosDefault
+          ? [
+              { sessionUuid: ANDROID.sessionUuid, deviceId: ANDROID.deviceId },
+              { sessionUuid: second.sessionUuid, deviceId: second.deviceId },
+            ]
+          : [
+              { sessionUuid: second.sessionUuid, deviceId: second.deviceId },
+              { sessionUuid: ANDROID.sessionUuid, deviceId: ANDROID.deviceId },
+            ],
+      });
+      expect(forwarded.length).toBe(before);
+      // PIN: ambiguous read-only selectors remain open.
+      await proxy.callTool("observe", { platform: "android" });
+      expect(lastParams().platform).toBe("android");
+      expect(lastParams()).not.toHaveProperty("sessionUuid");
+      expect(lastParams()).not.toHaveProperty(DAEMON_BOUND_SESSION_PARAM);
+    });
+  }
+
+  test("PIN: a released android sibling is no longer a platform candidate", async () => {
+    await acquire("getAndroid", ANDROID);
+    await acquire("getApple", IOS);
+    client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, ANDROID.sessionUuid, "idle");
+    await proxy.callTool("homeScreen", { platform: "android" });
+    expect(lastParams()).toMatchObject({
+      platform: "android",
+      [DAEMON_OWNED_SESSIONS_PARAM]: [IOS.sessionUuid],
+    });
+    expect(lastParams()).not.toHaveProperty("sessionUuid");
+    expect(lastParams()).not.toHaveProperty(DAEMON_BOUND_SESSION_PARAM);
+  });
+
+  test("PIN: an unknown android sibling platform keeps android selector routing", async () => {
+    await acquire("getAndroid", { ...ANDROID, platform: undefined });
+    await acquire("getApple", IOS);
+    await proxy.callTool("homeScreen", { platform: "android" });
+    expect(lastParams()).toMatchObject({
+      platform: "android",
+      [DAEMON_OWNED_SESSIONS_PARAM]: [IOS.sessionUuid, ANDROID.sessionUuid],
+    });
+    expect(lastParams()).not.toHaveProperty("sessionUuid");
+  });
+
+  for (const release of ["notification", "replay-expiry"]) {
+    test(`PIN: ${release} of the ios default is reported before android sibling routing`, async () => {
+      await acquire("getAndroid", ANDROID);
+      await acquire("getApple", IOS);
+      if (release === "notification") {
+        client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, IOS.sessionUuid, "idle");
+      } else {
+        timer.setCurrentTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS + 1);
+      }
+      const before = forwarded.length;
+      await expect(proxy.callTool("homeScreen", { platform: "android" })).rejects.toBeInstanceOf(
+        DaemonConnectionSessionReleasedError,
+      );
+      expect(forwarded.length).toBe(before);
+    });
+  }
+
+  test("PIN: setActiveDevice's android selector stays implicit beside the ios default", async () => {
+    await acquire("getAndroid", ANDROID);
+    await acquire("getApple", IOS);
+    await proxy.callTool("setActiveDevice", { platform: "android" });
     expect(lastParams()).toMatchObject({
       platform: "android",
       [DAEMON_OWNED_SESSIONS_PARAM]: [IOS.sessionUuid, ANDROID.sessionUuid],
@@ -569,6 +709,106 @@ describe("#11714: an unambiguous platform-only call uses its connection's defaul
     const second = { ...ANDROID, sessionUuid: "second-android", deviceId: "emulator-5556" };
     await acquire("getAndroid", second);
     await expectDefaultRoute(second);
+  });
+
+  test("an expired ios default reports its release before a default-platform read beside an android sibling", async () => {
+    await acquire("getAndroid", ANDROID);
+    await acquire("getApple", IOS);
+    timer.setCurrentTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS + 1);
+    const before = forwarded.length;
+    const refusal = await proxy.callTool("observe", { platform: "ios" }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(refusal).toBeInstanceOf(DaemonConnectionSessionReleasedError);
+    expect(refusal).toMatchObject({ reason: "replay-lease-expired" });
+    expect(forwarded.length).toBe(before);
+  });
+
+  test("reacquisition after a released startup binding injects the new default for control and read", async () => {
+    const daemonManager = new FakeDaemonManager();
+    daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
+    const startupProxy = new DaemonMcpProxy({
+      initialSessionUuid: "startup-session",
+      livenessOwnerToken: "stable-owner-token",
+      clientFactory: () => client,
+      daemonManager,
+      autoStartDaemon: false,
+      timer,
+      idGenerator: new FakeIdGenerator(),
+      heartbeatIntervalMs: 2_000,
+      heartbeatTimeoutMs: 10_000,
+    });
+    try {
+      await startupProxy.claimInitialSession();
+      client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "startup-session", "idle");
+      acquisitions.push(ANDROID);
+      await startupProxy.callTool("getAndroid", {});
+      const before = forwarded.length;
+      await startupProxy.callTool("homeScreen", { platform: "android" });
+      await startupProxy.callTool("observe", { platform: "android" });
+      expect(forwarded.slice(before)).toEqual([
+        {
+          name: "homeScreen",
+          params: {
+            platform: "android",
+            sessionUuid: ANDROID.sessionUuid,
+            [DAEMON_BOUND_SESSION_PARAM]: ANDROID.sessionUuid,
+          },
+        },
+        {
+          name: "observe",
+          params: {
+            platform: "android",
+            sessionUuid: ANDROID.sessionUuid,
+            [DAEMON_BOUND_SESSION_PARAM]: ANDROID.sessionUuid,
+          },
+        },
+      ]);
+    } finally {
+      await startupProxy.close();
+    }
+  });
+
+  test("PIN: an expired default leaves a sibling platform-only read sessionless", async () => {
+    await acquire("getAndroid", ANDROID);
+    await acquire("getApple", IOS);
+    timer.setCurrentTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS + 1);
+    const before = forwarded.length;
+    await proxy.callTool("observe", { platform: "android" });
+    expect(forwarded.length).toBe(before + 1);
+    expect(lastParams()).toMatchObject({ platform: "android" });
+    expect(lastParams()).not.toHaveProperty("sessionUuid");
+    expect(lastParams()).not.toHaveProperty(DAEMON_BOUND_SESSION_PARAM);
+  });
+
+  test("PIN: a managed android binding keeps the ios selector on its default", async () => {
+    daemonMethodResults.set(DAEMON_TOKEN_OWNED_SESSIONS_METHOD, {
+      sessions: [
+        {
+          sessionId: ANDROID.sessionUuid,
+          deviceId: ANDROID.deviceId,
+          platform: "android",
+          lastUsedAt: timer.now(),
+        },
+        {
+          sessionId: IOS.sessionUuid,
+          deviceId: IOS.deviceId,
+          platform: "ios",
+          lastUsedAt: timer.now(),
+        },
+      ],
+    });
+    await proxy.holdManagedExecutionSession(ANDROID.sessionUuid);
+    for (const name of ["homeScreen", "observe"]) {
+      await proxy.callTool(name, { platform: "ios" });
+      expect(lastParams()).toEqual({
+        platform: "ios",
+        sessionUuid: ANDROID.sessionUuid,
+        [DAEMON_BOUND_SESSION_PARAM]: ANDROID.sessionUuid,
+      });
+    }
+    expect(forwarded).toHaveLength(2);
   });
 
   test("D PIN: an expired replay lease refuses a matching platform like untargeted control", async () => {

@@ -116,7 +116,9 @@ import {
 export const RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS =
   SESSION_REHYDRATION_DEADLINE_MS + NO_HEARTBEAT_RELEASE_BUDGET_MS;
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { exponentialBackoff } from "../utils/Backoff";
+import { exponentialBackoff, normalizeBackoff, type BackoffInput } from "../utils/Backoff";
+import { DEVICE_CLEANUP_IN_PROGRESS_CODE } from "./deviceAcquisitionRefusals";
+import { readToolEnvelopePayload } from "../server/toolEnvelopePayload";
 import {
   type BuildIdentity,
   buildIdentitiesMatch,
@@ -971,6 +973,8 @@ export interface DaemonMcpProxyConfig {
   timer?: Timer;
   /** Total wait for a bind refused as `device_cleanup_in_progress` (#10960); 0 disables it. */
   cleanupWaitBudgetMs?: number;
+  /** Poll cadence while a refused bind waits for cleanup; defaults to 250ms x2, capped at 5s. */
+  cleanupWaitBackoff?: BackoffInput;
   /** Daemon session heartbeat timeout used to derive a safe cadence when unset. */
   heartbeatTimeoutMs?: number;
   /** Explicit bound-session heartbeat cadence; defaults to half the timeout or 2s. */
@@ -1299,12 +1303,15 @@ export function mergeDaemonOptions(
  */
 export const DEVICE_CLEANUP_WAIT_BUDGET_MS = 150_000;
 
-/** Floor under the daemon's `retryAfterMs` so a refusal that hints 0 ms is not busy-polled. */
+/** Short growing polls notice early cleanup; its remaining-cap hint is an upper bound (#11900). */
 const DEVICE_CLEANUP_BACKOFF = exponentialBackoff({
   initialDelayMs: 250,
   multiplier: 2,
   maxDelayMs: 5_000,
 });
+
+/** A hint or backoff near zero must not busy-poll the daemon (#11900). */
+const DEVICE_CLEANUP_POLL_FLOOR_MS = 50;
 
 /**
  * Record a managed execution's release outcome (#11177). `cleanup_pending` means some of the
@@ -4247,7 +4254,7 @@ export class DaemonMcpProxy {
 
   /**
    * A bind refused as `device_cleanup_in_progress` never reached a device, so it is forwarded
-   * again once the daemon says the previous session's cleanup should be done (#10960). The wait is
+   * again on short growing polls while the previous session's cleanup settles (#11900). The wait is
    * bounded by the cleanup budget; when it runs out the last refusal is returned unchanged.
    */
   private async waitOutDeviceCleanup(
@@ -4260,6 +4267,7 @@ export class DaemonMcpProxy {
   ): Promise<ForwardedToolCall> {
     const budgetMs = this.config.cleanupWaitBudgetMs ?? DEVICE_CLEANUP_WAIT_BUDGET_MS;
     const deadline = this.timer.now() + budgetMs;
+    const backoff = normalizeBackoff(this.config.cleanupWaitBackoff ?? DEVICE_CLEANUP_BACKOFF);
     let current = first;
     for (let attempt = 1; !this.closing; attempt++) {
       const refusal = readDeviceCleanupInProgressRefusal(current.result);
@@ -4267,21 +4275,50 @@ export class DaemonMcpProxy {
       if (!refusal || remaining <= 0) {
         return current;
       }
-      const delayMs = Math.min(
-        remaining,
-        Math.max(refusal.retryAfterMs ?? 0, DEVICE_CLEANUP_BACKOFF.delayForAttempt(attempt)),
+      const backoffMs = backoff.delayForAttempt(attempt);
+      const hintMs = refusal.retryAfterMs;
+      const cleanupCap =
+        readToolEnvelopePayload(current.result)?.payload.code === DEVICE_CLEANUP_IN_PROGRESS_CODE;
+      const stepMs = Math.max(
+        DEVICE_CLEANUP_POLL_FLOOR_MS,
+        hintMs !== undefined && hintMs > 0
+          ? cleanupCap
+            ? Math.min(hintMs, backoffMs)
+            : Math.max(hintMs, backoffMs)
+          : backoffMs,
       );
+      const delayMs = Math.floor(Math.min(remaining, stepMs));
+      if (delayMs <= 0) {
+        return current;
+      }
       logger.info(
-        `[DaemonMcpProxy] ${name} refused while the device finishes its previous session's cleanup; retrying in ${delayMs}ms`,
+        `[DaemonMcpProxy] ${name} refused while the device finishes its previous session's cleanup; re-checking in ${delayMs}ms`,
       );
-      await raceWithDeadline(this.timer.sleep(delayMs), {
-        timer: this.timer,
-        signal,
-        label: "Device cleanup wait",
-      });
+      await this.waitForCleanupPoll(delayMs, signal);
       current = await this.forwardToolCall(name, args, progressToken, onProgress, signal, false);
     }
     return current;
+  }
+
+  /** Keep the poll timeout cancellable; raceWithDeadline owns and removes the abort listener. */
+  private async waitForCleanupPoll(
+    delayMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    let handle: NodeJS.Timeout | undefined;
+    try {
+      await raceWithDeadline(
+        () =>
+          new Promise<void>((resolve) => {
+            handle = this.timer.setTimeout(resolve, delayMs);
+          }),
+        { timer: this.timer, signal, label: "Device cleanup wait" },
+      );
+    } finally {
+      if (handle !== undefined) {
+        this.timer.clearTimeout(handle);
+      }
+    }
   }
 
   /**

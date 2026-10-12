@@ -81,7 +81,10 @@ export function describeOutcome(result: unknown): string {
   return "ran";
 }
 
-export async function transportAliasHarness(options: HarnessOptions): Promise<Harness> {
+export async function transportAliasHarness(
+  options: HarnessOptions,
+  cleanups: Array<() => void>,
+): Promise<Harness> {
   const timer = new FakeTimer();
   const discovery = new FakeDeviceUtils();
   discovery.setBootedDevices("android", options.pooledRows);
@@ -94,14 +97,27 @@ export async function transportAliasHarness(options: HarnessOptions): Promise<Ha
     adb.setCommandResponse("getprop ro.boot.qemu.avd_name", createExecResult(options.avd, ""));
   }
   const adbFactory = new FakeAdbClientFactory(adb);
-  // The ingress lists raw adb rows through the process-wide device manager, as the daemon does.
-  PlatformDeviceManagerFactory.setInstance(discovery);
   const sessions = new SessionManager(
     timer,
     new FakeDeviceSessionPersistence(),
     () => new FakeDbWriteBarrier(),
   );
   sessions.stopCleanupTimer();
+  const tools = new RealToolCallPath([...options.pooledRows, ...(options.iosRows ?? [])]);
+  const registryTimer: unknown = Reflect.get(ToolRegistry, "timer");
+  const dispose = () => {
+    PlatformDeviceManagerFactory.setInstance(null);
+    tools.uninstall();
+    Reflect.set(ToolRegistry, "timer", registryTimer);
+    DaemonState.getInstance().reset();
+    sessions.stopCleanupTimer();
+    timer.reset();
+  };
+  // The caller owns teardown even if refresh, singleton initialization or tool install throws.
+  cleanups.push(dispose);
+  // The ingress lists raw adb rows through the process-wide device manager, as the daemon does.
+  PlatformDeviceManagerFactory.setInstance(discovery);
+  Reflect.set(ToolRegistry, "timer", timer);
   const registry = new FakeSlotRegistry(timer);
   if (options.managedSlotStableId) {
     await assignManagedSlotDevice(registry, "android", options.managedSlotStableId, "runner-b");
@@ -119,7 +135,7 @@ export async function transportAliasHarness(options: HarnessOptions): Promise<Ha
   );
   await pool.refreshDevices();
   DaemonState.getInstance().initialize(sessions, pool, new DeviceSessionRegistry(timer));
-  const tools = new RealToolCallPath([...options.pooledRows, ...(options.iosRows ?? [])]).install();
+  tools.install();
   // The real session manager's scan is already mapped onto pooled ids by the pool (#11133).
   const readinessScan = (rows: BootedDevice[]) =>
     tools.deviceSessionManager.setConnectedDevices([
@@ -144,13 +160,6 @@ export async function transportAliasHarness(options: HarnessOptions): Promise<Ha
     },
     { deviceReadOnly: true },
   );
-  const dispose = () => {
-    PlatformDeviceManagerFactory.setInstance(null);
-    tools.uninstall();
-    DaemonState.getInstance().reset();
-    sessions.stopCleanupTimer();
-    timer.reset();
-  };
   if (options.held) {
     await pool.bindOrReuseDeviceSession(
       HOLDER,

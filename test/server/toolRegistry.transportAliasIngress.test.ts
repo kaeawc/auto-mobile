@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE } from "../../src/daemon/managedSlots/managedSlotRefusal";
@@ -25,9 +25,7 @@ afterEach(() => {
   }
 });
 async function harness(options: HarnessOptions) {
-  const h = await transportAliasHarness(options);
-  cleanups.push(h.dispose);
-  return h;
+  return transportAliasHarness(options, cleanups);
 }
 
 const phone = () => harness({ pooledRows: [booted(USB), booted(WIRELESS)], held: USB });
@@ -479,6 +477,27 @@ describe("unidentified transports use the held-alias rule (#11596)", () => {
       expect(h.sessions.getAllSessions().map((s) => s.sessionId)).toEqual(sessionsBefore);
     },
   );
+
+  test("a healthy listing gives an unidentified read the real transport row", async () => {
+    const generic = "0123456789abcdef";
+    const listed = booted(WIRELESS);
+    const h = await harness({
+      pooledRows: [booted(generic), listed],
+      serial: generic,
+      held: generic,
+    });
+    const identity = spyOn(h.pool, "androidTransportMayAliasDevice");
+    cleanups.push(() => identity.mockRestore());
+    const listingsBefore = h.rawScans();
+
+    expect(await h.outcome("readProbe", { platform: "android", deviceId: WIRELESS })).toBe("ran");
+
+    expect(h.rawScans() - listingsBefore).toBe(2);
+    expect(identity).toHaveBeenCalledWith(listed, generic);
+    expect(identity.mock.calls.at(-1)?.[0]).toBe(listed);
+    expect(h.reads).toEqual([WIRELESS]);
+    expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+  });
 
   test("an unidentified read with nothing held keeps read readiness", async () => {
     const h = await harness({ pooledRows: [booted(WIRELESS)], serial: "unknown" });

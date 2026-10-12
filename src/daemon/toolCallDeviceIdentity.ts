@@ -21,11 +21,51 @@ export type ToolCallDeviceIdentityPool = FrameDeviceIdentityPool;
 /** How long an ingress probe that proved nothing is trusted before the transport is probed again. */
 export const UNPROVEN_TRANSPORT_PROBE_RETRY_MS = 30_000;
 
+/**
+ * Share a failed placement across a read's ingress, resolver and held-alias gate. Longer than
+ * the 10 s device-list timeout, but shorter than the unproven-identity retry window; controls
+ * always ask again, even immediately after a failed read.
+ */
+export const READ_TRANSPORT_LISTING_FAILURE_RETRY_MS = 15_000;
+
 /** Entries kept per pool; a full memo is dropped whole (it is only a probe-rate limiter). */
 const UNPROVEN_TRANSPORT_MEMO_LIMIT = 256;
 
 /** Per pool: transports an ingress probe could not identify, and when it last tried. */
 const unprovenTransportProbes = new WeakMap<object, Map<string, number>>();
+
+/** Per pool and address: incomplete placement listings remembered only by reads. */
+const failedReadTransportListings = new WeakMap<object, Map<string, number>>();
+
+/** Whether a read should reuse missing discovery evidence instead of asking adb again. */
+export function hasRecentReadTransportListingFailure(
+  pool: ToolCallDeviceIdentityPool,
+  deviceId: string,
+  now: number,
+): boolean {
+  const memo = failedReadTransportListings.get(pool);
+  const failedAt = memo?.get(deviceId);
+  if (failedAt === undefined) {
+    return false;
+  }
+  if (
+    canonicalFrameDeviceId(pool, deviceId) !== deviceId ||
+    !isUnfoldedTransportAddress(pool, deviceId) ||
+    now - failedAt >= READ_TRANSPORT_LISTING_FAILURE_RETRY_MS
+  ) {
+    memo?.delete(deviceId);
+    return false;
+  }
+  return true;
+}
+
+/** A full memo is dropped whole: neither rate limiter carries identity evidence. */
+function rememberTransportProbe(memo: Map<string, number>, deviceId: string, now: number): void {
+  if (memo.size >= UNPROVEN_TRANSPORT_MEMO_LIMIT) {
+    memo.clear();
+  }
+  memo.set(deviceId, now);
+}
 
 /**
  * `args` with every caller-supplied device id as the pool's canonical id, from the pool's cached
@@ -116,7 +156,7 @@ export interface ToolCallDeviceIdProbe {
    * of: a host without adb (or without Android devices) is refused nothing here.
    */
   tracksAndroidDevice: () => boolean;
-  /** The caller's clock, for {@link UNPROVEN_TRANSPORT_PROBE_RETRY_MS}. */
+  /** The caller's clock, for the unproven-identity and failed-read retry windows. */
   now: number;
 }
 
@@ -178,7 +218,8 @@ export function resolveToolCallDeviceIds<T>(
  * answered from the pool's cached fold with no device I/O. Only an unfolded transport ADDRESS is
  * probed, and one the probe could not identify is not probed again for
  * {@link UNPROVEN_TRANSPORT_PROBE_RETRY_MS}; the pool's own refresh keeps retrying it meanwhile.
- * Reads share this probe, but keep the id as sent on an incomplete listing. The probe only
+ * Reads share this probe, but keep the id as sent on an incomplete listing and reuse that failure
+ * for {@link READ_TRANSPORT_LISTING_FAILURE_RETRY_MS}. The probe only
  * reads discovery/identity and updates the fold; it never readies a device.
  *
  * Returns the id synchronously whenever no probe is needed, so an ordinary call gains no extra
@@ -194,7 +235,11 @@ export function canonicalControlCallDeviceId(
   const cached = canonicalFrameDeviceId(pool, deviceId);
   if (cached !== deviceId || !isUnfoldedTransportAddress(pool, deviceId)) {
     unprovenTransportProbes.get(pool)?.delete(deviceId);
+    failedReadTransportListings.get(pool)?.delete(deviceId);
     return cached;
+  }
+  if (input.refuseUnplaced === false && hasRecentReadTransportListingFailure(pool, deviceId, now)) {
+    return deviceId;
   }
   const memo = unprovenTransportProbes.get(pool) ?? new Map<string, number>();
   unprovenTransportProbes.set(pool, memo);
@@ -214,9 +259,15 @@ async function foldFirstSeenTransport(
   const { deviceId, now } = input;
   const listing = await input.listRawAndroidDevices();
   if (!listing.complete) {
-    // Never remembered: the next call asks adb again, so a recovered adb is seen at once.
+    if (input.refuseUnplaced === false) {
+      const failures = failedReadTransportListings.get(pool) ?? new Map<string, number>();
+      failedReadTransportListings.set(pool, failures);
+      rememberTransportProbe(failures, deviceId, now);
+    }
+    // Control failures are never remembered: the next control sees a recovered adb at once.
     return unlistedTransportOutcome(input, listing.error);
   }
+  failedReadTransportListings.get(pool)?.delete(deviceId);
   const android = listing.devices.filter((device) => device.platform === "android");
   const canonical = await canonicalizeFrameDiscovery(pool, "android", android, deviceId);
   await input.reconcileDiscovery(canonical.devices);
@@ -227,10 +278,7 @@ async function foldFirstSeenTransport(
   }
   // Only a transport that was connected was probed; an absent one is looked for again next call.
   if (android.some((device) => device.deviceId === deviceId)) {
-    if (memo.size >= UNPROVEN_TRANSPORT_MEMO_LIMIT) {
-      memo.clear();
-    }
-    memo.set(deviceId, now);
+    rememberTransportProbe(memo, deviceId, now);
   }
   return deviceId;
 }

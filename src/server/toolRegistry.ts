@@ -47,7 +47,11 @@ import { UnissuedSessionError, type Session, type SessionManager } from "../daem
 import { DaemonState } from "../daemon/daemonState";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
-import { resolveToolCallDeviceIds, toolCallNamesDeviceId } from "../daemon/toolCallDeviceIdentity";
+import {
+  hasRecentReadTransportListingFailure,
+  resolveToolCallDeviceIds,
+  toolCallNamesDeviceId,
+} from "../daemon/toolCallDeviceIdentity";
 import {
   assertFrameTargetIdentityProven,
   frameHeldSessionsFrom,
@@ -813,10 +817,10 @@ function multipleDevicesError(
  */
 async function isSessionlessReadTargetHeld(
   toolName: string,
-  deviceId: string,
-  requestedPlatform: unknown,
+  input: { deviceId: string; platform: unknown; now: number },
   signal?: AbortSignal,
 ): Promise<boolean> {
+  const { deviceId, platform: requestedPlatform, now } = input;
   const daemonState = DaemonState.getInstance();
   if (!daemonState.isInitialized()) {
     return false;
@@ -827,7 +831,7 @@ async function isSessionlessReadTargetHeld(
   const pool = daemonState.getDevicePool();
   try {
     const unidentified = await unidentifiedToolTargetRow(
-      { deviceId, platform: requestedPlatform },
+      { deviceId, platform: requestedPlatform, readOnly: true, now },
       signal,
     );
     if (
@@ -1492,7 +1496,15 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           readOnly &&
           !sessionUuid &&
           readinessTarget &&
-          (await isSessionlessReadTargetHeld(name, readinessTarget, args.platform, signal))
+          (await isSessionlessReadTargetHeld(
+            name,
+            {
+              deviceId: readinessTarget,
+              platform: args.platform,
+              now: (input.timer ?? defaultTimer).now(),
+            },
+            signal,
+          ))
         ) {
           return resolveSessionlessDeviceRead(
             input,
@@ -2672,7 +2684,7 @@ interface ToolTargetIdentityInput {
  * The cached listing matches direct input frames; an unavailable row stays conservative.
  */
 async function unidentifiedToolTargetRow(
-  input: ToolTargetIdentityInput,
+  input: ToolTargetIdentityInput & ({ readOnly: true; now: number } | { readOnly: false }),
   signal?: AbortSignal,
 ): Promise<BootedDevice | undefined> {
   const daemonState = DaemonState.getInstance();
@@ -2692,8 +2704,21 @@ async function unidentifiedToolTargetRow(
   if (pool.isAndroidTransportAssignable?.(synthetic) !== false) {
     return undefined;
   }
-  if (input.device) {
-    return input.device;
+  const reusableRow = (): BootedDevice | undefined => {
+    if (input.device) {
+      return input.device;
+    }
+    if (
+      input.readOnly &&
+      hasRecentReadTransportListingFailure(pool, synthetic.deviceId, input.now)
+    ) {
+      return synthetic;
+    }
+    return undefined;
+  };
+  const cachedRow = reusableRow();
+  if (cachedRow) {
+    return cachedRow;
   }
   try {
     const listing = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(
@@ -2722,7 +2747,7 @@ async function assertToolControlTargetIdentity(
   if (input.readOnly) {
     return;
   }
-  const device = await unidentifiedToolTargetRow(input, signal);
+  const device = await unidentifiedToolTargetRow({ ...input, readOnly: false }, signal);
   if (!device) {
     return;
   }

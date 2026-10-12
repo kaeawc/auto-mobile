@@ -4,12 +4,15 @@ import {
   canonicalizeToolCallDeviceIds,
   resolveToolCallDeviceIds,
   toolCallNamesDeviceId,
+  hasRecentReadTransportListingFailure,
+  READ_TRANSPORT_LISTING_FAILURE_RETRY_MS,
   UNPROVEN_TRANSPORT_PROBE_RETRY_MS,
   type ToolCallDeviceIdentityPool,
   type ToolCallDeviceIdProbe,
 } from "../../src/daemon/toolCallDeviceIdentity";
 import type { BootedDevice } from "../../src/models";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const USB = "R5CT1234ABC";
 const WIRELESS = "192.168.1.20:5555";
@@ -386,6 +389,120 @@ describe("resolveToolCallDeviceIds", () => {
 });
 
 describe("read transport probe", () => {
+  test("a failed read placement is shared until the short retry window expires", async () => {
+    const timer = new FakeTimer();
+    const pool = fakePool({ folded: false, provable: true });
+    const scan = scanOf([android(USB), android(WIRELESS)]);
+    scan.failure = "adb devices failed";
+    const read = () =>
+      canonicalControlCallDeviceId({
+        ...probeOf(scan, timer.now()),
+        pool,
+        deviceId: WIRELESS,
+        refuseUnplaced: false,
+      });
+
+    expect(await read()).toBe(WIRELESS);
+    timer.advanceTime(10_000);
+    expect(await read()).toBe(WIRELESS);
+    expect(scan.calls).toBe(1);
+    scan.failure = undefined;
+    timer.advanceTime(READ_TRANSPORT_LISTING_FAILURE_RETRY_MS - 10_000 + 1);
+    expect(await read()).toBe(USB);
+    expect(scan.calls).toBe(2);
+    timer.reset();
+  });
+
+  test("failed read listings are remembered per pool and address with an explicit expiry", async () => {
+    const timer = new FakeTimer();
+    const pool = fakePool({ folded: false });
+    const otherPool = fakePool({ folded: false });
+    const scan = scanOf([]);
+    scan.failure = "adb devices failed";
+    await canonicalControlCallDeviceId({
+      ...probeOf(scan, timer.now()),
+      pool,
+      deviceId: WIRELESS,
+      refuseUnplaced: false,
+    });
+
+    expect(hasRecentReadTransportListingFailure(pool, WIRELESS, timer.now())).toBe(true);
+    expect(hasRecentReadTransportListingFailure(pool, OTHER_WIRELESS, timer.now())).toBe(false);
+    expect(hasRecentReadTransportListingFailure(otherPool, WIRELESS, timer.now())).toBe(false);
+    timer.advanceTime(READ_TRANSPORT_LISTING_FAILURE_RETRY_MS - 1);
+    expect(hasRecentReadTransportListingFailure(pool, WIRELESS, timer.now())).toBe(true);
+    timer.advanceTime(1);
+    expect(hasRecentReadTransportListingFailure(pool, WIRELESS, timer.now())).toBe(false);
+    timer.reset();
+  });
+
+  test("a control-only failure never creates a failed-read memo", async () => {
+    const pool = fakePool({ folded: false });
+    const scan = scanOf([]);
+    scan.failure = "adb devices failed";
+    expect(
+      await outcomeOf(
+        canonicalControlCallDeviceId({
+          ...probeOf(scan),
+          pool,
+          deviceId: WIRELESS,
+        }),
+      ),
+    ).toEqual(DISCOVERY_INCOMPLETE);
+    expect(hasRecentReadTransportListingFailure(pool, WIRELESS, 0)).toBe(false);
+  });
+
+  test.each(["resolve", "query"])(
+    "a cached fold clears the failed-read memo via %s",
+    async (path) => {
+      const pool = fakePool({ folded: false });
+      const scan = scanOf([]);
+      scan.failure = "adb devices failed";
+      const input = { ...probeOf(scan), pool, deviceId: WIRELESS, refuseUnplaced: false };
+      await canonicalControlCallDeviceId(input);
+      pool.folded = true;
+      if (path === "resolve") {
+        expect(canonicalControlCallDeviceId(input)).toBe(USB);
+      } else {
+        expect(hasRecentReadTransportListingFailure(pool, WIRELESS, 0)).toBe(false);
+      }
+      pool.folded = false;
+      expect(hasRecentReadTransportListingFailure(pool, WIRELESS, 0)).toBe(false);
+      expect(scan.calls).toBe(1);
+    },
+  );
+
+  test.each(["absent", "unproven", "folded"])(
+    "a completed %s listing clears the failed-read memo",
+    async (result) => {
+      const pool = fakePool({ folded: false, provable: result === "folded" });
+      const scan = scanOf(result === "absent" ? [android(USB)] : [android(USB), android(WIRELESS)]);
+      scan.failure = "adb devices failed";
+      const input = { ...probeOf(scan), pool, deviceId: WIRELESS };
+      await canonicalControlCallDeviceId({ ...input, refuseUnplaced: false });
+      scan.failure = undefined;
+      expect(await canonicalControlCallDeviceId(input)).toBe(result === "folded" ? USB : WIRELESS);
+      expect(scan.calls).toBe(2);
+      expect(hasRecentReadTransportListingFailure(pool, WIRELESS, 0)).toBe(false);
+    },
+  );
+
+  test("failed-read memo drops a full pool's 256 entries before remembering another", async () => {
+    const pool = fakePool({ folded: false });
+    const scan = scanOf([]);
+    scan.failure = "adb devices failed";
+    const input = { ...probeOf(scan), pool, refuseUnplaced: false };
+    for (let i = 0; i < 256; i++) {
+      await canonicalControlCallDeviceId({ ...input, deviceId: `10.0.0.${i}:5555` });
+    }
+    expect(hasRecentReadTransportListingFailure(pool, "10.0.0.0:5555", 0)).toBe(true);
+    await canonicalControlCallDeviceId({ ...input, deviceId: OTHER_WIRELESS });
+    expect(hasRecentReadTransportListingFailure(pool, "10.0.0.0:5555", 0)).toBe(false);
+    expect(hasRecentReadTransportListingFailure(pool, "10.0.0.255:5555", 0)).toBe(false);
+    expect(hasRecentReadTransportListingFailure(pool, OTHER_WIRELESS, 0)).toBe(true);
+    expect(scan.calls).toBe(257);
+  });
+
   test("a read returns its id on an incomplete listing, while control refuses", async () => {
     const pool = fakePool({ folded: false });
     const scan = scanOf([]);

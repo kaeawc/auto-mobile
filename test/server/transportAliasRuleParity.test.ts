@@ -119,63 +119,76 @@ afterEach(() => {
   }
 });
 
-describe.each(scenarios)("direct frames and tools agree: $name", (scenario) => {
-  let h: Awaited<ReturnType<typeof transportAliasHarness>>;
-  let client: RawFrameClient;
-  beforeAll(async () => {
-    h = await transportAliasHarness(scenario);
-    cleanups.push(h.dispose);
-    if (scenario.requester === "stranger-session") {
-      await h.sessions.createSession("stranger-session", "OTHER-DEVICE", "android");
-    }
-    if (scenario.heldUnrepresentedEmulator) {
-      await h.sessions.createSession(HOLDER, EMULATOR, "android");
-      h.adb.setCommandError("getprop ro.serialno", new Error("unreadable"));
-      h.connect([booted(scenario.target)]);
-    }
-    if (scenario.remote) {
-      h.adb.setCommandResponse("getprop ro.kernel.qemu", createExecResult("1", ""));
-      h.adb.setCommandResponse("getprop ro.boot.qemu.avd_name", createExecResult("Pixel", ""));
-      h.connect([booted(scenario.target)]);
-    }
-    const ios = spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(
-      () =>
-        ({
-          bindSession: () => undefined,
-          getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
-          requestTapCoordinates: async () => ({ success: true }),
-        }) as unknown as IOSCtrlProxyClient,
-    );
-    cleanups.push(() => ios.mockRestore());
-    const wire = InMemoryControlSocket.attach({
-      timer: h.timer,
-      connectionIds: new FakeIdGenerator(),
-      loopback: async () => {
-        throw new Error("Parity harness must not forward MCP calls");
-      },
-      startupOptions: {
-        sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} },
-      },
-    });
-    client = new RawFrameClient("parity", () => wire.connect("parity-connection"));
-    cleanups.push(() => {
-      client.close();
-      wire.kill();
-    });
+async function runScenario(scenario: Scenario, cleanups: Array<() => void>) {
+  const h = await transportAliasHarness(scenario, cleanups);
+  if (scenario.requester === "stranger-session") {
+    await h.sessions.createSession("stranger-session", "OTHER-DEVICE", "android");
+  }
+  if (scenario.heldUnrepresentedEmulator) {
+    await h.sessions.createSession(HOLDER, EMULATOR, "android");
+    h.adb.setCommandError("getprop ro.serialno", new Error("unreadable"));
+    h.connect([booted(scenario.target)]);
+  }
+  if (scenario.remote) {
+    h.adb.setCommandResponse("getprop ro.kernel.qemu", createExecResult("1", ""));
+    h.adb.setCommandResponse("getprop ro.boot.qemu.avd_name", createExecResult("Pixel", ""));
+    h.connect([booted(scenario.target)]);
+  }
+  const ios = spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(
+    () =>
+      ({
+        bindSession: () => undefined,
+        getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
+        requestTapCoordinates: async () => ({ success: true }),
+      }) as unknown as IOSCtrlProxyClient,
+  );
+  cleanups.push(() => ios.mockRestore());
+  const wire = InMemoryControlSocket.attach({
+    timer: h.timer,
+    connectionIds: new FakeIdGenerator(),
+    loopback: async () => {
+      throw new Error("Parity harness must not forward MCP calls");
+    },
+    startupOptions: {
+      sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} },
+    },
   });
+  const client = new RawFrameClient("parity", () => wire.connect("parity-connection"));
+  cleanups.push(() => {
+    client.close();
+    wire.kill();
+  });
+  const args = {
+    platform: scenario.platform ?? "android",
+    deviceId: scenario.target,
+    sessionUuid: scenario.requester,
+  };
+  const frame = await client.request("input/tap", { ...args, x: 1, y: 2 });
+  const frameVerdict = verdict(frame.success ? "ran" : (frame.code ?? frame.error));
+  const toolVerdict = verdict(await h.outcome("controlProbe", args));
+  return { frame: frameVerdict, tool: toolVerdict };
+}
+
+// Pay first-use module/JIT warm-up only, outside the measured tests.
+// Each scenario builds its own fixture, including the throwaway warm-up.
+beforeAll(async () => {
+  const warmUpCleanups: Array<() => void> = [];
+  try {
+    await runScenario(scenarios[0]!, warmUpCleanups);
+  } finally {
+    for (const cleanup of warmUpCleanups.reverse()) {
+      cleanup();
+    }
+  }
+});
+
+describe.each(scenarios)("direct frames and tools agree: $name", (scenario) => {
   test("both paths return the expected verdict", async () => {
-    const args = {
-      platform: scenario.platform ?? "android",
-      deviceId: scenario.target,
-      sessionUuid: scenario.requester,
-    };
-    const frame = await client.request("input/tap", { ...args, x: 1, y: 2 });
-    const frameVerdict = verdict(frame.success ? "ran" : (frame.code ?? frame.error));
-    const toolVerdict = verdict(await h.outcome("controlProbe", args));
-    expect({ frame: frameVerdict, tool: toolVerdict }).toEqual({
+    const result = await runScenario(scenario, cleanups);
+    expect(result).toEqual({
       frame: scenario.expected,
       tool: scenario.expected,
     });
-    expect(toolVerdict).toBe(frameVerdict);
+    expect(result.tool).toBe(result.frame);
   });
 });

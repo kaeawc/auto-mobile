@@ -286,6 +286,9 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
   capacity?: Record<string, unknown>;
 } {
   const payload = fixture.payload as Record<string, unknown>;
+  if (fixture.surface === "aux-socket-response") {
+    return { typed: payload as TypedFields, details: { deviceId: payload.deviceId } };
+  }
   if (fixture.surface === "socket-frame") {
     return { typed: payload as TypedFields, details: payload.details as Record<string, unknown> };
   }

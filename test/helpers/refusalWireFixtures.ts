@@ -756,10 +756,17 @@ export type RefusalSurface =
   | "delete-device"
   | "managed-slots-result"
   | "overload-frame"
-  | "webrtc-stream-response";
+  | "webrtc-stream-response"
+  | "aux-socket-response";
 
 /** Asynchronous real-wire captures: their owning test always checks the committed bytes. */
 export const EXTERNALLY_CAPTURED_SURFACE_FIXTURES = [
+  {
+    surface: "aux-socket-response",
+    name: "device_owned_by_other_session",
+    testFile: "test/daemon/deviceGestureRecordingSocketServerAuth.test.ts",
+    errorClass: InputDeviceOwnedError,
+  },
   {
     surface: "webrtc-stream-response",
     name: "viewer_read_only",

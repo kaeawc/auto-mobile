@@ -398,6 +398,17 @@
         "retryable": true,
         "acquireNewSession": false
       }
+    },
+    "aux-socket-response.device_owned_by_other_session": {
+      "expected": "wait",
+      "fields": {
+        "code": "device_owned_by_other_session",
+        "retryable": false,
+        "acquireNewSession": false,
+        "details": {
+          "deviceId": "emu-held"
+        }
+      }
     }
   }
 }

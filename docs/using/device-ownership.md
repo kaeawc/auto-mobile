@@ -481,6 +481,8 @@ releasing.
   default.
 - **`scripts/mcp-drive.ts`:** a `getAndroid`/`getApple` step captures the session
   and injects it into later steps; `--session <uuid>` reuses an existing one.
+  For persistent proxy executions, raw frames and observer sockets, use the
+  [manual-test harness](manual-test-harness.md).
 - **Scripts that run `--cli` calls:** keep the acquiring call's `sessionUuid` and
   pass `--session-uuid` on every later call (see
   `scripts/android/navigation-graph-sdk-event-integration.sh`).

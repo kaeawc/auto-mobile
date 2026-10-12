@@ -15,6 +15,29 @@ Device work is **sequential — one device at a time (no parallelism yet)**. Do
 Phase A (Android) fully, then Phase B (iOS). Delegate breadth to **one** subagent
 at a time to conserve context; never let two actors drive devices at once.
 
+## Harness
+
+Use [the manual-test harness](../../docs/using/manual-test-harness.md) for private
+batches: `private-daemon.ts init|start|status|stop`, `in-daemon-env.sh`,
+`proxy-session.ts up|call|read|tools|resources|subscribe|status|close`,
+`daemon-frame.ts send`, and `aux-socket.ts recording|video|webrtc` under
+`scripts/manual-test/`. Use those commands instead of hand-rolling a private
+environment, MCP stdio loop or socket client.
+
+- Never touch the resident daemon, its default socket, port 3000 or
+  `~/.auto-mobile`; every client uses the wrapper or a guarded harness CLI.
+- Never `pkill`/`killall`; stop only your own daemon with `private-daemon.ts stop`.
+- Never delete an AVD, simulator or directory.
+- For `startDevice`, use `avdName` (Android) or `deviceId` (UDID/serial).
+  `name` is a matcher and is refused. The guard refuses
+  selector-only starts because one booted a protected AVD in batch 20261012a;
+  `--allow-selector` is only for a deliberate selection test.
+- Run `private-daemon.ts start` before proxy `up`/`serve`; both require a
+  private PID file naming a live daemon. Never use a proxy to wake a dead daemon.
+- Never pass daemon flags to a proxy or rebuild `dist/` while batch daemons run.
+- Keep one shared adb-server coordination directory per batch; split it only
+  when testing isolated registries, aware of the false 7-of-6 finding (#11905).
+
 ## Phase 0 — Scope from the start point
 
 1. **Get the start point.** Accept a commit SHA, a tag/milestone, or a date. If
@@ -42,10 +65,10 @@ at a time to conserve context; never let two actors drive devices at once.
 > `Daemon Build Identity` build hash (changes when dist changes) and/or
 > `dist/src/index.js` mtime. Always rebuild.
 
-1. **Sync git.** Rebase this worktree on `origin/main`, then fast-forward the
-   **main checkout the daemon runs from** (`~/kaeawc/auto-mobile`, `git pull --ff-only`).
-   The daemon's entry script is that checkout's `dist/src/index.js`, and the MCP
-   proxy must match its build — keep them on the same commit.
+1. **Sync git.** Prepare an isolated checkout at the intended main revision.
+   The private daemon and proxy must use that checkout's explicit
+   `dist/src/index.js` entry script on the same commit. Do not change the
+   resident daemon's checkout or rebuild a running batch's dist.
 2. **TS dist + schemas (always):** `bun run build` then
    `bash scripts/update-tool-definitions.sh`. Confirm the dist mtime moved and,
    for a specific fix, grep the compiled `dist/src/index.js` for a token from the
@@ -65,16 +88,12 @@ at a time to conserve context; never let two actors drive devices at once.
 
 ## Phase 2 — Restart the daemon with the right flags
 
-> **Multi-worktree daemon churn.** Other worktrees/sessions spawn competing
-> daemons on the shared socket `/tmp/auto-mobile-daemon-501.sock`. They cause
-> build-skew rejects and the CLI's daemon auto-restart can replace your
-> flag-configured daemon with a flagless one. Kill ALL daemons first and re-check
-> for strays after starting yours. If a competing daemon keeps respawning,
-> flag-gated (SDK) testing is **BLOCKED: multi-worktree daemon churn** — record it
-> and move on rather than fighting it.
-
-1. `ps aux | grep 'index.js --daemon-mode' | grep -v grep | awk '{print $2}' | xargs -r kill -9; rm -f /tmp/auto-mobile-daemon-501.sock`.
-2. Start ONE daemon from the fresh dist with the env + flags the run needs:
+1. Initialize a new private batch with `private-daemon.ts init --batch-dir B
+   --count 1 --base-port <unused-port> --server <absolute-dist-entry>`.
+   If replacing a daemon you started, use `private-daemon.ts stop --batch-dir B
+   --daemon 1`, then `start`. Never stop another batch's or the resident daemon.
+2. Start ONE private daemon using `private-daemon.ts start --batch-dir B --
+   <daemon-flags>`. Set run environment options with repeatable `init --env K=V`:
    - `AUTOMOBILE_CTRL_PROXY_APK_PATH=<fresh apk>` to use the freshly-built Android
      runner (also uninstall+reinstall the APK on the emulator first for a runner fix);
      otherwise `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED=true` to keep the
@@ -159,25 +178,20 @@ at a time to conserve context; never let two actors drive devices at once.
      SHA was trusted, and `grep 'Reusing an external CtrlProxy runner' <daemon-log>`
      to catch a stale/foreign runner silently serving.
    - `--embedded-sdk` — required for `sqlQuery`, `setPreference`/`getPreference`,
-     in-app `highlight` (registration is **daemon-side**; the CLI must pass the same
-     flag so the reuse check matches, else it restarts the daemon).
+     in-app `highlight` (registration is **daemon-side**; configure the private
+     daemon before starting proxy sessions).
    - `--network-mockable` — required for `mockNetwork` / network error-simulation.
    - To test the **gated-OFF** assertion (criticalSection/executePlan hidden
      without debug), start WITHOUT `--debug`/`--embedded-sdk`.
-3. Wait ~10-12s, then confirm exactly one daemon and that it carries your flags
-   (`ps -o command=`).
+3. Check `private-daemon.ts status --batch-dir B`, then use
+   `in-daemon-env.sh --batch-dir B --daemon 1 daemon status` for readiness.
+   Confirm the manifest port/socket and your private launch log before testing.
 
-> **MCP proxy build-skew → CLI fallback.** After any daemon restart the connected
-> MCP proxy is rejected by the build-skew guard (`client build != daemon build`).
-> In a fresh interactive Claude session the proxy auto-respawns from the current
-> dist and MCP tools work again. On a shared multi-session machine it stays stale.
-> **Fallback: drive tools via the CLI** — a fresh, build-matched client:
-> `bun /path/to/dist/src/index.js [--embedded-sdk --network-mockable] --cli <tool> --<param> <value>`.
-> Nested-object params must be JSON: `--selector '{"text":"Settings"}'`; booleans
-> `--raw true`. The result JSON is the string at `content[0].text`
-> (`python3 -c "import json;print(json.loads(open('F').read())['content'][0]['text'])"`).
-> If output begins with `Restarting daemon...` a competing daemon caused churn —
-> retry once; if persistent, mark the tool BLOCKED.
+After a private daemon restart, close the old proxy session and use
+`in-daemon-env.sh --batch-dir B --daemon 1 proxy up --dir <new-session-dir>`.
+Drive calls through the same wrapper's `proxy call` command. Never pass daemon
+flags to the proxy; a build/option mismatch must be resolved in your private
+batch before continuing. Do not replace the resident daemon to fix a mismatch.
 
 ## Phase 3 — Exercise tool calls (Android, then iOS)
 

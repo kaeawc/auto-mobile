@@ -8952,7 +8952,12 @@ export class DevicePool {
       };
     }
     if (options.receipt.minted?.session === session) {
-      this.recordMintedSessionOwnership(caller.mcpSessionId, sessionId, caller.oneShotCli === true);
+      this.recordMintedSessionOwnership(
+        caller.mcpSessionId,
+        sessionId,
+        caller.oneShotCli === true,
+        options.receipt.minted.clientSuppliedId === true,
+      );
     } else {
       this.recordBindOwnership(caller.mcpSessionId, sessionId);
     }
@@ -9584,22 +9589,24 @@ export class DevicePool {
   }
 
   /** #11999: retain a connection's close through forwarding and its terminal answer write. */
-  beginMcpToolCall(mcpSessionId: string | undefined): () => void {
+  beginMcpToolCall(mcpSessionId: string | undefined): (delivered?: boolean) => void {
     const endBind = this.beginMcpBind(mcpSessionId);
     const bind = mcpSessionId === undefined ? undefined : this.mcpBindsInFlight.get(mcpSessionId);
     if (bind) {
       bind.toolCalls++;
     }
     let ended = false;
-    return () => {
+    return (delivered = true) => {
       if (ended) {
         return;
       }
       ended = true;
       if (bind && mcpSessionId !== undefined) {
         bind.toolCalls--;
-        // Any answer on this connection conservatively acknowledges its mints (#11999).
-        this.mcpSessionUndeliveredMints.delete(mcpSessionId);
+        // A delivered answer acknowledges its mints; a closed connection retains none (#11999).
+        if (delivered || bind.closed) {
+          this.mcpSessionUndeliveredMints.delete(mcpSessionId);
+        }
       }
       endBind();
     };
@@ -9657,13 +9664,15 @@ export class DevicePool {
     mcpSessionId: string | undefined,
     sessionId: string,
     oneShotCli: boolean,
+    clientSuppliedId?: boolean,
   ): boolean {
+    const keepsOrdinaryGrace = (): boolean => oneShotCli || clientSuppliedId === true;
     const recorded = this.recordBindOwnership(mcpSessionId, sessionId);
     const token = mcpSessionId && this.mcpSessionLivenessOwnerTokens.get(mcpSessionId);
     if (recorded && token) {
       this.sessionManager.bindAcquiredLivenessOwnerToken(sessionId, token);
     }
-    if (mcpSessionId !== undefined && !oneShotCli) {
+    if (mcpSessionId !== undefined && !keepsOrdinaryGrace()) {
       const ownerSessionId = this.ownershipSessionId(sessionId);
       if (!recorded && !this.hasConnectedMcpSessionOwner(ownerSessionId)) {
         this.ownerDisconnectRelease.ownerDisconnected(ownerSessionId, mcpSessionId, 0);

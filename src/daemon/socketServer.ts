@@ -1747,7 +1747,21 @@ export class UnixSocketServer {
     let deviceId: string | undefined;
     let pending: PendingSocketRequest | undefined;
     let errorCode: number | undefined;
-    let endToolCall = (): void => {};
+    let endToolCall = (_delivered?: boolean): void => {};
+    let answerWritten = false;
+    const answerDelivered = (): boolean =>
+      answerWritten && this.clientSockets.get(sessionId) === socket && !socket.destroyed;
+    const writeAnswer = (response: DaemonResponse): void => {
+      if (pending?.terminal) {
+        return;
+      }
+      if (pending) {
+        this.writeTerminalSocketResponse(pending, response, deviceId);
+      } else {
+        this.writeFrame(socket, sessionId, response, undefined, deviceId);
+      }
+      answerWritten = true;
+    };
     try {
       let parsed: unknown;
       try {
@@ -1790,7 +1804,10 @@ export class UnixSocketServer {
               this.daemonState.getDevicePool().beginMcpToolCall?.(sessionId) ?? endToolCall;
           } catch (error) {
             // #11999: optional tracking may fall back to the existing owner-disconnect grace.
-            logger.debug("Could not begin MCP tool-call ownership claim", error);
+            logger.warn(
+              `Could not begin MCP tool-call ownership claim: ${errorMessage(error)}`,
+              error,
+            );
           }
         }
       };
@@ -1806,7 +1823,7 @@ export class UnixSocketServer {
         },
       );
       if (response) {
-        this.writeTerminalSocketResponse(tracked, response, deviceId);
+        writeAnswer(response);
       } else {
         this.pendingSocketRequests.delete(tracked);
         this.backpressuredSocketIdle.get(socket)?.responseFlushed();
@@ -1826,13 +1843,9 @@ export class UnixSocketServer {
         ...(errorCode === undefined ? {} : { code: errorCode }),
         ...mcpRequestFailureDetails(error, undefined),
       };
-      if (pending) {
-        this.writeTerminalSocketResponse(pending, errorResponse, deviceId);
-      } else {
-        this.writeFrame(socket, sessionId, errorResponse, undefined, deviceId);
-      }
+      writeAnswer(errorResponse);
     } finally {
-      endToolCall();
+      endToolCall(answerDelivered());
     }
   }
 

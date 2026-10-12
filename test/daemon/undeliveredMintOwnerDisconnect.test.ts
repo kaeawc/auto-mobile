@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { AcquisitionReceipt } from "../../src/daemon/acquisitionReceipt";
@@ -83,8 +83,7 @@ async function harness(withControlVeto = false) {
     }),
   );
   await pool.initializeWithDevices([DEVICE]);
-  const claim = (connection = CONNECTION) =>
-    pool.beginMcpToolCall?.(connection) ?? pool.beginMcpBind(connection);
+  const claim = (connection = CONNECTION) => pool.beginMcpToolCall(connection);
   const bind = (
     id = "mint",
     oneShotCli = false,
@@ -184,8 +183,8 @@ for (const autolock of [false, true]) {
         h.pool.releaseMcpSessionBindings(CONNECTION);
       }
       expect(h.pool["ownerDisconnectRelease"].remainingMs(id)).toBe(0);
-      end();
-      end();
+      end(false);
+      end(false);
       await h.assertReleased(id);
       expect(h.pool["mcpBindsInFlight"].has(CONNECTION)).toBe(false);
       h.pool.releaseMcpSessionBindings(CONNECTION);
@@ -194,6 +193,52 @@ for (const autolock of [false, true]) {
     });
   }
 }
+
+for (const closedAtCommit of [false, true]) {
+  test(`#11999 a client-chosen mint closed ${closedAtCommit ? "at commit" : "before answer"} keeps ordinary grace`, async () => {
+    const h = await harness();
+    h.pool.declareMcpSessionLivenessOwnerToken(CONNECTION, "mint-owner-token");
+    const end = h.claim();
+    const receipt: AcquisitionReceipt = { clientChosenSessionId: "client-mint" };
+    const minting = h.bind("client-mint", false, receipt);
+    if (closedAtCommit) {
+      h.pool.releaseMcpSessionBindings(CONNECTION);
+    }
+    const id = await minting;
+    expect(receipt.minted?.clientSuppliedId).toBe(true);
+    expect(h.manager.getSession(id)?.livenessOwnerToken).toBe(
+      closedAtCommit ? undefined : "mint-owner-token",
+    );
+    h.assertClean();
+    if (!closedAtCommit) {
+      h.pool.releaseMcpSessionBindings(CONNECTION);
+    }
+    expect(h.pool["ownerDisconnectRelease"].remainingMs(id)).toBe(OWNER_DISCONNECT_GRACE_MS);
+    end();
+    await h.settle();
+    expect(h.manager.hasSession(id)).toBe(true);
+    await h.settle(OWNER_DISCONNECT_GRACE_MS - 1);
+    expect(h.manager.hasSession(id)).toBe(true);
+    await h.settle(1);
+    await h.assertReleased(id);
+  });
+}
+
+test("#11999 an undelivered claim retains its mint until close and a later undelivered end leaves no entry", async () => {
+  const h = await harness();
+  const end = h.claim();
+  const laterEnd = h.claim();
+  const id = await h.mint(false);
+  end(false);
+  end(true);
+  expect(h.pool["mcpBindsInFlight"].get(CONNECTION)?.pending).toBe(1);
+  expect(h.pool["mcpSessionUndeliveredMints"].get(CONNECTION)?.has(id)).toBe(true);
+  h.pool.releaseMcpSessionBindings(CONNECTION);
+  h.assertClean();
+  laterEnd(false);
+  expect(h.pool["mcpBindsInFlight"].has(CONNECTION)).toBe(false);
+  await h.assertReleased(id);
+});
 
 for (const autolock of [false, true]) {
   test(`#11999 a ${autolock ? "autolock" : "explicit"} bind begun after close still sees the call-wide closed claim`, async () => {
@@ -331,7 +376,7 @@ for (const closeBeforeUndo of [false, true]) {
     const end = h.claim();
     const receipt: AcquisitionReceipt = { clientChosenSessionId: "mint" };
     const id = await h.bind("mint", false, receipt);
-    expect(h.pool["mcpSessionUndeliveredMints"]?.get(CONNECTION)?.has(id)).toBe(true);
+    h.assertClean();
     if (closeBeforeUndo) {
       h.pool.releaseMcpSessionBindings(CONNECTION);
     }
@@ -341,6 +386,7 @@ for (const closeBeforeUndo of [false, true]) {
     end();
     await h.settle(OWNER_DISCONNECT_GRACE_MS);
     expect(h.reasons).toEqual(["allocation-rollback"]);
+    expect(h.manager.getTerminalReleaseSnapshot(id)).toBeUndefined();
   });
 }
 
@@ -394,7 +440,7 @@ test("#11999 a direct pool mint without a socket answer claim keeps ordinary gra
   await h.assertReleased(id);
 });
 
-for (const outcome of ["answer", "answerless", "throw"] as const) {
+for (const outcome of ["answer", "answerless", "throw", "replaced", "terminal"] as const) {
   test(`#11999 socket claim brackets forwarding and ${outcome} termination`, async () => {
     const h = await harness();
     const server = new UnixSocketServer(
@@ -409,11 +455,15 @@ for (const outcome of ["answer", "answerless", "throw"] as const) {
       h.timer,
     );
     const events: string[] = [];
+    const deliveries: Array<boolean | undefined> = [];
+    const socket = new FakeSocket();
+    server["clientSockets"].set(CONNECTION, socket);
     h.pool.beginMcpToolCall = (connection) => {
       expect(connection).toBe(CONNECTION);
       events.push("begin");
-      return () => {
+      return (delivered) => {
         events.push("end");
+        deliveries.push(delivered);
       };
     };
     server["handleRequest"] = async () => {
@@ -421,6 +471,14 @@ for (const outcome of ["answer", "answerless", "throw"] as const) {
       expect(events).toEqual(["begin", "forward"]);
       if (outcome === "throw") {
         throw new Error("test forward failed");
+      }
+      if (outcome === "replaced") {
+        server["clientSockets"].set(CONNECTION, new FakeSocket());
+      }
+      if (outcome === "terminal") {
+        for (const pending of server["pendingSocketRequests"]) {
+          pending.terminal = true;
+        }
       }
       return outcome === "answerless"
         ? undefined
@@ -432,7 +490,7 @@ for (const outcome of ["answer", "answerless", "throw"] as const) {
     };
     await server["processSocketRequestLine"](
       CONNECTION,
-      new FakeSocket(),
+      socket,
       JSON.stringify({
         id: "mint",
         type: "mcp_request",
@@ -442,8 +500,11 @@ for (const outcome of ["answer", "answerless", "throw"] as const) {
       h.timer.now(),
     );
     expect(events).toEqual(
-      outcome === "answerless" ? ["begin", "forward", "end"] : ["begin", "forward", "write", "end"],
+      outcome === "answerless" || outcome === "terminal"
+        ? ["begin", "forward", "end"]
+        : ["begin", "forward", "write", "end"],
     );
+    expect(deliveries).toEqual([outcome === "answer" || outcome === "throw"]);
   });
 }
 
@@ -461,9 +522,12 @@ test("#11999 a failed optional socket claim still forwards and writes the answer
     h.timer,
   );
   const events: string[] = [];
+  const claimError = new Error("test claim failed");
+  const previousWarn = logger.warn;
+  const warning = spyOn(logger, "warn");
   h.pool.beginMcpToolCall = () => {
     events.push("begin");
-    throw new Error("test claim failed");
+    throw claimError;
   };
   server["handleRequest"] = async () => {
     events.push("forward");
@@ -472,74 +536,108 @@ test("#11999 a failed optional socket claim still forwards and writes the answer
   server["writeTerminalSocketResponse"] = () => {
     events.push("write");
   };
-  await server["processSocketRequestLine"](
-    CONNECTION,
-    new FakeSocket(),
-    JSON.stringify({
-      id: "mint",
-      type: "mcp_request",
-      method: "tools/call",
-    }),
-    h.timer.now(),
-  );
-  expect(events).toEqual(["begin", "forward", "write"]);
+  try {
+    await server["processSocketRequestLine"](
+      CONNECTION,
+      new FakeSocket(),
+      JSON.stringify({
+        id: "mint",
+        type: "mcp_request",
+        method: "tools/call",
+      }),
+      h.timer.now(),
+    );
+    expect(events).toEqual(["begin", "forward", "write"]);
+    expect(warning).toHaveBeenCalledWith(
+      "Could not begin MCP tool-call ownership claim: test claim failed",
+      claimError,
+    );
+  } finally {
+    warning.mockRestore();
+    expect(logger.warn).toBe(previousWarn);
+  }
 });
 
-test("#11999 socket close after the mint and before its answer immediately releases it", async () => {
-  const h = await harness();
-  const server = new UnixSocketServer(
-    "/fake/mint.sock",
-    "http://localhost:0/mcp",
-    {
-      isInitialized: () => true,
-      getSessionManager: () => h.manager,
-      getDevicePool: () => h.pool,
-      getDeviceSessionRegistry: () => ({ list: () => [] }),
-    },
-    h.timer,
-  );
-  server["acceptingRequests"] = true;
-  const socket = new FakeSocket();
-  server["handleConnection"](socket);
-  const connection = [...server["sessions"].keys()][0]!;
-  const minted = Promise.withResolvers<string>();
-  const answer = Promise.withResolvers<void>();
-  server.mcpClientFactory = async () => ({
-    callTool: async ({ arguments: args }) => {
-      const id = await h.pool.bindOrReuseDeviceSession(
-        "socket-mint",
-        DEVICE.deviceId,
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        String(args?.__mcpSessionId),
-      );
-      minted.resolve(id);
-      await answer.promise;
-      return { content: [] };
-    },
-    close: async () => {},
-  });
-  const request = server["processSocketRequestLine"](
-    connection,
-    socket,
-    JSON.stringify({
-      id: "socket-mint",
-      type: "mcp_request",
-      method: "tools/call",
-      params: { name: "getAndroid", arguments: {} },
-    }),
-    h.timer.now(),
-  );
-  const id = await minted.promise;
-  socket.destroy();
-  answer.resolve();
-  await request;
-  await h.assertReleased(id);
-  expect(h.pool["mcpSessionUndeliveredMints"]?.has(connection) ?? false).toBe(false);
+test("#11999 socket close around the mint's answer uses its delivery status", async () => {
+  for (const closeTiming of ["before-answer", "after-answer", "delivered"] as const) {
+    const h = await harness();
+    const server = new UnixSocketServer(
+      "/fake/mint.sock",
+      "http://localhost:0/mcp",
+      {
+        isInitialized: () => true,
+        getSessionManager: () => h.manager,
+        getDevicePool: () => h.pool,
+        getDeviceSessionRegistry: () => ({ list: () => [] }),
+      },
+      h.timer,
+    );
+    server["acceptingRequests"] = true;
+    const socket = new FakeSocket();
+    server["handleConnection"](socket);
+    const connection = [...server["sessions"].keys()][0]!;
+    const minted = Promise.withResolvers<string>();
+    const answer = Promise.withResolvers<void>();
+    server.mcpClientFactory = async () => ({
+      callTool: async ({ arguments: args }) => {
+        const id = await h.pool.bindOrReuseDeviceSession(
+          "socket-mint",
+          DEVICE.deviceId,
+          "android",
+          undefined,
+          undefined,
+          undefined,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          String(args?.__mcpSessionId),
+        );
+        minted.resolve(id);
+        await answer.promise;
+        return { content: [] };
+      },
+      close: async () => {},
+    });
+    const request = server["processSocketRequestLine"](
+      connection,
+      socket,
+      JSON.stringify({
+        id: "socket-mint",
+        type: "mcp_request",
+        method: "tools/call",
+        params: { name: "getAndroid", arguments: {} },
+      }),
+      h.timer.now(),
+    );
+    const id = await minted.promise;
+    if (closeTiming === "before-answer") {
+      socket.destroy();
+    } else if (closeTiming === "after-answer") {
+      // The transport is destroyed now; its close callback has not run yet.
+      socket.destroyed = true;
+      socket.writable = false;
+    }
+    answer.resolve();
+    await request;
+    if (closeTiming === "after-answer") {
+      expect(h.pool["mcpSessionUndeliveredMints"].get(connection)?.has(id)).toBe(true);
+      expect(h.pool["mcpBindsInFlight"].has(connection)).toBe(false);
+      socket.emit("close");
+    } else if (closeTiming === "delivered") {
+      expect(h.pool["mcpSessionUndeliveredMints"].has(connection)).toBe(false);
+      expect(socket.getWrittenMessages()).toContainEqual({
+        id: "socket-mint",
+        type: "mcp_response",
+        success: true,
+        result: { content: [] },
+      });
+      socket.destroy();
+      await h.settle(OWNER_DISCONNECT_GRACE_MS - 1);
+      expect(h.manager.hasSession(id)).toBe(true);
+      await h.settle(1);
+    }
+    await h.assertReleased(id);
+    expect(h.pool["mcpSessionUndeliveredMints"]?.has(connection) ?? false).toBe(false);
+  }
 });

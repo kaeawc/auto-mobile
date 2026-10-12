@@ -191,6 +191,8 @@ export interface BoundSessionLoss {
   code: typeof BOUND_SESSION_LOSS_CODE;
   sessionUuid: string;
   reason: string;
+  /** True only when the reason is an idle release; absent otherwise. */
+  idle?: true;
   /** Captured before the terminal session was removed, when still available. */
   release?: SessionReleaseSnapshot;
 }
@@ -343,6 +345,7 @@ export function sanitizeBoundSessionLoss(value: unknown): BoundSessionLoss | und
     code: BOUND_SESSION_LOSS_CODE,
     sessionUuid: record.sessionUuid,
     reason: record.reason,
+    ...idleReleaseField(record.reason),
     ...(release ? { release } : {}),
   };
 }
@@ -377,6 +380,8 @@ export interface DaemonNotification {
   sessionId?: string;
   /** Diagnostic release reason for `notifications/session/released`. */
   reason?: string;
+  /** True only for an idle release reason; absent otherwise. */
+  idle?: true;
   /** Authoritative terminal state captured before SessionManager removed it. */
   release?: SessionReleaseSnapshot;
   /**

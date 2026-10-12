@@ -44,11 +44,67 @@ test("a daemon release reason names the managed loss without changing the generi
   expect(livenessHandoverPayload(released)).toEqual(livenessHandoverPayload(handover));
 });
 
-test("a daemon stall is not a loss: a managed connection keeps its handover", () => {
-  const stalled = { ...handover, code: "daemon_stalled" as const };
-  expect(livenessHandoverNotificationPayloads(stalled, readyManagedSlotsResult(SESSION))).toEqual([
-    livenessHandoverPayload(stalled),
+const stalled: LivenessHandover = {
+  ...handover,
+  code: "daemon_stalled",
+  attempts: 3,
+  action: "restart_daemon_then_resume_by_session_uuid",
+};
+
+test("a managed daemon stall tells the agent to wait for automatic reclaim", () => {
+  const generic = livenessHandoverPayload(stalled);
+  const payloads = livenessHandoverNotificationPayloads(stalled, readyManagedSlotsResult(SESSION));
+  expect(payloads).toHaveLength(1);
+  const payload = payloads[0] as typeof generic;
+  expect(payload.error.recovery.action).toBe("wait_for_managed_reclaim");
+  expect(payload.error.message).toContain(SESSION);
+  expect(payload.error.message).toContain("3 automatic recovery attempts");
+  expect(payload.error.message).toContain("keeps probing every heartbeat interval");
+  expect(payload.error.message).toContain(
+    "reclaims the session itself once a daemon answers again",
+  );
+  expect(payload.error.message).toContain("Do not pass a sessionUuid or try to acquire a device");
+  expect(payload.error.message).toContain("retry the call later");
+  expect(payload.error.message).toContain("never restarts the daemon because it is shared");
+  expect(payload.error.message).toContain(
+    "restarting it or relaunching the execution is the runner's decision",
+  );
+  expect(payload.error.message).toContain("calls answer managed_execution_ended");
+  expect(payload.error.message).not.toContain("restart the daemon yourself");
+  expect(payload.error.message).not.toContain("passing its sessionUuid");
+  expect(payload).toEqual({
+    error: {
+      ...generic.error,
+      message: payload.error.message,
+      recovery: { action: "wait_for_managed_reclaim" },
+    },
+  });
+  expect(Object.keys(payload.error)).toEqual(Object.keys(generic.error));
+});
+
+test("generic and failed managed daemon stalls keep the generic payload byte for byte", () => {
+  const failed = { ...readyManagedSlotsResult(SESSION), outcome: "failed" as const };
+  for (const managedSlots of [undefined, failed]) {
+    const payloads = livenessHandoverNotificationPayloads(stalled, managedSlots);
+    expect(payloads).toEqual([livenessHandoverPayload(stalled)]);
+    expect(JSON.stringify(payloads[0])).toBe(JSON.stringify(livenessHandoverPayload(stalled)));
+  }
+});
+
+test("a mixed daemon stall keeps non-slot sessions on the generic notification", () => {
+  const other = { ...stalled.sessions[0], sessionUuid: OTHER };
+  const mixed = { ...stalled, sessions: [other, stalled.sessions[0]] };
+  const managed = livenessHandoverNotificationPayloads(stalled, readyManagedSlotsResult(SESSION));
+  expect(livenessHandoverNotificationPayloads(mixed, readyManagedSlotsResult(SESSION))).toEqual([
+    ...managed,
+    livenessHandoverPayload({ ...mixed, sessions: [other] }),
   ]);
+});
+
+test("a daemon stall with only non-slot sessions keeps the generic notification byte for byte", () => {
+  const payloads = livenessHandoverNotificationPayloads(stalled, readyManagedSlotsResult(OTHER));
+  expect(payloads).toEqual([livenessHandoverPayload(stalled)]);
+  expect(JSON.stringify(payloads[0])).toBe(JSON.stringify(livenessHandoverPayload(stalled)));
 });
 
 test("a lost session that is not one of the connection's slots keeps the handover", () => {

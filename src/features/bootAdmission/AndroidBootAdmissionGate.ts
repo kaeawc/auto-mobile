@@ -1,3 +1,4 @@
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { ActionableError } from "../../models/ActionableError";
 import type { BootAdmission } from "../../models/BootAdmission";
 import type { Timer } from "../../utils/SystemTimer";
@@ -15,6 +16,7 @@ import {
   DEFAULT_ADMISSION_RETRY_AFTER_MS,
   admitBootNow,
   DEFAULT_SAMPLE_TIMEOUT_MS,
+  sampleTimeoutError,
   type BootCapacityChecker,
   type BootCapacityReporter,
   type BootCapacitySnapshot,
@@ -255,10 +257,24 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     window: LedgerSampleWindow;
     peers: HostBootAdmissionRecord[];
   }> {
+    options.signal?.throwIfAborted();
     const window = this.ledger.beginSample();
+    const controller = new AbortController();
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
     try {
       const before = this.readPeers();
-      const sample = await this.sampleKnownCount(options);
+      const sample = await raceWithDeadline(() => this.sampleKnownCount({ signal }), {
+        timer: this.timer,
+        timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS,
+        signal: options.signal,
+        label: "Collecting Android emulator capacity",
+        timeoutError: () =>
+          sampleTimeoutError("android", DEFAULT_SAMPLE_TIMEOUT_MS, "Android emulator capacity"),
+        onTimeout: () => controller.abort(),
+      });
+      options.signal?.throwIfAborted();
       return { sample, window, peers: this.unionPeers(before, this.readPeers()) };
     } finally {
       window.close();

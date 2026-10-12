@@ -1,3 +1,10 @@
+import {
+  PRODUCT_PATH_ENV_VARIABLES,
+  STATE_PATH_VARIABLES,
+  OPT_IN_PATH_VARIABLES,
+  type ProductPathEnvVariable,
+} from "./productPathEnv";
+export { STATE_PATH_VARIABLES } from "./productPathEnv";
 import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -24,6 +31,9 @@ export interface PrivateDaemonBatchOptions {
   splitAdbCoordination?: boolean;
   orphanIdleMs?: number;
   extraEnv?: Record<string, string>;
+  daemonEnv?: Record<string, Record<string, string>>;
+  daemonArgs?: string[];
+  daemonArgsByDaemon?: Record<string, string[]>;
 }
 export interface PrivateDaemonSpec {
   index: number;
@@ -59,7 +69,8 @@ export const DERIVED_PATH_VARIABLES: readonly string[] = [
 ];
 const INHERITED_PATH_OVERRIDES = ["AUTOMOBILE_DB_PATH", "AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH"];
 export const INHERITED_ENV_VARIABLES: readonly string[] = [
-  ...DERIVED_PATH_VARIABLES.map((key) => key.replace("AUTOMOBILE_", "AUTO_MOBILE_")),
+  ...OPT_IN_PATH_VARIABLES.map((key) => key.replace("AUTOMOBILE_", "AUTO_MOBILE_")),
+  ...STATE_PATH_VARIABLES.map((key) => key.replace("AUTOMOBILE_", "AUTO_MOBILE_")),
   ...INHERITED_PATH_OVERRIDES,
   ...INHERITED_PATH_OVERRIDES.map((key) => key.replace("AUTOMOBILE_", "AUTO_MOBILE_")),
   MANAGED_SLOT_CONFIG_ENV,
@@ -84,7 +95,12 @@ export function privateClientEnvironment(
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(inherited)) {
-    if (value !== undefined && key !== MANAGED_SLOT_CONFIG_ENV && !isInheritedPathOverride(key)) {
+    if (
+      value !== undefined &&
+      key !== MANAGED_SLOT_CONFIG_ENV &&
+      !isInheritedPathOverride(key) &&
+      !OPT_IN_PATH_VARIABLES.includes(key)
+    ) {
       env[key] = value;
     }
   }
@@ -94,6 +110,9 @@ export interface CanonicalizePathFs {
   realpath(path: string): string;
   lstat(path: string): { isSymbolicLink(): boolean };
   readlink(path: string): string;
+}
+function isSymlinkLoopError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ELOOP";
 }
 function isMissingPathError(error: unknown): boolean {
   return (
@@ -110,13 +129,7 @@ export function canonicalizePath(path: string, fs: CanonicalizePathFs): string {
       return fs.realpath(current);
     } catch (error) {
       // Missing paths and unopened special files require resolving their parent instead.
-      if (
-        (typeof error === "object" &&
-          error !== null &&
-          "code" in error &&
-          error.code === "ELOOP") ||
-        dirname(current) === current
-      ) {
+      if (isSymlinkLoopError(error) || dirname(current) === current) {
         throw error;
       }
       let symlink: boolean;
@@ -172,6 +185,39 @@ export function extraEnvRefusal(env: Record<string, string>): string | undefined
   }
   return undefined;
 }
+export function missingStateDefaults(
+  table: readonly ProductPathEnvVariable[],
+  spec: PrivateDaemonSpec,
+): string[] {
+  return table.filter((row) => row.kind === "state" && !spec.env[row.name]).map((row) => row.name);
+}
+export function daemonArgsRefusal(args: string[]): string | undefined {
+  return args.some(
+    (arg) =>
+      arg === "--port" ||
+      arg.startsWith("--port=") ||
+      arg === "--strict-port" ||
+      arg.startsWith("--strict-port=") ||
+      arg.includes("\0"),
+  )
+    ? "The harness owns --port and --strict-port; daemon args must contain no NUL."
+    : undefined;
+}
+function perDaemonOptionsRefusal(options: PrivateDaemonBatchOptions): string | undefined {
+  const daemonEnv = options.daemonEnv ?? {};
+  const daemonArgs = options.daemonArgsByDaemon ?? {};
+  for (const index of new Set([...Object.keys(daemonEnv), ...Object.keys(daemonArgs)])) {
+    if (!/^[1-9]\d*$/.test(index) || Number(index) > options.count) {
+      return "Per-daemon option index is outside --count.";
+    }
+    const refusal =
+      extraEnvRefusal(daemonEnv[index] ?? {}) ?? daemonArgsRefusal(daemonArgs[index] ?? []);
+    if (refusal) {
+      return refusal;
+    }
+  }
+  return daemonArgsRefusal(options.daemonArgs ?? []);
+}
 export function derivePrivateDaemonBatch(options: PrivateDaemonBatchOptions): PrivateDaemonSpec[] {
   // Invalid counts must be refusals, never an unbounded allocation.
   if (!Number.isInteger(options.count) || options.count < 1 || options.count > 8) {
@@ -185,7 +231,13 @@ export function derivePrivateDaemonBatch(options: PrivateDaemonBatchOptions): Pr
     const dir = join(options.batchDir, `daemon${index}`);
     const auxSocketDir = join(auxRoot, String(index));
     const env: Record<string, string> = {
+      ...Object.fromEntries(
+        PRODUCT_PATH_ENV_VARIABLES.filter((row) => row.kind === "state" && row.subpath).map(
+          (row) => [row.name, join(dir, row.subpath!)],
+        ),
+      ),
       ...options.extraEnv,
+      ...options.daemonEnv?.[String(index)],
       AUTOMOBILE_DATA_DIR: join(dir, "data"),
       AUTOMOBILE_LOG_DIR: join(dir, "logs"),
       AUTOMOBILE_DB_DIR: join(dir, "db"),
@@ -265,11 +317,7 @@ export function privatePathRefusal(candidate: string, host: HostDefaults): strin
   }
   return undefined;
 }
-export function privateDaemonBatchRefusal(
-  specs: PrivateDaemonSpec[],
-  options: PrivateDaemonBatchOptions,
-  host: HostDefaults,
-): string | undefined {
+function optionPathsRefusal(options: PrivateDaemonBatchOptions): string | undefined {
   for (const [name, value] of [
     ["batchDir", options.batchDir],
     ["auxRoot", options.auxRoot],
@@ -279,11 +327,17 @@ export function privateDaemonBatchRefusal(
       return `${name} must be an absolute path without NUL.`;
     }
   }
+  return undefined;
+}
+function numericOptionsRefusal(
+  options: PrivateDaemonBatchOptions,
+  length: number,
+): string | undefined {
   if (
     !Number.isInteger(options.count) ||
     options.count < 1 ||
     options.count > 8 ||
-    specs.length !== options.count
+    length !== options.count
   ) {
     return "count must be an integer from 1 to 8, with one spec per daemon.";
   }
@@ -294,53 +348,109 @@ export function privateDaemonBatchRefusal(
   ) {
     return "Choose valid TCP ports between 1 and 65535.";
   }
-  if (!Number.isSafeInteger(options.orphanIdleMs ?? 0) || (options.orphanIdleMs ?? 0) < 0) {
+  const idle = options.orphanIdleMs ?? 0;
+  if (!Number.isSafeInteger(idle) || idle < 0) {
     return "orphanIdleMs must be a non-negative safe integer.";
   }
-  const extra = extraEnvRefusal(options.extraEnv ?? {});
-  if (extra) {
-    return extra;
+  return undefined;
+}
+function specPaths(spec: PrivateDaemonSpec, options: PrivateDaemonBatchOptions): string[] {
+  return [
+    options.batchDir,
+    options.serverPath,
+    ...(options.auxRoot ? [options.auxRoot] : []),
+    spec.dir,
+    spec.pidFilePath,
+    spec.plainPidFilePath,
+    spec.socketPath,
+    spec.auxSocketDir,
+    spec.logDir,
+    spec.adbServerCoordinationDir,
+    ...STATE_PATH_VARIABLES.map((key) => spec.env[key]),
+  ];
+}
+function specRefusal(
+  spec: PrivateDaemonSpec,
+  options: PrivateDaemonBatchOptions,
+  host: HostDefaults,
+): string | undefined {
+  const missing = missingStateDefaults(PRODUCT_PATH_ENV_VARIABLES, spec);
+  if (missing.length) {
+    return `Missing state defaults: ${missing.join(", ")}`;
   }
-  const ports = new Set<number>();
-  for (const spec of specs) {
-    if (
-      !Number.isInteger(spec.port) ||
-      spec.port < 1 ||
-      spec.port > 65535 ||
-      spec.port === DEFAULT_DAEMON_PORT ||
-      ports.has(spec.port)
-    ) {
-      return "Choose distinct valid ports away from DEFAULT_DAEMON_PORT.";
+  for (const path of specPaths(spec, options)) {
+    const refusal = privatePathRefusal(path, host);
+    if (refusal) {
+      return refusal;
     }
-    ports.add(spec.port);
-    const paths = [
-      options.batchDir,
-      options.serverPath,
-      ...(options.auxRoot ? [options.auxRoot] : []),
-      spec.dir,
-      spec.pidFilePath,
-      spec.plainPidFilePath,
-      spec.socketPath,
-      spec.auxSocketDir,
-      spec.logDir,
-      spec.adbServerCoordinationDir,
-      ...DERIVED_PATH_VARIABLES.flatMap((key) => (spec.env[key] ? [spec.env[key]] : [])),
-    ];
-    for (const candidate of paths) {
-      const refusal = privatePathRefusal(candidate, host);
+    if (!isAbsolute(path)) {
+      return `Private path must be absolute without surrounding whitespace: ${path}`;
+    }
+  }
+  if (!isDaemonNamespaceIsolated(spec.env)) {
+    return "Private env must isolate the daemon namespace.";
+  }
+  // Longest published auxiliary filename, preserving the existing short socket namespace.
+  if (
+    Buffer.byteLength(join(spec.auxSocketDir, "performance-stream.sock")) > 103 ||
+    Buffer.byteLength(spec.socketPath) > 103
+  ) {
+    return "Aux/control socket path exceeds 103 bytes; choose a shorter --aux-root.";
+  }
+  return undefined;
+}
+function invalidPrivatePort(port: number, ports: ReadonlySet<number>): boolean {
+  return (
+    !Number.isInteger(port) ||
+    port < 1 ||
+    port > 65535 ||
+    port === DEFAULT_DAEMON_PORT ||
+    ports.has(port)
+  );
+}
+function stateOverridesRefusal(
+  options: PrivateDaemonBatchOptions,
+  host: HostDefaults,
+): string | undefined {
+  const overrides = [options.extraEnv ?? {}, ...Object.values(options.daemonEnv ?? {})];
+  for (const env of overrides) {
+    for (const key of [...STATE_PATH_VARIABLES, ...OPT_IN_PATH_VARIABLES].filter(
+      (name) => name in env,
+    )) {
+      const refusal = privatePathRefusal(env[key], host);
       if (refusal) {
         return refusal;
       }
+      if (!isAbsolute(env[key])) {
+        return `${key} override must be absolute without surrounding whitespace.`;
+      }
     }
-    if (!isDaemonNamespaceIsolated(spec.env)) {
-      return "Private env must isolate the daemon namespace.";
+  }
+  return undefined;
+}
+export function privateDaemonBatchRefusal(
+  specs: PrivateDaemonSpec[],
+  options: PrivateDaemonBatchOptions,
+  host: HostDefaults,
+): string | undefined {
+  const optionError =
+    optionPathsRefusal(options) ??
+    numericOptionsRefusal(options, specs.length) ??
+    extraEnvRefusal(options.extraEnv ?? {}) ??
+    perDaemonOptionsRefusal(options) ??
+    stateOverridesRefusal(options, host);
+  if (optionError) {
+    return optionError;
+  }
+  const ports = new Set<number>();
+  for (const spec of specs) {
+    if (invalidPrivatePort(spec.port, ports)) {
+      return "Choose distinct valid ports away from DEFAULT_DAEMON_PORT.";
     }
-    // Longest published auxiliary filenames in src/daemon/daemonFiles.ts.
-    if (
-      Buffer.byteLength(join(spec.auxSocketDir, "performance-stream.sock")) > 103 ||
-      Buffer.byteLength(spec.socketPath) > 103
-    ) {
-      return "Aux/control socket path exceeds 103 bytes; choose a shorter --aux-root.";
+    ports.add(spec.port);
+    const refusal = specRefusal(spec, options, host);
+    if (refusal) {
+      return refusal;
     }
   }
   return undefined;
@@ -352,6 +462,11 @@ export function renderEnvFile(spec: PrivateDaemonSpec, options: PrivateDaemonBat
       .map(([key, value]) => `export ${key}=${shellQuote(value)}`)
       .join("\n") +
     "\n" +
-    INHERITED_ENV_VARIABLES.map((key) => `unset ${key}\n`).join("")
+    [
+      ...INHERITED_ENV_VARIABLES,
+      ...OPT_IN_PATH_VARIABLES.filter((key) => spec.env[key] === undefined),
+    ]
+      .map((key) => `unset ${key}\n`)
+      .join("")
   );
 }

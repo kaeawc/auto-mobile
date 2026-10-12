@@ -4,6 +4,8 @@ import { logger } from "../../../utils/logger";
 import { OBSERVE_RESULT_CACHE_TTL_MS } from "../cache/FileSystemObserveCacheStore";
 
 export { OBSERVE_RESULT_CACHE_TTL_MS };
+export const SCREENSHOT_CAPTURE_CANCELLED_REASON = "capture cancelled";
+export const SCREENSHOT_CAPTURE_SUPERSEDED_REASON = "capture superseded";
 export const MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE = 10;
 /**
  * Backstop on cleared-observation tombstones per device. Only observations

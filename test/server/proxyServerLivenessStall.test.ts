@@ -1,11 +1,25 @@
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
+  CallToolRequestSchema,
   LoggingMessageNotificationSchema,
+  McpError,
+  ReadResourceRequestSchema,
   type LoggingLevel,
 } from "@modelcontextprotocol/sdk/types.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createProxyMcpServer } from "../../src/server/proxyServer";
+import {
+  createProxyMcpServer,
+  livenessHandoverNotificationPayloads,
+} from "../../src/server/proxyServer";
+import { DaemonSessionStalledError } from "../../src/daemon/daemonMcpProxy";
+import {
+  livenessHandoverPayload,
+  type LivenessHandover,
+} from "../../src/daemon/proxyLivenessRecovery";
+import type { ManagedSlotsResult } from "../../src/models/managedSlotsResult";
+import { readyManagedSlotsResult } from "../helpers/refusalWireFixtures";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -17,6 +31,81 @@ import { logger } from "../../src/utils/logger";
 // next tool call and, so an idle harness is told, as an MCP logging notification.
 
 let isAvailableSpy: ReturnType<typeof spyOn> | null = null;
+
+const SESSION = "11111111-2222-4333-8444-555555555555";
+const stalled: LivenessHandover = {
+  code: "daemon_stalled",
+  sessions: [{ sessionUuid: SESSION, deviceId: "emulator-5554", lastAcknowledgedHeartbeatAt: 10 }],
+  attempts: 3,
+  lastAcknowledgedHeartbeatAt: 10,
+  action: "restart_daemon_then_resume_by_session_uuid",
+};
+const extra = {
+  signal: new AbortController().signal,
+  requestId: 1,
+  sendNotification: async () => {},
+  sendRequest: async () => {
+    throw new Error("Unexpected request");
+  },
+};
+
+/** Exercise the registered handlers without a daemon connection or host process. */
+async function stalledHandlerAnswer(
+  managedSlots: ManagedSlotsResult | undefined,
+  surface: "tool" | "resource",
+  handover = stalled,
+  sessionUuid = SESSION,
+) {
+  const registration = spyOn(Server.prototype, "setRequestHandler");
+  let harness: ReturnType<typeof createProxyMcpServer>;
+  let registrations: typeof registration.mock.calls;
+  try {
+    harness = createProxyMcpServer({
+      managedSlots,
+      proxyConfig: {
+        timer: new FakeTimer(),
+        clientFactory: () => new FakeDaemonClient(),
+        daemonManager: new FakeDaemonManager(),
+        daemonAvailabilityProbe: async () => true,
+        autoStartDaemon: false,
+      },
+    });
+    registrations = [...registration.mock.calls];
+  } finally {
+    registration.mockRestore();
+  }
+  const refused = new DaemonSessionStalledError(sessionUuid, handover);
+  const call = spyOn(
+    harness.proxy,
+    surface === "tool" ? "callTool" : "readResource",
+  ).mockRejectedValue(refused);
+  try {
+    const schema = surface === "tool" ? CallToolRequestSchema : ReadResourceRequestSchema;
+    const handler = registrations.find(([registered]) => registered === schema)?.[1];
+    if (!handler) {
+      throw new Error("Missing handler");
+    }
+    if (surface === "tool") {
+      const result = await handler({ method: "tools/call", params: { name: "tapOn" } }, extra);
+      expect(result.isError).toBe(true);
+      return (result.content[0] as { text: string }).text;
+    }
+    try {
+      await handler({ method: "resources/read", params: { uri: "automobile:hierarchy" } }, extra);
+    } catch (error) {
+      if (!(error instanceof McpError)) {
+        throw error;
+      }
+      expect(error.code).toBe(-32603);
+      return JSON.stringify(error.data);
+    }
+    throw new Error("Expected resource refusal");
+  } finally {
+    call.mockRestore();
+    await harness.server.close();
+    await harness.proxy.close();
+  }
+}
 
 afterEach(() => {
   isAvailableSpy?.mockRestore();
@@ -117,6 +206,51 @@ describe("proxy server liveness stall reporting", () => {
       isAvailableSpy?.mockRestore();
       isAvailableSpy = null;
     }
+  });
+
+  test.each(["tool", "resource"] as const)(
+    "a managed daemon stall uses automatic reclaim advice on a %s refusal",
+    async (surface) => {
+      const managedSlots = readyManagedSlotsResult(SESSION);
+      const text = await stalledHandlerAnswer(managedSlots, surface);
+      const payload = JSON.parse(text);
+      const generic = livenessHandoverPayload(stalled);
+      expect(payload.error.recovery.action).toBe("wait_for_managed_reclaim");
+      expect(payload.error.message).toContain(SESSION);
+      expect(payload.error.message).not.toContain("restart the daemon yourself");
+      expect(payload.error.message).not.toContain("passing its sessionUuid");
+      expect(payload).toEqual({
+        error: {
+          ...generic.error,
+          message: payload.error.message,
+          recovery: { action: "wait_for_managed_reclaim" },
+        },
+      });
+      expect(Object.keys(payload.error)).toEqual(Object.keys(generic.error));
+      expect(payload).toEqual(livenessHandoverNotificationPayloads(stalled, managedSlots)[0]);
+    },
+  );
+
+  test.each(["tool", "resource"] as const)(
+    "generic and non-slot daemon stalls keep their %s refusal byte for byte",
+    async (surface) => {
+      for (const managedSlots of [undefined, readyManagedSlotsResult("other-session")]) {
+        const text = await stalledHandlerAnswer(managedSlots, surface);
+        expect(JSON.parse(text)).toEqual(livenessHandoverPayload(stalled));
+        expect(text).toBe(JSON.stringify(livenessHandoverPayload(stalled)));
+      }
+    },
+  );
+
+  test("a mixed daemon stall scopes managed tool advice to slot sessions", async () => {
+    const other = { ...stalled.sessions[0], sessionUuid: "other-session" };
+    const mixed = { ...stalled, sessions: [other, stalled.sessions[0]] };
+    const managedSlots = readyManagedSlotsResult(SESSION);
+    const managed = await stalledHandlerAnswer(managedSlots, "tool", mixed);
+    expect(JSON.parse(managed).error.recovery.action).toBe("wait_for_managed_reclaim");
+    expect(JSON.parse(managed).error.sessions).toEqual(stalled.sessions);
+    const generic = await stalledHandlerAnswer(managedSlots, "tool", mixed, other.sessionUuid);
+    expect(generic).toBe(JSON.stringify(livenessHandoverPayload(mixed)));
   });
 
   test("an unresponsive daemon is reported by notification and on the next tool call", async () => {

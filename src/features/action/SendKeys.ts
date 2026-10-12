@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readIosTypedTextField, verifyIosTypedText } from "./iosTypedTextVerification";
+import { verifyIosClear } from "./iosClearVerification";
 import {
   resolveTextCtrlProxyTimeoutMs,
   getTextRequestDeadlineMs,
@@ -407,7 +408,13 @@ export interface SendKeysCommandExecutor {
     signal?: AbortSignal,
     display?: string,
     mode?: SendKeysClearMode,
-  ): Promise<{ success: boolean; error?: string; retryable?: boolean; warning?: string }>;
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    retryable?: boolean;
+    warning?: string;
+    partialApplication?: boolean;
+  }>;
 }
 
 export interface SendKeysTargetFocuser {
@@ -955,7 +962,18 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     signal?.throwIfAborted();
     this.resetCaretState();
     if (this.device.platform !== "android") {
-      return this.textClient.clear(this.device.platform === "ios" ? signal : undefined);
+      const result = await this.textClient.clear(
+        this.device.platform === "ios" ? signal : undefined,
+      );
+      return this.device.platform === "ios" && result.success
+        ? verifyIosClear({
+            clear: () => this.textClient.clear(signal),
+            observer: this.observer,
+            timer: this.timer,
+            signal,
+            display,
+          })
+        : result;
     }
     if (mode === "a11y") {
       return this.clearAndroidWithAccessibility(signal, display);
@@ -1316,11 +1334,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     signal?.throwIfAborted();
     const resolvedMode = "xcuiTypeText" as const;
+    let clearWarning: string | undefined;
     if (operation === "replace") {
-      const clearResult = await this.textClient.clear(signal);
+      const clearResult = await this.clear(signal, display);
       if (!clearResult.success) {
         return { ...clearResult, resolvedMode };
       }
+      clearWarning = clearResult.warning;
       signal?.throwIfAborted();
     }
 
@@ -1340,12 +1360,18 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     });
     if (!result.success) {
       return {
-        ...(operation === "replace" ? markPartialAfterMutation(result) : result),
+        ...this.withTextWarnings(
+          operation === "replace" ? markPartialAfterMutation(result) : result,
+          [clearWarning],
+        ),
         resolvedMode,
       };
     }
     return {
-      ...(await verifyIosTypedText(text, before, this.observer, this.timer, signal, display)),
+      ...this.withTextWarnings(
+        await verifyIosTypedText(text, before, this.observer, this.timer, signal, display),
+        [clearWarning],
+      ),
       resolvedMode,
     };
   }
@@ -3279,8 +3305,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             ...(options?.deadlineMs === undefined ? {} : { deadlineMs: options.deadlineMs }),
           },
         ),
-      clear: async (signal) =>
-        client.requestClearText(undefined, 5000, undefined, { abortSignal: signal }),
+      clear: async (signal) => {
+        const deadlineMs = getTextRequestDeadlineMs();
+        return client.requestClearText(undefined, 5000, undefined, {
+          abortSignal: signal,
+          ...(deadlineMs === undefined ? {} : { deadlineMs }),
+        });
+      },
       ime: async (action, signal, onDispatch) =>
         client.requestImeAction(action, 5000, undefined, signal, onDispatch),
       supportsImeCommit: async () => false,
@@ -4164,6 +4195,7 @@ export class SendKeys {
           index: -1,
           action: "clear",
           success: result.success,
+          ...(result.partialApplication ? { partialApplication: true } : {}),
           ...(result.retryable === false ? { retryable: false } : {}),
           ...(result.warning === undefined ? {} : { warning: result.warning }),
           ...(result.error ? { error: result.error } : {}),

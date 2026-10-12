@@ -358,7 +358,14 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       sessionManager.setDeviceReadiness(other, "automationReady");
       // Sessionless selection would settle on the other session's device.
       devices.setCurrentDevice(free, "android");
-      sessionManager.setActiveSessionExecutionChecker((sessionId) => sessionId === agent);
+      const earlierStart = sessionManager.sessionNow();
+      sessionManager.setActiveSessionExecutionChecker(
+        (sessionId, query) =>
+          sessionId === agent &&
+          query?.excludeExecutionId !== "earlier" &&
+          (query?.sessionClockStartedAtOrBefore === undefined ||
+            earlierStart <= query.sessionClockStartedAtOrBefore),
+      );
       const deadline = sessionManager
         .getAllSessions()
         .find((session) => session.sessionId === agent)!.expiresAt;
@@ -381,6 +388,32 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       // Nothing was bound, released or credited: the session still holds its device and deadline.
       expect(sessionManager.getSessionForDevice(held.deviceId)).toBe(agent);
       expect(sessionManager.getSession(agent)!.expiresAt).toBe(deadline);
+    });
+
+    test("another session's control gets the same typed ownership refusal before and after the holder's deadline", async () => {
+      ToolRegistry.registerDeviceAware(
+        "controlProbe",
+        "Control probe",
+        z.object({}).passthrough(),
+        async () => ({ success: true }),
+      );
+      const deadline = sessionManager.getSession(agent)!.expiresAt;
+      const args = { sessionUuid: other, deviceId: held.deviceId };
+      const pinsBefore = devices.getSetCurrentDeviceCalls();
+      const after = await outcome("controlProbe", args);
+      timer.setCurrentTime(deadline - 1);
+      const before = await outcome("controlProbe", args);
+      for (const error of [before, after]) {
+        expect(error).toBeInstanceOf(InputDeviceOwnedError);
+        expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      }
+      expect((after as InputDeviceOwnedError).message).toBe(
+        (before as InputDeviceOwnedError).message,
+      );
+      expect(sessionManager.getSessionForDevice(held.deviceId)).toBe(agent);
+      expect(audited).toEqual([]);
+      expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
+      expect(devices.getSetCurrentDeviceCalls()).toEqual(pinsBefore);
     });
   });
 

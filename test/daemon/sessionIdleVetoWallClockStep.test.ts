@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { SessionManager, type SessionExecutionMetadata } from "../../src/daemon/sessionManager";
+import {
+  SessionManager,
+  TerminalSessionError,
+  type SessionExecutionMetadata,
+} from "../../src/daemon/sessionManager";
+import { hasActiveSessionExecution } from "../../src/daemon/toolCallActivity";
+import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
 import { SESSION_IDLE_TIMEOUT_ENV } from "../../src/daemon/sessionLivenessWindows";
 import {
   ExecutionTracker,
@@ -137,6 +143,11 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
     manager.setSessionExecutionDeadlineLookup((sessionId) =>
       tracker.getLatestSessionExecutionDeadlineMs(sessionId, { onSessionClock: true }),
     );
+    manager.setExpiryReleaseExecutionCanceller((sessionId, cancellation, query) => {
+      void tracker.cancelDeviceSessionExecutions(sessionId, cancellation, {
+        excludeExecutionId: query.excludeExecutionId,
+      });
+    });
     await manager.createSession(SESSION, DEVICE, "android");
   });
 
@@ -166,7 +177,7 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
   }
 
   for (const step of [0, -HOUR_MS]) {
-    it(`refuses a call begun after the idle deadline while earlier work holds the session, wall step ${step}`, () => {
+    it(`admits a call begun after the idle deadline while timely control work holds the session, wall step ${step}`, () => {
       startLongCallHoldingTheSession();
       timer.advanceTime(IDLE_MS + 80_000);
       manager.cleanupExpiredSessions();
@@ -174,8 +185,34 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
 
       const late = tracker.startExecution("tapOn", undefined, SESSION);
 
-      expect(admission(metadataOf(late))).toBe("refused");
+      expect(admission(metadataOf(late))).toBe("admitted");
       expect(manager.getSession(SESSION)?.expiresAt).toBe(IDLE_MS);
+    });
+
+    it(`two calls both begun after the deadline cannot admit each other, wall step ${step}`, async () => {
+      timer.advanceTime(IDLE_MS + 1);
+      timer.stepWallClock(step);
+      const first = tracker.startExecution("tapOn", undefined, SESSION);
+      const second = tracker.startExecution("tapOn", undefined, SESSION);
+      const admissionA = manager.admitIssuedSessionForAutomation(SESSION, metadataOf(first));
+      const admissionB = manager.admitIssuedSessionForAutomation(SESSION, metadataOf(second));
+      const outcomes = await Promise.allSettled([admissionA, admissionB]);
+      for (const outcome of outcomes) {
+        expect(outcome.status).toBe("rejected");
+        if (outcome.status !== "rejected") {
+          throw new Error("A late call was admitted");
+        }
+        expect(outcome.reason).toBeInstanceOf(TerminalSessionError);
+        expect(outcome.reason).toMatchObject({
+          release: { releaseReason: "cleanup-expired", terminal: true },
+        });
+      }
+      expect(second.abortController.signal.aborted).toBe(true);
+      expect(sessionReleasedDuringCallPayload(second.cancelReason)).toMatchObject({
+        error: { reason: "cleanup-expired", idle: true },
+      });
+      await manager.waitForSessionRelease(SESSION);
+      expect(manager.getSession(SESSION)).toBeNull();
     });
 
     it(`expires the session for a call begun after the idle deadline, wall step ${step}`, () => {
@@ -196,6 +233,69 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
       expect(admission({ executionId: late.id, startTime: late.startTime })).toBe("expired");
     });
   }
+
+  it("a control call begun exactly at the deadline admits later non-owner control without stamping activity", async () => {
+    timer.advanceTime(IDLE_MS);
+    const timely = tracker.startExecution("tapOn", undefined, SESSION);
+    timer.advanceTime(1);
+    const late = tracker.startExecution("tapOn", undefined, SESSION);
+    const session = await manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late), {
+      access: "non-owner-control",
+    });
+    expect(session?.expiresAt).toBe(IDLE_MS);
+    expect(session?.lastUsedAt).toBe(0);
+    tracker.endExecution(timely.id);
+    tracker.endExecution(late.id);
+  });
+
+  it("a late control call with only an earlier read in flight expires and cuts that read", async () => {
+    const read = tracker.startExecution("observe", undefined, SESSION);
+    tracker.markDeviceReadCall(read.id, read.toolName);
+    timer.advanceTime(IDLE_MS + 1);
+    const late = tracker.startExecution("tapOn", undefined, SESSION);
+    const pending = manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late));
+    await expect(pending).rejects.toBeInstanceOf(TerminalSessionError);
+    await expect(pending).rejects.toMatchObject({ release: { releaseReason: "cleanup-expired" } });
+    expect(sessionReleasedDuringCallPayload(read.cancelReason)).toMatchObject({
+      error: { reason: "cleanup-expired", idle: true },
+    });
+    await manager.waitForSessionRelease(SESSION);
+  });
+
+  it("a derived session counts timely base control work on the session clock, never recovery alone", () => {
+    const derived = `${SESSION}:tablet`;
+    const earlier = tracker.startExecution("tapOn", undefined, SESSION);
+    timer.stepWallClock(-HOUR_MS);
+    timer.advanceTime(IDLE_MS + 1);
+    const late = tracker.startExecution("tapOn", undefined, derived);
+    const managerPort = {
+      getDeviceLabels: (id: string) => (id === SESSION ? { tablet: derived } : undefined),
+    };
+    const query = {
+      sessionClockStartedAtOrBefore: IDLE_MS,
+      excludeExecutionId: late.id,
+      excludeReads: true,
+    };
+    expect(
+      hasActiveSessionExecution(
+        tracker,
+        managerPort,
+        { isSessionRecoveryInFlight: () => false },
+        derived,
+        query,
+      ),
+    ).toBe(true);
+    tracker.endExecution(earlier.id);
+    expect(
+      hasActiveSessionExecution(
+        tracker,
+        managerPort,
+        { isSessionRecoveryInFlight: () => true },
+        derived,
+        query,
+      ),
+    ).toBe(false);
+  });
 
   it("admits a call begun before the idle deadline after a forward wall step", () => {
     // Where the monotonic clock includes sleep (Linux, Windows) the session clock ignores a forward step.

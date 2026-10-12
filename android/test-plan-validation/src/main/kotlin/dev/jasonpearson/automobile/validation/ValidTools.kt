@@ -57,7 +57,6 @@ object ValidTools {
         "provisionDevice",
         "recentApps",
         "recordDeviceGestures",
-        "recordDeviceGestures",
         "recordToolCalls",
         "removeKeyValue",
         "rotate",

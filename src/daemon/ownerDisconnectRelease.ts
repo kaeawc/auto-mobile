@@ -18,6 +18,7 @@ import type { SessionReleaseReason } from "./releaseReasons";
  * defers release and is cut with the typed terminal refusal (#11381).
  */
 
+import { DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS } from "./inputDeviceOwnership";
 import type { Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
@@ -176,6 +177,8 @@ interface PendingRelease {
   session: Session;
   mcpSessionId: string;
   closedAt: number;
+  /** The next scheduled attempt on the release clock, including a known deferral. */
+  dueAt: number;
   /** The scheduled attempt; undefined while an attempt is in flight. */
   handle: NodeJS.Timeout | undefined;
   /** Whether the pool has deferred this release at least once. */
@@ -218,6 +221,7 @@ export class OwnerDisconnectRelease {
       session,
       mcpSessionId,
       closedAt,
+      dueAt: closedAt + this.graceMs,
       handle,
       deferred: false,
       rearmRequested: false,
@@ -234,6 +238,24 @@ export class OwnerDisconnectRelease {
       this.timer.clearTimeout(pending.handle);
     }
     this.pending.delete(sessionId);
+  }
+
+  /** Time until the armed attempt; an attempt in flight has only a bounded poll hint. Pure read. */
+  remainingMs(sessionId: string): number | undefined {
+    const pending = this.pending.get(sessionId);
+    if (
+      !pending ||
+      this.port.hasConnectedOwner(sessionId) ||
+      ownerDisconnectReleaseBlocker(pending.session, pending.closedAt) !== undefined
+    ) {
+      return undefined;
+    }
+    // The pool's getSession probes stalls and expires sessions; judge the pending object only.
+    if (pending.handle === undefined) {
+      return DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS;
+    }
+    const remainingMs = pending.dueAt - this.now();
+    return remainingMs > this.graceMs ? undefined : Math.max(0, remainingMs);
   }
 
   isPending(sessionId: string): boolean {
@@ -256,6 +278,7 @@ export class OwnerDisconnectRelease {
         continue;
       }
       this.timer.clearTimeout(pending.handle);
+      pending.dueAt = this.now();
       pending.handle = this.timer.setTimeout(() => this.fire(sessionId), 0);
     }
   }
@@ -329,7 +352,9 @@ export class OwnerDisconnectRelease {
       return;
     }
     pending.deferred = true;
-    const delayMs = pending.rearmRequested ? 0 : Math.max(0, deferral.deferredUntil - this.now());
+    const now = this.now();
+    pending.dueAt = pending.rearmRequested ? now : Math.max(now, deferral.deferredUntil);
+    const delayMs = pending.dueAt - now;
     pending.rearmRequested = false;
     logger.debug(
       `[OwnerDisconnectRelease] Release of session ${sessionId} was deferred; retrying when its ` +

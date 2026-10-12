@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   runCliCommand,
   setDaemonProxyFactoryForTesting,
@@ -14,6 +14,7 @@ import {
   CLI_KEEPER_LIVENESS_OWNER_KIND,
   CLI_SESSION_LIVENESS_POLICY,
   DAEMON_HEARTBEAT_METHOD,
+  DAEMON_RELEASE_SESSION_METHOD,
   DAEMON_VERSION,
   getCliSessionIdleTimeoutMs,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
@@ -184,6 +185,44 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
   let isAvailableSpy: ReturnType<typeof spyOn> | null;
   let isolatedCliDataDir: IsolatedCliDataDir;
 
+  // Pay one-time proxy/handler module initialization outside per-case timings, as the
+  // proxy-close and liveness matrix suites do. Each test still creates its own session store.
+  beforeAll(async () => {
+    const warmTimer = new FakeTimer();
+    const warmSessions = new SessionManager(warmTimer, new FakeDeviceSessionPersistence());
+    const client = new FakeDaemonClient({
+      toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("warm-cli") : undefined),
+      onCallDaemonMethod: async (method, params) => {
+        const response = await handleDaemonRequest(
+          { id: "warm", type: "daemon_request", method, params },
+          daemonStateFor(warmSessions),
+        );
+        if (!response.success) {
+          throw Object.assign(new Error(response.error), { code: response.code });
+        }
+        return response.result;
+      },
+    });
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => client,
+      daemonManager: matchingDaemonManager(),
+      daemonAvailabilityProbe: async () => true,
+      autoStartDaemon: false,
+      idGenerator: new FakeIdGenerator(),
+      timer: warmTimer,
+    });
+    try {
+      await warmSessions.createSession("warm-cli", "emulator-5554", "android", 30 * 60_000);
+      await proxy.callTool("getAndroid", {});
+    } finally {
+      try {
+        await proxy.close();
+      } finally {
+        warmSessions.stopCleanupTimer();
+      }
+    }
+  });
+
   beforeEach(() => {
     clearEnv();
     isolatedCliDataDir = isolateCliDataDir();
@@ -333,6 +372,10 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     const client = new FakeDaemonClient({
       toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("shared") : undefined),
       onCallDaemonMethod: async (method, params) => {
+        // Model an unclean exit: the release never reaches the daemon (dead socket / kill -9).
+        if (method === DAEMON_RELEASE_SESSION_METHOD) {
+          throw new Error("socket closed before release delivery");
+        }
         await handleDaemonRequest(
           { id: "1", type: "daemon_request", method, params },
           daemonStateFor(sessionManager),
@@ -346,13 +389,14 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     const proxy = proxyOver(client);
     try {
       await proxy.callTool("getAndroid", {});
+      const session = sessionManager.getSession("shared")!;
+      expect(session.livenessPolicy).toBe("heartbeat");
+      expect(session.heartbeatTimeoutMs).toBe(SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS);
     } finally {
       await proxy.close();
     }
 
-    const session = sessionManager.getSession("shared")!;
-    expect(session.livenessPolicy).toBe("heartbeat");
-    expect(session.heartbeatTimeoutMs).toBe(SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS);
+    expect(sessionManager.getSession("shared")).not.toBeNull();
 
     // ... and the restored session is reaped on the strict timeout once that
     // long-lived client is gone, instead of squatting the device for minutes.

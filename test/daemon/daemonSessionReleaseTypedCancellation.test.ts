@@ -239,7 +239,7 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
 
       expect(baseCall.abortController.signal.aborted).toBe(false);
       expect(() => executionTracker.bindDeviceExecution(baseCall.id, DERIVED_DEVICE)).toThrow(
-        `Session ${DERIVED} was released (lazy-expiry)`,
+        `Session ${DERIVED} was released (cleanup-expired)`,
       );
       executionTracker.bindDeviceExecution(baseCall.id, BASE_DEVICE);
       expect(baseCall.deviceIds).toEqual(new Set([BASE_DEVICE]));
@@ -253,7 +253,7 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
 
       expect(derivedCall.abortController.signal.aborted).toBe(true);
       expect(sessionReleasedDuringCallPayload(derivedCall.cancelReason)).toMatchObject({
-        error: { code: "session_ownership_lost", sessionUuid: DERIVED, reason: "lazy-expiry" },
+        error: { code: "session_ownership_lost", sessionUuid: DERIVED, reason: "cleanup-expired" },
       });
     });
   });

@@ -228,7 +228,7 @@ describe("a plan whose base idles out while its steps run on a label", () => {
           expect(planBaseEndFields(BASE, false, failedStep)).toMatchObject({
             code: SESSION_OWNERSHIP_LOST_CODE,
             retryable: false,
-            details: { sessionUuid: BASE, reason: "lazy-expiry" },
+            details: { sessionUuid: BASE, reason: "cleanup-expired" },
           });
           expect(
             planBaseEndFields(BASE, false, {
@@ -304,8 +304,10 @@ describe("a plan whose base idles out while its steps run on a label", () => {
       expect(result.error).toContain("ordinary probe failure unrelated to sessions");
       expect(result.code).toBeUndefined();
       await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
-      expect(plan.released.filter(([id]) => id === BASE)).toEqual([[BASE, "lazy-expiry"]]);
-      expect(plan.released.filter(([id]) => id === LABEL_B)).toEqual([[LABEL_B, "lazy-expiry"]]);
+      expect(plan.released.filter(([id]) => id === BASE)).toEqual([[BASE, "cleanup-expired"]]);
+      expect(plan.released.filter(([id]) => id === LABEL_B)).toEqual([
+        [LABEL_B, "cleanup-expired"],
+      ]);
       expect(plan.hunt.poolHolder(deviceA.deviceId)).toBeUndefined();
       expect(plan.hunt.poolHolder(deviceB.deviceId)).toBeUndefined();
     }),
@@ -331,12 +333,15 @@ describe("a plan whose base idles out while its steps run on a label", () => {
         await plan.run();
 
         expect(refused?.sessionUuid).toBe(LABEL_B);
-        expect(refused?.release).toMatchObject({ releaseReason: "lazy-expiry", terminal: true });
+        expect(refused?.release).toMatchObject({
+          releaseReason: "cleanup-expired",
+          terminal: true,
+        });
         // The refused call never reached the label's device.
         expect(plan.ran.slice(ranBefore)).toEqual([]);
         expect(plan.released).toEqual([
-          [BASE, "lazy-expiry"],
-          [LABEL_B, "lazy-expiry"],
+          [BASE, "cleanup-expired"],
+          [LABEL_B, "cleanup-expired"],
         ]);
         expect(plan.hunt.poolHolder(deviceB.deviceId)).toBeUndefined();
       })(),
@@ -351,14 +356,14 @@ describe("a plan whose base idles out while its steps run on a label", () => {
       expect(result.success).toBe(false);
       expect(result.code).toBe(SESSION_OWNERSHIP_LOST_CODE);
       expect(result.retryable).toBe(false);
-      expect(result.details).toEqual({ sessionUuid: BASE, reason: "lazy-expiry", idle: true });
-      expect(result.error).toContain("lazy-expiry");
+      expect(result.details).toEqual({ sessionUuid: BASE, reason: "cleanup-expired", idle: true });
+      expect(result.error).toContain("cleanup-expired");
       expect(result.error).not.toContain("is not allocated");
       // Two steps ran on the label's device; the third was refused before reaching any device.
       expect(plan.ran).toEqual([deviceB.deviceId, deviceB.deviceId]);
       expect(plan.released).toEqual([
-        [BASE, "lazy-expiry"],
-        [LABEL_B, "lazy-expiry"],
+        [BASE, "cleanup-expired"],
+        [LABEL_B, "cleanup-expired"],
       ]);
       expect(plan.hunt.poolHolder(deviceA.deviceId)).toBeUndefined();
       expect(plan.hunt.poolHolder(deviceB.deviceId)).toBeUndefined();

@@ -152,6 +152,7 @@ test/daemon/managedSlots/daemonManagedSlotAcquisition.redrive.test.ts
 test/daemon/managedSlots/defaultFreeDeviceReclaimer.test.ts
 test/daemon/managedSlots/freeDeviceReclaimer.test.ts
 test/daemon/managedSlots/iosSlotDeviceUnexcludedWhileCreating.test.ts
+test/daemon/managedSlots/managedConnectionScope.test.ts
 test/daemon/managedSlots/managedExecutionDaemonRestart.test.ts
 test/daemon/managedSlots/managedExecutionRestartScenario.test.ts
 test/daemon/managedSlots/managedSlotAcquisition.test.ts
@@ -161,6 +162,7 @@ test/daemon/managedSlots/managedSlotReconcilerPorts.test.ts
 test/daemon/managedSlots/poolManagedSlotDeviceStopper.test.ts
 test/daemon/managedSlots/reconciler.test.ts
 test/daemon/managedSlots/resolvedExistingSpec.test.ts
+test/daemon/managedSlots/revivedScopeJournaledDelete.test.ts
 test/daemon/managedSlots/slotJournal.test.ts
 test/daemon/managedSlots/slotOwnerLiveness.test.ts
 test/daemon/managedSlots/slotRegistryMigrations.test.ts
@@ -172,6 +174,7 @@ test/daemon/managedSlots/slotsUnresolvedEmulatorIdentityGate.test.ts
 test/daemon/managedSlots/sqliteSlotRegistry.test.ts
 test/daemon/managedSlots/widenedSpecReportsCreationDefaultModel.test.ts
 test/daemon/managerOutputReductionArgs.test.ts
+test/daemon/notFoundDaemonInstanceError.test.ts
 test/daemon/observationRequestBatch.test.ts
 test/daemon/observerLeaseSleepForgiveness.test.ts
 test/daemon/observerLeaseWallClockStep.test.ts
@@ -416,6 +419,7 @@ test/features/appearance/AppearanceConfig.property.test.ts
 test/features/bootAdmission/AndroidBootAdmissionGate.crossDaemon.test.ts
 test/features/bootAdmission/AndroidBootAdmissionGate.test.ts
 test/features/bootAdmission/AndroidCapacitySource.test.ts
+test/features/bootAdmission/bootAdmissionRegistryLocation.test.ts
 test/features/bootAdmission/bootGateInterleavings.test.ts
 test/features/database/bigIntegerJson.test.ts
 test/features/database/sqlLexer.test.ts
@@ -579,6 +583,7 @@ test/features/observe/ios/runnerErrorCodes.contract.test.ts
 test/features/observe/ios/semanticRoles.property.test.ts
 test/features/observe/ios/semanticRoles.test.ts
 test/features/observe/ios/springBoardIcon.test.ts
+test/features/observe/ios/storageWriteDispatchHook.test.ts
 test/features/observe/iosObserveRotation.test.ts
 test/features/observe/linkWindowRoots.test.ts
 test/features/observe/linkedWindowProjection.interaction.test.ts

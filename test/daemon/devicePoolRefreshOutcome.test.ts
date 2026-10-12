@@ -387,7 +387,14 @@ describe("Android discovery failure refresh outcome", () => {
 
   test("setActiveDevice surfaces the caught adb reason through the refresh outcome", async () => {
     setup(`${"x".repeat(300)}\r\nsecond line must stay in logs`);
-    const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+    const handler = createSetActiveDeviceHandler({
+      resumeCtrlProxy: async () => {},
+      transportWait: {
+        timer: new FakeTimer(),
+        probe: async () => new Map(),
+        invalidateDeviceList: () => {},
+      },
+    });
     await expect(
       handler({ deviceId: "emulator-5604", sessionUuid: "selection" }),
     ).rejects.toMatchObject({
@@ -399,7 +406,14 @@ describe("Android discovery failure refresh outcome", () => {
     const { pool } = setup(
       new AdbUnavailableError("ADB executable is unavailable: spawn adb ENOENT"),
     );
-    const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+    const handler = createSetActiveDeviceHandler({
+      resumeCtrlProxy: async () => {},
+      transportWait: {
+        timer: new FakeTimer(),
+        probe: async () => new Map(),
+        invalidateDeviceList: () => {},
+      },
+    });
     const refusal = await handler({
       deviceId: "99999999-2222-3333-4444-555555555555",
       sessionUuid: "selection",
@@ -417,7 +431,14 @@ describe("Android discovery failure refresh outcome", () => {
   // #11586: the answer is typed by the platform whose discovery failed and could have listed the id.
   const SIMULATOR_UDID = "0F1E2D3C-4B5A-4978-8695-A4B3C2D1E0F9";
   const select = (deviceId: string, platform?: "android" | "ios") =>
-    createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} })({
+    createSetActiveDeviceHandler({
+      resumeCtrlProxy: async () => {},
+      transportWait: {
+        timer: new FakeTimer(),
+        probe: async () => new Map(),
+        invalidateDeviceList: () => {},
+      },
+    })({
       deviceId,
       sessionUuid: "selection",
       ...(platform ? { platform } : {}),
@@ -474,7 +495,14 @@ describe("Android discovery failure refresh outcome", () => {
 
   test("working adb with an absent device preserves the exact selection error", async () => {
     setup();
-    const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+    const handler = createSetActiveDeviceHandler({
+      resumeCtrlProxy: async () => {},
+      transportWait: {
+        timer: new FakeTimer(),
+        probe: async () => new Map(),
+        invalidateDeviceList: () => {},
+      },
+    });
     await expect(
       handler({ deviceId: "emulator-5604", sessionUuid: "selection" }),
     ).rejects.toMatchObject({

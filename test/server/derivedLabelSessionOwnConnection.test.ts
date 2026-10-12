@@ -218,11 +218,11 @@ describe("a connection bound to the base session naming its own derived label se
       expect(wire(result).error).toMatchObject({
         code: "session_ownership_lost",
         sessionUuid: DERIVED,
-        reason: "lazy-expiry",
+        reason: "cleanup-expired",
         nextAction: "acquire_new_session",
       });
       expect(tools.runs.length).toBe(ranBefore);
-      expect(released[0]).toEqual([BASE, "lazy-expiry"]);
+      expect(released[0]).toEqual([BASE, "cleanup-expired"]);
     }),
   );
 

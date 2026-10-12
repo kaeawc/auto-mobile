@@ -1,3 +1,4 @@
+import { holderReleaseRemainingMs } from "./holderReleaseRemaining";
 import {
   mintedSession,
   requestAcquisitionReceipt,
@@ -61,6 +62,7 @@ import {
 } from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
 import {
+  heldDeviceBindRefusal,
   deviceAlreadyAssignedToAnotherSessionError,
   deviceAssignedToOtherSessionError,
   devicePreparedForOtherRequestError,
@@ -9246,6 +9248,15 @@ export class DevicePool {
     }
   }
 
+  /** A read-only retry hint when this holder is already on its way out. */
+  holderReleaseRemainingMs(holderSessionId: string): number | undefined {
+    return holderReleaseRemainingMs({
+      disconnectRemainingMs: this.ownerDisconnectRelease.remainingMs(holderSessionId),
+      ownerLease: this.sessionManager.getSessionLeaseState(holderSessionId),
+      releasing: this.sessionManager.getReleasingSession(holderSessionId) !== null,
+    });
+  }
+
   private async reuseExistingDeviceSession(
     deviceId: string,
     existingSession: Session,
@@ -9270,7 +9281,7 @@ export class DevicePool {
       existingSessionId !== requestedSessionId &&
       !isAnonymousAcquisitionSession(existingSession)
     ) {
-      throw deviceAssignedToOtherSessionError(deviceId, existingSessionId, requestedSessionId);
+      throw heldDeviceBindRefusal(this, deviceId, existingSessionId, requestedSessionId);
     }
     // The reusing call may already be tracked under the holder (autolock); naming it keeps its
     // own admission from being judged as earlier work still in flight (#11400).
@@ -9301,7 +9312,7 @@ export class DevicePool {
   ): boolean {
     if (caller?.oneShotCli === true) {
       if (!isAnonymousAcquisitionSession(session)) {
-        throw deviceAlreadyAssignedToAnotherSessionError(device.id);
+        throw heldDeviceBindRefusal(this, device.id, session.sessionId, undefined, "another");
       }
       // Anonymous acquisitions share one owner, so a one-shot CLI caller reusing one is its
       // confirmed owner. Returning false sent an acquisition that resolved a source image (an AVD
@@ -9319,7 +9330,7 @@ export class DevicePool {
       !this.isSessionAssignmentCurrent(device, session) ||
       !this.sessionManager.isAdmittedForAutomation(session)
     ) {
-      throw deviceAlreadyAssignedToAnotherSessionError(device.id);
+      throw heldDeviceBindRefusal(this, device.id, session.sessionId, undefined, "another");
     }
     return true;
   }

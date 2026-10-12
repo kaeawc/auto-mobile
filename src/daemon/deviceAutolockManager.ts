@@ -1,8 +1,5 @@
 import { captureAutolockPolicy } from "./deviceAutolockPolicy";
-import {
-  deviceAlreadyAssignedToAnotherSessionError,
-  InputDeviceOwnedError,
-} from "./inputDeviceOwnership";
+import { heldDeviceBindRefusal, InputDeviceOwnedError } from "./inputDeviceOwnership";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { logger } from "../utils/logger";
@@ -67,6 +64,7 @@ interface AutolockAcquisitionOptions {
 }
 
 export interface DeviceAutolockPoolPort {
+  holderReleaseRemainingMs?(sessionId: string): number | undefined;
   /** Tell resource subscribers a status or holder write committed (#11413). */
   noteDeviceStateChanged?(device: Pick<PooledDevice, "id" | "platform">): void;
   getSessionManager(): SessionManager;
@@ -533,7 +531,13 @@ export class DeviceAutolockManager {
       mcpSessionId &&
       this.mcpSessionAutolockMap.get(mcpSessionId) !== client.expectedSessionId
     ) {
-      throw deviceAlreadyAssignedToAnotherSessionError(device.id);
+      throw heldDeviceBindRefusal(
+        this.pool,
+        device.id,
+        device.sessionId ?? undefined,
+        undefined,
+        "another",
+      );
     }
     const session = device.sessionId
       ? this.pool.getSessionManager().getSession(device.sessionId)
@@ -542,7 +546,13 @@ export class DeviceAutolockManager {
       return undefined;
     }
     if (!this.isOwnedAutolockSession(device, session, mcpSessionId)) {
-      throw deviceAlreadyAssignedToAnotherSessionError(device.id);
+      throw heldDeviceBindRefusal(
+        this.pool,
+        device.id,
+        device.sessionId ?? undefined,
+        undefined,
+        "another",
+      );
     }
     return session;
   }

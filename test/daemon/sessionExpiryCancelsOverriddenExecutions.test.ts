@@ -120,15 +120,15 @@ describe("idle-expiry release cancels the executions it overrides (#10820)", () 
     expect(manager.getSession(SESSION)).toBeNull();
     expect(hung!.abortController.signal.aborted).toBe(true);
     await settle();
-    expect(cancelCalls).toEqual([{ sessionId: SESSION, reason: "lazy-expiry" }]);
-    expect(releases).toEqual([{ reason: "lazy-expiry", abortedAtRelease: true }]);
+    expect(cancelCalls).toEqual([{ sessionId: SESSION, reason: "cleanup-expired" }]);
+    expect(releases).toEqual([{ reason: "cleanup-expired", abortedAtRelease: true }]);
   });
 
   // #11381: the call an idle release cuts is told the session is gone, in the same terminal
   // refusal a call arriving after the release gets, not a generic abort.
   for (const [path, reason, expire] of [
     ["sweep", "cleanup-expired", () => manager.cleanupExpiredSessions()],
-    ["lazy lookup", "lazy-expiry", () => manager.getSession(SESSION)],
+    ["lazy lookup", "cleanup-expired", () => manager.getSession(SESSION)],
   ] as const) {
     it(`${path}: the call it cuts is aborted with the typed terminal release`, async () => {
       const idleDeadline = startHungCall();
@@ -180,8 +180,8 @@ describe("idle-expiry release cancels the executions it overrides (#10820)", () 
     expect(manager.getSessionForNewExecution(SESSION)).toBeNull();
     expect(hung!.abortController.signal.aborted).toBe(true);
     await settle();
-    expect(cancelCalls).toEqual([{ sessionId: SESSION, reason: "lazy-expiry" }]);
-    expect(releases).toEqual([{ reason: "lazy-expiry", abortedAtRelease: true }]);
+    expect(cancelCalls).toEqual([{ sessionId: SESSION, reason: "cleanup-expired" }]);
+    expect(releases).toEqual([{ reason: "cleanup-expired", abortedAtRelease: true }]);
   });
 
   it("does not cancel the late execution whose own lookup expires the session", async () => {
@@ -198,6 +198,6 @@ describe("idle-expiry release cancels the executions it overrides (#10820)", () 
     await settle();
     expect(hung.abortController.signal.aborted).toBe(false);
     expect(cancelCalls).toEqual([]);
-    expect(releases.map((release) => release.reason)).toEqual(["lazy-expiry"]);
+    expect(releases.map((release) => release.reason)).toEqual(["cleanup-expired"]);
   });
 });

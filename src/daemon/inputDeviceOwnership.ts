@@ -31,7 +31,8 @@ export class InputDeviceOwnedError extends ActionableError {
   /**
    * False when a session holds the device: the holder keeps it until it releases it, so the same
    * call cannot succeed as-is. True, with `retryAfterMs`, only for a device another request is
-   * still preparing (#11651), or held for bounded restart recovery (#11902).
+   * still preparing (#11651), held for bounded restart recovery (#11902), or whose
+   * holder is already on its way out (#11920).
    */
   readonly retryable: boolean;
   declare readonly retryAfterMs?: number;
@@ -113,6 +114,44 @@ export function deviceAssignedToOtherSessionError(
     requesterSessionUuid,
     undefined,
     `Device '${deviceId}' is already assigned to session ${holderSessionUuid}`,
+  );
+}
+
+/** The pool read is optional so older daemon-state and autolock fakes keep their contracts. */
+interface HolderReleaseQuery {
+  holderReleaseRemainingMs(sessionId: string): number | undefined;
+}
+
+function readsHolderRelease(pool: object): pool is HolderReleaseQuery {
+  return typeof Reflect.get(pool, "holderReleaseRemainingMs") === "function";
+}
+
+/** Preserve each bind/select refusal's wording, adding a hint only for a hold ending by itself. */
+export function heldDeviceBindRefusal(
+  pool: object | undefined,
+  deviceId: string,
+  holderSessionUuid: string | undefined,
+  requesterSessionUuid?: string,
+  wording: "assigned" | "another" = "assigned",
+): InputDeviceOwnedError {
+  const original =
+    wording === "another"
+      ? deviceAlreadyAssignedToAnotherSessionError(deviceId)
+      : deviceAssignedToOtherSessionError(deviceId, holderSessionUuid!, requesterSessionUuid);
+  const retryAfterMs =
+    pool && holderSessionUuid && readsHolderRelease(pool)
+      ? pool.holderReleaseRemainingMs(holderSessionUuid)
+      : undefined;
+  if (retryAfterMs === undefined) {
+    return original;
+  }
+  return new InputDeviceOwnedError(
+    "acquire",
+    deviceId,
+    requesterSessionUuid,
+    undefined,
+    `${original.message}${original.message.endsWith(".") ? "" : "."} The holder is being released; retry in about ${retryAfterMs}ms.`,
+    retryAfterMs,
   );
 }
 

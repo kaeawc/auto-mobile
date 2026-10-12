@@ -5175,7 +5175,8 @@ export class DaemonMcpProxy {
     // An ack can arrive after a held session was dropped. End its retained history without
     // creating process evidence for a session that is no longer heartbeated.
     if (!this.isHeldSession(sessionUuid)) {
-      this.clearNotFoundHistory(sessionUuid);
+      this.notFoundWindows.delete(sessionUuid);
+      this.sessionDaemonInstances.delete(sessionUuid);
     }
     const daemonInstance = ackDaemonInstance(ack);
     if (daemonInstance !== undefined) {
@@ -6770,7 +6771,6 @@ export class DaemonMcpProxy {
       held.conflict = undefined;
     }
     this.notFoundWindows.delete(sessionUuid);
-    this.notFoundStopped.delete(sessionUuid);
     this.livenessAcks.set(sessionUuid, this.timer.now());
     this.livenessConflictLogged.delete(sessionUuid);
   }
@@ -7306,7 +7306,6 @@ export class DaemonMcpProxy {
     this.livenessConflictLogged.delete(sessionUuid);
     this.latestBindingConflict = undefined;
     this.notFoundWindows.delete(sessionUuid);
-    this.notFoundStopped.delete(sessionUuid);
     // Only a forwarded call refreshes the replay lease (`boundSessionUuidAt`); an ack proves the
     // daemon still holds the session, not that the agent is using it (#10656).
     this.livenessAcks.set(sessionUuid, this.timer.now());

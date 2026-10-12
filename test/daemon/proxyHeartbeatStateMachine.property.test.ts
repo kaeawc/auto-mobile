@@ -434,6 +434,16 @@ class World {
     return known.length === 0 ? undefined : known[index % known.length];
   }
 
+  lateHeldAcknowledgement(sessionUuid: string): void {
+    // The fake answers one keeper request at a time; use the acknowledgement seams to model an
+    // abandoned request answering after a later not-found request dropped the held session.
+    this.proxy["noteDaemonIdleEvidence"](sessionUuid, {
+      daemonInstance: `daemon-${this.daemonInstance}`,
+    });
+    this.proxy["recordHeldSessionHeartbeatSuccess"](sessionUuid, true);
+    this.acknowledged(this.sessions.get(sessionUuid)!);
+  }
+
   private newClient(): FakeDaemonClient {
     const instance = `daemon-${this.daemonInstance}`;
     const created = new FakeDaemonClient({
@@ -2177,6 +2187,7 @@ describe("not-found peer and retained handoff regressions", () => {
     "dropped held session keeps its handoff",
     "ack clears a dropped held session handoff",
     "admitted call clears a dropped held session handoff",
+    "late ack then admitted call restores a dropped held session",
   ] as const;
   const results = new Map<string, string[]>();
   beforeAll(async () => {
@@ -2219,6 +2230,28 @@ describe("not-found peer and retained handoff regressions", () => {
           world.release(held, "recoverable", false);
           await world.tick();
           await world.apply({ kind: "ticks", count: WINDOW_TICKS + 2 });
+          if (name.startsWith("late ack")) {
+            if (
+              !world.proxy["notFoundStopped"].has(held) ||
+              world.proxy["otherHeldSessions"].has(held)
+            ) {
+              world.violations.push("scenario did not drop the held session on stopped");
+            }
+            world.lateHeldAcknowledgement(held);
+            await world.call(held, false);
+            const beats = world.sessions.get(held)!.heartbeats;
+            await world.tick();
+            if (
+              !world.proxy["otherHeldSessions"].has(held) ||
+              world.sessions.get(held)!.heartbeats <= beats
+            ) {
+              world.violations.push(
+                "late acknowledgement prevented admitted-call restore and heartbeat",
+              );
+            }
+            results.set(name, world.violations);
+            continue;
+          }
           await world.rebind(held);
           await world.rebind(latest);
           await world.tick();

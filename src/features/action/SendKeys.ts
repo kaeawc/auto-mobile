@@ -472,6 +472,8 @@ interface SendKeysRouting extends SendKeysFocusOptions {
 }
 
 export type TextActionResult = {
+  /** Internal device read-back evidence; omitted from public command results. */
+  insertedText?: string;
   success: boolean;
   retryable?: boolean;
   warning?: string;
@@ -1910,7 +1912,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
                 operation === "replace" ? markPartialAfterMutation(result) : result,
                 text,
                 "commit",
-                { focusedFieldClass: routing.focusedFieldClass },
+                this.imeCommitDiagnosticContext(result, routing),
               ),
             ),
             [clearWarning],
@@ -1947,6 +1949,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         safeToRestore: progress.safeToRestore,
       };
     }
+  }
+
+  private imeCommitDiagnosticContext(result: TextActionResult, routing: ImeCommitRouting) {
+    return {
+      focusedFieldClass: routing.focusedFieldClass,
+      observedText: routing.passwordField ? undefined : result.insertedText,
+    };
   }
 
   private verifyImeCommit(
@@ -3283,6 +3292,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             ...(result.sessionUnsafe ? { sessionUnsafe: true } : {}),
             ...(result.transportFailure ? { imeFailureStage: "transport" as const } : {}),
             ...imeCommitUnitFields(result),
+            ...(result.insertedText !== undefined ? { insertedText: result.insertedText } : {}),
           };
         },
       };

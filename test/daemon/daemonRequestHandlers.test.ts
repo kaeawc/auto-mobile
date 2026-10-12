@@ -269,6 +269,35 @@ describe("handleDaemonRequest", () => {
     });
   });
 
+  test("session broker mode advertises its contract and rejects legacy allocation before dispatch", async () => {
+    const state = Object.assign(
+      new FakeDaemonState(
+        sessionManager,
+        new FakeDevicePool({
+          total: 0,
+          idle: 0,
+          assigned: 0,
+          error: 0,
+        }),
+      ),
+      { isSessionBrokerMode: () => true },
+    );
+    const capabilities = await handleDaemonRequest(buildRequest("daemon/capabilities"), state);
+    expect(capabilities?.result?.capabilities).toContain("session-broker/v1");
+    expect(capabilities?.result?.capabilities).not.toContain("managed-slots/v1");
+    for (const method of ["daemon/acquireManagedSlots", "daemon/resetSlotScope"]) {
+      expect(await handleDaemonRequest(buildRequest(method), state)).toMatchObject({
+        success: false,
+        code: "session_broker_exclusive",
+      });
+    }
+    // A provider that has not completed broker startup cannot grant a session.
+    expect(await handleDaemonRequest(buildRequest("daemon/prepareSession"), state)).toMatchObject({
+      success: false,
+      code: "session_broker_unavailable",
+    });
+  });
+
   test("returns session info for active session", async () => {
     const devicePool = new FakeDevicePool({
       total: 1,

@@ -8,6 +8,9 @@ import { ActionableError } from "../../models/ActionableError";
 import { ensureSecureDirectorySync, getAdbServerScopedAutoMobileDir } from "../../utils/tempDir";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
+import { SqliteSessionBrokerStore } from "../sessionBroker/sqliteStore";
+import type { BrokerRequestsTable, BrokerResourcesTable } from "../sessionBroker/store";
+import type { IdGenerator } from "../../utils/IdGenerator";
 import { migrateSlotRegistry } from "./slotRegistryMigrations";
 import {
   isAbandonedScope,
@@ -193,6 +196,8 @@ export interface SlotRegistryDatabase {
   slot_assignments: SlotAssignmentsTable;
   slot_free_devices: SlotFreeDevicesTable;
   slot_journal: SlotJournalTable;
+  session_broker_requests: BrokerRequestsTable;
+  session_broker_resources: BrokerResourcesTable;
 }
 
 type Executor = Kysely<SlotRegistryDatabase> | Transaction<SlotRegistryDatabase>;
@@ -472,6 +477,11 @@ export class SqliteSlotRegistry implements SlotRegistry {
   ) {
     this.timer = options.timer ?? defaultTimer;
     this.isExecOwnerLive = options.isExecOwnerLive ?? defaultSlotExecOwnerLiveness;
+  }
+
+  /** Shares this connection, transaction lock and physical authority; never opens another DB. */
+  sessionBrokerStore(scopeKey: string, ids?: IdGenerator): SqliteSessionBrokerStore {
+    return new SqliteSessionBrokerStore(this.db, scopeKey, this.isExecOwnerLive, ids);
   }
 
   async ensureScope(identity: SlotScopeIdentity): Promise<EnsureScopeResult> {

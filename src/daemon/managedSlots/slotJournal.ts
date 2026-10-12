@@ -923,10 +923,11 @@ export const SLOT_JOURNAL_REDRIVE_INTERVAL_MS = 5_000;
 export class SlotJournalRedriveLoop {
   private stopped = false;
   private running: Promise<void> | undefined;
+  private wake: (() => void) | undefined;
 
   constructor(
     private readonly journal: Pick<ManagedSlotJournal, "runPass">,
-    private readonly timer: Pick<Timer, "sleep">,
+    private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout">,
     private readonly intervalMs: number = SLOT_JOURNAL_REDRIVE_INTERVAL_MS,
   ) {}
 
@@ -937,6 +938,7 @@ export class SlotJournalRedriveLoop {
   /** Stop after the current pass; resolves once the loop has exited. */
   async stop(): Promise<void> {
     this.stopped = true;
+    this.wake?.();
     await this.running;
   }
 
@@ -951,7 +953,21 @@ export class SlotJournalRedriveLoop {
       if (this.stopped) {
         return;
       }
-      await this.timer.sleep(this.intervalMs);
+      await this.wait();
     }
+  }
+
+  private wait(): Promise<void> {
+    return new Promise((resolve) => {
+      const done = () => {
+        this.wake = undefined;
+        resolve();
+      };
+      const timeout = this.timer.setTimeout(done, this.intervalMs);
+      this.wake = () => {
+        this.timer.clearTimeout(timeout);
+        done();
+      };
+    });
   }
 }

@@ -709,7 +709,7 @@ describe("managed slot journal redrive", () => {
         5_000,
       );
       const untilSleeping = async () => {
-        for (let turn = 0; turn < 50 && timer.getPendingSleepCount() === 0; turn += 1) {
+        for (let turn = 0; turn < 50 && timer.getPendingTimeoutCount() === 0; turn += 1) {
           await Promise.resolve();
         }
       };
@@ -720,9 +720,36 @@ describe("managed slot journal redrive", () => {
       await untilSleeping();
       expect(passes).toBe(2);
       const stopped = loop.stop();
-      timer.advanceTime(5_000);
       await stopped;
       expect(passes).toBe(2);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+
+    test("stopping the journal loop joins a running pass before registry teardown", async () => {
+      const entered = Promise.withResolvers<void>();
+      const finish = Promise.withResolvers<void>();
+      const loop = new SlotJournalRedriveLoop(
+        {
+          runPass: async () => {
+            entered.resolve();
+            await finish.promise;
+            return { settled: [], blocked: [], skipped: 0 };
+          },
+        },
+        timer,
+      );
+      loop.start();
+      await entered.promise;
+      let stopped = false;
+      const stopping = loop.stop().then(() => {
+        stopped = true;
+      });
+      await Promise.resolve();
+      expect(stopped).toBe(false);
+      finish.resolve();
+      await stopping;
+      expect(stopped).toBe(true);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
     });
   });
 

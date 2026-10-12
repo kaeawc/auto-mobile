@@ -357,9 +357,9 @@ these scripted transport, close and typing behaviours.
 
 Initialize and start a private daemon with the commands above first. The Python
 client resolves its launch through `in-daemon-env.sh` and `harness-guard.ts`; the
-TypeScript guard owns all private namespace rules and requires a live daemon pid
-file. The proxy receives only the server entry point, with no daemon startup
-flags. Both real and fake modes check every device-start call, including
+TypeScript guard owns all private namespace rules; resolve requires a live daemon
+pid file and a responding private control socket. The proxy receives only the
+server entry point, with no daemon startup flags. Both real and fake modes check every device-start call, including
 `afterPeerClosed`, before spawning. Selector-only starts need `--allow-selector`.
 There is no arbitrary command, socket, port or real-server environment override.
 

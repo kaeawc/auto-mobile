@@ -1,4 +1,10 @@
 #!/usr/bin/env bun
+import "../harnessLogSink";
+import { harnessChildEnvironment } from "../harnessLogSink";
+import { probeControlSocket } from "../controlSocketProbe";
+import { connectFrameSocket } from "../daemon-frame";
+import { defaultTimer } from "../../../src/utils/SystemTimer";
+import { defaultIdGenerator } from "../../../src/utils/IdGenerator";
 import { readFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { z } from "zod";
@@ -19,6 +25,7 @@ export interface HarnessGuardDeps {
   runtimePath: string;
   readFile(path: string): string;
   isPidAlive(pid: number): boolean;
+  probeDaemonSocket(socketPath: string): Promise<{ alive: boolean; reason?: string }>;
 }
 export type HarnessGuardResult = { ok: true; stdout: string } | { ok: false; message: string };
 const inputSchema = z
@@ -31,11 +38,11 @@ const pidSchema = z.object({ pid: z.number().int().positive().max(Number.MAX_SAF
 const daemonRefusal =
   "Run private-daemon.ts start first; a Python stdio client must not wake a dead daemon.";
 
-export function runHarnessGuard(
+export async function runHarnessGuard(
   command: string | undefined,
   stdinText: string,
   deps: HarnessGuardDeps,
-): HarnessGuardResult {
+): Promise<HarnessGuardResult> {
   try {
     if (command !== "resolve" && command !== "check-calls") {
       return { ok: false, message: "Expected resolve or check-calls." };
@@ -87,6 +94,13 @@ export function runHarnessGuard(
       if (!deps.isPidAlive(pid)) {
         return { ok: false, message: daemonRefusal };
       }
+      const probe = await deps.probeDaemonSocket(env.AUTOMOBILE_DAEMON_SOCKET_PATH);
+      if (!probe.alive) {
+        return {
+          ok: false,
+          message: `${daemonRefusal} ${probe.reason ?? "Control socket did not answer."}`,
+        };
+      }
     }
     for (const [index, call] of input.calls.entries()) {
       const refusal = deviceStartGuardRefusal(call.tool, call.arguments, input);
@@ -121,11 +135,11 @@ export function runHarnessGuard(
   }
 }
 export async function main(): Promise<number> {
-  const result = runHarnessGuard(
+  const result = await runHarnessGuard(
     process.argv.length === 3 ? process.argv[2] : undefined,
     await Bun.stdin.text(),
     {
-      env: process.env,
+      env: harnessChildEnvironment(process.env),
       host: {
         homeDirs: [homedir(), userInfo().homedir],
         uid: process.getuid?.() ?? userInfo().username,
@@ -134,6 +148,12 @@ export async function main(): Promise<number> {
       runtimePath: process.execPath,
       readFile: (path) => readFileSync(path, "utf8"),
       isPidAlive: isProcessRunning,
+      probeDaemonSocket: (path) =>
+        probeControlSocket(path, {
+          connect: connectFrameSocket,
+          timer: defaultTimer,
+          ids: defaultIdGenerator,
+        }),
     },
   );
   if (!result.ok) {

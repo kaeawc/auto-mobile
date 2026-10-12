@@ -149,7 +149,9 @@ describe("a holder's control frame refused before it reaches the device", () => 
   let screenGeometry: { pixelWidth: number; pixelHeight: number } | null;
   let toolsEnabled: boolean;
   let beforeDeviceWork: (() => void) | undefined;
-  let deviceWork: ((onDispatch?: () => void) => Promise<{ success: true }>) | undefined;
+  let deviceWork:
+    | ((onDispatch?: () => void) => Promise<{ success: boolean; error?: string }>)
+    | undefined;
   let duringOwnershipGate: (() => void) | undefined;
   const pool = { isSessionRecoveryInFlight: () => false, sessionExecutionsEnded: () => {} };
 
@@ -205,7 +207,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
 
   const record =
     (call: string, hookIndex?: number) =>
-    async (...args: unknown[]): Promise<{ success: true }> => {
+    async (...args: unknown[]): Promise<{ success: boolean; error?: string }> => {
       const hook = hookIndex === undefined ? undefined : args[hookIndex];
       const onDispatch =
         typeof hook === "function"
@@ -372,6 +374,27 @@ describe("a holder's control frame refused before it reaches the device", () => 
     expect(response).toMatchObject({ success: true });
     expect(sent).toEqual(["tap"]);
     expect(idleClock().lastUsedAt).toBe(before.lastUsedAt! + 1_000);
+  });
+
+  test("input/typeText dispatched device failure marks session use exactly once (#11919)", async () => {
+    const before = idleClock();
+    timer.advanceTime(1_000);
+    const mark = spyOn(executionTracker, "markSessionAdmitted");
+    deviceWork = async (onDispatch) => {
+      onDispatch?.();
+      sent.push("setText");
+      return { success: false, error: "No focused editable node found" };
+    };
+
+    const response = await send("device-failure", "input/typeText", { text: "hello" });
+
+    expect(response).toMatchObject({ success: false, error: "No focused editable node found" });
+    expect(sent).toEqual(["setText"]);
+    expect(mark).toHaveBeenCalledTimes(1);
+    expect(idleClock()).toEqual({
+      lastUsedAt: before.lastUsedAt! + 1_000,
+      expiresAt: before.expiresAt! + 1_000,
+    });
   });
 
   test("control: a foreign session's tap is refused and leaves the idle window alone", async () => {

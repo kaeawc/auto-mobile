@@ -144,6 +144,23 @@
         "acquireNewSession": false
       }
     },
+    "managed_slot_ownership_unconfirmed": {
+      "expected": "retry",
+      "fields": {
+        "code": "managed_slot_ownership_unconfirmed",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 2000
+      }
+    },
+    "managed_slot_ownership_lost": {
+      "expected": "fail",
+      "fields": {
+        "code": "managed_slot_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
     "managed_execution_ended": {
       "expected": "fail",
       "fields": {

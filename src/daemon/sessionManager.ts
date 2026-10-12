@@ -3447,6 +3447,18 @@ export class SessionManager {
     persisted: DeviceSession,
     onlyIfOwnedByDaemon?: string,
   ): Promise<DeviceSession | undefined> {
+    let livePeerDaemonSessionIds: string[];
+    try {
+      livePeerDaemonSessionIds = this.rowWriteLivePeerDaemonSessionIds();
+    } catch (error) {
+      logger.warn(
+        `[SessionManager] Cannot prove ownership to expire restart recovery for ` +
+          `${persisted.session_uuid}: ${errorMessage(error)}`,
+        error,
+      );
+      // Refuse from the row as read, without a write, journal intent, fence or release notice.
+      return persisted;
+    }
     const snapshot = this.releaseSnapshotFromPersisted(
       persisted.session_uuid,
       persisted,
@@ -3458,7 +3470,7 @@ export class SessionManager {
       onlyIfRecoverable: true,
       onlyIfOwnedByDaemon: onlyIfOwnedByDaemon ?? persisted.daemon_session_id ?? undefined,
       unlessTerminalOrOwnedByLivePeer: {
-        livePeerDaemonSessionIds: this.rowWriteLivePeerDaemonSessionIds(),
+        livePeerDaemonSessionIds,
         reportRefusal: true,
       },
       onlyIfRestartRecoveryHandoff: {
@@ -4173,6 +4185,18 @@ export class SessionManager {
     throw this.unadmittedSessionError(sessionId, persisted, unissuedSessionError, options.access);
   }
 
+  private isLapsedUnownedRestartRecovery(
+    devicePool: SessionDeviceAssigner | undefined,
+    persisted: DeviceSession | undefined,
+  ): boolean {
+    return Boolean(
+      devicePool &&
+      persisted &&
+      persistedSessionExpiryReason(persisted, this.sessionNow()) === "restart-recovery-timeout" &&
+      !this.isRowOwnedByLivePeer(persisted),
+    );
+  }
+
   private async createUnseenSession(
     sessionId: string,
     devicePool: SessionDeviceAssigner | undefined,
@@ -4200,7 +4224,13 @@ export class SessionManager {
     // never-issued sessionUuid (e.g. "kumquat-D") whenever the #6045 admit guard
     // was bypassed by the call path — the ownership bypass this closes. The
     // pool-less `if (!devicePool)` throw below stays as a secondary safety net.
-    if (requireIssuedSession && !this.isReissuablePersistedSession(persisted)) {
+    // Every recovery must enter while its fixed window is open, including plan-label callers
+    // that may mint never-issued IDs. Idle-first rows retain that path's ordinary re-issue rules.
+    const restartWindowLapsed = this.isLapsedUnownedRestartRecovery(devicePool, persisted);
+    if (
+      (requireIssuedSession || restartWindowLapsed) &&
+      !this.isReissuablePersistedSession(persisted)
+    ) {
       // Answered from the row as the expiry write left it (#11498): a row whose deadline was
       // extended under this call is still live or recoverable, and is admitted like any other.
       persisted = await this.terminalizeExpiredPersistedSession(persisted);

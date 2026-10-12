@@ -453,6 +453,27 @@ describe("device restart reserves the entire recovery window", () => {
     expect(pool.getDevice(SIM.deviceId)?.sessionId).toBe(HOLDER);
   });
 
+  test("failed peer discovery at window expiry drops the hold without writing or fencing", async () => {
+    await useLongIdleWindow();
+    await handoff();
+    const before = { ...(await persistence.getSession(HOLDER))! };
+    sessions.attachLiveDaemonSessionIds(() => {
+      throw new Error("live daemon discovery unavailable");
+    });
+    let notices = 0;
+    sessions.onSessionRelease(() => {
+      notices++;
+    });
+    await advance(180_000);
+    await expect(sessions.expireRestartRecoveryReservation(HOLDER)).resolves.toBeUndefined();
+    expect(internals.rehydrationReservations.has(HOLDER)).toBe(false);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+    expect(await persistence.getSession(HOLDER)).toEqual(before);
+    expect(sessions.getTerminalReleaseSnapshot(HOLDER)).toBeUndefined();
+    expect(notices).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("recovery activity extends idle expiry but never the handoff window", async () => {
     await handoff();
     await absent();

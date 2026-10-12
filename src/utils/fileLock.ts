@@ -6,6 +6,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "fs";
@@ -42,7 +43,17 @@ export interface LockOwnerGenerationProbe {
  * `O_EXCL` + stale-reclaim logic.
  */
 
+// Generation is read BEFORE the `wx` create (#12001), so create + PID write is one
+// synchronous burst with no await (microseconds). Ten seconds covers scheduler stalls
+// or slow disks by orders of magnitude and stays below the 15 s admission-lock wait:
+// the first waiter heals an ownerless lock instead of timing out.
+export const OWNERLESS_LOCK_RECLAIM_AGE_MS = 10_000;
+
 export interface ExclusiveLockOptions {
+  /** Clock for ownerless-lock age checks (defaults to Date.now). */
+  now?: () => number;
+  /** Reclaim ownerless locks strictly older than this bound; defaults to 10 seconds. */
+  ownerlessReclaimAgeMs?: number;
   /** Owner PID written into the lock file (defaults to `process.pid`). */
   pid?: number;
   /** Liveness check for stale-lock reclaim (defaults to `process.kill(pid, 0)`). */
@@ -198,26 +209,14 @@ export function tryAcquireExclusiveLock(
     return false;
   }
 
-  if (content.length === 0) {
-    // A writer created the file but hasn't written its PID yet; treat as actively
-    // held to avoid stealing a lock mid-write.
-    //
-    // Known limitation: a crash in the microsecond window between the `wx` create
-    // and the PID write leaves an empty file that is never reclaimable. This is
-    // astronomically rare (generation is captured before create, so create+write
-    // remains a single synchronous burst) and is shared with the daemon lock;
-    // tracked as a follow-up, not fixed here.
-    return false;
-  }
-
   // `parseLockContent` reads the PID on line 1, owner token on line 2, metadata
   // on line 3, and OS generation token on line 4, keeping the positional contract
   // in one place (#3006, #11812).
   const observedOwner = parseLockContent(content);
   const { pid: ownerPid, token: tokenLine, generation } = observedOwner;
   if (Number.isNaN(ownerPid)) {
-    // Unreadable PID — a writer may still be filling it in; treat as held.
-    return false;
+    // A writer may still be filling it in; only an old, verified ownerless file is reclaimable.
+    return reclaimOwnerlessLock(lockFilePath, options);
   }
 
   const isOwnStaleLeak = isOwnStaleLock(ownerPid, tokenLine, pid, ownerToken, reclaimOwnPid);
@@ -244,6 +243,70 @@ function readContendedLockContent(lockFilePath: string): string | undefined {
   }
 
   return content;
+}
+
+interface OwnerlessLockSample {
+  ino: number;
+  mtimeMs: number;
+  raw: string;
+}
+
+function sampleOldOwnerlessLock(
+  path: string,
+  options: ExclusiveLockOptions,
+): OwnerlessLockSample | undefined {
+  try {
+    const { ino, mtimeMs } = statSync(path);
+    const raw = readFileSync(path, "utf-8");
+    const age = (options.now ?? Date.now)() - mtimeMs;
+    if (
+      age < 0 ||
+      !(age > (options.ownerlessReclaimAgeMs ?? OWNERLESS_LOCK_RECLAIM_AGE_MS)) ||
+      !Number.isNaN(parseLockContent(raw.trim()).pid)
+    ) {
+      return undefined;
+    }
+    return { ino, mtimeMs, raw };
+  } catch (error) {
+    // Sampling races or unreadable files cannot prove ownership; back off without stealing.
+    logger.debug(`Ownerless lock sample failed at ${path}: ${errorMessage(error)}`, error);
+    return undefined;
+  }
+}
+
+function reclaimOwnerlessLock(lockFilePath: string, options: ExclusiveLockOptions): boolean {
+  const observed = sampleOldOwnerlessLock(lockFilePath, options);
+  if (!observed) {
+    return false;
+  }
+  const pid = options.pid ?? process.pid;
+  const reclaimMarker = `${lockFilePath}.${pid}.reclaim`;
+  if (!claimLockMarker(lockFilePath, reclaimMarker)) {
+    return false;
+  }
+  const claimed = sampleOldOwnerlessLock(reclaimMarker, options);
+  if (
+    !claimed ||
+    claimed.ino !== observed.ino ||
+    claimed.mtimeMs !== observed.mtimeMs ||
+    claimed.raw !== observed.raw
+  ) {
+    restoreDisplacedLock(lockFilePath, reclaimMarker);
+    return false;
+  }
+  removeStaleLockMarker(reclaimMarker);
+  return writeExclusiveLockFile(lockFilePath, pid, options);
+}
+
+function claimLockMarker(lockFilePath: string, reclaimMarker: string): boolean {
+  try {
+    renameSync(lockFilePath, reclaimMarker);
+    return true;
+  } catch (error) {
+    // A racing opener may already have claimed the file; losing the race means retrying.
+    logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
+    return false;
+  }
 }
 
 function isOwnStaleLock(
@@ -283,12 +346,7 @@ function reclaimExclusiveLock(
   // rename alone does not prove that we claimed the instance we judged stale.
   // The final `wx` create still arbitrates with a third opener after reclaim.
   const reclaimMarker = `${lockFilePath}.${pid}.reclaim`;
-  try {
-    renameSync(lockFilePath, reclaimMarker);
-  } catch (error) {
-    // A racing opener already renamed/claimed this exact stale lock instance (see
-    // comment above); losing the race means we don't own it, so report not-acquired.
-    logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
+  if (!claimLockMarker(lockFilePath, reclaimMarker)) {
     return false;
   }
   let claimedContent: string | undefined;
@@ -316,10 +374,10 @@ function restoreDisplacedLock(lockFilePath: string, reclaimMarker: string): void
   try {
     linkSync(reclaimMarker, lockFilePath);
   } catch (error) {
-    if (!existsSync(lockFilePath)) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST" && !existsSync(lockFilePath)) {
       throw toActionableError(error, `Failed to restore displaced lock at ${lockFilePath}`);
     }
-    // An occupied path is an expected race (including Windows EPERM); leave it.
+    // EEXIST proves occupation even if the path disappears; other occupied-path errors (Windows EPERM) also back off.
     logger.debug(
       `src/utils/fileLock.ts: restore destination occupied at ${lockFilePath}: ${error}`,
     );
@@ -540,7 +598,7 @@ function writeExclusiveLockFile(
   }
 }
 
-function compareLockOwnerGeneration(
+export function compareLockOwnerGeneration(
   probe: LockOwnerGenerationProbe | undefined,
   pid: number,
   recorded: string | undefined,

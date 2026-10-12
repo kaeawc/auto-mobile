@@ -1,3 +1,4 @@
+import type { BootAdmissionResult } from "../bootAdmission/BootAdmissionGate";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import { deviceResourceProfileFingerprint } from "../../utils/deviceResourceDrift";
@@ -52,11 +53,13 @@ export class FleetBootInstrumentation implements IosBootInstrumentation {
     const releaseAdmission = gate ? await this.admit(gate, request, profileId) : undefined;
     const bootStartedAtMs = timer.now();
     let result: T;
+    let bootFailed = true;
     try {
       result = await boot(request.timeoutMs);
+      bootFailed = false;
     } finally {
       // The admitted boot counted toward the limit until now; the fleet sample takes over.
-      releaseAdmission?.();
+      releaseAdmission?.(bootFailed ? { bootFailed: true } : undefined);
     }
     const finishedAtMs = timer.now();
     history.record({
@@ -72,7 +75,7 @@ export class FleetBootInstrumentation implements IosBootInstrumentation {
     gate: SimulatorCapacityGate,
     request: IosBootRequest,
     profileId: string,
-  ): Promise<(() => void) | undefined> {
+  ): Promise<BootAdmissionResult<unknown>["releaseAdmission"]> {
     const result = await gate.admitBoot(
       { runtime: request.runtime, profileId, excludeUdids: [request.udid] },
       { signal: request.signal, bootUdid: request.udid },

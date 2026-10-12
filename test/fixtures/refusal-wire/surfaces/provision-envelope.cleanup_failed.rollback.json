@@ -1,0 +1,84 @@
+{
+  "surface": "provision-envelope",
+  "name": "cleanup_failed.rollback",
+  "builder": "registered provisionDevice handler via provisionDeviceErrorResponse",
+  "payload": {
+    "success": false,
+    "message": "provisioning timed out Cleanup of the newly created device also failed: platform delete failed",
+    "error": {
+      "code": "cleanup_failed",
+      "message": "provisioning timed out Cleanup of the newly created device also failed: platform delete failed",
+      "retryable": false,
+      "daemonBuild": "0.0.84+fixture-build"
+    },
+    "lifecycle": {
+      "state": "retained",
+      "phase": "cleanup",
+      "device": {
+        "platform": "android",
+        "stableId": "phone-api-36-a",
+        "name": "phone-api-36-a"
+      },
+      "reason": {
+        "code": "timeout",
+        "message": "provisioning timed out",
+        "retryable": true,
+        "daemonBuild": "0.0.84+fixture-build"
+      },
+      "cleanup": {
+        "status": "failed",
+        "reason": "readiness_timeout"
+      }
+    },
+    "recovery": {
+      "schemaVersion": 2,
+      "boundary": "cleanup_failure",
+      "phaseReached": "cleanup",
+      "device": {
+        "platform": "android",
+        "stableId": "phone-api-36-a",
+        "name": "phone-api-36-a",
+        "ownership": "unknown"
+      },
+      "outcomes": {
+        "deviceCreation": "created",
+        "settlement": "not_applicable"
+      },
+      "cleanup": {
+        "status": "failed_device_retained"
+      },
+      "originalError": {
+        "code": "timeout",
+        "message": "provisioning timed out"
+      },
+      "nextAction": {
+        "action": "perform_cleanup",
+        "reason": "Cleanup failed and the device is retained; remove it by its exact identity (not its name) or reacquire it.",
+        "automaticRetrySafe": false
+      },
+      "freshness": {
+        "observedAtMs": 0,
+        "daemonBuild": "0.0.84+fixture-build",
+        "source": "snapshot"
+      }
+    },
+    "provisionFailure": {
+      "code": "timeout",
+      "message": "provisioning timed out"
+    },
+    "cleanup": {
+      "status": "failed",
+      "target": {
+        "platform": "android",
+        "isVirtual": true,
+        "stableId": "phone-api-36-a",
+        "stableName": "phone-api-36-a"
+      },
+      "failure": {
+        "code": "operation_failed",
+        "phase": "destroy",
+        "message": "platform delete failed"
+      }
+    }
+  }
+}

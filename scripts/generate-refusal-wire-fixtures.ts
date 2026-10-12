@@ -2,6 +2,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   REFUSAL_FIXTURES_DIR,
+  REFUSAL_SURFACES_DIR,
+  buildRefusalSurfaceFixtures,
+  serializeRefusalSurfaceFixture,
+  surfaceFixtureStem,
   buildRefusalWireFixtures,
   serializeRefusalFixture,
 } from "../test/helpers/refusalWireFixtures";
@@ -19,3 +23,12 @@ for (const fixture of buildRefusalWireFixtures()) {
   );
 }
 console.log(`wrote refusal fixtures to ${REFUSAL_FIXTURES_DIR}`);
+
+mkdirSync(REFUSAL_SURFACES_DIR, { recursive: true });
+for (const fixture of buildRefusalSurfaceFixtures()) {
+  writeFileSync(
+    join(REFUSAL_SURFACES_DIR, `${surfaceFixtureStem(fixture)}.json`),
+    serializeRefusalSurfaceFixture(fixture),
+  );
+}
+console.log(`wrote synchronous surface fixtures to ${REFUSAL_SURFACES_DIR}`);

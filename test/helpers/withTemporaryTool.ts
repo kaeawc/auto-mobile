@@ -48,3 +48,9 @@ export function isolateToolRegistry(): void {
   });
   afterAll(() => restore());
 }
+
+/** Run a suite with an empty registry, then restore the exact tools it found. */
+export function isolateEmptyToolRegistry(): void {
+  isolateToolRegistry();
+  beforeAll(() => ToolRegistry.clearTools());
+}

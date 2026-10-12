@@ -1,3 +1,4 @@
+import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, expect, spyOn } from "bun:test";
 import { z } from "zod";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
@@ -36,6 +37,8 @@ import {
   settleByFakeEvents,
 } from "../helpers/fakeTimerStepping";
 import { warmedTests } from "../helpers/warmedTests";
+
+isolateEmptyToolRegistry();
 
 const HOLDER = "restart-holder";
 const CONNECTION = "holder-connection";

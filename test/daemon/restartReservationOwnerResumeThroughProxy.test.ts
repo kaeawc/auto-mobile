@@ -1,3 +1,4 @@
+import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, expect } from "bun:test";
 import {
   DAEMON_OWNED_SESSIONS_PARAM,
@@ -30,6 +31,8 @@ import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import type { LivenessScenarioOptions } from "../helpers/livenessScenarioHarness";
 import type { Mutex } from "async-mutex";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+
+isolateEmptyToolRegistry();
 
 const DEVICE = "emulator-5554";
 const AVD = "restart-owner-phone";

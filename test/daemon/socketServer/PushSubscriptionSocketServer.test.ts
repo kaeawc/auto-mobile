@@ -1,3 +1,5 @@
+import { InputDeviceOwnedError } from "../../../src/daemon/inputDeviceOwnership";
+import { SessionNoLongerOwnsDeviceError } from "../../../src/daemon/sessionNoLongerOwnsDevice";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { Socket } from "node:net";
 import {
@@ -29,6 +31,13 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<
   TestFilter,
   TestPushData
 > {
+  authorizationError?: Error;
+  protected override authorizeSubscription(): void {
+    if (this.authorizationError) {
+      throw this.authorizationError;
+    }
+  }
+
   constructor(timer: FakeTimer) {
     super("/fake/path/test.sock", timer, "TestPush");
   }
@@ -663,4 +672,23 @@ describe("PushSubscriptionSocketServer", () => {
       expect(server.getSubscriberCount()).toBe(0);
     });
   });
+});
+
+it.each([
+  new InputDeviceOwnedError("subscribe", "emu", "live"),
+  new SessionNoLongerOwnsDeviceError("live", "emu"),
+  new Error("untyped admission failure"),
+])("subscription refusal keeps its ownership fields: %s", async (error) => {
+  const server = new TestablePushSubscriptionServer(new FakeTimer());
+  server.authorizationError = error;
+  const socket = new FakeSocket();
+  await server.simulateLine(socket, JSON.stringify({ id: "auth", command: "subscribe" }));
+  const response = socket.getWrittenMessages()[0];
+  expect(response).toMatchObject({ success: false, error: error.message });
+  if (error instanceof InputDeviceOwnedError || error instanceof SessionNoLongerOwnsDeviceError) {
+    expect(response).toMatchObject({ code: error.code, retryable: false, deviceId: "emu" });
+  } else {
+    expect(response).not.toHaveProperty("code");
+  }
+  expect(server.getSubscriberCount()).toBe(0);
 });

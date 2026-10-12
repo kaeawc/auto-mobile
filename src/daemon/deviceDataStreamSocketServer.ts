@@ -28,6 +28,7 @@ import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
+  streamAuthRefusalFields,
 } from "./streamSocketAuth";
 import type { ScreenshotMetadata } from "../features/observe/ScreenshotMetadata";
 import { annotateHierarchyDiff, type HierarchyDiffSummary } from "./hierarchyStreamDiff";
@@ -1306,6 +1307,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         type: "error",
         success: false,
         error: errorMessage(error),
+        ...streamAuthRefusalFields(error),
         ...deviceSessionErrorFields(error),
       };
       this.sendJson(socket, errorResponse);
@@ -1367,6 +1369,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         type: "error",
         success: false,
         error: errorMessage(error),
+        ...streamAuthRefusalFields(error),
         ...deviceSessionErrorFields(error),
       };
       this.sendJson(socket, errorResponse);
@@ -1934,6 +1937,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         type: "error",
         success: false,
         error: errorMessage(error),
+        ...streamAuthRefusalFields(error),
         ...deviceSessionErrorFields(error),
       } satisfies SubscriptionResponse);
       return;
@@ -2093,6 +2097,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         type: "error",
         success: false,
         error: errorMessage(error),
+        ...streamAuthRefusalFields(error),
         ...deviceSessionErrorFields(error),
       };
       this.sendJson(socket, errorResponse);

@@ -1,0 +1,14 @@
+{
+  "surface": "proxy-tool-result",
+  "name": "daemon_shutting_down",
+  "builder": "createProxyMcpServer tools/call via resolveCallToolErrorResult",
+  "payload": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"code\":\"daemon_shutting_down\",\"message\":\"Daemon is shutting down\",\"retryable\":true}}"
+      }
+    ],
+    "isError": true
+  }
+}

@@ -22,6 +22,18 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `commit trace opt in round trips and omission stays false`() {
+    val legacy = """{"type":"request_commit_text","text":"value"}"""
+    val absent = assertIs<RequestCommitText>(json.decodeFromString<WebSocketRequest>(legacy))
+    assertFalse(absent.trace)
+    assertEquals(legacy, json.encodeToString<WebSocketRequest>(absent))
+    val literal = """{"type":"request_commit_text","text":"value","timeoutMs":1500,"trace":true}"""
+    val traced = assertIs<RequestCommitText>(json.decodeFromString<WebSocketRequest>(literal))
+    assertTrue(traced.trace)
+    assertEquals(literal, json.encodeToString<WebSocketRequest>(traced))
+  }
+
+  @Test
   fun `clear field delivery round trips without a text sentinel`() {
     val literal =
       """{"type":"request_commit_text","requestId":"clear-1","text":"","delivery":"clearField"}"""

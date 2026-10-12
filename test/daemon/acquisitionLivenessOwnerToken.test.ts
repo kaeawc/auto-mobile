@@ -1,3 +1,4 @@
+import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
 import { expect, spyOn } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import {
@@ -25,6 +26,8 @@ import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { freshStartAlreadyBoundError } from "../../src/daemon/deviceAcquisitionRefusals";
 
 let scenario: LivenessScenario | undefined;
+isolateEmptyToolRegistry();
+
 const proxies: DaemonMcpProxy[] = [];
 let clockOffset: unknown;
 const test = warmedTests(async () => {

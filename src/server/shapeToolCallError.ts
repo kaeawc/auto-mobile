@@ -26,7 +26,10 @@ import {
   daemonRestartDeferredPayload,
   daemonRestartPendingPayload,
 } from "../daemon/daemonRestartAdmission";
-import { DeviceOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
+import {
+  DeviceOutsideBoundSessionError,
+  SessionOutsideBoundSessionError,
+} from "./deviceOutsideBoundSessionRefusal";
 import { AppNotRunningError } from "../models/AppNotRunningError";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { DeviceGestureRecordingStartUnheldError } from "../daemon/deviceGestureRecordingStartAdmission";
@@ -149,6 +152,7 @@ function hasSelfDescribedRefusalPayload(
   | DeviceAssignedToManagedSlotError
   | DeviceOutsideManagedSlotsError
   | DeviceOutsideBoundSessionError
+  | SessionOutsideBoundSessionError
   | InputDeviceOwnedError
   | DeviceGestureRecordingStartUnheldError
   | AppNotRunningError
@@ -157,6 +161,7 @@ function hasSelfDescribedRefusalPayload(
     error instanceof DeviceAssignedToManagedSlotError ||
     error instanceof DeviceOutsideManagedSlotsError ||
     error instanceof DeviceOutsideBoundSessionError ||
+    error instanceof SessionOutsideBoundSessionError ||
     error instanceof InputDeviceOwnedError ||
     error instanceof DeviceGestureRecordingStartUnheldError ||
     error instanceof AppNotRunningError ||

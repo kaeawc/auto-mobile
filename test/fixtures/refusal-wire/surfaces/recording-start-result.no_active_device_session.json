@@ -1,0 +1,14 @@
+{
+  "surface": "recording-start-result",
+  "name": "no_active_device_session",
+  "builder": "shapeToolCallError via toPayload",
+  "payload": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"No session holds the recording device\",\"code\":\"no_active_device_session\",\"message\":\"No session holds the recording device\",\"reason\":\"device_not_held\",\"retryable\":false,\"nextAction\":\"acquire_new_session\",\"recovery\":{\"action\":\"acquire_replacement_session\",\"tools\":[\"getAndroid\",\"getApple\"]}}"
+      }
+    ],
+    "isError": true
+  }
+}

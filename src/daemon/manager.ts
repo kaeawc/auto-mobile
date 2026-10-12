@@ -120,10 +120,12 @@ import {
   type ProcessGenerationRecordFields,
 } from "./processGenerationFields";
 import {
+  compareLockOwnerGeneration,
   formatLockContent,
   parseLockContent,
   releaseExclusiveLock,
   tryAcquireExclusiveLock,
+  type LockOwnerGenerationProbe,
 } from "../utils/fileLock";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import {
@@ -583,6 +585,7 @@ export class DaemonManager implements DaemonManagerLike {
     retryExecutor: RetryExecutor = new DefaultRetryExecutor(timer),
     daemonProtocolHealthProbe: (() => Promise<boolean>) | undefined = undefined,
     identityRecoveryIO?: IdentityRecoveryIO,
+    private readonly lockOwnerGenerationProbe: LockOwnerGenerationProbe = defaultLockOwnerGenerationProbe,
   ) {
     this.identityRecoveryIO = identityRecoveryIO ?? {
       // Windows named pipes cannot use this POSIX socket identity probe. This accepted
@@ -672,7 +675,7 @@ export class DaemonManager implements DaemonManagerLike {
     const logPath = this.daemonLaunchLogPath();
     const acquired = tryAcquireExclusiveLock(this.lockFilePath, {
       isProcessRunning: (pid) => this.isProcessRunning(pid),
-      ownerGeneration: defaultLockOwnerGenerationProbe,
+      ownerGeneration: this.lockOwnerGenerationProbe,
       // Written on line 2 so a follower can tell a replacement holder apart from
       // the one it was already waiting on even under PID reuse (issue #5904).
       // `reclaimOwnPid` stays false (the daemon's documented same-process contract),
@@ -1790,12 +1793,13 @@ export class DaemonManager implements DaemonManagerLike {
       // but with no comparable identity yet.
       return { present: true, livePid: undefined, token: undefined };
     }
-    const { pid, token, metadata } = parseLockContent(content);
+    const { pid, token, metadata, generation } = parseLockContent(content);
     if (!Number.isSafeInteger(pid) || pid <= 0) {
       // Unreadable PID — a holder may still be filling it in; keep waiting.
       return { present: true, livePid: undefined, token };
     }
-    return this.isProcessRunning(pid)
+    return this.isProcessRunning(pid) &&
+      compareLockOwnerGeneration(this.lockOwnerGenerationProbe, pid, generation) !== "different"
       ? {
           present: true,
           livePid: pid,

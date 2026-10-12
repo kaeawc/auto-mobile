@@ -750,7 +750,16 @@ async function main() {
       const stdioTransport = new OutputGatedTransport(new StdioServerTransport());
       // Detect when the MCP client disconnects (stdin closes / stdout writes fail).
       // This uses the shared lifecycle handler so resources close before exit.
-      installStdinShutdownHandlers(process.stdin, () => stdioTransport.stopSending("stdin closed"));
+      const { MAX_CALLER_MCP_REQUEST_TIMEOUT_MS } = await import("./daemon/mcpRequestTimeout");
+      let connectingStdioServer = false;
+      installStdinShutdownHandlers(
+        process.stdin,
+        () =>
+          connectingStdioServer
+            ? stdioTransport.answerReceivedThenStop("stdin closed")
+            : stdioTransport.stopSending("stdin closed"),
+        MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+      );
       installStdoutShutdownHandler(process.stdout, () =>
         stdioTransport.stopSending("stdout write failed"),
       );
@@ -796,6 +805,7 @@ async function main() {
       try {
         logger.info("Connecting MCP server to stdio transport");
         startupBenchmark.startPhase("serverListening");
+        connectingStdioServer = true;
         await server.connect(earlyTransport ?? stdioTransport);
         startupBenchmark.endPhase("serverListening");
         logger.info("MCP server connected to stdio transport");

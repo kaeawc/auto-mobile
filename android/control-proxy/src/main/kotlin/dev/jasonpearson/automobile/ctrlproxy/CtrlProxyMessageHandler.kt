@@ -387,6 +387,7 @@ class CtrlProxyMessageHandler(
           request.priorImeId,
           request.delivery,
           request.timeoutMs,
+          request.trace,
         )
       is RequestCancelImeCommit ->
         actions.requestCancelImeCommit(request.requestId, request.targetRequestId)

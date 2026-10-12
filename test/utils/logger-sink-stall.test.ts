@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
 import * as io from "../../src/utils/io";
-import type { Timer } from "../../src/utils/SystemTimer";
+import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { useScratchRoot } from "../helpers/scratchRoot";
 
@@ -59,7 +59,7 @@ describe("logger sink stall watchdog", () => {
   const scratch = useScratchRoot("logger-sink-stall-");
   let sequence = 0;
 
-  async function harness(sink = "file", format = "text") {
+  async function harness(sink = "file", format = "text", injectTimer = true) {
     const dir = scratch.next();
     const streams: HeldStream[] = [];
     const emergency: string[] = [];
@@ -113,7 +113,9 @@ describe("logger sink stall watchdog", () => {
         }
       }
     }
-    mod.setLogSinkStallTimerForTesting?.(timer);
+    if (injectTimer) {
+      mod.setLogSinkStallTimerForTesting?.(timer);
+    }
     mod.resetLogRetentionNamespaceSourceForTesting();
     const target = join(dir, `${mod.resolveProcessLogPrefix(process.argv, process.pid)}.log`);
     const realExists = fs.existsSync;
@@ -122,10 +124,13 @@ describe("logger sink stall watchdog", () => {
       String(candidate) === target ? rotation : realExists(candidate),
     );
     let releaseStat: (() => void) | undefined;
+    let rejectStat: ((error: Error) => void) | undefined;
+    let rotationSize = 0;
     const stat = spyOn(io, "statAsync").mockImplementation(
       () =>
-        new Promise((resolve) => {
-          releaseStat = () => resolve(fs.statSync(dir));
+        new Promise((resolve, reject) => {
+          releaseStat = () => resolve(Object.assign(fs.statSync(dir), { size: rotationSize }));
+          rejectStat = reject;
         }),
     );
 
@@ -139,11 +144,16 @@ describe("logger sink stall watchdog", () => {
       target,
       create,
       sync,
+      out,
       hangRotation() {
         rotation = true;
       },
-      finishRotation() {
+      finishRotation(size = 0) {
+        rotationSize = size;
         releaseStat?.();
+      },
+      failRotation(error: Error) {
+        rejectStat?.(error);
       },
       async dispose() {
         mod.logger.close();
@@ -174,6 +184,176 @@ describe("logger sink stall watchdog", () => {
     await drain();
     expect(flushed).toBeTrue();
   }
+
+  test("production watchdog bypasses later global and defaultTimer spies", async () => {
+    const h = await harness("file", "text", false);
+    const timeout = spyOn(globalThis, "setTimeout");
+    const clear = spyOn(globalThis, "clearTimeout");
+    const defaultTimeout = spyOn(defaultTimer, "setTimeout");
+    try {
+      h.mod.logger.info("production watchdog record");
+      await drain();
+      expect(h.streams[0].callbacks).toHaveLength(1);
+      expect(timeout).not.toHaveBeenCalled();
+      expect(defaultTimeout).not.toHaveBeenCalled();
+      h.streams[0].release();
+      await expectFlushed(h.mod);
+      expect(clear).not.toHaveBeenCalled();
+    } finally {
+      timeout.mockRestore();
+      clear.mockRestore();
+      defaultTimeout.mockRestore();
+      await h.dispose();
+    }
+  });
+
+  test("intentional close preserves late file callback errors on stderr exactly once", async () => {
+    const h = await harness();
+    try {
+      h.mod.logger.info("close failure record");
+      await drain();
+      h.mod.logger.close();
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
+      h.timer.advanceTime(STALL_MS + ABANDON_MS);
+      expect(h.emergency).toHaveLength(0);
+      h.streams[0].release(new Error("EIO"));
+      await expectFlushed(h.mod);
+      expect(h.stderr.filter((line) => line.includes("close failure record"))).toHaveLength(1);
+    } finally {
+      await h.dispose();
+    }
+  });
+
+  test("flush after intentional close waits for the pending callback", async () => {
+    const h = await harness();
+    try {
+      h.mod.logger.info("pending at close");
+      await drain();
+      h.mod.logger.close();
+      let flushed = false;
+      void h.mod.logger.flush().then(() => {
+        flushed = true;
+      });
+      await drain();
+      expect(flushed).toBeFalse();
+      h.streams[0].release();
+      await expectFlushed(h.mod);
+      expect(flushed).toBeTrue();
+    } finally {
+      await h.dispose();
+    }
+  });
+
+  test("rotation close retains all in-flight callback failures for file-only degradation", async () => {
+    const h = await harness();
+    const rename = spyOn(fs.promises, "rename").mockResolvedValue(undefined);
+    const readdir = spyOn(io, "sortedReaddir").mockResolvedValue([]);
+    try {
+      const markers = Array.from({ length: 34 }, (_, index) => `rotation pending ${index}`);
+      for (const marker of markers) {
+        h.mod.logger.info("x".repeat(915) + marker);
+      }
+      await drain();
+      expect(h.streams[0].callbacks).toHaveLength(34);
+      h.hangRotation();
+      h.mod.logger.info("rotation trigger " + "x".repeat(32 * 1024));
+      await drain();
+      h.finishRotation(11 * 1024 * 1024);
+      await drain();
+      expect(h.streams[0].closed).toBeTrue();
+      expect(h.create).toHaveBeenCalledTimes(2);
+      while (h.streams[0].callbacks.length) {
+        h.streams[0].release(new Error("EIO"));
+      }
+      h.streams[1].prompt = true;
+      while (h.streams[1].callbacks.length) {
+        h.streams[1].release();
+      }
+      await drain();
+      await expectFlushed(h.mod);
+      for (const marker of markers) {
+        expect(h.stderr.filter((line) => line.trim().endsWith(marker))).toHaveLength(1);
+      }
+    } finally {
+      readdir.mockRestore();
+      rename.mockRestore();
+      await h.dispose();
+    }
+  });
+
+  test.each(["file", "both"])(
+    "a throwing stdout mirror still starts configured sinks (%s)",
+    async (sink) => {
+      const h = await harness(sink);
+      try {
+        h.streams[0].prompt = true;
+        h.out.mockImplementation(() => {
+          throw new Error("EPIPE");
+        });
+        h.mod.logger.enableStdoutLogging();
+        expect(() => h.mod.logger.info("mirror failure record")).not.toThrow();
+        await expectFlushed(h.mod);
+        expect(
+          h.streams[0].writes.filter((line) => line.includes("mirror failure record")),
+        ).toHaveLength(1);
+        if (sink === "both") {
+          expect(h.stderr.filter((line) => line.includes("mirror failure record"))).toHaveLength(1);
+        }
+      } finally {
+        await h.dispose();
+      }
+    },
+  );
+
+  test("rotation rejection after the bound reports and recovers exactly once", async () => {
+    const h = await harness("both");
+    try {
+      h.hangRotation();
+      h.mod.logger.info("late failed rotation A");
+      h.mod.logger.info("late failed rotation joiner");
+      await drain();
+      h.timer.advanceTime(STALL_MS);
+      await expectFlushed(h.mod);
+      expect(h.create).toHaveBeenCalledTimes(1);
+      // Recovery must also reopen an unavailable sink, only after the lock settles.
+      h.streams[0].writable = false;
+      h.failRotation(new Error("late stat failure"));
+      await drain();
+      expect(h.stderr.filter((line) => line.includes("Log rotation failed"))).toHaveLength(1);
+      expect(h.create).toHaveBeenCalledTimes(2);
+      h.streams[1].prompt = true;
+      h.mod.logger.info("after late rotation failure");
+      await expectFlushed(h.mod);
+      expect(
+        h.streams[1].writes.some((line) => line.includes("after late rotation failure")),
+      ).toBeTrue();
+    } finally {
+      await h.dispose();
+    }
+  });
+
+  test("a guard keeps its timer for diagnostics and abandonment close barriers", async () => {
+    const h = await harness("file", "json");
+    try {
+      h.mod.logger.info("timer ownership");
+      await drain();
+      const replacementTimer = new FakeTimer();
+      replacementTimer.advanceTime(100_000);
+      h.mod.setLogSinkStallTimerForTesting?.(replacementTimer);
+      h.timer.advanceTime(STALL_MS);
+      expect(JSON.parse(h.emergency[0]).timestamp).toBe(new Date(h.timer.now()).toISOString());
+      h.timer.advanceTime(ABANDON_MS);
+      expect(JSON.parse(h.emergency[1]).timestamp).toBe(new Date(h.timer.now()).toISOString());
+      expect(h.timer.getPendingTimeoutCount()).toBe(1);
+      expect(replacementTimer.getPendingTimeoutCount()).toBe(0);
+      h.timer.advanceTime(h.mod.CLOSE_LOG_STREAM_TIMEOUT_MS);
+      h.mod.logger.info("after original close barrier");
+      await drain();
+      expect(h.create).toHaveBeenCalledTimes(2);
+    } finally {
+      await h.dispose();
+    }
+  });
 
   test("mirrors immediately in emission order despite withheld file callbacks", async () => {
     const h = await harness();

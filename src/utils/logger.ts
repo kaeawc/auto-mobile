@@ -225,9 +225,16 @@ const attachStreamFailureHandlers = (stream: fs.WriteStream, target: string): vo
 // These are old-stream release barriers, never references to the current sink.
 const unconfirmedCloses = new Map<
   fs.WriteStream,
-  { timer: Timer; timeoutHandle: NodeJS.Timeout; onClose: () => void }
+  {
+    timer: Pick<Timer, "setTimeout" | "clearTimeout">;
+    timeoutHandle: NodeJS.Timeout;
+    onClose: () => void;
+  }
 >();
-const deferReopenUntilClose = (stream: fs.WriteStream, timer: Timer = defaultTimer): void => {
+const deferReopenUntilClose = (
+  stream: fs.WriteStream,
+  timer: Pick<Timer, "setTimeout" | "clearTimeout"> = defaultTimer,
+): void => {
   if (stream.closed) {
     return;
   }
@@ -317,15 +324,18 @@ export const CLOSE_LOG_WRITES_TIMEOUT_MS = 20_000;
 export const LOG_WRITE_STALL_TIMEOUT_MS = 5_000;
 export const LOG_SINK_ABANDON_TIMEOUT_MS = 30_000;
 
-let logSinkStallTimer = defaultTimer;
-// Keep the singleton's scheduler bound to its import-time defaultTimer. Only the
-// explicit stall-timer seam changes this ownership; shutdown has its own timer.
+type LogSinkTimer = Pick<Timer, "setTimeout" | "clearTimeout" | "now">;
+// The logger is process infrastructure: its watchdog must not enter the timer
+// history of code whose tests assert no real timers, even under later spies.
+const runtimeSetTimeout = globalThis.setTimeout;
+const runtimeClearTimeout = globalThis.clearTimeout;
+const runtimeNow = Date.now;
 const productionStallTimer = {
-  setTimeout: defaultTimer.setTimeout.bind(defaultTimer),
-  clearTimeout: defaultTimer.clearTimeout.bind(defaultTimer),
-  now: defaultTimer.now.bind(defaultTimer),
+  setTimeout: (callback: () => void, ms: number) => runtimeSetTimeout(callback, ms),
+  clearTimeout: (handle: NodeJS.Timeout) => runtimeClearTimeout(handle),
+  now: () => runtimeNow(),
 };
-let stallWatchdogTimer = productionStallTimer;
+let logSinkStallTimer: LogSinkTimer = productionStallTimer;
 const streamStallGuards = new WeakMap<fs.WriteStream, LogSinkStallGuard>();
 let intentionalDrainCount = 0;
 let rotationWait:
@@ -337,8 +347,7 @@ let rotationWait:
   | undefined;
 
 export function setLogSinkStallTimerForTesting(timer: Timer | undefined): void {
-  logSinkStallTimer = timer ?? defaultTimer;
-  stallWatchdogTimer = timer ?? productionStallTimer;
+  logSinkStallTimer = timer ?? productionStallTimer;
 }
 
 /**
@@ -633,7 +642,7 @@ let startupLogSweep = logsDir ? createStartupLogSweep(defaultTimer, pruneOldLogF
 // construction (issue #6149). A failed close defers rotation until the
 // descriptor confirms release; writes degrade to stderr in the meantime.
 const closeStreamBeforeRotation = async (stream: fs.WriteStream): Promise<boolean> => {
-  streamStallGuards.get(stream)?.retire();
+  streamStallGuards.get(stream)?.suspend();
   try {
     await closeLogStream(stream);
     return true;
@@ -935,11 +944,11 @@ const writeSynchronousStderr = (line: string): void => {
   }
 };
 
-const reportSinkStall = (event: string, message: string): void => {
+const reportSinkStall = (timer: LogSinkTimer, event: string, message: string): void => {
   writeSynchronousStderr(
     logFormat === "json"
       ? JSON.stringify({
-          timestamp: new Date(logSinkStallTimer.now()).toISOString(),
+          timestamp: new Date(timer.now()).toISOString(),
           level: "error",
           component: ownLogPrefix,
           event,
@@ -962,15 +971,21 @@ const writeResumedRecord = (elapsedMs: number, diverted: number): void => {
   );
 };
 
-const abandonStalledStream = (stream: fs.WriteStream, elapsed: number, dropped: number): void => {
+const abandonStalledStream = (
+  stream: fs.WriteStream,
+  timer: LogSinkTimer,
+  elapsed: number,
+  dropped: number,
+): void => {
   reportSinkStall(
+    timer,
     "log.sink_abandoned",
     `Log sink ${logFilePath} abandoned after ${elapsed}ms stalled; ${dropped} line(s) dropped`,
   );
   if (logStream === stream) {
     logStream = undefined;
   }
-  deferReopenUntilClose(stream, logSinkStallTimer);
+  deferReopenUntilClose(stream, timer);
   try {
     stream.destroy?.();
   } catch (error) {
@@ -982,17 +997,19 @@ const abandonStalledStream = (stream: fs.WriteStream, elapsed: number, dropped: 
 const stallGuardForStream = (stream: fs.WriteStream): LogSinkStallGuard => {
   let guard = streamStallGuards.get(stream);
   if (!guard) {
+    const timer = logSinkStallTimer;
     guard = new LogSinkStallGuard({
-      timer: stallWatchdogTimer,
+      timer,
       timeoutMs: LOG_WRITE_STALL_TIMEOUT_MS,
       abandonMs: LOG_SINK_ABANDON_TIMEOUT_MS,
       stalled: (pending) =>
         reportSinkStall(
+          timer,
           "log.sink_stalled",
           `Logging to ${logFilePath} stalled: no write completed within ${LOG_WRITE_STALL_TIMEOUT_MS}ms; ${pending} line(s) pending`,
         ),
       resumed: writeResumedRecord,
-      abandoned: (elapsed, pending) => abandonStalledStream(stream, elapsed, pending),
+      abandoned: (elapsed, pending) => abandonStalledStream(stream, timer, elapsed, pending),
     });
     if (intentionalDrainCount > 0) {
       guard.suspend();
@@ -1008,11 +1025,13 @@ const waitForRotation = (operation: Promise<void>): Promise<boolean> => {
   if (rotationWait?.operation === operation) {
     return rotationWait.completion;
   }
+  const timer = logSinkStallTimer;
   const guard = new LogSinkStallGuard({
-    timer: stallWatchdogTimer,
+    timer,
     timeoutMs: LOG_WRITE_STALL_TIMEOUT_MS,
     stalled: () =>
       reportSinkStall(
+        timer,
         "log.sink_stalled",
         `Logging to ${logFilePath} stalled: log rotation did not finish within ${LOG_WRITE_STALL_TIMEOUT_MS}ms`,
       ),
@@ -1028,14 +1047,31 @@ const waitForRotation = (operation: Promise<void>): Promise<boolean> => {
         rotationWait = undefined;
       }
     };
-    void operation.then(() => finish(), finish);
+    void operation
+      .then(
+        () => finish(),
+        async (error: unknown) => {
+          const stalled = guard.stalled;
+          finish(error);
+          // Timed-out waiters already settled, so they cannot run their usual recovery catch.
+          const paths = fileLogPaths();
+          if (stalled && paths) {
+            await recoverFromFailedRotation(paths, error);
+          }
+        },
+      )
+      .catch((error) => reportLogFailure("Failed to recover log rotation", error));
   });
   rotationWait = { operation, guard, completion };
   return completion;
 };
 
-const retireRotationWatchdog = (): void => {
-  rotationWait?.guard.retire();
+const stopRotationWatchdog = (retire = false): void => {
+  if (retire) {
+    rotationWait?.guard.retire();
+  } else {
+    rotationWait?.guard.suspend();
+  }
   rotationWait = undefined;
   // Keep rotationInFlight authoritative. A later record can watch it afresh,
   // but may never reopen the path while the original rotation is still running.
@@ -1139,7 +1175,12 @@ const writeToConfiguredStderr = async (line: string): Promise<void> => {
 
 const mirrorToLegacyStdout = (line: string): void => {
   if (logToStdout && logFormat === "text") {
-    process.stdout.write(`${line}\n`);
+    try {
+      process.stdout.write(`${line}\n`);
+    } catch (error) {
+      // A logger failure cannot be logged through the logger; configured sinks still receive this record.
+      void error;
+    }
   }
 };
 
@@ -1157,10 +1198,10 @@ const writeToLogFile = async (level: string, message: string, args: any[]) => {
 
 // In stderr-only mode there is no file stream to rotate or close.
 const closeCurrentLogStream = async (timer: Timer = defaultTimer): Promise<void> => {
-  retireRotationWatchdog();
+  stopRotationWatchdog();
   if (logStream) {
     const closingStream = logStream;
-    streamStallGuards.get(closingStream)?.retire();
+    streamStallGuards.get(closingStream)?.suspend();
     // Late records must degrade until close confirms release of the old descriptor.
     logStream = undefined;
     deferReopenUntilClose(closingStream, timer);
@@ -1267,11 +1308,11 @@ export const logger: Logger = {
    * Flushes queued writes and closes the log stream.
    */
   close(): void {
-    retireRotationWatchdog();
+    stopRotationWatchdog();
     const closingStream = logStream;
     logStream = undefined;
     if (closingStream) {
-      streamStallGuards.get(closingStream)?.retire();
+      streamStallGuards.get(closingStream)?.suspend();
       deferReopenUntilClose(closingStream);
       closingStream.end();
     }
@@ -1288,7 +1329,7 @@ export const logger: Logger = {
     const deadline = new AbortController();
     try {
       timeoutHandle = timer.setTimeout(() => {
-        retireRotationWatchdog();
+        stopRotationWatchdog(true);
         const stalledStream = logStream;
         if (stalledStream) {
           streamStallGuards.get(stalledStream)?.retire();

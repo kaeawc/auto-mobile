@@ -390,6 +390,14 @@
         "retryable": true,
         "acquireNewSession": false
       }
+    },
+    "socket-frame.timeout.iosHomeLaunch": {
+      "expected": "retry",
+      "fields": {
+        "code": "timeout",
+        "retryable": true,
+        "acquireNewSession": false
+      }
     }
   }
 }

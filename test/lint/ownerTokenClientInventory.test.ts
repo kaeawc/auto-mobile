@@ -5,21 +5,29 @@ import { join } from "node:path";
 import { DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM } from "../../src/daemon/constants";
 
 const root = join(import.meta.dir, "../..");
-const junit = "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/";
-const desktop =
-  "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/";
-const ios = "ios/XCTestRunner/Sources/XCTestRunner/MCP/";
 const clients = [
   // Pre-existing rows are compatibility pins; the JUnit sends row is this step's regression.
   // Not one-shot --cli or declared-CLI proxies: see withOwnedSessionCapabilities.
   ["src/daemon/daemonMcpProxy.ts", "sends"],
-  [`${junit}DaemonSocketClient.kt`, "sends"],
+  [
+    "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/DaemonSocketClient.kt",
+    "sends",
+  ],
   ["src/daemon/client.ts", "tokenless"],
-  [`${desktop}McpDaemonClient.kt`, "tokenless"],
-  [`${desktop}McpHttpClient.kt`, "tokenless"],
-  [`${desktop}McpStdioClient.kt`, "tokenless"],
-  [`${ios}AutoMobileDaemonClient.swift`, "tokenless"],
-  [`${ios}StreamableHTTPMCPClient.swift`, "tokenless"],
+  [
+    "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpDaemonClient.kt",
+    "tokenless",
+  ],
+  [
+    "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpHttpClient.kt",
+    "tokenless",
+  ],
+  [
+    "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpStdioClient.kt",
+    "tokenless",
+  ],
+  ["ios/XCTestRunner/Sources/XCTestRunner/MCP/AutoMobileDaemonClient.swift", "tokenless"],
+  ["ios/XCTestRunner/Sources/XCTestRunner/MCP/StreamableHTTPMCPClient.swift", "tokenless"],
 ] as const;
 
 test.each(clients)("first-party client %s is %s", (path, ownership) => {
@@ -31,10 +39,22 @@ test.each(clients)("first-party client %s is %s", (path, ownership) => {
 });
 
 test("JUnit wire literal matches the daemon constant and heartbeat carries its owner field", () => {
-  const socket = readFileSync(join(root, junit, "DaemonSocketClient.kt"), "utf8");
+  const socket = readFileSync(
+    join(
+      root,
+      "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/DaemonSocketClient.kt",
+    ),
+    "utf8",
+  );
   expect(DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM).toBe("__autoMobileOwnedSessionsOwnerToken");
   expect(socket).toContain(`"${DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM}"`);
-  expect(readFileSync(join(root, junit, "DaemonHeartbeat.kt"), "utf8")).toContain(
-    '"livenessOwnerToken"',
-  );
+  expect(
+    readFileSync(
+      join(
+        root,
+        "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/DaemonHeartbeat.kt",
+      ),
+      "utf8",
+    ),
+  ).toContain('"livenessOwnerToken"');
 });

@@ -537,7 +537,7 @@ describe("HTTP heartbeat on a proxy-owned session", () => {
     [undefined, "junit-owner", true],
     // Pin: a tokenless session still accepts its legacy tokenless heartbeat.
     [undefined, undefined, true],
-  ] as const)("HTTP owner %s with token %s records=%s", async (owner, token, records) => {
+  ] as const)("HTTP owner %p with token %p records=%p", async (owner, token, records) => {
     const h = releasingSessionHarness();
     try {
       const session = await h.create();

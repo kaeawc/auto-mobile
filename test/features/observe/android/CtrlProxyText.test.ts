@@ -93,17 +93,25 @@ describe("Android CtrlProxyText", () => {
     ["hi there", "hi, there", false],
     ["prefix hello", "hello", false],
     ["hello suffix", "hello", false],
-    [" hello", "hello", false],
-    ["hello ", "hello", false],
-    ["hi, there!", "hi, there", false],
-    ["one\n\ntwo", "one\ntwo", false],
-    ["one - item", "one item", false],
+    [" hello", "hello", true],
+    ["hello ", "hello", true],
+    ["hi, there!", "hi, there", true],
+    ["one\n\ntwo", "one\ntwo", true],
+    ["one - item", "one item", true],
+    ["(555) 123-4567", "5551234567", true],
+    ["4111 1111 1111 1111", "4111111111111111", true],
+    ["12/25", "1225", true],
+    ["(12) 34", "12 34", true],
+    [" a b", "a b", true],
     ["007", "7", false],
     ["hi name", "hi@name ", false],
     ["prefix code", "`code`", false],
-  ] as const)("checks exact inserted IME delta: inserted=%s sent=%s", (inserted, text, matches) => {
-    expect(imeInsertedTextMatches(inserted, text)).toBe(matches);
-  });
+  ] as const)(
+    "checks inserted IME delta transformations: inserted=%s sent=%s",
+    (inserted, text, matches) => {
+      expect(imeInsertedTextMatches(inserted, text)).toBe(matches);
+    },
+  );
 
   test.each([
     ["١٢٣", "123"],

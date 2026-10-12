@@ -1861,7 +1861,17 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     ) {
       return undefined;
     }
-    const supported = await this.textClient.supportsImeInsertedText();
+    let supported = true;
+    try {
+      supported = await this.textClient.supportsImeInsertedText();
+    } catch (error) {
+      this.checkAbort(routing.signal, error);
+      // An optional capability probe cannot invalidate an acknowledged, verified commit.
+      logger.warn(
+        `[SendKeys] IME inserted-text capability probe failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
     this.checkAbort(routing.signal);
     if (supported) {
       return undefined;

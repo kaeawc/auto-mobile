@@ -82,7 +82,10 @@ export function imeCommitSuffixMatches(committedText: string, text: string): boo
  *    characters removed; marker-only requests remain unverifiable and match.
  * 3. Line-start block shortcut consumed or replaced by a list marker.
  * 4. Input filters: lower/upper case tokens (including expansions) and decimal-digit value.
- * 5. Mention chips and code fences: unpredictable replacements retain subsequence acceptance on the delta.
+ * 5. Input mask: the editor may ADD characters that are not letters, digits or marks
+ *    (`[^\p{L}\p{N}\p{M}]`) around the sent text; every sent token must remain in order.
+ *    This also accepts added punctuation such as "hi, there" -> "hi, there!".
+ * 6. Mention chips and code fences: unpredictable replacements retain subsequence acceptance on the delta.
  */
 export function imeInsertedTextMatches(insertedText: string, text: string): boolean {
   const markers = /[*_~`]/g;
@@ -104,11 +107,21 @@ export function imeInsertedTextMatches(insertedText: string, text: string): bool
   const upperField = imeUpperTokens(field);
   const upperSent = imeUpperTokens(sent);
   return (
-    (lowerField.length === lowerSent.length &&
-      lowerField.every((token, i) => token === lowerSent[i])) ||
-    (upperField.length === upperSent.length &&
-      upperField.every((token, i) => token === upperSent[i]))
+    imeInputMaskTokensMatch(lowerField, lowerSent) || imeInputMaskTokensMatch(upperField, upperSent)
   );
+}
+
+function imeInputMaskTokensMatch(field: readonly string[], sent: readonly string[]): boolean {
+  let index = 0;
+  for (const token of field) {
+    // The earliest match is safe: any skipped alternative must itself be mask formatting.
+    if (token === sent[index]) {
+      index++;
+    } else if (/[\p{L}\p{N}\p{M}]/u.test(token)) {
+      return false;
+    }
+  }
+  return index === sent.length;
 }
 
 /**

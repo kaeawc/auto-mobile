@@ -1061,6 +1061,61 @@ class ImeCommitDriverTest {
   }
 
   @Test
+  fun `four rejected newlines succeed with only the first newline resent`() {
+    val sink = newlineStrippingSink()
+    val result = commit(sink, "a\nb\nc\nd\ne", PRIOR_IME_ID)
+    assertTrue(result.success)
+    assertNull(result.error)
+    assertEquals("abcde", sink.editorText)
+    assertEquals("abcde", result.insertedText)
+    assertEquals(5, sink.committedChars.count { it == "\n" })
+    assertEquals(9, result.committedUnits)
+  }
+
+  @Test
+  fun `distinct rejected units do not consume the recovery resume budget`() {
+    val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
+    sink.editorText = ""
+    val rejected = setOf("\n", "\t", ",", ";")
+    sink.afterCommit = {
+      if (sink.committedChars.last() in rejected) {
+        sink.editorText = requireNotNull(sink.editorText).dropLast(1)
+        sink.generation++
+      }
+    }
+    val result = commit(sink, "a\nb\tc,d;e", PRIOR_IME_ID)
+    assertTrue(result.success)
+    assertNull(result.error)
+    assertEquals("abcde", sink.editorText)
+    assertEquals("abcde", result.insertedText)
+    for (unit in rejected) assertEquals(2, sink.committedChars.count { it == unit })
+  }
+
+  @Test
+  fun `genuinely lost h still recovers after four tolerated newline rejections`() {
+    for (restart in listOf(true, false)) {
+      val sink = newlineStrippingSink()
+      val stripNewline = requireNotNull(sink.afterCommit)
+      sink.afterCommit = {
+        stripNewline()
+        if (sink.committedChars.last() == "h" && sink.committedChars.count { it == "h" } == 1) {
+          sink.editorText = requireNotNull(sink.editorText).dropLast(1)
+          sink.restarting = restart
+          sink.generation++
+        }
+      }
+      val result = commit(sink, "a\nb\nc\nd\nthree", PRIOR_IME_ID)
+      assertTrue(result.success)
+      assertNull(result.error)
+      assertEquals("abcdthree", sink.editorText)
+      assertEquals("abcdthree", result.insertedText)
+      assertEquals(5, sink.committedChars.count { it == "\n" })
+      assertEquals(2, sink.committedChars.count { it == "h" })
+      assertEquals(13, result.committedUnits)
+    }
+  }
+
+  @Test
   fun `consume on space fails without ever resending consumed units`() {
     val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
     sink.editorText = ""

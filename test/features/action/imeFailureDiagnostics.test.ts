@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models";
 import { DefaultSendKeysCommandExecutor, SendKeys } from "../../../src/features/action/SendKeys";
 import { clearAndroidImeQuarantine } from "../../../src/features/action/androidImeLock";
@@ -9,7 +9,6 @@ import {
   IME_INSERTED_TEXT_UNAVAILABLE_WARNING,
   verifyImeCommitResult,
 } from "../../../src/features/action/imeFailureDiagnostics";
-import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { android, createSendKeysHarness, focused } from "./SendKeysTestHarness";
 
@@ -635,6 +634,7 @@ describe("IME inserted delta verification", () => {
 
   test.each([
     { text: "hello", insertedText: "hello" },
+    { text: "5551234567", insertedText: "(555) 123-4567" },
     { text: "- item", insertedText: "• item" },
     { text: "*bold*", insertedText: "bold" },
     { text: "hello", insertedText: "HELLO" },
@@ -660,19 +660,49 @@ describe("IME inserted delta verification", () => {
       probes++;
       return false;
     };
-    const warning = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      const result = await h.action.execute([{ action: "type", text, mode: "ime" }]);
-      expect(result.success).toBe(true);
-      expect(result.commands[0].warning).toBe(IME_INSERTED_TEXT_UNAVAILABLE_WARNING);
-      expect(result.commands[0]).not.toHaveProperty("insertedText");
-      expect(probes).toBe(1);
-      expect(warning.mock.calls).toEqual([[IME_INSERTED_TEXT_UNAVAILABLE_WARNING]]);
-      expect(result.commands[0].warning).not.toContain(text);
-    } finally {
-      warning.mockRestore();
-    }
+    const result = await h.action.execute([{ action: "type", text, mode: "ime" }]);
+    expect(result.success).toBe(true);
+    expect(result.commands[0].warning).toBe(IME_INSERTED_TEXT_UNAVAILABLE_WARNING);
+    expect(result.commands[0]).not.toHaveProperty("insertedText");
+    expect(probes).toBe(1);
+    expect(result.commands[0].warning).not.toContain(text);
   });
+
+  test("a failed capability probe preserves the verified commit without a skew warning", async () => {
+    const h = harness("hello");
+    h.client.commitViaIme = async () => ({ success: true, committedUnits: 5 });
+    let probes = 0;
+    h.client.supportsImeInsertedText = async () => {
+      probes++;
+      throw new Error("socket dropped after commit");
+    };
+    const result = await h.executor.type({ action: "type", text: "hello", mode: "ime" });
+    expect(result).toMatchObject({ success: true, committedUnits: 5, resolvedMode: "ime" });
+    expect(result.warning).toBeUndefined();
+    expect(result.error).toBeUndefined();
+    expect(probes).toBe(1);
+  });
+
+  test.each(["signal", "AbortError"] as const)(
+    "a failed capability probe still honours %s cancellation",
+    async (kind) => {
+      const h = harness("hello");
+      h.client.commitViaIme = async () => ({ success: true });
+      const controller = new AbortController();
+      const error = new Error("probe cancelled");
+      h.client.supportsImeInsertedText = async () => {
+        if (kind === "signal") {
+          controller.abort(error);
+        } else {
+          error.name = "AbortError";
+        }
+        throw error;
+      };
+      await expect(
+        h.executor.type({ action: "type", text: "hello", mode: "ime" }, controller.signal),
+      ).rejects.toThrow("probe cancelled");
+    },
+  );
 
   test("a new APK without insertedText has no skew warning", async () => {
     const h = harness("hello");

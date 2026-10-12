@@ -171,6 +171,7 @@ class ImeCommitDriver(
       sink.readEditorTextBeforeCursor(EDITOR_READ_CAP)?.takeIf { it.length < EDITOR_READ_CAP }
     private var resumes = 0
     private var lastResumePosition = -1
+    private val rejectedUnitTexts = mutableSetOf<String>()
     private val currentLine = StringBuilder()
     private var settleWaitMs = 0L
 
@@ -282,14 +283,32 @@ class ImeCommitDriver(
       when (decision) {
         Reconciliation.Continue -> next()
         is Reconciliation.DropRejected -> {
-          retainConfirmed(decision.confirmed, now)
+          dropRejected(decision.confirmed, now)
           next()
         }
-        is Reconciliation.Resume -> resumeFrom(decision.confirmed, now)
+        is Reconciliation.Resume -> reconcileMissingUnit(decision.confirmed, now, next)
         is Reconciliation.Fail ->
           complete(failure(decision.error).copy(insertedText = decision.delta))
         is Reconciliation.Succeed -> succeed(decision.delta)
       }
+    }
+
+    private fun reconcileMissingUnit(confirmed: Int, now: String?, next: () -> Unit) {
+      if (dispatched[confirmed].text in rejectedUnitTexts) {
+        dropRejected(confirmed, now)
+        next()
+      } else {
+        resumeFrom(confirmed, now)
+      }
+    }
+
+    private fun dropRejected(confirmed: Int, now: String?) {
+      val rejected = dispatched[confirmed]
+      rejectedUnitTexts.add(rejected.text)
+      // Only recovered losses consume the budget. Each request position is still resent at
+      // most once (lastResumePosition is monotonic), bounding rejected resends by unit count.
+      if (rejected.requestPosition == lastResumePosition) resumes--
+      retainConfirmed(confirmed, now)
     }
 
     private fun resumeFrom(confirmed: Int, now: String?) {

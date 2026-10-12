@@ -61,6 +61,7 @@ import {
   passwordTextPlaceholder,
   redactPasswordImeFailure,
   verifyImeCommitResult,
+  verifyImeInsertedText,
   confirmImeCommitAfterSyncLoss,
   withImeFailure,
   type ImeFailureDiagnostic,
@@ -466,6 +467,8 @@ interface SendKeysRouting extends SendKeysFocusOptions {
 }
 
 export type TextActionResult = {
+  /** Internal device read-back evidence; omitted from public command results. */
+  insertedText?: string;
   success: boolean;
   retryable?: boolean;
   warning?: string;
@@ -1865,12 +1868,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         };
       }
       const clearWarning = cleared.warning;
-      const result = await this.textClient.commitViaIme(
+      const deviceResult = await this.textClient.commitViaIme(
         text,
         this.imeSpan ? null : prior,
         signal,
         mode === "imeKeyEvents" ? "keyEvents" : "commit",
       );
+      const result = this.verifyImeDeviceResult(deviceResult, text, routing, mode);
       progress.safeToRestore = this.canRestoreAfterImeCommit(result, prior, priorSubtype);
       progress.result = result;
       const syncConfirmed = await this.confirmImeCommitAfterSyncLoss(
@@ -1904,7 +1908,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
                 operation === "replace" ? markPartialAfterMutation(result) : result,
                 text,
                 "commit",
-                { focusedFieldClass: routing.focusedFieldClass },
+                this.imeCommitDiagnosticContext(result, routing),
               ),
             ),
             [clearWarning],
@@ -1941,6 +1945,22 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         safeToRestore: progress.safeToRestore,
       };
     }
+  }
+
+  private verifyImeDeviceResult(
+    result: TextActionResult,
+    text: string,
+    routing: ImeCommitRouting,
+    mode: "ime" | "imeKeyEvents",
+  ): TextActionResult {
+    return result.success && mode === "ime" ? verifyImeInsertedText(result, text, routing) : result;
+  }
+
+  private imeCommitDiagnosticContext(result: TextActionResult, routing: ImeCommitRouting) {
+    return {
+      focusedFieldClass: routing.focusedFieldClass,
+      observedText: routing.passwordField ? undefined : result.insertedText,
+    };
   }
 
   private verifyImeCommit(
@@ -3277,6 +3297,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             ...(result.sessionUnsafe ? { sessionUnsafe: true } : {}),
             ...(result.transportFailure ? { imeFailureStage: "transport" as const } : {}),
             ...imeCommitUnitFields(result),
+            ...(result.insertedText !== undefined ? { insertedText: result.insertedText } : {}),
           };
         },
       };

@@ -460,6 +460,7 @@ interface WsSetTextResultMessage extends WsRequestBase {
 
 interface WsCommitTextResultMessage extends WsRequestBase {
   type: "commit_text_result";
+  insertedText?: string;
   partialApplication?: boolean;
   committedUnits?: number;
 }
@@ -6043,6 +6044,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     commit_text_result: (message) =>
       this.resolvePendingResponse(message, (message): ImeCommitActionResult => ({
         success: message.success,
+        ...(typeof message.insertedText === "string" ? { insertedText: message.insertedText } : {}),
         totalTimeMs: message.totalTimeMs,
         error: message.error,
         partialApplication: message.partialApplication,

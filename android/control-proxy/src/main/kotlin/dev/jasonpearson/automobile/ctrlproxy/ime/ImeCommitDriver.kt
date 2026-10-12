@@ -1,8 +1,20 @@
 package dev.jasonpearson.automobile.ctrlproxy.ime
 
+import android.text.InputType
 import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 
 interface ImeCommitSink {
+  /** Changes on every input start and finish, including same-editor restarts. */
+  fun connectionGeneration(): Long
+
+  /** Stable editor metadata, or null between finish and start. */
+  fun editorIdentity(): String?
+
+  fun startedByRestart(): Boolean
+
+  /** Null means the editor did not answer, including a superseded session. */
+  fun readEditorTextBeforeCursor(maxChars: Int): String?
+
   fun nowMs(): Long
 
   /** The active editor's inputType (EditorInfo.inputType), or null if no connection. */
@@ -45,6 +57,7 @@ data class ImeCommitResult(
   val partialApplication: Boolean = false,
   // Incremented before dispatch: the final unit may only have been partially applied.
   val committedUnits: Int = 0,
+  val insertedText: String? = null,
 )
 
 /**
@@ -61,6 +74,8 @@ class ImeCommitDriver(
   private var committedUnits = 0
   private var completion: ((ImeCommitResult) -> Unit)? = null
   private var restoreId: String? = null
+  private var hardDeadlineMs = Long.MAX_VALUE
+  private var insertedText: (() -> String?)? = null
 
   /**
    * Stops scheduled polls and reports the outcome exactly once before the caller restores the IME.
@@ -75,11 +90,17 @@ class ImeCommitDriver(
     // Editor writes are oneway; a failed request may have already issued some of them.
     // Keep the result partial when the round-trip cannot confirm quiescence.
     val outcome =
-      if (!result.success && committedUnits > 0 && !sink.syncEditorState())
+      if (
+        !result.success &&
+          committedUnits > 0 &&
+          sink.nowMs() < hardDeadlineMs &&
+          !sink.syncEditorState()
+      )
         result.copy(partialApplication = true)
       else result
+    val delta = outcome.insertedText ?: insertedText?.invoke()
     restoreIfNeeded(restoreId)
-    completion?.invoke(outcome.copy(committedUnits = committedUnits))
+    completion?.invoke(outcome.copy(committedUnits = committedUnits, insertedText = delta))
   }
 
   /**
@@ -92,16 +113,18 @@ class ImeCommitDriver(
     deadlineMs: Long = Long.MAX_VALUE,
     isCancelled: () -> Boolean = { false },
     delivery: ImeTextDelivery = ImeTextDelivery.COMMIT,
+    hardDeadlineMs: Long = Long.MAX_VALUE,
     onComplete: (ImeCommitResult) -> Unit,
   ) {
     check(completion == null) { "An IME commit driver handles one request" }
     completion = onComplete
     restoreId = priorImeId
+    this.hardDeadlineMs = hardDeadlineMs
     if (isCancelled()) {
       complete(failure("IME commit cancelled"))
       return
     }
-    if (sink.nowMs() >= deadlineMs) {
+    if (sink.nowMs() >= minOf(deadlineMs, hardDeadlineMs)) {
       complete(failure("IME commit deadline exceeded"))
       return
     }
@@ -114,20 +137,30 @@ class ImeCommitDriver(
     // user-operated debug tool). The typed text is never formatted into a log or error here.
 
     if (delivery == ImeTextDelivery.KEY_EVENTS) {
-      sendKeyEvents(text, deadlineMs, isCancelled)
+      sendKeyEvents(text, minOf(deadlineMs, hardDeadlineMs), isCancelled)
       return
     }
 
-    CommitSequence(text, deadlineMs, isCancelled).commitSegment(0)
+    val sequence = CommitSequence(text, deadlineMs, isCancelled)
+    insertedText = sequence::readInsertedText
+    sequence.commitSegment(0)
   }
 
   /** Realistic typing pauses and conversion state belong to this request's continuations. */
   private inner class CommitSequence(
-    text: String,
+    private val text: String,
     private val deadlineMs: Long,
     private val isCancelled: () -> Boolean,
   ) {
     private val segments = splitInlineFormatSpans(text)
+    private val segmentUnits = segments.map { splitGraphemes(it.text) }
+    private val dispatched = mutableListOf<String>()
+    private var generation = sink.connectionGeneration()
+    private val identity = sink.editorIdentity()
+    private val baseline =
+      if (isPasswordInput(sink.editorInputType())) null
+      else sink.readEditorTextBeforeCursor(EDITOR_READ_CAP)?.takeIf { it.length < EDITOR_READ_CAP }
+    private var resumes = 0
     private val currentLine = StringBuilder()
     private var settleWaitMs = 0L
 
@@ -136,33 +169,180 @@ class ImeCommitDriver(
       val error =
         when {
           isCancelled() -> "IME commit cancelled"
-          deadlineMs < Long.MAX_VALUE - settleWaitMs && sink.nowMs() >= deadlineMs + settleWaitMs ->
-            "IME commit deadline exceeded"
+          sink.nowMs() >= effectiveDeadlineMs() -> "IME commit deadline exceeded"
           else -> return true
         }
       complete(failure(error))
       return false
     }
 
-    private fun remainingMs(): Long =
-      if (deadlineMs >= Long.MAX_VALUE - settleWaitMs) Long.MAX_VALUE
-      else deadlineMs + settleWaitMs - sink.nowMs()
+    private fun effectiveDeadlineMs(): Long =
+      minOf(
+        hardDeadlineMs,
+        if (deadlineMs >= Long.MAX_VALUE - settleWaitMs) Long.MAX_VALUE
+        else deadlineMs + settleWaitMs,
+      )
+
+    private fun remainingMs(): Long = effectiveDeadlineMs() - sink.nowMs()
+
+    private fun checkpoint(): Boolean {
+      if (completed) return false
+      if (sink.connectionGeneration() != generation && !isCancelled()) {
+        reconnect(
+          minOf(effectiveDeadlineMs(), sink.nowMs() + CtrlProxyIme.INPUT_CONNECTION_TIMEOUT_MS),
+        )
+        return false
+      }
+      return canContinue()
+    }
+
+    fun readInsertedText(): String? {
+      if (baseline == null || sink.editorIdentity() != identity || sink.nowMs() >= hardDeadlineMs)
+        return null
+      return editorDelta(sink.readEditorTextBeforeCursor(EDITOR_READ_CAP))
+    }
+
+    private fun editorDelta(now: String?): String? =
+      if (
+        baseline != null && now != null && now.length < EDITOR_READ_CAP && now.startsWith(baseline)
+      )
+        now.removePrefix(baseline)
+      else null
+
+    private fun reconnect(waitDeadlineMs: Long) {
+      if (completed) return
+      if (isCancelled()) {
+        complete(failure("IME commit cancelled"))
+        return
+      }
+      val currentIdentity = sink.editorIdentity()
+      when {
+        currentIdentity == null -> pollReconnect(waitDeadlineMs, DISCONNECTED_ERROR)
+        currentIdentity != identity -> complete(failure(DISCONNECTED_ERROR))
+        baseline == null -> complete(failure(RESTART_UNREADABLE_ERROR))
+        sink.nowMs() >= effectiveDeadlineMs() -> complete(failure("IME commit deadline exceeded"))
+        else -> reconcileReadBack(waitDeadlineMs)
+      }
+    }
+
+    private fun pollReconnect(waitDeadlineMs: Long, error: String) {
+      val remaining = minOf(waitDeadlineMs, effectiveDeadlineMs()) - sink.nowMs()
+      if (remaining <= 0) {
+        complete(failure(error))
+        return
+      }
+      sink.postDelayed(minOf(CtrlProxyIme.INPUT_CONNECTION_POLL_MS, remaining)) {
+        reconnect(waitDeadlineMs)
+      }
+    }
+
+    private fun reconcileReadBack(waitDeadlineMs: Long) {
+      val now = sink.readEditorTextBeforeCursor(EDITOR_READ_CAP)
+      if (now == null) {
+        pollReconnect(waitDeadlineMs, RESTART_UNREADABLE_ERROR)
+        return
+      }
+      val applied = editorDelta(now)
+      val confirmed = applied?.let(::confirmedUnits)
+      if (confirmed == null) {
+        complete(failure(RESTART_MISMATCH_ERROR).copy(insertedText = applied))
+        return
+      }
+      if (!sink.startedByRestart() && confirmed == 0 && dispatched.isNotEmpty() && baseline == "") {
+        complete(failure(DISCONNECTED_ERROR).copy(insertedText = applied))
+        return
+      }
+      if (resumes >= MAX_RESUMES) {
+        complete(
+          failure("Editor restarted its input connection during IME commit; resume limit exceeded")
+            .copy(insertedText = applied),
+        )
+        return
+      }
+      resumes++
+      generation = sink.connectionGeneration()
+      while (dispatched.size > confirmed) dispatched.removeAt(dispatched.lastIndex)
+      committedUnits = confirmed
+      currentLine.setLength(0)
+      currentLine.append(requireNotNull(applied).substringAfterLast('\n'))
+      resumeAt(confirmed)
+    }
+
+    private fun confirmedUnits(applied: String): Int? {
+      var length = 0
+      if (applied.isEmpty()) return 0
+      for ((index, unit) in dispatched.withIndex()) {
+        if (!applied.startsWith(unit, length)) return null
+        length += unit.length
+        if (length == applied.length) return index + 1
+      }
+      return null
+    }
+
+    private fun resumeAt(confirmed: Int) {
+      var offset = 0
+      for ((index, units) in segmentUnits.withIndex()) {
+        if (confirmed < offset + units.size) {
+          commitUnits(index, units, confirmed - offset)
+          return
+        }
+        offset += units.size
+      }
+      syncCommit()
+    }
+
+    private fun syncCommit(attempt: Int = 0) {
+      if (!checkpoint()) return
+      if (sink.syncEditorState()) {
+        verifyFinalText(0)
+        return
+      }
+      // Preserve #10799's bounded retry on the current connection.
+      if (
+        attempt >= SYNC_RETRY_ATTEMPTS ||
+          remainingMs() < SYNC_RETRY_DELAY_MS + SYNC_RETRY_RESERVE_MS
+      ) {
+        complete(failure(SYNC_LOST_ERROR))
+        return
+      }
+      sink.postDelayed(SYNC_RETRY_DELAY_MS) { syncCommit(attempt + 1) }
+    }
+
+    private fun verifyFinalText(attempt: Int) {
+      if (!checkpoint()) return
+      if (baseline == null) {
+        complete(ImeCommitResult(true, null))
+        return
+      }
+      val now = sink.readEditorTextBeforeCursor(EDITOR_READ_CAP)
+      if (sink.connectionGeneration() != generation) {
+        checkpoint()
+        return
+      }
+      if (now == baseline + text || attempt >= FINAL_VERIFY_ATTEMPTS) {
+        complete(ImeCommitResult(true, null, insertedText = editorDelta(now)))
+      } else {
+        waitForEditor(POLL_INTERVAL_MS) { verifyFinalText(attempt + 1) }
+      }
+    }
 
     private fun waitForEditor(delayMs: Long, next: () -> Unit) {
-      settleWaitMs += delayMs
-      sink.postDelayed(delayMs) { if (canContinue()) next() }
+      val boundedDelayMs = minOf(delayMs, hardDeadlineMs - sink.nowMs()).coerceAtLeast(0)
+      settleWaitMs += boundedDelayMs
+      sink.postDelayed(boundedDelayMs) { if (checkpoint()) next() }
     }
 
     fun commitSegment(index: Int) {
-      if (!canContinue()) return
+      if (!checkpoint()) return
       if (index == segments.size) {
-        syncAfterDispatch(isCancelled, ::remainingMs)
+        syncCommit()
         return
       }
-      commitUnits(index, splitGraphemes(segments[index].text), 0)
+      commitUnits(index, segmentUnits[index], 0)
     }
 
     private fun finishSegment(index: Int) {
+      if (!checkpoint()) return
       // Composing profiles retain the last word until explicitly finished.
       if (!sink.finishComposing()) {
         complete(failure("Input connection lost while finishing composition"))
@@ -177,7 +357,7 @@ class ImeCommitDriver(
     }
 
     private fun pollInlineConversion(literal: String, attempt: Int, next: () -> Unit) {
-      if (!canContinue()) return
+      if (!checkpoint()) return
       val seen = sink.readTextBeforeCursor(literal.length)
       // A short unconverted read is a suffix of the literal. Empty/null reads wait to the ceiling.
       val converted = seen != null && seen.isNotEmpty() && !literal.endsWith(seen)
@@ -189,7 +369,7 @@ class ImeCommitDriver(
     }
 
     private fun awaitLineStartConversion(literal: String, attempt: Int, next: () -> Unit) {
-      if (!canContinue()) return
+      if (!checkpoint()) return
       if (attempt == 0) {
         // Pause as in realistic typing so the rich-text composer can react to the typed shortcut.
         waitForEditor(REALISTIC_TYPING_PAUSE_MS) { awaitLineStartConversion(literal, 1, next) }
@@ -207,10 +387,11 @@ class ImeCommitDriver(
     private fun commitUnits(segmentIndex: Int, units: List<String>, start: Int) {
       // Word runs stay synchronous without consuming one stack frame per grapheme.
       for (unitIndex in start until units.size) {
-        if (!canContinue()) return
+        if (!checkpoint()) return
         val unit = units[unitIndex]
         // A false return can follow an applied prefix: count conservatively before dispatch.
         committedUnits++
+        dispatched.add(unit)
         if (!sink.commitChar(unit)) {
           complete(failure("Input connection lost during commit"))
           return
@@ -284,6 +465,10 @@ class ImeCommitDriver(
     attempt: Int = 0,
   ) {
     if (completed) return
+    if (sink.nowMs() >= hardDeadlineMs) {
+      complete(failure("IME commit deadline exceeded"))
+      return
+    }
     if (sink.syncEditorState()) {
       complete(ImeCommitResult(success = true, error = null))
       return
@@ -333,6 +518,31 @@ class ImeCommitDriver(
      * (#10799).
      */
     const val SYNC_LOST_ERROR = "Input connection lost while syncing editor state"
+    private const val EDITOR_READ_CAP = 20_000
+    private const val MAX_RESUMES = 3
+    private const val FINAL_VERIFY_ATTEMPTS = 6
+    private const val DISCONNECTED_ERROR = "Editor disconnected during IME commit"
+    private const val RESTART_UNREADABLE_ERROR =
+      "Editor restarted its input connection during IME commit; the applied text could not be read back"
+    private const val RESTART_MISMATCH_ERROR =
+      "Editor restarted its input connection during IME commit; the editor text does not match the dispatched units"
+
+    private fun isPasswordInput(inputType: Int?): Boolean {
+      if (inputType == null) return false
+      val variation = inputType and InputType.TYPE_MASK_VARIATION
+      return when (inputType and InputType.TYPE_MASK_CLASS) {
+        InputType.TYPE_CLASS_TEXT ->
+          variation in
+            listOf(
+              InputType.TYPE_TEXT_VARIATION_PASSWORD,
+              InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+              InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+            )
+        InputType.TYPE_CLASS_NUMBER -> variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        else -> false
+      }
+    }
+
     const val SYNC_RETRY_ATTEMPTS = 2
     const val SYNC_RETRY_DELAY_MS = 100L
     // One sync round-trip blocks for at most CtrlProxyIme's 2s sync timeout; keep a margin so a

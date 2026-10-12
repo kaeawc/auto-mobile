@@ -91,9 +91,10 @@ export const DEVICE_OUTSIDE_MANAGED_SLOTS_CODE = "device_outside_managed_slots";
  * named a session that is not one of the connection's slot sessions. `tool`: the tool acquires,
  * starts, stops, provisions or deletes devices, which a managed connection leaves to slot
  * acquisition and release; with a `deviceLabel`, a plan device label that would need a device from
- * outside the connection's slots (#11397).
+ * outside the connection's slots (#11397). `scope`: a reset does not name exactly its own scope.
+ * `host`: the action changes state shared by every connection of the daemon.
  */
-export type ManagedConnectionRefusalReason = "device" | "session" | "tool";
+export type ManagedConnectionRefusalReason = "device" | "session" | "tool" | "scope" | "host";
 
 export class DeviceOutsideManagedSlotsError extends ActionableError {
   readonly code = DEVICE_OUTSIDE_MANAGED_SLOTS_CODE;
@@ -134,6 +135,10 @@ function managedConnectionRefusalDetail(
   target: { deviceId?: string; sessionUuid?: string; deviceLabel?: string },
 ): string {
   switch (reason) {
+    case "scope":
+      return "A managed connection resets only its own slot scope, named by all three identity parts.";
+    case "host":
+      return "It changes state shared by every connection of this daemon.";
     case "device":
       return `Device '${target.deviceId}' is not one of its slot devices.`;
     case "session":

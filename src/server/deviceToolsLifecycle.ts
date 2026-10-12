@@ -337,6 +337,7 @@ function createDeleteDeviceWorkflow(
           {
             strictDeadline: true,
             timeoutMs: context.timeoutMs,
+            stoppingSessionUuid: requester?.sessionUuid,
             retainLifecycleUntil: retainLeaseUntil,
             pooledAvdIdentity: {
               capture: target.pooledAvdCapture,
@@ -522,6 +523,7 @@ export function createLifecycleHandlers() {
         {
           strictDeadline: false,
           timeoutMs: DEVICE_SHUTDOWN_TIMEOUT_MS,
+          stoppingSessionUuid: lifecycleRequester(args).sessionUuid,
           retainLifecycleUntil,
           pooledAvdIdentity: pooledAvdKillIdentity(pooledAvdCapture, args.force ?? false),
           // The entry check predates the lease wait; re-check under the assignment mutex.

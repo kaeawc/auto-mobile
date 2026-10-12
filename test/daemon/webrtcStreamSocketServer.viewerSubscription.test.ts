@@ -1,3 +1,11 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  REFUSAL_SURFACES_DIR,
+  serializeRefusalSurfaceFixture,
+  type RefusalSurfaceFixture,
+  surfaceFixtureStem,
+} from "../helpers/refusalWireFixtures";
 import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { afterAll, afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import * as manager from "../../src/server/webrtcStreamManager";
@@ -542,6 +550,18 @@ test("typed viewer failures survive the actual request/response wire boundary", 
     errorCode: "viewer_read_only",
     subscriptionKind: "viewer",
   });
+  const fixture: RefusalSurfaceFixture = {
+    surface: "webrtc-stream-response",
+    name: "viewer_read_only",
+    builder: "WebRtcStreamSocketServer.processLine",
+    payload: socket.getWrittenMessages()[0],
+  };
+  const path = join(REFUSAL_SURFACES_DIR, `${surfaceFixtureStem(fixture)}.json`);
+  const serialized = serializeRefusalSurfaceFixture(fixture);
+  if (process.env.UPDATE_CAPTURED_FIXTURES === "1") {
+    writeFileSync(path, serialized);
+  }
+  expect(readFileSync(path, "utf8")).toBe(serialized);
 });
 
 test("ended start is fresh admission even with another viewer lease on the same record", async () => {

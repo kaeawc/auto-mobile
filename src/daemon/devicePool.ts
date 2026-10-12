@@ -65,6 +65,7 @@ import {
   deviceAssignedToOtherSessionError,
   devicePreparedForOtherRequestError,
   InputDeviceOwnedError,
+  isSameHolderSession,
   MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
 } from "./inputDeviceOwnership";
 import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
@@ -2607,10 +2608,10 @@ export class DevicePool {
   }
 
   /**
-   * Mark the stop; naming the reserving session drops its device-restart handoff source. No
-   * lifecycle tool names that session yet, so those stops leave the hold to recovery, terminal
-   * release, idle expiry or the 180 s window. An intentional stop never ends the daemon-restart
-   * batch's source.
+   * Mark the Android stop; killDevice and deleteDevice name their admitted routing session,
+   * dropping only that session's device-restart handoff source, never the daemon-restart source.
+   * Base/label matches require live label state; a handed-off base's unresolved label leaves
+   * the hold to recovery, terminal release, idle expiry or the 180 s window.
    */
   markIntentionalShutdown(deviceId: string, stoppingSessionId?: string): void {
     this.sessionManager.flushDeferredRebindCleanups({ deviceId });
@@ -2621,19 +2622,11 @@ export class DevicePool {
       // Resolve reset-cohort ownership before consulting the current serial. A
       // prior recovery may already have reused this serial for a different AVD.
       resetReservation.cancelled = true;
-      this.dropStoppedDeviceRestartReservations(
-        deviceId,
-        resetReservation.image.name,
-        stoppingSessionId,
-      );
+      this.releaseDeviceRestartReservationForStop(deviceId, stoppingSessionId);
       return;
     }
     const device = this.devices.get(deviceId);
-    this.dropStoppedDeviceRestartReservations(
-      deviceId,
-      device && this.stableDeviceIdFor(device),
-      stoppingSessionId,
-    );
+    this.releaseDeviceRestartReservationForStop(deviceId, stoppingSessionId);
     if (device) {
       // Tie the marker to the incarnation present now, so a later same-serial
       // replacement is not treated as intentionally stopped.
@@ -2648,6 +2641,20 @@ export class DevicePool {
     }
   }
 
+  /** Drop only the named requester's restart hold, without setting a platform shutdown marker. */
+  releaseDeviceRestartReservationForStop(deviceId: string, stoppingSessionId?: string): void {
+    // Reset-cohort identity wins over a serial that recovery may have reused for another AVD.
+    const resetReservation = Array.from(this.adbServerResetRecoveryReservations.values()).find(
+      (reservation) => reservation.deviceId === deviceId,
+    );
+    const device = this.devices.get(deviceId);
+    this.dropStoppedDeviceRestartReservations(
+      deviceId,
+      resetReservation?.image.name ?? (device && this.stableDeviceIdFor(device)),
+      stoppingSessionId,
+    );
+  }
+
   private dropStoppedDeviceRestartReservations(
     deviceId: string,
     stableDeviceId?: string,
@@ -2655,7 +2662,7 @@ export class DevicePool {
   ): void {
     for (const [sessionId, target] of this.rehydrationReservations) {
       if (
-        sessionId === stoppingSessionId &&
+        isSameHolderSession(sessionId, stoppingSessionId, this.sessionManager) &&
         target.restartHandoff &&
         target.deviceId === deviceId &&
         (stableDeviceId === undefined || target.stableDeviceId === stableDeviceId)

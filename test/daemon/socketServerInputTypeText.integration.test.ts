@@ -232,7 +232,12 @@ describe("UnixSocketServer input/typeText", () => {
       textLength: 13,
       submitted: false,
     });
-    expect(requestSetText).toHaveBeenCalledWith("hello, Jason!", { timeoutMs: 1234 });
+    expect(requestSetText).toHaveBeenCalledWith("hello, Jason!", {
+      timeoutMs: 1234,
+      frameContext: undefined,
+      abortSignal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
     expect(requestImeAction).not.toHaveBeenCalled();
     expect(createMcpClient).not.toHaveBeenCalled();
   });
@@ -404,7 +409,13 @@ describe("UnixSocketServer input/typeText", () => {
       error: imeActionFailedAfterTextEntered("done", "enter key unavailable"),
       charsSent: 2,
     });
-    expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
+    expect(requestImeAction).toHaveBeenCalledWith(
+      "done",
+      30_000,
+      undefined,
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
   });
 
   test("append reports full progress when submit throws after all text lands", async () => {
@@ -439,7 +450,13 @@ describe("UnixSocketServer input/typeText", () => {
       error: imeActionFailedAfterTextEntered("done", "CtrlProxy send failed"),
       charsSent: 2,
     });
-    expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
+    expect(requestImeAction).toHaveBeenCalledWith(
+      "done",
+      30_000,
+      undefined,
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
   });
 
   test("append preserves full progress when submit reaches the shared deadline", async () => {
@@ -481,7 +498,13 @@ describe("UnixSocketServer input/typeText", () => {
     );
 
     await flushMicrotasks();
-    expect(requestImeAction).toHaveBeenCalledWith("done", 100);
+    expect(requestImeAction).toHaveBeenCalledWith(
+      "done",
+      100,
+      undefined,
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
     fakeTimer.advanceTime(100);
     await flushMicrotasks();
 
@@ -555,7 +578,12 @@ describe("UnixSocketServer input/typeText", () => {
       "the per-device queue stayed wedged behind the stalled append",
     );
     expect(next.success).toBe(true);
-    expect(requestSetText).toHaveBeenCalledWith("next", { timeoutMs: 30_000 });
+    expect(requestSetText).toHaveBeenCalledWith("next", {
+      timeoutMs: 30_000,
+      frameContext: undefined,
+      abortSignal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("a timed-out later append key omits an unsafe retry boundary", async () => {
@@ -672,7 +700,12 @@ describe("UnixSocketServer input/typeText", () => {
       "the per-device queue stayed wedged behind the stalled production probe",
     );
     expect(next.success).toBe(true);
-    expect(requestSetText).toHaveBeenCalledWith("next", { timeoutMs: 30_000 });
+    expect(requestSetText).toHaveBeenCalledWith("next", {
+      timeoutMs: 30_000,
+      frameContext: undefined,
+      abortSignal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   // Interactive latency (#1099): one input/typeText arrives PER KEYSTROKE, so a
@@ -1584,8 +1617,19 @@ describe("UnixSocketServer input/typeText", () => {
       textLength: 8,
       submitted: true,
     });
-    expect(requestSetText).toHaveBeenCalledWith("hi there", { timeoutMs: 30_000 });
-    expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
+    expect(requestSetText).toHaveBeenCalledWith("hi there", {
+      timeoutMs: 30_000,
+      frameContext: undefined,
+      abortSignal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
+    expect(requestImeAction).toHaveBeenCalledWith(
+      "done",
+      30_000,
+      undefined,
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
   });
 
   test("accepts iOS append mode and uses the CtrlProxy append primitive", async () => {
@@ -1645,7 +1689,10 @@ describe("UnixSocketServer input/typeText", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(requestAppendText).toHaveBeenCalledWith("a", 30_000, undefined, "ios:7");
+    expect(requestAppendText).toHaveBeenCalledWith("a", 30_000, undefined, "ios:7", {
+      abortSignal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("uses the socket autolock device when deviceId is omitted", async () => {
@@ -1692,7 +1739,12 @@ describe("UnixSocketServer input/typeText", () => {
       deviceId: "emulator-5554",
       textLength: 12,
     });
-    expect(requestSetText).toHaveBeenCalledWith("from session", { timeoutMs: 30_000 });
+    expect(requestSetText).toHaveBeenCalledWith("from session", {
+      timeoutMs: 30_000,
+      frameContext: undefined,
+      abortSignal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
     expect(requestImeAction).not.toHaveBeenCalled();
   });
 
@@ -1724,6 +1776,8 @@ describe("UnixSocketServer input/typeText", () => {
     expect(requestSetText).toHaveBeenCalledWith("context-bound", {
       timeoutMs: 30_000,
       frameContext: "frame-1",
+      abortSignal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
     });
   });
 
@@ -1943,7 +1997,12 @@ describe("UnixSocketServer input/typeText", () => {
     expect(response.success).toBe(false);
     expect(response.error).toContain("input/typeText exceeded 1ms");
     expect(response.error).toContain("operation exceeded remaining budget 1ms");
-    expect(requestSetText).toHaveBeenCalledWith("slow", { timeoutMs: 1 });
+    expect(requestSetText).toHaveBeenCalledWith("slow", {
+      timeoutMs: 1,
+      frameContext: undefined,
+      abortSignal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
     expect(requestImeAction).not.toHaveBeenCalled();
   });
 
@@ -2047,8 +2106,19 @@ describe("UnixSocketServer input/typeText", () => {
     expect(response.success).toBe(false);
     expect(response.error).toBe(imeActionFailedAfterTextEntered("done", "return key unavailable"));
     expect(response.charsSent).toBeUndefined();
-    expect(requestSetText).toHaveBeenCalledWith("hi there", { timeoutMs: 30_000 });
-    expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
+    expect(requestSetText).toHaveBeenCalledWith("hi there", {
+      timeoutMs: 30_000,
+      frameContext: undefined,
+      abortSignal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
+    expect(requestImeAction).toHaveBeenCalledWith(
+      "done",
+      30_000,
+      undefined,
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
   });
 
   test("charges the submit IME action against the remaining shared budget", async () => {
@@ -2097,8 +2167,19 @@ describe("UnixSocketServer input/typeText", () => {
     expect(response.success).toBe(true);
     // set-text consumed 40ms of the 100ms budget, so the IME action gets the
     // remaining 60ms rather than a fresh full timeout.
-    expect(requestSetText).toHaveBeenCalledWith("hello", { timeoutMs: 100 });
-    expect(requestImeAction).toHaveBeenCalledWith("done", 60);
+    expect(requestSetText).toHaveBeenCalledWith("hello", {
+      timeoutMs: 100,
+      frameContext: undefined,
+      abortSignal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
+    expect(requestImeAction).toHaveBeenCalledWith(
+      "done",
+      60,
+      undefined,
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
   });
 
   test("rejects missing, empty, and non-string text with actionable errors", async () => {

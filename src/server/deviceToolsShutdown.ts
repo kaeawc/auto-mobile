@@ -1382,6 +1382,7 @@ async function resolvePooledAvdKillTarget(
 }
 
 interface KillProcessAndRetireOwnershipOptions {
+  stoppingSessionUuid?: string;
   androidObserverState: AndroidObserverShutdownState;
   releaseShutdownReservation: () => Promise<void>;
   strictDeadline: boolean;
@@ -1515,7 +1516,12 @@ async function killProcessAndRetireOwnership(
   const shutdownDeadlineMs = context.deadlineMs;
   const deviceManager = dependencies.deviceManagerFactory();
   if (device.platform === "android") {
-    devicePool?.markIntentionalShutdown(device.deviceId);
+    devicePool?.markIntentionalShutdown(device.deviceId, options.stoppingSessionUuid);
+  } else if (device.platform === "ios") {
+    devicePool?.releaseDeviceRestartReservationForStop(
+      device.deviceId,
+      options.stoppingSessionUuid,
+    );
   }
 
   let shutdownDevice = device;
@@ -1723,20 +1729,23 @@ async function finishShutdownCleanup(
   );
 }
 
+interface ShutdownDeviceOptions {
+  strictDeadline: boolean;
+  timeoutMs: number;
+  stoppingSessionUuid?: string;
+  retainLifecycleUntil?: (operation: Promise<unknown>) => void;
+  pooledAvdIdentity?: PooledAvdKillIdentity;
+  /** Re-checks the caller still holds the device; runs under the pool's assignment mutex. */
+  assertHolder?: () => void;
+  /** Claim the device against other live daemons while it is stopped (#11200). */
+  foreignClaim?: ShutdownForeignClaim;
+}
+
 export async function shutdownDevice(
   context: ShutdownEntryContext,
   dependencies: DeviceToolsDependencies,
   operationName: string,
-  options: {
-    strictDeadline: boolean;
-    timeoutMs: number;
-    retainLifecycleUntil?: (operation: Promise<unknown>) => void;
-    pooledAvdIdentity?: PooledAvdKillIdentity;
-    /** Re-checks the caller still holds the device; runs under the pool's assignment mutex. */
-    assertHolder?: () => void;
-    /** Claim the device against other live daemons while it is stopped (#11200). */
-    foreignClaim?: ShutdownForeignClaim;
-  },
+  options: ShutdownDeviceOptions,
 ): Promise<ShutdownResult> {
   const { strictDeadline, timeoutMs, retainLifecycleUntil, pooledAvdIdentity, assertHolder } =
     options;
@@ -1831,6 +1840,7 @@ export async function shutdownDevice(
           devicePool,
           {
             androidObserverState,
+            stoppingSessionUuid: options.stoppingSessionUuid,
             releaseShutdownReservation,
             retainReservationUntil: retainShutdownUntil,
             strictDeadline,

@@ -7,6 +7,7 @@ import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import { MCP_FORWARD_START_HEADROOM_MS, UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { overloadRefusalError } from "../helpers/refusalWireFixtures";
 
 function createFakeDaemonState() {
   return {
@@ -61,6 +62,26 @@ const request: DaemonRequest = {
 };
 
 describe("UnixSocketServer MCP forward budget classification", () => {
+  test("pins the overload fixture to the real forward-budget refusal", () => {
+    const timer = new FakeTimer();
+    const server = createServer(timer);
+    const deadline = new ProgressExtendableDeadline(timer.now(), 1_000);
+    timer.advanceTime(950);
+
+    try {
+      requireBudget(server, request, 1_000, deadline, "waiting in queue");
+      expect.unreachable("insufficient forward budget should throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(McpOverloadError);
+      if (!(error instanceof McpOverloadError)) {
+        throw error;
+      }
+      const fixtureError = overloadRefusalError();
+      expect(error.message).toBe(fixtureError.message);
+      expect(error.failure).toEqual(fixtureError.failure);
+    }
+  });
+
   test("classifies an already-expired deadline as MCP timeout", () => {
     const timer = new FakeTimer();
     timer.advanceTime(1_000);

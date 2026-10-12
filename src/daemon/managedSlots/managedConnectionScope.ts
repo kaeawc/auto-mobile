@@ -1,6 +1,7 @@
 import { DeviceCriteriaMatcher, type DeviceAllocationCriteria } from "../DeviceCriteriaMatcher";
 import type { PooledDevice } from "../devicePool";
 import { DeviceOutsideManagedSlotsError } from "./managedSlotRefusal";
+import { computeSlotScopeKey, type SlotScopeQuery } from "./slotRegistry";
 
 /**
  * Managed-connection scope (#11178 part b, epic #11172).
@@ -15,6 +16,8 @@ import { DeviceOutsideManagedSlotsError } from "./managedSlotRefusal";
  * provision or delete devices are refused with `device_outside_managed_slots`. Reads stay open everywhere (owner
  * decision Q6). Unbound (generic) connections are unaffected; their protection against slot devices
  * is the generic `device_assigned_to_managed_slot` exclusion.
+ * Direct `daemon/releaseExecution` is confined to its slot sessions, `daemon/resetSlotScope` to its
+ * exact scope; host-wide `daemon/refreshDevices` and `ide/setFeatureFlag` are refused (#11596).
  */
 
 export interface ManagedConnectionBinding {
@@ -112,6 +115,36 @@ export function managedConnectionControlRefusal(input: {
     }
   }
   return new DeviceOutsideManagedSlotsError(action, "device", binding.scopeKey, { deviceId });
+}
+
+/** Host-wide mutations cannot be confined to a bound connection's slots. */
+export function managedConnectionHostMutationRefusal(input: {
+  binding: ManagedConnectionBinding | undefined;
+  action: string;
+}): DeviceOutsideManagedSlotsError | undefined {
+  return input.binding
+    ? new DeviceOutsideManagedSlotsError(input.action, "host", input.binding.scopeKey)
+    : undefined;
+}
+
+/** A bound connection resets only its exact scope, never every host of a runner incarnation. */
+export function managedConnectionScopeResetRefusal(input: {
+  binding: ManagedConnectionBinding | undefined;
+  action: string;
+  identity: SlotScopeQuery;
+}): DeviceOutsideManagedSlotsError | undefined {
+  const { binding, identity } = input;
+  if (!binding) {
+    return undefined;
+  }
+  if (
+    identity.managedHostScope !== undefined &&
+    computeSlotScopeKey({ ...identity, managedHostScope: identity.managedHostScope }) ===
+      binding.scopeKey
+  ) {
+    return undefined;
+  }
+  return new DeviceOutsideManagedSlotsError(input.action, "scope", binding.scopeKey);
 }
 
 /**

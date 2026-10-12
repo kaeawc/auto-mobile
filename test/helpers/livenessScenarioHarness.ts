@@ -594,8 +594,10 @@ export class LivenessScenario {
     // One database across daemon "processes", so a restart rehydrates what the last one persisted.
     this.repository ??= new DeviceSessionRepository(await createTestDatabase(), this.timer);
     const repository = this.repository;
-    // Each process has its own daemon session id, so a restart sees the last one's rows as stale.
-    const daemonIds = new FakeIdGenerator([`scenario-daemon-${++this.daemonCount}`]);
+    // Both process identity and session identity come from the daemon's injected id generator.
+    const daemonName = `scenario-daemon-${++this.daemonCount}`;
+    const daemonIds = new FakeIdGenerator([`${daemonName}:instance`, daemonName]);
+    const daemonInstance = daemonIds.next();
     // The process's own timers: they die with it, while the proxies' run on.
     const clock = new ProcessTimer(this.timer);
     const daemon = new Daemon(
@@ -659,7 +661,7 @@ export class LivenessScenario {
     });
     let socket: InMemoryControlSocket | undefined;
     await daemon.startOn(
-      this.startHost(clock, startupMs, (bound) => {
+      this.startHost(clock, startupMs, daemonInstance, (bound) => {
         socket = bound;
       }),
     );
@@ -678,6 +680,7 @@ export class LivenessScenario {
   private startHost(
     clock: ProcessTimer,
     startupMs: number,
+    daemonInstance: string,
     onSocket: (socket: InMemoryControlSocket) => void,
   ): DaemonStartHost {
     const steps: string[] = [];
@@ -704,6 +707,7 @@ export class LivenessScenario {
         }
         const socket = InMemoryControlSocket.attach({
           timer: clock,
+          daemonInstance,
           connectionIds: new FakeIdGenerator(),
           // Every tool is enabled for every session: the selection store is a database table.
           startupOptions: {

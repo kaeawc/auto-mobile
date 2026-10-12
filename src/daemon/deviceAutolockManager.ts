@@ -598,6 +598,7 @@ export class DeviceAutolockManager {
         device.id,
         existingSession.sessionId,
         existingSession.ownership === "awaiting-owner",
+        this.pool.holderReleaseRemainingMs?.(existingSession.sessionId),
       );
     }
   }

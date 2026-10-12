@@ -4388,6 +4388,10 @@ export class DaemonMcpProxy {
       await this.waitForLivenessRecovery(signal);
     }
     callerArgs = this.withFencedControlDeviceSession(name, callerArgs);
+    const ownSession = this.ownSessionForPlatformSelector(name, callerArgs, true);
+    if (ownSession !== undefined) {
+      callerArgs = { ...callerArgs, sessionUuid: ownSession };
+    }
     this.refuseAmbiguousSessionSelector(name, callerArgs);
     this.reportToolSessionLoss(name, callerArgs);
     if (this.stallHandovers.size > 0) {
@@ -4902,30 +4906,45 @@ export class DaemonMcpProxy {
     );
   }
 
-  /** A matching platform alone is untargeted only when no other still-held session could match. */
+  /** A platform-only call uses the default only when it is the unique known held match. */
   private platformSelectorTargetsBoundSession(
     name: string,
     args: Record<string, unknown>,
   ): boolean {
-    const platform = args.platform;
+    const ownSession = this.ownSessionForPlatformSelector(name, args);
+    return ownSession !== undefined && ownSession === this.boundSessionUuid;
+  }
+
+  /**
+   * Route platform-only device calls to their unique held session when every held platform is
+   * known; a configured binding, release fence or expired default lease keeps today's routing.
+   * Sibling-only selection leaves default injection to the existing bound-session path.
+   */
+  private ownSessionForPlatformSelector(
+    name: string,
+    args: Record<string, unknown>,
+    siblingOnly = false,
+  ): string | undefined {
     const bound = this.boundSessionUuid;
     if (
       isDeviceBindingTool(name) ||
-      (platform !== "android" && platform !== "ios") ||
+      !this.toolTargetsDevice(name) ||
+      !this.hasImplicitDeviceSelector(args, false) ||
       typeof args.deviceId === "string" ||
       this.sessionUuidFromArgs(args) !== undefined ||
+      this.config.initialSessionUuid ||
       !bound ||
       this.terminalBoundSession ||
-      this.sessionPlatforms.get(bound) !== platform
+      this.isBoundSessionReplayExpired()
     ) {
-      return false;
+      return undefined;
     }
-    return ![...this.otherHeldSessions.keys()].some(
-      (sessionUuid) =>
-        sessionUuid !== bound &&
-        (this.sessionPlatforms.get(sessionUuid) === undefined ||
-          this.sessionPlatforms.get(sessionUuid) === platform),
-    );
+    const held = [...new Set([bound, ...this.otherHeldSessions.keys()])];
+    if (held.some((id) => this.sessionPlatforms.get(id) === undefined)) {
+      return undefined;
+    }
+    const candidates = held.filter((id) => this.sessionPlatforms.get(id) === args.platform);
+    return candidates.find((id) => candidates.length === 1 && (!siblingOnly || id !== bound));
   }
 
   /**

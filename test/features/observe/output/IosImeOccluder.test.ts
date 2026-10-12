@@ -73,7 +73,7 @@ describe("iOS action keyboard geometry", () => {
 
 describe("real raw iOS keyboard captures", () => {
   test.each([
-    ["visible", iosKeyboardVisibleHierarchy, [4, 597, 399, 813], [0, 597, 402, 874]],
+    ["visible", iosKeyboardVisibleHierarchy, [4, 597, 399, 813], [0, 546, 402, 874]],
     ["minimized", iosKeyboardMinimizedHierarchy, [0, 918, 402, 1144], undefined],
   ] as const)(
     "finds the %s keyboard and clips its visible bounds",

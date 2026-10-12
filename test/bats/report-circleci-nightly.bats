@@ -11,6 +11,7 @@ setup() {
   OPEN_FILE="${BATS_TEST_TMPDIR}/open-number"
   FIX="${BATS_TEST_TMPDIR}/fix"
   STATUS_FILE="${BATS_TEST_TMPDIR}/status"
+  ARTIFACTS_STATUS_FILE="${BATS_TEST_TMPDIR}/artifacts-status"
   mkdir -p "${FIX}"
   cat > "${BATS_TEST_TMPDIR}/gh" <<'FAKE_EOF'
 #!/usr/bin/env bash
@@ -38,10 +39,14 @@ case "${url}" in
   */job) fixture="${FIX}/jobs-$(basename "$(dirname "${url}")").json" ;;
 esac
 cat "${fixture}" > "${out}"
-cat "${STATUS_FILE}" 2> /dev/null || printf 200
+if [[ "${url}" == */artifacts && -f "${ARTIFACTS_STATUS_FILE}" ]]; then
+  cat "${ARTIFACTS_STATUS_FILE}"
+else
+  cat "${STATUS_FILE}" 2> /dev/null || printf 200
+fi
 FAKE_EOF
   chmod +x "${BATS_TEST_TMPDIR}/gh" "${BATS_TEST_TMPDIR}/curl"
-  export CALLS OPEN_FILE FIX STATUS_FILE
+  export CALLS OPEN_FILE FIX STATUS_FILE ARTIFACTS_STATUS_FILE
   export ALERT_GH="${BATS_TEST_TMPDIR}/gh" ALERT_CURL="${BATS_TEST_TMPDIR}/curl"
   export CIRCLECI_TOKEN="test-token"
   export ALERT_NOW_EPOCH=1791715200 # 2026-10-11T10:40:00Z
@@ -112,6 +117,7 @@ JSON
   grep -qF 'macOS BATS Shell Tests: failed' "${CALLS}"
   grep -qF 'https://app.circleci.com/pipelines/github/kaeawc/auto-mobile/501/workflows/w1/jobs/9001' "${CALLS}"
   grep -qF 'bats-unit-joblog/bats-unit-joblog-durations.tsv' "${CALLS}"
+  grep -qF 'bats-unit-joblog/bats-unit-joblog.tsv' "${CALLS}"
   ! grep -qF 'Thread Sanitizer: ' "${CALLS}"
   ! grep -qF 'jobs/400' "${CALLS}"
 }
@@ -129,4 +135,34 @@ JSON
   run bash "${SCRIPT}"
   [ "${status}" -eq 0 ]
   grep -qF 'none uploaded' "${CALLS}"
+}
+
+@test "a red job whose artifacts request is refused (404) is still reported with no artifacts" {
+  printf 404 > "${ARTIFACTS_STATUS_FILE}"
+  run bash "${SCRIPT}"
+  [ "${status}" -eq 0 ]
+  grep -q '^issue create ' "${CALLS}"
+  grep -qF 'macOS BATS Shell Tests: failed' "${CALLS}"
+  grep -qF 'https://app.circleci.com/pipelines/github/kaeawc/auto-mobile/501/workflows/w1/jobs/9001' "${CALLS}"
+  grep -qF 'none uploaded' "${CALLS}"
+  ! grep -qF 'bats-unit-joblog/bats-unit-joblog.tsv' "${CALLS}"
+}
+
+@test "a red job whose artifacts request fails (500) is still reported with no artifacts" {
+  printf 500 > "${ARTIFACTS_STATUS_FILE}"
+  run bash "${SCRIPT}"
+  [ "${status}" -eq 0 ]
+  grep -q '^issue create ' "${CALLS}"
+  grep -qF 'macOS BATS Shell Tests: failed' "${CALLS}"
+  grep -qF 'https://app.circleci.com/pipelines/github/kaeawc/auto-mobile/501/workflows/w1/jobs/9001' "${CALLS}"
+  grep -qF 'none uploaded' "${CALLS}"
+  ! grep -qF 'bats-unit-joblog/bats-unit-joblog.tsv' "${CALLS}"
+}
+
+@test "a failed pipeline request (500) fails the run and files nothing" {
+  printf 500 > "${STATUS_FILE}"
+  run bash "${SCRIPT}"
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"HTTP 500"* ]]
+  [ ! -e "${CALLS}" ]
 }

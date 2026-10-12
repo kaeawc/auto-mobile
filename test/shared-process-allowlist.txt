@@ -415,6 +415,7 @@ test/features/action/swipeon/swipeSelectorScopes.test.ts
 test/features/action/textTransportTimeout.test.ts
 test/features/action/touchscreenInput.test.ts
 test/features/appearance/AppearanceConfig.property.test.ts
+test/features/bootAdmission/AndroidBootAdmissionGate.crossDaemon.test.ts
 test/features/bootAdmission/AndroidBootAdmissionGate.test.ts
 test/features/bootAdmission/AndroidCapacitySource.test.ts
 test/features/bootAdmission/bootGateInterleavings.test.ts

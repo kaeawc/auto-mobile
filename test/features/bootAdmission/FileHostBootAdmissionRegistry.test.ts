@@ -1,7 +1,6 @@
-import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { beforeEach, expect, spyOn, test } from "bun:test";
 import {
   existsSync,
-  mkdtempSync,
   readdirSync,
   rmSync,
   writeFileSync,
@@ -10,7 +9,6 @@ import {
   unlinkSync,
   utimesSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ADMISSION_LOCK_MAX_AGE_MS,
@@ -24,17 +22,16 @@ import { FakeAndroidCapacitySource } from "../../fakes/FakeAndroidCapacitySource
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 
+const scratch = useScratchRoot("boot-admission-test-");
 let directory: string;
 let timer: FakeTimer;
 let live: Set<number>;
 beforeEach(() => {
-  directory = mkdtempSync(join(tmpdir(), "boot-admission-test-"));
+  directory = scratch.next();
   timer = new FakeTimer();
   live = new Set([100, 200]);
-});
-afterEach(() => {
-  rmSync(directory, { recursive: true, force: true });
 });
 function registry(pid = 100, resolver = () => directory): FileHostBootAdmissionRegistry {
   return new FileHostBootAdmissionRegistry({

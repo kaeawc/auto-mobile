@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   managedConnectionHostMutationRefusal,
+  managedConnectionPlatformRefusal,
   managedConnectionScopeResetRefusal,
 } from "../../../src/daemon/managedSlots/managedConnectionScope";
 import {
@@ -73,4 +74,63 @@ describe("managed connection host and scope decisions", () => {
       managedConnectionScopeResetRefusal({ binding, action: "daemon/resetSlotScope", identity }),
     ).toBeUndefined();
   });
+});
+
+test.each([
+  { name: "android slot rejects ios", sessions: ["android-slot"], platform: "ios", refused: true },
+  {
+    name: "mixed slots permit ios",
+    sessions: ["android-slot", "ios-slot"],
+    platform: "ios",
+    refused: false,
+  },
+  {
+    name: "mixed slots permit android",
+    sessions: ["android-slot", "ios-slot"],
+    platform: "android",
+    refused: false,
+  },
+  {
+    name: "unknown slot permits routing",
+    sessions: ["unknown-slot"],
+    platform: "ios",
+    refused: false,
+  },
+  { name: "empty binding permits routing", sessions: [], platform: "ios", refused: false },
+  { name: "no binding permits routing", sessions: undefined, platform: "ios", refused: false },
+  {
+    name: "no platform permits routing",
+    sessions: ["android-slot"],
+    platform: undefined,
+    refused: false,
+  },
+])("platform-only managed refusal: $name", ({ sessions, platform, refused }) => {
+  const platforms = new Map([
+    ["android-slot", "android"],
+    ["ios-slot", "ios"],
+  ]);
+  const input = {
+    binding: sessions === undefined ? undefined : { ...binding, sessionUuids: new Set(sessions) },
+    action: "homeScreen",
+    platform,
+    slotPlatformOf: (sessionUuid: string) => platforms.get(sessionUuid),
+  };
+  const refusal = managedConnectionPlatformRefusal(input);
+  if (!refused) {
+    expect(refusal).toBeUndefined();
+    return;
+  }
+  expect(refusal).toBeInstanceOf(DeviceOutsideManagedSlotsError);
+  expect(refusal?.toPayload()).toEqual({
+    code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
+    action: "homeScreen",
+    reason: "device",
+    platform: "ios",
+    scopeKey: binding.scopeKey,
+    retryable: false,
+  });
+  expect(refusal?.message).toContain(
+    "None of its slot devices is an ios device; name a device by deviceId to read one outside its slots.",
+  );
+  expect(refusal?.message).not.toContain("undefined");
 });

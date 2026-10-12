@@ -150,7 +150,7 @@ liveness policy (heartbeat, one-shot CLI or managed execution; owner decision
 | Reason                                                                                                  | Terminal?  | What the client sees                                                                                                                                                                                                                                                |
 | ------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `explicit-release`                                                                                      | Yes        | `session_ownership_lost`; acquire a new session.                                                                                                                                                                                                                    |
-| `lazy-expiry`, `cleanup-expired`                                                                        | Yes (idle) | `session_ownership_lost` refusals and session-not-found answers (heartbeat, `daemon/sessionInfo`) carry `idle: true`. Acquire a new session.                                                                                                                        |
+| `cleanup-expired` (legacy: `lazy-expiry`)                                                               | Yes (idle) | `session_ownership_lost` refusals and session-not-found answers (heartbeat, `daemon/sessionInfo`) carry `idle: true`. Acquire a new session.                                                                                                                        |
 | `cli-idle-timeout`                                                                                      | Yes (idle) | `session_ownership_lost` refusals and session-not-found answers (heartbeat, `daemon/sessionInfo`) carry `idle: true` for a one-shot CLI session.                                                                                                                    |
 | `heartbeat-timeout`, `missing-first-heartbeat`                                                          | Yes        | `session_ownership_lost`, with the heartbeat age and limit in the message.                                                                                                                                                                                          |
 | `rehydration-owner-timeout`                                                                             | Yes        | `session_ownership_lost`: a rehydrated session's owner never reclaimed it.                                                                                                                                                                                          |
@@ -231,7 +231,10 @@ its device stays held until the release cascade frees it.
   device, a plan step) is refused with `session_ownership_lost`, `retryable:
   false` and `nextAction: "acquire_new_session"`, carrying the label's id and
   the base's release reason: the recorded one, or the one its expiry is about to
-  record (`lazy-expiry`, or `heartbeat-timeout` when the owner's lease lapsed).
+  record (`cleanup-expired`, or `heartbeat-timeout` when the owner's lease lapsed).
+  The lookup and sweep record the same idle reason. `lazy-expiry` is no longer
+  produced; older daemon rows and wire answers may still carry it and mean the
+  same idle end. Legacy values are not rewritten.
   A heartbeat or liveness claim for the label is answered "session not found"
   with that same reason, and claims nothing.
 - A read naming the label is never refused. It is answered without a session,

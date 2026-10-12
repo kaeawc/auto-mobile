@@ -360,7 +360,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
       }
 
       expect(taps).toBe(0);
-      expect(response).toMatchObject(terminalRefusal("lazy-expiry"));
+      expect(response).toMatchObject(terminalRefusal("cleanup-expired"));
     },
   );
 

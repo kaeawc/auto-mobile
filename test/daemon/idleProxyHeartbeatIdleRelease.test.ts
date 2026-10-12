@@ -317,7 +317,7 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
     // reason is an idle expiry, never "heartbeat-timeout".
     const releasedRow = await persistence.getSession?.(SESSION);
     expect(releasedRow).toMatchObject({ status: "expired" });
-    expect(["cleanup-expired", "lazy-expiry"]).toContain(releasedRow!.release_reason!);
+    expect(["cleanup-expired"]).toContain(releasedRow!.release_reason!);
   });
 
   test("a tool call a minute before the deadline moves the release a full window later; heartbeats alone never move it", async () => {

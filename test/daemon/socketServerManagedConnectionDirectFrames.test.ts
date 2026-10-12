@@ -401,11 +401,71 @@ describe("direct frames from a managed connection outside its slots", () => {
     expect(releasedExecutions).toEqual([]);
   });
 
-  test("an empty managed binding refuses every execution release", async () => {
+  test("an empty managed binding refuses an execution release with no recorded owner", async () => {
+    await sessionManager.adoptManagedExecutionLivenessPolicy(SLOT_SESSION);
     const [socketSessionId] = [...internals.sessions.keys()];
     scopes.bind(socketSessionId!, { scopeKey: SCOPE_KEY, sessionUuids: [] });
     const response = await send("execution-empty", "daemon/releaseExecution", {
       sessionId: SLOT_SESSION,
+      livenessOwnerToken: "owner",
+    });
+    expect(response).toMatchObject(OUTSIDE_SLOTS);
+    expect(releasedExecutions).toEqual([]);
+  });
+
+  test.each(["owner", "wrong"])(
+    "empty binding releases a managed execution only for its owner: %s",
+    async (token) => {
+      await sessionManager.adoptManagedExecutionLivenessPolicy(SLOT_SESSION);
+      expect(await sessionManager.claimLivenessOwnership(SLOT_SESSION, "owner")).toBe("claimed");
+      const [socketSessionId] = [...internals.sessions.keys()];
+      scopes.bind(socketSessionId!, { scopeKey: SCOPE_KEY, sessionUuids: [] });
+      const response = await send("execution-empty-owned", "daemon/releaseExecution", {
+        sessionId: SLOT_SESSION,
+        livenessOwnerToken: token,
+      });
+      expect(response).toMatchObject(token === "owner" ? { success: true } : OUTSIDE_SLOTS);
+      expect(releasedExecutions).toEqual(token === "owner" ? [SLOT_SESSION] : []);
+    },
+  );
+
+  test.each([true, false])(
+    "outside binding requires managed execution policy: %s",
+    async (managedPolicy) => {
+      if (managedPolicy) {
+        await sessionManager.adoptManagedExecutionLivenessPolicy(GENERIC_SESSION);
+      }
+      expect(
+        await sessionManager.claimLivenessOwnership(
+          GENERIC_SESSION,
+          managedPolicy ? "foreign-owner" : "owner",
+        ),
+      ).toBe("claimed");
+      const response = await send("execution-outside-policy", "daemon/releaseExecution", {
+        sessionId: GENERIC_SESSION,
+        livenessOwnerToken: "owner",
+      });
+      expect(response).toMatchObject(OUTSIDE_SLOTS);
+      expect(releasedExecutions).toEqual([]);
+    },
+  );
+
+  test("a non-empty binding permits its owner to release a managed execution outside its slots", async () => {
+    await sessionManager.adoptManagedExecutionLivenessPolicy(GENERIC_SESSION);
+    expect(await sessionManager.claimLivenessOwnership(GENERIC_SESSION, "owner")).toBe("claimed");
+    const response = await send("execution-outside-owned", "daemon/releaseExecution", {
+      sessionId: GENERIC_SESSION,
+      livenessOwnerToken: "owner",
+    });
+    expect(response).toMatchObject({ success: true });
+    expect(releasedExecutions).toEqual([GENERIC_SESSION]);
+  });
+
+  test("an empty binding still refuses an unknown execution", async () => {
+    const [socketSessionId] = [...internals.sessions.keys()];
+    scopes.bind(socketSessionId!, { scopeKey: SCOPE_KEY, sessionUuids: [] });
+    const response = await send("execution-empty-unknown", "daemon/releaseExecution", {
+      sessionId: "never-registered",
       livenessOwnerToken: "owner",
     });
     expect(response).toMatchObject(OUTSIDE_SLOTS);

@@ -2,8 +2,8 @@
  * The lease arithmetic of stall and host-sleep forgiveness (#10051, #10699, #11080), shared by
  * every lease the daemon judges on heartbeats: device sessions (`SessionManager.forgiveDaemonStall`)
  * and observer registrations (`ObserverSessionRegistry.forgiveStall`, #11554). The heartbeat
- * monitor detects a gap once; each store applies it with these functions, so an observer and a
- * session owner are excused the same interval under the same conditions.
+ * monitor detects a gap once; each store applies its lease rule with these functions. Device
+ * sessions also receive capped awake-stall credit for a connected owner (#11992).
  */
 
 /**

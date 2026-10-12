@@ -83,12 +83,13 @@ describe("OutputGatedTransport", () => {
     const received: Message[] = [];
     const errors: Error[] = [];
     let closes = 0;
-    gate.onmessage = (message) => received.push(message);
+    const callback: Transport["onmessage"] = (message) => received.push(message);
+    gate.onmessage = callback;
     gate.onerror = (error) => errors.push(error);
     gate.onclose = () => {
       closes++;
     };
-    expect(gate.onmessage).toBe(inner.onmessage);
+    expect(gate.onmessage).toBe(callback);
     expect(gate.onerror).toBe(inner.onerror);
     expect(gate.onclose).toBe(inner.onclose);
     gate.stopSending("stdin closed");
@@ -142,5 +143,180 @@ describe("OutputGatedTransport", () => {
     await early.send({ jsonrpc: "2.0", id: 1, result: {} });
     expect(inner.sent).toEqual([]);
     expect(inner.starts).toBe(1);
+  });
+});
+
+describe("answers-only EOF gate (#12049)", () => {
+  function tracked() {
+    const inner = new FakeTransport();
+    const logs: string[] = [];
+    const gate = new OutputGatedTransport(inner, (message) => logs.push(message));
+    gate.onmessage = () => {};
+    inner.onmessage?.(initialize);
+    return { inner, logs, gate };
+  }
+
+  test("only received answers pass; notifications, progress, server requests and unknown ids drop", async () => {
+    const { inner, logs, gate } = tracked();
+    const done = gate.answerReceivedThenStop("stdin closed");
+    for (const method of [
+      "notifications/tools/list_changed",
+      "notifications/resources/list_changed",
+      "notifications/resources/updated",
+      "notifications/message",
+      "notifications/progress",
+    ]) {
+      await gate.send({ jsonrpc: "2.0", method });
+      expect(logs).toContain(`[OutputGatedTransport] Dropped ${method}: stdin closed`);
+    }
+    await gate.send({ jsonrpc: "2.0", id: 10, method: "ping" });
+    await gate.send({ jsonrpc: "2.0", id: 10, result: {} });
+    expect(inner.sent).toEqual([]);
+    await gate.send({ jsonrpc: "2.0", id: 1, result: {} });
+    await done;
+    expect(inner.sent).toHaveLength(1);
+    await gate.send({ jsonrpc: "2.0", id: 1, result: {} });
+    expect(inner.sent).toHaveLength(1);
+  });
+
+  test.each([false, true])(
+    "waits for the final answer write to settle (reject=%s)",
+    async (reject) => {
+      const { inner, gate } = tracked();
+      const write = Promise.withResolvers<void>();
+      inner.send = () => write.promise;
+      let stopped = false;
+      const done = gate.answerReceivedThenStop("stdin closed");
+      void done.then(() => {
+        stopped = true;
+      });
+      const sending = gate.send({ jsonrpc: "2.0", id: 1, result: {} });
+      const observed = sending.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await Promise.resolve();
+      expect(stopped).toBe(false);
+      const error = new Error("write failed");
+      if (reject) {
+        write.reject(error);
+      } else {
+        write.resolve();
+      }
+      expect(await observed).toBe(reject ? error : undefined);
+      await done;
+      expect(stopped).toBe(true);
+    },
+  );
+
+  test("an answer write begun before EOF is also awaited", async () => {
+    const { inner, gate } = tracked();
+    const write = Promise.withResolvers<void>();
+    inner.send = () => write.promise;
+    const sending = gate.send({ jsonrpc: "2.0", id: 1, result: {} });
+    let stopped = false;
+    const done = gate.answerReceivedThenStop("stdin closed");
+    void done.then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    write.resolve();
+    await sending;
+    await done;
+    expect(stopped).toBe(true);
+  });
+
+  test("a response already answered while open is no longer received", async () => {
+    const { inner, gate } = tracked();
+    inner.onmessage?.({ jsonrpc: "2.0", id: "second", method: "ping" });
+    await gate.send({ jsonrpc: "2.0", id: 1, result: {} });
+    const done = gate.answerReceivedThenStop("stdin closed");
+    await gate.send({ jsonrpc: "2.0", id: 1, result: {} });
+    expect(inner.sent).toHaveLength(1);
+    await gate.send({ jsonrpc: "2.0", id: "second", error: { code: -32603, message: "failed" } });
+    await done;
+    expect(inner.sent).toHaveLength(2);
+  });
+
+  test("stopSending wins immediately, resolves the wait and preserves its own reason", async () => {
+    const { inner, gate, logs } = tracked();
+    const done = gate.answerReceivedThenStop("stdin closed");
+    gate.stopSending("stdout write failed");
+    await done;
+    await gate.send({ jsonrpc: "2.0", id: 1, result: {} });
+    expect(inner.sent).toEqual([]);
+    expect(logs).toContain("[OutputGatedTransport] Dropped response: stdout write failed");
+  });
+
+  test("cancelled ids are removed, including after EOF, without ignoring a pending write", async () => {
+    const { inner, gate } = tracked();
+    const write = Promise.withResolvers<void>();
+    inner.send = () => write.promise;
+    const sending = gate.send({ jsonrpc: "2.0", id: 1, result: {} });
+    let stopped = false;
+    const done = gate.answerReceivedThenStop("stdin closed");
+    void done.then(() => {
+      stopped = true;
+    });
+    inner.onmessage?.({
+      jsonrpc: "2.0",
+      method: "notifications/cancelled",
+      params: { requestId: 1 },
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    write.resolve();
+    await sending;
+    await done;
+    expect(stopped).toBe(true);
+  });
+
+  test("cancel before EOF does not hold the wait; empty-set stop is synchronous and idempotent", async () => {
+    const { inner, gate, logs } = tracked();
+    inner.onmessage?.({
+      jsonrpc: "2.0",
+      method: "notifications/cancelled",
+      params: { requestId: 1 },
+    });
+    const done = gate.answerReceivedThenStop("stdin closed");
+    expect(gate.answerReceivedThenStop("different reason")).toBe(done);
+    const sending = gate.send({ jsonrpc: "2.0", id: 1, result: {} });
+    expect(inner.sent).toEqual([]);
+    expect(logs).toEqual(["[OutputGatedTransport] Dropped response: stdin closed"]);
+    await sending;
+    await done;
+  });
+
+  test("reassignment and EarlyStartTransport keep request tracking and extra info", async () => {
+    const inner = new FakeTransport();
+    const gate = new OutputGatedTransport(inner, () => {});
+    const early = new EarlyStartTransport(gate);
+    await early.startEarly();
+    inner.onmessage?.(initialize);
+    const received: Message[] = [];
+    early.onmessage = (message) => received.push(message);
+    await early.start();
+    const callback: Transport["onmessage"] = (message, extra) => {
+      received.push(message);
+      expect(extra).toEqual({ sessionId: "extra" });
+    };
+    gate.onmessage = callback;
+    expect(gate.onmessage).toBe(callback);
+    inner.onmessage?.({ jsonrpc: "2.0", id: 2, method: "ping" }, { sessionId: "extra" });
+    const done = gate.answerReceivedThenStop("stdin closed");
+    await gate.send({ jsonrpc: "2.0", id: 1, result: {} });
+    await gate.send({ jsonrpc: "2.0", id: 2, result: {} });
+    await done;
+    expect(received).toHaveLength(2);
+    expect(inner.sent).toHaveLength(2);
+  });
+
+  test("stopSending before answers-only yields the same resolved promise", async () => {
+    const { gate } = tracked();
+    gate.stopSending("stdout write failed");
+    const done = gate.answerReceivedThenStop("stdin closed");
+    expect(gate.answerReceivedThenStop("again")).toBe(done);
+    await done;
   });
 });

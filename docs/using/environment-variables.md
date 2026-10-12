@@ -652,6 +652,8 @@ export AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT=true
 | `AUTOMOBILE_IOS_SIM_MAX_BOOTED`                                                       | Cap on concurrently booted iOS Simulators used by the fleet capacity report and the boot admission gate; positive integer. Invalid values are ignored with a warning. | min(RAM x 0.5 / measured per-simulator RSS, cores / 2), at least 1 |
 | `AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS`                                            | Android work-profile package polling interval; base-10 integer milliseconds. Use positive values; this read has no invalid-value fallback.                            | `5000` ms                                                          |
 
+The Android boot limit is shared by every daemon using the same adb server on one host. Admissions are coordinated through the adb-server directory configured by `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`; every daemon sharing a server must use the same directory. An unreadable coordination directory refuses boots with retryable `discovery_incomplete`.
+
 </div>
 
 The daemon's passive device work is limited to devices with a session in this

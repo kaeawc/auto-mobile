@@ -25,6 +25,14 @@ import {
   type CapacityLimits,
 } from "./capacityLimits";
 
+import {
+  HostBootAdmissionRegistryError,
+  type HostBootAdmissionRegistry,
+  type HostBootAdmissionRecord,
+  type PublishedBootAdmission,
+} from "./HostBootAdmissionRegistry";
+import { errorMessage } from "../../utils/describeUnknownError";
+
 /** Env override: positive integer cap on concurrently booted Android emulators. */
 export const ANDROID_MAX_BOOTED_ENV = "AUTOMOBILE_ANDROID_MAX_BOOTED";
 
@@ -39,6 +47,7 @@ export interface AndroidBootAdmissionRequest {
 type AndroidAdmissionDecision = { outcome: "allow"; limits: CapacityLimits; bootedCount: number };
 
 export interface AndroidBootAdmissionGateOptions {
+  hostRegistry?: HostBootAdmissionRegistry;
   env?: NodeJS.ProcessEnv;
   retryAfterMs?: number;
 }
@@ -46,13 +55,18 @@ export interface AndroidBootAdmissionGateOptions {
 /**
  * Refuses an Android emulator cold boot while the host already runs as many
  * emulators as its derived limit allows (#11181). Every running emulator
- * counts, including ones started outside AutoMobile. Read-only: it never
+ * counts, including ones started outside AutoMobile. It never
  * boots, kills or reconfigures an emulator.
  */
 export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapacityChecker {
   private readonly env: NodeJS.ProcessEnv;
   private readonly retryAfterMs: number;
   private readonly ledger: BootAdmissionLedger;
+  private readonly hostRegistry: HostBootAdmissionRegistry | undefined;
+  private readonly publications = new Map<
+    PublishedBootAdmission,
+    Pick<HostBootAdmissionRecord, "deviceId" | "handedOffUntilMs">
+  >();
   private warnedLimit: string | undefined;
   /** Serials of emulators this process launched through an admission. */
   private readonly startedSerials = new Set<string>();
@@ -67,6 +81,7 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     this.env = options.env ?? process.env;
     this.retryAfterMs = options.retryAfterMs ?? DEFAULT_ADMISSION_RETRY_AFTER_MS;
     this.ledger = new BootAdmissionLedger(timer);
+    this.hostRegistry = options.hostRegistry;
   }
 
   /**
@@ -77,20 +92,38 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
   async admit(request: AndroidBootAdmissionRequest): Promise<BootAdmission> {
     const deadlineMs = this.timer.now() + request.timeoutMs;
     let admitted: LedgerAdmission | undefined;
-    const result = await admitBootNow<AndroidCapacitySample, AndroidAdmissionDecision>({
-      timer: this.timer,
-      platform: "android",
-      signal: request.signal,
-      sampleTimeoutMs: Math.min(request.timeoutMs, DEFAULT_SAMPLE_TIMEOUT_MS),
-      label: "Android emulator capacity",
-      sample: () => this.sampleKnownCount({ signal: request.signal }),
-      ledger: this.ledger,
-      decide: (sample, window) => this.decide(sample, window),
-      admit: () => {
-        admitted = this.ledger.admit();
-        return admitted.release;
-      },
-    });
+    let published: PublishedBootAdmission | undefined;
+    let peers: HostBootAdmissionRecord[] = [];
+    const run = () =>
+      admitBootNow<AndroidCapacitySample, AndroidAdmissionDecision>({
+        timer: this.timer,
+        platform: "android",
+        signal: request.signal,
+        sampleTimeoutMs: Math.min(request.timeoutMs, DEFAULT_SAMPLE_TIMEOUT_MS),
+        label: "Android emulator capacity",
+        sample: async () => {
+          const before = this.readPeers();
+          const sample = await this.sampleKnownCount({ signal: request.signal });
+          peers = this.unionPeers(before, this.readPeers());
+          return sample;
+        },
+        ledger: this.ledger,
+        decide: (sample, window) => this.decide(sample, window, peers),
+        admit: () => {
+          admitted = this.ledger.admit();
+          try {
+            published = this.hostRegistry?.publish();
+            if (published) {
+              this.publications.set(published, {});
+            }
+          } catch (error) {
+            admitted.release();
+            throw this.registryFailure(error);
+          }
+          return admitted.release;
+        },
+      });
+    const result = await this.runWithHostLock(request, run);
     assertBootCapacityGranted(result, "android", "emulator");
     const ledgerAdmission = admitted;
     if (!ledgerAdmission) {
@@ -103,6 +136,10 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
       release: () => {
         released = true;
         ledgerAdmission.release();
+        this.updatePublication(published, () => published?.remove());
+        if (published) {
+          this.publications.delete(published);
+        }
         // A boot that ended before adb ever listed it never held its serial: an emulator
         // started elsewhere that takes the serial later is not ours.
         for (const serial of handedOffSerials) {
@@ -121,20 +158,32 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
           handedOffSerials.add(deviceId);
         }
         ledgerAdmission.handOff(deviceId, deadlineMs, processId);
+        const fields = published ? this.publications.get(published) : undefined;
+        if (fields) {
+          fields.deviceId = deviceId ?? fields.deviceId;
+          fields.handedOffUntilMs = deadlineMs;
+        }
+        this.updatePublication(published, () =>
+          published?.update({ deviceId, processId, handedOffUntilMs: deadlineMs }),
+        );
       },
     };
   }
 
   /** Refuses with `capacity_exhausted` when a cold boot would be refused now; admits nothing. */
   async assertCapacityAvailable(options: { signal?: AbortSignal } = {}): Promise<void> {
-    const { sample, window } = await this.sampleInWindow(options);
-    assertBootCapacityGranted({ decision: this.decide(sample, window) }, "android", "emulator");
+    const { sample, window, peers } = await this.sampleInWindow(options);
+    assertBootCapacityGranted(
+      { decision: this.decide(sample, window, peers) },
+      "android",
+      "emulator",
+    );
   }
 
   /** Current limit, booted emulators (every running one, owned or not) and admitted boots in flight. */
   async describeCapacity(options: { signal?: AbortSignal } = {}): Promise<BootCapacitySnapshot> {
-    const { sample, window } = await this.sampleInWindow(options);
-    const counts = this.count(sample, window);
+    const { sample, window, peers } = await this.sampleInWindow(options);
+    const counts = this.count(sample, window, peers);
     return {
       limit: this.limitsFor(sample).maxBooted,
       booted: counts.booted,
@@ -146,12 +195,16 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
    * A sample inside a ledger window, as `admit` takes it: a boot that ends while the sample is
    * being taken still counts for it (#11465, #11537).
    */
-  private async sampleInWindow(options: {
-    signal?: AbortSignal;
-  }): Promise<{ sample: AndroidCapacitySample; window: LedgerSampleWindow }> {
+  private async sampleInWindow(options: { signal?: AbortSignal }): Promise<{
+    sample: AndroidCapacitySample;
+    window: LedgerSampleWindow;
+    peers: HostBootAdmissionRecord[];
+  }> {
     const window = this.ledger.beginSample();
     try {
-      return { sample: await this.sampleKnownCount(options), window };
+      const before = this.readPeers();
+      const sample = await this.sampleKnownCount(options);
+      return { sample, window, peers: this.unionPeers(before, this.readPeers()) };
     } finally {
       window.close();
     }
@@ -187,10 +240,11 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
   private decide(
     sample: AndroidCapacitySample,
     window?: LedgerSampleWindow,
+    peers: readonly HostBootAdmissionRecord[] = [],
   ): AndroidAdmissionDecision | RefusedCapacityDecision {
     this.forgetExitedSerials(sample);
     const limits = this.limitsFor(sample);
-    const bootedCount = this.count(sample, window).effective;
+    const bootedCount = this.count(sample, window, peers).effective;
     return (
       atCapacityDecision(bootedCount, limits, this.retryAfterMs, {
         noun: "emulator",
@@ -225,9 +279,9 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
    * process count: a booting emulator has a process before adb lists it at all.
    *
    * `effective` is the larger of two views of the same load: the adb listing plus every admitted
-   * boot it does not show, and the process table plus every boot this sample knows whose own
+   * boot (local or peer) it does not show, and the process table plus every boot this sample knows whose own
    * process is not in it. A boot is matched to a process by the pid it was handed off with (the
-   * launcher this daemon spawned, which becomes the qemu process or is its parent), never by
+   * launcher the admitting daemon spawned, which becomes the qemu process or is its parent), never by
    * count: a process nobody admitted is another emulator and is added. Taking the plain process
    * count instead lost an external emulator adb had not listed whenever an admitted boot had no
    * process yet (#11564).
@@ -236,7 +290,8 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
    * DOES list when the table lacks its process: the table was read before the boot spawned and
    * adb after it was listed. Leaving it out counted that boot once in each view beside an
    * external emulator only the table shows, and admitted past the limit (#11588). With it the
-   * count covers every boot this gate admitted whichever read came first.
+   * count covers local and peer admissions whichever read came first. Peer records are the union
+   * of reads before and after the sample, so a record removed mid-sample still holds its slot.
    *
    * Emulators nobody admitted cannot be matched that way, so for them the order of the reads
    * matters and the source fixes it: `CommandAndroidCapacitySource` reads adb first, which makes
@@ -250,11 +305,13 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
   private count(
     sample: AndroidCapacitySample,
     window?: LedgerSampleWindow,
+    peers: readonly HostBootAdmissionRecord[] = [],
   ): {
     booted: number;
     inFlight: number;
     effective: number;
   } {
+    this.removeListedPublications(sample);
     const listed = sample.emulatorSerials.length;
     const processes = sample.emulatorProcessRssBytes?.length ?? 0;
     const listedProcessIds = new Set(
@@ -266,14 +323,136 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
       window,
       listedProcessIds,
     );
+    const peerCounts = this.countPeers(peers, new Set(sample.emulatorSerials), listedProcessIds);
+    const count = inFlight.count + peerCounts.count;
     return {
       booted: Math.max(listed, processes),
-      inFlight: inFlight.count,
+      inFlight: count,
       effective: Math.max(
-        listed + inFlight.count,
-        processes + (inFlight.count - inFlight.withListedProcess) + inFlight.listedWithoutProcess,
+        listed + count,
+        processes +
+          count -
+          inFlight.withListedProcess -
+          peerCounts.withListedProcess +
+          inFlight.listedWithoutProcess +
+          peerCounts.listedWithoutProcess,
       ),
     };
+  }
+
+  private async runWithHostLock<T>(
+    request: AndroidBootAdmissionRequest,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    if (!this.hostRegistry) {
+      return run();
+    }
+    let operationFailed = false;
+    const operation = async (): Promise<T> => {
+      try {
+        return await run();
+      } catch (error) {
+        operationFailed = true;
+        throw error;
+      }
+    };
+    try {
+      return await this.hostRegistry.withAdmissionLock(
+        {
+          timeoutMs: Math.min(request.timeoutMs, DEFAULT_SAMPLE_TIMEOUT_MS),
+          signal: request.signal,
+        },
+        operation,
+      );
+    } catch (error) {
+      if (request.signal?.aborted) {
+        throw request.signal.reason;
+      }
+      if (operationFailed) {
+        // Sampling keeps its existing error contract; registry reads/publish were mapped at source.
+        throw error;
+      }
+      throw this.registryFailure(error);
+    }
+  }
+
+  private readPeers(): HostBootAdmissionRecord[] {
+    try {
+      return this.hostRegistry?.readPeerAdmissions() ?? [];
+    } catch (error) {
+      throw this.registryFailure(error);
+    }
+  }
+
+  private registryFailure(error: unknown): AndroidBootedDeviceDiscoveryIncompleteError {
+    logger.warn(
+      `[BootAdmission] Android host registry refused admission: ${errorMessage(error)}`,
+      error,
+    );
+    return new AndroidBootedDeviceDiscoveryIncompleteError({
+      code: error instanceof HostBootAdmissionRegistryError ? error.code : "failed",
+      message: `Host boot registry: ${errorMessage(error)}`,
+      retryable: true,
+    });
+  }
+
+  private unionPeers(
+    before: HostBootAdmissionRecord[],
+    after: HostBootAdmissionRecord[],
+  ): HostBootAdmissionRecord[] {
+    return [...new Map([...before, ...after].map((record) => [record.id, record])).values()];
+  }
+
+  private countPeers(
+    peers: readonly HostBootAdmissionRecord[],
+    listed: ReadonlySet<string>,
+    processIds: ReadonlySet<number>,
+  ): { count: number; withListedProcess: number; listedWithoutProcess: number } {
+    const active = peers.filter(
+      (record) =>
+        record.handedOffUntilMs === undefined || this.timer.now() < record.handedOffUntilMs,
+    );
+    const visible = (record: HostBootAdmissionRecord): boolean =>
+      record.deviceId !== undefined && listed.has(record.deviceId);
+    const matched = (record: HostBootAdmissionRecord): boolean =>
+      record.processId !== undefined && processIds.has(record.processId);
+    const unlisted = active.filter((record) => !visible(record));
+    return {
+      count: unlisted.length,
+      withListedProcess: unlisted.filter(matched).length,
+      listedWithoutProcess: active.filter((record) => visible(record) && !matched(record)).length,
+    };
+  }
+
+  private updatePublication(
+    publication: PublishedBootAdmission | undefined,
+    write: () => void,
+  ): void {
+    if (!publication) {
+      return;
+    }
+    try {
+      write();
+    } catch (error) {
+      // Exit handlers cannot throw; the retained record conservatively holds the slot for peers.
+      logger.warn(
+        `[BootAdmission] Host registry update/remove failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
+  private removeListedPublications(sample: AndroidCapacitySample): void {
+    for (const [publication, fields] of this.publications) {
+      const listed =
+        fields.deviceId !== undefined && sample.emulatorSerials.includes(fields.deviceId);
+      const expired =
+        fields.handedOffUntilMs !== undefined && this.timer.now() >= fields.handedOffUntilMs;
+      if (listed || expired) {
+        this.updatePublication(publication, () => publication.remove());
+        this.publications.delete(publication);
+      }
+    }
   }
 
   private limitsFor(sample: AndroidCapacitySample): CapacityLimits {

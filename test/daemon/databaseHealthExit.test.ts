@@ -19,6 +19,9 @@ class FakeDatabaseHealthExitDeps implements DatabaseHealthExitDeps {
     this.calls.push("emergency");
     this.messages.push(message);
   }
+  writeExitRecord(): void {
+    this.calls.push("exitRecord");
+  }
   cleanupDaemonFiles(): void {
     this.calls.push("cleanup");
   }
@@ -37,7 +40,7 @@ describe("database health exit", () => {
 
     await exitAfterDatabaseHealthFailure(1, detail, deps);
 
-    expect(deps.calls).toEqual(["emergency", "cleanup", "closeLogger", "exit:1"]);
+    expect(deps.calls).toEqual(["emergency", "exitRecord", "cleanup", "closeLogger", "exit:1"]);
     expect(deps.nowCalls).toBe(1);
     expect(deps.messages).toEqual([databaseHealthExitMessage(1, detail, FIXED_NOW_MS)]);
     expect(deps.messages[0]).toBe(
@@ -57,11 +60,11 @@ describe("database health exit", () => {
 
     const exiting = exitAfterDatabaseHealthFailure(1, undefined, deps);
 
-    expect(deps.calls).toEqual(["emergency", "cleanup", "closeLogger"]);
+    expect(deps.calls).toEqual(["emergency", "exitRecord", "cleanup", "closeLogger"]);
     expect(deps.messages).toEqual([databaseHealthExitMessage(1, undefined, FIXED_NOW_MS)]);
     release();
     await exiting;
-    expect(deps.calls).toEqual(["emergency", "cleanup", "closeLogger", "exit:1"]);
+    expect(deps.calls).toEqual(["emergency", "exitRecord", "cleanup", "closeLogger", "exit:1"]);
   });
 
   test("exits with the requested code and rejects when logger close rejects", async () => {
@@ -74,7 +77,7 @@ describe("database health exit", () => {
 
     await expect(exitAfterDatabaseHealthFailure(7, undefined, deps)).rejects.toBe(error);
 
-    expect(deps.calls).toEqual(["emergency", "cleanup", "closeLogger", "exit:7"]);
+    expect(deps.calls).toEqual(["emergency", "exitRecord", "cleanup", "closeLogger", "exit:7"]);
   });
 
   test("continues cleanup, logger close and exit when emergency logging throws", async () => {
@@ -86,7 +89,17 @@ describe("database health exit", () => {
 
     await exitAfterDatabaseHealthFailure(1, undefined, deps);
 
-    expect(deps.calls).toEqual(["emergency", "cleanup", "closeLogger", "exit:1"]);
+    expect(deps.calls).toEqual(["emergency", "exitRecord", "cleanup", "closeLogger", "exit:1"]);
+  });
+
+  test("a throwing exit-record writer still cleans up and exits", async () => {
+    const deps = new FakeDatabaseHealthExitDeps();
+    deps.writeExitRecord = () => {
+      deps.calls.push("exitRecord");
+      throw new Error("record unavailable");
+    };
+    await exitAfterDatabaseHealthFailure(1, undefined, deps);
+    expect(deps.calls).toEqual(["emergency", "exitRecord", "cleanup", "closeLogger", "exit:1"]);
   });
 
   test("omits absent detail and replaces carriage returns and newlines with spaces", () => {

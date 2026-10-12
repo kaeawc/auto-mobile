@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { Daemon } from "../../src/daemon/daemon";
+import type { DaemonExitRecord } from "../../src/daemon/daemonExitRecord";
+import { Daemon, type DaemonStartHost } from "../../src/daemon/daemon";
+import * as buildIdentity from "../../src/daemon/buildIdentity";
+import { daemonProcessOptions } from "../../src/daemon/daemonOptionScopes";
+import type { DaemonOptions } from "../../src/daemon/types";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { IncumbentOwnerGuard } from "../../src/daemon/incumbentOwnerGuard";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
@@ -19,8 +23,12 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // that would touch the machine (the early owner record), with the real subscription in place.
 
 interface DaemonStartInternals {
+  options: DaemonOptions;
+  port: number;
+  processStartHost(): DaemonStartHost;
   setupShutdownHandlers(): void;
   writeEarlyOwnerRecord(): Promise<void>;
+  startThroughSocketBind(): Promise<void>;
   stopSessionTimers(): void;
 }
 
@@ -33,12 +41,42 @@ class InertIncumbentGuard extends IncumbentOwnerGuard {
   }
 }
 
+async function makeDaemon(options: DaemonOptions, guard = new InertIncumbentGuard()) {
+  const timer = new FakeTimer();
+  const daemon = new Daemon(
+    options,
+    undefined,
+    timer,
+    new DeviceSessionRepository(await createTestDatabase(), timer),
+    new FakeIdGenerator(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    () => 0,
+    () => "memory-generation",
+    undefined,
+    guard,
+  );
+  const internals = daemon as unknown as DaemonStartInternals;
+  return { daemon, internals, timer };
+}
+
 describe("Daemon.start() tool-call-end wiring", () => {
   const restores: Array<() => void> = [];
   let savedLaunchCwd: string | undefined;
 
   beforeEach(() => {
     savedLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
+    const identity = spyOn(buildIdentity, "getCurrentBuildIdentity").mockReturnValue({
+      entryScript: "/memory/entry.ts",
+      buildId: "memory-build",
+    });
+    restores.push(() => identity.mockRestore());
   });
 
   afterEach(() => {
@@ -58,27 +96,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
   });
 
   test("a started daemon stamps a session's activity at the end of its tool call", async () => {
-    const timer = new FakeTimer();
-    const daemon = new Daemon(
-      {},
-      undefined,
-      timer,
-      new DeviceSessionRepository(await createTestDatabase(), timer),
-      new FakeIdGenerator(),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      new InertIncumbentGuard(),
-    );
-    const internals = daemon as unknown as DaemonStartInternals;
+    const { daemon, internals, timer } = await makeDaemon({ port: 3161, debug: true });
     for (const spy of [
       spyOn(process, "chdir").mockImplementation(() => {}),
       spyOn(logger, "enableStdoutLogging").mockImplementation(() => {}),
@@ -89,11 +107,21 @@ describe("Daemon.start() tool-call-end wiring", () => {
     ]) {
       restores.push(() => spy.mockRestore());
     }
+    const exits: DaemonExitRecord[] = [];
+    const host = internals.processStartHost();
+    host.writeExitRecord = (record) => exits.push(record);
     const sessionManager = daemon.getSessionManager();
     const session = await sessionManager.createSession("start-wiring", "emulator-5554", "android");
 
     try {
-      await expect(daemon.start()).rejects.toBeInstanceOf(StartupStopped);
+      await expect(daemon.startOn(host)).rejects.toBeInstanceOf(StartupStopped);
+      expect(exits).toHaveLength(1);
+      expect(exits[0]).toEqual({
+        reason: "startup-failure",
+        exitedAtMs: 0,
+        buildId: "memory-build",
+        options: { ...daemonProcessOptions(internals.options), port: 3161 },
+      });
 
       // Held side: a call refused at admission is not use (#10824): its end moves nothing.
       const refused = executionTracker.startExecution("tapOn", undefined, "start-wiring");
@@ -109,6 +137,75 @@ describe("Daemon.start() tool-call-end wiring", () => {
       // The end of the admitted call restarted the idle window from that moment.
       expect(session.lastUsedAt).toBe(90_000);
       expect(session.expiresAt).toBe(90_000 + session.sessionTimeoutMs);
+    } finally {
+      internals.stopSessionTimers();
+    }
+  });
+
+  test.each(["before", "inside"] as const)(
+    "a start failing %s process entry records nothing through its host",
+    async (phase) => {
+      const { daemon, internals } = await makeDaemon({ port: 3161, debug: true });
+      const write = spyOn(internals.processStartHost(), "writeExitRecord").mockImplementation(
+        () => {},
+      );
+      restores.push(() => write.mockRestore());
+      const host: DaemonStartHost = {
+        ...internals.processStartHost(),
+        writeExitRecord: write,
+        enterProcess: () => {
+          throw new StartupStopped();
+        },
+      };
+      if (phase === "before") {
+        const beforeEntry = spyOn(internals, "startThroughSocketBind").mockRejectedValue(
+          new StartupStopped(),
+        );
+        restores.push(() => beforeEntry.mockRestore());
+      }
+      try {
+        await expect(daemon.startOn(host)).rejects.toBeInstanceOf(StartupStopped);
+        expect(write).not.toHaveBeenCalled();
+      } finally {
+        internals.stopSessionTimers();
+      }
+    },
+  );
+
+  test("a start refused over a live foreign socket owner records nothing through its host", async () => {
+    const guard = new InertIncumbentGuard({
+      readPidFile: () => ({
+        pid: 9001,
+        socketPath: "/memory/incumbent.sock",
+        port: 3161,
+        startedAt: 0,
+        version: "test",
+        entryScript: "/memory/entry.ts",
+        buildId: "memory-build",
+      }),
+      persistPidFile: () => {
+        throw new Error("refused contender must not persist a record");
+      },
+      isProcessRunning: (pid) => pid === 9001,
+      readProcessGenerationToken: () => undefined,
+      selfPid: 4242,
+    });
+    const { daemon, internals } = await makeDaemon({ port: 4000, debug: true }, guard);
+    const exits: DaemonExitRecord[] = [];
+    const host: DaemonStartHost = {
+      ...internals.processStartHost(),
+      enterProcess: () => {},
+      publishForwardLeaseOwner: () => {},
+      writeExitRecord: (entry) => void exits.push(entry),
+      writeEarlyOwnerRecord: async () => {
+        guard.captureIncumbentBeforeOverwrite();
+        expect(guard.hasLiveForeignOwner()).toBe(true);
+        throw new StartupStopped();
+      },
+    };
+    try {
+      await expect(daemon.startOn(host)).rejects.toBeInstanceOf(StartupStopped);
+      expect(exits).toEqual([]);
     } finally {
       internals.stopSessionTimers();
     }

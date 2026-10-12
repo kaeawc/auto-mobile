@@ -409,3 +409,65 @@ describe("location route player", () => {
     expect(fixes).toEqual([0]);
   });
 });
+
+for (const replaced of [true, false]) {
+  test(`release location cleanup with identity replacement=${replaced}`, async () => {
+    const timer = new FakeTimer();
+    const registry = new LocationRouteRegistry(timer);
+    let release!: Parameters<SessionManager["onSessionRelease"]>[0];
+    const commands: string[] = [];
+    const pending: Promise<unknown>[] = [];
+    let marker = true;
+    registerLocationRouteSessionCleanup(
+      {
+        onSessionRelease: (callback) => {
+          release = callback;
+        },
+        onSessionDeviceUnbound: () => {},
+        registerPendingDeviceCleanup: (_device, cleanup) => {
+          pending.push(cleanup);
+        },
+      },
+      {
+        registry,
+        mockLocationClears: {
+          markSet: () => {},
+          clearLateSet: () => null,
+          retireDevice: () => {
+            marker = false;
+          },
+          clearAfter: () => {
+            commands.push("location clear");
+            marker = false;
+            return Promise.resolve();
+          },
+        },
+      },
+    );
+    registry.start("serial", points, 2000, 500, false, async () => {
+      commands.push("location fix");
+    });
+    release(
+      "owner",
+      "serial",
+      "explicit-release",
+      {
+        sessionId: "owner",
+        deviceId: "serial",
+        releaseReason: "explicit-release",
+        releasedAtMs: 0,
+        terminal: true,
+        heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
+      },
+      { deviceIdentityReplaced: replaced },
+    );
+    await Promise.all(pending);
+    timer.advanceTime(3000);
+    await flush();
+    expect(registry.isActive("serial")).toBe(false);
+    expect(marker).toBe(false);
+    expect(commands).toEqual(replaced ? [] : ["location clear"]);
+    expect(pending).toHaveLength(replaced ? 0 : 2);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+}

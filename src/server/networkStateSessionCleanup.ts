@@ -68,7 +68,19 @@ export function registerNetworkStateSessionCleanup(
     }
     manager.registerPendingDeviceCleanup(deviceId, pushClearedState(pusher, deviceId));
   };
-  manager.onSessionRelease(cleanup);
+  manager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, releaseOptions) => {
+    if (releaseOptions?.deviceIdentityReplaced) {
+      (options.state?.() ?? NetworkState.getInstance()).clearDeviceOwnedBySession(
+        deviceId,
+        sessionId,
+      );
+      logger.debug(
+        `[networkState] Cleanup for session ${sessionId} on replaced serial ${deviceId}: skipped cleared-state device push`,
+      );
+      return;
+    }
+    cleanup(sessionId, deviceId);
+  });
   manager.onSessionDeviceUnbound(cleanup);
 }
 

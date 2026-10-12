@@ -330,9 +330,18 @@ export function registerLocationRouteSessionCleanup(
   };
   // A terminal upgrade of a finished release would stop the device's next owner's route (#10825).
   manager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, releaseOptions) => {
-    if (!releaseOptions?.upgradeOnly) {
-      cleanup(sessionId, deviceId);
+    if (releaseOptions?.upgradeOnly) {
+      return;
     }
+    if (releaseOptions?.deviceIdentityReplaced) {
+      registry.forget(deviceId);
+      mockLocationClears.retireDevice(deviceId);
+      logger.debug(
+        `Location cleanup for session ${sessionId} on replaced serial ${deviceId}: skipped location clear and device playback`,
+      );
+      return;
+    }
+    cleanup(sessionId, deviceId);
   });
   manager.onSessionDeviceUnbound(cleanup);
 }

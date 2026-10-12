@@ -6,6 +6,7 @@ import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDaemonExitRecordFileSystem } from "../fakes/SafeDaemonManager";
 
 // #11156: a startup step that throws after the control socket bind (aux sockets,
 // writePidFile, monitors) used to reach main().catch → process.exit directly,
@@ -14,6 +15,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // before rethrowing.
 
 interface DaemonStartPhases {
+  exitRecordFileSystem: FakeDaemonExitRecordFileSystem;
   startThroughSocketBind(): Promise<void>;
   startAfterSocketBind(): Promise<void>;
 }
@@ -40,6 +42,8 @@ describe("Daemon post-bind startup failure (#11156)", () => {
       new FakeDeviceSessionRepository(),
     );
     const phases = daemon as unknown as DaemonStartPhases;
+    const exitFiles = new FakeDaemonExitRecordFileSystem();
+    phases.exitRecordFileSystem = exitFiles;
     const events: string[] = [];
     const spies = [
       spyOn(logger, "error").mockImplementation(() => {}),
@@ -60,12 +64,12 @@ describe("Daemon post-bind startup failure (#11156)", () => {
     for (const spy of spies) {
       restores.push(() => spy.mockRestore());
     }
-    return { daemon, events };
+    return { daemon, events, exitFiles };
   }
 
   test("awaits stop() before rethrowing a post-bind failure", async () => {
     const failure = new PostBindFailure("aux socket refused");
-    const { daemon, events } = startableDaemon(new FakeTimer(), { postbind: failure });
+    const { daemon, events, exitFiles } = startableDaemon(new FakeTimer(), { postbind: failure });
     const stop = spyOn(daemon, "stop").mockImplementation(async () => {
       events.push("stop");
     });
@@ -74,12 +78,13 @@ describe("Daemon post-bind startup failure (#11156)", () => {
     await expect(daemon.start()).rejects.toBe(failure);
 
     expect(events).toEqual(["bind", "post-bind", "stop"]);
+    expect(exitFiles.files.size).toBe(0);
   });
 
   test("bounds a wedged stop() and still rethrows the startup failure", async () => {
     const timer = new FakeTimer();
     const failure = new PostBindFailure("writePidFile failed");
-    const { daemon } = startableDaemon(timer, { postbind: failure });
+    const { daemon, exitFiles } = startableDaemon(timer, { postbind: failure });
     const stopStarted = Promise.withResolvers<void>();
     const stop = spyOn(daemon, "stop").mockImplementation(() => {
       stopStarted.resolve();
@@ -98,11 +103,12 @@ describe("Daemon post-bind startup failure (#11156)", () => {
     timer.advanceTime(PROCESS_SHUTDOWN_TIMEOUT_MS);
 
     expect(await outcome).toBe(failure);
+    expect(exitFiles.files.size).toBe(0);
   });
 
   test("a pre-bind failure does not run the post-bind stop", async () => {
     const failure = new Error("HTTP bind refused");
-    const { daemon, events } = startableDaemon(new FakeTimer(), { prebind: failure });
+    const { daemon, events, exitFiles } = startableDaemon(new FakeTimer(), { prebind: failure });
     const stop = spyOn(daemon, "stop").mockResolvedValue(undefined);
     restores.push(() => stop.mockRestore());
 
@@ -110,5 +116,6 @@ describe("Daemon post-bind startup failure (#11156)", () => {
 
     expect(events).toEqual(["bind"]);
     expect(stop).not.toHaveBeenCalled();
+    expect(exitFiles.files.size).toBe(0);
   });
 });

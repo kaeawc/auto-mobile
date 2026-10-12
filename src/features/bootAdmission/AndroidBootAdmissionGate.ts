@@ -26,9 +26,10 @@ import {
 } from "./BootAdmissionGate";
 import {
   ANDROID_EMULATOR_MEMORY_POLICY,
-  estimatePerDeviceBytes,
+  estimateSettledPerDeviceBytes,
   resolveBootCapacityLimits,
   type CapacityLimits,
+  type InFlightBootMemory,
 } from "./capacityLimits";
 
 import {
@@ -207,7 +208,7 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     const { sample, window, peers } = await this.sampleInWindow(options);
     const counts = this.count(sample, window, peers);
     return {
-      limit: this.limitsFor(sample).maxBooted,
+      limit: counts.limits.maxBooted,
       booted: counts.booted,
       inFlight: counts.inFlight,
       ...this.describeProcessTable(sample),
@@ -321,8 +322,7 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     peers: readonly HostBootAdmissionRecord[] = [],
   ): AndroidAdmissionDecision | RefusedCapacityDecision {
     this.forgetExitedSerials(sample);
-    const limits = this.limitsFor(sample);
-    const bootedCount = this.count(sample, window, peers).effective;
+    const { limits, effective: bootedCount } = this.count(sample, window, peers);
     return (
       atCapacityDecision(bootedCount, limits, this.retryAfterMs, {
         noun: "emulator",
@@ -384,6 +384,15 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
    * process runs, up to and including the decision that first sees it listed: fail closed. The
    * emulator client hands off with the pid the moment the process exists
    * (`spawnUnderBootAdmission`).
+   *
+   * Sizing uses this exact in-flight view once, before the mutating ledger can end entries.
+   * Local and active peer boots absent from adb exclude every RSS row matching their pid or
+   * parent pid, and are charged the 4 GiB default (or the larger settled average). A handed-off
+   * boot with unknown pid, or a table without ids, drops the smallest remaining rows while
+   * keeping the largest; if every remaining row could be booting, the default is the floor.
+   * Known pids absent from the table and boots not handed off drop nothing. A boot stops being
+   * in flight when listed, released or past its hand-off deadline; entries ended during an
+   * older sample still count exactly as the ledger retains them. No settling timer is added.
    */
   private count(
     sample: AndroidCapacitySample,
@@ -393,6 +402,7 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     booted: number;
     inFlight: number;
     effective: number;
+    limits: CapacityLimits;
   } {
     this.removeListedPublications(sample);
     const listed = sample.emulatorSerials.length;
@@ -400,7 +410,7 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     const listedProcessIds = new Set(
       (sample.emulatorProcessIds ?? []).flatMap((ids) => [ids.pid, ids.ppid]),
     );
-    const inFlight = this.ledger.inFlight(
+    const inFlight = this.ledger.inFlightView(
       new Set(sample.emulatorSerials),
       undefined,
       window,
@@ -415,7 +425,8 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
       listed + count,
       processes + unseenBoots + inFlight.listedWithoutProcess + peerCounts.listedWithoutProcess,
     );
-    return { booted, inFlight: reported - booted, effective };
+    const limits = this.limitsFor(sample, [...inFlight.boots, ...peerCounts.boots]);
+    return { booted, inFlight: reported - booted, effective, limits };
   }
 
   private async runWithHostLock<T>(
@@ -485,7 +496,12 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     peers: readonly HostBootAdmissionRecord[],
     listed: ReadonlySet<string>,
     processIds: ReadonlySet<number>,
-  ): { count: number; withListedProcess: number; listedWithoutProcess: number } {
+  ): {
+    count: number;
+    boots: readonly InFlightBootMemory[];
+    withListedProcess: number;
+    listedWithoutProcess: number;
+  } {
     const active = peers.filter((record) => {
       const deadline = record.handedOffUntilMs ?? record.admittedUntilMs;
       return deadline === undefined || this.timer.now() < deadline;
@@ -497,6 +513,10 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     const unlisted = active.filter((record) => !visible(record));
     return {
       count: unlisted.length,
+      boots: unlisted.map((record) => ({
+        processId: record.processId,
+        handedOff: record.handedOffUntilMs !== undefined,
+      })),
       withListedProcess: unlisted.filter(matched).length,
       listedWithoutProcess: active.filter((record) => visible(record) && !matched(record)).length,
     };
@@ -547,12 +567,23 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     }
   }
 
-  private limitsFor(sample: AndroidCapacitySample): CapacityLimits {
+  /** All admission and reporting callers size from the boots returned by their single count. */
+  private limitsFor(
+    sample: AndroidCapacitySample,
+    inFlight: readonly InFlightBootMemory[],
+  ): CapacityLimits {
     const limits = resolveBootCapacityLimits(
       this.env,
       ANDROID_MAX_BOOTED_ENV,
       sample.host,
-      estimatePerDeviceBytes(sample.emulatorProcessRssBytes ?? [], ANDROID_EMULATOR_MEMORY_POLICY),
+      estimateSettledPerDeviceBytes(
+        sample.emulatorProcessRssBytes?.map((rssBytes, index) => ({
+          rssBytes,
+          ...sample.emulatorProcessIds?.[index],
+        })),
+        inFlight,
+        ANDROID_EMULATOR_MEMORY_POLICY,
+      ),
     );
     if (limits.warning && limits.warning !== this.warnedLimit) {
       this.warnedLimit = limits.warning;

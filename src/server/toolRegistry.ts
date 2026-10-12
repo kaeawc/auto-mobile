@@ -420,6 +420,12 @@ interface SessionlessDeviceRead {
 
 interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions {
   shouldEnsureDevice?: (args: T) => boolean;
+  /** Opt-in start admission: holder check before managed slots, held-session requirement after. */
+  assertHeldDeviceStart?: (
+    deviceId: string | undefined,
+    sessionUuid: string | undefined,
+    requireHeldSession?: boolean,
+  ) => void;
   /**
    * The tool only watches the device (#10730: watching is allowed on any device and is not use),
    * so a caller that does not hold a device another session holds may still run it. Every other
@@ -1279,8 +1285,12 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       mcpSessionId,
       platform: args.platform,
     };
+    options.assertHeldDeviceStart?.(providedDeviceId, sessionUuid, false);
     await assertManagedSlotControlAccess({ ...managedSlotAccess, deviceId: providedDeviceId });
     assertToolCallerHoldsDevice(name, readOnly, providedDeviceId, sessionUuid, autolockEnabled);
+    if (providedDeviceId && !sessionUuid) {
+      options.assertHeldDeviceStart?.(providedDeviceId, sessionUuid);
+    }
 
     logger.info(
       `[ToolRegistry] Tool ${name} called, sessionUuid=${sessionUuid}, daemonInitialized=${DaemonState.getInstance().isInitialized()}`,
@@ -1311,6 +1321,18 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         admittedSession?.assignedDevice,
         admittedSession?.platform,
       );
+      if (admittedSession && options.assertHeldDeviceStart) {
+        options.assertHeldDeviceStart(
+          admittedSession.assignedDevice || undefined,
+          sessionUuid,
+          false,
+        );
+        await assertManagedSlotControlAccess({
+          ...managedSlotAccess,
+          deviceId: admittedSession.assignedDevice || providedDeviceId,
+        });
+        options.assertHeldDeviceStart(admittedSession.assignedDevice || undefined, sessionUuid);
+      }
       const context = await createToolExecutionContext(
         sessionUuid,
         sessionManager,
@@ -1454,9 +1476,11 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // readiness runs cancels this call, and readiness stops at its next device step (#10905).
         // A read is marked for its readiness phase only (#10970); once ready it watches.
         if (readinessTarget !== providedDeviceId) {
+          options.assertHeldDeviceStart?.(readinessTarget, sessionUuid, false);
           await assertManagedSlotControlAccess({ ...managedSlotAccess, deviceId: readinessTarget });
         }
         assertToolCallerHoldsDevice(name, readOnly, readinessTarget, sessionUuid, autolockEnabled);
+        options.assertHeldDeviceStart?.(readinessTarget, sessionUuid);
         if (readinessTarget && execution && !sessionUuid) {
           executionTracker.markSessionlessDeviceUse(execution.executionId, readinessTarget);
         }
@@ -1490,6 +1514,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
 
     // The resolved target too: a call without a deviceId can land on a held device.
     if (device && device.deviceId !== providedDeviceId) {
+      options.assertHeldDeviceStart?.(device.deviceId, sessionUuid, false);
       await assertManagedSlotControlAccess({
         ...managedSlotAccess,
         deviceId: device.deviceId,
@@ -1497,6 +1522,9 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       });
     }
     assertToolCallerHoldsDevice(name, readOnly, device?.deviceId, sessionUuid, autolockEnabled);
+    if (device) {
+      options.assertHeldDeviceStart?.(device.deviceId, sessionUuid);
+    }
     if (device && execution && !sessionUuid && !readOnly) {
       // Admitted on a device no session holds: a session acquiring it from here on cancels this
       // call, which may not keep driving the new holder's device (#10829).

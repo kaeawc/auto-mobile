@@ -22,6 +22,7 @@ import {
 } from "./lifecycleDeviceOwnership";
 import { DaemonState } from "../daemon/daemonState";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
+import { assertTestRecordingStartHeldDevice } from "../daemon/testRecordingStartAdmission";
 import { startMcpRecording, stopMcpRecording, getMcpRecordingStatus } from "./mcpRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
 import { PlanExecutionOrchestrator, PlanExecutionRequest } from "./planExecutionOrchestrator";
@@ -635,7 +636,11 @@ export const registerPlanTools = () => {
     "Start recording user interactions for exportPlan.",
     startTestRecordingSchema,
     startTestRecordingTool,
-    { defaultEnabled: false, outputSchema: startTestRecordingResultSchema },
+    {
+      defaultEnabled: false,
+      outputSchema: startTestRecordingResultSchema,
+      assertHeldDeviceStart: assertTestRecordingStartHeldDevice,
+    },
   );
 
   ToolRegistry.register(

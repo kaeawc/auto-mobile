@@ -39,6 +39,7 @@ import {
   startDeviceSchema,
 } from "../src/server/deviceTools";
 import { readToolEnvelopePayload } from "../src/server/toolEnvelopePayload";
+import { AMBIGUOUS_DEVICE_TARGET_CODE } from "../src/server/ambiguousDeviceTargetRefusal";
 import { MIN_AVD_RAM_MB } from "../src/utils/android-cmdline-tools/AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "../src/utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import { parseAndroidApiLevelBound } from "../src/utils/androidVersionBounds";
@@ -907,10 +908,23 @@ export interface MultiDeviceRefusalResult {
   targetedDeviceId: string;
 }
 
-function expectedPlatformAmbiguityDiagnostic(platform: Platform): string {
-  return platform === "ios"
-    ? "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator."
-    : "Multiple Android devices detected. Provide sessionUuid to target a specific device.";
+function expectedPlatformAmbiguityDiagnostic(
+  payload: JsonObject | undefined,
+  platform: Platform,
+): boolean {
+  return (
+    payload?.code === AMBIGUOUS_DEVICE_TARGET_CODE &&
+    payload.retryable === false &&
+    Array.isArray(payload.candidates) &&
+    payload.candidates.filter(
+      (candidate) =>
+        candidate &&
+        typeof candidate === "object" &&
+        typeof candidate.deviceId === "string" &&
+        candidate.deviceId.length > 0 &&
+        candidate.platform === platform,
+    ).length >= 2
+  );
 }
 
 function assertAmbiguousTapDiagnostic(
@@ -918,13 +932,15 @@ function assertAmbiguousTapDiagnostic(
   platform: Platform,
   kind: "bare" | "platform-only",
 ): void {
-  const diagnostic = normalizeMcpTransportDiagnostic(toolDiagnostic(response, "tapAt"));
-  const platformDiagnostic = expectedPlatformAmbiguityDiagnostic(platform);
+  const payload = readToolEnvelopePayload(response)?.payload;
+  const diagnostic = normalizeMcpTransportDiagnostic(
+    typeof payload?.error === "string" ? payload.error : toolDiagnostic(response, "tapAt"),
+  );
   const mixedPlatformDiagnostic =
     "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid";
   const accepted =
     response.isError === true &&
-    (diagnostic === platformDiagnostic ||
+    (expectedPlatformAmbiguityDiagnostic(payload, platform) ||
       (kind === "bare" && diagnostic.startsWith(mixedPlatformDiagnostic)));
   if (!accepted) {
     throw new Error(`tapAt ${kind} ambiguity returned an unexpected diagnostic: ${diagnostic}`);

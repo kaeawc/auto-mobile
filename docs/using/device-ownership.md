@@ -103,6 +103,16 @@ connection holds, `ambiguous_session_selector` lists those sessions and asks for
 `sessionUuid` or `deviceId`. This non-retryable refusal leaves their idle windows
 unchanged; read-only tools and device-binding calls (such as `setActiveDevice`) keep their usual routing.
 
+A control call blocked by an active plan returns `plan_execution_in_progress`
+with `retryable: true` and, when available, the lock `scope`. Retry once the plan
+finishes; there is no bounded `retryAfterMs`. Reads remain allowed during a plan.
+
+A session released before its creation finishes returns
+`session_released_during_creation`, with `retryable: false` and
+`nextAction: "acquire_new_session"`. Acquire a new session with `getAndroid` or
+`getApple`; the released UUID cannot be retried. These refusals do not count as
+session use or echo an admitted session.
+
 ## When a session is released
 
 A session is released by an explicit release, a lost owner heartbeat, or the idle
@@ -585,6 +595,13 @@ decision 2026-10-09, #10982). Any local client can list every session UUID
 (`daemon/releaseSession` checks no requester), and edit any session's tool
 profile (`ide/setSessionToolEnabled`). That is intended, and there is no token
 gating.
+
+When an unnamed call matches multiple devices, including under autolock,
+`ambiguous_device_target` returns `retryable: false` and
+`candidates: [{ deviceId, platform }]` from the existing scan. Select a device:
+reads pass `deviceId`; control calls acquire with `getAndroid` or `getApple` and
+pass the returned `sessionUuid` (or target a `deviceId`). The refusal does not
+count as session use.
 
 ## Read and control
 

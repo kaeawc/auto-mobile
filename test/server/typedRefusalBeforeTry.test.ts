@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
@@ -17,6 +17,14 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ExecutionTrackerPlanExecutionLock } from "../../src/server/PlanExecutionLock";
+import { executionTracker } from "../../src/server/executionTracker";
+import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
+import { SessionReleasedDuringCreationError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
+import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
+import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 
 /**
@@ -56,6 +64,236 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
     unregisterDirectSession(BOUND_SESSION);
     DaemonState.getInstance().reset();
     restoreHermeticServer();
+    expect(DaemonState.getInstance().isInitialized()).toBe(false);
+    expect(executionTracker.getActiveExecutionCount()).toBe(0);
+  });
+
+  test("a control during a plan is typed; a read in the same state runs", async () => {
+    const readName = `${PROBE_TOOL}_read`;
+    ToolRegistry.registerDeviceAware(
+      PROBE_TOOL,
+      "control",
+      z.object({}),
+      async () => ({ content: [] }),
+      {
+        nonDeviceHandler: async () => ({ content: [] }),
+      },
+    );
+    ToolRegistry.registerDeviceAware(
+      readName,
+      "read",
+      z.object({}),
+      async () => ({ content: [] }),
+      {
+        deviceReadOnly: true,
+        nonDeviceHandler: async () => ({ content: [{ type: "text", text: "read ran" }] }),
+      },
+    );
+    const restore = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        resolveExecutionTarget: async ({ args }) => ({
+          args,
+          baseSessionUuid: undefined,
+          sessionUuid: undefined,
+          device: undefined,
+          internalCall: false,
+          shouldResolveDevice: false,
+        }),
+      },
+      afterToolCall: {
+        handle: async ({ response }) => ({ durationMs: 0, finalizedResponse: response }),
+      },
+    });
+    const plan = executionTracker.startExecution("executePlan");
+    try {
+      fixture = new McpTestFixture({
+        daemonMode: true,
+        planExecutionLock: new ExecutionTrackerPlanExecutionLock(executionTracker, {
+          getScope: () => "global",
+        }),
+      });
+      await fixture.setup();
+      const result = await fixture.client.callTool({ name: PROBE_TOOL, arguments: {} });
+      expect(result.isError).toBe(true);
+      expect(wire(result)).toEqual({
+        success: false,
+        error: expect.stringContaining("plan execution in progress"),
+        code: "plan_execution_in_progress",
+        retryable: true,
+        scope: "global",
+      });
+      expect(wire(result)).not.toHaveProperty("retryAfterMs");
+      expect(routedSessionUuidFromResult(result)).toBeUndefined();
+      const read = await fixture.client.callTool({ name: readName, arguments: {} });
+      expect(read.isError).not.toBe(true);
+      expect(read.content).toEqual([{ type: "text", text: "read ran" }]);
+    } finally {
+      executionTracker.endExecution(plan.id);
+      restore();
+    }
+  });
+
+  test.each([false, true])("ambiguous autolock read=%s has no session echo", async (readOnly) => {
+    const devices = new FakeDeviceSessionManager();
+    devices.setConnectedDevices([iosDevice, { ...iosDevice, deviceId: "IOS-OTHER" }]);
+    const previous = Reflect.get(ToolRegistry, "deviceSessionManager");
+    Reflect.set(ToolRegistry, "deviceSessionManager", devices);
+    const restore = ToolRegistry.setPipelineOverridesForTesting({
+      env: { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" },
+    });
+    try {
+      ToolRegistry.registerDeviceAware(
+        PROBE_TOOL,
+        "ambiguity",
+        z.object({}),
+        async () => ({ content: [] }),
+        { deviceReadOnly: readOnly },
+      );
+      fixture = new McpTestFixture({ daemonMode: true });
+      await fixture.setup();
+      const result = await fixture.client.callTool({ name: PROBE_TOOL, arguments: {} });
+      expect(wire(result)).toMatchObject({
+        code: "ambiguous_device_target",
+        retryable: false,
+        candidates: [
+          { deviceId: "IOS-BOUND", platform: "ios" },
+          { deviceId: "IOS-OTHER", platform: "ios" },
+        ],
+      });
+      expect(routedSessionUuidFromResult(result)).toBeUndefined();
+      expect(devices.getEnsureDeviceReadyCallCount()).toBe(0);
+    } finally {
+      restore();
+      Reflect.set(ToolRegistry, "deviceSessionManager", previous);
+    }
+  });
+
+  test("released creation is terminal and withdraws session use through dispatch", async () => {
+    const sessionUuid = "released-creation";
+    const ends: { admitted: boolean }[] = [];
+    const unsubscribe = executionTracker.onSessionExecutionEnded((_sessions, end) =>
+      ends.push(end),
+    );
+    const restore = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        resolveExecutionTarget: async ({ args }) => {
+          // Reproduce the recovery admission followed by creation's terminal refusal (#11351).
+          executionTracker.markSessionAdmitted(args.__executionId);
+          throw new SessionReleasedDuringCreationError(sessionUuid);
+        },
+      },
+    });
+    try {
+      ToolRegistry.registerDeviceAware(
+        PROBE_TOOL,
+        "creation",
+        z.object({ sessionUuid: z.string() }),
+        async () => ({ content: [] }),
+      );
+      fixture = new McpTestFixture({ daemonMode: true });
+      await fixture.setup();
+      const result = await fixture.client.callTool({
+        name: PROBE_TOOL,
+        arguments: { sessionUuid },
+      });
+      expect(routedSessionUuidFromResult(result)).toBeUndefined();
+      expect(result).not.toHaveProperty("_meta");
+      expect(ends).toEqual([{ admitted: false }]);
+      expect(wire(result)).toMatchObject({
+        success: false,
+        code: "session_released_during_creation",
+        sessionUuid,
+        retryable: false,
+        nextAction: "acquire_new_session",
+      });
+    } finally {
+      restore();
+      unsubscribe();
+    }
+  });
+
+  test("a release cutting real creation wins and withdraws admission through dispatch", async () => {
+    const sessionUuid = "released-during-call-creation";
+    const release = new SessionReleasedDuringCallError(sessionUuid, "explicit-release");
+    const timer = new FakeTimer();
+    const persistence = new FakeDeviceSessionPersistence();
+    await persistence.upsertActiveSession({
+      sessionUuid,
+      deviceId: iosDevice.deviceId,
+      platform: "ios",
+      createdAtMs: timer.now(),
+      lastUsedAtMs: timer.now(),
+      expiresAtMs: timer.now() + 60_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: true,
+    });
+    const sessionManager = new SessionManager(timer, persistence);
+    sessionManager.stopCleanupTimer();
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "released-creation-dispatch", {
+        timer,
+        deviceManager: new FakeDeviceUtils(),
+      }),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const ends: { admitted: boolean }[] = [];
+    const unsubscribe = executionTracker.onSessionExecutionEnded((_sessions, end) =>
+      ends.push(end),
+    );
+    const admission = spyOn(executionTracker, "markSessionAdmitted");
+    const assign = spyOn(pool, "assignDeviceToSession").mockImplementation(async (uuid) => {
+      // Real recovery was admitted, but assignment never publishes a session.
+      expect(uuid).toBe(sessionUuid);
+      expect(admission).toHaveBeenCalledTimes(1);
+      expect(await executionTracker.cancelSessionUuidExecutions(uuid, release)).toBe(1);
+      return iosDevice.deviceId;
+    });
+    try {
+      ToolRegistry.registerDeviceAware(
+        PROBE_TOOL,
+        "creation",
+        z.object({ sessionUuid: z.string() }),
+        async () => ({ content: [] }),
+      );
+      fixture = new McpTestFixture({ daemonMode: true });
+      await fixture.setup();
+      const result = await fixture.client.callTool({
+        name: PROBE_TOOL,
+        arguments: { sessionUuid },
+      });
+      expect(assign).toHaveBeenCalledTimes(1);
+      expect(sessionManager.getSession(sessionUuid)).toBeNull();
+      expect(result.isError).toBe(true);
+      expect(result.content).toEqual([
+        { type: "text", text: JSON.stringify(sessionReleasedDuringCallPayload(release)) },
+      ]);
+      expect(wire(result)).toMatchObject({
+        error: { code: "session_ownership_lost", reason: "explicit-release" },
+      });
+      expect(routedSessionUuidFromResult(result)).toBeUndefined();
+      expect(result).not.toHaveProperty("_meta");
+      expect(ends).toEqual([{ admitted: false }]);
+    } finally {
+      assign.mockRestore();
+      admission.mockRestore();
+      unsubscribe();
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("creation release uses the existing terminal refusal serializer", () => {
+    const error = new SessionReleasedDuringCreationError("released-creation");
+    expect(isTypedToolRefusal(error)).toBe(true);
+    expect(error.message).not.toContain("Retry the request");
+    expect(error.message).toContain("getAndroid or getApple");
+    expect(wire(shapeToolCallError(error, { toolName: "tapOn", source: "MCP" }))).toMatchObject({
+      success: false,
+      code: "session_released_during_creation",
+      sessionUuid: "released-creation",
+      retryable: false,
+      nextAction: "acquire_new_session",
+    });
   });
 
   test("device_outside_bound_session arrives as a typed result", async () => {

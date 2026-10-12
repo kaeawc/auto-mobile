@@ -84,16 +84,45 @@ export function imeCommitSuffixMatches(committedText: string, text: string): boo
 
 /**
  * 1. Canonical spelling: NFC normalization.
- * 2. Inline format markers consumed: INLINE_FORMAT_SPAN's * _ ~ and backtick
- *    characters removed; marker-only requests remain unverifiable and match.
+ * 2. Only request delimiters of real inline-format spans are optional, evaluated
+ *    after NFC and line-start block-shortcut removal (/^(>|[-*•+]|\d+[.)]) /gm).
+ *    A span is D content D with the same D: backtick (code), ** (bold), ~~ (strike),
+ *    * (bold), _ (italic), or ~ (strike). Content is non-empty, contains no LF or
+ *    occurrence of D's marker character, and neither starts nor ends with whitespace.
+ *    Runs are exact: opening D cannot follow the same marker; closing D cannot
+ *    precede it. Opening D must start the text or follow a non-letter/non-digit;
+ *    closing D must end the text or precede a non-letter/non-digit ([\p{L}\p{N}]).
+ *    Each kind scans independently left to right, allowing different kinds to nest.
+ *    Non-code spans with either delimiter inside code are excluded: code content is literal.
+ *    Every other marker is required literal text; inserted markers are never stripped.
+ *    Matched opening/closing character counts must agree per span (so **x** may
+ *    become x, *x*, or **x**, but *bold* cannot become *bold or bold*).
+ *    Marker-only requests remain unverifiable and match: a lone closing marker
+ *    typed by a separate call cannot be predicted.
  * 3. Line-start block shortcut consumed or replaced by a list marker.
  * 4. Input filters: lower/upper case tokens (including expansions) and decimal-digit value.
  * 5. Input mask: the editor may ADD characters that are not letters, digits or marks
  *    (`[^\p{L}\p{N}\p{M}]`) around the sent text; every sent token must remain in order.
  *    This also accepts added punctuation such as "hi, there" -> "hi, there!".
  * 6. Mention chips and code fences: unpredictable replacements retain subsequence acceptance on the delta.
+ * 7. Device success permits exactly one final LF consumed as submit (not CRLF):
+ *    a request ending in \n\n must still show the first newline. For a lone \n,
+ *    the inserted text must contain no letter, digit or mark.
  */
-export function imeInsertedTextMatches(insertedText: string, text: string): boolean {
+export function imeInsertedTextMatches(
+  insertedText: string,
+  text: string,
+  options?: { deviceSucceeded?: boolean },
+): boolean {
+  if (options?.deviceSucceeded === true && text.endsWith("\n") && !text.endsWith("\r\n")) {
+    if (text === "\n") {
+      return !/[\p{L}\p{N}\p{M}]/u.test(insertedText);
+    }
+    // Use the strict two-argument matcher so a second newline cannot be forgiven.
+    if (imeInsertedTextMatches(insertedText, text.slice(0, -1))) {
+      return true;
+    }
+  }
   const markers = /[*_~`]/g;
   if (text.replace(markers, "").length === 0) {
     return true;
@@ -104,30 +133,209 @@ export function imeInsertedTextMatches(insertedText: string, text: string): bool
   }
   // Mirror LINE_START_SHORTCUT in ImeCommitDriver.kt, at each line start.
   const blockShortcut = /^(>|[-*•+]|\d+[.)]) /gm;
-  const project = (value: string): string =>
-    value.normalize("NFC").replace(blockShortcut, "").replace(markers, "").normalize("NFC");
+  const project = (value: string): string => value.normalize("NFC").replace(blockShortcut, "");
   const field = project(insertedText);
   const sent = project(text);
-  const lowerField = imeLowerTokens(field);
-  const lowerSent = imeLowerTokens(sent);
-  const upperField = imeUpperTokens(field);
-  const upperSent = imeUpperTokens(sent);
+  // Try fully kept delimiters first. A mask can itself resemble a block shortcut
+  // (e.g. *a* -> * a*) or equal a required token beyond an optional closer.
+  if (imeCaseInputMaskTokensMatch(insertedText.normalize("NFC"), sent)) {
+    return true;
+  }
+  const spans = imeRequestFormatDelimiters(sent);
   return (
-    imeInputMaskTokensMatch(lowerField, lowerSent) || imeInputMaskTokensMatch(upperField, upperSent)
+    imeCaseInputMaskTokensMatch(field, sent, spans) || imeConvertedSpansMatch(field, sent, spans)
   );
 }
 
-function imeInputMaskTokensMatch(field: readonly string[], sent: readonly string[]): boolean {
-  let index = 0;
-  for (const token of field) {
-    // The earliest match is safe: any skipped alternative must itself be mask formatting.
-    if (token === sent[index]) {
-      index++;
-    } else if (/[\p{L}\p{N}\p{M}]/u.test(token)) {
+interface ImeInputMaskToken {
+  value: string;
+  /** Signed span ID: positive for opening characters, negative for closing, zero for literals. */
+  delimiter: number;
+}
+
+interface ImeFormatDelimiters {
+  positions: Int32Array;
+  count: number;
+}
+
+// Excluding each marker from content bounds backtracking to that marker-free run.
+// Edge whitespace is rejected inside the regex so an invalid candidate cannot
+// consume a delimiter that could open the next valid span.
+// Capture the preceding code point: Bun's Unicode lookbehind can inspect only
+// the low surrogate of an astral letter and incorrectly accept that boundary.
+const IME_REQUEST_FORMAT_SPANS: readonly (readonly [RegExp, number])[] = [
+  [/(^|[^\p{L}\p{N}`])(`[^`\s](?:[^`\n]*[^`\s])?`)(?![\p{L}\p{N}`])/gu, 1],
+  [/(^|[^\p{L}\p{N}*])(\*\*[^*\s](?:[^*\n]*[^*\s])?\*\*)(?![\p{L}\p{N}*])/gu, 2],
+  [/(^|[^\p{L}\p{N}~])(~~[^~\s](?:[^~\n]*[^~\s])?~~)(?![\p{L}\p{N}~])/gu, 2],
+  [/(^|[^\p{L}\p{N}*])(\*[^*\s](?:[^*\n]*[^*\s])?\*)(?![\p{L}\p{N}*])/gu, 1],
+  [/(^|[^\p{L}\p{N}_])(_[^_\s](?:[^_\n]*[^_\s])?_)(?![\p{L}\p{N}_])/gu, 1],
+  [/(^|[^\p{L}\p{N}~])(~[^~\s](?:[^~\n]*[^~\s])?~)(?![\p{L}\p{N}~])/gu, 1],
+];
+
+function imeRequestFormatDelimiters(text: string): ImeFormatDelimiters {
+  const positions = new Int32Array(text.length);
+  const codeContent = new Uint8Array(text.length);
+  let count = 0;
+  for (const [pattern, width] of IME_REQUEST_FORMAT_SPANS) {
+    for (const match of text.matchAll(pattern)) {
+      const start = match.index + match[1]!.length;
+      const end = start + match[2]!.length;
+      if (codeContent[start] || codeContent[end - 1]) {
+        continue;
+      }
+      // Code is scanned first; mark its interior so other kinds cannot consume
+      // literal markers there. A code span inside another kind remains optional.
+      if (text[start] === "`") {
+        codeContent.fill(1, start + width, end - width);
+      }
+      count++;
+      positions.fill(count, start, start + width);
+      positions.fill(-count, end - width, end);
+    }
+  }
+  return { positions, count };
+}
+
+function* imeInputMaskTokens(
+  text: string,
+  spans: ImeFormatDelimiters | undefined,
+  upperCase: boolean,
+): Generator<ImeInputMaskToken, void> {
+  let offset = 0;
+  for (const codePoint of text) {
+    const digit = imeDecimalDigit(codePoint);
+    // Lowercase expansions remain atomic, just like imeLowerTokens; uppercase
+    // expansions split, just like imeUpperTokens. Delimiters themselves are ASCII.
+    const values = upperCase ? digit.toUpperCase() : [digit.toLowerCase()];
+    for (const value of values) {
+      yield { value, delimiter: spans?.positions[offset] ?? 0 };
+    }
+    offset += codePoint.length;
+  }
+}
+
+function imeCaseInputMaskTokensMatch(
+  field: string,
+  sent: string,
+  spans?: ImeFormatDelimiters,
+  convertedMarkers?: ReadonlySet<string>,
+): boolean {
+  return [false, true].some((upperCase) =>
+    imeInputMaskTokensMatch(
+      imeInputMaskTokens(field, undefined, upperCase),
+      Array.from(imeInputMaskTokens(sent, spans, upperCase)),
+      spans?.count ?? 0,
+      convertedMarkers,
+    ),
+  );
+}
+
+function imeInputMaskTokensMatch(
+  field: Generator<ImeInputMaskToken, void>,
+  sent: readonly ImeInputMaskToken[],
+  spanCount: number,
+  convertedMarkers?: ReadonlySet<string>,
+): boolean {
+  const cursor: ImeInputMaskCursor = { position: 0 };
+  const balances = new Int32Array(spanCount);
+  for (const { value: token } of field) {
+    const candidate = imeInputMaskTokenCandidate(sent, cursor, token);
+    if (candidate >= 0) {
+      imeRecordDelimiterMatch(balances, sent[candidate]!.delimiter);
+      cursor.position = candidate + 1;
+    } else if (/[\p{L}\p{N}\p{M}]/u.test(token) || convertedMarkers?.has(token)) {
       return false;
     }
   }
-  return index === sent.length;
+  while (sent[cursor.position]?.delimiter) {
+    cursor.position++;
+  }
+  return cursor.position === sent.length && balances.every((balance) => balance === 0);
+}
+
+interface ImeInputMaskCursor {
+  position: number;
+  run?: ImeDelimiterRun;
+}
+
+interface ImeDelimiterRun {
+  end: number;
+  candidates: Map<string, { positions: number[]; cursor: number }>;
+}
+
+function imeInputMaskTokenCandidate(
+  sent: readonly ImeInputMaskToken[],
+  cursor: ImeInputMaskCursor,
+  token: string,
+): number {
+  if (sent[cursor.position]?.value === token) {
+    return cursor.position;
+  }
+  if (!sent[cursor.position]?.delimiter) {
+    return -1;
+  }
+  if (!cursor.run || cursor.position >= cursor.run.end) {
+    cursor.run = imeBufferDelimiterRun(sent, cursor.position);
+  }
+  return imeDelimiterRunCandidate(cursor.run, cursor.position, token);
+}
+
+// Buffer each optional run and its first required token once. Candidate queues
+// advance monotonically, so neither repeated nor distinct mask additions rescan it.
+function imeBufferDelimiterRun(sent: readonly ImeInputMaskToken[], start: number): ImeDelimiterRun {
+  const candidates: ImeDelimiterRun["candidates"] = new Map();
+  let end = start;
+  while (end < sent.length) {
+    const { value, delimiter } = sent[end]!;
+    let queue = candidates.get(value);
+    if (!queue) {
+      queue = { positions: [], cursor: 0 };
+      candidates.set(value, queue);
+    }
+    queue.positions.push(end++);
+    if (delimiter === 0) {
+      break;
+    }
+  }
+  return { end, candidates };
+}
+
+function imeDelimiterRunCandidate(run: ImeDelimiterRun, position: number, token: string): number {
+  const queue = run.candidates.get(token);
+  if (!queue) {
+    return -1;
+  }
+  while (queue.cursor < queue.positions.length && queue.positions[queue.cursor]! < position) {
+    queue.cursor++;
+  }
+  return queue.positions[queue.cursor] ?? -1;
+}
+
+function imeConvertedSpansMatch(field: string, sent: string, spans: ImeFormatDelimiters): boolean {
+  const literals: string[] = [];
+  const convertedMarkers = new Set<string>();
+  for (let offset = 0; offset < sent.length; offset++) {
+    const character = sent[offset]!;
+    if (spans.positions[offset]) {
+      convertedMarkers.add(character);
+    } else {
+      literals.push(character);
+    }
+  }
+  const converted = literals.join("");
+  const normalized = converted.normalize("NFC");
+  if (normalized === converted) {
+    return false;
+  }
+  // This path represents ALL spans converted. Unmatched markers of those spans
+  // cannot be mask additions here: that would bypass the per-span pairing check.
+  return imeCaseInputMaskTokensMatch(field, normalized, undefined, convertedMarkers);
+}
+
+function imeRecordDelimiterMatch(balances: Int32Array, delimiter: number): void {
+  if (delimiter !== 0) {
+    balances[Math.abs(delimiter) - 1]! += Math.sign(delimiter);
+  }
 }
 
 /**

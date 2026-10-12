@@ -26,12 +26,18 @@ export function matchRunningReadTarget(
   return named[0];
 }
 
+class ProvidedReadTargetNotFoundError extends ActionableError {}
+
+export function isProvidedReadTargetNotFound(error: unknown): boolean {
+  return error instanceof ProvidedReadTargetNotFoundError;
+}
+
 export function providedReadTargetNotFound(
   deviceId: string,
   platform: SomePlatform,
   devices: BootedDevice[],
 ): ActionableError {
-  return new ActionableError(
+  return new ProvidedReadTargetNotFoundError(
     `Device ${deviceId} not found on ${platform} platform. ` +
       `Available ${platform} devices: ${describeDevices(devices.filter((device) => platform === "either" || device.platform === platform))}`,
   );

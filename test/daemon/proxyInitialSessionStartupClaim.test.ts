@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import {
@@ -30,7 +30,7 @@ describe("proxy --initial-session-uuid startup claim", () => {
   let isAvailableSpy: ReturnType<typeof spyOn>;
   let state: DaemonStateAccess;
 
-  beforeEach(async () => {
+  const setUp = async () => {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     await sessionManager.createSession(SESSION, "emulator-5554", "android", 60_000);
@@ -44,11 +44,28 @@ describe("proxy --initial-session-uuid startup claim", () => {
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
     };
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-  });
+  };
 
-  afterEach(() => {
+  const tearDown = () => {
     isAvailableSpy.mockRestore();
     sessionManager.stopCleanupTimer();
+  };
+
+  beforeEach(setUp);
+  afterEach(tearDown);
+
+  // beforeAll is outside the per-test budget: one startup claim and keeper tick pays the proxy's
+  // first-use cost that the first timed test would otherwise carry.
+  beforeAll(async () => {
+    await setUp();
+    const proxy = handoffProxy([]);
+    try {
+      await proxy.claimInitialSession();
+      await timer.advanceTimeAsync(HEARTBEAT_INTERVAL_MS);
+    } finally {
+      await proxy.close();
+      tearDown();
+    }
   });
 
   async function daemonCall(method: string, params: Record<string, unknown>) {

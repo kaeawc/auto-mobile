@@ -471,3 +471,83 @@ describe("an emulator process adb does not list is added to admitted boots (#115
     (await gate.admit({ timeoutMs: 60_000, avdName: AVD })).release();
   });
 });
+
+describe("a boot adb lists whose process the process table predates still counts (#11588)", () => {
+  // `ps` was read before the admitted boot spawned and adb after it was listed: the table shows
+  // only the external emulator, adb shows only the boot, and both run.
+  function listedBootBesideExternalProcess(limit: string) {
+    const context = setup({ [ANDROID_MAX_BOOTED_ENV]: limit });
+    context.source.emulatorProcessRssBytes = [3 * GIB];
+    context.source.emulatorProcessPids = [900];
+    return context;
+  }
+
+  test("the boot and an external emulator only the process table shows are two", async () => {
+    const { source, gate } = listedBootBesideExternalProcess("2");
+    const first = await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+    first.handOff("emulator-5554", 501);
+    source.emulatorSerials = ["emulator-5554"];
+
+    const error = await rejection(gate.admit({ timeoutMs: 60_000, avdName: AVD }));
+
+    expect(error).toBeInstanceOf(BootCapacityExhaustedError);
+    expect((error as BootCapacityExhaustedError).details.booted).toBe(2);
+  });
+
+  test("a read-only check and a report taken on such a sample do not hide the boot from an older open sample", async () => {
+    const { source, gate } = listedBootBesideExternalProcess("2");
+    const first = await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+    first.handOff("emulator-5554", 501);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const stale = { ...(await source.sample()), emulatorSerials: ["emulator-5554"] };
+    const fresh = source.sample.bind(source);
+    // The older sample is still open when a reader's count sees the boot listed and ends its entry.
+    source.sample = async () => {
+      await held;
+      return stale;
+    };
+    const pending = rejection(gate.admit({ timeoutMs: 60_000, avdName: AVD }));
+    source.sample = fresh;
+    source.emulatorSerials = ["emulator-5554"];
+    source.emulatorProcessRssBytes = [3 * GIB, 3 * GIB];
+    source.emulatorProcessPids = [900, 501];
+    expect(await gate.describeCapacity()).toEqual({ limit: 2, booted: 2, inFlight: 0 });
+    release();
+
+    expect(await pending).toBeInstanceOf(BootCapacityExhaustedError);
+  });
+
+  test("steady state is not over-counted: once the table shows the boot's process it counts once", async () => {
+    const { source, gate } = listedBootBesideExternalProcess("3");
+    const first = await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+    first.handOff("emulator-5554", 501);
+    source.emulatorSerials = ["emulator-5554"];
+    // Table read before the spawn: the boot, the external emulator, and room for one more of three.
+    const second = await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+    second.release();
+
+    // Both reads now show the boot; the external emulator has exited. One of two slots is free.
+    source.emulatorProcessRssBytes = [3 * GIB];
+    source.emulatorProcessPids = [501];
+    const tight = new AndroidBootAdmissionGate(source, new FakeTimer(), {
+      env: { [ANDROID_MAX_BOOTED_ENV]: "2" },
+    });
+    (await tight.admit({ timeoutMs: 60_000, avdName: AVD })).release();
+    expect(await gate.describeCapacity()).toEqual({ limit: 3, booted: 1, inFlight: 0 });
+    (await gate.admit({ timeoutMs: 60_000, avdName: AVD })).release();
+  });
+
+  test("a listed boot whose process the table shows is not added to it", async () => {
+    const { source, gate } = setup();
+    const first = await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+    first.handOff("emulator-5554", 501);
+    source.emulatorSerials = ["emulator-5554"];
+    source.emulatorProcessRssBytes = [3 * GIB];
+    source.emulatorProcessPids = [501];
+
+    (await gate.admit({ timeoutMs: 60_000, avdName: AVD })).release();
+  });
+});

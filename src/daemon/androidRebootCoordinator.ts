@@ -3,7 +3,7 @@ import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelle
 import type { ChildProcess, PlatformDeviceManager } from "../devices/deviceUtils";
 import { waitForDeviceReadyOrCancel } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
-import type { AndroidDeviceReboot } from "../devices/androidDeviceReboot";
+import { isBootAdmissionRefusal, type AndroidDeviceReboot } from "../devices/androidDeviceReboot";
 import { logger } from "../utils/logger";
 import type { DeviceCriteriaMatcher } from "./DeviceCriteriaMatcher";
 import type { IdentityEvidence } from "../devices/deviceIdentityEvidence";
@@ -315,7 +315,6 @@ export class AndroidRebootCoordinator {
         // crash-loop budget on it (issue #7545).
         return "cancelled";
       }
-      const attempt = nextAttempt();
       let childProcess: ChildProcess | null = null;
       let ready: BootedDevice | undefined;
       let readinessCompleted = false;
@@ -399,7 +398,7 @@ export class AndroidRebootCoordinator {
           handoffOwner,
         );
         await this.pool.recordEmulatorLossRecoveryAttempt(incidentId, {
-          attempt,
+          attempt: nextAttempt(),
           outcome: "succeeded",
         });
       } catch (error) {
@@ -415,10 +414,12 @@ export class AndroidRebootCoordinator {
           await finishCancelledRecovery();
           return;
         }
-        await this.pool.recordEmulatorLossRecoveryAttempt(incidentId, {
-          attempt,
-          outcome: "failed",
-        });
+        if (!isBootAdmissionRefusal(error)) {
+          await this.pool.recordEmulatorLossRecoveryAttempt(incidentId, {
+            attempt: nextAttempt(),
+            outcome: "failed",
+          });
+        }
         throw error;
       } finally {
         if (handoffOwner !== undefined && ready !== undefined) {

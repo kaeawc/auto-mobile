@@ -16,6 +16,7 @@ import {
   sdkCapabilitiesUnavailable,
   type SdkCapabilitiesResult,
 } from "../../sdk/sdkCapabilities";
+import { getAbortSignal } from "../../../utils/AbortContext";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { ProviderUnavailableError } from "../../storage/ProviderUnavailableError";
@@ -685,6 +686,7 @@ export class CtrlProxyStorage {
     try {
       // Ensure WebSocket connection is established
       const connected = await this.context.ensureConnected();
+      getAbortSignal()?.throwIfAborted();
       if (!connected) {
         logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for setPreference");
         throw new Error("Failed to connect to accessibility service");
@@ -758,6 +760,7 @@ export class CtrlProxyStorage {
     try {
       // Ensure WebSocket connection is established
       const connected = await this.context.ensureConnected();
+      getAbortSignal()?.throwIfAborted();
       if (!connected) {
         logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for removePreference");
         throw new Error("Failed to connect to accessibility service");
@@ -822,6 +825,7 @@ export class CtrlProxyStorage {
     try {
       // Ensure WebSocket connection is established
       const connected = await this.context.ensureConnected();
+      getAbortSignal()?.throwIfAborted();
       if (!connected) {
         logger.warn(
           "[CTRL_PROXY] Failed to establish WebSocket connection for clearPreferenceStore",

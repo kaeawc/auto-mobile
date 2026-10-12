@@ -8,6 +8,7 @@ import {
   DeviceCleanupInProgressError,
   DeviceOwnedByOtherDaemonError,
   DeviceShuttingDownError,
+  DeviceTransportOfflineError,
   SessionCreationTimeoutError,
 } from "../../src/daemon/deviceAcquisitionRefusals";
 import { IOS_SIM_MAX_BOOTED_ENV } from "../../src/features/iosSimFleet/capacityPolicy";
@@ -23,7 +24,7 @@ import {
   daemonRestartPendingToolResult,
 } from "../../src/daemon/daemonRestartAdmission";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
-import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
+import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { typedTeardownRefusal } from "../../src/server/deviceToolsLifecycle";
@@ -223,6 +224,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     "device_shutting_down",
     "DeviceShuttingDownError via shapeToolCallError",
     () => shaped(new DeviceShuttingDownError(DEVICE, "and cannot be assigned")),
+  ],
+  [
+    "device_offline",
+    "DeviceTransportOfflineError via shapeToolCallError",
+    () => shaped(new DeviceTransportOfflineError(DEVICE, "offline")),
   ],
   [
     "session_creation_timeout",
@@ -666,6 +672,15 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
     () => terminalAtAdmission("cli-idle-timeout"),
   ],
   ["device_owned_by_other_session", () => new InputDeviceOwnedError("input/tap", DEVICE, "holder")],
+  // A gestureStart lifted because its admitting holder left the device before the ack (#11351).
+  [
+    "session_no_longer_owns_device",
+    () =>
+      strokeAdmissionEndedError("input/gestureStart", {
+        deviceId: DEVICE,
+        holderSessionId: SESSION,
+      }) as Error,
+  ],
   ["session_recovery_pending", recoveryPendingError],
   ["daemon_restart_deferred", () => new DaemonRestartDeferredError("a device operation is active")],
   ["daemon_restart_pending", () => new DaemonRestartPendingError()],
@@ -770,7 +785,7 @@ export const UNFIXTURED_REFUSAL_CODES: Readonly<Record<string, string>> = {
   viewer_read_only:
     "an aux-socket (WebRTC) response `errorCode` beside `error`; aux-socket error responses are not fixtured yet (#11351)",
   target_identity_unresolved:
-    "a nested provisionDevice cleanup failure code inside lifecycle.cleanup, never a top-level refusal (#11351)",
+    "typed on the socket frame only: shapeToolCallError answers AndroidAvdIdentityUnresolvedError as plain 'Error: ...' text, and deleteDevice/provisionDevice write the code inline with no shared builder to capture (#11351)",
   session_released_during_creation:
     "SessionReleasedDuringCreationError is not typed by shapeToolCallError: clients get plain 'Error: ...' text with no code",
   daemon_session_not_found:

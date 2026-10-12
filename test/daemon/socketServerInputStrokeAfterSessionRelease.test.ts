@@ -166,7 +166,9 @@ describe("an open input stroke vs. a release of its holder session", () => {
     strokes = [];
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    executionTracker.setSessionClockOffsetProvider(() => sessionManager.sessionNow() - Date.now());
+    executionTracker.setSessionClockOffsetProvider(
+      (wallNowMs = Date.now()) => sessionManager.sessionNow() - wallNowMs,
+    );
     sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
     );

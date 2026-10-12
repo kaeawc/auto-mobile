@@ -136,8 +136,15 @@ export class AdbUnavailableError extends Error {
 
 // Module-level cache configuration and instances
 const moduleTimer: Timer = defaultTimer;
-let deviceListCache: TTLCache<string, BootedDevice[]> | null = null;
-let deviceListSingleFlight = new SingleFlight<string, BootedDevice[]>();
+// The device-list cache and its single-flight are scoped to the Timer that reads them. Production
+// clients all share defaultTimer, so they still share one cache; a client injected with its own
+// (Fake)Timer gets private state, so a TTL entry frozen on another timer's clock, or an in-flight
+// read parked on it, can never answer a later client (#11614).
+interface DeviceListState {
+  cache: TTLCache<string, BootedDevice[]>;
+  singleFlight: SingleFlight<string, BootedDevice[]>;
+}
+let deviceListStates = new WeakMap<Timer, DeviceListState>();
 let deviceListGeneration = 0;
 let deviceListPublishedGeneration = 0;
 // Keep production clients sharing the resolved path while isolating injected
@@ -149,11 +156,20 @@ const DEVICE_LIST_CACHE_TTL_MS = 5000; // 5 seconds
 const ADB_PATH_CACHE_TTL_MS = 60000; // 1 minute - ADB path rarely changes
 const MACOS_MISSING_ADB_PROBE_COOLDOWN_MS = 30000;
 
-function getDeviceListCache(timer: Timer): TTLCache<string, BootedDevice[]> {
-  if (!deviceListCache) {
-    deviceListCache = new TTLCache(timer, { ttlMs: DEVICE_LIST_CACHE_TTL_MS });
+function getDeviceListState(timer: Timer): DeviceListState {
+  let state = deviceListStates.get(timer);
+  if (!state) {
+    state = {
+      cache: new TTLCache(timer, { ttlMs: DEVICE_LIST_CACHE_TTL_MS }),
+      singleFlight: new SingleFlight<string, BootedDevice[]>(),
+    };
+    deviceListStates.set(timer, state);
   }
-  return deviceListCache;
+  return state;
+}
+
+function getDeviceListCache(timer: Timer): TTLCache<string, BootedDevice[]> {
+  return getDeviceListState(timer).cache;
 }
 
 function getAdbPathCache(execAsync: ExecFileAsync): TTLCache<string, string> {
@@ -166,16 +182,14 @@ function getAdbPathCache(execAsync: ExecFileAsync): TTLCache<string, string> {
 }
 
 export function resetAdbClientCaches(): void {
-  deviceListCache = null;
-  deviceListSingleFlight = new SingleFlight();
+  deviceListStates = new WeakMap();
   deviceListPublishedGeneration = ++deviceListGeneration;
   adbPathCaches = new WeakMap();
   AdbClient.resetMissingAdbProbeState();
 }
 
 export function resetAdbDeviceListCache(): void {
-  deviceListCache = null;
-  deviceListSingleFlight = new SingleFlight();
+  deviceListStates = new WeakMap();
   deviceListPublishedGeneration = ++deviceListGeneration;
 }
 
@@ -1514,7 +1528,7 @@ export class AdbClient implements AdbExecutor {
         return await this.readDeviceListFromAdb(timeoutMs, options.signal);
       }
 
-      const shared = deviceListSingleFlight.run(
+      const shared = getDeviceListState(this.timer).singleFlight.run(
         "devices",
         () => {
           // The shared subprocess has its own bounded timeout but deliberately

@@ -26,11 +26,20 @@ describe("daemon startup timeout configuration", () => {
   afterEach(restoreEnvironment);
 
   test("caps an oversized override at the runtime timer maximum", async () => {
-    process.env[STARTUP_TIMEOUT_ENV] = "9223372036854775807";
+    process.env[STARTUP_TIMEOUT_ENV] = String(Number.MAX_SAFE_INTEGER);
     delete process.env[LEGACY_STARTUP_TIMEOUT_ENV];
 
     const constants = await importFreshConstants();
 
     expect(constants.DAEMON_STARTUP_TIMEOUT_MS).toBe(MAX_TIMER_DELAY_MS);
+  });
+
+  test("an override beyond the safe-integer range is ignored, not clamped (#11629)", async () => {
+    process.env[STARTUP_TIMEOUT_ENV] = "9223372036854775807";
+    delete process.env[LEGACY_STARTUP_TIMEOUT_ENV];
+
+    const constants = await importFreshConstants();
+
+    expect(constants.DAEMON_STARTUP_TIMEOUT_MS).toBe(30_000);
   });
 });

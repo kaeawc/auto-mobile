@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
 import { z } from "zod/v4";
 import {
   dragAndDropSchema,
@@ -10,6 +10,10 @@ import {
 import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { DragAndDropOptions } from "../../src/models";
+import { warmedTests } from "../helpers/warmedTests";
+
+// First-use costs (schema conversion, handler path) are paid in beforeAll, outside CI's per-test time.
+const test = warmedTests(() => resetDragAndDropFactory());
 
 const container = { elementId: "item_42", container: { text: "Cart", index: 0 } };
 const endpoints = { source: { elementId: "remove" }, target: { text: "Drop" } };

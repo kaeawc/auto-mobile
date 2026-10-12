@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { promises as fs } from "fs";
-import * as os from "os";
 import * as path from "path";
 import type { BootedDevice, DeviceSnapshotManifest } from "../../src/models";
 import type {
@@ -10,6 +9,7 @@ import type {
 import { DeviceSnapshotStore, type SnapshotPathOptions } from "../../src/utils/DeviceSnapshotStore";
 import { logger } from "../../src/utils/logger";
 import { sortedReaddir } from "../../src/utils/io";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import {
   captureDeviceSnapshot,
   listDeviceSnapshots,
@@ -76,10 +76,12 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
   let configRepository: FakeDeviceSnapshotConfigRepository;
   let avdSnapshots: FakeAvdSnapshotService;
   let timer: FakeTimer;
+  // One temp root for the block, a fresh empty directory per test (see scratchRoot.ts).
+  const scratch = useScratchRoot("snapshot-journal-manager-");
 
   beforeEach(async () => {
     resetDeviceSnapshotManagerDependencies();
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-journal-manager-"));
+    root = scratch.next();
     realStore = new DeviceSnapshotStore(root, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
     fakeStore = new FakeDeviceSnapshotStore(root);
     repository = new FakeDeviceSnapshotRepository();
@@ -113,9 +115,8 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
     });
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     resetDeviceSnapshotManagerDependencies();
-    await fs.rm(root, { recursive: true, force: true });
   });
 
   async function data(directory: string, contents: string): Promise<void> {

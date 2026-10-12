@@ -1539,6 +1539,177 @@ const noRawSelectorFieldReadRule = {
   },
 };
 
+// ---- BEGIN no-raw-env-number-parse (#11629) --------------------------------------------
+// Numeric coercion of an environment value must go through src/utils/envNumbers.ts
+// (`readEnvPositiveInteger`): `parseInt("2m")` is 2 and `Number("")` is 0, so a typo'd or
+// unit-suffixed variable silently becomes a hazardous number. Flags `parseInt`,
+// `parseFloat`, `Number.parseInt`, `Number.parseFloat`, `Number(...)` and unary `+` applied to
+// `process.env.X`, `process.env["X"]`, `Bun.env.X`, `<anything>.env.X`, `env.X`, a member of a
+// variable/parameter annotated `ProcessEnv`, a destructured env binding, or (inside the same
+// lexical function) a local `const raw = process.env.X` later passed to those. Not auto-fixable.
+//
+// WHAT IT CANNOT SEE: values that cross a function boundary (an env string returned from a
+// helper, passed as an argument, or stored on an object and parsed elsewhere), objects that
+// merely hold a copy of the env under another name, and computed aliases of `env`.
+// Intentional exemptions use `// oxlint-disable-next-line auto-mobile/no-raw-env-number-parse`
+// with a reason.
+const ENV_COERCION_FUNCTIONS = new Set(["parseInt", "parseFloat", "Number"]);
+const ENV_TRANSPARENT_WRAPPERS = new Set([
+  "ParenthesizedExpression",
+  "ChainExpression",
+  "TSNonNullExpression",
+  "TSAsExpression",
+  "TSSatisfiesExpression",
+  "TSTypeAssertion",
+]);
+const ENV_STRING_METHODS = new Set(["trim", "trimStart", "trimEnd"]);
+const ENV_FUNCTION_TYPES = new Set([
+  "FunctionDeclaration",
+  "FunctionExpression",
+  "ArrowFunctionExpression",
+]);
+
+function unwrapEnvExpression(node) {
+  let current = node;
+  while (current && ENV_TRANSPARENT_WRAPPERS.has(current.type)) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function isProcessEnvTypeAnnotation(annotation) {
+  const type = annotation?.typeAnnotation;
+  if (type?.type !== "TSTypeReference") return false;
+  const name = type.typeName;
+  return (
+    (name?.type === "Identifier" && name.name === "ProcessEnv") ||
+    (name?.type === "TSQualifiedName" && name.right?.name === "ProcessEnv")
+  );
+}
+
+function isEnvCoercionCallee(callee) {
+  const target = unwrapEnvExpression(callee);
+  if (target?.type === "Identifier") return ENV_COERCION_FUNCTIONS.has(target.name);
+  return (
+    target?.type === "MemberExpression" &&
+    !target.computed &&
+    target.object?.type === "Identifier" &&
+    (target.object.name === "Number" || target.object.name === "globalThis") &&
+    ENV_COERCION_FUNCTIONS.has(propertyName(target.property))
+  );
+}
+
+const noRawEnvNumberParseRule = {
+  meta: {
+    type: "problem",
+    messages: {
+      rawEnvNumberParse:
+        "Do not coerce an environment value with parseInt/parseFloat/Number/unary +; use readEnvPositiveInteger from src/utils/envNumbers.ts (or add a reasoned oxlint-disable for a deliberate exemption).",
+    },
+  },
+  create(context) {
+    // scope: { envObjects: names bound to an env map, rawLocals: names bound to an env value }
+    const isEnvObject = (node, scope) => {
+      const target = unwrapEnvExpression(node);
+      if (target?.type === "Identifier") {
+        return target.name === "env" || scope.envObjects.has(target.name);
+      }
+      // process.env, Bun.env, deps.env, this.env
+      return (
+        target?.type === "MemberExpression" &&
+        !target.computed &&
+        propertyName(target.property) === "env"
+      );
+    };
+    const isEnvValue = (node, scope) => {
+      const target = unwrapEnvExpression(node);
+      switch (target?.type) {
+        case "Identifier":
+          return scope.rawLocals.has(target.name);
+        case "MemberExpression":
+          return isEnvObject(target.object, scope);
+        case "LogicalExpression":
+          return isEnvValue(target.left, scope) || isEnvValue(target.right, scope);
+        case "ConditionalExpression":
+          return isEnvValue(target.consequent, scope) || isEnvValue(target.alternate, scope);
+        case "CallExpression": {
+          const callee = unwrapEnvExpression(target.callee);
+          return (
+            callee?.type === "MemberExpression" &&
+            !callee.computed &&
+            ENV_STRING_METHODS.has(propertyName(callee.property)) &&
+            isEnvValue(callee.object, scope)
+          );
+        }
+        default:
+          return false;
+      }
+    };
+    const bindName = (name, scope, tainted) => {
+      if (tainted) scope.rawLocals.add(name);
+      else scope.rawLocals.delete(name);
+    };
+    const bindParam = (param, scope) => {
+      const pattern = param.type === "TSParameterProperty" ? param.parameter : param;
+      const target = pattern.type === "AssignmentPattern" ? pattern.left : pattern;
+      if (target.type !== "Identifier") return;
+      bindName(target.name, scope, false);
+      if (
+        isProcessEnvTypeAnnotation(target.typeAnnotation) ||
+        (pattern.type === "AssignmentPattern" && isEnvObject(pattern.right, scope))
+      ) {
+        scope.envObjects.add(target.name);
+      }
+    };
+    const bindDeclarator = (node, scope) => {
+      const { id, init } = node;
+      if (id?.type === "Identifier") {
+        bindName(id.name, scope, isEnvValue(init, scope));
+        if (isProcessEnvTypeAnnotation(id.typeAnnotation) || isEnvObject(init, scope)) {
+          scope.envObjects.add(id.name);
+        }
+      } else if (id?.type === "ObjectPattern" && isEnvObject(init, scope)) {
+        for (const item of id.properties) {
+          const value = item.type === "RestElement" ? null : item.value;
+          const name = value?.type === "AssignmentPattern" ? value.left : value;
+          if (name?.type === "Identifier") scope.rawLocals.add(name.name);
+        }
+      }
+    };
+    const report = (node) => context.report({ node, messageId: "rawEnvNumberParse" });
+    const visit = (node, scope) => {
+      if (!node || typeof node.type !== "string") return;
+      let next = scope;
+      if (ENV_FUNCTION_TYPES.has(node.type)) {
+        next = { envObjects: new Set(scope.envObjects), rawLocals: new Set(scope.rawLocals) };
+        (node.params ?? []).forEach((param) => bindParam(param, next));
+      }
+      if (node.type === "CallExpression" && isEnvCoercionCallee(node.callee)) {
+        if (node.arguments?.[0] && isEnvValue(node.arguments[0], next)) report(node);
+      } else if (node.type === "UnaryExpression" && node.operator === "+") {
+        if (isEnvValue(node.argument, next)) report(node);
+      }
+      for (const [key, value] of Object.entries(node)) {
+        if (key === "parent") continue;
+        if (Array.isArray(value)) value.forEach((child) => visit(child, next));
+        else if (value && typeof value === "object") visit(value, next);
+      }
+      // Bindings take effect after their initializer has been visited.
+      if (node.type === "VariableDeclarator") {
+        bindDeclarator(node, next);
+      } else if (node.type === "AssignmentExpression" && node.left?.type === "Identifier") {
+        bindName(node.left.name, next, isEnvValue(node.right, next));
+      }
+    };
+    return {
+      Program(node) {
+        visit(node, { envObjects: new Set(), rawLocals: new Set() });
+      },
+    };
+  },
+};
+// ---- END no-raw-env-number-parse -------------------------------------------------------
+
 const plugin = {
   meta: {
     name: "auto-mobile",
@@ -1558,6 +1729,7 @@ const plugin = {
     "no-raw-selector-field-read": noRawSelectorFieldReadRule,
     "no-structured-content-read": noStructuredContentReadRule,
     "naming-convention": namingConventionRule,
+    "no-raw-env-number-parse": noRawEnvNumberParseRule,
   },
 };
 

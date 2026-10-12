@@ -7,6 +7,11 @@ import * as managedSlotRefusals from "../../src/daemon/managedSlots/managedSlotR
 import * as bootCapacity from "../../src/models/BootCapacityExhaustedError";
 import * as boundSessionRefusal from "../../src/server/deviceOutsideBoundSessionRefusal";
 import * as daemonTypes from "../../src/daemon/types";
+import * as daemonConstants from "../../src/daemon/constants";
+import * as mcpTimeouts from "../../src/daemon/McpTimeoutError";
+import * as sessionReleasedDuringCall from "../../src/daemon/sessionReleasedDuringCall";
+import * as appNotRunning from "../../src/models/AppNotRunningError";
+import * as sessionRecovery from "../../src/models/deviceSessionRecovery";
 import type { ManagedSlotsResult } from "../../src/models/managedSlotsResult";
 import { DEFAULT_PROVISION_DEVICE_RETRYABILITY } from "../../src/devices/exactDeviceProvisioning";
 import { planRefusalFields } from "../../src/server/planExecutionOrchestrator";
@@ -139,9 +144,9 @@ const fixtures = buildRefusalWireFixtures();
 const fixtureCodes = fixtures.map((fixture) => fixture.code);
 
 /**
- * Every exported `*_CODE` string constant of the modules that define device-refusal codes. The
- * session-envelope codes (`session_ownership_lost`, `no_active_device_session`) and the daemon
- * lifecycle codes are literals or live beside unrelated protocol codes; they are fixtured by name.
+ * Every exported `*_CODE` string constant of the modules that define device, session and daemon
+ * lifecycle refusal codes (#11351). Codes written as literals (`no_active_device_session`,
+ * `session_recovery_pending`, ...) are listed in `LITERAL_CLIENT_REACHABLE_CODES` instead.
  */
 function exportedCodeConstants(): Map<string, string> {
   const found = new Map<string, string>();
@@ -152,6 +157,11 @@ function exportedCodeConstants(): Map<string, string> {
     managedSlotRefusals,
     boundSessionRefusal,
     daemonTypes,
+    daemonConstants,
+    mcpTimeouts,
+    sessionReleasedDuringCall,
+    appNotRunning,
+    sessionRecovery,
   ]) {
     for (const [name, value] of Object.entries(module)) {
       if (name.endsWith("_CODE") && typeof value === "string") {

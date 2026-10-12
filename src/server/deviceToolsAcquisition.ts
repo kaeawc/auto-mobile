@@ -250,7 +250,9 @@ async function matchIosSimulatorSkippingManaged(
   const managed =
     (await managedSlotPoolGate(initializedDevicePool()).managedSlotStableIds?.("ios")) ??
     new Set<string>();
-  const free = simulators.filter((device) => !managed.has(device.deviceId ?? ""));
+  const free = simulators.filter(
+    (device) => !managed.has(device.deviceId ?? "") && !managed.has(device.name),
+  );
   return (
     deviceMatcher.matchDeviceImage(criteria, free, DEVICE_POOL_MATCHING) ??
     (free.length < simulators.length
@@ -322,6 +324,12 @@ async function resolveStartStableDeviceLifecycleTarget(
     // enabled, not the stable identity of an existing simulator.
     return undefined;
   }
+  await managedSlotPoolGate(initializedDevicePool()).assertNotAssignedToManagedSlot?.({
+    action: budgets.operationName,
+    deviceId: match.deviceId,
+    platform: "ios",
+    stableIds: [match.name],
+  });
   return { platform: "ios", stableId: match.deviceId };
 }
 

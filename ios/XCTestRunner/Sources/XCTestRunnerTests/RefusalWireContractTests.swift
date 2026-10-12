@@ -54,13 +54,30 @@ final class RefusalWireContractTests: XCTestCase {
         XCTAssertGreaterThan(checked, 0, "socket-frame rows were not found")
     }
 
-    private func hintRows(_ key: String) throws -> [[String: Any]] {
+    private func hintsTable() throws -> [String: Any] {
         let file = fixtureDirectory.deletingLastPathComponent()
             .appendingPathComponent("refusal-wire-hints/hints.json")
-        let table = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any]
-        )
-        return try XCTUnwrap(table[key] as? [[String: Any]])
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+    }
+
+    private func hintRows(_ key: String) throws -> [[String: Any]] {
+        try XCTUnwrap(hintsTable()[key] as? [[String: Any]])
+    }
+
+    func testTheFinalizeWaitCapAndCodesAreTheOnesSharedWithTheProxyAndJUnitRunner() throws {
+        typealias Backoff = AutoMobilePlanExecutor.DeviceWaitBackoff
+        let finalizeWait = try XCTUnwrap(hintsTable()["finalizeWait"] as? [String: Any])
+        let waitBudgetMs = try XCTUnwrap((finalizeWait["waitBudgetMs"] as? NSNumber)?.intValue)
+        let codes = try XCTUnwrap(finalizeWait["codes"] as? [String])
+        XCTAssertEqual(Backoff.finalizeWaitCapMs, waitBudgetMs)
+        XCTAssertEqual(Backoff.finalizeWaitCodes, Set(codes))
+        for code in codes {
+            // A hint far past the cap still stops the wait exactly at the shared budget.
+            var almostSpent = Backoff(waits: 8, waitedMs: waitBudgetMs - 1)
+            XCTAssertEqual(almostSpent.nextDelayMs(retryAfterMs: Int.max, code: code), 1, code)
+            var spent = Backoff(waits: 8, waitedMs: waitBudgetMs)
+            XCTAssertNil(spent.nextDelayMs(retryAfterMs: Int.max, code: code), code)
+        }
     }
 
     func testARetryAfterHintIsUsableAsTheSharedHintsTableSays() throws {

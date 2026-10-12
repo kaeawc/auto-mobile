@@ -48,6 +48,7 @@ export function getObservePerfWindowMs(): number {
   if (!raw) {
     return DEFAULT_PERF_WINDOW_MS;
   }
+  // oxlint-disable-next-line auto-mobile/no-raw-env-number-parse -- deliberately lenient: fractions are rounded (tested), unlike the digits-only integer helper.
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return DEFAULT_PERF_WINDOW_MS;

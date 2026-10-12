@@ -19,6 +19,7 @@ import { Timer, defaultTimer } from "./SystemTimer";
 import { toActionableError } from "../models/ActionableError";
 import { raceWithDeadline } from "./raceWithDeadline";
 import { isProcessRunning } from "./processLiveness";
+import { LogSinkStallGuard } from "./logSinkStallGuard";
 
 export {
   parseAutomobileLogFormat,
@@ -210,6 +211,7 @@ const attachStreamFailureHandlers = (stream: fs.WriteStream, target: string): vo
     if (logStream === stream) {
       logStream = undefined;
     }
+    streamStallGuards.get(stream)?.retire(error);
     // An asynchronously failed stream is no longer usable. Release its fd
     // before a later write retries opening this PID-scoped path.
     deferReopenUntilClose(stream);
@@ -312,6 +314,32 @@ export const CLOSE_LOG_STREAM_TIMEOUT_MS = 5_000;
 // callbacks to drain before treating a stalled writer as a shutdown failure;
 // the subsequent fd-close wait has its own shorter bound.
 export const CLOSE_LOG_WRITES_TIMEOUT_MS = 20_000;
+export const LOG_WRITE_STALL_TIMEOUT_MS = 5_000;
+export const LOG_SINK_ABANDON_TIMEOUT_MS = 30_000;
+
+let logSinkStallTimer = defaultTimer;
+// Keep the singleton's scheduler bound to its import-time defaultTimer. Only the
+// explicit stall-timer seam changes this ownership; shutdown has its own timer.
+const productionStallTimer = {
+  setTimeout: defaultTimer.setTimeout.bind(defaultTimer),
+  clearTimeout: defaultTimer.clearTimeout.bind(defaultTimer),
+  now: defaultTimer.now.bind(defaultTimer),
+};
+let stallWatchdogTimer = productionStallTimer;
+const streamStallGuards = new WeakMap<fs.WriteStream, LogSinkStallGuard>();
+let intentionalDrainCount = 0;
+let rotationWait:
+  | {
+      operation: Promise<void>;
+      guard: LogSinkStallGuard;
+      completion: Promise<boolean>;
+    }
+  | undefined;
+
+export function setLogSinkStallTimerForTesting(timer: Timer | undefined): void {
+  logSinkStallTimer = timer ?? defaultTimer;
+  stallWatchdogTimer = timer ?? productionStallTimer;
+}
 
 /**
  * Resolves once a log stream has ACTUALLY closed (its file descriptor
@@ -605,6 +633,7 @@ let startupLogSweep = logsDir ? createStartupLogSweep(defaultTimer, pruneOldLogF
 // construction (issue #6149). A failed close defers rotation until the
 // descriptor confirms release; writes degrade to stderr in the meantime.
 const closeStreamBeforeRotation = async (stream: fs.WriteStream): Promise<boolean> => {
+  streamStallGuards.get(stream)?.retire();
   try {
     await closeLogStream(stream);
     return true;
@@ -738,21 +767,22 @@ const ROTATION_CHECK_INTERVAL_BYTES = 32 * 1024;
 // is untouched: it still covers every writer that arrives while an actual
 // check/rotation cycle is running; only this too-eager triggering condition
 // changed.
-const checkAndRotateLog = async (lineByteLength: number): Promise<void> => {
+const checkAndRotateLog = async (lineByteLength: number): Promise<boolean> => {
   bytesSinceLastRotationCheck += lineByteLength;
   if (bytesSinceLastRotationCheck < ROTATION_CHECK_INTERVAL_BYTES) {
-    return;
+    return true;
   }
   bytesSinceLastRotationCheck = 0;
 
   const paths = fileLogPaths();
   if (!paths || !logStream) {
-    return;
+    return true;
   }
   try {
-    await beginOrJoinRotationCheck(paths);
+    return await waitForRotation(beginOrJoinRotationCheck(paths));
   } catch (error) {
     await recoverFromFailedRotation(paths, error);
+    return true;
   }
 };
 
@@ -895,71 +925,204 @@ const reportLogFailure = async (context: string, error: unknown): Promise<void> 
   }
 };
 
-const writeToFile = async (line: string): Promise<void> => {
-  if (!logFilePath) {
-    // Stderr-only sink: no file stream is ever expected here.
-    return;
+// Bypass the potentially wedged async stderr queue for the last diagnostic sink.
+const writeSynchronousStderr = (line: string): void => {
+  try {
+    fs.writeSync(process.stderr.fd, `${line}\n`);
+  } catch (error) {
+    // No diagnostic sink remains; EAGAIN/EPIPE/closed-fd failures cannot be logged through the logger.
+    void error;
   }
-  // Serialize this write against any in-flight rotation. During rotation
-  // `logStream` is transiently undefined (old stream closing, replacement not
-  // yet open); without this wait, the lazy reopen below would observe that gap
-  // and open a second stream at the same path while the old fd is still
-  // closing — the exact epoll EEXIST race rotation guards against (issue
-  // #6149). Wait for rotation to publish the fresh stream, then use it.
+};
+
+const reportSinkStall = (event: string, message: string): void => {
+  writeSynchronousStderr(
+    logFormat === "json"
+      ? JSON.stringify({
+          timestamp: new Date(logSinkStallTimer.now()).toISOString(),
+          level: "error",
+          component: ownLogPrefix,
+          event,
+          message: sanitizeMessage(message),
+        })
+      : sanitizeMessage(message),
+  );
+};
+
+const writeResumedRecord = (elapsedMs: number, diverted: number): void => {
+  // This file-sink recovery summary is a normal WARN record, without another stderr copy.
+  trackWrite(
+    writeToFile(
+      formatLogRecord(
+        "WARN",
+        `Log sink ${logFilePath} resumed after ${elapsedMs}ms; ${diverted} line(s) were diverted while it was stalled`,
+        [],
+      ),
+    ).catch((error) => reportLogFailure("Failed to write log sink recovery", error)),
+  );
+};
+
+const abandonStalledStream = (stream: fs.WriteStream, elapsed: number, dropped: number): void => {
+  reportSinkStall(
+    "log.sink_abandoned",
+    `Log sink ${logFilePath} abandoned after ${elapsed}ms stalled; ${dropped} line(s) dropped`,
+  );
+  if (logStream === stream) {
+    logStream = undefined;
+  }
+  deferReopenUntilClose(stream, logSinkStallTimer);
+  try {
+    stream.destroy?.();
+  } catch (error) {
+    // Descriptor teardown is best effort; the close barrier still bounds retry and no diagnostic sink remains.
+    void error;
+  }
+};
+
+const stallGuardForStream = (stream: fs.WriteStream): LogSinkStallGuard => {
+  let guard = streamStallGuards.get(stream);
+  if (!guard) {
+    guard = new LogSinkStallGuard({
+      timer: stallWatchdogTimer,
+      timeoutMs: LOG_WRITE_STALL_TIMEOUT_MS,
+      abandonMs: LOG_SINK_ABANDON_TIMEOUT_MS,
+      stalled: (pending) =>
+        reportSinkStall(
+          "log.sink_stalled",
+          `Logging to ${logFilePath} stalled: no write completed within ${LOG_WRITE_STALL_TIMEOUT_MS}ms; ${pending} line(s) pending`,
+        ),
+      resumed: writeResumedRecord,
+      abandoned: (elapsed, pending) => abandonStalledStream(stream, elapsed, pending),
+    });
+    if (intentionalDrainCount > 0) {
+      guard.suspend();
+    }
+    streamStallGuards.set(stream, guard);
+  }
+  return guard;
+};
+
+// One shared deadline per rotation, never one timer (or unresolved continuation) per later line.
+// Timing out does not cancel/clear rotationInFlight or open a second descriptor (#6149).
+const waitForRotation = (operation: Promise<void>): Promise<boolean> => {
+  if (rotationWait?.operation === operation) {
+    return rotationWait.completion;
+  }
+  const guard = new LogSinkStallGuard({
+    timer: stallWatchdogTimer,
+    timeoutMs: LOG_WRITE_STALL_TIMEOUT_MS,
+    stalled: () =>
+      reportSinkStall(
+        "log.sink_stalled",
+        `Logging to ${logFilePath} stalled: log rotation did not finish within ${LOG_WRITE_STALL_TIMEOUT_MS}ms`,
+      ),
+    resumed: writeResumedRecord,
+  });
+  if (intentionalDrainCount > 0) {
+    guard.suspend();
+  }
+  const completion = guard.track((done) => {
+    const finish = (error?: unknown): void => {
+      done(error);
+      if (rotationWait?.guard === guard) {
+        rotationWait = undefined;
+      }
+    };
+    void operation.then(() => finish(), finish);
+  });
+  rotationWait = { operation, guard, completion };
+  return completion;
+};
+
+const retireRotationWatchdog = (): void => {
+  rotationWait?.guard.retire();
+  rotationWait = undefined;
+  // Keep rotationInFlight authoritative. A later record can watch it afresh,
+  // but may never reopen the path while the original rotation is still running.
+};
+
+const divertFileRecord = (line: string): void => {
+  rotationWait?.guard.divert();
+  if (logStream) {
+    streamStallGuards.get(logStream)?.divert();
+  }
+  // Both already emits this record on its configured stderr sink.
+  if (logSink === "file") {
+    writeSynchronousStderr(line);
+  }
+};
+
+const sinkStalled = (): boolean =>
+  rotationWait?.guard.stalled === true ||
+  (logStream !== undefined && streamStallGuards.get(logStream)?.stalled === true);
+
+const waitForPriorRotation = async (): Promise<boolean> => {
   while (rotationInFlight) {
     try {
-      await rotationInFlight;
+      if (!(await waitForRotation(rotationInFlight))) {
+        return false;
+      }
     } catch (error) {
-      // The initiating writer handles a failed rotation in checkAndRotateLog,
-      // but a writer that joined before it settled gets here first and used to
-      // escape without writing its record. Give every joiner the same
-      // recovery/degradation path so a file-only sink never silently loses it.
+      // Every joiner retains the same failed-rotation recovery/degradation path (#6179).
       const paths = fileLogPaths();
       if (paths) {
         await recoverFromFailedRotation(paths, error);
       }
     }
   }
+  return true;
+};
+
+const prepareFileSink = async (line: string): Promise<boolean> => {
+  if (!logFilePath) {
+    return false;
+  }
+  if (sinkStalled()) {
+    divertFileRecord(line);
+    return false;
+  }
+  // Preserve close-before-reopen while bounding both shared rotation wait sites.
+  if (rotationInFlight && !(await waitForPriorRotation())) {
+    divertFileRecord(line);
+    return false;
+  }
   if (!logStream) {
-    // A prior open attempt failed — e.g. bun's transient EEXIST/epoll race
-    // (#5930 family). Retry lazily on the next write instead of leaving the
-    // sink permanently dead: the failure that killed it may have cleared.
     logStream = openLogStream(logFilePath);
   }
-  if (logStream) {
-    await checkAndRotateLog(Buffer.byteLength(line) + 1);
+  if (logStream && !(await checkAndRotateLog(Buffer.byteLength(line) + 1))) {
+    divertFileRecord(line);
+    return false;
+  }
+  if (sinkStalled()) {
+    divertFileRecord(line);
+    return false;
+  }
+  return true;
+};
+
+const writeToFile = async (line: string): Promise<void> => {
+  if (!(await prepareFileSink(line))) {
+    return;
+  }
+  // The watchdog may have fired while this record's preparation was settling.
+  if (sinkStalled()) {
+    divertFileRecord(line);
+    return;
   }
   const stream = logStream;
   if (!stream) {
-    // Still unavailable. When file is the only configured sink, degrade to
-    // stderr rather than silently discarding the record (issue #6179);
-    // `stderr`/`both` sinks already emit this line via writeToConfiguredStderr.
+    // Existing unavailable-file degradation (#6179), distinct from a detected stall.
     if (logSink === "file") {
       await writeToStderr(line);
     }
     return;
   }
   try {
-    await new Promise<void>((resolve, reject) => {
-      stream.write(line + "\n", (error) => {
-        if (error) {
-          reject(error);
-        } else {
-          resolve();
-        }
-      });
+    await stallGuardForStream(stream).track((done) => {
+      stream.write(line + "\n", done);
     });
   } catch (error) {
-    // The write itself failed (e.g. EISDIR/ENOSPC surfacing on write rather
-    // than at open). The stream's own 'error' listener (attachStreamFailureHandlers)
-    // will also fire and drop `logStream` so later writes retry/degrade, but
-    // THIS record must not vanish too. `reportLogFailure` intentionally
-    // suppresses its diagnostic for the `file` sink, so degrade the record
-    // itself to stderr here rather than relying on that path (issue #6179).
-    // `stderr`/`both` sinks already have this line on stderr via
-    // writeToConfiguredStderr, so only handle it here for `file`; otherwise
-    // rethrow and let the existing writeToLogFile/reportLogFailure diagnostic
-    // stand, avoiding a duplicate of the same line.
+    // This record must survive a failed file write (#6179); both already writes it to stderr.
     if (logSink === "file") {
       await writeToStderr(line);
       return;
@@ -985,8 +1148,8 @@ const writeToLogFile = async (level: string, message: string, args: any[]) => {
     const safeLogMessage = formatLogRecord(level, message, args).replace(/[\r\n\t]/g, " ");
     // Start both configured writes before awaiting either one. A failed file
     // sink must not suppress the process-stream record in `both` mode.
-    await Promise.all([writeToFile(safeLogMessage), writeToConfiguredStderr(safeLogMessage)]);
     mirrorToLegacyStdout(safeLogMessage);
+    await Promise.all([writeToFile(safeLogMessage), writeToConfiguredStderr(safeLogMessage)]);
   } catch (err) {
     await reportLogFailure("Failed to write log", err);
   }
@@ -994,8 +1157,10 @@ const writeToLogFile = async (level: string, message: string, args: any[]) => {
 
 // In stderr-only mode there is no file stream to rotate or close.
 const closeCurrentLogStream = async (timer: Timer = defaultTimer): Promise<void> => {
+  retireRotationWatchdog();
   if (logStream) {
     const closingStream = logStream;
+    streamStallGuards.get(closingStream)?.retire();
     // Late records must degrade until close confirms release of the old descriptor.
     logStream = undefined;
     deferReopenUntilClose(closingStream, timer);
@@ -1102,21 +1267,31 @@ export const logger: Logger = {
    * Flushes queued writes and closes the log stream.
    */
   close(): void {
+    retireRotationWatchdog();
     const closingStream = logStream;
     logStream = undefined;
     if (closingStream) {
+      streamStallGuards.get(closingStream)?.retire();
       deferReopenUntilClose(closingStream);
       closingStream.end();
     }
   },
 
   async closeAfterFlush(timer: Timer = defaultTimer): Promise<void> {
+    // Intentional shutdown keeps its original drain timeout, without a stall diagnostic.
+    intentionalDrainCount++;
+    rotationWait?.guard.suspend();
+    if (logStream) {
+      streamStallGuards.get(logStream)?.suspend();
+    }
     let timeoutHandle: NodeJS.Timeout | undefined;
     const deadline = new AbortController();
     try {
       timeoutHandle = timer.setTimeout(() => {
+        retireRotationWatchdog();
         const stalledStream = logStream;
         if (stalledStream) {
+          streamStallGuards.get(stalledStream)?.retire();
           logStream = undefined;
           deferReopenUntilClose(stalledStream, timer);
           stalledStream.destroy?.();
@@ -1135,6 +1310,7 @@ export const logger: Logger = {
         label: "Log writes",
       });
     } finally {
+      intentionalDrainCount--;
       if (timeoutHandle !== undefined) {
         timer.clearTimeout(timeoutHandle);
       }

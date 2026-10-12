@@ -818,6 +818,33 @@ class ImeCommitDriverTest {
   }
 
   @Test
+  fun `pure reconciliation requires resume progress regardless of restart flag`() {
+    val units = listOf("a", "b", "c", "d")
+    for (postDispatch in listOf(false, true)) {
+      for (restart in listOf(false, true)) {
+        assertEquals(
+          ImeCommitDriver.Reconciliation.Resume(2),
+          ImeCommitDriver.reconcileDecision(postDispatch, restart, "", "ab", units, 1),
+        )
+        for (lastResume in listOf(2, 3)) {
+          assertEquals(
+            if (postDispatch) ImeCommitDriver.Reconciliation.Succeed("ab")
+            else ImeCommitDriver.Reconciliation.Continue,
+            ImeCommitDriver.reconcileDecision(
+              postDispatch,
+              restart,
+              "",
+              "ab",
+              units,
+              lastResume,
+            ),
+          )
+        }
+      }
+    }
+  }
+
+  @Test
   fun `restart during word run reconciles four captured loss points without duplicate application`() {
     for (lostAt in listOf(7, 5, 10, 16)) {
       val sink = restartingSink("existing:", true, lostAt)
@@ -923,6 +950,59 @@ class ImeCommitDriverTest {
     assertNull(result.insertedText)
     assertEquals(CtrlProxyIme.INPUT_CONNECTION_TIMEOUT_MS, sink.clockMs)
     assertEquals("hello", sink.committedChars.joinToString(""))
+  }
+
+  @Test
+  fun `rejected dash restarts stop resending and continue pending digits`() {
+    val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
+    sink.editorText = ""
+    sink.restarting = true
+    sink.afterCommit = {
+      if (sink.committedChars.last() == "-") {
+        sink.editorText = requireNotNull(sink.editorText).dropLast(1)
+        sink.generation++
+      }
+    }
+    val result = commit(sink, "12-34", PRIOR_IME_ID)
+    assertEquals(2, sink.committedChars.count { it == "-" })
+    assertTrue(result.success)
+    assertNull(result.error)
+    assertEquals("1234", result.insertedText)
+    assertEquals("1234", sink.editorText)
+  }
+
+  @Test
+  fun `stripped final newline succeeds with retained query after one resend`() {
+    val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
+    sink.editorText = ""
+    sink.afterCommit = {
+      if (sink.committedChars.last() == "\n") {
+        sink.editorText = requireNotNull(sink.editorText).dropLast(1)
+        sink.generation++
+      }
+    }
+    val result = commit(sink, "hello\n", PRIOR_IME_ID)
+    assertEquals(2, sink.committedChars.count { it == "\n" })
+    assertTrue(result.success)
+    assertNull(result.error)
+    assertEquals("hello", result.insertedText)
+  }
+
+  @Test
+  fun `stripped mid dispatch newline continues remaining line after one resend`() {
+    val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
+    sink.editorText = ""
+    sink.afterCommit = {
+      if (sink.committedChars.last() == "\n") {
+        sink.editorText = requireNotNull(sink.editorText).dropLast(1)
+        sink.generation++
+      }
+    }
+    val result = commit(sink, "line one\nline two", PRIOR_IME_ID)
+    assertEquals(2, sink.committedChars.count { it == "\n" })
+    assertTrue(result.success)
+    assertNull(result.error)
+    assertEquals("line oneline two", result.insertedText)
   }
 
   @Test
@@ -1075,19 +1155,23 @@ class ImeCommitDriverTest {
   }
 
   @Test
-  fun `reconnect cannot resend a strict prefix more than three times`() {
+  fun `reconnect cannot resume more than three genuinely progressing prefixes`() {
     val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
     sink.editorText = "baseline:"
-    sink.beforeCommit = { if (it >= 1) sink.stale = true }
-    sink.beforeContinuation = {
-      sink.generation++
-      sink.stale = false
+    val lostAtPrefixes = mutableSetOf<String>()
+    sink.afterCommit = {
+      val prefix = requireNotNull(sink.editorText).dropLast(1)
+      if (sink.committedChars.last() == " " && lostAtPrefixes.add(prefix)) {
+        sink.editorText = prefix
+        sink.generation++
+      }
     }
-    val result = commit(sink, "a b", PRIOR_IME_ID)
+    val result = commit(sink, "a b c d e", PRIOR_IME_ID)
     assertFalse(result.success)
     assertTrue(requireNotNull(result.error).contains("resume limit exceeded"))
-    assertEquals(5, sink.committedChars.size)
-    assertEquals("baseline:a", sink.editorText)
+    assertEquals(4, lostAtPrefixes.size)
+    assertEquals(11, sink.committedChars.size)
+    assertEquals("baseline:a b c d", sink.editorText)
   }
 
   @Test

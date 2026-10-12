@@ -168,6 +168,7 @@ class ImeCommitDriver(
     private val baseline =
       sink.readEditorTextBeforeCursor(EDITOR_READ_CAP)?.takeIf { it.length < EDITOR_READ_CAP }
     private var resumes = 0
+    private var lastResumeConfirmed = -1
     private val currentLine = StringBuilder()
     private var settleWaitMs = 0L
 
@@ -266,7 +267,14 @@ class ImeCommitDriver(
 
     private fun applyReconciliation(now: String?, next: () -> Unit) {
       val decision =
-        reconcileDecision(postDispatch, sink.startedByRestart(), baseline, now, dispatched)
+        reconcileDecision(
+          postDispatch,
+          sink.startedByRestart(),
+          baseline,
+          now,
+          dispatched,
+          lastResumeConfirmed,
+        )
       generation = sink.connectionGeneration()
       when (decision) {
         Reconciliation.Continue -> next()
@@ -287,6 +295,7 @@ class ImeCommitDriver(
         return
       }
       resumes++
+      lastResumeConfirmed = confirmed
       while (dispatched.size > confirmed) dispatched.removeAt(dispatched.lastIndex)
       committedUnits = confirmed
       currentLine.setLength(0)
@@ -574,20 +583,26 @@ class ImeCommitDriver(
       return null
     }
 
-    /** Only a visible non-empty strict prefix proves that resending is safe. */
+    /** Resend only a visible non-empty strict prefix that advances beyond the previous resume. */
     internal fun reconcileDecision(
       postDispatch: Boolean,
       startedByRestart: Boolean,
       baseline: String?,
       now: String?,
       dispatched: List<String>,
+      lastResumeConfirmed: Int = -1,
     ): Reconciliation {
       val delta = editorDelta(baseline, now)
       val confirmed = delta?.let { confirmedUnits(it, dispatched) }
       return when {
         confirmed == dispatched.size ->
           if (postDispatch) Reconciliation.Succeed(delta) else Reconciliation.Continue
-        confirmed != null && confirmed > 0 -> Reconciliation.Resume(confirmed)
+        confirmed != null && confirmed > 0 ->
+          when {
+            confirmed > lastResumeConfirmed -> Reconciliation.Resume(confirmed)
+            postDispatch -> Reconciliation.Succeed(delta)
+            else -> Reconciliation.Continue
+          }
         postDispatch -> Reconciliation.Succeed(delta)
         confirmed == 0 -> Reconciliation.Fail(NONE_APPLIED_ERROR, delta)
         startedByRestart -> Reconciliation.Continue

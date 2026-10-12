@@ -1,7 +1,12 @@
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
+
 export interface DatabaseHealthExitDeps {
   now(): number;
   /** Synchronous last-resort diagnostic; production passes writeEmergencyLog. */
   writeEmergency(message: string): void;
+  /** Synchronous startup-policy record, before cleanup and logger flush. */
+  writeExitRecord(): void;
   /** Removes this daemon's pid and socket files. */
   cleanupDaemonFiles(): void;
   /** Bounded flush-and-close of the async logger. */
@@ -31,6 +36,11 @@ export async function exitAfterDatabaseHealthFailure(
   } catch (error) {
     // Emergency writes are the last-resort sink; the async logger may be stalled, so nothing else can report this failure.
     void error;
+  }
+  try {
+    deps.writeExitRecord();
+  } catch (error) {
+    logger.warn(`Failed to record database-health exit: ${errorMessage(error)}`, error);
   }
   deps.cleanupDaemonFiles();
   try {

@@ -13,6 +13,8 @@ import {
   getCliSessionIdleTimeoutMs,
 } from "../../src/daemon/constants";
 import { Daemon, type DaemonStartHost } from "../../src/daemon/daemon";
+import type { DaemonExitRecord } from "../../src/daemon/daemonExitRecord";
+import { FakeDaemonExitRecordFileSystem } from "../fakes/SafeDaemonManager";
 import {
   defaultAppearanceSyncDependencies,
   type AppearanceSyncTarget,
@@ -196,6 +198,7 @@ interface DaemonProcessTeardown {
 
 interface DaemonSide {
   daemon: Daemon;
+  exitFiles: FakeDaemonExitRecordFileSystem;
   manager: SessionManager;
   pool: DevicePool;
   state: DaemonStateAccess;
@@ -436,6 +439,7 @@ export class LivenessScenario {
    * list per daemon process. They do nothing here, so the order is all a scenario can see of them.
    */
   readonly hostStartSteps: string[][] = [];
+  readonly exitRecords: DaemonExitRecord[] = [];
   /** The loopback MCP transports the running daemon's socket server holds open, by bound session. */
   private readonly loopbackTransports = new Set<{ sessionUuid: string | undefined }>();
   private readonly managedSlotsEnabled: boolean;
@@ -668,6 +672,10 @@ export class LivenessScenario {
       () => NO_MANAGED_SLOTS,
       () => undefined,
     );
+    const exitFiles = new FakeDaemonExitRecordFileSystem();
+    (
+      daemon as unknown as { exitRecordFileSystem: FakeDaemonExitRecordFileSystem }
+    ).exitRecordFileSystem = exitFiles;
     armHostTripwires(daemon);
     if (this.managedSlotsEnabled) {
       // The registry is a file on the host that outlives the daemon; each process finds it open.
@@ -702,7 +710,7 @@ export class LivenessScenario {
     if (!socket) {
       throw new Error("LivenessScenario: Daemon.startOn() never bound its control socket");
     }
-    return { daemon, manager, pool, state: DaemonState.getInstance(), socket, clock };
+    return { daemon, exitFiles, manager, pool, state: DaemonState.getInstance(), socket, clock };
   }
 
   /**
@@ -720,6 +728,7 @@ export class LivenessScenario {
     const steps: string[] = [];
     this.hostStartSteps.push(steps);
     return {
+      writeExitRecord: (record) => void this.exitRecords.push(record),
       enterProcess: () => void steps.push("enterProcess"),
       publishForwardLeaseOwner: () => void steps.push("publishForwardLeaseOwner"),
       writeEarlyOwnerRecord: async () => void steps.push("writeEarlyOwnerRecord"),

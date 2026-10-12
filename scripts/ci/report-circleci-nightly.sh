@@ -124,9 +124,13 @@ while IFS=$'\t' read -r name job_status job_number pipeline_number workflow_id; 
     line="${line}
   Job: ${job_url}
   Artifacts (${job_url}/artifacts):"
-    # A pruned job (404) must not abort the report: list it with no artifacts instead.
-    artifacts_status=0
-    artifacts_json="$(cc "${project}/${job_number}/artifacts")" || artifacts_status=$?
+    # A pruned job (404) must not abort the report: list it with no artifacts instead. cc handles
+    # every failure itself (it returns the skip status or exits non-zero inside the command
+    # substitution), so errexit is suspended only around this one call to read its status.
+    set +e
+    artifacts_json="$(cc "${project}/${job_number}/artifacts")"
+    artifacts_status=$?
+    set -e
     [[ "${artifacts_status}" -eq 0 ]] || artifacts_json='{"items":[]}'
     artifacts="$(jq -r '[.items[]?.path] | unique | .[:15][]' <<< "${artifacts_json}")"
     if [[ -n "${artifacts}" ]]; then

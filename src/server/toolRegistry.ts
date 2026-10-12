@@ -1,3 +1,4 @@
+import { matchRunningReadTarget } from "../devices/runningReadTarget";
 import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
 import {
   runWithPostActionCaptureScope,
@@ -419,7 +420,12 @@ interface PlainToolOptions extends ToolRegistrationOptions {
 
 /** Resolves a device for a read without acquiring, readying or changing a device session. */
 interface SessionlessDeviceRead {
-  resolve(deviceId: string, signal?: AbortSignal): Promise<BootedDevice>;
+  resolve(deviceId: string, signal?: AbortSignal, platform?: SomePlatform): Promise<BootedDevice>;
+  findRunning?(
+    deviceId: string,
+    signal?: AbortSignal,
+    platform?: SomePlatform,
+  ): Promise<BootedDevice | undefined>;
   assertAuthorized(device: BootedDevice): void;
 }
 
@@ -762,11 +768,16 @@ async function resolveSessionlessDeviceRead(
   input: ExecutionTargetInput,
   read: SessionlessDeviceRead,
   deviceId: string,
+  resolvedDevice?: BootedDevice,
 ): Promise<ExecutionTargetContext> {
   const { args, signal } = input;
   signal?.throwIfAborted();
-  const device = await read.resolve(deviceId, signal);
-  if (args.platform && args.platform !== device.platform) {
+  const device =
+    resolvedDevice ?? (await read.resolve(deviceId, signal, args.platform || "either"));
+  if (resolvedDevice) {
+    read.assertAuthorized(device);
+  }
+  if (args.platform && args.platform !== "either" && args.platform !== device.platform) {
     throw new ActionableError(
       `Device ${deviceId} is ${device.platform}, not requested platform ${args.platform}.`,
     );
@@ -1108,11 +1119,21 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       input.args.deviceId &&
       !input.args.sessionUuid
     ) {
-      return resolveSessionlessDeviceRead(
-        input,
-        input.options.sessionlessDeviceRead,
-        input.args.deviceId,
-      );
+      const read = input.options.sessionlessDeviceRead;
+      const running = read.findRunning
+        ? await read.findRunning(input.args.deviceId, input.signal, input.args.platform || "either")
+        : await read.resolve(input.args.deviceId, input.signal);
+      if (running) {
+        // A running explicit observe keeps its lightweight handler readiness.
+        return resolveSessionlessDeviceRead(input, read, running.deviceId, running);
+      }
+      // Only absence falls through to the manager's existing named-image boot and errors.
+      const target = await this.resolveNormalExecutionTarget(input);
+      if (target.device && !target.sessionUuid) {
+        read.assertAuthorized(target.device);
+        return { ...target, deviceRead: read };
+      }
+      return target;
     }
     return this.resolveNormalExecutionTarget(input);
   }
@@ -1486,6 +1507,14 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
             deviceSessionManager,
             getConnectedPlatforms,
           );
+        }
+        if (readOnly && !sessionUuid && providedDeviceId) {
+          const runningReadTarget = matchRunningReadTarget(
+            (await getConnectedPlatforms()).devices,
+            providedDeviceId,
+            platform,
+          );
+          readinessTarget = runningReadTarget?.deviceId ?? readinessTarget;
         }
         // A sessionless read that would land on a held device (its explicit deviceId, or the device
         // readiness would select) watches it through the read-only path: no readiness, pin or

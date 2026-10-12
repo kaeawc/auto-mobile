@@ -1,4 +1,5 @@
-import type { BootedDevice } from "../models";
+import { matchRunningReadTarget, providedReadTargetNotFound } from "../devices/runningReadTarget";
+import type { BootedDevice, SomePlatform } from "../models";
 import { ActionableError } from "../models/ActionableError";
 import { listBootedDevicesForResource } from "./resourceDeviceResolver";
 
@@ -19,19 +20,16 @@ export async function resolveDeviceForObservationRead(
   deviceId: string,
   signal: AbortSignal | undefined,
   access: DeviceObservationAccess = defaultDeviceObservationAccess,
+  platform: SomePlatform = "either",
 ): Promise<BootedDevice> {
   const devices = await access.listBooted(signal);
   signal?.throwIfAborted();
-  const matches = devices.filter(
-    (device) => device.deviceId === deviceId || device.name === deviceId,
-  );
-  if (matches.length !== 1) {
-    throw new ActionableError(
-      `Expected one booted device for '${deviceId}'; found ${matches.length}.`,
-    );
+  const device = matchRunningReadTarget(devices, deviceId, platform);
+  if (!device) {
+    throw providedReadTargetNotFound(deviceId, platform, devices);
   }
-  assertObservationReadAccess(matches[0], access);
-  return matches[0];
+  assertObservationReadAccess(device, access);
+  return device;
 }
 
 export function assertObservationReadAccess(
@@ -50,11 +48,23 @@ export function assertObservationReadAccess(
 export function sessionlessDeviceReadFor(
   access: DeviceObservationAccess = defaultDeviceObservationAccess,
 ): {
-  resolve(deviceId: string, signal?: AbortSignal): Promise<BootedDevice>;
+  resolve(deviceId: string, signal?: AbortSignal, platform?: SomePlatform): Promise<BootedDevice>;
+  findRunning?(
+    deviceId: string,
+    signal?: AbortSignal,
+    platform?: SomePlatform,
+  ): Promise<BootedDevice | undefined>;
   assertAuthorized(device: BootedDevice): void;
 } {
   return {
-    resolve: (deviceId, signal) => resolveDeviceForObservationRead(deviceId, signal, access),
+    resolve: (deviceId, signal, platform) =>
+      resolveDeviceForObservationRead(deviceId, signal, access, platform),
+    findRunning: async (deviceId, signal, platform) => {
+      const devices = await access.listBooted(signal);
+      signal?.throwIfAborted();
+      const device = matchRunningReadTarget(devices, deviceId, platform);
+      return device;
+    },
     assertAuthorized: (device) => assertObservationReadAccess(device, access),
   };
 }

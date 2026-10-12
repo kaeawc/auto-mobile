@@ -155,9 +155,9 @@ A call without a deviceId is checked against the device readiness would select (
 `ensureDeviceReady` runs, so a refused call never readies, pins or configures the
 holder's device (#10828). A sessionless `deviceReadOnly` call whose target (its
 deviceId, or that predicted device) is held runs on the read-only device path
-instead (#10830): the device is resolved from the booted list
-(`sessionlessDeviceReadFor`), with no readiness, current-device pin, settings,
-navigation recording or audit, and handlers see `isSessionlessDeviceRead()`
+instead (#10830): a running name resolves to its serial/UDID before checking ownership;
+the device is resolved from the booted list (`sessionlessDeviceReadFor`), with no
+readiness, current-device pin, settings, navigation recording or audit, and handlers see `isSessionlessDeviceRead()`
 (observe and snapshotOf then use the observer capture, connect-only on a held
 device). The observation socket's `request_observation` follows the same rule: a requester
 whose session does not hold a held device gets that connect-only observer read, never the

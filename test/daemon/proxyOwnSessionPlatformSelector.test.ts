@@ -1,3 +1,4 @@
+import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DaemonConnectionSessionReleasedError,
@@ -750,19 +751,25 @@ describe("#11714: an unambiguous platform-only call uses its connection's defaul
       expect(forwarded.slice(before)).toEqual([
         {
           name: "homeScreen",
-          params: {
-            platform: "android",
-            sessionUuid: ANDROID.sessionUuid,
-            [DAEMON_BOUND_SESSION_PARAM]: ANDROID.sessionUuid,
-          },
+          params: withProxyOwnerToken(
+            {
+              platform: "android",
+              sessionUuid: ANDROID.sessionUuid,
+              [DAEMON_BOUND_SESSION_PARAM]: ANDROID.sessionUuid,
+            },
+            "stable-owner-token",
+          ),
         },
         {
           name: "observe",
-          params: {
-            platform: "android",
-            sessionUuid: ANDROID.sessionUuid,
-            [DAEMON_BOUND_SESSION_PARAM]: ANDROID.sessionUuid,
-          },
+          params: withProxyOwnerToken(
+            {
+              platform: "android",
+              sessionUuid: ANDROID.sessionUuid,
+              [DAEMON_BOUND_SESSION_PARAM]: ANDROID.sessionUuid,
+            },
+            "stable-owner-token",
+          ),
         },
       ]);
     } finally {
@@ -802,11 +809,16 @@ describe("#11714: an unambiguous platform-only call uses its connection's defaul
     await proxy.holdManagedExecutionSession(ANDROID.sessionUuid);
     for (const name of ["homeScreen", "observe"]) {
       await proxy.callTool(name, { platform: "ios" });
-      expect(lastParams()).toEqual({
-        platform: "ios",
-        sessionUuid: ANDROID.sessionUuid,
-        [DAEMON_BOUND_SESSION_PARAM]: ANDROID.sessionUuid,
-      });
+      expect(lastParams()).toEqual(
+        withProxyOwnerToken(
+          {
+            platform: "ios",
+            sessionUuid: ANDROID.sessionUuid,
+            [DAEMON_BOUND_SESSION_PARAM]: ANDROID.sessionUuid,
+          },
+          "stable-owner-token",
+        ),
+      );
     }
     expect(forwarded).toHaveLength(2);
   });

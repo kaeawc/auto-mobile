@@ -106,6 +106,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
         /// Injected performance tracking (Phase 6 wires the concrete provider).
         private let perf: any PerfTracking
+        private let appStateClock: any Clock<Duration>
 
         // `internal`, not `public`: this init injects the internal `PerfTracking` seam, so a
         // `public` init would expose an internal type (a first-time iOS-compile error the host
@@ -116,11 +117,13 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         // singleton; see STATUS §6.)
         init(
             application: XCUIApplication? = nil,
-            perf: any PerfTracking
+            perf: any PerfTracking,
+            appStateClock: any Clock<Duration> = ContinuousClock()
         ) {
             DeviceRotation.startMonitoring()
             tracker.setApplication(application, bundleId: nil, observe: false)
             self.perf = perf
+            self.appStateClock = appStateClock
         }
 
         /// Bracket a perf scope around `block` — the rewrite's expression of the reference
@@ -195,24 +198,13 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             }
         }
 
-        public func awaitAppState(bundleId: String, expectedState: AppStateExpectation) -> Bool {
-            for _ in 0 ..< 10 {
+        public func awaitAppState(bundleId: String, expectedState: AppStateExpectation) async -> Bool {
+            await AppStateWait.poll(clock: appStateClock) {
                 let stateRaw: UInt = catchingObjCExceptionNonThrowing({
                     XCUIApplication(bundleIdentifier: bundleId).state.rawValue
                 }, fallback: 0)
-                let matched: Bool
-                switch expectedState {
-                case .foreground:
-                    matched = stateRaw >= 4
-                case .notRunning:
-                    matched = stateRaw <= 1
-                case .background:
-                    matched = stateRaw == 3
-                }
-                if matched { return true }
-                Thread.sleep(forTimeInterval: 0.05)
+                return AppStateWait.matches(rawState: stateRaw, expected: expectedState)
             }
-            return false
         }
 
         /// Whether SpringBoard hosts a keyboard the app's own tree omits, using the same
@@ -581,7 +573,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             return .unknown
         }
 
-        public func awaitAppState(bundleId _: String, expectedState _: AppStateExpectation) -> Bool {
+        public func awaitAppState(bundleId _: String, expectedState _: AppStateExpectation) async -> Bool {
             return true
         }
 

@@ -8,6 +8,16 @@ import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 
 /** A freshly started device held by another session is the typed device_owned_by_other_session (#11351). */
 describe("freshStartAlreadyBoundError", () => {
+  test("retryable leaving holder keeps its message and adds the shared release suffix", () => {
+    for (const awaitingOwner of [false, true]) {
+      const old = freshStartAlreadyBoundError("d", "holder", awaitingOwner);
+      const error = freshStartAlreadyBoundError("d", "holder", awaitingOwner, 700);
+      expect(error.toPayload()).toMatchObject({ retryable: true, retryAfterMs: 700 });
+      expect(error.message).toBe(
+        `${old.message} The holder is being released; retry in about 700ms.`,
+      );
+    }
+  });
   for (const awaitingOwner of [false, true]) {
     test(`is typed on the wire (awaiting owner: ${awaitingOwner})`, () => {
       const error = freshStartAlreadyBoundError("emulator-5554", "holder", awaitingOwner);

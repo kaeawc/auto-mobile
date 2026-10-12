@@ -1,3 +1,4 @@
+import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -484,12 +485,14 @@ describe("proxy server session ownership errors", () => {
         arguments: {},
       });
 
-      expect(originalClient.callToolCalls).toEqual([{ toolName: "getApple", params: {} }]);
+      expect(originalClient.callToolCalls).toEqual([
+        { toolName: "getApple", params: withProxyOwnerToken({}) },
+      ]);
       expect(replacementClient.callToolCalls).toEqual([
-        { toolName: "getApple", params: {} },
+        { toolName: "getApple", params: withProxyOwnerToken({}) },
         {
           toolName: "observe",
-          params: { sessionUuid: "replacement-session" },
+          params: withProxyOwnerToken({ sessionUuid: "replacement-session" }),
         },
       ]);
     } finally {
@@ -631,11 +634,13 @@ describe("proxy server session ownership errors", () => {
       expect(result).toEqual({
         content: [{ type: "text", text: "reclaimed" }],
       });
-      expect(originalClient.callToolCalls).toEqual([{ toolName: "getApple", params: {} }]);
+      expect(originalClient.callToolCalls).toEqual([
+        { toolName: "getApple", params: withProxyOwnerToken({}) },
+      ]);
       expect(replacementClient.callToolCalls).toEqual([
         {
           toolName: "observe",
-          params: { sessionUuid: "shutdown-session" },
+          params: withProxyOwnerToken({ sessionUuid: "shutdown-session" }),
         },
       ]);
     } finally {

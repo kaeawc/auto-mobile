@@ -6,6 +6,7 @@ import type { Socket } from "node:net";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonState } from "../../src/daemon/daemonState";
 import {
   DEFAULT_SOCKET_PATH,
   PID_FILE_PATH,
@@ -219,11 +220,27 @@ export class InMemoryControlSocket {
     connectionIds: ConnectionIdQueue;
     loopback: McpClientFactory;
     startupOptions?: ConstructorParameters<typeof UnixSocketServer>[5];
+    daemonInstance?: string;
   }): InMemoryControlSocket {
+    const daemonInstance = deps.daemonInstance;
+    // Keep all state access on the singleton, with the identity captured by this server alone.
+    // Binding methods preserves DaemonState's receiver; no process-wide override is installed.
+    const daemonState =
+      daemonInstance === undefined
+        ? undefined
+        : new Proxy(DaemonState.getInstance(), {
+            get(target, property, receiver) {
+              if (property === "getDaemonInstance") {
+                return () => daemonInstance;
+              }
+              const value = Reflect.get(target, property, receiver);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          });
     const server = new UnixSocketServer(
       assertNotHostDaemonPath("control socket path", IN_MEMORY_SOCKET_PATH),
       "http://in-memory.invalid/mcp",
-      undefined,
+      daemonState,
       deps.timer,
       null,
       deps.startupOptions ?? {},

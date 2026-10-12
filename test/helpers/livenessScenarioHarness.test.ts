@@ -32,6 +32,7 @@ import {
   IDLE_WINDOW_MS,
   KEEPER_INTERVAL_MS,
   LivenessScenario,
+  OWNER_TOKEN,
   RELEASE_SLACK_MS,
 } from "./livenessScenarioHarness";
 import { warmedTests } from "./warmedTests";
@@ -198,6 +199,29 @@ describe("the harness's daemon runs every host step of the start sequence", () =
 });
 
 describe("a harness daemon is a process", () => {
+  test("a restarted daemon reports a distinct deterministic instance through its heartbeat wire", async () => {
+    scenario = await LivenessScenario.start();
+    const sessionId = await scenario.acquire();
+    const params = {
+      sessionId,
+      livenessOwnerToken: OWNER_TOKEN,
+      claimLivenessOwnership: true,
+      reportDaemonInstance: true,
+    };
+    const first = await scenario.daemonMethod("daemon/heartbeat", params);
+    await scenario.daemonRestart();
+    const next = await scenario.daemonMethod("daemon/heartbeat", params);
+
+    expect(first).toMatchObject({
+      success: true,
+      result: { daemonInstance: "scenario-daemon-1:instance" },
+    });
+    expect(next).toMatchObject({
+      success: true,
+      result: { daemonInstance: "scenario-daemon-2:instance" },
+    });
+  });
+
   test("a killed process's timers, intervals and sleeps never fire; the shared clock runs on", async () => {
     const clock = new FakeTimer();
     const dying = new ProcessTimer(clock);

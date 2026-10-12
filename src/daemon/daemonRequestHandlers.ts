@@ -93,6 +93,8 @@ import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery
 import { canonicalFrameDeviceId } from "./frameDeviceIdentity";
 import {
   managedConnectionControlRefusal,
+  managedConnectionHostMutationRefusal,
+  managedConnectionScopeResetRefusal,
   type ManagedConnectionScopes,
 } from "./managedSlots/managedConnectionScope";
 import {
@@ -615,7 +617,11 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
     [DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD, handleReleaseLivenessOwnership],
     [DAEMON_HEARTBEAT_METHOD, handleHeartbeat],
     [DAEMON_TOKEN_OWNED_SESSIONS_METHOD, handleTokenOwnedSessions],
-    ["daemon/refreshDevices", handleRefreshDevices],
+    [
+      "daemon/refreshDevices",
+      (request, state, _executions, _signal, context) =>
+        handleRefreshDevices(request, state, context),
+    ],
     ["daemon/availableDevices", handleAvailableDevices],
     ["daemon/sessionInfo", (request, state) => handleSessionInfo(request, state)],
     ["daemon/activeSessions", (request, state) => handleActiveSessions(request, state)],
@@ -624,8 +630,16 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
       (request, state, executions, _signal, context) =>
         handleReleaseSession(request, state, executions, context),
     ],
-    [DAEMON_RELEASE_EXECUTION_METHOD, handleReleaseExecution],
-    [DAEMON_RESET_SLOT_SCOPE_METHOD, handleResetSlotScope],
+    [
+      DAEMON_RELEASE_EXECUTION_METHOD,
+      (request, state, _executions, _signal, context) =>
+        handleReleaseExecution(request, state, context),
+    ],
+    [
+      DAEMON_RESET_SLOT_SCOPE_METHOD,
+      (request, state, _executions, _signal, context) =>
+        handleResetSlotScope(request, state, context),
+    ],
     [
       DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD,
       (request, state, _executions, signal, context) =>
@@ -1175,7 +1189,15 @@ async function refreshedPoolStats(
 async function handleRefreshDevices(
   request: DaemonRequest,
   state: DaemonStateAccess,
+  context: DaemonRequestContext,
 ): Promise<DaemonMethodResult> {
+  const refusal = managedConnectionHostMutationRefusal({
+    binding: state.getManagedConnectionScopes?.().get(context.socketSessionId),
+    action: request.method,
+  });
+  if (refusal) {
+    return { success: false, code: refusal.code, error: refusal.message };
+  }
   const pool = state.getDevicePool();
   const outcome = pool.refreshDevicesWithOutcome
     ? await pool.refreshDevicesWithOutcome()
@@ -1442,10 +1464,22 @@ const releaseExecutionParams = z.object({
 async function handleReleaseExecution(
   request: DaemonRequest,
   state: DaemonStateAccess,
+  context: DaemonRequestContext,
 ): Promise<DaemonMethodResult> {
   const parsed = releaseExecutionParams.safeParse(request.params);
   if (!parsed.success) {
     return { success: false, error: "sessionId and livenessOwnerToken parameters required" };
+  }
+  const refusal = managedConnectionLifecycleRefusal(
+    state,
+    context,
+    DAEMON_RELEASE_EXECUTION_METHOD,
+    {
+      sessionUuid: parsed.data.sessionId,
+    },
+  );
+  if (refusal) {
+    return refusal;
   }
   const drain = state.getManagedExecutionRelease?.();
   if (!drain) {
@@ -1484,6 +1518,7 @@ const resetSlotScopeParams = z
 async function handleResetSlotScope(
   request: DaemonRequest,
   state: DaemonStateAccess,
+  context: DaemonRequestContext,
 ): Promise<DaemonMethodResult> {
   const parsed = resetSlotScopeParams.safeParse(request.params);
   if (!parsed.success) {
@@ -1491,6 +1526,14 @@ async function handleResetSlotScope(
       success: false,
       error: `Invalid resetSlotScope parameters: ${parsed.error.message}`,
     };
+  }
+  const refusal = managedConnectionScopeResetRefusal({
+    binding: state.getManagedConnectionScopes?.().get(context.socketSessionId),
+    action: DAEMON_RESET_SLOT_SCOPE_METHOD,
+    identity: parsed.data,
+  });
+  if (refusal) {
+    return { success: false, code: refusal.code, error: refusal.message };
   }
   const reset = state.getSlotScopeReset?.();
   if (!reset) {

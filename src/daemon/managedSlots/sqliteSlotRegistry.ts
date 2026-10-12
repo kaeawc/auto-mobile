@@ -10,6 +10,7 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
 import { migrateSlotRegistry } from "./slotRegistryMigrations";
 import {
+  isAbandonedScope,
   isSlotJournalPhaseOpen,
   journalOwnersEqual,
   journalTargetEntries,
@@ -1144,6 +1145,11 @@ export class SqliteSlotRegistry implements SlotRegistry {
     return updated !== undefined;
   }
 
+  openSlotJournal(
+    key: SlotKey,
+    input: OpenSlotJournalInput & { requireAbandonedScope?: false },
+  ): Promise<Exclude<OpenSlotJournalResult, { kind: "scope_not_abandoned" }>>;
+  openSlotJournal(key: SlotKey, input: OpenSlotJournalInput): Promise<OpenSlotJournalResult>;
   async openSlotJournal(key: SlotKey, input: OpenSlotJournalInput): Promise<OpenSlotJournalResult> {
     assertValidSlotKey(key);
     assertOpenPhase(input.phase);
@@ -1158,6 +1164,12 @@ export class SqliteSlotRegistry implements SlotRegistry {
       const open = await this.readOpenJournal(trx, key);
       if (open) {
         return { kind: "journal_open", entry: open };
+      }
+      if (input.requireAbandonedScope) {
+        const scope = await this.readScope(trx, key.scopeKey);
+        if (!isAbandonedScope(scope)) {
+          return { kind: "scope_not_abandoned", scope };
+        }
       }
       const applied = await this.applyJournalAssignmentChange(trx, key, input.assignment);
       if ("kind" in applied) {

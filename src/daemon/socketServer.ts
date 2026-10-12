@@ -158,7 +158,10 @@ import {
   type CanonicalFrameDiscovery,
   type FrameDeviceIdentityPool,
 } from "./frameDeviceIdentity";
-import { managedConnectionControlRefusal } from "./managedSlots/managedConnectionScope";
+import {
+  managedConnectionControlRefusal,
+  managedConnectionHostMutationRefusal,
+} from "./managedSlots/managedConnectionScope";
 import { provisionCancellationOutcomes } from "../server/provisionCancellationOutcomes";
 import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../server/deviceTools";
 
@@ -219,7 +222,6 @@ import type {
   ImeAction,
   ScreenScaleMetadata,
 } from "../models";
-import type { DeviceService } from "../features/observe/DeviceService";
 import {
   executionTracker,
   sessionExecutionMetadataOf,
@@ -768,6 +770,7 @@ export interface AppendTextInput {
     timeoutMs?: number,
     beforeKeyEvent?: AppendKeyEventValidator,
     signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<{
     success: boolean;
     error?: string;
@@ -1101,6 +1104,7 @@ interface ProfileReaffirmForwardRouteOptions {
 }
 
 interface AndroidAppendTextOptions {
+  onDispatch?: () => void;
   targetDevice: BootedDevice;
   text: string;
   deadline: number;
@@ -5361,6 +5365,7 @@ export class UnixSocketServer {
         if (!args.key || typeof args.enabled !== "boolean") {
           throw new Error("setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params");
         }
+        this.assertManagedConnectionHostMutation(socketSessionId, "ide/setFeatureFlag");
         const updated = await featureFlagService.setFlag(
           args.key as FeatureFlagKey,
           args.enabled,
@@ -6847,7 +6852,6 @@ export class UnixSocketServer {
         }
 
         const imeAction: ImeAction | undefined = args.submit ? "done" : undefined;
-        dispatching?.();
         return await this.runInputOperationWithTimeout(
           request.method,
           totalTimeoutMs,
@@ -6864,6 +6868,7 @@ export class UnixSocketServer {
               args.frameContext,
               recordConfirmedAppendCharsSent,
               signal,
+              dispatching,
             ),
           (timeoutError) =>
             args.append && confirmedAppendCharsSent !== undefined
@@ -6942,10 +6947,13 @@ export class UnixSocketServer {
         // press to pick up): without it, session teardown mid-home-press leaves
         // the ADB dispatch and foreground-verification reads running (issue #6289).
         const pressButton = new PressButton(targetDevice);
-        dispatching?.();
-        return args.frameContext === undefined
-          ? await pressButton.press(args.button, remainingTimeoutMs, undefined, signal)
-          : await pressButton.press(args.button, remainingTimeoutMs, args.frameContext, signal);
+        return await pressButton.press(
+          args.button,
+          remainingTimeoutMs,
+          args.frameContext,
+          signal,
+          dispatching,
+        );
       },
       this.inputDeviceGate(
         request.method,
@@ -7007,7 +7015,6 @@ export class UnixSocketServer {
 
         const inputKey = new InputKey(targetDevice, defaultAdbClientFactory, undefined, this.timer);
         let dispatched = false;
-        dispatching?.();
         return await this.runInputOperationWithTimeout(
           request.method,
           totalTimeoutMs,
@@ -7018,6 +7025,7 @@ export class UnixSocketServer {
               signal,
               onDispatch: () => {
                 dispatched = true;
+                dispatching?.();
               },
             }),
           (timeoutError) => (dispatched ? InputKey.indeterminateError(timeoutError) : undefined),
@@ -7051,19 +7059,27 @@ export class UnixSocketServer {
     text: string,
     imeAction: ImeAction | undefined,
     timeoutMs: number,
-    ...[append = false, frameContext, onConfirmedAppendCharsSent, signal]: [
+    ...[append = false, frameContext, onConfirmedAppendCharsSent, signal, dispatching]: [
       append?: boolean,
       frameContext?: string,
       onConfirmedAppendCharsSent?: (charsSent: number) => void,
       signal?: AbortSignal,
+      dispatching?: () => void,
     ]
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
     // Charge set-text and the optional submit/IME action against a single
     // shared budget. Otherwise submit:true would hand each request the full
     // timeout, letting the combined operation run up to 2x the caller's
     // budget while the per-device queue stays held until it settles.
+    let dispatched = false;
+    const onDispatch = () => {
+      if (!dispatched) {
+        dispatched = true;
+        dispatching?.();
+      }
+    };
     const deadline = this.timer.now() + timeoutMs;
-    const client: DeviceService =
+    const client =
       platform === "android"
         ? AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory)
         : IOSCtrlProxyClient.getInstance(targetDevice);
@@ -7087,6 +7103,7 @@ export class UnixSocketServer {
         frameContext,
         client: client as AndroidCtrlProxyClient,
         signal,
+        onDispatch,
       });
       assertSocketInputNotAborted(signal);
       if (textResult.charsSent !== undefined) {
@@ -7107,8 +7124,14 @@ export class UnixSocketServer {
             timeoutMs,
             undefined,
             frameContext,
+            { abortSignal: signal, onDispatch },
           )
-        : await client.requestSetText(text, { timeoutMs, frameContext });
+        : await client.requestSetText(text, {
+            timeoutMs,
+            frameContext,
+            abortSignal: signal,
+            onDispatch,
+          });
       assertSocketInputNotAborted(signal);
       if (!textResult.success) {
         return { success: false, error: textResult.error };
@@ -7120,14 +7143,23 @@ export class UnixSocketServer {
       deadline,
       timeoutMs,
       appendCharsSent,
-      signal,
+      { signal, onDispatch },
     );
   }
 
   private async executeAndroidAppendText(
     options: AndroidAppendTextOptions,
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
-    const { targetDevice, text, deadline, totalTimeoutMs, frameContext, client, signal } = options;
+    const {
+      targetDevice,
+      text,
+      deadline,
+      totalTimeoutMs,
+      frameContext,
+      client,
+      signal,
+      onDispatch,
+    } = options;
     const appendTimeoutMs = deadline - this.timer.now();
     if (appendTimeoutMs <= 0) {
       return {
@@ -7145,10 +7177,7 @@ export class UnixSocketServer {
       pending: string,
       timeoutMs: number,
       validate: typeof beforeKeyEvent,
-    ) =>
-      signal
-        ? await input.appendText(pending, timeoutMs, validate, signal)
-        : await input.appendText(pending, timeoutMs, validate);
+    ) => await input.appendText(pending, timeoutMs, validate, signal, onDispatch);
     const result = await run(cached.input, text, appendTimeoutMs, beforeKeyEvent);
     if (
       result.success ||
@@ -7264,13 +7293,14 @@ export class UnixSocketServer {
   }
 
   private async runImeActionWithinBudget(
-    client: Pick<DeviceService, "requestImeAction">,
+    client: Pick<AndroidCtrlProxyClient | IOSCtrlProxyClient, "requestImeAction">,
     imeAction: ImeAction | undefined,
     deadline: number,
     totalTimeoutMs: number,
     appendCharsSent?: number,
-    signal?: AbortSignal,
+    options: { signal?: AbortSignal; onDispatch?: () => void } = {},
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
+    const { signal, onDispatch } = options;
     const withAppendProgress = (result: { success: boolean; error?: string }) =>
       appendCharsSent !== undefined ? { ...result, charsSent: appendCharsSent } : result;
     if (!imeAction) {
@@ -7288,7 +7318,13 @@ export class UnixSocketServer {
       });
     }
     try {
-      const result = await client.requestImeAction(imeAction, remainingTimeoutMs);
+      const result = await client.requestImeAction(
+        imeAction,
+        remainingTimeoutMs,
+        undefined,
+        signal,
+        onDispatch,
+      );
       if (!result.success) {
         const message = imeActionFailedAfterTextEntered(imeAction, result.error || "unknown error");
         logger.warn(`[input/typeText] ${message}`);
@@ -7301,6 +7337,10 @@ export class UnixSocketServer {
         errorMessage(error) || "unknown error",
       );
       logger.warn(`[input/typeText] ${message}`, error);
+      if (signal?.aborted) {
+        // Cancellation reasons are shared with the owner; preserve them untouched.
+        throw error;
+      }
       if (appendCharsSent === undefined) {
         // Preserve runner error identity, class, and structured failure metadata.
         if (error instanceof Error) {
@@ -7753,6 +7793,22 @@ export class UnixSocketServer {
       deviceId: target.deviceId,
       requesterSessionUuid: target.requesterSessionUuid,
       slotDeviceOf: (sessionUuid) => sessionManager.getSession(sessionUuid)?.assignedDevice,
+    });
+    if (refusal) {
+      throw refusal;
+    }
+  }
+
+  private assertManagedConnectionHostMutation(
+    socketSessionId: string | undefined,
+    action: string,
+  ): void {
+    if (!this.daemonState.isInitialized()) {
+      return;
+    }
+    const refusal = managedConnectionHostMutationRefusal({
+      binding: this.daemonState.getManagedConnectionScopes?.().get(socketSessionId),
+      action,
     });
     if (refusal) {
       throw refusal;

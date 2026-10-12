@@ -1,0 +1,12 @@
+{
+  "surface": "socket-frame",
+  "name": "timeout.shutdown",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "Device shutdown deadline exhausted",
+    "code": "timeout",
+    "retryable": true
+  }
+}

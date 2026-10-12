@@ -1,0 +1,12 @@
+{
+  "surface": "socket-frame",
+  "name": "timeout.boot",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "boot timeout exhausted while readiness; device=emulator-5554; remainingBudgetMs=0; elapsedMs=1000; budgetMs=1000; origin=DeviceBootService",
+    "code": "timeout",
+    "retryable": true
+  }
+}

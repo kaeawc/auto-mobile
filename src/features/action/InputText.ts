@@ -300,7 +300,7 @@ export class InputText extends BaseVisualChange {
         dismissKeyboard,
         undefined,
         undefined,
-        signal,
+        { signal },
       );
     }
 
@@ -587,15 +587,12 @@ export class InputText extends BaseVisualChange {
     timeoutMs?: number,
     beforeKeyEvents?: AppendKeyEventValidator,
     signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<SendTextResult & { method?: InputTextMode }> {
-    return this.executeAndroidAppendTextInput(
-      text,
-      undefined,
-      false,
-      timeoutMs,
-      beforeKeyEvents,
+    return this.executeAndroidAppendTextInput(text, undefined, false, timeoutMs, beforeKeyEvents, {
       signal,
-    );
+      onDispatch,
+    });
   }
 
   /**
@@ -627,8 +624,9 @@ export class InputText extends BaseVisualChange {
     dismissKeyboard: boolean = false,
     timeoutMs?: number,
     beforeKeyEvents?: AppendKeyEventValidator,
-    signal?: AbortSignal,
+    options: { signal?: AbortSignal; onDispatch?: () => void } = {},
   ): Promise<SendTextResult & { method?: InputTextMode }> {
+    const { signal, onDispatch } = options;
     assertInputNotAborted(signal);
     const remaining = this.createBudget(timeoutMs);
     const planned = await this.planAppendKeyEvents(text, remaining, timeoutMs, signal);
@@ -643,6 +641,7 @@ export class InputText extends BaseVisualChange {
       timeoutMs,
       beforeKeyEvents,
       signal,
+      onDispatch,
     );
     if (typed.error) {
       // A non-timeout failure leaves an exact confirmed prefix, while a timed-out
@@ -737,6 +736,7 @@ export class InputText extends BaseVisualChange {
     timeoutMs: number | undefined,
     beforeKeyEvents?: AppendKeyEventValidator,
     signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<{ charsSent?: number; error?: string; failureSource?: AppendTextFailureSource }> {
     let charsSent = 0;
     for (const plan of plans) {
@@ -748,12 +748,12 @@ export class InputText extends BaseVisualChange {
       let validationError: string | undefined;
       let validationFailureSource: AppendTextFailureSource | undefined;
       const beforeDispatch =
-        charsSent === 0 && beforeKeyEvents
+        charsSent === 0
           ? async (remainingTimeoutMs?: number) => {
               try {
-                const validation = await beforeKeyEvents(remainingTimeoutMs);
+                const validation = await beforeKeyEvents?.(remainingTimeoutMs);
                 assertInputNotAborted(signal);
-                if (!validation.success) {
+                if (validation && !validation.success) {
                   validationError =
                     validation.error ??
                     "Frame context is stale or unavailable; observe a fresh frame before retrying";
@@ -774,6 +774,8 @@ export class InputText extends BaseVisualChange {
               if (validationError) {
                 throw new Error(validationError);
               }
+              assertInputNotAborted(signal);
+              onDispatch?.();
             }
           : undefined;
       try {

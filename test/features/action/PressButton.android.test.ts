@@ -77,6 +77,67 @@ describe("PressButton Android keycode dispatch", () => {
     clearResolvedHomePackageCache();
   });
 
+  test.each(["plain", "refused", "cancelled", "deadline"] as const)(
+    "ADB fallback marks after every pre-dispatch check: %s",
+    async (outcome) => {
+      const controller = new AbortController();
+      let marks = 0;
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        validateFrameContext: async () => {
+          expect(marks).toBe(0);
+          if (outcome === "cancelled") {
+            controller.abort();
+          }
+          if (outcome === "deadline") {
+            fakeTimer.advanceTime(500);
+          }
+          return { success: outcome !== "refused", error: "stale frame" };
+        },
+      } as unknown as AndroidCtrlProxyClient);
+      const action = new PressButton(androidDevice, fakeAdb, fakeTimer);
+      const pending = action.press(
+        "volume_up",
+        500,
+        outcome === "plain" ? undefined : "frame",
+        controller.signal,
+        () => {
+          expect(fakeAdb.getExecutedArgv()).toEqual([]);
+          marks++;
+        },
+      );
+      if (outcome === "cancelled") {
+        await expect(pending).rejects.toThrow();
+      } else {
+        expect((await pending).success).toBe(outcome === "plain");
+      }
+      expect(marks).toBe(outcome === "plain" ? 1 : 0);
+      expect(fakeAdb.getExecutedArgv().length).toBe(outcome === "plain" ? 1 : 0);
+    },
+  );
+
+  test("global action followed by ADB fallback marks once", async () => {
+    let marks = 0;
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      requestGlobalAction: async (
+        ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
+      ) => {
+        args[5]?.();
+        expect(marks).toBe(1);
+        return { success: false, acknowledged: true, error: "global action refused" };
+      },
+    } as unknown as AndroidCtrlProxyClient);
+    const result = await new PressButton(androidDevice, fakeAdb, fakeTimer).press(
+      "back",
+      500,
+      undefined,
+      undefined,
+      () => marks++,
+    );
+    expect(result.success).toBe(true);
+    expect(fakeAdb.getExecutedArgv()).toEqual([["shell", "input", "keyevent", "4"]]);
+    expect(marks).toBe(1);
+  });
+
   const press = async (button: string, window?: WindowInterface) => {
     const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
     if (window) {
@@ -443,8 +504,8 @@ describe("PressButton Android keycode dispatch", () => {
         ),
       ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
 
-      const keyeventCall = fakeAdb.getCommandCalls().find((c) => c.command.includes("keyevent 3"));
-      expect(keyeventCall?.signal?.aborted).toBe(true);
+      expect(fakeAdb.getExecutedArgv()).toEqual([]);
+      expect(fakeAdb.getCommandCalls()).toEqual([]);
     });
 
     test("home verification spends the REMAINING deadline, not a fresh full getActive timeout", async () => {

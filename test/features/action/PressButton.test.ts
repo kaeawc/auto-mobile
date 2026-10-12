@@ -58,6 +58,87 @@ describe("PressButton", () => {
     }
   });
 
+  test.each([false, true])("simulator Home marks at launch, abort=%s", async (aborted) => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const client = new FakeIOSCtrlProxy(timer);
+    client.setHierarchyData({
+      packageName: "com.apple.springboard",
+      updatedAt: 1,
+      hierarchy: { className: "XCUIApplication" },
+    });
+    const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      client as unknown as IOSCtrlProxyClient,
+    );
+    let marks = 0;
+    let launches = 0;
+    const action = new PressButton(iosSimulator, null, timer, {
+      executeCommandArgs: async () => {
+        expect(marks).toBe(1);
+        launches++;
+        return { stdout: "", stderr: "" };
+      },
+    });
+    try {
+      if (aborted) {
+        controller.abort();
+      }
+      const pending = action.press("home", 500, undefined, controller.signal, () => {
+        expect(launches).toBe(0);
+        marks++;
+      });
+      if (aborted) {
+        await expect(pending).rejects.toThrow();
+      } else {
+        expect((await pending).success).toBe(true);
+      }
+      expect(marks).toBe(aborted ? 0 : 1);
+      expect(launches).toBe(aborted ? 0 : 1);
+    } finally {
+      instance.mockRestore();
+      expect((IOSCtrlProxyClient.getInstance as { mock?: unknown }).mock).toBeUndefined();
+    }
+  });
+
+  test.each(["home", "back", "recent", "volume_up"])(
+    "iOS %s threads dispatch to the runner",
+    async (button) => {
+      let marks = 0;
+      const request = async (...args: unknown[]) => {
+        expect(marks).toBe(0);
+        const hook = args.at(-1);
+        expect(typeof hook).toBe("function");
+        if (typeof hook === "function") {
+          hook();
+        }
+        expect(marks).toBe(1);
+        return { success: true };
+      };
+      const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+        requestPressHome: request,
+        requestPressBack: request,
+        requestRecentApps: request,
+        requestPressButton: request,
+      } as unknown as IOSCtrlProxyClient);
+      try {
+        expect(
+          (
+            await new PressButton(iosDevice, null, new FakeTimer()).press(
+              button,
+              500,
+              undefined,
+              undefined,
+              () => marks++,
+            )
+          ).success,
+        ).toBe(true);
+        expect(marks).toBe(1);
+      } finally {
+        instance.mockRestore();
+      }
+    },
+  );
+
   test("ios back delegates to CtrlProxy pressBack", async () => {
     let backCalls = 0;
     const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({

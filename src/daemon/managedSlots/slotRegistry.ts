@@ -28,7 +28,8 @@ export interface SlotScopeIdentity {
  * cleanup settle. `invalidated` is a tombstone so an old-incarnation request can never recreate the
  * scope's assignments. The one exception is a scope invalidated only because it was abandoned: the
  * same incarnation returning revives it (owner decision 2026-10-09), until an explicit reset or a
- * newer incarnation of its namespace makes the invalidation permanent.
+ * newer incarnation of its namespace makes the invalidation permanent. Unjournaled devices are
+ * reused; already journaled deletes complete first, then a later acquisition creates anew (#11545).
  */
 export type SlotScopeState = "valid" | "invalidating" | "invalidated";
 
@@ -195,9 +196,8 @@ export type EnsureScopeResult =
       created: boolean;
       /**
        * The scope had been abandoned and this acquisition reactivated it. Its slot rows (kept
-       * through the abandonment, even once the scope was invalidated) keep their bindings and
-       * generations: surviving devices are reused, and a device the abandonment cleanup already
-       * deleted is recreated by the reconciler.
+       * through abandonment) keep unjournaled bindings and generations. Already journaled deletes,
+       * even blocked ones, complete first; the reconciler then creates a new device (#11545).
        */
       revived: boolean;
     }
@@ -450,12 +450,19 @@ export interface OpenSlotJournalInput {
   owner: SlotJournalOwner;
   /** Anchors the entry to the slot's current binding; applied in the same transaction. */
   assignment: SlotJournalAssignmentChange;
+  /**
+   * Open only while the slot's scope is still abandoned (`invalidating`, reason `abandoned`),
+   * checked in the same transaction as the entry and its fence. A scope revived (or reset, or
+   * missing) by then is refused `scope_not_abandoned` and nothing is written (#11545).
+   */
+  requireAbandonedScope?: boolean;
 }
 
 export type OpenSlotJournalResult =
   | { kind: "opened"; entry: SlotJournalEntry; assignment: SlotAssignmentRecord }
   /** The slot already has unfinished journaled work; only one open entry per slot. */
   | { kind: "journal_open"; entry: SlotJournalEntry }
+  | { kind: "scope_not_abandoned"; scope: SlotScopeRecord | null }
   | SlotJournalChangeFailure;
 
 export interface AdvanceSlotJournalInput {
@@ -625,8 +632,13 @@ export interface SlotRegistry {
 
   /**
    * Open a journal entry for a slot together with its anchoring assignment change. Refused while
-   * the slot has another open entry or the binding moved.
+   * the slot has another open entry, the binding moved, or the requested scope precondition fails.
+   * Callers without the abandonment precondition retain their existing refusal variants.
    */
+  openSlotJournal(
+    key: SlotKey,
+    input: OpenSlotJournalInput & { requireAbandonedScope?: false },
+  ): Promise<Exclude<OpenSlotJournalResult, { kind: "scope_not_abandoned" }>>;
   openSlotJournal(key: SlotKey, input: OpenSlotJournalInput): Promise<OpenSlotJournalResult>;
   /** Move an open entry to its next phase (and apply its assignment change) in one transaction. */
   advanceSlotJournal(id: number, input: AdvanceSlotJournalInput): Promise<AdvanceSlotJournalResult>;
@@ -679,6 +691,11 @@ export function resolveAbandonmentThresholdMs(query: AbandonmentQuery | undefine
     );
   }
   return thresholdMs;
+}
+
+/** A scope whose idle devices may be accepted for abandoned-scope deletion. */
+export function isAbandonedScope(scope: SlotScopeRecord | null): boolean {
+  return scope?.state === "invalidating" && scope.invalidationReason === "abandoned";
 }
 
 /**

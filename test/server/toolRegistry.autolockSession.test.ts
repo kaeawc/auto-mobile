@@ -1,5 +1,6 @@
+import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { ActionableError, BootedDevice } from "../../src/models";
@@ -11,6 +12,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { McpTestFixture } from "../fixtures/mcpTestFixture";
 
 let policyReads = 0;
 const env = new Proxy<Record<string, string | undefined>>(
@@ -63,6 +66,18 @@ describe("ToolRegistry autolock session enforcement", () => {
     return tool!;
   }
 
+  beforeAll(async () => {
+    // Warm the shared server module and tool registration, independent of autolock scenarios.
+    const restore = installHermeticServerFixture();
+    const warm = new McpTestFixture();
+    try {
+      await warm.setup();
+    } finally {
+      await warm.teardown();
+      restore();
+    }
+  });
+
   beforeEach(() => {
     ToolRegistry.clearTools();
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
@@ -82,9 +97,35 @@ describe("ToolRegistry autolock session enforcement", () => {
     Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
+    expect(DaemonState.getInstance().isInitialized()).toBe(false);
     daemonSessionManager?.stopCleanupTimer();
     setAutolock(false);
   });
+
+  test.each([false, true])(
+    "autolock ambiguity read=%s is typed with only candidate ids",
+    async (readOnly) => {
+      setAutolock(true);
+      fakeDeviceSessionManager.setConnectedDevices([androidA, iosA]);
+      const tool = registerTool("typedAmbiguity", { deviceReadOnly: readOnly });
+      const error = await tool.handler({}).catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(AmbiguousDeviceTargetError);
+      expect(error).toMatchObject({
+        name: "AmbiguousDeviceTargetError",
+        code: "ambiguous_device_target",
+        retryable: false,
+        candidates: [
+          { deviceId: androidA.deviceId, platform: "android" },
+          { deviceId: iosA.deviceId, platform: "ios" },
+        ],
+      });
+      expect((error as Error).message).toContain(
+        readOnly ? "Provide a deviceId" : "Call getAndroid or getApple",
+      );
+      expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(1);
+      expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    },
+  );
 
   describe("held-device refusal under autolock (#10833)", () => {
     async function lockedPool() {
@@ -193,7 +234,18 @@ describe("ToolRegistry autolock session enforcement", () => {
 
     const tool = registerTool("autolockMultiAndroid");
 
-    await expect(tool.handler({ platform: "android" })).rejects.toThrow(
+    const error = await tool.handler({ platform: "android" }).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(AmbiguousDeviceTargetError);
+    expect(error).toMatchObject({
+      name: "AmbiguousDeviceTargetError",
+      code: "ambiguous_device_target",
+      retryable: false,
+      candidates: [
+        { deviceId: androidA.deviceId, platform: "android" },
+        { deviceId: androidB.deviceId, platform: "android" },
+      ],
+    });
+    expect((error as Error).message).toContain(
       "Multiple Android devices detected. Provide sessionUuid to target a specific device.",
     );
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);

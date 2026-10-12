@@ -30,6 +30,8 @@ import {
   DeviceOutsideBoundSessionError,
   SessionOutsideBoundSessionError,
 } from "./deviceOutsideBoundSessionRefusal";
+import { PlanExecutionInProgressError } from "./planExecutionInProgressRefusal";
+import { AmbiguousDeviceTargetError } from "./ambiguousDeviceTargetRefusal";
 import { AppNotRunningError } from "../models/AppNotRunningError";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { DeviceGestureRecordingStartUnheldError } from "../daemon/deviceGestureRecordingStartAdmission";
@@ -44,6 +46,7 @@ import {
   RetryableDeviceAcquisitionError,
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
+  SESSION_RELEASED_DURING_CREATION_CODE,
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
 } from "../daemon/deviceAcquisitionRefusals";
 
@@ -151,6 +154,8 @@ function toolCallErrorText(error: unknown, message: string): string {
 function hasSelfDescribedRefusalPayload(
   error: unknown,
 ): error is
+  | PlanExecutionInProgressError
+  | AmbiguousDeviceTargetError
   | DeviceAssignedToManagedSlotError
   | DeviceOutsideManagedSlotsError
   | DeviceOutsideBoundSessionError
@@ -162,6 +167,8 @@ function hasSelfDescribedRefusalPayload(
   | ManagedSlotOwnershipUnconfirmedError
   | ManagedSlotOwnershipLostError {
   return (
+    error instanceof PlanExecutionInProgressError ||
+    error instanceof AmbiguousDeviceTargetError ||
     error instanceof DeviceAssignedToManagedSlotError ||
     error instanceof DeviceOutsideManagedSlotsError ||
     error instanceof DeviceOutsideBoundSessionError ||
@@ -240,6 +247,7 @@ const TYPED_SESSION_REFUSAL_CODES: ReadonlySet<unknown> = new Set([
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
+  SESSION_RELEASED_DURING_CREATION_CODE,
 ]);
 
 /**

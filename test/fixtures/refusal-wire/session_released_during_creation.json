@@ -1,0 +1,13 @@
+{
+  "code": "session_released_during_creation",
+  "builder": "SessionReleasedDuringCreationError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Session 11111111-2222-4333-8444-555555555555 was released while it was being created (code session_released_during_creation); no device is bound to it. Acquire a new session with getAndroid or getApple.\",\"code\":\"session_released_during_creation\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"retryable\":false,\"nextAction\":\"acquire_new_session\"}"
+      }
+    ],
+    "isError": true
+  }
+}

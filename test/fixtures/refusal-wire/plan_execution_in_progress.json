@@ -1,0 +1,13 @@
+{
+  "code": "plan_execution_in_progress",
+  "builder": "PlanExecutionInProgressError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"plan execution in progress (code plan_execution_in_progress); retry the call once the plan finishes.\",\"code\":\"plan_execution_in_progress\",\"retryable\":true,\"scope\":\"session\"}"
+      }
+    ],
+    "isError": true
+  }
+}

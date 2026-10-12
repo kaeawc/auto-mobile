@@ -585,12 +585,15 @@ Owner decisions 2026-10-09 (#10982):
 - No read counts as activity, not even the owner's own (#10964).
 - Anything that changes visible UI, or starts a device-side process, is control.
 - Viewer streaming is a read.
-- A sessionless read on a free device verifies it is reachable and may install,
-  enable or connect CtrlProxy or the iOS runner because reading needs it
-  (owner decision 2026-10-11, #11641). It skips appearance sync, preference/settings
-  writes and selecting or pinning the current device. A later control call still
-  performs those steps. A sessionless read on a held device runs no readiness,
-  pinning or settings work at all; it uses the read-only path.
+- A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
+  A sessionless read that names a running device nobody holds may ready it in order to answer: on Android it may
+  install the CtrlProxy APK, write the accessibility settings, and force-stop and rebind the service; on an iOS
+  simulator it may install and launch the runner. The exception never applies to a device held, slot-assigned or
+  reserved by another session: those reads use what is already installed and never run readiness.
+  (Owner decision 2026-10-12, #11964.) It skips appearance sync, preference writes,
+  and selecting or pinning the current device. The only settings it may write are
+  the accessibility settings that enable CtrlProxy. A later control call still
+  performs appearance sync and current-device selection or pinning.
 - A sessionless read boots a stopped device only when the call explicitly passes
   its `deviceId` (owner decision 2026-10-11, follow-up to #11641). Every device-aware
   read tool, including `observe`, accepts a running device's serial or iOS UDID,
@@ -627,6 +630,68 @@ Owner decisions 2026-10-09 (#10982):
 - A holder's calls that name only a `deviceId` are credited to the MCP connection
   that owns the held session, and admitted as that session. Other connections
   stay read-only watchers.
+
+### Which read tools ready an unheld device
+
+For a sessionless call naming an unheld running device whose service is not ready,
+the **Yes/No** classifications refer to registry readiness: `ensureDeviceReady`
+with `intent: "read"`. **Yes** means the platform manager performs CtrlProxy/runner
+setup through that path. These are the exact sets pinned
+by `test/server/readToolsExplicitDeviceIdRule.test.ts`: 18 of 21 tools on each platform.
+The handlers are stubbed in that test; platform-specific feature support is separate
+from target resolution and readiness.
+
+| Tool                    | Android                                     | iOS simulator                               |
+| ----------------------- | ------------------------------------------- | ------------------------------------------- |
+| `accessibility`         | Yes                                         | Yes                                         |
+| `clipboard`             | Yes                                         | Yes                                         |
+| `displayConfig`         | Yes                                         | Yes                                         |
+| `getAppPermissions`     | Yes                                         | Yes                                         |
+| `getDataStore`          | Yes                                         | Yes                                         |
+| `getDeepLinks`          | Yes                                         | Yes                                         |
+| `getDeviceState`        | Yes                                         | Yes                                         |
+| `getNavigationGraph`    | Yes                                         | Yes                                         |
+| `getNetworkGraph`       | Yes                                         | Yes                                         |
+| `getNotificationPolicy` | Yes                                         | Yes                                         |
+| `getPreference`         | Yes                                         | Yes                                         |
+| `hitTest`               | Yes                                         | Yes                                         |
+| `identifyInteractions`  | Yes                                         | Yes                                         |
+| `inspectPackageSigning` | No: booted-only verification                | No: booted-only verification                |
+| `keyboard`              | Yes                                         | Yes                                         |
+| `listApps`              | No: booted-only verification                | No: booted-only verification                |
+| `listDataStores`        | Yes                                         | Yes                                         |
+| `observe`               | Own path: may start the service (see below) | Own path: may start the service (see below) |
+| `prototype`             | Yes                                         | Yes                                         |
+| `snapshotOf`            | Yes                                         | Yes                                         |
+| `sqlQuery`              | Yes                                         | Yes                                         |
+
+`listApps` and `inspectPackageSigning` declare `deviceReadiness: "booted"` and
+verify the device without CtrlProxy/runner setup. `observe {deviceId}` bypasses
+`ensureDeviceReady`; its own read path may start the hierarchy service on an
+unheld, idle, pooled device through `ObservationReadServiceStart`, as described in
+[Reading a device you do not own](../tools.md#reading-a-device-you-do-not-own-deviceid).
+
+On Android, registry readiness for the 18 **Yes** tools uses
+`DeviceSessionManager.ensureAndroidCtrlProxyReady`: `CtrlProxyManager.setup` may
+install or upgrade the CtrlProxy APK, and `enable` writes
+`enabled_accessibility_services` (preserving other services) and
+`accessibility_enabled`. Setup/enable do not directly force-stop or rebind;
+however, repeated connection failures on the singleton CtrlProxy client can
+trigger recovery that removes CtrlProxy from `enabled_accessibility_services`,
+force-stops its process, and re-adds it. `observe`'s own service start uses the
+session acquisition setup through `RunnerReadinessService`: it may perform the
+same APK installation and accessibility enablement, and its readiness recovery
+explicitly calls `rebindIfUnhealthy` or `forceRestartProcess`. Those calls use
+`CtrlProxyManager.rebindOrRestartInternal` to remove/re-add the service entry and
+force-stop the process. On an iOS simulator, both registry readiness and
+`observe`'s service start use `RunnerReadinessService` and `IOSCtrlProxyManager`
+to install and launch the runner as needed via `xcodebuild test-without-building`.
+
+Held, slot-assigned and restart-reserved running targets run neither registry
+readiness nor observer service setup.
+
+A physical iPhone is never readied by a sessionless read: automation readiness
+throws without a session; booted-only verification does no runner setup.
 
 ## Streams need an observer registration, not a session
 

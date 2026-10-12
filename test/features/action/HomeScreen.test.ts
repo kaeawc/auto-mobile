@@ -17,6 +17,9 @@ import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { clearResolvedHomePackageCache } from "../../../src/features/observe/androidLauncherPackages";
 import { hideCapturedNode } from "../../helpers/hideCapturedNode";
+import { SimctlCommandTimeoutError } from "../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
+import { drainUntil } from "../../helpers/fakeTimerStepping";
+import { IosHomeLaunchTimeoutError } from "../../../src/models/IosHomeLaunchTimeoutError";
 
 // Helper function to create mock ObserveResult
 // Each call creates a unique viewHierarchy object so change detection works
@@ -826,6 +829,198 @@ describe("HomeScreen", () => {
       expect(result.success).toBe(true);
       expect(readCount).toBe(3);
       expect(fakeTimer.getSleepHistory()).toEqual([300, 600]);
+    });
+
+    describe("simulator launch budget regression", () => {
+      test("retries a busy host timeout with one dispatch and a short backoff", async () => {
+        const timeouts: number[] = [];
+        let dispatches = 0;
+        const { action, client } = createIosHomeScreen({
+          simulator: true,
+          simctl: {
+            executeCommandArgs: async (_args, timeoutMs = 0) => {
+              expect(dispatches).toBe(1);
+              timeouts.push(timeoutMs);
+              if (timeouts.length === 1) {
+                await fakeTimer.sleep(timeoutMs);
+                throw new SimctlCommandTimeoutError("busy host launch timed out");
+              }
+              return { stdout: "", stderr: "" };
+            },
+          },
+        });
+        client.setHierarchyData(iosHierarchy("com.apple.springboard"));
+        const read = spyOn(client, "requestHierarchySync");
+
+        await action.executeIosHomeNavigation(undefined, undefined, undefined, undefined, () => {
+          dispatches++;
+        });
+        expect(timeouts).toEqual([2500, 2400]);
+        expect(fakeTimer.getSleepHistory()).toEqual([2500, 100]);
+        expect(fakeTimer.now()).toBe(2600);
+        expect(dispatches).toBe(1);
+        expect(read.mock.calls[0]?.[3]).toBe(1500);
+      });
+
+      test("allows a 1200ms successful launch without retry or backoff", async () => {
+        const timeouts: number[] = [];
+        const { action, client } = createIosHomeScreen({
+          simulator: true,
+          simctl: {
+            executeCommandArgs: async (_args, timeoutMs = 0) => {
+              timeouts.push(timeoutMs);
+              await fakeTimer.sleep(Math.min(1200, timeoutMs));
+              if (timeoutMs < 1200) {
+                throw new SimctlCommandTimeoutError("slow launch timed out");
+              }
+              return { stdout: "", stderr: "" };
+            },
+          },
+        });
+        client.setHierarchyData(iosHierarchy("com.apple.springboard"));
+
+        await action.executeIosHomeNavigation();
+        expect(timeouts).toEqual([2500]);
+        expect(fakeTimer.getSleepHistory()).toEqual([1200]);
+        expect(fakeTimer.now()).toBe(1200);
+      });
+
+      test.each([undefined, 500])(
+        "exhausts the %s Home budget with a typed retryable timeout",
+        async (budget) => {
+          const homeBudget = budget ?? 5000;
+          const timeouts: number[] = [];
+          const failures: SimctlCommandTimeoutError[] = [];
+          const { action, client } = createIosHomeScreen({
+            simulator: true,
+            simctl: {
+              executeCommandArgs: async (_args, timeoutMs = 0) => {
+                expect(timeoutMs).toBe(Math.min(2500, homeBudget - fakeTimer.now()));
+                timeouts.push(timeoutMs);
+                await fakeTimer.sleep(timeoutMs);
+                const error = new SimctlCommandTimeoutError("launch timed out");
+                failures.push(error);
+                throw error;
+              },
+            },
+          });
+
+          const error = await action.executeIosHomeNavigation(undefined, undefined, budget).then(
+            () => undefined,
+            (failure: unknown) => failure,
+          );
+          expect(error).toMatchObject({ code: "timeout", retryable: true });
+          expect(error).toBeInstanceOf(IosHomeLaunchTimeoutError);
+          expect(error).toHaveProperty("cause", failures.at(-1));
+          expect(error).toHaveProperty(
+            "message",
+            expect.stringContaining(`${timeouts.length} attempt`),
+          );
+          expect(error).toHaveProperty("message", expect.stringContaining(`${homeBudget}ms`));
+          expect(error).toHaveProperty("message", expect.stringContaining("host may be busy"));
+          expect(error).toHaveProperty("message", expect.stringContaining("retried"));
+          expect(timeouts).toEqual(budget === 500 ? [500] : [2500, 2400]);
+          expect(fakeTimer.getSleepHistory()).toEqual(budget === 500 ? [500] : [2500, 100, 2400]);
+          expect(fakeTimer.now()).toBe(homeBudget);
+          expect(client.getHierarchyRequestCount()).toBe(0);
+        },
+      );
+
+      test("warm launch adds no delay before the first foreground read", async () => {
+        const timeouts: number[] = [];
+        const { action, client } = createIosHomeScreen({
+          simulator: true,
+          simctl: {
+            executeCommandArgs: async (_args, timeoutMs = 0) => {
+              timeouts.push(timeoutMs);
+              return { stdout: "", stderr: "" };
+            },
+          },
+        });
+        const read = spyOn(client, "requestHierarchySync").mockImplementation(async () => {
+          expect(fakeTimer.now()).toBe(0);
+          expect(fakeTimer.getSleepHistory()).toEqual([]);
+          return { hierarchy: iosHierarchy("com.apple.springboard") };
+        });
+
+        await action.executeIosHomeNavigation();
+        expect(timeouts).toEqual([2500]);
+        expect(read).toHaveBeenCalledTimes(1);
+        expect(fakeTimer.getSleepHistory()).toEqual([]);
+      });
+
+      test("plain simctl rejection retains its message without retry", async () => {
+        let launches = 0;
+        const { action, client } = createIosHomeScreen({
+          simulator: true,
+          simctl: {
+            executeCommandArgs: async () => {
+              launches++;
+              throw new Error("simctl launch rejected SpringBoard");
+            },
+          },
+        });
+        const error = await action.executeIosHomeNavigation().then(
+          () => undefined,
+          (failure: unknown) => failure,
+        );
+        expect(error).toHaveProperty(
+          "message",
+          "Failed to launch SpringBoard with simctl: simctl launch rejected SpringBoard",
+        );
+        expect(error).not.toBeInstanceOf(IosHomeLaunchTimeoutError);
+        expect(launches).toBe(1);
+        expect(fakeTimer.getSleepHistory()).toEqual([]);
+        expect(client.getHierarchyRequestCount()).toBe(0);
+      });
+
+      test("abort during pending backoff prevents the second launch", async () => {
+        fakeTimer = new FakeTimer();
+        const controller = new AbortController();
+        let launches = 0;
+        let settled = false;
+        const { action, client } = createIosHomeScreen({
+          simulator: true,
+          simctl: {
+            executeCommandArgs: async (_args, timeoutMs = 0) => {
+              launches++;
+              await fakeTimer.sleep(timeoutMs);
+              throw new SimctlCommandTimeoutError("launch timed out");
+            },
+          },
+        });
+        const pending = action
+          .executeIosHomeNavigation(undefined, undefined, undefined, controller.signal)
+          .then(
+            () => {
+              settled = true;
+              return undefined;
+            },
+            (error: unknown) => {
+              settled = true;
+              return error;
+            },
+          );
+        try {
+          fakeTimer.advanceTime(2500);
+          await drainUntil(() => settled || fakeTimer.getPendingSleeps().includes(100), {
+            description: "launch retry backoff",
+          });
+          expect(settled).toBe(false);
+          expect(fakeTimer.getPendingSleeps()).toEqual([100]);
+          controller.abort();
+          const error = await pending;
+          expect(error).toHaveProperty("message", OPERATION_CANCELLED_MESSAGE);
+          expect(error).not.toBeInstanceOf(IosHomeLaunchTimeoutError);
+          fakeTimer.advanceTime(100);
+          expect(launches).toBe(1);
+          expect(client.getHierarchyRequestCount()).toBe(0);
+        } finally {
+          controller.abort();
+          fakeTimer.reset();
+          await pending;
+        }
+      });
     });
 
     test("simulator launches SpringBoard without requesting runner Home", async () => {

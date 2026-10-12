@@ -33,3 +33,6 @@ export function buildObservationScreenshotUri(deviceId: string, observationId: s
  * their request deadline with it.
  */
 export const OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS = 10_000;
+
+/** Suggested delay before retrying the same resource URI while capture is pending. */
+export const OBSERVATION_SCREENSHOT_NOT_READY_RETRY_AFTER_MS = 1_000;

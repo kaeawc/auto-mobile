@@ -1,0 +1,15 @@
+{
+  "surface": "socket-frame",
+  "name": "managed_slot_ownership_lost",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "Session '11111111-2222-4333-8444-555555555555' no longer owns its managed slot; acquire a new session.",
+    "code": "managed_slot_ownership_lost",
+    "retryable": false,
+    "details": {
+      "sessionUuid": "11111111-2222-4333-8444-555555555555"
+    }
+  }
+}

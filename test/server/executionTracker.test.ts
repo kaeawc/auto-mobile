@@ -35,6 +35,27 @@ describe("ExecutionTracker", function () {
     expect(tracker.getAdmittedSessionUse(control.id)).toBeUndefined();
   });
 
+  test("withdrawing admission removes the session echo and reports a refused end", () => {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["creation"]));
+    const ends: { admitted: boolean }[] = [];
+    const unsubscribe = tracker.onSessionExecutionEnded((_sessions, end) => ends.push(end));
+    const execution = tracker.startExecution("tapOn", undefined, "released-creation");
+    try {
+      tracker.markSessionAdmitted(execution.id);
+      expect(tracker.getAdmittedSessionUse(execution.id)).toBe("released-creation");
+      tracker.unmarkSessionAdmitted(execution.id);
+      expect(tracker.getAdmittedSessionUse(execution.id)).toBeUndefined();
+      tracker.endExecution(execution.id);
+      expect(ends).toEqual([{ admitted: false }]);
+      tracker.unmarkSessionAdmitted(execution.id);
+      expect(ends).toHaveLength(1);
+    } finally {
+      tracker.endExecution(execution.id);
+      unsubscribe();
+    }
+    expect(tracker.getActiveExecutionCount()).toBe(0);
+  });
+
   test("an acquisition cancels only the sessionless device use recorded on that device (#10829)", () => {
     const tracker = new ExecutionTracker(
       new FakeTimer(),

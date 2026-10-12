@@ -29,7 +29,6 @@ import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
 import { OWNER_DISCONNECT_GRACE_MS } from "../../src/daemon/ownerDisconnectRelease";
-import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
 import { AppearanceSyncScheduler } from "../../src/daemon/AppearanceSyncScheduler";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import type { AppearanceConfig } from "../../src/models";

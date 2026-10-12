@@ -2172,6 +2172,7 @@ export class SessionManager {
   }
 
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
+  private livenessOwnerCallInFlightReader?: (ownerToken: string) => boolean;
   // No lookup means no known deadline: the veto falls back to the unsettled-execution ceiling.
   private sessionExecutionDeadlineLookup: SessionExecutionDeadlineLookup = () => undefined;
   // No canceller means nothing to abort: only the daemon tracks executions (#10820).
@@ -2670,7 +2671,7 @@ export class SessionManager {
       // returned anyway, and the release's own stage was already reported above.
       logger.debug(`[SessionManager] Forced release of ${sessionId}: ${errorMessage(error)}`);
     });
-    this.trackPendingDeviceCleanup(deviceId, [capped]);
+    this.registerPendingDeviceCleanup(deviceId, capped, SESSION_RELEASE_TEARDOWN_CAP_MS);
     logger.warn(
       `[SessionManager] Forcing the stuck release of session ${sessionId} ` +
         `(stage=${operation.stage ?? "unknown"}, reason=${fence.releaseReason}): the session ` +
@@ -2764,6 +2765,20 @@ export class SessionManager {
    */
   setActiveSessionExecutionChecker(checker: ActiveSessionExecutionChecker): void {
     this.activeSessionExecutionChecker = checker;
+  }
+
+  setLivenessOwnerCallInFlightReader(reader: ((ownerToken: string) => boolean) | undefined): void {
+    this.livenessOwnerCallInFlightReader = reader;
+  }
+
+  /** An owner's completed call restarts only its still-mint-bound claim leases. */
+  restartMintBoundClaimLeases(ownerToken: string): void {
+    const now = this.sessionNow();
+    for (const session of this.sessions.values()) {
+      if (session.livenessOwnerToken === ownerToken && hasMintBoundClaimLease(session)) {
+        session.livenessOwnerBoundAt = Math.max(session.livenessOwnerBoundAt, now);
+      }
+    }
   }
 
   /**
@@ -9864,7 +9879,8 @@ export class SessionManager {
     logger.info(
       `Network condition TTL elapsed for session ${sessionId}; resetting device ${target.deviceId} to none`,
     );
-    this.trackPendingDeviceCleanup(target.deviceId, [
+    this.registerPendingDeviceCleanup(
+      target.deviceId,
       this.runUnderTeardownShield(async () => [
         {
           pending: this.restoreNetworkConditionOnExpiry(session, target, expectedGeneration),
@@ -9873,7 +9889,8 @@ export class SessionManager {
       ]).then(async (cleanups) => {
         await Promise.all(cleanups);
       }),
-    ]);
+      SESSION_RELEASE_TEARDOWN_CAP_MS,
+    );
   }
 
   /**
@@ -10989,7 +11006,14 @@ export class SessionManager {
     const hold =
       ownerToken === undefined || session.livenessPolicy === "cli-idle"
         ? "none"
-        : livenessLeaseState(sessionOwnerLeaseSnapshot(session, this.sessionNow())).phase;
+        : livenessLeaseState(
+            sessionOwnerLeaseSnapshot(
+              session,
+              this.sessionNow(),
+              hasMintBoundClaimLease(session) &&
+                (this.livenessOwnerCallInFlightReader?.(ownerToken) ?? false),
+            ),
+          ).phase;
     return { ownerToken, hold };
   }
 
@@ -11107,7 +11131,14 @@ export class SessionManager {
     if (!session || session.livenessPolicy === "cli-idle") {
       return undefined;
     }
-    return livenessOwnerHold(sessionOwnerLeaseSnapshot(session, this.sessionNow()));
+    return livenessOwnerHold(
+      sessionOwnerLeaseSnapshot(
+        session,
+        this.sessionNow(),
+        hasMintBoundClaimLease(session) &&
+          (this.livenessOwnerCallInFlightReader?.(session.livenessOwnerToken!) ?? false),
+      ),
+    );
   }
 
   /**
@@ -11606,7 +11637,40 @@ export class SessionManager {
     }
     session.livenessOwnerToken = ownerToken;
     session.livenessOwnerBoundAt = undefined;
+    this.persistAdoptedLivenessOwnerToken(session);
     return true;
+  }
+
+  private persistAdoptedLivenessOwnerToken(session: Session): void {
+    if (!this.deviceSessionRepository.replaceLivenessOwnership) {
+      return;
+    }
+    void this.getBarrier()
+      .track(() =>
+        this.livenessOwnershipClaimMutexFor(session).runExclusive(async () => {
+          if (
+            this.peekSession(session.sessionId) !== session ||
+            !this.isAdmittedForAutomation(session) ||
+            !session.livenessOwnerToken
+          ) {
+            return;
+          }
+          // Read under the claim mutex: a queued adoption must not restore an older owner.
+          await this.deviceSessionRepository.replaceLivenessOwnership?.(
+            session.sessionId,
+            session.livenessOwnerToken,
+          );
+        }),
+      )
+      .catch((error) => {
+        if (error instanceof DeviceSessionNotActiveError) {
+          // The row may have been released or not yet activated; in-memory adoption still stands.
+          logger.debug("[SessionManager] Adopted liveness owner row is no longer active");
+          return;
+        }
+        // Persistence is best-effort; omit error details because they may contain the token.
+        logger.warn("[SessionManager] Failed to persist adopted liveness ownership");
+      });
   }
 
   /**

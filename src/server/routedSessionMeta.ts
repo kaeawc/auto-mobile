@@ -10,8 +10,9 @@
 export const ROUTED_SESSION_META_KEY = "automobile/routedSessionUuid";
 
 /**
- * The explicitly named `sessionUuid` of a call belongs to another connected client's autolock
- * (#11235). Naming a UUID is not proof of ownership (#11164): the call may run on that session,
+ * The explicitly named `sessionUuid` belongs to another connected client (#11235), or a device
+ * read names an owner-heartbeat session the caller does not own (#11557), including an ownerless
+ * session. Naming a UUID is not proof of ownership (#11164): the call may run on that session,
  * but the caller's connection must not bind it for later sessionless calls. The proxy reads this
  * to skip remembering the session; additive like {@link ROUTED_SESSION_META_KEY}.
  */
@@ -48,12 +49,12 @@ export function routedSessionUuidFromResult(result: unknown): string | undefined
   return sessionMetaFromResult(result, ROUTED_SESSION_META_KEY);
 }
 
-/** Mark a result whose named session another connection owns; unchanged without one. */
+/** Mark a named session another connection owns or a read's caller does not own; unchanged without one. */
 export function withForeignOwnedSessionMeta<T>(result: T, sessionUuid: string | undefined): T {
   return withSessionMeta(result, FOREIGN_OWNED_SESSION_META_KEY, sessionUuid);
 }
 
-/** The named session a daemon reported as owned by another connection, when it did. */
+/** The named session the daemon told the proxy not to remember, when it did. */
 export function foreignOwnedSessionUuidFromResult(result: unknown): string | undefined {
   return sessionMetaFromResult(result, FOREIGN_OWNED_SESSION_META_KEY);
 }

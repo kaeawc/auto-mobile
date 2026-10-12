@@ -9739,6 +9739,8 @@ export class DevicePool {
     return await this.assignmentMutex.runExclusive(() => {
       const refused: RefusedOwnedSessionRestore[] = [];
       for (const sessionId of sessionIds) {
+        // Released label holds count as their base even when the base itself is live or refused.
+        this.restoreRestartReservationConnectionOwner(sessionId, mcpSessionId, livenessOwnerToken);
         const session = this.sessionManager.getSession(sessionId);
         const device = session ? this.devices.get(session.assignedDevice) : undefined;
         if (
@@ -9761,12 +9763,6 @@ export class DevicePool {
           }
           // A connection that closed while this restore waited is not recorded (#11192).
           this.recordBindOwnership(mcpSessionId, sessionId);
-        } else {
-          this.restoreRestartReservationConnectionOwner(
-            sessionId,
-            mcpSessionId,
-            livenessOwnerToken,
-          );
         }
       }
       return refused;
@@ -9787,13 +9783,18 @@ export class DevicePool {
     mcpSessionId: string,
     livenessOwnerToken: string | undefined,
   ): void {
-    const target = this.rehydrationReservations.get(sessionId);
-    if (
-      target?.restartHandoff === true &&
-      target.ownerLivenessToken !== undefined &&
-      target.ownerLivenessToken === livenessOwnerToken &&
-      !this.mcpBindsInFlight.get(mcpSessionId)?.closed
-    ) {
+    if (livenessOwnerToken === undefined || this.mcpBindsInFlight.get(mcpSessionId)?.closed) {
+      return;
+    }
+    for (const [reservationSessionId, target] of this.rehydrationReservations) {
+      if (
+        target.restartHandoff !== true ||
+        target.ownerLivenessToken !== livenessOwnerToken ||
+        (reservationSessionId !== sessionId &&
+          this.sessionManager.ownershipSessionUuid(reservationSessionId, false) !== sessionId)
+      ) {
+        continue;
+      }
       // The token proves the released holder without reviving it or renewing its hold.
       target.ownerMcpSessionIds = new Set([...(target.ownerMcpSessionIds ?? []), mcpSessionId]);
     }

@@ -7,7 +7,16 @@ import {
 } from "./identityRecovery";
 import { createServer } from "node:net";
 import { errorMessage } from "../utils/describeUnknownError";
-import { consumePrivateDaemonOrphanExitRecord } from "./privateDaemonOrphanExitRecord";
+import {
+  consumeDaemonExitRecord,
+  defaultDaemonExitRecordFileSystem,
+  removeDaemonExitRecord,
+  resolveDaemonExitOptions,
+  DAEMON_EXIT_RECORD_TTL_MS,
+  mergeDaemonStartupOptions,
+  type DaemonExitRecordFileSystem,
+} from "./daemonExitRecord";
+import { getCurrentBuildIdentity } from "./buildIdentity";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { open, readFile, rm } from "node:fs/promises";
 import {
@@ -403,26 +412,7 @@ function restartResultFromStart(result: DaemonStartResult): DaemonRestartResult 
 }
 
 function mergeRestartOptions(running: DaemonOptions, requested: DaemonOptions): DaemonOptions {
-  const merged = { ...running, ...requested, strictPort: true };
-  if (
-    requested.enabledTools !== undefined &&
-    requested.disabledTools === undefined &&
-    running.disabledTools !== undefined
-  ) {
-    merged.disabledTools = running.disabledTools.filter(
-      (name) => !requested.enabledTools?.includes(name),
-    );
-  }
-  if (
-    requested.disabledTools !== undefined &&
-    requested.enabledTools === undefined &&
-    running.enabledTools !== undefined
-  ) {
-    merged.enabledTools = running.enabledTools.filter(
-      (name) => !requested.disabledTools?.includes(name),
-    );
-  }
-  return merged;
+  return { ...mergeDaemonStartupOptions(running, requested), strictPort: true };
 }
 
 /**
@@ -506,9 +496,6 @@ function isDaemonAdmittedRestartReason(
  * - Check daemon status
  * - Restart daemon
  */
-/** An orphan-exit port record older than this no longer describes the port's state (#11092). */
-const ORPHAN_EXIT_RECORD_TTL_MS = 30 * 60 * 1000;
-
 function isTcpPortFree(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const probe = createServer();
@@ -548,6 +535,8 @@ export class DaemonManager implements DaemonManagerLike {
   private heldLockLogPath: string | undefined;
   /** Whether a TCP port can be bound right now; replaceable so tests need no real socket. */
   private portFreeProbe: (port: number) => Promise<boolean> = isTcpPortFree;
+  protected exitRecordFileSystem: DaemonExitRecordFileSystem = defaultDaemonExitRecordFileSystem;
+  private currentBuildId: () => string = () => getCurrentBuildIdentity().buildId;
   /**
    * A per-instance owner token written into the startup lock alongside the PID
    * (issue #5904). It distinguishes a genuinely new lock holder from the prior one
@@ -1241,29 +1230,43 @@ export class DaemonManager implements DaemonManagerLike {
     return false;
   }
 
-  /**
-   * A harness private daemon stopped by its orphan watchdog leaves its port behind (#11074). A
-   * start that names no port is the next client auto-starting a replacement: bind the same port,
-   * strictly, instead of silently moving to the default one.
-   */
-  private async inheritOrphanExitSettings(options: DaemonOptions): Promise<DaemonOptions> {
-    const record = consumePrivateDaemonOrphanExitRecord(this.socketPath);
-    if (!record || options.port !== undefined) {
-      return options;
+  /** Restore startup policy after a self-exit on this control socket. */
+  private async inheritExitSettings(options: DaemonOptions): Promise<DaemonOptions> {
+    const record = consumeDaemonExitRecord(this.socketPath, this.exitRecordFileSystem);
+    const resolution = resolveDaemonExitOptions(
+      options,
+      record,
+      this.timer.now(),
+      DAEMON_EXIT_RECORD_TTL_MS,
+      this.currentBuildId(),
+    );
+    if (resolution.outcome === "stale" || resolution.outcome === "build-mismatch") {
+      logger.info(`Ignoring daemon exit record: ${resolution.outcome}`);
     }
-    // A record from a long-ago exit says nothing about the port now (#11092).
-    if (this.timer.now() - record.exitedAtMs > ORPHAN_EXIT_RECORD_TTL_MS) {
-      logger.debug(`Ignoring stale private daemon orphan exit record (port ${record.port})`);
-      return options;
+    if (resolution.outcome !== "inherited" || !record) {
+      return resolution.options;
     }
-    const inherited = { ...options, port: record.port };
-    if (!(await this.portFreeProbe(record.port))) {
-      // Another process took the port; a strict bind would fail the start outright.
-      stderrLog(`Previous private daemon port ${record.port} is busy; binding without strictness`);
-      return inherited;
+    const inherited = resolution.options;
+    let portNote = "";
+    if (resolution.inheritedPort && inherited.port !== undefined) {
+      // A stolen predecessor port must not wedge every auto-start (#11074).
+      inherited.strictPort = await this.portFreeProbe(inherited.port);
+      if (!inherited.strictPort) {
+        portNote = "; previous port is busy, binding without strictness";
+      }
     }
-    stderrLog(`Restarting private daemon on its previous port ${record.port} (stopped when idle)`);
-    return { ...inherited, strictPort: true };
+    const flags = Object.entries(inherited)
+      .filter(([key]) => key !== "port")
+      .map(([key, value]) =>
+        value === true
+          ? key
+          : `${key}=${JSON.stringify(typeof value === "string" && isAbsolute(value) ? basename(value) : value)}`,
+      )
+      .join(" ");
+    stderrLog(
+      `Inheriting daemon port ${inherited.port ?? "default"} after ${record.reason}; flags: ${flags || "none"}${portNote}`,
+    );
+    return inherited;
   }
 
   /**
@@ -1274,7 +1277,7 @@ export class DaemonManager implements DaemonManagerLike {
     recoverySignal?: AbortSignal,
   ): Promise<DaemonStartResult> {
     options = daemonProcessOptions(options);
-    options = await this.inheritOrphanExitSettings(options);
+    options = await this.inheritExitSettings(options);
     // The overall start budget, captured before any work so the post-exit peer
     // rejoin (issue #6103) can only ever spend time the caller still has. The
     // client times its `tools/list` out at DAEMON_STARTUP_TIMEOUT_MS; launchAndWait
@@ -2097,11 +2100,13 @@ export class DaemonManager implements DaemonManagerLike {
       // remove that CONFIRMED-DEAD daemon's PID FILE here — but NOT its
       // socket pathname (see removeConfirmedDeadPidFile for why).
       await this.removeConfirmedDeadPidFile();
+      removeDaemonExitRecord(this.socketPath, this.exitRecordFileSystem);
       stderrLog("Daemon is not running");
       return;
     }
 
     await this.stopRunningDaemon(status, timeout);
+    removeDaemonExitRecord(this.socketPath, this.exitRecordFileSystem);
   }
 
   /**

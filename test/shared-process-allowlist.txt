@@ -195,7 +195,6 @@ test/daemon/poolOwnershipConcurrency.regressions.test.ts
 test/daemon/poolOwnershipConcurrency.slotsAndTools.property.test.ts
 test/daemon/poolOwnershipConcurrency.twoDaemon.property.test.ts
 test/daemon/poolOwnershipConcurrency.twoDaemon.regressions.test.ts
-test/daemon/privateDaemonOrphanExitRecord.test.ts
 test/daemon/privateDaemonOrphanWatchdog.test.ts
 test/daemon/processGeneration.test.ts
 test/daemon/processGenerationFields.test.ts

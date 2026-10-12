@@ -142,7 +142,14 @@ import {
 } from "./socketServer/BaseSocketServer";
 import { readDeviceLeaseActivity } from "./deviceLeaseActivity";
 import { daemonDeviceLeaseActivitySources } from "./deviceLeaseActivitySources";
-import { writePrivateDaemonOrphanExitRecord } from "./privateDaemonOrphanExitRecord";
+import {
+  DaemonSelfExitRecorder,
+  defaultDaemonExitRecordFileSystem,
+  writeDaemonExitRecord,
+  type DaemonExitRecord,
+  type DaemonExitRecordFileSystem,
+} from "./daemonExitRecord";
+import { daemonProcessOptions } from "./daemonOptionScopes";
 import {
   PrivateDaemonOrphanWatchdog,
   isHarnessPrivateDaemon,
@@ -568,6 +575,8 @@ export type DaemonProcessGenerationTokenProvider = () => string | undefined;
  * Each step sits where `start()` has always run it.
  */
 export interface DaemonStartHost {
+  /** Synchronous self-exit policy record; fake hosts keep it in memory. */
+  writeExitRecord(record: DaemonExitRecord): void;
   /** Logging, the stable working directory and the shutdown handlers. */
   enterProcess(): void;
   /** Name this daemon's control socket in the CtrlProxy forwarding leases it takes (#10497). */
@@ -657,8 +666,19 @@ export class Daemon {
   private httpServer: HttpServer | null = null;
   private httpServerClosePromise: Promise<void> | null = null;
   private socketServer: UnixSocketServer | null = null;
+  private exitRecordFileSystem: DaemonExitRecordFileSystem = defaultDaemonExitRecordFileSystem;
+  private enteredDaemonProcess = false;
   /** The machine-touching start steps; `startOn()` replaces the process's own. */
   private startHost: DaemonStartHost = this.processStartHost();
+  private readonly selfExitRecorder = new DaemonSelfExitRecorder({
+    write: (record) => this.startHost.writeExitRecord(record),
+    now: () => this.timer.now(),
+    buildId: () => getCurrentBuildIdentity().buildId,
+    options: () => ({ ...daemonProcessOptions(this.options), port: this.port }),
+    canRecord: () =>
+      this.enteredDaemonProcess &&
+      (this.socketBindCommitted || !this.incumbentOwnerGuard.hasLiveForeignOwner()),
+  });
   private readonly startupCompletion: Promise<void>;
   private resolveStartupCompletion!: () => void;
   private rejectStartupCompletion!: (reason: unknown) => void;
@@ -864,6 +884,7 @@ export class Daemon {
         exitAfterDatabaseHealthFailure(code, detail, {
           now: () => this.timer.now(),
           writeEmergency: (message) => writeEmergencyLog(message),
+          writeExitRecord: () => this.selfExitRecorder.record("database-health"),
           cleanupDaemonFiles: () => {
             cleanupDaemonFilesSync(this.getDaemonFileCleanupOptions());
           },
@@ -1544,10 +1565,13 @@ export class Daemon {
    */
   async startOn(host: DaemonStartHost): Promise<void> {
     this.startHost = host;
+    // A previous start attempt cannot authorize a failed process entry on this attempt.
+    this.enteredDaemonProcess = false;
     try {
       await this.startUntilReady();
       this.resolveStartupCompletion();
     } catch (error) {
+      this.selfExitRecorder.record("startup-failure");
       this.rejectStartupCompletion(error);
       throw error;
     }
@@ -1598,6 +1622,8 @@ export class Daemon {
   /** The process's own {@link DaemonStartHost}: the steps `start()` has always run. */
   private processStartHost(): DaemonStartHost {
     return {
+      writeExitRecord: (record) =>
+        writeDaemonExitRecord(SOCKET_PATH, record, this.exitRecordFileSystem),
       enterProcess: () => this.enterDaemonProcess(),
       publishForwardLeaseOwner: () => {
         // Record our socket in every CtrlProxy forwarding lease we take, so another
@@ -1639,6 +1665,7 @@ export class Daemon {
 
   private async startThroughSocketBind(): Promise<void> {
     this.startHost.enterProcess();
+    this.enteredDaemonProcess = true;
     // Subscribe here, not in the constructor: only a started daemon is ever stopped, so a
     // constructed-but-never-started daemon must not leave a listener on the global tracker (#10712).
     this.subscribeToolCallEndActivity();
@@ -3453,11 +3480,7 @@ export class Daemon {
           this.httpRequestsSeen,
         liveSessionCount: () => this.sessionManager.getAllSessions().length,
         shutdown: () => {
-          // A client that auto-starts the replacement without --port must rebind this port (#11074).
-          writePrivateDaemonOrphanExitRecord(SOCKET_PATH, {
-            port: this.port,
-            exitedAtMs: this.timer.now(),
-          });
+          this.selfExitRecorder.record("orphan-watchdog");
           setImmediate(() => process.kill(process.pid, "SIGTERM"));
         },
       },
@@ -5009,6 +5032,7 @@ export class Daemon {
     installHangupShutdownHandler();
 
     const shutdown = async (signal: string) => {
+      this.selfExitRecorder.markCleanStop();
       if (this.shutdownInProgress) {
         return;
       }
@@ -5019,6 +5043,7 @@ export class Daemon {
 
     setProcessShutdownHandler(shutdown);
     process.once("exit", () => {
+      this.selfExitRecorder.record("unexpected-exit");
       cleanupDaemonFilesSync(this.getDaemonFileCleanupOptions());
     });
     // Escaped throws in un-awaited callbacks/timers and floating rejections must

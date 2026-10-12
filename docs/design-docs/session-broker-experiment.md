@@ -15,6 +15,28 @@ tested clean-reset and reuse interfaces, but native reuse is rejected until
 platform contamination tests qualify an implementation. Fake reset tests are
 not evidence of native isolation.
 
+Native zero-pooling qualification passed on October 12, 2026, using broker
+commit `6fb70c201` on this macOS host with iPhone 17 Pro / iOS 26.5:
+
+- Two distinct fresh execution UUIDs and simulator UDIDs were acquired and
+  relinquished. Acquisition took approximately 59 and 45 seconds; each confirmed
+  release took approximately 16 seconds.
+- The first session successfully observed its device through the normal MCP
+  proxy. Observation of the second session was not part of this smoke test.
+- While the first session was active, a second request received
+  `capacity_exhausted` and advertised no tools.
+- Replaying that refused identity after capacity was freed returned the same
+  terminal refusal. A new request identity acquired the next fresh session.
+- Both releases reached terminal receipts with no pending cleanup. The native
+  run completed at `2026-10-12T20:40:54Z`; artifacts are retained locally under
+  `session-broker-native/smoke-2026-10-12T20-38-35.228Z`.
+
+The preceding combined deterministic and file-backed suite passed 392 tests.
+It included independent-process capacity and replay contention, durable cleanup
+after reopen, stale-session admission, launcher recovery, and joined shutdown.
+This is a provider lifecycle milestone, not yet a Slack test batch or Talos
+orchestration qualification.
+
 The experiment is opt-in. Set `AUTOMOBILE_SESSION_BROKER_CONFIG` to the absolute
 path of an operator JSON configuration when starting the provider daemon.
 An already-running ordinary daemon does not become a broker because a client

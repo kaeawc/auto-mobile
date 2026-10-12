@@ -67,6 +67,18 @@ function failureFor(error: unknown): SessionBrokerFailure {
     : { code: "session_preparation_failed", message: errorMessage(error), retryable: false };
 }
 
+function failedResult(config: SessionConfig, failure: SessionBrokerFailure): SessionBrokerResult {
+  return {
+    contractVersion: 1,
+    requestId: config.requestId,
+    outcome: "failed",
+    sessionUuid: null,
+    profile: null,
+    cleanupPending: false,
+    failure,
+  };
+}
+
 function sameProcess(left: SlotProcessIdentity, right: SlotProcessIdentity): boolean {
   return (
     left.daemonId === right.daemonId &&
@@ -120,14 +132,19 @@ export class SessionBroker {
     signal: AbortSignal,
   ): Promise<SessionBrokerResult> {
     let admitted = false;
+    const fingerprint = requestFingerprint(config, livenessOwnerToken);
     this.preparations.set(config.requestId, (this.preparations.get(config.requestId) ?? 0) + 1);
     try {
-      const fingerprint = requestFingerprint(config, livenessOwnerToken);
       const previous = await this.options.store.getRequest(config.requestId);
       if (previous) {
         if (previous.fingerprint !== fingerprint) {
-          throw new ActionableError(
-            "Session request identity was already used with different parameters",
+          return failedResult(
+            config,
+            failureFor(
+              new ActionableError(
+                "Session request identity was already used with different parameters",
+              ),
+            ),
           );
         }
         // Receipt replay does not depend on today's runtime catalog or default configuration.
@@ -156,16 +173,19 @@ export class SessionBroker {
         if (request) {
           return { ...(await this.result(request)), failure };
         }
+        throw new ActionableError(
+          "Admitted session request lost its durable receipt; cleanup cannot be acknowledged",
+        );
       }
-      return {
-        contractVersion: 1,
-        requestId: config.requestId,
-        outcome: "failed",
-        sessionUuid: null,
-        profile: null,
-        cleanupPending: false,
+      // Catalog/default resolution can fail before admission. Retain that terminal identity too:
+      // a changed host catalog must not turn its replay into a new native acquisition.
+      // An independently committed receipt wins; never overwrite an acquisition from a sibling
+      // caller. A persistence failure is an RPC error, not a claimed durable terminal result.
+      const receipt = await this.options.store.recordPreAdmissionFailure(
+        { requestId: config.requestId, fingerprint, parameters: config, owner: this.options.owner },
         failure,
-      };
+      );
+      return this.result(receipt);
     } finally {
       const remaining = (this.preparations.get(config.requestId) ?? 1) - 1;
       if (remaining === 0) {

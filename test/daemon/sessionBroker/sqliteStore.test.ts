@@ -70,7 +70,11 @@ describe("session broker durable admission", () => {
     return { scopeKey: resource.scopeKey, slotIndex: resource.allocationIndex };
   }
 
-  async function prepare(requestId: string, extra: Partial<BrokerAdmissionInput> = {}) {
+  async function prepare(
+    requestId: string,
+    extra: Partial<BrokerAdmissionInput> = {},
+    claimOwner: SlotProcessIdentity = OWNER,
+  ) {
     const admission = await store.admit(input(requestId, extra));
     if (admission.kind !== "create" && admission.kind !== "reuse") {
       throw new Error(`Unexpected admission: ${admission.kind}`);
@@ -103,11 +107,11 @@ describe("session broker durable admission", () => {
     }
     expect(
       await registry.claimExecution(key(resource), assignment, {
-        ...OWNER,
+        ...claimOwner,
         sessionUuid: sessionId,
       }),
     ).toMatchObject({ kind: "claimed" });
-    await store.activate(requestId, OWNER, sessionId);
+    await store.activate(requestId, extra.owner ?? OWNER, sessionId);
     return { resource, sessionId };
   }
 
@@ -165,6 +169,50 @@ describe("session broker durable admission", () => {
     expect(await store.activate("bound", OWNER, prepared.sessionId)).toMatchObject({
       state: "active",
     });
+  });
+
+  test("activation rejects a physical claim from another generation of the same daemon PID", async () => {
+    await expect(
+      prepare("wrong-generation", {}, { ...OWNER, processGenerationToken: "different-start" }),
+    ).rejects.toThrow("physical device binding");
+    expect(await store.getRequest("wrong-generation")).toMatchObject({
+      state: "acquiring",
+      sessionId: null,
+    });
+    expect((await store.listResources())[0].state).toBe("reserved");
+  });
+
+  test("activation supports owners whose platform supplies no generation token", async () => {
+    const owner = { daemonId: OWNER.daemonId, pid: OWNER.pid };
+    const prepared = await prepare("no-generation", { owner }, owner);
+    expect(await store.getSession(prepared.sessionId)).toMatchObject({ state: "active" });
+  });
+
+  test("pre-admission refusal keeps its identity without reserving device or session capacity", async () => {
+    const refusal = await store.recordPreAdmissionFailure(input("unavailable"), {
+      code: "catalog_unavailable",
+      message: "No authoritative inventory",
+    });
+    expect(refusal).toMatchObject({
+      state: "failed",
+      resourceId: null,
+      sessionId: null,
+    });
+    expect(await store.admit(input("unavailable"))).toEqual({
+      kind: "existing",
+      request: refusal,
+    });
+    await expect(
+      store.recordPreAdmissionFailure(input("unavailable", { fingerprint: "changed" }), {
+        code: "another_error",
+        message: "Must not replace existing failure",
+      }),
+    ).rejects.toThrow("different parameters");
+    expect(await store.getRequest("unavailable")).toEqual(refusal);
+    expect(await store.listResources()).toHaveLength(0);
+    expect(
+      await store.admit(input("new-attempt", { limits: { totalDeviceCap: 1, sessionCap: 1 } })),
+    ).toMatchObject({ kind: "create" });
   });
 
   test("released acquisition receipt never grants another session after physical reuse", async () => {

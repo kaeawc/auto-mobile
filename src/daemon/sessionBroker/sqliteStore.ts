@@ -52,6 +52,21 @@ function sameOwner(left: SlotProcessIdentity, right: SlotProcessIdentity): boole
   );
 }
 
+function ownsReadyBinding(
+  binding: Selectable<SlotRegistryDatabase["slot_assignments"]> | undefined,
+  sessionId: string,
+  owner: SlotProcessIdentity,
+): boolean {
+  return Boolean(
+    binding?.stable_device_id &&
+    binding.state === "ready" &&
+    binding.exec_session_uuid === sessionId &&
+    binding.exec_owner_daemon_id === owner.daemonId &&
+    binding.exec_owner_pid === owner.pid &&
+    binding.exec_owner_process_token === (owner.processGenerationToken ?? null),
+  );
+}
+
 function requireValue<T>(value: T | undefined | null, message: string): T {
   if (value === undefined || value === null) {
     throw new ActionableError(message);
@@ -107,6 +122,43 @@ export class SqliteSessionBrokerStore {
   async listRequests(): Promise<BrokerRequestRecord[]> {
     const rows = await this.db.selectFrom("session_broker_requests").selectAll().execute();
     return rows.map(requestRecord);
+  }
+
+  /** A failed catalog/default lookup consumes its operation identity without consuming capacity. */
+  async recordPreAdmissionFailure(
+    input: Pick<BrokerAdmissionInput, "requestId" | "fingerprint" | "parameters" | "owner">,
+    failure: { code: string; message: string },
+  ): Promise<BrokerRequestRecord> {
+    if (!input.requestId.trim() || !input.fingerprint.trim()) {
+      throw new ActionableError("Session request identity and fingerprint must be non-empty");
+    }
+    return this.db.transaction().execute(async (trx) => {
+      const previous = await this.readRequest(trx, input.requestId);
+      if (previous) {
+        if (previous.fingerprint !== input.fingerprint) {
+          throw new ActionableError(
+            "Session request identity was already used with different parameters",
+          );
+        }
+        return previous;
+      }
+      const row = await trx
+        .insertInto("session_broker_requests")
+        .values({
+          request_id: input.requestId,
+          fingerprint: input.fingerprint,
+          parameters_json: JSON.stringify(input.parameters),
+          owner_json: JSON.stringify(input.owner),
+          state: "failed",
+          resource_id: null,
+          session_id: null,
+          error: failure.message,
+          error_code: failure.code,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      return requestRecord(row);
+    });
   }
 
   async admit(input: BrokerAdmissionInput): Promise<BrokerAdmission> {
@@ -188,13 +240,7 @@ export class SqliteSessionBrokerStore {
         .where("scope_key", "=", resource.scopeKey)
         .where("slot_index", "=", resource.allocationIndex)
         .executeTakeFirst();
-      if (
-        !binding?.stable_device_id ||
-        binding.state !== "ready" ||
-        binding.exec_session_uuid !== sessionId ||
-        binding.exec_owner_daemon_id !== owner.daemonId ||
-        binding.exec_owner_pid !== owner.pid
-      ) {
+      if (!ownsReadyBinding(binding, sessionId, owner)) {
         throw new ActionableError(
           "Prepared session does not own the current physical device binding",
         );

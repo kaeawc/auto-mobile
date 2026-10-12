@@ -167,6 +167,8 @@ export interface LivenessScenarioOptions {
   sharedDeviceClaims?: boolean;
   /** Device ids in the pool; the first is the default acquisition target. */
   devices?: string[];
+  /** Captured desktop pools use their real display names, rather than scenario defaults. */
+  deviceNames?: Record<string, string>;
   /** Autolock acquisition with the 60 s window (AUTOMOBILE_DEVICE_POOL_AUTOLOCK). */
   autolock?: boolean;
   /**
@@ -426,6 +428,7 @@ export class LivenessScenario {
   private managedSlots: SlotRegistry | undefined;
   daemon!: DaemonSide;
   proxy!: DaemonMcpProxy;
+  private readonly deviceNames: Record<string, string>;
   private readonly autolock: boolean;
   private readonly sharedDeviceClaims: boolean;
   private readonly discovery = new FakeDeviceUtils();
@@ -451,6 +454,7 @@ export class LivenessScenario {
 
   private constructor(options: LivenessScenarioOptions) {
     this.deviceIds = options.devices ?? ["emulator-5554"];
+    this.deviceNames = options.deviceNames ?? {};
     this.autolock = options.autolock ?? false;
     this.sharedDeviceClaims = options.sharedDeviceClaims ?? false;
     this.managedSlotsEnabled = options.managedSlots ?? false;
@@ -463,7 +467,11 @@ export class LivenessScenario {
   }
 
   private device(deviceId: string) {
-    return { deviceId, name: `Pixel_${deviceId}`, platform: PLATFORM };
+    return {
+      deviceId,
+      name: this.deviceNames[deviceId] ?? `Pixel_${deviceId}`,
+      platform: PLATFORM,
+    };
   }
 
   private async boot(): Promise<void> {
@@ -1163,50 +1171,127 @@ export class LivenessScenario {
   }
 
   /**
-   * The desktop/IDE client as `test/fixtures/desktop-wire/<name>.json` records it (#10669): replays
-   * the fixture's `daemon/*` frames from the desktop and the probe, at the recorded times (a
-   * repeated frame at its `everyMs`), against this scenario's real daemon, so the cadence and
-   * shape are the checked-in wire contract rather than a hand-written loop. Returns each
-   * response that differs from the recorded one (`expiresAtMs` is relative to the replay start)
-   * and the labels of the frames it could not drive (`tools/call`, `input/*`), which need the
-   * socket and tool-call path of the wire harness.
+   * Drive every captured actor frame through the started daemon's control socket. Only absolute
+   * clock fields are rebased: the fixture clock starts at zero, this scenario may already be live.
+   * Captured request params, including the owned-session list, reach the socket unchanged.
    */
-  async replayDesktopFixture(
-    name: string,
-  ): Promise<{ mismatches: string[]; skipped: string[]; finishedAtMs: number }> {
-    const fixture = JSON.parse(
-      readFileSync(join(import.meta.dir, "..", "fixtures", "desktop-wire", `${name}.json`), "utf8"),
-    ) as WireFixture;
+  async replayDesktopFixture(name: string | WireFixture): Promise<{
+    mismatches: string[];
+    skipped: string[];
+    finishedAtMs: number;
+    drivenFrames: number;
+    unclaimedInputs: string[];
+    unclaimedControls: string[];
+  }> {
+    const fixture =
+      typeof name === "string"
+        ? (JSON.parse(
+            readFileSync(
+              join(import.meta.dir, "..", "fixtures", "desktop-wire", `${name}.json`),
+              "utf8",
+            ),
+          ) as WireFixture)
+        : name;
     const startedAt = this.timer.now();
     const mismatches: string[] = [];
-    const skipped: string[] = [];
+    const unclaimedInputs: string[] = [];
+    const unclaimedControls: string[] = [];
+    let drivenFrames = 0;
+    let keptSession: string | undefined;
+    let nextKeepAliveAt = Infinity;
     for (const exchange of fixture.exchanges) {
-      const method = exchange.request.method;
-      if (!method.startsWith("daemon/") || exchange.actor === "agent") {
-        skipped.push(exchange.label);
-        continue;
+      // desktopWireContract.test.ts:532 restarts after "heartbeat", before "heartbeat-lapse".
+      // Keep the real database: capture's fresh fake persistence is a potential wire divergence.
+      if (fixture.scenario === "daemon-restart" && exchange.label === "heartbeat-lapse") {
+        await this.daemonRestart();
       }
       for (let beat = 0; beat < (exchange.repeat ?? 1); beat++) {
         const dueAt = startedAt + exchange.atMs + beat * (exchange.everyMs ?? 0);
+        // Contract lines 96-102, 240-243 and desktopWireHarness.ts:353-365: unrecorded agent
+        // beats every 2 s, after timers settle, on a separate connection, until agent-release.
+        while (keptSession && nextKeepAliveAt <= dueAt) {
+          await this.idle(nextKeepAliveAt - this.timer.now());
+          const keeper = await this.daemonMethod(
+            "daemon/heartbeat",
+            { sessionId: keptSession },
+            "scenario-agent-keeper",
+          );
+          if (!keeper.success) {
+            throw new Error(`captured agent keeper refused: ${JSON.stringify(keeper)}`);
+          }
+          nextKeepAliveAt += 2_000;
+        }
         if (dueAt > this.timer.now()) {
           await this.idle(dueAt - this.timer.now());
         }
-        const response = await this.daemonMethod(
-          method,
-          exchange.request.params,
-          `scenario-${exchange.actor}`,
-        );
+        const { method, params } = exchange.request;
+        const args =
+          method === "tools/call" ? (params.arguments as Record<string, unknown>) : params;
+        const deviceId = typeof args.deviceId === "string" ? args.deviceId : undefined;
+        const heldBefore = deviceId ? this.poolState(deviceId).sessionId : null;
+        const response = await this.daemonMethod(method, params, `scenario-${exchange.actor}`);
+        drivenFrames++;
+        const label = `${exchange.label}#${beat}`;
+        if (
+          exchange.actor === "desktop" &&
+          response.success &&
+          !isErrorResult(response.result) &&
+          (!args.sessionUuid || heldBefore !== args.sessionUuid)
+        ) {
+          if (method.startsWith("input/")) {
+            unclaimedInputs.push(label);
+          }
+          // All captured device controls are rotate; setActiveDevice is the claim itself.
+          if (method === "tools/call" && params.name !== "setActiveDevice") {
+            unclaimedControls.push(label);
+          }
+        }
         const actual = JSON.parse(JSON.stringify(response)) as Record<string, unknown>;
         const result = actual.result as Record<string, unknown> | undefined;
-        if (typeof result?.expiresAtMs === "number") {
-          result.expiresAtMs -= startedAt;
+        // These fields are absolute fake-clock readings, including sessionInfo and activeSessions.
+        const rebase = (value: Record<string, unknown>) => {
+          for (const key of [
+            "expiresAtMs",
+            "createdAt",
+            "lastUsedAt",
+            "expiresAt",
+            "lastToolActivityAt",
+            "lastOwnerHeartbeatAt",
+            "idleReleaseAt",
+          ]) {
+            if (typeof value[key] === "number") {
+              value[key] -= startedAt;
+            }
+          }
+        };
+        if (result) {
+          rebase(result);
+          if (Array.isArray(result.sessions)) {
+            for (const session of result.sessions) {
+              rebase(session);
+            }
+          }
         }
         if (JSON.stringify(actual) !== JSON.stringify(exchange.response)) {
-          mismatches.push(`${exchange.label}#${beat}: ${JSON.stringify(actual)}`);
+          mismatches.push(`${label}: ${JSON.stringify(actual)}`);
+        }
+        if (exchange.actor === "agent" && exchange.label === "agent-bind") {
+          keptSession = args.sessionUuid as string;
+          nextKeepAliveAt = this.timer.now() + 2_000;
+        }
+        if (exchange.actor === "agent" && method === "daemon/releaseSession") {
+          keptSession = undefined;
         }
       }
     }
-    return { mismatches, skipped, finishedAtMs: this.timer.now() - startedAt };
+    return {
+      mismatches,
+      skipped: [],
+      finishedAtMs: this.timer.now() - startedAt,
+      drivenFrames,
+      unclaimedInputs,
+      unclaimedControls,
+    };
   }
 
   /**

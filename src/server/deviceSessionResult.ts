@@ -1,3 +1,4 @@
+import { idleReleaseField } from "../daemon/releaseReasons";
 import {
   ACQUIRE_NEW_SESSION_NEXT_ACTION,
   DEVICE_SESSION_RECOVERY_TOOLS,
@@ -157,6 +158,7 @@ export function sessionOwnershipLostPayload({
       message: appendHeartbeatExpiryMessage(message, release),
       sessionUuid,
       reason,
+      ...idleReleaseField(reason),
       ...terminalSessionRefusalFields(release?.ownerPid),
       ...(release ? { release } : {}),
     },

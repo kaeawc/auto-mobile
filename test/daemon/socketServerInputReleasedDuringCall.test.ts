@@ -160,7 +160,7 @@ describe("input/* cut by a session release (#11381)", () => {
       code: "session_ownership_lost",
       retryable: false,
       nextAction: "acquire_new_session",
-      details: { sessionUuid: OWNER, reason: "cleanup-expired" },
+      details: { sessionUuid: OWNER, reason: "cleanup-expired", idle: true },
     });
     // The same refusal the MCP path builds from the same cancellation.
     const mcp = sessionReleasedDuringCallPayload(release)?.error;
@@ -169,7 +169,7 @@ describe("input/* cut by a session release (#11381)", () => {
       code: mcp?.code,
       retryable: mcp?.retryable,
       nextAction: mcp?.nextAction,
-      details: { sessionUuid: mcp?.sessionUuid, reason: mcp?.reason },
+      details: { sessionUuid: mcp?.sessionUuid, reason: mcp?.reason, idle: true },
     });
   });
 

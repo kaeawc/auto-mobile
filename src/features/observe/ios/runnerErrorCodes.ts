@@ -84,6 +84,18 @@ export function isRunnerFocusQueryFailed(failure: { errorCode?: string }): boole
 }
 
 /**
+ * The runner could not capture the hierarchy to validate the frame context, so the gesture was
+ * NOT sent (a definite non-delivery). This is not a stale frame; re-observing alone will not fix
+ * the capture failure. Newer runners only, with no wording fallback.
+ */
+export const RUNNER_HIERARCHY_CAPTURE_FAILED_CODE = "hierarchy_capture_failed";
+
+/** True when a runner failure says hierarchy capture failed before the gesture was sent. */
+export function isRunnerHierarchyCaptureFailed(failure: { errorCode?: string }): boolean {
+  return failure.errorCode === RUNNER_HIERARCHY_CAPTURE_FAILED_CODE;
+}
+
+/**
  * The runner refused a command with `runner_busy` before queuing it: the command never ran, so
  * the refusal is a definite non-execution and safe to retry, unlike a lost or late reply.
  */

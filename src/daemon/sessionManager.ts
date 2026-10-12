@@ -129,6 +129,7 @@ import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
 import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
 import {
   isExpiryReleaseReason,
+  isIdleReleaseReason,
   isRecoverableDaemonReleaseReason,
   isReissuableByNameReleaseReason,
   isTerminalReleaseReason,
@@ -136,8 +137,8 @@ import {
   IDLE_WINDOW_RELEASE_REASON,
   releasedRowStatus,
   shouldJudgeOwnerLeaseForRelease,
-  type SessionReleaseReason,
   sessionReleaseReasonTraits,
+  type SessionReleaseReason,
 } from "./releaseReasons";
 import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
@@ -5700,15 +5701,19 @@ export class SessionManager {
   }
 
   /**
-   * Why this daemon released a session it issued (#10730), from the in-memory terminal snapshot or
-   * the persisted `release_reason`. Undefined for a live session or a UUID it never issued, so a
-   * caller can tell a known release from a plain unknown id.
+   * The known end of a UUID (#10730), from the ended-session answer, in-memory terminal snapshot
+   * or persisted `release_reason`. Undefined for a live session or an unknown UUID. A row released
+   * before its latest handout keeps its stored reason regardless of its creation deadline.
    *
-   * A fenced terminal non-device-loss release is named while it writes its row (#11646), using
-   * the operation's live reason so a join is visible before its snapshot upgrades. Only
-   * commit-fenced releases can be abandoned after the terminal fence is raised; those are never
-   * named, even if a join upgrades their reason. Teardown before the fence stays unanswered.
-   * A plan label whose base has ended is otherwise answered with the base's reason.
+   * Idle ends are named from the start of teardown via registration's read-only ended-session
+   * predicate. Other releases stay unanswered before the fence. Commit-fenced operations can
+   * leave the session live, and non-terminal handoffs preserve it for reissue, so neither is
+   * named early even if its idle deadline has passed. After the fence, a terminal non-device-loss
+   * release uses the operation's live reason so a join is visible before its snapshot upgrades
+   * (#11646); commit-fenced operations and device-loss cancellations stay unanswered.
+   * The read-only answer also names an unheld idle deadline without starting release; a timely
+   * control call's execution hold still keeps it live. A plan label whose base has ended is
+   * otherwise answered with the base's reason.
    */
   async getReleasedSessionReason(sessionId: string): Promise<string | undefined> {
     const published = this.sessions.get(sessionId);
@@ -5717,9 +5722,11 @@ export class SessionManager {
       const inFlightReason = (): string | undefined => {
         const operation = this.releasePromises.get(sessionId);
         const current = operation?.session === published ? operation : undefined;
+        if (inMemory === undefined) {
+          return this.preFenceIdleReleaseReason(sessionId, current);
+        }
         const reason = current?.reason.value ?? inMemory;
-        return inMemory !== undefined &&
-          !current?.commitFenced &&
+        return !current?.commitFenced &&
           reason !== undefined &&
           isTerminalReleaseReason(reason) &&
           !isDeviceLossCancellationReason(reason)
@@ -5746,6 +5753,17 @@ export class SessionManager {
       persisted.release_reason ??
       undefined
     );
+  }
+
+  private preFenceIdleReleaseReason(
+    sessionId: string,
+    current: SessionReleaseOperation | undefined,
+  ): string | undefined {
+    if (current?.commitFenced || (current && !isTerminalReleaseReason(current.reason.value))) {
+      return undefined;
+    }
+    const reason = this.peekTerminalAnswerForEndedSession(sessionId)?.release.releaseReason;
+    return reason !== undefined && isIdleReleaseReason(reason) ? reason : undefined;
   }
 
   /**

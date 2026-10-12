@@ -131,7 +131,7 @@ describe("registerSession after a daemon restart (#11367)", () => {
         retryable: false,
         nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
         error: expect.stringContaining(`Session ${SESSION} is terminal after ${releaseReason}`),
-        details: { sessionUuid: SESSION, reason: releaseReason },
+        details: { sessionUuid: SESSION, reason: releaseReason, ...(idle ? { idle: true } : {}) },
         releaseReason,
         ...(idle ? { idle: true } : {}),
       });

@@ -1,3 +1,4 @@
+import { DaemonState } from "../../src/daemon/daemonState";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { planBaseEndFields } from "../../src/server/planExecutionOrchestrator";
@@ -350,6 +351,7 @@ describe("a plan whose base idles out while its steps run on a label", () => {
       expect(result.success).toBe(false);
       expect(result.code).toBe(SESSION_OWNERSHIP_LOST_CODE);
       expect(result.retryable).toBe(false);
+      expect(result.details).toEqual({ sessionUuid: BASE, reason: "lazy-expiry", idle: true });
       expect(result.error).toContain("lazy-expiry");
       expect(result.error).not.toContain("is not allocated");
       // Two steps ran on the label's device; the third was refused before reaching any device.
@@ -363,3 +365,26 @@ describe("a plan whose base idles out while its steps run on a label", () => {
     }),
   );
 });
+
+for (const reason of ["cleanup-expired", "heartbeat-timeout"] as const) {
+  test(`plan base end qualifies only the idle reason: ${reason}`, async () => {
+    const hunt = await createPlanSessionHunt([deviceA]);
+    try {
+      const { sessionManager } = hunt.daemon();
+      await hunt.acquire();
+      await sessionManager.releaseSession(BASE, reason);
+      const ended = sessionManager.peekTerminalAnswerForEndedSession(BASE)!;
+      expect(
+        planBaseEndFields(BASE, false, { index: 0, tool: "observe", error: String(ended) }).details,
+      ).toEqual({
+        sessionUuid: BASE,
+        reason,
+        ...(reason === "cleanup-expired" ? { idle: true } : {}),
+      });
+    } finally {
+      hunt.tearDown();
+      expect(DaemonState.getInstance().isInitialized()).toBe(false);
+      expect(executionTracker.getActiveExecutionCount()).toBe(0);
+    }
+  });
+}

@@ -1,3 +1,4 @@
+import { idleReleaseField } from "./releaseReasons";
 import { shapeToolCallError } from "../server/shapeToolCallError";
 import type { SessionRecoveryAssignmentDetails } from "../models/SessionRecoveryAssignmentError";
 import { readToolEnvelopePayload } from "../server/toolEnvelopePayload";
@@ -418,6 +419,7 @@ function sessionAdmissionRefusalFields(error: unknown): RefusalFrameFields | und
     details: {
       sessionUuid,
       ...(typeof reason === "string" ? { reason } : {}),
+      ...idleReleaseField(typeof reason === "string" ? reason : undefined),
       ...(typeof ownerPid === "number" ? { ownerPid } : {}),
     },
   };

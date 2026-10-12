@@ -10,6 +10,9 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import type { Database } from "../../src/db/types";
 import { createTestDatabase } from "../db/testDbHelper";
+import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // #11361 item 1: a row whose deadline passed while its daemon was down names a session that is
@@ -37,7 +40,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
   });
 
   /** A row the previous daemon left behind, released with `reason` when one is given. */
-  async function seedRow(reason?: string): Promise<void> {
+  async function seedRow(reason?: string, sessionTimeoutMs = 60_000): Promise<void> {
     await repo.upsertActiveSession({
       sessionUuid: SESSION,
       deviceId: DEVICE,
@@ -46,8 +49,8 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       daemonSessionId: "dead-daemon",
       createdAtMs: 1_000,
       lastUsedAtMs: 1_000,
-      expiresAtMs: DEADLINE,
-      sessionTimeoutMs: 60_000,
+      expiresAtMs: 1_000 + sessionTimeoutMs,
+      sessionTimeoutMs,
       heartbeatTimeoutMs: 60_000,
       hasReceivedHeartbeat: true,
     });
@@ -58,7 +61,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
 
   /** The daemon that starts after the previous one died. */
   function restartedDaemon(): SessionManager {
-    const manager = new SessionManager(timer, repo);
+    const manager = new SessionManager(timer, repo, () => new FakeDbWriteBarrier());
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId("daemon-b");
     manager.attachLiveDaemonSessionIds(() => new Set(["daemon-b"]));
@@ -78,6 +81,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
     ["a live row whose idle deadline passed", undefined],
     ["a daemon-shutdown handoff whose recovery window lapsed", "daemon-shutdown"],
     ["a device-restart handoff whose recovery window lapsed", `device-restart:${DEVICE}`],
+    ["a row already marked expired", "expired"],
   ] as const) {
     test(`${label} answers the typed terminal refusal with reason expired`, async () => {
       await seedRow(reason);
@@ -91,6 +95,28 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
         deviceId: DEVICE,
         releaseReason: "expired",
         terminal: true,
+      });
+      if (!(error instanceof TerminalSessionError)) {
+        throw new Error("expected terminal refusal");
+      }
+      expect(
+        sessionOwnershipLostPayload({
+          message: error.message,
+          sessionUuid: SESSION,
+          reason: error.release.releaseReason,
+          release: error.release,
+        }).error,
+      ).toMatchObject({
+        code: "session_ownership_lost",
+        reason: "expired",
+        idle: true,
+        retryable: false,
+        nextAction: "acquire_new_session",
+      });
+      expect(mcpRequestFailureDetails(error, undefined).details).toEqual({
+        sessionUuid: SESSION,
+        reason: "expired",
+        idle: true,
       });
       // Row hygiene is unchanged: the answer writes no terminal reason to the row.
       expect((await repo.getSession(SESSION))?.release_reason ?? undefined).toBe(reason);
@@ -192,6 +218,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
           error: `Session not found: ${SESSION}`,
           code: "daemon_session_not_found",
           releaseReason: "expired",
+          idle: true,
         });
         // Answering is a read: the row is left as it was.
         expect((await repo.getSession(SESSION))?.release_reason ?? undefined).toBe(reason);
@@ -202,7 +229,9 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       await seedRow("daemon-shutdown");
       timer.setCurrentTime(DEADLINE - 1);
 
-      expect(await wireAnswer(restartedDaemon(), method)).toMatchObject({
+      const answer = await wireAnswer(restartedDaemon(), method);
+      expect(answer).not.toHaveProperty("idle");
+      expect(answer).toMatchObject({
         code: "daemon_session_not_found",
         releaseReason: "daemon-shutdown",
       });
@@ -212,7 +241,9 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       await seedRow("heartbeat-timeout");
       timer.setCurrentTime(DEADLINE + 1);
 
-      expect(await wireAnswer(restartedDaemon(), method)).toMatchObject({
+      const answer = await wireAnswer(restartedDaemon(), method);
+      expect(answer).not.toHaveProperty("idle");
+      expect(answer).toMatchObject({
         code: "daemon_session_not_found",
         releaseReason: "heartbeat-timeout",
       });
@@ -242,6 +273,53 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       terminal: true,
     });
     expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+  });
+
+  for (const withPool of [false, true]) {
+    test(`pins: never-resumed restart row past 180 seconds ${withPool ? "is rewritten by device-tool admission" : "is left intact by pool-less admission"}`, async () => {
+      await seedRow(`device-restart:${DEVICE}`, 120_000);
+      timer.setCurrentTime(181_001);
+      const manager = restartedDaemon();
+      const assigned: string[] = [];
+      const pool = {
+        async assignDeviceToSession(id: string): Promise<string> {
+          assigned.push(id);
+          return DEVICE;
+        },
+      };
+      const error = await (
+        withPool
+          ? manager.getOrCreateSession(SESSION, pool, "android", undefined, true)
+          : manager.admitIssuedSessionForAutomation(SESSION)
+      ).then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(TerminalSessionError);
+      expect((error as TerminalSessionError).release).toMatchObject({
+        releaseReason: "expired",
+        terminal: true,
+      });
+      expect(await repo.getSession(SESSION)).toMatchObject({
+        status: withPool ? "expired" : "released",
+        release_reason: withPool ? "expired" : `device-restart:${DEVICE}`,
+      });
+      expect(assigned).toEqual([]);
+    });
+  }
+
+  test("pins: pool-less control admission after restart recovery but before a 300-second idle deadline remains admissible", async () => {
+    await seedRow(`device-restart:${DEVICE}`, 300_000);
+    timer.setCurrentTime(181_001);
+    const manager = restartedDaemon();
+    expect(await manager.isReleasedSessionInRestartRecoveryWindow(SESSION)).toBe(false);
+    expect(await refusal(manager)).toBeUndefined();
+    expect(manager.hasSession(SESSION)).toBe(false);
+    expect(await repo.getSession(SESSION)).toMatchObject({
+      status: "released",
+      release_reason: `device-restart:${DEVICE}`,
+      expires_at_ms: 301_000,
+    });
   });
 
   test("a terminally released row is not offered as expired", async () => {

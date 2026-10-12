@@ -1,3 +1,6 @@
+import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
+import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
+import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/sessionLivenessWindows";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
@@ -286,6 +289,7 @@ describe("a persisted session lost to recovery identity loss is a terminal-sessi
       deviceId: "emulator-5554",
       ...terminalSessionRefusalFields(reason === "owned-by-other-daemon" ? 4242 : undefined),
     });
+    expect("idle" in payload.error).toBe(false);
     expect(payload.error.message).toContain("Cannot safely recover session dead-session");
     expect("ownerPid" in payload.error).toBe(reason === "owned-by-other-daemon");
   });
@@ -302,3 +306,54 @@ describe("a persisted session lost to recovery identity loss is a terminal-sessi
     expect(JSON.parse(text).code).toBeUndefined();
   });
 });
+
+test.each([
+  "cli-idle-timeout",
+  "lazy-expiry",
+  "cleanup-expired",
+  "expired",
+  "heartbeat-timeout",
+  "owner-disconnected",
+  "explicit-release",
+])("ownership refusal qualifies only an idle reason: %s", (reason) => {
+  const idle = ["cli-idle-timeout", "lazy-expiry", "cleanup-expired", "expired"].includes(reason);
+  const error = new TerminalSessionError("s", {
+    sessionId: "s",
+    deviceId: "d",
+    releaseReason: reason,
+    terminal: true,
+    releasedAtMs: 1,
+    heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: true, timeoutMs: 1, ageMs: 1 },
+  });
+  const payload = sessionOwnershipLostPayload({
+    message: error.message,
+    sessionUuid: "s",
+    reason,
+  }).error;
+  expect(payload).toMatchObject({ reason, retryable: false, nextAction: "acquire_new_session" });
+  expect("idle" in payload).toBe(idle);
+  if (idle) {
+    expect(payload.idle).toBe(true);
+  }
+  expect(mcpRequestFailureDetails(error, undefined).details).toEqual({
+    sessionUuid: "s",
+    reason,
+    ...(idle ? { idle: true } : {}),
+  });
+  expect(Object.keys(payload).slice(3, idle ? 5 : 4)).toEqual(
+    idle ? ["reason", "idle"] : ["reason"],
+  );
+});
+test.each(["cleanup-expired", "heartbeat-timeout"] as const)(
+  "release during call qualifies reason on both wires: %s",
+  (reason) => {
+    const ended = new SessionReleasedDuringCallError("s", reason);
+    expect(ended.details).toEqual({
+      sessionUuid: "s",
+      reason,
+      ...(reason === "cleanup-expired" ? { idle: true } : {}),
+    });
+    const payload = sessionReleasedDuringCallPayload(ended)!;
+    expect("idle" in payload.error).toBe(reason === "cleanup-expired");
+  },
+);

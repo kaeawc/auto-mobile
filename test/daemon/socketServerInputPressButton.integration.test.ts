@@ -169,6 +169,7 @@ describe("UnixSocketServer input/pressButton", () => {
       expect.any(Number),
       undefined,
       expect.any(AbortSignal),
+      expect.any(Function),
     );
     expect(createMcpClient).not.toHaveBeenCalled();
   });
@@ -199,7 +200,13 @@ describe("UnixSocketServer input/pressButton", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(press).toHaveBeenCalledWith("back", 30_000, "frame-1", expect.any(AbortSignal));
+    expect(press).toHaveBeenCalledWith(
+      "back",
+      30_000,
+      "frame-1",
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
   });
 
   test("routes iOS button presses through the existing pressButton implementation", async () => {
@@ -237,6 +244,7 @@ describe("UnixSocketServer input/pressButton", () => {
       expect.any(Number),
       undefined,
       expect.any(AbortSignal),
+      expect.any(Function),
     );
   });
 
@@ -270,7 +278,13 @@ describe("UnixSocketServer input/pressButton", () => {
     );
 
     expect(response.success).toBe(true);
-    expect(press).toHaveBeenCalledWith("home", 500, undefined, expect.any(AbortSignal));
+    expect(press).toHaveBeenCalledWith(
+      "home",
+      500,
+      undefined,
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
   });
 
   test("maps the socket app_switch contract name to the existing recent button implementation", async () => {
@@ -308,6 +322,7 @@ describe("UnixSocketServer input/pressButton", () => {
       expect.any(Number),
       undefined,
       expect.any(AbortSignal),
+      expect.any(Function),
     );
   });
 
@@ -360,6 +375,7 @@ describe("UnixSocketServer input/pressButton", () => {
       expect.any(Number),
       undefined,
       expect.any(AbortSignal),
+      expect.any(Function),
     );
   });
 
@@ -393,6 +409,7 @@ describe("UnixSocketServer input/pressButton", () => {
       expect.any(Number),
       undefined,
       expect.any(AbortSignal),
+      expect.any(Function),
     );
   });
 
@@ -455,6 +472,7 @@ describe("UnixSocketServer input/pressButton", () => {
       expect.any(Number),
       undefined,
       expect.any(AbortSignal),
+      expect.any(Function),
     );
     expect(receivedSignal).toBeInstanceOf(AbortSignal);
   });

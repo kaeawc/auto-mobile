@@ -82,14 +82,34 @@ export class PressButton extends BaseVisualChange {
     timeoutMs?: number,
     frameContext?: string,
     signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<PressButtonResult> {
     throwIfAborted(signal);
+    let dispatched = false;
+    const markDispatch = () => {
+      if (!dispatched) {
+        dispatched = true;
+        onDispatch?.();
+      }
+    };
     try {
       switch (this.device.platform) {
         case "android":
-          return await this.executeAndroidButtonPress(button, timeoutMs, frameContext, signal);
+          return await this.executeAndroidButtonPress(
+            button,
+            timeoutMs,
+            frameContext,
+            signal,
+            markDispatch,
+          );
         case "ios":
-          return await this.executeiOSButtonPress(button, timeoutMs, frameContext, signal);
+          return await this.executeiOSButtonPress(
+            button,
+            timeoutMs,
+            frameContext,
+            signal,
+            markDispatch,
+          );
         default:
           throw unsupportedPlatformError(this.device.platform, "press buttons");
       }
@@ -132,6 +152,7 @@ export class PressButton extends BaseVisualChange {
     timeoutMs?: number,
     frameContext?: string,
     signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<PressButtonResult> {
     const normalized = button.toLowerCase();
     const keyCode = resolveAndroidKeyCode(normalized);
@@ -154,7 +175,7 @@ export class PressButton extends BaseVisualChange {
       keyCode,
       deadlineMs,
       frameContext,
-      signal,
+      { signal, onDispatch },
     );
     if (globalActionResult) {
       return globalActionResult;
@@ -183,37 +204,38 @@ export class PressButton extends BaseVisualChange {
     let validationFailure: PressButtonResult | undefined;
     try {
       await awaitWhileRequestIsLive(
-        this.adb.execute(["shell", "input", "keyevent", String(keyCode)], {
-          timeoutMs: adbBudget,
-          noRetry: true,
-          signal: dispatchSignal,
-          beforeDispatch:
-            frameContext === undefined
-              ? undefined
-              : async () => {
-                  validationFailure = await this.validateFrameContextBeforeAdb(
-                    button,
-                    keyCode,
-                    deadlineMs,
-                    frameContext,
-                    signal,
-                  );
-                  throwIfAborted(signal);
-                  if (validationFailure) {
-                    throw new Error(validationFailure.error);
-                  }
-                  const remainingMs = this.remainingMs(deadlineMs);
-                  if (remainingMs !== undefined && remainingMs <= 0) {
-                    validationFailure = {
-                      success: false,
-                      button,
-                      keyCode: -1,
-                      error: `Button press deadline exhausted before ADB keyevent for ${button}`,
-                    };
-                    throw new Error(validationFailure.error);
-                  }
-                },
-        }),
+        Promise.resolve().then(() =>
+          this.adb.execute(["shell", "input", "keyevent", String(keyCode)], {
+            timeoutMs: adbBudget,
+            noRetry: true,
+            signal: dispatchSignal,
+            beforeDispatch: async () => {
+              throwIfAborted(dispatchSignal);
+              validationFailure = await this.validateFrameContextBeforeAdb(
+                button,
+                keyCode,
+                deadlineMs,
+                frameContext,
+                signal,
+              );
+              throwIfAborted(dispatchSignal);
+              if (validationFailure) {
+                throw new Error(validationFailure.error);
+              }
+              const remainingMs = this.remainingMs(deadlineMs);
+              if (remainingMs !== undefined && remainingMs <= 0) {
+                validationFailure = {
+                  success: false,
+                  button,
+                  keyCode: -1,
+                  error: `Button press deadline exhausted before ADB keyevent for ${button}`,
+                };
+                throw new Error(validationFailure.error);
+              }
+              onDispatch?.();
+            },
+          }),
+        ),
         signal,
       );
     } catch (error) {
@@ -257,8 +279,9 @@ export class PressButton extends BaseVisualChange {
     keyCode: number,
     deadlineMs: number | undefined,
     frameContext: string | undefined,
-    signal?: AbortSignal,
+    options: { signal?: AbortSignal; onDispatch?: () => void },
   ): Promise<PressButtonResult | undefined> {
+    const { signal, onDispatch } = options;
     if (!PressButton.GLOBAL_ACTION_BUTTONS.has(normalized)) {
       return undefined;
     }
@@ -290,6 +313,7 @@ export class PressButton extends BaseVisualChange {
           () => {
             // HOME is idempotent; only latch presses that must not be replayed.
             dispatched = normalized !== "home";
+            onDispatch?.();
           },
         ),
         signal,
@@ -378,6 +402,7 @@ export class PressButton extends BaseVisualChange {
     timeoutMs?: number,
     frameContext?: string,
     signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<PressButtonResult> {
     throwIfAborted(signal);
     const normalizedButton = button.toLowerCase();
@@ -393,6 +418,7 @@ export class PressButton extends BaseVisualChange {
             timeoutMs,
             frameContext,
             signal,
+            onDispatch,
           )
         : await client.requestPressButton(
             normalizedButton,
@@ -400,6 +426,7 @@ export class PressButton extends BaseVisualChange {
             undefined,
             frameContext,
             signal,
+            onDispatch,
           );
       if (!result.success) {
         if (normalizedButton !== "home" && result.dispatched && result.acknowledged === false) {
@@ -447,6 +474,7 @@ export class PressButton extends BaseVisualChange {
     timeoutMs?: number,
     frameContext?: string,
     signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<IOSDispatchResult<{ success: boolean; error?: string }>> {
     throwIfAborted(signal);
     switch (button) {
@@ -460,18 +488,37 @@ export class PressButton extends BaseVisualChange {
               frameContext,
               timeoutMs,
               signal,
+              onDispatch,
             ),
             signal,
           );
           return { success: true };
         }
-        const result = await client.requestPressHome(timeoutMs, undefined, frameContext, signal);
+        const result = await client.requestPressHome(
+          timeoutMs,
+          undefined,
+          frameContext,
+          signal,
+          onDispatch,
+        );
         throwIfAborted(signal);
         return result;
       case "back":
-        return await client.requestPressBack(timeoutMs, undefined, frameContext, signal);
+        return await client.requestPressBack(
+          timeoutMs,
+          undefined,
+          frameContext,
+          signal,
+          onDispatch,
+        );
       case "recent":
-        return await client.requestRecentApps(timeoutMs, undefined, frameContext, signal);
+        return await client.requestRecentApps(
+          timeoutMs,
+          undefined,
+          frameContext,
+          signal,
+          onDispatch,
+        );
       default:
         return { success: false, error: `Unsupported iOS button: ${button}` };
     }

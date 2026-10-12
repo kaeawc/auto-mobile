@@ -26,6 +26,50 @@ function createAdbFactory(fakeAdb: FakeAdbExecutor): AdbClientFactory {
 }
 
 describe("InputKey", () => {
+  test.each(["refused", "cancelled", "deadline", "sent"] as const)(
+    "modifier API probe is a read; only the key event marks dispatch: %s",
+    async (outcome) => {
+      const adb = new FakeAdbExecutor();
+      const timer = new FakeTimer();
+      const controller = new AbortController();
+      const events: string[] = [];
+      const probe = spyOn(adb, "getAndroidApiLevel").mockImplementation(async () => {
+        events.push("probe");
+        return 31;
+      });
+      const validator = {
+        validateFrameContext: async () => {
+          events.push("validation");
+          if (outcome === "cancelled") {
+            controller.abort();
+          }
+          if (outcome === "deadline") {
+            timer.advanceTime(500);
+          }
+          return { success: outcome !== "refused", error: "Stale frame context" };
+        },
+      };
+      const key = new InputKey(androidDevice, createAdbFactory(adb), validator, timer);
+      const pending = key.press("a", 500, "frame", ["ctrl"], {
+        signal: controller.signal,
+        onDispatch: () => {
+          expect(adb.getExecutedArgv()).toEqual([]);
+          events.push("dispatch");
+        },
+      });
+      if (outcome === "cancelled") {
+        await expect(pending).rejects.toThrow();
+      } else {
+        expect((await pending).success).toBe(outcome === "sent");
+      }
+      expect(events).toEqual(
+        outcome === "sent" ? ["probe", "validation", "dispatch"] : ["probe", "validation"],
+      );
+      expect(adb.getExecutedArgv().length).toBe(outcome === "sent" ? 1 : 0);
+      probe.mockRestore();
+    },
+  );
+
   test.each(["cancelled", "timed out", "closed"])(
     "reports an indeterminate outcome when ADB fails after dispatch: %s",
     async (reason) => {

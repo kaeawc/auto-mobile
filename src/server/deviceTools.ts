@@ -4173,6 +4173,7 @@ function stopUnownedColdBoot(boot: DeviceBootResult | undefined): Promise<void> 
       );
       return undefined;
     }
+    // Unnamed: cancelling an unowned cold boot is not the session giving the device up.
     devicePool.markIntentionalShutdown(boot.device.deviceId);
   }
   const termination = terminateColdBootProcess(

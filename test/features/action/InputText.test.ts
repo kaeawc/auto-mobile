@@ -908,6 +908,38 @@ describe("InputText", () => {
     expect(inputCommands(factory)).toEqual([]);
   });
 
+  test.each(["sent", "refused", "cancelled", "deadline"] as const)(
+    "append marks once at its first keyevent after validation: %s",
+    async (outcome) => {
+      const factory = new FakeAdbClientFactory();
+      const timer = new FakeTimer();
+      const input = new InputText(androidDevice, factory, undefined, timer);
+      const controller = new AbortController();
+      let marks = 0;
+      const validate = async () => {
+        expect(marks).toBe(0);
+        if (outcome === "cancelled") {
+          controller.abort();
+        }
+        if (outcome === "deadline") {
+          timer.advanceTime(500);
+        }
+        return { success: outcome !== "refused", error: "stale", failureSource: "runner" as const };
+      };
+      const pending = input.appendText("abc", 500, validate, controller.signal, () => {
+        expect(inputCommands(factory)).toEqual([]);
+        marks++;
+      });
+      if (outcome === "cancelled") {
+        await expect(pending).rejects.toThrow();
+      } else {
+        expect((await pending).success).toBe(outcome === "sent");
+      }
+      expect(marks).toBe(outcome === "sent" ? 1 : 0);
+      expect(inputCommands(factory).length).toBe(outcome === "sent" ? 3 : 0);
+    },
+  );
+
   // Issue #3351: an interactive client mirroring a keyboard sends one call per
   // keystroke. Every other Android mode is replace-shaped (a11y sets the whole
   // string; eventAll clears first), so per-keystroke typing through

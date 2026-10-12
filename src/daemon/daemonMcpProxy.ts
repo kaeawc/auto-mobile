@@ -6373,15 +6373,22 @@ export class DaemonMcpProxy {
     if (this.isDaemonSessionNotFoundError(error)) {
       // The same decision as any other heartbeat's not-found: an attempt that reached a daemon
       // this proxy just connected to gets that session's first answer on the connection (#11570).
-      this.recoveryNotFoundOutcomes.set(sessionUuid, {
-        outcome: this.noteNotFoundAnswer(
-          sessionUuid,
-          attemptedClient,
-          releaseReasonFromError(error),
-          daemonInstanceFromError(error),
-        ),
-        releaseReason: releaseReasonFromError(error),
-      });
+      const releaseReason = releaseReasonFromError(error);
+      const outcome = this.noteNotFoundAnswer(
+        sessionUuid,
+        attemptedClient,
+        releaseReason,
+        daemonInstanceFromError(error),
+      );
+      this.recoveryNotFoundOutcomes.set(sessionUuid, { outcome, releaseReason });
+      if (
+        this.managedExecutionSessions.has(sessionUuid) &&
+        releaseReason !== undefined &&
+        isRecoverableDaemonHandoffReason(releaseReason) &&
+        outcome.kind === "awaited"
+      ) {
+        return "session-awaited";
+      }
       return "session-gone";
     }
     if (!this.isMissingHeartbeatAcknowledgement(error)) {

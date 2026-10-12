@@ -2,7 +2,10 @@ import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test"
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
-import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import {
+  DaemonMcpProxy,
+  RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
+} from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import {
   handleDaemonRequest,
@@ -92,10 +95,16 @@ let proxy: DaemonMcpProxy;
 let handovers: LivenessHandover[];
 let clients: FakeDaemonClient[];
 let stripReleaseReason = false;
+let heartbeatSilent = false;
+let heartbeats: Array<{ at: number; params: Record<string, unknown> }>;
+let firstNotFoundAnswerAt: number | undefined;
 let spies: Array<ReturnType<typeof spyOn>>;
 
 const setUp = async (): Promise<void> => {
   stripReleaseReason = false;
+  heartbeatSilent = false;
+  heartbeats = [];
+  firstNotFoundAnswerAt = undefined;
   baseTimer = new LivenessTimer();
   timer = new StallableTimer(baseTimer);
   sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -127,11 +136,16 @@ const setUp = async (): Promise<void> => {
           if (method !== DAEMON_HEARTBEAT_METHOD) {
             return undefined;
           }
+          heartbeats.push({ at: timer.now(), params });
+          if (heartbeatSilent) {
+            return new Promise<never>(() => {});
+          }
           const response = await handleDaemonRequest(
             { id: "r", type: "daemon_request", method, params },
             state,
           );
           if (!response.success) {
+            firstNotFoundAnswerAt ??= timer.now();
             const refusal = { ...response };
             if (stripReleaseReason) {
               delete refusal.releaseReason;
@@ -150,6 +164,7 @@ const setUp = async (): Promise<void> => {
     idGenerator: new FakeIdGenerator(["managed-proxy-token"]),
     heartbeatTimeoutMs: LEASE_MS,
     heartbeatIntervalMs: INTERVAL_MS,
+    initialSessionUuid: SESSION,
   });
   proxy.onLivenessHandover((handover) => handovers.push(handover));
 };
@@ -197,6 +212,12 @@ async function withStallLoss(
     callTool: (name: string, args: Record<string, unknown>) => Promise<ToolAnswer>,
     pushed: () => unknown[],
   ) => Promise<void>,
+  options: {
+    reason?: string;
+    stall?: boolean;
+    expectHandover?: boolean;
+    releaseBeforeStall?: boolean;
+  } = {},
 ): Promise<void> {
   const registration = spyOn(Server.prototype, "setRequestHandler");
   const { server } = createProxyMcpServer({ proxy, ...(managedSlots ? { managedSlots } : {}) });
@@ -210,18 +231,32 @@ async function withStallLoss(
 
   try {
     // The session is held: claimed and heartbeated from now on.
-    await proxy.holdManagedExecutionSession(SESSION);
+    if (managedSlots) {
+      await proxy.holdManagedExecutionSession(SESSION);
+    } else {
+      await proxy.ensureConnected();
+      expect(proxy.getManagedExecutionSessions()).toEqual([]);
+    }
     expect(sessionManager.getSession(SESSION)?.livenessOwnerToken).toBeDefined();
 
     // The proxy stalls past the lease and the suspect grace; the daemon's heartbeat monitor
     // releases the session terminally meanwhile.
-    timer.stall(LEASE_MS + SUSPECT_GRACE_MS + 5_000);
-    await sessionManager.releaseSession(SESSION, "heartbeat-timeout");
+    if (options.releaseBeforeStall) {
+      await sessionManager.releaseSession(SESSION, options.reason);
+    }
+    if (options.stall !== false) {
+      timer.stall(LEASE_MS + SUSPECT_GRACE_MS + 5_000);
+    }
+    if (!options.releaseBeforeStall) {
+      await sessionManager.releaseSession(SESSION, options.reason ?? "heartbeat-timeout");
+    }
     await baseTimer.advanceTimeAsync(INTERVAL_MS);
     await baseTimer.advanceTimeAsync(INTERVAL_MS);
 
     // Precondition: the proxy's own recovery classified this as a definitive loss.
-    expect(handovers.map((handover) => handover.code)).toEqual(["proxy_stalled"]);
+    if (options.expectHandover !== false) {
+      expect(handovers.map((handover) => handover.code)).toEqual(["proxy_stalled"]);
+    }
 
     await body(
       async (name, args) =>
@@ -280,22 +315,141 @@ test.each(["heartbeat-timeout", "session-not-found"] as const)(
   },
 );
 
-test("a generic connection keeps the proxy_stalled answer for the same loss, and is told once", async () => {
-  await withStallLoss(undefined, async (callTool, pushed) => {
-    const result = await callTool("tapOn", { text: "OK" });
-    const error = JSON.parse(result.content[0].text).error;
+test.each(["heartbeat-timeout", "daemon-restart"])(
+  "a generic connection keeps the proxy_stalled answer for %s, and is told once",
+  async (reason) => {
+    await withStallLoss(
+      undefined,
+      async (callTool, pushed) => {
+        const result = await callTool("tapOn", { text: "OK" });
+        const error = JSON.parse(result.content[0].text).error;
 
-    expect(result.isError).toBe(true);
-    expect(error).toMatchObject({
-      code: "proxy_stalled",
-      retryable: true,
-      recovery: { action: "reacquire_lost_sessions" },
-    });
-    expect(error.sessions.map((session: { sessionUuid: string }) => session.sessionUuid)).toEqual([
-      SESSION,
-    ]);
-    expect(pushed()).toEqual([{ error }]);
+        expect(result.isError).toBe(true);
+        expect(error).toMatchObject({
+          code: "proxy_stalled",
+          retryable: true,
+          recovery: { action: "reacquire_lost_sessions" },
+        });
+        expect(
+          error.sessions.map((session: { sessionUuid: string }) => session.sessionUuid),
+        ).toEqual([SESSION]);
+        expect(pushed()).toEqual([{ error }]);
 
-    await expectNextReadForwardedSessionless(callTool);
-  });
+        await expectNextReadForwardedSessionless(callTool);
+      },
+      { reason },
+    );
+  },
+);
+
+test("PIN: a managed proxy stall ends on device-restart under the daemon's reason", async () => {
+  const reason = "device-restart:emulator-5554";
+  await withStallLoss(
+    readyManagedSlotsResult(SESSION),
+    async (callTool, pushed) => {
+      expect(proxy.getTerminalSessionRelease()).toEqual({ sessionUuid: SESSION, reason });
+      expect(handovers[0].releaseReasons).toEqual({ [SESSION]: reason });
+      const result = await callTool("tapOn", { text: "OK" });
+      expect(result.isError).toBe(true);
+      const error = JSON.parse(result.content[0].text).error;
+      expect(error).toMatchObject({ code: "managed_execution_ended", reason, retryable: false });
+      expect(pushed()).toEqual([{ error }]);
+      const count = heartbeats.length;
+      await baseTimer.advanceTimeAsync(INTERVAL_MS * 2);
+      expect(heartbeats).toHaveLength(count);
+    },
+    { reason, releaseBeforeStall: true },
+  );
 });
+
+test.each(["daemon-restart", "daemon-shutdown"])(
+  "a managed proxy stall awaits %s and claims the rehydrated session",
+  async (reason) => {
+    await withStallLoss(
+      readyManagedSlotsResult(SESSION),
+      async (callTool, pushed) => {
+        expect(handovers).toEqual([]);
+        expect(proxy.getTerminalSessionRelease()).toBeUndefined();
+        expect(proxy.getManagedExecutionSessions()).toEqual([SESSION]);
+        expect(pushed()).toEqual([]);
+        const count = heartbeats.length;
+        await baseTimer.advanceTimeAsync(INTERVAL_MS * 2);
+        expect(heartbeats.slice(count).map(({ params }) => params.claimLivenessOwnership)).toEqual([
+          true,
+          true,
+        ]);
+
+        const session = await sessionManager.createSession(
+          SESSION,
+          "emulator-5554",
+          "android",
+          600_000,
+          LEASE_MS,
+        );
+        await sessionManager.adoptManagedExecutionLivenessPolicy(SESSION, {
+          idleTimeoutMs: 600_000,
+        });
+        session.ownership = "awaiting-owner";
+        session.awaitingOwnerSince = timer.now();
+        await baseTimer.advanceTimeAsync(INTERVAL_MS);
+        expect(session.ownership).toBe("owned");
+        expect(session.livenessOwnerToken).toBe("managed-proxy-token");
+        const result = await callTool("tapOn", { text: "OK" });
+        expect(result.isError).not.toBe(true);
+        expect(clients.flatMap((client) => client.callToolCalls)).toEqual([
+          { toolName: "tapOn", params: { text: "OK", sessionUuid: SESSION } },
+        ]);
+        expect(handovers).toEqual([]);
+        expect(proxy.getTerminalSessionRelease()).toBeUndefined();
+        expect(proxy.getManagedExecutionSessions()).toEqual([SESSION]);
+        expect(pushed()).toEqual([]);
+      },
+      { reason, expectHandover: false },
+    );
+  },
+);
+
+async function expiredHandoff(reason: string, stall: boolean) {
+  let surface;
+  await withStallLoss(
+    readyManagedSlotsResult(SESSION),
+    async (_callTool, pushed) => {
+      expect(firstNotFoundAnswerAt).toBeDefined();
+      const firstAnswerAt = firstNotFoundAnswerAt!;
+      // A silent socket between not-found answers must not open a second handoff window.
+      heartbeatSilent = true;
+      await baseTimer.advanceTimeAsync(INTERVAL_MS * 2);
+      heartbeatSilent = false;
+      await baseTimer.advanceTimeAsync(
+        firstAnswerAt + RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS + INTERVAL_MS - timer.now(),
+      );
+      const count = heartbeats.length;
+      expect(count).toBeGreaterThan(2);
+      expect(heartbeats.at(-1)!.at - firstAnswerAt).toBeLessThanOrEqual(
+        RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS + INTERVAL_MS,
+      );
+      await baseTimer.advanceTimeAsync(RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS + INTERVAL_MS * 4);
+      expect(heartbeats).toHaveLength(count);
+      surface = {
+        handovers: [...handovers],
+        terminalRelease: proxy.getTerminalSessionRelease(),
+        managedSessions: proxy.getManagedExecutionSessions(),
+        pushed: pushed(),
+      };
+    },
+    { reason, stall, expectHandover: false },
+  );
+  return surface;
+}
+
+test.each(["daemon-restart", "daemon-shutdown"])(
+  "a managed proxy stall expires %s exactly like an ordinary keeper, even after silence",
+  async (reason) => {
+    const stalled = await expiredHandoff(reason, true);
+    await tearDown();
+    await setUp();
+    const ordinary = await expiredHandoff(reason, false);
+    expect(stalled).toEqual(ordinary);
+    expect(stalled).toMatchObject({ handovers: [], terminalRelease: undefined, pushed: [] });
+  },
+);

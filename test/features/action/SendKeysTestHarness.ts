@@ -195,6 +195,7 @@ export function createSendKeysHarness(device: BootedDevice, observe: SendKeysObs
     supportsImeKeyEvents: async () => true,
     supportsImeClearField: async () => true,
     supportsImePasswordCommit: async () => false,
+    supportsImeInsertedText: async () => true,
     supportsKeyboardProfiles: async () => true,
     setKeyboardProfile: async () => ({ success: true, previousProfileId: "direct" }),
     commitViaIme: async (text, _prior, _signal, delivery) => {

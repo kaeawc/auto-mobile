@@ -126,7 +126,11 @@ internal object DaemonHeartbeat {
    * ordinary exception the caller treats as a transient miss and warns about, rate-limited. The
    * connection is always disconnected.
    */
-  internal fun sendHeartbeat(endpoint: URL, sessionId: String) {
+  internal fun sendHeartbeat(
+    endpoint: URL,
+    sessionId: String,
+    livenessOwnerToken: String = DaemonLivenessOwner.token,
+  ) {
     val connection = endpoint.openConnection() as HttpURLConnection
     try {
       connection.requestMethod = "POST"
@@ -135,7 +139,12 @@ internal object DaemonHeartbeat {
       connection.doOutput = true
 
       val payload =
-        json.encodeToString(buildJsonObject { put("sessionId", JsonPrimitive(sessionId)) })
+        json.encodeToString(
+          buildJsonObject {
+            put("sessionId", JsonPrimitive(sessionId))
+            put("livenessOwnerToken", JsonPrimitive(livenessOwnerToken))
+          },
+        )
       connection.outputStream.use { it.write(payload.toByteArray()) }
 
       val status = connection.responseCode

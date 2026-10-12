@@ -59,7 +59,8 @@ A session's owner is the connection that acquired it, or that restored it after
 a reconnect. Ownership is cooperative: naming a session's UUID never takes it over.
 A proxy's bound-session marker is honoured for another connected owner's session
 only with its recorded liveness owner token; tokenless sessions retain the existing
-bound-session behaviour (#11555 item 3). While the owner is connected, a control call from any
+bound-session behaviour (#11555 item 3). The token is stored with the session and survives a daemon
+restart; the Android JUnit runner sends one on tool calls and HTTP heartbeats. While the owner is connected, a control call from any
 other connection that names the session is refused, with autolock on or off, and
 that connection is never bound to the session. The rule covers control tools
 that take no device routing too (`killDevice`, `deleteDevice`, `exportPlan`,

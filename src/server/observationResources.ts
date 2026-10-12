@@ -22,9 +22,14 @@ import {
   screenshotMimeType,
   type ScreenshotFileSystem,
 } from "./retainedScreenshot";
-import { getScreenshotStateStore } from "../features/observe/screenshot/ScreenshotStateRegistry";
+import {
+  getScreenshotStateStore,
+  SCREENSHOT_CAPTURE_CANCELLED_REASON,
+  SCREENSHOT_CAPTURE_SUPERSEDED_REASON,
+} from "../features/observe/screenshot/ScreenshotStateRegistry";
 import {
   OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS,
+  OBSERVATION_SCREENSHOT_NOT_READY_RETRY_AFTER_MS,
   OBSERVATION_SCREENSHOT_URI_TEMPLATE,
 } from "./observationResourceUris";
 import { stripInternalObservationFields } from "./observationInternalFields";
@@ -92,145 +97,208 @@ function resolveLatestScreenshotDeviceId(): string | undefined {
   return RealObserveScreen.getRecentCachedObservation()?.deviceId;
 }
 
-// Helper to get the cached screenshot path for the device selected by this
-// screenshot read's atomic latest-observation lookup (issue #6600).
-async function getLatestScreenshotPath(deviceId: string): Promise<string | undefined> {
+export type ObservationResourceFailureCode =
+  | "INVALID_REQUEST"
+  | "OBSERVATION_NOT_RETAINED"
+  | "SCREENSHOT_NOT_READY"
+  | "SCREENSHOT_CAPTURE_FAILED"
+  | "SCREENSHOT_CAPTURE_CANCELLED"
+  | "SCREENSHOT_CAPTURE_SUPERSEDED"
+  | "SCREENSHOT_NOT_CAPTURED"
+  | "SCREENSHOT_FILE_UNAVAILABLE"
+  | "SCREENSHOT_ACCESS_DENIED"
+  | "SCREENSHOT_READ_FAILED"
+  | "OBSERVATION_NOT_AVAILABLE"
+  | "OBSERVATION_READ_FAILED"
+  | "SESSION_NOT_BOUND"
+  | "SESSION_NOT_ACTIVE";
+
+interface ObservationResourceIdentity {
+  deviceId?: string;
+  observationId?: string;
+  sessionUuid?: string;
+}
+
+function observationResourceError(
+  uri: string,
+  code: ObservationResourceFailureCode,
+  error: string,
+  identity: ObservationResourceIdentity = {},
+): ResourceContent {
+  const retryable = code === "SCREENSHOT_NOT_READY";
+  const body = {
+    code,
+    retryable,
+    ...(retryable ? { retryAfterMs: OBSERVATION_SCREENSHOT_NOT_READY_RETRY_AFTER_MS } : {}),
+    error,
+    ...(identity.deviceId ? { deviceId: identity.deviceId } : {}),
+    ...(identity.observationId ? { observationId: identity.observationId } : {}),
+    ...(identity.sessionUuid ? { sessionUuid: identity.sessionUuid } : {}),
+  };
+  return { uri, mimeType: "application/json", text: JSON.stringify(body, null, 2) };
+}
+
+function screenshotCaptureFailureCode(reason: string | undefined): ObservationResourceFailureCode {
+  if (reason === SCREENSHOT_CAPTURE_CANCELLED_REASON) {
+    return "SCREENSHOT_CAPTURE_CANCELLED";
+  }
+  if (reason === SCREENSHOT_CAPTURE_SUPERSEDED_REASON) {
+    return "SCREENSHOT_CAPTURE_SUPERSEDED";
+  }
+  return reason ? "SCREENSHOT_CAPTURE_FAILED" : "SCREENSHOT_NOT_CAPTURED";
+}
+
+function hasErrnoCode(error: unknown): error is { code: string } {
+  return (
+    typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+  );
+}
+
+function screenshotFileFailureCode(error: unknown): ObservationResourceFailureCode {
+  if (!hasErrnoCode(error)) {
+    return "SCREENSHOT_READ_FAILED";
+  }
+  switch (error.code) {
+    case "ENOENT":
+    case "ENOTDIR":
+      return "SCREENSHOT_FILE_UNAVAILABLE";
+    case "EACCES":
+    case "EPERM":
+      return "SCREENSHOT_ACCESS_DENIED";
+    default:
+      return "SCREENSHOT_READ_FAILED";
+  }
+}
+
+async function screenshotNotFileError(
+  uri: string,
+  path: string,
+  identity: ObservationResourceIdentity,
+): Promise<ResourceContent | undefined> {
+  const fileStat = await screenshotFileSystem.stat(path);
+  if (!fileStat.isFile()) {
+    return observationResourceError(
+      uri,
+      "SCREENSHOT_FILE_UNAVAILABLE",
+      "The retained screenshot path is not a file. Call the 'observe' tool again to capture a screenshot.",
+      identity,
+    );
+  }
+  return undefined;
+}
+
+// Resolve the selected device's path, preserving stat/protection failure evidence.
+async function getLatestScreenshotPath(
+  deviceId: string,
+): Promise<string | ResourceContent | undefined> {
   try {
     const screenshotPath = RealObserveScreen.getRecentCachedScreenshotPathForDevice(deviceId);
     if (!screenshotPath) {
       return undefined;
     }
-
     await screenshotPathProtection.protect(screenshotPath);
-    const fileStat = await screenshotFileSystem.stat(screenshotPath);
-    if (!fileStat.isFile()) {
-      return undefined;
+    const unavailable = await screenshotNotFileError(
+      RESOURCE_URIS.LATEST_SCREENSHOT,
+      screenshotPath,
+      { deviceId },
+    );
+    if (unavailable) {
+      return unavailable;
     }
-
     await screenshotPathProtection.protect(screenshotPath);
     return screenshotPath;
   } catch (error) {
     logger.warn("[ObservationResources] Failed to get latest screenshot", error);
-    return undefined;
+    return observationResourceError(
+      RESOURCE_URIS.LATEST_SCREENSHOT,
+      screenshotFileFailureCode(error),
+      `Failed to retrieve screenshot: ${errorMessage(String(error))}`,
+      { deviceId },
+    );
   }
 }
 
 // Handler for latest observation resource (text/json)
 async function getLatestObservation(): Promise<ResourceContent> {
+  let deviceId: string | undefined;
   try {
     const cachedObservation = RealObserveScreen.getRecentCachedObservation();
-
     if (!cachedObservation) {
-      return {
-        uri: RESOURCE_URIS.LATEST_OBSERVATION,
-        mimeType: "application/json",
-        text: JSON.stringify(
-          {
-            error:
-              "No observation available. Call the 'observe' tool first to capture screen state.",
-          },
-          null,
-          2,
-        ),
-      };
+      return observationResourceError(
+        RESOURCE_URIS.LATEST_OBSERVATION,
+        "OBSERVATION_NOT_AVAILABLE",
+        "No observation available. Call the 'observe' tool first to capture screen state.",
+      );
     }
-
+    deviceId = cachedObservation.deviceId;
     // The cache is shared with tool paths that still need internal observation fields.
     const observation = { ...cachedObservation.result };
     stripInternalObservationFields(observation);
-
-    // Return the observation as JSON
     return {
       uri: RESOURCE_URIS.LATEST_OBSERVATION,
       mimeType: "application/json",
       text: stringifyToolResponse(observation),
     };
   } catch (error) {
-    logger.error(`[ObservationResources] Failed to get latest observation: ${error}`);
-    return {
-      uri: RESOURCE_URIS.LATEST_OBSERVATION,
-      mimeType: "application/json",
-      text: JSON.stringify(
-        {
-          error: `Failed to retrieve observation: ${error}`,
-        },
-        null,
-        2,
-      ),
-    };
+    logger.warn("[ObservationResources] Failed to get latest observation", error);
+    return observationResourceError(
+      RESOURCE_URIS.LATEST_OBSERVATION,
+      "OBSERVATION_READ_FAILED",
+      `Failed to retrieve observation: ${errorMessage(String(error))}`,
+      { deviceId },
+    );
   }
 }
 
-// Handler for latest screenshot resource (image/png as blob)
+// Handler for latest screenshot resource (image blob)
 async function getLatestScreenshot(): Promise<ResourceContent> {
+  let deviceId: string | undefined;
   try {
-    const deviceId = resolveLatestScreenshotDeviceId();
+    deviceId = resolveLatestScreenshotDeviceId();
     if (!deviceId) {
-      return {
-        uri: RESOURCE_URIS.LATEST_SCREENSHOT,
-        mimeType: "application/json",
-        text: JSON.stringify(
-          {
-            error:
-              "No observation available. Call the 'observe' tool first to capture a screenshot.",
-          },
-          null,
-          2,
-        ),
-      };
+      return observationResourceError(
+        RESOURCE_URIS.LATEST_SCREENSHOT,
+        "OBSERVATION_NOT_AVAILABLE",
+        "No observation available. Call the 'observe' tool first to capture a screenshot.",
+      );
     }
-
     let screenshotPath = await getLatestScreenshotPath(deviceId);
-
     if (!screenshotPath && ScreenshotJobTracker.isPending(deviceId)) {
       await ScreenshotJobTracker.waitForCompletion(deviceId, 3000);
       screenshotPath = await getLatestScreenshotPath(deviceId);
     }
-
+    if (typeof screenshotPath === "object") {
+      return screenshotPath;
+    }
     if (!screenshotPath) {
       const screenshotError = RealObserveScreen.getRecentCachedScreenshotErrorForDevice(deviceId);
-      const errorMessage = screenshotError
+      const message = screenshotError
         ? `No screenshot available from the latest observation: ${screenshotError}`
         : "No screenshot available. Call the 'observe' tool again to capture a screenshot.";
-      return {
-        uri: RESOURCE_URIS.LATEST_SCREENSHOT,
-        mimeType: "application/json",
-        text: JSON.stringify(
-          {
-            error: errorMessage,
-          },
-          null,
-          2,
-        ),
-      };
+      return observationResourceError(
+        RESOURCE_URIS.LATEST_SCREENSHOT,
+        ScreenshotJobTracker.isPending(deviceId)
+          ? "SCREENSHOT_NOT_READY"
+          : screenshotCaptureFailureCode(screenshotError),
+        message,
+        { deviceId },
+      );
     }
-
-    // Read the screenshot file and convert to base64
     await screenshotPathProtection.protect(screenshotPath);
     const imageBuffer = await screenshotFileSystem.readFile(screenshotPath);
-    const base64Image = imageBuffer.toString("base64");
-
-    // Determine mime type from file extension
-    const mimeType = screenshotMimeType(screenshotPath, imageBuffer);
-
     return {
       uri: RESOURCE_URIS.LATEST_SCREENSHOT,
-      mimeType,
-      blob: base64Image,
+      mimeType: screenshotMimeType(screenshotPath, imageBuffer),
+      blob: imageBuffer.toString("base64"),
     };
   } catch (error) {
-    logger.error(`[ObservationResources] Failed to get latest screenshot: ${error}`);
-    return {
-      uri: RESOURCE_URIS.LATEST_SCREENSHOT,
-      mimeType: "application/json",
-      text: JSON.stringify(
-        {
-          error: `Failed to retrieve screenshot: ${error}`,
-        },
-        null,
-        2,
-      ),
-    };
+    logger.warn("[ObservationResources] Failed to get latest screenshot", error);
+    return observationResourceError(
+      RESOURCE_URIS.LATEST_SCREENSHOT,
+      screenshotFileFailureCode(error),
+      `Failed to retrieve screenshot: ${errorMessage(String(error))}`,
+      { deviceId },
+    );
   }
 }
 
@@ -239,43 +307,33 @@ function observationScreenshotUnknownError(
   deviceId: string,
   observationId: string,
 ): ResourceContent {
-  return {
+  return observationResourceError(
     uri,
-    mimeType: "application/json",
-    text: JSON.stringify(
-      {
-        error: `Observation id ${observationId} is unknown or has been superseded or evicted by a newer observation for device ${deviceId}. Call the 'observe' tool again.`,
-      },
-      null,
-      2,
-    ),
-  };
+    "OBSERVATION_NOT_RETAINED",
+    `Observation id ${observationId} is unknown or has been superseded or evicted by a newer observation for device ${deviceId}. Call the 'observe' tool again.`,
+    { deviceId, observationId },
+  );
 }
 
-function observationScreenshotNotReadyError(uri: string, observationId: string): ResourceContent {
-  return {
+function observationScreenshotNotReadyError(
+  uri: string,
+  deviceId: string,
+  observationId: string,
+): ResourceContent {
+  return observationResourceError(
     uri,
-    mimeType: "application/json",
-    text: JSON.stringify(
-      {
-        error: `Screenshot for observation id ${observationId} is not ready yet. Call the resource again after the capture completes.`,
-      },
-      null,
-      2,
-    ),
-  };
+    "SCREENSHOT_NOT_READY",
+    `Screenshot for observation id ${observationId} is not ready yet. Call the resource again after the capture completes.`,
+    { deviceId, observationId },
+  );
 }
 
 function observationScreenshotMalformedUriError(uri: string): ResourceContent {
-  return {
+  return observationResourceError(
     uri,
-    mimeType: "application/json",
-    text: JSON.stringify(
-      { error: "Malformed resource URI: a path segment is not valid percent-encoding." },
-      null,
-      2,
-    ),
-  };
+    "INVALID_REQUEST",
+    "Malformed resource URI: a path segment is not valid percent-encoding.",
+  );
 }
 
 function matchesObservationId(deviceId: string, observationId: string): boolean {
@@ -298,7 +356,7 @@ async function waitForObservationScreenshot(
     return observationScreenshotUnknownError(uri, deviceId, observationId);
   }
   if (store.isObservationPending(deviceId, observationId)) {
-    return observationScreenshotNotReadyError(uri, observationId);
+    return observationScreenshotNotReadyError(uri, deviceId, observationId);
   }
   return undefined;
 }
@@ -362,16 +420,22 @@ async function getObservationScreenshot(params: Record<string, string>): Promise
         deviceId,
         observationId,
       );
-      const errorMessage = screenshotError
+      const message = screenshotError
         ? `No screenshot available for observation id ${observationId}: ${screenshotError}`
         : "No screenshot available. Call the 'observe' tool again to capture a screenshot.";
-      return {
-        uri,
-        mimeType: "application/json",
-        text: JSON.stringify({ error: errorMessage }, null, 2),
-      };
+      return observationResourceError(uri, screenshotCaptureFailureCode(screenshotError), message, {
+        deviceId,
+        observationId,
+      });
     }
 
+    const unavailable = await screenshotNotFileError(uri, screenshotPath, {
+      deviceId,
+      observationId,
+    });
+    if (unavailable) {
+      return unavailable;
+    }
     const image = await readRetainedScreenshot({
       path: screenshotPath,
       fileSystem: screenshotFileSystem,
@@ -386,41 +450,52 @@ async function getObservationScreenshot(params: Record<string, string>): Promise
       blob: image.data,
     };
   } catch (error) {
-    logger.error(
-      `[ObservationResources] Failed to get screenshot for observation ${observationId} on device ${deviceId}: ${error}`,
+    logger.warn(
+      `[ObservationResources] Failed to get screenshot for observation ${observationId} on device ${deviceId}`,
+      error,
     );
-    return {
+    return observationResourceError(
       uri,
-      mimeType: "application/json",
-      text: JSON.stringify(
-        {
-          error: `Failed to retrieve screenshot for observation id ${observationId}: ${error}`,
-        },
-        null,
-        2,
-      ),
-    };
+      screenshotFileFailureCode(error),
+      `Failed to retrieve screenshot for observation id ${observationId}: ${errorMessage(String(error))}`,
+      { deviceId, observationId },
+    );
   }
 }
 
 const OBSERVATION_SCREENSHOT_URI_PATTERN =
   /^automobile:observation\/([^/&]+)\/([^/&]+)\/screenshot$/;
 
-export type ObservationScreenshotBytes = { bytes: Buffer; mimeType: string } | { error: string };
+export type ObservationScreenshotBytes =
+  | { bytes: Buffer; mimeType: string }
+  | { error: string; code?: string; retryable?: boolean };
 
-function resourceErrorText(content: ResourceContent): string {
+function resourceErrorText(content: ResourceContent): {
+  error: string;
+  code?: string;
+  retryable?: boolean;
+} {
   try {
     const parsed: unknown = JSON.parse(content.text ?? "");
-    const message =
-      typeof parsed === "object" && parsed !== null && "error" in parsed ? parsed.error : undefined;
-    if (typeof message === "string") {
-      return message;
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "error" in parsed &&
+      typeof parsed.error === "string"
+    ) {
+      return {
+        error: parsed.error,
+        ...("code" in parsed && typeof parsed.code === "string" ? { code: parsed.code } : {}),
+        ...("retryable" in parsed && typeof parsed.retryable === "boolean"
+          ? { retryable: parsed.retryable }
+          : {}),
+      };
     }
   } catch (error) {
     // Our own error envelope is JSON; anything else falls back to the raw text below.
-    logger.debug(`[ObservationResources] Non-JSON resource error body: ${errorMessage(error)}`);
+    logger.warn(`[ObservationResources] Non-JSON resource error body: ${errorMessage(error)}`);
   }
-  return content.text ?? `No screenshot was returned for ${content.uri}.`;
+  return { error: content.text ?? `No screenshot was returned for ${content.uri}.` };
 }
 
 /**
@@ -441,23 +516,18 @@ export async function readObservationScreenshotBytes(
   }
   const content = await getObservationScreenshot({ deviceId: match[1], observationId: match[2] });
   if (content.blob === undefined) {
-    return { error: resourceErrorText(content) };
+    return resourceErrorText(content);
   }
   return { bytes: Buffer.from(content.blob, "base64"), mimeType: content.mimeType ?? "image/png" };
 }
 
 function sessionResourceError(uri: string, sessionUuid: string): ResourceContent {
-  return {
+  return observationResourceError(
     uri,
-    mimeType: "application/json",
-    text: JSON.stringify(
-      {
-        error: `No active device session found for sessionUuid ${sessionUuid}.`,
-      },
-      null,
-      2,
-    ),
-  };
+    "SESSION_NOT_ACTIVE",
+    `No active device session found for sessionUuid ${sessionUuid}.`,
+    { sessionUuid },
+  );
 }
 
 type FreshSessionScreenshotFailureCode =
@@ -495,18 +565,13 @@ function freshScreenshotCaptureFailure(
   return freshSessionScreenshotError(uri, "SCREENSHOT_CAPTURE_FAILED", true, error);
 }
 
-function unauthorizedSessionResourceError(uri: string): ResourceContent {
-  return {
+function unauthorizedSessionResourceError(uri: string, sessionUuid: string): ResourceContent {
+  return observationResourceError(
     uri,
-    mimeType: "application/json",
-    text: JSON.stringify(
-      {
-        error: "This resource can only be read by its bound device session.",
-      },
-      null,
-      2,
-    ),
-  };
+    "SESSION_NOT_BOUND",
+    "This resource can only be read by its bound device session.",
+    { sessionUuid },
+  );
 }
 
 function unauthorizedFreshScreenshotError(uri: string): ResourceContent {
@@ -621,7 +686,7 @@ async function getSessionObservation(
   const { sessionUuid } = params;
   const uri = `automobile:observation/session/${sessionUuid}/latest`;
   if (!isAuthorizedSessionResource(context, sessionUuid)) {
-    return unauthorizedSessionResourceError(uri);
+    return unauthorizedSessionResourceError(uri, sessionUuid);
   }
   const activeSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
   if (!activeSession) {
@@ -633,17 +698,12 @@ async function getSessionObservation(
     const cachedResult = RealObserveScreen.getRecentCachedResultForDevice(deviceId);
 
     if (!cachedResult) {
-      return {
+      return observationResourceError(
         uri,
-        mimeType: "application/json",
-        text: JSON.stringify(
-          {
-            error: `No observation available for sessionUuid ${sessionUuid}. Call the 'observe' tool first.`,
-          },
-          null,
-          2,
-        ),
-      };
+        "OBSERVATION_NOT_AVAILABLE",
+        `No observation available for sessionUuid ${sessionUuid}. Call the 'observe' tool first.`,
+        { deviceId, sessionUuid },
+      );
     }
 
     // The cache is shared with tool paths that still need internal observation fields.
@@ -656,20 +716,16 @@ async function getSessionObservation(
       text: stringifyToolResponse(observation),
     };
   } catch (error) {
-    logger.error(
-      `[ObservationResources] Failed to get observation for session ${sessionUuid}: ${error}`,
+    logger.warn(
+      `[ObservationResources] Failed to get observation for session ${sessionUuid}`,
+      error,
     );
-    return {
+    return observationResourceError(
       uri,
-      mimeType: "application/json",
-      text: JSON.stringify(
-        {
-          error: `Failed to retrieve observation for sessionUuid ${sessionUuid}: ${error}`,
-        },
-        null,
-        2,
-      ),
-    };
+      "OBSERVATION_READ_FAILED",
+      `Failed to retrieve observation for sessionUuid ${sessionUuid}: ${errorMessage(String(error))}`,
+      { deviceId, sessionUuid },
+    );
   }
 }
 
@@ -681,7 +737,7 @@ async function getSessionScreenshot(
   const { sessionUuid } = params;
   const uri = `automobile:observation/session/${sessionUuid}/latest/screenshot`;
   if (!isAuthorizedSessionResource(context, sessionUuid)) {
-    return unauthorizedSessionResourceError(uri);
+    return unauthorizedSessionResourceError(uri, sessionUuid);
   }
   const activeSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
   if (!activeSession) {
@@ -692,32 +748,39 @@ async function getSessionScreenshot(
   try {
     const cachedResult = RealObserveScreen.getRecentCachedResultForDevice(deviceId);
     if (!cachedResult) {
-      return {
+      return observationResourceError(
         uri,
-        mimeType: "application/json",
-        text: JSON.stringify(
-          {
-            error: `No observation available for sessionUuid ${sessionUuid}. Call the 'observe' tool first.`,
-          },
-          null,
-          2,
-        ),
-      };
+        "OBSERVATION_NOT_AVAILABLE",
+        `No observation available for sessionUuid ${sessionUuid}. Call the 'observe' tool first.`,
+        { deviceId, sessionUuid },
+      );
     }
 
     const screenshotPath = RealObserveScreen.getRecentCachedScreenshotPathForDevice(deviceId);
     if (!screenshotPath) {
       const screenshotError = RealObserveScreen.getRecentCachedScreenshotErrorForDevice(deviceId);
-      const errorMessage = screenshotError
+      const message = screenshotError
         ? `No screenshot available for sessionUuid ${sessionUuid}: ${screenshotError}`
         : `No screenshot available for sessionUuid ${sessionUuid}. Call the 'observe' tool again.`;
-      return {
+      const pending = getScreenshotStateStore().isObservationPending(
+        deviceId,
+        cachedResult.observationId,
+      );
+      return observationResourceError(
         uri,
-        mimeType: "application/json",
-        text: JSON.stringify({ error: errorMessage }, null, 2),
-      };
+        pending ? "SCREENSHOT_NOT_READY" : screenshotCaptureFailureCode(screenshotError),
+        message,
+        { deviceId, sessionUuid },
+      );
     }
 
+    const unavailable = await screenshotNotFileError(uri, screenshotPath, {
+      deviceId,
+      sessionUuid,
+    });
+    if (unavailable) {
+      return unavailable;
+    }
     await screenshotPathProtection.protect(screenshotPath);
     const imageBuffer = await screenshotFileSystem.readFile(screenshotPath);
     const base64Image = imageBuffer.toString("base64");
@@ -725,20 +788,16 @@ async function getSessionScreenshot(
 
     return { uri, mimeType, blob: base64Image };
   } catch (error) {
-    logger.error(
-      `[ObservationResources] Failed to get screenshot for session ${sessionUuid}: ${error}`,
+    logger.warn(
+      `[ObservationResources] Failed to get screenshot for session ${sessionUuid}`,
+      error,
     );
-    return {
+    return observationResourceError(
       uri,
-      mimeType: "application/json",
-      text: JSON.stringify(
-        {
-          error: `Failed to retrieve screenshot for sessionUuid ${sessionUuid}: ${error}`,
-        },
-        null,
-        2,
-      ),
-    };
+      screenshotFileFailureCode(error),
+      `Failed to retrieve screenshot for sessionUuid ${sessionUuid}: ${errorMessage(String(error))}`,
+      { deviceId, sessionUuid },
+    );
   }
 }
 
@@ -816,7 +875,7 @@ export function registerObservationResources(): void {
   ResourceRegistry.register(
     RESOURCE_URIS.LATEST_OBSERVATION,
     "Latest Observation",
-    "The hierarchy and unscoped screenshot are a best-effort point-in-time snapshot per read, with no hard cross-read guarantee: another device's newer observation can land between reads.",
+    "The hierarchy and unscoped screenshot are a best-effort point-in-time snapshot per read, with no hard cross-read guarantee: another device's newer observation can land between reads. Failures are application/json with code, retryable, error.",
     "application/json",
     getLatestObservation,
   );
@@ -825,7 +884,7 @@ export function registerObservationResources(): void {
   ResourceRegistry.register(
     RESOURCE_URIS.LATEST_SCREENSHOT,
     "Latest Screenshot",
-    "The most recent screen capture as a PNG or WebP image. Updated automatically after each observe() call.",
+    "The most recent screen capture as a PNG or WebP image. Updated automatically after each observe() call. Failures are application/json with code, retryable, error.",
     "image/png",
     getLatestScreenshot,
   );
@@ -835,7 +894,7 @@ export function registerObservationResources(): void {
   ResourceRegistry.registerTemplate(
     RESOURCE_URIS.OBSERVATION_SCREENSHOT,
     "Observation Screenshot",
-    "Screen capture paired with one immutable device observation identity. Readable by any client and unavailable after that observation is superseded or evicted.",
+    "Screen capture paired with one immutable device observation identity. Readable by any client and unavailable after that observation is superseded or evicted. Failures are application/json with code, retryable, error. SCREENSHOT_NOT_READY: read the same URI again; OBSERVATION_NOT_RETAINED: observe again.",
     "image/png",
     getObservationScreenshot,
   );
@@ -844,7 +903,7 @@ export function registerObservationResources(): void {
   ResourceRegistry.registerTemplateWithReadContext(
     RESOURCE_URIS.SESSION_OBSERVATION,
     "Session Observation",
-    "Cached screen observation for an active device session.",
+    "Cached screen observation for an active device session. Failures are application/json with code, retryable, error.",
     "application/json",
     getSessionObservation,
   );
@@ -853,7 +912,7 @@ export function registerObservationResources(): void {
   ResourceRegistry.registerTemplateWithReadContext(
     RESOURCE_URIS.SESSION_SCREENSHOT,
     "Session Screenshot",
-    "Cached screen capture for an active device session.",
+    "Cached screen capture for an active device session. Failures are application/json with code, retryable, error.",
     "image/png",
     getSessionScreenshot,
   );
@@ -862,7 +921,7 @@ export function registerObservationResources(): void {
   ResourceRegistry.registerTemplateWithReadContext(
     RESOURCE_URIS.FRESH_SESSION_SCREENSHOT,
     "Fresh Session Screenshot",
-    "Fresh PNG screen capture for an active device session. Every read captures the current screen.",
+    "Fresh PNG screen capture for an active device session. Every read captures the current screen. Failures are application/json with code, retryable, error.",
     "image/png",
     getFreshSessionScreenshot,
   );

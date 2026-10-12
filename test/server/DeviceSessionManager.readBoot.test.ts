@@ -1035,3 +1035,41 @@ for (const state of ["unresolved serial", "unknown running state"] as const) {
     h.assertNoReadWrites();
   });
 }
+
+for (const daemon of [false, true]) {
+  for (const platform of ["android", "ios"] as const) {
+    const lane = `${platform} ${daemon ? "daemon" : "direct"}`;
+    test(`${lane}: shaped absent read ignores failed other-platform discovery and inventory`, async () => {
+      const h = harness(platform, daemon);
+      const other = platform === "android" ? "ios" : "android";
+      const id = platform === "android" ? "emulator-5599" : "87654321-ABCD-ABCD-ABCD-123456789ABC";
+      h.incomplete(other);
+      const otherImages = mock(async (): Promise<DeviceInfo[]> => {
+        throw new Error("other inventory must not be read");
+      });
+      if (other === "ios") {
+        h.simctl.listSimulatorImages = otherImages;
+      } else {
+        h.devices.listDeviceImages = otherImages;
+      }
+      await expect(h.manager.ensureDeviceReady("either", id, h.options)).rejects.toThrow(
+        `Device ${id} not found on either platform`,
+      );
+      expect(otherImages).not.toHaveBeenCalled();
+      h.assertNoBoot();
+      h.assertNoReadWrites();
+      expect(h.lifecycle.reservations).toEqual([]);
+    });
+    test(`${lane}: shaped image still requires healthy own-platform discovery`, async () => {
+      const h = harness(platform, daemon);
+      const id = platform === "android" ? "emulator-5599" : "87654321-ABCD-ABCD-ABCD-123456789ABC";
+      h.incomplete(platform);
+      await expect(h.manager.ensureDeviceReady("either", id, h.options)).rejects.toMatchObject({
+        code: "discovery_incomplete",
+        platform,
+        retryable: true,
+      });
+      h.assertEmptySelection();
+    });
+  }
+}

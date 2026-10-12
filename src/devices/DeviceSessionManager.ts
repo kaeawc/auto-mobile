@@ -1,5 +1,6 @@
 import {
   describeDevices,
+  explicitReadTargetPlatform,
   matchRunningReadTarget,
   providedReadTargetNotFound,
 } from "./runningReadTarget";
@@ -1105,12 +1106,14 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
   }
 
-  private async findProvidedReadinessImage(
+  /** Read-only inventory lookup, also used to prove a target before read discovery retries. */
+  async findProvidedReadinessImage(
     platform: SomePlatform,
     providedDeviceId: string,
     scan: ConnectedPlatformScan,
     options: DeviceReadyOptions,
   ): Promise<DeviceInfo | undefined> {
+    platform = explicitReadTargetPlatform(providedDeviceId, platform);
     if (platform !== "either") {
       this.assertReadinessDiscoveryComplete(platform, scan);
     }

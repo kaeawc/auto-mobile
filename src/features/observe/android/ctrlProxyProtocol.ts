@@ -1027,6 +1027,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   "ime_key_events_v1",
   "ime_clear_field_v1",
   "ime_password_commit_v1",
+  "ime_inserted_text_v1",
   "gesture_display_id_v1",
   "tap_double_v1",
   PROTOTYPE_DISPLAY_CAPABILITY,

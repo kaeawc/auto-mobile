@@ -17,6 +17,46 @@ export const MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE = "discovery_incomplete";
 /** Retry hint while the registry is unreadable. */
 export const MANAGED_SLOT_DISCOVERY_RETRY_AFTER_MS = 2_000;
 
+/** The same bounded retry hint while a live session's slot ownership is unconfirmed. */
+export const MANAGED_SLOT_OWNERSHIP_RETRY_AFTER_MS = MANAGED_SLOT_DISCOVERY_RETRY_AFTER_MS;
+
+export class ManagedSlotOwnershipUnconfirmedError extends ActionableError {
+  readonly code = "managed_slot_ownership_unconfirmed";
+  readonly retryable = true;
+  readonly retryAfterMs = MANAGED_SLOT_OWNERSHIP_RETRY_AFTER_MS;
+
+  constructor(readonly sessionUuid: string) {
+    super(
+      `Session '${sessionUuid}' slot ownership is not recorded for this daemon yet ` +
+        "(the managed slot registry is busy or the slot is not ready); retry shortly.",
+    );
+    this.name = "ManagedSlotOwnershipUnconfirmedError";
+  }
+
+  toPayload(): Record<string, unknown> {
+    return {
+      code: this.code,
+      sessionUuid: this.sessionUuid,
+      retryable: this.retryable,
+      retryAfterMs: this.retryAfterMs,
+    };
+  }
+}
+
+export class ManagedSlotOwnershipLostError extends ActionableError {
+  readonly code = "managed_slot_ownership_lost";
+  readonly retryable = false;
+
+  constructor(readonly sessionUuid: string) {
+    super(`Session '${sessionUuid}' no longer owns its managed slot; acquire a new session.`);
+    this.name = "ManagedSlotOwnershipLostError";
+  }
+
+  toPayload(): Record<string, unknown> {
+    return { code: this.code, sessionUuid: this.sessionUuid, retryable: this.retryable };
+  }
+}
+
 export class DeviceAssignedToManagedSlotError extends ActionableError {
   readonly code = DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE;
   readonly retryable = false;

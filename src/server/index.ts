@@ -1,4 +1,5 @@
 import { SessionOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
+import { PlanExecutionInProgressError } from "./planExecutionInProgressRefusal";
 import { managedConnectionPlatformRefusal } from "../daemon/managedSlots/managedConnectionScope";
 import {
   getLiveDeadlineMs,
@@ -40,6 +41,7 @@ import { SessionToolBinding } from "./SessionToolBinding";
 import { dropToolCallRecording } from "./toolCallRecordingManager";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { DaemonSessionCreationRejectedError, TerminalSessionError } from "../daemon/sessionManager";
+import { SessionReleasedDuringCreationError } from "../daemon/deviceAcquisitionRefusals";
 import { isDeviceInventoryTool } from "../daemon/daemonMcpProxy";
 import { ToolUnavailableError } from "./toolUnavailableError";
 import { stripInternalToolParams } from "./internalToolParams";
@@ -1328,7 +1330,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       logger.warn(
         `[MCP] Rejecting tool ${name} due to active executePlan (scope=${decision.scope}, sessionId=${sessionId ?? "none"}, sessionUuid=${routingSessionUuid ?? "none"})`,
       );
-      throw new ActionableError(decision.reason ?? "plan execution in progress");
+      throw new PlanExecutionInProgressError(decision.scope, decision.reason);
     }
 
     // Parse and validate the parameters
@@ -1875,6 +1877,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           isError: true,
         };
       }
+      if (error instanceof SessionReleasedDuringCreationError) {
+        // Creation never published a session: the admission mark is not session use (#11351).
+        executionTracker.unmarkSessionAdmitted(execution.id);
+      }
       // The heartbeat monitor released this call's session under it and cancelled the call
       // (#11322): the same terminal refusal a call arriving after the release gets.
       const releasedDuringCall = sessionReleasedDuringCallPayload(execution.cancelReason);
@@ -1883,6 +1889,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           content: [{ type: "text" as const, text: JSON.stringify(releasedDuringCall) }],
           isError: true,
         };
+      }
+      if (error instanceof SessionReleasedDuringCreationError) {
+        return shapeToolCallError(error, { toolName: name, source: "MCP" }) as McpToolCallResult;
       }
       const leaseConflict = forwardingLeaseConflictCause(error, execution.deviceIds);
       if (leaseConflict) {

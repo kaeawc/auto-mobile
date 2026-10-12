@@ -78,18 +78,22 @@ describe("Plan execution lock", () => {
     });
 
     const { client } = fixture.getContext();
-    await expect(
-      client.request(
-        {
-          method: "tools/call",
-          params: {
-            name: "listDeviceImages",
-            arguments: { platform: "android" },
-          },
+    const result = await client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "listDeviceImages",
+          arguments: { platform: "android" },
         },
-        z.any(),
-      ),
-    ).rejects.toThrow("plan execution in progress");
+      },
+      z.any(),
+    );
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0].text)).toMatchObject({
+      code: "plan_execution_in_progress",
+      retryable: true,
+      error: expect.stringContaining("plan execution in progress"),
+    });
   });
 
   test("allows MCP tool calls when no plan is executing", async () => {
@@ -276,7 +280,12 @@ describe("Plan execution lock through session routing", () => {
       expect(await call(readToolName)).toMatchObject({
         content: [{ type: "text", text: "probe executed" }],
       });
-      await expect(call(toolName)).rejects.toThrow("plan execution in progress");
+      const refused = await call(toolName);
+      expect(refused.isError).toBe(true);
+      expect(JSON.parse(refused.content[0].text)).toMatchObject({
+        code: "plan_execution_in_progress",
+        retryable: true,
+      });
     } finally {
       tracker.endExecution(execution.id);
     }
@@ -357,7 +366,12 @@ describe("Plan execution lock through session routing", () => {
           z.any(),
         );
       if (blocked) {
-        await expect(request).rejects.toThrow("plan execution in progress");
+        const refused = await request;
+        expect(refused.isError).toBe(true);
+        expect(JSON.parse(refused.content[0].text)).toMatchObject({
+          code: "plan_execution_in_progress",
+          retryable: true,
+        });
       } else {
         expect(await request).toMatchObject({
           content: [{ type: "text", text: "probe executed" }],

@@ -1,3 +1,4 @@
+import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
@@ -54,7 +55,18 @@ describe("ToolRegistry iOS session context", () => {
     const tool = ToolRegistry.getTool("iosSessionRequiredTool");
     expect(tool).toBeDefined();
 
-    await expect(tool!.handler({ platform: "ios" })).rejects.toThrow(
+    const error = await tool!.handler({ platform: "ios" }).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(AmbiguousDeviceTargetError);
+    expect(error).toMatchObject({
+      name: "AmbiguousDeviceTargetError",
+      code: "ambiguous_device_target",
+      retryable: false,
+      candidates: [
+        { deviceId: iosDeviceA.deviceId, platform: "ios" },
+        { deviceId: iosDeviceB.deviceId, platform: "ios" },
+      ],
+    });
+    expect((error as Error).message).toContain(
       "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator.",
     );
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);

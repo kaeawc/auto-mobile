@@ -178,7 +178,13 @@ test("backs off and removes the marker after EEXIST even when the destination di
     }
     return realRead(file, options);
   });
+  const realLink = fs.linkSync;
+  let restores = 0;
   const link = spyOn(fs, "linkSync").mockImplementation((from, to) => {
+    if (from !== marker) {
+      return realLink(from, to);
+    }
+    restores++;
     expect(from).toBe(marker);
     expect(to).toBe(path);
     fs.writeFileSync(path, "200\ncompetitor");
@@ -189,7 +195,7 @@ test("backs off and removes the marker after EEXIST even when the destination di
   const debug = spyOn(logger, "debug").mockImplementation(() => {});
   try {
     expect(acquire()).toBe(false);
-    expect(link).toHaveBeenCalledTimes(1);
+    expect(restores).toBe(1);
     expect(debug).toHaveBeenCalledWith(expect.stringContaining("restore destination occupied"));
     expect(fs.readdirSync(directory)).toEqual([]);
   } finally {
@@ -199,27 +205,32 @@ test("backs off and removes the marker after EEXIST even when the destination di
   }
 });
 
-test("throws for a non-EEXIST restore failure when the destination is absent", () => {
+test("restores by exclusive copy without throwing after a non-EEXIST link failure", () => {
   leaveLock("");
-  expectedFiles = ["ownerless.lock.100.reclaim"];
   const marker = `${path}.100.reclaim`;
-  const realRead = fs.readFileSync;
-  const read = spyOn(fs, "readFileSync").mockImplementation((file, options) => {
-    if (file === marker) {
-      throw new Error("marker sample unavailable");
-    }
-    return realRead(file, options);
+  const raw = "200\ndisplaced-owner\nmetadata  ";
+  const realRename = fs.renameSync;
+  const rename = spyOn(fs, "renameSync").mockImplementation((from, to) => {
+    fs.writeFileSync(path, raw);
+    realRename(from, to);
   });
-  const link = spyOn(fs, "linkSync").mockImplementation(() => {
+  const realLink = fs.linkSync;
+  let restores = 0;
+  const link = spyOn(fs, "linkSync").mockImplementation((from, to) => {
+    if (from !== marker) {
+      return realLink(from, to);
+    }
+    restores++;
     throw Object.assign(new Error("permission denied"), { code: "EPERM" });
   });
   try {
-    expect(() => acquire()).toThrow(`Failed to restore displaced lock at ${path}`);
-    expect(link).toHaveBeenCalledTimes(1);
-    expect(fs.existsSync(path)).toBe(false);
+    expect(acquire()).toBe(false);
+    expect(restores).toBe(1);
+    expect(fs.readFileSync(path, "utf8")).toBe(raw);
+    expect(fs.existsSync(marker)).toBe(false);
   } finally {
-    read.mockRestore();
+    rename.mockRestore();
     link.mockRestore();
   }
-  expect(fs.readFileSync(marker, "utf8")).toBe("");
+  expect(fs.readdirSync(directory)).toEqual(["ownerless.lock"]);
 });

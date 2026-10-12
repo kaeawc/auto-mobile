@@ -46,7 +46,7 @@ import type { RunningAvdAdvertisementReader } from "./RunningAvdAdvertisementRea
 import { TmpdirRunningAvdAdvertisementReader } from "./RunningAvdAdvertisementReader";
 import { AndroidWakeAndUnlock } from "./AndroidWakeAndUnlock";
 import { DeviceLockStore } from "../../devices/DeviceLockStore";
-import { formFactorFrom } from "../../models/formFactor";
+import { androidProfileFormFactor } from "../../models/formFactor";
 import type { AdbDeviceState } from "./interfaces/AdbExecutor";
 import {
   AndroidCommandOutputStreamRedactor,
@@ -1081,12 +1081,8 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           if (!config) {
             return device;
           }
-          const hint = /pixel[_ ]tablet|nexus (?:9|10)/i.test(config.deviceName ?? "")
-            ? "tablet"
-            : undefined;
-          const formFactor = formFactorFrom({
-            hint,
-            deviceType: config.deviceName,
+          const formFactor = androidProfileFormFactor({
+            profileId: config.deviceName,
             width: config.screenWidth,
             height: config.screenHeight,
             density: config.screenDensity,
@@ -1104,7 +1100,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   private deviceInfoFromConfig(
     device: DeviceInfo,
     config: AvdConfig,
-    formFactor: ReturnType<typeof formFactorFrom>,
+    formFactor: ReturnType<typeof androidProfileFormFactor>,
   ): DeviceInfo {
     return {
       ...device,

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { DAEMON_OWNED_SESSIONS_PARAM } from "../../src/daemon/constants";
+import {
+  DAEMON_OWNED_SESSIONS_PARAM,
+  DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
+} from "../../src/daemon/constants";
 import type { RefusedOwnedSessionRestore } from "../../src/daemon/devicePool";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
@@ -48,6 +51,50 @@ function restore(server: UnixSocketServer, args: Record<string, unknown>): Promi
 }
 
 describe("refused owned-session restore", () => {
+  test("declares a token before restore, including token-only calls; malformed arguments stay harmless", async () => {
+    const events: string[] = [];
+    const pool = {
+      refreshDevices: async () => 0,
+      getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
+      declareMcpSessionLivenessOwnerToken: (id: string, token: string) => {
+        events.push(`${id}:${token}`);
+      },
+      restoreOwnedDeviceSessionsForMcpSession: async () => {
+        events.push("restore");
+        return [];
+      },
+    };
+    const server = new UnixSocketServer(
+      "/tmp/never-listened.sock",
+      "http://localhost:0/mcp",
+      {
+        isInitialized: () => true,
+        getDevicePool: () => pool,
+      } as unknown as DaemonStateAccess,
+      new FakeTimer(),
+    ) as unknown as RestoreSeam;
+    for (const args of [
+      undefined,
+      null,
+      [],
+      {},
+      { [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: " " },
+    ]) {
+      await server.restoreSelectorSessions(args, "client");
+    }
+    expect(events).toEqual([]);
+    await server.restoreSelectorSessions(
+      { [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "owner" },
+      "client",
+    );
+    expect(events).toEqual(["client:owner"]);
+    events.length = 0;
+    await server.restoreSelectorSessions(
+      { [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "owner", [DAEMON_OWNED_SESSIONS_PARAM]: [MINE] },
+      "client",
+    );
+    expect(events).toEqual(["client:owner", "restore"]);
+  });
   test("does not fail a call that targets a different device", async () => {
     const restores: string[][] = [];
     const server = serverRefusing(restores);

@@ -107,7 +107,7 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
     }
   });
 
-  async function handoff() {
+  async function handoff(beforeFirstHeartbeat = false) {
     previous = {
       env: ENV_KEYS.map((key) => process.env[key]),
       clockOffset: Reflect.get(executionTracker, "sessionClockOffsetProvider"),
@@ -131,8 +131,11 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
     });
     managerFactory = getDeviceToolsDependencies().deviceManagerFactory;
     const s = scenario;
+    s.dropHeartbeats = beforeFirstHeartbeat;
     const holder = await s.acquire();
-    await s.idle(KEEPER_INTERVAL_MS);
+    if (!beforeFirstHeartbeat) {
+      await s.idle(KEEPER_INTERVAL_MS);
+    }
     await drainMicrotasks(256);
     expect(s.daemon.manager.getSession(holder)?.livenessOwnerToken).toBe(OWNER_TOKEN);
     const connection = s.proxyConnectionId()!;
@@ -141,6 +144,24 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
     expect(reservations(s).get(holder)?.ownerMcpSessionIds?.has(connection)).toBe(true);
     return { s, holder, connection };
   }
+
+  test("owner resumes a restart handoff lost before its first heartbeat on a fresh connection", async () => {
+    const { s, holder, connection } = await handoff(true);
+    expect(reservations(s).get(holder)?.ownerLivenessToken).toBe(OWNER_TOKEN);
+    const result = await s.proxy.callTool("getAndroid", { avdName: AVD });
+    expect(result).not.toMatchObject({ isError: true });
+    expect(getDeviceSessionIdFromResult(result)).toBe(holder);
+    expect(s.proxyConnectionId()).not.toBe(connection);
+    expect(s.deviceBootCount()).toBe(1);
+  });
+
+  test("pre-first-heartbeat reservation refuses a rival proxy naming the holder", async () => {
+    const { s, holder } = await handoff(true);
+    const rival = s.addProxy({ token: "rival-token" });
+    await expectRefused(s, holder, () =>
+      rival.callTool("getAndroid", { avdName: AVD, [DAEMON_OWNED_SESSIONS_PARAM]: [holder] }),
+    );
+  });
 
   for (const keeperReconnect of [true, false]) {
     test(`${keeperReconnect ? "keeper-reconnected" : "immediate"} owner boots once and resumes the same session`, async () => {

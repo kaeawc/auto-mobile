@@ -1105,6 +1105,7 @@ export class DevicePool {
    * adopt it through an idempotent getAndroid/getApple/startDevice call.
    */
   private readonly mcpSessionAcquiredDeviceSessions = new Map<string, Set<string>>();
+  private readonly mcpSessionLivenessOwnerTokens = new Map<string, string>();
   /** Releases a session after its owning connection closes and no owner remains (#10503). */
   private readonly ownerDisconnectRelease: OwnerDisconnectRelease;
   private readonly mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();
@@ -9261,6 +9262,7 @@ export class DevicePool {
       disconnectRemainingMs: this.ownerDisconnectRelease.remainingMs(holderSessionId),
       ownerLease: this.sessionManager.getSessionLeaseState(holderSessionId),
       releasing: this.sessionManager.getReleasingSession(holderSessionId) !== null,
+      ownerLeaseAwaitsReap: this.sessionManager.ownerLeaseAwaitsReap(holderSessionId),
     });
   }
 
@@ -9404,6 +9406,11 @@ export class DevicePool {
     return acquired !== undefined && acquired.has(this.ownershipSessionId(sessionId));
   }
 
+  /** Remember the connection's identity before acquisition, even with no retained sessions. */
+  declareMcpSessionLivenessOwnerToken(mcpSessionId: string, token: string): void {
+    this.mcpSessionLivenessOwnerTokens.set(mcpSessionId, token);
+  }
+
   private recordMcpSessionOwnership(
     mcpSessionId: string | undefined,
     namedSessionId: string,
@@ -9412,6 +9419,10 @@ export class DevicePool {
       return;
     }
     const sessionId = this.ownershipSessionId(namedSessionId);
+    const token = this.mcpSessionLivenessOwnerTokens.get(mcpSessionId);
+    if (token !== undefined) {
+      this.sessionManager.bindAcquiredLivenessOwnerToken(sessionId, token);
+    }
     this.ownerDisconnectRelease.cancel(sessionId);
     // One owning connection per session (#11107): recording ownership moves it off any other
     // connection, so the previous owner's disconnect can no longer be suppressed by a duplicate.
@@ -9841,6 +9852,7 @@ export class DevicePool {
     }
     const acquired = this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId);
     this.mcpSessionAcquiredDeviceSessions.delete(mcpSessionId);
+    this.mcpSessionLivenessOwnerTokens.delete(mcpSessionId);
     this.autolockManager.releaseMcpSessionBindings(mcpSessionId);
     this.mcpSessionRecoveryDevices.delete(mcpSessionId);
     for (const sessionId of acquired ?? []) {

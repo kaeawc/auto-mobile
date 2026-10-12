@@ -8,7 +8,10 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import {
+  DAEMON_VERSION,
+  DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
+} from "../../src/daemon/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -410,7 +413,15 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
       await tickSessions();
 
       expect(forwardedTools()).toEqual([
-        { toolName: "tapOn", params: { sessionUuid: "android-session", x: 1, y: 2 } },
+        {
+          toolName: "tapOn",
+          params: {
+            sessionUuid: "android-session",
+            x: 1,
+            y: 2,
+            [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "harness-token",
+          },
+        },
       ]);
       expect(replies).toEqual([]);
       expect(ownerOf("android-session")).toBe("other-harness");
@@ -418,7 +429,10 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
       await proxy.callTool("observe", {});
       expect(forwardedTools().at(-1)).toEqual({
         toolName: "observe",
-        params: { sessionUuid: "android-session" },
+        params: {
+          sessionUuid: "android-session",
+          [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "harness-token",
+        },
       });
       expect(replies).toEqual([]);
     });

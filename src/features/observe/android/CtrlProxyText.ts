@@ -92,8 +92,24 @@ export function imeCommitSuffixMatches(committedText: string, text: string): boo
  *    (`[^\p{L}\p{N}\p{M}]`) around the sent text; every sent token must remain in order.
  *    This also accepts added punctuation such as "hi, there" -> "hi, there!".
  * 6. Mention chips and code fences: unpredictable replacements retain subsequence acceptance on the delta.
+ * 7. Device success permits exactly one final LF consumed as submit (not CRLF):
+ *    a request ending in \n\n must still show the first newline. For a lone \n,
+ *    the inserted text must contain no letter, digit or mark.
  */
-export function imeInsertedTextMatches(insertedText: string, text: string): boolean {
+export function imeInsertedTextMatches(
+  insertedText: string,
+  text: string,
+  options?: { deviceSucceeded?: boolean },
+): boolean {
+  if (options?.deviceSucceeded === true && text.endsWith("\n") && !text.endsWith("\r\n")) {
+    if (text === "\n") {
+      return !/[\p{L}\p{N}\p{M}]/u.test(insertedText);
+    }
+    // Use the strict two-argument matcher so a second newline cannot be forgiven.
+    if (imeInsertedTextMatches(insertedText, text.slice(0, -1))) {
+      return true;
+    }
+  }
   const markers = /[*_~`]/g;
   if (text.replace(markers, "").length === 0) {
     return true;

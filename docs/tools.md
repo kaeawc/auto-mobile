@@ -1337,6 +1337,27 @@ observation without copying type-command text into the metadata.
 | Android `eventLast`                            | Supported with split delivery                            | ASCII uses key events; other text uses accessibility insertion. A keycap, decomposed letter, or ASCII followed by ZWJ can split after its ASCII base. |
 | Android `eventOnly`, `imeKeyEvents`            | ASCII only                                               | `eventOnly` preflights available key events; `imeKeyEvents` accepts printable ASCII only. Unsupported text fails before editing.                      |
 
+#### Android IME result check
+
+When the CtrlProxy APK reports the inserted text, the host compares it with the
+request. Other differences report `partialApplication` with the actual inserted
+text. These editor transformations are allowed:
+
+- NFC spelling; consumed inline format markers (`*`, `_`, `~`, and backticks).
+- A line-start block shortcut consumed or replaced by a list marker.
+- Case and decimal-digit input filters.
+- Input-mask additions of characters that are not letters, digits, or marks.
+- Mention chips and code fences use a looser in-order check.
+- With device success, exactly one final `\n` consumed as the editor's submit
+  action. A request ending in two newlines must still show the first; a newline
+  missing mid-text fails. CRLF and CR receive no special treatment. For a lone
+  `\n`, the inserted text must contain no letter, digit, or mark.
+
+A submit-and-clear composer also succeeds immediately when the device reports
+success, the inserted text is exactly empty, and the readable focused field is
+empty after a request ending in `\n`. Older APKs that omit inserted text retain
+the whole-field check: a retained query can pass, but a cleared composer fails.
+
 Android `eventAll` sends single printable ASCII characters with a key-event
 plan through `adb shell input keyevent` and inserts all other graphemes whole
 through accessibility. `eventLast` sends ASCII with key events and sends

@@ -8,6 +8,7 @@ import {
   noActiveDeviceSessionResult,
 } from "../../src/server/proxyServer";
 import {
+  recoveryIdentityLossDetails,
   sessionOwnershipLostPayload,
   sessionReleasedDuringCallPayload,
 } from "../../src/server/deviceSessionResult";
@@ -29,6 +30,12 @@ import {
   REFUSAL_FIXTURES_DIR,
   REFUSAL_SURFACES_DIR,
 } from "../helpers/refusalWireFixtures";
+
+import {
+  handleDaemonRequest,
+  type DaemonStateAccess,
+} from "../../src/daemon/daemonRequestHandlers";
+import { RELEASE_REASON_WIRE_BUILDERS } from "../lint/releaseReasonWireBuilders";
 
 const SESSION = "11111111-2222-4333-8444-555555555555";
 const slots = readyManagedSlotsResult(SESSION);
@@ -84,11 +91,14 @@ async function boundLoss(reason: string): Promise<Holder> {
 interface Surface {
   name: string;
   reasonKey: "reason" | "releaseReason";
+  builders: string[];
+  ends?: readonly string[];
   holder(reason: string): Holder | Promise<Holder>;
 }
 const surfaces: Surface[] = [
   {
     name: "default proxy tool result",
+    builders: ["src/server/proxyServer.ts#noActiveDeviceSessionPayload"],
     reasonKey: "reason",
     holder: (reason) => {
       const content = noActiveDeviceSessionResult(new DaemonConnectionSessionReleasedError(reason))
@@ -101,11 +111,13 @@ const surfaces: Surface[] = [
   },
   {
     name: "managed tool result",
+    builders: ["src/server/deviceSessionResult.ts#managedExecutionEndedPayload"],
     reasonKey: "reason",
     holder: (reason) => managedEndedPayload(slots, SESSION, reason)!.error,
   },
   {
     name: "managed liveness logging notification",
+    builders: ["src/server/deviceSessionResult.ts#managedExecutionEndedPayload"],
     reasonKey: "reason",
     holder: (reason) =>
       livenessHandoverNotificationPayloads(
@@ -124,18 +136,24 @@ const surfaces: Surface[] = [
   },
   {
     name: "managed slots resource",
+    builders: ["src/server/proxyServer.ts#managedSlotsResourceView"],
     reasonKey: "reason",
     holder: (reason) =>
       managedSlotsResourceView(slots, { sessionUuid: SESSION, reason }).slots[0].executionEnded!,
   },
   {
     name: "ownership lost",
+    builders: ["src/server/deviceSessionResult.ts#sessionOwnershipLostPayload"],
     reasonKey: "reason",
     holder: (reason) =>
       sessionOwnershipLostPayload({ message: "Released", sessionUuid: SESSION, reason }).error,
   },
   {
     name: "released during call MCP",
+    builders: [
+      "src/server/deviceSessionResult.ts#sessionOwnershipLostPayload",
+      "src/daemon/sessionReleasedDuringCall.ts#SessionReleasedDuringCallError.constructor",
+    ],
     reasonKey: "reason",
     holder: (reason) =>
       sessionReleasedDuringCallPayload(
@@ -144,6 +162,9 @@ const surfaces: Surface[] = [
   },
   {
     name: "released during call socket details",
+    builders: [
+      "src/daemon/sessionReleasedDuringCall.ts#SessionReleasedDuringCallError.constructor",
+    ],
     reasonKey: "reason",
     holder: (reason) =>
       new SessionReleasedDuringCallError(SESSION, reason as SessionReleaseReason).details,
@@ -151,12 +172,22 @@ const surfaces: Surface[] = [
   // Registration and heartbeat/sessionInfo not-found handlers share this exported builder.
   {
     name: "session not found fields",
+    builders: ["src/daemon/types.ts#releasedSessionNotFoundFields"],
     reasonKey: "releaseReason",
     holder: releasedSessionNotFoundFields,
   },
-  { name: "bound session loss construction", reasonKey: "reason", holder: boundLoss },
+  {
+    name: "bound session loss construction",
+    builders: ["src/daemon/socketServer.ts#UnixSocketServer.admitReleasedBoundSession"],
+    reasonKey: "reason",
+    holder: boundLoss,
+  },
   {
     name: "bound session loss sanitizer round trip",
+    builders: [
+      "src/daemon/types.ts#sanitizeBoundSessionLoss",
+      "src/daemon/socketServer.ts#UnixSocketServer.admitReleasedBoundSession",
+    ],
     reasonKey: "reason",
     holder: async (reason) =>
       sanitizeBoundSessionLoss(
@@ -172,6 +203,7 @@ const surfaces: Surface[] = [
   },
   {
     name: "session released push",
+    builders: ["src/daemon/socketServer.ts#UnixSocketServer.broadcastSessionReleased"],
     reasonKey: "reason",
     holder: (reason) => {
       let frame: DaemonNotification | undefined;
@@ -186,6 +218,7 @@ const surfaces: Surface[] = [
   },
   {
     name: "typed socket admission refusal",
+    builders: ["src/daemon/socketServer.ts#sessionAdmissionRefusalFields"],
     reasonKey: "reason",
     holder: (reason) =>
       mcpRequestFailureDetails(new TerminalSessionError(SESSION, snapshot(reason)), undefined)
@@ -193,6 +226,7 @@ const surfaces: Surface[] = [
   },
   {
     name: "plan base end fields",
+    builders: ["src/server/planExecutionOrchestrator.ts#planBaseEndFields"],
     reasonKey: "reason",
     holder: (reason) => {
       const ended = new TerminalSessionError(SESSION, snapshot(reason));
@@ -211,9 +245,69 @@ const surfaces: Surface[] = [
       }
     },
   },
+  {
+    name: "recovery identity loss details",
+    builders: ["src/server/deviceSessionResult.ts#recoveryIdentityLossDetails"],
+    reasonKey: "reason",
+    holder: (reason) =>
+      recoveryIdentityLossDetails({
+        message: "Recovery lost identity",
+        sessionUuid: SESSION,
+        reason,
+        recoveryReason: "identity-changed",
+      }),
+  },
+  {
+    name: "terminal registration refusal",
+    builders: [
+      "src/daemon/daemonRequestHandlers.ts#terminalSessionRegistrationRefusal",
+      "src/daemon/types.ts#releasedSessionNotFoundFields",
+    ],
+    reasonKey: "reason",
+    // Registration refuses only terminal expiry ends; recoverable and proxy-local ends are admitted.
+    ends: [
+      "cleanup-expired",
+      "cli-idle-timeout",
+      "lazy-expiry",
+      "heartbeat-timeout",
+      "restart-recovery-timeout",
+    ],
+    holder: async (reason) => {
+      const manager: ReturnType<DaemonStateAccess["getSessionManager"]> = {
+        hasSession: () => false,
+        getSession: () => null,
+        getTerminalReleaseSnapshot: () => snapshot(reason),
+        getDeviceLabels: () => undefined,
+        releaseSession: async () => null,
+      };
+      // Registration takes only this state seam and never reaches a device pool on a terminal refusal.
+      const state = {
+        isInitialized: () => true,
+        getSessionManager: () => manager,
+      } as DaemonStateAccess;
+      const refusal = await handleDaemonRequest(
+        {
+          type: "request",
+          id: "registration-surface",
+          method: "daemon/registerSession",
+          params: { sessionId: SESSION, clientName: "surface-test" },
+        },
+        state,
+      );
+      expect(refusal.success).toBe(false);
+      expect(refusal.releaseReason).toBe(reason);
+      if (isIdleReleaseReason(reason)) {
+        expect(refusal.idle).toBe(true);
+      } else {
+        expect("idle" in refusal).toBe(false);
+      }
+      return refusal.details as Holder;
+    },
+  },
 ];
 const ends: string[] = [
   "cleanup-expired",
+  "replay-lease-expired",
   "cli-idle-timeout",
   "lazy-expiry",
   "expired",
@@ -226,8 +320,33 @@ const ends: string[] = [
   "unknown",
 ];
 const rows = surfaces
-  .flatMap((surface) => ends.map((reason) => ({ ...surface, reason })))
+  .flatMap((surface) => (surface.ends ?? ends).map((reason) => ({ ...surface, reason })))
   .concat([{ ...surfaces[0], reason: "device_not_held" }]);
+
+test("every wire builder is driven by a surface row with idle and non-idle ends", () => {
+  const builders = new Set(surfaces.flatMap((surface) => surface.builders));
+  expect(
+    [...builders].sort(),
+    "Every wire builder needs a surface table row; rows must name only listed builders",
+  ).toEqual([...RELEASE_REASON_WIRE_BUILDERS].sort());
+  const invalidRows = surfaces.flatMap((surface) => {
+    const reasons = surface.ends ?? ends;
+    return [
+      ...(reasons.some(isIdleReleaseReason) ? [] : [`${surface.name} needs an idle end`]),
+      ...(reasons.some((reason) => !isIdleReleaseReason(reason))
+        ? []
+        : [`${surface.name} needs a non-idle end`]),
+      ...(reasons.every((reason) => ends.includes(reason))
+        ? []
+        : [`${surface.name} ends must be a shared-list subset`]),
+      ...(surface.builders.length > 0 ? [] : [`${surface.name} must drive a builder`]),
+    ];
+  });
+  expect(
+    invalidRows,
+    "Every surface row must drive a builder and admit idle and non-idle ends",
+  ).toEqual([]);
+});
 
 test.each(rows)("$name / $reason", async ({ holder, reasonKey, reason }) => {
   const fields = await holder(reason);

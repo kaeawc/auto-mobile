@@ -5480,8 +5480,22 @@ export class DaemonMcpProxy {
     this.recoverableBoundSessionHandoffIsDeviceRestart = false;
   }
 
+  /**
+   * The one place this proxy retires its own idle binding, called by
+   * withFencedControlDeviceSession, throwIfBoundSessionUnavailable,
+   * discoveryAfterResultMintRelease and retireIdleLatestBinding.
+   *
+   * A daemon idle report still held here means isBoundSessionReplayExpired saw a heartbeat
+   * answered at or after the daemon's reported idle instant. This is the session's idle end,
+   * named with the reason the daemon records for it. Without a report, the proxy's own clock
+   * judged the binding idle, so its reason is proxy-local. Read the reason before fencing:
+   * fenceBoundSessionUuid forgets the report through forgetSessionLivenessState.
+   *
+   * A one-shot CLI's cli-idle-timeout report cannot reach here: adoptCliSessionLiveness stops
+   * and drains the keeper, sends the CLI declaration without recording its acknowledgement
+   * through noteDaemonIdleEvidence, then the CLI closes without another tool call.
+   */
   private retireIdleBinding(sessionUuid: string): void {
-    // CLI idle declaration stops the keeper and closes without recording its ack or another call.
     const reason = this.daemonIdleReports.has(sessionUuid)
       ? IDLE_WINDOW_RELEASE_REASON
       : REPLAY_LEASE_EXPIRED_REASON;

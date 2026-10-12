@@ -187,7 +187,9 @@ down counts toward the window, and no heartbeat was judged during it.
 
 The proxy also retires its own idle binding. A daemon-confirmed idle end uses
 `cleanup-expired`. An end known only from the proxy's clock uses `replay-lease-expired`
-with `idle: true`. This reason is proxy-local: the daemon session may still be live or
+with `idle: true`. The proxy’s clock is the only judge for a session this connection named
+in a call but does not heartbeat, or a daemon that has not reported an idle-release instant for it.
+This reason is proxy-local: the daemon session may still be live or
 have ended otherwise. The daemon's reason replaces it when a session-released notification arrives.
 
 A call still running when its session is released (heartbeat reap, idle sweep,

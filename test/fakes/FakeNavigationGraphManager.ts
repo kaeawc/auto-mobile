@@ -187,7 +187,7 @@ export class FakeNavigationGraphManager
     return this.currentAppId;
   }
 
-  recordNavigationEvent(event: NavigationEvent): void {
+  async recordNavigationEvent(event: NavigationEvent): Promise<void> {
     this.trackCall("recordNavigationEvent", [event]);
 
     const previousScreen = this.currentScreen;

@@ -14,6 +14,7 @@ import {
   journalOwnersEqual,
   journalTargetEntries,
   sameBinding,
+  scopeAcceptsSameSessionClaim,
   scopeAcceptsSlotChange,
   SLOT_JOURNAL_TERMINAL_PHASES,
   SLOT_JOURNAL_TERMINAL_RETENTION_MS,
@@ -720,7 +721,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
   ): Promise<ClaimExecutionResult> {
     assertValidSlotKey(key);
     return this.db.transaction().execute(async (trx): Promise<ClaimExecutionResult> => {
-      const checked = await this.checkBinding(trx, key, expected);
+      const checked = await this.checkBinding(trx, key, expected, false, owner.sessionUuid);
       if ("kind" in checked) {
         return checked;
       }
@@ -1371,19 +1372,27 @@ export class SqliteSlotRegistry implements SlotRegistry {
 
   /**
    * The shared CAS precondition: valid scope, existing slot, unchanged binding. Journaled work may
-   * also settle in an `invalidating` scope, whose invalidation waits for exactly that work.
+   * also settle in an `invalidating` scope, whose invalidation waits for exactly that work, and so
+   * may an execution claim by the session the slot already records (`claimingSessionUuid`).
    */
   private async checkBinding(
     trx: Executor,
     key: SlotKey,
     expected: SlotBindingExpectation,
     journaled = false,
+    claimingSessionUuid?: string,
   ): Promise<SlotAssignmentRecord | SlotCasFailure> {
     const scope = await this.readScope(trx, key.scopeKey);
-    if (!scopeAcceptsSlotChange(scope, journaled)) {
+    const current = await this.readAssignment(trx, key);
+    if (
+      !scopeAcceptsSlotChange(scope, journaled) &&
+      !(
+        claimingSessionUuid !== undefined &&
+        scopeAcceptsSameSessionClaim(scope, current, claimingSessionUuid)
+      )
+    ) {
       return { kind: "scope_not_valid", scope };
     }
-    const current = await this.readAssignment(trx, key);
     if (!current) {
       return { kind: "slot_missing" };
     }

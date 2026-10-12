@@ -113,7 +113,7 @@ export class AndroidSegmentedPlanVideoSession {
 
   private readonly highlights: VideoRecordingHighlightInput[] | undefined;
 
-  private readonly ownerSessionUuid: string | undefined;
+  private ownerSessionUuid: string | undefined;
   private readonly display: string | undefined;
   private recordedPhysicalDisplayId: string | undefined;
   private lastActivePanel: VideoRecordingPanel | undefined;
@@ -238,6 +238,15 @@ export class AndroidSegmentedPlanVideoSession {
   /** Daemon session that started this recording; undefined for a sessionless start. */
   get ownerSession(): string | undefined {
     return this.ownerSessionUuid;
+  }
+
+  /** Adopt a live ownerless session; future segments use the acquiring holder. */
+  adoptOwnerSession(sessionUuid: string): boolean {
+    if (this.ownerSessionUuid !== undefined || this.finalizedNotified) {
+      return false;
+    }
+    this.ownerSessionUuid = sessionUuid;
+    return true;
   }
 
   /** True when the daemon session `sessionUuid` owns this recording session on `deviceId`. */

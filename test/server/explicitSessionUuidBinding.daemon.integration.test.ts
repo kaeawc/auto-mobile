@@ -32,6 +32,7 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import type { BootedDevice } from "../../src/models";
@@ -51,6 +52,8 @@ let pool: DevicePool;
 let timer: FakeTimer;
 let previousAutolock: string | undefined;
 let originalRepository: unknown;
+let originalDeviceSessionManager: unknown;
+let deviceSessionManager: FakeDeviceSessionManager;
 let restorePipelineOverrides: (() => void) | undefined;
 const fixtures = new Map<string, McpTestFixture>();
 const proxies: DaemonMcpProxy[] = [];
@@ -58,6 +61,10 @@ let received: string[];
 let restoreSpies: Array<() => void> = [];
 
 beforeEach(async () => {
+  originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
+  deviceSessionManager = new FakeDeviceSessionManager();
+  deviceSessionManager.setConnectedDevices(devices);
+  Reflect.set(ToolRegistry, "deviceSessionManager", deviceSessionManager);
   previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
   process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
   db = new Kysely<Database>({
@@ -106,28 +113,32 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  for (const proxy of proxies.splice(0)) {
-    await proxy.close();
-  }
-  for (const fixture of fixtures.values()) {
-    await fixture.teardown();
-  }
-  fixtures.clear();
-  for (const restore of restoreSpies) {
-    restore();
-  }
-  restorePipelineOverrides?.();
-  restorePipelineOverrides = undefined;
-  PlatformDeviceManagerFactory.setInstance(null);
-  registryInternals().toolCallRepository = originalRepository;
-  ToolRegistry.clearTools();
-  DaemonState.getInstance().reset();
-  manager.stopCleanupTimer();
-  await db.destroy();
-  if (previousAutolock === undefined) {
-    delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
-  } else {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
+  try {
+    for (const proxy of proxies.splice(0)) {
+      await proxy.close();
+    }
+    for (const fixture of fixtures.values()) {
+      await fixture.teardown();
+    }
+    fixtures.clear();
+    for (const restore of restoreSpies) {
+      restore();
+    }
+    restorePipelineOverrides?.();
+    restorePipelineOverrides = undefined;
+    PlatformDeviceManagerFactory.setInstance(null);
+    registryInternals().toolCallRepository = originalRepository;
+    ToolRegistry.clearTools();
+    DaemonState.getInstance().reset();
+    manager.stopCleanupTimer();
+    await db.destroy();
+    if (previousAutolock === undefined) {
+      delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    } else {
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
+    }
+  } finally {
+    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
   }
 });
 
@@ -300,7 +311,13 @@ test("a read naming another connection's session watches it without binding the 
   expect(internals(socket).boundMcpClientKeysBySocketSession.has("other")).toBe(false);
 
   // The other connection's next untargeted call must not be routed to the owner's device.
+  const scansBeforeUntargeted = deviceSessionManager.getDetectConnectedPlatformsCallCount();
   const untargeted = await otherProxy.callTool("routingProbe", { keepScreenAwake: false });
+  expect(deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(
+    scansBeforeUntargeted + 1,
+  );
+  expect(untargeted.isError).toBe(true);
+  expect(JSON.stringify(untargeted.content)).toContain("Multiple Android devices detected");
   const reachedOwnerDevice = !untargeted.isError && received.at(-1) === devices[0].deviceId;
   expect(reachedOwnerDevice).toBe(false);
   expect(pool.resolveAutolockSessionForMcpSession("owner")).toBe(ownerSession);
@@ -383,7 +400,13 @@ for (const autolock of ["1", "0"]) {
     expect(received).toEqual([]);
     expect(internals(socket).boundMcpClientKeysBySocketSession.has("other")).toBe(false);
 
+    const scansBeforeUntargeted = deviceSessionManager.getDetectConnectedPlatformsCallCount();
     const untargeted = await otherProxy.callTool("routingProbe", { keepScreenAwake: false });
+    expect(deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(
+      scansBeforeUntargeted + 1,
+    );
+    expect(untargeted.isError).toBe(true);
+    expect(JSON.stringify(untargeted.content)).toContain("Multiple Android devices detected");
     const reachedOwnerDevice = !untargeted.isError && received.at(-1) === devices[0].deviceId;
     expect(reachedOwnerDevice).toBe(false);
   }, 30000);

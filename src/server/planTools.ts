@@ -9,15 +9,29 @@ import { addSessionUuidToSchema, DEVICE_LABEL_DESCRIPTION } from "./toolSchemaHe
 import {
   startTestRecording,
   getStoppedTestRecording,
+  joinInFlightTestRecordingStop,
   stopTestRecording,
   getTestRecordingStatus,
+  type TestRecordingStatus,
 } from "./testRecordingManager";
+import {
+  assertLifecycleCallerHoldsDevice,
+  assertLifecycleCallerNotOnForeignManagedSlot,
+  lifecycleRequester,
+  type LifecycleRequester,
+} from "./lifecycleDeviceOwnership";
+import { DaemonState } from "../daemon/daemonState";
+import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
+import { assertTestRecordingStartHeldDevice } from "../daemon/testRecordingStartAdmission";
 import { startMcpRecording, stopMcpRecording, getMcpRecordingStatus } from "./mcpRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
 import { PlanExecutionOrchestrator, PlanExecutionRequest } from "./planExecutionOrchestrator";
 import { failedPlanSessionHoldable, planLifecycleSessionUuid } from "./deviceLabelMapping";
 import type { ExecutePlanResult } from "../models/ExecutePlanResult";
-import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import {
+  getToolSelectionContext,
+  runWithToolSelectionContext,
+} from "../features/toolSelection/toolSelectionContext";
 import { planCallerContext } from "./planCallerIdentity";
 import {
   INTERNAL_MCP_SESSION_PARAM,
@@ -350,30 +364,120 @@ const exportPlanResultSchema = z.object({
   error: z.string().optional(),
 });
 
+/**
+ * exportPlan stops the daemon's one live test recording, so it is a control call on that
+ * recording's device (#11647). It is a plain tool: device-aware ownership never sees it and the
+ * ingress only judges a session the call names. The handler therefore asks the question the
+ * test-recording socket's `stop` asks, in the shape killDevice uses: a device a live session holds
+ * is exported only by its holder, and a managed slot's device only by that slot's execution.
+ * An unheld device's recording (owned or not) stays exportable by anyone, as on the socket.
+ *
+ * Returns the recording to stop. The holder check runs after this function's last await, against
+ * the recording it returns; the caller stops that recording by id. Throws the typed
+ * `device_owned_by_other_session` / `device_assigned_to_managed_slot` refusal, which the caller
+ * must not swallow.
+ */
+async function activeRecordingForExport(params: object): Promise<TestRecordingStatus | null> {
+  const seen = getTestRecordingStatus();
+  if (!seen) {
+    return null;
+  }
+  const requester = exportRequester(params, seen.deviceId);
+  await assertLifecycleCallerNotOnForeignManagedSlot({
+    toolName: "exportPlan",
+    device: seen,
+    requester,
+  });
+  const status = getTestRecordingStatus();
+  if (!status) {
+    return null;
+  }
+  const holder = exportRequester(params, status.deviceId);
+  try {
+    assertLifecycleCallerHoldsDevice({
+      toolName: "exportPlan",
+      device: status,
+      requester: holder,
+      // A recording has no forced stop: only the holder exports it.
+      force: false,
+    });
+  } catch (error) {
+    if (error instanceof InputDeviceOwnedError) {
+      // Same typed refusal, without the lifecycle remedy's offer of `force`.
+      throw new InputDeviceOwnedError(
+        "exportPlan",
+        error.deviceId,
+        holder.sessionUuid,
+        EXPORT_PLAN_REMEDY,
+      );
+    }
+    throw error;
+  }
+  return status;
+}
+
+const EXPORT_PLAN_REMEDY =
+  "call exportPlan with the holding session's sessionUuid, or wait for the holder to release the device.";
+
+/**
+ * Who is exporting. The connection that acquired the session holding the recording's device is
+ * that session, whether the call named it, another of its sessions, or none (as a deviceId-only
+ * device call is, #10994).
+ */
+function exportRequester(params: object, deviceId: string): LifecycleRequester {
+  const requester = lifecycleRequester(params);
+  const daemonState = DaemonState.getInstance();
+  const mcpSessionId = requester.mcpSessionId ?? getToolSelectionContext()?.callerMcpSessionId;
+  const held =
+    mcpSessionId && daemonState.isInitialized()
+      ? daemonState.getDevicePool().resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId)
+      : undefined;
+  return held ? { ...requester, sessionUuid: held } : requester;
+}
+
+function exportedTestRecordingResponse(result: Awaited<ReturnType<typeof stopTestRecording>>) {
+  return createStructuredToolResponse({
+    success: true,
+    recordingId: result.recordingId,
+    planName: result.planName,
+    planContent: result.planContent,
+    stepCount: result.stepCount,
+    durationMs: result.durationMs,
+    ...(result.error ? { error: result.error } : {}),
+  });
+}
+
 // Export plan tool handler
 const exportPlanTool = async (params: {
   recordingId?: string;
   planName?: string;
   sessionUuid?: string;
 }): Promise<any> => {
+  // An announced id may still be finalizing after its owner's session ended.
   try {
-    // Check if there's an active recording
-    const status = getTestRecordingStatus();
+    if (params.recordingId) {
+      const joined = await joinInFlightTestRecordingStop(params.recordingId, params.sessionUuid);
+      if (joined) {
+        return exportedTestRecordingResponse(joined);
+      }
+    }
+  } catch (error) {
+    logger.error(`[exportPlan] Failed to join recording stop: ${errorMessage(error)}`, error);
+    return withIsErrorOnFailure(
+      createStructuredToolResponse({ success: false, error: errorMessage(error) }),
+      false,
+    );
+  }
+  // Outside the try: a holder refusal reaches the client typed, never as a generic failure.
+  const status = await activeRecordingForExport(params);
+  try {
     // After a release-time stop the owner fetches the retained plan by id (#10958).
     const retained =
       !status && params.recordingId
         ? getStoppedTestRecording(params.recordingId, params.sessionUuid)
         : undefined;
     if (retained) {
-      return createStructuredToolResponse({
-        success: true,
-        recordingId: retained.recordingId,
-        planName: retained.planName,
-        planContent: retained.planContent,
-        stepCount: retained.stepCount,
-        durationMs: retained.durationMs,
-        ...(retained.error ? { error: retained.error } : {}),
-      });
+      return exportedTestRecordingResponse(retained);
     }
     if (!status) {
       return withIsErrorOnFailure(
@@ -396,18 +500,10 @@ const exportPlanTool = async (params: {
       );
     }
 
-    // Stop the recording and get the plan
-    const result = await stopTestRecording(params.recordingId, params.planName);
+    // Stop the recording the holder check judged, and get the plan
+    const result = await stopTestRecording(status.recordingId, params.planName);
 
-    return createStructuredToolResponse({
-      success: true,
-      recordingId: result.recordingId,
-      planName: result.planName,
-      planContent: result.planContent,
-      stepCount: result.stepCount,
-      durationMs: result.durationMs,
-      ...(result.error ? { error: result.error } : {}),
-    });
+    return exportedTestRecordingResponse(result);
   } catch (error) {
     logger.error(`[exportPlan] Failed to export plan: ${error}`);
     return withIsErrorOnFailure(
@@ -540,7 +636,11 @@ export const registerPlanTools = () => {
     "Start recording user interactions for exportPlan.",
     startTestRecordingSchema,
     startTestRecordingTool,
-    { defaultEnabled: false, outputSchema: startTestRecordingResultSchema },
+    {
+      defaultEnabled: false,
+      outputSchema: startTestRecordingResultSchema,
+      assertHeldDeviceStart: assertTestRecordingStartHeldDevice,
+    },
   );
 
   ToolRegistry.register(

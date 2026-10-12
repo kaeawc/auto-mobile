@@ -3,6 +3,7 @@ import { existsSync, realpathSync } from "fs";
 import { basename, dirname, join } from "path";
 import { ActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
+import { readOptionalEnvPositiveInteger } from "../utils/envNumbers";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
@@ -252,6 +253,18 @@ export function selectMigrationLock(dbPath: string): MigrationLock {
   return isInMemoryDatabasePath(dbPath) ? new NoOpMigrationLock() : createFileMigrationLock(dbPath);
 }
 
+/** The env-configured busy-wait ceiling, or undefined for the built-in default (#11629). */
+export function resolveMigrationLockTimeoutMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number | undefined {
+  return readOptionalEnvPositiveInteger(
+    "AUTOMOBILE_MIGRATION_LOCK_TIMEOUT_MS",
+    "AUTO_MOBILE_MIGRATION_LOCK_TIMEOUT_MS",
+    {},
+    env,
+  );
+}
+
 /**
  * Default migration lock for a resolved DB file path. Keyed per-file (not
  * per-uid) because the trigger — two openers on one DB file — is per-file. The
@@ -261,11 +274,7 @@ export function selectMigrationLock(dbPath: string): MigrationLock {
  */
 export function createFileMigrationLock(dbPath: string): MigrationLock {
   const lockFilePath = migrationLockPathFor(dbPath);
-  const override =
-    process.env.AUTOMOBILE_MIGRATION_LOCK_TIMEOUT_MS ??
-    process.env.AUTO_MOBILE_MIGRATION_LOCK_TIMEOUT_MS;
-  const parsed = override ? Number.parseInt(override, 10) : NaN;
-  const timeoutMs = Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  const timeoutMs = resolveMigrationLockTimeoutMs();
 
   logger.debug(`Migration lock keyed to ${lockFilePath}`);
   return new FileMigrationLock(lockFilePath, timeoutMs !== undefined ? { timeoutMs } : {});

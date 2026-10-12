@@ -8,7 +8,9 @@ import {
 } from "../../src/db/videoRecordingRepository";
 import { DEFAULT_VIDEO_RECORDING_CONFIG, VideoRecorderService } from "../../src/features/video";
 import {
+  adoptOwnerlessActiveVideoRecordings,
   getVideoRecordingConfig,
+  listActiveVideoRecordingIdsForOwner,
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
   startVideoRecording,
@@ -98,6 +100,22 @@ describe("video recording daemon ownership", () => {
       hasReceivedHeartbeat: false,
     });
   }
+
+  test("adoption updates the real persisted owner and the release ids without stopping capture", async () => {
+    await configure(new Set());
+    const device = { deviceId: "adopt-device", platform: "ios" as const };
+    const active = await startVideoRecording({ device });
+    await adoptOwnerlessActiveVideoRecordings(device.deviceId, "holder");
+    expect((await recordings.getRecording(active.recordingId))?.ownerSessionUuid).toBe("holder");
+    expect(listActiveVideoRecordingIdsForOwner("holder", device.deviceId)).toEqual([
+      active.recordingId,
+    ]);
+    expect(listActiveVideoRecordingIdsForOwner(undefined, device.deviceId)).toEqual([]);
+    expect(backend.stopCalls).toEqual([]);
+    await stopVideoRecording(active.recordingId);
+    expect((await recordings.getRecording(active.recordingId))?.ownerSessionUuid).toBe("holder");
+    expect((await recordings.getRecording(active.recordingId))?.status).toBe("completed");
+  });
 
   test("restart preserves live peer rows and interrupts dead, missing, inactive and NULL owners", async () => {
     await configure(new Set(["peer"]));

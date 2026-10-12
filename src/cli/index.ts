@@ -3,6 +3,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { formatDaemonToolError } from "./removedTools";
 import { ToolRegistry } from "../server/toolRegistry";
 import { coerceCliValue, getDeclaredParamTypes } from "./cliValueCoercion";
+import { splitFlagToken } from "../utils/flagTokens";
 import { initializeCliTools } from "./cliToolRegistration";
 import {
   SET_TOOL_ENABLED_TOOL_NAME,
@@ -59,6 +60,29 @@ function requireNonBlankSessionUuid(value: unknown): void {
   }
 }
 
+/**
+ * A `--session-uuid <id>` or `--session-uuid=<id>` before the tool name: the session it names
+ * and the index where the tool name starts.
+ */
+function readLeadingSessionUuid(args: string[]): {
+  sessionUuid: string | undefined;
+  toolNameIndex: number;
+} {
+  const leading = splitFlagToken(args[0]);
+  if (leading.flag !== "--session-uuid") {
+    return { sessionUuid: undefined, toolNameIndex: 0 };
+  }
+  // The separate form takes the next word verbatim (even one starting with `--`), as before.
+  const inline = leading.inlineValue !== undefined;
+  const value = inline ? leading.inlineValue : args[1];
+  const toolNameIndex = inline ? 1 : 2;
+  if (args.length <= toolNameIndex) {
+    throw new ActionableError("--session-uuid requires a value and a tool name");
+  }
+  requireNonBlankSessionUuid(value);
+  return { sessionUuid: value, toolNameIndex };
+}
+
 export function parseCliArgs(args: string[]): {
   toolName: string;
   sessionUuid?: string;
@@ -70,18 +94,7 @@ export function parseCliArgs(args: string[]): {
     );
   }
 
-  let toolNameIndex = 0;
-  let sessionUuid: string | undefined;
-
-  // Check for --session-uuid parameter before tool name
-  if (args[0] === "--session-uuid") {
-    if (args.length < 3) {
-      throw new ActionableError("--session-uuid requires a value and a tool name");
-    }
-    requireNonBlankSessionUuid(args[1]);
-    sessionUuid = args[1];
-    toolNameIndex = 2;
-  }
+  const { sessionUuid, toolNameIndex } = readLeadingSessionUuid(args);
 
   const toolName = args[toolNameIndex];
   const params: Record<string, any> = {};
@@ -97,7 +110,14 @@ export function parseCliArgs(args: string[]): {
 
     // Remove '--' prefix and convert kebab-case to camelCase
     // e.g., --session-uuid -> sessionUuid
-    const paramName = key.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+    // `--key=value` is the same parameter as `--key value` (#11612): split at the first `=`
+    // so the name is never `key=value` and the value is never dropped.
+    const { flag: keyFlag, inlineValue } = splitFlagToken(key);
+    const paramName = keyFlag.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+    if (inlineValue !== undefined) {
+      params[paramName] = coerceCliValue(inlineValue, declaredTypes?.[paramName]);
+      continue;
+    }
 
     const nextArg = args[i + 1];
 

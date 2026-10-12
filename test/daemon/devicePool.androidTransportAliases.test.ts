@@ -462,7 +462,7 @@ describe("Android transport aliases (#10201)", () => {
     await h.pool.refreshDevices();
     const calls = h.adb.getExecutedCommands().length;
     h.manager.setAndroidDiscoveryIncomplete();
-    expect((await h.pool.refreshDevicesWithOutcome()).failure).toBeUndefined();
+    expect((await h.pool.refreshDevicesWithOutcome()).failure).toBe("adb devices failed");
     expect(h.pool.getAndroidTransportRouting().resolveTransport(usb)).toBe(wireless);
     h.manager.failedPlatforms.delete("android");
     await h.pool.refreshDevices();

@@ -1,6 +1,4 @@
-import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
-import type { Socket } from "node:net";
 import { join } from "node:path";
 import { spyOn } from "bun:test";
 import {
@@ -15,7 +13,10 @@ import {
   getCliSessionIdleTimeoutMs,
 } from "../../src/daemon/constants";
 import { Daemon, type DaemonStartHost } from "../../src/daemon/daemon";
-import type { AppearanceSyncTarget } from "../../src/daemon/AppearanceSyncScheduler";
+import {
+  defaultAppearanceSyncDependencies,
+  type AppearanceSyncTarget,
+} from "../../src/daemon/AppearanceSyncScheduler";
 import { IncumbentOwnerGuard } from "../../src/daemon/incumbentOwnerGuard";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
@@ -26,8 +27,6 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { AppearanceSocketServer } from "../../src/daemon/appearanceSocketServer";
 import type { AppearanceSocketResponse } from "../../src/daemon/appearanceSocketTypes";
 import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
@@ -38,9 +37,11 @@ import {
   PROXY_HEARTBEAT_INTERVAL_MS,
 } from "../../src/daemon/sessionLivenessWindows";
 import {
+  SESSION_REHYDRATION_DEADLINE_MS,
   SessionManager,
   getDefaultSessionHeartbeatTimeoutMs,
 } from "../../src/daemon/sessionManager";
+import { DefaultDeviceSettingsAccess } from "../../src/features/utility/DeviceSettingDefaults";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";
@@ -55,6 +56,13 @@ import { FakeToolSelectionProfileProvenanceLoader } from "../fakes/FakeToolSelec
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
 import { createDaemonTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
+import type {
+  SlotExecOwner,
+  SlotProcessIdentity,
+  SlotRegistry,
+} from "../../src/daemon/managedSlots/slotRegistry";
+import { openSqliteSlotRegistry } from "../../src/daemon/managedSlots/sqliteSlotRegistry";
+import type { McpClientFactory } from "../../src/daemon/socketServer";
 import { toolErrorResult, type WireFixture } from "../daemon/helpers/desktopWireHarness";
 import {
   IN_MEMORY_DATA_DIR,
@@ -82,8 +90,9 @@ import { RealToolCallPath, type DeviceToolRun } from "./realToolCallPath";
 //   the previous process's rows, adopts the terminal-release journal, discovers devices,
 //   rehydrates sessions and starts the heartbeat monitor, in that order. A restart is a new
 //   `Daemon` started the same way over the same database and journal directory.
-// - the control socket: a real `UnixSocketServer` over that daemon's state (framing, admission,
-//   the `daemon/*` handlers, selector-session restore, forward routing, release notifications).
+// - the control socket: a real `UnixSocketServer` over that daemon's state, opened by its own
+//   `startDetached()` (framing, admission, the `daemon/*` and `ide/*` handlers, selector-session
+//   restore, forward routing, and the release, list-changed and resource-updated fan-out).
 // - the clients: `DaemonMcpProxy` built like src/index.ts over a real `DaemonClient`, and raw
 //   frame clients for the desktop, JUnit and `--cli` actors.
 // - a device tool call: the real registration through the real ToolRegistry, session admission
@@ -91,7 +100,8 @@ import { RealToolCallPath, type DeviceToolRun } from "./realToolCallPath";
 // Faked: the kernel socket (in-process socket ends), the loopback MCP HTTP hop behind the socket
 // server (its tool-call entry is RealToolCallPath plus the entry's error shaping), device
 // acquisition's device work, the tool body's device work, device discovery and readiness, the
-// recording operations, the data directory (an in-memory file system), and the clock (FakeTimer).
+// recording operations, host appearance sync's host and device ends, the data directory (an
+// in-memory file system), and the clock (FakeTimer).
 // Nothing here reaches the host: the start steps that would (working directory, signal handlers,
 // PID file, HTTP and socket listeners, device monitors) are this file's no-op `DaemonStartHost`,
 // and every path handed to production code passes `assertNotHostDaemonPath`.
@@ -110,6 +120,8 @@ export const RELEASE_SLACK_MS = SUSPECT_GRACE_MS + SCAN_MS + KEEPER_INTERVAL_MS;
 export const JUNIT_HEARTBEAT_MS = 1_000;
 export const AUTOLOCK_WINDOW_MS = 60_000;
 
+/** Microtask turns for a starting daemon to reach its next wait: ten times the ~400 measured. */
+const SLOW_START_TURNS = 4_096;
 /** Microtask turns per fake-timer event so a keeper round trip settles before the next tick. */
 const TURNS_PER_EVENT = 32;
 const CONNECTION = "scenario-connection";
@@ -117,6 +129,8 @@ const CONNECTION = "scenario-connection";
 export const SOCKET_CLIENT_CONNECTION = "scenario-socket-client";
 /** The desktop/IDE client's own connection: it acquires and heartbeats on it. */
 export const DESKTOP_CONNECTION = "desktop-connection";
+/** The desktop/IDE client's connection for its `ide/*` and `input/*` frames. */
+const IDE_FRAME_CONNECTION = "scenario-ide-frames";
 /** The connection of a `--daemon heartbeat` keeper process. */
 const CLI_KEEPER_CONNECTION = "scenario-cli-keeper";
 export const OWNER_TOKEN = "scenario-proxy-owner";
@@ -155,6 +169,12 @@ export interface LivenessScenarioOptions {
   devices?: string[];
   /** Autolock acquisition with the 60 s window (AUTOMOBILE_DEVICE_POOL_AUTOLOCK). */
   autolock?: boolean;
+  /**
+   * Give every daemon of the scenario the host's managed-slot registry: one in-memory registry
+   * that outlives a daemon restart, as the registry file does (see
+   * {@link LivenessScenario.holdAsManagedExecution}). Without it the host has no registry.
+   */
+  managedSlots?: boolean;
 }
 
 /** Drops a dead daemon's listeners on process-wide registries. Teardown only, never wiring. */
@@ -339,6 +359,12 @@ export class LivenessScenario {
    * claims here wins the race the daemon's earlier foreign-owner check could not see.
    */
   beforeDeviceClaim: ((deviceId: string) => void) | undefined;
+  /**
+   * How long the daemon's claim on a device takes to publish (a slow claim store). Past the
+   * startup deadline a restart stops waiting for it: the daemon starts without that device's
+   * session, which finishes rehydrating late, once the claim lands.
+   */
+  deviceClaimDelayMs = 0;
   /** Heartbeat frames the proxy keepers delivered, by session. */
   readonly heartbeatsBySession = new Map<string, number>();
   /** Heartbeat frames delivered, by owner token. */
@@ -376,6 +402,12 @@ export class LivenessScenario {
   /** Recordings force-stopped at the finalize cap and marked incomplete, in order. */
   readonly incompleteRecordings: string[] = [];
   /**
+   * Appearance modes the daemon's own host sync applied, as `<device>:<mode>` in order: the sync
+   * it starts for the device of each session it creates. The host lookup and the device command
+   * are stubbed at their boundary and report here.
+   */
+  readonly appearanceApplies: string[] = [];
+  /**
    * The daemon stops answering heartbeats (a wedged event loop on the wire): each frame hangs
    * until the end of the scenario, except that the first is accepted `lateAckDelayMs` after it
    * was sent when that is set (#10973, a late ack). Clear it to answer again.
@@ -383,18 +415,27 @@ export class LivenessScenario {
   daemonStall: { lateAckDelayMs?: number; lateAckTaken?: boolean } | undefined;
   /** While true, the transport silently loses every heartbeat frame (the proxy sees an ack). */
   dropHeartbeats = false;
+  /**
+   * The start steps that touch the machine, in the order each daemon's `start()` ran them, one
+   * list per daemon process. They do nothing here, so the order is all a scenario can see of them.
+   */
+  readonly hostStartSteps: string[][] = [];
+  /** The loopback MCP transports the running daemon's socket server holds open, by bound session. */
+  private readonly loopbackTransports = new Set<{ sessionUuid: string | undefined }>();
+  private readonly managedSlotsEnabled: boolean;
+  private managedSlots: SlotRegistry | undefined;
   daemon!: DaemonSide;
   proxy!: DaemonMcpProxy;
   private readonly autolock: boolean;
   private readonly sharedDeviceClaims: boolean;
   private readonly discovery = new FakeDeviceUtils();
   private tools!: RealToolCallPath;
-  private socketServer: UnixSocketServer | undefined;
   private readonly spies: Array<ReturnType<typeof spyOn>> = [];
   private readonly savedEnv = new Map<string, string | undefined>();
   private readonly gates = new Map<string, { opened: Promise<void>; wedged: boolean }>();
   private unsubscribeReleaseBroadcast: (() => void) | undefined;
   private restoreRecordingDeps: (() => void) | undefined;
+  private restoreAppearanceDeps: (() => void) | undefined;
   private minted: string | undefined;
   private mintCount = 0;
   private daemonCount = 0;
@@ -412,6 +453,7 @@ export class LivenessScenario {
     this.deviceIds = options.devices ?? ["emulator-5554"];
     this.autolock = options.autolock ?? false;
     this.sharedDeviceClaims = options.sharedDeviceClaims ?? false;
+    this.managedSlotsEnabled = options.managedSlots ?? false;
   }
 
   static async start(options: LivenessScenarioOptions = {}): Promise<LivenessScenario> {
@@ -429,6 +471,10 @@ export class LivenessScenario {
       spyOn(DaemonClient, "isAvailable").mockResolvedValue(true),
       spyOn(logger, "warn").mockImplementation(() => {}),
       spyOn(logger, "info").mockImplementation(() => {}),
+      // The daemon records a device's display settings before a session changes them (#11145),
+      // reading them over adb. The device reports nothing here, as a host without it would.
+      spyOn(DefaultDeviceSettingsAccess.prototype, "read").mockResolvedValue({}),
+      spyOn(DefaultDeviceSettingsAccess.prototype, "write").mockResolvedValue([]),
     );
     for (const key of AUTOLOCK_ENV_KEYS) {
       this.savedEnv.set(key, process.env[key]);
@@ -445,6 +491,7 @@ export class LivenessScenario {
     // The real Daemon builds its pool with the process-wide device manager: serve the fake.
     PlatformDeviceManagerFactory.setInstance(this.discovery);
     this.stubRecordingDevice();
+    this.stubAppearanceSync();
     this.tools = new RealToolCallPath(this.deviceIds.map((id) => this.device(id))).install();
     // A long call stays in flight at the device boundary until the scenario settles it.
     this.tools.setBody(async (input) => {
@@ -492,6 +539,27 @@ export class LivenessScenario {
   }
 
   /**
+   * The daemon syncs a device to the host's appearance when a session is created on it. Left
+   * alone that reads the config store, runs `defaults`/`gsettings` on the host and then `adb`
+   * against the device id, which on a machine with that emulator attached is a real device. The
+   * decision to sync stays the daemon's; its three ends answer here instead.
+   */
+  private stubAppearanceSync(): void {
+    const deps = defaultAppearanceSyncDependencies;
+    const original = { ...deps };
+    deps.getConfig = async () => ({
+      syncWithHost: true,
+      defaultMode: "light",
+      applyOnConnect: true,
+    });
+    deps.resolveMode = async () => "light";
+    deps.apply = async (device, mode) => {
+      this.appearanceApplies.push(`${device.deviceId}:${mode}`);
+    };
+    this.restoreAppearanceDeps = () => Object.assign(deps, original);
+  }
+
+  /**
    * A second stdio proxy on the same daemon, e.g. a challenger naming another proxy's session.
    * `client` builds the proxy's daemon client over each new connection to the daemon, for a test
    * that puts its own client (a recorder, a `FakeDaemonClient` backed by the daemon) in between.
@@ -509,7 +577,7 @@ export class LivenessScenario {
    * (#11441). Its constructor and its start sequence do all the wiring; this method only supplies
    * the device boundary, the in-memory "disk" and the steps of `start()` that touch the machine.
    */
-  private async createDaemonSide(): Promise<DaemonSide> {
+  private async createDaemonSide(startupMs = 0): Promise<DaemonSide> {
     // One database across daemon "processes", so a restart rehydrates what the last one persisted.
     this.repository ??= new DeviceSessionRepository(await createTestDatabase(), this.timer);
     const repository = this.repository;
@@ -552,6 +620,12 @@ export class LivenessScenario {
       () => undefined,
     );
     armHostTripwires(daemon);
+    if (this.managedSlotsEnabled) {
+      // The registry is a file on the host that outlives the daemon; each process finds it open.
+      this.managedSlots ??= await openSqliteSlotRegistry({ dbPath: ":memory:", timer: this.timer });
+      (daemon as unknown as { managedSlotRegistry: Promise<SlotRegistry> }).managedSlotRegistry =
+        Promise.resolve(this.managedSlots);
+    }
     const manager = daemon.getSessionManager();
     const pool = daemon.getDevicePool();
     // The Daemon builds its pool over the real multi-platform device manager and the forwarding
@@ -565,14 +639,14 @@ export class LivenessScenario {
     poolInternals.deviceManager = this.discovery;
     // The idle-device reaper captured the pool's device manager when the pool was built.
     poolInternals.idleDeviceReaper.deviceManager = this.discovery;
-    poolInternals.foreignDeviceOwnership = this.peerAwareOwnership();
+    poolInternals.foreignDeviceOwnership = this.peerAwareOwnership(clock);
     poolInternals.iosForeignDeviceOwnership = undefined;
     manager.onSessionRelease((sessionId, deviceId, reason) => {
       this.releases.push({ at: this.timer.now(), sessionId, deviceId, reason: reason ?? "" });
     });
     let socket: InMemoryControlSocket | undefined;
     await daemon.startOn(
-      this.startHost(clock, (bound) => {
+      this.startHost(clock, startupMs, (bound) => {
         socket = bound;
       }),
     );
@@ -590,41 +664,76 @@ export class LivenessScenario {
    */
   private startHost(
     clock: ProcessTimer,
+    startupMs: number,
     onSocket: (socket: InMemoryControlSocket) => void,
   ): DaemonStartHost {
+    const steps: string[] = [];
+    this.hostStartSteps.push(steps);
     return {
-      enterProcess: () => {},
-      publishForwardLeaseOwner: () => {},
-      writeEarlyOwnerRecord: async () => {},
-      openTerminalReleaseJournal: (owner) =>
-        createDaemonTerminalReleaseJournal({
+      enterProcess: () => void steps.push("enterProcess"),
+      publishForwardLeaseOwner: () => void steps.push("publishForwardLeaseOwner"),
+      writeEarlyOwnerRecord: async () => void steps.push("writeEarlyOwnerRecord"),
+      openTerminalReleaseJournal: (owner) => {
+        steps.push("openTerminalReleaseJournal");
+        return createDaemonTerminalReleaseJournal({
           ...owner,
           dataDir: assertNotHostDaemonPath("data directory", IN_MEMORY_DATA_DIR),
           fileSystem: this.journalFiles,
-        }),
-      startHttpIngress: async () => {},
-      sweepStaleAppearanceConfigs: async () => {},
+        });
+      },
+      startHttpIngress: async () => void steps.push("startHttpIngress"),
+      sweepStaleAppearanceConfigs: async () => void steps.push("sweepStaleAppearanceConfigs"),
       bindControlSocket: async () => {
+        steps.push("bindControlSocket");
+        // A slow start: the work between session rehydration and the bind takes this long.
+        if (startupMs > 0) {
+          await clock.sleep(startupMs);
+        }
         const socket = InMemoryControlSocket.attach({
           timer: clock,
           connectionIds: new FakeIdGenerator(),
-          loopback: loopbackMcpClientFactory(
-            (name, args, requestSignal) => this.loopbackToolCall(name, args, requestSignal),
-            clock,
+          // Every tool is enabled for every session: the selection store is a database table.
+          startupOptions: {
+            sessionToolSelectionService: {
+              isEnabled: async () => true,
+              setEnabled: async () => {},
+            },
+          },
+          loopback: this.trackedLoopback(
+            loopbackMcpClientFactory(
+              (name, args, requestSignal) => this.loopbackToolCall(name, args, requestSignal),
+              clock,
+            ),
           ),
         });
         onSocket(socket);
         return socket.server;
       },
-      startServicesAfterSocketBind: async () => {},
-      startMaintenanceMonitors: () => {},
+      startServicesAfterSocketBind: async () => void steps.push("startServicesAfterSocketBind"),
+      startMaintenanceMonitors: () => void steps.push("startMaintenanceMonitors"),
+    };
+  }
+
+  /** The loopback hop, reporting each transport the socket server opens and closes. */
+  private trackedLoopback(factory: McpClientFactory): McpClientFactory {
+    return async (boundSessionUuid, ...rest) => {
+      const client = await factory(boundSessionUuid, ...rest);
+      const transport = { sessionUuid: boundSessionUuid };
+      this.loopbackTransports.add(transport);
+      const close = client.close.bind(client);
+      client.close = async () => {
+        this.loopbackTransports.delete(transport);
+        await close();
+      };
+      return client;
     };
   }
 
   /** This daemon's view of the shared claim store: a claim by any other PID is foreign. */
-  private peerAwareOwnership(): ForeignDeviceOwnership {
+  private peerAwareOwnership(clock: ProcessTimer): ForeignDeviceOwnership {
     const claims = this.deviceClaims;
     const beforeClaim = (deviceId: string) => this.beforeDeviceClaim?.(deviceId);
+    const claimDelayMs = () => this.deviceClaimDelayMs;
     return {
       async refresh(): Promise<void> {},
       foreignOwnerPid(deviceId: string): number | undefined {
@@ -632,6 +741,9 @@ export class LivenessScenario {
         return owner === undefined || owner === SCENARIO_DAEMON_PID ? undefined : owner;
       },
       async claim(deviceId: string): Promise<boolean> {
+        if (claimDelayMs() > 0) {
+          await clock.sleep(claimDelayMs());
+        }
         beforeClaim(deviceId);
         const owner = claims.get(deviceId);
         if (owner !== undefined && owner !== SCENARIO_DAEMON_PID) {
@@ -926,63 +1038,11 @@ export class LivenessScenario {
   }
 
   /**
-   * One frame over a socket connection to the scenario's real daemon state (the desktop/IDE path:
-   * `ide/*`, `input/*`, `appearance/*`), answered by the real {@link UnixSocketServer} handlers.
-   * The server is in-process: frames are handed to its connection handler without a real socket.
+   * One frame from the desktop/IDE client (`ide/*`, `input/*`, `appearance/*`) on its own
+   * connection to the daemon's control socket, answered by the started daemon's socket server.
    */
-  async socketFrame(
-    method: string,
-    params: Record<string, unknown>,
-    type: DaemonRequest["type"] = "mcp_request",
-  ): Promise<DaemonResponse> {
-    if (!this.socketServer) {
-      this.socketServer = new UnixSocketServer(
-        "unused",
-        "http://localhost:0/mcp",
-        this.daemon.state as never,
-        this.timer,
-        null,
-        {
-          sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} },
-        },
-      );
-      Reflect.set(this.socketServer, "acceptingRequests", true);
-    }
-    const server = this.socketServer as unknown as {
-      handleConnection(socket: Socket): void;
-      activeRequestHandlers: Set<Promise<void>>;
-    };
-    const responses: DaemonResponse[] = [];
-    const socket = Object.assign(new EventEmitter(), {
-      destroyed: false,
-      writableLength: 0,
-      setTimeout: () => socket,
-      write(data: string, callback?: (error?: Error | null) => void): boolean {
-        responses.push(JSON.parse(data) as DaemonResponse);
-        callback?.();
-        return true;
-      },
-      end: () => socket.destroy(),
-      destroy: () => {
-        if (!socket.destroyed) {
-          socket.destroyed = true;
-          socket.emit("close", false);
-        }
-        return socket;
-      },
-    });
-    server.handleConnection(socket as unknown as Socket);
-    socket.emit("data", Buffer.from(`${JSON.stringify({ id: "frame", type, method, params })}\n`));
-    for (let turn = 0; turn < 4; turn++) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    await Promise.all([...server.activeRequestHandlers]);
-    socket.destroy();
-    const response = responses.find((frame) => frame.id === "frame");
-    if (!response) {
-      throw new Error(`socketFrame ${method}: no response`);
-    }
-    return response;
+  socketFrame(method: string, params: Record<string, unknown>): Promise<WireEnvelope> {
+    return this.daemonMethod(method, params, IDE_FRAME_CONNECTION);
   }
 
   /**
@@ -1060,6 +1120,11 @@ export class LivenessScenario {
        * was already answered with a timeout.
        */
       wedged?: boolean;
+      /**
+       * The call reaches the daemon's MCP entry directly (its HTTP endpoint, no control socket in
+       * front): nothing stamped a request deadline on it, and no caller times out.
+       */
+      direct?: boolean;
     } = {},
   ): LongCall {
     let open!: () => void;
@@ -1070,7 +1135,13 @@ export class LivenessScenario {
       wedged: options.wedged ?? false,
     });
     let failure: unknown;
-    const done = this.proxy.callTool(tool, { sessionUuid: sessionId });
+    const done = options.direct
+      ? this.runDeviceTool(
+          tool,
+          { sessionUuid: sessionId, __mcpSessionId: SOCKET_CLIENT_CONNECTION },
+          new AbortController().signal,
+        )
+      : this.proxy.callTool(tool, { sessionUuid: sessionId });
     // The caller of a long call is answered with a failure when the call outlives its request
     // deadline; a scenario reads it from `failure()` rather than as an unhandled rejection.
     const answered = done.then(
@@ -1256,6 +1327,86 @@ export class LivenessScenario {
     return this.tools.runs;
   }
 
+  /**
+   * Streamed-gesture frames the device's CtrlProxy received, as `<start|move|end|cancel>:<id>`:
+   * a `cancel` lifts a pointer that was left down.
+   */
+  get gestureFrames(): readonly string[] {
+    return this.tools.gestureFrames;
+  }
+
+  /** Times the daemon listed the booted devices: what an acquisition's device discovery costs. */
+  get deviceDiscoveries(): number {
+    return this.discovery.getCallCount("getBootedDevices");
+  }
+
+  /** Sessions the running daemon still holds a loopback MCP transport open for. */
+  get sessionsWithOpenTransport(): string[] {
+    return Array.from(this.loopbackTransports).flatMap(({ sessionUuid }) =>
+      sessionUuid === undefined ? [] : [sessionUuid],
+    );
+  }
+
+  /** The running daemon's own id: what it records itself as wherever it owns something. */
+  get daemonId(): string {
+    return this.daemonInternals().managedSlotJournalOwner().daemonId;
+  }
+
+  private daemonInternals(): { managedSlotJournalOwner(): SlotProcessIdentity } {
+    return this.daemon.daemon as unknown as { managedSlotJournalOwner(): SlotProcessIdentity };
+  }
+
+  /**
+   * `sessionId` becomes the execution of a managed slot, as `daemon/acquireManagedSlots` leaves
+   * it: the session is held on the managed-execution policy and the host registry records the
+   * running daemon as the slot's execution owner. The reconciler's device work is the device
+   * boundary; the registry writes are the ones the acquisition makes. Needs `managedSlots`.
+   */
+  async holdAsManagedExecution(sessionId: string): Promise<void> {
+    const registry = this.managedSlots;
+    if (!registry) {
+      throw new Error("LivenessScenario: start the scenario with `managedSlots`");
+    }
+    await this.daemon.manager.adoptManagedExecutionLivenessPolicy(sessionId);
+    const scope = await registry.ensureScope({
+      managedHostScope: "scenario-host",
+      runnerNamespace: "scenario-runner",
+      runnerIncarnation: "boot-1",
+    });
+    if (scope.kind !== "ready") {
+      throw new Error(`LivenessScenario: managed scope not ready: ${scope.kind}`);
+    }
+    const key = { scopeKey: scope.scope.scopeKey, slotIndex: 0 };
+    const stableDeviceId = `Pixel_${sessionId}`;
+    await registry.initSlot(key, { role: "primary", platform: PLATFORM, requestedSpec: {} });
+    await registry.commitBinding(
+      key,
+      { generation: 0, stableDeviceId: null },
+      {
+        stableDeviceId,
+        deviceName: stableDeviceId,
+        resolvedSpec: {},
+        specFingerprint: "scenario",
+        state: "ready",
+      },
+    );
+    const assignment = (await registry.getAssignment(key))!;
+    const claimed = await registry.claimExecution(
+      key,
+      { generation: assignment.generation, stableDeviceId: assignment.stableDeviceId },
+      { ...this.daemonInternals().managedSlotJournalOwner(), sessionUuid: sessionId },
+    );
+    if (claimed.kind !== "claimed") {
+      throw new Error(`LivenessScenario: slot not claimed: ${claimed.kind}`);
+    }
+  }
+
+  /** Who the host registry records as owning the slot `sessionId` executes in, if any. */
+  async managedSlotOwnerOf(sessionId: string): Promise<SlotExecOwner | undefined> {
+    const [assignment] = (await this.managedSlots?.findExecutionAssignments(sessionId)) ?? [];
+    return assignment?.execOwner ?? undefined;
+  }
+
   /** The MCP host closes the proxy's stdin: the keeper stops and the connection drops. */
   async closeTransport(): Promise<void> {
     await this.proxy.close();
@@ -1268,14 +1419,45 @@ export class LivenessScenario {
    * `Daemon.startOn()` over the same database and journal directory. Its start sequence expires
    * the dead process's rows, rehydrates them awaiting their owners, and opens their owner
    * windows. A proxy that is still running sees its connection drop and reconnects.
+   *
+   * `startupMs` makes it a slow start: that much time passes between the new process's session
+   * rehydration and its control socket accepting connections, with no daemon to reach meanwhile.
+   * A device claim slower than the startup deadline ({@link deviceClaimDelayMs}) is a slow start
+   * too: rehydration waits the deadline out, then the daemon starts without the late session.
    */
-  async daemonRestart(): Promise<void> {
+  async daemonRestart(options: { startupMs?: number } = {}): Promise<void> {
     this.killDaemonSide(this.daemon);
-    this.daemon = await this.createDaemonSide();
+    const startupMs = options.startupMs ?? 0;
+    const rehydrationMs =
+      this.deviceClaimDelayMs > SESSION_REHYDRATION_DEADLINE_MS
+        ? SESSION_REHYDRATION_DEADLINE_MS
+        : this.deviceClaimDelayMs;
+    if (startupMs === 0 && rehydrationMs === 0) {
+      this.daemon = await this.createDaemonSide();
+      return;
+    }
+    let started: DaemonSide | undefined;
+    const starting = this.createDaemonSide(startupMs).then((side) => {
+      started = side;
+    });
+    // Let the start reach each slow step before the clock moves, wait the step out, then let the
+    // rest of the start run: the socket opens exactly that long after the restart.
+    for (const waitMs of [rehydrationMs, startupMs]) {
+      if (waitMs > 0) {
+        await drainMicrotasks(SLOW_START_TURNS);
+        await this.idle(waitMs);
+      }
+    }
+    await Promise.race([starting, drainMicrotasks(SLOW_START_TURNS)]);
+    if (!started) {
+      throw new Error("LivenessScenario: the slow start never finished");
+    }
+    this.daemon = started;
   }
 
   /** The process is gone: its connections drop and none of its timers fires again. */
   private killDaemonSide(side: DaemonSide): void {
+    this.loopbackTransports.clear();
     side.socket.kill();
     side.clock.kill();
     (side.daemon as unknown as DaemonProcessTeardown).stopSessionTimers();
@@ -1293,9 +1475,11 @@ export class LivenessScenario {
     }
     this.rawClients.clear();
     this.killDaemonSide(this.daemon);
+    await this.managedSlots?.close();
     this.tools.uninstall();
     PlatformDeviceManagerFactory.reset();
     this.restoreRecordingDeps?.();
+    this.restoreAppearanceDeps?.();
     this.unsubscribeReleaseBroadcast?.();
     DaemonState.getInstance().reset();
     for (const spy of this.spies.splice(0)) {

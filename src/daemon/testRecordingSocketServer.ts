@@ -8,6 +8,7 @@ import {
   getTestRecordingStatus,
   startTestRecording,
   getStoppedTestRecording,
+  joinInFlightTestRecordingStop,
   stopTestRecording,
 } from "../server/testRecordingManager";
 import { TestRecordingCommand, TestRecordingResponse } from "./testRecordingSocketTypes";
@@ -21,6 +22,7 @@ import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/de
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
 import { assertInputNotOnForeignManagedSlotDevice } from "./inputDeviceOwnership";
 import { DaemonState } from "./daemonState";
+import { testRecordingStartOwnershipRefusal } from "./testRecordingStartAdmission";
 
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
 const TEST_RECORDING_PURPOSE = "to start a test recording";
@@ -34,8 +36,19 @@ const TEST_RECORDING_PURPOSE = "to start a test recording";
  */
 export interface TestRecordingDeviceResolution {
   selectDevice(deviceId?: string, platform?: Platform): Promise<BootedDevice>;
-  readyDevice(device: BootedDevice): Promise<BootedDevice>;
+  /**
+   * `sessionUuid` is the session that asked for the recording: readiness writes to the device
+   * (appearance on connect), and those writes follow that session's own config, not the global
+   * one (#10976, #11641).
+   */
+  readyDevice(device: BootedDevice, sessionUuid?: string): Promise<BootedDevice>;
 }
+
+/** What device resolution needs of the device session manager; narrowed so a test can supply one. */
+export type TestRecordingDeviceSessions = Pick<
+  DeviceSessionManager,
+  "ensureDeviceReady" | "getPlatformDeviceManager" | "getCurrentDevice"
+>;
 
 /**
  * Pick the device this recording targets, and fold the discovery it ran into
@@ -124,22 +137,32 @@ const defaultManagedSlotGate: TestRecordingManagedSlotGate = async (input) => {
   });
 };
 
-const defaultDeviceResolution: TestRecordingDeviceResolution = {
-  selectDevice: (deviceId, platform) => {
-    const deviceSessionManager = DeviceSessionManager.getInstance();
-    return resolveTestRecordingDevice(
-      deviceSessionManager.getPlatformDeviceManager(),
-      deviceId,
-      platform,
-      () => deviceSessionManager.getCurrentDevice(),
-    );
-  },
-  // Readiness for an already-selected, already-admitted device: the same
-  // provided-device path (runner setup, current-device selection, appearance)
-  // a start took before, now naming its target exactly.
-  readyDevice: (device) =>
-    DeviceSessionManager.getInstance().ensureDeviceReady(device.platform, device.deviceId),
-};
+/**
+ * The production device resolution over a device session manager, resolved at each use. Exported
+ * with the manager injectable so a test can drive real readiness (and its device writes) on fakes.
+ */
+export function createTestRecordingDeviceResolution(
+  deviceSessions: () => TestRecordingDeviceSessions = () => DeviceSessionManager.getInstance(),
+): TestRecordingDeviceResolution {
+  return {
+    selectDevice: (deviceId, platform) => {
+      const deviceSessionManager = deviceSessions();
+      return resolveTestRecordingDevice(
+        deviceSessionManager.getPlatformDeviceManager(),
+        deviceId,
+        platform,
+        () => deviceSessionManager.getCurrentDevice(),
+      );
+    },
+    // Readiness for an already-selected, already-admitted device: the same
+    // provided-device path (runner setup, current-device selection, appearance)
+    // a start took before, now naming its target exactly and the session it runs for.
+    readyDevice: (device, sessionUuid) =>
+      deviceSessions().ensureDeviceReady(device.platform, device.deviceId, {
+        sessionId: sessionUuid,
+      }),
+  };
+}
 
 const ensurePlatform = (value: unknown): Platform | undefined => {
   if (value === undefined) {
@@ -173,7 +196,7 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
       "testRecording",
     ),
     admissionGate: DeviceAdmissionGate = daemonDeviceAdmissionGate,
-    deviceResolution: TestRecordingDeviceResolution = defaultDeviceResolution,
+    deviceResolution: TestRecordingDeviceResolution = createTestRecordingDeviceResolution(),
     managedSlotGate: TestRecordingManagedSlotGate = defaultManagedSlotGate,
   ) {
     super(socketPath, timer, "TestRecording");
@@ -191,17 +214,24 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
 
     switch (command) {
       case "start": {
-        // Authorize before touching device state: an unauthenticated or
-        // cross-session caller cannot start a recording on another session's
-        // device (issue #4752).
-        this.authenticator.authorize({
-          sessionUuid: request.sessionUuid,
-          deviceId: request.deviceId,
-        });
+        if (request.deviceId !== undefined) {
+          const refusal = testRecordingStartOwnershipRefusal(request.deviceId, request.sessionUuid);
+          if (refusal) {
+            return refusal;
+          }
+        }
+        const daemonInitialized = DaemonState.getInstance().isInitialized();
+        // With a daemon registry, resolve the target before authentication so an unheld-device
+        // start gets the same acquire-session refusal even without a requester identity.
+        if (!daemonInitialized) {
+          this.authenticator.authorize({
+            sessionUuid: request.sessionUuid,
+            deviceId: request.deviceId,
+          });
+        }
         // FUNNEL 2, before any device work. The quarantine preserves the owning
-        // session, so the authorization above still passes on a serial whose AVD
-        // the pool can no longer identify, and readiness would go on to set up
-        // whichever runtime now answers on it
+        // session, so ownership alone still admits a serial whose AVD the pool can
+        // no longer identify; readiness would set up whichever runtime now answers on it
         // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
         // Gated twice because an omitted `deviceId` names its target only after
         // selection — and selection is kept apart from readiness precisely so
@@ -209,35 +239,7 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
         if (request.deviceId !== undefined) {
           this.admissionGate.assertDeviceActionable(request.deviceId, TEST_RECORDING_PURPOSE);
         }
-        const platform = ensurePlatform(request.platform);
-        const selected = await this.deviceResolution.selectDevice(request.deviceId, platform);
-        this.admissionGate.assertDeviceActionable(selected.deviceId, TEST_RECORDING_PURPOSE);
-        authorizeResolvedDevice(this.authenticator, {
-          sessionUuid: request.sessionUuid,
-          deviceId: selected.deviceId,
-        });
-        // A managed slot's device is idle (no owner), so the authorization above admits it; the
-        // slot exclusion refuses before readiness sets up a runner on it (#11352).
-        await this.managedSlotGate({
-          action: "testRecording start",
-          device: selected,
-          requesterSessionUuid: request.sessionUuid,
-        });
-        const device = await this.deviceResolution.readyDevice(selected);
-        const result = await startTestRecording(
-          device,
-          undefined,
-          undefined,
-          undefined,
-          request.sessionUuid,
-        );
-        return {
-          success: true,
-          recordingId: result.recordingId,
-          startedAt: result.startedAt,
-          deviceId: result.deviceId,
-          platform: result.platform,
-        };
+        return this.handleStart(request, daemonInitialized);
       }
       case "stop":
         return this.handleStop(request);
@@ -261,11 +263,71 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
     }
   }
 
+  private async handleStart(
+    request: TestRecordingCommand,
+    daemonInitialized: boolean,
+  ): Promise<TestRecordingResponse> {
+    const platform = ensurePlatform(request.platform);
+    const selected = await this.deviceResolution.selectDevice(request.deviceId, platform);
+    this.admissionGate.assertDeviceActionable(selected.deviceId, TEST_RECORDING_PURPOSE);
+    const refusal = testRecordingStartOwnershipRefusal(selected.deviceId, request.sessionUuid);
+    if (refusal) {
+      return refusal;
+    }
+    if (!daemonInitialized) {
+      authorizeResolvedDevice(this.authenticator, {
+        sessionUuid: request.sessionUuid,
+        deviceId: selected.deviceId,
+      });
+    }
+    // Preserve managed-slot refusals before the unheld-device start refusal (#11665).
+    await this.managedSlotGate({
+      action: "testRecording start",
+      device: selected,
+      requesterSessionUuid: request.sessionUuid,
+    });
+    const postSlotRefusal = testRecordingStartOwnershipRefusal(
+      selected.deviceId,
+      request.sessionUuid,
+      true,
+    );
+    if (postSlotRefusal) {
+      return postSlotRefusal;
+    }
+    if (daemonInitialized) {
+      authorizeResolvedDevice(this.authenticator, {
+        sessionUuid: request.sessionUuid,
+        deviceId: selected.deviceId,
+      });
+    }
+    const device = await this.deviceResolution.readyDevice(selected, request.sessionUuid);
+    const result = await startTestRecording(
+      device,
+      undefined,
+      undefined,
+      undefined,
+      request.sessionUuid,
+    );
+    return {
+      success: true,
+      recordingId: result.recordingId,
+      startedAt: result.startedAt,
+      deviceId: result.deviceId,
+      platform: result.platform,
+    };
+  }
+
   private async handleStop(request: TestRecordingCommand): Promise<TestRecordingResponse> {
     // Authorize the stop against the active recording's device so a session
     // that does not own it cannot stop another session's recording — the
     // recordingId-only guard in stopTestRecording is not an ownership check
     // (issue #4752).
+    if (request.recordingId) {
+      const joined = await joinInFlightTestRecordingStop(request.recordingId, request.sessionUuid);
+      if (joined) {
+        return this.toStopResponse(joined);
+      }
+    }
     const active = getTestRecordingStatus();
     // A stop by id after a release-time stop returns the owner's retained plan (#10958).
     // It needs no device and no live session: the owning session's uuid is the scope.

@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -132,7 +132,7 @@ describe("idle release while the holder's device call is in flight", () => {
     await sessionManager.waitForSessionRelease(SESSION);
   }
 
-  beforeEach(async () => {
+  const setUp = async () => {
     deviceCallStarted = false;
     deviceCallSignal = undefined;
     releases = [];
@@ -208,9 +208,9 @@ describe("idle release while the holder's device call is in flight", () => {
     internals.acceptingRequests = true;
     socket = new FakeSocket();
     internals.handleConnection(socket as unknown as Socket);
-  });
+  };
 
-  afterEach(async () => {
+  const tearDown = async () => {
     finishDeviceCall();
     await settle();
     await Promise.all([...internals.activeRequestHandlers]);
@@ -219,6 +219,26 @@ describe("idle release while the holder's device call is in flight", () => {
     PlatformDeviceManagerFactory.reset();
     socket.destroy();
     sessionManager.stopCleanupTimer();
+  };
+
+  beforeEach(setUp);
+  afterEach(tearDown);
+
+  // beforeAll is outside the per-test budget: one full tap scenario pays the server, socket and
+  // first-call cold start the first timed test would otherwise carry.
+  beforeAll(async () => {
+    await setUp();
+    try {
+      await runPastIdleDeadlineWith("input/tap", {
+        platform: "android",
+        deviceId: DEVICE,
+        x: 1,
+        y: 2,
+        sessionUuid: SESSION,
+      });
+    } finally {
+      await tearDown();
+    }
   });
 
   test("contrast: an input/tap in flight keeps the session", async () => {

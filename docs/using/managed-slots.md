@@ -197,9 +197,15 @@ connection used for tools and resources:
    device-tool refusal). A daemon restart does not end the execution: its session
    is rehydrated, the proxy re-binds, and the restarted daemon records itself as
    the slot's owner. While the daemon is away, tool calls answer `daemon_stalled`
-   after automatic recovery is exhausted. The proxy keeps probing every heartbeat
-   interval, however long the daemon was away, and reclaims the rehydrated session
-   when the restarted daemon answers; the next call carries `daemon_restart_resumed`.
+   after automatic recovery is exhausted. Its message names the affected sessions
+   and attempt count, with `recovery.action: "wait_for_managed_reclaim"`: the proxy
+   keeps probing every heartbeat interval, however long the daemon was away, and
+   reclaims the session itself once a daemon answers again. Do not pass a `sessionUuid`
+   or try to acquire a device; retry the call later. The proxy never restarts the
+   shared daemon. If no daemon comes back, restarting it or relaunching the execution
+   is the runner's decision. If the session turns out to be released, calls answer
+   `managed_execution_ended`. The next call after reclaim carries `daemon_restart_resumed`
+   when the daemon restarted, or `daemon_stall_resumed` when the same daemon resumed.
    The restarted daemon waits lease + suspect grace (about 8 s) for the owner.
    During reclaim, reasonless not-found answers and `daemon-shutdown` or
    `daemon-restart` answers are awaited for the existing rehydration window, once

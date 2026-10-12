@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
 import type { BootedDevice, VideoRecordingMetadata } from "../../src/models";
+import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // #9885 review: a plan whose session handed the device back must not delete the
@@ -38,7 +39,9 @@ async function sessionWithTwoCompletedAndOneActive() {
     metadata: metadata(id ?? "missing"),
     evictedRecordingIds: [],
   }));
-  const rollback = mock(async (_id: string, _options?: { deviceWide?: boolean }) => {});
+  const rollback = mock(
+    async (_id: string, _options?: { deviceWide?: boolean; hostOnly?: boolean }) => {},
+  );
   const session = new AndroidSegmentedPlanVideoSession({
     device,
     outputNamePrefix: "plan",
@@ -62,7 +65,7 @@ async function sessionWithTwoCompletedAndOneActive() {
   timer.advanceTime(1000);
   await session.onBeforePlanStep();
   stop.mockClear();
-  return { session, stop, rollback };
+  return { session, stop, rollback, timer };
 }
 
 describe("AndroidSegmentedPlanVideoSession.finalizeWithoutDevice", () => {
@@ -79,6 +82,70 @@ describe("AndroidSegmentedPlanVideoSession.finalizeWithoutDevice", () => {
     const warnings = result.metadata.flatMap((entry) => entry.warnings ?? []).join(" ");
     expect(warnings).toContain("id-plan-seg2");
     expect(warnings).toContain("own time limit");
+  });
+
+  test("replaced-device finalize keeps host segments and abandons the active segment host-only", async () => {
+    const { session, stop, rollback } = await sessionWithTwoCompletedAndOneActive();
+    const result = await session.finalizeWithoutDevice({ hostOnly: true });
+    expect(result.recordingIds).toEqual(["id-plan", "id-plan-seg1"]);
+    expect(rollback.mock.calls).toEqual([["id-plan-seg2", { deviceWide: false, hostOnly: true }]]);
+    expect(stop).not.toHaveBeenCalled();
+    const warnings = result.metadata.flatMap((entry) => entry.warnings ?? []).join(" ");
+    expect(warnings).toContain("device identity was replaced");
+    expect(warnings).not.toContain("own time limit");
+  });
+
+  test("host-only finalize bypasses a wedged stop and is idempotent after its late rejection", async () => {
+    const { session, stop, rollback, timer } = await sessionWithTwoCompletedAndOneActive();
+    const gate = Promise.withResolvers<never>();
+    stop.mockImplementation(() => gate.promise);
+    const stopped = session.stop().catch((error: unknown) => error);
+    await drainUntil(() => stop.mock.calls.length === 1, { description: "wedged segment stop" });
+    let result: Awaited<ReturnType<typeof session.finalizeWithoutDevice>> | undefined;
+    const finalize = session.finalizeWithoutDevice({ hostOnly: true }).then((value) => {
+      result = value;
+    });
+    await drainUntilQuiescent(timer);
+    expect(result?.recordingIds).toEqual(["id-plan", "id-plan-seg1"]);
+    await finalize;
+    expect(rollback.mock.calls).toEqual([["id-plan-seg2", { deviceWide: false, hostOnly: true }]]);
+    gate.reject(new Error("late device stop failure"));
+    await stopped;
+    expect(await session.finalizeWithoutDevice({ hostOnly: true })).toBe(result!);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(rollback).toHaveBeenCalledTimes(1);
+  });
+
+  test("non-host-only released-plan finalize still discards while a graceful stop is wedged", async () => {
+    const { session, stop, rollback, timer } = await sessionWithTwoCompletedAndOneActive();
+    const gate = Promise.withResolvers<never>();
+    stop.mockImplementation(() => gate.promise);
+    const stopped = session.stop().catch((error: unknown) => error);
+    await drainUntil(() => stop.mock.calls.length === 1, { description: "plan stop" });
+    let result: Awaited<ReturnType<typeof session.finalizeWithoutDevice>> | undefined;
+    void session.finalizeWithoutDevice().then((value) => {
+      result = value;
+    });
+    await drainUntilQuiescent(timer);
+    expect(result?.recordingIds).toEqual(["id-plan", "id-plan-seg1"]);
+    expect(rollback.mock.calls).toEqual([["id-plan-seg2", { deviceWide: false }]]);
+    gate.reject(new Error("late stop"));
+    await stopped;
+  });
+
+  test("a rejected host discard is retryable and retains the completed result on success", async () => {
+    const { session, rollback } = await sessionWithTwoCompletedAndOneActive();
+    rollback.mockRejectedValueOnce(new Error("host reap failed"));
+    await expect(session.finalizeWithoutDevice({ hostOnly: true })).rejects.toThrow(
+      "Failed to discard host segments",
+    );
+    const result = await session.finalizeWithoutDevice();
+    expect(result.recordingIds).toEqual(["id-plan", "id-plan-seg1"]);
+    expect(await session.finalizeWithoutDevice({ hostOnly: true })).toBe(result);
+    expect(rollback.mock.calls).toEqual([
+      ["id-plan-seg2", { deviceWide: false, hostOnly: true }],
+      ["id-plan-seg2", { deviceWide: false, hostOnly: true }],
+    ]);
   });
 
   test("abort() still rolls back every segment, completed ones included", async () => {

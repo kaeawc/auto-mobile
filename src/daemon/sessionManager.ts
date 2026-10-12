@@ -93,13 +93,16 @@ import { SingleFlight } from "../utils/cache/SingleFlight";
 import { errorMessage } from "../utils/describeUnknownError";
 import { effectiveLastToolActivity, sessionIdleDeadline } from "./sessionClocks";
 import { forgivenLeaseStart, leaseRunningAt, type StallForgivingLeases } from "./stallForgiveness";
+import {
+  daemonStallLeaseExtension,
+  type OwnerConnectedAtReader,
+} from "./connectedOwnerStallExcuse";
 import { onSessionClock } from "./sessionClockPersistence";
 import {
   judgedLeaseHeartbeat,
   hasMintBoundClaimLease,
   heartbeatLeasePastGrace,
   judgesOwnerHeartbeats,
-  ownerLeaseLiveAt,
   livenessLeaseState,
   livenessOwnerHold,
   sessionOwnerLeaseSnapshot,
@@ -130,6 +133,7 @@ import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
 import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
 import {
   isExpiryReleaseReason,
+  isIdleReleaseReason,
   isRecoverableDaemonReleaseReason,
   isReissuableByNameReleaseReason,
   isTerminalReleaseReason,
@@ -137,6 +141,7 @@ import {
   IDLE_WINDOW_RELEASE_REASON,
   releasedRowStatus,
   shouldJudgeOwnerLeaseForRelease,
+  sessionReleaseReasonTraits,
   type SessionReleaseReason,
 } from "./releaseReasons";
 import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
@@ -2372,6 +2377,7 @@ export class SessionManager {
 
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
   private livenessOwnerCallInFlightReader?: (ownerToken: string) => boolean;
+  private ownerConnectedAtReader?: OwnerConnectedAtReader;
   // No lookup means no known deadline: the veto falls back to the unsettled-execution ceiling.
   private sessionExecutionDeadlineLookup: SessionExecutionDeadlineLookup = () => undefined;
   // No canceller means nothing to abort: only the daemon tracks executions (#10820).
@@ -3047,6 +3053,10 @@ export class SessionManager {
 
   setLivenessOwnerCallInFlightReader(reader: ((ownerToken: string) => boolean) | undefined): void {
     this.livenessOwnerCallInFlightReader = reader;
+  }
+
+  setOwnerConnectedAtReader(reader: OwnerConnectedAtReader | undefined): void {
+    this.ownerConnectedAtReader = reader;
   }
 
   /** An owner's completed call restarts only its still-mint-bound claim leases. */
@@ -3817,20 +3827,20 @@ export class SessionManager {
     onlyIfOwnedByDaemon?: string,
   ): Promise<DeviceSession | undefined> {
     const now = this.sessionNow();
-    if (
-      persisted &&
-      hasLapsedRestartRecoveryWindow(persisted, now) &&
-      this.isRowOwnedByLivePeer(persisted)
-    ) {
+    if (!persisted) {
       return persisted;
     }
-    if (persisted && persistedSessionExpiryReason(persisted, now) === "restart-recovery-timeout") {
+    if (hasLapsedRestartRecoveryWindow(persisted, now) && this.isRowOwnedByLivePeer(persisted)) {
+      return persisted;
+    }
+    if (persistedSessionExpiryReason(persisted, now) === "restart-recovery-timeout") {
       return this.terminalizeRestartRecoveryHandoff(persisted, onlyIfOwnedByDaemon);
     }
     if (
-      !persisted ||
       persisted.expires_at_ms > now ||
-      (persisted.release_reason && isTerminalReleaseReason(persisted.release_reason))
+      (persisted.release_reason &&
+        (isTerminalReleaseReason(persisted.release_reason) ||
+          sessionReleaseReasonTraits(persisted.release_reason).releasedBeforeHandout))
     ) {
       return persisted;
     }
@@ -3993,7 +4003,11 @@ export class SessionManager {
     sessionId: string,
     persisted: DeviceSession,
   ): SessionReleaseSnapshot | undefined {
-    if (persisted.release_reason && isTerminalReleaseReason(persisted.release_reason)) {
+    if (
+      persisted.release_reason &&
+      (isTerminalReleaseReason(persisted.release_reason) ||
+        sessionReleaseReasonTraits(persisted.release_reason).releasedBeforeHandout)
+    ) {
       return undefined;
     }
     const reason = this.isRowOwnedByLivePeer(persisted)
@@ -5810,15 +5824,19 @@ export class SessionManager {
   }
 
   /**
-   * Why this daemon released a session it issued (#10730), from the in-memory terminal snapshot or
-   * the persisted `release_reason`. Undefined for a live session or a UUID it never issued, so a
-   * caller can tell a known release from a plain unknown id.
+   * The known end of a UUID (#10730), from the ended-session answer, in-memory terminal snapshot
+   * or persisted `release_reason`. Undefined for a live session or an unknown UUID. A row released
+   * before its latest handout keeps its stored reason regardless of its creation deadline.
    *
-   * A fenced terminal non-device-loss release is named while it writes its row (#11646), using
-   * the operation's live reason so a join is visible before its snapshot upgrades. Only
-   * commit-fenced releases can be abandoned after the terminal fence is raised; those are never
-   * named, even if a join upgrades their reason. Teardown before the fence stays unanswered.
-   * A plan label whose base has ended is otherwise answered with the base's reason.
+   * Idle ends are named from the start of teardown via registration's read-only ended-session
+   * predicate. Other releases stay unanswered before the fence. Commit-fenced operations can
+   * leave the session live, and non-terminal handoffs preserve it for reissue, so neither is
+   * named early even if its idle deadline has passed. After the fence, a terminal non-device-loss
+   * release uses the operation's live reason so a join is visible before its snapshot upgrades
+   * (#11646); commit-fenced operations and device-loss cancellations stay unanswered.
+   * The read-only answer also names an unheld idle deadline without starting release; a timely
+   * control call's execution hold still keeps it live. A plan label whose base has ended is
+   * otherwise answered with the base's reason.
    */
   async getReleasedSessionReason(sessionId: string): Promise<string | undefined> {
     const published = this.sessions.get(sessionId);
@@ -5827,9 +5845,11 @@ export class SessionManager {
       const inFlightReason = (): string | undefined => {
         const operation = this.releasePromises.get(sessionId);
         const current = operation?.session === published ? operation : undefined;
+        if (inMemory === undefined) {
+          return this.preFenceIdleReleaseReason(sessionId, current);
+        }
         const reason = current?.reason.value ?? inMemory;
-        return inMemory !== undefined &&
-          !current?.commitFenced &&
+        return !current?.commitFenced &&
           reason !== undefined &&
           isTerminalReleaseReason(reason) &&
           !isDeviceLossCancellationReason(reason)
@@ -5856,6 +5876,17 @@ export class SessionManager {
       persisted.release_reason ??
       undefined
     );
+  }
+
+  private preFenceIdleReleaseReason(
+    sessionId: string,
+    current: SessionReleaseOperation | undefined,
+  ): string | undefined {
+    if (current?.commitFenced || (current && !isTerminalReleaseReason(current.reason.value))) {
+      return undefined;
+    }
+    const reason = this.peekTerminalAnswerForEndedSession(sessionId)?.release.releaseReason;
+    return reason !== undefined && isIdleReleaseReason(reason) ? reason : undefined;
   }
 
   /**
@@ -11954,13 +11985,14 @@ export class SessionManager {
    * `lostMs` (and never by `sleptMs`) through `idleStallForgivenAt`, so whether it survives a stall
    * no longer depends on which timer fires first afterwards (#10835).
    *
-   * `gapBeganAt`, when given, narrows the lease forgiveness (#11080): an owned session's lease is
-   * excused only when the gap began within one lease of its owner's last heartbeat
-   * ({@link ownerLeaseLiveAt}); its idle deadline is still moved as above. An owner whose lease
-   * had already run out before the gap was not heartbeating, so the gap hid nothing from the
-   * daemon; forgiving it anyway let a dead owner keep its device for as long as the daemon's scans
-   * kept arriving late. A live owner is forgiven in full however long the gap. Returns how many
-   * sessions were extended.
+   * `gapBeganAt`, when given, narrows full lease forgiveness (#11080) to owners live at the
+   * gap's start (`ownerLeaseLiveAt`). A live owner is forgiven in full however long the gap.
+   * An owned session whose socket was connected at that instant also receives awake-stall credit
+   * (#11992), capped in total between raw owner heartbeats at MAX_CREDIBLE_DAEMON_STALL_MS (30 s).
+   * Sleep contributes no credit to this extra rule. Without another owner heartbeat, even an
+   * always-open socket is released once its raw heartbeat age exceeds heartbeatTimeoutMs +
+   * SUSPECT_GRACE_MS + MAX_CREDIBLE_DAEMON_STALL_MS, plus one scan. With no late tick, the existing
+   * lease + grace + one scan bound is unchanged (10 s at defaults). Returns sessions considered.
    *
    * Observer registrations are excused the same gap under the same rule (#11554): it is handed
    * on as durations, because the observer registry keeps its own clock.
@@ -11974,6 +12006,8 @@ export class SessionManager {
     });
     let forgiven = 0;
     let leaseExtended = 0;
+    let connectedExtended = 0;
+    let connectedCreditMs = 0;
     let idleExtended = 0;
     for (const session of this.sessions.values()) {
       if (session.livenessPolicy === "cli-idle") {
@@ -11994,13 +12028,18 @@ export class SessionManager {
         continue;
       }
       this.forgiveMintBoundClaimLease(session, resumedAt, leaseLostMs, gapBeganAt);
-      if (ownerLeaseLiveAt(session, gapBeganAt)) {
-        // The lease that is judged (#11162): for a session judged on its owner's heartbeats, a
-        // non-owner's tool call must not move the forgiven lease start.
-        const leaseStart = judgedLeaseHeartbeat(session);
-        session.stallForgivenAt = forgivenLeaseStart(leaseStart, resumedAt, leaseLostMs);
-        leaseExtended += Number(session.stallForgivenAt > leaseStart);
+      const extension = daemonStallLeaseExtension(
+        session,
+        resumedAt,
+        { lostMs, sleptMs, gapBeganAt },
+        this.ownerConnectedAtReader,
+      );
+      if (extension.leaseStart !== undefined) {
+        session.stallForgivenAt = extension.leaseStart;
       }
+      leaseExtended += extension.leaseExtended;
+      connectedExtended += extension.connectedExtended;
+      connectedCreditMs += extension.connectedCreditMs;
       // Shift, never reset (#10662): a full window per late tick would let a session whose
       // owner is gone outlive its lease for as long as the ticks keep arriving late.
       const previousExpiry = session.expiresAt;
@@ -12020,6 +12059,7 @@ export class SessionManager {
     if (forgiven > 0) {
       logger.info(
         `Stall forgiveness: ${leaseExtended} session lease(s) extended by ${leaseLostMs}ms, ` +
+          `${connectedExtended} connected-owner lease(s) extended by ${connectedCreditMs}ms, ` +
           `${idleExtended} idle deadline(s) extended by ${lostMs}ms, of ${forgiven} session(s)`,
       );
     }

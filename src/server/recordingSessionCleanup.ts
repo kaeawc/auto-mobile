@@ -13,17 +13,58 @@ import {
 import {
   adoptOwnerlessSegmentedVideoRecordings,
   hasSegmentedVideoRecordingsForOwner,
+  finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice,
   segmentedVideoRecordingHandlesForOwner,
   stopSegmentedVideoRecordingsForOwner,
 } from "./videoRecordingTools";
 import {
   adoptOwnerlessActiveVideoRecordings,
+  abandonVideoRecordingOnReplacedDevice,
   listActiveVideoRecordingIdsForOwner,
   listActiveVideoRecordings,
   listOwnedActiveVideoRecordingIds,
   markVideoRecordingIncomplete,
   stopVideoRecordingUnattended,
 } from "./videoRecordingManager";
+import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
+
+export const RECORDING_TEARDOWN_RETRY_BUDGET_MS = 25_000;
+
+export interface RecordingTeardownGiveUp {
+  deviceId: string;
+  sessionId: string | undefined;
+  recordingIds: string[];
+  attempts: number;
+  budgetMs: number;
+}
+
+const recorderRecoveryNeeded = new Map<string, RecordingTeardownGiveUp[]>();
+
+/** A late stop clears recovery only when every original capture has released ownership. */
+export function recordingTeardownRecoveryNeeded(
+  deviceId: string,
+): RecordingTeardownGiveUp | undefined {
+  const giveUps = recorderRecoveryNeeded.get(deviceId);
+  if (!giveUps) {
+    return undefined;
+  }
+  const active = new Set(listOwnedActiveVideoRecordingIds());
+  const retained = giveUps.filter((giveUp) => {
+    const gestureId = ownedDeviceGestureRecordingId(giveUp.sessionId, deviceId);
+    return giveUp.recordingIds.some((id) => active.has(id) || id === gestureId);
+  });
+  if (retained.length > 0) {
+    recorderRecoveryNeeded.set(deviceId, retained);
+    return retained[0];
+  }
+  recorderRecoveryNeeded.delete(deviceId);
+  return undefined;
+}
+
+/** Test/reset seam: recovery must not leak across manager incarnations. */
+export function resetRecordingTeardownRecoveryNeeded(): void {
+  recorderRecoveryNeeded.clear();
+}
 
 /**
  * How long finalizing a released session's recordings may hold the device (#10957), per
@@ -44,6 +85,8 @@ function defaultFinalizeCapMs(deviceId: string): number {
 
 /** The recording operations session cleanup needs, injectable so tests need no device or DB. */
 export interface RecordingSessionCleanupDeps {
+  /** Finalize only host state; the serial now belongs to a different device. */
+  abandonRecordingsOnReplacedDevice(sessionId: string, deviceId: string): Promise<void>;
   /** Synchronous pre-check: false means the release has no recording work and stays a no-op. */
   hasRecordingsToStop(sessionId: string | undefined, deviceId: string): boolean;
   /** Finalize timer-driven segmented sessions the session owns on the device. */
@@ -64,15 +107,21 @@ export interface RecordingSessionCleanupDeps {
   ): string | undefined;
   /** Ids of the recordings a session owns on the device, from memory only (no DB read). */
   activeRecordingIdsForOwner(sessionId: string | undefined, deviceId: string): string[];
+  /** Capture ids still owned by the recorder or gesture service; excludes registry handles. */
+  retainedCaptureIdsForOwner(sessionId: string | undefined, deviceId: string): string[];
   /** Deadline clock for the finalize cap; a FakeTimer in tests. */
   timer: Pick<Timer, "setTimeout" | "clearTimeout">;
   /** Finalize cap for the device's platform. */
   finalizeCapMs(deviceId: string): number;
   /** Force-stop a recording whose finalize overran and mark it `incomplete`. */
   markVideoRecordingIncomplete(recordingId: string): Promise<void>;
+  teardownRetryBackoff: BackoffPolicy;
+  teardownRetryBudgetMs: number;
+  markDeviceNeedsRecorderRecovery(giveUp: RecordingTeardownGiveUp): void;
 }
 
 export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
+  abandonRecordingsOnReplacedDevice,
   hasRecordingsToStop: (sessionId, deviceId) =>
     listOwnedActiveVideoRecordingIds().length > 0 ||
     hasSegmentedVideoRecordingsForOwner(sessionId, deviceId) ||
@@ -93,13 +142,65 @@ export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
       ...(deviceGestureRecordingId === undefined ? [] : [deviceGestureRecordingId]),
     ];
   },
+  retainedCaptureIdsForOwner: (sessionId, deviceId) => {
+    const gestureId = ownedDeviceGestureRecordingId(sessionId, deviceId);
+    return [
+      ...listActiveVideoRecordingIdsForOwner(sessionId, deviceId),
+      ...(gestureId === undefined ? [] : [gestureId]),
+    ];
+  },
   stopDeviceGestureRecording: async (recordingId) => {
     await stopDeviceGestureRecording(recordingId);
   },
   timer: defaultTimer,
   finalizeCapMs: defaultFinalizeCapMs,
   markVideoRecordingIncomplete,
+  teardownRetryBackoff: exponentialBackoff({
+    initialDelayMs: 1_000,
+    multiplier: 2,
+    maxDelayMs: 8_000,
+  }),
+  teardownRetryBudgetMs: RECORDING_TEARDOWN_RETRY_BUDGET_MS,
+  markDeviceNeedsRecorderRecovery: (giveUp) => {
+    const giveUps = recorderRecoveryNeeded.get(giveUp.deviceId) ?? [];
+    giveUps.push(giveUp);
+    recorderRecoveryNeeded.set(giveUp.deviceId, giveUps);
+  },
 };
+
+async function abandonRecordingsOnReplacedDevice(
+  sessionId: string,
+  deviceId: string,
+): Promise<void> {
+  const recordingIds = listActiveVideoRecordingIdsForOwner(sessionId, deviceId);
+  const gestureId = ownedDeviceGestureRecordingId(sessionId, deviceId);
+  await Promise.all([
+    logHostOnlyAbandonFailure(() =>
+      finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice(sessionId, deviceId),
+    ),
+    ...recordingIds.map((recordingId) =>
+      logHostOnlyAbandonFailure(() => abandonVideoRecordingOnReplacedDevice(recordingId)),
+    ),
+    ...(gestureId === undefined
+      ? []
+      : [
+          logHostOnlyAbandonFailure(() =>
+            stopDeviceGestureRecording(gestureId, undefined, undefined, { hostOnly: true }),
+          ),
+        ]),
+  ]);
+}
+
+async function logHostOnlyAbandonFailure(abandon: () => Promise<unknown>): Promise<void> {
+  try {
+    await abandon();
+  } catch (error) {
+    logger.warn(
+      `[RecordingSessionCleanup] Host-only recording cleanup failed: ${errorMessage(error)}`,
+      error,
+    );
+  }
+}
 
 /**
  * Recording ids captured at release time, per released session. Captured inside the release
@@ -128,9 +229,14 @@ async function attempt(description: string, work: () => Promise<void>): Promise<
   try {
     await work();
   } catch (error) {
-    // A recording that cannot be stopped must never block the release or the next owner's acquire.
+    // Release stays bounded; retained captures are checked separately and keep a cleanup owner.
     logger.warn(`[recording] Failed to ${description}: ${errorMessage(error)}`, error);
   }
+}
+
+interface RecordingFinalizeStageState {
+  stopping: Set<string>;
+  capExpired: boolean;
 }
 
 /** `sessionId` undefined selects the owner-less recordings on the device (#10961). */
@@ -138,12 +244,16 @@ async function stopOwnedRecordings(
   deps: RecordingSessionCleanupDeps,
   sessionId: string | undefined,
   deviceId: string,
-  stopping: Set<string>,
+  state: RecordingFinalizeStageState,
   deviceGestureRecordingId: string | undefined,
 ): Promise<void> {
+  const { stopping } = state;
   // `stopping` starts as every recording the owner has; a stage that finished drops the ids that
   // are no longer active, so only what is still stopping is force-stopped at the cap (#11041).
   const pruneFinalized = (): void => {
+    if (state.capExpired) {
+      return;
+    }
     const stillActive = new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId));
     for (const recordingId of stopping) {
       if (!stillActive.has(recordingId)) {
@@ -163,15 +273,19 @@ async function stopOwnedRecordings(
     async () => {
       const active = await deps.listActiveVideoRecordings(deviceId);
       for (const { recordingId, ownerSessionUuid } of active) {
-        if (ownerSessionUuid !== sessionId) {
+        if (ownerSessionUuid !== sessionId || (state.capExpired && !stopping.has(recordingId))) {
           continue;
         }
-        stopping.add(recordingId);
+        if (!state.capExpired) {
+          stopping.add(recordingId);
+        }
         await attempt(
           `stop video recording ${recordingId} of released session ${sessionId ?? "(owner-less)"}`,
           async () => {
             await deps.stopVideoRecording(recordingId);
-            stopping.delete(recordingId);
+            if (!state.capExpired) {
+              stopping.delete(recordingId);
+            }
             // The finalized file stays in the recording store, readable by its owner via
             // owner-scoped video recording lookups.
             logger.info(
@@ -201,27 +315,38 @@ async function stopOwnedRecordings(
 }
 
 /**
- * Bounds the stop (#10957): past the platform cap the device is released anyway, the recordings
- * still stopping are force-stopped and marked `incomplete`, and a warning names them.
+ * Bounds finalization (#10957), then retains quarantine through bounded retries when a capture
+ * still owns its handle. At give-up the remaining original ids require device recovery.
  */
 async function stopOwnedRecordingsWithinCap(
   deps: RecordingSessionCleanupDeps,
   sessionId: string | undefined,
   deviceId: string,
+  registerRetryCleanup: (cleanup: Promise<void>, capMs: number) => void,
 ): Promise<void> {
   // Every recording the owner has, up front: single-file, segmented and the device gesture recording, so
   // the cap force-stops all of them rather than only the one mid-stop (#11041).
-  const stopping = new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId));
+  const state: RecordingFinalizeStageState = {
+    stopping: new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId)),
+    capExpired: false,
+  };
+  let originalIds: string[] = [];
   const deviceGestureRecordingId = deps.ownedDeviceGestureRecordingId(sessionId, deviceId);
   const capMs = deps.finalizeCapMs(deviceId);
   try {
     await raceWithDeadline(
-      stopOwnedRecordings(deps, sessionId, deviceId, stopping, deviceGestureRecordingId),
+      stopOwnedRecordings(deps, sessionId, deviceId, state, deviceGestureRecordingId),
       {
         timer: deps.timer,
         timeoutMs: capMs,
         label: `finalize recordings of released session ${sessionId ?? "(owner-less)"}`,
         timeoutError: () => new FinalizeCapExceeded(),
+        onTimeout: () => {
+          // Freeze eligibility in the timer callback, before the detached stage can resume.
+          state.capExpired = true;
+          const active = new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId));
+          originalIds = [...state.stopping].filter((id) => active.has(id));
+        },
       },
     );
   } catch (error) {
@@ -230,28 +355,167 @@ async function stopOwnedRecordingsWithinCap(
     }
     logger.warn(
       `[recording] Finalizing recordings of released session ${sessionId ?? "(owner-less)"} on ${deviceId} exceeded ${capMs}ms; ` +
-        `force-stopping ${[...stopping].join(", ") || "none"} and marking incomplete`,
+        `force-stopping ${originalIds.join(", ") || "none"} and marking incomplete`,
     );
     // The video incomplete handler cannot stop a test recorder. Start this independently
     // of the wedged stage, by its captured owner id, so it cannot stop a replacement recorder.
-    await Promise.all(
-      [...stopping].map((recordingId) =>
-        attempt(`force-stop recording ${recordingId}`, () =>
-          raceWithDeadline(
-            () =>
-              recordingId === deviceGestureRecordingId
-                ? deps.stopDeviceGestureRecording(recordingId)
-                : deps.markVideoRecordingIncomplete(recordingId),
-            {
-              timer: deps.timer,
-              timeoutMs: INCOMPLETE_MARK_GRACE_MS,
-              label: `force-stop recording ${recordingId}`,
-            },
-          ),
+    await forceStopOwnedRecordings(deps, originalIds, deviceGestureRecordingId);
+    if (unconfirmedRecordingIds(deps, sessionId, deviceId, originalIds).length === 0) {
+      return;
+    }
+    const retryPhase = retryRecordingTeardown(deps, {
+      sessionId,
+      deviceId,
+      recordingIds: originalIds,
+      deviceGestureRecordingId,
+      attempts: 0,
+    });
+    // Extend the manager's bound synchronously before the initial cleanup can settle (#12059).
+    registerRetryCleanup(retryPhase, deps.teardownRetryBudgetMs);
+    await retryPhase;
+  }
+}
+
+function unconfirmedRecordingIds(
+  deps: RecordingSessionCleanupDeps,
+  sessionId: string | undefined,
+  deviceId: string,
+  originalIds: string[],
+): string[] {
+  const active = new Set(deps.retainedCaptureIdsForOwner(sessionId, deviceId));
+  return originalIds.filter((id) => active.has(id));
+}
+
+async function forceStopOwnedRecordings(
+  deps: RecordingSessionCleanupDeps,
+  recordingIds: string[],
+  deviceGestureRecordingId: string | undefined,
+  signal?: AbortSignal,
+): Promise<void> {
+  await Promise.all(
+    recordingIds.map((recordingId) =>
+      attempt(`force-stop recording ${recordingId}`, () =>
+        raceWithDeadline(
+          () =>
+            recordingId === deviceGestureRecordingId
+              ? deps.stopDeviceGestureRecording(recordingId)
+              : deps.markVideoRecordingIncomplete(recordingId),
+          {
+            timer: deps.timer,
+            timeoutMs: INCOMPLETE_MARK_GRACE_MS,
+            signal,
+            label: `force-stop recording ${recordingId}`,
+          },
         ),
       ),
+    ),
+  );
+}
+
+interface RecordingTeardownRetryState {
+  sessionId: string | undefined;
+  deviceId: string;
+  recordingIds: string[];
+  deviceGestureRecordingId: string | undefined;
+  attempts: number;
+}
+
+class RecordingTeardownRetryBudgetExceeded extends Error {}
+
+/** The retry sleep has a cancellation handle so reaching the budget leaves no loop timer. */
+async function waitForTeardownRetry(
+  deps: RecordingSessionCleanupDeps,
+  attemptNumber: number,
+  signal: AbortSignal,
+): Promise<void> {
+  let handle: NodeJS.Timeout | undefined;
+  try {
+    await raceWithDeadline(
+      () =>
+        new Promise<void>((resolve) => {
+          handle = deps.timer.setTimeout(
+            resolve,
+            deps.teardownRetryBackoff.delayForAttempt(attemptNumber),
+          );
+        }),
+      { timer: deps.timer, signal, label: "recording teardown retry backoff" },
     );
+  } finally {
+    if (handle !== undefined) {
+      deps.timer.clearTimeout(handle);
+    }
   }
+}
+
+async function runTeardownRetries(
+  deps: RecordingSessionCleanupDeps,
+  state: RecordingTeardownRetryState,
+  signal: AbortSignal,
+): Promise<void> {
+  const unconfirmed = () =>
+    unconfirmedRecordingIds(deps, state.sessionId, state.deviceId, state.recordingIds);
+  while (!signal.aborted && unconfirmed().length > 0) {
+    await waitForTeardownRetry(deps, state.attempts + 1, signal);
+    if (signal.aborted) {
+      return;
+    }
+    const recordingIds = unconfirmed();
+    if (recordingIds.length === 0) {
+      return;
+    }
+    state.attempts += 1;
+    await forceStopOwnedRecordings(deps, recordingIds, state.deviceGestureRecordingId, signal);
+  }
+}
+
+async function retryRecordingTeardown(
+  deps: RecordingSessionCleanupDeps,
+  state: RecordingTeardownRetryState,
+): Promise<void> {
+  const controller = new AbortController();
+  try {
+    await raceWithDeadline(() => runTeardownRetries(deps, state, controller.signal), {
+      timer: deps.timer,
+      timeoutMs: deps.teardownRetryBudgetMs,
+      label: `retry recording teardown on ${state.deviceId}`,
+      timeoutError: () => new RecordingTeardownRetryBudgetExceeded(),
+      onTimeout: () => controller.abort(),
+    });
+  } catch (error) {
+    if (!(error instanceof RecordingTeardownRetryBudgetExceeded)) {
+      logger.warn(
+        `[recording] Teardown retry failed on ${state.deviceId}: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    const recordingIds = unconfirmedRecordingIds(
+      deps,
+      state.sessionId,
+      state.deviceId,
+      state.recordingIds,
+    );
+    if (recordingIds.length > 0) {
+      const giveUp: RecordingTeardownGiveUp = {
+        deviceId: state.deviceId,
+        sessionId: state.sessionId,
+        recordingIds,
+        attempts: state.attempts,
+        budgetMs: deps.teardownRetryBudgetMs,
+      };
+      logger.warn(
+        `[recording] Teardown gave up on device ${giveUp.deviceId}, released session ${giveUp.sessionId ?? "(owner-less)"}: ` +
+          `recordings ${recordingIds.join(", ")}; ${giveUp.attempts} attempts, ${giveUp.budgetMs}ms budget; device needs recorder recovery`,
+      );
+      deps.markDeviceNeedsRecorderRecovery(giveUp);
+      return;
+    }
+  } finally {
+    controller.abort();
+  }
+  logger.info(
+    `[recording] Teardown retry settled recordings ${state.recordingIds.join(", ")} on ${state.deviceId} ` +
+      `for released session ${state.sessionId ?? "(owner-less)"} after ${state.attempts} attempts`,
+  );
 }
 
 /** Recording acquisition operations; each claims ownership before yielding. */
@@ -270,8 +534,7 @@ const defaultRecordingAcquisitionDeps: RecordingAcquisitionDeps = {
 };
 
 /**
- * The longest {@link stopOwnedRecordingsWithinCap} runs: the stop is capped, then force-stopped
- * recordings are marked incomplete within a grace.
+ * The initial finalization phase's bound; retained teardown extends it with a second registration.
  */
 function finalizeSettlesWithinMs(
   deps: Pick<RecordingSessionCleanupDeps, "finalizeCapMs">,
@@ -330,7 +593,9 @@ export function registerRecordingSessionCleanup(
     }
     manager.registerPendingDeviceCleanup(
       deviceId,
-      stopOwnedRecordingsWithinCap(deps, sessionId, deviceId),
+      stopOwnedRecordingsWithinCap(deps, sessionId, deviceId, (retryPhase, capMs) =>
+        manager.registerPendingDeviceCleanup(deviceId, retryPhase, capMs),
+      ),
       // A refused bind must advertise the stop's bound, not the 1 s default (#11360).
       finalizeSettlesWithinMs(deps, deviceId),
     );
@@ -341,6 +606,12 @@ export function registerRecordingSessionCleanup(
       const ids = [...new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId))];
       if (ids.length > 0) {
         idsCapturedAtRelease.set(sessionId, ids);
+      }
+      if (releaseOptions?.deviceIdentityReplaced) {
+        void logHostOnlyAbandonFailure(() =>
+          deps.abandonRecordingsOnReplacedDevice(sessionId, deviceId),
+        );
+        return;
       }
       cleanup(sessionId, deviceId);
     }

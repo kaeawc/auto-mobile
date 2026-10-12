@@ -17,9 +17,11 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import {
   DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD,
   DAEMON_HEARTBEAT_METHOD,
+  DAEMON_REGISTER_SESSION_METHOD,
   DAEMON_VERSION,
 } from "../../src/daemon/constants";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { ManagedConnectionScopes } from "../../src/daemon/managedSlots/managedConnectionScope";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
   livenessBudgetMs,
@@ -66,10 +68,15 @@ class RestartScenario {
   monitor!: SessionHeartbeatMonitor;
   available = true;
   heartbeatUnavailable = false;
+  readonly unrehydratedManager = new SessionManager(this.timer, new FakeDeviceSessionPersistence());
+  registrationSessionAvailable = true;
+  scopes = new ManagedConnectionScopes();
+  rebinds: Array<{ at: number; params: Record<string, unknown>; socketSessionId: string }> = [];
   releasePushOnSubscribe = false;
   instance = "old-daemon";
 
   constructor() {
+    this.unrehydratedManager.stopCleanupTimer();
     this.daemonManager.statusResult = {
       ...this.daemonManager.statusResult,
       version: DAEMON_VERSION,
@@ -109,6 +116,7 @@ class RestartScenario {
   }
 
   private async newDaemon(withSession: boolean): Promise<void> {
+    this.scopes = new ManagedConnectionScopes();
     this.manager = new SessionManager(this.timer, new FakeDeviceSessionPersistence());
     this.managers.push(this.manager);
     this.manager.stopCleanupTimer();
@@ -150,6 +158,7 @@ class RestartScenario {
       isInitialized: () => true,
       getDaemonInstance: () => this.instance,
       getSessionManager: () => this.manager,
+      getManagedConnectionScopes: () => this.scopes,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
@@ -160,6 +169,7 @@ class RestartScenario {
 
   private client(): FakeDaemonClient {
     this.dials.push(this.timer.now());
+    const socketSessionId = `socket-${this.clients.length}`;
     const client = new FakeDaemonClient({
       daemonMethodResults: new Map<string, unknown>([
         ["tools/list", { tools: [] }],
@@ -170,6 +180,24 @@ class RestartScenario {
         content: [{ type: "text", text: JSON.stringify({ observed: params.sessionUuid }) }],
       }),
       onCallDaemonMethod: async (method, params) => {
+        if (method === DAEMON_REGISTER_SESSION_METHOD) {
+          this.rebinds.push({ at: this.timer.now(), params, socketSessionId });
+          const state = this.state();
+          if (!this.registrationSessionAvailable) {
+            state.getSessionManager = () => this.unrehydratedManager;
+          }
+          const response = await handleDaemonRequest(
+            { id: "rebind", type: "daemon_request", method, params },
+            state,
+            undefined,
+            undefined,
+            { socketSessionId },
+          );
+          if (!response.success) {
+            throw Object.assign(new Error(response.error), response);
+          }
+          return response.result;
+        }
         if (method !== DAEMON_HEARTBEAT_METHOD) {
           return undefined;
         }
@@ -225,6 +253,7 @@ class RestartScenario {
   async close(): Promise<void> {
     await this.proxy.close();
     await this.monitor.stop();
+    this.unrehydratedManager.stopCleanupTimer();
     for (const manager of this.managers) {
       manager.stopCleanupTimer();
     }
@@ -800,4 +829,81 @@ test("same-daemon not-found alternating with silence cannot extend the reclaim w
   await s.advance(INTERVAL * 4);
   expect(s.heartbeats).toHaveLength(count);
   expect(s.timer.getPendingIntervals()).toEqual([INTERVAL]);
+});
+
+test("PIN: a transient managed re-bind refusal retries and binds the same replacement socket", async () => {
+  await s.start();
+  await s.stop(true);
+  s.registrationSessionAvailable = false;
+  await s.restart();
+  await s.advance(INTERVAL);
+  expect(s.rebinds).toHaveLength(1);
+  const socket = s.clients.at(-1)!;
+  const socketSessionId = s.rebinds[0].socketSessionId;
+  expect(s.scopes.get(socketSessionId)?.sessionUuids.size).toBe(0);
+  expect(s.timer.getPendingTimeouts()).toContain(500);
+  s.registrationSessionAvailable = true;
+  await s.advance(499);
+  expect(s.rebinds).toHaveLength(1);
+  await s.advance(1);
+  expect(s.rebinds).toHaveLength(2);
+  expect(s.clients.at(-1)).toBe(socket);
+  expect(s.rebinds[1].socketSessionId).toBe(socketSessionId);
+  expect(s.rebinds[1].params.managedSlots).toMatchObject({
+    sessionUuids: [SESSION],
+    livenessOwnerToken: TOKEN,
+  });
+  expect([...s.scopes.get(socketSessionId)!.sessionUuids]).toEqual([SESSION]);
+  expect(s.timer.getPendingTimeoutCount()).toBe(0);
+  await s.advance(INTERVAL * 3);
+  expect(s.rebinds).toHaveLength(2);
+  expect(s.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("an ended managed execution still confines a reconnected socket without retries", async () => {
+  await s.start();
+  await s.manager.releaseSession(SESSION, "cli-idle-timeout");
+  s.clients
+    .at(-1)!
+    .emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, SESSION, "cli-idle-timeout");
+  s.clients.at(-1)!.emitConnectionClosed();
+  await s.proxy.callTool("startDevice", { platform: "android" });
+  expect(s.rebinds).toHaveLength(1);
+  const registration = s.rebinds[0];
+  expect(registration.socketSessionId).toBe("socket-1");
+  expect(registration.params.managedSlots).toMatchObject({ sessionUuids: [SESSION] });
+  expect(s.scopes.get(registration.socketSessionId)?.sessionUuids.size).toBe(0);
+  expect(s.timer.getPendingTimeoutCount()).toBe(0);
+  await s.advance(5_001);
+  expect(s.rebinds).toHaveLength(1);
+  expect(s.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("ending the execution stops a refused managed re-bind before retry", async () => {
+  await s.start();
+  await s.stop(true);
+  s.registrationSessionAvailable = false;
+  await s.restart();
+  await s.advance(INTERVAL);
+  expect(s.rebinds).toHaveLength(1);
+  expect(s.timer.getPendingTimeouts()).toContain(500);
+  s.clients
+    .at(-1)!
+    .emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, SESSION, "cli-idle-timeout");
+  await s.advance(500);
+  expect(s.rebinds).toHaveLength(1);
+  expect(s.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("closing the proxy cancels a pending managed re-bind timer", async () => {
+  await s.start();
+  await s.stop(true);
+  s.registrationSessionAvailable = false;
+  await s.restart();
+  await s.advance(INTERVAL);
+  expect(s.timer.getPendingTimeouts()).toContain(500);
+  await s.proxy.close();
+  expect(s.timer.getPendingTimeoutCount()).toBe(0);
+  await s.advance(INTERVAL);
+  expect(s.rebinds).toHaveLength(1);
 });

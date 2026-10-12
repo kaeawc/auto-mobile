@@ -74,6 +74,48 @@ function harness(text: string, observation: ObserveResult = field(text)) {
 }
 
 describe("IME failure diagnostics", () => {
+  test.each([
+    ["john_doe@example.com", "johndoe@example.com"],
+    ["user_name", "username"],
+    ["~/Downloads", "/Downloads"],
+    ["it`s", "its"],
+  ])("device success cannot hide a lost literal marker in %s", async (text, insertedText) => {
+    const observation = field("");
+    const h = harness("", observation);
+    h.client.commitViaIme = async () => {
+      observation.viewHierarchy = field(insertedText).viewHierarchy;
+      return { success: true, insertedText };
+    };
+
+    const result = await h.executor.type({ action: "type", text, mode: "ime" });
+
+    expect(result).toMatchObject({
+      success: false,
+      partialApplication: true,
+      imeFailure: { stage: "verification", observedText: insertedText },
+    });
+  });
+
+  test.each([
+    ["*bold*", "bold"],
+    ["john_doe@example.com", "john_doe@example.com"],
+  ])(
+    "device success verifies real formatting or exact literal text in %s",
+    async (text, insertedText) => {
+      const observation = field("");
+      const h = harness("", observation);
+      h.client.commitViaIme = async () => {
+        observation.viewHierarchy = field(insertedText).viewHierarchy;
+        return { success: true, insertedText };
+      };
+
+      const result = await h.executor.type({ action: "type", text, mode: "ime" });
+
+      expect(result.success).toBe(true);
+      expect(result).not.toHaveProperty("imeFailure");
+    },
+  );
+
   test("a password-field read-back mismatch never names the typed or observed value", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -558,6 +600,101 @@ describe("IME failure diagnostics", () => {
 
 describe("IME inserted delta verification", () => {
   const text = "line one\nline two\nline three";
+  test.each([
+    { name: "search field keeps its query and focus", after: "hello", insertedText: "hello" },
+    { name: "chat composer sends and clears, keeps focus", after: "", insertedText: "" },
+  ])(
+    "a trailing newline the editor consumed as submit is not a partial commit: $name",
+    async ({ after, insertedText }) => {
+      const observation = field("");
+      const h = harness("", observation);
+      h.client.commitViaIme = async () => {
+        observation.viewHierarchy = field(after).viewHierarchy;
+        return { success: true, insertedText };
+      };
+      const result = await h.executor.type({ action: "type", text: "hello\n" });
+      expect(result.error).toBeUndefined();
+      expect(result.success).toBe(true);
+      expect(result.partialApplication).toBeUndefined();
+      expect(result.imeFailure).toBeUndefined();
+      expect(result.warning).toBeUndefined();
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    },
+  );
+
+  test("forgives only the final newline when the preceding newline is inserted", async () => {
+    const observation = field("");
+    const h = harness("", observation);
+    h.client.commitViaIme = async () => {
+      observation.viewHierarchy = field("hello\n").viewHierarchy;
+      return { success: true, insertedText: "hello\n" };
+    };
+    const result = await h.executor.type({ action: "type", text: "hello\n\n" });
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.partialApplication).toBeUndefined();
+    expect(result.imeFailure).toBeUndefined();
+    expect(result.warning).toBeUndefined();
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test.each([
+    {
+      name: "two trailing newlines lost",
+      text: "hello\n\n",
+      insertedText: "hello",
+      after: "hello",
+    },
+    { name: "middle newline lost", text: "one\ntwo\n", insertedText: "onetwo", after: "onetwo" },
+    { name: "empty delta without submit", text: "hello", insertedText: "", after: "" },
+    { name: "empty delta with stale field", text: "hello\n", insertedText: "", after: "stale" },
+  ])("does not forgive an incomplete commit: $name", async ({ text, insertedText, after }) => {
+    const observation = field("");
+    const h = harness("", observation);
+    h.client.commitViaIme = async () => {
+      observation.viewHierarchy = field(after).viewHierarchy;
+      return { success: true, insertedText };
+    };
+    const result = await h.executor.type({ action: "type", text });
+    expect(result).toMatchObject({
+      success: false,
+      partialApplication: true,
+      imeFailure: { stage: "verification", observedText: insertedText },
+    });
+    expect(result.error).toContain(`the editor inserted ${JSON.stringify(insertedText)}`);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test.each([
+    { name: "retained query", after: "hello", success: true },
+    { name: "cleared composer", after: "", success: false },
+  ])("keeps legacy read-back behaviour after submit: $name", async ({ after, success }) => {
+    const observation = field("");
+    const h = harness("", observation);
+    h.client.commitViaIme = async () => {
+      observation.viewHierarchy = field(after).viewHierarchy;
+      return { success: true };
+    };
+    h.client.supportsImeInsertedText = async () => false;
+    const result = await h.executor.type({ action: "type", text: "hello\n" });
+    expect(result.success).toBe(success);
+    expect(result).not.toHaveProperty("insertedText");
+    if (success) {
+      expect(result.error).toBeUndefined();
+      expect(result.partialApplication).toBeUndefined();
+      expect(result.imeFailure).toBeUndefined();
+      expect(result.warning).toBe(IME_INSERTED_TEXT_UNAVAILABLE_WARNING);
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    } else {
+      expect(result.error).toContain('the focused field holds ""');
+      expect(result).toMatchObject({
+        partialApplication: true,
+        imeFailure: { stage: "verification", observedText: "" },
+      });
+      expect(h.timer.getSleepHistory()).toEqual([150, 150]);
+    }
+  });
+
   test.each([
     "line online two\nline three",
     "line line two\nline three",

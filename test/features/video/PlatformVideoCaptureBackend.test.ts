@@ -470,6 +470,37 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       expect(signals).toContain("SIGKILL");
     });
 
+    test("forceStop with hostOnly:true only reaps the owned host adb child", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeProcess = new FakeChildProcess(testTimer);
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, testTimer);
+      const signals = spyOnKill(fakeProcess);
+
+      await backend.forceStop(buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess), {
+        hostOnly: true,
+      });
+
+      expect(fakeFactory.getCallCount()).toBe(0);
+      expect(fakeFactory.getFakeClient().getAllCommands()).toEqual([]);
+      expect(signals).toEqual(["SIGKILL"]);
+    });
+
+    test("forceStop with hostOnly:true rejects when the owned host child cannot be reaped", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeProcess = new FakeChildProcess(testTimer);
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, testTimer);
+      const handle = buildAndroidStopHandle(
+        path.join(tempDir, "out.mp4"),
+        fakeProcess,
+        Promise.reject(new Error("exit tracking failed")),
+      );
+
+      await expect(backend.forceStop(handle, { hostOnly: true })).rejects.toThrow(
+        "host adb process cleanup failed",
+      );
+      expect(fakeFactory.getCallCount()).toBe(0);
+    });
+
     test("forceStop surfaces device temp-file cleanup failures", async () => {
       const fakeFactory = new FakeAdbClientFactory();
       fakeFactory

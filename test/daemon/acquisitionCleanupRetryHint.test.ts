@@ -5,6 +5,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
   registerRecordingSessionCleanup,
+  defaultRecordingSessionCleanupDeps,
   type RecordingAcquisitionDeps,
   type RecordingSessionCleanupDeps,
 } from "../../src/server/recordingSessionCleanup";
@@ -45,6 +46,10 @@ function runnerBudgetMs(waitedMs: number, retryAfterMs: number): number {
 
 /** One recording per owner on the device whose stop never returns (a wedged capture backend). */
 class WedgedRecordings implements RecordingSessionCleanupDeps, RecordingAcquisitionDeps {
+  teardownRetryBackoff = defaultRecordingSessionCleanupDeps.teardownRetryBackoff;
+  teardownRetryBudgetMs = defaultRecordingSessionCleanupDeps.teardownRetryBudgetMs;
+  markDeviceNeedsRecorderRecovery =
+    defaultRecordingSessionCleanupDeps.markDeviceNeedsRecorderRecovery;
   readonly active = new Map<string, string | undefined>();
   adoptionPersistence: Promise<void> | undefined;
 
@@ -53,6 +58,7 @@ class WedgedRecordings implements RecordingSessionCleanupDeps, RecordingAcquisit
   hasRecordingsToStop(): boolean {
     return this.active.size > 0;
   }
+  async abandonRecordingsOnReplacedDevice(): Promise<void> {}
   async stopSegmentedRecordings(): Promise<void> {}
   async listActiveVideoRecordings() {
     return [...this.active].map(([recordingId, ownerSessionUuid]) => ({
@@ -86,6 +92,9 @@ class WedgedRecordings implements RecordingSessionCleanupDeps, RecordingAcquisit
   }
   activeRecordingIdsForOwner(sessionId: string | undefined): string[] {
     return [...this.active].filter(([, owner]) => owner === sessionId).map(([id]) => id);
+  }
+  retainedCaptureIdsForOwner(sessionId: string | undefined): string[] {
+    return this.activeRecordingIdsForOwner(sessionId);
   }
   finalizeCapMs(): number {
     return FINALIZE_CAP_MS;

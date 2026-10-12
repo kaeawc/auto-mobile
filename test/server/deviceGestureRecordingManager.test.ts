@@ -41,6 +41,7 @@ class FakeRecorder {
   steps: PlanStep[] = [];
   /** What the recorder can still hand over after a failed stop. */
   capturedSteps: PlanStep[] | undefined;
+  lastStopOptions?: { hostOnly?: boolean };
 
   get stepCount(): number {
     return this.steps.length;
@@ -51,8 +52,9 @@ class FakeRecorder {
     await this.startGate.promise;
   }
 
-  async stop(): Promise<{ steps: PlanStep[]; stepCount: number }> {
+  async stop(options?: { hostOnly?: boolean }): Promise<{ steps: PlanStep[]; stepCount: number }> {
     this.stopCount++;
+    this.lastStopOptions = options;
     if (this.stopError) {
       throw this.stopError;
     }
@@ -112,6 +114,17 @@ describe("deviceGestureRecordingManager user-input capture contract (#11919)", (
     await expect(result).rejects.toMatchObject({ reason: "no_user_input_captured" });
     await expect(result).rejects.toThrow(/^No recorded interactions were captured\./);
     await expect(result).rejects.toThrow("recordToolCalls");
+  });
+
+  test("passes host-only stop options through to the recorder", async () => {
+    const timer = new FakeTimer();
+    const recorder = new FakeRecorder();
+    recorder.steps = [capturedStep];
+    await start(timer, recorder);
+
+    await stopDeviceGestureRecording(undefined, "host only", timer, { hostOnly: true });
+
+    expect(recorder.lastStopOptions).toEqual({ hostOnly: true });
   });
 });
 

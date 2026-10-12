@@ -227,7 +227,7 @@ admission, and admission's own refusals (suspect, lapsed owner lease, idle
 expiry) stamp nothing. A call that is admitted and then fails while the daemon
 sets its device up is use (#10824).
 Ambiguous platform-only control gets `ambiguous_session_selector` without refreshing clocks;
-read-only tools and device-binding calls (such as `setActiveDevice`) keep their usual routing.
+platform-only control and read-only calls use the connection's unique held session of that platform when all held platforms are known and the default is live; ambiguous reads and device-binding calls (such as `setActiveDevice`) keep their usual routing.
 `test/server/namedForeignSessionActivity.test.ts` has one row per refusal.
 Desktop input is use. The desktop and IDE clients register an observer session
 that allocates nothing, allocate a device with `setActiveDevice` on the first
@@ -300,8 +300,10 @@ holds the three to one instant for every session kind.
 Release reasons are classified in one place, `src/daemon/releaseReasons.ts`
 (#11258): a typed `Record` tags each reason `idle`, `expiry`, `terminal` and
 `recoverable`, and a new reason does not compile until it is tagged there. Never
-keep a separate reason list. Every idle release (`lazy-expiry`, `cleanup-expired`,
+keep a separate reason list. Every live idle release (`lazy-expiry`, `cleanup-expired`,
 `cli-idle-timeout`, whatever the liveness policy) is terminal (owner decision
 2026-10-09); an idle reason is the weakest terminal reason, so a concurrent
-non-idle terminal reason replaces it. The reason table in
+non-idle terminal reason replaces it. A stored row found past its idle deadline with no daemon there
+to release it has the non-terminal reason `expired`; answers about that idle lapse carry
+`idle: true` beside the reason, only ever `true` and absent otherwise. The reason table in
 `docs/using/device-ownership.md` must match the code table.

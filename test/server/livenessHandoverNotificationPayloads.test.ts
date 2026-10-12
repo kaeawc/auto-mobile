@@ -30,6 +30,17 @@ test("a generic connection keeps the handover payload", () => {
   ]);
 });
 
+test("a daemon release reason names the managed loss without changing the generic payload", () => {
+  const released: LivenessHandover = { ...handover, releaseReason: "rehydration-owner-timeout" };
+  expect(livenessHandoverNotificationPayloads(released, readyManagedSlotsResult(SESSION))).toEqual([
+    managedEndedPayload(readyManagedSlotsResult(SESSION), SESSION, "rehydration-owner-timeout"),
+  ]);
+  expect(livenessHandoverNotificationPayloads(released)).toEqual(
+    livenessHandoverNotificationPayloads(handover),
+  );
+  expect(livenessHandoverPayload(released)).toEqual(livenessHandoverPayload(handover));
+});
+
 test("a daemon stall is not a loss: a managed connection keeps its handover", () => {
   const stalled = { ...handover, code: "daemon_stalled" as const };
   expect(livenessHandoverNotificationPayloads(stalled, readyManagedSlotsResult(SESSION))).toEqual([

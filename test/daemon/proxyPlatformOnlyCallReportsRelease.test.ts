@@ -224,15 +224,20 @@ test("setActiveDevice stays sessionless and rebinds platform-only calls to the n
 });
 
 for (const args of [{ deviceId: ANDROID.deviceId }, { platform: "android" }] as const) {
-  test(`without a fence the sibling control remains unchanged and sessionless: ${JSON.stringify(args)}`, async () => {
+  test(`without a fence the sibling control ${"platform" in args ? "names its own platform session" : "remains unchanged and sessionless"}: ${JSON.stringify(args)}`, async () => {
     await acquireBoth(false);
     await proxy.callTool("tapOn", args);
     expect(forwarded[0]?.args).toMatchObject({
       ...args,
       [DAEMON_OWNED_SESSIONS_PARAM]: [IOS.sessionUuid, ANDROID.sessionUuid],
     });
-    expect(forwarded[0]?.args.sessionUuid).toBeUndefined();
-    expect(forwarded[0]?.args[DAEMON_BOUND_SESSION_PARAM]).toBeUndefined();
+    if ("platform" in args) {
+      expect(forwarded[0]?.args.sessionUuid).toBe(ANDROID.sessionUuid);
+      expect(forwarded[0]?.args[DAEMON_BOUND_SESSION_PARAM]).toBe(IOS.sessionUuid);
+    } else {
+      expect(forwarded[0]?.args.sessionUuid).toBeUndefined();
+      expect(forwarded[0]?.args[DAEMON_BOUND_SESSION_PARAM]).toBeUndefined();
+    }
   });
 }
 

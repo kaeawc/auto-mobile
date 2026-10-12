@@ -88,7 +88,7 @@ import {
   SESSION_OWNERSHIP_LOST_CODE,
   SessionReleasedDuringCallError,
 } from "./sessionReleasedDuringCall";
-import { isExpiryReleaseReason, isTerminalReleaseReason } from "./releaseReasons";
+import { idleReleaseField, isExpiryReleaseReason, isTerminalReleaseReason } from "./releaseReasons";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import { canonicalFrameDeviceId } from "./frameDeviceIdentity";
 import {
@@ -449,6 +449,7 @@ async function terminalSessionRegistrationRefusal(
     details: {
       sessionUuid: sessionId,
       reason: releaseReason,
+      ...idleReleaseField(releaseReason),
       ...(ownerPid === undefined ? {} : { ownerPid }),
     },
     ...releasedSessionNotFoundFields(releaseReason),

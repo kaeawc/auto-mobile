@@ -218,6 +218,8 @@ export interface LivenessHandover {
    * only; it is not part of the wire payload.
    */
   stalledBy?: "daemon";
+  /** Daemon-named release after a daemon stall, for managed surfaces only; not part of the wire payload. */
+  releaseReason?: string;
 }
 
 function describeSessions(sessions: readonly StalledSession[]): string {

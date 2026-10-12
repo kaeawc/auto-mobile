@@ -117,7 +117,9 @@ import {
 export const RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS =
   SESSION_REHYDRATION_DEADLINE_MS + NO_HEARTBEAT_RELEASE_BUDGET_MS;
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { exponentialBackoff } from "../utils/Backoff";
+import { exponentialBackoff, normalizeBackoff, type BackoffInput } from "../utils/Backoff";
+import { DEVICE_CLEANUP_IN_PROGRESS_CODE } from "./deviceAcquisitionRefusals";
+import { readToolEnvelopePayload } from "../server/toolEnvelopePayload";
 import {
   type BuildIdentity,
   buildIdentitiesMatch,
@@ -290,9 +292,13 @@ interface StallHandoverRecord {
   delivered: boolean;
   /**
    * The daemon process the stall probe resumes the session on; undefined once that daemon was
-   * found replaced, or when its identity was never reported, so nothing probes (#10989).
+   * found replaced, or when its identity was never reported (#10989).
    */
   probeDaemonInstance?: string;
+  /** First instance-change answer; marks a managed session reclaiming without a daemon pin. */
+  managedReclaimSince?: number;
+  /** First reasonless not-found in a continuous answering stretch; cleared on an unanswered probe. */
+  managedNotFoundSince?: number;
   /**
    * The daemon process that last acknowledged a heartbeat before the handover, kept even after
    * probing stops, so a resume acknowledged by another process is reported as a restart (#11018).
@@ -981,6 +987,8 @@ export interface DaemonMcpProxyConfig {
   timer?: Timer;
   /** Total wait for a bind refused as `device_cleanup_in_progress` (#10960); 0 disables it. */
   cleanupWaitBudgetMs?: number;
+  /** Poll cadence while a refused bind waits for cleanup; defaults to 250ms x2, capped at 5s. */
+  cleanupWaitBackoff?: BackoffInput;
   /** Daemon session heartbeat timeout used to derive a safe cadence when unset. */
   heartbeatTimeoutMs?: number;
   /** Explicit bound-session heartbeat cadence; defaults to half the timeout or 2s. */
@@ -1309,12 +1317,15 @@ export function mergeDaemonOptions(
  */
 export const DEVICE_CLEANUP_WAIT_BUDGET_MS = 150_000;
 
-/** Floor under the daemon's `retryAfterMs` so a refusal that hints 0 ms is not busy-polled. */
+/** Short growing polls notice early cleanup; its remaining-cap hint is an upper bound (#11900). */
 const DEVICE_CLEANUP_BACKOFF = exponentialBackoff({
   initialDelayMs: 250,
   multiplier: 2,
   maxDelayMs: 5_000,
 });
+
+/** A hint or backoff near zero must not busy-poll the daemon (#11900). */
+const DEVICE_CLEANUP_POLL_FLOOR_MS = 50;
 
 /**
  * Record a managed execution's release outcome (#11177). `cleanup_pending` means some of the
@@ -2683,7 +2694,18 @@ export class DaemonMcpProxy {
     if (!releasedSessionUuid) {
       return;
     }
-    this.endLostSessionHandover(releasedSessionUuid);
+    const handleStallHandoverRelease = (): boolean => {
+      const keepsHandover =
+        this.managedExecutionSessions.has(releasedSessionUuid) &&
+        this.stallHandovers.get(releasedSessionUuid)?.handover.code === DAEMON_STALLED_CODE &&
+        isRecoverableDaemonReleaseReason(notification.reason ?? "") &&
+        !notification.reason?.startsWith("device-restart:");
+      if (!keepsHandover) {
+        this.endLostSessionHandover(releasedSessionUuid, notification.reason);
+      }
+      return keepsHandover;
+    };
+    const preservedStallHandover = handleStallHandoverRelease();
     this.rememberFinalizedRecordings(releasedSessionUuid, notification.recordingIds);
     if (notification.reason === "daemon-shutdown") {
       this.daemonShutdownAnnouncedAt = this.timer.now();
@@ -2691,6 +2713,11 @@ export class DaemonMcpProxy {
       // this UUID belongs to an unresolved acquisition result that has not become
       // the current binding yet.
       this.waitForDaemonShutdownDisconnect();
+    }
+    if (preservedStallHandover) {
+      // The stall fence already removed the binding. Keep its restore snapshot and claims,
+      // rather than recording a loss or setting up a handoff for a binding that is absent.
+      return;
     }
     if (this.releaseKeepsBinding(releasedSessionUuid, notification.reason)) {
       // The replacement daemon rehydrates this UUID as awaiting-owner. Preserve
@@ -4259,7 +4286,7 @@ export class DaemonMcpProxy {
 
   /**
    * A bind refused as `device_cleanup_in_progress` never reached a device, so it is forwarded
-   * again once the daemon says the previous session's cleanup should be done (#10960). The wait is
+   * again on short growing polls while the previous session's cleanup settles (#11900). The wait is
    * bounded by the cleanup budget; when it runs out the last refusal is returned unchanged.
    */
   private async waitOutDeviceCleanup(
@@ -4272,6 +4299,7 @@ export class DaemonMcpProxy {
   ): Promise<ForwardedToolCall> {
     const budgetMs = this.config.cleanupWaitBudgetMs ?? DEVICE_CLEANUP_WAIT_BUDGET_MS;
     const deadline = this.timer.now() + budgetMs;
+    const backoff = normalizeBackoff(this.config.cleanupWaitBackoff ?? DEVICE_CLEANUP_BACKOFF);
     let current = first;
     for (let attempt = 1; !this.closing; attempt++) {
       const refusal = readDeviceCleanupInProgressRefusal(current.result);
@@ -4279,21 +4307,50 @@ export class DaemonMcpProxy {
       if (!refusal || remaining <= 0) {
         return current;
       }
-      const delayMs = Math.min(
-        remaining,
-        Math.max(refusal.retryAfterMs ?? 0, DEVICE_CLEANUP_BACKOFF.delayForAttempt(attempt)),
+      const backoffMs = backoff.delayForAttempt(attempt);
+      const hintMs = refusal.retryAfterMs;
+      const cleanupCap =
+        readToolEnvelopePayload(current.result)?.payload.code === DEVICE_CLEANUP_IN_PROGRESS_CODE;
+      const stepMs = Math.max(
+        DEVICE_CLEANUP_POLL_FLOOR_MS,
+        hintMs !== undefined && hintMs > 0
+          ? cleanupCap
+            ? Math.min(hintMs, backoffMs)
+            : Math.max(hintMs, backoffMs)
+          : backoffMs,
       );
+      const delayMs = Math.floor(Math.min(remaining, stepMs));
+      if (delayMs <= 0) {
+        return current;
+      }
       logger.info(
-        `[DaemonMcpProxy] ${name} refused while the device finishes its previous session's cleanup; retrying in ${delayMs}ms`,
+        `[DaemonMcpProxy] ${name} refused while the device finishes its previous session's cleanup; re-checking in ${delayMs}ms`,
       );
-      await raceWithDeadline(this.timer.sleep(delayMs), {
-        timer: this.timer,
-        signal,
-        label: "Device cleanup wait",
-      });
+      await this.waitForCleanupPoll(delayMs, signal);
       current = await this.forwardToolCall(name, args, progressToken, onProgress, signal, false);
     }
     return current;
+  }
+
+  /** Keep the poll timeout cancellable; raceWithDeadline owns and removes the abort listener. */
+  private async waitForCleanupPoll(
+    delayMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    let handle: NodeJS.Timeout | undefined;
+    try {
+      await raceWithDeadline(
+        () =>
+          new Promise<void>((resolve) => {
+            handle = this.timer.setTimeout(resolve, delayMs);
+          }),
+        { timer: this.timer, signal, label: "Device cleanup wait" },
+      );
+    } finally {
+      if (handle !== undefined) {
+        this.timer.clearTimeout(handle);
+      }
+    }
   }
 
   /**
@@ -4400,6 +4457,10 @@ export class DaemonMcpProxy {
       await this.waitForLivenessRecovery(signal);
     }
     callerArgs = this.withFencedControlDeviceSession(name, callerArgs);
+    const ownSession = this.ownSessionForPlatformSelector(name, callerArgs, true);
+    if (ownSession !== undefined) {
+      callerArgs = { ...callerArgs, sessionUuid: ownSession };
+    }
     this.refuseAmbiguousSessionSelector(name, callerArgs);
     this.reportToolSessionLoss(name, callerArgs);
     if (this.stallHandovers.size > 0) {
@@ -4914,30 +4975,48 @@ export class DaemonMcpProxy {
     );
   }
 
-  /** A matching platform alone is untargeted only when no other still-held session could match. */
+  /** A platform-only call uses the default only when it is the unique known held match. */
   private platformSelectorTargetsBoundSession(
     name: string,
     args: Record<string, unknown>,
   ): boolean {
-    const platform = args.platform;
+    const ownSession = this.ownSessionForPlatformSelector(name, args);
+    return ownSession !== undefined && ownSession === this.boundSessionUuid;
+  }
+
+  /**
+   * Route platform-only device calls to their unique held session when every held platform is
+   * known. Sibling-only selection preserves startup binding and expired-default routing;
+   * default selection leaves injection and release reporting to the existing bound-session path.
+   */
+  private ownSessionForPlatformSelector(
+    name: string,
+    args: Record<string, unknown>,
+    siblingOnly = false,
+  ): string | undefined {
     const bound = this.boundSessionUuid;
     if (
       isDeviceBindingTool(name) ||
-      (platform !== "android" && platform !== "ios") ||
+      !this.toolTargetsDevice(name) ||
+      !this.hasImplicitDeviceSelector(args, false) ||
       typeof args.deviceId === "string" ||
       this.sessionUuidFromArgs(args) !== undefined ||
+      (siblingOnly && this.shouldPreserveSiblingSelectorRouting()) ||
       !bound ||
-      this.terminalBoundSession ||
-      this.sessionPlatforms.get(bound) !== platform
+      this.terminalBoundSession
     ) {
-      return false;
+      return undefined;
     }
-    return ![...this.otherHeldSessions.keys()].some(
-      (sessionUuid) =>
-        sessionUuid !== bound &&
-        (this.sessionPlatforms.get(sessionUuid) === undefined ||
-          this.sessionPlatforms.get(sessionUuid) === platform),
-    );
+    const held = [...new Set([bound, ...this.otherHeldSessions.keys()])];
+    if (held.some((id) => this.sessionPlatforms.get(id) === undefined)) {
+      return undefined;
+    }
+    const candidates = held.filter((id) => this.sessionPlatforms.get(id) === args.platform);
+    return candidates.find((id) => candidates.length === 1 && (!siblingOnly || id !== bound));
+  }
+
+  private shouldPreserveSiblingSelectorRouting(): boolean {
+    return !!this.config.initialSessionUuid || this.isBoundSessionReplayExpired();
   }
 
   /**
@@ -6313,7 +6392,8 @@ export class DaemonMcpProxy {
 
   private hasProbeableStall(): boolean {
     return [...this.stallHandovers.values()].some(
-      (record) => record.probeDaemonInstance !== undefined,
+      (record) =>
+        record.probeDaemonInstance !== undefined || record.managedReclaimSince !== undefined,
     );
   }
 
@@ -6323,11 +6403,14 @@ export class DaemonMcpProxy {
    * forgiveness keeps them, but they lapse a lease later unless their owner heartbeats again. Each
    * handed-over session is heartbeated with the same owner token, observation-only and pinned to
    * the daemon process that stalled; the first acknowledgement resumes it. A restarted daemon
-   * refuses the pinned heartbeat without changing anything, and stays the harness's to resume.
+   * refuses the pinned heartbeat without changing anything. Plain sessions stay the harness's to
+   * resume; managed sessions reclaim themselves. Keep the heartbeat cadence: a restarted daemon
+   * only waits lease + suspect grace for its owner, so reclaim must land within one keeper interval.
    */
   private async probeStalledSessions(): Promise<void> {
     const probed = [...this.stallHandovers].filter(
-      ([, record]) => record.probeDaemonInstance !== undefined,
+      ([, record]) =>
+        record.probeDaemonInstance !== undefined || record.managedReclaimSince !== undefined,
     );
     if (probed.length === 0 || this.closing) {
       void this.stallResumeProbe.stop();
@@ -6343,26 +6426,29 @@ export class DaemonMcpProxy {
     record: StallHandoverRecord,
   ): Promise<void> {
     const expectedDaemonInstance = record.probeDaemonInstance;
+    const reclaiming = record.managedReclaimSince !== undefined;
     let ack: unknown;
     try {
-      ack = await runWithoutDaemonLifecycle(() =>
-        raceWithDeadline(
-          async () => {
-            await this.ensureConnected();
-            return this.requireClient().callDaemonMethod(DAEMON_HEARTBEAT_METHOD, {
-              ...this.boundSessionHeartbeatParams(sessionUuid, false, true),
-              expectedDaemonInstance,
-            });
-          },
-          {
-            timer: this.timer,
-            timeoutMs: this.heartbeatRequestTimeoutMs(),
-            label: "Stalled-daemon probe",
-          },
-        ),
-      );
+      ack = reclaiming
+        ? await this.sendStalledSessionResumeHeartbeat(sessionUuid)
+        : await runWithoutDaemonLifecycle(() =>
+            raceWithDeadline(
+              async () => {
+                await this.ensureConnected();
+                return this.requireClient().callDaemonMethod(DAEMON_HEARTBEAT_METHOD, {
+                  ...this.boundSessionHeartbeatParams(sessionUuid, false, true),
+                  expectedDaemonInstance,
+                });
+              },
+              {
+                timer: this.timer,
+                timeoutMs: this.heartbeatRequestTimeoutMs(),
+                label: "Stalled-daemon probe",
+              },
+            ),
+          );
     } catch (error) {
-      this.handleStallProbeFailure(sessionUuid, record, error);
+      await this.handleStallProbeFailure(sessionUuid, record, error);
       return;
     }
     if (this.stallHandovers.get(sessionUuid) !== record || this.closing) {
@@ -6371,32 +6457,60 @@ export class DaemonMcpProxy {
     logger.info(
       `[DaemonMcpProxy] The daemon answered again and still holds session ${sessionUuid}; resuming it after ${record.handover.code}`,
     );
-    this.restoreResumedSession(sessionUuid);
+    this.restoreResumedSession(
+      sessionUuid,
+      reclaiming ? daemonRestartEvidence(record, ack) : undefined,
+    );
     this.noteDaemonIdleEvidence(sessionUuid, ack);
   }
 
-  private handleStallProbeFailure(
+  private async handleStallProbeFailure(
     sessionUuid: string,
     record: StallHandoverRecord,
     error: unknown,
-  ): void {
+  ): Promise<void> {
     if (this.stallHandovers.get(sessionUuid) !== record || this.closing) {
       return;
     }
     if (isDaemonInstanceChangedError(error)) {
+      const wasPinned = record.probeDaemonInstance !== undefined;
+      record.probeDaemonInstance = undefined;
+      if (this.managedExecutionSessions.has(sessionUuid) && wasPinned) {
+        record.managedReclaimSince = this.timer.now();
+        await this.probeStalledSession(sessionUuid, record);
+        return;
+      }
       logger.info(
         `[DaemonMcpProxy] The daemon was restarted while session ${sessionUuid} was handed over; ` +
           `no longer probing it, the harness resumes it by naming its sessionUuid`,
       );
-      record.probeDaemonInstance = undefined;
       return;
     }
     if (this.isDefinitiveSessionLoss(error)) {
+      const releaseReason = releaseReasonFromError(error);
+      if (
+        record.managedReclaimSince !== undefined &&
+        releaseReason === undefined &&
+        this.isDaemonSessionNotFoundError(error)
+      ) {
+        record.managedNotFoundSince ??= this.timer.now();
+        if (
+          this.timer.now() - record.managedNotFoundSince <
+          RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS
+        ) {
+          // The successor may not have rehydrated this session yet; keep the same probe cadence.
+          logger.debug(
+            `[DaemonMcpProxy] Managed session ${sessionUuid} is still awaiting rehydration`,
+          );
+          return;
+        }
+      }
       // The daemon answered that the session is gone or owned by another token: the next call
       // that reaches it reports the loss once.
-      this.endLostSessionHandover(sessionUuid);
+      this.endLostSessionHandover(sessionUuid, releaseReason);
       return;
     }
+    record.managedNotFoundSince = undefined;
     // Expected while the daemon is still stalled; the next probe round asks again.
     logger.debug(
       `[DaemonMcpProxy] Stalled-daemon probe for session ${sessionUuid} got no answer: ${errorMessage(error)}`,
@@ -6482,25 +6596,10 @@ export class DaemonMcpProxy {
     }
     let ack: unknown;
     try {
-      ack = await runWithoutDaemonLifecycle(() =>
-        raceWithDeadline(
-          async () => {
-            await this.ensureConnected();
-            return this.requireClient().callDaemonMethod(
-              DAEMON_HEARTBEAT_METHOD,
-              this.boundSessionHeartbeatParams(sessionUuid, true, true),
-            );
-          },
-          {
-            timer: this.timer,
-            timeoutMs: this.heartbeatRequestTimeoutMs(),
-            label: "Resume handed-over session",
-          },
-        ),
-      );
+      ack = await this.sendStalledSessionResumeHeartbeat(sessionUuid);
     } catch (error) {
       if (this.isDefinitiveSessionLoss(error)) {
-        this.endLostSessionHandover(sessionUuid);
+        this.endLostSessionHandover(sessionUuid, releaseReasonFromError(error));
         this.reportPendingSessionLoss(args);
         return;
       }
@@ -6517,6 +6616,26 @@ export class DaemonMcpProxy {
     this.noteDaemonIdleEvidence(sessionUuid, ack);
   }
 
+  /** Resume-by-name and managed reclaim use the same unpinned, observation-only owner claim. */
+  private sendStalledSessionResumeHeartbeat(sessionUuid: string): Promise<unknown> {
+    return runWithoutDaemonLifecycle(() =>
+      raceWithDeadline(
+        async () => {
+          await this.ensureConnected();
+          return this.requireClient().callDaemonMethod(
+            DAEMON_HEARTBEAT_METHOD,
+            this.boundSessionHeartbeatParams(sessionUuid, true, true),
+          );
+        },
+        {
+          timer: this.timer,
+          timeoutMs: this.heartbeatRequestTimeoutMs(),
+          label: "Resume handed-over session",
+        },
+      ),
+    );
+  }
+
   private isDefinitiveSessionLoss(error: unknown): boolean {
     return (
       (error !== null &&
@@ -6528,7 +6647,7 @@ export class DaemonMcpProxy {
     );
   }
 
-  private endLostSessionHandover(sessionUuid: string): void {
+  private endLostSessionHandover(sessionUuid: string, releaseReason?: string): void {
     const record = this.stallHandovers.get(sessionUuid);
     if (!record) {
       return;
@@ -6539,6 +6658,7 @@ export class DaemonMcpProxy {
         ...record.handover,
         code: PROXY_STALLED_CODE,
         ...(record.handover.code === DAEMON_STALLED_CODE ? { stalledBy: "daemon" as const } : {}),
+        releaseReason,
         sessions: record.handover.sessions.filter((session) => session.sessionUuid === sessionUuid),
         lastAcknowledgedHeartbeatAt:
           record.handover.sessions.find((session) => session.sessionUuid === sessionUuid)
@@ -6554,10 +6674,13 @@ export class DaemonMcpProxy {
       }
     }
     this.forgetSessionLivenessState(sessionUuid);
+    if (!this.hasProbeableStall()) {
+      void this.stallResumeProbe.stop();
+    }
     this.ownedDeviceSessions.delete(sessionUuid);
     this.claimableSessions.delete(sessionUuid);
     if (this.terminalBoundSession?.sessionUuid === sessionUuid) {
-      this.terminalBoundSession.reason = "session-not-found";
+      this.terminalBoundSession.reason = releaseReason ?? "session-not-found";
     }
   }
 

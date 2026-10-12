@@ -130,7 +130,35 @@ async function harness() {
     }
     return { key, id, entry: opened.entry };
   }
-  return { ...deps, journal, seed };
+  return { ...deps, journal, seed, key: { scopeKey: scope.scope.scopeKey, slotIndex: 0 } };
+}
+
+async function replacementHarness() {
+  const h = await harness();
+  const reconciler = new ManagedSlotReconciler({
+    ...h,
+    resolver: new DefaultManagedSpecResolver(),
+    provisioner: new FakeProvisioner(h.inventory),
+    journal: {
+      owner: h.owner,
+      isOwnerLive: h.isOwnerLive,
+      inFlight: h.journal.inFlight,
+      backoff: BACKOFF,
+    },
+  });
+  const request = {
+    key: h.key,
+    role: "app",
+    platform: "ios" as const,
+    requestedSpec: SPEC,
+    deadlineMs: h.timer.now() + 60_000,
+  };
+  const initial = await reconciler.reconcile({
+    ...request,
+    requestedSpec: { ...SPEC, runtime: "com.apple.CoreSimulator.SimRuntime.iOS-17-5" },
+  });
+  expect(initial.outcome).toBe("ready");
+  return { ...h, reconciler, request };
 }
 
 describe("bounded journal provider stages (#12056)", () => {
@@ -483,5 +511,170 @@ describe("bounded journal provider stages (#12056)", () => {
     expect(await h.registry.listOpenSlotJournal()).toEqual(before);
     expect(h.journal.inFlight.has(first.entry.id)).toBe(false);
     expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  for (const cancellation of ["parked", "cooperative"] as const) {
+    test(`replacement caller abort with ${cancellation} deleter resolves cleanup_pending and redrives`, async () => {
+      const h = await replacementHarness();
+      const controller = new AbortController();
+      const reached = Promise.withResolvers<void>();
+      if (cancellation === "parked") {
+        h.deleter.beforeDelete = () => {
+          reached.resolve();
+          return new Promise<void>(() => {});
+        };
+      } else {
+        h.deleter.deleteAndVerifyAbsence = async (target) => {
+          // Abort immediately before the cooperative deleter reads its signal.
+          controller.abort(new Error("caller cancelled"));
+          h.deleter.calls.push(target);
+          expect(target.signal?.aborted).toBe(true);
+          return { kind: "failed", message: "cooperative delete cancelled" };
+        };
+      }
+      const result = h.reconciler.reconcile({ ...h.request, signal: controller.signal }).then(
+        (value) => value,
+        (error: unknown) => error,
+      );
+      if (cancellation === "parked") {
+        await reached.promise;
+        controller.abort(new Error("caller cancelled"));
+      }
+      expect(await result).toMatchObject({
+        outcome: "failed",
+        failure: { code: "cleanup_pending", retryable: true },
+      });
+      const open = await h.registry.listOpenSlotJournal(h.key);
+      expect(open).toHaveLength(1);
+      expect(open[0]).toMatchObject({
+        phase: "deleting",
+        attempts: 1,
+        nextAttemptAtMs: h.timer.now() + BACKOFF,
+      });
+      expect(await h.registry.getAssignment(h.key)).toMatchObject({ state: "cleanup_pending" });
+      expect(h.journal.inFlight.has(open[0].id)).toBe(false);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
+      h.deleter.beforeDelete = undefined;
+      h.deleter.deleteAndVerifyAbsence = FakeDeleter.prototype.deleteAndVerifyAbsence.bind(
+        h.deleter,
+      );
+      h.timer.advanceTime(BACKOFF);
+      expect(await h.journal.redriveSlot(h.key)).toMatchObject({ kind: "clear" });
+      expect(await h.registry.listOpenSlotJournal(h.key)).toEqual([]);
+      expect(h.inventory.has(open[0].target.oldStableId!)).toBe(false);
+    });
+  }
+
+  test("public deletion with an already aborted signal records cleanup_pending", async () => {
+    const h = await harness();
+    const first = await h.seed(0, "ios", "deleting", true);
+    const journal = new ManagedSlotJournal({ ...h, owner: first.entry.owner });
+    const controller = new AbortController();
+    controller.abort(new Error("caller cancelled before deletion"));
+    const result = await journal.driveDeletion(first.entry, { signal: controller.signal }).then(
+      (value) => value,
+      (error: unknown) => error,
+    );
+    expect(result).toMatchObject({ kind: "blocked", reason: "cleanup_pending" });
+    expect(await h.registry.listOpenSlotJournal(first.key)).toMatchObject([
+      {
+        attempts: 1,
+        phase: "deleting",
+        lastError: expect.stringContaining("cancelled"),
+        nextAttemptAtMs: BACKOFF,
+      },
+    ]);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("public deletion records a typed failure when caller aborts as the delete completes", async () => {
+    const h = await harness();
+    const first = await h.seed(0, "ios", "deleting", true);
+    const journal = new ManagedSlotJournal({ ...h, owner: first.entry.owner });
+    const controller = new AbortController();
+    h.deleter.afterDelete = async () => {
+      controller.abort(new Error("caller cancelled after delete"));
+    };
+    const result = await journal.driveDeletion(first.entry, { signal: controller.signal });
+    expect(result).toMatchObject({ kind: "blocked", reason: "cleanup_pending" });
+    expect(await h.registry.listOpenSlotJournal(first.key)).toMatchObject([
+      { attempts: 1, phase: "deleting" },
+    ]);
+    expect(h.inventory.has(first.id)).toBe(false);
+    h.timer.advanceTime(BACKOFF);
+    expect(await h.journal.redriveSlot(first.key)).toMatchObject({ kind: "clear" });
+  });
+
+  test("public creation settlement returns a typed result on discovery timeout", async () => {
+    const h = await harness();
+    const first = await h.seed(0, "ios", "created", true);
+    const journal = new ManagedSlotJournal({ ...h, owner: first.entry.owner });
+    h.inventory.beforeList = () => new Promise<void>(() => {});
+    const result = journal.settleCreation(first.entry, { adopt: true });
+    await flush();
+    h.timer.advanceTime(SLOT_JOURNAL_DISCOVERY_BUDGET_MS);
+    expect(await result).toMatchObject({ kind: "blocked", reason: "discovery_incomplete" });
+    expect(await h.registry.listOpenSlotJournal(first.key)).toMatchObject([
+      { phase: "created", attempts: 1 },
+    ]);
+  });
+
+  test("redrive preserves a foreign registry error instance and class", async () => {
+    const h = await harness();
+    class RegistryError extends Error {}
+    const error = new RegistryError("registry unavailable");
+    h.registry.listOpenSlotJournal = async () => {
+      throw error;
+    };
+    const result = await h.journal.redriveSlot(h.key).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(result).toBe(error);
+    expect(result).toBeInstanceOf(RegistryError);
+  });
+
+  test("rejected delete preserves provider text in its recorded attempt", async () => {
+    const h = await harness();
+    const first = await h.seed(0, "ios", "deleting", true);
+    h.deleter.beforeDelete = async () => {
+      throw new Error("simctl delete exploded");
+    };
+    expect(await h.journal.redriveSlot(first.key)).toMatchObject({
+      kind: "blocked",
+      reason: "cleanup_pending",
+    });
+    expect(await h.registry.listOpenSlotJournal(first.key)).toMatchObject([
+      { attempts: 1, lastError: expect.stringContaining("simctl delete exploded") },
+    ]);
+  });
+
+  test("delete timeout names the device and budget in its recorded attempt", async () => {
+    const h = await harness();
+    const first = await h.seed(0, "ios", "deleting", true);
+    const journal = new ManagedSlotJournal({ ...h, owner: first.entry.owner });
+    h.deleter.beforeDelete = () => new Promise<void>(() => {});
+    const result = journal.driveDeletion(first.entry, { deadlineMs: 77 });
+    await flush();
+    h.timer.advanceTime(77 + SLOT_JOURNAL_DELETE_GRACE_MS);
+    expect(await result).toMatchObject({ kind: "blocked", reason: "cleanup_pending" });
+    expect(await h.registry.listOpenSlotJournal(first.key)).toMatchObject([
+      { attempts: 1, lastError: "deleting 'device-0' timed out after 5077ms" },
+    ]);
+  });
+
+  test("rejected claim preserves provider text in its recorded attempt", async () => {
+    const h = await harness();
+    const first = await h.seed(0, "ios", "deleting", true);
+    h.claims.beforeDescribe = async () => {
+      throw new Error("claim lookup exploded");
+    };
+    expect(await h.journal.redriveSlot(first.key)).toMatchObject({
+      kind: "blocked",
+      reason: "discovery_incomplete",
+    });
+    expect(await h.registry.listOpenSlotJournal(first.key)).toMatchObject([
+      { attempts: 1, lastError: expect.stringContaining("claim lookup exploded") },
+    ]);
   });
 });

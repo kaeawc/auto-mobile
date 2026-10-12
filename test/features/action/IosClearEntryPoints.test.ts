@@ -32,7 +32,7 @@ type Outcome = {
   failedRequest?: number;
 };
 const outcomes: Outcome[] = [
-  { name: "empty", values: [""], success: true, clears: 1 },
+  { name: "empty", values: ["old", ""], success: true, clears: 1 },
   {
     name: "secure",
     values: ["secret"],
@@ -50,28 +50,35 @@ const outcomes: Outcome[] = [
   },
   {
     name: "same leftover",
-    values: ["prefix", "prefix"],
+    values: ["prefix5", "prefix", "prefix"],
     success: true,
     clears: 2,
     warning: "still holds",
   },
   {
+    name: "untouched",
+    values: ["old", "old", "old"],
+    success: false,
+    clears: 2,
+    error: 'remaining value: "old"',
+  },
+  {
     name: "changing leftover",
-    values: ["abc", "ab", "a"],
+    values: ["abcd", "abc", "ab", "a"],
     success: false,
     clears: 3,
     error: 'remaining value: "a"',
   },
   {
     name: "unreadable after leftover",
-    values: ["abc", undefined],
+    values: ["abcd", "abc", undefined],
     success: false,
     clears: 2,
     error: 'last held "abc"',
   },
   {
     name: "first request fails",
-    values: [],
+    values: ["old"],
     success: false,
     clears: 1,
     failedRequest: 1,
@@ -79,7 +86,7 @@ const outcomes: Outcome[] = [
   },
   {
     name: "retry request fails",
-    values: ["abc"],
+    values: ["abcd", "abc"],
     success: false,
     clears: 2,
     failedRequest: 2,
@@ -87,12 +94,15 @@ const outcomes: Outcome[] = [
   },
 ];
 const entries: Entry[] = ["sendKeys clear", "sendKeys replace", "ClearText", "setUIState"];
-// setUIState re-focuses and re-clears per field attempt.
+// setUIState re-focuses and re-clears per field attempt. An untouched clear
+// fails all three attempts before input or its final-value check can run.
 const rows = entries.flatMap((entry) =>
   outcomes.map((outcome) => {
     const fieldAttempts =
       entry === "setUIState" &&
-      (outcome.name === "changing leftover" || outcome.name === "unreadable after leftover")
+      (outcome.name === "changing leftover" ||
+        outcome.name === "unreadable after leftover" ||
+        outcome.name === "untouched")
         ? 3
         : 1;
     const sleeps = outcome.clears === 3 ? [100, 200] : outcome.clears === 2 ? [100] : [];
@@ -189,7 +199,6 @@ test.each(rows)("$entry / $name", async (row) => {
   let readIndex = 0;
   const request = spyOn(proxy, "requestClearText").mockImplementation(async () => {
     clears++;
-    readIndex = (clears - 1) % Math.max(row.values.length, 1);
     return row.failedRequest === clears
       ? { success: false, totalTimeMs: 0, error: "runner refused clear", retryable: false }
       : { success: true, totalTimeMs: 0 };
@@ -200,7 +209,11 @@ test.each(rows)("$entry / $name", async (row) => {
     if (options?.minTimestamp !== undefined) {
       return typedObservation(typed ? "new" : "old");
     }
-    const value = row.values[readIndex];
+    const index =
+      row.entry === "setUIState"
+        ? readIndex++ % row.values.length
+        : Math.min(readIndex++, row.values.length - 1);
+    const value = row.values[index];
     return typedObservation(typed ? "new" : (value ?? ""), row.secure, value === undefined);
   });
   try {
@@ -280,7 +293,7 @@ test.each(rows)("$entry / $name", async (row) => {
     expect(clears).toBe(row.clears);
     expect(timer.getSleepHistory()).toEqual(row.sleeps);
     if (row.entry.startsWith("sendKeys")) {
-      if (row.success || row.failedRequest === 1) {
+      if (row.success || row.failedRequest === 1 || row.name === "untouched") {
         expect(result).not.toHaveProperty("partialApplication");
       } else {
         expect(result.partialApplication).toBe(true);
@@ -302,9 +315,11 @@ test("ClearText cancellation during verification rejects after the acknowledged 
   observer.setObserveResult(typedObservation("old"));
   const controller = new AbortController();
   const reason = new Error("cancel verification");
-  const read = spyOn(observer, "execute").mockImplementation(async () => {
-    controller.abort(reason);
-    return typedObservation("");
+  const read = spyOn(observer, "execute").mockImplementation(async (options) => {
+    if (options?.minTimestamp === undefined && request.mock.calls.length === 1) {
+      controller.abort(reason);
+    }
+    return typedObservation(request.mock.calls.length === 0 ? "old" : "");
   });
   const request = spyOn(proxy, "requestClearText");
   try {

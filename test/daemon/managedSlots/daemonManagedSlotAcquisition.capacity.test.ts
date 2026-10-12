@@ -210,6 +210,7 @@ describe("daemon managed-slot wiring: replacing a slot's device against boot cap
           }),
         },
         androidImageCatalog: { listInstalledPackages: async () => [RUNTIME] },
+        androidProfileCatalog: { listProfileIds: async () => ["pixel_8", "pixel_9"] },
         checkBootCapacity,
       },
     });

@@ -109,16 +109,17 @@ below are the defaults; the constants live in
   `daemon_session_suspect` refusal instead: retry it now.
 - **Reads and a lapsing session.** A read is never refused, not even in the
   suspect window, and it never holds a session: for a lost heartbeat, a missing
-  first heartbeat or a one-shot CLI idle release, a read in flight cannot keep the
-  session past its release (#11372). The same release cuts a read still running
-  and answers it with the typed terminal refusal (#11384).
+  first heartbeat, any idle release or an owner-disconnect release, a read in flight
+  neither holds nor extends the release (#11372, #11381). The same release cuts
+  a read still running and answers it with the typed terminal refusal (#11384).
 - **Idle.** `DEFAULT_SESSION_IDLE_TIMEOUT_MS` (2 min) after the last control tool
   call ends. An idle release is terminal: the session UUID ends with it. The
   grace does not stretch it: a heartbeating session is released at the idle
   deadline. Heartbeats and reads (`observe`, `listDevices`, `doctor`,
-  `recordSteps` status and the other reads listed above) never extend it. A call
-  still in flight holds the release, up to a bounded ceiling (a one-shot CLI
-  session's idle release is the exception for reads: see above).
+  `recordSteps` status and the other reads listed above) never extend it. Only a control
+  call still in flight holds the release, until its request deadline plus 10 s
+  (or the 30 min ceiling without a deadline). A read in flight never holds it;
+  the release cuts the read with the typed terminal refusal `session_ownership_lost`.
 - **`idleReleaseAt`** is the idle deadline as wall-clock epoch milliseconds. The
   daemon computes it (session-clock instants are converted to wall time at the
   daemon boundary), reports it in the session hold diagnostics and the heartbeat
@@ -314,13 +315,13 @@ When one handset is reachable over both USB and Wi-Fi, the pool treats the
 endpoints as aliases of one device only when `ro.serialno` and boot identity prove
 it, and two emulators that merely share an AVD name are never merged.
 
-For direct `input/*` and device-mutating `ide/*` frames, an Android transport the
-pool cannot identify (`isAndroidTransportAssignable` is false) is refused only
+For direct `input/*`, device-mutating `ide/*` frames and device-aware control tools,
+an Android transport the pool cannot identify (`isAndroidTransportAssignable` is false) is refused only
 while a held Android device could be its alias. Held devices are every
 Android device still in the session holder map, including expired sessions and
 releases in progress until their ownership is removed, plus one unknown hold if
 the fresh managed-slot snapshot contains Android stable ids not represented by
-those sessions. Control frames reuse that snapshot for at most one second.
+those sessions. Control frames and tools reuse that snapshot for at most one second.
 
 The pool can positively distinguish the target from a held device only when its
 current folded alias group identifies another canonical device, its proven
@@ -332,9 +333,9 @@ serials or alias-group keys still could alias. A loopback port cannot distinguis
 a phone or an unknown device; an unknown managed-slot hold could alias unless
 the target's current folded group identifies another device.
 
-If no held device could alias the transport, the frame is allowed. If every
+If no held device could alias the transport, control is allowed. If every
 possible alias belongs to the requester's own session (including derived label
-sessions), the frame keeps the untyped “no proven identity” refusal. Otherwise
+sessions), control keeps the untyped “no proven identity” refusal. Otherwise
 it fails with `device_owned_by_other_session` and `retryable: false`, naming the
 transport the caller targeted; an unknown managed-slot hold uses
 `device_assigned_to_managed_slot` when its registry entry is available. Address
@@ -343,7 +344,7 @@ not restart a holder's idle window. A target already held under its very id goes
 through the normal holder check. Identifiable Android targets and iOS targets
 keep their existing behavior; screenshot, hierarchy and observe reads never
 pass this control check. A managed connection still controls only its own slot
-devices, after the identity check and before the existing ownership checks.
+devices; the existing connection and ownership checks still apply.
 
 A tool call may name such a device by either endpoint (#11618). The `deviceId` is
 resolved to the pool's one id for the device before any ownership, managed-slot
@@ -353,9 +354,10 @@ and the tool sees the pool's id. The same holds for an emulator's loopback adb
 address (`localhost:5555` for `emulator-5554`), and for every tool that takes a
 device id on every path: `setActiveDevice`, `killDevice`'s `device.deviceId`, a
 `getAndroid`, `getApple` or `startDevice` `deviceId`, plan steps, and a client
-that calls the daemon's MCP endpoint directly. A wireless id a control call names
-before the pool has seen it is identified first (one adb probe, not repeated per
-call); reads use only what the pool already knows.
+that calls the daemon's MCP endpoint directly. A wireless id a read or control
+call names before the pool has seen it is identified first (one adb probe, not repeated per
+call). The probe only reads discovery and identity and updates the pool fold; it
+never readies the device. Already folded aliases need no probe.
 
 A failed `adb devices` listing is never read as "no such device". If the listing
 fails while the pool tracks an Android device, a control call naming a wireless
@@ -368,8 +370,11 @@ pool tracks no Android device is refused nothing.
 
 An Android transport the pool cannot identify at all (a wireless phone
 reporting a generic serial, an emulator on a non-loopback `adb connect` address)
-is not an alias of anything: if no session holds it, tool calls on it are allowed
-as before.
+uses the same could-alias-a-held-device rule for device-aware control tools and
+direct frames. A sessionless read that could alias a held device stays on the
+read-only path without readiness; a proven alias reads the canonical device,
+and an unproven or unplaced transport reads the id as sent. Reads never refuse
+identity or ownership and never hold, bind or extend a session.
 
 ## Daemon restart
 
@@ -394,8 +399,10 @@ call is waiting. Other sessions' selectors skip it and binding by id is refused;
 reads remain available. The hold ends on successful recovery, any terminal session
 release, the three-minute window ending, or daemon shutdown. An idle expiry inside the
 window ends the hold without another call; tool activity extends that deadline, and a
-call in flight retains the hold through the recovery window. Intentional stops end
-the hold. Concurrent daemon-restart and device-restart holds end independently. Managed slots still
+call in flight retains the hold through the recovery window. An intentional stop of the
+device (`killDevice` and similar) leaves the device-restart hold to end by recovery, a
+terminal release of the session, idle expiry, or the window, and never ends a
+daemon-restart hold. Concurrent daemon-restart and device-restart holds end independently. Managed slots still
 win, and the reservation does not extend the owner's heartbeat lease. A wiped or
 re-imaged device returning under the same AVD name or UDID remains an identity gap.
 

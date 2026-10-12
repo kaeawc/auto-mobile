@@ -616,8 +616,9 @@ export class ExecutionTracker {
     if (sessionUuids.length === 0) {
       return;
     }
-    // An inventory read's end is reported like any other call's, because a release it deferred
-    // must be retried when it ends (#11381); it is reported as not admitted, because it is not use.
+    // An inventory read's end is reported like any other call's, because a call may end before
+    // it was classified as a read, and a release deferred while it was still counted must be
+    // retried (#11381). It is reported as not admitted, because it is not use.
     const admitted = execution.sessionAdmitted === true && !execution.readOnlySessionAccess;
     for (const listener of this.sessionExecutionEndListeners) {
       try {

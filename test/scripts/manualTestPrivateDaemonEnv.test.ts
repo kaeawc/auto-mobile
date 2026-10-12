@@ -153,7 +153,10 @@ posixTest(
 );
 posixTest("env file uses POSIX unset lines for the shared inherited names", () => {
   expect(INHERITED_ENV_VARIABLES).toEqual([
-    ...DERIVED_PATH_VARIABLES.map((key) => key.replace("AUTOMOBILE_", "AUTO_MOBILE_")),
+    ...PRODUCT_PATH_ENV_VARIABLES.filter((row) => row.kind === "opt-in").map((row) =>
+      row.name.replace("AUTOMOBILE_", "AUTO_MOBILE_"),
+    ),
+    ...STATE_PATH_VARIABLES.map((key) => key.replace("AUTOMOBILE_", "AUTO_MOBILE_")),
     "AUTOMOBILE_DB_PATH",
     "AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH",
     "AUTO_MOBILE_DB_PATH",
@@ -396,3 +399,129 @@ posixTest(
     ).toContain("default product");
   },
 );
+
+import {
+  missingStateDefaults,
+  STATE_PATH_VARIABLES,
+} from "../../scripts/manual-test/privateDaemonEnv";
+import { PRODUCT_PATH_ENV_VARIABLES } from "../../scripts/manual-test/productPathEnv";
+posixTest("state registry coverage gives every daemon an absolute distinct private default", () => {
+  const specs = derivePrivateDaemonBatch(options);
+  for (const row of PRODUCT_PATH_ENV_VARIABLES.filter((row) => row.kind === "state")) {
+    for (const spec of specs) {
+      expect(spec.env[row.name], row.name).toBeDefined();
+      expect(spec.env[row.name].startsWith("/"), row.name).toBe(true);
+      const root =
+        row.scope === "batch"
+          ? join(options.batchDir, "shared")
+          : row.name === "AUTOMOBILE_AUX_SOCKET_DIR" || row.name === "AUTOMOBILE_DAEMON_SOCKET_PATH"
+            ? spec.auxSocketDir
+            : spec.dir;
+      expect(
+        spec.env[row.name] === root || spec.env[row.name].startsWith(`${root}/`),
+        row.name,
+      ).toBe(true);
+    }
+    if (row.scope !== "batch") {
+      expect(new Set(specs.map((spec) => spec.env[row.name])).size).toBe(specs.length);
+    }
+    for (const spec of specs) {
+      expect(renderEnvFile(spec, options)).toContain(`export ${row.name}=`);
+    }
+  }
+});
+
+posixTest("registry reports injected missing state and unsets every alternative", () => {
+  const spec = derivePrivateDaemonBatch(options)[0];
+  expect(
+    missingStateDefaults(
+      [...PRODUCT_PATH_ENV_VARIABLES, { name: "AUTOMOBILE_NEW_DIR", kind: "state" }],
+      spec,
+    ),
+  ).toEqual(["AUTOMOBILE_NEW_DIR"]);
+  for (const row of PRODUCT_PATH_ENV_VARIABLES.filter((row) => row.kind === "unset")) {
+    expect(renderEnvFile(spec, options)).toContain(`unset ${row.name}\n`);
+  }
+});
+posixTest(
+  "new state defaults accept private overrides, refuse host defaults and missing client state",
+  () => {
+    for (const row of PRODUCT_PATH_ENV_VARIABLES.filter(
+      (row) => row.kind === "state" && !row.owner,
+    )) {
+      expect(refusal({ extraEnv: { [row.name]: "/private/prebuilt" } })).toBeUndefined();
+      expect(refusal({ extraEnv: { [row.name]: "/home/fake/.auto-mobile/cache" } })).toContain(
+        "default product",
+      );
+      expect(refusal({ extraEnv: { [row.name]: "relative" } })).toContain("absolute");
+      const env = derivePrivateDaemonBatch(options)[0].env;
+      expect(privateHarnessEnvRefusal({ ...env, [row.name]: undefined }, host)).toContain(row.name);
+    }
+  },
+);
+posixTest("daemon env applies to just one daemon over the batch env", () => {
+  const key = "AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA";
+  const modified = {
+    ...options,
+    extraEnv: { [key]: "/private/shared" },
+    daemonEnv: { "2": { [key]: "/private/second" } },
+  };
+  const specs = derivePrivateDaemonBatch(modified);
+  expect(specs.map((spec) => spec.env[key])).toEqual(["/private/shared", "/private/second"]);
+  expect(privateDaemonBatchRefusal(specs, modified, host)).toBeUndefined();
+  for (const daemonEnv of [
+    { "0": { NOTE: "bad" } },
+    { "3": { NOTE: "bad" } },
+    { "1": { AUTOMOBILE_DATA_DIR: "/private/owned" } },
+    { "1": { [key]: "/home/fake/.auto-mobile" } },
+  ]) {
+    expect(refusal({ daemonEnv })).toBeDefined();
+  }
+});
+
+posixTest("unsafe global state override is refused even if every daemon shadows it", () => {
+  const key = "AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR";
+  expect(
+    refusal({
+      extraEnv: { [key]: "/home/fake/.auto-mobile" },
+      daemonEnv: { "1": { [key]: "/private/one" }, "2": { [key]: "/private/two" } },
+    }),
+  ).toContain("default product");
+});
+
+posixTest("opt-in paths stay unset, strip inheritance and require private explicit paths", () => {
+  const env = derivePrivateDaemonBatch(options)[0].env;
+  expect(
+    PRODUCT_PATH_ENV_VARIABLES.find((row) => row.name === "AUTOMOBILE_STARTUP_BENCHMARK_OUTPUT")
+      ?.kind,
+  ).toBe("opt-in");
+  for (const row of PRODUCT_PATH_ENV_VARIABLES.filter((row) => row.kind === "opt-in")) {
+    const legacy = row.name.replace("AUTOMOBILE_", "AUTO_MOBILE_");
+    expect(env[row.name]).toBeUndefined();
+    expect(renderEnvFile(derivePrivateDaemonBatch(options)[0], options)).toContain(
+      `unset ${row.name}\n`,
+    );
+    expect(renderEnvFile(derivePrivateDaemonBatch(options)[0], options)).toContain(
+      `unset ${legacy}\n`,
+    );
+    expect(privateClientEnvironment({ [row.name]: "/inherited", [legacy]: "/legacy" }, {})).toEqual(
+      {},
+    );
+    expect(privateHarnessEnvRefusal(env, host)).toBeUndefined();
+    expect(refusal({ extraEnv: { [row.name]: "/private/feature" } })).toBeUndefined();
+    expect(refusal({ daemonEnv: { "2": { [row.name]: "/private/feature" } } })).toBeUndefined();
+    expect(refusal({ extraEnv: { [row.name]: "/home/fake/.auto-mobile/features" } })).toContain(
+      "default product",
+    );
+    expect(refusal({ extraEnv: { [row.name]: "relative" } })).toContain("absolute");
+    expect(privateHarnessEnvRefusal({ ...env, [row.name]: "relative" }, host)).toContain(row.name);
+    expect(
+      privateHarnessEnvRefusal({ ...env, [row.name]: "/home/fake/.auto-mobile/feature" }, host),
+    ).toContain("default product");
+    const enabled = { ...options, extraEnv: { [row.name]: "/private/feature" } };
+    const spec = derivePrivateDaemonBatch(enabled)[0];
+    expect(renderEnvFile(spec, enabled)).toContain(`export ${row.name}=`);
+    expect(renderEnvFile(spec, enabled)).not.toContain(`unset ${row.name}\n`);
+    expect(privateClientEnvironment({}, spec.env)[row.name]).toBe("/private/feature");
+  }
+});

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { basename, join, resolve } from "node:path";
 import {
   parseAuxSocketArgs,
@@ -58,6 +58,9 @@ class FakeConnection implements FrameConnection {
 }
 function parsed(args: string[]): AuxSocketCommand {
   const command = parseAuxSocketArgs(args);
+  if ("help" in command) {
+    throw new Error("Unexpected help");
+  }
   if ("error" in command) {
     throw new Error(command.error);
   }
@@ -182,7 +185,9 @@ test("rejects usage, JSON, duplicates, missing values, invalid options and obser
 posixTest("private environment refusal never connects or sends WebRTC", async () => {
   const f = fixture();
   f.deps.env = {};
-  expect(await runAuxSocket(parsed(["recording", "status"]), f.deps)).toBe(2);
+  expect(
+    await runAuxSocket(parsed(["recording", "status", "--session-uuid", "uuid"]), f.deps),
+  ).toBe(2);
   expect(await runAuxSocket(parsed(["webrtc", "list"]), f.deps)).toBe(2);
   expect(f.paths).toEqual([]);
   expect(f.webCalls).toEqual([]);
@@ -271,7 +276,9 @@ posixTest(
         code: "observer_refused",
         error: "full refusal",
       });
-    expect(await runAuxSocket(parsed(["recording", "status", "--observer"]), f.deps)).toBe(1);
+    expect(
+      await runAuxSocket(parsed(["video", '{"action":"subscribe"}', "--observer"]), f.deps),
+    ).toBe(1);
     expect(f.paths).toHaveLength(1);
     expect(f.aux.writes).toEqual([]);
     expect(f.out[0]).toContain("observer_refused");
@@ -283,7 +290,7 @@ posixTest(
     const f = fixture();
     expect(
       await runAuxSocket(
-        parsed(["recording", "status", "--observer", "--heartbeat-ms", "8000"]),
+        parsed(["video", '{"action":"subscribe"}', "--observer", "--heartbeat-ms", "8000"]),
         f.deps,
       ),
     ).toBe(2);
@@ -328,19 +335,22 @@ posixTest(
     expect(f.out.at(-1)).toContain("full refusal");
   },
 );
-posixTest("recording timeout cleans observer heartbeat and releases on exit", async () => {
-  const f = fixture();
-  f.aux.respond = () => {};
-  const task = runAuxSocket(
-    { ...parsed(["recording", "status", "--observer"]), timeoutMs: 10 },
-    f.deps,
-  );
-  await drainUntilQuiescent(f.timer);
-  f.timer.advanceTime(10);
-  expect(await task).toBe(3);
-  expect(f.control.writes.at(-1)?.method).toBe("daemon/releaseSession");
-  expect(f.timer.getPendingIntervalCount()).toBe(0);
-});
+posixTest(
+  "video acknowledgement timeout cleans observer heartbeat and releases on exit",
+  async () => {
+    const f = fixture();
+    f.aux.respond = () => {};
+    const task = runAuxSocket(
+      { ...parsed(["video", '{"action":"subscribe"}', "--observer"]), timeoutMs: 10 },
+      f.deps,
+    );
+    await drainUntilQuiescent(f.timer);
+    f.timer.advanceTime(10);
+    expect(await task).toBe(3);
+    expect(f.control.writes.at(-1)?.method).toBe("daemon/releaseSession");
+    expect(f.timer.getPendingIntervalCount()).toBe(0);
+  },
+);
 
 posixTest("canonical auxiliary socket pointing into default state refuses before I/O", async () => {
   const f = fixture();
@@ -350,8 +360,72 @@ posixTest("canonical auxiliary socket pointing into default state refuses before
   );
   f.deps.host.canonicalize = (path) =>
     path === socket ? resolve("/fake/home/.auto-mobile/recording.sock") : resolve(path);
-  expect(await runAuxSocket(parsed(["recording", "status"]), f.deps)).toBe(2);
+  expect(
+    await runAuxSocket(parsed(["recording", "status", "--session-uuid", "uuid"]), f.deps),
+  ).toBe(2);
   expect(f.paths).toEqual([]);
   expect(f.webCalls).toEqual([]);
   expect(f.err.join(" ")).toContain("default product");
+});
+
+test("recording observer is a parse error with device-session guidance", () => {
+  const result = parseAuxSocketArgs(["recording", "status", "--observer"]);
+  expect(result).toHaveProperty("error");
+  if ("error" in result) {
+    expect(result.error).toContain("a device session");
+    expect(result.error).toContain("video/WebRTC");
+  }
+});
+
+import {
+  AUX_SOCKET_COMMANDS,
+  AUX_SOCKET_ACTIONS,
+  AUX_SOCKET_FLAGS,
+} from "../../scripts/manual-test/auxSocketHelp";
+test("aux help variants enumerate every parser command action and flag", () => {
+  for (const args of [["--help"], ["-h"], ["help"], ["recording", "--help"]]) {
+    const result = parseAuxSocketArgs(args);
+    if (!("help" in result)) {
+      throw new Error("Expected help");
+    }
+    for (const name of [
+      ...AUX_SOCKET_COMMANDS,
+      ...AUX_SOCKET_ACTIONS.recording,
+      ...AUX_SOCKET_ACTIONS.webrtc,
+      ...Object.keys(AUX_SOCKET_FLAGS),
+    ]) {
+      expect(result.help).toContain(name);
+    }
+  }
+});
+test("all recording commands require a device session while viewers keep observers", () => {
+  for (const op of ["start", "stop", "status"]) {
+    expect(parseAuxSocketArgs(["recording", op])).toHaveProperty("error");
+    expect(parseAuxSocketArgs(["recording", op, "--observer"])).toHaveProperty("error");
+    expect(parsed(["recording", op, "--session-uuid", "U"]).request.sessionUuid).toBe("U");
+  }
+  expect(parsed(["video", '{"action":"subscribe"}', "--observer"]).observer).toBe(true);
+  expect(parsed(["webrtc", "list", "--observer"]).observer).toBe(true);
+});
+
+import { main as helpMain } from "../../scripts/manual-test/aux-socket";
+test("help main writes stdout and returns zero for top-level and subcommand help", async () => {
+  const argv = process.argv;
+  const out = spyOn(console, "log").mockImplementation(() => {});
+  const err = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    for (const args of [["--help"], ["-h"], ["help"], ["recording", "--help"]]) {
+      process.argv = ["bun", "aux-socket.ts", ...args];
+      expect(await helpMain()).toBe(0);
+    }
+    expect(out).toHaveBeenCalledTimes(4);
+    expect(err).not.toHaveBeenCalled();
+    process.argv = ["bun", "aux-socket.ts", "invalid-command"];
+    expect(await helpMain()).toBe(2);
+    expect(err.mock.calls[0][0]).toContain("--help for usage");
+  } finally {
+    process.argv = argv;
+    out.mockRestore();
+    err.mockRestore();
+  }
 });

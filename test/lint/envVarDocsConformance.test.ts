@@ -4,6 +4,12 @@ import path, { resolve } from "node:path";
 import ts from "typescript";
 import { moduleExportResolver, resolveModule, toPosixPath } from "./moduleExportResolver";
 
+import {
+  PRODUCT_PATH_ENV_VARIABLES,
+  NON_PATH_ENV_VARIABLES,
+  productEnvClassificationIssues,
+} from "../../scripts/manual-test/productPathEnv";
+
 const ROOT = resolve(import.meta.dir, "../..");
 const NAME = /^(?:AUTOMOBILE_|AUTO_MOBILE_)[A-Z0-9_]+$/;
 
@@ -469,6 +475,28 @@ describe("environment variable documentation", () => {
     markdown = readFileSync(resolve(ROOT, "docs/using/environment-variables.md"), "utf8");
     docs = documentedNames(markdown);
   }, 60_000);
+  test("product path registry covers AST reads without stale rows", () => {
+    const registered = PRODUCT_PATH_ENV_VARIABLES.map((row) => row.name);
+    const issues = productEnvClassificationIssues(reads, registered, NON_PATH_ENV_VARIABLES);
+    expect(
+      issues.missing,
+      `New environment variable(s) ${issues.missing.join(", ")}: if the value is a filesystem path, add a row to scripts/manual-test/productPathEnv.ts PRODUCT_PATH_ENV_VARIABLES and classify it (state / opt-in / unset / input); otherwise add the name to NON_PATH_ENV_VARIABLES.`,
+    ).toEqual([]);
+    expect(
+      productEnvClassificationIssues(
+        reads,
+        registered.filter((name) => name !== "AUTOMOBILE_VIDEO_SERVER_JAR"),
+        NON_PATH_ENV_VARIABLES,
+      ).missing,
+    ).toEqual(["AUTOMOBILE_VIDEO_SERVER_JAR"]);
+    expect(issues.overlap, "Path and non-path classifications must be disjoint.").toEqual([]);
+    expect(issues.stale, "Remove stale productPathEnv.ts classifications.").toEqual([]);
+    expect(NON_PATH_ENV_VARIABLES).toEqual([...new Set(NON_PATH_ENV_VARIABLES)].sort());
+    expect(new Set(registered).size).toBe(PRODUCT_PATH_ENV_VARIABLES.length);
+    expect(
+      PRODUCT_PATH_ENV_VARIABLES.filter((row) => row.kind !== "state").every((row) => !!row.reason),
+    ).toBe(true);
+  });
   test("every source read is public documentation or explicitly internal", () => {
     expect(violations(reads, docs, INTERNAL)).toEqual([]);
     expect(Object.values(INTERNAL).every((reason) => reason.length > 0)).toBe(true);
@@ -751,5 +779,30 @@ describe("environment variable documentation", () => {
         AUTOMOBILE_STALE: "removed",
       }),
     ).toEqual(["Ambiguous: AUTOMOBILE_INTERNAL", "Stale internal: AUTOMOBILE_STALE"]);
+  });
+});
+
+test("F2 exhaustive classification reports a fabricated non-suffix product read", () => {
+  expect(
+    productEnvClassificationIssues(new Set(["AUTOMOBILE_NEW_EXECUTABLE"]), [], []).missing,
+  ).toEqual(["AUTOMOBILE_NEW_EXECUTABLE"]);
+});
+test("F2 exhaustive classification catches an omitted encoder JAR", () => {
+  expect(
+    productEnvClassificationIssues(new Set(["AUTOMOBILE_VIDEO_SERVER_JAR"]), [], []).missing,
+  ).toEqual(["AUTOMOBILE_VIDEO_SERVER_JAR"]);
+});
+
+test("classification folds legacy reads and reports overlaps and stale entries", () => {
+  expect(
+    productEnvClassificationIssues(
+      new Set(["AUTO_MOBILE_FILE"]),
+      ["AUTOMOBILE_FILE", "AUTOMOBILE_STALE"],
+      ["AUTOMOBILE_FILE", "AUTOMOBILE_OTHER_STALE"],
+    ),
+  ).toEqual({
+    missing: [],
+    overlap: ["AUTOMOBILE_FILE"],
+    stale: ["AUTOMOBILE_OTHER_STALE", "AUTOMOBILE_STALE"],
   });
 });

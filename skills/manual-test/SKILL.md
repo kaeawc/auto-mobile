@@ -18,9 +18,9 @@ at a time to conserve context; never let two actors drive devices at once.
 ## Harness
 
 Use [the manual-test harness](../../docs/using/manual-test-harness.md) for private
-batches: `private-daemon.ts init|start|status|stop`, `in-daemon-env.sh`,
+batches: `private-daemon.ts init|start|status|stop|env|wrappers`, `in-daemon-env.sh`,
 `proxy-session.ts up|call|read|tools|resources|subscribe|status|close`,
-`daemon-frame.ts send`, and `aux-socket.ts recording|video|webrtc` under
+`daemon-frame.ts send|session-info|heartbeat`, and `aux-socket.ts recording|video|webrtc` under
 `scripts/manual-test/`. Use those commands instead of hand-rolling a private
 environment, MCP stdio loop or socket client.
 
@@ -33,10 +33,80 @@ environment, MCP stdio loop or socket client.
   selector-only starts because one booted a protected AVD in batch 20261012a;
   `--allow-selector` is only for a deliberate selection test.
 - Run `private-daemon.ts start` before proxy `up`/`serve`; both require a
-  private PID file naming a live daemon. Never use a proxy to wake a dead daemon.
+  private PID file naming a live daemon AND a responding control socket
+  (`daemon/capabilities`); a recycled PID is not enough. Proxy `status` reports
+  `daemonSocketAlive`. Never use a proxy to wake a dead daemon.
 - Never pass daemon flags to a proxy or rebuild `dist/` while batch daemons run.
 - Keep one shared adb-server coordination directory per batch; split it only
   when testing isolated registries, aware of the false 7-of-6 finding (#11905).
+
+The harness path registry (`scripts/manual-test/productPathEnv.ts`) uses this policy:
+
+| Kind     | Destinations                                                                                                                              | Handling                                                                                                                                |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `state`  | Data, logs, DB directory, coordination, shared ADB registry, aux/control sockets, PID/lock/launch log, iOS cache and derived data         | Required isolated defaults. Defaults relocate state without enabling a feature.                                                         |
+| `opt-in` | `AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR`, `AUTOMOBILE_PLAN_HEALTH_DIR`, `AUTOMOBILE_TOOL_OUTPUTS_DIR`, `AUTOMOBILE_STARTUP_BENCHMARK_OUTPUT` | Unset by default; both inherited spellings stripped. Explicit private absolute paths through `--env`/`--daemon-env` enable the feature. |
+| `unset`  | `AUTOMOBILE_DB_PATH`, `AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH`                                                                              | Strip competing overrides in both spellings.                                                                                            |
+| `input`  | APK/IPA/bundle, codec/encoder/helper, project/migration/signing inputs, test markers and config sources                                   | Caller-selected inputs, no harness defaults; inherited managed-slot config is stripped.                                                 |
+
+The linked harness guide lists every variable. `env.sh` unsets absent opt-ins;
+client gates validate them only when present. Before product imports, entry
+scripts preserve explicit stderr sinks and permit file logging only with an
+explicit absolute log directory outside both home defaults (lexical and
+ancestor-realpath checks). They force stderr otherwise, including invalid sinks
+and data-dir-only environments, and restore all overrides in child environments. Known uncovered product path:
+`~/.auto-mobile/libwebp` has no override
+(`src/utils/image/webp/WebpBinaryResolver.ts:94`). A private daemon needing a
+libwebp download would write there; set `AUTOMOBILE_CWEBP_PATH` and
+`AUTOMOBILE_DWEBP_PATH` to avoid it.
+
+`init --env K=V` applies to the batch; `--daemon-env N:K=V` overrides it for
+one daemon. Record argv tokens with `--daemon-arg`, for example
+`--daemon-arg --plan-execution-lock-scope --daemon-arg session --daemon-arg
+--tool-call-recording`; `N:token` selects a daemon. Restarts reuse these env/args.
+`start -- …` adds one-off argv. Use generated `<batch>/bin/amN|proxyN|frameN|auxN`
+wrappers; `amN cli …` runs the one-shot CLI with `--cli`. It finds the private
+daemon through the socket and PID path env sourced from `env.sh`.
+`in-daemon-env.sh --cd` is an explicit cwd change; its `cli` shorthand matches `amN cli`.
+
+`pid.txt` is mirrored after successful start and removed after successful stop.
+`status` reports PID agreement/socket state; `status --devices` also returns
+host inventories and `daemonDevicesMethod: "daemon/availableDevices"`. It is
+read-only except for the daemon's own inventory ownership/discovery refresh.
+Android inventory reads the local ADB server socket without launching `adb`,
+so it can neither start nor restart a server.
+`wrappers` regenerates wrappers alone. Control sockets are at the short aux
+root (`/tmp/am-mt-<hash>/<N>/d.sock`), not under the batch directory. Redirect
+stdin with `< /dev/null` on harness calls made through an agent tool call.
+
+`frame session-info SESSION` uses `daemon/sessionInfo`; `frame heartbeat SESSION`
+uses the external CLI keeper, without claiming liveness ownership. The daemon
+rejects a heartbeat for a proxy-owned session and changes nothing. Destroy modes
+`cancel`/`cancel-after` retain their semantics. `--mode cancel-keep-open[:<ms>]`
+(default read window 5000 ms) waits `--cancel-after-ms` (default 0), sends a real
+same-connection cancel frame, prints late answers and an answered/unanswered
+summary, then ends gracefully. Repeatable `--then '<method> <json|@file>'` sends
+sequentially after the first answers in send mode. Params string placeholders
+`{{ownSessionId}}`, `{{ownSessionId:<slotIndex>}}` and
+`{{ownLivenessOwnerToken}}` require `--managed-binding`; unresolved values refuse
+before user frames. Every frame uses the device-start and host-mutation guards.
+A released own session is accepted as done during automatic cleanup.
+
+Recording requires a **device session**, never an observer: owner for start/stop,
+any live device session for status; a retained stop result permits the former
+owner's UUID. Obtain `sessionUuid` from proxy up/status managed slots or the tool
+response, or `amN daemon active-sessions --json`. Correct example:
+`<batch>/bin/aux1 recording status --session-uuid SESSION < /dev/null`.
+`--observer` remains available for video/WebRTC only. Current recording names
+are `recordToolCalls`, `recordDeviceGestures`, `--tool-call-recording` and
+`device-gesture-recording.sock`.
+
+Client help (`--help`, `-h`, `help`, `<subcommand> --help`) exits 0 on stdout;
+parse errors exit 2 with a help pointer. Frame/aux codes: 0 success/cancel ran,
+1 typed refusal, 2 usage/guard, 3 timeout/connection. Proxy codes: 0 success/status,
+1 failed response, 2 usage/guard/wait deadline, 3 serve transport closed,
+4 serve initialization failed. Private-daemon codes: 0 success/status,
+2 usage/guard/I/O, or the lifecycle command's propagated code.
 
 ## Phase 0 — Scope from the start point
 
@@ -126,12 +196,13 @@ environment, MCP stdio loop or socket client.
      writes to the **default** derived-data path (`/tmp/automobile-ctrl-proxy`), so
      no path env var is needed; only for a non-default location set
      `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=<derived-data-root>` (the root — the
-     code appends `Build/Products` itself).
+     code appends `Build/Products` itself). The private harness defaults this path
+     under the batch, so explicitly point it at your prebuilt tree.
 
    - **Serve a locally built iOS runner.** Set
      `AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true` and point
      `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=<derived-data-root>` at your build
-     (omit the path variable for the default location). Local-build mode never
+     (the private harness defaults to its own tree, so explicitly select your build). Local-build mode never
      downloads or extracts the released bundle, regardless of cache metadata,
      `AUTOMOBILE_VERSION`, or a vendored bundle override. It validates the local
      products before consulting release metadata, including during background

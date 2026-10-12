@@ -1,7 +1,11 @@
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
+import {
+  DAEMON_BOUND_SESSION_PARAM,
+  DAEMON_OWNED_SESSIONS_PARAM,
+  DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
+} from "../../src/daemon/constants";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
@@ -586,3 +590,42 @@ test.each(["expiry", "stale-true", "probe-throw"])(
     }
   },
 );
+
+test("a failed token declaration is logged and does not stop owned-session restoration", async () => {
+  const events: string[] = [];
+  const failure = new Error("declaration failed");
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  const pool = {
+    refreshDevices: async () => 0,
+    getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
+    declareMcpSessionLivenessOwnerToken: () => {
+      throw failure;
+    },
+    restoreOwnedDeviceSessionsForMcpSession: async () => {
+      events.push("restore");
+      return [];
+    },
+  };
+  const server = new UnixSocketServer(
+    "/tmp/never-listened.sock",
+    "http://localhost:0/mcp",
+    { isInitialized: () => true, getDevicePool: () => pool },
+    new FakeTimer(),
+  );
+  try {
+    await server["restoreSelectorSessions"](
+      {
+        [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "owner",
+        [DAEMON_OWNED_SESSIONS_PARAM]: ["owned"],
+      },
+      "client",
+    );
+    expect(events).toEqual(["restore"]);
+    expect(warn).toHaveBeenCalledWith(
+      "Unable to declare MCP session owner token: declaration failed",
+      failure,
+    );
+  } finally {
+    warn.mockRestore();
+  }
+});

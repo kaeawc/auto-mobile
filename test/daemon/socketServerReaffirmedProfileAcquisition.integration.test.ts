@@ -1,3 +1,4 @@
+import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { describe, expect, spyOn, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -114,7 +115,9 @@ describe("reaffirmed tool-selection profile acquisition forwarding", () => {
 
       expect(reaffirmClient.callToolCalls.at(-1)).toEqual({
         toolName: "provisionDevice",
-        params: { [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: persistedProfileUuid },
+        params: withProxyOwnerToken({
+          [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: persistedProfileUuid,
+        }),
       });
     } finally {
       isAvailableSpy.mockRestore();
@@ -139,7 +142,10 @@ describe("reaffirmed tool-selection profile acquisition forwarding", () => {
       });
       await proxy.callTool("provisionDevice", {});
 
-      expect(client.callToolCalls.at(-1)).toEqual({ toolName: "provisionDevice", params: {} });
+      expect(client.callToolCalls.at(-1)).toEqual({
+        toolName: "provisionDevice",
+        params: withProxyOwnerToken({}),
+      });
     } finally {
       isAvailableSpy.mockRestore();
       await proxy.close();
@@ -172,7 +178,10 @@ describe("reaffirmed tool-selection profile acquisition forwarding", () => {
       });
       await proxy.callTool("provisionDevice", {});
 
-      expect(client.callToolCalls.at(-1)).toEqual({ toolName: "provisionDevice", params: {} });
+      expect(client.callToolCalls.at(-1)).toEqual({
+        toolName: "provisionDevice",
+        params: withProxyOwnerToken({}),
+      });
     } finally {
       isAvailableSpy.mockRestore();
       await proxy.close();

@@ -21,6 +21,8 @@ extension CommandHandler {
     /// and blocking SDK fetch entirely on the fast path. When context IS supplied, extract
     /// once and prefer the zero-device-cost cached SDK hierarchy (the observe that produced
     /// `expected` warmed that cache) over the slow `/hierarchy/fresh` walk.
+    /// A failed capture throws `hierarchyCaptureFailed` before `beforeOperation`, without
+    /// sending the gesture; only a successfully captured, differing context is rejected as stale.
     @discardableResult
     func performContextCheckedGesture<T: Sendable>(
         expected: String?,
@@ -34,13 +36,17 @@ extension CommandHandler {
             return try await perf.withScope { try await MainActor.run { try operation() } }
         }
 
-        let hierarchy = (try? await captureHierarchy())
-            .map(enrichWithCachedSdkHierarchy)
+        let hierarchy: ViewHierarchy
+        do {
+            hierarchy = try enrichWithCachedSdkHierarchy(await captureHierarchy())
+        } catch {
+            throw CommandError.hierarchyCaptureFailed(reason: WireError.message(for: error))
+        }
         try beforeOperation?()
 
         return try await perf.withScope {
             try await MainActor.run {
-                guard let hierarchy, self.frameContext.context(for: hierarchy) == expected else {
+                guard self.frameContext.context(for: hierarchy) == expected else {
                     throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
                 }
                 return try operation()
@@ -52,6 +58,8 @@ extension CommandHandler {
     /// before starting the operation. The server's serial command chain prevents another
     /// command from interleaving while keyboard polling yields this actor. Awaiting directly
     /// keeps cancellation and task-local diagnostics in the caller's task.
+    /// Capture failure rejects the gesture before `beforeOperation` with `hierarchyCaptureFailed`;
+    /// no expected context skips capture, and a captured context mismatch retains the stale error.
     @discardableResult
     func performContextCheckedGestureAsync<T: Sendable>(
         expected: String?,
@@ -62,8 +70,11 @@ extension CommandHandler {
     {
         let hierarchy: ViewHierarchy?
         if expected != nil {
-            hierarchy = (try? await captureHierarchy())
-                .map(enrichWithCachedSdkHierarchy)
+            do {
+                hierarchy = try enrichWithCachedSdkHierarchy(await captureHierarchy())
+            } catch {
+                throw CommandError.hierarchyCaptureFailed(reason: WireError.message(for: error))
+            }
         } else {
             hierarchy = nil
         }

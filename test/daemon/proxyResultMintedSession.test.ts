@@ -1,3 +1,4 @@
+import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { describe, expect, test, spyOn, beforeEach, afterEach } from "bun:test";
 import { DaemonMcpProxy, DaemonToolOutcomeUnknownError } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
@@ -183,7 +184,9 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
       });
       expect(client.callToolCalls.at(-1)?.params).not.toHaveProperty("sessionUuid");
       await proxy.callTool("observe", {});
-      expect(client.callToolCalls.at(-1)?.params).toEqual({ sessionUuid: "android-session" });
+      expect(client.callToolCalls.at(-1)?.params).toEqual(
+        withProxyOwnerToken({ sessionUuid: "android-session" }),
+      );
     } finally {
       await proxy.close();
     }
@@ -205,10 +208,12 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
       try {
         await proxy.callTool("getAndroid", {});
         await proxy.callTool(name, { platform: "android" });
-        expect(client.callToolCalls.at(-1)?.params).toEqual({
-          platform: "android",
-          sessionUuid: "android-session",
-        });
+        expect(client.callToolCalls.at(-1)?.params).toEqual(
+          withProxyOwnerToken({
+            platform: "android",
+            sessionUuid: "android-session",
+          }),
+        );
       } finally {
         await proxy.close();
       }
@@ -380,10 +385,10 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
         content: [{ type: "text", text: "reclaimed" }],
       });
       expect(staleClient.callToolCalls).toEqual([
-        { toolName: "getAndroid", params: { avdName: "am-api34-ga-arm64" } },
+        { toolName: "getAndroid", params: withProxyOwnerToken({ avdName: "am-api34-ga-arm64" }) },
       ]);
       expect(recoveredClient.callToolCalls).toEqual([
-        { toolName: "observe", params: { sessionUuid: MINTED } },
+        { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: MINTED }) },
       ]);
     } finally {
       finishHeartbeat.resolve();
@@ -499,7 +504,7 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
         await proxy.callTool("listDevices", { platform });
         expect(client.callToolCalls.at(-1)).toEqual({
           toolName: "listDevices",
-          params: { platform },
+          params: withProxyOwnerToken({ platform }),
         });
         await expect(proxy.callTool("observe", { deviceId })).rejects.toThrow(
           /acquire a new device session/i,
@@ -514,10 +519,10 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
         await proxy.callTool("observe", {});
 
         expect(client.callToolCalls).toEqual([
-          { toolName: acquisitionTool, params: initialArgs },
-          { toolName: "listDevices", params: { platform } },
-          { toolName: acquisitionTool, params: initialArgs },
-          { toolName: "observe", params: { sessionUuid: M2 } },
+          { toolName: acquisitionTool, params: withProxyOwnerToken(initialArgs) },
+          { toolName: "listDevices", params: withProxyOwnerToken({ platform }) },
+          { toolName: acquisitionTool, params: withProxyOwnerToken(initialArgs) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: M2 }) },
         ]);
         expect(sessionManager.getSession(M2)?.hasReceivedHeartbeat).toBe(true);
       } finally {
@@ -651,8 +656,12 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
           reason: "device-killed",
         }),
       ]);
-      expect(firstApple.client.callToolCalls).toEqual([{ toolName: "getApple", params: {} }]);
-      expect(secondApple.client.callToolCalls).toEqual([{ toolName: "getApple", params: {} }]);
+      expect(firstApple.client.callToolCalls).toEqual([
+        { toolName: "getApple", params: withProxyOwnerToken({}) },
+      ]);
+      expect(secondApple.client.callToolCalls).toEqual([
+        { toolName: "getApple", params: withProxyOwnerToken({}) },
+      ]);
 
       firstApple.client.emitConnectionClosed();
       secondApple.client.emitConnectionClosed();
@@ -663,17 +672,17 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
       await Promise.all([firstProxy.callTool("observe", {}), secondProxy.callTool("observe", {})]);
 
       expect(replacementApple.client.callToolCalls).toEqual([
-        { toolName: "getApple", params: {} },
+        { toolName: "getApple", params: withProxyOwnerToken({}) },
         {
           toolName: "observe",
-          params: { sessionUuid: "ios-replacement-a" },
+          params: withProxyOwnerToken({ sessionUuid: "ios-replacement-a" }),
         },
       ]);
       expect(replacementSecondApple.client.callToolCalls).toEqual([
-        { toolName: "getApple", params: {} },
+        { toolName: "getApple", params: withProxyOwnerToken({}) },
         {
           toolName: "observe",
-          params: { sessionUuid: "ios-replacement-b" },
+          params: withProxyOwnerToken({ sessionUuid: "ios-replacement-b" }),
         },
       ]);
     } finally {
@@ -740,13 +749,17 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
         }),
       ]);
 
-      expect(firstApple.client.callToolCalls).toEqual([{ toolName: "getApple", params: {} }]);
-      expect(secondApple.client.callToolCalls).toEqual([{ toolName: "getApple", params: {} }]);
+      expect(firstApple.client.callToolCalls).toEqual([
+        { toolName: "getApple", params: withProxyOwnerToken({}) },
+      ]);
+      expect(secondApple.client.callToolCalls).toEqual([
+        { toolName: "getApple", params: withProxyOwnerToken({}) },
+      ]);
       expect(replacementApple.callToolCalls).toEqual([
-        { toolName: "observe", params: { sessionUuid: "ios-session-a" } },
+        { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "ios-session-a" }) },
       ]);
       expect(replacementSecondApple.callToolCalls).toEqual([
-        { toolName: "observe", params: { sessionUuid: "ios-session-b" } },
+        { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "ios-session-b" }) },
       ]);
     } finally {
       await Promise.all([firstProxy.close(), secondProxy.close()]);

@@ -619,7 +619,7 @@ export function createStdioShutdownStages(
     ),
     stage(
       "stdio proxy",
-      "the daemon releasing this proxy's managed execution sessions",
+      "the daemon releasing this proxy's managed execution and ordinary owned sessions",
       always(dependencies.closeStdioProxy),
     ),
     stage("abandoned stage settle", "earlier stages that passed their deadline", (context) =>

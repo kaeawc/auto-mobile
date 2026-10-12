@@ -38,8 +38,9 @@ public protocol ElementLocating: Sendable {
     func getAppState(bundleId: String) -> ObservedAppState
 
     /// Wait for `bundleId` to reach `expectedState`. Bounded polling: up to 10 attempts at
-    /// 50ms intervals. Returns `true` if reached, `false` on timeout.
-    func awaitAppState(bundleId: String, expectedState: AppStateExpectation) -> Bool
+    /// 50ms intervals, yielding the main actor between probes. Returns `true` if reached,
+    /// `false` on exhaustion or cancellation.
+    func awaitAppState(bundleId: String, expectedState: AppStateExpectation) async -> Bool
 
     /// Bundle id of the currently tracked foreground app, or `nil` if none has been set.
     var foregroundBundleId: String? { get }

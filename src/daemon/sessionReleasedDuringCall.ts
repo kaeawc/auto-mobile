@@ -19,6 +19,7 @@ export const SESSION_OWNERSHIP_LOST_CODE = "session_ownership_lost" as const;
  * Kept free of the session machinery so the wire layer can recognise it without loading the daemon.
  */
 export class SessionReleasedDuringCallError extends ActionableError {
+  declare charsSent?: number;
   readonly code = SESSION_OWNERSHIP_LOST_CODE;
   readonly retryable = false;
   readonly nextAction = ACQUIRE_NEW_SESSION_NEXT_ACTION;

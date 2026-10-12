@@ -7,7 +7,14 @@ import {
 } from "../daemon/inputDeviceOwnership";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
-import type { Platform } from "../models";
+import type { RestartStopIdentity } from "../daemon/devicePool";
+import {
+  androidLifecycleDiscoveryIncomplete,
+  POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS,
+  type DeviceToolsDependencies,
+} from "./deviceTools";
+import { isUnresolvedAndroidEmulatorName } from "../devices/deviceIdentityEvidence";
+import type { BootedDevice, Platform } from "../models";
 import { logger } from "../utils/logger";
 import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
 
@@ -40,6 +47,47 @@ export function lifecycleRequester(args: object): LifecycleRequester {
   };
 }
 
+/** Resolve once before synchronous stop guards; shutdown reuses this evidence for its capture. */
+export async function resolveRestartStopIdentity(input: {
+  device: BootedDevice;
+  dependencies: DeviceToolsDependencies;
+  deadlineMs: number;
+  signal?: AbortSignal;
+  /** Identity of an already-stopped image from teardown's existing target resolution. */
+  stoppedStableId?: string;
+}): Promise<RestartStopIdentity | undefined> {
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return undefined;
+  }
+  const pool = daemonState.getDevicePool();
+  const { device, dependencies, deadlineMs, signal, stoppedStableId } = input;
+  if (!pool.hasRestartHandoffReservation?.(device.platform)) {
+    return undefined;
+  }
+  const known =
+    stoppedStableId ?? pool.restartStopConfirmedPooledIdentity?.(device.deviceId, device.platform);
+  if (known !== undefined) {
+    return { confirmed: known };
+  }
+  const timeoutMs = Math.min(
+    POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS,
+    deadlineMs - dependencies.timer.now(),
+  );
+  if (timeoutMs <= 0) {
+    return { unconfirmed: true };
+  }
+  try {
+    const name = await dependencies.resolveRunningAndroidAvdName(device, timeoutMs, signal);
+    return name && !isUnresolvedAndroidEmulatorName({ ...device, name })
+      ? { confirmed: name }
+      : { unconfirmed: true };
+  } catch (error) {
+    logger.warn(`[DeviceTools] Stop identity probe failed for ${device.deviceId}`, error);
+    return { unconfirmed: true };
+  }
+}
+
 /**
  * Device ownership for lifecycle tools that stop a running device (#10785). These tools are
  * registered without device routing, so `ToolRegistry`'s device-aware ownership check
@@ -57,8 +105,9 @@ export function assertLifecycleCallerHoldsDevice(input: {
   device: { deviceId: string; platform: Platform };
   requester: LifecycleRequester;
   force: boolean;
-  /** Extra stable identities of the target (an AVD name the caller resolved). */
+  /** Caller labels are hints for an unresolved target, never reservation identity. */
   stableIds?: ReadonlyArray<string | undefined>;
+  stopIdentity?: RestartStopIdentity;
   /** Stop tools also fence a restart hold's original connection, even with force. */
   checkRestartHold?: boolean;
 }): void {
@@ -71,7 +120,7 @@ export function assertLifecycleCallerHoldsDevice(input: {
   const base = (uuid: string) => resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
   assertNotForeignManagedSlotFromSnapshot(daemonState, input);
   const pool = daemonState.getDevicePool();
-  assertLifecycleRequesterOwnsRestartHold(pool, input);
+  assertLifecycleCallerMayStopRestartReservation(input);
   const owner = sessionManager.getSessionForDevice(device.deviceId) ?? undefined;
   if (!owner) {
     return;
@@ -108,23 +157,31 @@ export function assertLifecycleCallerHoldsDevice(input: {
   });
 }
 
-/** Naming a handed-off holder remains connection-owned even while no live session exists. */
-function assertLifecycleRequesterOwnsRestartHold(
-  pool: ReturnType<DaemonState["getDevicePool"]>,
-  {
-    toolName,
-    device,
-    requester,
-    checkRestartHold,
-  }: Pick<
-    Parameters<typeof assertLifecycleCallerHoldsDevice>[0],
-    "toolName" | "device" | "requester" | "checkRestartHold"
-  >,
-): void {
-  if (!checkRestartHold) {
+/** Stopped images need only the restart guard; live-holder and slot snapshot checks stay separate. */
+export function assertLifecycleCallerMayStopRestartReservation({
+  toolName,
+  device,
+  requester,
+  checkRestartHold,
+  stableIds,
+  stopIdentity,
+}: Parameters<typeof assertLifecycleCallerHoldsDevice>[0]): void {
+  const daemonState = DaemonState.getInstance();
+  if (!checkRestartHold || !daemonState.isInitialized()) {
     return;
   }
-  if (pool.isRestartReservationOwnedByOtherConnection?.(device.deviceId, requester)) {
+  const pool = daemonState.getDevicePool();
+  const identity = {
+    platform: device.platform,
+    stableIds: stableIds?.filter((id): id is string => id !== undefined),
+    stopIdentity,
+  };
+  assertRestartStopIdentityConfirmed(pool, device, requester, identity);
+  const reservation = pool.restartReservationForStop?.(device.deviceId, requester, identity);
+  if (
+    reservation?.foreignConnection ||
+    pool.isRestartReservationOwnedByOtherConnection?.(device.deviceId, requester, identity)
+  ) {
     throw new InputDeviceOwnedError(
       toolName,
       device.deviceId,
@@ -136,6 +193,65 @@ function assertLifecycleRequesterOwnsRestartHold(
         "the recovery window to end. force: true does not override naming another client's session.",
     );
   }
+  assertNotStoppingAnotherRestartHold(pool, { toolName, device, requester }, reservation);
+}
+
+function assertRestartStopIdentityConfirmed(
+  pool: ReturnType<DaemonState["getDevicePool"]>,
+  device: { deviceId: string; platform: Platform },
+  requester: LifecycleRequester,
+  identity: {
+    platform: Platform;
+    stableIds?: readonly string[];
+    stopIdentity?: RestartStopIdentity;
+  },
+): void {
+  const unconfirmed = identity.stopIdentity
+    ? "unconfirmed" in identity.stopIdentity
+    : pool.restartStopConfirmedPooledIdentity?.(device.deviceId, device.platform) === undefined;
+  if (
+    unconfirmed &&
+    pool.hasUnconfirmedRestartStopReservation?.(device.deviceId, requester, identity)
+  ) {
+    throw androidLifecycleDiscoveryIncomplete(device.deviceId, undefined);
+  }
+}
+
+function assertNotStoppingAnotherRestartHold(
+  pool: ReturnType<DaemonState["getDevicePool"]>,
+  {
+    toolName,
+    device,
+    requester,
+  }: Pick<
+    Parameters<typeof assertLifecycleCallerHoldsDevice>[0],
+    "toolName" | "device" | "requester"
+  >,
+  reservation: ReturnType<ReturnType<DaemonState["getDevicePool"]>["restartReservationForStop"]>,
+): void {
+  if (!reservation || reservation.owned) {
+    return;
+  }
+  const differentSession =
+    requester.sessionUuid !== undefined ||
+    pool.restartStopConnectionHasLiveSession?.(requester.mcpSessionId);
+  if (!differentSession) {
+    return;
+  }
+  throw new InputDeviceOwnedError(
+    toolName,
+    device.deviceId,
+    requester.sessionUuid,
+    undefined,
+    `${toolName} refused: device '${device.deviceId}' is reserved for session ` +
+      `${reservation.sessionUuid}'s device-restart recovery. ` +
+      (requester.sessionUuid
+        ? `Session ${requester.sessionUuid} does not hold it. `
+        : "This connection holds another device session. ") +
+      `Retry in ${reservation.retryAfterMs}ms, once the recovery window ends. ` +
+      "force: true does not override a reservation held for another session.",
+    reservation.retryAfterMs,
+  );
 }
 
 /** Remedy text for a lifecycle call refused because another live daemon holds the device. */

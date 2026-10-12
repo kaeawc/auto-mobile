@@ -1377,7 +1377,7 @@ export function cancelProvisionDeviceRequest(
  * or the caller's remaining teardown/kill deadline, and an unanswered probe
  * REFUSES the action (see {@link confirmPooledAvdIdentity}).
  */
-const POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS = 3_000;
+export const POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS = 3_000;
 
 /**
  * Exported for tests only: the DEFAULT {@link
@@ -4722,7 +4722,7 @@ function assertAndroidLifecycleDiscovery(
  * did not complete. Typed retryable `discovery_incomplete`, never a generic error; a genuinely
  * ambiguous identity under COMPLETE discovery keeps its plain ActionableError.
  */
-function androidLifecycleDiscoveryIncomplete(
+export function androidLifecycleDiscoveryIncomplete(
   deviceId: string,
   discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> | undefined,
 ): AndroidBootedDeviceDiscoveryIncompleteError {

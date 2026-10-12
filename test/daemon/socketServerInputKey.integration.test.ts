@@ -1,3 +1,14 @@
+import { spyOn } from "bun:test";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import { executionTracker } from "../../src/server/executionTracker";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
+import {
+  createFakeDaemonState as createDrainDaemonState,
+  createFakeSession as createDrainSession,
+} from "./helpers/inputSocketHarness";
+import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -95,6 +106,11 @@ describe("UnixSocketServer input/key", () => {
     }
     InputKey.prototype.press = originalPress;
     PlatformDeviceManagerFactory.reset();
+    mock.restore();
+    AndroidCtrlProxyClient.clearInstanceRegistryForTesting();
+    IOSCtrlProxyClient.clearInstanceRegistryForTesting();
+    executionTracker.clearDaemonRestartPreparation();
+    executionTracker.clearDaemonMaintenancePreparation();
   });
 
   test("routes Android key presses without forwarding through tools/call", async () => {
@@ -299,5 +315,116 @@ describe("UnixSocketServer input/key", () => {
     expect(modifiers.response.success).toBe(false);
     expect(modifiers.response.error).toBe("input/key unsupported params: modifiers");
     expect(modifiers.frameCount).toBe(1);
+  });
+  test("tracks direct input until a session-loss drain can safely finish", async () => {
+    const operationStarted = Promise.withResolvers<void>();
+    const releaseOperation = Promise.withResolvers<void>();
+    let sent = false;
+    const adb = new FakeAdbExecutor();
+    spyOn(defaultAdbClientFactory, "create").mockReturnValue(adb);
+    const deviceRequest = spyOn(adb, "execute").mockImplementation(async (_args, options) => {
+      await options?.beforeDispatch?.(options.timeoutMs);
+      options?.signal?.throwIfAborted();
+      sent = true;
+      operationStarted.resolve();
+      await releaseOperation.promise;
+      return { stdout: "", stderr: "" };
+    });
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    const sessionId = "direct-key-after-dispatch-session";
+    const sessions = new Map([
+      [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
+    ]);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createDrainDaemonState(sessions),
+      fakeTimer,
+    );
+    await server.start();
+    const response = sendRequest(socketPath, "input/key", {
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+      key: "enter",
+      sessionUuid: sessionId,
+    }).then((value) => value.response);
+    await operationStarted.promise;
+    expect(executionTracker.hasActiveSessionUuidExecutions(sessionId)).toBe(true);
+    expect(await executionTracker.cancelDeviceSessionExecutions(sessionId, "test recovery")).toBe(
+      1,
+    );
+    let drained = false;
+    const drain = executionTracker
+      .waitForDeviceSessionExecutionsToEnd(sessionId, 1_000)
+      .then((result) => {
+        drained = result;
+        return result;
+      });
+    await drainMicrotasks(100);
+    // Dispatch is latched exactly as in the real client; drain waits for its runner reply.
+    expect(drained).toBe(false);
+    releaseOperation.resolve();
+    expect(await drain).toBe(true);
+    const failure = await response;
+    expect(failure.success).toBe(false);
+    expect(failure.error).toContain("indeterminate");
+    expect(sent).toBe(true);
+    await deviceRequest.mock.results[0]!.value;
+    expect(executionTracker.hasActiveSessionUuidExecutions(sessionId)).toBe(false);
+  });
+
+  test("a direct input cancelled before dispatch lets a session-loss drain finish at once and is never sent", async () => {
+    const operationStarted = Promise.withResolvers<void>();
+    const releaseOperation = Promise.withResolvers<void>();
+    let sent = false;
+    const adb = new FakeAdbExecutor();
+    spyOn(defaultAdbClientFactory, "create").mockReturnValue(adb);
+    const deviceRequest = spyOn(adb, "execute").mockImplementation(async (_args, options) => {
+      operationStarted.resolve();
+      await releaseOperation.promise;
+      await options?.beforeDispatch?.(options.timeoutMs);
+      options?.signal?.throwIfAborted();
+      sent = true;
+      return { stdout: "", stderr: "" };
+    });
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    const sessionId = "direct-key-before-dispatch-session";
+    const sessions = new Map([
+      [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
+    ]);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createDrainDaemonState(sessions),
+      fakeTimer,
+    );
+    await server.start();
+    const response = sendRequest(socketPath, "input/key", {
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+      key: "enter",
+      sessionUuid: sessionId,
+    }).then((value) => value.response);
+    await operationStarted.promise;
+    expect(executionTracker.hasActiveSessionUuidExecutions(sessionId)).toBe(true);
+    expect(await executionTracker.cancelDeviceSessionExecutions(sessionId, "test recovery")).toBe(
+      1,
+    );
+    let drained = false;
+    const drain = executionTracker
+      .waitForDeviceSessionExecutionsToEnd(sessionId, 1_000)
+      .then((result) => {
+        drained = result;
+        return result;
+      });
+    await drainMicrotasks(100);
+    expect(drained).toBe(true);
+    expect(await drain).toBe(true);
+    expect((await response).success).toBe(false);
+    releaseOperation.resolve();
+    await expect(deviceRequest.mock.results[0]!.value).rejects.toThrow();
+    await drainMicrotasks(100);
+    expect(sent).toBe(false);
+    expect(executionTracker.hasActiveSessionUuidExecutions(sessionId)).toBe(false);
   });
 });

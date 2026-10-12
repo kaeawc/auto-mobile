@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "fs/promises";
 import * as path from "path";
-import os from "os";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { IosCtrlProxyBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -26,6 +26,7 @@ describe("authoritative iOS local builds", () => {
   let savedEnv: (string | undefined)[];
   let originalPlatform: PropertyDescriptor | undefined;
   let tempDir: string;
+  const scratch = useScratchRoot("ios-local-build-");
   let derivedDataPath: string;
   let bundleCacheDir: string;
   let productsDir: string;
@@ -49,7 +50,7 @@ describe("authoritative iOS local builds", () => {
     IosCtrlProxyBuilder.setIosPrerequisiteDetectorForTesting({
       hasIosPrerequisites: async () => true,
     });
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ios-local-build-"));
+    tempDir = scratch.next();
     derivedDataPath = path.join(tempDir, "Derived Data's");
     bundleCacheDir = path.join(tempDir, "cache");
     productsDir = path.join(derivedDataPath, "Build", "Products");
@@ -78,7 +79,6 @@ describe("authoritative iOS local builds", () => {
         process.env[key] = value;
       }
     }
-    await fs.rm(tempDir, { recursive: true, force: true });
   });
 
   // Reuse the existing fake's product fixture writer, independently of the

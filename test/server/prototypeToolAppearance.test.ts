@@ -32,6 +32,8 @@ const spec = {
 };
 const darkOverride: PrototypeAppearance = { mode: "dark", source: "override", deviceDark: false };
 const lightSystem: PrototypeAppearance = { mode: "light", source: "system", deviceDark: false };
+/** What the host-local status reports of a device answer: mode and source, never deviceDark (#11416). */
+const hostLocal = ({ mode, source }: PrototypeAppearance) => ({ mode, source });
 const png = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
   Buffer.alloc(4),
@@ -246,8 +248,8 @@ describe("prototype appearance on the host (#11223)", () => {
       const shown = await show(android, { appearance: "dark" });
       expect(shown.lastResult?.appearance).toEqual(darkOverride);
       const status = await call(android, { action: "status" });
-      expect(status.prototypes?.[0]?.appearance).toEqual(darkOverride);
-      expect(status.lastResult?.appearance).toEqual(darkOverride);
+      expect(status.prototypes?.[0]?.appearance).toEqual(hostLocal(darkOverride));
+      expect(status.lastResult?.appearance).toEqual(hostLocal(darkOverride));
     });
 
     test("a device that reports none leaves the field absent, and a malformed one is dropped", async () => {
@@ -272,7 +274,7 @@ describe("prototype appearance on the host (#11223)", () => {
       const refused = await show(android);
       expect(refused.lastResult).not.toHaveProperty("appearance");
       const status = await call(android, { action: "status" });
-      expect(status.prototypes?.[0]?.appearance).toEqual(lightSystem);
+      expect(status.prototypes?.[0]?.appearance).toEqual(hostLocal(lightSystem));
     });
 
     test("a dismiss result carries no appearance", async () => {
@@ -289,7 +291,7 @@ describe("prototype appearance on the host (#11223)", () => {
       const shown = await show(ios, { appearance: "dark" });
       expect(shown.lastResult?.appearance).toEqual(darkOverride);
       expect((await call(ios, { action: "status" })).prototypes?.[0]?.appearance).toEqual(
-        darkOverride,
+        hostLocal(darkOverride),
       );
       // An agent without the capability reports none.
       const plain = await show(ios);
@@ -307,7 +309,7 @@ describe("prototype appearance on the host (#11223)", () => {
       const inspected = await call(android, { action: "inspect" });
       expect(inspected.prototypes?.[0]?.appearance).toEqual(darkOverride);
       expect((await call(android, { action: "status" })).prototypes?.[0]?.appearance).toEqual(
-        darkOverride,
+        hostLocal(darkOverride),
       );
       // An older CtrlProxy omits it; the host does not carry the previous value over.
       client.setInspectReply({ success: true, prototypes: [entry], droppedEvents: 0 });
@@ -353,18 +355,20 @@ describe("prototype appearance on the host (#11223)", () => {
       expect(status.prototypes?.[0]?.appearance).toEqual({ mode: "dark", source: "system" });
       expect(status.prototypes?.[0]?.appearance).not.toHaveProperty("deviceDark");
       // lastResult stays the record of what the show itself reported.
-      expect(status.lastResult?.appearance).toEqual(lightSystem);
+      expect(status.lastResult?.appearance).toEqual(hostLocal(lightSystem));
     });
 
     test("pinned dark on a light device, then a state-driven change: deviceDark is dropped, not kept stale (#11416)", async () => {
       client.setSupportedCommands([INSPECT, PROTOTYPE_APPEARANCE_CAPABILITY]);
       client.setPrototypeResult({ success: true, appearance: darkOverride });
-      await show(android, { appearance: "dark" });
-      // The device flips to dark: the pinned mode is unchanged, so no event arrives and the
-      // host still holds what the show reported.
-      expect(
-        (await call(android, { action: "status" })).prototypes?.[0]?.appearance?.deviceDark,
-      ).toBe(false);
+      const shown = await show(android, { appearance: "dark" });
+      // The show result is the device's answer, so it reports deviceDark.
+      expect(shown.lastResult?.appearance).toEqual(darkOverride);
+      // The device flips to dark: the pinned mode is unchanged, so no event arrives. status is
+      // host-local and cannot know, so it reports mode and source only, never the old false.
+      const pinned = await call(android, { action: "status" });
+      expect(pinned.prototypes?.[0]?.appearance).toEqual({ mode: "dark", source: "override" });
+      expect(pinned.lastResult?.appearance).toEqual({ mode: "dark", source: "override" });
       client.emitPrototypeEvent(changed(1, { mode: "light", source: "authoredBackground" }));
       const afterEvent = (await call(android, { action: "status" })).prototypes?.[0]?.appearance;
       expect(afterEvent).toEqual({ mode: "light", source: "authoredBackground" });
@@ -405,7 +409,7 @@ describe("prototype appearance on the host (#11223)", () => {
       const waited = await call(android, { action: "awaitEvent", id: spec.id });
       expect(waited.event?.kind).toBe("appearance_changed");
       const status = await call(android, { action: "status" });
-      expect(status.prototypes?.[0]?.appearance).toEqual(lightSystem);
+      expect(status.prototypes?.[0]?.appearance).toEqual(hostLocal(lightSystem));
     });
 
     test("iOS delivers the agent's push through awaitEvent and refreshes status", async () => {

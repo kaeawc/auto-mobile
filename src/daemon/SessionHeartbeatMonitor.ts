@@ -1,4 +1,5 @@
 import { Timer, defaultTimer, monotonicClockSemanticsDrift } from "../utils/SystemTimer";
+import { readOptionalEnvPositiveInteger } from "../utils/envNumbers";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
@@ -46,6 +47,8 @@ export interface HeartbeatSessionSource {
    * clock.
    */
   sessionNow?(): number;
+  /** Lease heartbeat including a qualifying same-token base's owner proof (#11722). */
+  judgedLeaseHeartbeat?(session: Session): number;
   /** Register a detector the source runs before every expiry judgement; undefined detaches it. */
   setStallProbe?(probe: (() => void) | undefined): void;
   /**
@@ -61,6 +64,13 @@ export interface HeartbeatSessionSource {
    * release's start and never reaps it for the silence the release itself imposed.
    */
   getNonTerminalReleasesInProgress?(): NonTerminalReleaseInProgress[];
+  /**
+   * Whether the release of this session that started at `startedAtMs` is still running and still
+   * holds its device, whatever reason it carries now (#11554). A joiner can upgrade a non-terminal
+   * release to a terminal reason, which drops it from {@link getNonTerminalReleasesInProgress}
+   * while it is as wedged as before; the monitor asks this before it forgets a release it tracks.
+   */
+  isReleaseInProgress?(sessionId: string, startedAtMs: number): boolean;
 }
 
 /** One idle release the session source is still running. */
@@ -165,12 +175,7 @@ export const STUCK_REAP_WARN_MS =
 const DEFAULT_INITIAL_GRACE_MS = 20_000;
 
 function readPositiveMsEnv(primaryName: string, legacyName: string): number | undefined {
-  const rawValue = process.env[primaryName] ?? process.env[legacyName];
-  if (!rawValue) {
-    return undefined;
-  }
-  const parsed = Number.parseInt(rawValue, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  return readOptionalEnvPositiveInteger(primaryName, legacyName);
 }
 
 /**
@@ -584,9 +589,12 @@ export class SessionHeartbeatMonitor {
   /**
    * Mirror the releases the source runs without a monitor reap into {@link reapStartedAt}: its
    * idle releases (#11481) and its non-terminal releases, which the monitor never joins (#11554)
-   * and so must hold to the stuck deadline from their own start. One that settled, was forced and
-   * so no longer holds its device, or was upgraded to a terminal reason drops out of the source's
-   * lists and is forgotten here; a new release of the same session id starts a new deadline. A
+   * and so must hold to the stuck deadline from their own start. One that settled, or was forced
+   * and so no longer holds its device, is forgotten here; a new release of the same session id
+   * starts a new deadline. One a joiner upgraded to a terminal reason also drops out of the
+   * source's lists, but it is the same release, as wedged as before, and no reap of the monitor
+   * need ever join it (an in-flight call vetoes the reap): it stays tracked from its own start
+   * until the source says it is over, and is forced with whatever reason it carries by then. A
    * reap of the monitor's own is left alone: it is already tracked from its own start and
    * forgotten when it settles.
    */
@@ -602,7 +610,11 @@ export class SessionHeartbeatMonitor {
       ]),
     );
     for (const [sessionId, tracked] of this.reapStartedAt) {
-      if (tracked.sourceRelease && inProgress.get(sessionId) !== tracked.at) {
+      if (
+        tracked.sourceRelease &&
+        inProgress.get(sessionId) !== tracked.at &&
+        this.sessions.isReleaseInProgress?.(sessionId, tracked.at) !== true
+      ) {
         this.reapStartedAt.delete(sessionId);
       }
     }
@@ -705,9 +717,11 @@ export class SessionHeartbeatMonitor {
     // heartbeated is judged on its owner's own heartbeats: `lastHeartbeat` is also stamped by tool
     // calls from any connection, which must not keep a dead owner's lease alive (#11107). A
     // session no proxy owns keeps the activity-refreshed `lastHeartbeat` fallback.
-    const lastHeartbeat = judgedLeaseHeartbeat(session);
+    const ownHeartbeat = judgedLeaseHeartbeat(session);
+    const lastHeartbeat = this.sessions.judgedLeaseHeartbeat?.(session) ?? ownHeartbeat;
 
-    if (!session.hasReceivedHeartbeat) {
+    // A later base heartbeat is owner proof even if this label never heartbeated by name (#11722).
+    if (!session.hasReceivedHeartbeat && lastHeartbeat === ownHeartbeat) {
       if (session.heartbeatTimeoutSource === "default") {
         return now - lastHeartbeat > this.preFirstHeartbeatGraceMs
           ? "missing-first-heartbeat"

@@ -133,6 +133,13 @@ export type SimctlScreenshotFailureReason =
   | "aborted-by-timeout"
   | "non-zero-exit";
 
+/**
+ * `xcrun`/`simctl` is not installed on this host (ENOENT, no active developer directory, or xcrun
+ * cannot find the utility). Distinct from a simctl that exists and failed: discovery reports this
+ * one as not applicable rather than incomplete (#11605).
+ */
+export class SimctlUnavailableError extends ActionableError {}
+
 export class SimctlScreenshotError extends Error {
   readonly reason: SimctlScreenshotFailureReason;
   readonly exitCode: number | null;
@@ -1098,7 +1105,7 @@ export class SimCtlClient implements SimCtl {
       this.platform === "darwin"
         ? `simctl is not available. Please install Xcode command line tools to continue. ${detail}`
         : "iOS simulator tooling is only available on macOS.";
-    return new ActionableError(message);
+    return new SimctlUnavailableError(message);
   }
 
   /**

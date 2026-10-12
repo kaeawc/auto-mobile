@@ -282,40 +282,84 @@ describe("stdio proxy: keeper fence, not-delivered retry and result-minted disco
     });
   });
 
-  describe("(d) unbound tool list while released, then re-binding a surviving session", () => {
-    test("does not serve a tool list cached while released after an explicit sessionUuid re-binds", async () => {
-      const timer = new FakeTimer();
-      let minted = FIRST_SESSION;
-      const client = mintingClient(() => minted);
-      const target = createProxy(timer, [client], () => client);
-
+  describe("(d) unbound lists while released, then binding a surviving session", () => {
+    // Two minted sessions; the second (the binding) is released. A call naming the surviving
+    // first session runs on it and binds nothing (#11656), so lists stay unbound and uncached
+    // until the agent binds a session explicitly, and are then asked under that session.
+    async function releasedBindingBesideSurvivor(): Promise<{
+      client: FakeDaemonClient;
+      target: DaemonMcpProxy;
+      bindSurvivor: (how: "setActiveDevice" | "getAndroid") => Promise<unknown>;
+    }> {
+      const sessionResult = (payload: Record<string, unknown>) => ({
+        content: [{ type: "text", text: JSON.stringify(payload) }],
+      });
+      const client = new FakeDaemonClient({
+        daemonMethodResults: discoveryResults(),
+        toolResultFor: (toolName) =>
+          toolName === "getAndroid"
+            ? sessionResult({ sessionId: FIRST_SESSION })
+            : toolName === "getApple"
+              ? sessionResult({ sessionId: SECOND_SESSION })
+              : toolName === "setActiveDevice"
+                ? sessionResult({ sessionUuid: FIRST_SESSION })
+                : undefined,
+      });
+      const target = createProxy(new FakeTimer(), [client], () => client);
       await target.callTool("getAndroid", {});
-      minted = SECOND_SESSION;
       await target.callTool("getApple", {});
       client.emitNotification(
         SESSION_RELEASED_NOTIFICATION_METHOD,
         SECOND_SESSION,
         "device-killed",
       );
+      return { client, target, bindSurvivor: (how) => target.callTool(how, {}) };
+    }
+
+    async function listEverything(target: DaemonMcpProxy): Promise<void> {
+      await target.listTools();
+      await target.listResources();
+      await target.listResourceTemplates();
+    }
+
+    const listsUnder = (params: Record<string, unknown>) => [
+      { method: "tools/list", params },
+      { method: "resources/list", params },
+      { method: "resources/list-templates", params },
+    ];
+
+    test("a named call for the surviving session runs and binds nothing: lists stay unbound and uncached", async () => {
+      const { client, target } = await releasedBindingBesideSurvivor();
 
       client.callDaemonMethodCalls.length = 0;
-      await target.listTools();
-      await target.listTools();
-      // Unbound lists are not cached while released (as resources already are).
-      expect(listCalls(client)).toEqual([
-        { method: "tools/list", params: {} },
-        { method: "tools/list", params: {} },
-      ]);
-
-      // An explicit call for the surviving first session re-binds it with no
-      // acquisition result, so nothing else would drop a cached unbound list.
+      await listEverything(target);
       await target.callTool("observe", { sessionUuid: FIRST_SESSION });
-      client.callDaemonMethodCalls.length = 0;
-      await target.listTools();
-      expect(listCalls(client)).toEqual([
-        { method: "tools/list", params: { sessionUuid: FIRST_SESSION } },
-      ]);
+      await listEverything(target);
+
+      expect({
+        named: client.callToolCalls.at(-1)?.params.sessionUuid,
+        lists: listCalls(client),
+      }).toEqual({
+        named: FIRST_SESSION,
+        // Asked each time: a list fetched while released is never served from a cache.
+        lists: [...listsUnder({}), ...listsUnder({})],
+      });
     });
+
+    for (const how of ["setActiveDevice", "getAndroid"] as const) {
+      test(`${how} for the surviving session binds it: lists are asked under it, not served from the released cache`, async () => {
+        const { client, target, bindSurvivor } = await releasedBindingBesideSurvivor();
+        await listEverything(target);
+        await target.callTool("observe", { sessionUuid: FIRST_SESSION });
+        await listEverything(target);
+
+        await bindSurvivor(how);
+        client.callDaemonMethodCalls.length = 0;
+        await listEverything(target);
+
+        expect(listCalls(client)).toEqual(listsUnder({ sessionUuid: FIRST_SESSION }));
+      });
+    }
   });
 
   describe("(e) closing during the last safe reconnect", () => {

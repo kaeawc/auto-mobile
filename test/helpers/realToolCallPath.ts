@@ -2,6 +2,7 @@ import { spyOn } from "bun:test";
 import {
   INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
 } from "../../src/daemon/constants";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
@@ -36,10 +37,11 @@ const SUCCESS = { content: [{ type: "text", text: JSON.stringify({ success: true
  * The production device-tool path for daemon harnesses (#10839): the real `rotate`/`observe`/...
  * registrations, the real `ToolRegistry` target resolution (ownership refusal, session admission,
  * `createToolExecutionContext`), and the execution tracker run exactly as the daemon's tool-call
- * entry runs them, so a tool call's start and end reach the daemon wiring the harness subscribes
- * (`subscribeToolCallEndActivity`). Only the device boundary is fake: device discovery and
- * readiness ({@link FakeDeviceSessionManager}), display inventory, CtrlProxy, and the handler's
- * device work (the audit runner, which runs {@link DeviceToolBody} instead of the handler).
+ * entry runs them, so a tool call's start, end and request deadline reach the daemon wiring the
+ * harness subscribes (`subscribeToolCallEndActivity`, the release vetoes' deadline lookup). Only
+ * the device boundary is fake: device discovery and readiness ({@link FakeDeviceSessionManager}),
+ * display inventory, CtrlProxy, and the handler's device work (the audit runner, which runs
+ * {@link DeviceToolBody} instead of the handler).
  *
  * `ToolRegistry` reads `DaemonState.getInstance()`, so the harness must initialize it with its
  * daemon's session manager and pool.
@@ -55,6 +57,8 @@ export class RealToolCallPath {
   readonly cancelledExecutions: Array<{ name: string; sessionUuid: string | undefined }> = [];
   /** Writes a socket `ide/*` frame sent to the device through CtrlProxy (the device boundary). */
   readonly ctrlProxyWrites: string[] = [];
+  /** Streamed-gesture frames CtrlProxy received, as `<start|move|end|cancel>:<gestureId>`. */
+  readonly gestureFrames: string[] = [];
   /** Devices the read-only (watcher) path resolved from the booted list (#10830). */
   watcherResolutions = 0;
   /** Devices whose observer capture the read-only path ran (the handler's `executeDeviceRead`). */
@@ -74,7 +78,7 @@ export class RealToolCallPath {
     this.deviceSessionManager.setConnectedDevices(devices);
   }
 
-  install(): this {
+  install(registerDefaultTools = true): this {
     ToolRegistry.clearTools();
     this.restorers.push(
       ToolRegistry.setPipelineOverridesForTesting({
@@ -116,9 +120,25 @@ export class RealToolCallPath {
             this.ctrlProxyWrites.push("setPreference");
             return { success: true };
           },
+          requestGestureStart: async (gestureId: string) => {
+            this.gestureFrames.push(`start:${gestureId}`);
+            return { success: true };
+          },
+          requestGestureMove: async (gestureId: string) => {
+            this.gestureFrames.push(`move:${gestureId}`);
+            return { success: true };
+          },
+          requestGestureEnd: async (gestureId: string, _x: number, _y: number, cancel: boolean) => {
+            this.gestureFrames.push(`${cancel ? "cancel" : "end"}:${gestureId}`);
+            return { success: true };
+          },
         }) as unknown as AndroidCtrlProxyClient,
     );
     this.restorers.push(() => ctrlProxy.mockRestore());
+    // Focused admission suites register their own tool and keep the real pipeline above.
+    if (!registerDefaultTools) {
+      return this;
+    }
     registerInteractionTools();
     // sqlQuery is an embedded-SDK tool: it is only reachable when that mode is on.
     const embeddedSdk = serverConfig.isEmbeddedSdkEnabled();
@@ -182,6 +202,12 @@ export class RealToolCallPath {
     }
     const sessionUuid = typeof args.sessionUuid === "string" ? args.sessionUuid : undefined;
     const execution = executionTracker.startExecution(name, undefined, sessionUuid);
+    // The entry records the absolute deadline the socket server stamped on the forwarded call, so
+    // a release this call vetoes is bounded by the call's own deadline (#10712).
+    const requestDeadlineMs = args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
+    executionTracker.setExecutionDeadline(execution.id, () =>
+      typeof requestDeadlineMs === "number" ? requestDeadlineMs : undefined,
+    );
     execution.abortController.signal.addEventListener(
       "abort",
       () => this.cancelledExecutions.push({ name, sessionUuid }),

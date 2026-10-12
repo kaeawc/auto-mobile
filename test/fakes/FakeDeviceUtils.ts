@@ -270,6 +270,14 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
   failedSources: Set<DiscoverySource> = new Set();
 
   /**
+   * Sources whose tooling is not installed on this host (no adb binary, no Xcode/simctl, no
+   * devicectl): production reports these with the typed `unavailable` error, which is "not
+   * applicable", never a failed sweep (#11605). `failedPlatforms`/`failedSources` model a tool
+   * that exists and failed.
+   */
+  notInstalledSources: Set<DiscoverySource> = new Set();
+
+  /**
    * Omit `succeededSources` from the result to model a producer that predates
    * per-source reporting, exercising the consumer's platform-aggregate fallback.
    */
@@ -327,6 +335,15 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
       // returns (and vice versa), matching FakeDeviceManager and production.
       const platformDevices = await this.getBootedDevices(p);
       for (const source of sourcesForPlatform(p)) {
+        if (this.notInstalledSources.has(source)) {
+          if (source === "ios-physical") {
+            sourceErrors[source] = {
+              code: "unavailable",
+              message: "devicectl could not list physical iOS devices (xcrun/devicectl not found)",
+            };
+          }
+          continue;
+        }
         if (this.failedPlatforms.has(p) || this.failedSources.has(source)) {
           if (source === "ios-physical") {
             sourceErrors[source] = {
@@ -344,13 +361,22 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
       // The platform aggregate mirrors production: iOS tracks the simulator
       // source, so a devicectl-only failure keeps the platform succeeded.
       const platformSource: DiscoverySource = p === "android" ? "android" : "ios-simulator";
-      if (this.failedPlatforms.has(p) || this.failedSources.has(platformSource)) {
+      if (this.notInstalledSources.has(platformSource)) {
         discoveryErrors[p] = {
           code: "unavailable",
+          message: `${p === "ios" ? "iOS" : "Android"} booted-device discovery is unavailable.`,
+        };
+        continue;
+      }
+      if (this.failedPlatforms.has(p) || this.failedSources.has(platformSource)) {
+        // A tool that exists and failed is `failed`, as in production; `unavailable` is reserved
+        // for tooling that is not installed (`notInstalledSources`).
+        discoveryErrors[p] = {
+          code: "failed",
           message:
             p === "android" && this.androidDiscoveryErrorMessage
               ? this.androidDiscoveryErrorMessage
-              : `${p === "ios" ? "iOS" : "Android"} booted-device discovery is unavailable.`,
+              : `${p === "ios" ? "iOS" : "Android"} booted-device discovery failed.`,
         };
         continue;
       }

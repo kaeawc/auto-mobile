@@ -316,8 +316,9 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
     }
 
     options?.signal?.throwIfAborted();
-    // Set as current device
-    this.setCurrentDevice(selectedDevice, selectedDevice.platform);
+    if (options?.intent !== "read") {
+      this.setCurrentDevice(selectedDevice, selectedDevice.platform);
+    }
 
     return selectedDevice;
   }

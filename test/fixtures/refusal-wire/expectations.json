@@ -392,14 +392,6 @@
         "acquireNewSession": false
       }
     },
-    "provision_device.device_offline": {
-      "expected": "retry",
-      "fields": {
-        "code": "device_offline",
-        "retryable": true,
-        "acquireNewSession": false
-      }
-    },
     "provision_device.identity_conflict": {
       "expected": "fail",
       "fields": {
@@ -577,6 +569,15 @@
         "code": "daemon_restart_pending",
         "retryable": true,
         "acquireNewSession": false
+      }
+    },
+    "device_offline": {
+      "expected": "retry",
+      "fields": {
+        "code": "device_offline",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 1000
       }
     }
   }

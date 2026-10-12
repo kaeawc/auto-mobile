@@ -220,6 +220,7 @@ import {
   getDatabase,
   getDatabasePath,
   getDbWriteBarrier,
+  refusedDatabaseAccessCountAfterShutdownClose,
 } from "../db";
 import { NavigationRetention } from "../db/navigationRetention";
 import { NavigationRetentionMonitor } from "./NavigationRetentionMonitor";
@@ -384,7 +385,15 @@ import {
 import { onAdbMissingDevice } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { stopManagedAdbServer } from "../utils/android-cmdline-tools/AdbServerLifecycle";
 import { iosSimulatorCaptureHelperPool } from "../features/screen-stream";
-import { runShutdownCleanupStages } from "../shutdownCleanup";
+import {
+  DAEMON_SHUTDOWN_STAGES,
+  boundWithinStage,
+  createShutdownDatabaseTail,
+  runShutdownCleanupStages,
+  shutdownStageFrom,
+  type DaemonShutdownStageName,
+  type ShutdownCleanupStage,
+} from "../shutdownCleanup";
 import { cleanupDaemonChildProcesses } from "./childProcessCleanup";
 import {
   defaultToolSelectionProfileRegistry,
@@ -429,6 +438,15 @@ const CTRL_PROXY_FORWARD_RELEASE_SHUTDOWN_TIMEOUT_MS = 3_000;
 // closing app connection (Windows busy_timeout stall). Bounded: a wedged migration
 // cannot itself hang shutdown — the timeout wins and shutdown proceeds anyway.
 const MIGRATION_SETTLE_TIMEOUT_MS = 5_000;
+
+/** A `Daemon.stop()` stage with its deadline and database flag drawn from the stage table. */
+function shutdownStage(
+  name: DaemonShutdownStageName,
+  waitingOn: string,
+  run: ShutdownCleanupStage["run"],
+): ShutdownCleanupStage {
+  return shutdownStageFrom(DAEMON_SHUTDOWN_STAGES, name, waitingOn, run);
+}
 
 type HealthFailureKind = "http" | "socket" | "database" | "unknown";
 type DatabaseHealthFailureRecovery = (code: number) => void | Promise<void>;
@@ -1273,11 +1291,14 @@ export class Daemon {
     );
     // A sessionless call admitted while the device was free must not keep driving it for the new
     // holder (#10829). The call performing the acquisition is spared.
-    // A sessionless recording on the device is stopped and finalized the same way (#10961).
-    const stopOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(this.sessionManager);
+    // The acquiring holder adopts active sessionless recordings without stopping them (#11665).
+    const adoptOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(
+      this.sessionManager,
+    );
     // Sessionless network mocks and simulations are cleared the same way (#11130).
     const clearOwnerlessNetworkState = createOwnerlessNetworkStateAcquisitionCleanup(
       this.sessionManager,
+      { timer: this.timer },
     );
     // Display/system settings a previous session changed are reset to the recorded device
     // defaults when a different session acquires the device (#11145).
@@ -1292,6 +1313,7 @@ export class Daemon {
     const resetSettingDefaults = createDeviceSettingDefaultsAcquisitionReset(
       this.sessionManager,
       settingDefaults,
+      this.timer,
     );
     this.sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {
       executionTracker.cancelSessionlessDeviceUse(deviceId, {
@@ -1299,7 +1321,7 @@ export class Daemon {
       });
       // A sessionless stroke parked on the device with no frame in flight is lifted too (#11541).
       this.socketServer?.liftSessionlessStrokesOn(deviceId);
-      stopOwnerlessRecordings(deviceId);
+      adoptOwnerlessRecordings(deviceId, sessionId);
       clearOwnerlessNetworkState(deviceId);
       resetSettingDefaults(deviceId, sessionId);
     });
@@ -1355,6 +1377,7 @@ export class Daemon {
     // A rebind keeps the session live, but its navigation state was collected on
     // the old device and must not follow it to the new one.
     this.sessionManager.onSessionDeviceUnbound((sessionId, deviceId) => {
+      this.socketServer?.liftStrokesHeldByOn(sessionId, deviceId);
       DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
       const previousNavigationManager = NavigationGraphManager.getInstanceForSession(sessionId);
       NavigationGraphManager.resetSession(sessionId);
@@ -4970,171 +4993,294 @@ export class Daemon {
   async stop(): Promise<void> {
     this.shutdownInProgress = true;
     logger.info("Stopping daemon...");
-    await this.quiesceProvisioningIngress();
-    await this.interruptProvisioningForShutdown();
-    this.shutdownReleaseNotifications = new Set();
-    this.shutdownFallbackReleaseNotifications = new Set();
-    this.shutdownSessionIds = [];
-
-    const heartbeatMonitor = this.heartbeatMonitor;
-    this.heartbeatMonitor = null;
-    const navigationRetentionMonitor = this.navigationRetentionMonitor;
-    this.navigationRetentionMonitor = null;
-    const deviceDisconnectMonitor = this.deviceDisconnectMonitor;
-    this.deviceDisconnectMonitor = null;
-    this.orphanWatchdog?.stop();
-    this.orphanWatchdog = null;
-    const forwardLeaseIdleReleaser = this.forwardLeaseIdleReleaser;
-    this.forwardLeaseIdleReleaser = null;
-    await forwardLeaseIdleReleaser?.stop();
-    // A shutdown release keeps the execution owner: the rehydrated session awaits its owner (#11177).
-    await this.closeManagedExecutionRelease();
+    // Every stage draws its deadline from DAEMON_SHUTDOWN_STAGES, whose budgets sum to less
+    // than the process limit: a wedged stage is abandoned with a warning and the stages that
+    // protect user state (session release and its daemon-shutdown notification, the database
+    // close, the pid/socket file removal) still run (#11601). The order is unchanged.
     await runShutdownCleanupStages(
       [
-        {
-          // Quiesce new recording work and stop owned children before any
-          // potentially blocking socket teardown consumes the shutdown budget.
-          name: "active capture and iOS CtrlProxy children",
-          run: cleanupDaemonChildProcesses,
-        },
-        {
-          name: "health check timer",
-          run: async () => {
-            this.stopHealthCheckTimer();
-            await this.databaseHealthProbe.dispose?.();
-          },
-        },
-        {
-          name: "location routes",
-          run: () => defaultLocationRouteRegistry.stopAll(),
-        },
-        {
-          name: "shutdown monitors",
-          run: () =>
-            this.drainShutdownMonitors(
-              navigationRetentionMonitor,
-              heartbeatMonitor,
-              deviceDisconnectMonitor,
-            ),
-        },
-        { name: "ADB missing-device subscription", run: () => this.unsubscribeAdbMissing() },
-        {
-          // Stop the session cleanup interval before the DB drain below. It is the one
-          // best-effort DB writer that fires on its own timer rather than an external
-          // socket (which are all torn down here), so if left running it could route a
-          // tracked `markReleased` write through a freshly-resolved, non-draining
-          // barrier in the microtask window AFTER closeDatabase()'s resetDbWriteBarrier()
-          // and hit the just-closed connection (issue #2912; #2792 safety window).
-          name: "session cleanup timer",
-          run: () => this.stopSessionTimers(),
-        },
-        { name: "video recording socket server", run: stopVideoRecordingSocketServer },
-        { name: "test recording socket server", run: stopTestRecordingSocketServer },
-        { name: "device snapshot socket server", run: stopDeviceSnapshotSocketServer },
-        { name: "appearance socket server", run: stopAppearanceSocketServer },
-        { name: "performance stream socket server", run: stopPerformanceStreamSocketServer },
-        { name: "performance push socket server", run: stopPerformancePushSocketServer },
-        { name: "device data stream socket server", run: stopDeviceDataStreamSocketServer },
-        { name: "failures stream socket server", run: stopFailuresStreamSocketServer },
-        { name: "failures push socket server", run: stopFailuresPushSocketServer },
-        { name: "telemetry push socket server", run: stopTelemetryPushSocketServer },
-        { name: "WebRTC stream socket server", run: stopWebRtcStreamSocketServer },
-        { name: "video stream socket server", run: stopVideoStreamSocketServer },
-        {
-          name: "iOS simulator capture helper pool",
-          run: () => iosSimulatorCaptureHelperPool.shutdown(),
-        },
-        { name: "appearance sync scheduler", run: stopAppearanceSyncScheduler },
-        { name: "performance monitor", run: stopPerformanceMonitor },
-        {
-          name: "active HTTP sessions",
-          run: () =>
-            runShutdownCleanupStages(
-              Array.from(this.transports, ([sessionId, streamableTransport]) => ({
-                name: `Streamable HTTP session ${sessionId}`,
-                run: () => streamableTransport.close(),
-              })),
-              (message, error) => logger.warn(message, error),
-            ),
-        },
-        {
-          name: "active HTTP session registry",
-          run: () => this.clearHttpSessionRegistry(),
-        },
-        {
-          name: "HTTP server",
-          run: () => this.closeHttpListener(),
-        },
-        { name: "active device sessions", run: () => this.releaseActiveSessionsForShutdown() },
-        {
-          // Session release broadcasts must be written while subscribed proxy
-          // sockets are still connected; closing first degrades the exact
-          // daemon-shutdown reason into session-not-found after reconnect.
-          // Runs right after session release, before the device-cleanup and
-          // forward-release drains, so a wedged stage behind it cannot push the
-          // daemon-shutdown notification past the 9 s process limit (#11156).
-          name: "Unix socket server",
-          run: async () => {
-            if (this.socketServer) {
-              this.publishMissingShutdownReleaseNotifications();
-              await this.socketServer.drainSessionReleaseNotifications();
-              await this.socketServer.close();
-            }
-          },
-        },
-        {
-          name: "pending device cleanups",
-          run: async () => {
-            await this.sessionManager.drainPendingDeviceCleanups(
-              DEVICE_CLEANUP_SHUTDOWN_DRAIN_TIMEOUT_MS,
-            );
-          },
-        },
-        { name: "CtrlProxy forwarding leases", run: () => this.releaseForwardLeases() },
-        {
-          name: "device allocation claims",
-          run: () => this.devicePool.releaseDeviceClaimsForShutdown(),
-        },
-        { name: "managed ADB server", run: this.stopManagedAdbServer },
-        {
-          name: "database write drain",
-          run: () => this.drainShutdownDatabaseWrites(),
-        },
-        {
-          name: "in-flight migrations",
-          run: () => this.settleShutdownMigrations(),
-        },
-        {
-          name: "database",
-          run: async () => {
-            if (!this.shutdownSessionReleasesDrained) {
-              logger.warn(
-                "Skipping database close because a session terminal write is still in flight",
-              );
-              return;
-            }
-            await closeDatabase();
-          },
-        },
-        {
-          name: "logger",
-          run: async () => {
-            logger.info("Daemon stopped");
-            await logger.closeAfterFlush();
-          },
-        },
-        // Removed LAST, only once logging has fully flushed and closed: the pid
-        // record is this daemon's ONLY externally-observable liveness signal, and
-        // the detached process keeps holding the inherited launch-log fd through
-        // every earlier stage above. Removing it any earlier opens a window where
-        // a concurrent pruning sweep in another process reads "no daemon" while
-        // this one is still alive and still writing, and unlinks a launch log out
-        // from under it (issue #6194). The unconditional `process.once("exit", ...)`
-        // cleanup remains as a safety net for shutdown paths that never reach here.
-        { name: "daemon files", run: () => this.cleanupDaemonFilesForShutdown() },
+        ...this.shutdownQuiesceStages(),
+        ...this.shutdownStreamAndTransportStages(),
+        ...this.shutdownSessionAndStateStages(),
       ],
       (message, error) => logger.warn(message, error),
+      { timer: this.timer },
     );
+  }
+
+  /** Stop admitting work, then stop the daemon's own children, timers and monitors. */
+  private shutdownQuiesceStages(): ShutdownCleanupStage[] {
+    // Detached from the daemon by the snapshot stage, then stopped by the stages after it.
+    const handoff: {
+      heartbeatMonitor: SessionHeartbeatMonitor | null;
+      navigationRetentionMonitor: NavigationRetentionMonitor | null;
+      deviceDisconnectMonitor: SingleFlightInterval | null;
+      forwardLeaseIdleReleaser: DeviceForwardLeaseIdleReleaser | null;
+    } = {
+      heartbeatMonitor: null,
+      navigationRetentionMonitor: null,
+      deviceDisconnectMonitor: null,
+      forwardLeaseIdleReleaser: null,
+    };
+    return [
+      shutdownStage(
+        "provisioning ingress quiesce",
+        "in-flight control-socket request handlers",
+        () => this.quiesceProvisioningIngress(),
+      ),
+      shutdownStage(
+        "provisioning interruption",
+        "interrupted provisionDevice calls persisting their handoff",
+        (stage) =>
+          this.interruptProvisioningForShutdown(
+            boundWithinStage(stage, DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS),
+          ),
+      ),
+      shutdownStage("shutdown release snapshot", "nothing (synchronous)", () => {
+        this.shutdownReleaseNotifications = new Set();
+        this.shutdownFallbackReleaseNotifications = new Set();
+        this.shutdownSessionIds = [];
+        handoff.heartbeatMonitor = this.heartbeatMonitor;
+        this.heartbeatMonitor = null;
+        handoff.navigationRetentionMonitor = this.navigationRetentionMonitor;
+        this.navigationRetentionMonitor = null;
+        handoff.deviceDisconnectMonitor = this.deviceDisconnectMonitor;
+        this.deviceDisconnectMonitor = null;
+        this.orphanWatchdog?.stop();
+        this.orphanWatchdog = null;
+        handoff.forwardLeaseIdleReleaser = this.forwardLeaseIdleReleaser;
+        this.forwardLeaseIdleReleaser = null;
+      }),
+      shutdownStage(
+        "forward lease idle releaser",
+        "an in-flight idle forward-lease sweep (adb forward removal)",
+        async () => {
+          await handoff.forwardLeaseIdleReleaser?.stop();
+        },
+      ),
+      shutdownStage(
+        // A shutdown release keeps the execution owner: the rehydrated session awaits its
+        // owner (#11177).
+        "managed execution release",
+        "the managed slot registry close",
+        () => this.closeManagedExecutionRelease(),
+      ),
+      shutdownStage(
+        // Quiesce new recording work and stop owned children before any
+        // potentially blocking socket teardown consumes the shutdown budget.
+        "active capture and iOS CtrlProxy children",
+        "recording stop/finalize and iOS CtrlProxy child exit",
+        () => cleanupDaemonChildProcesses(),
+      ),
+      shutdownStage("health check timer", "the database health probe", async () => {
+        this.stopHealthCheckTimer();
+        await this.databaseHealthProbe.dispose?.();
+      }),
+      shutdownStage("location routes", "nothing (synchronous)", () =>
+        defaultLocationRouteRegistry.stopAll(),
+      ),
+      shutdownStage(
+        "shutdown monitors",
+        "the heartbeat and disconnect monitors and deferred recovery sweeps",
+        (stage) =>
+          this.drainShutdownMonitors(
+            handoff.navigationRetentionMonitor,
+            handoff.heartbeatMonitor,
+            handoff.deviceDisconnectMonitor,
+            boundWithinStage(stage, DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS),
+          ),
+      ),
+      shutdownStage("ADB missing-device subscription", "nothing (synchronous)", () =>
+        this.unsubscribeAdbMissing(),
+      ),
+      shutdownStage(
+        // Stop the session cleanup interval before the DB drain below. It is the one
+        // best-effort DB writer that fires on its own timer rather than an external
+        // socket (which are all torn down here), so if left running it could route a
+        // tracked `markReleased` write through a freshly-resolved, non-draining
+        // barrier in the microtask window AFTER closeDatabase()'s resetDbWriteBarrier()
+        // and hit the just-closed connection (issue #2912; #2792 safety window).
+        "session cleanup timer",
+        "nothing (synchronous)",
+        () => this.stopSessionTimers(),
+      ),
+    ];
+  }
+
+  /** Close the auxiliary socket servers, the stream servers and the HTTP transports. */
+  private shutdownStreamAndTransportStages(): ShutdownCleanupStage[] {
+    return [
+      shutdownStage("video recording socket server", "its connections closing", () =>
+        stopVideoRecordingSocketServer(),
+      ),
+      shutdownStage("test recording socket server", "its connections closing", () =>
+        stopTestRecordingSocketServer(),
+      ),
+      shutdownStage("device snapshot socket server", "its connections closing", () =>
+        stopDeviceSnapshotSocketServer(),
+      ),
+      shutdownStage("appearance socket server", "its connections closing", () =>
+        stopAppearanceSocketServer(),
+      ),
+      shutdownStage("performance stream socket server", "its connections closing", () =>
+        stopPerformanceStreamSocketServer(),
+      ),
+      shutdownStage("performance push socket server", "its connections closing", () =>
+        stopPerformancePushSocketServer(),
+      ),
+      shutdownStage("device data stream socket server", "its connections closing", () =>
+        stopDeviceDataStreamSocketServer(),
+      ),
+      shutdownStage("failures stream socket server", "its connections closing", () =>
+        stopFailuresStreamSocketServer(),
+      ),
+      shutdownStage("failures push socket server", "its connections closing", () =>
+        stopFailuresPushSocketServer(),
+      ),
+      shutdownStage("telemetry push socket server", "its connections closing", () =>
+        stopTelemetryPushSocketServer(),
+      ),
+      shutdownStage(
+        "WebRTC stream socket server",
+        "WebRTC stream teardown (encoder stop, adb forward removal)",
+        () => stopWebRtcStreamSocketServer(),
+      ),
+      shutdownStage(
+        "video stream socket server",
+        "capture source stop (encoder stop, adb forward removal)",
+        () => stopVideoStreamSocketServer(),
+      ),
+      shutdownStage(
+        "iOS simulator capture helper pool",
+        "simulator capture helper processes exiting",
+        () => iosSimulatorCaptureHelperPool.shutdown(),
+      ),
+      shutdownStage("appearance sync scheduler", "an in-flight appearance sync", () =>
+        stopAppearanceSyncScheduler(),
+      ),
+      shutdownStage("performance monitor", "an in-flight performance sample", () =>
+        stopPerformanceMonitor(),
+      ),
+      shutdownStage("active HTTP sessions", "streamable HTTP transports closing", () =>
+        // No deadline per transport: one that wedges is covered by this stage's deadline, which
+        // also marks the stage as still running for the database stage.
+        runShutdownCleanupStages(
+          Array.from(this.transports, ([sessionId, streamableTransport]) => ({
+            name: `Streamable HTTP session ${sessionId}`,
+            run: () => streamableTransport.close(),
+          })),
+          (message, error) => logger.warn(message, error),
+        ),
+      ),
+      shutdownStage("active HTTP session registry", "nothing (synchronous)", () =>
+        this.clearHttpSessionRegistry(),
+      ),
+      shutdownStage("HTTP server", "open HTTP connections closing", () => this.closeHttpListener()),
+    ];
+  }
+
+  /**
+   * Release sessions, tell their clients, then close the database, the logger and the daemon
+   * files. These protect user state; the budget table keeps their share whatever came before.
+   */
+  private shutdownSessionAndStateStages(): ShutdownCleanupStage[] {
+    // Abandoned is not cancelled: the connection stays open while an abandoned stage that may
+    // write is still running, and closes late if those stragglers finish in time (#11601).
+    const databaseTail = createShutdownDatabaseTail({
+      // The shutdown close: late work is refused from here on instead of reopening it.
+      closeDatabase: () => closeDatabase({ forShutdown: true }),
+      refusedAccessCount: () => refusedDatabaseAccessCountAfterShutdownClose(),
+      drainWrites: (timeoutMs) => this.drainShutdownDatabaseWrites(timeoutMs),
+      keepOpenReason: () =>
+        this.shutdownSessionReleasesDrained
+          ? undefined
+          : "a session terminal write is still in flight",
+      warn: (message) => logger.warn(message),
+    });
+    return [
+      shutdownStage(
+        "active device sessions",
+        "session release teardown and terminal-row persistence",
+        (stage) =>
+          this.releaseActiveSessionsForShutdown(
+            boundWithinStage(stage, SESSION_RELEASE_DRAIN_TIMEOUT_MS),
+          ),
+      ),
+      shutdownStage(
+        // Session release broadcasts must be written while subscribed proxy
+        // sockets are still connected; closing first degrades the exact
+        // daemon-shutdown reason into session-not-found after reconnect.
+        // Runs right after session release, before the device-cleanup and
+        // forward-release drains, so a wedged stage behind it cannot push the
+        // daemon-shutdown notification past the 9 s process limit (#11156).
+        "Unix socket server",
+        "release notification writes and in-flight request handlers",
+        async () => {
+          if (this.socketServer) {
+            this.publishMissingShutdownReleaseNotifications();
+            await this.socketServer.drainSessionReleaseNotifications();
+            await this.socketServer.close();
+          }
+        },
+      ),
+      shutdownStage(
+        "pending device cleanups",
+        "per-device cleanup registered by released sessions",
+        async (stage) => {
+          await this.sessionManager.drainPendingDeviceCleanups(
+            boundWithinStage(stage, DEVICE_CLEANUP_SHUTDOWN_DRAIN_TIMEOUT_MS),
+          );
+        },
+      ),
+      shutdownStage("CtrlProxy forwarding leases", "adb forward removal", (stage) =>
+        this.releaseForwardLeases(
+          boundWithinStage(stage, CTRL_PROXY_FORWARD_RELEASE_SHUTDOWN_TIMEOUT_MS),
+        ),
+      ),
+      shutdownStage("device allocation claims", "device claim release", () =>
+        this.devicePool.releaseDeviceClaimsForShutdown(),
+      ),
+      shutdownStage("managed ADB server", "adb kill-server", () => this.stopManagedAdbServer()),
+      shutdownStage(
+        // Abandoned is not cancelled. With every later stage's share still reserved, give the
+        // stragglers (a recording finalizer, a capture stop, a slow release) what is left of
+        // the budget before the database closes and the process exits.
+        "abandoned stage settle",
+        "earlier stages that passed their deadline",
+        (stage) => databaseTail.settle(stage),
+      ),
+      shutdownStage("database write drain", "in-flight best-effort database writes", (stage) =>
+        this.drainShutdownDatabaseWrites(boundWithinStage(stage, DB_WRITE_DRAIN_TIMEOUT_MS)),
+      ),
+      shutdownStage("in-flight migrations", "a cold-start migration still running", (stage) =>
+        this.settleShutdownMigrations(boundWithinStage(stage, MIGRATION_SETTLE_TIMEOUT_MS)),
+      ),
+      shutdownStage("database", "the database connection closing", (stage) =>
+        databaseTail.close(stage),
+      ),
+      shutdownStage(
+        // The three database stages above rarely use their share. Hand it to any stage still
+        // running, so a shutdown that finishes all its work inside the limit is a clean one.
+        "late abandoned stage settle",
+        "earlier stages that passed their deadline",
+        (stage) => databaseTail.lateSettle(stage),
+      ),
+      shutdownStage("logger", "the log file flush", async () => {
+        logger.info("Daemon stopped");
+        await logger.closeAfterFlush();
+      }),
+      // Removed LAST, only once logging has fully flushed and closed: the pid
+      // record is this daemon's ONLY externally-observable liveness signal, and
+      // the detached process keeps holding the inherited launch-log fd through
+      // every earlier stage above. Removing it any earlier opens a window where
+      // a concurrent pruning sweep in another process reads "no daemon" while
+      // this one is still alive and still writing, and unlinks a launch log out
+      // from under it (issue #6194). The unconditional `process.once("exit", ...)`
+      // cleanup remains as a safety net for shutdown paths that never reach here.
+      shutdownStage("daemon files", "pid and socket file removal", () =>
+        this.cleanupDaemonFilesForShutdown(),
+      ),
+    ];
   }
 
   private async cleanupDaemonFilesForShutdown(): Promise<void> {
@@ -5166,11 +5312,8 @@ export class Daemon {
   }
 
   /** Remove the forwards this daemon recorded and release its forwarding leases, bounded. */
-  private releaseForwardLeases(): Promise<void> {
-    return AndroidCtrlProxyClient.releaseForwardLeasesForShutdown(
-      this.timer,
-      CTRL_PROXY_FORWARD_RELEASE_SHUTDOWN_TIMEOUT_MS,
-    );
+  private releaseForwardLeases(timeoutMs: number): Promise<void> {
+    return AndroidCtrlProxyClient.releaseForwardLeasesForShutdown(this.timer, timeoutMs);
   }
 
   private clearHttpSessionRegistry(): void {
@@ -5181,30 +5324,30 @@ export class Daemon {
     this.transports.clear();
   }
 
-  private async drainShutdownDatabaseWrites(): Promise<void> {
+  private async drainShutdownDatabaseWrites(timeoutMs: number): Promise<void> {
     // Quiesce in-flight best-effort DB writes (fire-and-forget telemetry ingest,
     // background retention cleanup) BEFORE closing the connection, so a query
     // queued in Kysely's ConnectionMutex can't strand shutdown on an unsettled
     // promise (issue #2792). Bounded: a wedged write cannot itself hang shutdown.
-    const drained = await getDbWriteBarrier().drain(DB_WRITE_DRAIN_TIMEOUT_MS);
+    const drained = await getDbWriteBarrier().drain(timeoutMs);
     if (!drained) {
       logger.warn(
-        `Timed out after ${DB_WRITE_DRAIN_TIMEOUT_MS}ms draining in-flight DB writes; closing database anyway`,
+        `Timed out after ${timeoutMs}ms draining in-flight DB writes; closing database anyway`,
       );
     }
   }
 
-  private async settleShutdownMigrations(): Promise<void> {
+  private async settleShutdownMigrations(timeoutMs: number): Promise<void> {
     // If a SIGTERM arrived mid cold-start migration, the detached migration
     // connection is still open and writing on its own connection (its writes are
     // NOT tracked by the write barrier drained above). Let it settle before
     // closeDatabase() destroys the app connection, so their WAL writes/checkpoint
     // can't contend and stall shutdown on busy_timeout (Windows; issue #3044).
     // Bounded so a wedged migration cannot itself hang shutdown.
-    const migrationsSettled = await awaitInFlightMigrations(MIGRATION_SETTLE_TIMEOUT_MS);
+    const migrationsSettled = await awaitInFlightMigrations(timeoutMs);
     if (!migrationsSettled) {
       logger.warn(
-        `Timed out after ${MIGRATION_SETTLE_TIMEOUT_MS}ms awaiting in-flight startup migration; closing database anyway`,
+        `Timed out after ${timeoutMs}ms awaiting in-flight startup migration; closing database anyway`,
       );
     }
   }
@@ -5213,6 +5356,7 @@ export class Daemon {
     navigationRetentionMonitor: typeof this.navigationRetentionMonitor,
     heartbeatMonitor: typeof this.heartbeatMonitor,
     deviceDisconnectMonitor: typeof this.deviceDisconnectMonitor,
+    sweepDrainTimeoutMs: number,
   ): Promise<void> {
     // The navigation retention monitor's in-flight pass drains via the DB
     // write-barrier stage below; here we only cancel its next scheduled tick.
@@ -5232,7 +5376,7 @@ export class Daemon {
     try {
       await raceWithDeadline(Promise.allSettled(this.deferredSessionRecoverySweeps), {
         timer: this.timer,
-        timeoutMs: DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
+        timeoutMs: sweepDrainTimeoutMs,
         label: "Recovery sweep drain",
         timeoutError: () => timedOut,
       });
@@ -5244,7 +5388,7 @@ export class Daemon {
     }
     if (!sweepsSettled) {
       logger.warn(
-        `Timed out after ${DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS}ms draining deferred session recovery sweeps; continuing daemon shutdown`,
+        `Timed out after ${sweepDrainTimeoutMs}ms draining deferred session recovery sweeps; continuing daemon shutdown`,
       );
     }
   }
@@ -5267,7 +5411,7 @@ export class Daemon {
     await quiescing;
   }
 
-  private async interruptProvisioningForShutdown(): Promise<void> {
+  private async interruptProvisioningForShutdown(drainTimeoutMs: number): Promise<void> {
     const reason = new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE);
     const cancelled = await executionTracker.cancelToolExecutions("provisionDevice", reason);
     if (cancelled === 0) {
@@ -5275,16 +5419,16 @@ export class Daemon {
     }
     const drained = await executionTracker.waitForToolExecutionsToEnd(
       "provisionDevice",
-      DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
+      drainTimeoutMs,
     );
     if (!drained) {
       logger.warn(
-        `Timed out after ${DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS}ms persisting ${cancelled} interrupted provisionDevice operation(s) before daemon shutdown`,
+        `Timed out after ${drainTimeoutMs}ms persisting ${cancelled} interrupted provisionDevice operation(s) before daemon shutdown`,
       );
     }
   }
 
-  private async releaseActiveSessionsForShutdown(): Promise<void> {
+  private async releaseActiveSessionsForShutdown(drainTimeoutMs: number): Promise<void> {
     const sessionIds = this.sessionManager.getAllKnownSessionIds();
     this.shutdownSessionIds = sessionIds;
     const releases = sessionIds.map(async (sessionId) => {
@@ -5301,14 +5445,11 @@ export class Daemon {
     };
     const settled = Promise.allSettled(releases);
     await Promise.resolve();
-    const drained = await this.sessionManager.drainReleasePromises(
-      SESSION_RELEASE_DRAIN_TIMEOUT_MS,
-      releases,
-    );
+    const drained = await this.sessionManager.drainReleasePromises(drainTimeoutMs, releases);
     if (!drained) {
       this.shutdownSessionReleasesDrained = false;
       logger.warn(
-        `Timed out after ${SESSION_RELEASE_DRAIN_TIMEOUT_MS}ms draining session releases; database will remain open`,
+        `Timed out after ${drainTimeoutMs}ms draining session releases; database will remain open`,
       );
       void settled.then(reportFailures);
       return;

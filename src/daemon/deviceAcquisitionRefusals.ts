@@ -28,6 +28,9 @@ export const DEVICE_OWNED_BY_OTHER_DAEMON_CODE = "device_owned_by_other_daemon";
  */
 export const DEVICE_SHUTTING_DOWN_CODE = "device_shutting_down";
 
+/** adb still lists the transport, but it has not returned online within the bind budget. */
+export const DEVICE_OFFLINE_CODE = "device_offline";
+
 /**
  * The session UUID is under a kill's terminal release reservation (#11146), so it cannot be bound,
  * rebound or reserved again. Unlike `device_shutting_down` it is NOT retryable: the UUID ends with
@@ -35,11 +38,8 @@ export const DEVICE_SHUTTING_DOWN_CODE = "device_shutting_down";
  */
 export const SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE = "session_terminal_release_in_progress";
 
-/**
- * A kill's terminal-release reservation named a device the session no longer holds (#11166).
- * Not retryable as-is: the device's holder changed, so the caller re-checks before killing.
- */
-export const SESSION_NO_LONGER_OWNS_DEVICE_CODE = "session_no_longer_owns_device";
+// Defined beside its error class, which the input layer throws too (#11351).
+export { SESSION_NO_LONGER_OWNS_DEVICE_CODE } from "./sessionNoLongerOwnsDevice";
 
 /**
  * A kill's terminal-release reservation raced the session's own rebind (#11166). Retryable with a
@@ -121,6 +121,23 @@ export class DeviceCleanupInProgressError extends RetryableDeviceAcquisitionErro
   }
 }
 
+export class DeviceTransportOfflineError extends RetryableDeviceAcquisitionError {
+  constructor(
+    deviceId: string,
+    readonly state: string,
+  ) {
+    super(
+      DEVICE_OFFLINE_CODE,
+      deviceId,
+      DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
+      `Device '${deviceId}' is still attached but adb lists it as ${state} ` +
+        `(code ${DEVICE_OFFLINE_CODE}); it was not bound. Retry in about ` +
+        `${DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS}ms.`,
+    );
+    this.name = "DeviceTransportOfflineError";
+  }
+}
+
 export class SessionCreationTimeoutError extends RetryableDeviceAcquisitionError {
   constructor(
     readonly sessionUuid: string,
@@ -162,7 +179,12 @@ export class DeviceOwnedByOtherDaemonError extends RetryableDeviceAcquisitionErr
   }
 }
 
-/** Retry hint for a device under shutdown: a kill normally finishes within a few seconds. */
+/**
+ * Retry hint for a device under shutdown: a kill normally finishes within a few seconds. It is a
+ * polling interval, not a remaining time like `device_cleanup_in_progress` carries (#11616): a
+ * shutdown reservation spans several separately bounded steps and records no deadline, so the
+ * refusal has no bound to report and the runners' 30 s floor (one shutdown step's timeout) applies.
+ */
 export const DEVICE_SHUTTING_DOWN_RETRY_AFTER_MS = 2_000;
 
 export class DeviceShuttingDownError extends RetryableDeviceAcquisitionError {

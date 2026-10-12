@@ -1,3 +1,4 @@
+import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import { DaemonState } from "../daemon/daemonState";
 import type { DevicePool, PooledDevice } from "../daemon/devicePool";
 import type { SessionManager } from "../daemon/sessionManager";
@@ -27,7 +28,10 @@ import {
 import { prepareSessionDisplayPin } from "./sessionDisplayPin";
 import { deviceAssignedToOtherSessionError } from "../daemon/inputDeviceOwnership";
 import { executionTracker } from "./executionTracker";
+import { isClientCancelled } from "../utils/AbortContext";
+import { acquireUndoneIfUndelivered } from "./undeliveredAcquisition";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import { refuseControlOnForeignOwnedSession } from "./foreignOwnedSessionRefusal";
 
 export interface SetActiveDeviceArgs {
   deviceId: string;
@@ -88,18 +92,31 @@ function resolveAutolockSelection(args: HandlerArgs): string | undefined {
  * #11167, #11344: sharing a session needs its owner to release it first. Naming a session another
  * connected client owns is refused, typed, before anything is selected or rebound, with autolock
  * on or off: otherwise the caller could move that client's session to another device and adopt it
- * as its own default.
+ * as its own default. The refusal is the one every other tool gives (#11647): its evidence is the
+ * device the SESSION holds, never the requested target, which may be free.
  */
 function refuseForeignOwnedSession(args: HandlerArgs): void {
-  if (!args.sessionUuid || !DaemonState.getInstance().isInitialized()) {
-    return;
-  }
-  const pool = DaemonState.getInstance().getDevicePool();
   // #11469: a plan step or nested call carries no socket identity of its own and is judged as
   // the connection of the call that started it.
   const callerMcpSessionId = args.__mcpSessionId ?? getToolSelectionContext()?.callerMcpSessionId;
-  if (pool.isSessionOwnedByOtherConnection(args.sessionUuid, callerMcpSessionId)) {
-    throw deviceAssignedToOtherSessionError(args.deviceId, args.sessionUuid, undefined);
+  refuseControlOnForeignOwnedSession("setActiveDevice", args.sessionUuid, callerMcpSessionId);
+  // #11235: a caller with no connection identity is not judged above, but a live autolock session
+  // is owned by connection, so it is foreign to that caller too.
+  const daemonState = DaemonState.getInstance();
+  if (
+    !callerMcpSessionId &&
+    args.sessionUuid &&
+    daemonState.isInitialized() &&
+    daemonState.getDevicePool().isSessionOwnedByOtherConnection(args.sessionUuid)
+  ) {
+    const sessionDevice = daemonState
+      .getSessionManager()
+      .getSession(args.sessionUuid)?.assignedDevice;
+    throw deviceAssignedToOtherSessionError(
+      sessionDevice ?? "unknown",
+      args.sessionUuid,
+      undefined,
+    );
   }
 }
 
@@ -195,9 +212,20 @@ async function bindRequestedDevice(input: {
   device: PooledDevice;
   pool: DevicePool;
   sessions: SessionManager;
+  receipt: AcquisitionReceipt;
+  rememberPrior: (prior: PriorSelection) => void;
 }): Promise<void> {
-  const { args, device, pool, sessions } = input;
+  const { args, device, pool, sessions, receipt } = input;
   const existing = sessions.getSession(args.sessionUuid);
+  if (existing?.assignedDevice) {
+    // Remembered for a selection of the device the session already holds too: nothing is
+    // rebound then, but the selection may still replace the session's display pin.
+    input.rememberPrior({
+      sessionUuid: args.sessionUuid,
+      deviceId: existing.assignedDevice,
+      displayPin: existing.cacheData.displayPin,
+    });
+  }
   if (existing?.assignedDevice === args.deviceId) {
     return;
   }
@@ -210,6 +238,12 @@ async function bindRequestedDevice(input: {
   }
   // The pool persists the replacement before releasing the previous binding.
   // #5870: infer platform from the resolved device when the caller omitted it.
+  if (!existing) {
+    // This call mints the session under an id its client chose and will name again: from here
+    // on a cancellation takes the session back without retiring the id, wherever it lands in
+    // the mint (#11593).
+    receipt.clientChosenSessionId = args.sessionUuid;
+  }
   const boundSession = await pool.bindOrReuseDeviceSession(
     args.sessionUuid,
     args.deviceId,
@@ -218,6 +252,15 @@ async function bindRequestedDevice(input: {
     undefined,
     undefined,
     true,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    // Records the move (or the mint), so a call cancelled before it answers is undone (#11593).
+    receipt,
+    // Asked again under the pool's assignment mutex: a start may have reserved the device since.
+    true,
   );
   if (boundSession !== args.sessionUuid) {
     throw deviceAssignedToOtherSessionError(args.deviceId, boundSession, args.sessionUuid);
@@ -225,14 +268,39 @@ async function bindRequestedDevice(input: {
   sessions.setDeviceReadiness(args.sessionUuid, "booted");
 }
 
+/** Where a session was bound, and its display pin, before a selection that may be undone. */
+type PriorSelection = { sessionUuid: string; deviceId: string; displayPin: string | undefined };
+
+/**
+ * A rebind drops the session's display pin, and the selection may have set a new one. Once a
+ * cancelled selection is undone and the session is back on its device, it gets its pin back too.
+ */
+function restorePriorDisplayPin(prior: PriorSelection | undefined): void {
+  if (!prior || !DaemonState.getInstance().isInitialized()) {
+    return;
+  }
+  const sessions = DaemonState.getInstance().getSessionManager();
+  if (
+    sessions.getSession(prior.sessionUuid)?.assignedDevice === prior.deviceId &&
+    sessions.getDisplayPin(prior.sessionUuid) !== prior.displayPin
+  ) {
+    sessions.setDisplayPin(prior.sessionUuid, prior.displayPin ?? null);
+  }
+}
+
 async function selectSessionDevice(input: {
   args: HandlerArgs & { sessionUuid: string };
   dependencies: SetActiveDeviceDependencies;
+  receipt: AcquisitionReceipt;
+  signal: AbortSignal | undefined;
+  rememberPrior: (prior: PriorSelection) => void;
 }): Promise<boolean> {
-  const { args, dependencies } = input;
+  const { args, dependencies, receipt, signal, rememberPrior } = input;
   const sessions = DaemonState.getInstance().getSessionManager();
   const pool = DaemonState.getInstance().getDevicePool();
   const device = await requestedPoolDevice(pool, args.deviceId, args.platform);
+  // A device another request is still preparing is refused before anything touches it (#11651).
+  pool.assertNotPreparedForOtherRequest(args.deviceId);
   const hadDisplayPin = sessions.getDisplayPin(args.sessionUuid) !== undefined;
   const displayPin =
     args.display === undefined
@@ -244,9 +312,16 @@ async function selectSessionDevice(input: {
           inventory: dependencies.displayInventory,
         });
   pool.assertDeviceCleanupComplete(args.deviceId);
-  await dependencies.resumeCtrlProxy(args.deviceId, device.platform);
+  // Refused before the resume: resuming re-arms the device's CtrlProxy restart budget and drops
+  // its admitted attempt, which a caller that does not hold the device must not do (#11651).
+  pool.assertNotPreparedForOtherRequest(args.deviceId);
   assertDeviceOwner({ device, sessionUuid: args.sessionUuid, sessions });
-  await bindRequestedDevice({ args, device, pool, sessions });
+  await dependencies.resumeCtrlProxy(args.deviceId, device.platform);
+  // Checked again: another session may have bound the device while the resume listed devices.
+  assertDeviceOwner({ device, sessionUuid: args.sessionUuid, sessions });
+  // A request cancelled before the bind changes nothing.
+  signal?.throwIfAborted();
+  await bindRequestedDevice({ args, device, pool, sessions, receipt, rememberPrior });
   if (displayPin !== undefined) {
     sessions.setDisplayPin(args.sessionUuid, displayPin);
   }
@@ -288,8 +363,17 @@ function admitSessionlessSelection(args: HandlerArgs): void {
     }
     throw deviceAssignedToOtherSessionError(args.deviceId, liveHolder, undefined);
   }
+  // No session holds it yet, but another request is preparing it and will bind it (#11651).
+  pool.assertNotPreparedForOtherRequest(args.deviceId);
   if (args.__executionId && args.display === undefined) {
     executionTracker.markSessionlessDeviceUse(args.__executionId, args.deviceId);
+  }
+}
+
+function assertNotPreparedForOtherRequest(deviceId: string): void {
+  const daemonState = DaemonState.getInstance();
+  if (daemonState.isInitialized()) {
+    daemonState.getDevicePool().assertNotPreparedForOtherRequest(deviceId);
   }
 }
 
@@ -310,9 +394,11 @@ async function selectLegacyDevice(input: {
   );
   // A session that acquired the device during readiness cancelled this call: never pin its device.
   signal?.throwIfAborted();
+  assertNotPreparedForOtherRequest(readyDevice.deviceId);
   const resolvedPlatform = args.platform ?? readyDevice.platform;
   await resumeCtrlProxy(readyDevice.deviceId, resolvedPlatform);
   signal?.throwIfAborted();
+  assertNotPreparedForOtherRequest(readyDevice.deviceId);
   if (args.sessionUuid && resolveDirectSessionDevice(args.sessionUuid)) {
     registerDirectSessionDevice(args.sessionUuid, readyDevice);
   }
@@ -342,6 +428,7 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
     dependencies.legacyDeviceSelection ?? (() => DeviceSessionManager.getInstance());
   return async (args: HandlerArgs, _progress?: unknown, signal?: AbortSignal) => {
     const mcpSessionId = args.__mcpSessionId;
+    let prior: PriorSelection | undefined;
     try {
       const selectedAutolockSession = resolveAutolockSelection(args);
       refuseForeignOwnedSession(args);
@@ -351,33 +438,50 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
       if (args.display !== undefined && !sessionScoped) {
         throw new DisplayPinNeedsSessionError();
       }
-      let reportClearedPin = false;
-      if (sessionScoped && sessionUuid) {
-        reportClearedPin = await selectSessionDevice({
-          args: { ...args, sessionUuid },
-          dependencies,
-        });
-      } else {
-        await selectLegacyDevice({
-          args,
-          resumeCtrlProxy: dependencies.resumeCtrlProxy,
-          sessions: legacyDeviceSelection(),
-          signal,
-        });
-      }
-      if (selectedAutolockSession) {
-        await DaemonState.getInstance()
-          .getDevicePool()
-          .attachAutolockSessionToMcpSession(selectedAutolockSession, mcpSessionId, true, true);
-      }
-      const payload = {
-        message: `Active device set to '${args.deviceId}'`,
-        deviceId: args.deviceId,
-        ...(args.sessionUuid ? { sessionUuid: args.sessionUuid } : {}),
-        ...currentDisplayPinResult({ sessionUuid: args.sessionUuid, reportClearedPin }),
+      const select = async (receipt: AcquisitionReceipt) => {
+        let reportClearedPin = false;
+        if (sessionScoped && sessionUuid) {
+          reportClearedPin = await selectSessionDevice({
+            args: { ...args, sessionUuid },
+            dependencies,
+            receipt,
+            signal,
+            rememberPrior: (selection) => {
+              prior = selection;
+            },
+          });
+        } else {
+          await selectLegacyDevice({
+            args,
+            resumeCtrlProxy: dependencies.resumeCtrlProxy,
+            sessions: legacyDeviceSelection(),
+            signal,
+          });
+        }
+        if (selectedAutolockSession) {
+          await DaemonState.getInstance()
+            .getDevicePool()
+            .attachAutolockSessionToMcpSession(selectedAutolockSession, mcpSessionId, true, true);
+        }
+        const payload = {
+          message: `Active device set to '${args.deviceId}'`,
+          deviceId: args.deviceId,
+          ...(args.sessionUuid ? { sessionUuid: args.sessionUuid } : {}),
+          ...currentDisplayPinResult({ sessionUuid: args.sessionUuid, reportClearedPin }),
+        };
+        return createJSONToolResponse(payload);
       };
-      return createJSONToolResponse(payload);
+      if (!sessionScoped || !sessionUuid) {
+        // A legacy selection binds no session, so there is nothing a cancellation leaves behind.
+        return await select({});
+      }
+      // A session-scoped selection cancelled before it answers leaves the session where it was:
+      // moved back to the device it held, or released when this call minted it (#11593).
+      return await acquireUndoneIfUndelivered(signal, select);
     } catch (error) {
+      if (isClientCancelled(signal)) {
+        restorePriorDisplayPin(prior);
+      }
       logger.error("Failed to set active device:", error);
       throw toActionableError(error, "Failed to set active device");
     }

@@ -183,10 +183,13 @@ describe("a non-terminal release and the bounds the heartbeat monitor still keep
   let reaped: string[];
   let forcedAt: number[];
   let announced: string[];
+  /** A control call in flight on the session: it vetoes the monitor's own reap. */
+  let callInFlight: boolean;
 
   beforeEach(async () => {
     timer = new FakeTimer();
     timer.setCurrentTime(0);
+    callInFlight = false;
     persistence = new ParkablePersistence();
     manager = new SessionManager(
       timer,
@@ -208,7 +211,7 @@ describe("a non-terminal release and the bounds the heartbeat monitor still keep
     });
     monitor = new SessionHeartbeatMonitor(
       manager,
-      () => false,
+      () => callInFlight,
       async (sessionId, reason) => {
         reaped.push(reason);
         await manager.releaseSession(sessionId, reason);
@@ -255,6 +258,99 @@ describe("a non-terminal release and the bounds the heartbeat monitor still keep
       held: manager.getSessionForDevice(DEVICE),
       terminalFence: manager.getTerminalReleaseSnapshot(SESSION)?.releaseReason,
     }).toEqual({ announced: [RELEASE_REASON], reaped: [], held: null, terminalFence: undefined });
+  });
+
+  test("a wedged release a joiner upgrades to a terminal reason is still forced at its own deadline", async () => {
+    // The plan's own call is still in flight, so the monitor never starts a reap of its own that
+    // would track the release instead.
+    callInFlight = true;
+    monitor.start();
+    persistence.parkUpsert = new Promise<void>(() => undefined);
+    void manager.rebindSession(SESSION, "emulator-5556", "android").catch(() => undefined);
+    await drainMicrotasks(20);
+    const releaseStartedAt = timer.now();
+    void manager.releaseSession(SESSION, RELEASE_REASON).catch(() => undefined);
+    await timer.advanceTimeAsync(2 * SCAN_MS, () => drainMicrotasks(20));
+
+    // The owner's connection drops: its release joins the wedged one and upgrades the reason.
+    void manager.releaseSession(SESSION, "owner-disconnected").catch(() => undefined);
+    await timer.advanceTimeAsync(STUCK_REAP_WARN_MS - 3 * SCAN_MS, () => drainMicrotasks(20));
+    expect({ forcedAt, reaped }).toEqual({ forcedAt: [], reaped: [] });
+    await timer.advanceTimeAsync(2 * SCAN_MS, () => drainMicrotasks(20));
+
+    // Still held to the deadline of the release's own start, and forced with the reason the
+    // release carries by then: the upgrade must not hide a wedged release from the monitor.
+    expect(forcedAt).toHaveLength(1);
+    expect(forcedAt[0] - releaseStartedAt).toBeGreaterThanOrEqual(STUCK_REAP_WARN_MS);
+    expect(forcedAt[0] - releaseStartedAt).toBeLessThanOrEqual(STUCK_REAP_WARN_MS + SCAN_MS);
+    expect({
+      announced,
+      reaped,
+      held: manager.getSessionForDevice(DEVICE),
+      terminalFence: manager.getTerminalReleaseSnapshot(SESSION)?.releaseReason,
+    }).toEqual({
+      announced: ["owner-disconnected"],
+      reaped: [],
+      held: null,
+      terminalFence: "owner-disconnected",
+    });
+
+    // Forced once: later scans do not force the same release again.
+    await timer.advanceTimeAsync(STUCK_REAP_WARN_MS + 2 * SCAN_MS, () => drainMicrotasks(20));
+    expect(forcedAt).toHaveLength(1);
+  });
+
+  test("the source names one release in progress: its session, its start, while it holds the device", async () => {
+    persistence.parkUpsert = new Promise<void>(() => undefined);
+    void manager.rebindSession(SESSION, "emulator-5556", "android").catch(() => undefined);
+    await drainMicrotasks(20);
+    void manager.releaseSession(SESSION, RELEASE_REASON).catch(() => undefined);
+    const [{ startedAtMs }] = manager.getNonTerminalReleasesInProgress();
+    void manager.releaseSession(SESSION, "owner-disconnected").catch(() => undefined);
+
+    const whileWedged = {
+      upgradedStillListed: manager.getNonTerminalReleasesInProgress().length,
+      thisRelease: manager.isReleaseInProgress(SESSION, startedAtMs),
+      // A release of the same session id that began at another instant is another release.
+      anotherStart: manager.isReleaseInProgress(SESSION, startedAtMs + 1),
+      anotherSession: manager.isReleaseInProgress("another-session", startedAtMs),
+    };
+    manager.forceStuckRelease(SESSION);
+
+    expect({
+      ...whileWedged,
+      onceForced: manager.isReleaseInProgress(SESSION, startedAtMs),
+    }).toEqual({
+      upgradedStillListed: 0,
+      thisRelease: true,
+      anotherStart: false,
+      anotherSession: false,
+      // A forced release no longer holds its device: the monitor forgets it, so it is forced once.
+      onceForced: false,
+    });
+  });
+
+  test("a new release of the same session id is held to its own deadline, not the settled one's", async () => {
+    monitor.start();
+    const first = manager.releaseSession(SESSION, RELEASE_REASON);
+    await timer.advanceTimeAsync(2 * SCAN_MS, () => drainMicrotasks(20));
+    expect(await first).toBe(DEVICE);
+
+    // The same UUID is issued again and its release wedges, much later than the first one began.
+    await timer.advanceTimeAsync(STUCK_REAP_WARN_MS / 2, () => drainMicrotasks(20));
+    await manager.createSession(SESSION, DEVICE, "android");
+    manager.recordHeartbeat(SESSION);
+    persistence.parkUpsert = new Promise<void>(() => undefined);
+    void manager.rebindSession(SESSION, "emulator-5556", "android").catch(() => undefined);
+    await drainMicrotasks(20);
+    const secondStartedAt = timer.now();
+    void manager.releaseSession(SESSION, RELEASE_REASON).catch(() => undefined);
+
+    await timer.advanceTimeAsync(STUCK_REAP_WARN_MS - SCAN_MS, () => drainMicrotasks(20));
+    expect(forcedAt).toEqual([]);
+    await timer.advanceTimeAsync(2 * SCAN_MS, () => drainMicrotasks(20));
+    expect(forcedAt).toHaveLength(1);
+    expect(forcedAt[0] - secondStartedAt).toBeGreaterThanOrEqual(STUCK_REAP_WARN_MS);
   });
 
   test("an owner that had already lost its lease when the release began is still reaped", async () => {

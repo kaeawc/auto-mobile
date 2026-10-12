@@ -684,12 +684,26 @@ export function registerMcpTools(daemonMode: boolean): void {
   validateConfiguredToolSelectionDefaults(new Set(ToolRegistry.getConfigurableToolNames()));
 }
 
+/**
+ * Whether `sessionUuid` is a live session of the plan `boundSessionUuid` belongs to (#11602). The
+ * one answer for a connection's seeded binding ({@link SessionToolBinding}) and for the binding
+ * its calls recorded, read without holding, extending or releasing either session.
+ */
+function namesLiveSessionOfBoundPlan(sessionUuid: string, boundSessionUuid: string): boolean {
+  const daemonState = DaemonState.getInstance();
+  return (
+    daemonState.isInitialized() &&
+    daemonState.getSessionManager().isLiveSessionOfSamePlan(sessionUuid, boundSessionUuid)
+  );
+}
+
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   const sessionToolBinding = new SessionToolBinding(
     options.sessionContext?.initialSessionToolBinding,
     options.sessionContext?.initialToolSelectionProfile,
     undefined,
     options.sessionContext?.initialReleasedSession,
+    namesLiveSessionOfBoundPlan,
   );
   // Plan execution lock with per-session scope to prevent interference during executePlan
   // Each test thread gets its own sessionUuid, enabling parallel execution on different devices
@@ -1142,7 +1156,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         boundDeviceSessionUuid &&
         explicitSessionUuid &&
         explicitSessionUuid !== boundDeviceSessionUuid &&
-        !sessionToolBinding.ownsSession(sessionId, explicitSessionUuid)
+        !sessionToolBinding.ownsSession(sessionId, explicitSessionUuid) &&
+        // #11602: a derived `${base}:${label}` session counts as its base, so a connection bound
+        // to the base or to one of its labels may name any live session of that plan. It is no
+        // second device: the session is already allocated. Whose base it is stays the owner
+        // rule's question below.
+        !namesLiveSessionOfBoundPlan(explicitSessionUuid, boundDeviceSessionUuid)
       ) {
         throw new ActionableError(
           `MCP connection is bound to device session ${boundDeviceSessionUuid}; ` +
@@ -1857,9 +1876,28 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   // A typed refusal thrown while routing, before the body's own `try`, would otherwise escape into
   // the SDK as an untyped -32603 error. Shape it here so every typed refusal reaches the client in
   // the same result shape; untyped pre-`try` failures (unknown tool, ...) still throw (#11292).
+  // #11618: the device ids a call names, as the pool's canonical ids, before anything below routes,
+  // judges or queues it. The socket server resolves a forwarded call's ids from the pool's cached
+  // fold only, and a client on the daemon's HTTP endpoint reaches this server with the ids as sent.
+  // Synchronous unless a control call names a transport the pool has never seen.
+  const withCanonicalDeviceIds = (
+    call: ToolCall<McpToolCallExtra>,
+  ): ToolCall<McpToolCallExtra> | Promise<ToolCall<McpToolCallExtra>> => {
+    const tool = daemonMode ? ToolRegistry.getTool(call.name) : undefined;
+    if (!tool) {
+      return call;
+    }
+    const args = ToolRegistry.resolveToolCallDeviceIds(tool, call.args, call.extra.signal);
+    return args instanceof Promise
+      ? args.then((resolved) => ({ ...call, args: resolved }))
+      : args === call.args
+        ? call
+        : { ...call, args };
+  };
   const executeToolCall = async (call: ToolCall<McpToolCallExtra>): Promise<McpToolCallResult> => {
     try {
-      return await executeToolCallBody(call);
+      const canonical = withCanonicalDeviceIds(call);
+      return await executeToolCallBody(canonical instanceof Promise ? await canonical : canonical);
     } catch (error) {
       if (!isTypedToolRefusal(error)) {
         throw error;

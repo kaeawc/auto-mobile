@@ -75,6 +75,14 @@ order with `terminal` requirements so a failure never skips later jobs:
 9. Swift Packages Sweep (Xcode 26.5)
 10. Build Xcode Projects Sweep (Xcode 26.5)
 
+CircleCI posts no commit status for the scheduled pipeline (#11615), so
+`.github/workflows/circleci-nightly-visibility.yml` (ubuntu, daily 10:40 UTC, not a
+required check) runs `scripts/ci/report-circleci-nightly.sh`. It reads the nightly
+through the CircleCI API with the existing `CIRCLECI_TOKEN` secret and opens or
+updates one `circleci-nightly-macos` issue naming each red job, its job URL and its
+artifact names (for example `bats-unit-joblog/bats-unit-joblog-durations.tsv`).
+Without the secret, or if CircleCI refuses it, the run skips with a notice.
+
 The Xcode 26.5 sweeps run last because every iOS PR already builds on 26.5. The
 nightly sweeps build unsigned (the CircleCI executor pins signing off); the
 GitHub sweeps signed when certificates were configured. Release and signing

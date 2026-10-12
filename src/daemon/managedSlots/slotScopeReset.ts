@@ -237,7 +237,10 @@ export class SlotScopeReset {
     };
     // Idempotent: blocks acquisitions now, and turns an abandoned (revivable) scope permanent.
     await registry.beginScopeInvalidation(scope.scopeKey, reason);
-    const forceRefusals = force ? await this.abandonSettlement(registry, scope) : [];
+    let forceRefusals = force ? await this.abandonSettlement(registry, scope) : [];
+    // `--force` judges each slot again once the settle wait is over (#11616): a verdict taken
+    // before the wait is stale by then (the cap may have passed, the settler may have exited).
+    let forceRejudged = !force;
     for (;;) {
       const completed = await registry.completeScopeInvalidation(scope.scopeKey);
       if (completed.kind === "invalidated") {
@@ -257,19 +260,15 @@ export class SlotScopeReset {
         // Not marked (yet): mark it again and re-check on the next pass, within the same budget.
         await registry.beginScopeInvalidation(scope.scopeKey, reason);
       }
-      const waitingOn =
-        completed.kind === "pending"
-          ? pendingEvidence(completed)
-          : { liveOwners: [], settling: [], cleanupPending: [], openJournal: [] };
       const remainingMs = deadlineMs - this.options.timer.now();
+      if (remainingMs <= 0 && !forceRejudged) {
+        forceRejudged = true;
+        forceRefusals = await this.abandonSettlement(registry, scope);
+        // One more completion pass: a slot abandoned just now no longer holds the scope.
+        continue;
+      }
       if (remainingMs <= 0) {
-        return {
-          ...base,
-          outcome: "pending",
-          freedDevices: [],
-          pending: waitingOn,
-          ...(forceRefusals.length > 0 ? { forceRefusals } : {}),
-        };
+        return { ...base, ...pendingOutcome(completed, forceRefusals) };
       }
       await this.options.timer.sleep(Math.min(this.pollMs, remainingMs));
     }
@@ -448,6 +447,22 @@ function describeSettler(settler: SlotProcessIdentity | null): string {
   return settler === null
     ? "an unrecorded settler"
     : `settling daemon ${settler.daemonId} (pid ${settler.pid})`;
+}
+
+/** The `pending` answer for a scope whose last completion pass did not invalidate it. */
+function pendingOutcome(
+  completed: CompleteScopeInvalidationResult,
+  forceRefusals: SlotScopeResetForceRefusal[],
+): Pick<SlotScopeResetScopeResult, "outcome" | "freedDevices" | "pending" | "forceRefusals"> {
+  return {
+    outcome: "pending",
+    freedDevices: [],
+    pending:
+      completed.kind === "pending"
+        ? pendingEvidence(completed)
+        : { liveOwners: [], settling: [], cleanupPending: [], openJournal: [] },
+    ...(forceRefusals.length > 0 ? { forceRefusals } : {}),
+  };
 }
 
 function pendingEvidence(

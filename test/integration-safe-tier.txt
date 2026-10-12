@@ -184,7 +184,7 @@ test/server/daemonShutdownOutcomeWire.integration.test.ts | safe | hermetic fixt
 test/server/deviceLabelSessionReleaseOrdering.integration.test.ts | safe | in-memory DB; new Daemon never started, pool release mocked L33
 test/server/deviceLossOutcomeWire.integration.test.ts | safe | FakeDeviceManager installed; in-memory McpTestFixture L29
 test/server/downloadsFixtureOwnership.integration.test.ts | safe | fake DownloadsFixtureService; FakeDeviceUtils pool L46/L56
-test/server/explicitSessionUuidBinding.daemon.integration.test.ts | safe | UnixSocketServer built but never started; :memory: DB, fakes L276/L61
+test/server/explicitSessionUuidBinding.daemon.integration.test.ts | safe | Registry device session manager replaced with FakeDeviceSessionManager L67; UnixSocketServer never started, fake pool and :memory: DB
 test/server/finalizeToolResponse.outputSchema.integration.test.ts | safe | FakeDeviceManager and FakeArtifactWriter L19/L142
 test/server/internalToolPayloads.integration.test.ts | safe | read-only scan of src files L8
 test/server/liveAcceptanceDestructiveToolSelection.integration.test.ts | safe | hermetic fixture; tools are in-test stubs L1
@@ -198,7 +198,7 @@ test/server/planTools.executePlanThrow.integration.test.ts | safe | executePlan 
 test/server/proxyServerListChanged.integration.test.ts | safe | FakeDaemonClient/FakeDaemonManager; isAvailable mocked L20/L25/L44
 test/server/proxyServerTransportFailure.integration.test.ts | safe | fake client/manager; DaemonClient("/unused") never connects L288
 test/server/resources/read.integration.test.ts | unsafe | unlinks files in hardcoded /tmp/auto-mobile/observe_results L68/L72
-test/server/sessionPlatformRouting.daemon.integration.test.ts | safe | UnixSocketServer never started; fakes and :memory: DB L172/L63
+test/server/sessionPlatformRouting.daemon.integration.test.ts | safe | Registry device session manager replaced with FakeDeviceSessionManager L68; UnixSocketServer never started, fake pool and :memory: DB
 test/server/sessionPlatformRouting.integration.test.ts | safe | FakeDeviceUtils, FakeDeviceSessionManager, no booted devices L38/L54
 test/server/sessionResourceBinding.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture L28
 test/server/sessionToolBindingFailedCall.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture L41

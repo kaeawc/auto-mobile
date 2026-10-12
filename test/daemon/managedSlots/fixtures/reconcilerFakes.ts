@@ -17,7 +17,11 @@ import {
   type ManagedSpecMatcher,
 } from "../../../../src/daemon/managedSlots/reconciler";
 import type { SlotPlatform } from "../../../../src/daemon/managedSlots/slotRegistry";
-import { ProvisionDeviceError } from "../../../../src/devices/exactDeviceProvisioning";
+import {
+  ProvisionDeviceError,
+  type ResolvedExactDeviceSpecification,
+} from "../../../../src/devices/exactDeviceProvisioning";
+import { classifyDisplayCutout } from "../../../../src/utils/displayCutout";
 import type { DeviceInfo } from "../../../../src/models";
 
 // Port fakes shared by the reconciler and journal-redrive suites (#11175, #11179).
@@ -66,6 +70,17 @@ export class FakeProvisioner implements ManagedSlotDeviceProvisioner {
   private nextSession = 1;
 
   constructor(private readonly inventory: FakeInventory) {}
+
+  async readExistingSpec(device: DeviceInfo): Promise<ResolvedExactDeviceSpecification | null> {
+    if (!device.runtime || !device.deviceType) {
+      return null;
+    }
+    return {
+      runtime: device.runtime,
+      deviceType: device.deviceType,
+      displayCutout: classifyDisplayCutout(device.platform, device.deviceType),
+    };
+  }
 
   async provision(request: ManagedSlotProvisionRequest): Promise<ManagedSlotProvisionedDevice> {
     this.calls.push(request);

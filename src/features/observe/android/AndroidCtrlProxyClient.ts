@@ -460,6 +460,7 @@ interface WsSetTextResultMessage extends WsRequestBase {
 
 interface WsCommitTextResultMessage extends WsRequestBase {
   type: "commit_text_result";
+  trace?: unknown;
   insertedText?: string;
   partialApplication?: boolean;
   committedUnits?: number;
@@ -1195,6 +1196,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     delivery?: "commit" | "keyEvents" | "clearField",
+    trace?: boolean,
   ): Promise<ImeCommitActionResult>;
 
   setKeyboardProfile(
@@ -3618,9 +3620,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs?: number,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents" | "clearField",
+    ...[delivery, trace]: [delivery?: "commit" | "keyEvents" | "clearField", trace?: boolean]
   ): Promise<ImeCommitActionResult> {
-    return this.text.commitViaIme(text, priorImeId, timeoutMs, perf, signal, delivery);
+    return this.text.commitViaIme(text, priorImeId, timeoutMs, perf, signal, delivery, trace);
   }
 
   async setKeyboardProfile(
@@ -6045,6 +6047,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.resolvePendingResponse(message, (message): ImeCommitActionResult => ({
         success: message.success,
         ...(typeof message.insertedText === "string" ? { insertedText: message.insertedText } : {}),
+        ...(Array.isArray(message.trace) &&
+        message.trace.every((line): line is string => typeof line === "string")
+          ? { trace: message.trace.slice(-256) }
+          : {}),
         totalTimeMs: message.totalTimeMs,
         error: message.error,
         partialApplication: message.partialApplication,

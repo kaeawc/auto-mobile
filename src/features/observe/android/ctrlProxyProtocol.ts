@@ -234,6 +234,7 @@ export interface RequestCommitTextMessage {
    */
   delivery?: "commit" | "keyEvents" | "clearField";
   timeoutMs?: number;
+  trace?: true;
 }
 
 export interface RequestCancelImeCommitMessage {
@@ -1028,6 +1029,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   "ime_clear_field_v1",
   "ime_password_commit_v1",
   "ime_inserted_text_v1",
+  "ime_commit_trace_v1",
   "gesture_display_id_v1",
   "tap_double_v1",
   PROTOTYPE_DISPLAY_CAPABILITY,
@@ -1263,6 +1265,10 @@ export function normalizeCtrlProxyMilliseconds(
  * JSON.stringify omits undefined fields and preserves explicit nulls.
  */
 export function serializeCtrlProxyRequest(request: CtrlProxyRequest): string {
+  if (request.type === "request_commit_text" && request.trace === true) {
+    const { trace, ...legacyFields } = request;
+    return JSON.stringify(normalizeCtrlProxyMilliseconds(request.type, { ...legacyFields, trace }));
+  }
   return JSON.stringify(normalizeCtrlProxyMilliseconds(request.type, { ...request }));
 }
 

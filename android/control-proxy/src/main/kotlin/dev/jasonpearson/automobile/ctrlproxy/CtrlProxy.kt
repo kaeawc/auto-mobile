@@ -2899,6 +2899,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     priorImeId: String?,
     delivery: ImeTextDelivery,
     timeoutMs: Long?,
+  ) = requestCommitText(requestId, text, priorImeId, delivery, timeoutMs, false)
+
+  override fun requestCommitText(
+    requestId: String?,
+    text: String,
+    priorImeId: String?,
+    delivery: ImeTextDelivery,
+    timeoutMs: Long?,
+    trace: Boolean,
   ) {
     rememberedInsert = null
     val start = System.currentTimeMillis()
@@ -2966,6 +2975,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         delivery,
         timeoutMs,
         requestDeadlineMs,
+        trace,
       ) { result ->
         finish(result)
         launchRequestScope(requestId) {
@@ -2977,6 +2987,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             result.partialApplication,
             result.committedUnits,
             result.insertedText,
+            if (trace) result.trace else null,
           )
         }
       }
@@ -7671,6 +7682,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     partialApplication: Boolean,
     committedUnits: Int = 0,
     insertedText: String? = null,
+    trace: List<String>? = null,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping commit text result broadcast")
@@ -7685,6 +7697,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           if (partialApplication) put("partialApplication", true)
           if (committedUnits > 0) put("committedUnits", committedUnits)
           if (insertedText != null) put("insertedText", insertedText)
+          if (trace != null) put("trace", Json.encodeToJsonElement(trace))
           if (error != null) {
             put("error", error)
           }

@@ -28143,6 +28143,12 @@
                 ],
                 "additionalProperties": false
               },
+              "imeTrace": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
               "backend": {
                 "type": "string",
                 "const": "autoMobileIme"

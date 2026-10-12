@@ -32,6 +32,7 @@ import {
   beginPostActionCaptureAction,
   deferTerminalScreenshot,
 } from "../../utils/PostActionCaptureContext";
+import { isDebugModeEnabled } from "../../utils/debug";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
@@ -354,6 +355,7 @@ export interface SendKeysCommandResult extends BaseActionResult {
   key?: SendKeysKey;
   modifiers?: InputKeyModifier[];
   partialApplication?: boolean;
+  imeTrace?: string[];
   imeFailure?: ImeFailureDiagnostic;
   committedGraphemes?: number;
   /** Device upper bound; this is not the verified committedGraphemes count. */
@@ -482,6 +484,7 @@ export type TextActionResult = {
   resultingTextLength?: number;
   error?: string;
   partialApplication?: boolean;
+  imeTrace?: string[];
   imeFailure?: ImeFailureDiagnostic;
   /** Internal stage supplied by transport/restoration boundaries. */
   imeFailureStage?: ImeFailureDiagnostic["stage"];
@@ -516,6 +519,7 @@ export interface SendKeysTextClient {
   supportsImePasswordCommit(): Promise<boolean>;
   /** Reports the editor delta on commit_text_result when it can be read safely. */
   supportsImeInsertedText(): Promise<boolean>;
+  supportsImeTrace?(): Promise<boolean>;
   supportsKeyboardProfiles(): Promise<boolean>;
   setKeyboardProfile(
     id: string,
@@ -525,6 +529,7 @@ export interface SendKeysTextClient {
     priorImeId: string | null,
     signal?: AbortSignal,
     delivery?: "commit" | "keyEvents" | "clearField",
+    trace?: boolean,
   ): Promise<TextActionResult>;
 }
 
@@ -642,6 +647,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private imeUserId: number | undefined;
   /** Set while a type command targets a password field: diagnostics never name its characters. */
   private typingPasswordField = false;
+  private readonly imeTraceContext = new AsyncLocalStorage<{ lines?: string[] }>();
   private readonly imeSpanContext = new AsyncLocalStorage<AndroidImeSpan>();
 
   private get imeSpan(): AndroidImeSpan | undefined {
@@ -796,6 +802,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     signal?: AbortSignal,
     display?: string,
   ): Promise<SendKeysCommandResult> {
+    return this.imeTraceContext.run({}, () => this.typeWithTraceContext(command, signal, display));
+  }
+
+  private async typeWithTraceContext(
+    command: SendKeysTypeCommand,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<SendKeysCommandResult> {
     signal?.throwIfAborted();
     const operation = command.operation ?? "insert";
     const requestedMode = command.mode ?? "auto";
@@ -861,6 +875,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         committedGraphemes: result.committedGraphemes,
         ...imeCommitUnitFields(result),
         ...imeFailureFields(result),
+        ...this.imeTraceFields(),
         ...(result.resolvedMode ? { resolvedMode: result.resolvedMode } : {}),
         ...this.imeResultFields(result.resolvedMode ?? baseResult.resolvedMode),
       };
@@ -875,8 +890,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         ...this.imeResultFields(baseResult.resolvedMode),
         success: false,
         error: errorMessage(error),
+        ...this.imeTraceFields(),
       };
     }
+  }
+
+  private imeTraceFields(): Pick<TextActionResult, "imeTrace"> {
+    const lines = this.imeTraceContext.getStore()?.lines;
+    return lines !== undefined ? { imeTrace: lines } : {};
   }
 
   private imeResultFields(mode: ResolvedSendKeysTypingMode) {
@@ -1784,6 +1805,35 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return activated;
   }
 
+  private async requestImeCommit(
+    text: string,
+    priorImeId: string | null,
+    signal?: AbortSignal,
+    delivery?: "commit" | "keyEvents" | "clearField",
+  ): Promise<TextActionResult> {
+    let trace = false;
+    if (isDebugModeEnabled()) {
+      try {
+        trace = (await this.textClient.supportsImeTrace?.()) === true;
+      } catch (error) {
+        // Capability probing is optional; delivery can proceed without diagnostics.
+        logger.debug("[SendKeys] IME trace capability unavailable", error);
+      }
+    }
+    const result = await this.textClient.commitViaIme(
+      text,
+      priorImeId,
+      signal,
+      delivery,
+      trace ? true : undefined,
+    );
+    const traceState = this.imeTraceContext.getStore();
+    if (trace && traceState && result.imeTrace !== undefined) {
+      traceState.lines = [...(traceState.lines ?? []), ...result.imeTrace];
+    }
+    return result;
+  }
+
   private async prepareImeCommitClear(
     operation: SendKeysOperation,
     routing: ImeCommitRouting,
@@ -1809,7 +1859,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       routing.signal,
       routing.display,
       async () => {
-        const cleared = await this.textClient.commitViaIme("", null, routing.signal, "clearField");
+        const cleared = await this.requestImeCommit("", null, routing.signal, "clearField");
         // Record safety before verification can abort or exhaust the request budget.
         progress.safeToRestore = this.canRestoreAfterImeCommit(cleared, prior, priorSubtype);
         if (routing.delivery === "clearField") {
@@ -1911,7 +1961,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         };
       }
       const clearWarning = cleared.warning;
-      const result = await this.textClient.commitViaIme(
+      const result = await this.requestImeCommit(
         text,
         this.imeSpan ? null : prior,
         signal,
@@ -3325,10 +3375,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         supportsImeClearField: async () => client.supportsCommand("ime_clear_field_v1"),
         supportsImePasswordCommit: async () => client.supportsCommand("ime_password_commit_v1"),
         supportsImeInsertedText: async () => client.supportsCommand("ime_inserted_text_v1"),
+        supportsImeTrace: async () => client.supportsCommand("ime_commit_trace_v1"),
         supportsKeyboardProfiles: async () =>
           client.supportsCommand("request_set_keyboard_profile"),
         setKeyboardProfile: async (id) => client.setKeyboardProfile(id),
-        commitViaIme: async (text, priorImeId, signal, delivery) => {
+        commitViaIme: async (text, priorImeId, signal, delivery, trace) => {
           const result = await client.commitViaIme(
             text,
             priorImeId ?? undefined,
@@ -3336,6 +3387,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             undefined,
             signal,
             delivery,
+            trace,
           );
           return {
             success: result.success,
@@ -3345,6 +3397,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             ...(result.transportFailure ? { imeFailureStage: "transport" as const } : {}),
             ...imeCommitUnitFields(result),
             ...(result.insertedText !== undefined ? { insertedText: result.insertedText } : {}),
+            ...(result.trace !== undefined ? { imeTrace: result.trace } : {}),
           };
         },
       };

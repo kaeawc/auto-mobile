@@ -1081,3 +1081,17 @@ describe("prototype builders enforce either/or types", () => {
   };
   void invalidBuilders;
 });
+
+test("IME trace opt-in serializes after the timeout", () => {
+  expect(
+    serializeCtrlProxyRequest({
+      type: "request_commit_text",
+      requestId: "trace-1",
+      text: "value",
+      trace: true,
+      timeoutMs: 1500,
+    }),
+  ).toBe(
+    '{"type":"request_commit_text","requestId":"trace-1","text":"value","timeoutMs":1500,"trace":true}',
+  );
+});

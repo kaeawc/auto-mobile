@@ -328,6 +328,8 @@ class WebSocketServer(
     add("ime_password_commit_v1")
     // commit_text_result reports the editor delta as insertedText when readable and safe.
     add("ime_inserted_text_v1")
+    // Optional text-free callback and commit decision trace.
+    add("ime_commit_trace_v1")
     add("tap_double_v1")
     // set_network_mock_rules with a requestId is answered with set_network_mock_rules_result
     // naming the rules the app's regex engine rejected (issue #10101). Hosts only wait for the

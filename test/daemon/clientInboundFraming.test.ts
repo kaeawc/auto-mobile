@@ -244,6 +244,80 @@ async function withSocketConnection(
   }
 }
 
+test("overflow preserves the frame error when a connection-closed handler closes the client", async () => {
+  await withSocketConnection(async (client, sockets, callbacks, timer) => {
+    const connecting = client.connect();
+    callbacks[0]!();
+    await connecting;
+    const socket = sockets[0]!;
+    const controller = new AbortController();
+    const remove = spyOn(controller.signal, "removeEventListener");
+    let closed = 0;
+    client.onConnectionClosed(() => {
+      closed++;
+      void client.close();
+    });
+    const first = client
+      .callTool("tapOn", {}, undefined, undefined, controller.signal)
+      .catch((error: unknown) => error);
+    const second = client.callTool("tapOn", {}).catch((error: unknown) => error);
+    try {
+      client.simulateIncomingDataForTesting(Buffer.from("x".repeat(129)));
+      const error = await first;
+      expect(error).toBeInstanceOf(DaemonFrameTooLargeError);
+      expect(error).not.toBeInstanceOf(DaemonUnavailableError);
+      expect(await second).toBe(error);
+      expect(client.hasPendingRequestForTesting("p")).toBe(false);
+      expect(client.hasPendingRequestForTesting("q")).toBe(false);
+      expect(socket.destroyed).toBe(true);
+      expect(closed).toBe(1);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
+      socket.emit("close");
+      client.simulateIncomingDataForTesting(Buffer.from("x".repeat(129)));
+      expect(closed).toBe(1);
+    } finally {
+      remove.mockRestore();
+    }
+  });
+});
+
+test("overflow destroys the socket and rejects requests even when a connection-closed handler throws", async () => {
+  await withSocketConnection(async (client, sockets, callbacks, timer) => {
+    const connecting = client.connect();
+    callbacks[0]!();
+    await connecting;
+    const socket = sockets[0]!;
+    const handlerError = new Error("connection-closed handler failed");
+    let closed = 0;
+    const unsubscribe = client.onConnectionClosed(() => {
+      closed++;
+      throw handlerError;
+    });
+    const first = client.callTool("tapOn", {}).catch((error: unknown) => error);
+    const second = client.callTool("tapOn", {}).catch((error: unknown) => error);
+    try {
+      expect(() => client.simulateIncomingDataForTesting(Buffer.from("x".repeat(129)))).toThrow(
+        handlerError,
+      );
+      expect(socket.destroyed).toBe(true);
+      const error = await first;
+      expect(error).toBeInstanceOf(DaemonFrameTooLargeError);
+      expect(error).not.toBeInstanceOf(DaemonUnavailableError);
+      expect(await second).toBe(error);
+      expect(client.hasPendingRequestForTesting("p")).toBe(false);
+      expect(client.hasPendingRequestForTesting("q")).toBe(false);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(closed).toBe(1);
+      socket.emit("close");
+      client.simulateIncomingDataForTesting(Buffer.from("x".repeat(129)));
+      expect(closed).toBe(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+});
+
 test("test socket attachment adds no listeners", async () => {
   const socket = new FakeSocket();
   const client = new DaemonClient("/fake/socket", 1000, new FakeTimer(), {}, null);
@@ -340,7 +414,7 @@ for (const reconnectBeforeClose of [false, true]) {
       const unsubscribe = client.onConnectionClosed(() => {
         closed++;
         expect(socket.destroyed).toBe(false);
-        expect(client.hasPendingRequestForTesting("p")).toBe(true);
+        expect(client.hasPendingRequestForTesting("p")).toBe(false);
       });
       const otherData = () => {};
       socket.on("data", otherData);

@@ -891,14 +891,17 @@ export class DaemonClient {
     const error = new DaemonFrameTooLargeError(this.maxInboundFrameBytes);
     logger.warn(error.message);
     const socket = this.socket;
-    this.handleSocketClosed(socket);
     for (const pending of this.pendingRequests.values()) {
       this.timer.clearTimeout(pending.timeout);
       pending.removeAbortListener?.();
       pending.reject(error);
     }
     this.pendingRequests.clear();
-    socket?.destroy();
+    try {
+      this.handleSocketClosed(socket);
+    } finally {
+      socket?.destroy();
+    }
   }
 
   private handleSocketClosed(socket: Socket | Duplex | null): void {

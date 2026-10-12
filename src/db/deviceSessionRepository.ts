@@ -105,6 +105,39 @@ function hasTerminalReleaseReason(eb: ExpressionBuilder<Database, "device_sessio
   ]);
 }
 
+/** The shared statement predicate: null/dead owners are writable, live peers are not. */
+function livePeerOwnerGuard(
+  eb: ExpressionBuilder<Database, "device_sessions">,
+  livePeerDaemonSessionIds: readonly string[],
+) {
+  return livePeerDaemonSessionIds.length > 0
+    ? [
+        eb.or([
+          eb("device_sessions.daemon_session_id", "is", null),
+          eb("device_sessions.daemon_session_id", "not in", livePeerDaemonSessionIds),
+        ]),
+      ]
+    : [];
+}
+
+/** The release and live-row rewrite share the terminal-reason and live-peer predicates. */
+function rowRewriteGuard(
+  eb: ExpressionBuilder<Database, "device_sessions">,
+  supersededReasons: readonly string[],
+  livePeerDaemonSessionIds: readonly string[],
+) {
+  return eb.and([
+    eb.or([
+      eb("device_sessions.release_reason", "is", null),
+      eb.not(hasTerminalReleaseReason(eb)),
+      ...(supersededReasons.length > 0
+        ? [eb("device_sessions.release_reason", "in", supersededReasons)]
+        : []),
+    ]),
+    ...livePeerOwnerGuard(eb, livePeerDaemonSessionIds),
+  ]);
+}
+
 function shouldRetainLivenessOwner(reason: string): boolean {
   return isRecoverableDaemonReleaseReason(reason);
 }
@@ -160,6 +193,16 @@ export class DeviceSessionRowNotRewritableError extends ActionableError {
   }
 }
 
+/** A guarded release matched no writable row; this is a refusal, not a storage failure. */
+export class DeviceSessionRowNotReleasableError extends ActionableError {
+  constructor(readonly sessionUuid: string) {
+    super(
+      `Device session ${sessionUuid} was not released: its row is terminal or owned by a live peer.`,
+    );
+    this.name = "DeviceSessionRowNotReleasableError";
+  }
+}
+
 /** Options for {@link DeviceSessionPersistence.upsertActiveSession}. */
 export interface UpsertActiveSessionOptions {
   /**
@@ -186,6 +229,8 @@ export interface UpsertActiveSessionOptions {
   rewriteOverSupersededRelease?: {
     supersededReasons: readonly string[];
     livePeerDaemonSessionIds: readonly string[];
+    /** Activity re-persistence may replace only the generation its incarnation last wrote. */
+    expectedRowGeneration?: number;
   };
 }
 
@@ -253,6 +298,13 @@ export interface MarkReleasedOptions {
    * took over after the adopter read it.
    */
   onlyIfOwnedByDaemon?: string;
+  /** Preserve any terminal reason and any live peer's row, in the release statement (#11557).
+   * A refusal rejects with DeviceSessionRowNotReleasableError; existing options keep their behavior.
+   */
+  unlessTerminalOrOwnedByLivePeer?: {
+    livePeerDaemonSessionIds: readonly string[];
+    supersededReasons?: readonly string[];
+  };
 }
 
 /** The row incarnation a recovery read, which its ownership claim must still match (#11200). */
@@ -527,28 +579,20 @@ export class DeviceSessionRepository {
           });
           if (!claimedRow) {
             if (rewriteOverSupersededRelease) {
-              const { supersededReasons, livePeerDaemonSessionIds } = rewriteOverSupersededRelease;
+              const { supersededReasons, livePeerDaemonSessionIds, expectedRowGeneration } =
+                rewriteOverSupersededRelease;
               return update.where((eb) =>
                 eb.and([
-                  eb.or([
-                    eb("device_sessions.release_reason", "is", null),
-                    eb.not(hasTerminalReleaseReason(eb)),
-                    ...(supersededReasons.length > 0
-                      ? [eb("device_sessions.release_reason", "in", supersededReasons)]
-                      : []),
-                  ]),
-                  ...(livePeerDaemonSessionIds.length > 0
-                    ? [
-                        eb.or([
-                          eb("device_sessions.daemon_session_id", "is", null),
-                          eb(
-                            "device_sessions.daemon_session_id",
-                            "not in",
-                            livePeerDaemonSessionIds,
-                          ),
-                        ]),
-                      ]
-                    : []),
+                  rowRewriteGuard(eb, supersededReasons, livePeerDaemonSessionIds),
+                  ...(expectedRowGeneration === undefined
+                    ? []
+                    : [
+                        eb(
+                          "device_sessions.stable_identity_generation",
+                          "=",
+                          expectedRowGeneration,
+                        ),
+                      ]),
                 ]),
               );
             }
@@ -813,14 +857,24 @@ export class DeviceSessionRepository {
       if (onlyIfOwnedByDaemon !== undefined) {
         update = update.where("daemon_session_id", "=", onlyIfOwnedByDaemon);
       }
-      const result = await update.executeTakeFirst();
-      if (expectedRowGeneration !== undefined && Number(result.numUpdatedRows) === 0) {
-        // Expected outcome of the precondition: the UUID was re-upserted (or removed) after this
-        // release was captured, so the row is not this release's to change.
-        logger.info(
-          `[DeviceSessionRepository] Skipped ${reason} release of ${sessionUuid}: the row is no ` +
-            `longer generation ${expectedRowGeneration}`,
+      const guarded = options.unlessTerminalOrOwnedByLivePeer;
+      if (guarded) {
+        update = update.where((eb) =>
+          rowRewriteGuard(eb, guarded.supersededReasons ?? [], guarded.livePeerDaemonSessionIds),
         );
+      }
+      const result = await update.executeTakeFirst();
+      if (Number(result.numUpdatedRows) === 0) {
+        if (expectedRowGeneration !== undefined) {
+          // Expected outcome of the precondition: the UUID was re-upserted (or removed) after this
+          // release was captured, so the row is not this release's to change.
+          logger.info(
+            `[DeviceSessionRepository] Skipped ${reason} release of ${sessionUuid}: the row is no ` +
+              `longer generation ${expectedRowGeneration}`,
+          );
+        } else if (guarded) {
+          throw new DeviceSessionRowNotReleasableError(sessionUuid);
+        }
       }
     } catch (error) {
       logger.warn(

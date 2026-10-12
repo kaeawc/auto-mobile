@@ -8,6 +8,7 @@ import {
 import {
   DeviceSessionRepository,
   DeviceSessionRowNotRewritableError,
+  DeviceSessionRowNotReleasableError,
   DeviceSessionTerminallyReleasedError,
   type DeviceSessionPersistence,
   type DeviceSessionRecord,
@@ -78,6 +79,88 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
   async function rowOf(persistence: DeviceSessionPersistence) {
     return await persistence.getSession?.(SESSION);
   }
+
+  describe("markReleased preserving terminal releases and live peers", () => {
+    test.each([
+      { reason: null, owner: "daemon-a", refused: false },
+      { reason: null, owner: null, refused: false },
+      { reason: null, owner: "daemon-dead", refused: false },
+      { reason: null, owner: "daemon-peer", refused: true },
+      { reason: "explicit-release", owner: "daemon-a", refused: true },
+      { reason: "explicit-release", owner: "daemon-peer", refused: true },
+      { reason: "device-disconnected:emulator-5554", owner: "daemon-a", refused: true },
+      { reason: "plan-auto-release", owner: "daemon-a", refused: false },
+    ])("guarded release with %p", async ({ reason, owner, refused }) => {
+      const persistence = await create();
+      await persistence.upsertActiveSession(record({ daemonSessionId: owner }));
+      if (reason) {
+        await persistence.markReleased(SESSION, "released", 2_000, reason);
+      }
+      const before = structuredClone(await rowOf(persistence));
+      const result = await persistence
+        .markReleased(SESSION, "released", 3_000, "device-disconnected:emulator-5554", {
+          unlessTerminalOrOwnedByLivePeer: { livePeerDaemonSessionIds: ["daemon-peer"] },
+        })
+        .then(
+          () => "written",
+          (error: unknown) => error,
+        );
+      if (refused) {
+        expect(result).toBeInstanceOf(DeviceSessionRowNotReleasableError);
+        expect(await rowOf(persistence)).toEqual(before);
+      } else {
+        expect(result).toBe("written");
+        expect(await rowOf(persistence)).toMatchObject({
+          status: "released",
+          release_reason: "device-disconnected:emulator-5554",
+        });
+      }
+    });
+
+    test.each(["daemon-a", "daemon-peer"])(
+      "a committed terminal release replaces only our superseded row: %s",
+      async (owner) => {
+        const persistence = await create();
+        await persistence.upsertActiveSession(record({ daemonSessionId: owner }));
+        await persistence.markReleased(
+          SESSION,
+          "released",
+          2_000,
+          "device-disconnected:emulator-5554",
+        );
+        const before = structuredClone(await rowOf(persistence));
+        const result = await persistence
+          .markReleased(SESSION, "released", 3_000, "explicit-release", {
+            unlessTerminalOrOwnedByLivePeer: {
+              livePeerDaemonSessionIds: ["daemon-peer"],
+              supersededReasons: ["device-disconnected:emulator-5554"],
+            },
+          })
+          .then(
+            () => "written",
+            (error: unknown) => error,
+          );
+        if (owner === "daemon-peer") {
+          expect(result).toBeInstanceOf(DeviceSessionRowNotReleasableError);
+          expect(await rowOf(persistence)).toEqual(before);
+        } else {
+          expect(result).toBe("written");
+          expect(await rowOf(persistence)).toMatchObject({ release_reason: "explicit-release" });
+        }
+      },
+    );
+
+    test("the existing generation mismatch stays a silent no-op with the new guard", async () => {
+      const persistence = await create();
+      const generation = await persistence.upsertActiveSession(record());
+      const before = structuredClone(await rowOf(persistence));
+      await persistence.markReleased(SESSION, "released", 3_000, "explicit-release", {
+        expectedRowGeneration: Number(generation) + 1,
+        unlessTerminalOrOwnedByLivePeer: { livePeerDaemonSessionIds: [] },
+      });
+      expect(await rowOf(persistence)).toEqual(before);
+    });
+  });
 
   describe("markReleased with onlyIfExpiredAtMs", () => {
     test("releases a row whose deadline is at or before the instant", async () => {
@@ -215,6 +298,51 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
   });
 
   describe("upsertActiveSession with rewriteOverSupersededRelease", () => {
+    test.each([
+      { owner: "daemon-a", generationChanged: false, refused: false },
+      { owner: "daemon-a", generationChanged: true, refused: true },
+      { owner: "daemon-peer", generationChanged: false, refused: true },
+      { owner: "daemon-dead", generationChanged: false, refused: false },
+    ])(
+      "activity replacement matches its generation and excludes live peers: %p",
+      async ({ owner, generationChanged, refused }) => {
+        const persistence = await create();
+        const generation = await persistence.upsertActiveSession(
+          record({ daemonSessionId: owner }),
+        );
+        await persistence.markReleased(SESSION, "released", 2_000, "daemon-restart");
+        if (generationChanged) {
+          await persistence.upsertActiveSession(
+            record({ deviceId: "replacement", daemonSessionId: owner }),
+          );
+        }
+        const before = structuredClone(await rowOf(persistence));
+        const result = await persistence
+          .upsertActiveSession(record({ lastUsedAtMs: 3_000 }), 3_000, {
+            unlessTerminal: true,
+            rewriteOverSupersededRelease: {
+              supersededReasons: [],
+              livePeerDaemonSessionIds: ["daemon-peer"],
+              expectedRowGeneration: Number(generation),
+            },
+          })
+          .then(
+            () => "written",
+            (error: unknown) => error,
+          );
+        if (refused) {
+          expect(result).toBeInstanceOf(DeviceSessionRowNotRewritableError);
+          expect(await rowOf(persistence)).toEqual(before);
+        } else {
+          expect(result).toBe("written");
+          expect(await rowOf(persistence)).toMatchObject({
+            status: "active",
+            release_reason: null,
+          });
+        }
+      },
+    );
+
     const cases = [
       { reason: "device-disconnected:emulator-5554", owner: "daemon-a", replaced: true },
       { reason: "explicit-release", owner: "daemon-a", replaced: false },

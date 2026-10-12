@@ -21,6 +21,9 @@ export class BusyRewritePersistence extends FakeDeviceSessionPersistence {
   afterPlainUpsert: (() => Promise<void>) | undefined;
   /** Release writes still to fail, counted from the next one issued. */
   failReleaseWrites = 0;
+  /** Runs once before an activity re-persist lands, to drive an incarnation change. */
+  duringActivityUpsert: (() => Promise<void>) | undefined;
+  failActivityUpserts = 0;
 
   override async markReleased(
     sessionUuid: string,
@@ -56,6 +59,13 @@ export class BusyRewritePersistence extends FakeDeviceSessionPersistence {
       this.afterPlainUpsert = undefined;
       await landed?.();
       return generation;
+    }
+    const hook = this.duringActivityUpsert;
+    this.duringActivityUpsert = undefined;
+    await hook?.();
+    if (this.failActivityUpserts > 0) {
+      this.failActivityUpserts--;
+      throw new Error("SQLITE_BUSY: database is locked");
     }
     return await super.upsertActiveSession(record, nowMs, options);
   }

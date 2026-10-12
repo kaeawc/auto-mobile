@@ -3,9 +3,12 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import type { ManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
 import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
+import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
+import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
 import {
   DEVICE_RESTART_RECOVERY_WINDOW_MS,
   SessionManager,
+  TerminalSessionError,
   type RehydrationDeviceReservation,
 } from "../../src/daemon/sessionManager";
 import {
@@ -299,7 +302,7 @@ describe("device restart reserves the entire recovery window", () => {
     pool.releaseDeviceClaimsForShutdown();
     expect(notifications).toBe(1);
   });
-  test("idle expiry at 120 seconds ends the hold with no recovery call waiting", async () => {
+  test("pins: never-resumed restart row expires at 120 seconds and is refused after 180 seconds", async () => {
     await setup();
     await handoff();
     const row = await persistence.getSession(HOLDER);
@@ -325,10 +328,74 @@ describe("device restart reserves the entire recovery window", () => {
         release: { releaseReason: "expired" },
       });
     }
-    await advance(60_000);
+    await advance(60_001);
+    expect(await persistence.getSession(HOLDER)).toMatchObject({
+      status: "expired",
+      release_reason: "expired",
+    });
+    await expect(sessions.admitIssuedSessionForAutomation(HOLDER)).rejects.toMatchObject({
+      release: { releaseReason: "expired", terminal: true },
+    });
+    expect(pool.getDevice(SIM.deviceId)?.sessionId).toBeNull();
     expect(expiryNotices).toBe(1);
     expect(notifications).toBe(1);
   });
+  test("an idle-ended restart reservation carries idle on both refusal wires after 180 seconds", async () => {
+    await handoff();
+    await advance(180_001);
+    const error = await sessions.admitIssuedSessionForAutomation(HOLDER).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    if (!(error instanceof TerminalSessionError)) {
+      throw new Error("expected the expired reservation's terminal refusal");
+    }
+    expect(
+      sessionOwnershipLostPayload({
+        message: error.message,
+        sessionUuid: HOLDER,
+        reason: error.release.releaseReason,
+        release: error.release,
+      }).error,
+    ).toMatchObject({
+      code: "session_ownership_lost",
+      reason: "expired",
+      idle: true,
+      retryable: false,
+      nextAction: "acquire_new_session",
+    });
+    expect(mcpRequestFailureDetails(error, undefined).details).toEqual({
+      sessionUuid: HOLDER,
+      reason: "expired",
+      idle: true,
+    });
+    expect(pool.getDevice(SIM.deviceId)?.sessionId).toBeNull();
+  });
+
+  test("pins: a never-resumed restart row with a 300-second idle window recovers a present target after 180 seconds", async () => {
+    const session = sessions.getSession(HOLDER)!;
+    session.sessionTimeoutMs = 300_000;
+    session.expiresAt = timer.now() + 300_000;
+    const row = (await persistence.getSession(HOLDER))!;
+    row.session_timeout_ms = 300_000;
+    row.expires_at_ms = session.expiresAt;
+    await handoff();
+    await advance(180_001);
+    expect(await persistence.getSession(HOLDER)).toMatchObject({
+      status: "released",
+      release_reason: `device-restart:${SIM.name}`,
+    });
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+    expect(await sessions.admitIssuedSessionForAutomation(HOLDER)).toBeUndefined();
+    const recovered = await sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true);
+    expect(recovered.assignedDevice).toBe(SIM.deviceId);
+    expect(pool.getDevice(SIM.deviceId)?.sessionId).toBe(HOLDER);
+    expect(await persistence.getSession(HOLDER)).toMatchObject({
+      status: "active",
+      release_reason: null,
+    });
+  });
+
   for (const livePeer of [true, false]) {
     test(`a peer claim before idle expiry is preserved, live peer: ${livePeer}`, async () => {
       sessions.attachLiveDaemonSessionIds(

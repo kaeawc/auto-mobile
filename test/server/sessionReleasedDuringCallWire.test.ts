@@ -70,6 +70,7 @@ describe("a call cut by its session's release (#11381)", () => {
         code: "session_ownership_lost",
         sessionUuid: SESSION,
         reason: "cleanup-expired",
+        idle: true,
         retryable: false,
         nextAction: "acquire_new_session",
       },

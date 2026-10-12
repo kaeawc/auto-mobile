@@ -1,4 +1,8 @@
-import { isIdleReleaseReason, isRecoverableDaemonReleaseReason } from "./releaseReasons";
+import {
+  idleReleaseField,
+  isIdleReleaseReason,
+  isRecoverableDaemonReleaseReason,
+} from "./releaseReasons";
 import type { DeviceControlTransportFailure } from "./deviceControlTransportFailure";
 import type { SessionReleaseSnapshot } from "./sessionManager";
 import type { DaemonHandshakeFailure } from "./daemonHandshake";
@@ -211,7 +215,7 @@ export function releasedSessionNotFoundFields(releaseReason: string | undefined)
   if (!releaseReason) {
     return {};
   }
-  return isIdleReleaseReason(releaseReason) ? { releaseReason, idle: true } : { releaseReason };
+  return { releaseReason, ...idleReleaseField(releaseReason) };
 }
 
 const OWNER_DISCONNECTED_LOSS_REASON = "owner-disconnected";

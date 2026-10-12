@@ -857,6 +857,7 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
     "session_ownership_lost.admission_cli_idle_timeout",
     () => terminalAtAdmission("cli-idle-timeout"),
   ],
+  ["session_ownership_lost.admission_expired", () => terminalAtAdmission("expired")],
   ["device_owned_by_other_session", () => new InputDeviceOwnedError("input/tap", DEVICE, "holder")],
   // A gestureStart lifted because its admitting holder left the device before the ack (#11351).
   [

@@ -1,6 +1,6 @@
 import { ActionableError } from "../models/ActionableError";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
-import type { SessionReleaseReason } from "./releaseReasons";
+import { idleReleaseField, type SessionReleaseReason } from "./releaseReasons";
 
 /** The wire code of a terminal-session refusal: the named session UUID is gone for good. */
 export const SESSION_OWNERSHIP_LOST_CODE = "session_ownership_lost" as const;
@@ -22,7 +22,7 @@ export class SessionReleasedDuringCallError extends ActionableError {
   readonly code = SESSION_OWNERSHIP_LOST_CODE;
   readonly retryable = false;
   readonly nextAction = ACQUIRE_NEW_SESSION_NEXT_ACTION;
-  readonly details: { sessionUuid: string; reason: SessionReleaseReason };
+  readonly details: { sessionUuid: string; reason: SessionReleaseReason; idle?: true };
 
   constructor(
     readonly sessionUuid: string,
@@ -34,7 +34,7 @@ export class SessionReleasedDuringCallError extends ActionableError {
         "Acquire a new device with getAndroid or getApple.",
     );
     this.name = "SessionReleasedDuringCallError";
-    this.details = { sessionUuid, reason: releaseReason };
+    this.details = { sessionUuid, reason: releaseReason, ...idleReleaseField(releaseReason) };
   }
 }
 

@@ -5,8 +5,11 @@ import {
   isDeviceControlTargetOwnerValid,
   isDeviceControlRoutingSessionValid,
 } from "./deviceControlSessionValidity";
-import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import { runWithAbortSignal } from "../utils/AbortContext";
+import {
+  getToolSelectionContext,
+  runWithToolSelectionContext,
+} from "../features/toolSelection/toolSelectionContext";
+import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { createServer, Server as NetServer, Socket } from "node:net";
 import { createHash } from "node:crypto";
 import { unlink } from "node:fs/promises";
@@ -34,6 +37,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { isDebugModeEnabled } from "../utils/debug";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
+  DAEMON_SESSION_SUSPECT_CODE,
   DAEMON_TOOL_UNAVAILABLE_CODE,
   BOUND_SESSION_LOSS_CODE,
   DaemonNotification,
@@ -78,6 +82,7 @@ import {
 } from "./socketRequestAdmission";
 import {
   daemonShuttingDownFailure,
+  daemonShuttingDownFrameFields,
   daemonShuttingDownFailureFromToolResult,
   isDaemonShuttingDownToolResult,
 } from "./daemonShutdownOutcome";
@@ -118,6 +123,7 @@ import { InputText, type AppendKeyEventValidator } from "../features/action/Inpu
 import { imeActionFailedAfterTextEntered } from "../features/action/imeActionFailedAfterTextEntered";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { DaemonState } from "./daemonState";
+import { canonicalizeToolCallDeviceIds, toolCallNamesDeviceId } from "./toolCallDeviceIdentity";
 import { isDeviceInventoryTool } from "./daemonMcpProxy";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
 import { deviceIncarnationToken } from "../utils/deviceIncarnation";
@@ -133,19 +139,23 @@ import {
 import { assertToolEnabledForAnySession } from "../features/toolSelection/toolSelectionPolicy";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
+  admitInputOnHolderSession,
+  InputDeviceOwnedError,
+  assertControlNotOnForeignDaemonDevice,
   assertInputNotOnForeignManagedSlotDevice,
   assertInputRequesterHoldsDevice,
   deviceAlreadyAssignedToAnotherSessionError,
-  InputDeviceOwnedError,
   parseInputRequesterSessionUuid,
 } from "./inputDeviceOwnership";
+import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
 import { ToolRegistry } from "../server/toolRegistry";
-import { DeviceOutsideBoundSessionError } from "../server/deviceOutsideBoundSessionRefusal";
 import {
-  DeviceAssignedToManagedSlotError,
-  DeviceOutsideManagedSlotsError,
-  ManagedSlotDiscoveryIncompleteError,
-} from "./managedSlots/managedSlotRefusal";
+  assertFrameTargetIdentityProven,
+  canonicalFrameDeviceId,
+  canonicalizeFrameDiscovery,
+  type CanonicalFrameDiscovery,
+  type FrameDeviceIdentityPool,
+} from "./frameDeviceIdentity";
 import { managedConnectionControlRefusal } from "./managedSlots/managedConnectionScope";
 import { provisionCancellationOutcomes } from "../server/provisionCancellationOutcomes";
 import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../server/deviceTools";
@@ -173,7 +183,11 @@ import {
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
-import { BootedDeviceDiscoveryIncompleteError } from "../devices/deviceBootService";
+import {
+  AndroidBootedDeviceDiscoveryIncompleteError,
+  BootedDeviceDiscoveryIncompleteError,
+} from "../models/BootedDeviceDiscoveryIncompleteError";
+import { expectingPooledSources, isDeviceSourceIncomplete } from "../utils/discoverySource";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { PressButton } from "../features/action/PressButton";
@@ -232,7 +246,12 @@ import {
   recordedProcessGenerationToken,
 } from "./processGenerationFields";
 import { CONTROL_SOCKET_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
-import { sessionReleaseThatCancelledCall } from "./sessionReleasedDuringCall";
+import {
+  SESSION_OWNERSHIP_LOST_CODE,
+  sessionReleaseThatCancelledCall,
+} from "./sessionReleasedDuringCall";
+import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
+import { recoveryIdentityLoss, recoveryIdentityLossDetails } from "../server/deviceSessionResult";
 import {
   createDeviceSessionErrorResolver,
   DeviceSessionSupersededByRestoreError,
@@ -329,14 +348,112 @@ function logRequestFailureCause(cause: DaemonRequestFailureCause | undefined): v
 
 const JSONRPC_INVALID_PARAMS = -32602;
 
-/** The typed code of a managed-slot refusal (#11174, #11178), for the failure frame. */
-function managedSlotRefusalCode(error: unknown): { code?: string } {
-  return error instanceof DeviceAssignedToManagedSlotError ||
-    error instanceof DeviceOutsideManagedSlotsError ||
-    error instanceof DeviceOutsideBoundSessionError ||
-    error instanceof ManagedSlotDiscoveryIncompleteError
-    ? { code: error.code }
-    : {};
+type RefusalFrameFields = Pick<
+  DaemonResponse,
+  "code" | "retryable" | "retryAfterMs" | "nextAction" | "details"
+>;
+
+/**
+ * The payload a refusal builds for the MCP result (`toPayload()`), when it is a typed one. Read
+ * structurally so a new self-describing refusal reaches the socket without a branch here.
+ */
+function selfDescribedRefusalPayload(error: unknown): Record<string, unknown> | undefined {
+  if (!(error instanceof Error) || !("toPayload" in error)) {
+    return undefined;
+  }
+  const { toPayload } = error;
+  if (typeof toPayload !== "function") {
+    return undefined;
+  }
+  const payload: unknown = toPayload.call(error);
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return undefined;
+  }
+  const fields: Record<string, unknown> = Object.fromEntries(Object.entries(payload));
+  return typeof fields.code === "string" && typeof fields.retryable === "boolean"
+    ? fields
+    : undefined;
+}
+
+/**
+ * The frame fields of a control call refused at session admission (#11417): a suspect session is
+ * the retryable `daemon_session_suspect`, a terminal one `session_ownership_lost` with
+ * `acquire_new_session`, as in the MCP result for the same refusal. Matched on the error's name
+ * and fields so the wire layer does not import the daemon's session manager.
+ */
+function sessionAdmissionRefusalFields(error: unknown): RefusalFrameFields | undefined {
+  if (!(error instanceof Error)) {
+    return undefined;
+  }
+  const field = (key: string): unknown => Reflect.get(error, key);
+  const sessionUuid = field("sessionUuid");
+  if (typeof sessionUuid !== "string") {
+    return undefined;
+  }
+  const remainingMs = field("remainingMs");
+  if (error.name === "SessionSuspectError" && typeof remainingMs === "number") {
+    return {
+      code: DAEMON_SESSION_SUSPECT_CODE,
+      retryable: true,
+      details: { sessionUuid, remainingMs },
+    };
+  }
+  const release = field("release");
+  if (error.name !== "TerminalSessionError" || release === null || typeof release !== "object") {
+    return undefined;
+  }
+  const reason: unknown = Reflect.get(release, "releaseReason");
+  const ownerPid: unknown = Reflect.get(release, "ownerPid");
+  return {
+    code: SESSION_OWNERSHIP_LOST_CODE,
+    retryable: false,
+    nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
+    details: {
+      sessionUuid,
+      ...(typeof reason === "string" ? { reason } : {}),
+      ...(typeof ownerPid === "number" ? { ownerPid } : {}),
+    },
+  };
+}
+
+/** Whether a failure is a session refusal: the session is suspect, or gone for good. */
+function isSessionRefusal(error: unknown): boolean {
+  const { code } = refusalFrameFields(error);
+  return code === DAEMON_SESSION_SUSPECT_CODE || code === SESSION_OWNERSHIP_LOST_CODE;
+}
+
+/**
+ * The typed fields a refusal puts on a failure frame: the same code, retry intent and evidence its
+ * MCP result carries (#11244, #11391). A self-describing refusal's payload supplies the evidence
+ * (`deviceId`, `boundSessionUuid`, ...) as `details`; a persisted session lost to recovery is the
+ * terminal `session_ownership_lost`; any other typed refusal is read from the error's own fields.
+ */
+function refusalFrameFields(error: unknown): RefusalFrameFields {
+  const sessionRefusal = sessionAdmissionRefusalFields(error);
+  if (sessionRefusal) {
+    return sessionRefusal;
+  }
+  const lostToRecovery = recoveryIdentityLoss(error);
+  if (lostToRecovery) {
+    return {
+      code: SESSION_OWNERSHIP_LOST_CODE,
+      retryable: false,
+      nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
+      details: recoveryIdentityLossDetails(lostToRecovery),
+    };
+  }
+  const payload = selfDescribedRefusalPayload(error);
+  if (!payload) {
+    return typedRefusalFields(error) ?? {};
+  }
+  const { code, retryable, retryAfterMs, nextAction, ...details } = payload;
+  return {
+    ...(typeof code === "string" ? { code } : {}),
+    ...(typeof retryable === "boolean" ? { retryable } : {}),
+    ...(typeof retryAfterMs === "number" ? { retryAfterMs } : {}),
+    ...(typeof nextAction === "string" ? { nextAction } : {}),
+    ...(Object.keys(details).length > 0 ? { details } : {}),
+  };
 }
 
 export function mcpRequestFailureDetails(
@@ -354,19 +471,22 @@ export function mcpRequestFailureDetails(
 > {
   return {
     // Any typed refusal (e.g. retryable discovery_incomplete from an ide/* device lookup) keeps
-    // its code and retry intent on the socket wire, not just its message (#11244). The
-    // class-specific codes below still win.
-    ...typedRefusalFields(error),
+    // its code, retry intent and evidence on the socket wire, not just its message (#11244,
+    // #11391). The class-specific codes below still win.
+    ...refusalFrameFields(error),
     ...(error instanceof McpOverloadError ? { overloadFailure: error.failure } : {}),
     ...(error instanceof McpTimeoutError && error.code ? { code: error.code } : {}),
+    // Nothing was dispatched while the request waited in the queue, so a retry is safe; the MCP
+    // result already says so and the frame must agree for direct-socket clients.
+    ...(error instanceof McpTimeoutError && error.code === MCP_QUEUE_TIMEOUT_ERROR_CODE
+      ? { retryable: true }
+      : {}),
     // Keep the daemon MCP server's invalid-params verdict (e.g. a malformed
     // resource URI) so the proxy can return -32602 instead of -32603.
     ...(error instanceof McpError && "code" in error && error.code === JSONRPC_INVALID_PARAMS
       ? { code: JSONRPC_INVALID_PARAMS }
       : {}),
     ...(isToolUnavailableWireError(error) ? { code: DAEMON_TOOL_UNAVAILABLE_CODE } : {}),
-    ...(error instanceof InputDeviceOwnedError ? { code: error.code } : {}),
-    ...managedSlotRefusalCode(error),
     ...(cause ? { requestFailureCause: cause } : {}),
   };
 }
@@ -696,15 +816,23 @@ type McpForwardAttempt<T> =
 interface SocketDaemonStateAccess extends DaemonStateAccess {
   getSessionManager(): ReturnType<DaemonStateAccess["getSessionManager"]> & {
     isReleasedSessionInRestartRecoveryWindow?(sessionId: string): Promise<boolean>;
+    getExpiredReleaseSnapshot?(sessionId: string): Promise<BoundSessionLoss["release"]>;
   };
-  getDevicePool(): ReturnType<DaemonStateAccess["getDevicePool"]> & {
-    getDevice?(deviceId: string): { autolockSessionId?: string | null } | null | undefined;
-    resolveOwnedDeviceSessionForMcpSession?(
-      mcpSessionId: string | undefined,
-      deviceId: string,
-    ): string | undefined;
-    isAutolockSessionOwnedByOtherConnection?(sessionId: string, mcpSessionId?: string): boolean;
-  };
+  getDevicePool(): ReturnType<DaemonStateAccess["getDevicePool"]> &
+    FrameDeviceIdentityPool & {
+      getDevice?(deviceId: string): { autolockSessionId?: string | null } | null | undefined;
+      resolveOwnedDeviceSessionForMcpSession?(
+        mcpSessionId: string | undefined,
+        deviceId: string,
+      ): string | undefined;
+      isSessionOwnedByOtherConnection?(sessionId: string, mcpSessionId?: string): boolean;
+      assertNotClaimedByForeignDaemon?(
+        deviceId: string,
+        platform: "android" | "ios",
+        remedy?: string,
+        maxAgeMs?: number,
+      ): Promise<void>;
+    };
 }
 
 /** Classifies one tools/call argument set as a device read (`deviceReadOnly`). */
@@ -768,6 +896,41 @@ interface DeviceControlTransportRecoveryContext extends McpForwardRecoveryContex
 const isNonBlankSessionUuid = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 
+/** The `ide/*` routes that write to a device or restart its service: control calls (#11486). */
+const IDE_DEVICE_MUTATION_METHODS: ReadonlySet<string> = new Set([
+  "ide/updateService",
+  "ide/setKeyValue",
+  "ide/removeKeyValue",
+  "ide/clearKeyValueFile",
+]);
+
+/** One device-mutating `ide/*` route in flight; its ownership gate hands it the execution. */
+interface IdeMutationCall {
+  /**
+   * Keep `execution` in flight until the route settles. The holder's own call (`asHolder`) is also
+   * cut by a release of its session; a forced call acts for no session and runs to its end.
+   */
+  track(execution: ActiveExecution, asHolder: boolean): void;
+  /** The holder's session admission passed for `execution`: its dispatch will be session use. */
+  admit(execution: ActiveExecution): void;
+  /**
+   * The route passed every pre-dispatch check and is about to act on the device: only now is the
+   * holder's call use of its session (#11596). A route refused before this point ends unstamped.
+   */
+  dispatching(): void;
+  /** The socket session that sent the frame: a managed connection mutates only its slot devices. */
+  readonly socketSessionId: string | undefined;
+}
+
+/**
+ * One `input/*` frame's device work. It calls `dispatching` once every pre-dispatch check passed
+ * (owner still there, current frame context, budget left, coordinates in bounds), immediately
+ * before it acts on the device: only then is the frame use of the holder's session (#11596).
+ * `runTrackedDeviceInput` always supplies it; it is absent only when a test drives a handler
+ * without that funnel.
+ */
+type InputOperation<T> = (signal?: AbortSignal, dispatching?: () => void) => Promise<T>;
+
 function assertSocketInputNotAborted(signal?: AbortSignal): void {
   signal?.throwIfAborted();
 }
@@ -799,6 +962,46 @@ const GESTURE_FRAME_METHODS = {
   move: "input/gestureMove",
   end: "input/gestureEnd",
 } as const;
+
+/** What held the device when a `gestureStart` was admitted (#11541). */
+export interface StrokeAdmission {
+  deviceId: string;
+  /** The admitting holder; absent for a start on a device no session held. */
+  holderSessionId?: string;
+  /** The holder's session object: a re-created session with the same id is another holder. */
+  holderIncarnation?: object;
+  /** Aborted when the frame's tracked execution or its owner was cancelled. */
+  signal?: AbortSignal;
+}
+
+/**
+ * The answer to a `gestureStart` whose stroke was lifted because its admission ended before the
+ * ack: whatever aborted the frame (the typed release or ownership refusal), else that the holder
+ * changed.
+ */
+export function strokeAdmissionEndedError(method: string, admission: StrokeAdmission): unknown {
+  if (admission.signal?.aborted) {
+    return admission.signal.reason;
+  }
+  const { deviceId, holderSessionId } = admission;
+  const lifted = (cause: string) =>
+    `${method} on device '${deviceId}' was lifted: ${cause} before the stroke's start was acknowledged.`;
+  // Typed like the frames that follow the lifted start (#11351): the admitting holder left the
+  // device, or a session now holds a device the sessionless start was admitted on.
+  return holderSessionId
+    ? new SessionNoLongerOwnsDeviceError(
+        holderSessionId,
+        deviceId,
+        lifted(`session ${holderSessionId} no longer holds the device`),
+      )
+    : new InputDeviceOwnedError(
+        method,
+        deviceId,
+        undefined,
+        undefined,
+        lifted("a session acquired the device"),
+      );
+}
 
 /** Timeout for the best-effort cancelling `gestureEnd` issued when a socket owning a gesture closes. */
 const OWNED_GESTURE_CANCEL_TIMEOUT_MS = 5000;
@@ -1159,10 +1362,7 @@ export class UnixSocketServer {
    * Start the Unix socket server
    */
   async start(): Promise<void> {
-    this.closing = false;
-    this.acceptingRequests = true;
-    this.serverClosePromise = null;
-    this.lifecycleGeneration += 1;
+    this.beginAccepting();
     // Owner-only (0o700) socket directory so the control socket is not
     // world-traversable. On macOS socket-file permission bits are not reliably
     // enforced on connect(), so the containing directory's mode is the primary
@@ -1197,34 +1397,7 @@ export class UnixSocketServer {
         await this.reclaimExistingSocketBeforeBind();
       }
 
-      this.server = createServer((socket) => {
-        this.handleConnection(socket);
-      });
-
-      // Fan list-changed events out to subscribed socket clients (issue #3223).
-      // Subscribed here (not in the daemon) so a socket-server recreation during
-      // recovery re-wires itself; close() unsubscribes symmetrically.
-      this.listChangedUnsubscribe?.();
-      this.listChangedUnsubscribe = ListChangedBroadcaster.subscribe((kind) => {
-        this.broadcastListChanged(kind);
-      });
-
-      this.resourceUpdatedUnsubscribe?.();
-      this.resourceUpdatedUnsubscribe = ResourceUpdatedBroadcaster.subscribe((resolveTargets) => {
-        this.broadcastResourceUpdated(resolveTargets);
-      });
-
-      // Fan session-release events out to subscribed proxy clients (issue #4610),
-      // so a proxy clears its remembered binding on a real release instead of the
-      // replay-TTL guess. Subscribed here (not in the daemon) for the same
-      // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
-      this.sessionReleaseUnsubscribe?.();
-      this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
-        (sessionId, reason, snapshot, extras) => {
-          this.clearBoundMcpClientsForReleasedSession(sessionId);
-          this.broadcastSessionReleased(sessionId, reason, snapshot, extras?.recordingIds);
-        },
-      );
+      this.server = createServer(this.connectionHandlerWithFanOut());
 
       await new Promise<void>((resolve, reject) => {
         this.server!.listen(this.socketPath, () => {
@@ -1247,6 +1420,53 @@ export class UnixSocketServer {
       // the reachability probe alone protects the live socket from later binders.
       this.socketReclaimLock.release();
     }
+  }
+
+  /**
+   * `start()` without the socket file (#11441): the same accept state, broadcast fan-out and
+   * connection handler, with the caller handing each connection to the returned handler instead
+   * of a bound listener. For an in-process harness; nothing touches the file system.
+   */
+  startDetached(): (socket: Socket) => void {
+    this.beginAccepting();
+    return this.connectionHandlerWithFanOut();
+  }
+
+  private beginAccepting(): void {
+    this.closing = false;
+    this.acceptingRequests = true;
+    this.serverClosePromise = null;
+    this.lifecycleGeneration += 1;
+  }
+
+  /** Subscribe the broadcast fan-out and return the handler every accepted connection goes to. */
+  private connectionHandlerWithFanOut(): (socket: Socket) => void {
+    // Fan list-changed events out to subscribed socket clients (issue #3223).
+    // Subscribed here (not in the daemon) so a socket-server recreation during
+    // recovery re-wires itself; close() unsubscribes symmetrically.
+    this.listChangedUnsubscribe?.();
+    this.listChangedUnsubscribe = ListChangedBroadcaster.subscribe((kind) => {
+      this.broadcastListChanged(kind);
+    });
+
+    this.resourceUpdatedUnsubscribe?.();
+    this.resourceUpdatedUnsubscribe = ResourceUpdatedBroadcaster.subscribe((resolveTargets) => {
+      this.broadcastResourceUpdated(resolveTargets);
+    });
+
+    // Fan session-release events out to subscribed proxy clients (issue #4610),
+    // so a proxy clears its remembered binding on a real release instead of the
+    // replay-TTL guess. Subscribed here (not in the daemon) for the same
+    // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
+    this.sessionReleaseUnsubscribe?.();
+    this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
+      (sessionId, reason, snapshot, extras) => {
+        this.clearBoundMcpClientsForReleasedSession(sessionId);
+        void this.liftStrokesHeldBy(sessionId);
+        this.broadcastSessionReleased(sessionId, reason, snapshot, extras?.recordingIds);
+      },
+    );
+    return (socket) => this.handleConnection(socket);
   }
 
   /**
@@ -1577,6 +1797,28 @@ export class UnixSocketServer {
       },
       deviceId,
     );
+  }
+
+  /**
+   * A `tools/call` with the device ids it names as the pool's canonical ids (#11618), before the
+   * admission lane, the forward key, the read lane, recovery pinning or the forward itself reads
+   * them: a handset named by its other transport id must serialize, route and be judged as the one
+   * pooled device it is. Cached fold only; the same request when nothing changes. Older socket-state
+   * fakes carry no pool, or none with a fold: their ids pass through as sent.
+   */
+  private withCanonicalToolCallDeviceIds(request: DaemonRequest): DaemonRequest {
+    const args: unknown = request.params?.arguments;
+    if (
+      request.method !== "tools/call" ||
+      !toolCallNamesDeviceId(args) ||
+      !this.daemonState.isInitialized?.()
+    ) {
+      return request;
+    }
+    const canonical = canonicalizeToolCallDeviceIds(this.daemonState.getDevicePool?.(), args);
+    return canonical === args
+      ? request
+      : { ...request, params: { ...request.params, arguments: canonical } };
   }
 
   private frameDeviceId(request: DaemonRequest): string | undefined {
@@ -1974,6 +2216,7 @@ export class UnixSocketServer {
     if (handshakeError) {
       return handshakeError;
     }
+    request = this.withCanonicalToolCallDeviceIds(request);
 
     // Notification opt-in is per-socket-session state owned here, not by the
     // daemon request handlers — answer immediately without queueing (issue #3223).
@@ -2142,7 +2385,7 @@ export class UnixSocketServer {
               type: "mcp_response",
               success: false,
               error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-              daemonShuttingDown: daemonShuttingDownFailureFromToolResult(result),
+              ...daemonShuttingDownFrameFields(daemonShuttingDownFailureFromToolResult(result)),
             };
           }
 
@@ -2270,7 +2513,7 @@ export class UnixSocketServer {
       type: "mcp_response",
       success: false,
       error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-      daemonShuttingDown: daemonShuttingDownFailure(),
+      ...daemonShuttingDownFrameFields(daemonShuttingDownFailure()),
     };
   }
 
@@ -3322,15 +3565,12 @@ export class UnixSocketServer {
     );
   }
 
-  private isAutolockSessionOwnedByOtherConnection(
-    sessionUuid: string,
-    socketSessionId: string,
-  ): boolean {
+  private isSessionOwnedByOtherConnection(sessionUuid: string, socketSessionId: string): boolean {
     return (
       this.daemonState.isInitialized() &&
       this.daemonState
         .getDevicePool()
-        .isAutolockSessionOwnedByOtherConnection?.(sessionUuid, socketSessionId) === true
+        .isSessionOwnedByOtherConnection?.(sessionUuid, socketSessionId) === true
     );
   }
 
@@ -3365,9 +3605,14 @@ export class UnixSocketServer {
       this.clearBoundMcpClientKey(socketSessionId);
       return;
     }
-    if (this.isAutolockSessionOwnedByOtherConnection(sessionUuid, socketSessionId)) {
-      // Naming another connected client's autolock session is not ownership (#11235): the call
-      // ran there, but this socket keeps its own route so its sessionless calls never follow it.
+    if (this.isSessionOwnedByOtherConnection(sessionUuid, socketSessionId)) {
+      // Naming a session another connected client owns is not ownership (#11235, #11344): this
+      // socket keeps its own route so its sessionless calls never follow it.
+      return;
+    }
+    if (this.targetsOneCallOnly(args, sessionUuid)) {
+      // The proxy named its own binding beside an explicit session: the call targeted that
+      // session only, and the connection's default route does not move (#11347).
       return;
     }
     const sessionIsActiveAfterForward = this.hasActiveDaemonSession(sessionUuid);
@@ -3389,6 +3634,19 @@ export class UnixSocketServer {
     if (previousBinding && previousBinding.clientKey !== route.clientKey) {
       this.scheduleMcpClientIdleClose(previousBinding.clientKey);
     }
+  }
+
+  /**
+   * Whether the call carried the connection's bound session ({@link DAEMON_BOUND_SESSION_PARAM})
+   * beside a different session it routed to. Only setActiveDevice or an acquisition moves a
+   * connection's default (#11347); an explicit `sessionUuid` targets its own call.
+   */
+  private targetsOneCallOnly(args: unknown, routedSessionUuid: string): boolean {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      return false;
+    }
+    const bound = (args as Record<string, unknown>)[DAEMON_BOUND_SESSION_PARAM];
+    return isNonBlankSessionUuid(bound) && bound !== routedSessionUuid;
   }
 
   private recordGeneratedToolSelectionProfile(
@@ -4400,13 +4658,34 @@ export class UnixSocketServer {
         error,
       );
     }
-    const release = this.daemonState.getSessionManager().getTerminalReleaseSnapshot?.(sessionUuid);
+    const release =
+      this.daemonState.getSessionManager().getTerminalReleaseSnapshot?.(sessionUuid) ??
+      (await this.expiredBoundSessionRelease(sessionUuid));
     throw new ReleasedBoundSessionError({
       code: BOUND_SESSION_LOSS_CODE,
       sessionUuid,
       reason: release?.releaseReason ?? "session-not-found",
       ...(release ? { release } : {}),
     });
+  }
+
+  /**
+   * The release of a bound session whose row ran out its window with no daemon holding it
+   * (#11361), so its owner is told `expired` rather than `session-not-found`. Best-effort: a
+   * failed read keeps the fail-closed not-found answer.
+   */
+  private async expiredBoundSessionRelease(
+    sessionUuid: string,
+  ): Promise<BoundSessionLoss["release"]> {
+    try {
+      return await this.daemonState.getSessionManager().getExpiredReleaseSnapshot?.(sessionUuid);
+    } catch (error) {
+      logger.warn(
+        `Unable to read the expired release of bound session ${sessionUuid}: ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
   }
 
   private getRequestArgumentScopeKey(args: unknown): string | undefined {
@@ -4959,8 +5238,8 @@ export class UnixSocketServer {
   }
 
   /**
-   * `input/*` frames get the same owner fence as forwarded MCP calls: a signal that aborts on
-   * socket close and on `daemon/cancelRequest`, and a budget that runs from receipt (#10006).
+   * Input and device-mutating IDE frames share the owner fence of forwarded MCP calls: socket
+   * close and `daemon/cancelRequest` abort them (#10006, #11667). Input also has a budget from receipt.
    * Other local requests run unfenced, as before.
    */
   private async runLocalSocketRequest(
@@ -4971,7 +5250,7 @@ export class UnixSocketServer {
     receivedAtMs: number,
     onOwnerSignal: (signal: AbortSignal) => void,
   ): Promise<unknown> {
-    if (!request.method.startsWith("input/")) {
+    if (!request.method.startsWith("input/") && !IDE_DEVICE_MUTATION_METHODS.has(request.method)) {
       return await this.handleLocalSocketRequest(request, sessionId);
     }
     const owner = this.mcpRequestSignal(sessionId, ownerSocket, cancelSignal);
@@ -5025,7 +5304,35 @@ export class UnixSocketServer {
     if (request.method === "input/gestureEnd") {
       return await this.handleInputGesture(request, "end", socketSessionId, input);
     }
+    return await this.dispatchIdeSocketRequest(request, socketSessionId, signal);
+  }
 
+  /** A route that mutates a device runs as one tracked control call (#11486); the rest run bare. */
+  private async dispatchIdeSocketRequest(
+    request: DaemonRequest,
+    socketSessionId?: string,
+    signal?: AbortSignal,
+  ): Promise<any | undefined> {
+    if (!IDE_DEVICE_MUTATION_METHODS.has(request.method)) {
+      return await this.handleIdeSocketRequest(request, socketSessionId);
+    }
+    signal?.throwIfAborted();
+    return await this.runTrackedIdeMutation(
+      socketSessionId,
+      (call) => this.handleIdeSocketRequest(request, socketSessionId, call),
+      signal,
+    );
+  }
+
+  /**
+   * The `ide/*` and acceptance routes. `ideMutation` is set for the routes that mutate a device
+   * ({@link IDE_DEVICE_MUTATION_METHODS}): their ownership gate tracks the call under it.
+   */
+  private async handleIdeSocketRequest(
+    request: DaemonRequest,
+    socketSessionId?: string,
+    ideMutation?: IdeMutationCall,
+  ): Promise<any | undefined> {
     switch (request.method) {
       case "ide/listFeatureFlags": {
         const flags = await this.requireFeatureFlagService().listFlags();
@@ -5064,6 +5371,9 @@ export class UnixSocketServer {
             "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params",
           );
         }
+        this.assertManagedConnectionControl(socketSessionId, "ide/setSessionToolEnabled", {
+          requesterSessionUuid: args.sessionUuid,
+        });
         await (this.sessionToolSelectionService ?? getSessionToolSelectionService()).setEnabled(
           args.sessionUuid,
           args.toolName,
@@ -5159,14 +5469,14 @@ export class UnixSocketServer {
         }
 
         // Find the booted device
-        const bootedDevices = await this.listBootedDevicesForIdeAction(
+        const { devices: bootedDevices, deviceId } = await this.resolveIdeActionDevices(
           args.platform,
           args.deviceId,
         );
         // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
         await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/updateService");
-        this.assertDeviceActionable(args.deviceId, "to update the accessibility service");
-        const targetDevice = bootedDevices.find((d) => d.deviceId === args.deviceId);
+        this.assertDeviceActionable(deviceId, "to update the accessibility service");
+        const targetDevice = bootedDevices.find((d) => d.deviceId === deviceId);
         if (!targetDevice) {
           throw new Error(`Device not found: ${args.deviceId}`);
         }
@@ -5180,9 +5490,11 @@ export class UnixSocketServer {
           targetDevice,
           "ide/updateService",
           (request.params as { force?: unknown }).force === true,
+          ideMutation,
         );
-
         if (args.platform === "android") {
+          getAbortSignal()?.throwIfAborted();
+          ideMutation?.dispatching();
           AndroidCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
           const manager = AndroidCtrlProxyManager.getInstance(targetDevice);
           const result = await manager.ensureCompatibleVersion({
@@ -5197,6 +5509,8 @@ export class UnixSocketServer {
           };
         } else {
           const manager = IOSCtrlProxyManager.getInstance(targetDevice);
+          getAbortSignal()?.throwIfAborted();
+          ideMutation?.dispatching();
           IOSCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
           await manager.forceRestart();
           return {
@@ -5224,6 +5538,7 @@ export class UnixSocketServer {
           args.deviceId,
           request,
           "ide/setKeyValue",
+          ideMutation,
         );
         const appId = args.appId;
         const fileName = args.fileName;
@@ -5236,8 +5551,12 @@ export class UnixSocketServer {
             device,
             appId,
             fileName,
-            () => client.removePreference(appId, fileName, key),
-            (adb) => removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+            {
+              dispatching: () => ideMutation?.dispatching(),
+              viaSdk: () => client.removePreference(appId, fileName, key),
+              viaDirectFile: (adb) =>
+                removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+            },
           ));
         } else {
           // Enforce the same cross-platform type guidance as the MCP-tool path
@@ -5251,9 +5570,12 @@ export class UnixSocketServer {
             device,
             appId,
             fileName,
-            () => client.setPreference(appId, fileName, key, value, type),
-            (adb) =>
-              setAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key, value, type),
+            {
+              dispatching: () => ideMutation?.dispatching(),
+              viaSdk: () => client.setPreference(appId, fileName, key, value, type),
+              viaDirectFile: (adb) =>
+                setAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key, value, type),
+            },
           ));
         }
         const resolvedStore = resolution?.resolvedStore;
@@ -5286,6 +5608,7 @@ export class UnixSocketServer {
           args.deviceId,
           request,
           "ide/removeKeyValue",
+          ideMutation,
         );
         const appId = args.appId;
         const fileName = args.fileName;
@@ -5295,8 +5618,12 @@ export class UnixSocketServer {
           device,
           appId,
           fileName,
-          () => client.removePreference(appId, fileName, key),
-          (adb) => removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+          {
+            dispatching: () => ideMutation?.dispatching(),
+            viaSdk: () => client.removePreference(appId, fileName, key),
+            viaDirectFile: (adb) =>
+              removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+          },
         );
         const resolvedStore = resolution?.resolvedStore;
         const warning = usedDirectFileFallback
@@ -5324,6 +5651,7 @@ export class UnixSocketServer {
           args.deviceId,
           request,
           "ide/clearKeyValueFile",
+          ideMutation,
         );
         const appId = args.appId;
         const fileName = args.fileName;
@@ -5332,8 +5660,12 @@ export class UnixSocketServer {
           device,
           appId,
           fileName,
-          () => client.clearPreferenceStore(appId, fileName),
-          (adb) => clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
+          {
+            dispatching: () => ideMutation?.dispatching(),
+            viaSdk: () => client.clearPreferenceStore(appId, fileName),
+            viaDirectFile: (adb) =>
+              clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
+          },
         );
         const resolvedStore = resolution?.resolvedStore;
         const warning = usedDirectFileFallback
@@ -5355,19 +5687,37 @@ export class UnixSocketServer {
    * device accepts them only from its holder (the optional `sessionUuid` param), or when `force`
    * is allowed and set. Reads stay open to watchers. Unheld devices stay open to any client,
    * except a device a managed slot holds, which only that slot's execution may mutate, `force`
-   * or not (#11178).
+   * or not (#11178). A socket bound to managed slots mutates only its own slot devices, for its own
+   * slot sessions, `force` or not (#11596).
+   *
+   * The holder's own mutation is a control call on its session, so it also passes the session
+   * admission `input/*` passes (#11486): a suspect, lapsed or idle-expired holder is refused with
+   * the typed code before anything is written. `force` overrides the local holder, so a forced
+   * call is not judged against the holder's session.
+   *
+   * Passing the gate starts the mutation's tracked execution on `ideMutation`, under the holder's
+   * session: from here to the end of the route it is control in flight on that session, forced or
+   * not, so the session is never released under it (#11486). Tracking is not use: the route
+   * restarts the holder's idle window only when it calls `ideMutation.dispatching()`, after its
+   * last pre-dispatch check (#11596).
    */
   private async assertIdeMutationOwnership(
     request: DaemonRequest,
     device: BootedDevice,
     action: string,
     force = false,
+    ideMutation?: IdeMutationCall,
   ): Promise<void> {
     const deviceId = device.deviceId;
     const requesterSessionUuid = parseInputRequesterSessionUuid(request.method, request.params);
     if (!this.daemonState.isInitialized()) {
       return;
     }
+    await this.assertFrameTargetProven(device, action, () => requesterSessionUuid);
+    this.assertManagedConnectionControl(ideMutation?.socketSessionId, action, {
+      deviceId,
+      requesterSessionUuid,
+    });
     const sessionManager = this.daemonState.getSessionManager();
     await assertInputNotOnForeignManagedSlotDevice({
       action,
@@ -5377,43 +5727,223 @@ export class UnixSocketServer {
       sessionManager,
       gate: this.daemonState.getDevicePool(),
     });
-    if (force) {
-      return;
-    }
-    assertInputRequesterHoldsDevice({
-      action,
+    // Another daemon's device is refused, `force` or not: `force` overrides a local holder only.
+    await assertControlNotOnForeignDaemonDevice({
       deviceId,
-      ownerSessionUuid: sessionManager.getSessionForDevice?.(deviceId) ?? undefined,
-      requesterSessionUuid,
-      sessionManager,
-      remedy:
-        "pass the holding session's sessionUuid, or wait for the holder to release the device.",
+      platform: device.platform,
+      gate: this.daemonState.getDevicePool(),
     });
+    const holderSessionUuid = sessionManager.getSessionForDevice?.(deviceId) ?? undefined;
+    if (!force) {
+      assertInputRequesterHoldsDevice({
+        action,
+        deviceId,
+        ownerSessionUuid: holderSessionUuid,
+        requesterSessionUuid,
+        sessionManager,
+        remedy:
+          "pass the holding session's sessionUuid, or wait for the holder to release the device.",
+      });
+    }
+    if (holderSessionUuid) {
+      await this.admitIdeMutationOnHolderSession(
+        executionTracker.startExecution(action, undefined, holderSessionUuid),
+        { deviceId, holderSessionUuid, force },
+        ideMutation,
+      );
+    }
   }
 
   /**
-   * Booted devices for an `ide/*` action on one serial. iOS discovery has two
-   * sources, and the legacy listing turns a failed simctl sweep into `[]`, which
-   * surfaced as a misleading "Device not found". When the serial is absent from an
-   * incomplete iOS sweep the absence proves nothing, so refuse with the retryable
-   * discovery error instead (#11122, cf. #11103).
+   * Judge a mutating `ide/*` frame against the session holding its device, under the execution
+   * that tracks the mutation, so the admission does not mistake it for earlier work in flight.
+   * With a route to track it (`ideMutation`) the execution outlives the gate and the route ends
+   * it; otherwise it ends here.
+   */
+  private async admitIdeMutationOnHolderSession(
+    execution: ActiveExecution,
+    target: { deviceId: string; holderSessionUuid: string; force: boolean },
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<void> {
+    ideMutation?.track(execution, !target.force);
+    try {
+      executionTracker.bindDeviceExecution(execution.id, target.deviceId);
+      if (target.force) {
+        return;
+      }
+      await this.admitInputAsControlCall(execution, target.deviceId, target.holderSessionUuid);
+      if (ideMutation) {
+        // Tracked from here; stamped as session use only when the route dispatches (#11596).
+        ideMutation.admit(execution);
+      } else {
+        // The holder's own admitted mutation is use of its session, like its input (#10824).
+        executionTracker.markSessionAdmitted(execution.id);
+      }
+    } finally {
+      if (!ideMutation) {
+        executionTracker.endExecution(execution.id);
+      }
+    }
+  }
+
+  /**
+   * Run a device-mutating `ide/*` route as one tracked control call. The route's ownership gate
+   * starts the execution once the device and its holder are known; it stays in flight until the
+   * route settles, so the heartbeat and idle monitors see control in flight on the holder's
+   * session. A release that still lands (owner disconnect, forced release) cancels the execution:
+   * the holder's own route runs its device work under that signal, and the frame answers the
+   * release's typed refusal whatever the interrupted work threw. A forced route is not the
+   * holder's call, so the release neither cuts it nor names the holder's session to its caller.
+   */
+  private async runTrackedIdeMutation<T>(
+    socketSessionId: string | undefined,
+    run: (call: IdeMutationCall) => Promise<T>,
+    ownerSignal?: AbortSignal,
+  ): Promise<T> {
+    const abort = new AbortController();
+    let tracked: ActiveExecution | undefined;
+    let cutByRelease: ActiveExecution | undefined;
+    let admitted: ActiveExecution | undefined;
+    const call: IdeMutationCall = {
+      socketSessionId,
+      admit: (execution) => {
+        admitted = execution;
+      },
+      dispatching: () => {
+        if (admitted) {
+          // The holder's own mutation that reaches the device is use of its session (#10824).
+          executionTracker.markSessionAdmitted(admitted.id);
+        }
+      },
+      track: (execution, asHolder) => {
+        tracked = execution;
+        if (!asHolder) {
+          return;
+        }
+        cutByRelease = execution;
+        const signal = execution.abortController.signal;
+        if (signal.aborted) {
+          abort.abort(signal.reason);
+          return;
+        }
+        signal.addEventListener("abort", () => abort.abort(signal.reason), { once: true });
+      },
+    };
+    try {
+      const signal = ownerSignal ? AbortSignal.any([ownerSignal, abort.signal]) : abort.signal;
+      signal.throwIfAborted();
+      return await runWithAbortSignal(signal, () => run(call));
+    } catch (error) {
+      throw sessionReleaseThatCancelledCall(cutByRelease?.cancelReason) ?? error;
+    } finally {
+      if (tracked) {
+        executionTracker.endExecution(tracked.id);
+      }
+    }
+  }
+
+  /**
+   * Booted devices for an `ide/*` action on one serial. The legacy listing turns a
+   * failed sweep into `[]`, which surfaced as a misleading "Device not found". When
+   * the serial is absent and the discovery source that would have observed it failed
+   * (adb for Android; simctl or devicectl for iOS, by serial shape), the absence
+   * proves nothing, so refuse with the retryable discovery error instead (#11122,
+   * cf. #11103, #11535).
    */
   private async listBootedDevicesForIdeAction(
     platform: "android" | "ios",
     serial: string,
   ): Promise<BootedDevice[]> {
+    getAbortSignal()?.throwIfAborted();
     const manager = PlatformDeviceManagerFactory.getInstance();
-    if (platform !== "ios") {
-      return manager.getBootedDevices(platform);
-    }
-    const discovery = await manager.getBootedDevicesDetailed("ios");
+    const discovery = expectingPooledSources(
+      await manager.getBootedDevicesDetailed(platform),
+      this.daemonState?.isInitialized()
+        ? this.daemonState.getDevicePool().getAllDevices?.()
+        : undefined,
+    );
     if (
-      !discovery.succeededPlatforms.has("ios") &&
-      !discovery.devices.map((device) => device.deviceId).includes(serial)
+      !discovery.devices.map((device) => device.deviceId).includes(serial) &&
+      // Tooling that is not installed on this host is not an unknown: no retry can list the serial (#11605).
+      isDeviceSourceIncomplete(discovery, platform, serial)
     ) {
-      throw new BootedDeviceDiscoveryIncompleteError("ios", discovery.discoveryErrors?.ios);
+      const discoveryError = discovery.discoveryErrors?.[platform];
+      throw platform === "android"
+        ? new AndroidBootedDeviceDiscoveryIncompleteError(discoveryError)
+        : new BootedDeviceDiscoveryIncompleteError(platform, discoveryError);
     }
+    getAbortSignal()?.throwIfAborted();
     return discovery.devices;
+  }
+
+  /**
+   * The booted devices for an `ide/*` action and the device it names, both as pooled canonical
+   * ids: the frame may name a held handset by its other transport id (#11596).
+   */
+  private async resolveIdeActionDevices(
+    platform: "android" | "ios",
+    serial: string,
+  ): Promise<CanonicalFrameDiscovery & { deviceId: string }> {
+    const canonical = await this.canonicalFrameDiscovery(
+      platform,
+      await this.listBootedDevicesForIdeAction(platform, serial),
+      serial,
+    );
+    return { devices: canonical.devices, deviceId: canonical.deviceId ?? serial };
+  }
+
+  /**
+   * The ONE place a direct frame's discovery rows and `deviceId` become the pool's canonical ids
+   * (#11596). Every `input/*` and `ide/*` handler resolves its target through here before any
+   * holder, managed-slot or admission decision. A no-op in direct mode, where there is no pool.
+   */
+  private async canonicalFrameDiscovery(
+    platform: "android" | "ios",
+    rawDevices: readonly BootedDevice[],
+    deviceId: string | undefined,
+  ): Promise<CanonicalFrameDiscovery> {
+    return await canonicalizeFrameDiscovery(
+      this.daemonState.isInitialized() ? this.daemonState.getDevicePool() : undefined,
+      platform,
+      rawDevices,
+      deviceId,
+    );
+  }
+
+  /** Refuse unresolved control only when its target could alias a held device; see the helper. */
+  private async assertFrameTargetProven(
+    device: BootedDevice,
+    action: string,
+    requester?: () => string | undefined,
+  ): Promise<void> {
+    if (!this.daemonState.isInitialized()) {
+      return;
+    }
+    const sessionManager = this.daemonState.getSessionManager();
+    await assertFrameTargetIdentityProven(
+      this.daemonState.getDevicePool(),
+      device,
+      action,
+      Boolean(sessionManager.getSessionForDevice?.(device.deviceId)),
+      {
+        sessions: sessionManager.getHeldDeviceSessions
+          ? sessionManager.getHeldDeviceSessions().map(({ deviceId, ...session }) => ({
+              ...session,
+              assignedDevice: deviceId,
+            }))
+          : (sessionManager.getAllSessions?.() ?? []),
+        requester,
+        sessionManager,
+      },
+    );
+  }
+
+  /** A frame's device id as the pool's canonical id, for lookups that run without a discovery. */
+  private canonicalFrameDeviceId(deviceId: string): string {
+    return canonicalFrameDeviceId(
+      this.daemonState.isInitialized() ? this.daemonState.getDevicePool() : undefined,
+      deviceId,
+    );
   }
 
   /**
@@ -5427,6 +5957,7 @@ export class UnixSocketServer {
     deviceId: string,
     request: DaemonRequest,
     action: string,
+    ideMutation?: IdeMutationCall,
   ): Promise<{
     platform: "android" | "ios";
     client: KeyValueMutationClient;
@@ -5436,15 +5967,17 @@ export class UnixSocketServer {
     if (platform !== "android" && platform !== "ios") {
       throw new Error(`Invalid platform: ${platform}. Must be 'android' or 'ios'.`);
     }
-    const bootedDevices = await this.listBootedDevicesForIdeAction(platform, deviceId);
+    const { devices: bootedDevices, deviceId: canonicalDeviceId } =
+      await this.resolveIdeActionDevices(platform, deviceId);
     // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
     await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/keyValueMutation");
-    this.assertDeviceActionable(deviceId, "to mutate stored values");
-    const targetDevice = bootedDevices.find((d) => d.deviceId === deviceId);
+    this.assertDeviceActionable(canonicalDeviceId, "to mutate stored values");
+    const targetDevice = bootedDevices.find((d) => d.deviceId === canonicalDeviceId);
     if (!targetDevice) {
       throw new Error(`Device not found: ${deviceId}`);
     }
-    await this.assertIdeMutationOwnership(request, targetDevice, action);
+    await this.assertIdeMutationOwnership(request, targetDevice, action, false, ideMutation);
+    getAbortSignal()?.throwIfAborted();
     const client =
       platform === "ios"
         ? IOSCtrlProxyClient.getInstance(targetDevice)
@@ -5466,14 +5999,19 @@ export class UnixSocketServer {
     device: BootedDevice,
     appId: string,
     fileName: string,
-    viaSdk: () => Promise<PreferenceStoreResolution | void>,
-    viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>,
+    mutation: {
+      dispatching: () => void;
+      viaSdk: () => Promise<PreferenceStoreResolution | void>;
+      viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>;
+    },
   ): Promise<{
     usedDirectFileFallback: boolean;
     resolution: PreferenceStoreResolution | undefined;
   }> {
     if (platform !== "android") {
-      const resolution = (await viaSdk()) || undefined;
+      getAbortSignal()?.throwIfAborted();
+      mutation.dispatching();
+      const resolution = (await mutation.viaSdk()) || undefined;
       return { usedDirectFileFallback: false, resolution };
     }
     let resolution: PreferenceStoreResolution | undefined;
@@ -5482,10 +6020,15 @@ export class UnixSocketServer {
       fileName,
       () => this.adbClientFactory.create(device),
       async () => {
-        resolution = (await viaSdk()) || undefined;
+        getAbortSignal()?.throwIfAborted();
+        mutation.dispatching();
+        resolution = (await mutation.viaSdk()) || undefined;
       },
       // The ide/* params carry no userId, so an ambiguous-user error cannot say "pass userId".
-      (adb) => viaDirectFile(adb).catch(rethrowForRouteWithoutUserId),
+      (adb) => {
+        getAbortSignal()?.throwIfAborted();
+        return mutation.viaDirectFile(adb).catch(rethrowForRouteWithoutUserId);
+      },
     );
     return { ...result, resolution };
   }
@@ -5513,7 +6056,9 @@ export class UnixSocketServer {
     // session. Enforce the UNION of base + derived (issue #4611 Gap B, product
     // decision) so a tool is enabled when EITHER grants it — symmetric with the
     // MCP `registerDeviceAware` path. The shared helper resolves the base.
-    const derivedSessionUuid = sessionManager.getSessionForDevice?.(deviceId) ?? undefined;
+    // The holder is keyed on the pooled canonical id; the frame may name the device by an alias.
+    const derivedSessionUuid =
+      sessionManager.getSessionForDevice?.(this.canonicalFrameDeviceId(deviceId)) ?? undefined;
     const baseSessionUuid = resolveToolSelectionBaseSessionUuid(derivedSessionUuid, sessionManager);
     await assertToolEnabledForAnySession(
       toolName,
@@ -5674,11 +6219,13 @@ export class UnixSocketServer {
       args.deviceId,
       socketSessionId,
       "input/tap",
+      false,
+      input?.requester,
     );
     const gestureResult = await this.runTrackedKeyedDeviceInput(
       request.method,
       targetDevice,
-      async (signal) => {
+      async (signal, dispatching) => {
         assertSocketInputNotAborted(signal);
         this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/tap");
         const queueWaitMs = this.timer.now() - queueEnterMs;
@@ -5698,6 +6245,7 @@ export class UnixSocketServer {
             [args.x, args.y],
             client.getScreenScaleMetadata?.() ?? null,
           );
+          dispatching?.();
           // The signal reaches the send step itself, so an owner that went away while the client
           // was still connecting never has its tap written to the device (#10006).
           return await this.dispatchFencedInput("Tap", signal, (onDispatch) =>
@@ -5730,6 +6278,7 @@ export class UnixSocketServer {
         );
         // The scale probe awaited the runner; the owner may have left meanwhile.
         assertSocketInputNotAborted(signal);
+        dispatching?.();
         return args.frameContext === undefined
           ? await iosClient.requestTapCoordinates(x, y, args.duration, gestureTimeoutMs)
           : await iosClient.requestTapCoordinates(
@@ -5776,11 +6325,13 @@ export class UnixSocketServer {
       args.deviceId,
       socketSessionId,
       "input/swipe",
+      false,
+      input?.requester,
     );
     const gestureResult = await this.runTrackedKeyedDeviceInput(
       request.method,
       targetDevice,
-      async (signal) => {
+      async (signal, dispatching) => {
         assertSocketInputNotAborted(signal);
         this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/swipe");
         const queueWaitMs = this.timer.now() - queueEnterMs;
@@ -5796,6 +6347,7 @@ export class UnixSocketServer {
 
         if (args.platform === "android") {
           const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+          dispatching?.();
           return await this.dispatchFencedInput("Swipe", signal, (onDispatch) =>
             client.requestSwipe(
               args.startX,
@@ -5825,6 +6377,7 @@ export class UnixSocketServer {
           "handleInputSwipe",
         );
         assertSocketInputNotAborted(signal);
+        dispatching?.();
         return args.frameContext === undefined
           ? await client.requestDrag(
               startX,
@@ -5897,48 +6450,65 @@ export class UnixSocketServer {
       args.deviceId,
       socketSessionId,
       method,
+      false,
+      input?.requester,
     );
-    const gestureResult = await this.runTrackedKeyedDeviceInput(
-      method,
+    let startAdmission: StrokeAdmission | undefined;
+    const gestureResult = await this.liftingStrokeOnSessionRefusal(
+      kind,
+      socketSessionId,
       targetDevice,
-      async (signal) => {
-        assertSocketInputNotAborted(signal);
-        const queueWaitMs = this.timer.now() - queueEnterMs;
-        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-        if (remainingTimeoutMs <= 0) {
-          throw new McpTimeoutError({
-            toolName: method,
-            timeoutMs: totalTimeoutMs,
-            origin: "UnixSocketServer.handleInputGesture",
-            detail: `spent ${queueWaitMs}ms waiting in queue`,
-          });
-        }
-        const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
-        return this.forwardGestureFrame(client, kind, args, remainingTimeoutMs);
-      },
-      this.inputDeviceGate(
-        method,
-        "UnixSocketServer.handleInputGesture",
-        totalTimeoutMs,
-        queueEnterMs,
-        input,
-      ),
+      args.gestureId,
+      () =>
+        this.runTrackedKeyedDeviceInput(
+          method,
+          targetDevice,
+          async (signal, dispatching) => {
+            assertSocketInputNotAborted(signal);
+            const queueWaitMs = this.timer.now() - queueEnterMs;
+            const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+            if (remainingTimeoutMs <= 0) {
+              throw new McpTimeoutError({
+                toolName: method,
+                timeoutMs: totalTimeoutMs,
+                origin: "UnixSocketServer.handleInputGesture",
+                detail: `spent ${queueWaitMs}ms waiting in queue`,
+              });
+            }
+            // Before the start's admission is captured: it reads the session this frame uses.
+            dispatching?.();
+            const client = AndroidCtrlProxyClient.getInstance(
+              targetDevice,
+              defaultAdbClientFactory,
+            );
+            if (kind !== "start") {
+              return this.forwardGestureFrame(client, kind, args, remainingTimeoutMs);
+            }
+            startAdmission = this.captureStrokeAdmission(targetDevice.deviceId, signal);
+            return this.forwardGestureStart(client, args, remainingTimeoutMs, startAdmission);
+          },
+          this.inputDeviceGate(
+            method,
+            "UnixSocketServer.handleInputGesture",
+            totalTimeoutMs,
+            queueEnterMs,
+            input,
+          ),
+        ),
     );
 
     if (!gestureResult.success) {
       throw new Error(gestureResult.error ?? `${method} failed on ${args.platform}`);
     }
 
-    // Track ownership so a socket that tears down mid-drag can lift its still-open on-device stroke.
-    // Only an acked start opens the gesture; an end (release OR cancel) closes it. A socket-less
-    // forward (no client session) can't be cancelled on close, so it isn't tracked.
     if (socketSessionId) {
-      if (kind === "start") {
-        // A start acked after its socket closed is cancelled here instead of recorded (#10005).
-        await this.ownedGestures.onStartAcked(socketSessionId, targetDevice, args.gestureId);
-      } else if (kind === "end") {
-        this.ownedGestures.onEndAcked(socketSessionId, targetDevice.deviceId, args.gestureId);
-      }
+      await this.trackAckedGestureFrame(
+        kind,
+        socketSessionId,
+        targetDevice,
+        args.gestureId,
+        startAdmission,
+      );
     }
 
     return {
@@ -5950,6 +6520,187 @@ export class UnixSocketServer {
       point: { x: args.x, y: args.y },
       ...(kind === "end" ? { cancel: args.cancel } : {}),
     };
+  }
+
+  /**
+   * Track ownership so a socket that tears down mid-drag can lift its still-open on-device stroke.
+   * Only an acked start opens the gesture; an end (release OR cancel) closes it. A socket-less
+   * forward (no client session) can't be cancelled on close, so it isn't tracked.
+   */
+  private async trackAckedGestureFrame(
+    kind: "start" | "move" | "end",
+    socketSessionId: string,
+    targetDevice: BootedDevice,
+    gestureId: string,
+    startAdmission: StrokeAdmission | undefined,
+  ): Promise<void> {
+    if (kind === "end") {
+      this.ownedGestures.onEndAcked(socketSessionId, targetDevice.deviceId, gestureId);
+      return;
+    }
+    if (kind !== "start") {
+      return;
+    }
+    // A start acked after its socket closed is cancelled here instead of recorded (#10005), and so
+    // is one whose holder left the device since the in-slot check of `forwardGestureStart`
+    // (#11541). Evaluated in the same turn the stroke is recorded, so no release or acquisition
+    // can land between the check and the record.
+    const admissionHolds = !startAdmission || this.strokeAdmissionStillHolds(startAdmission);
+    await this.ownedGestures.onStartAcked(
+      socketSessionId,
+      targetDevice,
+      gestureId,
+      startAdmission?.holderSessionId,
+      admissionHolds,
+    );
+    if (startAdmission && !admissionHolds) {
+      throw strokeAdmissionEndedError(GESTURE_FRAME_METHODS.start, startAdmission);
+    }
+  }
+
+  /**
+   * Each gesture frame is its own control call, so a `gestureMove`/`gestureEnd` can be refused at
+   * session admission (suspect, or released) after its `gestureStart` was admitted (#11417). The
+   * runner parks a continued stroke with no ceiling, so the refused frame would leave the pointer
+   * down: the daemon lifts the stroke with a cancelling end (no drop is committed) and then
+   * answers the typed refusal. A refused `gestureStart` opened nothing.
+   *
+   * A frame refused for any other reason (the holder gate's `device_owned_by_other_session`, a
+   * target resolved for a holder that has left) lifts the stroke this socket owns when the device
+   * is no longer held by the session the start was admitted under (#11448): the holder was
+   * released between frames, and the stroke must not stay down on the next owner's device.
+   */
+  private async liftingStrokeOnSessionRefusal<T>(
+    kind: "start" | "move" | "end",
+    socketSessionId: string | undefined,
+    targetDevice: BootedDevice,
+    gestureId: string,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      if (kind !== "start" && isSessionRefusal(error)) {
+        try {
+          await this.cancelGestureOnDevice(targetDevice, gestureId);
+        } catch (cancelError) {
+          logger.warn(
+            `Failed to lift gesture ${gestureId} on ${targetDevice.deviceId} after its session ` +
+              `refused a frame: ${errorMessage(cancelError)}`,
+          );
+        }
+        if (socketSessionId) {
+          this.ownedGestures.onEndAcked(socketSessionId, targetDevice.deviceId, gestureId);
+        }
+      } else if (kind !== "start" && socketSessionId) {
+        await this.ownedGestures.cancelIfDeviceChangedHands(
+          socketSessionId,
+          targetDevice.deviceId,
+          gestureId,
+          this.getSessionForDevice(targetDevice.deviceId),
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * The holder a `gestureStart` is being sent under, read in the device's slot immediately before
+   * the frame leaves: the session the tracked execution was admitted under and that session's
+   * incarnation (a released session re-created under the same id is a different holder), or no
+   * holder for a start on a device no session held.
+   */
+  private captureStrokeAdmission(deviceId: string, signal?: AbortSignal): StrokeAdmission {
+    const executionId = getToolSelectionContext()?.execution?.executionId;
+    const holderSessionId = executionId
+      ? executionTracker.getAdmittedSessionUse(executionId)
+      : undefined;
+    return {
+      deviceId,
+      ...(holderSessionId !== undefined ? { holderSessionId } : {}),
+      holderIncarnation: this.getDeviceControlSessionIncarnation(holderSessionId),
+      ...(signal ? { signal } : {}),
+    };
+  }
+
+  /**
+   * Whether the device is still held exactly as it was when the start was admitted: the frame was
+   * not aborted (a release that cuts, a session acquiring a free device, a cancel), and the device
+   * has the same holder incarnation, or still none. Synchronous, so a caller that records the
+   * stroke in the same turn cannot be overtaken by a release or an acquisition.
+   */
+  private strokeAdmissionStillHolds(admission: StrokeAdmission): boolean {
+    if (admission.signal?.aborted) {
+      return false;
+    }
+    if (this.getSessionForDevice(admission.deviceId) !== admission.holderSessionId) {
+      return false;
+    }
+    return (
+      this.getDeviceControlSessionIncarnation(admission.holderSessionId) ===
+      admission.holderIncarnation
+    );
+  }
+
+  /**
+   * Send a `gestureStart` from inside the device's slot and, once the runner acks it, check that
+   * its admission still holds. A release that cuts does not wait for the ack and streamed frames
+   * carry no abort to the runner, so the pointer can go down for a holder that has already left:
+   * the release-time lift found no stroke, and recording this one would leave it down on a freed
+   * device (#11541). The same goes for a sessionless start whose device a session acquired
+   * meanwhile (#10829). Such a start is cancelled here, on the runner directly because this call
+   * still occupies the device's slot, so the lift precedes anything queued behind the start, and
+   * the frame answers what ended its admission. A failed cancel is logged and the refusal still
+   * answered. A start the runner did not accept opened nothing and is never cancelled.
+   */
+  private async forwardGestureStart(
+    client: AndroidCtrlProxyClient,
+    args: { gestureId: string; x: number; y: number; cancel: boolean },
+    timeoutMs: number,
+    admission: StrokeAdmission,
+  ) {
+    const started = await this.forwardGestureFrame(client, "start", args, timeoutMs);
+    if (!started.success || this.strokeAdmissionStillHolds(admission)) {
+      return started;
+    }
+    try {
+      await client.requestGestureEnd(args.gestureId, 0, 0, true, OWNED_GESTURE_CANCEL_TIMEOUT_MS);
+    } catch (error) {
+      logger.warn(
+        `Failed to lift gesture ${args.gestureId} on ${admission.deviceId} whose holder left ` +
+          `before its start was acked: ${errorMessage(error)}`,
+      );
+    }
+    throw strokeAdmissionEndedError(GESTURE_FRAME_METHODS.start, admission);
+  }
+
+  /**
+   * A session acquired `deviceId`: lift every stroke that was started on it while no session held
+   * it, at acquisition time, so the cancel is on the device's keyed queue ahead of the new holder's
+   * first call (#10829, #11541). With no frame in flight nothing else would lift the pointer until
+   * the pane sent another frame or its socket closed. Best-effort; never throws.
+   */
+  liftSessionlessStrokesOn(deviceId: string): void {
+    this.trackRequestHandler(this.ownedGestures.cancelAllUnheldOn(deviceId));
+  }
+
+  /** Queue the old device's holder strokes before rebind makes it available (#11667). */
+  liftStrokesHeldByOn(sessionId: string, deviceId: string): void {
+    // Forced same-serial rebinds also notify unbound; the holder kept this device.
+    if (this.getSessionForDevice(deviceId) === sessionId) {
+      return;
+    }
+    this.trackRequestHandler(this.ownedGestures.cancelAllHeldByOn(sessionId, deviceId));
+  }
+
+  /**
+   * A session was released: lift every stroke admitted under it, at release time, so the cancel is
+   * on the device's keyed queue ahead of any input the next owner sends (#11448). The frames of a
+   * gesture are separate control calls, so a release between two of them cuts no call and nothing
+   * else would lift the pointer until the pane's socket closed. Best-effort; never throws.
+   */
+  private liftStrokesHeldBy(releasedSessionId: string): Promise<void> {
+    return this.ownedGestures.cancelAllHeldBy(releasedSessionId);
   }
 
   /**
@@ -6047,6 +6798,7 @@ export class UnixSocketServer {
       socketSessionId,
       "input/typeText",
       args.append,
+      input?.requester,
     );
     let confirmedAppendCharsSent: number | undefined;
     const recordConfirmedAppendCharsSent = (charsSent: number): void => {
@@ -6055,7 +6807,7 @@ export class UnixSocketServer {
     const inputResult = await this.runTrackedKeyedDeviceInput(
       request.method,
       targetDevice,
-      async (signal) => {
+      async (signal, dispatching) => {
         assertSocketInputNotAborted(signal);
         // A same-serial emulator may reconnect while this request waits behind an
         // earlier input. Re-read its ADB transport inside the keyed callback so the
@@ -6068,6 +6820,7 @@ export class UnixSocketServer {
                 socketSessionId,
                 "input/typeText",
                 true,
+                input?.requester,
               )
             : targetDevice;
         this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/typeText");
@@ -6083,6 +6836,7 @@ export class UnixSocketServer {
         }
 
         const imeAction: ImeAction | undefined = args.submit ? "done" : undefined;
+        dispatching?.();
         return await this.runInputOperationWithTimeout(
           request.method,
           totalTimeoutMs,
@@ -6148,11 +6902,13 @@ export class UnixSocketServer {
       args.deviceId,
       socketSessionId,
       "input/pressButton",
+      false,
+      input?.requester,
     );
     const buttonResult = await this.runTrackedKeyedDeviceInput(
       request.method,
       targetDevice,
-      async (signal) => {
+      async (signal, dispatching) => {
         assertSocketInputNotAborted(signal);
         this.requireCurrentFrameContext(
           targetDevice.deviceId,
@@ -6175,6 +6931,7 @@ export class UnixSocketServer {
         // press to pick up): without it, session teardown mid-home-press leaves
         // the ADB dispatch and foreground-verification reads running (issue #6289).
         const pressButton = new PressButton(targetDevice);
+        dispatching?.();
         return args.frameContext === undefined
           ? await pressButton.press(args.button, remainingTimeoutMs, undefined, signal)
           : await pressButton.press(args.button, remainingTimeoutMs, args.frameContext, signal);
@@ -6217,11 +6974,13 @@ export class UnixSocketServer {
       args.deviceId,
       socketSessionId,
       "input/key",
+      false,
+      input?.requester,
     );
     const keyResult = await this.runTrackedKeyedDeviceInput(
       request.method,
       targetDevice,
-      async (signal) => {
+      async (signal, dispatching) => {
         assertSocketInputNotAborted(signal);
         this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/key");
         const queueWaitMs = this.timer.now() - queueEnterMs;
@@ -6237,6 +6996,7 @@ export class UnixSocketServer {
 
         const inputKey = new InputKey(targetDevice, defaultAdbClientFactory, undefined, this.timer);
         let dispatched = false;
+        dispatching?.();
         return await this.runInputOperationWithTimeout(
           request.method,
           totalTimeoutMs,
@@ -6934,6 +7694,7 @@ export class UnixSocketServer {
     socketSessionId: string | undefined,
     action: InputTargetAction,
     bypassAndroidDeviceListCache: boolean = false,
+    requester?: () => string | undefined,
   ): Promise<BootedDevice> {
     const targetDevice = await this.selectInputTargetDevice(
       platform,
@@ -6942,6 +7703,7 @@ export class UnixSocketServer {
       action,
       bypassAndroidDeviceListCache,
     );
+    await this.assertFrameTargetProven(targetDevice, action, requester);
     this.assertManagedConnectionInputTarget(socketSessionId, action, targetDevice.deviceId);
     this.captureInputTargetOwner(targetDevice);
     return targetDevice;
@@ -6957,6 +7719,19 @@ export class UnixSocketServer {
     action: InputTargetAction,
     deviceId: string,
   ): void {
+    this.assertManagedConnectionControl(socketSessionId, action, { deviceId });
+  }
+
+  /**
+   * The one confinement every control frame from a managed connection passes (#11178, #11596): the
+   * device it would act on is one of the connection's slot devices, and the session it names is
+   * one of its slot sessions. A generic (unbound) socket is never refused here.
+   */
+  private assertManagedConnectionControl(
+    socketSessionId: string | undefined,
+    action: string,
+    target: { deviceId?: string; requesterSessionUuid?: string },
+  ): void {
     if (!this.daemonState.isInitialized()) {
       return;
     }
@@ -6964,7 +7739,8 @@ export class UnixSocketServer {
     const refusal = managedConnectionControlRefusal({
       binding: this.daemonState.getManagedConnectionScopes?.().get(socketSessionId),
       action,
-      deviceId,
+      deviceId: target.deviceId,
+      requesterSessionUuid: target.requesterSessionUuid,
       slotDeviceOf: (sessionUuid) => sessionManager.getSession(sessionUuid)?.assignedDevice,
     });
     if (refusal) {
@@ -6989,13 +7765,15 @@ export class UnixSocketServer {
     action: InputTargetAction,
     bypassAndroidDeviceListCache: boolean = false,
   ): Promise<BootedDevice> {
-    const bootedDevices = await this.discoverInputTargetDevices(
-      platform,
-      action,
-      bypassAndroidDeviceListCache,
-    );
-    if (deviceId) {
-      const targetDevice = bootedDevices.find((device) => device.deviceId === deviceId);
+    const { devices: bootedDevices, deviceId: canonicalDeviceId } =
+      await this.discoverInputTargetDevices(
+        platform,
+        action,
+        bypassAndroidDeviceListCache,
+        deviceId,
+      );
+    if (canonicalDeviceId) {
+      const targetDevice = bootedDevices.find((device) => device.deviceId === canonicalDeviceId);
       if (!targetDevice) {
         throw new Error(`Device not found: ${deviceId}`);
       }
@@ -7030,21 +7808,21 @@ export class UnixSocketServer {
   private async runTrackedKeyedDeviceInput<T>(
     toolName: string,
     targetDevice: BootedDevice,
-    operation: (signal?: AbortSignal) => Promise<T>,
+    operation: InputOperation<T>,
     gate?: InputDeviceGate,
   ): Promise<T> {
     const executionKey = `device:${targetDevice.deviceId}`;
     return await this.runTrackedDeviceInput(
       toolName,
       targetDevice,
-      async (signal) =>
+      async (signal, dispatching) =>
         this.runKeyedMcpForward(
           executionKey,
           () => {
             // Parked on the device key, the input may have been cancelled (a session acquired the
             // device, #10829): it is not sent.
             signal?.throwIfAborted();
-            return operation(signal);
+            return operation(signal, dispatching);
           },
           executionKey,
           gate?.chainWait,
@@ -7157,12 +7935,18 @@ export class UnixSocketServer {
       sessionManager: this.daemonState.getSessionManager(),
       gate: this.daemonState.getDevicePool(),
     });
+    // A device no local session holds takes no input while another daemon claims it (#11349).
+    await assertControlNotOnForeignDaemonDevice({
+      deviceId: targetDevice.deviceId,
+      platform: targetDevice.platform,
+      gate: this.daemonState.getDevicePool(),
+    });
   }
 
   private async runTrackedDeviceInput<T>(
     toolName: string,
     targetDevice: BootedDevice,
-    operation: (signal?: AbortSignal) => Promise<T>,
+    operation: InputOperation<T>,
     ownerSignal?: AbortSignal,
     requester?: () => string | undefined,
   ): Promise<T> {
@@ -7193,7 +7977,9 @@ export class UnixSocketServer {
     if (resolvedOwner !== undefined && resolvedOwner !== sessionUuid) {
       // The target was resolved for `resolvedOwner`, which has since left the device (rebind or
       // release). Running now would drive it as an unowned call or as the next owner's (#9958).
-      throw new ActionableError(
+      throw new SessionNoLongerOwnsDeviceError(
+        resolvedOwner,
+        targetDevice.deviceId,
         `Session ${resolvedOwner} no longer owns device '${targetDevice.deviceId}' (it was rebound ` +
           `or released after this input resolved its target); the input was not sent.`,
       );
@@ -7203,8 +7989,13 @@ export class UnixSocketServer {
     try {
       executionTracker.bindDeviceExecution(execution.id, targetDevice.deviceId);
       signal.throwIfAborted();
-      // The holder and readiness checks above passed: this input is use of the session (#10824).
-      executionTracker.markSessionAdmitted(execution.id);
+      await this.admitInputAsControlCall(execution, targetDevice.deviceId, sessionUuid);
+      // The holder, readiness and admission checks passed, so the execution stays tracked as
+      // control in flight on the session from here on. It is USE of the session (#10824) only once
+      // the handler's own pre-dispatch checks passed too: a frame refused for a stale frame
+      // context, spent budget or out-of-bounds coordinates sends nothing and must not restart the
+      // idle window (#11596).
+      const dispatching = () => executionTracker.markSessionAdmitted(execution.id);
       if (!sessionUuid) {
         // Admitted on a device no session holds: a session acquiring it while this input is parked
         // or in flight cancels it (#10829).
@@ -7221,12 +8012,40 @@ export class UnixSocketServer {
               },
             },
           },
-          () => this.runFencedInputOperation(signal, ownerSignal, operation),
+          () =>
+            this.runFencedInputOperation(signal, ownerSignal, (fenced) =>
+              operation(fenced, dispatching),
+            ),
         ),
       );
     } finally {
       executionTracker.endExecution(execution.id);
     }
+  }
+
+  /**
+   * Input on a held device is a control call on the holder's session: refused while the session is
+   * suspect, lapsed or past its idle deadline, exactly as an MCP control call is (#11417). Input
+   * on a device no session holds has no session to admit.
+   */
+  private async admitInputAsControlCall(
+    execution: ActiveExecution,
+    deviceId: string,
+    holderSessionUuid: string | undefined,
+  ): Promise<void> {
+    if (!holderSessionUuid) {
+      return;
+    }
+    await admitInputOnHolderSession({
+      deviceId,
+      holderSessionUuid,
+      sessionManager: this.daemonState.getSessionManager(),
+      execution: sessionExecutionMetadataOf(execution),
+    });
+    // A release that landed while admission was awaited answers its own typed refusal.
+    await this.answeringSessionRelease(execution, async () =>
+      execution.abortController.signal.throwIfAborted(),
+    );
   }
 
   /**
@@ -7263,21 +8082,24 @@ export class UnixSocketServer {
     platform: "android" | "ios",
     action: InputTargetAction,
     bypassAndroidDeviceListCache: boolean,
-  ): Promise<BootedDevice[]> {
+    deviceId: string | undefined,
+  ): Promise<CanonicalFrameDiscovery> {
     const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(
       platform,
       {
         bypassAndroidDeviceListCache,
       },
     );
+    // The frame's rows and device id as pooled canonical ids, before anything reads pool state.
+    const canonical = await this.canonicalFrameDiscovery(platform, discovery.devices, deviceId);
     // FUNNEL 1: the target this resolves is handed straight to the device-addressed
     // admission gate, which reads pool state — so the pool must have seen this
     // observation first (#6863 review).
-    await this.reconcileDiscoveryObservation(discovery.devices, `socket:${action}`);
+    await this.reconcileDiscoveryObservation(canonical.devices, `socket:${action}`);
     if (!discovery.succeededPlatforms.has(platform)) {
       throw new Error(`Unable to discover booted ${platform} devices for ${action}`);
     }
-    return discovery.devices;
+    return canonical;
   }
 
   private mcpRequestOptions(
@@ -8013,7 +8835,7 @@ export class UnixSocketServer {
       type: "mcp_response",
       success: false,
       error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-      daemonShuttingDown: daemonShuttingDownFailure(pending.admitted),
+      ...daemonShuttingDownFrameFields(daemonShuttingDownFailure(pending.admitted)),
     });
   }
 

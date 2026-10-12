@@ -4,6 +4,7 @@ import {
   InputDeviceOwnedError,
 } from "./inputDeviceOwnership";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
+import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
@@ -16,6 +17,7 @@ import { getDevicePoolTimeoutMs, type Environment } from "./poolConfig";
 import { freshStartAlreadyBoundError } from "./deviceAcquisitionRefusals";
 import type { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import type { Session, SessionExecutionMetadata, SessionManager } from "./sessionManager";
+import { mintedSession, receiptOrNew, type AcquisitionReceipt } from "./acquisitionReceipt";
 
 /**
  * Result of attaching an autolock session to an MCP session (#11129). `attached-not-persisted`
@@ -60,9 +62,13 @@ interface AutolockAcquisitionOptions {
   verifiedAndroidAvdIdentity?: DeviceInfo;
   achievedReadiness: DeviceReadinessLevel;
   collectCancellationSettlement?: (settlement: Promise<void>) => void;
+  /** Records the session this acquisition minted (never a reused one) once it is committed. */
+  receipt: AcquisitionReceipt;
 }
 
 export interface DeviceAutolockPoolPort {
+  /** Tell resource subscribers a status or holder write committed (#11413). */
+  noteDeviceStateChanged?(device: Pick<PooledDevice, "id" | "platform">): void;
   getSessionManager(): SessionManager;
   getDaemonSessionId(): string;
   getDevice(id: string): PooledDevice | undefined;
@@ -70,6 +76,11 @@ export interface DeviceAutolockPoolPort {
   withTargetDeviceDiscovery(options: TargetDeviceDiscoveryOptions): Promise<string>;
   assertRuntimeIdentity(device: PooledDevice, identity: ExpectedIdentity | undefined): void;
   assertNotReservedForShutdown(device: PooledDevice, message: string): void;
+  /**
+   * Refuse a device reserved for another session's restart recovery, like an explicit bind
+   * (#11294, #11461). An autolock mints a fresh session, so it is never the reserved row's own.
+   */
+  assertNotReservedForOtherRehydration(device: PooledDevice): void;
   recordSourceAndroidAvd(id: string, image: DeviceInfo | undefined): void;
   notifyTargetDeviceReady(options: {
     device: PooledDevice;
@@ -107,12 +118,17 @@ export interface DeviceAutolockPoolPort {
     platform: Platform,
     sourceImage?: DeviceInfo,
   ): Promise<void>;
-  /** Publish this daemon's claim, rolling a fresh acquisition back when another daemon won. */
+  /**
+   * Publish this daemon's claim, rolling a fresh acquisition back when another daemon won.
+   * `createdSession` is the session this acquisition minted; it is released again when the
+   * publish itself fails (#11565).
+   */
   claimAcquiredDevice(
     sessionId: string,
     deviceId: string,
     heldBefore: string | null,
     platform: Platform,
+    createdSession?: Session,
   ): Promise<void>;
 }
 
@@ -165,7 +181,7 @@ export class DeviceAutolockManager {
       verifiedAndroidAvdIdentity?: DeviceInfo,
       achievedReadiness?: DeviceReadinessLevel,
       collectCancellationSettlement?: (settlement: Promise<void>) => void,
-      policy?: { autolockEnabled?: boolean },
+      policy?: { autolockEnabled?: boolean; receipt?: AcquisitionReceipt },
     ]
   ): Promise<string | undefined> {
     if (!(policy.autolockEnabled ?? captureAutolockPolicy(this.env))) {
@@ -180,8 +196,10 @@ export class DeviceAutolockManager {
       verifiedAndroidAvdIdentity ?? sourceImage,
     );
     const heldBefore = this.pool.getDevice(deviceId)?.sessionId ?? null;
+    const receipt = receiptOrNew(policy.receipt);
     const sessionId = await this.pool.withTargetDeviceDiscovery({
       deviceId,
+      readinessReservationOwners,
       sourceImage: verifiedAndroidAvdIdentity ?? sourceImage,
       unavailableMessage: this.unavailableMessage(deviceId),
       platform,
@@ -198,10 +216,17 @@ export class DeviceAutolockManager {
           verifiedAndroidAvdIdentity,
           achievedReadiness,
           collectCancellationSettlement,
+          receipt,
         }),
     });
     if (sessionId) {
-      await this.pool.claimAcquiredDevice(sessionId, deviceId, heldBefore, platform);
+      await this.pool.claimAcquiredDevice(
+        sessionId,
+        deviceId,
+        heldBefore,
+        platform,
+        receipt.minted?.session,
+      );
     }
     return sessionId;
   }
@@ -218,6 +243,7 @@ export class DeviceAutolockManager {
     verifiedAndroidAvdIdentity,
     achievedReadiness,
     collectCancellationSettlement,
+    receipt,
   }: AutolockAcquisitionOptions): Promise<string | undefined> {
     throwIfRequestAborted();
     const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
@@ -233,6 +259,7 @@ export class DeviceAutolockManager {
     this.assertMcpSessionCanAutolockDevice(mcpSessionId, device);
     this.pool.assertRuntimeIdentity(device, expectedIdentity);
     this.pool.assertNotReservedForShutdown(device, "and cannot be autolocked");
+    this.pool.assertNotReservedForOtherRehydration(device);
     if (alreadyPooled) {
       this.pool.recordSourceAndroidAvd(deviceId, androidAvdIdentity);
       this.pool.notifyTargetDeviceReady({ device, snapshot });
@@ -344,11 +371,17 @@ export class DeviceAutolockManager {
       owner,
       collectCancellationSettlement,
     );
+    receipt.minted = mintedSession(session, deviceId);
+    this.noteStateChanged(device);
 
     logger.info(
       `Autolocked device ${deviceId} with session ${sessionId} (timeout: ${timeoutMs}ms)`,
     );
     return sessionId;
+  }
+
+  private noteStateChanged(device: PooledDevice): void {
+    this.pool.noteDeviceStateChanged?.(device);
   }
 
   private unavailableMessage(deviceId: string): string {
@@ -466,7 +499,13 @@ export class DeviceAutolockManager {
     if (!session) {
       return undefined;
     }
-    const refreshed = await this.pool.getSessionManager().getOrCreateSession(session.sessionId);
+    // The call doing this is already tracked under the autolock session; naming it keeps its own
+    // admission from being judged as earlier work still in flight (#11400).
+    const refreshed = await this.pool
+      .getSessionManager()
+      .getOrCreateSession(session.sessionId, undefined, undefined, undefined, false, {
+        callerExecutionId: getToolSelectionContext()?.execution?.executionId,
+      });
     // Release can finish while activity persistence yields, even under the
     // assignment mutex. Do not report success for a retired ownership identity.
     if (

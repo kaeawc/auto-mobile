@@ -18,7 +18,9 @@ import { resolveAutoMobileBaseDir } from "../utils/tempDir";
  * Several daemons can share a data directory (#11158), so each daemon writes its own file, keyed
  * by its daemon session id, and only ever compacts that file. At startup a daemon adopts the files
  * of daemons that are no longer live (see {@link createDaemonTerminalReleaseJournal}); a live
- * peer's file, and its in-flight intents, are left alone.
+ * peer's file, and its in-flight intents, are left alone. A peer that was live at startup and died
+ * later is read when one of its rows is next read, and its file is kept until its intents are
+ * settled ({@link TerminalReleaseJournal.readDeadDaemon}, #11355).
  */
 export interface TerminalReleaseIntent {
   sessionId: string;
@@ -41,6 +43,20 @@ export interface TerminalReleaseJournal {
    * a later upgraded intent whose own write is still pending.
    */
   resolve(sessionId: string, reason?: string): void;
+  /**
+   * The unconfirmed intents of a peer daemon the caller knows is dead (#11355): a peer that was
+   * live when this daemon started is skipped by startup adoption, so its journal is read when it
+   * is found dead. The file is not changed: it stays the one copy every survivor (and a later
+   * startup) can read until {@link discardDeadDaemon}. Returns `undefined` when the file could
+   * not be read (the caller retries later). Never call it for a daemon that may be live: its
+   * file holds in-flight intents whose fence may still be lifted.
+   */
+  readDeadDaemon?(daemonSessionId: string): TerminalReleaseIntent[] | undefined;
+  /**
+   * Remove a dead peer daemon's journal once every intent {@link readDeadDaemon} returned is
+   * settled: its row is terminal, or is no longer that daemon's.
+   */
+  discardDeadDaemon?(daemonSessionId: string): void;
 }
 
 /** Durable file primitives the journal needs; injected so tests never touch the disk. */
@@ -167,11 +183,41 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
   constructor(
     private readonly filePath: string,
     private readonly fileSystem: TerminalReleaseJournalFileSystem,
+    /** Where a peer daemon keeps its journal; without it no peer is read after startup. */
+    private readonly peerJournalPath?: (daemonSessionId: string) => string,
   ) {}
 
   loadUnconfirmed(): TerminalReleaseIntent[] {
     this.ensureLoaded();
     return Array.from(this.intents.values());
+  }
+
+  readDeadDaemon(daemonSessionId: string): TerminalReleaseIntent[] | undefined {
+    const deadPath = this.peerPath(daemonSessionId);
+    return deadPath === undefined ? [] : readDeadJournal(deadPath, this.fileSystem);
+  }
+
+  discardDeadDaemon(daemonSessionId: string): void {
+    const deadPath = this.peerPath(daemonSessionId);
+    if (deadPath === undefined) {
+      return;
+    }
+    try {
+      this.fileSystem.remove(deadPath);
+    } catch (error) {
+      // Its rows are terminal already; a later startup adopts the file and drops every intent.
+      logger.warn(
+        `[TerminalReleaseJournal] Could not remove the settled journal ${deadPath}: ` +
+          errorMessage(error),
+        error,
+      );
+    }
+  }
+
+  /** A peer's journal file; undefined for this daemon's own, or when peers are not addressable. */
+  private peerPath(daemonSessionId: string): string | undefined {
+    const peerPath = this.peerJournalPath?.(daemonSessionId);
+    return peerPath === this.filePath ? undefined : peerPath;
   }
 
   record(intent: TerminalReleaseIntent): void {
@@ -382,7 +428,9 @@ export function createDaemonTerminalReleaseJournal(
     deadDaemonJournalPaths(dataDir, options, fileSystem),
     fileSystem,
   );
-  return new FileTerminalReleaseJournal(ownPath, fileSystem);
+  return new FileTerminalReleaseJournal(ownPath, fileSystem, (daemonSessionId) =>
+    terminalReleaseJournalPath(dataDir, daemonSessionId),
+  );
 }
 
 function deadDaemonJournalPaths(

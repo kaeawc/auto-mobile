@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   DeviceManagerSlotInventory,
+  GateManagedSlotBootCapacity,
   PoolManagedSlotDeviceClaims,
   ToolManagedSlotProvisioner,
   type ManagedSlotToolInvoker,
@@ -8,6 +9,8 @@ import {
 import type { PooledDevice } from "../../../src/daemon/devicePool";
 import { ProvisionDeviceError } from "../../../src/devices/exactDeviceProvisioning";
 import type { BootedDevice, DeviceInfo } from "../../../src/models";
+import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
+import { BootedDeviceDiscoveryIncompleteError } from "../../../src/models/BootedDeviceDiscoveryIncompleteError";
 import {
   createProvisionDeviceResponse,
   createToolErrorResponse,
@@ -291,5 +294,89 @@ describe("PoolManagedSlotDeviceClaims", () => {
       const pool = { getAllDevices: () => [], assertNotClaimedByForeignDaemon: async () => {} };
       expect((await new PoolManagedSlotDeviceClaims(pool).describe(device)).kind).toBe("free");
     });
+  });
+});
+
+describe("GateManagedSlotBootCapacity", () => {
+  test("a passing gate check is available capacity", async () => {
+    const platforms: string[] = [];
+    const capacity = new GateManagedSlotBootCapacity(new FakeTimer(), async (platform) => {
+      platforms.push(platform);
+    });
+
+    expect(await capacity.check("ios", {})).toEqual({ kind: "available" });
+    expect(platforms).toEqual(["ios"]);
+  });
+
+  test("the gate's refusal keeps its limit, count, wait hint and external devices", async () => {
+    const capacity = new GateManagedSlotBootCapacity(new FakeTimer(), async () => {
+      throw new BootCapacityExhaustedError(
+        { platform: "ios", limit: 2, booted: 3, retryAfterMs: 5_000, externalDevices: ["UDID-1"] },
+        "full",
+      );
+    });
+
+    expect(await capacity.check("ios", {})).toEqual({
+      kind: "exhausted",
+      limit: 2,
+      booted: 3,
+      retryAfterMs: 5_000,
+      externalDevices: ["UDID-1"],
+    });
+  });
+
+  test("the gate's unknown booted count is unknown, never available", async () => {
+    const capacity = new GateManagedSlotBootCapacity(new FakeTimer(), async () => {
+      throw new BootedDeviceDiscoveryIncompleteError("ios", {
+        code: "failed",
+        message: "simulator count unknown",
+        retryable: true,
+      });
+    });
+
+    expect(await capacity.check("ios", {})).toMatchObject({
+      kind: "unknown",
+      message: expect.stringContaining("simulator count unknown"),
+    });
+  });
+
+  test("a check that never answers is unknown after 5 s, with no real wait", async () => {
+    const timer = new FakeTimer();
+    const capacity = new GateManagedSlotBootCapacity(timer, () => new Promise<void>(() => {}));
+
+    const check = capacity.check("ios", {});
+    await timer.advanceTimersByTimeAsync(4_999);
+    let settled = false;
+    void check.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    await timer.advanceTimersByTimeAsync(1);
+
+    expect(await check).toEqual({
+      kind: "unknown",
+      message: "Timed out after 5000ms checking ios boot capacity.",
+    });
+  });
+
+  test("a defect in the gate propagates instead of becoming a retryable refusal", async () => {
+    const capacity = new GateManagedSlotBootCapacity(new FakeTimer(), async () => {
+      throw new TypeError("gate.decide is not a function");
+    });
+
+    await expect(capacity.check("android", {})).rejects.toThrow("gate.decide is not a function");
+  });
+
+  test("a cancelled check rethrows the cancellation instead of reporting a count", async () => {
+    const controller = new AbortController();
+    const capacity = new GateManagedSlotBootCapacity(new FakeTimer(), async () => {
+      controller.abort(new Error("cancelled"));
+      await new Promise<void>(() => {});
+    });
+
+    await expect(capacity.check("android", { signal: controller.signal })).rejects.toThrow(
+      "cancelled",
+    );
   });
 });

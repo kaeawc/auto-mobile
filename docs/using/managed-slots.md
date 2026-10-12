@@ -41,18 +41,32 @@ Known gaps at the time of writing:
 
 ## Concepts
 
-| Concept                   | Meaning and lifetime                                                                                                                                                                                                                                            |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Scoped slot identifier    | A caller-declared numeric `slotIndex`, qualified by `managedHostScope`, `runnerNamespace` and `runnerIncarnation`. Two runners that both use `0` do not share an identity. The registry derives a `scopeKey`, the SHA-256 hex digest of the three scope parts.  |
-| Slot-to-device assignment | AutoMobile's host-local mapping from a valid scoped slot to a stable device identifier (AVD name or simulator UDID) and the spec it was resolved against. It survives the execution proxy exiting. Every binding change increments the assignment `generation`. |
-| Live session ownership    | The fresh session, held by the current STDIO proxy, that may control the assigned device. AutoMobile owns heartbeat, expiry and cleanup.                                                                                                                        |
-| Execution capacity        | The caller's own local concurrency permit. Releasing it does not erase the assignment or free the device for other slots.                                                                                                                                       |
+| Concept                   | Meaning and lifetime                                                                                                                                                                                                                                                                  |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Scoped slot identifier    | A caller-declared numeric `slotIndex`, qualified by `managedHostScope`, `runnerNamespace` and `runnerIncarnation`. Two runners that both use `0` do not share an identity. The registry derives a `scopeKey`, the SHA-256 hex digest of the three scope parts.                        |
+| Slot-to-device assignment | AutoMobile's host-local mapping from a valid scoped slot to a stable device identifier (AVD name or simulator UDID) and the spec it was resolved against. It survives the execution proxy exiting. Binding commits and entry into fencing states advance the assignment `generation`. |
+| Live session ownership    | The fresh session, held by the current STDIO proxy, that may control the assigned device. AutoMobile owns heartbeat, expiry and cleanup.                                                                                                                                              |
+| Execution capacity        | The caller's own local concurrency permit. Releasing it does not erase the assignment or free the device for other slots.                                                                                                                                                             |
 
 An idle assigned device is not an unassigned device. Ending the live session
 clears only the execution owner; the assignment stays, and the device is not
 returned to the generic pool. A device assignment is not a session UUID and is
 not an externally renewed lease. The resident daemon and the per-execution proxy
 keep their usual split: the device and its assignment can outlive the proxy.
+
+The assignment `generation` is a monotonic fencing counter for a slot within its
+scope, not a count of devices; it only grows and may skip (#11712). Every binding
+commit consumes one, even when a changed spec keeps the same device; widening
+then narrowing such a spec can move `1 → 2 → 3`. Entering `replacing`, `settling`
+or `cleanup_pending` from a different state also consumes one. A replacement can
+move `1 → 4`: fencing for deletion (`2`), committing the empty binding before
+creation (`3`), then committing the new device (`4`). An unchanged ready binding
+and a release that never enters `settling` keep the generation. A new incarnation
+has a new scope: a slot starts at `0` and its first binding commit reaches `1`.
+An adopted device keeps its name: its `-gN-` records the generation used by the
+scope that created it, not its current `assignmentGeneration`. Compare generations
+for equality or ordering within the same scoped slot, never as consecutive device
+numbers.
 
 The registry is host-wide (the same root iOS claims use), not the per-daemon
 `AUTOMOBILE_DB_DIR`, so several daemons on one host see one set of assignments.
@@ -186,14 +200,54 @@ connection used for tools and resources:
    `slot_in_use` and the scope is never treated as abandoned.
 4. **Drain and release.** When the execution ends (stdin EOF, cancellation or
    owner loss) the proxy releases its sessions with a bounded wait
-   (`MANAGED_EXECUTION_RELEASE_TIMEOUT_MS`, 1.5 s). The daemon cancels the
+   (`MANAGED_EXECUTION_RELEASE_TIMEOUT_MS`, 1.5 s). A closing proxy first
+   cancels its own tool calls and resource reads still in flight (a process
+   stopped by a signal closes with them open), because the daemon admits the
+   release in arrival order on the proxy's connection; their callers get a
+   "MCP proxy is closing" error. The daemon cancels the
    session's in-flight work, waits about 500 ms for it, then releases the session
    (about 700 ms budget). If everything settled, the slot is
    `reusable_for_this_slot`. If work outlived the budget the slot is marked
    `settling` before its owner is cleared, so the next acquisition waits
    (retryable `slot_settling`) until the work ends or the settler is found dead.
-   A release clears the execution owner only; the assignment, generation and spec
-   are kept, whatever the release reason (explicit, heartbeat loss, idle).
+   The slot registry is shared by every daemon on the host and can be busy, so no
+   registry step of the drain is assumed to have happened (#11616). A failed
+   slot lookup, `settling` mark or return to `ready` is retried with backoff
+   (250 ms doubling to 5 s) until the 5-minute settlement cap, then every 30 s
+   until it lands or the daemon stops. A failed owner clear is retried the
+   same way: the record it leaves belongs to an ended session and pins nothing
+   in the draining daemon, but it names that daemon's running process, so other
+   daemons on the host answer `slot_in_use` for it until the retry lands. The
+   retry clears only that ended session's record; one a live execution holds
+   again is left to that execution's own release. If the
+   `settling` mark itself cannot be written, the slot keeps its owner record and
+   the daemon keeps treating that owner as live for as long as the released work
+   runs, so the slot is never handed to the next execution under running work;
+   `reset-slot-scope --force` reports such a slot as `live_owner`. An explicit
+   release whose slot lookup fails is rejected before anything is cancelled or
+   released.
+   What tells every daemon on the host that released work is still running is
+   in the registry and names the draining daemon's process: the `settling` mark,
+   or, until that mark lands, the owner record. Before it marks a slot the
+   daemon re-stamps an owner record that still names another process (the
+   previous daemon after a restart, or a second daemon) with itself, so a slot
+   whose mark is owed reads `slot_in_use` from any daemon. Both hold for as long
+   as that process runs, including after it has begun to shut down, and neither
+   outlives it: once the process is gone its work is gone too, the next daemon
+   returns a `settling` slot to `ready` at startup, and the owner record reads
+   dead. A mark whose write was committed although the call failed is read back
+   and treated as written. One window has no registry record: while neither the
+   re-stamp nor the mark of such a foreign record has landed (or the lookup of
+   a session released by heartbeat loss has not), only the draining daemon
+   itself refuses the slot. And an owner record whose clear failed, which the
+   draining daemon itself reads as dead, still names that daemon's process:
+   other daemons on the host answer `slot_in_use` for it until the clear's
+   retry lands, the draining daemon next claims the slot, or it exits.
+   A release clears the execution owner and keeps the device assignment and spec,
+   whatever the release reason (explicit, heartbeat loss, idle). The generation
+   stays unchanged unless the slot enters `settling`; entering it to fence
+   undrained work, an unconfirmed session release or unfinished cleanup advances
+   it by one.
 5. **Reuse.** A new proxy with the same scoped slot and a matching spec reuses
    the assigned device with a fresh session. A duplicate proxy for a slot whose
    execution is still live is refused with a retryable `slot_in_use`.
@@ -212,7 +266,13 @@ A managed-execution session uses the `managed-execution` liveness policy:
   heartbeats never extend the window. The effective window is reported as
   `idleTimeoutMs` in the acquisition result.
 - **Idle release is terminal.** As for every session, the session UUID ends with
-  the idle release (`session_ownership_lost`; session-not-found answers carry
+  the idle release. A call on the managed connection after it is answered with
+  `managed_execution_ended` (`nextAction: relaunch_execution`, the release reason,
+  `slotIndex` and `assignmentGeneration`; no recovery tools). Reads that name a
+  non-blank string `deviceId` still work; a read without one (including a
+  `device` label alone) is answered with
+  `managed_execution_ended` every time;
+  a direct daemon client sees `session_ownership_lost` (session-not-found answers carry
   `idle: true`). The slot's device stays assigned. To continue, start a new
   execution proxy on the same scoped slot; it reuses the device with a new
   session.
@@ -226,6 +286,19 @@ A managed-execution session uses the `managed-execution` liveness policy:
   runner is PID 1 in a container, or the proxy is started by `docker exec`, set
   `executionOwnerPid` to a live pid; an explicit owner takes precedence over the
   parent-pid heuristic.
+
+The registry's execution owner record (`exec_owner_daemon_id`, `exec_owner_pid`,
+`exec_owner_process_token`, `exec_session_uuid`) names the **daemon** holding the
+session, not the proxy or runner (#11711). Host daemons use it to identify the
+recorded owner and check whether that daemon still runs, using its PID and process
+start identity (falling back to the PID when that identity is unavailable).
+Client liveness is separate: the session's proxy heartbeat lease and the proxy's
+execution-owner watch; `executionOwnerPid` is never written to the registry.
+After a daemon restart, the persisted record still names the previous, dead
+daemon until the execution is re-owned, a new execution claims the slot, or the
+record is cleared. A dead record alone never keeps a slot in use; a live session
+held by the current daemon can still do so while re-owning catches up. The `pid`
+in `reset-slot-scope` pending `liveOwners` evidence is this recorded daemon PID.
 
 Values are the defaults in `src/daemon/sessionLivenessWindows.ts`; see
 [Device ownership](device-ownership.md#when-a-session-is-released) for the
@@ -253,6 +326,11 @@ Matching is declarative, per slot, and the result reports a `disposition` of
   emulator may be replaced with an iOS simulator). If deletion fails, the old
   assignment is kept and marked cleanup pending (`cleanup_pending`); replacement
   never starts from a partial inventory (`discovery_incomplete`).
+  Boot capacity is checked before the old device is deleted, so a replacement
+  refused at the limit (`capacity_exhausted`), or with an unknown booted count
+  (`discovery_incomplete`), leaves the old device in place (#11433). Reuse and
+  adopt are not pre-checked: nothing is deleted first, and provisioning's own
+  exemption for the slot's own device applies.
 - Generic `provisionDevice` keeps its existing `identity_conflict` behavior;
   destructive mismatch replacement exists only for managed slots.
 
@@ -272,22 +350,54 @@ The registry tracks each scope as `valid`, `invalidating` or `invalidated`
   (retryable `scope_transition_pending` meanwhile, bounded by the preparation
   deadline), then moves the old scope's devices to a free pool that only managed
   slots can adopt. Other namespaces are untouched. Requests carrying the old
-  incarnation are refused with `scope_invalidated`.
+  incarnation are refused with `scope_invalidated`. A daemon restart during the
+  wait changes nothing: the restarted daemon still records itself as the owner
+  of the execution it holds, so the transition keeps waiting for that execution
+  on every daemon of the host. No other session can claim a slot of the retiring
+  scope (#11642).
 - **Operator command.** Invalidate one incarnation explicitly:
 
   ```bash
   auto-mobile --daemon reset-slot-scope \
     --runner-namespace runner-A --incarnation boot-1 \
-    [--managed-host-scope host-1] [--wait-ms 10000]
+    [--managed-host-scope host-1] [--wait-ms 10000] [--force]
   ```
+
+  `--force` abandons a slot stuck `settling`: one whose released work outlived the
+  5-minute settlement cap, or whose settling daemon is gone (its work died with
+  it, so the cap is not waited out). The slot returns to `ready`, its release
+  journal entry is committed, and the reset proceeds; work that outlived the cap
+  may keep running after an abandon. `--force` never overrides a slot with a live
+  execution owner, nor a slot still inside the cap whose settling daemon is not
+  provably gone. Slots are judged when the command starts and again when its
+  settle wait ends, so a slot that outlives the cap, or whose settling daemon
+  exits, during the wait is abandoned by the same call, and the refusals in the
+  answer describe the moment it answers (#11616). Each slot it leaves alone is
+  listed in the scope's `forceRefusals` with a typed `reason` and a message
+  saying what to do:
+
+  | `reason`                 | Meaning                                                                                                                                                                                                                                 |
+  | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `live_owner`             | An execution this daemon holds is using the slot: release it first. Also a released execution whose work is still running while its `settling` mark could not be written yet (#11616); it clears when that work ends or the mark lands. |
+  | `owner_liveness_unknown` | The owner record belongs to another running daemon. This daemon cannot tell whether that execution ended there, so it neither cuts the slot nor treats the record as dead. Run the reset through that daemon, or restart it.            |
+  | `within_settlement_cap`  | The slot is settling under a daemon not known to be gone. `remainingMs`, measured when the command answers, says when `--force` will apply.                                                                                             |
+  | `no_release_entry`       | The slot is `settling` with no open release entry, so `--force` cannot tell whether it is stuck. Restart the settling daemon: startup recovery returns the slot to `ready`.                                                             |
+  | `other_open_journal`     | Unfinished non-release journal work; wait for the redrive.                                                                                                                                                                              |
+  | `abandon_failed`         | The slot changed, or the registry failed, during the abandon; retry.                                                                                                                                                                    |
+
+  An owner record whose session has ended in the daemon that wrote it (its clear
+  failed against a busy registry) is not a live owner there: that daemon clears it
+  when the slot settles, re-checking until the settlement cap if the same session
+  id is held again at that moment, and its `--force` does not yield to it.
 
   `--runner-namespace` and `--incarnation` are required; `--managed-host-scope`
   narrows to one host scope; `--wait-ms` is the bounded settle wait (integer 0 to
   60000, default 10000). The command prints the daemon's JSON result and exits
   `0` when every matching scope is invalidated, `2` when a scope is still waiting
   on owners or cleanup (the result lists the live owners, settling and
-  cleanup-pending slots and open journal work; retry later), and `1` when no
-  scope matched or the call failed. It is idempotent and a repeated call resumes
+  cleanup-pending slots and open journal work; stderr also lists each
+  `forceRefusals` entry with its reason, `remainingMs` and message; retry later),
+  and `1` when no scope matched or the call failed. It is idempotent and a repeated call resumes
   where it stopped. It accepts the usual daemon launch options. Like the other
   daemon lifecycle commands, it is refused (`shared_daemon_namespace`) when
   `AUTOMOBILE_DATA_DIR` or the DB dirs are set without
@@ -310,18 +420,23 @@ time.
 
 On success, the `initialize` result carries the contract under
 `capabilities.experimental["automobile/managedSlots"]` and the proxy exposes the
-identical JSON as the resource `automobile:managed-slots`
+acquisition evidence as the resource `automobile:managed-slots`
 (`MANAGED_SLOTS_RESOURCE_URI`, `application/json`). The payload
 (`src/models/managedSlotsResult.ts`):
 
-| Field             | Meaning                                                                                                                                                                                                                                                                                                                                                    |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `contractVersion` | `1`.                                                                                                                                                                                                                                                                                                                                                       |
-| `scope`           | `managedHostScope`, `runnerNamespace`, `runnerIncarnation`, `scopeKey` (null if it failed before the scope resolved), optional `revived`.                                                                                                                                                                                                                  |
-| `outcome`         | `"ready"` or `"failed"`.                                                                                                                                                                                                                                                                                                                                   |
-| `idleTimeoutMs`   | The idle window the sessions are held with.                                                                                                                                                                                                                                                                                                                |
-| `slots[]`         | Per slot: `slotIndex`, `role`, `platform`, `assignmentGeneration`, `device` (`stableId`, `transportId`, `name`), `sessionUuid`, `requestedSpec`, `resolvedSpec`, `specFingerprint` (`version`, `hash`), `disposition`, `readiness` (`mode`, `status`), `lifecycle` (provision timing and the reconciler's decision trail), and `failure` on a failed slot. |
-| `failure`         | Scope- or transport-level failure: `code`, `retryable`, `message`, `nextAction`. Per-slot failures sit on the slot entry.                                                                                                                                                                                                                                  |
+The initialize capability is a snapshot at connect. Resource reads add
+`executionEnded` to a slot whose session was terminally released, while preserving
+`outcome`, `sessionUuid` (the session that ended) and all other acquisition fields.
+
+| Field                    | Meaning                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `contractVersion`        | `1`.                                                                                                                                                                                                                                                                                                                                                       |
+| `scope`                  | `managedHostScope`, `runnerNamespace`, `runnerIncarnation`, `scopeKey` (null if it failed before the scope resolved), optional `revived`.                                                                                                                                                                                                                  |
+| `outcome`                | `"ready"` or `"failed"`.                                                                                                                                                                                                                                                                                                                                   |
+| `idleTimeoutMs`          | The idle window the sessions are held with.                                                                                                                                                                                                                                                                                                                |
+| `slots[]`                | Per slot: `slotIndex`, `role`, `platform`, `assignmentGeneration`, `device` (`stableId`, `transportId`, `name`), `sessionUuid`, `requestedSpec`, `resolvedSpec`, `specFingerprint` (`version`, `hash`), `disposition`, `readiness` (`mode`, `status`), `lifecycle` (provision timing and the reconciler's decision trail), and `failure` on a failed slot. |
+| `slots[].executionEnded` | Optional `{ reason: string, nextAction: "relaunch_execution" }`, present only in the `automobile:managed-slots` resource after that slot's session was terminally released.                                                                                                                                                                                |
+| `failure`                | Scope- or transport-level failure: `code`, `retryable`, `message`, `nextAction`. Per-slot failures sit on the slot entry.                                                                                                                                                                                                                                  |
 
 If acquisition fails, the proxy still serves MCP: `initialize` reports outcome
 `failed` with the typed failure, the tool list is empty, and every tool call is
@@ -356,9 +471,23 @@ slot. Only control and lifecycle calls on another slot's device are refused.
   even on the connection's own slot device: it could not boot the device again,
   so a stop would strand the execution. End the execution instead; the next
   acquisition on the slot boots and reuses the device.
+- The same confinement applies to a managed connection's direct socket frames:
+  `input/*`, the device-mutating `ide/*` routes (`force` or not),
+  `ide/setSessionToolEnabled`, `daemon/releaseSession` and
+  `daemon/relinquishDeviceLease` are refused off-slot (#11596). An ordinary
+  connection may still release any session.
+- A managed connection's multi-device plan labels are served only by its own slot
+  sessions. Any other label, or one whose declared platform the slot device does
+  not match, is refused with `device_outside_managed_slots` before anything is
+  allocated or booted. Plan steps cannot acquire, boot, kill or delete devices
+  outside the slot set (#11425). Reads of non-slot devices inside a plan still
+  work.
 - The generic device pool skips assigned and free-pool devices as capacity, idle
   or not. If the registry has never been readable, allocation refuses with
-  retryable `discovery_incomplete` rather than treat unknown as free.
+  retryable `discovery_incomplete` rather than treat unknown as free (#11410). A
+  host with no registry at all has no managed slots, and devices are free. A
+  registry that was read successfully once and then fails keeps its last good
+  snapshot.
 
 ## Boot capacity
 
@@ -366,7 +495,11 @@ When a platform already runs as many booted devices as its limit allows, a cold
 boot is refused at once with the retryable `capacity_exhausted` code instead of
 waiting in an internal queue. The error carries `retryAfterMs`, the `limit`, the
 `booted` count and `platform`, plus `externalDevices` when counted devices were
-not started by AutoMobile. Capacity frees when another device shuts down.
+not started by AutoMobile. Capacity frees when another device shuts down. A slot
+failure refused at the limit carries these as `capacity { limit, booted,
+retryAfterMs, externalDevices }` on the initialize outcome, the
+`automobile:managed-slots` resource, the daemon socket JSON and a refused tool
+call's `acquisitionFailure` (#11402).
 `capacity_exhausted` applies to all boots, including a slot that must create or
 boot its device.
 

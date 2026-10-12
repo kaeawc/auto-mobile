@@ -40,6 +40,11 @@ exclude = [
   # including links to other repos' issues/PRs, are unaffected and still
   # checked.
   "^https://github\\.com/kaeawc/auto-mobile/(issues|pull)/[0-9]+([#?].*)?$",
+  # Links to this repository's own files and directories at main. github.com
+  # answers these with intermittent 504s, and they are verifiable offline, so
+  # scripts/lychee/check_own_repo_links.sh resolves them against the checked-out
+  # tree (file/dir exists, #L<n> anchors within the file) instead of fetching.
+  "^https://github\\.com/kaeawc/auto-mobile/(blob|tree)/main(/|$|[#?])",
   # The release-asset base URL with no tag or file. It is the documented default
   # of AUTOMOBILE_ASSET_BASE_URL (docs/using/environment-variables.md) and is a
   # prefix, not a page: GitHub answers 404 for it. Only this exact URL is
@@ -95,6 +100,7 @@ accept = [
   "500", # Internal Server Error (transient GitHub/CDN errors)
   "502", # Bad Gateway (transient GitHub/CDN errors)
   "503", # Service Unavailable (temporary for Anthropic URLs under load)
+  "504", # Gateway Timeout (transient GitHub/CDN errors)
 ]
 
 # Timeout for each request in seconds. Raised from 20 to give slow, rate-limited

@@ -1,0 +1,13 @@
+{
+  "code": "device_outside_managed_slots.tool",
+  "builder": "DeviceOutsideManagedSlotsError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"startDevice refused: this managed connection controls only its own slot devices (code device_outside_managed_slots). Slot devices are acquired, started, stopped and deleted only by managed slot acquisition and release. Reads stay open; use a separate MCP connection for anything else.\",\"code\":\"device_outside_managed_slots\",\"action\":\"startDevice\",\"reason\":\"tool\",\"scopeKey\":\"0123abcd\",\"retryable\":false}"
+      }
+    ],
+    "isError": true
+  }
+}

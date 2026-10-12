@@ -1,3 +1,9 @@
+import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
+import {
+  describeInventoryDevice,
+  type AdbOfflineHold,
+  type SimulatorTransitionHold,
+} from "./inventoryDeviceDescription";
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { androidTransportIdentityAdbFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
@@ -12,7 +18,6 @@ import {
 } from "../devices/deviceUtils";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import {
-  configuredImageForBootedDevice,
   configuredImagesByStableId,
   type StableConfiguredDeviceImage,
 } from "../utils/configuredDeviceInventory";
@@ -20,7 +25,6 @@ import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
 import { DaemonState } from "../daemon/daemonState";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
-import { classifyPoolStatus } from "../daemon/devicePool";
 import type { Session } from "../daemon/sessionManager";
 import type {
   DevicePool,
@@ -61,7 +65,15 @@ import {
   type IosRunnerCommandRequirements,
 } from "../features/observe/ios/iosRunnerFeatureCommands";
 import { resolveApkChecksum, resolveIpaChecksum } from "../constants/release";
-import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
+import {
+  type DiscoverySource,
+  discoverySourceFor,
+  discoverySourceOutcome,
+  expectingPooledSources,
+  incompleteDiscoverySources,
+  notApplicableDiscoverySources,
+  sourcesForPlatform,
+} from "../utils/discoverySource";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
   AndroidAvdProvenanceCache,
@@ -264,7 +276,27 @@ export interface BootedDevicesResourceContent {
 
 interface PlatformObservation {
   observationComplete: boolean;
+  /**
+   * The tooling behind this observation is not installed on this host (no adb, not macOS, no
+   * Xcode, no devicectl), so "no devices" is exact and retrying cannot change it (#11605).
+   */
+  notApplicable?: true;
   discoveryError?: DeviceDiscoveryError;
+}
+
+/** One source's observation: complete unless the source exists on this host and did not finish. */
+function sourceObservation(
+  discovery: BootedDeviceDiscovery,
+  source: DiscoverySource,
+): PlatformObservation {
+  const outcome = discoverySourceOutcome(discovery, source);
+  return {
+    observationComplete: outcome !== "incomplete",
+    ...(outcome === "not_applicable" ? { notApplicable: true as const } : {}),
+    ...(outcome === "incomplete" && discovery.sourceErrors?.[source]
+      ? { discoveryError: discovery.sourceErrors[source] }
+      : {}),
+  };
 }
 
 type PoolDeviceStatus = "idle" | "assigned" | "error";
@@ -276,6 +308,12 @@ interface PoolStatusSummary {
   error: number;
   total: number;
   recoveryPolicy: DeviceRecoveryPolicy;
+  /**
+   * Present when a pooled device's own discovery source did not complete: whether that device
+   * is still there is unknown, so the counts cover verified devices only and are not the pool's
+   * size. `available-devices` refuses with this code instead of printing them (#11643).
+   */
+  countUnknown?: { code: "discovery_incomplete"; platforms: Platform[] };
 }
 
 interface PoolDeviceInfo {
@@ -428,13 +466,36 @@ function bootedDiscoveryError(
   discovery: BootedDeviceDiscovery,
   platform: Platform,
 ): DeviceDiscoveryError {
+  // Prefer a real failure: an `unavailable` error is tooling this host does not have, and explains
+  // an incomplete sweep only when a pooled device depends on that tooling.
+  const errors = [
+    discovery.discoveryErrors?.[platform],
+    platform === "ios" ? discovery.sourceErrors?.["ios-physical"] : undefined,
+  ].filter((error) => error !== undefined);
   return (
-    discovery.discoveryErrors?.[platform] ??
-    (platform === "ios" ? discovery.sourceErrors?.["ios-physical"] : undefined) ?? {
+    errors.find((error) => error.code !== "unavailable") ??
+    errors[0] ?? {
       code: "failed",
       message: `${platform === "android" ? "Android" : "iOS"} booted-device discovery did not complete.`,
     }
   );
+}
+
+/** A platform's observation: complete unless one of its sources exists here and did not finish. */
+function platformObservation(
+  discovery: BootedDeviceDiscovery,
+  platform: Platform,
+): PlatformObservation {
+  if (incompleteDiscoverySources(discovery, [platform]).length > 0) {
+    return {
+      observationComplete: false,
+      discoveryError: bootedDiscoveryError(discovery, platform),
+    };
+  }
+  const noneApply =
+    notApplicableDiscoverySources(discovery, [platform]).length ===
+    sourcesForPlatform(platform).length;
+  return { observationComplete: true, ...(noneApply ? { notApplicable: true as const } : {}) };
 }
 
 /**
@@ -448,9 +509,11 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
   const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
   for (const platform of ["android", "ios"] as Platform[]) {
     try {
-      const discovery =
-        await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
       const pool = readDaemonDeviceContext().devicePool;
+      const discovery = expectingPooledSources(
+        await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform),
+        pool?.getAllDevices(),
+      );
       const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
       const normalized =
         platform === "android"
@@ -459,11 +522,7 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
             : aliases.fold(discovery.devices, await aliases.prepare(discovery.devices), new Set())
           : discovery.devices;
       devices.push(...normalized);
-      const complete = sourcesForPlatform(platform).every(
-        (source) =>
-          discovery.succeededSources?.has(source) ?? discovery.succeededPlatforms.has(platform),
-      );
-      if (complete) {
+      if (incompleteDiscoverySources(discovery, [platform]).length === 0) {
         succeededPlatforms.add(platform);
       } else {
         discoveryErrors[platform] = bootedDiscoveryError(discovery, platform);
@@ -518,26 +577,26 @@ async function getDeviceLockStates(): Promise<ResourceContent> {
 // Convert BootedDevice to BootedDeviceInfo
 function toBootedDeviceInfo(
   device: BootedDevice,
-  poolContext?: PoolDeviceContext,
-  configured?: StableConfiguredDeviceImage,
-  adbOfflineState?: string,
+  poolContext: PoolDeviceContext | undefined,
+  configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
+  extras: {
+    adbOffline?: AdbOfflineHold;
+    simulatorState?: SimulatorTransitionHold["simulatorState"];
+    transportAvdName?: string;
+  } = {},
 ): BootedDeviceInfo {
-  const description = describeDevice({
-    kind: "booted",
-    adbOfflineState,
+  const description = describeInventoryDevice({
     device,
     pooled: poolContext?.pooled,
     unhealthy: poolContext?.poolInfo.unhealthy,
-    configured,
-    // Preserve the pool's already-published assignment in the canonical session
-    // when the optional session-detail map is unavailable for this observation.
-    session:
-      poolContext?.session ??
-      (poolContext?.poolInfo.assignedSession
-        ? { sessionId: poolContext.poolInfo.assignedSession }
-        : undefined),
+    configuredImages,
+    // The holder is the pool's assignment, resolved in describeInventoryDevice; the map only
+    // supplies session detail and may be unavailable for this observation.
+    sessionsById: poolContext?.sessionsById,
     deviceSessionUuid: poolContext?.deviceSessionUuid,
-    ...poolContext?.hold,
+    hold: poolContext?.hold,
+    poolStatus: poolContext?.poolInfo.poolStatus,
+    ...extras,
   });
   const projected = projectBootedDevice(description);
   return {
@@ -592,10 +651,13 @@ interface AdbOfflineHeldInput {
   platform: Platform;
   discovered: readonly BootedDevice[];
   devicePool: DevicePool | null;
-  sessionInfoByDeviceId: Map<string, Session> | null;
+  sessionsById: Map<string, Session> | null;
   resolveDeviceSessionUuid: (deviceId: string) => string | null;
   deviceManager: PlatformDeviceManager;
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>;
+  transportAvdName: (deviceId: string) => string | undefined;
+  /** Receives the failure when the held-device state probe cannot answer (#11573). */
+  onProbeFailure: (failure: DeviceDiscoveryError) => void;
 }
 
 /**
@@ -607,50 +669,57 @@ interface AdbOfflineHeldInput {
 async function adbOfflineHeldDeviceDescriptions(
   input: AdbOfflineHeldInput,
 ): Promise<BootedDeviceInfo[]> {
-  const { platform, devicePool, deviceManager } = input;
-  if (platform !== "android" || !devicePool || !deviceManager.getAndroidListedDeviceStates) {
-    return [];
-  }
-  const discoveredIds = new Set(input.discovered.map((device) => device.deviceId));
-  const held = devicePool
-    .getAssignedDevices()
-    .filter((pooled) => pooled.platform === "android" && !discoveredIds.has(pooled.id));
-  if (held.length === 0) {
-    return [];
-  }
-  let states: Map<string, string>;
-  try {
-    states = await deviceManager.getAndroidListedDeviceStates(
-      held.map((pooled) => pooled.id),
-      { signal: getAbortSignal() },
-    );
-  } catch (error) {
-    logger.warn(
-      `[BootedDeviceResources] Offline held-device probe failed: ${errorMessage(error)}`,
-      error,
-    );
-    return [];
-  }
-  return held.flatMap((pooled) => {
-    const adbState = states.get(pooled.id);
-    if (!adbState) {
-      return [];
-    }
-    const device: BootedDevice = { deviceId: pooled.id, name: pooled.name, platform: "android" };
-    return [
-      toBootedDeviceInfo(
-        device,
-        resolvePoolDeviceContext(
-          devicePool,
-          device,
-          input.sessionInfoByDeviceId,
-          input.resolveDeviceSessionUuid,
-        ),
-        input.configuredImages.get(`android:${pooled.avdName ?? pooled.name}`),
-        adbState,
-      ),
-    ];
+  const held = await adbOfflineHeldDevices({
+    platform: input.platform,
+    discovered: input.discovered,
+    devicePool: input.devicePool,
+    deviceManager: input.deviceManager,
+    onProbeFailure: input.onProbeFailure,
   });
+  return held.map(({ device, avdName, adbState }) =>
+    toBootedDeviceInfo(
+      device,
+      resolvePoolDeviceContext(
+        input.devicePool,
+        device,
+        input.sessionsById,
+        input.resolveDeviceSessionUuid,
+      ),
+      input.configuredImages,
+      {
+        adbOffline: { adbState, avdName },
+        transportAvdName: input.transportAvdName(device.deviceId),
+      },
+    ),
+  );
+}
+
+/** Held simulators `simctl` lists Booting / Shutting Down, described like any booted row (#11573). */
+function transitionalSimulatorDescriptions(input: {
+  discovery: BootedDeviceDiscovery;
+  devicePool: DevicePool | null;
+  sessionsById: Map<string, Session> | null;
+  resolveDeviceSessionUuid: (deviceId: string) => string | null;
+  configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>;
+}): BootedDeviceInfo[] {
+  const { discovery, devicePool } = input;
+  return transitionalHeldSimulators({
+    transitional: discovery.transitionalSimulators,
+    discovered: discovery.devices,
+    devicePool,
+  }).map(({ device, simulatorState }) =>
+    toBootedDeviceInfo(
+      device,
+      resolvePoolDeviceContext(
+        devicePool,
+        device,
+        input.sessionsById,
+        input.resolveDeviceSessionUuid,
+      ),
+      input.configuredImages,
+      { simulatorState },
+    ),
+  );
 }
 
 export async function configuredImagesForBootedPlatform(
@@ -740,26 +809,16 @@ export async function configuredImagesForBootedPlatform(
 interface PoolDeviceContext {
   poolInfo: PoolDeviceInfo;
   pooled: PooledDevice;
-  session?: Session;
+  sessionsById?: ReadonlyMap<string, Session>;
   deviceSessionUuid?: string;
   /** Why generic allocation will not lend this device; the same answer `listDevices` publishes. */
   hold: ReturnType<typeof poolHoldFor>;
 }
 
-/** The same classification as `DevicePool.getStats()` (#11387): see {@link classifyPoolStatus}. */
-function effectivePoolStatus(
-  status: PooledDevice["status"],
-  hold: ReturnType<typeof poolHoldFor>,
-  unhealthy: boolean,
-): PoolDeviceStatus {
-  const held = hold.heldBy !== undefined || hold.reserved === true;
-  return classifyPoolStatus(status, held || unhealthy);
-}
-
 function resolvePoolDeviceContext(
   devicePool: DevicePool | null,
   device: BootedDevice,
-  sessionInfoByDeviceId: Map<string, Session> | null,
+  sessionsById: Map<string, Session> | null,
   resolveDeviceSessionUuid: (deviceId: string) => string | null,
 ): PoolDeviceContext | undefined {
   if (!devicePool) {
@@ -772,11 +831,7 @@ function resolvePoolDeviceContext(
   }
 
   const hold = poolHoldFor(devicePool, device.deviceId);
-  const poolStatus = effectivePoolStatus(
-    pooledDevice.status,
-    hold,
-    devicePool.getDeviceHealthMarker(device.deviceId) !== undefined,
-  );
+  const poolStatus = devicePool.poolBucket(device.deviceId) ?? "idle";
 
   return {
     poolInfo: {
@@ -789,15 +844,31 @@ function resolvePoolDeviceContext(
     },
     pooled: pooledDevice,
     hold,
-    session: sessionInfoByDeviceId?.get(device.deviceId),
+    sessionsById: sessionsById ?? undefined,
     deviceSessionUuid: resolveDeviceSessionUuid(device.deviceId) ?? undefined,
   };
 }
 
+/**
+ * Pool counts over the devices this read verified. A pooled entry the read does not list is a
+ * phantom (shut down) when its own discovery source completed, and unknown when that source did
+ * not: unknown entries are never counted idle and mark the summary `countUnknown`, the answer
+ * `getRefreshedStats`, `daemon/availableDevices` and the in-daemon CLI give for the same state
+ * (#11643). A source whose tooling is not installed observed completely (#11605), so it never
+ * makes a count unknown unless a pooled device depends on it.
+ *
+ * This read is bounded by the resource budget and the pool's own read is not, so the summary may
+ * be `countUnknown` where the pool, asked later, answers a number -- also when a step of this read
+ * fails after the listing (the rows cannot be built, though the pool's count needs none of them).
+ * It never answers a different number: anything this read did not finish is unknown.
+ */
 function summarizePoolStatus(
   devicePool: DevicePool,
   discoveredDevices: BootedDeviceInfo[],
-  succeededPlatforms: Set<Platform>,
+  sourceObservations: Partial<Record<DiscoverySource, PlatformObservation>>,
+  requestedPlatforms: readonly Platform[],
+  /** Platforms whose whole read (listing, then held-device placement) returned within the budget. */
+  finishedPlatforms: ReadonlySet<Platform>,
 ): PoolStatusSummary {
   let idle = 0;
   let assigned = 0;
@@ -813,25 +884,40 @@ function summarizePoolStatus(
     }
   };
 
-  // For successfully-discovered platforms, count from the live booted list so
-  // phantom (shut-down) pool entries are excluded.
+  // Count from the listed devices so phantom (shut-down) pool entries are excluded. Their pool
+  // status was read after the ownership refresh every inventory surface performs.
+  const listed = new Set<string>();
   for (const device of discoveredDevices) {
-    if (succeededPlatforms.has(device.platform)) {
-      tally(device.runtime.poolStatus ?? undefined);
+    const deviceId = device.runtime.deviceId;
+    // A row that withholds its pool context (identity quarantine: #6863) still names a serial the
+    // pool holds and counts by id, so the count is the pool's own bucket for it (#11643).
+    tally(
+      device.runtime.poolStatus ?? (deviceId ? devicePool.poolBucket(deviceId) : null) ?? undefined,
+    );
+    if (deviceId) {
+      listed.add(deviceId);
     }
   }
 
-  // For platforms whose discovery failed/was unavailable, keep the pool's own
-  // tracked counts — we cannot confirm which of those entries are phantom.
-  for (const pooled of devicePool.getAllDevices()) {
-    if (!succeededPlatforms.has(pooled.platform)) {
-      tally(
-        effectivePoolStatus(
-          pooled.status,
-          poolHoldFor(devicePool, pooled.id),
-          devicePool.getDeviceHealthMarker(pooled.id) !== undefined,
-        ),
-      );
+  // The pool rule (readLiveInventoryDeviceIds): any pooled device whose own source did not
+  // complete makes the count unknown, whether or not a stale listing still shows it. So does a
+  // platform whose read did not finish: its held offline and transitional devices, which the pool
+  // counts, are placed after the listing and may be missing from these rows.
+  const unknown = devicePool
+    .getAllDevices()
+    .filter(
+      (pooled) =>
+        requestedPlatforms.includes(pooled.platform) &&
+        (!finishedPlatforms.has(pooled.platform) ||
+          sourceObservations[discoverySourceFor(pooled.platform, pooled.id)]
+            ?.observationComplete !== true),
+    );
+  for (const pooled of unknown) {
+    // Whether an unlisted, unverified entry is free is unknown (it may be gone, or slot-held:
+    // #11455), so it is never tallied idle. Assigned/error are the pool's own facts and stay.
+    const status = devicePool.poolBucket(pooled.id) ?? "idle";
+    if (!listed.has(pooled.id) && status !== "idle") {
+      tally(status);
     }
   }
 
@@ -842,6 +928,14 @@ function summarizePoolStatus(
     error,
     total: idle + assigned + error,
     recoveryPolicy: devicePool.getRecoveryPolicy(),
+    ...(unknown.length > 0
+      ? {
+          countUnknown: {
+            code: "discovery_incomplete" as const,
+            platforms: [...new Set(unknown.map((pooled) => pooled.platform))],
+          },
+        }
+      : {}),
   };
 }
 
@@ -886,15 +980,47 @@ async function getBootedDevicesByPlatform(
 
 interface PlatformDiscoveryResult {
   devices: BootedDeviceInfo[];
-  succeededPlatforms: Set<Platform>;
   observation: PlatformObservation;
   sourceObservations: Partial<Record<DiscoverySource, PlatformObservation>>;
+}
+
+/** The platform's observation: complete only when discovery and the held-device probe both were. */
+function platformDiscoveryResult(input: {
+  platform: Platform;
+  devices: BootedDeviceInfo[];
+  discovery: BootedDeviceDiscovery;
+  heldProbeFailure: DeviceDiscoveryError | undefined;
+}): PlatformDiscoveryResult {
+  const { platform, devices, discovery, heldProbeFailure } = input;
+  // Discovery completeness is the one classifier's (#11605): tooling that is not installed is not
+  // applicable, never incomplete. A failed held-device probe is an installed tool that failed, so
+  // it makes every source of the platform unknown whatever discovery said.
+  const discoveryComplete = incompleteDiscoverySources(discovery, [platform]).length === 0;
+  const observed = (source: DiscoverySource): PlatformObservation => {
+    const observation = sourceObservation(discovery, source);
+    return heldProbeFailure === undefined
+      ? observation
+      : {
+          observationComplete: false,
+          ...(observation.discoveryError ? { discoveryError: observation.discoveryError } : {}),
+        };
+  };
+  return {
+    devices,
+    sourceObservations: Object.fromEntries(
+      sourcesForPlatform(platform).map((source) => [source, observed(source)]),
+    ),
+    observation:
+      discoveryComplete && heldProbeFailure !== undefined
+        ? { observationComplete: false, discoveryError: heldProbeFailure }
+        : platformObservation(discovery, platform),
+  };
 }
 
 async function discoverBootedDevicesForPlatform(
   platform: Platform,
   devicePool: DevicePool | null,
-  sessionInfoByDeviceId: Map<string, Session> | null,
+  sessionsById: Map<string, Session> | null,
   options: {
     resolveDeviceSessionUuid: (deviceId: string) => string | null;
     timer: Timer;
@@ -904,12 +1030,21 @@ async function discoverBootedDevicesForPlatform(
   const { resolveDeviceSessionUuid, timer } = options;
   try {
     const deviceManager = PlatformDeviceManagerFactory.getInstance();
-    const rawDiscovery = await deviceManager.getBootedDevicesDetailed(platform, {
-      coalesceInventoryEnrichment: true,
-      signal: getAbortSignal(),
-    });
+    const rawDiscovery = expectingPooledSources(
+      await deviceManager.getBootedDevicesDetailed(platform, {
+        coalesceInventoryEnrichment: true,
+        signal: getAbortSignal(),
+      }),
+      devicePool?.getAllDevices(),
+    );
     getAbortSignal()?.throwIfAborted();
     const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
+    // The same lookup the listDevices tool applies, so both surfaces name the same stable AVD.
+    const transportAvdName = (device: BootedDevice): string | undefined =>
+      device.platform === "android"
+        ? (devicePool?.getAndroidTransportAvdName(device.deviceId) ??
+          aliases.avdName(device.deviceId))
+        : undefined;
     const discovery = {
       ...rawDiscovery,
       devices:
@@ -937,12 +1072,9 @@ async function discoverBootedDevicesForPlatform(
         withIdentityQuarantineMarker(
           toBootedDeviceInfo(
             device,
-            resolvePoolDeviceContext(
-              devicePool,
-              device,
-              sessionInfoByDeviceId,
-              resolveDeviceSessionUuid,
-            ),
+            resolvePoolDeviceContext(devicePool, device, sessionsById, resolveDeviceSessionUuid),
+            new Map(),
+            { transportAvdName: transportAvdName(device) },
           ),
           devicePool,
         ),
@@ -955,20 +1087,15 @@ async function discoverBootedDevicesForPlatform(
       timer,
     );
     getAbortSignal()?.throwIfAborted();
-    const complete = discovery.succeededSources
-      ? sourcesForPlatform(platform).every((source) => discovery.succeededSources!.has(source))
-      : discovery.succeededPlatforms.has(platform);
+    // A held device discovery misses and the state probe cannot place is unknown, not absent.
+    let heldProbeFailure: DeviceDiscoveryError | undefined;
     const devices = discovery.devices.map((device) =>
       withIdentityQuarantineMarker(
         toBootedDeviceInfo(
           device,
-          resolvePoolDeviceContext(
-            devicePool,
-            device,
-            sessionInfoByDeviceId,
-            resolveDeviceSessionUuid,
-          ),
-          configuredImageForBootedDevice(device, configuredImages),
+          resolvePoolDeviceContext(devicePool, device, sessionsById, resolveDeviceSessionUuid),
+          configuredImages,
+          { transportAvdName: transportAvdName(device) },
         ),
         devicePool,
       ),
@@ -977,9 +1104,22 @@ async function discoverBootedDevicesForPlatform(
       platform,
       discovered: discovery.devices,
       devicePool,
-      sessionInfoByDeviceId,
+      sessionsById,
       resolveDeviceSessionUuid,
       deviceManager,
+      configuredImages,
+      transportAvdName: (deviceId) =>
+        devicePool?.getAndroidTransportAvdName(deviceId) ?? aliases.avdName(deviceId),
+      onProbeFailure: (failure) => {
+        heldProbeFailure = failure;
+      },
+    });
+    // Held simulators `simctl` lists Booting / Shutting Down are not booted either (#11573).
+    const transitionalSimulators = transitionalSimulatorDescriptions({
+      discovery,
+      devicePool,
+      sessionsById,
+      resolveDeviceSessionUuid,
       configuredImages,
     });
     // A held AVD re-cold-booting while adb still lists its old serial offline would otherwise
@@ -991,38 +1131,14 @@ async function discoverBootedDevicesForPlatform(
         (device) => !heldStableIds.has(device.identity.stableId),
       ),
       ...offlineHeld,
+      ...transitionalSimulators,
     );
-    return {
-      devices,
-      succeededPlatforms: complete ? new Set([platform]) : new Set(),
-      sourceObservations: Object.fromEntries(
-        sourcesForPlatform(platform).map((source) => [
-          source,
-          {
-            observationComplete: discovery.succeededSources
-              ? discovery.succeededSources.has(source)
-              : discovery.succeededPlatforms.has(platform),
-            ...(!(
-              discovery.succeededSources?.has(source) ?? discovery.succeededPlatforms.has(platform)
-            ) && discovery.sourceErrors?.[source]
-              ? { discoveryError: discovery.sourceErrors[source] }
-              : {}),
-          },
-        ]),
-      ),
-      observation: complete
-        ? { observationComplete: true }
-        : {
-            observationComplete: false,
-            discoveryError: bootedDiscoveryError(discovery, platform),
-          },
-    };
+    return platformDiscoveryResult({ platform, devices, discovery, heldProbeFailure });
   } catch (error) {
     const platformName = platform === "android" ? "Android" : "iOS";
     logger.warn(`[BootedDeviceResources] Failed to get booted ${platformName} devices: ${error}`);
     return {
       devices: [],
-      succeededPlatforms: new Set(),
       sourceObservations: Object.fromEntries(
         sourcesForPlatform(platform).map((source) => [source, { observationComplete: false }]),
       ),
@@ -1040,7 +1156,7 @@ async function discoverBootedDevicesForPlatform(
 interface DaemonDeviceContext {
   devicePool: DevicePool | null;
   poolStatus?: PoolStatusSummary;
-  sessionInfoByDeviceId: Map<string, Session> | null;
+  sessionsById: Map<string, Session> | null;
   resolveDeviceSessionUuid: (deviceId: string) => string | null;
 }
 
@@ -1049,14 +1165,14 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
   if (!daemonState.isInitialized()) {
     return {
       devicePool: null,
-      sessionInfoByDeviceId: null,
+      sessionsById: null,
       resolveDeviceSessionUuid: () => null,
     };
   }
 
   let devicePool: DevicePool | null = null;
   let poolStatus: PoolStatusSummary | undefined;
-  let sessionInfoByDeviceId: Map<string, Session> | null = null;
+  let sessionsById: Map<string, Session> | null = null;
   let resolveDeviceSessionUuid: (deviceId: string) => string | null = () => null;
   try {
     devicePool = daemonState.getDevicePool();
@@ -1074,7 +1190,7 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
 
   try {
     const sessions = daemonState.getSessionManager().getAllSessions();
-    sessionInfoByDeviceId = new Map(sessions.map((session) => [session.assignedDevice, session]));
+    sessionsById = new Map(sessions.map((session) => [session.sessionId, session]));
   } catch (error) {
     logger.warn(`[BootedDeviceResources] Failed to read session manager state: ${error}`);
   }
@@ -1087,7 +1203,7 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
     logger.warn(`[BootedDeviceResources] Failed to read device session registry: ${error}`);
   }
 
-  return { devicePool, poolStatus, sessionInfoByDeviceId, resolveDeviceSessionUuid };
+  return { devicePool, poolStatus, sessionsById, resolveDeviceSessionUuid };
 }
 
 /**
@@ -1121,7 +1237,9 @@ function isProbeableDevice(device: BootedDeviceInfo): boolean {
     device.runtime.deviceId !== null &&
     device.identityUnresolved !== true &&
     // adb lists it offline (#11118): every probe would just time out against it.
-    device.runtime.connection === undefined
+    device.runtime.connection === undefined &&
+    // A simulator mid-transition has no service to probe (#11573).
+    device.runtime.simulatorState === undefined
   );
 }
 
@@ -1484,9 +1602,9 @@ async function computeBootedDevicesForPlatforms(
   const devices: BootedDeviceInfo[] = [];
   const daemonContext = readDaemonDeviceContext();
 
-  const succeededPlatforms = new Set<Platform>();
   const platformObservations: Partial<Record<Platform, PlatformObservation>> = {};
   const sourceObservations: Partial<Record<DiscoverySource, PlatformObservation>> = {};
+  const finishedPlatforms = new Set<Platform>();
 
   const controller = new AbortController();
   const pending = new Set<string>(["discovery", "configuredImages"]);
@@ -1496,24 +1614,18 @@ async function computeBootedDevicesForPlatforms(
       const discovery = await discoverBootedDevicesForPlatform(
         platform,
         daemonContext.devicePool,
-        daemonContext.sessionInfoByDeviceId,
+        daemonContext.sessionsById,
         {
           resolveDeviceSessionUuid: daemonContext.resolveDeviceSessionUuid,
           timer,
           onDiscovery: (known, snapshot) => {
             devices.push(...known);
             pending.delete("discovery");
-            const complete = sourcesForPlatform(platform).every(
-              (source) =>
-                snapshot.succeededSources?.has(source) ?? snapshot.succeededPlatforms.has(platform),
-            );
+            const complete = incompleteDiscoverySources(snapshot, [platform]).length === 0;
             platformObservations[platform] = { observationComplete: complete };
-            if (complete) {
-              succeededPlatforms.add(platform);
-            }
             for (const source of sourcesForPlatform(platform)) {
               sourceObservations[source] = {
-                observationComplete: snapshot.succeededSources?.has(source) ?? complete,
+                observationComplete: discoverySourceOutcome(snapshot, source) !== "incomplete",
               };
             }
           },
@@ -1524,9 +1636,7 @@ async function computeBootedDevicesForPlatforms(
       devices.splice(0, devices.length, ...otherPlatforms, ...discovery.devices);
       platformObservations[platform] = discovery.observation;
       Object.assign(sourceObservations, discovery.sourceObservations);
-      for (const discoveredPlatform of discovery.succeededPlatforms) {
-        succeededPlatforms.add(discoveredPlatform);
-      }
+      finishedPlatforms.add(platform);
     }
     pending.clear();
     const probes = [
@@ -1570,7 +1680,13 @@ async function computeBootedDevicesForPlatforms(
   const physicalCount = devices.length - virtualCount;
   const poolStatus =
     daemonContext.poolStatus && daemonContext.devicePool
-      ? summarizePoolStatus(daemonContext.devicePool, devices, succeededPlatforms)
+      ? summarizePoolStatus(
+          daemonContext.devicePool,
+          devices,
+          sourceObservations,
+          platforms,
+          finishedPlatforms,
+        )
       : undefined;
 
   return {

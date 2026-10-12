@@ -8,8 +8,11 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import {
   isRecoverableDaemonReleaseReason,
+  literalReleaseReasonsStrongerThan,
   literalReleaseReasonsWhere,
+  releaseReasonFamiliesStrongerThan,
   releaseReasonFamiliesWhere,
+  releaseReasonStrength,
   sessionReleaseReasonFamily,
   type SessionReleaseReasonFamily,
 } from "../daemon/releaseReasons";
@@ -56,6 +59,52 @@ function hasRecoverableReleaseReason(eb: ExpressionBuilder<Database, "device_ses
   ]);
 }
 
+/**
+ * SQL form of "the stored reason is stronger than `candidate`" (see `releaseReasonMayReplace`): a
+ * release with `candidate` must not be applied to such a row.
+ */
+function holdsStrongerReleaseReason(
+  eb: ExpressionBuilder<Database, "device_sessions">,
+  candidate: string,
+) {
+  const strength = releaseReasonStrength(candidate);
+  const literals = literalReleaseReasonsStrongerThan(strength);
+  return eb.or([
+    ...(literals.length > 0 ? [eb("release_reason", "in", literals)] : []),
+    ...releaseReasonFamiliesStrongerThan(strength).map((family) =>
+      eb("release_reason", "like", `${family}_%`),
+    ),
+  ]);
+}
+
+/**
+ * SQL form of {@link isReissuableByNameReleaseReason}: the rows a call naming the UUID may claim
+ * and re-issue. Used by the claim, its hand-back and the claimed-row upsert fence, so all three
+ * accept the same set.
+ */
+function hasReissuableByNameReleaseReason(eb: ExpressionBuilder<Database, "device_sessions">) {
+  return eb.or([
+    eb("release_reason", "in", literalReleaseReasonsWhere("reissuableByName")),
+    ...releaseReasonFamiliesWhere("reissuableByName").map((family) =>
+      eb("release_reason", "like", `${family}_%`),
+    ),
+  ]);
+}
+
+/**
+ * SQL form of {@link isTerminalReleaseReason} on `device_sessions.release_reason`: the rows whose
+ * UUID has ended. A row with no reason, or released for any non-terminal one (a recoverable
+ * handoff, `plan-auto-release`, `expired`, a reason this build does not know), does not match.
+ */
+function hasTerminalReleaseReason(eb: ExpressionBuilder<Database, "device_sessions">) {
+  return eb.or([
+    eb("release_reason", "in", literalReleaseReasonsWhere("terminal")),
+    ...releaseReasonFamiliesWhere("terminal").map((family) =>
+      eb("release_reason", "like", `${family}_%`),
+    ),
+  ]);
+}
+
 function shouldRetainLivenessOwner(reason: string): boolean {
   return isRecoverableDaemonReleaseReason(reason);
 }
@@ -86,6 +135,20 @@ export class DeviceSessionRowChangedError extends ActionableError {
   }
 }
 
+/**
+ * An upsert that must not revive an ended UUID ({@link UpsertActiveSessionOptions.unlessTerminal},
+ * #11498) found the row released for a terminal reason. Nothing was written: the session the
+ * caller holds has been terminally released, whoever wrote the release.
+ */
+export class DeviceSessionTerminallyReleasedError extends ActionableError {
+  constructor(readonly sessionUuid: string) {
+    super(
+      `Device session ${sessionUuid} was terminally released; its row was not made active again.`,
+    );
+    this.name = "DeviceSessionTerminallyReleasedError";
+  }
+}
+
 /** Options for {@link DeviceSessionPersistence.upsertActiveSession}. */
 export interface UpsertActiveSessionOptions {
   /**
@@ -95,6 +158,14 @@ export interface UpsertActiveSessionOptions {
    * rejects with {@link DeviceSessionRowChangedError}.
    */
   claimedRow?: RecoverableRowIncarnation;
+  /**
+   * Replace an existing row only while its release is not terminal (#11498), decided in the
+   * statement: a terminal release that lands after any earlier read of the row, or while this
+   * call awaits its retention prune, is not erased. A missing row, an active row and a row
+   * released for a non-terminal reason (a recoverable handoff, `plan-auto-release`, `expired`)
+   * are written as usual. A refusal rejects with {@link DeviceSessionTerminallyReleasedError}.
+   */
+  unlessTerminal?: boolean;
 }
 
 export interface DeviceSessionRecord {
@@ -143,6 +214,24 @@ export interface DeviceSessionActivityUpdate {
  */
 export interface MarkReleasedOptions {
   expectedRowGeneration?: number;
+  /**
+   * Apply the release only while the row still holds a recoverable reason (single statement): a
+   * sweep that terminalizes an expired recoverable row must not overwrite a release that landed
+   * after it selected the row.
+   */
+  onlyIfRecoverable?: boolean;
+  /**
+   * Apply the release only while the row's `expires_at_ms` is at or before this instant (single
+   * statement): the expiry sweep must not terminalize a row whose deadline was extended (restart-
+   * recovery activity, #11281) after it selected the row (#11448).
+   */
+  onlyIfExpiredAtMs?: number;
+  /**
+   * Apply the release only while the row is still owned by this daemon (single statement): a
+   * release adopted from a dead daemon's journal (#11355) must not land on a row another daemon
+   * took over after the adopter read it.
+   */
+  onlyIfOwnedByDaemon?: string;
 }
 
 /** The row incarnation a recovery read, which its ownership claim must still match (#11200). */
@@ -322,6 +411,32 @@ function unlessStale<T>(column: string, lastUsedAtMs: number, value: T) {
   return sql<T>`CASE WHEN last_used_at_ms > ${lastUsedAtMs} THEN ${sql.ref(column)} ELSE ${value} END`;
 }
 
+/** The row an upsert of `record` inserts; `nowIso` stamps its audit columns. */
+function newActiveSessionRow(record: DeviceSessionRecord, nowIso: string): NewDeviceSession {
+  return {
+    session_uuid: record.sessionUuid,
+    device_id: record.deviceId,
+    stable_device_id: record.stableDeviceId ?? null,
+    stable_identity_generation: 0,
+    platform: record.platform,
+    status: record.status ?? "active",
+    source: record.source ?? null,
+    autolock_enabled: record.autolockEnabled ? 1 : 0,
+    mcp_session_id: record.mcpSessionId ?? null,
+    daemon_session_id: record.daemonSessionId ?? null,
+    created_at_ms: record.createdAtMs,
+    last_used_at_ms: record.lastUsedAtMs,
+    expires_at_ms: record.expiresAtMs,
+    released_at_ms: null,
+    release_reason: null,
+    session_timeout_ms: record.sessionTimeoutMs,
+    heartbeat_timeout_ms: record.heartbeatTimeoutMs,
+    ...livenessColumns(record),
+    created_at: nowIso,
+    updated_at: nowIso,
+  };
+}
+
 export class DeviceSessionRepository {
   private db: Kysely<Database> | null;
 
@@ -349,7 +464,7 @@ export class DeviceSessionRepository {
     nowMs: number = this.timer.now(),
     options: UpsertActiveSessionOptions = {},
   ): Promise<number> {
-    const { claimedRow } = options;
+    const { claimedRow, unlessTerminal } = options;
     // A cheap, unconditional, indexed range
     // delete run before the write rather than gated behind amortization —
     // session starts are far less frequent than the amortized-per-insert
@@ -360,28 +475,7 @@ export class DeviceSessionRepository {
     try {
       const db = await this.getDb();
       const now = this.nowIso();
-      const row: NewDeviceSession = {
-        session_uuid: record.sessionUuid,
-        device_id: record.deviceId,
-        stable_device_id: record.stableDeviceId ?? null,
-        stable_identity_generation: 0,
-        platform: record.platform,
-        status: record.status ?? "active",
-        source: record.source ?? null,
-        autolock_enabled: record.autolockEnabled ? 1 : 0,
-        mcp_session_id: record.mcpSessionId ?? null,
-        daemon_session_id: record.daemonSessionId ?? null,
-        created_at_ms: record.createdAtMs,
-        last_used_at_ms: record.lastUsedAtMs,
-        expires_at_ms: record.expiresAtMs,
-        released_at_ms: null,
-        release_reason: null,
-        session_timeout_ms: record.sessionTimeoutMs,
-        heartbeat_timeout_ms: record.heartbeatTimeoutMs,
-        ...livenessColumns(record),
-        created_at: now,
-        updated_at: now,
-      };
+      const row = newActiveSessionRow(record, now);
 
       written = await db
         .insertInto("device_sessions")
@@ -411,8 +505,16 @@ export class DeviceSessionRepository {
             updated_at: now,
           });
           if (!claimedRow) {
-            return update;
+            return unlessTerminal
+              ? update.where((eb) =>
+                  eb.or([
+                    eb("device_sessions.release_reason", "is", null),
+                    eb.not(hasTerminalReleaseReason(eb)),
+                  ]),
+                )
+              : update;
           }
+          // A claimed row is re-issuable by name, which no terminal reason is.
           return update
             .where("device_sessions.status", "!=", "active")
             .where("device_sessions.stable_identity_generation", "=", claimedRow.rowGeneration)
@@ -421,20 +523,7 @@ export class DeviceSessionRepository {
                 ? eb("device_sessions.daemon_session_id", "is", null)
                 : eb("device_sessions.daemon_session_id", "=", claimedRow.daemonSessionId),
             )
-            .where((eb) =>
-              eb.or([
-                eb(
-                  "device_sessions.release_reason",
-                  "in",
-                  Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS),
-                ),
-                eb(
-                  "device_sessions.release_reason",
-                  "like",
-                  `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`,
-                ),
-              ]),
-            );
+            .where((eb) => hasReissuableByNameReleaseReason(eb));
         })
         .returning("stable_identity_generation")
         .executeTakeFirst();
@@ -445,8 +534,10 @@ export class DeviceSessionRepository {
       throw error;
     }
     if (!written) {
-      // The claimed row's precondition failed: an expected race outcome, not a storage failure.
-      throw new DeviceSessionRowChangedError(record.sessionUuid);
+      // The row's precondition failed: an expected race outcome, not a storage failure.
+      throw claimedRow
+        ? new DeviceSessionRowChangedError(record.sessionUuid)
+        : new DeviceSessionTerminallyReleasedError(record.sessionUuid);
     }
     return written.stable_identity_generation ?? 0;
   }
@@ -523,6 +614,8 @@ export class DeviceSessionRepository {
             ? eb("daemon_session_id", "is", null)
             : eb("daemon_session_id", "=", expected.daemonSessionId),
         )
+        // Only a row a call naming the UUID may issue again; any other row is left untouched.
+        .where((eb) => hasReissuableByNameReleaseReason(eb))
         .returning("stable_identity_generation")
         .executeTakeFirst();
       return claimed?.stable_identity_generation ?? undefined;
@@ -552,7 +645,7 @@ export class DeviceSessionRepository {
             ? eb("daemon_session_id", "is", null)
             : eb("daemon_session_id", "=", claimed.daemonSessionId),
         )
-        .where((eb) => hasRecoverableReleaseReason(eb))
+        .where((eb) => hasReissuableByNameReleaseReason(eb))
         .executeTakeFirst();
       return Number(released.numUpdatedRows) === 1;
     } catch (error) {
@@ -634,7 +727,8 @@ export class DeviceSessionRepository {
     reason: string,
     options: MarkReleasedOptions = {},
   ): Promise<void> {
-    const { expectedRowGeneration } = options;
+    const { expectedRowGeneration, onlyIfRecoverable, onlyIfExpiredAtMs, onlyIfOwnedByDaemon } =
+      options;
     try {
       const db = await this.getDb();
       let update = db
@@ -646,9 +740,28 @@ export class DeviceSessionRepository {
           ...(shouldRetainLivenessOwner(reason) ? {} : { liveness_owner_token: null }),
           updated_at: this.nowIso(),
         })
-        .where("session_uuid", "=", sessionUuid);
+        .where("session_uuid", "=", sessionUuid)
+        // A terminal reason is never replaced by a weaker one (a stronger or equal one may).
+        .where((eb) =>
+          // Nothing is stronger than the strongest reason, so it replaces any row.
+          releaseReasonStrength(reason) === 2
+            ? eb.val(true)
+            : eb.or([
+                eb("release_reason", "is", null),
+                eb.not(holdsStrongerReleaseReason(eb, reason)),
+              ]),
+        );
       if (expectedRowGeneration !== undefined) {
         update = update.where("stable_identity_generation", "=", expectedRowGeneration);
+      }
+      if (onlyIfRecoverable) {
+        update = update.where((eb) => hasRecoverableReleaseReason(eb));
+      }
+      if (onlyIfExpiredAtMs !== undefined) {
+        update = update.where("expires_at_ms", "<=", onlyIfExpiredAtMs);
+      }
+      if (onlyIfOwnedByDaemon !== undefined) {
+        update = update.where("daemon_session_id", "=", onlyIfOwnedByDaemon);
       }
       const result = await update.executeTakeFirst();
       if (expectedRowGeneration !== undefined && Number(result.numUpdatedRows) === 0) {
@@ -744,6 +857,8 @@ export class DeviceSessionRepository {
       try {
         await this.markReleased(row.session_uuid, "expired", nowMs, "expired", {
           expectedRowGeneration: row.stable_identity_generation ?? 0,
+          onlyIfRecoverable: true,
+          onlyIfExpiredAtMs: nowMs,
         });
       } catch (error) {
         logger.warn(

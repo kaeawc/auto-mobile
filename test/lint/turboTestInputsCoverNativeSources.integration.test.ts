@@ -627,6 +627,10 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
    */
   const NOT_READ_EXEMPTIONS: ReadonlyMap<string, string> = new Map([
     [
+      "android/protocol",
+      "named only in comments of prototypeAppearance.test.ts and CtrlProxyPrototypes.test.ts that cite the Kotlin WebSocketResponseTest; the kotlin tree under it is a declared input",
+    ],
+    [
       "android/video-server",
       "bare dir named in a comment / workflow-YAML string; the kotlin tree under it is a declared input",
     ],

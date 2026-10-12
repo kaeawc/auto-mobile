@@ -112,6 +112,49 @@ final class DaemonRefusalTests: XCTestCase {
         XCTAssertNil(nearlySpent.nextDelayMs(retryAfterMs: nil))
     }
 
+    /// #11538: the finalize wait ends when the daemon finishes and is bounded by the remaining-time
+    /// hint (clamped to 150 s) for the two finalize codes only; every other code keeps 30 s.
+    func testFinalizeWaitEndsWhenTheDaemonFinishesAndIsBoundedForFinalizeCodesOnly() {
+        let cases: [(String, Bool, Int?, Int)] = [
+            ("device_cleanup_in_progress", true, nil, 30000),
+            ("device_cleanup_in_progress", true, 1000, 1500),
+            ("device_cleanup_in_progress", true, 125_000, 125_000),
+            ("device_cleanup_in_progress", true, 600_000, 150_000),
+            ("device_shutting_down", true, nil, 30000),
+            ("device_shutting_down", true, 1000, 1500),
+            ("device_shutting_down", true, 125_000, 125_000),
+            ("device_shutting_down", true, 600_000, 150_000),
+            ("device_owned_by_other_session", false, 125_000, 30000),
+            ("device_owned_by_other_daemon", false, 125_000, 30000),
+            ("capacity_exhausted", false, 125_000, 30000),
+            ("discovery_incomplete", false, 125_000, 30000),
+        ]
+        for (code, finalizes, finalizeAtMs, total) in cases {
+            var backoff = AutoMobilePlanExecutor.DeviceWaitBackoff()
+            while !(finalizes && finalizeAtMs.map { backoff.waitedMs >= $0 } == true) {
+                // For the finalize codes the daemon's retryAfterMs is the finalize time remaining.
+                let hint = finalizes ? finalizeAtMs.map { $0 - backoff.waitedMs } : finalizeAtMs
+                if backoff.nextDelayMs(retryAfterMs: hint, code: code) == nil { break }
+            }
+            XCTAssertEqual(backoff.waitedMs, total, "\(code)/\(String(describing: finalizeAtMs))")
+        }
+    }
+
+    func testCleanupRefusalAdvertisingTheFinalizeCapIsRetriedOnTheOrdinaryBackoff() async throws {
+        let client = RefusalMCPClient()
+        let refusal =
+            #"{"success":false,"error":"finalizing","code":"device_cleanup_in_progress","retryable":true,"retryAfterMs":125000}"#
+        client.executePlanReplies = [refusal, refusal, refusal, successPayload]
+        let scheduler = RecordingScheduler()
+        let executor = makeExecutor(client: client, scheduler: scheduler, retryCount: 0)
+
+        let result = try await executor.execute(sessionUuid: "first")
+
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(scheduler.delays, [0.5, 1.0, 2.0])
+        XCTAssertEqual(client.executePlanSessions.count, 4)
+    }
+
     // MARK: - Executor
 
     func testHeldDeviceRefusalIsWaitedOutUnderFreshSessionsWithoutSpendingARetry() async throws {
@@ -123,7 +166,7 @@ final class DaemonRefusalTests: XCTestCase {
         let result = try await executor.execute(sessionUuid: "first")
 
         XCTAssertTrue(result.success)
-        XCTAssertEqual(scheduler.delays, [0.5, 4.0], "backoff, then the daemon's retryAfterMs")
+        XCTAssertEqual(scheduler.delays, [0.5, 1.0], "the finalize refusal stays on the ordinary backoff (#11538)")
         XCTAssertEqual(client.executePlanSessions, ["first", "session-1", "session-2"])
     }
 
@@ -155,7 +198,7 @@ final class DaemonRefusalTests: XCTestCase {
         let result = try await executor.execute(sessionUuid: "first")
 
         XCTAssertTrue(result.success)
-        XCTAssertEqual(scheduler.delays, [2.0])
+        XCTAssertEqual(scheduler.delays, [0.5], "a shutting-down refusal stays on the ordinary backoff (#11538)")
         XCTAssertEqual(client.setToolEnabledSessions, ["first", "session-1"])
         XCTAssertEqual(client.executePlanSessions, ["session-1"], "the refused session never ran executePlan")
     }
@@ -183,6 +226,82 @@ final class DaemonRefusalTests: XCTestCase {
             XCTAssertEqual(tool, "executePlan")
             XCTAssertEqual(refusal.code, "session_ownership_lost")
         }
+    }
+
+    /// `managedEndedPayload` (#11341): a managed connection's answer after its execution's session was
+    /// released. The runner decides whether to relaunch, so it is neither retried nor treated as
+    /// acquire-new-session.
+    func testManagedExecutionEndedIsTerminalAndNotRetried() async throws {
+        let payload = """
+        {"error":{"code":"managed_execution_ended","message":"ended","sessionUuid":"s1",\
+        "reason":"heartbeat_timeout","retryable":false,"nextAction":"relaunch_execution",\
+        "slotIndex":1,"assignmentGeneration":3}}
+        """
+        let refusal = try XCTUnwrap(Refusal.parse(payload))
+        XCTAssertEqual(refusal.code, "managed_execution_ended")
+        XCTAssertFalse(refusal.retryable)
+        XCTAssertFalse(refusal.acquiresNewSession)
+        XCTAssertFalse(refusal.waitsForDevice)
+
+        let client = RefusalMCPClient()
+        client.executePlanReplies = [payload, successPayload]
+        let scheduler = RecordingScheduler()
+        let executor = makeExecutor(client: client, scheduler: scheduler, retryCount: 2)
+        do {
+            _ = try await executor.execute(sessionUuid: "first")
+            XCTFail("expected the refusal to throw")
+        } catch let AutoMobilePlanExecutor.ExecutorError.refused(_, refused) {
+            XCTAssertEqual(refused.code, "managed_execution_ended")
+        }
+        XCTAssertEqual(client.executePlanSessions, ["first"])
+        XCTAssertTrue(scheduler.delays.isEmpty)
+    }
+
+    /// #11544: a typed failed frame reaches the executor as `MCPClientError.refused`; only a retryable
+    /// one is retried, a terminal code is not, and an untyped failure keeps the blind retry.
+    func testFailedFramesAreRetriedOnlyWhenTheirTypedRetryableFlagSays() async throws {
+        func frame(_ code: String?, retryable: Bool) -> MCPClientError {
+            .refused(Refusal(code: code, message: "m", retryable: retryable, nextAction: nil, retryAfterMs: nil))
+        }
+        let cases: [(String, MCPClientError, Int)] = [
+            ("daemon_queue_timeout", frame("daemon_queue_timeout", retryable: true), 2),
+            ("daemon_shutting_down", frame("daemon_shutting_down", retryable: true), 2),
+            ("daemon_restart_pending", frame("daemon_restart_pending", retryable: true), 2),
+            ("session_recovery_pending", frame("session_recovery_pending", retryable: true), 2),
+            ("daemon_session_suspect", frame("daemon_session_suspect", retryable: true), 2),
+            ("device_outside_bound_session", frame("device_outside_bound_session", retryable: false), 1),
+            ("some_terminal_code", frame("some_terminal_code", retryable: false), 1),
+            ("untyped", .serverError("daemon request timeout"), 2),
+        ]
+        for (name, error, calls) in cases {
+            let client = RefusalMCPClient()
+            client.executePlanErrors = [error, error, error]
+            let executor = makeExecutor(client: client, scheduler: RecordingScheduler(), retryCount: 1)
+
+            do {
+                _ = try await executor.execute(sessionUuid: "first")
+                XCTFail("\(name): expected the failure to throw")
+            } catch {}
+            XCTAssertEqual(client.executePlanSessions.count, calls, name)
+        }
+    }
+
+    func testAFailedFrameForAHeldDeviceIsWaitedOutWithoutSpendingARetry() async throws {
+        let client = RefusalMCPClient()
+        client.executePlanErrors = [
+            .refused(Refusal(
+                code: "device_owned_by_other_session", message: "held", retryable: false, nextAction: nil,
+                retryAfterMs: nil
+            )),
+        ]
+        client.executePlanReplies = [successPayload]
+        let scheduler = RecordingScheduler()
+        let executor = makeExecutor(client: client, scheduler: scheduler, retryCount: 0)
+
+        let result = try await executor.execute(sessionUuid: "first")
+
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(scheduler.delays, [0.5])
     }
 
     func testNonRetryableTypedRefusalIsNotRetried() async throws {
@@ -287,6 +406,8 @@ private final class RecordingScheduler: DeadlineScheduler, @unchecked Sendable {
 private final class RefusalMCPClient: AutoMobileMCPClient, @unchecked Sendable {
     var setToolEnabledReplies: [String] = []
     var executePlanReplies: [String] = []
+    /// Failures thrown (in order) before any reply is served, as a failed daemon frame is.
+    var executePlanErrors: [MCPClientError] = []
     private(set) var setToolEnabledSessions: [String] = []
     private(set) var executePlanSessions: [String] = []
 
@@ -301,6 +422,7 @@ private final class RefusalMCPClient: AutoMobileMCPClient, @unchecked Sendable {
             return MCPToolResponse(text: reply)
         case "executePlan":
             executePlanSessions.append(session)
+            if !executePlanErrors.isEmpty { throw executePlanErrors.removeFirst() }
             return MCPToolResponse(text: executePlanReplies.removeFirst())
         default:
             return MCPToolResponse(text: "{}")

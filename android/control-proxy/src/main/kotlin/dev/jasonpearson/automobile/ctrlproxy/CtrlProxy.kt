@@ -60,6 +60,7 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
 import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceAppearance
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDisplays
 import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoader
@@ -106,6 +107,8 @@ import dev.jasonpearson.automobile.protocol.NavigationEventResponse
 import dev.jasonpearson.automobile.protocol.NetworkEventData
 import dev.jasonpearson.automobile.protocol.NetworkEventResponse
 import dev.jasonpearson.automobile.protocol.NodeSelector
+import dev.jasonpearson.automobile.protocol.PrototypeAppearance
+import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
@@ -1115,6 +1118,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
 
+      override suspend fun sendShown(
+        requestId: String?,
+        missingAssets: List<String>,
+        appearance: PrototypeAppearance,
+      ) {
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          resultBroadcaster.guard(requestId, "prototype_result") {
+            webSocketServer.broadcastWithPerf { _ ->
+              prototypeResultFrame(requestId, true, null, missingAssets, appearance)
+            }
+          }
+        }
+      }
+
       override suspend fun sendPrototypeStatus(
         requestId: String?,
         prototypes: List<PrototypeStatusEntry>,
@@ -1844,6 +1861,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             packageName = packageName,
             fonts = prototypeFonts,
             foreground = prototypeForeground,
+            deviceAppearance = AndroidPrototypeDeviceAppearance(this),
           )
         // Service start: drop anything a previous process left in the cache directory.
         prototypeAssets.purgeLeftovers()
@@ -3210,8 +3228,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     spec: PrototypeSpec,
     displayId: Int?,
     reset: Boolean,
+    appearance: PrototypeAppearanceOverride?,
   ) {
-    launchRequestScope(requestId) { prototypeController.show(requestId, spec, displayId, reset) }
+    launchRequestScope(requestId) {
+      prototypeController.show(requestId, spec, displayId, reset, appearance)
+    }
   }
 
   override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {

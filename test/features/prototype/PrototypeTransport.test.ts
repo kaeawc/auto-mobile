@@ -220,8 +220,28 @@ describe("IosPrototypeTransport", () => {
     const received: PrototypeEvent[] = [];
     new IosPrototypeTransport(agent).onEvent((pushed) => received.push(pushed));
     agent.emit({ type: "prototype_event", id: "panel", sequence: "one" });
-    agent.emit({ ...event(3), kind: "teleported" });
+    agent.emit({ ...event(3), kind: "emit", name: 7 });
     expect(received).toEqual([]);
+  });
+
+  test("a push of a kind this host does not know arrives as a sequence-only marker (#11223)", () => {
+    const agent = new FakePrototypeAgentClient();
+    const received: PrototypeEvent[] = [];
+    new IosPrototypeTransport(agent).onEvent((pushed) => received.push(pushed));
+    agent.emit({ ...event(3), kind: "teleported" });
+    expect(received).toEqual([
+      {
+        type: "prototype_event",
+        id: "panel",
+        sequence: 3,
+        timestamp: 3,
+        kind: "unknown",
+        name: null,
+        payload: null,
+        state: {},
+        pages: {},
+      },
+    ]);
   });
 
   test("show reaches the real agent client as one show_prototype frame", async () => {

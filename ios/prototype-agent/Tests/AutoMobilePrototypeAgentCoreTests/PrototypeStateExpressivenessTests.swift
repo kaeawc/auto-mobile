@@ -223,4 +223,47 @@ final class PrototypeStateExpressivenessTests: XCTestCase {
             [.index, .field("a_1"), .literal("{it.}{it.1x}{x}}{")]
         )
     }
+
+    // MARK: Scalar-level placeholder scan (#11409)
+
+    // Each case mirrors `templateSegments` in src/features/prototype/prototypeTemplate.ts, which
+    // scans UTF-16 code units: only an ASCII `{` / `}` delimits, whatever follows or precedes it.
+
+    private func boundTexts(_ template: String) throws -> [String?] {
+        let encoded = try String(decoding: JSONEncoder().encode(template), as: UTF8.self)
+        let json = """
+        {"id":"a","window":{"placement":{"type":"fullscreen"}},
+         "root":{"type":"column","repeat":{"as":"item","items":[{"n":"x"}]},
+                 "children":[{"type":"text","text":\(encoded)}]}}
+        """
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data(json.utf8))
+        return (spec.root.children ?? []).map(\.text)
+    }
+
+    func testPlaceholderFollowedByCombiningMarkIsStillBound() throws {
+        XCTAssertEqual(try boundTexts("{item.n}\u{301}"), ["x\u{301}"])
+        XCTAssertEqual(
+            PrototypeRepeat.segments("{item.n}\u{301}", alias: "item"),
+            [.field("n"), .literal("\u{301}")]
+        )
+    }
+
+    func testCombiningMarkAfterOpeningBraceLeavesThePlaceholderLiteral() throws {
+        // TS: inner "\u{301}item.n" lacks the `item.` prefix, so the whole text stays literal.
+        XCTAssertEqual(try boundTexts("{\u{301}item.n}"), ["{\u{301}item.n}"])
+    }
+
+    func testZwjEmojiSequenceAdjacentToAPlaceholderIsKeptIntact() throws {
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"
+        XCTAssertEqual(try boundTexts("\(family){item.n}\(family)"), ["\(family)x\(family)"])
+        XCTAssertEqual(try boundTexts("{item.n}\u{200D}\u{1F469}"), ["x\u{200D}\u{1F469}"])
+    }
+
+    func testEscapedAndUnterminatedBracesFollowThePlainScan() throws {
+        // TS has no escape syntax: the backslash is literal and the placeholder still binds.
+        XCTAssertEqual(try boundTexts("\\{item.n}"), ["\\x"])
+        // An unterminated brace never matches; an earlier `{` consumes up to the first `}` only.
+        XCTAssertEqual(try boundTexts("{item.n"), ["{item.n"])
+        XCTAssertEqual(try boundTexts("{{item.n}"), ["{x"])
+    }
 }

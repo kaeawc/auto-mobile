@@ -1,4 +1,4 @@
-import type { AppearanceMode, BootedDevice } from "../models";
+import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../models";
 import { DaemonState } from "./daemonState";
 import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
@@ -25,14 +25,27 @@ interface AppliedAppearance {
   incarnation?: number;
 }
 
-interface AppearanceSyncDependencies {
+export interface AppearanceSyncDependencies {
   getConfig: typeof getAppearanceConfig;
   resolveMode: typeof resolveAppearanceMode;
-  getTargets: () => AppearanceSyncTarget[];
+  /** Omitted: the scheduler's own targets, the pooled Android devices a session holds. */
+  getTargets?: () => AppearanceSyncTarget[];
   apply: typeof applyAppearanceToDevice;
   isEnabled?: () => boolean;
   applyDeadlineMs?: number;
 }
+
+/**
+ * What the process-wide scheduler reaches the config store, the host (`defaults`/`gsettings`
+ * child processes) and the device (`adb`/`simctl`) through. One shared object, read at each use,
+ * so a test that runs a real daemon can replace that boundary and restore it afterwards.
+ */
+export const defaultAppearanceSyncDependencies: AppearanceSyncDependencies = {
+  getConfig: getAppearanceConfig,
+  resolveMode: resolveAppearanceMode,
+  apply: applyAppearanceToDevice,
+  isEnabled: isAppearanceSyncEnabledFromEnvironment,
+};
 
 export interface AppearanceSyncScope {
   getTargets: () => AppearanceSyncTarget[];
@@ -47,7 +60,7 @@ export interface AppearanceSyncScope {
 export class AppearanceSyncScheduler {
   private intervalHandle: NodeJS.Timeout | null = null;
   private lastAppliedModes = new Map<string, AppliedAppearance>();
-  private readonly inFlightApplies = new Map<string, Promise<void>>();
+  private readonly inFlightApplies = new Map<string, Promise<boolean>>();
   private pending: Promise<void> | null = null;
   private readonly timer: Timer;
   private readonly dependencies: AppearanceSyncDependencies;
@@ -55,13 +68,7 @@ export class AppearanceSyncScheduler {
 
   constructor(
     timer: Timer = defaultTimer,
-    dependencies: AppearanceSyncDependencies = {
-      getConfig: getAppearanceConfig,
-      resolveMode: resolveAppearanceMode,
-      getTargets: () => this.getSyncTargets(),
-      apply: applyAppearanceToDevice,
-      isEnabled: isAppearanceSyncEnabledFromEnvironment,
-    },
+    dependencies: AppearanceSyncDependencies = defaultAppearanceSyncDependencies,
   ) {
     this.timer = timer;
     this.dependencies = dependencies;
@@ -104,7 +111,7 @@ export class AppearanceSyncScheduler {
       }
       const mode = await this.dependencies.resolveMode(config);
       if (!this.stopped) {
-        await this.applyToDevice(device, mode);
+        await this.applyToDevice(device, mode, config);
       }
     } catch (error) {
       logger.warn(`[Appearance] Failed to apply host sync mode to ${device.deviceId}: ${error}`);
@@ -151,7 +158,7 @@ export class AppearanceSyncScheduler {
   }
 
   private async tick(): Promise<void> {
-    const targets = this.scope?.getTargets() ?? this.dependencies.getTargets();
+    const targets = this.scope?.getTargets() ?? this.ownTargets();
     if (this.stopped) {
       return;
     }
@@ -184,14 +191,24 @@ export class AppearanceSyncScheduler {
         if (this.isAlreadyApplied(device, mode)) {
           continue;
         }
-        await this.applyToDevice(device, mode);
+        await this.applyToDevice(device, mode, config);
       } catch (error) {
         logger.warn(`[Appearance] Failed to apply host sync mode to ${device.deviceId}: ${error}`);
       }
     }
   }
 
-  private async applyToDevice(device: AppearanceSyncTarget, mode: AppearanceMode): Promise<void> {
+  /**
+   * Apply `mode` to `device` for the holder and config the caller decided under. The decision can
+   * be seconds old by the time the write is due: a tick waits up to the apply deadline on each
+   * earlier device, and `beforeApply` waits behind the device's pending reset. So the write is
+   * issued only if {@link applyIfStillOwed} finds the decision still stands at that moment (#11641).
+   */
+  private async applyToDevice(
+    device: AppearanceSyncTarget,
+    mode: AppearanceMode,
+    config: AppearanceConfig,
+  ): Promise<void> {
     if (!this.isEnabled()) {
       return;
     }
@@ -202,10 +219,7 @@ export class AppearanceSyncScheduler {
     }
 
     let timedOut = false;
-    const beforeApply = this.scope?.beforeApply;
-    const apply = beforeApply
-      ? beforeApply(device).then(() => this.dependencies.apply(device, mode))
-      : this.dependencies.apply(device, mode);
+    const apply = this.applyIfStillOwed(device, mode, config);
     this.inFlightApplies.set(device.deviceId, apply);
     void apply.then(
       () => {
@@ -218,7 +232,7 @@ export class AppearanceSyncScheduler {
         }
       },
     );
-    await raceWithDeadline(apply, {
+    const written = await raceWithDeadline(apply, {
       timer: this.timer,
       timeoutMs: this.dependencies.applyDeadlineMs ?? DEFAULT_APPEARANCE_APPLY_DEADLINE_MS,
       label: `Appearance apply for ${device.deviceId}`,
@@ -226,9 +240,63 @@ export class AppearanceSyncScheduler {
         timedOut = true;
       },
     });
-    if (!this.stopped) {
+    if (written && !this.stopped) {
       this.lastAppliedModes.set(device.deviceId, { mode, incarnation: device.incarnation });
     }
+  }
+
+  /**
+   * Resolves true when the device was written, false when the write was no longer owed: the
+   * scheduler stopped, sync was switched off, the session the decision was made for no longer
+   * holds the device, or that session's config no longer asks for the same thing.
+   *
+   * The config re-read is the last await. The stopped flag, the kill switch and the holder are
+   * read after it and the write is issued in that same turn, with no awaited helper in between,
+   * so nothing can change between the last check and the write.
+   */
+  private async applyIfStillOwed(
+    device: AppearanceSyncTarget,
+    mode: AppearanceMode,
+    decidedUnder: AppearanceConfig,
+  ): Promise<boolean> {
+    // beforeApply records the device's defaults for its holder: not for a device that has none.
+    if (this.scope?.beforeApply && !this.skipReason(device)) {
+      await this.scope.beforeApply(device);
+    }
+    let reason = this.skipReason(device);
+    if (!reason) {
+      const config = await this.dependencies.getConfig(device.sessionKey);
+      reason =
+        this.skipReason(device) ??
+        (config.syncWithHost && config.defaultMode === decidedUnder.defaultMode
+          ? undefined
+          : "its holder's appearance config changed");
+    }
+    if (reason) {
+      logger.debug(`[Appearance] Skipping ${device.deviceId}: ${reason} before the apply`);
+      return false;
+    }
+    await this.dependencies.apply(device, mode);
+    return true;
+  }
+
+  /** Why a decided write must not happen now, read synchronously; undefined when it may. */
+  private skipReason(device: AppearanceSyncTarget): string | undefined {
+    if (this.stopped) {
+      return "the scheduler stopped";
+    }
+    if (!this.isEnabled()) {
+      return "appearance sync was switched off";
+    }
+    return this.isHeldBySameSession(device) ? undefined : "its holder changed";
+  }
+
+  /** The scope's current view: the same session (or the same absence of one) holds the device. */
+  private isHeldBySameSession(device: AppearanceSyncTarget): boolean {
+    const current = (this.scope?.getTargets() ?? this.ownTargets()).find(
+      (target) => target.deviceId === device.deviceId,
+    );
+    return current !== undefined && current.sessionKey === device.sessionKey;
   }
 
   private isAlreadyApplied(device: AppearanceSyncTarget, mode: AppearanceMode): boolean {
@@ -239,6 +307,11 @@ export class AppearanceSyncScheduler {
         device.incarnation === undefined ||
         previous.incarnation === device.incarnation)
     );
+  }
+
+  /** The targets of a scheduler nothing has scoped: the injected ones, else the pool's. */
+  private ownTargets(): AppearanceSyncTarget[] {
+    return this.dependencies.getTargets?.() ?? this.getSyncTargets();
   }
 
   private getSyncTargets(): AppearanceSyncTarget[] {

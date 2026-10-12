@@ -750,6 +750,7 @@ internal constructor(
       packageName = packageName,
       prototypePlacement = prototypeMetadata?.placement,
       prototypeOpaque = prototypeMetadata?.opaque,
+      prototypeAppearance = prototypeMetadata?.appearance,
     )
   }
 

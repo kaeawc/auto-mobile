@@ -12,16 +12,30 @@ import {
 import { SessionRecoveryAssignmentError } from "../models/SessionRecoveryAssignmentError";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
+import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
+import { typedRefusalFields } from "../models/typedRefusalFields";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
+import {
+  recoveryIdentityLoss,
+  recoveryIdentityLossPayload,
+  sessionReleasedDuringCallPayload,
+} from "./deviceSessionResult";
+import {
+  DaemonRestartDeferredError,
+  DaemonRestartPendingError,
+  daemonRestartDeferredPayload,
+  daemonRestartPendingPayload,
+} from "../daemon/daemonRestartAdmission";
 import { DeviceOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
+import { AppNotRunningError } from "../models/AppNotRunningError";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
+import { TestRecordingStartUnheldError } from "../daemon/testRecordingStartAdmission";
 import {
   DeviceAssignedToManagedSlotError,
   DeviceOutsideManagedSlotsError,
   ManagedSlotDiscoveryIncompleteError,
 } from "../daemon/managedSlots/managedSlotRefusal";
 import {
-  DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   RetryableDeviceAcquisitionError,
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
@@ -64,7 +78,8 @@ export function isTypedToolRefusal(error: unknown): boolean {
   return (
     typedRefusalPayload(error) !== undefined ||
     isSuspectSessionError(error) ||
-    error instanceof SessionRecoveryAssignmentError
+    error instanceof SessionRecoveryAssignmentError ||
+    recoveryIdentityLoss(error) !== undefined
   );
 }
 
@@ -94,6 +109,25 @@ function toolCallErrorText(error: unknown, message: string): string {
       },
     });
   }
+  // A persisted session lost to recovery is terminal (#11391): the same envelope a later call
+  // naming that UUID gets, whatever the reason recovery failed.
+  const lostToRecovery = recoveryIdentityLoss(error);
+  if (lostToRecovery) {
+    return JSON.stringify(recoveryIdentityLossPayload(lostToRecovery));
+  }
+  // A call cut by its session's release is the same terminal refusal a later call naming the
+  // session gets (#11381).
+  const releasedDuringCall = sessionReleasedDuringCallPayload(error);
+  if (releasedDuringCall) {
+    return JSON.stringify(releasedDuringCall);
+  }
+  // Retryable daemon restart refusals keep the envelope their tool results use (#11544).
+  if (error instanceof DaemonRestartDeferredError) {
+    return JSON.stringify(daemonRestartDeferredPayload(error));
+  }
+  if (error instanceof DaemonRestartPendingError) {
+    return JSON.stringify(daemonRestartPendingPayload(error));
+  }
   const refusal = typedRefusalPayload(error);
   if (refusal) {
     return JSON.stringify({ success: false, error: message, ...refusal });
@@ -115,11 +149,17 @@ function hasSelfDescribedRefusalPayload(
   | DeviceAssignedToManagedSlotError
   | DeviceOutsideManagedSlotsError
   | DeviceOutsideBoundSessionError
+  | InputDeviceOwnedError
+  | TestRecordingStartUnheldError
+  | AppNotRunningError
   | ManagedSlotDiscoveryIncompleteError {
   return (
     error instanceof DeviceAssignedToManagedSlotError ||
     error instanceof DeviceOutsideManagedSlotsError ||
     error instanceof DeviceOutsideBoundSessionError ||
+    error instanceof InputDeviceOwnedError ||
+    error instanceof TestRecordingStartUnheldError ||
+    error instanceof AppNotRunningError ||
     error instanceof ManagedSlotDiscoveryIncompleteError
   );
 }
@@ -129,11 +169,19 @@ function typedRefusalPayload(error: unknown): Record<string, unknown> | undefine
   if (hasSelfDescribedRefusalPayload(error)) {
     return error.toPayload();
   }
-  if (error instanceof InputDeviceOwnedError || isTerminalForeignOwnedRecoveryError(error)) {
-    return { code: error.code, deviceId: error.deviceId, retryable: false };
-  }
   if (error instanceof BootCapacityExhaustedError) {
     return { ...error.details };
+  }
+  // Incomplete booted-device discovery is typed and retryable on every tool that throws it, not
+  // a generic `Error:` string (#11493).
+  if (error instanceof BootedDeviceDiscoveryIncompleteError) {
+    return { code: error.code, retryable: error.retryable };
+  }
+  // A device boot or shutdown that ran out of budget is the typed retryable `timeout` on every
+  // tool that throws it, like `provisionDevice`'s (#11548).
+  const timeout = error instanceof ActionableError ? typedRefusalFields(error) : undefined;
+  if (timeout?.code === "timeout") {
+    return { code: timeout.code, retryable: timeout.retryable };
   }
   if (error instanceof RetryableDeviceAcquisitionError) {
     return {
@@ -173,22 +221,6 @@ function isSuspectSessionError(
     typeof error.sessionUuid === "string" &&
     "remainingMs" in error &&
     typeof error.remainingMs === "number"
-  );
-}
-
-/**
- * A restarted daemon's session whose device another live daemon now holds (#11076). The session
- * is terminal, so unlike an acquisition refusal it is not retryable under the same UUID. Matched
- * on its wire `code` so this module does not import the daemon's session manager.
- */
-function isTerminalForeignOwnedRecoveryError(
-  error: unknown,
-): error is Error & { code: string; deviceId: string | undefined } {
-  return (
-    error instanceof Error &&
-    error.name === "SessionRecoveryIdentityLossError" &&
-    "code" in error &&
-    error.code === DEVICE_OWNED_BY_OTHER_DAEMON_CODE
   );
 }
 

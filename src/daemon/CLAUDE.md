@@ -147,8 +147,10 @@ takes input only from a frame whose `sessionUuid` names its holder (typed code
 Device-aware `tools/call` follows the same rule (`assertToolCallerHoldsDevice` in
 `src/server/toolRegistry.ts`): on a held device, a call from another session or
 with no session is refused with the same code before admission or device work,
-unless the tool is registered `deviceReadOnly` (watching). A call
-without a deviceId is checked against the device readiness would select (the
+unless the tool is registered `deviceReadOnly` (watching).
+`startTestRecording` also refuses an unheld device (`no_active_device_session`) before readiness;
+a live session holding no device is refused before context creation can auto-acquire one (#11716).
+A call without a deviceId is checked against the device readiness would select (the
 `setActiveDevice` pin, the current device, or the only candidate) before
 `ensureDeviceReady` runs, so a refused call never readies, pins or configures the
 holder's device (#10828). A sessionless `deviceReadOnly` call whose target (its
@@ -206,8 +208,8 @@ selection, multi-device allocation and auto-start; explicit binds, autolock,
 `killDevice`/`deleteDevice` (stopped targets included) and `input/*`/`ide/*` mutations
 refuse them with non-retryable `device_assigned_to_managed_slot` unless the caller is
 the slot's recorded execution session; `force` never overrides. Reads stay open. A
-registry never read refuses with retryable `discovery_incomplete`; an unreadable one
-keeps the last good snapshot.
+registry never read refuses with retryable `discovery_incomplete` (an absent one means
+no managed slots); an unreadable one keeps the last good snapshot.
 
 Owner decisions 2026-10-08 (#10730) settle the viewing question: watching is
 allowed on any device, whichever session owns it, and watching is not use.
@@ -215,6 +217,16 @@ Owner decision 2026-10-09 (#10964) extends that to the owner: no read counts as
 activity. A `deviceReadOnly` call naming a live session is admitted with
 `access: "read-only"` (no refresh, no `markSessionAdmitted`), so only control
 calls move `lastUsedAt`/`expiresAt`.
+A refused call is not use either (#11558). Admission is the stamp
+(`admitIssuedSessionForAutomation` restarts the idle window, and
+`markSessionAdmitted` makes the call's end restart it again), so a device
+tool's refusals run before that stamp: the owner rule, the device holder check,
+`deviceId` routing (`device_outside_bound_session`) and the
+device-not-actionable gate (`refuseControlCallBeforeAdmission`) run before
+admission, and admission's own refusals (suspect, lapsed owner lease, idle
+expiry) stamp nothing. A call that is admitted and then fails while the daemon
+sets its device up is use (#10824).
+`test/server/namedForeignSessionActivity.test.ts` has one row per refusal.
 Desktop input is use. The desktop and IDE clients register an observer session
 that allocates nothing, allocate a device with `setActiveDevice` on the first
 `input/*` to it, and send input under that session, so each input restarts the
@@ -275,6 +287,13 @@ User-facing statement of the release model (lease and grace, exact idle release,
 offline budget, restart recovery): `docs/using/device-ownership.md`. Change it in
 the same PR as any constant in `src/daemon/sessionLivenessWindows.ts` or
 `OFFLINE_DEVICE_DISCONNECT_BUDGET_MS`.
+
+One function answers "when does this session idle-expire": `sessionIdleDeadline`
+in `src/daemon/sessionClocks.ts` (#11558). The idle sweep, the heartbeat monitor's
+`cli-idle` scan, the lazy-expiry check at a new call's admission and the reported
+`idleReleaseAt` all read it; never compare `expiresAt` or `lastUsedAt` with the
+clock directly in a new idle judgement. `test/daemon/idleExpiryOneSourceOfTruth.test.ts`
+holds the three to one instant for every session kind.
 
 Release reasons are classified in one place, `src/daemon/releaseReasons.ts`
 (#11258): a typed `Record` tags each reason `idle`, `expiry`, `terminal` and

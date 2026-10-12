@@ -64,6 +64,16 @@ struct PrototypeSession {
     /// dismissal or another prototype never rewinds it, because hosts discard lower-or-equal
     /// sequences as duplicates.
     private var sequences: [String: Int] = [:]
+    /// The shown prototype's `appearance` from its show request.
+    /// The shown spec's size outside its `state`, for the spec byte cap (#11562); see
+    /// `PrototypeStateValidator.stateBytes`.
+    private var nonStateBytes = 0
+    private(set) var appearanceOverride = PrototypeAppearanceOverride.device
+    /// The device's own appearance, as last reported through `setDeviceDark`; it outlives a show.
+    private(set) var deviceDark = false
+    /// The mode the host was last told for the shown prototype, by its show result or by an
+    /// `appearance_changed` event; nil while nothing is shown.
+    private var reportedDark: Bool?
 
     var isShown: Bool {
         spec != nil
@@ -79,7 +89,17 @@ struct PrototypeSession {
     /// authoritative and each pager that survives keeps its page, matched by id and clamped to the
     /// new page count. Any other show, or one with `reset`, starts fresh: the spec's own state and
     /// every pager on its first page. Event sequences are per id and never rewound either way.
-    mutating func show(_ spec: PrototypeSpec, reset: Bool = false) {
+    /// `appearance` is the request's own: a show that carries none follows the device again.
+    mutating func show(
+        _ spec: PrototypeSpec,
+        reset: Bool = false,
+        appearance: PrototypeAppearanceOverride = .device,
+        specBytes: Int? = nil
+    ) {
+        appearanceOverride = appearance
+        // The agent keeps no raw spec, so the request's own size (when the caller has it) less the
+        // state it carried is what the cap adds every later state to; without it only state counts.
+        nonStateBytes = max(0, (specBytes ?? 0) - PrototypeStateValidator.stateBytes(spec.state ?? [:]))
         let previous = !reset && self.spec?.id == spec.id ? pages : [:]
         pageCounts = spec.root.pagerCounts()
         pages = pageCounts.reduce(into: [:]) { result, entry in
@@ -87,10 +107,58 @@ struct PrototypeSession {
         }
         state = spec.state ?? [:]
         self.spec = spec
+        // The show result reports this mode, so the show itself is not a change.
+        reportedDark = self.appearance?.dark
     }
 
     func holds(_ condition: Condition) -> Bool {
         condition.holds(state)
+    }
+
+    // MARK: Appearance
+
+    /// The mode the shown prototype draws in and why; nil while nothing is shown. It is derived
+    /// from the spec, the current state and pages, the show's override and the device, so the
+    /// palette, the host chrome, the UIKit trait and the reports all read this one value.
+    var appearance: PrototypeAppearance? {
+        guard let spec else { return nil }
+        return .resolve(
+            theme: spec.theme,
+            root: spec.root,
+            state: state,
+            pages: pages,
+            override: appearanceOverride,
+            deviceDark: deviceDark
+        )
+    }
+
+    /// The device's appearance changed (or was read for the first time). The shown prototype is
+    /// re-resolved, keeping its state and pages; see `appearanceChange` for the event.
+    mutating func setDeviceDark(_ dark: Bool) -> [PrototypeEvent] {
+        deviceDark = dark
+        return appearanceChange()
+    }
+
+    /// Runs one transition and appends the `appearance_changed` it caused, if any: a state or page
+    /// change can move the leading authored background (a `styleWhen`, a `visibleWhen`, a pager
+    /// page) and with it the inferred mode. The event follows the `change` or `page_changed` that
+    /// caused it. Every transition of a shown prototype goes through here.
+    mutating func transition(_ body: (inout PrototypeSession) -> [PrototypeEvent]) -> [PrototypeEvent] {
+        let events = body(&self)
+        return events + appearanceChange()
+    }
+
+    /// Exactly one `appearance_changed` when the shown prototype's mode differs from the one last
+    /// reported, whatever changed it, and none otherwise: a repeated report, an explicit or pinned
+    /// mode, a change that leaves the mode as it was, nothing shown.
+    private mutating func appearanceChange() -> [PrototypeEvent] {
+        guard let appearance else {
+            reportedDark = nil
+            return []
+        }
+        guard appearance.dark != reportedDark else { return [] }
+        reportedDark = appearance.dark
+        return emit(kind: "appearance_changed", name: nil, payload: appearance.eventPayload)
     }
 
     // MARK: Interactions
@@ -100,11 +168,80 @@ struct PrototypeSession {
     /// changed state, exactly one `change` event carrying the final state follows the last action;
     /// `emit` actions fire in order with the state as it was at that point. A list that nets no
     /// change emits nothing.
+    ///
+    /// The tap is atomic, as on Android (#11408, #11551): every state write is planned and
+    /// validated against the controls bound to its key (`PrototypeStateValidator`) before anything
+    /// runs, so one rejected write drops the whole tap with no write, page move or event.
     mutating func run(_ actions: [PrototypeAction]) -> [PrototypeEvent] {
+        guard isShown, let writes = plannedWrites(actions, from: state) else { return [] }
+        return execute(actions, writes)
+    }
+
+    /// One interaction as one unit, as Android's `PrototypeRuntime.control`: the control's `own`
+    /// writes (a flipped switch, a chosen option, a closed dialog; empty for a plain tap) and every
+    /// state write of its `actions` are validated before anything is applied, so a rejected
+    /// interaction changes and emits nothing. An accepted one reports the control's own `change`
+    /// first, when a value moved, then the action list.
+    mutating func control(own: [(String, JSONValue)], then actions: [PrototypeAction]) -> [PrototypeEvent] {
+        guard isShown else { return [] }
+        let (written, moved) = applying(own)
+        if !moved.isEmpty, !accepts(written) { return [] }
+        guard let writes = plannedWrites(actions, from: written) else { return [] }
+        let events: [PrototypeEvent]
+        if moved.isEmpty {
+            events = []
+        } else {
+            state = written
+            events = emitStateChange(moved)
+        }
+        return events + execute(actions, writes)
+    }
+
+    /// `own` written over the current state (a later write to a key wins) and the keys, in order, whose
+    /// final value differs from the current one.
+    private func applying(_ own: [(String, JSONValue)]) -> (state: [String: JSONValue], moved: [String]) {
+        var written = state
+        own.forEach { written[$0.0] = $0.1 }
+        var seen = Set<String>()
+        let moved = own.map(\.0).filter { state[$0] != written[$0] && seen.insert($0).inserted }
+        return (written, moved)
+    }
+
+    private typealias PlannedWrite = (key: String, value: JSONValue)
+
+    /// The write each state action of `actions` makes when the list starts from `start`, by action
+    /// index; nil when the state it leaves behind is invalid. Nothing is applied here. Actions after
+    /// a `dismiss` never run, so they are not planned; a toggle or step that is a no-op has no entry.
+    private func plannedWrites(
+        _ actions: [PrototypeAction],
+        from start: [String: JSONValue]
+    )
+        -> [Int: PlannedWrite]?
+    {
+        var planned = start
+        var writes: [Int: PlannedWrite] = [:]
+        for (index, action) in actions.enumerated() {
+            if action.type == "dismiss" { break }
+            guard let write = stateWrite(action, in: planned) else { continue }
+            planned[write.key] = write.value
+            guard accepts(planned) else { return nil }
+            writes[index] = write
+        }
+        return writes
+    }
+
+    /// Whether every control, list item, modal and state action of the shown spec accepts `state`.
+    private func accepts(_ state: [String: JSONValue]) -> Bool {
+        guard let spec else { return false }
+        return PrototypeStateValidator.rejection(root: spec.root, state: state, nonStateBytes: nonStateBytes) == nil
+    }
+
+    /// Runs `actions` in order, applying the writes planned for them.
+    private mutating func execute(_ actions: [PrototypeAction], _ writes: [Int: PlannedWrite]) -> [PrototypeEvent] {
         let baseline = state
         var touched: [String] = []
         var events: [PrototypeEvent] = []
-        for action in actions {
+        for (index, action) in actions.enumerated() {
             guard isShown else { break }
             switch action.type {
             case "emit":
@@ -114,7 +251,10 @@ struct PrototypeSession {
             case "dismiss":
                 events += dismiss(reason: .user)
             default:
-                if let key = applyStateAction(action), !touched.contains(key) { touched.append(key) }
+                if let write = writes[index] {
+                    state[write.key] = write.value
+                    if !touched.contains(write.key) { touched.append(write.key) }
+                }
             }
         }
         guard isShown else { return events }
@@ -132,10 +272,10 @@ struct PrototypeSession {
         return setPage(pager, target)
     }
 
-    /// Applies one state action and returns the key it wrote, or nil when it was a no-op. A toggle
-    /// of a non-boolean, or an increment/decrement of a non-number or to a non-finite value, is a
-    /// no-op, as on Android.
-    private mutating func applyStateAction(_ action: PrototypeAction) -> String? {
+    /// The key and value a state action writes given `state`, or nil when it writes nothing: a
+    /// toggle of a non-boolean, or an increment/decrement of a non-number or to a non-finite value,
+    /// is a no-op, as on Android's `stateWrite`.
+    private func stateWrite(_ action: PrototypeAction, in state: [String: JSONValue]) -> PlannedWrite? {
         guard let key = action.key else { return nil }
         let next: JSONValue? = switch action.type {
         case "setState": action.value
@@ -144,9 +284,7 @@ struct PrototypeSession {
         case "decrement": stepped(state[key], by: -(action.by ?? 1))
         default: nil
         }
-        guard let next else { return nil }
-        state[key] = next
-        return key
+        return next.map { (key, $0) }
     }
 
     private func stepped(_ value: JSONValue?, by step: Double) -> JSONValue? {
@@ -169,12 +307,11 @@ struct PrototypeSession {
         return emit(kind: "emit", name: "change", payload: payload)
     }
 
-    /// Several keys written together, reported by one `change` event (see `emitStateChange`).
+    /// Several keys written together, reported by one `change` event (see `emitStateChange`). They are
+    /// validated as one unit like any other interaction (#11562): a state that breaks a binding
+    /// writes none of them.
     mutating func setStates(_ values: [(String, JSONValue)]) -> [PrototypeEvent] {
-        guard isShown else { return [] }
-        let baseline = state
-        values.forEach { state[$0.0] = $0.1 }
-        return emitStateChange(values.map(\.0).filter { baseline[$0] != state[$0] })
+        control(own: values, then: [])
     }
 
     /// Test-hook tap (see `PrototypeTestHooks`): performs in-process what a real tap on the
@@ -200,22 +337,22 @@ struct PrototypeSession {
     }
 
     /// A user edit of a bound control: one `emit` named `change` per changed value, matching
-    /// Android's `PrototypeRuntime.change`.
+    /// Android's `PrototypeRuntime.textChange`: validated against the bound controls and the spec byte
+    /// cap (#11562), and dropped whole when rejected.
     mutating func change(key: String, value: JSONValue) -> [PrototypeEvent] {
-        guard isShown, state[key] != value else { return [] }
-        state[key] = value
-        return emit(kind: "emit", name: "change", payload: .object(["key": .string(key), "value": value]))
+        control(own: [(key, value)], then: [])
     }
 
     /// A `switch` or `checkbox` tap flips its bound boolean, then runs the node's own actions. A key
     /// that no longer holds a boolean leaves the control inert.
     mutating func toggle(key: String, then actions: [PrototypeAction]) -> [PrototypeEvent] {
         guard isShown, case let .bool(stored)? = state[key] else { return [] }
-        return change(key: key, value: .bool(!stored)) + run(actions)
+        return control(own: [(key, .bool(!stored))], then: actions)
     }
 
     /// A `tabBar`/`bottomNav` selection drives its pager when it has one, else its state key, then
-    /// runs the node's `onTap` actions, as Android's selection does.
+    /// runs the node's `onTap` actions, as Android's selection does. The pager only moves once the
+    /// action list is known to be accepted.
     mutating func select(
         index: Int,
         pager: String?,
@@ -225,13 +362,11 @@ struct PrototypeSession {
         -> [PrototypeEvent]
     {
         guard isShown else { return [] }
-        var events: [PrototypeEvent] = []
-        if let pager {
-            events = setPage(pager, index)
-        } else if let key {
-            events = change(key: key, value: .number(Double(index)))
+        guard let pager else {
+            return control(own: key.map { [($0, .number(Double(index)))] } ?? [], then: actions)
         }
-        return events + run(actions)
+        guard let writes = plannedWrites(actions, from: state) else { return [] }
+        return setPage(pager, index) + execute(actions, writes)
     }
 
     /// The terminal event: every dismissal emits exactly one `dismissed`, carrying its reason.

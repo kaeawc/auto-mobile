@@ -31,6 +31,13 @@ export interface SessionReleaseReasonTraits {
    * restarted, and a restarted daemon may rehydrate it for the same owner.
    */
   readonly recoverable: boolean;
+  /**
+   * A call that names the UUID may issue the session again: every recoverable reason, plus
+   * `plan-auto-release`, whose plan freed the device but left the UUID reusable by the next plan.
+   * Unlike {@link recoverable}, this is on-demand only: a restarted daemon does not rehydrate
+   * these rows on its own, so a finished plan's session is not resurrected to reserve its device.
+   */
+  readonly reissuableByName: boolean;
 }
 
 /** Every literal session release reason. */
@@ -70,6 +77,7 @@ const NOT_TERMINAL: SessionReleaseReasonTraits = {
   expiry: false,
   terminal: false,
   recoverable: false,
+  reissuableByName: false,
 };
 const TERMINAL: SessionReleaseReasonTraits = { ...NOT_TERMINAL, terminal: true };
 const TERMINAL_EXPIRY: SessionReleaseReasonTraits = { ...TERMINAL, expiry: true };
@@ -78,7 +86,13 @@ const TERMINAL_EXPIRY: SessionReleaseReasonTraits = { ...TERMINAL, expiry: true 
  * managed execution (owner decision 2026-10-09, #11258).
  */
 const IDLE_EXPIRY: SessionReleaseReasonTraits = { ...TERMINAL_EXPIRY, idle: true };
-const RECOVERABLE_HANDOFF: SessionReleaseReasonTraits = { ...NOT_TERMINAL, recoverable: true };
+const RECOVERABLE_HANDOFF: SessionReleaseReasonTraits = {
+  ...NOT_TERMINAL,
+  recoverable: true,
+  reissuableByName: true,
+};
+/** Not rehydrated after a restart, but a call naming the UUID issues it again. */
+const REISSUABLE_BY_NAME: SessionReleaseReasonTraits = { ...NOT_TERMINAL, reissuableByName: true };
 
 /** The tags of every literal release reason. */
 export const SESSION_RELEASE_REASON_TRAITS: Readonly<
@@ -108,8 +122,11 @@ export const SESSION_RELEASE_REASON_TRAITS: Readonly<
   "session-creation-timeout": NOT_TERMINAL,
   /** An allocation rolled back before the session was handed out. */
   "allocation-rollback": NOT_TERMINAL,
-  /** Plan cleanup frees devices while allowing the base and label UUIDs to be reused. */
-  "plan-auto-release": NOT_TERMINAL,
+  /**
+   * Plan cleanup frees devices; the base and label UUIDs may be issued again by name (a later plan
+   * under the same UUID), but a restarted daemon does not rehydrate the finished plan's session.
+   */
+  "plan-auto-release": REISSUABLE_BY_NAME,
   /** A newer incarnation of the same UUID replaced this one. */
   superseded: NOT_TERMINAL,
   /** The daemon shut down; its successor may rehydrate the session. */
@@ -148,6 +165,11 @@ export function sessionReleaseReasonFamily(reason: string): SessionReleaseReason
   );
 }
 
+/** Only plan cleanup and device restart judge the owner's lease before handing off the UUID. */
+export function shouldJudgeOwnerLeaseForRelease(reason: string): boolean {
+  return reason === "plan-auto-release" || sessionReleaseReasonFamily(reason) === "device-restart:";
+}
+
 /**
  * The tags of a release reason. Accepts any string, because persisted rows and wire payloads may
  * carry reasons an older or newer daemon wrote; an unknown reason is ordinary and non-terminal.
@@ -162,8 +184,11 @@ export function sessionReleaseReasonTraits(reason: string): SessionReleaseReason
     : SESSION_RELEASE_REASON_FAMILY_TRAITS[family];
 }
 
-/** Whether the UUID ends with this release (see {@link SessionReleaseReasonTraits.terminal}). */
-export function isTerminalReleaseReason(reason: string): boolean {
+/**
+ * Whether the UUID ends with this release (see {@link SessionReleaseReasonTraits.terminal}). Only
+ * tagged reasons carry the tag, so a match is a {@link SessionReleaseReason}.
+ */
+export function isTerminalReleaseReason(reason: string): reason is SessionReleaseReason {
   return sessionReleaseReasonTraits(reason).terminal;
 }
 
@@ -201,6 +226,42 @@ export function outranksReleaseReason(candidate: string, current: string): boole
   return !held.terminal || (held.idle && !next.idle);
 }
 
+/**
+ * Whether a call naming the UUID may issue the session again: the recoverable reasons plus
+ * `plan-auto-release` (see {@link SessionReleaseReasonTraits.reissuableByName}). The one
+ * admission, claim and claimed-row-fence predicate; startup rehydration and the recoverable list
+ * keep the narrower {@link isRecoverableDaemonReleaseReason}.
+ */
+export function isReissuableByNameReleaseReason(reason: string): boolean {
+  return sessionReleaseReasonTraits(reason).reissuableByName;
+}
+
+/**
+ * How firmly a release reason ends a session, the one ordering of "which release stands" for a
+ * row's stored reason: 0 non-terminal (including recoverable handoffs and unknown reasons),
+ * 1 idle terminal (the weakest terminal reason, see {@link outranksReleaseReason}), 2 any other
+ * terminal reason.
+ */
+export type ReleaseReasonStrength = 0 | 1 | 2;
+
+export function releaseReasonStrength(reason: string): ReleaseReasonStrength {
+  const traits = sessionReleaseReasonTraits(reason);
+  if (!traits.terminal) {
+    return 0;
+  }
+  return traits.idle ? 1 : 2;
+}
+
+/**
+ * Whether a release with `candidate` may overwrite a row holding `held` (null: no reason yet).
+ * A stored terminal reason is never replaced by a weaker one, so a late non-terminal release (a
+ * sweep's `expired`, a `daemon-shutdown` handoff) cannot erase a terminal fence; an equal or
+ * stronger reason replaces it.
+ */
+export function releaseReasonMayReplace(candidate: string, held: string | null): boolean {
+  return held === null || releaseReasonStrength(candidate) >= releaseReasonStrength(held);
+}
+
 /** The persisted status of a released row. */
 export function releasedRowStatus(reason: string): "expired" | "released" {
   return isExpiryReleaseReason(reason) ? "expired" : "released";
@@ -221,5 +282,23 @@ export function releaseReasonFamiliesWhere(
 ): SessionReleaseReasonFamily[] {
   return (Object.keys(SESSION_RELEASE_REASON_FAMILY_TRAITS) as SessionReleaseReasonFamily[]).filter(
     (family) => SESSION_RELEASE_REASON_FAMILY_TRAITS[family][tag],
+  );
+}
+
+/** The literal reasons strictly stronger than `strength`, for SQL filters. */
+export function literalReleaseReasonsStrongerThan(
+  strength: ReleaseReasonStrength,
+): SessionReleaseReasonLiteral[] {
+  return (Object.keys(SESSION_RELEASE_REASON_TRAITS) as SessionReleaseReasonLiteral[]).filter(
+    (reason) => releaseReasonStrength(reason) > strength,
+  );
+}
+
+/** The prefix families strictly stronger than `strength`, for SQL filters. */
+export function releaseReasonFamiliesStrongerThan(
+  strength: ReleaseReasonStrength,
+): SessionReleaseReasonFamily[] {
+  return (Object.keys(SESSION_RELEASE_REASON_FAMILY_TRAITS) as SessionReleaseReasonFamily[]).filter(
+    (family) => releaseReasonStrength(`${family}x`) > strength,
   );
 }

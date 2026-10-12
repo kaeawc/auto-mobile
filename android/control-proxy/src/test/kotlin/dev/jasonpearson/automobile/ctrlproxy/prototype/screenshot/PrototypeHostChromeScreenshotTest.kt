@@ -8,6 +8,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRequest
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSpecContent
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowContent
 import dev.jasonpearson.automobile.ctrlproxy.prototype.mapPrototypeSpec
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeShownThemeFlow
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -16,8 +17,8 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * Host chrome snapshots (#11217): the fullscreen dismiss bar and the persistent Close control of
- * `PrototypeWindowContent`, each in light and dark. The request's `darkTheme` is what the host
- * derives from the spec, so the device night mode stays at its default.
+ * `PrototypeWindowContent`, each in light and dark. The request's `theme` is what the controller
+ * resolves for the show, so the device night mode stays at its default.
  *
  * Every baseline is pending until recorded on Linux with the `Record Desktop Screenshot Baselines`
  * workflow; [PrototypeRenderThemeTest] checks the light/dark difference on any OS meanwhile.
@@ -70,7 +71,7 @@ internal fun renderPrototypeChrome(
       placement =
         if (fullscreen) PrototypePlacement.Fullscreen() else PrototypePlacement.Floating(),
       persistent = !fullscreen,
-      darkTheme = dark,
+      theme = prototypeShownThemeFlow(model, dark),
       content = { PrototypeSpecContent(model.root, theme = model.theme) },
     )
   val content: @Composable () -> Unit = {

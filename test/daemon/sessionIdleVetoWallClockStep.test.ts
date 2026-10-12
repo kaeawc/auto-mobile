@@ -35,7 +35,9 @@ describe("idle-release veto under a wall-clock step (#11105)", () => {
     tracker = new ExecutionTracker(timer, new FakeIdGenerator());
     manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     // Wired the way the daemon wires the real tracker.
-    tracker.setSessionClockOffsetProvider(() => manager.sessionNow() - timer.now());
+    tracker.setSessionClockOffsetProvider(
+      (wallNowMs = timer.now()) => manager.sessionNow() - wallNowMs,
+    );
     manager.setActiveSessionExecutionChecker((sessionId, query) =>
       tracker.hasActiveSessionUuidExecutions(sessionId, query),
     );
@@ -126,7 +128,9 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
     tracker = new ExecutionTracker(timer, new FakeIdGenerator());
     manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     manager.stopCleanupTimer();
-    tracker.setSessionClockOffsetProvider(() => manager.sessionNow() - timer.now());
+    tracker.setSessionClockOffsetProvider(
+      (wallNowMs = timer.now()) => manager.sessionNow() - wallNowMs,
+    );
     manager.setActiveSessionExecutionChecker((sessionId, query) =>
       tracker.hasActiveSessionUuidExecutions(sessionId, query),
     );

@@ -16,6 +16,7 @@ import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
 import {
   getVideoRecordingMetadata,
+  getVideoRecordingOwnerRef,
   IOS_MAX_DURATION_SECONDS,
   listActiveVideoRecordings,
   rollbackVideoRecordingStart,
@@ -24,7 +25,7 @@ import {
 } from "./videoRecordingManager";
 import type { VideoRecordingConfigInput } from "../models";
 import { DeviceSessionManager } from "../devices/DeviceSessionManager";
-import type { VideoRecordingRecord } from "../db/videoRecordingRepository";
+import { ownerVisibleInScope, type VideoRecordingRecord } from "../db/videoRecordingRepository";
 import { highlightShapeSchema } from "../features/debug/VisualHighlight";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../features/video/androidScreenrecord";
 import {
@@ -34,10 +35,17 @@ import {
 } from "./androidSegmentedPlanVideoSession";
 import type { Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
+import {
+  assertLifecycleCallerHoldsDevice,
+  assertLifecycleCallerNotOnForeignManagedSlot,
+  type LifecycleRequester,
+} from "./lifecycleDeviceOwnership";
+import { DeviceAssignedToManagedSlotError } from "../daemon/managedSlots/managedSlotRefusal";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { DaemonState } from "../daemon/daemonState";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
+import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { type StoppedSegment, writeSegmentManifest } from "./segmentManifest";
 
 const DEFAULT_MAX_DURATION_SECONDS = 30;
@@ -127,20 +135,16 @@ const segmentedSessions = (() => {
   // release-time stop (#10958). Bounded: the oldest entry is dropped first.
   const finished = new Map<
     string,
-    { owner: string | undefined; stopped: StoppedSegmentedSession }
+    { owner: string | undefined; deviceId: string; stopped: StoppedSegmentedSession }
   >();
   return {
-    /** A finalized session's stop result, when `ownerSessionUuid` may see it (unset = unscoped). */
-    getFinished(handle: string, ownerSessionUuid?: string): StoppedSegmentedSession | undefined {
+    /** A finalized session's stop result, when `canSee` admits its owner (#11533). */
+    getFinished(
+      handle: string,
+      canSee: (owner: string | undefined, deviceId: string) => boolean,
+    ): StoppedSegmentedSession | undefined {
       const entry = finished.get(handle);
-      if (!entry) {
-        return undefined;
-      }
-      const visible =
-        ownerSessionUuid === undefined ||
-        entry.owner === undefined ||
-        entry.owner === ownerSessionUuid;
-      return visible ? entry.stopped : undefined;
+      return entry && canSee(entry.owner, entry.deviceId) ? entry.stopped : undefined;
     },
     get timer(): Timer | undefined {
       return injectedTimer;
@@ -194,7 +198,7 @@ const segmentedSessions = (() => {
       byHandle.delete(handle);
       const { segments, manifestPath } = await persistSegmentedResult(handle, result);
       const stopped = { sessionId: handle, segments, manifestPath, highlights: result.highlights };
-      finished.set(handle, { owner: session.ownerSession, stopped });
+      finished.set(handle, { owner: session.ownerSession, deviceId: session.deviceId, stopped });
       if (finished.size > MAX_FINISHED_SEGMENTED_SESSIONS) {
         const oldest = finished.keys().next();
         if (!oldest.done) {
@@ -261,6 +265,16 @@ export async function stopSegmentedVideoRecordingsForDevice(
         error,
       );
     }
+  }
+}
+
+/** Transfer live ownerless segmented sessions without stopping their rotation timers. */
+export function adoptOwnerlessSegmentedVideoRecordings(
+  deviceId: string,
+  sessionUuid: string,
+): void {
+  for (const [, session] of segmentedSessions.forOwner(undefined, deviceId)) {
+    session.adoptOwnerSession(sessionUuid);
   }
 }
 
@@ -444,6 +458,58 @@ async function resolveTargetDevices(
   return Array.from(unique.values());
 }
 
+interface SkippedVideoRecordingTarget {
+  deviceId: string;
+  platform: BootedDevice["platform"];
+  code: InputDeviceOwnedError["code"] | DeviceAssignedToManagedSlotError["code"];
+  reason: string;
+}
+
+/** Only extra sessionless fan-out targets need admission; the registry judged its target. */
+async function skippedFanoutTarget(
+  resolved: BootedDevice,
+  target: BootedDevice,
+  args: VideoRecordingArgs,
+): Promise<SkippedVideoRecordingTarget | undefined> {
+  if (!shouldTargetAllDevices(args) || target.deviceId === resolved.deviceId) {
+    return undefined;
+  }
+  const requester = { sessionUuid: args.sessionUuid, mcpSessionId: mcpSessionIdOf(args) };
+  try {
+    if (recordingRequesterResolver.assertFanoutTargetAllowed) {
+      await recordingRequesterResolver.assertFanoutTargetAllowed(target, requester);
+    } else if (recordingRequesterResolver.isDeviceHeld(target.deviceId)) {
+      const owner = recordingRequesterResolver.holdingSessionUuid?.(target.deviceId);
+      assertActiveRecordingOwner({
+        recordingId: "fan-out target",
+        deviceId: target.deviceId,
+        // A fake without holder identities must still refuse a held target.
+        recordingOwner: owner ?? "held",
+        requesterSessionUuid: requester.sessionUuid,
+        requesterMcpSessionId: requester.mcpSessionId,
+      });
+    }
+  } catch (error) {
+    if (
+      !(error instanceof InputDeviceOwnedError) &&
+      !(error instanceof DeviceAssignedToManagedSlotError)
+    ) {
+      throw error;
+    }
+    logger.info(`[VideoRecording] Skipping device ${target.deviceId}: ${error.code}`);
+    return {
+      deviceId: target.deviceId,
+      platform: target.platform,
+      code: error.code,
+      reason:
+        error instanceof InputDeviceOwnedError
+          ? "Device is held by another session."
+          : "Device is assigned to another execution's managed slot.",
+    };
+  }
+  return undefined;
+}
+
 async function throwIfVideoStartAborted(
   recordings: Array<Record<string, unknown>>,
   signal?: AbortSignal,
@@ -520,9 +586,35 @@ export interface RecordingRequesterResolver {
     deviceId: string,
     ownerBaseSessionUuid: string,
   ): boolean;
+  /** Whether a live session holds `deviceId`. A device no session holds takes calls from anyone. */
+  isDeviceHeld(deviceId: string): boolean;
+  /** Daemon-aware holder and managed-slot gate; omitted by small in-memory resolver fakes. */
+  assertFanoutTargetAllowed?(device: BootedDevice, requester: LifecycleRequester): Promise<void>;
+  /** Holder identity, when available, for the connection-ownership seam. Never sent to clients. */
+  holdingSessionUuid?(deviceId: string): string | undefined;
+  /** Session acquired by this connection on this device, for recording ownership at start. */
+  resolveOwnedDeviceSessionForMcpSession?(
+    mcpSessionId: string,
+    deviceId: string,
+  ): string | undefined;
 }
 
 const daemonRecordingRequesterResolver: RecordingRequesterResolver = {
+  async assertFanoutTargetAllowed(device, requester) {
+    const daemon = DaemonState.getInstance();
+    if (!daemon.isInitialized()) {
+      return;
+    }
+    const held = requester.mcpSessionId
+      ? daemon
+          .getDevicePool()
+          .resolveOwnedDeviceSessionForMcpSession(requester.mcpSessionId, device.deviceId)
+      : undefined;
+    const effectiveRequester = held ? { ...requester, sessionUuid: held } : requester;
+    const input = { toolName: "videoRecording", device, requester: effectiveRequester };
+    await assertLifecycleCallerNotOnForeignManagedSlot(input);
+    assertLifecycleCallerHoldsDevice({ ...input, force: false });
+  },
   baseSessionUuid(sessionUuid) {
     if (!DaemonState.getInstance().isInitialized()) {
       return sessionUuid;
@@ -539,6 +631,18 @@ const daemonRecordingRequesterResolver: RecordingRequesterResolver = {
       .resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId);
     return held !== undefined && this.baseSessionUuid(held) === ownerBaseSessionUuid;
   },
+  resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId) {
+    const daemon = DaemonState.getInstance();
+    return daemon.isInitialized()
+      ? daemon.getDevicePool().resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId)
+      : undefined;
+  },
+  isDeviceHeld(deviceId) {
+    return (
+      DaemonState.getInstance().isInitialized() &&
+      DaemonState.getInstance().getSessionManager().getSessionForDevice(deviceId) !== null
+    );
+  },
 };
 
 let recordingRequesterResolver: RecordingRequesterResolver = daemonRecordingRequesterResolver;
@@ -551,14 +655,43 @@ export function setRecordingRequesterResolverForTesting(
 
 function mcpSessionIdOf(args: VideoRecordingArgs): string | undefined {
   const value: unknown = Reflect.get(args, INTERNAL_MCP_SESSION_PARAM);
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+  return typeof value === "string" && value.length > 0
+    ? value
+    : getToolSelectionContext()?.callerMcpSessionId;
+}
+
+function recordingStartOwner(args: VideoRecordingArgs, deviceId: string): string | undefined {
+  const connection = mcpSessionIdOf(args);
+  if (!connection) {
+    return args.sessionUuid;
+  }
+  const resolved = recordingRequesterResolver.resolveOwnedDeviceSessionForMcpSession?.(
+    connection,
+    deviceId,
+  );
+  if (resolved) {
+    return resolved;
+  }
+  const holder = recordingRequesterResolver.holdingSessionUuid?.(deviceId);
+  return holder &&
+    recordingRequesterResolver.connectionOwnsDeviceSession(
+      connection,
+      deviceId,
+      recordingRequesterResolver.baseSessionUuid(holder),
+    )
+    ? holder
+    : args.sessionUuid;
 }
 
 /**
  * An active recording another session started is not the caller's to stop (#11130): a stop by id
- * needs no device, so without this any live session holding a recordingId could end a capture on a
- * device it does not hold. Ownerless recordings and unscoped (sessionless) callers stay open, the
- * same visibility rule the finalized lookups use.
+ * needs no device, so without this any caller holding a recordingId could end a capture on a
+ * device it does not hold. The recording's owner (its base session counts) and the connection
+ * that acquired the owner's device session may stop it.
+ *
+ * A caller with no session is judged like any sessionless control call (#11647,
+ * docs/using/device-ownership.md): refused while a session holds the recording's device, open on
+ * a device no session holds. An ownerless recording stays stoppable by anyone.
  */
 function assertActiveRecordingOwner(input: {
   recordingId: string;
@@ -569,14 +702,14 @@ function assertActiveRecordingOwner(input: {
 }): void {
   const { recordingId, deviceId, recordingOwner, requesterSessionUuid, requesterMcpSessionId } =
     input;
-  if (!recordingOwner || requesterSessionUuid === undefined) {
-    return;
-  }
-  if (recordingOwner === requesterSessionUuid) {
+  if (!recordingOwner || recordingOwner === requesterSessionUuid) {
     return;
   }
   const ownerBase = recordingRequesterResolver.baseSessionUuid(recordingOwner);
-  if (recordingRequesterResolver.baseSessionUuid(requesterSessionUuid) === ownerBase) {
+  if (
+    requesterSessionUuid !== undefined &&
+    recordingRequesterResolver.baseSessionUuid(requesterSessionUuid) === ownerBase
+  ) {
     return;
   }
   if (
@@ -587,6 +720,9 @@ function assertActiveRecordingOwner(input: {
       ownerBase,
     )
   ) {
+    return;
+  }
+  if (requesterSessionUuid === undefined && !recordingRequesterResolver.isDeviceHeld(deviceId)) {
     return;
   }
   throw new InputDeviceOwnedError(
@@ -650,12 +786,84 @@ function stopResultEntry(
  * is returned to its owner instead of failing: the owner-scoped lookup needs no device, so a
  * stop by id never allocates one (#10958).
  */
-async function finalizedStopResponse(recordingId: string, ownerSessionUuid?: string) {
-  const finishedSegmented = segmentedSessions.getFinished(recordingId, ownerSessionUuid);
+/**
+ * Whether a requester may reach a finalized recording of `owner` on `deviceId`: the same owners
+ * `assertActiveRecordingOwner` accepts (#11533), so a recording stays reachable after the stop that
+ * finalized it. A sessionless requester or an ownerless recording is unscoped, as before: fetching
+ * a finalized artifact stops nothing, so it keeps that rule where the active stop no longer does
+ * (#11647).
+ */
+function finalizedOwnerVisible(
+  owner: string | undefined,
+  deviceId: string,
+  requesterSessionUuid: string | undefined,
+  requesterMcpSessionId: string | undefined,
+): boolean {
+  if (owner === undefined || requesterSessionUuid === undefined) {
+    return true;
+  }
+  const requesterBase = recordingRequesterResolver.baseSessionUuid(requesterSessionUuid);
+  const ownerBase = recordingRequesterResolver.baseSessionUuid(owner);
+  return (
+    ownerVisibleInScope(owner, {
+      ownerSessionUuid: requesterSessionUuid,
+      ownerBaseSessionUuid: requesterBase,
+    }) ||
+    ownerBase === requesterBase ||
+    (requesterMcpSessionId !== undefined &&
+      recordingRequesterResolver.connectionOwnsDeviceSession(
+        requesterMcpSessionId,
+        deviceId,
+        ownerBase,
+      ))
+  );
+}
+
+/** The finalized row's metadata, owner-scoped in the query itself (#11533). */
+async function getFinalizedMetadata(
+  recordingId: string,
+  requesterSessionUuid: string | undefined,
+  requesterMcpSessionId: string | undefined,
+) {
+  if (requesterSessionUuid === undefined) {
+    return getVideoRecordingMetadata(recordingId);
+  }
+  const metadata = await getVideoRecordingMetadata(recordingId, {
+    ownerSessionUuid: requesterSessionUuid,
+    ownerBaseSessionUuid: recordingRequesterResolver.baseSessionUuid(requesterSessionUuid),
+  });
+  if (metadata || requesterMcpSessionId === undefined) {
+    return metadata;
+  }
+  // The requester's connection may hold the device session of the owner's base: learn the owner
+  // from the row's header, then re-query scoped to exactly that owner.
+  const ref = await getVideoRecordingOwnerRef(recordingId);
+  if (
+    ref?.ownerSessionUuid === undefined ||
+    !finalizedOwnerVisible(
+      ref.ownerSessionUuid,
+      ref.deviceId,
+      requesterSessionUuid,
+      requesterMcpSessionId,
+    )
+  ) {
+    return null;
+  }
+  return getVideoRecordingMetadata(recordingId, { ownerSessionUuid: ref.ownerSessionUuid });
+}
+
+async function finalizedStopResponse(
+  recordingId: string,
+  ownerSessionUuid?: string,
+  requesterMcpSessionId?: string,
+) {
+  const finishedSegmented = segmentedSessions.getFinished(recordingId, (owner, deviceId) =>
+    finalizedOwnerVisible(owner, deviceId, ownerSessionUuid, requesterMcpSessionId),
+  );
   if (finishedSegmented) {
     return segmentedStopResponse(finishedSegmented);
   }
-  const metadata = await getVideoRecordingMetadata(recordingId, { ownerSessionUuid });
+  const metadata = await getFinalizedMetadata(recordingId, ownerSessionUuid, requesterMcpSessionId);
   if (!metadata) {
     return null;
   }
@@ -686,7 +894,11 @@ async function stopRecordingById(
   const activeRecords = await listActiveVideoRecordings();
   const matching = activeRecords.find((record) => record.recordingId === recordingId);
   if (!matching) {
-    const finalized = await finalizedStopResponse(recordingId, ownerSessionUuid);
+    const finalized = await finalizedStopResponse(
+      recordingId,
+      ownerSessionUuid,
+      requesterMcpSessionId,
+    );
     if (finalized) {
       return finalized;
     }
@@ -722,8 +934,9 @@ async function stopRecordingById(
 function createVideoStartResponse(output: {
   recordings: Array<Record<string, unknown>>;
   failures: Array<Record<string, unknown>>;
+  skipped: SkippedVideoRecordingTarget[];
 }) {
-  const { recordings, failures } = output;
+  const { recordings, failures, skipped } = output;
   if (recordings.length === 0) {
     const message =
       failures.length > 0
@@ -734,6 +947,7 @@ function createVideoStartResponse(output: {
 
   return createJSONToolResponse({
     action: "start",
+    skipped: skipped.length > 0 ? skipped : undefined,
     count: recordings.length,
     recordings,
     failures: failures.length > 0 ? failures : undefined,
@@ -750,12 +964,19 @@ async function startDeviceRecordings(
   const maxDurationSeconds = args.maxDuration ?? DEFAULT_MAX_DURATION_SECONDS;
   const recordings: Array<Record<string, unknown>> = [];
   const failures: Array<Record<string, unknown>> = [];
+  const skipped: SkippedVideoRecordingTarget[] = [];
   const finalizedBeforeFanoutCommit = new Set<AndroidSegmentedPlanVideoSession>();
   let fanoutCommitted = !shouldTargetAllDevices(args);
 
   for (const target of targetDevices) {
     await throwIfVideoStartAborted(recordings, signal);
+    const denied = await skippedFanoutTarget(device, target, args);
+    if (denied) {
+      skipped.push(denied);
+      continue;
+    }
     try {
+      const ownerSessionUuid = recordingStartOwner(args, target.deviceId);
       // Android `screenrecord` is hard-capped at 180s. For longer Android
       // recordings, transparently produce ordered segments (<outputName>,
       // <outputName>-seg1, ...) via a timer-driven segmented session.
@@ -767,7 +988,7 @@ async function startDeviceRecordings(
           configOverrides: buildConfigOverrides(args),
           highlights: args.highlights,
           display: args.display,
-          ownerSessionUuid: args.sessionUuid,
+          ownerSessionUuid,
           timer: segmentedSessions.timer,
           maxDurationSeconds,
           startupAbortSignal: signal,
@@ -817,7 +1038,7 @@ async function startDeviceRecordings(
         outputName: args.outputName,
         maxDurationSeconds: args.maxDuration,
         highlights: args.highlights,
-        ownerSessionUuid: args.sessionUuid,
+        ownerSessionUuid,
         abortSignal: signal,
         display: args.display,
       });
@@ -852,7 +1073,7 @@ async function startDeviceRecordings(
     segmentedSessions.remove(session);
   }
 
-  return createVideoStartResponse({ recordings, failures });
+  return createVideoStartResponse({ recordings, failures, skipped });
 }
 
 interface StoppedRecordingResults {
@@ -894,22 +1115,32 @@ function appendEvictedRecordingIds(recordingIds: string[], evicted: string[]): v
   }
 }
 
-function createVideoStopResponse(output: {
+export function createVideoStopResponse(output: {
   results: Array<Record<string, unknown>>;
   failures: Array<Record<string, unknown>>;
   evictedRecordingIds: string[];
   manifestPaths: string[];
   highlights: SessionHighlight[];
   stoppedAnySegmented: boolean;
+  skipped: SkippedVideoRecordingTarget[];
 }) {
-  const { results, failures, evictedRecordingIds, manifestPaths, highlights, stoppedAnySegmented } =
-    output;
-  if (results.length === 0) {
+  const {
+    results,
+    failures,
+    evictedRecordingIds,
+    manifestPaths,
+    highlights,
+    stoppedAnySegmented,
+    skipped,
+  } = output;
+  if (results.length === 0 && (failures.length > 0 || skipped.length === 0)) {
     const message =
       failures.length > 0
         ? `Failed to stop video recordings: ${failures.map((failure) => failure.error).join("; ")}`
         : "Failed to stop video recordings.";
-    throw new ActionableError(message);
+    throw new ActionableError(
+      skipped.length > 0 ? `${message} skipped: ${JSON.stringify(skipped)}` : message,
+    );
   }
 
   return createJSONToolResponse({
@@ -917,6 +1148,7 @@ function createVideoStopResponse(output: {
     count: results.length,
     recordings: results,
     segmented: stoppedAnySegmented ? true : undefined,
+    skipped: skipped.length > 0 ? skipped : undefined,
     manifestPaths: manifestPaths.length > 0 ? manifestPaths : undefined,
     highlights: highlights.length > 0 ? highlights : undefined,
     failures: failures.length > 0 ? failures : undefined,
@@ -928,17 +1160,26 @@ async function stopDeviceRecordings(device: BootedDevice, args: VideoRecordingAr
   if (args.recordingId) {
     return stopRecordingById(args.recordingId, args.sessionUuid, mcpSessionIdOf(args));
   }
+  return stopResolvedDeviceRecordings(device, args);
+}
 
+async function stopResolvedDeviceRecordings(device: BootedDevice, args: VideoRecordingArgs) {
   const results: Array<Record<string, unknown>> = [];
   const failures: Array<Record<string, unknown>> = [];
   const evictedRecordingIds: string[] = [];
   const manifestPaths: string[] = [];
   const highlights: SessionHighlight[] = [];
+  const skipped: SkippedVideoRecordingTarget[] = [];
   let stoppedAnySegmented = false;
   const targetDevices = await resolveTargetDevices(device, args);
   let activeRecords: VideoRecordingRecord[] | undefined;
 
   for (const target of targetDevices) {
+    const denied = await skippedFanoutTarget(device, target, args);
+    if (denied) {
+      skipped.push(denied);
+      continue;
+    }
     // A bare (by-device) stop must also finalize any timer-driven segmented
     // session for this device; otherwise its rotation timer leaks and keeps
     // producing segments. The session owns its segments' recording lifecycle,
@@ -1027,6 +1268,7 @@ async function stopDeviceRecordings(device: BootedDevice, args: VideoRecordingAr
     manifestPaths,
     highlights,
     stoppedAnySegmented,
+    skipped,
   });
 }
 

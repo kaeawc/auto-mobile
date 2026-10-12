@@ -572,6 +572,49 @@ class WebSocketResponseTest {
   }
 
   @Test
+  fun `prototype appearance round trips in a show result, a status entry and an event`() {
+    val appearance = """{"mode":"dark","source":"override","deviceDark":false}"""
+    val shown =
+      """{"type":"prototype_result","timestamp":42,"requestId":"r1","success":true,"error":null,"appearance":$appearance}"""
+    val result = assertIs<PrototypeResult>(json.decodeFromString<WebSocketResponse>(shown))
+    assertEquals(
+      PrototypeAppearance(
+        PrototypeAppearanceMode.DARK,
+        PrototypeAppearanceSource.OVERRIDE,
+        deviceDark = false,
+      ),
+      result.appearance,
+    )
+    assertEquals(shown, json.encodeToString<WebSocketResponse>(result))
+    val status =
+      """{"type":"prototype_result","timestamp":42,"requestId":"r2","success":true,"error":null,"prototypes":[{"id":"panel","persistent":false,"state":{},"pages":{},"lastSequence":3,"appearance":$appearance}],"droppedEvents":0}"""
+    val inspected = assertIs<PrototypeResult>(json.decodeFromString<WebSocketResponse>(status))
+    assertEquals(result.appearance, inspected.prototypes?.single()?.appearance)
+    assertEquals(status, json.encodeToString<WebSocketResponse>(inspected))
+    val event =
+      """{"type":"prototype_event","timestamp":42,"id":"panel","sequence":4,"kind":"appearance_changed","name":null,"payload":{"mode":"light","source":"system"},"state":{},"pages":{}}"""
+    val changed = assertIs<PrototypeEvent>(json.decodeFromString<WebSocketResponse>(event))
+    assertEquals(PrototypeEventKind.APPEARANCE_CHANGED, changed.kind)
+    assertEquals(event, json.encodeToString<WebSocketResponse>(changed))
+  }
+
+  @Test
+  fun `prototype appearance names every source and is omitted by older peers`() {
+    assertEquals(
+      listOf("explicit", "override", "roleLuminance", "authoredBackground", "system"),
+      PrototypeAppearanceSource.entries.map {
+        json.encodeToString(PrototypeAppearanceSource.serializer(), it).trim('"')
+      },
+    )
+    val legacy =
+      """{"type":"prototype_result","timestamp":42,"requestId":"r2","success":true,"prototypes":[{"id":"panel","persistent":false,"state":{},"lastSequence":3}]}"""
+    val decoded = assertIs<PrototypeResult>(json.decodeFromString<WebSocketResponse>(legacy))
+    assertNull(decoded.appearance)
+    assertNull(decoded.prototypes?.single()?.appearance)
+    assertFalse(json.encodeToString<WebSocketResponse>(decoded).contains("appearance"))
+  }
+
+  @Test
   fun `prototype result echoes request id and event has no request id`() {
     val resultLiteral =
       """{"type":"prototype_result","timestamp":42,"requestId":"r1","success":false,"error":"prototype host not wired"}"""

@@ -1,7 +1,10 @@
 import {
   ACQUIRE_NEW_SESSION_NEXT_ACTION,
   DEVICE_SESSION_RECOVERY_TOOLS,
+  MANAGED_EXECUTION_ENDED_CODE,
+  RELAUNCH_EXECUTION_NEXT_ACTION,
 } from "../models/deviceSessionRecovery";
+import type { ManagedSlotResultEntry } from "../models/managedSlotsResult";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
 import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
@@ -76,6 +79,66 @@ export function terminalSessionRefusalFields(ownerPid?: number) {
   };
 }
 
+/**
+ * The envelope a managed connection answers with once its execution's session is terminally released
+ * (#11341). Every idle or heartbeat release is terminal and a managed proxy never acquires devices
+ * itself, so the answer is not retryable, names `relaunch_execution` (the runner's decision) and
+ * carries no recovery tools. The slot is named when the session is one of the connection's slots.
+ */
+export function managedExecutionEndedPayload({
+  sessionUuid,
+  reason,
+  slot,
+}: {
+  sessionUuid?: string;
+  reason: string;
+  slot?: Pick<ManagedSlotResultEntry, "slotIndex" | "assignmentGeneration"> | null;
+}) {
+  return {
+    error: {
+      code: MANAGED_EXECUTION_ENDED_CODE,
+      message:
+        `This managed execution has ended: its device session${sessionUuid ? ` ${sessionUuid}` : ""} ` +
+        `was released (${reason}) and cannot be reused. This connection never acquires devices, so ` +
+        "device calls are refused until the runner relaunches the execution; reads that name a deviceId still work.",
+      ...(sessionUuid === undefined ? {} : { sessionUuid }),
+      reason,
+      retryable: false as const,
+      nextAction: RELAUNCH_EXECUTION_NEXT_ACTION,
+      ...(slot
+        ? {
+            slotIndex: slot.slotIndex,
+            assignmentGeneration: slot.assignmentGeneration,
+          }
+        : {}),
+    },
+  };
+}
+
+/**
+ * The session a relayed daemon terminal-session refusal names and why it ended, or undefined when
+ * `result` is not one. A managed proxy rewrites such a result into `managed_execution_ended`
+ * (#11341) instead of passing on advice to acquire a new session.
+ */
+export function readTerminalSessionRefusal(
+  result: unknown,
+): { sessionUuid?: string; reason?: string } | undefined {
+  if (!declaresDeviceSessionInvalid(result)) {
+    return undefined;
+  }
+  const payload = readToolEnvelopePayload(result)?.payload;
+  const nested = payload?.error;
+  const fields: Record<string, unknown> | undefined =
+    nested !== null && typeof nested === "object" && !Array.isArray(nested)
+      ? (nested as Record<string, unknown>)
+      : payload;
+  const { sessionUuid, reason } = fields ?? {};
+  return {
+    ...(typeof sessionUuid === "string" && sessionUuid.length > 0 ? { sessionUuid } : {}),
+    ...(typeof reason === "string" && reason.length > 0 ? { reason } : {}),
+  };
+}
+
 /** Build the ownership-loss envelope shared by the direct MCP server and daemon proxy. */
 export function sessionOwnershipLostPayload({
   message,
@@ -119,6 +182,87 @@ export function sessionReleasedDuringCallPayload(
     sessionUuid: released.sessionUuid,
     reason: released.releaseReason,
   });
+}
+
+/** What a failed persisted-session recovery says about the session it ended. */
+export interface RecoveryIdentityLoss {
+  message: string;
+  sessionUuid: string;
+  /** The terminal release reason the session is persisted with (`identity-recovery-<reason>`). */
+  reason: string;
+  /** Why recovery failed: target-absent, target-busy, identity-continuity-lost, owned-by-other-daemon. */
+  recoveryReason: string;
+  /** The device recovery was looking for (or, held by another daemon, the device that daemon holds). */
+  deviceId?: string;
+  ownerPid?: number;
+}
+
+/**
+ * The terminal session loss a `SessionRecoveryIdentityLossError` reports (#11391), or undefined for
+ * anything else. Recovery of a persisted session could not keep its device identity, so the session
+ * manager terminalizes the UUID: the caller is told what any later call naming it is told. Matched
+ * on the error's name and fields so the wire layer does not import the daemon's session manager.
+ */
+export function recoveryIdentityLoss(error: unknown): RecoveryIdentityLoss | undefined {
+  if (!(error instanceof Error) || error.name !== "SessionRecoveryIdentityLossError") {
+    return undefined;
+  }
+  const field = (key: string): unknown => Reflect.get(error, key);
+  const sessionUuid = field("sessionUuid");
+  const reason = field("terminalReleaseReason");
+  const recoveryReason = field("reason");
+  if (
+    typeof sessionUuid !== "string" ||
+    typeof reason !== "string" ||
+    typeof recoveryReason !== "string"
+  ) {
+    return undefined;
+  }
+  const target = field("target");
+  const targetDeviceId =
+    target !== null && typeof target === "object" ? Reflect.get(target, "deviceId") : undefined;
+  const deviceId = field("deviceId") ?? targetDeviceId;
+  const ownerPid = field("ownerPid");
+  return {
+    message: error.message,
+    sessionUuid,
+    reason,
+    recoveryReason,
+    ...(typeof deviceId === "string" ? { deviceId } : {}),
+    ...(typeof ownerPid === "number" ? { ownerPid } : {}),
+  };
+}
+
+/** The evidence of a recovery identity loss, beside the terminal-session fields (#11391). */
+export function recoveryIdentityLossDetails(loss: RecoveryIdentityLoss): Record<string, unknown> {
+  return {
+    sessionUuid: loss.sessionUuid,
+    reason: loss.reason,
+    recoveryReason: loss.recoveryReason,
+    ...(loss.deviceId === undefined ? {} : { deviceId: loss.deviceId }),
+    ...(loss.ownerPid === undefined ? {} : { ownerPid: loss.ownerPid }),
+  };
+}
+
+/**
+ * The ownership-loss envelope for a recovery identity loss (#11391): the standard terminal refusal
+ * (`session_ownership_lost`, not retryable, `acquire_new_session`) with the recovery reason and
+ * device as evidence. Never the wait-class `device_owned_by_other_daemon` code, whose meaning is
+ * "wait for the other daemon": this session UUID does not come back.
+ */
+export function recoveryIdentityLossPayload(loss: RecoveryIdentityLoss) {
+  const { error } = sessionOwnershipLostPayload({
+    message: loss.message,
+    sessionUuid: loss.sessionUuid,
+    reason: loss.reason,
+  });
+  return {
+    error: {
+      ...error,
+      ...terminalSessionRefusalFields(loss.ownerPid),
+      ...recoveryIdentityLossDetails(loss),
+    },
+  };
 }
 
 /** Whether `name` is a device-session acquisition tool (see above). */

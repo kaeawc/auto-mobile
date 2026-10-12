@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
@@ -67,6 +67,38 @@ describe("setActiveDevice never rebinds a session across platforms (#11167)", ()
     DaemonState.getInstance().initialize(manager, pool, new DeviceSessionRegistry(timer));
     tools = new RealToolCallPath(devices).install();
   };
+
+  // CI's per-test time excludes only beforeAll: one throwaway setup + setActiveDevice call pays the
+  // tool path's one-time module/JIT cost here, not in the first timed test.
+  beforeAll(async () => {
+    const previous = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const warmSpies = [
+      spyOn(logger, "info").mockImplementation(() => {}),
+      spyOn(logger, "warn").mockImplementation(() => {}),
+      spyOn(logger, "error").mockImplementation(() => {}),
+    ];
+    try {
+      await setup([android, iphone]);
+      await pool.autolockDevice(iphone.deviceId, "ios", CONNECTION);
+      await tools.call("setActiveDevice", {
+        deviceId: android.deviceId,
+        __mcpSessionId: CONNECTION,
+      });
+    } finally {
+      tools.uninstall();
+      DaemonState.getInstance().reset();
+      manager.stopCleanupTimer();
+      for (const spy of warmSpies) {
+        spy.mockRestore();
+      }
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      } else {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previous;
+      }
+    }
+  });
 
   beforeEach(() => {
     savedAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;

@@ -29,8 +29,6 @@ enum class SetActiveDeviceRefusal {
   SESSION_RELEASED,
 }
 
-private const val SESSION_OWNERSHIP_LOST_CODE = "session_ownership_lost"
-
 // The daemon's typed ownership refusal (#10832): `setActiveDevice` and the pool bind carry
 // [DEVICE_OWNED_BY_OTHER_SESSION_CODE] as a top-level `code` in the tool error payload, like
 // `input/*` and device-aware `tools/call`. Older daemons sent ownership refusals as plain
@@ -68,8 +66,17 @@ internal fun classifySetActiveDeviceRefusal(
   val payload = runCatching { json.parseToJsonElement(text) }.getOrNull() as? JsonObject
   val code = ((payload?.get("error") as? JsonObject)?.get("code") as? JsonPrimitive)?.contentOrNull
   val topLevelCode = (payload?.get("code") as? JsonPrimitive)?.contentOrNull
+  val retryable = payload?.let { refusalPrimitive(it, "retryable")?.booleanOrNull }
+  // The daemon's contract: every terminal session loss says `nextAction: acquire_new_session`
+  // with `retryable: false`, in either payload shape. A retryable refusal is never terminal.
+  val terminalByContract =
+    payload?.let { refusalString(it, "nextAction") } == NEXT_ACTION_ACQUIRE_NEW_SESSION &&
+      retryable != true
   return when {
-    code == SESSION_OWNERSHIP_LOST_CODE -> SetActiveDeviceRefusal.SESSION_RELEASED
+    terminalByContract -> SetActiveDeviceRefusal.SESSION_RELEASED
+    // Fallback for daemons that predate `nextAction` on the ownership-lost refusal.
+    code == SESSION_OWNERSHIP_LOST_CODE && retryable != true ->
+      SetActiveDeviceRefusal.SESSION_RELEASED
     topLevelCode == DEVICE_OWNED_BY_OTHER_SESSION_CODE ->
       SetActiveDeviceRefusal.HELD_BY_ANOTHER_SESSION
     TERMINAL_SESSION_MESSAGE.containsMatchIn(text) -> SetActiveDeviceRefusal.SESSION_RELEASED

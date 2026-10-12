@@ -19,14 +19,12 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import type { DevicePool } from "../../src/daemon/devicePool";
 import type { BootedDevice } from "../../src/models";
 import * as appearanceSyncScheduler from "../../src/daemon/AppearanceSyncScheduler";
-import {
-  resetVideoRecordingManagerDependencies,
-  setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
-import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
+import { fakeDaemonShutdownIo } from "../helpers/daemonShutdownIoFakes";
+import { settlesOnMicrotasksAlone } from "../helpers/shutdownStageHarness";
 
 interface DaemonSocketServerInternals {
   socketServer: {
+    liftSessionlessStrokesOn(deviceId: string): void;
     quiesce(): Promise<void>;
     drainSessionReleaseNotifications(): Promise<void>;
     close(): Promise<void>;
@@ -57,6 +55,7 @@ function stubPoolDiscovery(devicePool: DevicePool, devices: BootedDevice[]): voi
 
 describe("Daemon shutdown session release (issue #5303)", () => {
   let appearanceSync: ReturnType<typeof spyOn>;
+  let restoreShutdownIo: () => void = () => {};
   // Daemon shutdown drains the process-wide write barrier. These unit tests mock
   // closeDatabase(), so reset that global explicitly to retain test isolation.
   beforeEach(async () => {
@@ -64,27 +63,41 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     appearanceSync = spyOn(appearanceSyncScheduler, "syncAppearanceForDevice").mockResolvedValue(
       undefined,
     );
-    // daemon.stop() lists active recordings before closing the DB. Without a fake
-    // repository that read reaches getDatabase(): the unit-test guard makes it
-    // throw instantly, but a caller-exported AUTOMOBILE_DB_DIR stands the guard
-    // down and the real file I/O outlives the FakeTimer-bounded cleanup stage.
-    await setVideoRecordingManagerDependencies({
-      videoRecorderService: { listActiveRecordingIds: () => [] } as never,
-      recordingRepository: new FakeVideoRecordingRepository() as never,
-      configRepository: {} as never,
-      highlightClient: {} as never,
-      timer: new FakeTimer(),
-      now: () => new Date(0),
-    });
+    // Every stage of daemon.stop() has a FakeTimer deadline, so no stage may await real I/O:
+    // the recording repository read, the database close, the log flush and the pid/socket
+    // file removal are all fakes here. (Without a fake repository that read reaches
+    // getDatabase(); a caller-exported AUTOMOBILE_DB_DIR stands the unit-test guard down and
+    // the real file I/O then outlives the FakeTimer-bounded cleanup stage.)
+    restoreShutdownIo = await fakeDaemonShutdownIo();
   });
 
   afterEach(() => {
-    resetVideoRecordingManagerDependencies();
+    restoreShutdownIo();
     appearanceSync.mockRestore();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }
     resetDbWriteBarrier();
+  });
+
+  test("no shutdown stage awaits real I/O: stop() finishes on microtasks alone, with no fake time passing", async () => {
+    const timer = new FakeTimer();
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      new FakeDeviceSessionRepository(),
+    );
+    const warnSpy = spyOn(logger, "warn");
+
+    try {
+      // Only microtasks run, so a stage waiting on a real file, socket or timer never finishes.
+      expect(await settlesOnMicrotasksAlone(daemon.stop())).toBe(true);
+      expect(timer.now()).toBe(0);
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   test("retried release keeps the device busy and unclaimable during backoff", async () => {
@@ -811,6 +824,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       events.push(`release:${sessionId}:${reason}`);
     });
     (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      liftSessionlessStrokesOn: () => {},
       quiesce: async () => {
         events.push("socket:quiesce");
       },
@@ -869,6 +883,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       (error: unknown) => error,
     );
     (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      liftSessionlessStrokesOn: () => {},
       quiesce: async () => {
         continueAcquisition.resolve();
         await Promise.resolve();
@@ -917,6 +932,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       events.push(`release:${sessionId}:${reason}`);
     });
     (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      liftSessionlessStrokesOn: () => {},
       quiesce: async () => {},
       drainSessionReleaseNotifications: async () => {
         events.push("socket:drain-releases");
@@ -1011,6 +1027,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       events.push(`release:${sessionId}:${reason}`);
     });
     (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      liftSessionlessStrokesOn: () => {},
       quiesce: async () => {},
       drainSessionReleaseNotifications: async () => {
         events.push("socket:drain-releases");
@@ -1085,6 +1102,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     });
     let ordinaryRelease: Promise<string | null> | undefined;
     (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+      liftSessionlessStrokesOn: () => {},
       quiesce: async () => {
         ordinaryRelease = sessionManager.releaseSession("upgraded-release", "explicit-release");
         await persistenceStarted.promise;

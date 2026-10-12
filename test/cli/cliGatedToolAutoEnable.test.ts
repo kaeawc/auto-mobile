@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import {
   runCliCommand,
@@ -70,6 +70,20 @@ describe("CLI transparently enables gated tools", () => {
       close: async (): Promise<void> => {},
     }));
   }
+
+  // CI's per-test time excludes only beforeAll: pay the first gated runCliCommand's one-time
+  // cost (tool registry, profile store, lock) here, not in the first timed test.
+  beforeAll(async () => {
+    const warmDir = isolateCliDataDir("cli-tool-selection-warm-");
+    try {
+      recordProxy([]);
+      await runCliCommand(["deleteDevice", "--deviceId", "emulator-5554"]);
+    } finally {
+      resetDaemonProxyFactoryForTesting();
+      resetCliToolSelectionProfileLockOptionsForTesting();
+      warmDir.restore();
+    }
+  });
 
   test("enables a gated tool (deleteDevice) before calling it, with no manual setToolEnabled", async () => {
     const calls: Array<{ name: string; params: unknown }> = [];

@@ -32,7 +32,7 @@ import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvi
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   isSessionlessDeviceRead,
@@ -68,6 +68,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
   let devices: FakeDeviceSessionManager;
+  let timer: FakeTimer;
+  let persistence: FakeDeviceSessionPersistence;
 
   const call = (name: string, args: Record<string, unknown>) =>
     ToolRegistry.getTool(name)!.handler(args);
@@ -129,8 +131,9 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       },
     });
 
-    const timer = new FakeTimer();
-    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    timer = new FakeTimer();
+    persistence = new FakeDeviceSessionPersistence();
+    sessionManager = new SessionManager(timer, persistence);
     sessionManager.stopCleanupTimer();
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [held, free]);
@@ -201,12 +204,27 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     expect(recorded).toEqual(["readProbe"]);
   });
 
-  test("a sessionless read on an unheld device keeps the normal readiness path", async () => {
+  test("a sessionless read on an unheld device runs required readiness without pinning", async () => {
     await call("readProbe", { platform: "android", deviceId: free.deviceId });
 
     expect(listed).toBe(0);
     expect(devices.getEnsureDeviceReadyCalls()).toBe(1);
+    expect(devices.getLastOptions()?.intent).toBe("read");
+    expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
     expect(audited).toEqual([{ name: "readProbe", deviceId: free.deviceId }]);
+  });
+
+  test("a sessionless control call on a free device uses control readiness and pins", async () => {
+    ToolRegistry.registerDeviceAware(
+      "controlProbe",
+      "Control probe",
+      z.object({}).passthrough(),
+      async () => ({ success: true }),
+    );
+    await call("controlProbe", { platform: "android", deviceId: free.deviceId });
+    expect(devices.getEnsureDeviceReadyCalls()).toBe(1);
+    expect(devices.getLastOptions()?.intent).toBeUndefined();
+    expect(devices.getSetCurrentDeviceCalls()).toEqual([free]);
   });
 
   // #10968: the IDE injects its observer session UUID into every call. That UUID is not a device
@@ -223,6 +241,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     await call("readProbe", { sessionUuid: "observer-session", deviceId: free.deviceId });
 
     expect(devices.getEnsureDeviceReadyCalls()).toBe(1);
+    expect(devices.getLastOptions()?.intent).toBe("read");
+    expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
     expect(audited).toEqual([{ name: "readProbe", deviceId: free.deviceId }]);
     expect(sessionManager.getSession("observer-session")).toBeNull();
     expect(sessionManager.getSessionForDevice(free.deviceId)).toBeNull();
@@ -275,6 +295,93 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
 
     expect((error as Error).message).toContain("observer-session");
     expect(audited).toEqual([]);
+  });
+
+  describe("a session whose row expired while the daemon was down (#11361)", () => {
+    const expired = "expired-while-down";
+
+    /** A row a previous daemon left behind, now past its deadline. */
+    async function seedExpiredRow(): Promise<void> {
+      await persistence.upsertActiveSession({
+        sessionUuid: expired,
+        deviceId: free.deviceId,
+        stableDeviceId: free.name,
+        platform: "android",
+        daemonSessionId: "dead-daemon",
+        createdAtMs: timer.now(),
+        lastUsedAtMs: timer.now(),
+        expiresAtMs: timer.now() + 1_000,
+        sessionTimeoutMs: 1_000,
+        heartbeatTimeoutMs: 1_000,
+        hasReceivedHeartbeat: true,
+      });
+      timer.advanceTime(1_001);
+    }
+
+    test("a read naming it is not refused: it runs sessionless, as a read of an unissued id does", async () => {
+      await seedExpiredRow();
+      await call("readProbe", { sessionUuid: expired, deviceId: held.deviceId });
+
+      expect(reads).toEqual([{ deviceId: held.deviceId, readPath: true, sessionUuid: undefined }]);
+      expectNoReadiness();
+      expect(sessionManager.getSession(expired)).toBeNull();
+    });
+
+    test("a control call naming it gets the typed terminal refusal with reason expired", async () => {
+      await seedExpiredRow();
+      ToolRegistry.registerDeviceAware(
+        "controlProbe",
+        "Control probe",
+        z.object({}).passthrough(),
+        async () => ({ success: true }),
+      );
+      const error = await outcome("controlProbe", { sessionUuid: expired });
+
+      expect(error).toBeInstanceOf(TerminalSessionError);
+      expect((error as TerminalSessionError).release).toMatchObject({
+        sessionId: expired,
+        releaseReason: "expired",
+        terminal: true,
+      });
+      expect(audited).toEqual([]);
+      expect(sessionManager.getSessionForDevice(free.deviceId)).toBeNull();
+    });
+  });
+
+  // #11361: a read that names a session past its idle deadline, still held by earlier work, is
+  // not admitted under the session. It must still read the device of the session it named.
+  describe("a late read while earlier work holds the named session (#11361)", () => {
+    const other = "other-session";
+
+    beforeEach(async () => {
+      await sessionManager.createSession(other, free.deviceId, "android");
+      sessionManager.setDeviceReadiness(other, "automationReady");
+      // Sessionless selection would settle on the other session's device.
+      devices.setCurrentDevice(free, "android");
+      sessionManager.setActiveSessionExecutionChecker((sessionId) => sessionId === agent);
+      const deadline = sessionManager
+        .getAllSessions()
+        .find((session) => session.sessionId === agent)!.expiresAt;
+      timer.setCurrentTime(deadline + 1);
+    });
+
+    test("the read returns the named session's device, sessionless and without readiness", async () => {
+      const readinessBefore = devices.getEnsureDeviceReadyCalls();
+      const deadline = sessionManager.getSession(agent)!.expiresAt;
+
+      // The read begins after the deadline, as MCP ingress stamps it.
+      await runWithToolSelectionContext(
+        { execution: { executionId: "late-read", startTime: timer.now() } },
+        () => call("readProbe", { sessionUuid: agent }),
+      );
+
+      expect(reads).toEqual([{ deviceId: held.deviceId, readPath: true, sessionUuid: undefined }]);
+      expect(devices.getEnsureDeviceReadyCalls()).toBe(readinessBefore);
+      expect(audited).toEqual([]);
+      // Nothing was bound, released or credited: the session still holds its device and deadline.
+      expect(sessionManager.getSessionForDevice(held.deviceId)).toBe(agent);
+      expect(sessionManager.getSession(agent)!.expiresAt).toBe(deadline);
+    });
   });
 
   // #11322 review: nested device-aware calls run under their outer call's execution. A nested read
@@ -473,6 +580,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
 
         expect(error).not.toBeInstanceOf(InputDeviceOwnedError);
         expect(audited).toEqual([{ name, deviceId: free.deviceId }]);
+        expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
         expect(listed).toBe(0);
       });
     }

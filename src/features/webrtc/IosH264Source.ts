@@ -35,6 +35,7 @@ import {
 import { ScreenCaptureHelperProvider } from "../screen-stream/ScreenCaptureHelperProvider";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { logger } from "../../utils/logger";
+import { readEnvPositiveInteger } from "../../utils/envNumbers";
 import {
   capToQualityPreset,
   QUALITY_PRESET_MAX_LONG_SIDE,
@@ -100,15 +101,13 @@ export const IOS_FIRST_FRAME_TIMEOUT_MS = 15_000;
 /** Env override for {@link IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS}. */
 export const IOS_SIMULATOR_WINDOW_TIMEOUT_ENV = "AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS";
 
-function resolveSimulatorWindowTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env[IOS_SIMULATOR_WINDOW_TIMEOUT_ENV];
-  if (raw !== undefined) {
-    const parsed = Number.parseInt(raw.trim(), 10);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
-  }
-  return 2_000;
+export function resolveSimulatorWindowTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  return readEnvPositiveInteger(
+    IOS_SIMULATOR_WINDOW_TIMEOUT_ENV,
+    undefined,
+    { fallback: 2_000 },
+    env,
+  );
 }
 
 /**

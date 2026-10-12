@@ -32,6 +32,7 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import type { BootedDevice } from "../../src/models";
@@ -51,6 +52,8 @@ let pool: DevicePool;
 let timer: FakeTimer;
 let previousAutolock: string | undefined;
 let originalRepository: unknown;
+let originalDeviceSessionManager: unknown;
+let deviceSessionManager: FakeDeviceSessionManager;
 let restorePipelineOverrides: (() => void) | undefined;
 const fixtures = new Map<string, McpTestFixture>();
 const proxies: DaemonMcpProxy[] = [];
@@ -58,6 +61,10 @@ let received: string[];
 let restoreSpies: Array<() => void> = [];
 
 beforeEach(async () => {
+  originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
+  deviceSessionManager = new FakeDeviceSessionManager();
+  deviceSessionManager.setConnectedDevices(devices);
+  Reflect.set(ToolRegistry, "deviceSessionManager", deviceSessionManager);
   previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
   process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
   db = new Kysely<Database>({
@@ -106,28 +113,32 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  for (const proxy of proxies.splice(0)) {
-    await proxy.close();
-  }
-  for (const fixture of fixtures.values()) {
-    await fixture.teardown();
-  }
-  fixtures.clear();
-  for (const restore of restoreSpies) {
-    restore();
-  }
-  restorePipelineOverrides?.();
-  restorePipelineOverrides = undefined;
-  PlatformDeviceManagerFactory.setInstance(null);
-  registryInternals().toolCallRepository = originalRepository;
-  ToolRegistry.clearTools();
-  DaemonState.getInstance().reset();
-  manager.stopCleanupTimer();
-  await db.destroy();
-  if (previousAutolock === undefined) {
-    delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
-  } else {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
+  try {
+    for (const proxy of proxies.splice(0)) {
+      await proxy.close();
+    }
+    for (const fixture of fixtures.values()) {
+      await fixture.teardown();
+    }
+    fixtures.clear();
+    for (const restore of restoreSpies) {
+      restore();
+    }
+    restorePipelineOverrides?.();
+    restorePipelineOverrides = undefined;
+    PlatformDeviceManagerFactory.setInstance(null);
+    registryInternals().toolCallRepository = originalRepository;
+    ToolRegistry.clearTools();
+    DaemonState.getInstance().reset();
+    manager.stopCleanupTimer();
+    await db.destroy();
+    if (previousAutolock === undefined) {
+      delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    } else {
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
+    }
+  } finally {
+    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
   }
 });
 
@@ -172,11 +183,23 @@ function registerTools(): void {
       .object({ __mcpSessionId: z.string().optional(), deviceId: z.string().optional() })
       .passthrough(),
     async (toolArgs) => {
-      const sessionUuid = await pool.autolockDevice(
-        toolArgs.deviceId ?? devices[0].deviceId,
-        "android",
-        toolArgs.__mcpSessionId,
-      );
+      const deviceId = toolArgs.deviceId ?? devices[0].deviceId;
+      // Autolock off mints an ordinary device session owned by the acquiring connection.
+      const sessionUuid =
+        (await pool.autolockDevice(deviceId, "android", toolArgs.__mcpSessionId)) ??
+        (await pool.bindOrReuseDeviceSession(
+          `session-${deviceId}`,
+          deviceId,
+          "android",
+          undefined,
+          undefined,
+          undefined,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          toolArgs.__mcpSessionId,
+        ));
       return {
         content: [
           {
@@ -203,6 +226,16 @@ function registerTools(): void {
     },
     { deviceReadiness: "booted" },
   );
+  ToolRegistry.registerDeviceAware(
+    "watchProbe",
+    "watchProbe",
+    z.object({ deviceId: z.string().optional(), sessionUuid: z.string().optional() }),
+    async (device) => {
+      received.push(device.deviceId);
+      return { content: [{ type: "text" as const, text: device.deviceId }] };
+    },
+    { deviceReadiness: "booted", deviceReadOnly: true },
+  );
 }
 
 /** One MCP connection: its own proxy and daemon socket session, sharing the daemon's pool. */
@@ -225,7 +258,11 @@ function connect(socket: UnixSocketServer, socketSessionId: string): DaemonMcpPr
       registerTools();
     }
     const forwarded = internals(socket).withSocketSessionAutolockKey(args, socketSessionId, 10000);
-    const result = await fixture.client.callTool({ name, arguments: forwarded });
+    // The first call pays one-time cold-start cost (~0.4 s locally, ~3.5-4.3 s on Windows CI,
+    // which sits on the fixture's 4 s default); the tests carry a 30 s timeout of their own.
+    const result = await fixture.client.callTool({ name, arguments: forwarded }, undefined, {
+      timeout: 20_000,
+    });
     internals(socket).recordBoundMcpClientKey(request, socketSessionId, route, true, result);
     return result;
   };
@@ -239,6 +276,7 @@ function connect(socket: UnixSocketServer, socketSessionId: string): DaemonMcpPr
     staticToolDefinitionsProvider: () => [
       ...getStaticToolDefinitions(),
       { name: "routingProbe", inputSchema: { properties: { device: {}, sessionUuid: {} } } },
+      { name: "watchProbe", inputSchema: { properties: { sessionUuid: {} } } },
     ],
   });
   proxies.push(proxy);
@@ -254,7 +292,7 @@ function newSocketServer(): UnixSocketServer {
   );
 }
 
-test("naming another connection's autolock session does not bind the caller's sessionless calls to it (#11235)", async () => {
+test("a read naming another connection's session watches it without binding the caller (#11235)", async () => {
   const socket = newSocketServer();
   const ownerProxy = connect(socket, "owner");
   const otherProxy = connect(socket, "other");
@@ -262,21 +300,24 @@ test("naming another connection's autolock session does not bind the caller's se
   const ownerSession = pool.resolveAutolockSessionForMcpSession("owner");
   expect(ownerSession).toBeDefined();
 
-  // Naming the UUID still reaches that session's device (the UUID is the capability) ...
-  const named = await otherProxy.callTool("routingProbe", {
-    sessionUuid: ownerSession,
-    keepScreenAwake: false,
-  });
+  // A read is never refused: it watches that session's device ...
+  const named = await otherProxy.callTool("watchProbe", { sessionUuid: ownerSession });
   expect(named.isError).toBeFalsy();
   expect(received).toEqual([devices[0].deviceId]);
   // ... but never moves ownership (#11188), and binds neither the daemon socket's route nor the
   // proxy: the daemon marks the session as another connection's.
-  expect(pool.isAutolockSessionOwnedByOtherConnection(ownerSession!, "other")).toBe(true);
+  expect(pool.isSessionOwnedByOtherConnection(ownerSession!, "other")).toBe(true);
   expect(foreignOwnedSessionUuidFromResult(named)).toBe(ownerSession);
   expect(internals(socket).boundMcpClientKeysBySocketSession.has("other")).toBe(false);
 
   // The other connection's next untargeted call must not be routed to the owner's device.
+  const scansBeforeUntargeted = deviceSessionManager.getDetectConnectedPlatformsCallCount();
   const untargeted = await otherProxy.callTool("routingProbe", { keepScreenAwake: false });
+  expect(deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(
+    scansBeforeUntargeted + 1,
+  );
+  expect(untargeted.isError).toBe(true);
+  expect(JSON.stringify(untargeted.content)).toContain("Multiple Android devices detected");
   const reachedOwnerDevice = !untargeted.isError && received.at(-1) === devices[0].deviceId;
   expect(reachedOwnerDevice).toBe(false);
   expect(pool.resolveAutolockSessionForMcpSession("owner")).toBe(ownerSession);
@@ -329,3 +370,96 @@ test("setActiveDevice moves the connection's untargeted calls to the selected de
   await proxy.callTool("routingProbe", { keepScreenAwake: false });
   expect(received.at(-1)).toBe(devices[0].deviceId);
 }, 30000);
+
+function sessionFromResult(result: { content?: unknown }): string {
+  const [first] = result.content as Array<{ text: string }>;
+  return JSON.parse(first.text).runtime.session.sessionUuid;
+}
+
+function refusalCode(result: { content?: unknown }): unknown {
+  const [first] = result.content as Array<{ text: string }>;
+  return JSON.parse(first.text).code;
+}
+
+for (const autolock of ["1", "0"]) {
+  const mode = autolock === "1" ? "autolock on" : "autolock off";
+
+  test(`a control call naming another connection's session is refused and binds nothing (#11344, ${mode})`, async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = autolock;
+    const socket = newSocketServer();
+    const ownerProxy = connect(socket, "owner");
+    const otherProxy = connect(socket, "other");
+    const ownerSession = sessionFromResult(await ownerProxy.callTool("getAndroid", {}));
+
+    const named = await otherProxy.callTool("routingProbe", {
+      sessionUuid: ownerSession,
+      keepScreenAwake: false,
+    });
+    expect(named.isError).toBe(true);
+    expect(refusalCode(named)).toBe("device_owned_by_other_session");
+    expect(received).toEqual([]);
+    expect(internals(socket).boundMcpClientKeysBySocketSession.has("other")).toBe(false);
+
+    const scansBeforeUntargeted = deviceSessionManager.getDetectConnectedPlatformsCallCount();
+    const untargeted = await otherProxy.callTool("routingProbe", { keepScreenAwake: false });
+    expect(deviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(
+      scansBeforeUntargeted + 1,
+    );
+    expect(untargeted.isError).toBe(true);
+    expect(JSON.stringify(untargeted.content)).toContain("Multiple Android devices detected");
+    const reachedOwnerDevice = !untargeted.isError && received.at(-1) === devices[0].deviceId;
+    expect(reachedOwnerDevice).toBe(false);
+  }, 30000);
+
+  test(`a thrown call naming another connection's session leaves the caller on its own device (#11344, ${mode})`, async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = autolock;
+    const socket = newSocketServer();
+    const ownerProxy = connect(socket, "owner");
+    const otherProxy = connect(socket, "other");
+    const ownerSession = sessionFromResult(await ownerProxy.callTool("getAndroid", {}));
+    await otherProxy.callTool("getAndroid", { deviceId: devices[1].deviceId });
+
+    await expect(
+      otherProxy.callTool("routingProbe", { sessionUuid: ownerSession, keepScreenAwake: "no" }),
+    ).rejects.toThrow();
+
+    const untargeted = await otherProxy.callTool("routingProbe", { keepScreenAwake: false });
+    expect(untargeted.isError).toBeFalsy();
+    expect(received).toEqual([devices[1].deviceId]);
+  }, 30000);
+
+  test(`an explicit sessionUuid targets one call and leaves the connection's default alone (#11347, ${mode})`, async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = autolock;
+    const socket = newSocketServer();
+    const proxy = connect(socket, "client");
+    const first = sessionFromResult(
+      await proxy.callTool("getAndroid", { deviceId: devices[0].deviceId }),
+    );
+    const second = sessionFromResult(
+      await proxy.callTool("getAndroid", { deviceId: devices[1].deviceId }),
+    );
+    const selected = await proxy.callTool("setActiveDevice", { deviceId: devices[0].deviceId });
+    expect(selected.isError).toBeFalsy();
+    const socketRoute = () =>
+      internals(socket).boundMcpClientKeysBySocketSession.get("client")?.sessionUuid;
+
+    // The named session takes that one call ...
+    await proxy.callTool("routingProbe", { sessionUuid: second, keepScreenAwake: false });
+    expect(received).toEqual([devices[1].deviceId]);
+    expect(socketRoute()).not.toBe(second);
+    // ... and the untargeted call after it still runs on the selected device, in the proxy
+    // (the session it forwards), the daemon socket (its route) and the daemon (the device).
+    await proxy.callTool("routingProbe", { keepScreenAwake: false });
+    expect(received).toEqual([devices[1].deviceId, devices[0].deviceId]);
+    expect(socketRoute()).toBe(first);
+
+    // Once the socket has a route, naming the other session again does not move it either.
+    await proxy.callTool("routingProbe", { sessionUuid: second, keepScreenAwake: false });
+    expect(socketRoute()).toBe(first);
+    await proxy.callTool("routingProbe", { keepScreenAwake: false });
+    expect(received.at(-1)).toBe(devices[0].deviceId);
+    if (autolock === "1") {
+      expect(pool.resolveAutolockSessionForMcpSession("client")).toBe(first);
+    }
+  }, 30000);
+}

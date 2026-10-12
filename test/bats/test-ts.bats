@@ -1,5 +1,9 @@
 #!/usr/bin/env bats
-# bats file_tags=serial
+# bats file_tags=parallel-within-file
+# Hermetic: every test relocates the shard scratch tree into BATS_TEST_TMPDIR
+# (AUTOMOBILE_TEST_TS_SCRATCH_DIR) and stubs bun/find, so nothing is written to
+# the real tree and this slowest file leads the cross-file parallel pass instead
+# of occupying the serial pass alone.
 
 SCRIPT="scripts/test-ts.sh"
 TIMING_SCRIPT="scripts/validate-bun-test-timings.sh"
@@ -56,6 +60,9 @@ setup() {
   # scripts/test-ts.sh resolves ROOT with pwd -P; a checkout reached through a
   # symlink (macOS /tmp -> /private/tmp) makes $PWD differ from what it prints.
   ROOT_PHYS="$(pwd -P)"
+  SHARD_SCRATCH="$BATS_TEST_TMPDIR/scratch"
+  export AUTOMOBILE_TEST_TS_SCRATCH_DIR="$SHARD_SCRATCH"
+  export AUTOMOBILE_TEST_TS_COVERAGE_DIR="$BATS_TEST_TMPDIR/coverage"
   # The lane derives its per-test timeout and worker count from the runner's
   # OS, so a macOS CI runner (RUNNER_OS=macOS: --timeout 20000) must not leak
   # into stubbed invocations; tests that need an OS set RUNNER_OS themselves.
@@ -135,6 +142,11 @@ if [[ "$1" == */scripts/lib/runner-calibration.ts ]]; then
     fi
     if [[ -n "${STUB_PROBE_EXIT:-}" ]]; then exit "$STUB_PROBE_EXIT"; fi
     printf '%s\t%s\t25\n' "$4" "${STUB_PROBE_MS:-10}" >> "$3"
+    exit 0
+  fi
+  if [[ "$2" == measure ]]; then
+    # The timing gate's per-recheck probe: a quiet runner unless a test injects one.
+    printf '%s\n' "${STUB_MEASURE_SLOWDOWN:-1.00}"
     exit 0
   fi
   exec "$REAL_BUN" "$@"
@@ -697,7 +709,7 @@ bun_test_invocations() {
   [[ "$output" == *"test-ts: unit shard 1/1 wall="*"s status=0 attempts=2"* ]]
   [[ "$output" == *"test-ts: unit shards total wall="*"s status=0 retried=1"* ]]
   [[ "$output" == *"==> TypeScript unit shard 1/1 (attempt 1 of 2, retried)"* ]]
-  [ -f scratch/test-ts-unit-shards/shard-0.attempt-1.log ]
+  [ -f "$SHARD_SCRATCH/test-ts-unit-shards/shard-0.attempt-1.log" ]
   [ -s "$report_dir/shard-0.xml" ]
 }
 
@@ -855,9 +867,9 @@ reset_completion_order_hook() {
   [[ "$output" == *"test-ts: unit shard 1/3 wall="*"s status=0"* ]]
   [[ "$output" == *"test-ts: unit shard 3/3 wall="*"s status=0 attempts=2"* ]]
   [[ "$output" == *"test-ts: unit shards total wall="*"s status=0 retried=1"* ]]
-  [ -f scratch/test-ts-unit-shards/shard-2.attempt-1.log ]
-  [ -s scratch/test-ts-unit-shards/shard-0.wall ]
-  [ -s scratch/test-ts-unit-shards/shard-2.wall ]
+  [ -f "$SHARD_SCRATCH/test-ts-unit-shards/shard-2.attempt-1.log" ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/shard-0.wall" ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/shard-2.wall" ]
 }
 
 @test "completion-order reaping judges the lane cap at each shard's own reap time (#10644)" {
@@ -951,7 +963,7 @@ unit shard 0 attempt 2 end|$report_dir/calibration-unit-shard-0.tsv" ]
   run_retry_lane STUB_PROBE_RECORD="$probes" AUTOMOBILE_RUNNER_CALIBRATION=0
   [ "$status" -eq 0 ]
   [ ! -e "$probes" ]
-  [ ! -e scratch/test-ts-unit-shards/calibration-unit-shard-0.tsv ]
+  [ ! -e "$SHARD_SCRATCH/test-ts-unit-shards/calibration-unit-shard-0.tsv" ]
 
   run_retry_lane STUB_PROBE_EXIT=3
   [ "$status" -eq 0 ]
@@ -979,8 +991,8 @@ EOF
     STUB_SLOW_SHARD_LABEL="unit shard 0" STUB_SLOW_SHARD_SECONDS=2 \
     bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
-  [ -s scratch/test-ts-unit-shards/shard-0.wall ]
-  [ -s scratch/test-ts-unit-shards/shard-1.wall ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/shard-0.wall" ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/shard-1.wall" ]
   slow="$(sed -nE 's/^test-ts: unit shard 1\/2 wall=([0-9]+)s status=0$/\1/p' <<< "$output")"
   fast="$(sed -nE 's/^test-ts: unit shard 2\/2 wall=([0-9]+)s status=0$/\1/p' <<< "$output")"
   [ "$slow" -ge 2 ]
@@ -1034,7 +1046,7 @@ EOF
   [ "$status" -eq 0 ]
   [ -s "$report_dir/changed-shard-1.xml" ]
   [ -s "$report_dir/changed-shard-2.xml" ]
-  [ -f scratch/test-ts-changed-shards/shard-0.log ]
+  [ -f "$SHARD_SCRATCH/test-ts-changed-shards/shard-0.log" ]
   grep -q -- '--changed=origin/main --shard=1/2' "$BUN_ARGS_FILE"
   [ "$(grep -c '^180$' "$wall_file")" -eq 2 ]
 }
@@ -1246,8 +1258,8 @@ EOF
 }
 
 @test "classifies a symlinked test file by its resolved target" {
-  link="test/.lane-classification-${BATS_TEST_NUMBER}.test.ts"
-  ln -s "stress/memory-leak.stress.test.ts" "$link"
+  link="$BATS_TEST_TMPDIR/lane-classification.test.ts"
+  ln -s "$ROOT_PHYS/test/stress/memory-leak.stress.test.ts" "$link"
   run_lane unit "$link"
   rm -f "$link"
   [ "$status" -eq 2 ]
@@ -1364,7 +1376,7 @@ EOF
     STUB_BUN_SLEEP_SECONDS=5 AUTOMOBILE_UNIT_SHARD_RETRIES=0 \
     AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
-  [ -s "scratch/test-ts-unit-shards/watchdog-shard-0.txt" ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/watchdog-shard-0.txt" ]
   [[ "$output" == *"TIMEOUT: unit shard 0 exceeded its wall-clock budget"* ]]
 }
 
@@ -1539,6 +1551,122 @@ EOF
   [ "$(cat "$BATS_TEST_TMPDIR/timings.recheck.d/verdict.txt")" -eq 0 ]
   grep -Fxq 'Recheck cleared suite.slow: configured median guaranteed <= 100ms after 2 isolated runs (early stop: majority under budget; first sample 200.00ms).' \
     "$BATS_TEST_TMPDIR/timings.recheck.d/summary.txt"
+}
+
+# Contention-aware recheck: the probe is injected through
+# BUN_TEST_TIMING_PROBE_COMMAND, a script that replays PROBE_SEQ (one slowdown
+# per call, two calls per isolated attempt) and then reports a quiet 1.00.
+install_fake_probe() {
+  PROBE_SEQ="$1"
+  PROBE_INDEX="$BATS_TEST_TMPDIR/probe-index"
+  : > "$PROBE_INDEX"
+  cat > "$BATS_TEST_TMPDIR/fake-probe.sh" <<'EOF'
+#!/usr/bin/env bash
+index="$(cat "$PROBE_INDEX")"
+index="${index:-0}"
+read -r -a values <<< "$PROBE_SEQ"
+printf '%s\n' "$((index + 1))" > "$PROBE_INDEX"
+printf '%s\n' "${values[$index]:-1.00}"
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/fake-probe.sh"
+  export PROBE_SEQ PROBE_INDEX
+  export BUN_TEST_TIMING_PROBE_COMMAND="$BATS_TEST_TMPDIR/fake-probe.sh"
+}
+
+@test "timing gate still fails a genuinely slow test on a quiet runner and reports the probe" {
+  seed_outlier_report
+  install_fake_probe ""
+  run_timing_gate_with_recheck_times "0.150 0.150 0.150"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Test exceeded 100ms: suite.slow (median 150.00ms of 3 isolated runs)"* ]]
+  [[ "$output" == *"runner probe slowdown 1.00x after 1 attempt(s) (quiet)"* ]]
+  grep -Fq -- '- Runner probe during re-runs: 1.00x, quiet' "$report_dir/unit-timing-budget-summary.md"
+}
+
+@test "timing gate retries a contended recheck run and keeps the quiet attempt" {
+  seed_outlier_report
+  # Attempt 1 of run 1 is contended and slow (150ms); its retry is quiet and 20ms.
+  install_fake_probe "3.00 3.00"
+  run_timing_gate_with_recheck_times "0.150 0.020 0.020 0.020"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"runner contended (probe 3.00x before, 3.00x after; limit 1.5x); attempt 1 of 3"* ]]
+  [[ "$output" == *"Recheck run 1/3 of "*"runner probe slowdown 1.00x after 2 attempt(s) (quiet)"* ]]
+  [[ "$output" == *"Recheck cleared suite.slow"* ]]
+}
+
+@test "timing gate passes a 20ms test even when every probe reads contended" {
+  seed_outlier_report
+  install_fake_probe "4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00"
+  run_timing_gate_with_recheck_times "0.020 0.020 0.020 0.020 0.020 0.020 0.020 0.020 0.020"
+  [ "$status" -eq 0 ]
+  # An under-budget sample is conclusive however contended the runner was: no retry.
+  [[ "$output" == *"runner probe slowdown 4.00x after 1 attempt(s) (contended)"* ]]
+  [[ "$output" != *"attempt 1 of"* ]]
+  grep -Fq -- '- Runner probe during re-runs: 4.00x, contended' "$report_dir/unit-timing-budget-summary.md"
+}
+
+@test "timing gate keeps the least-contended attempt, not the first or the fastest" {
+  seed_outlier_report
+  # Run 1 attempts: 130ms at 3.0x, 110ms at 2.0x (least contended), 90ms at 4.0x
+  # (fastest, most contended). Runs 2 and 3 are quiet: 110ms and 20ms.
+  install_fake_probe "3.00 3.00 2.00 2.00 4.00 4.00"
+  run_timing_gate_with_recheck_times "0.130 0.110 0.090 0.110 0.020"
+  [ "$status" -eq 1 ]
+  grep -Fq 're-run samples: 110.00ms / 110.00ms / 20.00ms | median: 110.00ms' \
+    "$BATS_TEST_TMPDIR/timings.recheck.d/failures.txt"
+  [[ "$output" == *"runner probe slowdown 2.00x after 3 attempt(s) (contended)"* ]]
+}
+
+@test "timing gate retry is what clears a contended slow first attempt" {
+  seed_outlier_report
+  # Runs 1 and 2 are each 150ms on a contended first attempt and 20ms on the
+  # quiet retry. Without the retry the median would be 150ms and fail.
+  install_fake_probe "3.00 3.00 1.00 1.00 3.00 3.00 1.00 1.00"
+  run_timing_gate_with_recheck_times "0.150 0.020 0.150 0.020 0.020"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Recheck cleared suite.slow"* ]]
+}
+
+@test "timing gate spends no contention retries when the recheck budget is nearly exhausted" {
+  seed_outlier_report
+  install_fake_probe "4.00 4.00 4.00 4.00 4.00 4.00"
+  BUN_TEST_TIMING_FAKE_ELAPSED_SECONDS=599 run_timing_gate_with_recheck_times "0.150 0.150 0.150"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no contention retry"* ]]
+  [[ "$output" == *"runner probe slowdown 4.00x after 1 attempt(s) (contended)"* ]]
+  # Still verified: a median verdict, not "could not verify".
+  [[ "$output" == *"Test exceeded 100ms: suite.slow (median 150.00ms of 3 isolated runs)"* ]]
+  [[ "$output" != *"Could not verify"* ]]
+}
+
+@test "timing gate does not forgive a 150ms test because the probe reads contended" {
+  seed_outlier_report
+  install_fake_probe "4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00 4.00"
+  run_timing_gate_with_recheck_times "0.150 0.150 0.150 0.150 0.150 0.150 0.150 0.150 0.150"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Test exceeded 100ms: suite.slow (median 150.00ms of 3 isolated runs)"* ]]
+  [[ "$output" == *"(contended)"* ]]
+}
+
+@test "timing gate bounds contention retries with BUN_TEST_TIMING_CONTENTION_RETRIES=0" {
+  seed_outlier_report
+  install_fake_probe "4.00 4.00 4.00 4.00 4.00 4.00"
+  BUN_TEST_TIMING_CONTENTION_RETRIES=0 run_timing_gate_with_recheck_times "0.150 0.150 0.150"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"runner probe slowdown 4.00x after 1 attempt(s) (contended)"* ]]
+  [[ "$output" == *"attempt 1 of 1."* ]]
+  [[ "$output" != *"attempt 2 of"* ]]
+}
+
+@test "timing gate marks a shard with many over-budget first samples as contended" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  [[ "$output" != *"Runner contended"* ]]
+  rm -f "$STUB_RECHECK_INDEX"
+  BUN_TEST_TIMING_CONTENDED_SHARD_MIN=1 run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Runner contended"*"shard-0: 1 over-budget first samples"* ]]
+  grep -Fq 'Runner contended' "$report_dir/unit-timing-budget-summary.md"
 }
 
 @test "timing gate fails a breaching median even when stdout writes fail" {
@@ -2228,6 +2356,8 @@ printf '%s\n' "$*" > "$STUB_TIMEOUT_ARGS"
 exit 124
 EOF
   chmod +x "$STUB_BIN/timeout"
+  # The stubbed timeout would otherwise also wrap the real probe invocation.
+  install_fake_probe ""
   run env -u AUTOMOBILE_FORCE_PORTABLE_TIMEOUT PATH="$STUB_BIN:$PATH" \
     STUB_TIMEOUT_ARGS="$BATS_TEST_TMPDIR/timeout-args" \
     BUN_TEST_TIMING_BASE_REF=origin/main BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
@@ -2290,7 +2420,7 @@ EOF
     [ "$(sed -n "$((chunk + 1))p" "$BUN_ARGS_FILE")" = "$expected" ]
     [ -s "$reports/shard-0-chunk-$chunk.xml" ]
   done
-  timing="$ROOT_PHYS/scratch/test-ts-unit-shards/timing-shard-0.ndjson"
+  timing="$SHARD_SCRATCH/test-ts-unit-shards/timing-shard-0.ndjson"
   [ "$(grep -Fxc "true|$timing|$timing" "$record")" -eq 3 ]
   [ "$(wc -l < "$timing")" -eq 12 ]
   for ((i = 0; i < 12; i += 1)); do
@@ -2323,7 +2453,7 @@ EOF
   [ "$status" -eq 1 ]
   [ "$(wc -l < "$record")" -eq 3 ]
   [[ "$output" == *"FAIL: unit shard 0 exited with status 7"* ]]
-  [ "$(wc -l < scratch/test-ts-unit-shards/timing-shard-0.ndjson)" -eq 12 ]
+  [ "$(wc -l < "$SHARD_SCRATCH/test-ts-unit-shards/timing-shard-0.ndjson")" -eq 12 ]
 }
 
 @test "one watchdog bounds the complete chunk sequence rather than each fresh invocation" {
@@ -2345,7 +2475,7 @@ EOF
   started=0
   if [ -e "$record" ]; then started="$(wc -l < "$record" | tr -d ' ')"; fi
   [ "$started" -lt 3 ]
-  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/watchdog-shard-0.txt" ]
 }
 
 @test "a chunk deadline spent before the shard launches still leaves a non-empty watchdog snapshot (#11019)" {
@@ -2362,8 +2492,8 @@ EOF
     AUTOMOBILE_UNIT_TEST_CHUNK_FILES=5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
-  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
-  grep -Fq "deadline" scratch/test-ts-unit-shards/watchdog-shard-0.txt
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/watchdog-shard-0.txt" ]
+  grep -Fq "deadline" "$SHARD_SCRATCH/test-ts-unit-shards/watchdog-shard-0.txt"
 }
 
 @test "a retried watchdog timeout keeps attempt 1's snapshot and writes a fresh non-empty one (#11019)" {
@@ -2372,9 +2502,9 @@ EOF
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
   [[ "$output" == *"RETRY: unit shard 0"* ]]
-  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.attempt-1.txt ]
-  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
-  [ -z "$(ls scratch/test-ts-unit-shards | grep -F '.tmp.' || true)" ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/watchdog-shard-0.attempt-1.txt" ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/watchdog-shard-0.txt" ]
+  [ -z "$(ls "$SHARD_SCRATCH/test-ts-unit-shards" | grep -F '.tmp.' || true)" ]
 }
 
 @test "chunk size rejects invalid values just like worker count before invoking Bun" {
@@ -2484,7 +2614,7 @@ fixture_list() {
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
   [ "$(grep -c -- '--isolate' "$BUN_ARGS_FILE")" -le 1 ]
-  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/watchdog-shard-0.txt" ]
 }
 
 @test "isolated chunk size splits a shard's isolated group into sequential processes with distinct reports" {
@@ -2502,7 +2632,7 @@ fixture_list() {
   [ "$(sed -n 3p "$BUN_ARGS_FILE")" = "$flags-2.xml$(fixture_list 10 11)" ]
   [ ! -e "$reports/shard-0.xml" ]
   # All chunks share the shard's timing log and watchdog environment.
-  timing="$ROOT_PHYS/scratch/test-ts-unit-shards/timing-shard-0.ndjson"
+  timing="$SHARD_SCRATCH/test-ts-unit-shards/timing-shard-0.ndjson"
   [ "$(grep -Fxc "true|$timing|$timing" "$record")" -eq 3 ]
   # The timing gate globs *.xml, so every chunk report is read.
   run "$REAL_BUN" run scripts/lib/junit-testcase-timings.ts "$reports"/*.xml

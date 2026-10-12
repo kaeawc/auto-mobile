@@ -96,6 +96,46 @@ describe("PrototypeEventCoordinator", () => {
     });
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
+  test("an appearance_changed event resolves a waiter filtering on its kind", async () => {
+    coordinator.show(scope, "panel", client);
+    const waiting = awaitEvent({ kind: "appearance_changed" });
+    client.emitPrototypeEvent(event(1));
+    const changed = {
+      ...event(2, "panel", "appearance_changed"),
+      name: null,
+      payload: { mode: "dark", source: "system" },
+    };
+    client.emitPrototypeEvent(changed);
+    expect((await waiting).event).toMatchObject({
+      sequence: 2,
+      kind: "appearance_changed",
+      name: null,
+      payload: { mode: "dark", source: "system" },
+    });
+    // The unmatched tap stays buffered for the next wait.
+    expect((await awaitEvent()).event?.sequence).toBe(1);
+  });
+  test("an event of an unknown kind advances the sequence without telemetry, status or delivery", async () => {
+    const recorded: number[] = [];
+    coordinator = new PrototypeEventCoordinator(timer, store, {
+      recordPrototypeEvent: (_origin, pushed) => recorded.push(pushed.sequence),
+    });
+    store.record(scope, "show", { id: "panel" }, { success: true });
+    coordinator.show(scope, "panel", client);
+    const waiting = awaitEvent({ timeoutMs: 20 });
+    client.emitPrototypeEvent({ ...event(1, "panel", "unknown"), state: {}, payload: null });
+    expect(coordinator.counts(scope, "panel")).toEqual({
+      pendingCount: 0,
+      droppedCount: 0,
+      lastSequence: 1,
+    });
+    expect(recorded).toEqual([]);
+    expect(store.status(scope).prototypes[0]).not.toHaveProperty("lastKnown");
+    // The waiter is still waiting: the next known event is the one it gets.
+    client.emitPrototypeEvent(event(2));
+    expect((await waiting).event?.sequence).toBe(2);
+    expect(recorded).toEqual([2]);
+  });
   test("event during wait resolves and removes its timeout", async () => {
     const waiting = awaitEvent();
     expect(timer.getPendingTimeouts()).toEqual([DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS]);

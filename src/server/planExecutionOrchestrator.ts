@@ -26,11 +26,24 @@ import { normalizePlanDevices } from "../utils/plan/PlanDevices";
 import { decodePlanYamlContent } from "../utils/plan/planYaml";
 
 type NormalizedPlanDevices = ReturnType<typeof normalizePlanDevices>;
-import { buildDeviceLabelMap, registerDeviceLabelMap } from "./deviceLabelMapping";
+import {
+  buildDeviceLabelMap,
+  planLifecycleSessionUuid,
+  registerDeviceLabelMap,
+} from "./deviceLabelMapping";
 import { importPlanFromYaml, executePlan } from "../utils/planUtils";
 import { DaemonState } from "../daemon/daemonState";
+import { DAEMON_SHUTTING_DOWN_ERROR_CODE, INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
+import {
+  managedConnectionPlanLabelRefusal,
+  slotDeviceFailsLabelCriteria,
+} from "../daemon/managedSlots/managedConnectionScope";
+import { DeviceOutsideManagedSlotsError } from "../daemon/managedSlots/managedSlotRefusal";
 import type { DevicePool } from "../daemon/devicePool";
-import type { SessionManager } from "../daemon/sessionManager";
+import { PLAN_LABEL_SESSION_SOURCE, type SessionManager } from "../daemon/sessionManager";
+import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
+import { SESSION_OWNERSHIP_LOST_CODE } from "../daemon/sessionReleasedDuringCall";
+import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import {
   AndroidSegmentedPlanVideoSession,
   ROTATION_STOP_TIMEOUT_MS,
@@ -54,6 +67,7 @@ import type { Plan } from "../models/Plan";
 import { isDeviceLostError } from "./deviceLossOutcome";
 import { errorMessage } from "../utils/describeUnknownError";
 import { typedRefusalFields } from "../models/typedRefusalFields";
+import { isTypedToolRefusal, shapeToolCallError } from "./shapeToolCallError";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
@@ -234,11 +248,106 @@ function planToolResultsTruncatedField(truncated: PlanToolResultsTruncation | un
 /**
  * The typed refusal fields of an error that failed the plan, so a typed retryable refusal (e.g.
  * `capacity_exhausted` from device allocation) is not flattened into the `error` string (#11236).
+ * A refusal with its own wire payload also keeps that evidence (`deviceLabel`, `reason`,
+ * `scopeKey`, ...), so a client can branch on fields instead of parsing the message (#11421).
  */
 export function planRefusalFields(
   error: unknown,
-): Pick<ExecutePlanResult, "code" | "retryable" | "retryAfterMs" | "nextAction" | "details"> {
-  return typedRefusalFields(error) ?? {};
+): Pick<ExecutePlanResult, "code" | "retryable" | "retryAfterMs" | "nextAction" | "details"> &
+  Record<string, unknown> {
+  const fields = typedRefusalFields(error);
+  return fields ? { ...refusalPayloadEvidence(error, fields.details ?? {}), ...fields } : {};
+}
+
+/**
+ * The typed outcome of a plan that daemon shutdown cut (#11572): the shutdown aborts the plan's
+ * call and releases its sessions, and the plan still answers with its own result, so that result
+ * carries `daemon_shutting_down` and `retryable: true` like every call the shutdown answers itself.
+ * The caller runs the plan again against the restarted daemon; its derived label sessions are
+ * minted by that run. Steps may already have run, as `executedSteps` reports.
+ */
+export function planShutdownInterruptionFields(
+  signal: AbortSignal | undefined,
+  planSucceeded = false,
+): Pick<ExecutePlanResult, "code" | "retryable"> {
+  const daemonState = DaemonState.getInstance();
+  if (
+    planSucceeded ||
+    !signal?.aborted ||
+    !daemonState.isInitialized() ||
+    daemonState.getSessionManager().isAcceptingSessionCreations()
+  ) {
+    return {};
+  }
+  return { code: DAEMON_SHUTTING_DOWN_ERROR_CODE, retryable: true };
+}
+
+/**
+ * The typed outcome of a failed plan whose base session ended while it ran (#11640): the base's
+ * end ends its labels, so the plan's next step is refused with the base's terminal release and
+ * the result says so in fields, `session_ownership_lost` with the base's release reason, instead
+ * of leaving the caller to parse the failed step's message. A plan's steps on a label do not keep
+ * its base alive; the plan's own call does, until that call's request deadline.
+ */
+export function planBaseEndFields(
+  baseSessionUuid: string | undefined,
+  planSucceeded: boolean,
+  failedStep?: PlanExecutionResult["failedStep"],
+): Pick<ExecutePlanResult, "code" | "retryable" | "nextAction" | "details"> {
+  const daemonState = DaemonState.getInstance();
+  if (planSucceeded || !baseSessionUuid || !failedStep || !daemonState.isInitialized()) {
+    return {};
+  }
+  const manager = daemonState.getSessionManager();
+  const ended = manager.peekTerminalAnswerForEndedSession(baseSessionUuid);
+  if (!ended) {
+    return {};
+  }
+  // The executor retains only the failed step's string, not its thrown error. Match the exact
+  // terminal answer, never infer causality from the base merely having expired (#11640).
+  const labelEnd = failedStep.device
+    ? manager.peekTerminalAnswerForEndedSession(`${baseSessionUuid}:${failedStep.device}`)
+    : undefined;
+  if (
+    failedStep.error !== String(ended) &&
+    !(
+      labelEnd?.release.releaseReason === ended.release.releaseReason &&
+      failedStep.error === String(labelEnd)
+    )
+  ) {
+    return {};
+  }
+  return {
+    code: SESSION_OWNERSHIP_LOST_CODE,
+    retryable: false,
+    nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
+    details: { sessionUuid: ended.sessionUuid, reason: ended.release.releaseReason },
+  };
+}
+
+/**
+ * The evidence a thrown `tools/call` gives the same refusal, read from `shapeToolCallError`'s
+ * payload so the two surfaces cannot drift. `success` and `error` are the plan result's own, and
+ * fields `details` already carries are not repeated beside it.
+ */
+function refusalPayloadEvidence(
+  error: unknown,
+  details: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!isTypedToolRefusal(error)) {
+    return {};
+  }
+  const wire: unknown = JSON.parse(
+    shapeToolCallError(error, { toolName: "executePlan", source: "MCP" }).content[0].text,
+  );
+  if (typeof wire !== "object" || wire === null || typeof Reflect.get(wire, "code") !== "string") {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(wire).filter(
+      ([key]) => key !== "success" && key !== "error" && !(key in details),
+    ),
+  );
 }
 
 /** The deviceFailures response field, omitted when no device failures were reported. */
@@ -464,6 +573,8 @@ export class PlanExecutionOrchestrator {
         totalSteps: result.totalSteps,
         failedStep: result.failedStep,
         error: result.failedStep ? result.failedStep.error : undefined,
+        ...planBaseEndFields(this.request.sessionUuid, result.success, result.failedStep),
+        ...planShutdownInterruptionFields(this.signal, result.success),
         platform: this.device.platform,
         deviceId: this.device.deviceId,
         deviceMapping,
@@ -507,6 +618,7 @@ export class PlanExecutionOrchestrator {
         totalSteps: 0,
         error: `${error}`,
         ...planRefusalFields(error),
+        ...planShutdownInterruptionFields(this.signal),
         platform: this.device.platform,
         deviceId: this.device.deviceId,
         ...healthSummaryField(failureHealth),
@@ -633,6 +745,19 @@ export class PlanExecutionOrchestrator {
       this.request.device,
     );
     const sessionIds = Object.values(labelToSessionMap);
+    // A managed connection is refused here, before anything is published, allocated or booted.
+    const slotDevices = this.managedSlotLabelDevices(
+      sessionUuid,
+      labelToSessionMap,
+      normalized,
+      sessionManager,
+    );
+    this.refuseLabelNamingSessionOfItsOwn(
+      sessionUuid,
+      labelToSessionMap,
+      sessionManager,
+      slotDevices,
+    );
 
     // The plan execution is tracked on its base session. Publish its derived
     // label-session ownership before the allocator's first await so heartbeat
@@ -654,15 +779,26 @@ export class PlanExecutionOrchestrator {
       throw error;
     };
 
-    const allocation = Promise.resolve().then(() =>
-      this.requestDeviceAllocation(
-        devicePool,
-        normalized,
-        effectiveLabels,
-        labelToSessionMap,
-        sessionIds,
-      ),
-    );
+    // A derived label session lives only as long as its plan run (#11572): this run's allocation
+    // may mint each label again, however the previous run's label session ended. A managed slot
+    // serves its labels with live slot sessions and mints nothing.
+    const allocation = Promise.resolve().then(() => {
+      if (slotDevices) {
+        return slotDevices;
+      }
+      const closeLabelMints = sessionManager.openPlanLabelMints(sessionUuid, labelToSessionMap);
+      return Promise.resolve()
+        .then(() =>
+          this.requestDeviceAllocation(
+            devicePool,
+            normalized,
+            effectiveLabels,
+            labelToSessionMap,
+            sessionIds,
+          ),
+        )
+        .finally(closeLabelMints);
+    });
 
     const sessionToDeviceMap = await allocation.catch((error) => {
       return restorePreviousDeviceLabels(error);
@@ -690,6 +826,93 @@ export class PlanExecutionOrchestrator {
     );
 
     return deviceMapping;
+  }
+
+  /**
+   * A plan never takes a session it did not mint as one of its labels (#11602). A live
+   * `${base}:${label}` session that no plan run minted is a session of its own, created under a
+   * caller-chosen id before this base existed: publishing it as a label would hand its device to
+   * the base's owner and refuse its own connection. Refused typed before anything is published
+   * or allocated; the plan runs once that session is released or the label is renamed.
+   */
+  private refuseLabelNamingSessionOfItsOwn(
+    sessionUuid: string,
+    labelToSessionMap: Record<string, string>,
+    sessionManager: SessionManager,
+    slotDevices: Map<string, string> | undefined,
+  ): void {
+    // A managed slot serves its labels with its own live slot sessions and mints nothing.
+    if (slotDevices) {
+      return;
+    }
+    for (const [label, labelSessionUuid] of Object.entries(labelToSessionMap)) {
+      const taken =
+        labelSessionUuid === sessionUuid ? null : sessionManager.peekSession(labelSessionUuid);
+      if (taken && taken.persistenceMetadata?.source !== PLAN_LABEL_SESSION_SOURCE) {
+        throw new InputDeviceOwnedError(
+          "executePlan",
+          taken.assignedDevice,
+          sessionUuid,
+          undefined,
+          `executePlan refused: device label '${label}' would be session ${labelSessionUuid}, ` +
+            "which is already a live session that no plan run created. " +
+            "Release that session or rename the label, then run the plan again.",
+        );
+      }
+    }
+  }
+
+  /**
+   * Managed slots (#11397): a managed connection controls only its own slot devices, so its plan
+   * labels are never handed to the generic pool allocator, which lends generic devices and can boot
+   * more. Returns the session -> device map for labels its own slot sessions serve, throws
+   * `device_outside_managed_slots` for a label they cannot serve, and returns undefined for a
+   * generic connection. A plan step carries no socket session id, so the connection is also
+   * recognized by the slot session the plan runs on.
+   */
+  private managedSlotLabelDevices(
+    sessionUuid: string,
+    labelToSessionMap: Record<string, string>,
+    normalized: NormalizedPlanDevices,
+    sessionManager: SessionManager,
+  ): Map<string, string> | undefined {
+    const scopes = DaemonState.getInstance().getManagedConnectionScopes();
+    const connectionId: unknown = Reflect.get(this.request, INTERNAL_MCP_SESSION_PARAM);
+    const binding =
+      scopes.get(typeof connectionId === "string" ? connectionId : undefined) ??
+      scopes.forSlotSession(planLifecycleSessionUuid(sessionUuid));
+    if (!binding) {
+      return undefined;
+    }
+    const refusal = managedConnectionPlanLabelRefusal({
+      binding,
+      action: "executePlan",
+      labelSessions: labelToSessionMap,
+    });
+    if (refusal) {
+      throw refusal;
+    }
+    const devicePool = DaemonState.getInstance().getDevicePool();
+    const slotDevices = new Map<string, string>();
+    for (const [label, slotSessionUuid] of Object.entries(labelToSessionMap)) {
+      const slotSession = sessionManager.getSession(slotSessionUuid);
+      // The slot serves the label with its own device or not at all: a declared criterion that
+      // device demonstrably fails is refused instead of silently ignored (#11421).
+      if (
+        !slotSession?.assignedDevice ||
+        slotDeviceFailsLabelCriteria({
+          declared: normalized.definitions.find((definition) => definition.label === label),
+          slotPlatform: slotSession.platform,
+          device: devicePool.getDevice(slotSession.assignedDevice),
+        })
+      ) {
+        throw new DeviceOutsideManagedSlotsError("executePlan", "tool", binding.scopeKey, {
+          deviceLabel: label,
+        });
+      }
+      slotDevices.set(slotSessionUuid, slotSession.assignedDevice);
+    }
+    return slotDevices;
   }
 
   private requestDeviceAllocation(

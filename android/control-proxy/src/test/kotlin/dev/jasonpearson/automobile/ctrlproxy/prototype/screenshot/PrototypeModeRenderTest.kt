@@ -19,6 +19,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeTheme
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowContent
 import dev.jasonpearson.automobile.ctrlproxy.prototype.mapPrototypeSpec
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeAuthoredForeground
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeShownThemeFlow
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
@@ -192,11 +193,48 @@ class PrototypeModeRenderTest {
         ),
       )
     // The controller hands the host the spec's root and theme the same way.
-    val request = model.request().copy(themeRoot = model.root, specTheme = model.theme)
+    val request = model.request().copy(theme = prototypeShownThemeFlow(model))
     return renderComposable("scrim-$mode") {
         PrototypeWindowContent(request) { PrototypeInsetFloor.None }
       }
       .at(0.5, 0.9)
+  }
+
+  /**
+   * A content tree that would infer its own mode from [contentBackground], inside a window whose
+   * show resolved [shownDark]: the window scrim and a pair in the content, as drawn.
+   */
+  private fun scrimAndContent(shownDark: Boolean, contentBackground: String): Pair<Int, Int> {
+    fun tree(background: String) =
+      mapPrototypeSpec(
+        spec(
+          """{"id":"p","window":{"placement":{"type":"fullscreen","scrim":$PAIR}},
+            "root":{"type":"box","style":{"width":"fill","height":{"dp":200},"background":"$background"},
+              "children":[{"type":"box","style":{$FILL,"background":$PAIR},"children":[]}]}}""",
+        ),
+      )
+    // The tree as it was first shown paints the opposite background of the live content.
+    val shown = tree(if (shownDark) "#101010" else "#FFFFFF")
+    val live = tree(contentBackground)
+    val request =
+      shown
+        .request()
+        .copy(
+          theme = prototypeShownThemeFlow(shown),
+          content = { PrototypeSpecContent(live.root, live.theme) },
+        )
+    val image =
+      renderComposable("one-mode") { PrototypeWindowContent(request) { PrototypeInsetFloor.None } }
+    return image.at(0.5, 0.9) to image.at(0.5, 0.2)
+  }
+
+  @Test
+  @Config(qualifiers = "+notnight")
+  fun theShownModeDrivesTheWindowScrimAndTheContentTogether() {
+    // Before #11221 the content inferred its own mode from its live tree while the scrim kept the
+    // mode of the tree first shown, so one window drew a blue scrim around red content.
+    assertEquals(BLUE to BLUE, scrimAndContent(shownDark = true, contentBackground = "#FFFFFF"))
+    assertEquals(RED to RED, scrimAndContent(shownDark = false, contentBackground = "#101010"))
   }
 
   @Test

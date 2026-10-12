@@ -6,6 +6,7 @@ import type {
   PrototypeEvent,
   PrototypeResult,
 } from "../observe/android/ctrlProxyProtocol";
+import { withParsedAppearance } from "./prototypeAppearance";
 import type { PrototypeAssetUpload } from "./prototypeAssets";
 import type { PrototypeSpec } from "./prototypeSpec";
 import type {
@@ -33,13 +34,16 @@ export type AndroidPrototypeClient = Pick<
 export class AndroidPrototypeTransport implements PrototypeTransport {
   constructor(private readonly client: AndroidPrototypeClient) {}
 
-  show(spec: PrototypeSpec, options: PrototypeShowOptions = {}): Promise<PrototypeResult> {
-    return this.client.requestShowPrototype(
-      spec,
-      options.timeoutMs,
-      undefined,
-      options.displayId,
-      options.reset,
+  async show(spec: PrototypeSpec, options: PrototypeShowOptions = {}): Promise<PrototypeResult> {
+    return withParsedAppearance(
+      await this.client.requestShowPrototype(
+        spec,
+        options.timeoutMs,
+        undefined,
+        options.displayId,
+        options.reset,
+        options.appearance,
+      ),
     );
   }
 

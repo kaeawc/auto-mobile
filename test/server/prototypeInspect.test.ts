@@ -131,7 +131,7 @@ describe("prototype inspect (#10494)", () => {
   test("events the device buffered offline are delivered to awaitEvent in order", async () => {
     client.setInspectReply({ success: true, prototypes: [reported(3)] }, [
       event(1, "emit", "tap"),
-      event(2, "page_changed", null),
+      event(2, "page_changed", "pager", { payload: 1 }),
       event(3, "emit", "change"),
     ]);
     const inspected = await call({ action: "inspect" });

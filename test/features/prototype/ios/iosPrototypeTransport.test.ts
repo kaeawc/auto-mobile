@@ -202,5 +202,34 @@ describe("IosPrototypeTransport.captureWithPrototypeHidden", () => {
       await transport.show(spec);
       expect(bodies).toEqual([{ spec }]);
     });
+
+    test("appearance is sent top level, only when given, and the reported one is returned", async () => {
+      const reported = { mode: "dark", source: "override", deviceDark: false };
+      const replies = [{ appearance: reported }, { appearance: { mode: "dark" } }];
+      const bodies: PrototypeAgentMessage[] = [];
+      const agent = fakeAgent(["show_prototype", "prototype_appearance_v1"], [], () => ({
+        success: true,
+        ...replies.shift(),
+      }));
+      const request = agent.request.bind(agent);
+      agent.request = async (type, body) => {
+        bodies.push(body ?? {});
+        return request(type, body);
+      };
+      const transport = new IosPrototypeTransport(agent);
+      expect((await transport.show(spec, { appearance: "dark" })).appearance).toEqual(reported);
+      // A reply that is not {mode, source, deviceDark} is dropped, not passed on.
+      expect(await transport.show(spec)).not.toHaveProperty("appearance");
+      expect(bodies).toEqual([{ spec, appearance: "dark" }, { spec }]);
+    });
+
+    test("an agent without the capability refuses appearance before sending anything", async () => {
+      const { agent, bodies } = recording(["show_prototype"]);
+      const transport = new IosPrototypeTransport(agent);
+      await expect(transport.show(spec, { appearance: "light" })).rejects.toThrow(
+        "does not advertise prototype_appearance_v1",
+      );
+      expect(bodies).toEqual([]);
+    });
   });
 });

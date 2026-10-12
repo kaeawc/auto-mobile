@@ -90,7 +90,8 @@ export const DEVICE_OUTSIDE_MANAGED_SLOTS_CODE = "device_outside_managed_slots";
  * `device`: the target device is not one of the connection's slot devices. `session`: the call
  * named a session that is not one of the connection's slot sessions. `tool`: the tool acquires,
  * starts, stops, provisions or deletes devices, which a managed connection leaves to slot
- * acquisition and release.
+ * acquisition and release; with a `deviceLabel`, a plan device label that would need a device from
+ * outside the connection's slots (#11397).
  */
 export type ManagedConnectionRefusalReason = "device" | "session" | "tool";
 
@@ -102,7 +103,7 @@ export class DeviceOutsideManagedSlotsError extends ActionableError {
     readonly action: string,
     readonly reason: ManagedConnectionRefusalReason,
     readonly scopeKey: string,
-    readonly target: { deviceId?: string; sessionUuid?: string } = {},
+    readonly target: { deviceId?: string; sessionUuid?: string; deviceLabel?: string } = {},
   ) {
     super(
       `${action} refused: this managed connection controls only its own slot devices ` +
@@ -122,6 +123,7 @@ export class DeviceOutsideManagedSlotsError extends ActionableError {
       scopeKey: this.scopeKey,
       ...(this.target.deviceId === undefined ? {} : { deviceId: this.target.deviceId }),
       ...(this.target.sessionUuid === undefined ? {} : { sessionUuid: this.target.sessionUuid }),
+      ...(this.target.deviceLabel === undefined ? {} : { deviceLabel: this.target.deviceLabel }),
       retryable: false,
     };
   }
@@ -129,7 +131,7 @@ export class DeviceOutsideManagedSlotsError extends ActionableError {
 
 function managedConnectionRefusalDetail(
   reason: ManagedConnectionRefusalReason,
-  target: { deviceId?: string; sessionUuid?: string },
+  target: { deviceId?: string; sessionUuid?: string; deviceLabel?: string },
 ): string {
   switch (reason) {
     case "device":
@@ -138,6 +140,9 @@ function managedConnectionRefusalDetail(
       return `Session ${target.sessionUuid} is not one of its slot sessions.`;
     case "tool":
       return (
+        (target.deviceLabel === undefined
+          ? ""
+          : `Device label '${target.deviceLabel}' needs a device its slots do not provide. `) +
         "Slot devices are acquired, started, stopped and deleted only by managed slot " +
         "acquisition and release."
       );

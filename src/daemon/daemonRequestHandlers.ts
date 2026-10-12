@@ -1,13 +1,15 @@
 import { toActionableError } from "../models/ActionableError";
+import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import type { ManagedSlotInputGate } from "./inputDeviceOwnership";
 import { isSessionReleasing } from "./sessionReleaseState";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
-  cancelAndReleaseSession,
+  cancelExecutionsCutBySessionRelease,
   releaseSessionAndDevice,
-  type SessionExecutionCanceller,
+  type ReleaseCutExecutions,
 } from "./releaseSessionAndDevice";
+import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import type { DeviceHealthMarker } from "./deviceHealthMarkers";
 import { z } from "zod";
 import {
@@ -29,11 +31,13 @@ import {
 } from "./types";
 import {
   DeviceLabelMap,
+  type HeldDeviceSession,
   type LivenessClaimOutcome,
   type LivenessReleaseOutcome,
   Session,
   type SessionReleaseSnapshot,
 } from "./sessionManager";
+import { sessionForIngress } from "./sessionForIngress";
 import type {
   LivenessLeasePhase,
   LivenessLeaseState,
@@ -80,7 +84,17 @@ import {
 } from "./managedExecutionLiveness";
 import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
 import type { ManagedExecutionRelease } from "./managedSlots/managedExecutionRelease";
-import type { ManagedConnectionScopes } from "./managedSlots/managedConnectionScope";
+import {
+  SESSION_OWNERSHIP_LOST_CODE,
+  SessionReleasedDuringCallError,
+} from "./sessionReleasedDuringCall";
+import { isExpiryReleaseReason, isTerminalReleaseReason } from "./releaseReasons";
+import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
+import { canonicalFrameDeviceId } from "./frameDeviceIdentity";
+import {
+  managedConnectionControlRefusal,
+  type ManagedConnectionScopes,
+} from "./managedSlots/managedConnectionScope";
 import {
   DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
   DeviceOutsideManagedSlotsError,
@@ -136,13 +150,18 @@ export interface DaemonStateAccess {
   getSessionManager(): {
     hasSession(sessionId: string): boolean;
     getSession(sessionId: string): Session | null;
+    /** Admission/liveness judgement; never starts lazy release. */
+    peekSession?(sessionId: string): Session | null;
     getReleasingSession?(sessionId: string): Session | null;
     waitForSessionReleaseWithin?(sessionId: string, timeoutMs: number): Promise<boolean>;
     getAllSessions?(): Session[];
+    /** Reverse-map holders, including sessions awaiting or completing release. */
+    getHeldDeviceSessions?(): readonly HeldDeviceSession[];
     getTerminalReleaseSnapshot?(sessionId: string): SessionReleaseSnapshot | undefined;
     /** Why a session this daemon released was released; undefined for a never-issued UUID. */
     getReleasedSessionReason?(sessionId: string): Promise<string | undefined>;
     recordHeartbeat?(sessionId: string): void;
+    creditOwnerHeartbeatDuringRelease?(sessionId: string, ownerToken: string): void;
     /** Claim the token permitted to refresh this session's liveness. */
     claimLivenessOwnership?(sessionId: string, ownerToken: string): Promise<LivenessClaimOutcome>;
     releaseLivenessOwnership?(
@@ -168,6 +187,8 @@ export interface DaemonStateAccess {
     getIdleReleaseExecutionVeto?(sessionId: string): { latestDeadlineMs?: number } | undefined;
     /** Converts a session-clock instant to wall-clock epoch ms for reporting (#11105). */
     sessionClockToWall?(sessionClockMs: number): number;
+    /** The same conversion, stable across queries, for values shown to a client (#11368). */
+    sessionClockToReportedWall?(sessionClockMs: number): number;
     getDeviceLabels(sessionId: string): DeviceLabelMap | undefined;
     releaseSession(sessionId: string): Promise<string | null>;
   };
@@ -185,11 +206,18 @@ export interface DaemonStateAccess {
       livenessOwnerToken?: string,
     ): Promise<readonly RefusedOwnedSessionRestore[] | void>;
     releaseMcpSessionBindings?(mcpSessionId: string): void;
+    /** Give up the restart-recovery reservation made for a session, if any (#11294). */
+    releaseRehydrationReservation?(sessionId: string): void;
     refreshDevices(): Promise<number>;
     refreshDevicesWithOutcome?(): Promise<import("./devicePoolRefresh").DevicePoolRefreshResult>;
     getStats(): DevicePoolStats;
     /** {@link getStats} after refreshing slot and foreign-daemon ownership (#11305). */
     getRefreshedStats?(): Promise<DevicePoolStats>;
+    /** {@link getRefreshedStats} plus the live device ids it counted (#11568). */
+    getRefreshedInventory?(): Promise<{
+      stats: DevicePoolStats;
+      deviceIds: ReadonlySet<string>;
+    }>;
     releaseDevice(deviceId: string, expectedSessionId: string): Promise<void>;
     getAllDevices?(): PooledDevice[];
     /** The pooled device, whose `sessionId` is set as soon as a session is assigned it. */
@@ -205,6 +233,8 @@ export interface DaemonStateAccess {
      * has it ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
      */
     assertDeviceActionable?(deviceId: string, purpose: string): void;
+    /** The pooled canonical id for a known Android alias serial (identity otherwise). */
+    resolveAndroidCanonicalId?(deviceId: string): string;
     /** Refuse control of a device a managed slot holds (#11178); see `DevicePool`. */
     assertNotAssignedToManagedSlot?: ManagedSlotInputGate["assertNotAssignedToManagedSlot"];
     /** FUNNEL 1 — fold a discovery observation into pooled identity. */
@@ -236,8 +266,16 @@ export type DaemonMethodResult = {
   releaseReason?: string;
   /** With `releaseReason`: an idle-window release (#10832). */
   idle?: true;
+  /** With a typed refusal `code`: whether retrying the same request can succeed. */
+  retryable?: boolean;
+  /** With a typed refusal `code`: what to do instead of retrying. */
+  nextAction?: typeof ACQUIRE_NEW_SESSION_NEXT_ACTION;
+  /** With a typed refusal `code`: its structured evidence. */
+  details?: Record<string, unknown>;
   code?:
     | typeof DAEMON_SESSION_NOT_FOUND_CODE
+    /** `daemon/registerSession` naming a UUID an idle or heartbeat release ended (#11367). */
+    | typeof SESSION_OWNERSHIP_LOST_CODE
     | typeof DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
     | typeof DAEMON_LIVENESS_OWNER_UNOWNED_CODE
     | typeof DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE
@@ -248,7 +286,9 @@ export type DaemonMethodResult = {
     | ManagedSlotConfigErrorCode
     /** `daemon/registerSession` managed-connection refusals (#11178). */
     | typeof DEVICE_OUTSIDE_MANAGED_SLOTS_CODE
-    | typeof DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE;
+    | typeof DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE
+    /** A device-count read while a discovery source that exists has not completed (#11605). */
+    | BootedDeviceDiscoveryIncompleteError["code"];
 };
 
 /** Device-session listing entry; a quarantined UUID cannot be subscribed to until identity resolves. */
@@ -303,11 +343,19 @@ function managedConnectionRegistrationRefusal(
   if (!managedSlots) {
     return undefined;
   }
-  const refuse = (reason: string): DaemonMethodResult => ({
-    success: false,
-    code: DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE,
-    error: `Managed slot registration refused: ${reason}`,
-  });
+  const refuse = (reason: string): DaemonMethodResult => {
+    // The connection declared itself managed, so a refusal must not leave it generic: the slot
+    // set is fixed for its lifetime. Bind an unbound socket fail-closed with zero sessions, so
+    // device acquisition and lifecycle stay refused while reads remain open (#11399).
+    if (scopes && socketSessionId !== undefined && !binding) {
+      scopes.bind(socketSessionId, { scopeKey: managedSlots.scopeKey, sessionUuids: [] });
+    }
+    return {
+      success: false,
+      code: DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE,
+      error: `Managed slot registration refused: ${reason}`,
+    };
+  };
   if (!scopes || socketSessionId === undefined) {
     return refuse("this daemon cannot bind managed connections.");
   }
@@ -319,7 +367,7 @@ function managedConnectionRegistrationRefusal(
   }
   const manager = state.getSessionManager();
   const foreign = managedSlots.sessionUuids.find((uuid) => {
-    const session = manager.getSession(uuid);
+    const session = sessionForIngress(manager, uuid);
     return (
       session?.livenessPolicy !== MANAGED_EXECUTION_LIVENESS_POLICY ||
       session.livenessOwnerToken !== managedSlots.livenessOwnerToken
@@ -364,18 +412,97 @@ async function releaseDrainRefusal(
     : undefined;
 }
 
+/**
+ * The terminal refusal for registering a UUID that an idle or heartbeat release ended (#11367), or
+ * undefined when the UUID may register. Such a UUID never comes back, so admitting it as an
+ * observer would let a client heartbeat and re-authenticate streams under a dead session. The
+ * answer is the standard `session_ownership_lost` (not retryable, `acquire_new_session`) with the
+ * release reason and, for an idle-window release, `idle: true`. A never-issued UUID has no
+ * snapshot and no row, and still registers as an observer.
+ *
+ * The in-memory snapshot is empty after a daemon restart, so a UUID without one is judged by its
+ * persisted `release_reason` under the same predicate. The read changes nothing: a recoverable
+ * handoff or a re-issuable `plan-auto-release` row keeps registering and stays as it was.
+ */
+async function terminalSessionRegistrationRefusal(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+): Promise<DaemonMethodResult | undefined> {
+  const snapshot = manager.getTerminalReleaseSnapshot?.(sessionId);
+  const release = snapshot ?? (await persistedTerminalRelease(manager, sessionId));
+  if (!release?.terminal || !isExpiryReleaseReason(release.releaseReason)) {
+    return undefined;
+  }
+  const { releaseReason, ownerPid } = release;
+  return {
+    success: false,
+    code: SESSION_OWNERSHIP_LOST_CODE,
+    retryable: false,
+    nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
+    error:
+      `Session ${sessionId} is terminal after ${releaseReason} and cannot be registered again. ` +
+      "Acquire a new device with getAndroid or getApple, or register a new session UUID to observe.",
+    details: {
+      sessionUuid: sessionId,
+      reason: releaseReason,
+      ...(ownerPid === undefined ? {} : { ownerPid }),
+    },
+    ...releasedSessionNotFoundFields(releaseReason),
+  };
+}
+
+/** The persisted release of a UUID this daemon holds no snapshot for (best-effort read). */
+async function persistedTerminalRelease(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+): Promise<Pick<SessionReleaseSnapshot, "releaseReason" | "terminal" | "ownerPid"> | undefined> {
+  const releaseReason = await lookupReleasedSessionReason(manager, sessionId);
+  return releaseReason === undefined
+    ? undefined
+    : { releaseReason, terminal: isTerminalReleaseReason(releaseReason) };
+}
+
 /** A session-clock instant as wall-clock epoch ms, for a report another process reads (#11105). */
 function reportedWallClock(
-  manager: { sessionClockToWall?(sessionClockMs: number): number },
+  manager: {
+    sessionClockToWall?(sessionClockMs: number): number;
+    sessionClockToReportedWall?(sessionClockMs: number): number;
+  },
   sessionClockMs: number,
 ): number {
-  return manager.sessionClockToWall?.(sessionClockMs) ?? sessionClockMs;
+  return (
+    manager.sessionClockToReportedWall?.(sessionClockMs) ??
+    manager.sessionClockToWall?.(sessionClockMs) ??
+    sessionClockMs
+  );
+}
+
+/** The accepted registration of a UUID that is a live device session, or undefined. */
+function liveSessionRegistration(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+  clientName: string,
+): DaemonMethodResult | undefined {
+  const session = sessionForIngress(manager, sessionId);
+  if (!session) {
+    return undefined;
+  }
+  manager.recordSessionClientName?.(sessionId, clientName);
+  return {
+    success: true,
+    result: {
+      accepted: true,
+      heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+      // Reported to another process: wall-clock epoch ms, not the session clock (#11243).
+      expiresAtMs: reportedWallClock(manager, session.lastHeartbeat + session.heartbeatTimeoutMs),
+    },
+  };
 }
 
 async function handleRegisterSession(
   request: DaemonRequest,
   state: DaemonStateAccess,
-  _executions?: SessionExecutionCanceller,
+  _executions?: ReleaseCutExecutions,
   _signal?: AbortSignal,
   context: DaemonRequestContext = {},
 ): Promise<DaemonMethodResult> {
@@ -402,18 +529,18 @@ async function handleRegisterSession(
   if (draining) {
     return draining;
   }
-  const session = manager.getSession(sessionId);
-  if (session) {
-    manager.recordSessionClientName?.(sessionId, clientName);
-    return {
-      success: true,
-      result: {
-        accepted: true,
-        heartbeatTimeoutMs: session.heartbeatTimeoutMs,
-        // Reported to another process: wall-clock epoch ms, not the session clock (#11243).
-        expiresAtMs: reportedWallClock(manager, session.lastHeartbeat + session.heartbeatTimeoutMs),
-      },
-    };
+  const live = liveSessionRegistration(manager, sessionId, clientName);
+  if (live) {
+    return live;
+  }
+  const terminal = await terminalSessionRegistrationRefusal(manager, sessionId);
+  if (terminal) {
+    return terminal;
+  }
+  // The persisted read yielded: a session issued meanwhile answers as itself, never an observer.
+  const issued = liveSessionRegistration(manager, sessionId, clientName);
+  if (issued) {
+    return issued;
   }
   const registry = state.getObserverSessionRegistry?.();
   if (!registry) {
@@ -434,7 +561,7 @@ export interface DaemonRequestContext {
 export async function handleDaemonRequest(
   request: DaemonRequest,
   state: DaemonStateAccess,
-  executions?: SessionExecutionCanceller,
+  executions?: ReleaseCutExecutions,
   /** Aborts when the requesting socket closes or cancels this request. */
   signal?: AbortSignal,
   context: DaemonRequestContext = {},
@@ -475,7 +602,7 @@ export async function handleDaemonRequest(
 type InitializedDaemonMethodHandler = (
   request: DaemonRequest,
   state: DaemonStateAccess,
-  executions: SessionExecutionCanceller | undefined,
+  executions: ReleaseCutExecutions | undefined,
   signal: AbortSignal | undefined,
   context: DaemonRequestContext,
 ) => DaemonMethodResult | Promise<DaemonMethodResult>;
@@ -493,7 +620,8 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
     ["daemon/activeSessions", (request, state) => handleActiveSessions(request, state)],
     [
       DAEMON_RELEASE_SESSION_METHOD,
-      (request, state, executions) => handleReleaseSession(request, state, executions),
+      (request, state, executions, _signal, context) =>
+        handleReleaseSession(request, state, executions, context),
     ],
     [DAEMON_RELEASE_EXECUTION_METHOD, handleReleaseExecution],
     [DAEMON_RESET_SLOT_SCOPE_METHOD, handleResetSlotScope],
@@ -510,7 +638,7 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
 async function handleInitializedDaemonRequest(
   request: DaemonRequest,
   state: DaemonStateAccess,
-  executions: SessionExecutionCanceller | undefined,
+  executions: ReleaseCutExecutions | undefined,
   signal: AbortSignal | undefined,
   context: DaemonRequestContext,
 ): Promise<DaemonMethodResult> {
@@ -595,7 +723,7 @@ export function handleTokenOwnedSessions(
         // The daemon's own idle clock, so the resuming proxy judges idleness from the last tool
         // call rather than from the resume (#10656). Reported as wall-clock epoch ms: the proxy
         // compares it with its own wall clock, not the daemon's session clock (#11117).
-        lastUsedAt: manager.sessionClockToWall?.(session.lastUsedAt) ?? session.lastUsedAt,
+        lastUsedAt: reportedWallClock(manager, session.lastUsedAt),
       })),
     },
   };
@@ -683,8 +811,11 @@ async function handleHeartbeat(
     ...(heartbeatParams?.reportDaemonInstance === true ? { daemonInstance } : {}),
   };
   const manager = state.getSessionManager();
-  const session = manager.getSession(sessionId);
+  const session = sessionForIngress(manager, sessionId);
   if (!session || isSessionReleasing(manager, sessionId, session)) {
+    if (typeof heartbeatParams?.livenessOwnerToken === "string") {
+      manager.creditOwnerHeartbeatDuringRelease?.(sessionId, heartbeatParams.livenessOwnerToken);
+    }
     if (
       typeof sessionId === "string" &&
       state.getObserverSessionRegistry?.()?.heartbeat(sessionId)
@@ -735,10 +866,15 @@ async function handleHeartbeat(
       livenessOwnerToken,
       outcome,
     );
+    if (rejection?.code === DAEMON_SESSION_NOT_FOUND_CODE) {
+      // The release that ended the session while the claim was resolving is named like on every
+      // other not-found answer (#11646); the lookup changes nothing and nothing is recorded after.
+      return sessionNotFoundResult(manager, sessionId);
+    }
     if (rejection) {
       // A concurrent `--cli` call can move the session onto the cli-idle policy (claiming it
       // with its own token) while the keeper's claim was resolving; the keeper still no-ops.
-      const current = manager.getSession(sessionId);
+      const current = sessionForIngress(manager, sessionId);
       return rejection.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE &&
         current &&
         isCliKeeperOnCliIdleSession(heartbeatParams?.livenessOwnerKind, current)
@@ -758,7 +894,7 @@ async function handleHeartbeat(
   // strict contract when a prior CLI invocation widened the same session.
   if (
     heartbeatParams?.livenessPolicy === CLI_SESSION_LIVENESS_POLICY &&
-    manager.getSession(sessionId)?.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY
+    sessionForIngress(manager, sessionId)?.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY
   ) {
     // A managed execution's session stays on its owner lease (#11176): the CLI declaration is
     // refused, and the ack says which policy still governs the session.
@@ -777,7 +913,7 @@ async function handleHeartbeat(
     // Reports the idle instant like every other ack when asked (#10972).
     return heartbeatAck(manager, sessionId, ackReport, {
       livenessPolicy: "cli-idle",
-      idleTimeoutMs: manager.getSession(sessionId)?.heartbeatTimeoutMs,
+      idleTimeoutMs: sessionForIngress(manager, sessionId)?.heartbeatTimeoutMs,
     });
   }
   if (
@@ -842,16 +978,16 @@ function heartbeatAck(
   report: HeartbeatAckReport,
   extra: Record<string, unknown> = {},
 ): DaemonMethodResult {
-  const session = manager.getSession(sessionId);
+  const session = sessionForIngress(manager, sessionId);
   const instance =
     report.daemonInstance === undefined ? {} : { daemonInstance: report.daemonInstance };
   const idle =
     report.idleRelease && session
       ? {
-          idleReleaseAt:
-            manager.sessionClockToWall?.(
-              vetoedIdleReleaseAt(session, manager.getIdleReleaseExecutionVeto?.(sessionId)),
-            ) ?? vetoedIdleReleaseAt(session, manager.getIdleReleaseExecutionVeto?.(sessionId)),
+          idleReleaseAt: reportedWallClock(
+            manager,
+            vetoedIdleReleaseAt(session, manager.getIdleReleaseExecutionVeto?.(sessionId)),
+          ),
         }
       : {};
   return { success: true, result: { sessionId, ...extra, ...idle, ...instance } };
@@ -926,7 +1062,7 @@ function rejectHeartbeatWithoutOwnership(
 ): DaemonMethodResult | undefined {
   // A claim can yield while release ends admission or replaces this UUID.
   // Keep the request bound to the device session admitted above.
-  const currentSession = manager.getSession(sessionId);
+  const currentSession = sessionForIngress(manager, sessionId);
   if (
     outcome === "not-found" ||
     !currentSession ||
@@ -1006,8 +1142,15 @@ function livenessOwnershipFailure(
  */
 async function refreshedPoolStats(
   pool: ReturnType<DaemonStateAccess["getDevicePool"]>,
-): Promise<{ ok: true; stats: DevicePoolStats } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; stats: DevicePoolStats; deviceIds?: ReadonlySet<string> }
+  | { ok: false; refusal: Pick<DaemonMethodResult, "success" | "error" | "code" | "retryable"> }
+> {
   try {
+    if (pool.getRefreshedInventory) {
+      const { stats, deviceIds } = await pool.getRefreshedInventory();
+      return { ok: true, stats, deviceIds };
+    }
     return {
       ok: true,
       stats: pool.getRefreshedStats ? await pool.getRefreshedStats() : pool.getStats(),
@@ -1016,7 +1159,14 @@ async function refreshedPoolStats(
     logger.warn(`[Daemon] Could not refresh device ownership: ${errorMessage(error)}`, error);
     return {
       ok: false,
-      error: `Could not determine which devices are available: ${errorMessage(error)}. Resolve the cause and retry.`,
+      refusal: {
+        success: false,
+        error: `Could not determine which devices are available: ${errorMessage(error)}. Resolve the cause and retry.`,
+        // The count is unknown, not zero: keep the typed, retryable refusal on the wire (#11605).
+        ...(error instanceof BootedDeviceDiscoveryIncompleteError
+          ? { code: error.code, retryable: error.retryable }
+          : {}),
+      },
     };
   }
 }
@@ -1037,7 +1187,7 @@ async function handleRefreshDevices(
   }
   const refreshed = await refreshedPoolStats(pool);
   if (!refreshed.ok) {
-    return { success: false, error: refreshed.error };
+    return refreshed.refusal;
   }
   const stats = refreshed.stats;
   return {
@@ -1058,18 +1208,22 @@ async function handleAvailableDevices(
   const pool = state.getDevicePool();
   const refreshed = await refreshedPoolStats(pool);
   if (!refreshed.ok) {
-    return { success: false, error: refreshed.error };
+    return refreshed.refusal;
   }
   const stats = refreshed.stats;
   const recoveryPolicy = pool.getRecoveryPolicy?.();
-  const devices = pool.getAllDevices?.().map((device) => ({
-    deviceId: device.id,
-    platform: device.platform,
-    recoveryEligibility: pool.getRecoveryEligibility?.(device.id),
-    ...(pool.getDeviceHealthMarker?.(device.id)
-      ? { unhealthy: pool.getDeviceHealthMarker(device.id) }
-      : {}),
-  }));
+  // List only the devices the counts cover, so a phantom entry is neither counted nor listed.
+  const devices = pool
+    .getAllDevices?.()
+    .filter((device) => !refreshed.deviceIds || refreshed.deviceIds.has(device.id))
+    .map((device) => ({
+      deviceId: device.id,
+      platform: device.platform,
+      recoveryEligibility: pool.getRecoveryEligibility?.(device.id),
+      ...(pool.getDeviceHealthMarker?.(device.id)
+        ? { unhealthy: pool.getDeviceHealthMarker(device.id) }
+        : {}),
+    }));
   return {
     success: true,
     result: {
@@ -1102,7 +1256,7 @@ export async function handleSessionInfo(
     };
   }
   const manager = state.getSessionManager();
-  const session = manager.getSession(sessionId);
+  const session = sessionForIngress(manager, sessionId);
   if (!session) {
     return sessionNotFoundResult(manager, sessionId);
   }
@@ -1121,7 +1275,7 @@ export async function handleSessionInfo(
         session,
         executions.getActiveDeviceSessionExecutionCount(sessionId),
         manager.getIdleReleaseExecutionVeto?.(sessionId),
-        (ms) => manager.sessionClockToWall?.(ms) ?? ms,
+        (ms) => reportedWallClock(manager, ms),
       ),
       ...livenessInfo(manager.getSessionLeaseState?.(sessionId)),
       ...(isSessionReleasing(manager, sessionId, session) ? { releasing: true } : {}),
@@ -1170,7 +1324,7 @@ export async function handleActiveSessions(
                 session,
                 executions.getActiveDeviceSessionExecutionCount(session.sessionId),
                 manager.getIdleReleaseExecutionVeto?.(session.sessionId),
-                (ms) => manager.sessionClockToWall?.(ms) ?? ms,
+                (ms) => reportedWallClock(manager, ms),
               ),
               ...(isSessionReleasing(manager, session.sessionId, session)
                 ? { releasing: true }
@@ -1182,10 +1336,41 @@ export async function handleActiveSessions(
   };
 }
 
+/**
+ * The refusal for a lifecycle request from a connection bound to managed slots (#11178, #11596):
+ * it ends only its own slot sessions and gives up only its own slot devices. Undefined for a
+ * generic connection, and for a request that carries no socket (the daemon's own callers).
+ */
+function managedConnectionLifecycleRefusal(
+  state: DaemonStateAccess,
+  context: DaemonRequestContext,
+  action: string,
+  target: { sessionUuid?: string; deviceId?: string },
+): DaemonMethodResult | undefined {
+  const manager = state.getSessionManager();
+  const refusal = managedConnectionControlRefusal({
+    binding: state.getManagedConnectionScopes?.().get(context.socketSessionId),
+    action,
+    // Slot sessions hold the pooled canonical id; the request may name the device by an alias.
+    deviceId:
+      target.deviceId === undefined
+        ? undefined
+        : canonicalFrameDeviceId(state.getDevicePool(), target.deviceId),
+    requesterSessionUuid: target.sessionUuid,
+    slotDeviceOf: (sessionUuid) => manager.getSession(sessionUuid)?.assignedDevice ?? undefined,
+  });
+  return refusal ? { success: false, code: refusal.code, error: refusal.message } : undefined;
+}
+
+/**
+ * Release a session by id. Any ordinary connection may release any session (owner contract); a
+ * connection bound to managed slots is confined to its own slot sessions.
+ */
 async function handleReleaseSession(
   request: DaemonRequest,
   state: DaemonStateAccess,
-  executions?: SessionExecutionCanceller,
+  executions?: ReleaseCutExecutions,
+  context: DaemonRequestContext = {},
 ): Promise<DaemonMethodResult> {
   const params = request.params as { sessionId?: string; requireKnown?: boolean } | undefined;
   const sessionId = params?.sessionId;
@@ -1195,21 +1380,48 @@ async function handleReleaseSession(
       error: "sessionId parameter required",
     };
   }
+  const refusal = managedConnectionLifecycleRefusal(state, context, DAEMON_RELEASE_SESSION_METHOD, {
+    sessionUuid: sessionId,
+  });
+  if (refusal) {
+    return refusal;
+  }
   const manager = state.getSessionManager();
   const session = manager.getSession(sessionId) ?? manager.getReleasingSession?.(sessionId);
   if (!session && !manager.hasSession(sessionId)) {
-    if (typeof sessionId === "string" && state.getObserverSessionRegistry?.()?.release(sessionId)) {
-      return {
-        success: true,
-        result: {
-          message: `Session ${sessionId} released`,
-          alreadyReleased: false,
-        },
-      };
-    }
-    return await releaseUnknownSession(manager, sessionId, params?.requireKnown === true);
+    return await releaseSessionWithoutDevice(
+      state,
+      sessionId,
+      params?.requireKnown === true,
+      executions,
+    );
   }
   return releaseBoundSession(state, manager, sessionId, session, executions);
+}
+
+/** Release an id with no device session behind it: an observer session, or an unknown id. */
+async function releaseSessionWithoutDevice(
+  state: DaemonStateAccess,
+  sessionId: string,
+  requireKnown: boolean,
+  executions: ReleaseCutExecutions | undefined,
+): Promise<DaemonMethodResult> {
+  if (typeof sessionId === "string" && state.getObserverSessionRegistry?.()?.release(sessionId)) {
+    return {
+      success: true,
+      result: {
+        message: `Session ${sessionId} released`,
+        alreadyReleased: false,
+      },
+    };
+  }
+  return await releaseUnknownSession(
+    state,
+    state.getSessionManager(),
+    sessionId,
+    requireKnown,
+    executions,
+  );
 }
 
 const releaseExecutionParams = z.object({
@@ -1259,6 +1471,7 @@ const resetSlotScopeParams = z
     runnerIncarnation: z.string().trim().min(1),
     managedHostScope: z.string().trim().min(1).optional(),
     waitMs: z.number().int().min(0).max(SLOT_SCOPE_RESET_MAX_WAIT_MS).optional(),
+    force: z.boolean().optional(),
   })
   .strict();
 
@@ -1365,10 +1578,40 @@ function bindManagedConnection(
  * (#11148). A session this daemon issued and already released stays idempotent either way.
  */
 async function releaseUnknownSession(
+  state: DaemonStateAccess,
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
   requireKnown: boolean,
+  executions?: ReleaseCutExecutions,
 ): Promise<DaemonMethodResult> {
+  // Not in the session map is not the same as released (#11461): a restart handoff this daemon has
+  // not recovered yet, or a session still being created, would come back after an "already
+  // released" answer. The manager's release path ends those terminally; it resolves null when
+  // there was nothing to release. A UUID already fenced terminal needs no second release.
+  if (!manager.getTerminalReleaseSnapshot?.(sessionId)) {
+    const deviceId = await manager.releaseSession(sessionId);
+    // A recovery that won the race published the session meanwhile: release it like any held one.
+    const published = manager.getSession(sessionId) ?? manager.getReleasingSession?.(sessionId);
+    if (published || manager.hasSession(sessionId)) {
+      return releaseBoundSession(state, manager, sessionId, published, executions);
+    }
+    if (deviceId !== null && deviceId !== undefined) {
+      const pool = state.getDevicePool();
+      // The row no longer recovers, so its device is no longer held for it (#11294).
+      pool.releaseRehydrationReservation?.(sessionId);
+      // A session released while it was being created may already hold its device in the pool;
+      // this frees it only if this session is the holder.
+      await pool.releaseDevice(deviceId, sessionId);
+      return {
+        success: true,
+        result: {
+          message: `Session ${sessionId} released`,
+          device: deviceId,
+          alreadyReleased: false,
+        },
+      };
+    }
+  }
   if (requireKnown && (await lookupReleasedSessionReason(manager, sessionId)) === undefined) {
     return {
       success: false,
@@ -1392,23 +1635,38 @@ async function releaseBoundSession(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
   session: Session | null | undefined,
-  executions: SessionExecutionCanceller = executionTracker,
+  executions: ReleaseCutExecutions = executionTracker,
 ): Promise<DaemonMethodResult> {
   const pool = state.getDevicePool();
   // A failed terminal write hides routing identity while retaining ownership.
   let deviceId =
     session?.assignedDevice ?? manager.getTerminalReleaseSnapshot?.(sessionId)?.deviceId ?? null;
-  const release = () =>
-    releaseSessionAndDevice(manager, pool, deviceId, sessionId, undefined, {
-      release: async () => {
-        deviceId = await manager.releaseSession(sessionId);
-        return deviceId;
-      },
-    });
-  // Preserve the idle path's timing: no cancellation await when there is no work.
-  await (executions.hasActiveSessionUuidExecutions(sessionId)
-    ? cancelAndReleaseSession(sessionId, "explicit-release", release, executions)
-    : release());
+  // An explicit release is terminal and immediate (docs/using/device-ownership.md): it waits for
+  // no call, so every call it cuts is told the session is gone, as a call arriving after the
+  // release is (#11393). It cuts through the routine every other release uses, so an implicit
+  // (autolock) call is aborted too rather than left driving the freed device. The requester is a
+  // daemon request, never a tracked execution, so it is not cut. The aborts are signalled
+  // synchronously: with or without work in flight, the release starts in this turn.
+  cancelExecutionsCutBySessionRelease(
+    executions,
+    {
+      sessionId,
+      baseSessionId: resolveToolSelectionBaseSessionUuid(sessionId, manager),
+      deviceId,
+    },
+    new SessionReleasedDuringCallError(sessionId, "explicit-release"),
+  ).catch((error: unknown) => {
+    logger.warn(
+      `Failed to cancel executions of explicitly released session ${sessionId}: ${errorMessage(error)}`,
+      error,
+    );
+  });
+  await releaseSessionAndDevice(manager, pool, deviceId, sessionId, undefined, {
+    release: async () => {
+      deviceId = await manager.releaseSession(sessionId);
+      return deviceId;
+    },
+  });
   return {
     success: true,
     result: {
@@ -1520,6 +1778,9 @@ async function handleDeviceLeaseStatus(
 async function handleRelinquishDeviceLease(
   request: DaemonRequest,
   state: DaemonStateAccess,
+  _executions?: ReleaseCutExecutions,
+  _signal?: AbortSignal,
+  context: DaemonRequestContext = {},
 ): Promise<DaemonMethodResult> {
   const parsed = z.object({ deviceId: z.string().min(1) }).safeParse(request.params);
   if (!parsed.success) {
@@ -1529,6 +1790,15 @@ async function handleRelinquishDeviceLease(
     };
   }
   const { deviceId } = parsed.data;
+  const refusal = managedConnectionLifecycleRefusal(
+    state,
+    context,
+    DAEMON_RELINQUISH_DEVICE_LEASE_METHOD,
+    { deviceId },
+  );
+  if (refusal) {
+    return refusal;
+  }
   const sources = deviceLeaseActivitySourcesFor(state);
   const port = state.getDeviceLeaseRelinquishPort?.() ?? daemonDeviceLeaseRelinquishPort();
   const status = { pid: process.pid, deviceId, ...readDeviceLeaseActivity(sources, deviceId) };

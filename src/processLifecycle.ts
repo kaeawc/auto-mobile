@@ -3,10 +3,17 @@ import { writeEmergencyLog } from "./utils/loggingConfig";
 import { raceWithDeadline } from "./utils/raceWithDeadline";
 
 /**
- * What started a shutdown. `execution-owner-lost` is a managed slot proxy whose execution owner
+ * What started a shutdown. `stdin` means the client input closed; `stdout` means a transport
+ * write failed (#11710). `execution-owner-lost` is a managed slot proxy whose execution owner
  * exited or which was re-parented (#11176).
  */
-export type ShutdownSignal = "SIGINT" | "SIGTERM" | "SIGHUP" | "stdin" | "execution-owner-lost";
+export type ShutdownSignal =
+  | "SIGINT"
+  | "SIGTERM"
+  | "SIGHUP"
+  | "stdin"
+  | "stdout"
+  | "execution-owner-lost";
 
 // A clean recording finalization alone requires one second. Leave enough time
 // for every child owner to receive a bounded stop or force-stop attempt, while
@@ -16,6 +23,10 @@ const PROCESS_SHUTDOWN_FINALIZATION_TIMEOUT_MS = 100;
 
 export interface StdinShutdownSource {
   on(event: "end" | "close", listener: () => void): unknown;
+  on(event: "error", listener: (error: Error) => void): unknown;
+}
+
+export interface StdioWriteErrorSource {
   on(event: "error", listener: (error: Error) => void): unknown;
 }
 
@@ -78,6 +89,8 @@ export type FatalProcessHandler = (event: FatalProcessEvent) => Promise<void> | 
 export class ProcessLifecycleHandlers {
   private installed = false;
   private stdinShutdownHandlersInstalled = false;
+  private stdoutShutdownHandlerInstalled = false;
+  private stderrErrorGuardInstalled = false;
   private hangupShutdownHandlerInstalled = false;
   private shutdownInProgress = false;
   private shutdownHandler: ProcessShutdownHandler | undefined;
@@ -148,6 +161,26 @@ export class ProcessLifecycleHandlers {
     stdin.on("end", shutdownOnStdinClose);
     stdin.on("error", shutdownOnStdinClose);
     stdin.on("close", shutdownOnStdinClose);
+  }
+
+  installStdoutShutdownHandler(stdout: StdioWriteErrorSource): void {
+    if (this.stdoutShutdownHandlerInstalled) {
+      return;
+    }
+    this.stdoutShutdownHandlerInstalled = true;
+    stdout.on("error", () => {
+      void this.shutdown("stdout");
+    });
+  }
+
+  installStderrErrorGuard(stderr: StdioWriteErrorSource): void {
+    if (this.stderrErrorGuardInstalled) {
+      return;
+    }
+    this.stderrErrorGuardInstalled = true;
+    stderr.on("error", () => {
+      // Cannot report on failed stderr: an unhandled error re-enters the fatal handler, which writes stderr again (#11710).
+    });
   }
 
   /** Start the same shutdown a signal would, for an in-process reason (#11176). */
@@ -251,6 +284,7 @@ export class ProcessLifecycleHandlers {
 const processLifecycleHandlers = new ProcessLifecycleHandlers(process);
 
 export function installProcessLifecycleHandlers(): void {
+  installStderrErrorGuard();
   processLifecycleHandlers.install();
 }
 
@@ -260,6 +294,14 @@ export function installHangupShutdownHandler(): void {
 
 export function installStdinShutdownHandlers(stdin: StdinShutdownSource = process.stdin): void {
   processLifecycleHandlers.installStdinShutdownHandlers(stdin);
+}
+
+export function installStdoutShutdownHandler(stdout: StdioWriteErrorSource = process.stdout): void {
+  processLifecycleHandlers.installStdoutShutdownHandler(stdout);
+}
+
+export function installStderrErrorGuard(stderr: StdioWriteErrorSource = process.stderr): void {
+  processLifecycleHandlers.installStderrErrorGuard(stderr);
 }
 
 /** Shut the process down through the registered handler, as a signal would (#11176). */

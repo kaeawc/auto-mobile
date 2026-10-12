@@ -1,11 +1,21 @@
-import type { PrototypeEvent } from "../observe/android/ctrlProxyProtocol";
+import {
+  UNKNOWN_PROTOTYPE_EVENT_KIND,
+  type PrototypeEvent,
+  type PrototypeEventKind,
+} from "../observe/android/ctrlProxyProtocol";
 
 /** Maximum pending events per (session, device, prototype); overflow drops the oldest. */
 export const PROTOTYPE_EVENT_BUFFER_CAPACITY = 64;
+/** An event of a kind this host knows: the only ones buffered and returned by awaitEvent. */
+export type DeliverablePrototypeEvent = PrototypeEvent & { kind: PrototypeEventKind };
 export interface PrototypeEventFilter {
   afterSequence?: number;
   eventName?: string;
-  kind?: PrototypeEvent["kind"];
+  kind?: PrototypeEventKind;
+}
+
+function isDeliverable(event: PrototypeEvent): event is DeliverablePrototypeEvent {
+  return event.kind !== UNKNOWN_PROTOTYPE_EVENT_KIND;
 }
 export interface PrototypeEventCounts {
   pendingCount: number;
@@ -19,15 +29,23 @@ export interface PrototypeEventCounts {
  * arrivals are therefore already ordered. Reconnects must reuse this buffer.
  */
 export class PrototypeEventBuffer {
-  private events: PrototypeEvent[] = [];
+  private events: DeliverablePrototypeEvent[] = [];
   private lastSequence?: number;
   private droppedCount = 0;
 
+  /**
+   * Returns whether the event was buffered. A duplicate or late sequence is not. Neither is an
+   * event of a kind this host does not know (a newer device): it only raises the high-water mark,
+   * so the ledger stays in step with the device and nothing unreadable is handed to a waiter.
+   */
   push(event: PrototypeEvent): boolean {
     if (this.lastSequence !== undefined && event.sequence <= this.lastSequence) {
       return false;
     }
     this.lastSequence = event.sequence;
+    if (!isDeliverable(event)) {
+      return false;
+    }
     this.events.push(structuredClone(event));
     if (this.events.length > PROTOTYPE_EVENT_BUFFER_CAPACITY) {
       this.events.shift();
@@ -46,7 +64,7 @@ export class PrototypeEventBuffer {
     }
   }
 
-  take(filter: PrototypeEventFilter): PrototypeEvent | undefined {
+  take(filter: PrototypeEventFilter): DeliverablePrototypeEvent | undefined {
     const index = this.events.findIndex(
       (event) =>
         event.sequence > (filter.afterSequence ?? -1) &&

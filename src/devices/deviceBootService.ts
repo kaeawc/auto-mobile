@@ -66,15 +66,21 @@ const IOS_POST_LEASE_RECHECK_TIMEOUT_MS = 5_000;
 /** A boot deadline failure, kept distinct from platform command failures. */
 export class DeviceBootTimeoutError extends ActionableError {
   readonly code = "timeout";
+  /** A purely time-based failure, retryable like provisionDevice's `timeout` (#11548). */
+  readonly retryable = true;
 
   constructor(
     readonly operation: string,
     readonly phase: string,
     readonly elapsedMs: number,
     readonly budgetMs: number,
+    /** The device being booted, when it was known at the time of the timeout. */
+    readonly device?: string,
   ) {
     super(
-      `${operation} timeout exhausted while ${phase}; remainingBudgetMs=0; elapsedMs=${elapsedMs}; budgetMs=${budgetMs}; origin=DeviceBootService`,
+      `${operation} timeout exhausted while ${phase}; ` +
+        (device ? `device=${device}; ` : "") +
+        `remainingBudgetMs=0; elapsedMs=${elapsedMs}; budgetMs=${budgetMs}; origin=DeviceBootService`,
     );
   }
 }
@@ -115,6 +121,22 @@ export class AndroidAvdIdentityUnresolvedError extends ActionableError {
   }
 }
 
+/**
+ * Whether a request that names its device by `deviceId` also carries spec fields that device must
+ * satisfy. `name` is a spec field like any other (#11648); an exact name (`matchExactName`) paired
+ * with a deviceId is an identity pair with its own typed mismatch checks, so it stays out.
+ */
+function hasExplicitSpecConstraints(request: DeviceBootRequest): boolean {
+  return (
+    (request.name !== undefined && request.matchExactName !== true) ||
+    request.minOsVersion !== undefined ||
+    request.maxOsVersion !== undefined ||
+    request.formFactor !== undefined ||
+    request.requires !== undefined ||
+    request.screenSize !== undefined
+  );
+}
+
 function assertAndroidAvdIdentityResolved(devices: readonly BootedDevice[], avdName: string): void {
   const unresolved = devices
     .filter(
@@ -139,6 +161,17 @@ function assertBootedMatchesImage(device: BootedDevice, image: DeviceInfo): void
         `(${image.deviceId ?? "no runtime ID"}) resolved to '${device.name}' (${device.deviceId}). ` +
         "Retry after device discovery refreshes.",
     );
+  }
+}
+
+/**
+ * A `name` constraint on an emulator whose AVD-name probe went unanswered cannot be judged: the
+ * placeholder name proves neither a match nor a mismatch, so the request is retryable rather than
+ * refused as unsatisfied (#11648).
+ */
+function assertRequestedNameVerifiable(request: DeviceBootRequest, running: BootedDevice): void {
+  if (request.name !== undefined && request.matchExactName !== true) {
+    assertAndroidAvdIdentityResolved([running], request.name);
   }
 }
 
@@ -289,6 +322,9 @@ function trackInFlightAndroidColdBootIfNeeded(
     : undefined;
 }
 
+/** Whether a boot re-checks for an already-running device after its lifecycle lease settles. */
+type AdoptAfterLease = "always" | "if-queued" | "never";
+
 function findBootedDeviceMatchingImage(
   image: DeviceInfo,
   booted: readonly BootedDevice[],
@@ -353,6 +389,13 @@ export interface DeviceBootRequest {
    * devices and images.
    */
   excludeDeviceIds?: ReadonlySet<string>;
+  /**
+   * Booted devices a selector match takes only when no other booted device satisfies the spec:
+   * the ones another session holds (#11648). They stay candidates, so a spec only held devices
+   * satisfy keeps its typed ownership refusal instead of booting around the holder. An exact
+   * target (`deviceId`, `matchExactName`) is an identity, not a choice, and ignores this.
+   */
+  deferDeviceIds?: ReadonlySet<string>;
   /** Non-mutating acceptance control for deterministic discovery-order coverage. */
   presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"];
 }
@@ -364,6 +407,7 @@ export interface DeviceBootProgress {
 export interface DeviceBootResult {
   device: BootedDevice;
   source: "booted" | "cold-boot";
+  runningBeforeCall?: true;
   sourceImage?: DeviceInfo;
   processHandle?: ChildProcess | null;
   processId?: number;
@@ -432,6 +476,8 @@ interface BootDeadlineContext {
   operationName: string;
   startedAtMs: number;
   deadlineMs: number;
+  /** Name of the device being booted, once resolved; named by a timeout error (#11548). */
+  deviceLabel?: string;
   signal?: AbortSignal;
   lifecycleLease?: VirtualDeviceLifecycleLease;
   ownsLifecycleLease: boolean;
@@ -649,12 +695,7 @@ export class DeviceBootService {
       true,
       request.presentationOrder,
     );
-    const hasExplicitConstraints =
-      request.minOsVersion !== undefined ||
-      request.maxOsVersion !== undefined ||
-      request.formFactor !== undefined ||
-      request.requires !== undefined ||
-      request.screenSize !== undefined;
+    const hasExplicitConstraints = hasExplicitSpecConstraints(request);
     const running = booted.find((device) => device.deviceId === request.deviceId);
     if (running) {
       return await this.waitForKnownRunningDevice(
@@ -714,6 +755,7 @@ export class DeviceBootService {
     context: BootDeadlineContext,
     progress: DeviceBootProgress | undefined,
   ): Promise<DeviceBootResult> {
+    assertRequestedNameVerifiable(request, running);
     const enriched = await this.enrichKnownRunningDevice(
       running,
       request.deviceId,
@@ -918,11 +960,7 @@ export class DeviceBootService {
     const match =
       request.matchExactName && request.name
         ? findEligibleExactBootedDevice(request.platform, enriched, request.name, criteria)
-        : this.dependencies.deviceMatcher.matchBootedDevice(
-            criteria,
-            enriched,
-            this.dependencies.matchingStrategy,
-          );
+        : this.matchBootedPreferringUndeferred(criteria, enriched, request.deferDeviceIds);
     if (!match) {
       return undefined;
     }
@@ -935,26 +973,50 @@ export class DeviceBootService {
       : result;
   }
 
+  /** The strategy's pick among the booted devices not deferred, else among all of them. */
+  private matchBootedPreferringUndeferred(
+    criteria: DeviceMatchCriteria,
+    booted: BootedDevice[],
+    deferred: ReadonlySet<string> | undefined,
+  ): BootedDevice | null {
+    const { deviceMatcher, matchingStrategy } = this.dependencies;
+    const preferred = deferred?.size
+      ? booted.filter((device) => !deferred.has(device.deviceId))
+      : booted;
+    return (
+      deviceMatcher.matchBootedDevice(criteria, preferred, matchingStrategy) ??
+      (preferred.length < booted.length
+        ? deviceMatcher.matchBootedDevice(criteria, booted, matchingStrategy)
+        : null)
+    );
+  }
+
   /**
-   * Whether bootImage should re-check for a now-running device once its
+   * When bootImage should re-check for a now-running device once its
    * lifecycle lease settles. Explicit cold-boot intent is never turned into
-   * adoption (#7197). Android only does so behind an in-flight cold boot; iOS
-   * has no marker, because a sibling boot of the same UDID holds the stable
-   * lease this call is about to queue on, so its re-check always applies (#9902).
+   * adoption (#7197). iOS has no marker, because a sibling boot of the same UDID
+   * holds the stable lease this call is about to queue on, so its re-check always
+   * applies (#9902). Android always re-checks behind an in-flight cold boot. That
+   * marker is read before the lease wait, though, and a sibling queued on the same
+   * lease has not claimed it yet, so an Android start that had to wait for the
+   * lease re-checks too instead of cold-booting an AVD that is now running (#11565).
    */
-  private shouldAdoptAfterLease(
+  private adoptAfterLeasePolicy(
     context: BootDeadlineContext,
     image: DeviceInfo,
     preferRunning: boolean | undefined,
     hasInFlightColdBoot: boolean,
-  ): boolean {
+  ): AdoptAfterLease {
     // The daemon's externally managed lease is held through its later
     // reservation/session handoff, which tolerates this shared-cold-boot
     // re-check via throwIfFreshStartAlreadyBound in deviceTools.
     const holdsLease =
       context.ownsLifecycleLease || this.dependencies.allowExternalLeaseAdoptionRecheck === true;
     const explicitColdBoot = preferRunning === false && !image.isRunning;
-    return holdsLease && !explicitColdBoot && (image.platform === "ios" || hasInFlightColdBoot);
+    if (!holdsLease || explicitColdBoot) {
+      return "never";
+    }
+    return image.platform === "ios" || hasInFlightColdBoot ? "always" : "if-queued";
   }
 
   private async bootMatchedImage(
@@ -978,7 +1040,7 @@ export class DeviceBootService {
         context,
         progress,
         false,
-        this.shouldAdoptAfterLease(context, image, preferRunning, false),
+        this.adoptAfterLeasePolicy(context, image, preferRunning, false),
       );
     }
     const booted = await this.discoverBootedDevices(
@@ -1002,7 +1064,7 @@ export class DeviceBootService {
       image.platform === "android" &&
       hasInFlightAndroidColdBoot(this.lifecycleCoordinator, image.name);
     const explicitlyRequestedColdBoot = preferRunning === false && !image.isRunning;
-    const adoptAfterLease = this.shouldAdoptAfterLease(
+    const adoptAfterLease = this.adoptAfterLeasePolicy(
       context,
       image,
       preferRunning,
@@ -1354,20 +1416,28 @@ export class DeviceBootService {
     context: BootDeadlineContext,
     progress: DeviceBootProgress | undefined,
     provisioned: boolean,
-    adoptRunningAfterLease = false,
+    adoptAfterLease: AdoptAfterLease = "never",
   ): Promise<DeviceBootResult> {
+    context.deviceLabel = image.deviceId ? `${image.name} (${image.deviceId})` : image.name;
     assertAndroidImageRunningStateKnown(image);
     if (image.platform === "ios" && !image.deviceId) {
       throw new ActionableError("iOS simulator deviceId (UDID) is required to start a simulator.");
     }
+    // The lease asks for revalidation exactly when another owner held the identity first.
+    let queuedBehindLease = false;
     await this.bindLifecycleIdentity(
       context,
       {
         platform: image.platform,
         stableId: image.platform === "android" ? image.name : image.deviceId!,
       },
-      async () => await this.revalidateImageIdentity(image, context),
+      async () => {
+        queuedBehindLease = true;
+        return await this.revalidateImageIdentity(image, context);
+      },
     );
+    const adoptRunningAfterLease =
+      adoptAfterLease === "always" || (adoptAfterLease === "if-queued" && queuedBehindLease);
     if (adoptRunningAfterLease) {
       const adopted = await this.adoptRunningImageAfterLease(image, context, progress);
       if (adopted) {
@@ -1756,6 +1826,7 @@ export class DeviceBootService {
       phase,
       this.timer.now() - context.startedAtMs,
       Math.max(0, context.deadlineMs - context.startedAtMs),
+      context.deviceLabel ?? context.request.name ?? context.request.deviceId,
     );
   }
 }

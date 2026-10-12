@@ -1,4 +1,7 @@
-import { ActionableError } from "../../models/ActionableError";
+import {
+  AndroidBootedDeviceDiscoveryIncompleteError,
+  BootedDeviceDiscoveryIncompleteError,
+} from "../../models/BootedDeviceDiscoveryIncompleteError";
 import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
 import type { Platform } from "../../models/Platform";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -88,6 +91,8 @@ export function atCapacityDecision(
 
 export interface BootAdmissionOptions<S, D extends { outcome: string }> {
   timer: Timer;
+  /** Platform being sampled: a sample timeout means its booted count is unknown. */
+  platform: Platform;
   signal?: AbortSignal;
   /** e.g. "iOS simulator capacity"; used in timeout and cancellation messages. */
   label: string;
@@ -95,8 +100,13 @@ export interface BootAdmissionOptions<S, D extends { outcome: string }> {
   sampleTimeoutMs?: number;
   /** One fresh capacity sample. */
   sample: () => Promise<S>;
-  /** Synchronous so a caller decides and records its admission without an interleaving. */
-  decide: (sample: S) => D | RefusedCapacityDecision;
+  /** The ledger whose in-flight boots the sample may not yet reflect. */
+  ledger: BootAdmissionLedger;
+  /**
+   * Synchronous so a caller decides and records its admission without an interleaving. Pass the
+   * `window` to the ledger's `inFlightCount` so a boot released mid-sample still counts.
+   */
+  decide: (sample: S, window: LedgerSampleWindow) => D | RefusedCapacityDecision;
   /** Records the admission; returns its release. Called synchronously after `decide`. */
   admit: (decision: D) => () => void;
 }
@@ -114,9 +124,18 @@ export async function admitBootNow<S, D extends { outcome: string }>(
   options: BootAdmissionOptions<S, D>,
 ): Promise<BootAdmissionResult<D>> {
   options.signal?.throwIfAborted();
-  const sample = await sampleWithin(options);
+  // A boot that ends before the sample returns must still hold its slot in this decision, whether
+  // it was admitted before or after the sample started: the (possibly slow) listing may predate
+  // it (#11465, #11537).
+  const window = options.ledger.beginSample();
+  let sample: S;
+  try {
+    sample = await sampleWithin(options);
+  } finally {
+    window.close();
+  }
   options.signal?.throwIfAborted();
-  const decision = options.decide(sample);
+  const decision = options.decide(sample, window);
   if (isRefused(decision)) {
     return { decision };
   }
@@ -140,9 +159,27 @@ async function sampleWithin<S, D extends { outcome: string }>(
     timeoutMs,
     signal: options.signal,
     label: `Collecting ${options.label}`,
-    timeoutError: () =>
-      new ActionableError(`Timed out after ${timeoutMs}ms collecting ${options.label}.`),
+    timeoutError: () => sampleTimeoutError(options.platform, timeoutMs, options.label),
   });
+}
+
+/**
+ * An unfinished sample leaves the booted count unknown, which never fails open: retryable
+ * `discovery_incomplete`, as for a failed listing.
+ */
+function sampleTimeoutError(
+  platform: Platform,
+  timeoutMs: number,
+  label: string,
+): BootedDeviceDiscoveryIncompleteError {
+  const discoveryError = {
+    code: "timeout",
+    message: `timed out after ${timeoutMs}ms collecting ${label}`,
+    retryable: true,
+  } as const;
+  return platform === "android"
+    ? new AndroidBootedDeviceDiscoveryIncompleteError(discoveryError)
+    : new BootedDeviceDiscoveryIncompleteError(platform, discoveryError);
 }
 
 /** Throws the typed retryable {@link BootCapacityExhaustedError} when the boot was refused. */
@@ -169,14 +206,59 @@ export function assertBootCapacityGranted<D extends { outcome: string }>(
 
 interface LedgerEntry {
   deviceId?: string;
+  /** Pid of the process spawned for the boot, once handed off with one. */
+  processId?: number;
   /** Set once the boot was handed off: the entry ends when the device is visible or this passes. */
   handedOffUntilMs?: number;
 }
 
-/** A ledger entry's handle; `handOff` takes the absolute end of the hand-off window. */
+/**
+ * A ledger entry's handle; `handOff` takes the absolute end of the hand-off window and may be
+ * repeated, a later call adding the device id or process id the earlier one lacked.
+ */
 export interface LedgerAdmission {
   release(): void;
-  handOff(deviceId: string | undefined, untilMs: number): void;
+  handOff(deviceId: string | undefined, untilMs: number, processId?: number): void;
+}
+
+/**
+ * One capacity sample in progress. Every entry that leaves the ledger while the window is open
+ * stays in `ended`, whenever it was admitted: the listing may have been taken before that boot
+ * showed up in it, so the boot still holds its slot for this sample's decision (#11465, #11537).
+ */
+export interface LedgerSampleWindow {
+  close(): void;
+}
+
+class SampleWindow implements LedgerSampleWindow {
+  readonly ended: LedgerEntry[] = [];
+
+  constructor(private readonly onClose: (window: SampleWindow) => void) {}
+
+  close(): void {
+    this.onClose(this);
+  }
+}
+
+/** Admitted boots a capacity sample's device listing does not show. */
+export interface InFlightBoots {
+  count: number;
+  /**
+   * How many of `count` have their own process in the sample's process listing: the boot was
+   * handed off with a process id and the listing shows that process. Any other admitted boot is
+   * not in the listing, whatever it shows: not spawned yet, spawned after the listing was read,
+   * or spawned as a launcher that is not the counted process yet (#11564). Zero when no listed
+   * process ids are given.
+   */
+  withListedProcess: number;
+  /**
+   * Boots NOT in `count`, because the device listing shows them, whose own process the process
+   * listing does not show: boots in the ledger, or ended while the sample was open. The two
+   * listings are read at different moments, so such a boot spawned after the process listing was
+   * read and the device listing then caught it; the process listing is short by exactly that boot
+   * (#11588). A listed boot handed off without a process id is one of them: it cannot be matched.
+   */
+  listedWithoutProcess: number;
 }
 
 /**
@@ -186,6 +268,7 @@ export interface LedgerAdmission {
  */
 export class BootAdmissionLedger {
   private readonly entries = new Map<symbol, LedgerEntry>();
+  private readonly openWindows = new Set<SampleWindow>();
 
   constructor(private readonly timer: Pick<Timer, "now">) {}
 
@@ -193,14 +276,13 @@ export class BootAdmissionLedger {
     const token = Symbol("boot-admission");
     this.entries.set(token, { deviceId });
     return {
-      release: () => {
-        this.entries.delete(token);
-      },
-      handOff: (handedOffDeviceId, untilMs) => {
+      release: () => this.end(token),
+      handOff: (handedOffDeviceId, untilMs, processId) => {
         const entry = this.entries.get(token);
         if (entry) {
           this.entries.set(token, {
             deviceId: handedOffDeviceId ?? entry.deviceId,
+            processId: processId ?? entry.processId,
             handedOffUntilMs: untilMs,
           });
         }
@@ -209,21 +291,104 @@ export class BootAdmissionLedger {
   }
 
   /**
+   * The only way an entry leaves the ledger. Every open sample window keeps it: a window that
+   * kept only the boots in flight when it opened lost a boot admitted and ended inside it, and
+   * a listing older than that boot then admitted past the limit (#11537).
+   */
+  private end(token: symbol, listed = false): void {
+    const entry = this.entries.get(token);
+    if (!entry) {
+      return;
+    }
+    this.entries.delete(token);
+    // A device a listing showed is running whatever its boot deadline says: an older listing
+    // still open counts it until that sample decides, so the window keeps it without a deadline.
+    const kept = listed ? { deviceId: entry.deviceId, processId: entry.processId } : entry;
+    for (const window of this.openWindows) {
+      window.ended.push(kept);
+    }
+  }
+
+  /**
+   * Start tracking the boots that end from now on; `close` it once the sample returns. The
+   * sample's listing must start no earlier than this call, or a boot that ended in between is
+   * in neither the window nor the listing.
+   */
+  beginSample(): LedgerSampleWindow {
+    const window = new SampleWindow((closed) => this.openWindows.delete(closed));
+    this.openWindows.add(window);
+    return window;
+  }
+
+  /**
    * Admitted boots the listing does not already show. A handed-off boot that
    * is now visible, or past its hand-off window, leaves the ledger here.
+   * An entry for `excludeDeviceId` is not counted: a boot's own target needs no second slot.
    */
-  inFlightCount(visibleDeviceIds: ReadonlySet<string>): number {
+  inFlightCount(
+    visibleDeviceIds: ReadonlySet<string>,
+    excludeDeviceId?: string,
+    sampleWindow?: LedgerSampleWindow,
+  ): number {
+    return this.inFlight(visibleDeviceIds, excludeDeviceId, sampleWindow).count;
+  }
+
+  /**
+   * {@link inFlightCount}, split by whether the sample's process listing shows the boot's own
+   * process. `listedProcessIds` holds every id that identifies a listed device process.
+   */
+  inFlight(
+    visibleDeviceIds: ReadonlySet<string>,
+    excludeDeviceId?: string,
+    sampleWindow?: LedgerSampleWindow,
+    listedProcessIds: ReadonlySet<number> = new Set(),
+  ): InFlightBoots {
     const now = this.timer.now();
-    let count = 0;
-    for (const [token, entry] of this.entries) {
-      const visible = entry.deviceId !== undefined && visibleDeviceIds.has(entry.deviceId);
+    const hasListedProcess = (entry: LedgerEntry): boolean =>
+      entry.processId !== undefined && listedProcessIds.has(entry.processId);
+    const isVisible = (entry: LedgerEntry): boolean =>
+      entry.deviceId !== undefined && visibleDeviceIds.has(entry.deviceId);
+    const ended = this.endedDuringSample(sampleWindow, visibleDeviceIds, excludeDeviceId, now);
+    let count = ended.length;
+    let withListedProcess = ended.filter(hasListedProcess).length;
+    // Read before the loop below ends the listed entries into the open windows, this one included.
+    const known = [...this.windowEnded(sampleWindow), ...this.entries.values()];
+    const listedWithoutProcess = known.filter(
+      (entry) => isVisible(entry) && !hasListedProcess(entry) && entry.deviceId !== excludeDeviceId,
+    ).length;
+    for (const [token, entry] of [...this.entries]) {
+      const visible = isVisible(entry);
       if (entry.handedOffUntilMs !== undefined && (visible || now >= entry.handedOffUntilMs)) {
-        this.entries.delete(token);
-      } else if (!visible) {
+        // Visible in this listing, but a sample still open may hold an older one without it.
+        this.end(token, visible);
+      } else if (
+        !visible &&
+        (excludeDeviceId === undefined || entry.deviceId !== excludeDeviceId)
+      ) {
         count += 1;
+        withListedProcess += hasListedProcess(entry) ? 1 : 0;
       }
     }
-    return count;
+    return { count, withListedProcess, listedWithoutProcess };
+  }
+
+  private windowEnded(window: LedgerSampleWindow | undefined): readonly LedgerEntry[] {
+    return window instanceof SampleWindow ? window.ended : [];
+  }
+
+  /** Boots that ended while the sample was open and that the sample does not show either. */
+  private endedDuringSample(
+    window: LedgerSampleWindow | undefined,
+    visibleDeviceIds: ReadonlySet<string>,
+    excludeDeviceId: string | undefined,
+    now: number,
+  ): LedgerEntry[] {
+    return this.windowEnded(window).filter(
+      (entry) =>
+        !(entry.handedOffUntilMs !== undefined && now >= entry.handedOffUntilMs) &&
+        !(entry.deviceId !== undefined && visibleDeviceIds.has(entry.deviceId)) &&
+        (excludeDeviceId === undefined || entry.deviceId !== excludeDeviceId),
+    );
   }
 }
 

@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../daemon/sessionLivenessWindows";
+import { MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS } from "../daemon/sessionLivenessWindows";
 import {
   androidManagedSlotSpecSchema,
   iosManagedSlotSpecSchema,
@@ -41,7 +41,7 @@ export const MANAGED_SLOT_CONFIG_ENV = "AUTOMOBILE_MANAGED_SLOT_CONFIG";
 export const MAX_MANAGED_SLOT_GROUP_SIZE = 1;
 
 /** The 2-minute default; a trusted config may lengthen but never shorten the idle window. */
-export const MIN_MANAGED_SLOT_IDLE_TIMEOUT_MS = DEFAULT_SESSION_IDLE_TIMEOUT_MS;
+export const MIN_MANAGED_SLOT_IDLE_TIMEOUT_MS = MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS;
 export const MAX_MANAGED_SLOT_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 
 export type ManagedSlotConfigErrorCode =

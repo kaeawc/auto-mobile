@@ -37,6 +37,7 @@ import {
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
+import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
@@ -323,6 +324,8 @@ describe("deleteDevice handler", () => {
     resetSegmentedSessions();
     DaemonState.getInstance().reset();
     ToolRegistry.clearTools();
+    // Never-settling resource notifications must not leak into another test's DB drain.
+    resetDbWriteBarrier();
   };
 
   const reset = async () => {
@@ -331,7 +334,10 @@ describe("deleteDevice handler", () => {
   };
   const test = warmedTests(reset);
   beforeEach(reset);
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    expect(getDbWriteBarrier().inFlightCount()).toBe(0);
+  });
   afterAll(cleanup);
 
   test("stops, destroys, and proves a booted iOS simulator is durably absent", async () => {
@@ -1076,6 +1082,8 @@ describe("deleteDevice handler", () => {
       expect(body.state).toBe("failed");
       expect(body.failure).toEqual({
         code: "device_owned_by_other_session",
+        deviceId: device.deviceId,
+        retryable: false,
         phase: "precondition",
         message:
           `deleteDevice refused: device '${device.deviceId}' is held by another session. ` +

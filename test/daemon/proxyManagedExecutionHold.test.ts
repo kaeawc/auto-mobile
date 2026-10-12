@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -25,6 +25,7 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 
 // #11176: the proxy holds a managed execution's session from launch (not from its first tool
 // call) and releases it promptly when the execution ends (stdin EOF / owner loss close it).
@@ -41,6 +42,8 @@ describe("proxy managed-execution session hold", () => {
   let isAvailableSpy: ReturnType<typeof spyOn>;
   let state: DaemonStateAccess;
   let releaseFails: boolean;
+  /** What the fake daemon saw, in order: a cancelled request, then each daemon method. */
+  let wire: string[];
   let registry: FakeSlotRegistry;
   let slotKey: { scopeKey: string; slotIndex: number };
 
@@ -52,6 +55,7 @@ describe("proxy managed-execution session hold", () => {
       idleTimeoutMs: 10 * 60_000,
     });
     releaseFails = false;
+    wire = [];
     registry = new FakeSlotRegistry(timer);
     const scope = await registry.ensureScope({
       managedHostScope: "host",
@@ -112,8 +116,16 @@ describe("proxy managed-execution session hold", () => {
       livenessOwnerToken: TOKEN,
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
       clientFactory: () => {
-        const client = new FakeDaemonClient({
+        const client: FakeDaemonClient = new FakeDaemonClient({
+          // A `tapOn` stays in flight until its signal cancels it (the real client then sends
+          // `daemon/cancelRequest` for it).
+          onCallTool: async (toolName) => {
+            if (toolName === "tapOn") {
+              await cancelled(client.callToolSignals.at(-1), `cancel ${toolName}`);
+            }
+          },
           onCallDaemonMethod: async (method, params) => {
+            wire.push(method);
             if (method === DAEMON_RELEASE_EXECUTION_METHOD && releaseFails) {
               throw new Error("daemon stalled");
             }
@@ -138,6 +150,12 @@ describe("proxy managed-execution session hold", () => {
       autoStartDaemon: false,
       timer,
     });
+  }
+
+  /** Never settles: records the signal's abort, like the cancel frame the real client writes. */
+  function cancelled(signal: AbortSignal | undefined, label: string): Promise<never> {
+    signal?.addEventListener("abort", () => wire.push(label), { once: true });
+    return new Promise<never>(() => {});
   }
 
   const heartbeats = (client: FakeDaemonClient) =>
@@ -229,6 +247,59 @@ describe("proxy managed-execution session hold", () => {
       execOwner: null,
     });
     expect(await registry.isDeviceAssignedToValidSlot("android", "Pixel_8_API_35")).toBe(true);
+  });
+
+  test("close cancels this proxy's call in flight before it asks for the release (#11642)", async () => {
+    const clients: FakeDaemonClient[] = [];
+    const proxy = proxyWith(clients);
+    await proxy.holdManagedExecutionSession(SESSION);
+    // A signal stops the process with the MCP server still open: the caller never aborts the call.
+    const call = proxy.callTool("tapOn", { sessionUuid: SESSION }).catch((error: unknown) => error);
+    await drainMicrotasks(64);
+    expect(clients[0]!.callToolCalls).toHaveLength(1);
+    wire.length = 0;
+
+    await proxy.close();
+
+    // The daemon admits the release in arrival order on this socket: the call must be off it first.
+    expect(wire).toEqual(["cancel tapOn", DAEMON_RELEASE_EXECUTION_METHOD]);
+    expect(sessionManager.hasSession(SESSION)).toBe(false);
+    // The call's caller is answered with the typed closing error, never left waiting.
+    const answer: unknown = await call;
+    expect(answer).toBeInstanceOf(DaemonUnavailableError);
+    expect(String(answer)).toContain("MCP proxy is closing");
+  });
+
+  test("close still cancels a call whose caller passed its own signal (#11642)", async () => {
+    const clients: FakeDaemonClient[] = [];
+    const proxy = proxyWith(clients);
+    await proxy.holdManagedExecutionSession(SESSION);
+    const caller = new AbortController();
+    const call = proxy
+      .callTool("tapOn", { sessionUuid: SESSION }, undefined, undefined, caller.signal)
+      .catch((error: unknown) => error);
+    await drainMicrotasks(64);
+    wire.length = 0;
+
+    await proxy.close();
+
+    expect(wire).toEqual(["cancel tapOn", DAEMON_RELEASE_EXECUTION_METHOD]);
+    expect(caller.signal.aborted).toBe(false);
+    expect(await call).toBeInstanceOf(DaemonUnavailableError);
+  });
+
+  test("a call made after close is refused with the typed closing error", async () => {
+    const clients: FakeDaemonClient[] = [];
+    const proxy = proxyWith(clients);
+    await proxy.holdManagedExecutionSession(SESSION);
+    await proxy.close();
+
+    const answer: unknown = await proxy
+      .callTool("tapOn", { sessionUuid: SESSION })
+      .catch((error: unknown) => error);
+
+    expect(answer).toBeInstanceOf(DaemonUnavailableError);
+    expect(clients[0]!.callToolCalls).toEqual([]);
   });
 
   test("an orphaned predecessor cannot release its successor's execution (#11232)", async () => {

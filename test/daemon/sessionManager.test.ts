@@ -375,10 +375,13 @@ test("a retry during an unpublished same-UUID resume leaves the new row active",
     await expect(
       manager.releaseSession("racing-session", "allocation-rollback"),
     ).resolves.toBeNull();
-    expect(pending.has("racing-session")).toBe(false);
+    // Still pending while the resume is in flight (#11557): a resume that failed would leave the
+    // row to this release. Publishing ends it.
+    expect(pending.has("racing-session")).toBe(true);
     expect((await persistence.getSession?.("racing-session"))?.status).toBe("active");
     finishUpsert.resolve();
     await expect(resume).resolves.toMatchObject({ assignedDevice: "emulator-new" });
+    expect(pending.has("racing-session")).toBe(false);
     expect(await persistence.getSession?.("racing-session")).toMatchObject({
       status: "active",
       release_reason: null,
@@ -1081,9 +1084,15 @@ describe("SessionManager", () => {
       };
 
       try {
-        await expect(
-          manager.getOrCreateSession("persisted-session", devicePool, "android", undefined, true),
-        ).rejects.toThrow("not found");
+        // Typed terminal refusal carrying the expired reason, not an untyped not-found (#11361).
+        const error = await manager
+          .getOrCreateSession("persisted-session", devicePool, "android", undefined, true)
+          .catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(TerminalSessionError);
+        expect((error as TerminalSessionError).release).toMatchObject({
+          releaseReason: "expired",
+          terminal: true,
+        });
         expect(assignments).toBe(0);
         expect(persisted).toMatchObject({
           status: "expired",
@@ -2494,8 +2503,9 @@ describe("SessionManager", () => {
       try {
         await manager.createSession("session-1", "emulator-old", "android");
         await manager.claimLivenessOwnership("session-1", "owner-a");
-        // owner-a's lease must lapse or the daemon rejects owner-b's claim (#10050).
-        fakeTimer.advanceTime(getDefaultSessionHeartbeatTimeoutMs() + 1);
+        // owner-a's lease and suspect grace must lapse or the daemon rejects owner-b's claim
+        // (#10050); an accepted claim is its owner's heartbeat, so it holds the grace (#11646).
+        fakeTimer.advanceTime(getDefaultSessionHeartbeatTimeoutMs() + SUSPECT_GRACE_MS + 1);
         repository.deferUpsert = true;
 
         const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
@@ -7343,7 +7353,40 @@ describe("terminal release of persisted restart recovery", () => {
     }
   });
 
-  test.each(["missing", "daemon-restart", "expired-window"])(
+  // #11461: an explicit release is terminal and never rehydrated, so it ends a restart handoff
+  // this daemon has not recovered yet; no other reason reaches a row the daemon does not hold.
+  test("an explicit release terminalizes an unrecovered daemon-restart row", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    persistence.seed(persistedRecoverySession({ release_reason: "daemon-restart" }));
+    const manager = new SessionManager(new FakeTimer(), persistence);
+    manager.stopCleanupTimer();
+
+    expect(await manager.releaseSession("persisted-session", "explicit-release")).toBe(
+      "emulator-5554",
+    );
+
+    expect(await persistence.getSession?.("persisted-session")).toMatchObject({
+      release_reason: "explicit-release",
+    });
+    await expect(
+      manager.getOrCreateSession("persisted-session", undefined, undefined, undefined, true),
+    ).rejects.toThrow(TerminalSessionError);
+  });
+
+  test("a heartbeat-timeout release leaves an unrecovered daemon-restart row unchanged", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    persistence.seed(persistedRecoverySession({ release_reason: "daemon-restart" }));
+    const manager = new SessionManager(new FakeTimer(), persistence);
+    manager.stopCleanupTimer();
+    const before = { ...(await persistence.getSession?.("persisted-session")) };
+
+    expect(await manager.releaseSession("persisted-session", "heartbeat-timeout")).toBeNull();
+
+    expect({ ...(await persistence.getSession?.("persisted-session")) }).toEqual(before);
+    expect(manager.getTerminalReleaseSnapshot("persisted-session")).toBeUndefined();
+  });
+
+  test.each(["missing", "expired-window"])(
     "terminal release leaves %s outside restart recovery unchanged",
     async (state) => {
       const timer = new FakeTimer();
@@ -7351,7 +7394,7 @@ describe("terminal release of persisted restart recovery", () => {
       if (state !== "missing") {
         persistence.seed(
           persistedRecoverySession({
-            release_reason: state === "daemon-restart" ? "daemon-restart" : "device-restart:Pixel",
+            release_reason: "device-restart:Pixel",
           }),
         );
       }

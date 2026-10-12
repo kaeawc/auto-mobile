@@ -6,6 +6,10 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
+import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
+import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -38,6 +42,48 @@ async function steppedDaemon() {
 }
 
 describe("session reports in wall-clock ms after a wall step (#11243)", () => {
+  test.each(["daemon/heartbeat", "daemon/sessionInfo"])(
+    "%s reports an ended base's label as not found without stamping or releasing",
+    async (method) => {
+      const { timer, manager, call } = await steppedDaemon();
+      const base = manager.getSession(SESSION)!;
+      const labelId = `${SESSION}:B`;
+      const label = await asPlanAllocation(manager, SESSION, [labelId], () =>
+        manager.createSession(labelId, "emulator-5556", "android", 600_000),
+      );
+      manager.setDeviceLabels(SESSION, buildDeviceLabelMap(["A", "B"], SESSION));
+      base.expiresAt = manager.sessionNow() + 1_000;
+      timer.advanceTime(1_001);
+      const beforeBase = { ...base };
+      const beforeLabel = { ...label };
+      const released: string[] = [];
+      manager.onSessionRelease((id) => {
+        released.push(id);
+      });
+
+      expect(
+        await call(method, {
+          sessionId: labelId,
+          livenessOwnerToken: "new-owner",
+          claimLivenessOwnership: true,
+          livenessPolicy: "heartbeat",
+        }),
+      ).toMatchObject({
+        success: false,
+        error: `Session not found: ${labelId}`,
+        code: DAEMON_SESSION_NOT_FOUND_CODE,
+        releaseReason: "lazy-expiry",
+        idle: true,
+      });
+      await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+      expect(released).toEqual([]);
+      expect(base).toEqual(beforeBase);
+      expect(label).toEqual(beforeLabel);
+      expect(manager.hasSession(SESSION)).toBe(true);
+      expect(manager.hasSession(labelId)).toBe(true);
+    },
+  );
+
   test("daemon/sessionInfo createdAt, lastUsedAt and expiresAt", async () => {
     const { manager, call } = await steppedDaemon();
     const session = manager.getSession(SESSION)!;
@@ -65,5 +111,44 @@ describe("session reports in wall-clock ms after a wall step (#11243)", () => {
       manager.sessionClockToWall(session.lastHeartbeat + session.heartbeatTimeoutMs),
     );
     expect(expiresAtMs).toBe(session.lastHeartbeat + session.heartbeatTimeoutMs + WALL_STEP_MS);
+  });
+
+  test("daemon/sessionInfo lastUsedAt of an unmoved session reads back the same under wall-read jitter (#11368)", async () => {
+    const jitter = [0, 0, -1, 0, -2, -2, 1, 2];
+    class JitteryTimer extends FakeTimer {
+      private reads = 0;
+      override now(): number {
+        return super.now() + jitter[this.reads++ % jitter.length]!;
+      }
+    }
+    const timer = new JitteryTimer();
+    timer.setCurrentTime(10_000_000);
+    const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    manager.stopCleanupTimer();
+    await manager.createSession(SESSION, "emulator-5554", "android", 600_000);
+    const state: DaemonStateAccess = {
+      isInitialized: () => true,
+      getSessionManager: () => manager,
+      getDevicePool: () => ({
+        refreshDevices: async () => 0,
+        getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
+      }),
+      getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
+    };
+    const seen = new Set<number>();
+    for (let i = 0; i < 20; i++) {
+      timer.advanceTime(31);
+      const response = await handleDaemonRequest(
+        {
+          id: "r",
+          type: "daemon_request",
+          method: "daemon/sessionInfo",
+          params: { sessionId: SESSION },
+        },
+        state,
+      );
+      seen.add((response.result as { lastUsedAt: number }).lastUsedAt);
+    }
+    expect(seen.size).toBe(1);
   });
 });

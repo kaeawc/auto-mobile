@@ -1,0 +1,17 @@
+{
+  "surface": "socket-frame",
+  "name": "session_ownership_lost.released_explicit_release",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "Session 11111111-2222-4333-8444-555555555555 is terminal after explicit-release and cannot be reused; it was released while this call was in flight, so the call was cancelled. Acquire a new device with getAndroid or getApple.",
+    "code": "session_ownership_lost",
+    "retryable": false,
+    "nextAction": "acquire_new_session",
+    "details": {
+      "sessionUuid": "11111111-2222-4333-8444-555555555555",
+      "reason": "explicit-release"
+    }
+  }
+}

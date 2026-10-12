@@ -206,6 +206,13 @@ export type HierarchyUnavailableReason =
 
 export type PrototypePlacement = "fullscreen" | "sheet" | "floating";
 
+/** Same shape as the prototype protocol's `PrototypeAppearance`; `deviceDark` is the device's own setting. */
+export interface PrototypeWindowAppearance {
+  mode: "light" | "dark";
+  source: "explicit" | "override" | "roleLuminance" | "authoredBackground" | "system";
+  deviceDark: boolean;
+}
+
 export interface ViewHierarchyWindowInfo {
   displayId?: number | null;
   panelUniqueId?: string | null;
@@ -233,6 +240,11 @@ export interface ViewHierarchyWindowInfo {
    * root or scrim). Absent when unknown or from an older APK.
    */
   prototypeOpaque?: boolean;
+  /**
+   * The light or dark mode that prototype is drawn in, and what decided it. Only on the prototype
+   * window and only from an APK advertising `prototype_appearance_v1`; absent otherwise.
+   */
+  prototypeAppearance?: PrototypeWindowAppearance;
   hierarchy?: ViewHierarchyNode;
   /** Per-window truncation attribution; absent from older runners and complete windows. */
   truncationReasons?: string[] | null;

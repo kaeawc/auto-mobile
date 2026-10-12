@@ -1,4 +1,6 @@
 import { ActionableError } from "../models/ActionableError";
+import type { SessionAccess, SessionExecutionMetadata } from "./sessionManager";
+import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
 import {
   resolveToolSelectionBaseSessionUuid,
   type ToolSelectionSessionManager,
@@ -26,6 +28,13 @@ export const TOOL_CALL_REMEDY =
  */
 export class InputDeviceOwnedError extends ActionableError {
   readonly code = DEVICE_OWNED_BY_OTHER_SESSION_CODE;
+  /**
+   * False when a session holds the device: the holder keeps it until it releases it, so the same
+   * call cannot succeed as-is. True, with `retryAfterMs`, only for a device another request is
+   * still preparing (#11651), which ends by itself.
+   */
+  readonly retryable: boolean;
+  declare readonly retryAfterMs?: number;
 
   constructor(
     action: string,
@@ -34,6 +43,8 @@ export class InputDeviceOwnedError extends ActionableError {
     remedy = INPUT_REMEDY,
     /** Replaces the composed message where a caller's existing wording must stay stable. */
     message?: string,
+    /** Set only when the refusal ends without the caller or a holder doing anything. */
+    retryAfterMs?: number,
   ) {
     super(
       message ??
@@ -44,7 +55,46 @@ export class InputDeviceOwnedError extends ActionableError {
           remedy,
     );
     this.name = "InputDeviceOwnedError";
+    this.retryable = retryAfterMs !== undefined;
+    if (retryAfterMs !== undefined) {
+      this.retryAfterMs = retryAfterMs;
+    }
   }
+
+  /** The wire evidence: the held device, never the holder's session. */
+  toPayload(): Record<string, unknown> {
+    return {
+      code: this.code,
+      deviceId: this.deviceId,
+      retryable: this.retryable,
+      ...(this.retryAfterMs === undefined ? {} : { retryAfterMs: this.retryAfterMs }),
+    };
+  }
+}
+
+/** Retry hint for a device another request is preparing: a poll interval, not a bound. */
+export const DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS = 2_000;
+
+/**
+ * The refusal for selecting a device another request booted or picked and is still preparing: it
+ * holds a readiness reservation and has not bound a session yet (#11651, owner decision
+ * 2026-10-11). No session holds the device, so the message names none. Unlike a held device this
+ * ends by itself, when that request binds (the held-device rules apply from then on) or fails
+ * (the device is free), so this one emission is retryable with a hint. The reservation lasts as
+ * long as that request's preparation and its cleanup, which nothing else bounds.
+ */
+export function devicePreparedForOtherRequestError(deviceId: string): InputDeviceOwnedError {
+  const retryAfterMs = DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS;
+  return new InputDeviceOwnedError(
+    "setActiveDevice",
+    deviceId,
+    undefined,
+    undefined,
+    `Device '${deviceId}' is being prepared for another request, which has not bound it to a ` +
+      `session yet. Retry in about ${retryAfterMs}ms, once that request has bound the device or ` +
+      "failed, or use another device.",
+    retryAfterMs,
+  );
 }
 
 /**
@@ -84,6 +134,19 @@ export function deviceAlreadyAssignedToAnotherSessionError(
   );
 }
 
+/** True when the requester is the holder, a derived `${base}:${label}` session counting as its base. */
+export function isSameHolderSession(
+  ownerSessionUuid: string,
+  requesterSessionUuid: string | undefined,
+  sessionManager: ToolSelectionSessionManager | undefined,
+): boolean {
+  if (!requesterSessionUuid) {
+    return false;
+  }
+  const base = (uuid: string) => resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
+  return base(requesterSessionUuid) === base(ownerSessionUuid);
+}
+
 /** Throws {@link InputDeviceOwnedError} unless the requester may drive the device. */
 export function assertInputRequesterHoldsDevice(input: {
   action: string;
@@ -100,11 +163,64 @@ export function assertInputRequesterHoldsDevice(input: {
   if (!ownerSessionUuid) {
     return;
   }
-  const base = (uuid: string) => resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
-  if (requesterSessionUuid && base(requesterSessionUuid) === base(ownerSessionUuid)) {
+  if (isSameHolderSession(ownerSessionUuid, requesterSessionUuid, sessionManager)) {
     return;
   }
   throw new InputDeviceOwnedError(input.action, input.deviceId, requesterSessionUuid, input.remedy);
+}
+
+/**
+ * The session manager's control-call admission, the entry point the MCP tool path uses. Read
+ * structurally so daemon-state fakes that model no session lifecycle keep working.
+ */
+interface InputSessionAdmission {
+  admitIssuedSessionForAutomation(
+    sessionId: string,
+    execution?: SessionExecutionMetadata,
+    options?: { access?: SessionAccess },
+  ): Promise<{ assignedDevice: string } | undefined>;
+}
+
+function admitsIssuedSessions<T extends object>(manager: T): manager is T & InputSessionAdmission {
+  return typeof Reflect.get(manager, "admitIssuedSessionForAutomation") === "function";
+}
+
+/**
+ * `input/*` on a held device is a control call on the holder's session (#11417), so it passes the
+ * admission an MCP control call passes before anything reaches the device: a suspect session
+ * refuses it (retryable), and a session whose owner lease and grace ran out, or whose idle window
+ * closed, is released and refuses it terminally (`session_ownership_lost`). `execution` is the
+ * input's own tracked execution, so it is not mistaken for earlier work still in flight.
+ *
+ * The pane is not the session's owner, so admission is `non-owner-control`: it changes nothing on
+ * the session. It does not reclaim a rehydrated session awaiting its owner (that session is still
+ * released at the owner-reconnect timeout, which cuts an input in flight with the typed refusal),
+ * and it stamps neither the owner lease nor the activity clocks. The input's END is tool use, as
+ * it was before admission existed: the tracker reports it and the idle window restarts there.
+ */
+export async function admitInputOnHolderSession(input: {
+  deviceId: string;
+  holderSessionUuid: string;
+  sessionManager: object | undefined;
+  execution: SessionExecutionMetadata;
+}): Promise<void> {
+  const { sessionManager, holderSessionUuid, deviceId } = input;
+  if (!sessionManager || !admitsIssuedSessions(sessionManager)) {
+    return;
+  }
+  const admitted = await sessionManager.admitIssuedSessionForAutomation(
+    holderSessionUuid,
+    input.execution,
+    { access: "non-owner-control" },
+  );
+  if (admitted?.assignedDevice !== deviceId) {
+    // Typed session_no_longer_owns_device (#11351): clients branch on the code, not this wording.
+    throw new SessionNoLongerOwnsDeviceError(
+      holderSessionUuid,
+      deviceId,
+      `Session ${holderSessionUuid} no longer holds device '${deviceId}'; the input was not sent.`,
+    );
+  }
 }
 
 /**
@@ -169,4 +285,40 @@ export async function assertInputNotOnForeignManagedSlotDevice(input: {
       : undefined,
     maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
   });
+}
+
+/** The pool's cross-daemon claim check, optional so older daemon-state fakes keep compiling. */
+export interface ForeignDaemonClaimGate {
+  assertNotClaimedByForeignDaemon?(
+    deviceId: string,
+    platform: "android" | "ios",
+    remedy?: string,
+    maxAgeMs?: number,
+  ): Promise<void>;
+}
+
+/**
+ * How stale the foreign-claim read may be for a sessionless control call. Like
+ * {@link MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS}: such calls are frequent and each fresh read may
+ * cost a status query and a relinquish round trip to a peer daemon, so calls share one per second.
+ */
+export const FOREIGN_DAEMON_CLAIM_SNAPSHOT_MAX_AGE_MS = 1_000;
+
+/**
+ * Control on a device no session of this daemon holds is refused with the typed
+ * `device_owned_by_other_daemon` while another live daemon claims it (#11349): two daemons must
+ * never drive the same device. The pool skips the check for a device a local session holds, whose
+ * access the holder check governs. Reads are never passed here; watching stays open.
+ */
+export async function assertControlNotOnForeignDaemonDevice(input: {
+  deviceId: string;
+  platform: "android" | "ios";
+  gate: ForeignDaemonClaimGate;
+}): Promise<void> {
+  await input.gate.assertNotClaimedByForeignDaemon?.(
+    input.deviceId,
+    input.platform,
+    undefined,
+    FOREIGN_DAEMON_CLAIM_SNAPSHOT_MAX_AGE_MS,
+  );
 }

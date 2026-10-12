@@ -1,9 +1,11 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import dev.jasonpearson.automobile.protocol.PrototypeAction
 import dev.jasonpearson.automobile.protocol.PrototypeCondition
 import dev.jasonpearson.automobile.protocol.PrototypeDecrementAction
 import dev.jasonpearson.automobile.protocol.PrototypeIncrementAction
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
+import dev.jasonpearson.automobile.protocol.PrototypeSetStateAction
 import dev.jasonpearson.automobile.protocol.PrototypeStyle
 import dev.jasonpearson.automobile.protocol.PrototypeStyleWhen
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
@@ -22,8 +24,8 @@ internal fun PrototypeCondition.holds(state: Map<String, PrototypeScalar>): Bool
   val gt = gt
   val lt = lt
   return when {
-    key != null && equals != null -> stored == equals
-    key != null && notEquals != null -> stored != notEquals
+    key != null && equals != null -> stored.sameValue(equals)
+    key != null && notEquals != null -> !stored.sameValue(notEquals)
     gt != null -> number != null && number > gt
     lt != null -> number != null && number < lt
     all != null -> all.all { it.holds(state) }
@@ -32,6 +34,14 @@ internal fun PrototypeCondition.holds(state: Map<String, PrototypeScalar>): Bool
     else -> false
   }
 }
+
+/**
+ * Strict equality as the host's `===` and Swift's `==` see it: same type and same value, where
+ * numbers compare numerically, so `-0` equals `0` (data-class equality tells them apart).
+ */
+private fun PrototypeScalar?.sameValue(other: PrototypeScalar?): Boolean =
+  if (this is PrototypeScalar.Numeric && other is PrototypeScalar.Numeric) value == other.value
+  else this == other
 
 /** The flipped value, or null when the key no longer holds a boolean (the action is a no-op). */
 internal fun PrototypeToggleAction.nextValue(
@@ -56,6 +66,21 @@ internal fun PrototypeDecrementAction.nextValue(
   val next = current - (by ?: 1.0)
   return if (next.isFinite()) PrototypeScalar.Numeric(next) else null
 }
+
+/**
+ * The key and value a state-changing action writes given [state], or null when the action writes
+ * nothing: it is not a state action, or it is a toggle or step that is a no-op for the stored type.
+ */
+internal fun PrototypeAction.stateWrite(
+  state: Map<String, PrototypeScalar>,
+): Pair<String, PrototypeScalar>? =
+  when (this) {
+    is PrototypeSetStateAction -> key to value
+    is PrototypeToggleAction -> nextValue(state)?.let { key to it }
+    is PrototypeIncrementAction -> nextValue(state)?.let { key to it }
+    is PrototypeDecrementAction -> nextValue(state)?.let { key to it }
+    else -> null
+  }
 
 /**
  * The base style with every `styleWhen` entry whose condition holds merged over it, in authored

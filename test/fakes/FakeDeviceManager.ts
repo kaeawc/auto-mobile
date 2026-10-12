@@ -176,9 +176,10 @@ export class FakeDeviceManager implements PlatformDeviceManager {
       if (platformSucceeded) {
         succeededPlatforms.add(p);
       } else {
+        // A tool that exists and failed, as in production; `unavailable` means "not installed" (#11605).
         discoveryErrors[p] = {
-          code: "unavailable",
-          message: `${p === "ios" ? "iOS" : "Android"} booted-device discovery is unavailable.`,
+          code: "failed",
+          message: `${p === "ios" ? "iOS" : "Android"} booted-device discovery failed.`,
         };
       }
     }

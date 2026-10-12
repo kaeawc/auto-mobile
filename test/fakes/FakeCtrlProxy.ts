@@ -18,6 +18,7 @@ import type { PrototypeSpec } from "../../src/features/prototype/prototypeSpec";
 import type { PrototypeAssetUpload } from "../../src/features/prototype/prototypeAssets";
 import type { PrototypeAssetRequestOptions } from "../../src/features/observe/android/CtrlProxyPrototypes";
 import type {
+  PrototypeAppearanceOverride,
   PrototypeAssetResult,
   PrototypeDismiss,
   PrototypeEvent,
@@ -118,6 +119,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
         perf?: PerformanceTracker;
         displayId?: number;
         reset?: boolean;
+        appearance?: PrototypeAppearanceOverride;
       }
     | { method: "dismiss"; target: PrototypeDismiss; timeoutMs: number; perf?: PerformanceTracker }
   > = [];
@@ -148,6 +150,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     perf?: PerformanceTracker,
     displayId?: number,
     reset?: boolean,
+    appearance?: PrototypeAppearanceOverride,
   ): Promise<PrototypeResult> {
     this.checkFailure("requestShowPrototype");
     this.prototypeHistory.push({
@@ -157,6 +160,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       perf,
       ...(displayId === undefined ? {} : { displayId }),
       ...(reset === undefined ? {} : { reset }),
+      ...(appearance === undefined ? {} : { appearance }),
     });
     return this.nextPrototypeResult();
   }

@@ -1,0 +1,18 @@
+{
+  "surface": "socket-frame",
+  "name": "device_outside_managed_slots",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "tapOn refused: this managed connection controls only its own slot devices (code device_outside_managed_slots). Device 'emulator-5554' is not one of its slot devices. Reads stay open; use a separate MCP connection for anything else.",
+    "code": "device_outside_managed_slots",
+    "retryable": false,
+    "details": {
+      "action": "tapOn",
+      "reason": "device",
+      "scopeKey": "0123abcd",
+      "deviceId": "emulator-5554"
+    }
+  }
+}

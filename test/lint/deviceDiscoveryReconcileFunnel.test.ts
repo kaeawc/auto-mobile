@@ -57,11 +57,13 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   const ALLOWLIST: Readonly<Record<string, Allowed>> = {
     // --- The funnel itself, and its producers -------------------------------
     "src/daemon/devicePool.ts": {
-      calls: 3,
+      calls: 4,
       reason:
         "The pool routes discovery through the identity collaborator before reading pooled identity. " +
         "The third call only asks whether an emulator a start did not launch is visible to this adb, " +
-        "and whose foreign lease it carries, before readiness; it never consults pooled identity.",
+        "and whose foreign lease it carries, before readiness; it never consults pooled identity. " +
+        "The fourth (readLiveInventoryDeviceIds, #11568) only collects the listed device ids for the " +
+        "stats surfaces' live set; it reads cached discovery and never consults pooled identity.",
     },
     "src/daemon/devicePoolRefresh.ts": {
       calls: 1,
@@ -110,7 +112,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "Disconnect monitor joins the observation to getAllDevices() by serial; reconciles first.",
     },
     "src/daemon/socketServer.ts": {
-      calls: 3,
+      calls: 2,
       reason:
         "Input-target discovery and the ide/* device-addressed routes; each reconciles first.",
     },
@@ -142,6 +144,13 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "provisionDevice exact-boot reconciles fresh Android or per-platform discovery into the " +
         "pool before deciding whether it resolves the requested identity or matching the pooled " +
         "entry it is about to hand out.",
+    },
+    "src/server/toolRegistry.ts": {
+      calls: 1,
+      reason:
+        "A control call naming an ADB transport address the pool has never folded (#11618) lists " +
+        "fresh raw rows so the pool can fold the alias, then reconciles the folded listing " +
+        "before the holder check reads pooled identity for it.",
     },
     "src/server/utilityTools.ts": {
       calls: 1,
@@ -191,12 +200,6 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       calls: 1,
       reason:
         "iOS-only liveness sweep of idle pooled devices; the Android identity reconcile funnel does not apply.",
-    },
-    "src/features/bootAdmission/sharedBootAdmissionGates.ts": {
-      calls: 1,
-      reason:
-        "Boot admission capacity sample (#11181): counts adb-listed emulator serials against the " +
-        "booted-emulator limit and reads no pool state or identity.",
     },
     "src/doctor/checks/android.ts": {
       calls: 1,

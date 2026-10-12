@@ -1,3 +1,7 @@
+import {
+  FREE_DEVICE_STOP_CLAIM_STALE_MS,
+  type FreeDeviceStopClaim,
+} from "../../../src/daemon/managedSlots/slotRegistry";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS,
@@ -9,8 +13,15 @@ import {
   type SlotRegistry,
   type SlotScopeIdentity,
 } from "../../../src/daemon/managedSlots/slotRegistry";
+import { MANAGED_EXECUTION_SETTLEMENT_CAP_MS } from "../../../src/daemon/managedSlots/managedExecutionRelease";
+import { SlotScopeReset } from "../../../src/daemon/managedSlots/slotScopeReset";
 import { ManagedExecutionReowner } from "../../../src/daemon/managedSlots/managedExecutionReowner";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { IosSimCapacityGate } from "../../../src/features/iosSimFleet/CapacityGate";
+import { IosSimFleetCostCollector } from "../../../src/features/iosSimFleet/FleetCostCollector";
+import { InMemoryBootDurationHistory } from "../../../src/features/iosSimFleet/BootDurationHistory";
+import { FakeFleetHostSource } from "../../fakes/FakeFleetHostSource";
+import { RegistryManagedSlotExclusion } from "../../../src/daemon/managedSlots/managedSlotExclusion";
 
 export type SlotRegistryFactory = (
   timer: FakeTimer,
@@ -152,6 +163,45 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
         resolvedSpec: { ...SPEC, abi: "arm64-v8a" },
         specFingerprint: "fp-avd-1",
         state: "ready",
+      });
+    });
+
+    test("actual device metadata survives a ready-state update independently of the creation fingerprint", async () => {
+      const key = { scopeKey: await readyScope(), slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      const resolvedSpec = {
+        runtime: "system-images;android-35;google_apis;arm64-v8a",
+        deviceType: "pixel_tablet",
+        displayCutout: "none",
+        configuration: { memoryMb: 3072, screenWidth: 800, screenHeight: 1280 },
+      };
+      const committed = await registry.commitBinding(
+        key,
+        { generation: 1, stableDeviceId: "avd-1" },
+        {
+          ...readyBinding("avd-1", 2),
+          requestedSpec: { runtime: resolvedSpec.runtime },
+          resolvedSpec,
+          specFingerprint: "creation-default-fingerprint",
+        },
+      );
+      expect(committed.kind).toBe("committed");
+      const updated = await registry.updateSlotState(
+        key,
+        { generation: 2, stableDeviceId: "avd-1" },
+        "ready",
+      );
+      expect(updated).toMatchObject({
+        kind: "updated",
+        assignment: {
+          generation: 2,
+          resolvedSpec,
+          specFingerprint: "creation-default-fingerprint",
+        },
+      });
+      expect(await registry.getAssignment(key)).toMatchObject({
+        resolvedSpec,
+        specFingerprint: "creation-default-fingerprint",
       });
     });
 
@@ -390,6 +440,91 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect(await registry.completeScopeInvalidation(scopeKey)).toMatchObject({
         kind: "invalidated",
         freedDevices: [{ stableDeviceId: "avd-1" }],
+      });
+    });
+
+    // #11336: `reset-slot-scope --force` abandons a slot stuck settling under a live settler.
+    describe("forced scope reset of a stuck settling slot", () => {
+      const settler = { daemonId: "d", pid: 300 };
+      const releaseTarget = {
+        oldStableId: "avd-1",
+        oldName: "avd-1",
+        newName: null,
+        newStableId: null,
+        requestedSpec: SPEC,
+        resolvedSpec: SPEC,
+        specFingerprint: "fp-avd-1",
+      };
+
+      async function stuckSettling(): Promise<{ scopeKey: string }> {
+        const scopeKey = await readyScope();
+        const key = { scopeKey, slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        livePids.add(300);
+        const expected = { generation: 1, stableDeviceId: "avd-1" };
+        const opened = await registry.openSlotJournal(key, {
+          kind: "release",
+          phase: "intent",
+          owner: settler,
+          target: releaseTarget,
+          assignment: { kind: "state", expected, state: "settling", options: { settler } },
+        });
+        expect(opened.kind).toBe("opened");
+        return { scopeKey };
+      }
+
+      function resetter(): SlotScopeReset {
+        timer.enableAutoAdvance();
+        return new SlotScopeReset({
+          registry: async () => registry,
+          timer,
+          isExecOwnerLive: (owner) => livePids.has(owner.pid),
+        });
+      }
+
+      test("commits the release entry, invalidates and frees the device; without --force it stays pending", async () => {
+        const { scopeKey } = await stuckSettling();
+        const request = { ...SCOPE_A1, waitMs: 0 };
+        const reset = resetter();
+
+        expect((await reset.reset(request)).outcome).toBe("pending");
+        expect((await registry.getAssignment({ scopeKey, slotIndex: 0 }))?.state).toBe("settling");
+
+        // Inside the settlement cap --force is refused with the time remaining (#11539).
+        const early = await reset.reset({ ...request, force: true });
+        expect(early.outcome).toBe("pending");
+        expect(early.scopes[0]?.forceRefusals?.[0]?.reason).toBe("within_settlement_cap");
+        expect(await registry.listFreeDevices()).toEqual([]);
+
+        timer.setCurrentTime(timer.now() + MANAGED_EXECUTION_SETTLEMENT_CAP_MS);
+        const forced = await reset.reset({ ...request, force: true });
+
+        expect(forced).toMatchObject({
+          outcome: "invalidated",
+          scopes: [{ freedDevices: [{ stableDeviceId: "avd-1" }] }],
+        });
+        expect(await registry.listOpenSlotJournal()).toEqual([]);
+        expect((await registry.listFreeDevices()).map((d) => d.stableDeviceId)).toEqual(["avd-1"]);
+      });
+
+      test("a slot with a live execution owner is still pending under --force", async () => {
+        const scopeKey = await readyScope();
+        const key = { scopeKey, slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        livePids.add(100);
+        await registry.claimExecution(
+          key,
+          { generation: 1, stableDeviceId: "avd-1" },
+          ownerFor(100, "s1"),
+        );
+
+        const result = await resetter().reset({ ...SCOPE_A1, waitMs: 0, force: true });
+
+        expect(result.outcome).toBe("pending");
+        expect(result.scopes[0]?.pending?.liveOwners).toEqual([
+          { slotIndex: 0, sessionUuid: "s1", pid: 100 },
+        ]);
+        expect((await registry.getAssignment(key))?.execOwner?.sessionUuid).toBe("s1");
       });
     });
 
@@ -884,6 +1019,174 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       ).toEqual([]);
     });
 
+    describe("free-pool stop state (#11337)", () => {
+      async function dueFreeDevice(): Promise<{
+        target: FreeDeviceStopClaim;
+        key: SlotKey;
+      }> {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
+        await registry.completeScopeInvalidation(key.scopeKey);
+        const [freed] = await registry.listFreeDevices();
+        timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS);
+        return {
+          target: {
+            platform: "android",
+            stableDeviceId: "avd-1",
+            freedAtMs: freed!.freedAtMs,
+            fromScopeKey: key.scopeKey,
+            claimedBy: "daemon-1",
+          },
+          key,
+        };
+      }
+
+      test("a due device goes free to stopping to stopped and keeps its row", async () => {
+        const { target } = await dueFreeDevice();
+        expect((await registry.listFreeDevices())[0]).toMatchObject({ state: "free" });
+
+        expect(await registry.beginFreeDeviceStop(target)).toEqual({ kind: "begun" });
+        expect((await registry.listFreeDevices())[0]).toMatchObject({ state: "stopping" });
+        // An interrupted attempt is retried: still reclaimable, and begin is idempotent.
+        expect(await registry.findReclaimableFreeDevices()).toHaveLength(1);
+        expect(await registry.beginFreeDeviceStop(target)).toEqual({ kind: "begun" });
+
+        expect(await registry.completeFreeDeviceStop(target)).toBe(true);
+        expect((await registry.listFreeDevices())[0]).toMatchObject({ state: "stopped" });
+        expect(await registry.findReclaimableFreeDevices()).toEqual([]);
+        expect(await registry.beginFreeDeviceStop(target)).toEqual({ kind: "not_reclaimable" });
+        // Still excluded from generic use while stopped.
+        expect(await registry.snapshotManagedDevices()).toMatchObject([
+          { stableDeviceId: "avd-1", holder: "free" },
+        ]);
+      });
+
+      test("a stopping row is owned: only the claimer drives it until the claim is stale", async () => {
+        const { target } = await dueFreeDevice();
+        const other = { ...target, claimedBy: "daemon-2" };
+        await registry.beginFreeDeviceStop(target);
+
+        expect(await registry.holdsFreeDeviceStop(target)).toBe(true);
+        expect(await registry.holdsFreeDeviceStop(other)).toBe(false);
+        expect(await registry.beginFreeDeviceStop(other)).toEqual({ kind: "not_reclaimable" });
+        expect(await registry.completeFreeDeviceStop(other)).toBe(false);
+        expect(await registry.revertFreeDeviceStop(other)).toBe(false);
+        expect((await registry.listFreeDevices())[0]).toMatchObject({
+          state: "stopping",
+          stopClaimedBy: "daemon-1",
+        });
+
+        // The claimer died: past the stale bound another daemon takes the stop over.
+        timer.advanceTime(FREE_DEVICE_STOP_CLAIM_STALE_MS);
+        expect(await registry.beginFreeDeviceStop(other)).toEqual({ kind: "begun" });
+        expect(await registry.holdsFreeDeviceStop(target)).toBe(false);
+        expect(await registry.completeFreeDeviceStop(target)).toBe(false);
+        expect(await registry.completeFreeDeviceStop(other)).toBe(true);
+      });
+
+      test("a failed shutdown reverts to free so the device is adoptable again", async () => {
+        const { target } = await dueFreeDevice();
+        await registry.beginFreeDeviceStop(target);
+
+        expect(await registry.revertFreeDeviceStop(target)).toBe(true);
+        expect((await registry.listFreeDevices())[0]).toMatchObject({
+          state: "free",
+          stopClaimedBy: null,
+          stopClaimedAtMs: null,
+        });
+        expect(await registry.findReclaimableFreeDevices()).toHaveLength(1);
+
+        const slot = { scopeKey: await readyScope(SCOPE_B1), slotIndex: 0 };
+        await registry.initSlot(slot, INIT);
+        const adopted = await registry.commitBinding(
+          slot,
+          { generation: 0, stableDeviceId: null },
+          readyBinding("avd-1", 1),
+        );
+        expect(adopted).toMatchObject({ kind: "committed" });
+      });
+
+      test("a stale stopping claim no longer blocks adoption", async () => {
+        const { target } = await dueFreeDevice();
+        await registry.beginFreeDeviceStop(target);
+        timer.advanceTime(FREE_DEVICE_STOP_CLAIM_STALE_MS);
+        const slot = { scopeKey: await readyScope(SCOPE_B1), slotIndex: 0 };
+        await registry.initSlot(slot, INIT);
+
+        const adopted = await registry.commitBinding(
+          slot,
+          { generation: 0, stableDeviceId: null },
+          readyBinding("avd-1", 1),
+        );
+
+        expect(adopted).toMatchObject({ kind: "committed" });
+        expect(await registry.holdsFreeDeviceStop(target)).toBe(false);
+      });
+
+      test("a device that is not yet due is not claimed", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
+        await registry.completeScopeInvalidation(key.scopeKey);
+        const [freed] = await registry.listFreeDevices();
+        timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS - 1);
+        expect(
+          await registry.beginFreeDeviceStop({
+            platform: "android",
+            stableDeviceId: "avd-1",
+            freedAtMs: freed!.freedAtMs,
+            fromScopeKey: key.scopeKey,
+            claimedBy: "daemon-1",
+          }),
+        ).toEqual({ kind: "not_reclaimable" });
+      });
+
+      test("an adoption that wins the race keeps the device and fails the stop CAS", async () => {
+        const { target } = await dueFreeDevice();
+        const slot = { scopeKey: await readyScope(SCOPE_B1), slotIndex: 0 };
+        await registry.initSlot(slot, INIT);
+        const adopted = await registry.commitBinding(
+          slot,
+          { generation: 0, stableDeviceId: null },
+          readyBinding("avd-1", 1),
+        );
+        expect(adopted).toMatchObject({ kind: "committed" });
+
+        expect(await registry.beginFreeDeviceStop(target)).toEqual({ kind: "not_reclaimable" });
+        expect(await registry.completeFreeDeviceStop(target)).toBe(false);
+        expect(await registry.listFreeDevices()).toEqual([]);
+      });
+
+      test("adoption is refused while stopping and succeeds once stopped", async () => {
+        const { target } = await dueFreeDevice();
+        const slot = { scopeKey: await readyScope(SCOPE_B1), slotIndex: 0 };
+        await registry.initSlot(slot, INIT);
+        await registry.beginFreeDeviceStop(target);
+
+        expect(
+          await registry.commitBinding(
+            slot,
+            { generation: 0, stableDeviceId: null },
+            readyBinding("avd-1", 1),
+          ),
+        ).toEqual({ kind: "free_device_stopping" });
+        expect(await registry.listFreeDevices()).toHaveLength(1);
+
+        await registry.completeFreeDeviceStop(target);
+        const adopted = await registry.commitBinding(
+          slot,
+          { generation: 0, stableDeviceId: null },
+          readyBinding("avd-1", 1),
+        );
+        expect(adopted).toMatchObject({
+          kind: "committed",
+          adoptedFreeDevice: { stableDeviceId: "avd-1", state: "stopped" },
+        });
+        expect(await registry.listFreeDevices()).toEqual([]);
+      });
+    });
+
     describe("daemon restart (#11275)", () => {
       const BEFORE_RESTART = { daemonId: "daemon-before", pid: 301, processGenerationToken: "t-1" };
       const AFTER_RESTART = { daemonId: "daemon-after", pid: 302, processGenerationToken: "t-2" };
@@ -961,6 +1264,136 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
           sessionUuid: "live-session",
         });
       });
+
+      // #11642: the runner's next incarnation asked while the execution was live, so the scope is
+      // already `invalidating` when the daemon restarts.
+      describe("while the scope is invalidating (#11642)", () => {
+        const BINDING = { generation: 1, stableDeviceId: "avd-1" };
+
+        async function invalidatingAcrossRestart(): Promise<SlotKey> {
+          const key = await liveExecutionAcrossRestart();
+          expect((await registry.ensureScope(SCOPE_A2)).kind).toBe("incarnation_conflict");
+          expect(
+            (await registry.beginScopeInvalidation(key.scopeKey, "incarnation_reset")).kind,
+          ).toBe("invalidating");
+          return key;
+        }
+
+        test("the restarted daemon re-owns its live execution and the transition waits for it", async () => {
+          const key = await invalidatingAcrossRestart();
+          // Unowned, the record names a dead process: any daemon would retire the scope.
+          const reowned = await reowner().reown(["live-session"]);
+
+          expect(reowned.map((slot) => slot.execOwner)).toEqual([
+            { ...AFTER_RESTART, sessionUuid: "live-session" },
+          ]);
+          expect(await registry.completeScopeInvalidation(key.scopeKey)).toMatchObject({
+            kind: "pending",
+            liveOwners: [{ execOwner: { pid: AFTER_RESTART.pid, sessionUuid: "live-session" } }],
+          });
+          // Re-owning neither revives the scope nor touches the binding.
+          expect(await registry.getScope(key.scopeKey)).toMatchObject({
+            state: "invalidating",
+            invalidationReason: "incarnation_reset",
+          });
+          expect(await registry.getAssignment(key)).toMatchObject({ ...BINDING, state: "ready" });
+        });
+
+        test("the transition completes once the re-owned execution ends, and the next incarnation proceeds", async () => {
+          const key = await invalidatingAcrossRestart();
+          await reowner().reown(["live-session"]);
+
+          expect((await registry.releaseExecution(key, "live-session")).released).toBe(true);
+
+          expect(await registry.completeScopeInvalidation(key.scopeKey)).toMatchObject({
+            kind: "invalidated",
+            freedDevices: [{ stableDeviceId: "avd-1" }],
+          });
+          expect(await registry.ensureScope(SCOPE_A2)).toMatchObject({ kind: "ready" });
+          // Nothing is left to re-own in the retired scope.
+          expect(await reowner().reown(["live-session"])).toEqual([]);
+        });
+
+        test("no other session, reservation or superseding claim gets into the invalidating scope", async () => {
+          const key = await invalidatingAcrossRestart();
+          const other = { ...AFTER_RESTART, sessionUuid: "other-session" };
+
+          // The recorded owner's process is dead: in a valid scope each of these would be claimed.
+          expect((await registry.claimExecution(key, BINDING, other)).kind).toBe("scope_not_valid");
+          expect(
+            (
+              await registry.claimExecution(key, BINDING, other, {
+                supersedesSessionUuid: "live-session",
+              })
+            ).kind,
+          ).toBe("scope_not_valid");
+          expect(
+            (
+              await registry.claimExecution(
+                key,
+                BINDING,
+                { ...AFTER_RESTART, sessionUuid: "reserve-next" },
+                { supersedesSessionUuid: "live-session" },
+              )
+            ).kind,
+          ).toBe("scope_not_valid");
+          expect((await registry.getAssignment(key))?.execOwner).toEqual({
+            ...BEFORE_RESTART,
+            sessionUuid: "live-session",
+          });
+
+          // The same session with a stale binding is still a stale binding.
+          expect(
+            (
+              await registry.claimExecution(
+                key,
+                { generation: 2, stableDeviceId: "avd-1" },
+                { ...AFTER_RESTART, sessionUuid: "live-session" },
+              )
+            ).kind,
+          ).toBe("stale_binding");
+        });
+
+        test("an ownerless slot of an invalidating scope cannot be claimed, even by its last session", async () => {
+          const key = await invalidatingAcrossRestart();
+          await registry.releaseExecution(key, "live-session");
+
+          expect(
+            (
+              await registry.claimExecution(key, BINDING, {
+                ...AFTER_RESTART,
+                sessionUuid: "live-session",
+              })
+            ).kind,
+          ).toBe("scope_not_valid");
+          expect(await reowner().reown(["live-session"])).toEqual([]);
+        });
+
+        test("an invalidated scope accepts no claim, the recorded session's included", async () => {
+          const key = await liveExecutionAcrossRestart();
+          timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS + 60_000);
+          // No daemon holds the session and its process is dead: the scope is abandoned through.
+          expect((await registry.markScopeAbandoned(key.scopeKey)).kind).toBe("marked");
+          expect((await registry.completeScopeInvalidation(key.scopeKey)).kind).toBe("invalidated");
+
+          expect(await reowner().reown(["live-session"])).toEqual([]);
+          expect((await registry.getAssignment(key))?.execOwner).toEqual({
+            ...BEFORE_RESTART,
+            sessionUuid: "live-session",
+          });
+        });
+
+        test("a scope marked abandoned before the re-own is not retired under the live session", async () => {
+          const key = await liveExecutionAcrossRestart();
+          timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS + 60_000);
+          // A peer daemon judged the record by its dead process and marked the scope.
+          expect((await registry.markScopeAbandoned(key.scopeKey)).kind).toBe("marked");
+
+          expect(await reowner().reown(["live-session"])).toHaveLength(1);
+
+          expect((await registry.completeScopeInvalidation(key.scopeKey)).kind).toBe("pending");
+        });
+      });
     });
 
     describe("slot journal (#11179)", () => {
@@ -1021,6 +1454,36 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
         });
         expect(second).toMatchObject({ kind: "journal_open", entry: { id: entry.id } });
         expect((await registry.getAssignment(key))?.state).toBe("replacing");
+      });
+
+      test("a cross-platform target's newPlatform survives the store and a later advance (#11457)", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        const opened = await registry.openSlotJournal(key, {
+          kind: "replace",
+          phase: "deleting",
+          owner: OWNER_1,
+          target: { ...TARGET, newPlatform: "ios" },
+          assignment: { kind: "state", expected: BOUND, state: "replacing" },
+        });
+        if (opened.kind !== "opened") {
+          throw new Error(`journal not opened: ${opened.kind}`);
+        }
+        expect(opened.entry.target.newPlatform).toBe("ios");
+        const [reread] = await registry.listOpenSlotJournal(key);
+        expect(reread?.target).toEqual({ ...TARGET, newPlatform: "ios" });
+        const advanced = await registry.advanceSlotJournal(opened.entry.id, {
+          owner: OWNER_1,
+          expectedPhase: "deleting",
+          phase: "deleted",
+          target: { newName: "amslot-new-g2" },
+        });
+        expect(advanced).toMatchObject({
+          kind: "advanced",
+          entry: { target: { newPlatform: "ios", newName: "amslot-new-g2" } },
+        });
+        const [afterAdvance] = await registry.listOpenSlotJournal(key);
+        expect(afterAdvance?.target.newPlatform).toBe("ios");
       });
 
       test("a stale binding refuses to open and writes nothing", async () => {
@@ -1272,6 +1735,94 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
             execSessionUuid: null,
           },
         ]);
+      });
+
+      test("iOS creation excludes the exact journal name until its UDID is recorded", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        const name = "amslot-12345678-0-g1-attempt";
+        await registry.initSlot(key, { ...INIT, platform: "ios" });
+        const opened = await registry.openSlotJournal(key, {
+          kind: "create",
+          phase: "creating",
+          owner: OWNER_1,
+          target: { ...TARGET, oldStableId: null, oldName: null, newName: name },
+          assignment: {
+            kind: "state",
+            expected: { generation: 0, stableDeviceId: null },
+            state: "provisioning",
+          },
+        });
+        if (opened.kind !== "opened") {
+          throw new Error(`journal not opened: ${opened.kind}`);
+        }
+        const entry = {
+          platform: "ios",
+          stableDeviceId: name,
+          holder: "slot",
+          scopeKey: key.scopeKey,
+          slotIndex: 0,
+          scopeState: null,
+          execSessionUuid: null,
+        };
+        expect(await registry.snapshotManagedDevices()).toEqual([entry]);
+        // Boot admission counts the listed UDID, regardless of the registry's temporary name.
+        const fleet = new FakeFleetHostSource();
+        fleet.inventory = [
+          {
+            udid: "UDID-CREATED",
+            name,
+            state: "Booted",
+            runtime: "iOS-18",
+            isAvailable: true,
+          },
+        ];
+        fleet.snapshot = {
+          takenAtMs: timer.now(),
+          processes: [],
+          resources: {
+            totalMemoryBytes: 16 * 1024 ** 3,
+            cpuCount: 8,
+            loadAverage1m: 0,
+            memoryPressure: "normal",
+          },
+        };
+        const capacity = new IosSimCapacityGate(
+          new IosSimFleetCostCollector(fleet, new InMemoryBootDurationHistory(), timer),
+          timer,
+          { env: { AUTOMOBILE_IOS_SIM_MAX_BOOTED: "1" } },
+        );
+        expect(await capacity.describeCapacity()).toMatchObject({ booted: 1, inFlight: 0 });
+        await expect(capacity.assertCapacityAvailable()).rejects.toMatchObject({
+          code: "capacity_exhausted",
+          details: { booted: 1, externalDevices: ["UDID-CREATED"] },
+        });
+        const exclusion = new RegistryManagedSlotExclusion(async () => registry, timer);
+        await exclusion.refresh();
+        expect(exclusion.holderOf({ platform: "ios", stableIds: [name] })).toEqual(entry);
+        for (const other of ["iPhone user", `${name}-user`, "amslot-12345678-0-g1-other"]) {
+          expect(exclusion.holderOf({ platform: "ios", stableIds: [other] })).toBeUndefined();
+        }
+        expect(
+          await registry.advanceSlotJournal(opened.entry.id, {
+            owner: OWNER_1,
+            expectedPhase: "creating",
+            phase: "created",
+            target: { newStableId: "UDID-CREATED" },
+          }),
+        ).toMatchObject({ kind: "advanced" });
+        expect(await registry.snapshotManagedDevices()).toEqual([
+          { ...entry, stableDeviceId: "UDID-CREATED" },
+        ]);
+        await exclusion.refresh();
+        expect(exclusion.stableIdsFor("ios")).toEqual(new Set(["UDID-CREATED"]));
+        expect(await capacity.describeCapacity()).toMatchObject({ booted: 1, inFlight: 0 });
+        await expect(capacity.assertCapacityAvailable()).rejects.toMatchObject({
+          code: "capacity_exhausted",
+          details: { booted: 1, externalDevices: ["UDID-CREATED"] },
+        });
+        expect(
+          exclusion.holderOf({ platform: "ios", stableIds: ["UDID-CREATED", name] }),
+        ).toMatchObject({ stableDeviceId: "UDID-CREATED" });
       });
 
       test("terminal entries are pruned after the retention window; open ones never are", async () => {

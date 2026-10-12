@@ -398,7 +398,7 @@ class PrototypeModeValueTest {
       )
     assertFalse(prototypeThemeSpec(root, false, PrototypeSpecTheme(colors = maps)).dark)
     assertTrue(prototypeThemeSpec(root, true, PrototypeSpecTheme(colors = maps)).dark)
-    assertNull(prototypeHostDark(model(PrototypeSpacerNode(), PrototypeSpecTheme(colors = maps))))
+    assertNull(prototypeSpecDark(model(PrototypeSpacerNode(), PrototypeSpecTheme(colors = maps))))
     val flat = maps.copy(surface = "#101010")
     assertTrue(prototypeThemeSpec(root, false, PrototypeSpecTheme(colors = flat)).dark)
   }
@@ -419,7 +419,7 @@ class PrototypeModeValueTest {
     assertNull(prototypeAuthoredTheme(pairOnly.root))
     assertFalse(prototypeThemeSpec(pairOnly.root, false).dark)
     assertTrue(prototypeThemeSpec(pairOnly.root, true).dark)
-    assertNull(prototypeHostDark(pairOnly))
+    assertNull(prototypeSpecDark(pairOnly))
 
     val hexChild = model(box(inverted, box(PrototypeModeValue.Single("#101010"))))
     assertEquals(true, prototypeAuthoredTheme(hexChild.root)?.dark)

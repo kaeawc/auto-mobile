@@ -47,6 +47,11 @@ import {
   type ToolFixture,
 } from "./benchmark-device-tools-fixture";
 import { installListDevicesFixture } from "./benchmark-listdevices-fixture";
+import {
+  chooseBatchSize,
+  compareAgainstThreshold,
+  type ThresholdResult,
+} from "./benchmark-thresholds";
 
 import fs from "node:fs";
 import path from "node:path";
@@ -123,15 +128,6 @@ interface ToolMetrics {
   successRate: number;
   sampleSize: number;
   measurements: number[];
-}
-
-// Result for threshold comparison
-interface ThresholdResult {
-  passed: boolean;
-  metric: string;
-  actual: number;
-  threshold: number;
-  regression: number; // percentage
 }
 
 // Tool benchmark result with threshold checks
@@ -249,13 +245,22 @@ async function benchmarkTool(
     const args = fixture.args ?? { platform: "android" as const };
     const measurements: number[] = [];
 
-    // Warm-up run (not counted)
-    await callHandler(tool, mockDevice, args);
+    // Warm-up (not counted) doubles as the per-call estimate that sizes the batch: a fake-backed
+    // handler takes microseconds, below what one timer pair can resolve (see benchmark-thresholds).
+    const warmupCalls = 5;
+    const warmupStart = performance.now();
+    for (let i = 0; i < warmupCalls; i++) {
+      await callHandler(tool, mockDevice, args);
+    }
+    const batchSize = chooseBatchSize((performance.now() - warmupStart) / warmupCalls);
 
+    // Each sample is the per-call mean over one batch.
     for (let i = 0; i < sampleSize; i++) {
       const startTime = performance.now();
-      await callHandler(tool, mockDevice, args);
-      measurements.push(performance.now() - startTime);
+      for (let j = 0; j < batchSize; j++) {
+        await callHandler(tool, mockDevice, args);
+      }
+      measurements.push((performance.now() - startTime) / batchSize);
     }
     return calculateMetrics(toolName, measurements, measurements.length);
   } finally {
@@ -324,35 +329,6 @@ function loadBaseline(baselinePath: string): BenchmarkReport | null {
     console.error(`Error loading baseline: ${error}`);
     return null;
   }
-}
-
-/**
- * Compare tool metrics against threshold
- */
-function compareAgainstThreshold(
-  metrics: ToolMetrics,
-  threshold: ThresholdConfig["thresholds"][string],
-): ThresholdResult[] {
-  const checks: ThresholdResult[] = [];
-
-  // Define acceptable regression percentage (20% for fast ops)
-  const regressionLimit = 20;
-
-  for (const metric of ["p50", "p95", "mean"] as const) {
-    const actual = metrics[metric];
-    const expected = threshold[metric];
-    const regression = ((actual - expected) / expected) * 100;
-
-    checks.push({
-      passed: regression <= regressionLimit,
-      metric,
-      actual,
-      threshold: expected,
-      regression,
-    });
-  }
-
-  return checks;
 }
 
 /**

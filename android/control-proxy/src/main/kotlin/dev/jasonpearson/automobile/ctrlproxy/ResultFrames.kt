@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleReportContract
+import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
@@ -141,6 +142,7 @@ internal fun prototypeResultFrame(
   success: Boolean,
   error: String?,
   missingAssets: List<String> = emptyList(),
+  appearance: PrototypeAppearance? = null,
 ): String =
   resultFrameJson.encodeToString<WebSocketResponse>(
     PrototypeResult(
@@ -149,6 +151,7 @@ internal fun prototypeResultFrame(
       success = success,
       error = error,
       missingAssets = missingAssets.ifEmpty { null },
+      appearance = appearance,
     ),
   )
 

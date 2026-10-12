@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
   evaluateIosPairCompatibility,
   iosDeviceSpecificationMismatch,
@@ -19,12 +20,17 @@ import type {
   AppleDeviceRuntime,
   AppleDeviceType,
 } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { SLOT_OCCUPYING_STATES } from "../../features/iosSimFleet/FleetCostCollector";
 import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
 import type { AvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "../../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
-import { defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
+import {
+  defaultSlotExecOwnerLiveness,
+  type InFlightSlotReservations,
+  inFlightSlotReservations,
+} from "./slotOwnerLiveness";
 import type { BackoffInput } from "../../utils/Backoff";
 import { currentDaemonProcessGenerationToken } from "../processGeneration";
 import { deviceStableId } from "./slotDeviceIdentity";
@@ -39,6 +45,7 @@ import { stableStringify } from "../../utils/stableStringify";
 import type { Timer } from "../../utils/SystemTimer";
 import {
   bindingMatches,
+  isStaleFreeDeviceStopClaim,
   type SlotAssignmentRecord,
   type SlotBindingExpectation,
   type SlotCasFailure,
@@ -74,7 +81,8 @@ import {
  *   overwrites a newer binding. A deletion that fails leaves the old binding as `cleanup_pending`;
  *   a creation that fails after a verified deletion leaves the slot empty (`provisioning`).
  * - Boot capacity fails immediately with retryable `capacity_exhausted` (owner decision): the
- *   reconciler never waits for capacity and never creates a device it could not boot.
+ *   reconciler never waits for capacity, never creates a device it could not boot, and checks
+ *   before it deletes the device a replacement would not be able to boot.
  * - Every create and replace is journaled (`slot_journal`, #11179) with its exact devices, and each
  *   acquisition first redrives the slot's unfinished work of a dead owner (see `slotJournal.ts`),
  *   so a retry after an interruption converges instead of repeating destructive work.
@@ -106,6 +114,14 @@ type WithOptionalDeviceType<T extends { deviceType: string }> = Omit<T, "deviceT
 export type ManagedSlotRequestedSpec =
   | WithOptionalDeviceType<AndroidDeviceSpecification>
   | WithOptionalDeviceType<IosDeviceSpecification>;
+
+/** Known device metadata; an Android AVD may have no configured hardware profile. */
+export interface ManagedSlotResolvedSpec {
+  runtime: string;
+  deviceType?: string;
+  displayCutout?: ResolvedExactDeviceSpecification["displayCutout"];
+  configuration?: AndroidDeviceSpecification["configuration"];
+}
 
 /**
  * The Android hardware profile created for a spec that omits `deviceType` (a current Pixel with a
@@ -191,12 +207,18 @@ export interface ManagedSlotProvisionedDevice {
   lifecycle?: unknown;
 }
 
+/** Reads an existing device without applying the creation resolver's defaults. */
+export interface ManagedSlotExistingSpecReader {
+  /** The device's own metadata; null for unreadable config/runtime or an unknown iOS model. */
+  readExistingSpec(device: DeviceInfo): Promise<ManagedSlotResolvedSpec | null>;
+}
+
 /**
  * The `provisionDevice` path with `readiness: "automation"`: exact matching, creation, boot,
  * session bind and its own rollback of partial creations (#11125, #11182). Throws
  * `ProvisionDeviceError` or `BootCapacityExhaustedError` on failure.
  */
-export interface ManagedSlotDeviceProvisioner {
+export interface ManagedSlotDeviceProvisioner extends ManagedSlotExistingSpecReader {
   provision(request: ManagedSlotProvisionRequest): Promise<ManagedSlotProvisionedDevice>;
   /** Release a session this reconciler obtained but could not publish. */
   releaseSession(sessionUuid: string): Promise<void>;
@@ -250,7 +272,9 @@ export type ManagedSlotCapacityCheck =
       retryAfterMs: number;
       /** Counted devices AutoMobile did not start; present only when there are any (#11390). */
       externalDevices?: string[];
-    };
+    }
+  /** The booted count could not be established; never read as free capacity. */
+  | { kind: "unknown"; message: string };
 
 /** Immediate boot capacity probe (no waiting). Absent means boots are not gated. */
 export interface ManagedSlotBootCapacity {
@@ -271,9 +295,11 @@ export interface ManagedSlotReconcilerDependencies {
   capacity?: ManagedSlotBootCapacity;
   /** Whether a recorded execution owner is alive; default: PID plus process generation. */
   isExecOwnerLive?: SlotExecOwnerLiveness;
-  timer: Pick<Timer, "now">;
+  timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
   /** Execution-reservation ids (default: random UUIDs). */
   idGenerator?: IdGenerator;
+  /** Reservations in flight, which the registry's owner liveness reads (default: process-wide). */
+  reservations?: Pick<InFlightSlotReservations, "add" | "delete">;
   /** Journal ownership and redrive policy (#11179). */
   journal?: ManagedSlotReconcilerJournalOptions;
 }
@@ -428,7 +454,7 @@ export type ManagedSlotReconcileResult =
       device: ManagedSlotDeviceIdentity;
       sessionUuid: string;
       requestedSpec: ManagedSlotRequestedSpec;
-      resolvedSpec: ResolvedExactDeviceSpecification;
+      resolvedSpec: ManagedSlotResolvedSpec;
       specFingerprint: ManagedSlotSpecFingerprint;
       readiness: { mode: string; status: string };
       lifecycle?: unknown;
@@ -850,6 +876,11 @@ function casFailure(result: SlotCasFailure, step: string): ManagedSlotReconcileF
         "concurrent_modification",
         `Device is already assigned to slot ${result.holder.slotIndex} of another scope (${step}).`,
       );
+    case "free_device_stopping":
+      return failure(
+        "concurrent_modification",
+        `Free-pool device is being shut down for reclaim (${step}); retry once it is stopped.`,
+      );
   }
 }
 
@@ -918,6 +949,19 @@ function provisionFailure(error: unknown): ManagedSlotReconcileFailure {
   return failure("provision_failed", errorMessage(error), { retryable: false });
 }
 
+/**
+ * Whether the device counts toward its platform's boot limit, by the gates' own definition: a
+ * simulator that is booting or shutting down holds its slot although it is not listed as running.
+ */
+function holdsBootSlot(device: DeviceInfo): boolean {
+  return (
+    device.isRunning ||
+    (device.platform === "ios" &&
+      device.state !== undefined &&
+      SLOT_OCCUPYING_STATES.has(device.state))
+  );
+}
+
 function slotId(key: SlotKey): string {
   return `${key.scopeKey}#${key.slotIndex}`;
 }
@@ -928,7 +972,7 @@ function expectationOf(assignment: SlotAssignmentRecord): SlotBindingExpectation
 
 interface ReconcileContext {
   request: ManagedSlotReconcileRequest;
-  resolvedSpec: ResolvedExactDeviceSpecification;
+  resolvedSpec: ManagedSlotResolvedSpec;
   fingerprint: ManagedSlotSpecFingerprint;
   evidence: ManagedSlotReconcileEvidence;
 }
@@ -944,12 +988,14 @@ export class ManagedSlotReconciler {
   private readonly inFlight = new Map<string, Promise<unknown>>();
   private readonly isExecOwnerLive: SlotExecOwnerLiveness;
   private readonly idGenerator: IdGenerator;
+  private readonly reservations: Pick<InFlightSlotReservations, "add" | "delete">;
 
   readonly journal: ManagedSlotJournal;
 
   constructor(private readonly deps: ManagedSlotReconcilerDependencies) {
     this.isExecOwnerLive = deps.isExecOwnerLive ?? defaultSlotExecOwnerLiveness;
     this.idGenerator = deps.idGenerator ?? defaultIdGenerator;
+    this.reservations = deps.reservations ?? inFlightSlotReservations;
     this.journal = new ManagedSlotJournal({
       registry: deps.registry,
       inventory: deps.inventory,
@@ -967,18 +1013,74 @@ export class ManagedSlotReconciler {
 
   async reconcile(request: ManagedSlotReconcileRequest): Promise<ManagedSlotReconcileResult> {
     const id = slotId(request.key);
-    const previous = this.inFlight.get(id) ?? Promise.resolve();
-    const run = previous.then(
-      () => this.reconcileSerialized(request),
-      () => this.reconcileSerialized(request),
-    );
+    const previous = this.inFlight.get(id);
+    // A caller that stopped waiting (deadline or abort) must not run its reconcile afterwards.
+    let abandoned = false;
+    const run: Promise<ManagedSlotReconcileResult | undefined> = (previous ?? Promise.resolve())
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .then(() => (abandoned ? undefined : this.reconcileSerialized(request)));
     this.inFlight.set(id, run);
     try {
-      return await run;
-    } finally {
-      if (this.inFlight.get(id) === run) {
-        this.inFlight.delete(id);
+      if (previous) {
+        const waitFailure = await this.waitForQueue(previous, request);
+        if (waitFailure) {
+          abandoned = true;
+          return {
+            outcome: "failed",
+            failure: waitFailure,
+            assignment: await this.deps.registry.getAssignment(request.key),
+            evidence: { initial: null, inventoryComplete: null },
+          };
+        }
       }
+      return (await run) as ManagedSlotReconcileResult;
+    } finally {
+      const release = () => {
+        if (this.inFlight.get(id) === run) {
+          this.inFlight.delete(id);
+        }
+      };
+      if (abandoned) {
+        // An abandoned waiter's run settles only after every earlier run has, so it keeps the
+        // slot's queue entry until then: a later caller must still queue behind the running one.
+        void run.then(release, release);
+      } else {
+        release();
+      }
+    }
+  }
+
+  /**
+   * Wait behind the slot's in-flight reconcile for at most the request's own deadline and abort
+   * signal (#11342): a duplicate acquisition reports `timeout` or `cancelled` on time instead of
+   * after the first one finishes. Undefined when the queue cleared in time.
+   */
+  private async waitForQueue(
+    previous: Promise<unknown>,
+    request: ManagedSlotReconcileRequest,
+  ): Promise<ManagedSlotReconcileFailure | undefined> {
+    try {
+      await raceWithDeadline(
+        previous.then(
+          () => undefined,
+          () => undefined,
+        ),
+        {
+          timer: this.deps.timer,
+          timeoutMs: Math.max(0, request.deadlineMs - this.deps.timer.now()),
+          ...(request.signal ? { signal: request.signal } : {}),
+          label: "Waiting for the slot's in-flight reconcile",
+        },
+      );
+      return undefined;
+    } catch (error) {
+      logger.debug(`[ManagedSlots] queued reconcile stopped waiting: ${errorMessage(error)}`);
+      return request.signal?.aborted
+        ? failure("cancelled", "Slot preparation was cancelled.")
+        : failure("timeout", "Slot preparation deadline passed.");
     }
   }
 
@@ -1247,7 +1349,8 @@ export class ManagedSlotReconciler {
     assignment: SlotAssignmentRecord,
     device: DeviceInfo,
   ): Promise<ReadyResult> {
-    await this.assertBootCapacity(context.request, device);
+    // No capacity pre-check: booting the slot's own device is the provision path's decision, which
+    // exempts a boot target that already holds its slot (booted, booting, or running unseen).
     // Before reserving: a reservation would take the slot over from the live execution's record.
     this.assertNoLiveExecutionOn(context, device);
     // Reserve the slot before binding a session to its device, so a concurrent replacement can
@@ -1260,6 +1363,11 @@ export class ManagedSlotReconciler {
         await this.releaseReservation(context.request.key, reservation);
       }
       throw error;
+    } finally {
+      // Superseded by the real claim or released: it no longer keeps the slot in use (#11339).
+      if (reservation) {
+        this.reservations.delete(reservation);
+      }
     }
   }
 
@@ -1269,6 +1377,7 @@ export class ManagedSlotReconciler {
     device: DeviceInfo,
     reservation: string | undefined,
   ): Promise<ReadyResult> {
+    context = { ...context, resolvedSpec: await this.existingSpec(device) };
     // The slot's own device is excluded from every other caller and the registry records no live
     // execution, so any session on it is an earlier execution's leftover, unless this daemon still
     // holds it as a live execution (#11275), which refuses with slot_in_use instead.
@@ -1278,7 +1387,12 @@ export class ManagedSlotReconciler {
     const unchanged =
       assignment.state === "ready" &&
       assignment.specFingerprint === fingerprint &&
-      stableStringify(assignment.requestedSpec) === stableStringify(context.request.requestedSpec);
+      stableStringify(assignment.requestedSpec) ===
+        stableStringify(context.request.requestedSpec) &&
+      this.resolvedIdentityMatches(assignment.resolvedSpec, context.resolvedSpec);
+    // Repair an older binding's creation-default metadata once; subsequent identical requests
+    // retain the generation. A full AVD config read adds detail beyond the resolver's fields,
+    // without changing the binding. The fingerprint still describes the resolver's creation choice.
     // An unchanged ready binding is only re-verified; a new spec or a not-yet-ready binding is
     // recorded as a new generation of the same device.
     const committed = unchanged
@@ -1304,6 +1418,15 @@ export class ManagedSlotReconciler {
     );
   }
 
+  private resolvedIdentityMatches(stored: unknown, actual: ManagedSlotResolvedSpec): boolean {
+    if (stored === null || typeof stored !== "object") {
+      return false;
+    }
+    return (["runtime", "deviceType", "displayCutout"] as const).every(
+      (key) => Reflect.get(stored, key) === actual[key],
+    );
+  }
+
   /** Claim a ready, assigned slot for a placeholder session before provisioning, when owned. */
   private async reserveExecution(
     context: ReconcileContext,
@@ -1314,12 +1437,19 @@ export class ManagedSlotReconciler {
       return undefined;
     }
     const reservation = `reserve-${this.idGenerator.next()}`;
-    const claimed = await this.deps.registry.claimExecution(key, expectationOf(assignment), {
-      ...owner,
-      sessionUuid: reservation,
-    });
-    if (claimed.kind !== "claimed") {
-      throw new ReconcileAbort(claimFailure(claimed, "reservation"));
+    // Recorded before the claim: the registry judges the new record by this set (#11339).
+    this.reservations.add(reservation);
+    try {
+      const claimed = await this.deps.registry.claimExecution(key, expectationOf(assignment), {
+        ...owner,
+        sessionUuid: reservation,
+      });
+      if (claimed.kind !== "claimed") {
+        throw new ReconcileAbort(claimFailure(claimed, "reservation"));
+      }
+    } catch (error) {
+      this.reservations.delete(reservation);
+      throw error;
     }
     return reservation;
   }
@@ -1328,8 +1458,8 @@ export class ManagedSlotReconciler {
     try {
       await this.deps.registry.releaseExecution(key, reservation);
     } catch (error) {
-      // A leaked reservation names this daemon's PID, so it blocks the slot only until this
-      // process exits; log it so the stuck slot has a trace.
+      // The reservation is no longer in flight, so the registry judges a leaked record dead and
+      // the next claim takes the slot over (#11339); log it so a stuck slot has a trace.
       logger.warn(
         `[ManagedSlots] releasing reservation ${reservation} failed: ${errorMessage(error)}`,
         error,
@@ -1366,6 +1496,11 @@ export class ManagedSlotReconciler {
     const free = new Set(
       (await this.deps.registry.listFreeDevices())
         .filter((entry) => entry.platform === request.platform)
+        // A `stopping` device is mid-shutdown (#11337); a `stopped` one is adopted and booted.
+        .filter(
+          (entry) =>
+            entry.state !== "stopping" || isStaleFreeDeviceStopClaim(entry, this.deps.timer.now()),
+        )
         .map((entry) => entry.stableDeviceId),
     );
     const prefix = managedSlotDeviceNamePrefix(request.key);
@@ -1409,9 +1544,9 @@ export class ManagedSlotReconciler {
     device: DeviceInfo,
     source: "free_pool" | "orphan",
   ): Promise<ReadyResult> {
+    context = { ...context, resolvedSpec: await this.existingSpec(device) };
     const { request } = context;
     const stableId = deviceStableId(device)!;
-    await this.assertBootCapacity(request, device);
     // Commit first: the CAS atomically takes the device out of the free pool and reserves it,
     // so a failed provision leaves the slot bound (`provisioning`) and the next attempt reuses.
     const reserved = await this.deps.registry.commitBinding(
@@ -1447,6 +1582,19 @@ export class ManagedSlotReconciler {
     return await this.claimAndReady(context, "adopted", ready.assignment, provisioned, undefined);
   }
 
+  private async existingSpec(device: DeviceInfo): Promise<ManagedSlotResolvedSpec> {
+    const spec = await this.deps.provisioner.readExistingSpec(device);
+    if (!spec) {
+      throw new ReconcileAbort(
+        failure(
+          "discovery_incomplete",
+          `The configuration of device '${device.name}' could not be read.`,
+        ),
+      );
+    }
+    return spec;
+  }
+
   /**
    * Create a device under the slot's next generated name and commit it, journaled so an
    * interruption at any boundary converges: `creating` (provision issued) → `created` (device
@@ -1458,10 +1606,15 @@ export class ManagedSlotReconciler {
     assignment: SlotAssignmentRecord,
     disposition: "created" | "replaced",
     replacing?: SlotJournalEntry,
+    options: { capacityAsserted?: boolean } = {},
   ): Promise<ReadyResult> {
     const { request } = context;
     this.checkBudget(request);
-    await this.assertBootCapacity(request, undefined);
+    // A replacement asserted capacity before deleting, counting the slot its old device frees;
+    // asking again here could refuse after the deletion while that device is still being counted.
+    if (!options.capacityAsserted) {
+      await this.assertBootCapacity(request);
+    }
     const name = managedSlotDeviceName(
       request.key,
       assignment.generation + 1,
@@ -1733,7 +1886,9 @@ export class ManagedSlotReconciler {
     } finally {
       this.journal.inFlight.delete(opened.entry.id);
     }
-    return await this.createAndCommit(context, emptied, "replaced", deletedEntry);
+    return await this.createAndCommit(context, emptied, "replaced", deletedEntry, {
+      capacityAsserted: true,
+    });
   }
 
   private journalTarget(
@@ -1786,10 +1941,10 @@ export class ManagedSlotReconciler {
         ),
       );
     }
-    // Deleting a running device frees a boot slot; a stopped one does not, so fail before deleting.
-    if (!device.isRunning) {
-      await this.assertBootCapacity(request, undefined);
-    }
+    // Fail before deleting: only a device holding a boot slot of the platform being booted frees one.
+    const freedBootSlots =
+      assignment.platform === request.platform && holdsBootSlot(device) ? 1 : 0;
+    await this.assertBootCapacity(request, freedBootSlots);
     this.checkBudget(request);
     const holder = await this.deps.registry.findDeviceHolder(assignment.platform, oldId);
     if (
@@ -1925,16 +2080,24 @@ export class ManagedSlotReconciler {
     );
   }
 
-  /** Fail immediately at the boot limit when the device would need a boot. */
+  /**
+   * Fail immediately at the boot limit before creating a device (and before deleting the one it
+   * replaces). `freedBootSlots` counts slot-holding devices the caller is about to delete; an
+   * unknown count is never free capacity. Booting a device that already exists is not checked
+   * here: the provision path owns that decision and its own-target exemption.
+   */
   private async assertBootCapacity(
     request: ManagedSlotReconcileRequest,
-    device: DeviceInfo | undefined,
+    freedBootSlots = 0,
   ): Promise<void> {
-    if (!this.deps.capacity || device?.isRunning) {
+    if (!this.deps.capacity) {
       return;
     }
     const check = await this.deps.capacity.check(request.platform, { signal: request.signal });
-    if (check.kind === "exhausted") {
+    if (check.kind === "unknown") {
+      throw new ReconcileAbort(failure("discovery_incomplete", check.message));
+    }
+    if (check.kind === "exhausted" && check.booted - freedBootSlots >= check.limit) {
       throw new ReconcileAbort(
         failure(
           "capacity_exhausted",

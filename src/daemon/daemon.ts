@@ -9,10 +9,11 @@ import { isSessionReleasing } from "./sessionReleaseState";
 import { isTokenOwnedOrClaimPending, lookupReleasedSessionReason } from "./daemonRequestHandlers";
 import {
   cancelAndReleaseSession as cancelExecutionsAndReleaseSession,
+  cancelExecutionsCutBySessionRelease,
   forceStuckSessionRelease,
   releaseSessionAndDevice,
 } from "./releaseSessionAndDevice";
-import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
+import type { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
 import { ambientExecutionIdReader } from "../server/deviceExecutionBinding";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { ObserverReleaseBroadcaster } from "./observerReleaseBroadcast";
@@ -41,9 +42,14 @@ import { defaultMockLocationClearRegistry } from "../features/utility/MockLocati
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
-import { MultiPlatformDeviceManager } from "../devices/deviceUtils";
+import { MultiPlatformDeviceManager, type BootedDeviceDiscovery } from "../devices/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
-import { SessionManager, type ActiveSessionExecutionQuery, type Session } from "./sessionManager";
+import {
+  SessionManager,
+  type ActiveSessionExecutionQuery,
+  type RehydrationSummary,
+  type Session,
+} from "./sessionManager";
 import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
 import {
   hasActiveSessionExecution,
@@ -57,6 +63,12 @@ import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "./deviceDisconnectHandler";
 import { DevicePool, type PooledDevice } from "./devicePool";
+import { DeviceOwnedByOtherDaemonError } from "./deviceAcquisitionRefusals";
+import {
+  assertControlNotOnForeignDaemonDevice,
+  assertInputNotOnForeignManagedSlotDevice,
+} from "./inputDeviceOwnership";
+import { DeviceAssignedToManagedSlotError } from "./managedSlots/managedSlotRefusal";
 import {
   OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
   OwnerDisconnectExecutionVeto,
@@ -82,6 +94,11 @@ import {
   type ManagedSlotReclaimerFactory,
   type ManagedSlotReclaimerHandle,
 } from "./managedSlots/defaultAbandonedScopeReclaimer";
+import {
+  createDefaultFreeDeviceReclaimer,
+  type FreeDeviceReclaimerFactory,
+  type FreeDeviceReclaimerHandle,
+} from "./managedSlots/defaultFreeDeviceReclaimer";
 import type {
   AbandonedScopeReclaimJournal,
   AbandonedScopeReclaimRegistry,
@@ -90,7 +107,11 @@ import {
   createDaemonManagedSlotAcquisition,
   type DaemonManagedSlotAcquisitionHandle,
 } from "./managedSlots/daemonManagedSlotAcquisition";
-import type { SlotJournalOwner, SlotRegistry } from "./managedSlots/slotRegistry";
+import type {
+  SlotExecOwnerLiveness,
+  SlotJournalOwner,
+  SlotRegistry,
+} from "./managedSlots/slotRegistry";
 import { SlotJournalInFlight, type SlotJournalRedriveLoop } from "./managedSlots/slotJournal";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import {
@@ -154,11 +175,20 @@ import {
 import { currentDaemonProcessGenerationToken } from "./processGeneration";
 import { processGenerationRecordFields } from "./processGenerationFields";
 import { executionTracker } from "../server/executionTracker";
+import {
+  createDeviceStateChangeNotifier,
+  type DeviceStateChangeNotifier,
+} from "../server/deviceStateChangeNotifier";
+import {
+  notifyBootedDeviceResourcesUpdated,
+  resetBootedDevicesResourceCache,
+} from "../server/bootedDeviceResources";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import {
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
   DaemonHandoffInterruptionError,
 } from "./daemonHandoffInterruption";
+import { transitionalHeldSimulators } from "../server/adbOfflineHeldDevices";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import { announceSessionRelease } from "./announceSessionRelease";
 import { clearSessionAppearanceConfig } from "../server/appearanceManager";
@@ -190,6 +220,7 @@ import {
   getDatabase,
   getDatabasePath,
   getDbWriteBarrier,
+  refusedDatabaseAccessCountAfterShutdownClose,
 } from "../db";
 import { NavigationRetention } from "../db/navigationRetention";
 import { NavigationRetentionMonitor } from "./NavigationRetentionMonitor";
@@ -278,7 +309,11 @@ import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
-import { createDaemonTerminalReleaseJournal } from "./terminalReleaseJournal";
+import {
+  createDaemonTerminalReleaseJournal,
+  type DaemonTerminalReleaseJournalOptions,
+  type TerminalReleaseJournal,
+} from "./terminalReleaseJournal";
 import { EmulatorLossIncidentRepository } from "../db/emulatorLossIncidentRepository";
 import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
@@ -308,11 +343,13 @@ import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerServ
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import {
   evaluateDeviceDisconnects,
+  isTransitionalAdbState,
   OFFLINE_DEVICE_DISCONNECT_BUDGET_MS,
   pruneStaleOfflineRecoveryAttempts,
   recordingCandidateIncarnations,
   selectImmediateDisconnectCandidates,
   selectOfflineRecoveryCandidates,
+  selectTransitionalDeviceIds,
   type OfflineEpisode,
   type DisconnectCandidateIncarnation,
 } from "./disconnectMonitor";
@@ -348,7 +385,15 @@ import {
 import { onAdbMissingDevice } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { stopManagedAdbServer } from "../utils/android-cmdline-tools/AdbServerLifecycle";
 import { iosSimulatorCaptureHelperPool } from "../features/screen-stream";
-import { runShutdownCleanupStages } from "../shutdownCleanup";
+import {
+  DAEMON_SHUTDOWN_STAGES,
+  boundWithinStage,
+  createShutdownDatabaseTail,
+  runShutdownCleanupStages,
+  shutdownStageFrom,
+  type DaemonShutdownStageName,
+  type ShutdownCleanupStage,
+} from "../shutdownCleanup";
 import { cleanupDaemonChildProcesses } from "./childProcessCleanup";
 import {
   defaultToolSelectionProfileRegistry,
@@ -394,6 +439,15 @@ const CTRL_PROXY_FORWARD_RELEASE_SHUTDOWN_TIMEOUT_MS = 3_000;
 // cannot itself hang shutdown — the timeout wins and shutdown proceeds anyway.
 const MIGRATION_SETTLE_TIMEOUT_MS = 5_000;
 
+/** A `Daemon.stop()` stage with its deadline and database flag drawn from the stage table. */
+function shutdownStage(
+  name: DaemonShutdownStageName,
+  waitingOn: string,
+  run: ShutdownCleanupStage["run"],
+): ShutdownCleanupStage {
+  return shutdownStageFrom(DAEMON_SHUTDOWN_STAGES, name, waitingOn, run);
+}
+
 type HealthFailureKind = "http" | "socket" | "database" | "unknown";
 type DatabaseHealthFailureRecovery = (code: number) => void | Promise<void>;
 type ManagedAdbServerShutdown = () => Promise<void>;
@@ -420,7 +474,7 @@ function toBootedDevice(pooledDevice: PooledDevice): BootedDevice {
  */
 function createDaemonObservationExecutor(
   requestStart: number,
-  isViewerRead: (pooledDevice: PooledDevice) => boolean,
+  isViewerRead: (pooledDevice: PooledDevice) => boolean | Promise<boolean>,
 ) {
   return createPooledObservationExecutor({
     hostRequestStartMs: requestStart,
@@ -504,6 +558,36 @@ export type DaemonProcessBirthTimeProvider = () => number;
 export type DaemonProcessGenerationTokenProvider = () => string | undefined;
 
 /**
+ * The steps of `Daemon.start()` that touch the machine: the process's working directory and
+ * signal handlers, the PID file, the data directory, listening sockets, and the monitors that
+ * probe devices. `start()` runs the process's own; `Daemon.startOn()` runs a caller's, so a test
+ * harness starts a daemon through the same sequence with nothing reaching the host (#11441).
+ * Each step sits where `start()` has always run it.
+ */
+export interface DaemonStartHost {
+  /** Logging, the stable working directory and the shutdown handlers. */
+  enterProcess(): void;
+  /** Name this daemon's control socket in the CtrlProxy forwarding leases it takes (#10497). */
+  publishForwardLeaseOwner(): void;
+  /** Publish the owned database path in the PID file before the database opens (#2871). */
+  writeEarlyOwnerRecord(): Promise<void>;
+  /** This daemon's terminal-release journal, with dead daemons' intents adopted (#10959). */
+  openTerminalReleaseJournal(
+    owner: Pick<DaemonTerminalReleaseJournalOptions, "daemonSessionId" | "liveDaemonSessionIds">,
+  ): TerminalReleaseJournal;
+  /** The AVD provenance warm-up, port selection and the HTTP MCP listener. */
+  startHttpIngress(): Promise<void>;
+  /** Drop per-session appearance rows no rehydrated or recoverable session owns (#10976). */
+  sweepStaleAppearanceConfigs(rehydration: RehydrationSummary): Promise<void>;
+  /** Create the control socket server over this daemon's state and start accepting clients. */
+  bindControlSocket(): Promise<UnixSocketServer>;
+  /** Auxiliary sockets, device monitors, the PID file and the health check. */
+  startServicesAfterSocketBind(): Promise<void>;
+  /** Navigation retention, forwarding-lease idle release, the orphan watchdog and slot reclaim. */
+  startMaintenanceMonitors(): void;
+}
+
+/**
  * Captures a wall-clock approximation of this OS process's birth time, rather
  * than the later point at which daemon bootstrap constructs its generation.
  * `process.uptime()` is rooted at process creation, so it remains comparable to
@@ -570,6 +654,8 @@ export class Daemon {
   private httpServer: HttpServer | null = null;
   private httpServerClosePromise: Promise<void> | null = null;
   private socketServer: UnixSocketServer | null = null;
+  /** The machine-touching start steps; `startOn()` replaces the process's own. */
+  private startHost: DaemonStartHost = this.processStartHost();
   private readonly startupCompletion: Promise<void>;
   private resolveStartupCompletion!: () => void;
   private rejectStartupCompletion!: (reason: unknown) => void;
@@ -618,8 +704,9 @@ export class Daemon {
   // a later episode for the same serial gets a fresh attempt.
   private offlineRecoveryAttemptedDeviceIds: Set<string> = new Set();
   private offlineRecoveryAttemptedIncarnations = new Map<string, number | string>();
-  // Start of each candidate's current ADB `offline` episode (#11090): offline
-  // sweeps run against OFFLINE_DEVICE_DISCONNECT_BUDGET_MS, not the miss count.
+  // Start of each candidate's current transitional-state episode (#11090, #11592):
+  // adb offline/unauthorized and simctl Booting/Shutting Down sweeps run against
+  // OFFLINE_DEVICE_DISCONNECT_BUDGET_MS, not the miss count.
   private offlineEpisodes = new Map<string, OfflineEpisode>();
   private stoppingRecordings: Set<string> = new Set();
   private observerSessionRegistry: ObserverSessionRegistry;
@@ -632,9 +719,11 @@ export class Daemon {
   private timer: Timer;
   private managedExecutionRelease: ManagedExecutionRelease | undefined;
   private managedSlotRegistry: Promise<SlotRegistry> | undefined;
+  private managedSlotExecOwnerLiveness: SlotExecOwnerLiveness | undefined;
   /** Journal entries this daemon is driving; shared by the drain and the slot reconciler. */
   private readonly managedSlotJournalInFlight = new SlotJournalInFlight();
   private managedSlotReclaimer: ManagedSlotReclaimerHandle | undefined;
+  private freeDeviceReclaimer: FreeDeviceReclaimerHandle | undefined;
   private managedSlotAcquisition: DaemonManagedSlotAcquisitionHandle | undefined;
   private managedExecutionReowner: ManagedExecutionReowner | undefined;
   private managedSlotRedrive: SlotJournalRedriveLoop | undefined;
@@ -663,6 +752,7 @@ export class Daemon {
   >();
   private unsubscribeAdbMissingDevice: (() => void) | null = null;
   private unsubscribeSessionExecutionEnded: (() => void) | null = null;
+  private readonly deviceStateChangeNotifier: DeviceStateChangeNotifier;
   private options: DaemonOptions;
   private readonly acceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
   private shutdownHandlersRegistered: boolean = false;
@@ -715,6 +805,8 @@ export class Daemon {
     private readonly managedSlotJournalFactory?: (
       registry: AbandonedScopeReclaimRegistry,
     ) => AbandonedScopeReclaimJournal,
+    /** Free-pool device reclamation (#11337); not armed under `bun test`. */
+    private readonly freeDeviceReclaimerFactory: FreeDeviceReclaimerFactory = createDefaultFreeDeviceReclaimer,
   ) {
     installDefaultProvisionedDeviceTransportFence();
     this.startupCompletion = new Promise<void>((resolve, reject) => {
@@ -740,6 +832,11 @@ export class Daemon {
     this.idGenerator = idGenerator;
     this.daemonSessionId = this.idGenerator.next();
     this.timer = timer;
+    this.deviceStateChangeNotifier = createDeviceStateChangeNotifier({
+      timer,
+      invalidate: resetBootedDevicesResourceCache,
+      notify: notifyBootedDeviceResourcesUpdated,
+    });
     this.generationStartedAt = this.timer.now();
     this.processStartedAt = processBirthTime();
     this.processGenerationToken = processGenerationToken();
@@ -780,9 +877,13 @@ export class Daemon {
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
     this.sessionManager.attachDaemonSessionId(this.daemonSessionId);
-    // Read when a recovery claims its row, so a peer that started after this daemon is seen.
+    // Read when a recovery claims its row, so a peer that started after this daemon is seen. A
+    // restart incumbent whose pid file this daemon replaced is not listed, so it is added while
+    // it is still live: its rows and its terminal-release journal are not a dead daemon's (#11355).
     this.sessionManager.attachLiveDaemonSessionIds(() =>
-      this.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
+      this.incumbentOwnerGuard.withLiveIncumbent(
+        this.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
+      ),
     );
     this.observerSessionRegistry = new ObserverSessionRegistry(
       this.timer,
@@ -845,6 +946,7 @@ export class Daemon {
       }),
       timer: this.timer,
       settler: this.managedSlotJournalOwner(),
+      isExecOwnerLive: this.managedSlotOwnerLiveness(),
     });
     this.managedExecutionRelease = release;
     this.sessionManager.onSessionRelease((_sessionId, _deviceId, _reason, snapshot, options) =>
@@ -857,8 +959,23 @@ export class Daemon {
         registry: () => this.openManagedSlotRegistry(),
         registryExists: () => this.managedSlotRegistryExists(),
         timer: this.timer,
+        isExecOwnerLive: this.managedSlotOwnerLiveness(),
       }),
     );
+  }
+
+  /**
+   * Owner liveness as this daemon judges it, shared by the registry, the settlement watcher and the
+   * scope reset so they never disagree. A live execution's slot is in use while this daemon holds
+   * its session, even when the recorded owner is a previous daemon that died with a restart
+   * (#11275); a record this daemon wrote is judged by its session alone (#11339).
+   */
+  private managedSlotOwnerLiveness(): SlotExecOwnerLiveness {
+    this.managedSlotExecOwnerLiveness ??= withLiveExecutionSessions(
+      defaultSlotExecOwnerLiveness,
+      this.sessionManager,
+    );
+    return this.managedSlotExecOwnerLiveness;
   }
 
   /** Start the abandoned-scope sweep (#11174): one hour idle, no live owner → devices deleted. */
@@ -870,6 +987,16 @@ export class Daemon {
       timer: this.timer,
     });
     this.managedSlotReclaimer?.start();
+    // Free-pool devices unadopted for an hour are shut down, image kept (#11337).
+    this.freeDeviceReclaimer ??= this.freeDeviceReclaimerFactory({
+      registry: () => this.openManagedSlotRegistry(),
+      registryExists: () => this.managedSlotRegistryExists(),
+      pool: this.devicePool,
+      executions: this.sessionManager,
+      timer: this.timer,
+      claimedBy: this.daemonSessionId,
+    });
+    this.freeDeviceReclaimer?.start();
   }
 
   /**
@@ -955,22 +1082,16 @@ export class Daemon {
       owner: () => this.managedSlotJournalOwner(),
     });
     DaemonState.getInstance().setManagedExecutionReowner(this.managedExecutionReowner);
-    // Interrupted journaled work (#11179) is redriven in the background, but only on a host that
-    // has a slot registry: a daemon that never served a managed slot never creates one.
+    // Interrupted journaled work (#11179) is redriven in the background. The loop starts when this
+    // daemon first opens the registry (#11338), so a fresh host that creates it on its first
+    // acquisition is covered; an existing registry is opened now so leftovers redrive at startup.
     if (process.env.NODE_ENV !== "test" && slotRegistryFileExists()) {
-      void this.openManagedSlotRegistry().then(
-        (registry) => {
-          if (this.managedSlotAcquisition === acquisition && !this.managedSlotRedrive) {
-            this.managedSlotRedrive = acquisition.startJournalRedrive(registry);
-          }
-        },
-        (error: unknown) => {
-          logger.warn(
-            `[Daemon] Managed slot journal redrive not started: ${errorMessage(error)}`,
-            error,
-          );
-        },
-      );
+      void this.openManagedSlotRegistry().catch((error: unknown) => {
+        logger.warn(
+          `[Daemon] Managed slot journal redrive not started: ${errorMessage(error)}`,
+          error,
+        );
+      });
     }
   }
 
@@ -980,15 +1101,19 @@ export class Daemon {
     }
     const opening = openSqliteSlotRegistry({
       timer: this.timer,
-      // A live execution's slot is in use while this daemon holds its session, even when the
-      // recorded owner is a previous daemon that died with a restart (#11275).
-      isExecOwnerLive: withLiveExecutionSessions(defaultSlotExecOwnerLiveness, this.sessionManager),
+      isExecOwnerLive: this.managedSlotOwnerLiveness(),
     });
     this.managedSlotRegistry = opening;
     // Restart-time recovery (#11242): slots a previous daemon left settling are settled once that
     // daemon is gone. Runs once per open, after the open succeeds.
     opening.then(
-      () => void this.managedExecutionRelease?.recoverSettledSlots(),
+      (registry) => {
+        void this.managedExecutionRelease?.recoverSettledSlots();
+        const acquisition = this.managedSlotAcquisition;
+        if (acquisition && !this.managedSlotRedrive && process.env.NODE_ENV !== "test") {
+          this.managedSlotRedrive = acquisition.startJournalRedrive(registry);
+        }
+      },
       // The open failure is logged (and the open forgotten) by the handler below.
       () => undefined,
     );
@@ -1008,6 +1133,8 @@ export class Daemon {
     this.managedExecutionRelease?.close();
     this.managedSlotReclaimer?.stop();
     this.managedSlotReclaimer = undefined;
+    this.freeDeviceReclaimer?.stop();
+    this.freeDeviceReclaimer = undefined;
     // Signalled, not awaited: the loop may be in its inter-pass sleep, and shutdown must not wait
     // it out. A pass still running when the registry closes fails, logs, and the loop exits.
     void this.managedSlotRedrive?.stop();
@@ -1058,7 +1185,7 @@ export class Daemon {
           // A call the release cuts (one still running past the veto's bound) is told the session
           // is gone, as a call arriving after the release is (#11381).
           await this.cancelAndReleaseSession(session.sessionId, reason, false, session, undefined, {
-            cancellation: new SessionReleasedDuringCallError(session.sessionId, reason),
+            cutCallsLearnRelease: true,
           });
         },
       },
@@ -1087,6 +1214,8 @@ export class Daemon {
           });
         }
       },
+      // Subscribers to the booted-device resources learn of status and holder changes (#11413).
+      onDeviceStateChanged: this.deviceStateChangeNotifier,
       emulatorLossIncidentStore: new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
       ambientExecutionIdReader,
       cancelDeviceSessionExecutions: Object.assign(
@@ -1107,6 +1236,8 @@ export class Daemon {
 
   /** Stop the session sweeps and the tool-call-end subscription that feed session expiry. */
   private stopSessionTimers(): void {
+    // A change in the last debounce window must not notify after the daemon closed (#11413).
+    this.deviceStateChangeNotifier.dispose();
     this.sessionManager.stopCleanupTimer();
     this.observerSessionRegistry.dispose();
     this.unsubscribeSessionExecutionEnded?.();
@@ -1146,24 +1277,28 @@ export class Daemon {
     this.sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       this.hasActiveSessionExecution(sessionId, query),
     );
-    this.sessionManager.setSessionExecutionDeadlineLookup((sessionId) =>
-      this.latestSessionExecutionDeadlineMs(sessionId, { onSessionClock: true }),
+    this.sessionManager.setSessionExecutionDeadlineLookup((sessionId, query) =>
+      this.latestSessionExecutionDeadlineMs(sessionId, { onSessionClock: true, ...query }),
     );
     // Deadlines are stamped on the wall clock; remember how far the session clock stood from it
     // so the idle veto can judge them without a later wall step (#11105).
     executionTracker.setSessionClockOffsetProvider(
       () => this.sessionManager.sessionNow() - this.timer.now(),
     );
-    this.sessionManager.setExpiryReleaseExecutionCanceller((sessionId, cancellation, query) =>
-      this.cancelExecutionsForExpiryRelease(sessionId, cancellation, query),
+    this.sessionManager.setExpiryReleaseExecutionCanceller(
+      (sessionId, cancellation, query, releasedDeviceId) =>
+        this.cancelExecutionsForExpiryRelease(sessionId, cancellation, query, releasedDeviceId),
     );
     // A sessionless call admitted while the device was free must not keep driving it for the new
     // holder (#10829). The call performing the acquisition is spared.
-    // A sessionless recording on the device is stopped and finalized the same way (#10961).
-    const stopOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(this.sessionManager);
+    // The acquiring holder adopts active sessionless recordings without stopping them (#11665).
+    const adoptOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(
+      this.sessionManager,
+    );
     // Sessionless network mocks and simulations are cleared the same way (#11130).
     const clearOwnerlessNetworkState = createOwnerlessNetworkStateAcquisitionCleanup(
       this.sessionManager,
+      { timer: this.timer },
     );
     // Display/system settings a previous session changed are reset to the recorded device
     // defaults when a different session acquires the device (#11145).
@@ -1178,12 +1313,15 @@ export class Daemon {
     const resetSettingDefaults = createDeviceSettingDefaultsAcquisitionReset(
       this.sessionManager,
       settingDefaults,
+      this.timer,
     );
     this.sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {
       executionTracker.cancelSessionlessDeviceUse(deviceId, {
         excludeExecutionId: getToolSelectionContext()?.execution?.executionId,
       });
-      stopOwnerlessRecordings(deviceId);
+      // A sessionless stroke parked on the device with no frame in flight is lifted too (#11541).
+      this.socketServer?.liftSessionlessStrokesOn(deviceId);
+      adoptOwnerlessRecordings(deviceId, sessionId);
       clearOwnerlessNetworkState(deviceId);
       resetSettingDefaults(deviceId, sessionId);
     });
@@ -1239,6 +1377,7 @@ export class Daemon {
     // A rebind keeps the session live, but its navigation state was collected on
     // the old device and must not follow it to the new one.
     this.sessionManager.onSessionDeviceUnbound((sessionId, deviceId) => {
+      this.socketServer?.liftStrokesHeldByOn(sessionId, deviceId);
       DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
       const previousNavigationManager = NavigationGraphManager.getInstanceForSession(sessionId);
       NavigationGraphManager.resetSession(sessionId);
@@ -1388,6 +1527,17 @@ export class Daemon {
    * Start the daemon
    */
   async start(): Promise<void> {
+    await this.startOn(this.processStartHost());
+  }
+
+  /**
+   * `start()` with the steps that touch the machine supplied by `host` (#11441). The rest of the
+   * start sequence runs here in its own order: the tool-call-end subscription, database bring-up,
+   * journal adoption, device discovery, session rehydration and the heartbeat monitor. A test
+   * harness passes in-memory steps, so its daemon is wired by this code and not by a copy of it.
+   */
+  async startOn(host: DaemonStartHost): Promise<void> {
+    this.startHost = host;
     try {
       await this.startUntilReady();
       this.resolveStartupCompletion();
@@ -1439,7 +1589,33 @@ export class Daemon {
     }
   }
 
-  private async startThroughSocketBind(): Promise<void> {
+  /** The process's own {@link DaemonStartHost}: the steps `start()` has always run. */
+  private processStartHost(): DaemonStartHost {
+    return {
+      enterProcess: () => this.enterDaemonProcess(),
+      publishForwardLeaseOwner: () => {
+        // Record our socket in every CtrlProxy forwarding lease we take, so another
+        // AutoMobile process can ask whether we still use the device (#10497).
+        setCtrlProxyForwardLeaseOwnerSocketPath(SOCKET_PATH);
+      },
+      writeEarlyOwnerRecord: () => this.writeEarlyOwnerRecord(),
+      openTerminalReleaseJournal: (owner) => createDaemonTerminalReleaseJournal(owner),
+      startHttpIngress: () => this.startHttpIngress(),
+      sweepStaleAppearanceConfigs: async (rehydration) => {
+        await sweepStaleAppearanceConfigs(rehydration, this.sessionManager, {
+          liveDaemonSessionIds: this.startupLiveDaemonSessionIds,
+          ownDaemonSessionId: this.daemonSessionId,
+          getPersistedSession: (sessionUuid) =>
+            this.deviceSessionRepository.getSession(sessionUuid),
+        });
+      },
+      bindControlSocket: () => this.bindControlSocket(),
+      startServicesAfterSocketBind: () => this.startServicesAfterSocketBind(),
+      startMaintenanceMonitors: () => this.startMaintenanceMonitors(),
+    };
+  }
+
+  private enterDaemonProcess(): void {
     // Mirror structured daemon logs to stdout/stderr capture as well. The
     // primary stable log is `<configured log dir>/daemon.log` (defaulting to
     // `<auto-mobile data dir>/logs/daemon.log`); the daemon manager also
@@ -1453,12 +1629,14 @@ export class Daemon {
 
     logger.info("Starting AutoMobile daemon...");
     this.setupShutdownHandlers();
+  }
+
+  private async startThroughSocketBind(): Promise<void> {
+    this.startHost.enterProcess();
     // Subscribe here, not in the constructor: only a started daemon is ever stopped, so a
     // constructed-but-never-started daemon must not leave a listener on the global tracker (#10712).
     this.subscribeToolCallEndActivity();
-    // Record our socket in every CtrlProxy forwarding lease we take, so another
-    // AutoMobile process can ask whether we still use the device (#10497).
-    setCtrlProxyForwardLeaseOwnerSocketPath(SOCKET_PATH);
+    this.startHost.publishForwardLeaseOwner();
 
     // Publish the owned DB path in the PID file BEFORE opening the DB so the
     // direct-mode DB-ownership guard can tell a same-file collision from an
@@ -1479,7 +1657,7 @@ export class Daemon {
     try {
       await startupBenchmark.runPhase("daemonDatabaseInitialization", () =>
         runStartupPrologue({
-          writeEarlyOwnerRecord: () => this.writeEarlyOwnerRecord(),
+          writeEarlyOwnerRecord: () => this.startHost.writeEarlyOwnerRecord(),
           initializeDatabase: () => this.initializeDatabase(),
         }),
       );
@@ -1487,32 +1665,13 @@ export class Daemon {
       // Adopt terminal releases a crashed predecessor never persisted (#10959) before any
       // listener can admit a session; startup rehydration writes their rows.
       this.sessionManager.attachTerminalReleaseJournal(
-        createDaemonTerminalReleaseJournal({
+        this.startHost.openTerminalReleaseJournal({
           daemonSessionId: this.daemonSessionId,
           liveDaemonSessionIds: this.startupLiveDaemonSessionIds,
         }),
       );
 
-      this.warmAndroidAvdProvenanceCache();
-      // iOS device-type profiles are memoized per SimCtlClient and populated inline
-      // during its simulator inventory; there is no process-wide profile cache to warm.
-
-      // Find an available port. In strict-port mode (issue #6260, restart's
-      // atomic guard) we deliberately skip findAvailablePort()'s probe-then-
-      // release preflight and its in-range port fallback: that preflight releases
-      // its probe socket before this process actually binds, leaving a window
-      // for a competitor to claim the canonical port and for the fallback to
-      // paper over it with a "successful" restart on the wrong port. Leaving
-      // `this.port` as the requested port makes the real `listen()` call below
-      // (in startHttpServer) the single atomic bind-or-fail attempt.
-      if (!this.strictPort) {
-        this.port = await this.findAvailablePort(this.port);
-      }
-
-      // Start HTTP MCP server
-      startupBenchmark.startPhase("httpServerStart");
-      await this.startHttpServer();
-      startupBenchmark.endPhase("httpServerStart");
+      await this.startHost.startHttpIngress();
 
       // Initialize device pool BEFORE starting socket server
       // This ensures clients connecting via socket will see initialized device pool
@@ -1527,12 +1686,7 @@ export class Daemon {
           this.sessionManager.rehydratePersistedSessions(this.devicePool),
         );
         await this.reownRehydratedManagedExecutions(rehydration.rehydrated);
-        await sweepStaleAppearanceConfigs(rehydration, this.sessionManager, {
-          liveDaemonSessionIds: this.startupLiveDaemonSessionIds,
-          ownDaemonSessionId: this.daemonSessionId,
-          getPersistedSession: (sessionUuid) =>
-            this.deviceSessionRepository.getSession(sessionUuid),
-        });
+        await this.startHost.sweepStaleAppearanceConfigs(rehydration);
       } catch (error) {
         logger.warn(`[Daemon] Session rehydration failed; continuing startup: ${error}`);
       }
@@ -1541,45 +1695,7 @@ export class Daemon {
       await startupBenchmark.runPhase("iosServices", () => this.initializeIosServices());
 
       // Start Unix socket server AFTER device pool is ready
-      logger.info(`Daemon host: "${this.host}", port: ${this.port}`);
-      logger.info(`MCP_STREAMABLE_PATH: "${MCP_STREAMABLE_PATH}"`);
-      const mcpEndpoint = `http://${this.host}:${this.port}${MCP_STREAMABLE_PATH}`;
-      logger.info(`Creating UnixSocketServer with endpoint: "${mcpEndpoint}"`);
-      this.socketServer = new UnixSocketServer(
-        SOCKET_PATH,
-        mcpEndpoint,
-        undefined,
-        undefined,
-        FeatureFlagService.getInstance(),
-        {
-          identityStartedAt: this.generationStartedAt,
-          processGenerationToken: this.processGenerationToken,
-          startupOptions: this.options,
-          onRepublishIdentity: () => this.republishIdentity(),
-          startupCompletion: this.startupCompletion,
-          pidFilePath: PID_FILE_PATH,
-          sockets: getDaemonSocketPathsByName(),
-          dbPath: getDatabasePath(),
-          processStartedAt: this.processStartedAt,
-          onRestartAccepted: () => {
-            setImmediate(() => process.kill(process.pid, "SIGTERM"));
-          },
-          liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
-          acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
-        },
-        this.idGenerator,
-        // A hand-launched daemon (no startup lock) must refuse to unlink a live
-        // sibling's socket; only a manager-launched, lock-protected daemon may
-        // reclaim it (issue #6232). The owner-liveness check reads the CAPTURED
-        // incumbent snapshot, not the PID file we already overwrote above, so an
-        // inconclusive probe still sees the live sibling.
-        {
-          ownerLiveness: this.incumbentOwnerGuard.asSocketOwnerLiveness(),
-        },
-      );
-      logger.info("Starting Unix socket server...");
-      startupBenchmark.startPhase("socketServerStart");
-      await this.socketServer.start();
+      this.socketServer = await this.startHost.bindControlSocket();
       // We now hold the socket bind. Only past this point may this process's exit /
       // shutdown cleanup delete the shared socket/PID files: before it, the early
       // owner record (issue #2871) makes the `expectedPid` self-check pass even
@@ -1601,7 +1717,74 @@ export class Daemon {
     logger.info("Unix socket server started");
   }
 
-  private async startAfterSocketBind(): Promise<void> {
+  private async startHttpIngress(): Promise<void> {
+    this.warmAndroidAvdProvenanceCache();
+    // iOS device-type profiles are memoized per SimCtlClient and populated inline
+    // during its simulator inventory; there is no process-wide profile cache to warm.
+
+    // Find an available port. In strict-port mode (issue #6260, restart's
+    // atomic guard) we deliberately skip findAvailablePort()'s probe-then-
+    // release preflight and its in-range port fallback: that preflight releases
+    // its probe socket before this process actually binds, leaving a window
+    // for a competitor to claim the canonical port and for the fallback to
+    // paper over it with a "successful" restart on the wrong port. Leaving
+    // `this.port` as the requested port makes the real `listen()` call below
+    // (in startHttpServer) the single atomic bind-or-fail attempt.
+    if (!this.strictPort) {
+      this.port = await this.findAvailablePort(this.port);
+    }
+
+    // Start HTTP MCP server
+    startupBenchmark.startPhase("httpServerStart");
+    await this.startHttpServer();
+    startupBenchmark.endPhase("httpServerStart");
+  }
+
+  /** Create the control socket server over this daemon's state and bind it. */
+  private async bindControlSocket(): Promise<UnixSocketServer> {
+    logger.info(`Daemon host: "${this.host}", port: ${this.port}`);
+    logger.info(`MCP_STREAMABLE_PATH: "${MCP_STREAMABLE_PATH}"`);
+    const mcpEndpoint = `http://${this.host}:${this.port}${MCP_STREAMABLE_PATH}`;
+    logger.info(`Creating UnixSocketServer with endpoint: "${mcpEndpoint}"`);
+    this.socketServer = new UnixSocketServer(
+      SOCKET_PATH,
+      mcpEndpoint,
+      undefined,
+      undefined,
+      FeatureFlagService.getInstance(),
+      {
+        identityStartedAt: this.generationStartedAt,
+        processGenerationToken: this.processGenerationToken,
+        startupOptions: this.options,
+        onRepublishIdentity: () => this.republishIdentity(),
+        startupCompletion: this.startupCompletion,
+        pidFilePath: PID_FILE_PATH,
+        sockets: getDaemonSocketPathsByName(),
+        dbPath: getDatabasePath(),
+        processStartedAt: this.processStartedAt,
+        onRestartAccepted: () => {
+          setImmediate(() => process.kill(process.pid, "SIGTERM"));
+        },
+        liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
+        acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
+      },
+      this.idGenerator,
+      // A hand-launched daemon (no startup lock) must refuse to unlink a live
+      // sibling's socket; only a manager-launched, lock-protected daemon may
+      // reclaim it (issue #6232). The owner-liveness check reads the CAPTURED
+      // incumbent snapshot, not the PID file we already overwrote above, so an
+      // inconclusive probe still sees the live sibling.
+      {
+        ownerLiveness: this.incumbentOwnerGuard.asSocketOwnerLiveness(),
+      },
+    );
+    logger.info("Starting Unix socket server...");
+    startupBenchmark.startPhase("socketServerStart");
+    await this.socketServer.start();
+    return this.socketServer;
+  }
+
+  private async startServicesAfterSocketBind(): Promise<void> {
     startupBenchmark.startPhase("auxiliarySocketServerStart");
     await this.startAuxiliarySocket("video-recording", startVideoRecordingSocketServer);
     await this.startAuxiliarySocket("test-recording", startTestRecordingSocketServer);
@@ -1645,11 +1828,19 @@ export class Daemon {
 
     // Start health check timer (every 30 seconds)
     this.startHealthCheckTimer();
-    this.startHeartbeatMonitor();
+  }
+
+  private startMaintenanceMonitors(): void {
     this.startNavigationRetentionMonitor();
     this.startForwardLeaseIdleReleaser();
     this.startPrivateDaemonOrphanWatchdog();
     this.startManagedSlotReclaimer();
+  }
+
+  private async startAfterSocketBind(): Promise<void> {
+    await this.startHost.startServicesAfterSocketBind();
+    this.startHeartbeatMonitor();
+    this.startHost.startMaintenanceMonitors();
 
     startupBenchmark.emit("daemon", {
       host: this.host,
@@ -2735,7 +2926,7 @@ export class Daemon {
       return runObservationRequestBatch(
         pooledDevices,
         createDaemonObservationExecutor(requestStart, (pooledDevice) =>
-          this.isHeldByAnotherSession(pooledDevice.id, sessionUuid),
+          this.isHeldByAnotherOwner(pooledDevice, sessionUuid),
         ),
         {
           timer: this.timer,
@@ -2769,6 +2960,62 @@ export class Daemon {
     const base = (sessionUuid: string | undefined) =>
       resolveToolSelectionBaseSessionUuid(sessionUuid, this.sessionManager);
     return base(holder) !== base(requesterSessionUuid?.trim() || undefined);
+  }
+
+  /**
+   * Whether anyone but the requester holds the device, for classifying a READ: another local
+   * session, a managed slot (idle or not, unless the requester is the slot's execution), or
+   * another daemon's claim. Such a request is downgraded to the connect-only read, never refused.
+   * An ownership state that cannot be read counts as held: a read must not risk a rebind on a
+   * device that may belong to someone else. The checks reuse the pool's own gates and their
+   * one-second snapshots, so an observation adds no cross-daemon round trip beyond them.
+   */
+  private async isHeldByAnotherOwner(
+    pooledDevice: PooledDevice,
+    requesterSessionUuid?: string,
+  ): Promise<boolean> {
+    const deviceId = pooledDevice.id;
+    if (this.isHeldByAnotherSession(deviceId, requesterSessionUuid)) {
+      return true;
+    }
+    if (this.sessionManager.getSessionForDevice(deviceId) ?? pooledDevice.sessionId) {
+      // The requester's own session holds it; the pool's gates govern others, not the holder.
+      return false;
+    }
+    const platform = pooledDevice.platform;
+    const requester = requesterSessionUuid?.trim() || undefined;
+    try {
+      await assertInputNotOnForeignManagedSlotDevice({
+        action: "observe",
+        deviceId,
+        platform,
+        requesterSessionUuid: requester,
+        sessionManager: this.sessionManager,
+        gate: this.devicePool,
+      });
+      await assertControlNotOnForeignDaemonDevice({
+        deviceId,
+        platform,
+        gate: this.devicePool,
+      });
+      return false;
+    } catch (error) {
+      if (
+        error instanceof DeviceAssignedToManagedSlotError ||
+        error instanceof DeviceOwnedByOtherDaemonError
+      ) {
+        // A slot or another daemon holds the device: an expected verdict, so the read is
+        // downgraded to connect-only rather than refused.
+        logger.debug(`[Daemon] observation of ${deviceId} is read-only: ${errorMessage(error)}`);
+      } else {
+        // Unknown ownership is treated as held; the trace says why the read was downgraded.
+        logger.warn(
+          `[Daemon] ownership of ${deviceId} unreadable; observation is read-only: ${errorMessage(error)}`,
+          error,
+        );
+      }
+      return true;
+    }
   }
 
   /**
@@ -3096,10 +3343,11 @@ export class Daemon {
       // quiet is answered, but it is not the owner's liveness and must not hold the device.
       this.sessionExecutionProbe({ excludeReads: true }),
       async (sessionId, reason) => {
-        // A call still in flight (a read never keeps the session) learns why it was cancelled:
-        // the typed terminal refusal, not a generic abort (#11322).
+        // A call still in flight (a read never keeps the session; a control call only until its
+        // veto runs out) learns why it was cancelled: the typed terminal refusal, not a generic
+        // abort (#11322). That includes a call that reached the session through autolock (#11400).
         await this.cancelAndReleaseSession(sessionId, reason, false, undefined, undefined, {
-          cancellation: new SessionReleasedDuringCallError(sessionId, reason),
+          cutCallsLearnRelease: true,
         });
       },
       this.timer,
@@ -3155,6 +3403,8 @@ export class Daemon {
       {
         parentPid: () => process.ppid,
         launcherPid: () => launcherPid,
+        launcherIsExplicit: () => launcherPid !== PROCESS_ENTRY_PARENT_PID,
+        isProcessRunning: (pid) => isProcessRunning(pid),
         clientCount: () =>
           (this.socketServer?.getClientConnectionCount() ?? 0) +
           getLiveAuxSocketConnectionCount() +
@@ -3210,7 +3460,7 @@ export class Daemon {
   /** Mirrors {@link hasActiveSessionExecution}; a recovery in flight carries no deadline. */
   private latestSessionExecutionDeadlineMs(
     sessionId: string,
-    options: { onSessionClock?: boolean } = {},
+    options: { onSessionClock?: boolean; excludeReads?: boolean } = {},
   ): number | undefined {
     return latestSessionExecutionDeadlineMs(
       executionTracker,
@@ -3222,34 +3472,32 @@ export class Daemon {
   }
 
   /**
-   * Abort what an idle-expiry release overrides (#10820), over the same session scope
-   * {@link hasActiveSessionExecution} counts as in flight. The tracker signals each abort before
-   * its first await, so the aborts land before the release that follows starts. They are aborted
-   * with the typed release, so each cut caller gets the terminal refusal (#11381).
+   * Abort what a release overrides — idle expiry (#10820), heartbeat reap and owner disconnect
+   * (#11400) — through {@link cancelExecutionsCutBySessionRelease}: the released session's own
+   * calls with the typed release (#11381), and a base session's calls only where they drive the
+   * released derived session's device. The aborts land before the release that follows starts.
    */
   private cancelExecutionsForExpiryRelease(
     sessionId: string,
     cancellation: SessionReleasedDuringCallError,
     query: ActiveSessionExecutionQuery,
+    releasedDeviceId: string | undefined,
   ): void {
-    const executionSessionId =
-      resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager) ?? sessionId;
-    for (const id of new Set([sessionId, executionSessionId])) {
-      // Only a call running under the released session is told it is gone. The base session's call
-      // is cut because it drives the derived session's device (#5364), but the base is still live:
-      // it gets the plain cancellation, never a refusal naming a session that is not its own.
-      const reason = id === sessionId ? cancellation : cancellation.releaseReason;
-      executionTracker
-        .cancelDeviceSessionExecutions(id, reason, {
-          excludeExecutionId: query.excludeExecutionId,
-        })
-        .catch((error: unknown) => {
-          logger.warn(
-            `[Daemon] Failed to cancel executions of expired session ${id}: ${errorMessage(error)}`,
-            error,
-          );
-        });
-    }
+    cancelExecutionsCutBySessionRelease(
+      executionTracker,
+      {
+        sessionId,
+        baseSessionId: resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager),
+        deviceId: releasedDeviceId,
+        excludeExecutionId: query.excludeExecutionId,
+      },
+      cancellation,
+    ).catch((error: unknown) => {
+      logger.warn(
+        `[Daemon] Failed to cancel executions of released session ${sessionId}: ${errorMessage(error)}`,
+        error,
+      );
+    });
   }
 
   private async tryRecoverCapturedDisconnectTarget(
@@ -3451,7 +3699,7 @@ export class Daemon {
           const missingByDevice = new Map<string, string[]>();
           const { candidateDeviceIds, candidatePlatforms, candidateIncarnations } =
             this.collectDisconnectCandidates(activeRecordings);
-          const { offlineDeviceIds, listedNonDeviceIds } = await this.probeListedAndroidStates(
+          const listed = await this.probeListedAndroidStates(
             deviceManager,
             planActive,
             candidateDeviceIds,
@@ -3461,7 +3709,7 @@ export class Daemon {
           if (!planActive) {
             const { dispatchTargets, offlineRecoveryTargets } = this.prepareOfflineRecovery(
               candidateDeviceIds,
-              offlineDeviceIds,
+              listed.offlineDeviceIds,
               candidateIncarnations,
             );
             if (dispatchTargets.length > 0) {
@@ -3495,14 +3743,14 @@ export class Daemon {
             candidateIncarnations,
             deviceDisconnectMissIncarnations: this.deviceDisconnectMissIncarnations,
             forceDisconnectedDeviceIds: this.forceDisconnectedDeviceIds,
-            offlineDeviceIds,
+            transitionalDeviceIds: this.transitionalCandidateIds(discovery, listed),
             offlineEpisodes: this.offlineEpisodes,
             nowMs: this.timer.monotonicNow?.() ?? this.timer.now(),
             immediateDisconnectDeviceIds: selectImmediateDisconnectCandidates(
               candidateDeviceIds,
               candidatePlatforms,
               bootedDeviceIds,
-              listedNonDeviceIds,
+              listed.listedNonDeviceIds,
               transportRestarts,
             ),
           });
@@ -3514,7 +3762,7 @@ export class Daemon {
             return;
           }
 
-          this.logDisconnectMisses(disconnectResult, planActive, offlineDeviceIds, bootedDeviceIds);
+          this.logDisconnectMisses(disconnectResult, planActive, bootedDeviceIds);
 
           // Keep absence evidence current, but leave allocation's pool/session
           // state untouched. Two inactive ticks can confirm continued absence;
@@ -3638,8 +3886,9 @@ export class Daemon {
    * candidates already missing from that list, so a fully-healthy sweep never
    * pays for this extra `devices -l` probe (#7536). Every non-`device` row
    * counts as still attached for the immediate physical-device path; only
-   * `offline` drives reconnect and the offline budget (#11090). Both sets are
-   * undefined when the probe is skipped (plan active) or fails.
+   * `offline` drives reconnect (#11090), and the transitional rows (`offline`,
+   * `unauthorized`) are held under the budget (#11592). Every set is undefined
+   * when the probe is skipped (plan active) or fails.
    */
   private async probeListedAndroidStates(
     deviceManager: Pick<MultiPlatformDeviceManager, "getAndroidListedDeviceStates">,
@@ -3647,7 +3896,11 @@ export class Daemon {
     candidateDeviceIds: Set<string>,
     bootedDeviceIds: Set<string>,
     candidatePlatforms: Map<string, "android" | "ios">,
-  ): Promise<{ offlineDeviceIds?: Set<string>; listedNonDeviceIds?: Set<string> }> {
+  ): Promise<{
+    offlineDeviceIds?: Set<string>;
+    transitionalAdbDeviceIds?: Set<string>;
+    listedNonDeviceIds?: Set<string>;
+  }> {
     if (planActive) {
       return {};
     }
@@ -3673,6 +3926,9 @@ export class Daemon {
         offlineDeviceIds: new Set(
           candidateStates.filter(([, state]) => state === "offline").map(([id]) => id),
         ),
+        transitionalAdbDeviceIds: new Set(
+          candidateStates.filter(([, state]) => isTransitionalAdbState(state)).map(([id]) => id),
+        ),
       };
     } catch (error) {
       if (!(error instanceof AndroidOfflineProbeError)) {
@@ -3684,6 +3940,28 @@ export class Daemon {
       );
       return {};
     }
+  }
+
+  /**
+   * One rule for both platforms (#11592): a held device the platform still
+   * lists mid-transition (adb `offline`/`unauthorized`, simctl `Booting`/
+   * `Shutting Down`) is held under the budget instead of counting misses. The
+   * simulator half reads the sweep's own listing and the same held-device
+   * filter the inventory surfaces use, so an unheld pooled simulator keeps the
+   * three-miss rule and the surfaces agree with what the monitor keeps.
+   */
+  private transitionalCandidateIds(
+    discovery: Pick<BootedDeviceDiscovery, "devices" | "transitionalSimulators">,
+    listed: { transitionalAdbDeviceIds?: ReadonlySet<string> },
+  ): Set<string> {
+    return selectTransitionalDeviceIds(
+      listed.transitionalAdbDeviceIds,
+      transitionalHeldSimulators({
+        transitional: discovery.transitionalSimulators,
+        discovered: discovery.devices,
+        devicePool: this.devicePool,
+      }).map(({ device }) => device.deviceId),
+    );
   }
 
   /**
@@ -3838,10 +4116,9 @@ export class Daemon {
   private logDisconnectMisses(
     disconnectResult: ReturnType<typeof evaluateDeviceDisconnects>,
     planActive: boolean,
-    offlineDeviceIds: Set<string> | undefined,
     bootedDeviceIds: Set<string>,
   ): void {
-    for (const { deviceId, misses: evaluatedMisses } of disconnectResult.missed) {
+    for (const { deviceId, misses: evaluatedMisses, budgetExhausted } of disconnectResult.missed) {
       const misses = planActive
         ? Math.min(evaluatedMisses, PLAN_DEVICE_DISCONNECT_MISS_CAP)
         : evaluatedMisses;
@@ -3849,7 +4126,7 @@ export class Daemon {
         // Also lower pre-plan misses so a plan-driven restart gets the same grace.
         this.deviceDisconnectMisses.set(deviceId, misses);
       }
-      const missState = offlineDeviceIds?.has(deviceId) ? "offline" : "absent";
+      const missState = budgetExhausted ? "transitional, budget exhausted" : "absent";
       const message = `[DisconnectMonitor] Device ${deviceId} not in booted list (${missState}, miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`;
       if (planActive && evaluatedMisses > PLAN_DEVICE_DISCONNECT_MISS_CAP) {
         logger.debug(message);
@@ -3857,9 +4134,9 @@ export class Daemon {
         logger.info(message);
       }
     }
-    for (const { deviceId, offlineForMs } of disconnectResult.offline) {
+    for (const { deviceId, transitionalForMs } of disconnectResult.transitional) {
       logger.info(
-        `[DisconnectMonitor] Device ${deviceId} ADB-offline for ${Math.round(offlineForMs / 1000)}s (budget ${OFFLINE_DEVICE_DISCONNECT_BUDGET_MS / 1000}s); keeping session`,
+        `[DisconnectMonitor] Device ${deviceId} listed in a transitional state for ${Math.round(transitionalForMs / 1000)}s (budget ${OFFLINE_DEVICE_DISCONNECT_BUDGET_MS / 1000}s); keeping session`,
       );
     }
   }
@@ -4275,10 +4552,17 @@ export class Daemon {
     allowExpired: boolean = false,
     expectedSession?: Session,
     shouldCommit?: () => boolean,
-    options?: { deferFailureFallback?: boolean; cancellation?: Error },
+    options?: {
+      deferFailureFallback?: boolean;
+      /**
+       * The release ends the session for a reason of its own (heartbeat reap, owner disconnect),
+       * so every call it cuts is aborted with the typed release, through the routine the
+       * idle-expiry releases use (#11381, #11400).
+       */
+      cutCallsLearnRelease?: boolean;
+    },
   ): Promise<boolean> {
-    const cancelWith = options?.cancellation ?? releaseReason;
-    return cancelExecutionsAndReleaseSession(sessionId, cancelWith, async (cancelled) => {
+    const release = async (cancelled: number): Promise<boolean> => {
       // Early identity fence: discovery can replace a same-serial runtime while
       // execution cancellation is in flight. It is not the final one — the
       // session manager re-evaluates `shouldCommit` immediately before it
@@ -4355,7 +4639,17 @@ export class Daemon {
           `(reason=${releaseReason})`,
       );
       return true;
-    });
+    };
+    if (options?.cutCallsLearnRelease) {
+      // The veto that held this release counted the session's implicit (autolock) calls too, so
+      // the release must cut them as well, never only the calls that name the session UUID: one
+      // left running would keep driving a device that is already free (#11400). The aborts are
+      // signalled before the release starts.
+      const cancelled = executionTracker.getActiveDeviceSessionExecutionCount(sessionId);
+      this.sessionManager.cancelExecutionsCutByRelease(sessionId, releaseReason);
+      return release(cancelled);
+    }
+    return cancelExecutionsAndReleaseSession(sessionId, releaseReason, release);
   }
 
   private isSessionDeviceAssigned(deviceId: string | null, sessionId: string): boolean {
@@ -4632,13 +4926,10 @@ export class Daemon {
       // catch: treating it as an empty live set would let this daemon steal a
       // live peer's sessions, which is less safe than refusing startup.
       const liveDaemonSessionIds = new Set(
-        this.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
+        this.incumbentOwnerGuard.withLiveIncumbent(
+          this.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
+        ),
       );
-      const incumbentDaemonSessionId =
-        this.incumbentOwnerGuard.capturedLiveIncumbentDaemonSessionId();
-      if (incumbentDaemonSessionId !== undefined) {
-        liveDaemonSessionIds.add(incumbentDaemonSessionId);
-      }
       this.startupLiveDaemonSessionIds = liveDaemonSessionIds;
       // Clear installed apps cache from previous daemon sessions, keeping a live
       // peer's rows (issue #11158) — hence after the live set is computed.
@@ -4702,171 +4993,294 @@ export class Daemon {
   async stop(): Promise<void> {
     this.shutdownInProgress = true;
     logger.info("Stopping daemon...");
-    await this.quiesceProvisioningIngress();
-    await this.interruptProvisioningForShutdown();
-    this.shutdownReleaseNotifications = new Set();
-    this.shutdownFallbackReleaseNotifications = new Set();
-    this.shutdownSessionIds = [];
-
-    const heartbeatMonitor = this.heartbeatMonitor;
-    this.heartbeatMonitor = null;
-    const navigationRetentionMonitor = this.navigationRetentionMonitor;
-    this.navigationRetentionMonitor = null;
-    const deviceDisconnectMonitor = this.deviceDisconnectMonitor;
-    this.deviceDisconnectMonitor = null;
-    this.orphanWatchdog?.stop();
-    this.orphanWatchdog = null;
-    const forwardLeaseIdleReleaser = this.forwardLeaseIdleReleaser;
-    this.forwardLeaseIdleReleaser = null;
-    await forwardLeaseIdleReleaser?.stop();
-    // A shutdown release keeps the execution owner: the rehydrated session awaits its owner (#11177).
-    await this.closeManagedExecutionRelease();
+    // Every stage draws its deadline from DAEMON_SHUTDOWN_STAGES, whose budgets sum to less
+    // than the process limit: a wedged stage is abandoned with a warning and the stages that
+    // protect user state (session release and its daemon-shutdown notification, the database
+    // close, the pid/socket file removal) still run (#11601). The order is unchanged.
     await runShutdownCleanupStages(
       [
-        {
-          // Quiesce new recording work and stop owned children before any
-          // potentially blocking socket teardown consumes the shutdown budget.
-          name: "active capture and iOS CtrlProxy children",
-          run: cleanupDaemonChildProcesses,
-        },
-        {
-          name: "health check timer",
-          run: async () => {
-            this.stopHealthCheckTimer();
-            await this.databaseHealthProbe.dispose?.();
-          },
-        },
-        {
-          name: "location routes",
-          run: () => defaultLocationRouteRegistry.stopAll(),
-        },
-        {
-          name: "shutdown monitors",
-          run: () =>
-            this.drainShutdownMonitors(
-              navigationRetentionMonitor,
-              heartbeatMonitor,
-              deviceDisconnectMonitor,
-            ),
-        },
-        { name: "ADB missing-device subscription", run: () => this.unsubscribeAdbMissing() },
-        {
-          // Stop the session cleanup interval before the DB drain below. It is the one
-          // best-effort DB writer that fires on its own timer rather than an external
-          // socket (which are all torn down here), so if left running it could route a
-          // tracked `markReleased` write through a freshly-resolved, non-draining
-          // barrier in the microtask window AFTER closeDatabase()'s resetDbWriteBarrier()
-          // and hit the just-closed connection (issue #2912; #2792 safety window).
-          name: "session cleanup timer",
-          run: () => this.stopSessionTimers(),
-        },
-        { name: "video recording socket server", run: stopVideoRecordingSocketServer },
-        { name: "test recording socket server", run: stopTestRecordingSocketServer },
-        { name: "device snapshot socket server", run: stopDeviceSnapshotSocketServer },
-        { name: "appearance socket server", run: stopAppearanceSocketServer },
-        { name: "performance stream socket server", run: stopPerformanceStreamSocketServer },
-        { name: "performance push socket server", run: stopPerformancePushSocketServer },
-        { name: "device data stream socket server", run: stopDeviceDataStreamSocketServer },
-        { name: "failures stream socket server", run: stopFailuresStreamSocketServer },
-        { name: "failures push socket server", run: stopFailuresPushSocketServer },
-        { name: "telemetry push socket server", run: stopTelemetryPushSocketServer },
-        { name: "WebRTC stream socket server", run: stopWebRtcStreamSocketServer },
-        { name: "video stream socket server", run: stopVideoStreamSocketServer },
-        {
-          name: "iOS simulator capture helper pool",
-          run: () => iosSimulatorCaptureHelperPool.shutdown(),
-        },
-        { name: "appearance sync scheduler", run: stopAppearanceSyncScheduler },
-        { name: "performance monitor", run: stopPerformanceMonitor },
-        {
-          name: "active HTTP sessions",
-          run: () =>
-            runShutdownCleanupStages(
-              Array.from(this.transports, ([sessionId, streamableTransport]) => ({
-                name: `Streamable HTTP session ${sessionId}`,
-                run: () => streamableTransport.close(),
-              })),
-              (message, error) => logger.warn(message, error),
-            ),
-        },
-        {
-          name: "active HTTP session registry",
-          run: () => this.clearHttpSessionRegistry(),
-        },
-        {
-          name: "HTTP server",
-          run: () => this.closeHttpListener(),
-        },
-        { name: "active device sessions", run: () => this.releaseActiveSessionsForShutdown() },
-        {
-          // Session release broadcasts must be written while subscribed proxy
-          // sockets are still connected; closing first degrades the exact
-          // daemon-shutdown reason into session-not-found after reconnect.
-          // Runs right after session release, before the device-cleanup and
-          // forward-release drains, so a wedged stage behind it cannot push the
-          // daemon-shutdown notification past the 9 s process limit (#11156).
-          name: "Unix socket server",
-          run: async () => {
-            if (this.socketServer) {
-              this.publishMissingShutdownReleaseNotifications();
-              await this.socketServer.drainSessionReleaseNotifications();
-              await this.socketServer.close();
-            }
-          },
-        },
-        {
-          name: "pending device cleanups",
-          run: async () => {
-            await this.sessionManager.drainPendingDeviceCleanups(
-              DEVICE_CLEANUP_SHUTDOWN_DRAIN_TIMEOUT_MS,
-            );
-          },
-        },
-        { name: "CtrlProxy forwarding leases", run: () => this.releaseForwardLeases() },
-        {
-          name: "device allocation claims",
-          run: () => this.devicePool.releaseDeviceClaimsForShutdown(),
-        },
-        { name: "managed ADB server", run: this.stopManagedAdbServer },
-        {
-          name: "database write drain",
-          run: () => this.drainShutdownDatabaseWrites(),
-        },
-        {
-          name: "in-flight migrations",
-          run: () => this.settleShutdownMigrations(),
-        },
-        {
-          name: "database",
-          run: async () => {
-            if (!this.shutdownSessionReleasesDrained) {
-              logger.warn(
-                "Skipping database close because a session terminal write is still in flight",
-              );
-              return;
-            }
-            await closeDatabase();
-          },
-        },
-        {
-          name: "logger",
-          run: async () => {
-            logger.info("Daemon stopped");
-            await logger.closeAfterFlush();
-          },
-        },
-        // Removed LAST, only once logging has fully flushed and closed: the pid
-        // record is this daemon's ONLY externally-observable liveness signal, and
-        // the detached process keeps holding the inherited launch-log fd through
-        // every earlier stage above. Removing it any earlier opens a window where
-        // a concurrent pruning sweep in another process reads "no daemon" while
-        // this one is still alive and still writing, and unlinks a launch log out
-        // from under it (issue #6194). The unconditional `process.once("exit", ...)`
-        // cleanup remains as a safety net for shutdown paths that never reach here.
-        { name: "daemon files", run: () => this.cleanupDaemonFilesForShutdown() },
+        ...this.shutdownQuiesceStages(),
+        ...this.shutdownStreamAndTransportStages(),
+        ...this.shutdownSessionAndStateStages(),
       ],
       (message, error) => logger.warn(message, error),
+      { timer: this.timer },
     );
+  }
+
+  /** Stop admitting work, then stop the daemon's own children, timers and monitors. */
+  private shutdownQuiesceStages(): ShutdownCleanupStage[] {
+    // Detached from the daemon by the snapshot stage, then stopped by the stages after it.
+    const handoff: {
+      heartbeatMonitor: SessionHeartbeatMonitor | null;
+      navigationRetentionMonitor: NavigationRetentionMonitor | null;
+      deviceDisconnectMonitor: SingleFlightInterval | null;
+      forwardLeaseIdleReleaser: DeviceForwardLeaseIdleReleaser | null;
+    } = {
+      heartbeatMonitor: null,
+      navigationRetentionMonitor: null,
+      deviceDisconnectMonitor: null,
+      forwardLeaseIdleReleaser: null,
+    };
+    return [
+      shutdownStage(
+        "provisioning ingress quiesce",
+        "in-flight control-socket request handlers",
+        () => this.quiesceProvisioningIngress(),
+      ),
+      shutdownStage(
+        "provisioning interruption",
+        "interrupted provisionDevice calls persisting their handoff",
+        (stage) =>
+          this.interruptProvisioningForShutdown(
+            boundWithinStage(stage, DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS),
+          ),
+      ),
+      shutdownStage("shutdown release snapshot", "nothing (synchronous)", () => {
+        this.shutdownReleaseNotifications = new Set();
+        this.shutdownFallbackReleaseNotifications = new Set();
+        this.shutdownSessionIds = [];
+        handoff.heartbeatMonitor = this.heartbeatMonitor;
+        this.heartbeatMonitor = null;
+        handoff.navigationRetentionMonitor = this.navigationRetentionMonitor;
+        this.navigationRetentionMonitor = null;
+        handoff.deviceDisconnectMonitor = this.deviceDisconnectMonitor;
+        this.deviceDisconnectMonitor = null;
+        this.orphanWatchdog?.stop();
+        this.orphanWatchdog = null;
+        handoff.forwardLeaseIdleReleaser = this.forwardLeaseIdleReleaser;
+        this.forwardLeaseIdleReleaser = null;
+      }),
+      shutdownStage(
+        "forward lease idle releaser",
+        "an in-flight idle forward-lease sweep (adb forward removal)",
+        async () => {
+          await handoff.forwardLeaseIdleReleaser?.stop();
+        },
+      ),
+      shutdownStage(
+        // A shutdown release keeps the execution owner: the rehydrated session awaits its
+        // owner (#11177).
+        "managed execution release",
+        "the managed slot registry close",
+        () => this.closeManagedExecutionRelease(),
+      ),
+      shutdownStage(
+        // Quiesce new recording work and stop owned children before any
+        // potentially blocking socket teardown consumes the shutdown budget.
+        "active capture and iOS CtrlProxy children",
+        "recording stop/finalize and iOS CtrlProxy child exit",
+        () => cleanupDaemonChildProcesses(),
+      ),
+      shutdownStage("health check timer", "the database health probe", async () => {
+        this.stopHealthCheckTimer();
+        await this.databaseHealthProbe.dispose?.();
+      }),
+      shutdownStage("location routes", "nothing (synchronous)", () =>
+        defaultLocationRouteRegistry.stopAll(),
+      ),
+      shutdownStage(
+        "shutdown monitors",
+        "the heartbeat and disconnect monitors and deferred recovery sweeps",
+        (stage) =>
+          this.drainShutdownMonitors(
+            handoff.navigationRetentionMonitor,
+            handoff.heartbeatMonitor,
+            handoff.deviceDisconnectMonitor,
+            boundWithinStage(stage, DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS),
+          ),
+      ),
+      shutdownStage("ADB missing-device subscription", "nothing (synchronous)", () =>
+        this.unsubscribeAdbMissing(),
+      ),
+      shutdownStage(
+        // Stop the session cleanup interval before the DB drain below. It is the one
+        // best-effort DB writer that fires on its own timer rather than an external
+        // socket (which are all torn down here), so if left running it could route a
+        // tracked `markReleased` write through a freshly-resolved, non-draining
+        // barrier in the microtask window AFTER closeDatabase()'s resetDbWriteBarrier()
+        // and hit the just-closed connection (issue #2912; #2792 safety window).
+        "session cleanup timer",
+        "nothing (synchronous)",
+        () => this.stopSessionTimers(),
+      ),
+    ];
+  }
+
+  /** Close the auxiliary socket servers, the stream servers and the HTTP transports. */
+  private shutdownStreamAndTransportStages(): ShutdownCleanupStage[] {
+    return [
+      shutdownStage("video recording socket server", "its connections closing", () =>
+        stopVideoRecordingSocketServer(),
+      ),
+      shutdownStage("test recording socket server", "its connections closing", () =>
+        stopTestRecordingSocketServer(),
+      ),
+      shutdownStage("device snapshot socket server", "its connections closing", () =>
+        stopDeviceSnapshotSocketServer(),
+      ),
+      shutdownStage("appearance socket server", "its connections closing", () =>
+        stopAppearanceSocketServer(),
+      ),
+      shutdownStage("performance stream socket server", "its connections closing", () =>
+        stopPerformanceStreamSocketServer(),
+      ),
+      shutdownStage("performance push socket server", "its connections closing", () =>
+        stopPerformancePushSocketServer(),
+      ),
+      shutdownStage("device data stream socket server", "its connections closing", () =>
+        stopDeviceDataStreamSocketServer(),
+      ),
+      shutdownStage("failures stream socket server", "its connections closing", () =>
+        stopFailuresStreamSocketServer(),
+      ),
+      shutdownStage("failures push socket server", "its connections closing", () =>
+        stopFailuresPushSocketServer(),
+      ),
+      shutdownStage("telemetry push socket server", "its connections closing", () =>
+        stopTelemetryPushSocketServer(),
+      ),
+      shutdownStage(
+        "WebRTC stream socket server",
+        "WebRTC stream teardown (encoder stop, adb forward removal)",
+        () => stopWebRtcStreamSocketServer(),
+      ),
+      shutdownStage(
+        "video stream socket server",
+        "capture source stop (encoder stop, adb forward removal)",
+        () => stopVideoStreamSocketServer(),
+      ),
+      shutdownStage(
+        "iOS simulator capture helper pool",
+        "simulator capture helper processes exiting",
+        () => iosSimulatorCaptureHelperPool.shutdown(),
+      ),
+      shutdownStage("appearance sync scheduler", "an in-flight appearance sync", () =>
+        stopAppearanceSyncScheduler(),
+      ),
+      shutdownStage("performance monitor", "an in-flight performance sample", () =>
+        stopPerformanceMonitor(),
+      ),
+      shutdownStage("active HTTP sessions", "streamable HTTP transports closing", () =>
+        // No deadline per transport: one that wedges is covered by this stage's deadline, which
+        // also marks the stage as still running for the database stage.
+        runShutdownCleanupStages(
+          Array.from(this.transports, ([sessionId, streamableTransport]) => ({
+            name: `Streamable HTTP session ${sessionId}`,
+            run: () => streamableTransport.close(),
+          })),
+          (message, error) => logger.warn(message, error),
+        ),
+      ),
+      shutdownStage("active HTTP session registry", "nothing (synchronous)", () =>
+        this.clearHttpSessionRegistry(),
+      ),
+      shutdownStage("HTTP server", "open HTTP connections closing", () => this.closeHttpListener()),
+    ];
+  }
+
+  /**
+   * Release sessions, tell their clients, then close the database, the logger and the daemon
+   * files. These protect user state; the budget table keeps their share whatever came before.
+   */
+  private shutdownSessionAndStateStages(): ShutdownCleanupStage[] {
+    // Abandoned is not cancelled: the connection stays open while an abandoned stage that may
+    // write is still running, and closes late if those stragglers finish in time (#11601).
+    const databaseTail = createShutdownDatabaseTail({
+      // The shutdown close: late work is refused from here on instead of reopening it.
+      closeDatabase: () => closeDatabase({ forShutdown: true }),
+      refusedAccessCount: () => refusedDatabaseAccessCountAfterShutdownClose(),
+      drainWrites: (timeoutMs) => this.drainShutdownDatabaseWrites(timeoutMs),
+      keepOpenReason: () =>
+        this.shutdownSessionReleasesDrained
+          ? undefined
+          : "a session terminal write is still in flight",
+      warn: (message) => logger.warn(message),
+    });
+    return [
+      shutdownStage(
+        "active device sessions",
+        "session release teardown and terminal-row persistence",
+        (stage) =>
+          this.releaseActiveSessionsForShutdown(
+            boundWithinStage(stage, SESSION_RELEASE_DRAIN_TIMEOUT_MS),
+          ),
+      ),
+      shutdownStage(
+        // Session release broadcasts must be written while subscribed proxy
+        // sockets are still connected; closing first degrades the exact
+        // daemon-shutdown reason into session-not-found after reconnect.
+        // Runs right after session release, before the device-cleanup and
+        // forward-release drains, so a wedged stage behind it cannot push the
+        // daemon-shutdown notification past the 9 s process limit (#11156).
+        "Unix socket server",
+        "release notification writes and in-flight request handlers",
+        async () => {
+          if (this.socketServer) {
+            this.publishMissingShutdownReleaseNotifications();
+            await this.socketServer.drainSessionReleaseNotifications();
+            await this.socketServer.close();
+          }
+        },
+      ),
+      shutdownStage(
+        "pending device cleanups",
+        "per-device cleanup registered by released sessions",
+        async (stage) => {
+          await this.sessionManager.drainPendingDeviceCleanups(
+            boundWithinStage(stage, DEVICE_CLEANUP_SHUTDOWN_DRAIN_TIMEOUT_MS),
+          );
+        },
+      ),
+      shutdownStage("CtrlProxy forwarding leases", "adb forward removal", (stage) =>
+        this.releaseForwardLeases(
+          boundWithinStage(stage, CTRL_PROXY_FORWARD_RELEASE_SHUTDOWN_TIMEOUT_MS),
+        ),
+      ),
+      shutdownStage("device allocation claims", "device claim release", () =>
+        this.devicePool.releaseDeviceClaimsForShutdown(),
+      ),
+      shutdownStage("managed ADB server", "adb kill-server", () => this.stopManagedAdbServer()),
+      shutdownStage(
+        // Abandoned is not cancelled. With every later stage's share still reserved, give the
+        // stragglers (a recording finalizer, a capture stop, a slow release) what is left of
+        // the budget before the database closes and the process exits.
+        "abandoned stage settle",
+        "earlier stages that passed their deadline",
+        (stage) => databaseTail.settle(stage),
+      ),
+      shutdownStage("database write drain", "in-flight best-effort database writes", (stage) =>
+        this.drainShutdownDatabaseWrites(boundWithinStage(stage, DB_WRITE_DRAIN_TIMEOUT_MS)),
+      ),
+      shutdownStage("in-flight migrations", "a cold-start migration still running", (stage) =>
+        this.settleShutdownMigrations(boundWithinStage(stage, MIGRATION_SETTLE_TIMEOUT_MS)),
+      ),
+      shutdownStage("database", "the database connection closing", (stage) =>
+        databaseTail.close(stage),
+      ),
+      shutdownStage(
+        // The three database stages above rarely use their share. Hand it to any stage still
+        // running, so a shutdown that finishes all its work inside the limit is a clean one.
+        "late abandoned stage settle",
+        "earlier stages that passed their deadline",
+        (stage) => databaseTail.lateSettle(stage),
+      ),
+      shutdownStage("logger", "the log file flush", async () => {
+        logger.info("Daemon stopped");
+        await logger.closeAfterFlush();
+      }),
+      // Removed LAST, only once logging has fully flushed and closed: the pid
+      // record is this daemon's ONLY externally-observable liveness signal, and
+      // the detached process keeps holding the inherited launch-log fd through
+      // every earlier stage above. Removing it any earlier opens a window where
+      // a concurrent pruning sweep in another process reads "no daemon" while
+      // this one is still alive and still writing, and unlinks a launch log out
+      // from under it (issue #6194). The unconditional `process.once("exit", ...)`
+      // cleanup remains as a safety net for shutdown paths that never reach here.
+      shutdownStage("daemon files", "pid and socket file removal", () =>
+        this.cleanupDaemonFilesForShutdown(),
+      ),
+    ];
   }
 
   private async cleanupDaemonFilesForShutdown(): Promise<void> {
@@ -4898,11 +5312,8 @@ export class Daemon {
   }
 
   /** Remove the forwards this daemon recorded and release its forwarding leases, bounded. */
-  private releaseForwardLeases(): Promise<void> {
-    return AndroidCtrlProxyClient.releaseForwardLeasesForShutdown(
-      this.timer,
-      CTRL_PROXY_FORWARD_RELEASE_SHUTDOWN_TIMEOUT_MS,
-    );
+  private releaseForwardLeases(timeoutMs: number): Promise<void> {
+    return AndroidCtrlProxyClient.releaseForwardLeasesForShutdown(this.timer, timeoutMs);
   }
 
   private clearHttpSessionRegistry(): void {
@@ -4913,30 +5324,30 @@ export class Daemon {
     this.transports.clear();
   }
 
-  private async drainShutdownDatabaseWrites(): Promise<void> {
+  private async drainShutdownDatabaseWrites(timeoutMs: number): Promise<void> {
     // Quiesce in-flight best-effort DB writes (fire-and-forget telemetry ingest,
     // background retention cleanup) BEFORE closing the connection, so a query
     // queued in Kysely's ConnectionMutex can't strand shutdown on an unsettled
     // promise (issue #2792). Bounded: a wedged write cannot itself hang shutdown.
-    const drained = await getDbWriteBarrier().drain(DB_WRITE_DRAIN_TIMEOUT_MS);
+    const drained = await getDbWriteBarrier().drain(timeoutMs);
     if (!drained) {
       logger.warn(
-        `Timed out after ${DB_WRITE_DRAIN_TIMEOUT_MS}ms draining in-flight DB writes; closing database anyway`,
+        `Timed out after ${timeoutMs}ms draining in-flight DB writes; closing database anyway`,
       );
     }
   }
 
-  private async settleShutdownMigrations(): Promise<void> {
+  private async settleShutdownMigrations(timeoutMs: number): Promise<void> {
     // If a SIGTERM arrived mid cold-start migration, the detached migration
     // connection is still open and writing on its own connection (its writes are
     // NOT tracked by the write barrier drained above). Let it settle before
     // closeDatabase() destroys the app connection, so their WAL writes/checkpoint
     // can't contend and stall shutdown on busy_timeout (Windows; issue #3044).
     // Bounded so a wedged migration cannot itself hang shutdown.
-    const migrationsSettled = await awaitInFlightMigrations(MIGRATION_SETTLE_TIMEOUT_MS);
+    const migrationsSettled = await awaitInFlightMigrations(timeoutMs);
     if (!migrationsSettled) {
       logger.warn(
-        `Timed out after ${MIGRATION_SETTLE_TIMEOUT_MS}ms awaiting in-flight startup migration; closing database anyway`,
+        `Timed out after ${timeoutMs}ms awaiting in-flight startup migration; closing database anyway`,
       );
     }
   }
@@ -4945,6 +5356,7 @@ export class Daemon {
     navigationRetentionMonitor: typeof this.navigationRetentionMonitor,
     heartbeatMonitor: typeof this.heartbeatMonitor,
     deviceDisconnectMonitor: typeof this.deviceDisconnectMonitor,
+    sweepDrainTimeoutMs: number,
   ): Promise<void> {
     // The navigation retention monitor's in-flight pass drains via the DB
     // write-barrier stage below; here we only cancel its next scheduled tick.
@@ -4964,7 +5376,7 @@ export class Daemon {
     try {
       await raceWithDeadline(Promise.allSettled(this.deferredSessionRecoverySweeps), {
         timer: this.timer,
-        timeoutMs: DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
+        timeoutMs: sweepDrainTimeoutMs,
         label: "Recovery sweep drain",
         timeoutError: () => timedOut,
       });
@@ -4976,7 +5388,7 @@ export class Daemon {
     }
     if (!sweepsSettled) {
       logger.warn(
-        `Timed out after ${DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS}ms draining deferred session recovery sweeps; continuing daemon shutdown`,
+        `Timed out after ${sweepDrainTimeoutMs}ms draining deferred session recovery sweeps; continuing daemon shutdown`,
       );
     }
   }
@@ -4999,7 +5411,7 @@ export class Daemon {
     await quiescing;
   }
 
-  private async interruptProvisioningForShutdown(): Promise<void> {
+  private async interruptProvisioningForShutdown(drainTimeoutMs: number): Promise<void> {
     const reason = new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE);
     const cancelled = await executionTracker.cancelToolExecutions("provisionDevice", reason);
     if (cancelled === 0) {
@@ -5007,16 +5419,16 @@ export class Daemon {
     }
     const drained = await executionTracker.waitForToolExecutionsToEnd(
       "provisionDevice",
-      DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
+      drainTimeoutMs,
     );
     if (!drained) {
       logger.warn(
-        `Timed out after ${DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS}ms persisting ${cancelled} interrupted provisionDevice operation(s) before daemon shutdown`,
+        `Timed out after ${drainTimeoutMs}ms persisting ${cancelled} interrupted provisionDevice operation(s) before daemon shutdown`,
       );
     }
   }
 
-  private async releaseActiveSessionsForShutdown(): Promise<void> {
+  private async releaseActiveSessionsForShutdown(drainTimeoutMs: number): Promise<void> {
     const sessionIds = this.sessionManager.getAllKnownSessionIds();
     this.shutdownSessionIds = sessionIds;
     const releases = sessionIds.map(async (sessionId) => {
@@ -5033,14 +5445,11 @@ export class Daemon {
     };
     const settled = Promise.allSettled(releases);
     await Promise.resolve();
-    const drained = await this.sessionManager.drainReleasePromises(
-      SESSION_RELEASE_DRAIN_TIMEOUT_MS,
-      releases,
-    );
+    const drained = await this.sessionManager.drainReleasePromises(drainTimeoutMs, releases);
     if (!drained) {
       this.shutdownSessionReleasesDrained = false;
       logger.warn(
-        `Timed out after ${SESSION_RELEASE_DRAIN_TIMEOUT_MS}ms draining session releases; database will remain open`,
+        `Timed out after ${drainTimeoutMs}ms draining session releases; database will remain open`,
       );
       void settled.then(reportFailures);
       return;

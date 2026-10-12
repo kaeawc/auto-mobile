@@ -112,7 +112,53 @@ export interface FreeSlotDeviceRecord {
   specFingerprint: string | null;
   fromScopeKey: string;
   freedAtMs: number;
+  /**
+   * `free`: not yet reclaimed (the device may be booted). `stopping`: a reclaim sweep claimed it and
+   * is shutting it down, so adoption waits. `stopped`: shut down with its image kept; a matching
+   * slot may adopt it and boots it (#11337).
+   */
+  state: FreeDeviceState;
+  /** The daemon driving a `stopping` shutdown; null in every other state. */
+  stopClaimedBy: string | null;
+  /** When that claim was made (registry clock); null in every other state. */
+  stopClaimedAtMs: number | null;
 }
+
+/**
+ * How long a `stopping` claim holds against other daemons and against adoption. Past it the claimer
+ * is presumed dead: another daemon may re-drive the stop, and a slot may adopt the device. Twice the
+ * slot journal's step budget (120 s), which bounds one delete-or-stop step, so a live claimer that
+ * is merely slow is not pre-empted.
+ */
+export const FREE_DEVICE_STOP_CLAIM_STALE_MS = 2 * 120_000;
+
+export function isStaleFreeDeviceStopClaim(
+  device: Pick<FreeSlotDeviceRecord, "state" | "stopClaimedAtMs">,
+  nowMs: number,
+): boolean {
+  return (
+    device.state === "stopping" &&
+    (device.stopClaimedAtMs === null ||
+      nowMs - device.stopClaimedAtMs >= FREE_DEVICE_STOP_CLAIM_STALE_MS)
+  );
+}
+
+export type FreeDeviceState = "free" | "stopping" | "stopped";
+
+/**
+ * The identity a reclaim sweep read plus the daemon claiming the stop; every CAS refuses when the
+ * row moved on since or another daemon holds a live claim.
+ */
+export type FreeDeviceStopClaim = Pick<
+  FreeSlotDeviceRecord,
+  "platform" | "stableDeviceId" | "freedAtMs" | "fromScopeKey"
+> & { claimedBy: string };
+
+export type BeginFreeDeviceStopResult =
+  /** The row is now `stopping` (or already was, from an earlier interrupted attempt). */
+  | { kind: "begun" }
+  /** Adopted, re-freed since, not yet due or already stopped: nothing to shut down. */
+  | { kind: "not_reclaimable" };
 
 /** The optimistic-concurrency token every mutating slot step must present. */
 export interface SlotBindingExpectation {
@@ -169,7 +215,9 @@ export type SlotCasFailure =
   | { kind: "scope_not_valid"; scope: SlotScopeRecord | null }
   | { kind: "slot_missing" }
   | { kind: "stale_binding"; current: SlotAssignmentRecord }
-  | { kind: "device_assigned_elsewhere"; holder: SlotAssignmentRecord };
+  | { kind: "device_assigned_elsewhere"; holder: SlotAssignmentRecord }
+  /** The free-pool device is being shut down by a reclaim sweep; adopt it once it is `stopped`. */
+  | { kind: "free_device_stopping" };
 
 export type CommitBindingResult =
   | {
@@ -485,7 +533,9 @@ export interface SlotRegistry {
 
   /**
    * Record the live execution holding a ready slot; refused while another live owner holds it,
-   * unless that owner is the session `options.supersedesSessionUuid` names.
+   * unless that owner is the session `options.supersedesSessionUuid` names. Needs a `valid` scope,
+   * except that the session the slot already records may re-stamp its owner process while the
+   * scope is `invalidating` ({@link scopeAcceptsSameSessionClaim}).
    */
   claimExecution(
     key: SlotKey,
@@ -544,8 +594,27 @@ export interface SlotRegistry {
    * so no acquisition races the later device deletion.
    */
   markScopeAbandoned(scopeKey: string, query?: AbandonmentQuery): Promise<MarkScopeAbandonedResult>;
-  /** Free-pool devices that have sat unadopted for at least the threshold. */
+  /**
+   * Free-pool devices that have sat unadopted for at least the threshold and are not yet
+   * `stopped` (a `stopping` one is returned so an interrupted shutdown is retried).
+   */
   findReclaimableFreeDevices(query?: AbandonmentQuery): Promise<FreeSlotDeviceRecord[]>;
+  /**
+   * CAS to `stopping` under `claim.claimedBy`, only while the row is the one that was read (same
+   * `freedAtMs`), still past the threshold, and either `free`, already claimed by the same daemon,
+   * or claimed by another daemon whose claim is stale. A concurrent adoption deletes the row, so it
+   * wins.
+   */
+  beginFreeDeviceStop(
+    claim: FreeDeviceStopClaim,
+    query?: AbandonmentQuery,
+  ): Promise<BeginFreeDeviceStopResult>;
+  /** Whether the row is still `stopping` under this claim (not adopted, not taken over). */
+  holdsFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean>;
+  /** CAS `stopping` to `stopped` after the shutdown was verified; false when the claim was lost. */
+  completeFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean>;
+  /** CAS `stopping` back to `free` after a failed shutdown, so the device is adoptable again. */
+  revertFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean>;
   /** Every scope of `(namespace, incarnation)`, optionally narrowed to one host scope. */
   findScopes(query: SlotScopeQuery): Promise<SlotScopeRecord[]>;
   /**
@@ -668,13 +737,10 @@ export function sameBinding(a: SlotBindingExpectation, b: SlotBindingExpectation
 
 /**
  * The stable id an open journal entry's new device has, or will have: the recorded id once creation
- * returned it, else (Android) the generated AVD name, which is the stable id.
+ * returned it, else the generated name (the AVD identity on Android, a temporary iOS identity).
  */
 export function journalNewStableId(entry: SlotJournalEntry): string | null {
-  return (
-    entry.target.newStableId ??
-    (journalCreationPlatform(entry) === "android" ? entry.target.newName : null)
-  );
+  return entry.target.newStableId ?? entry.target.newName;
 }
 
 /**
@@ -716,6 +782,22 @@ export function journalTargetEntries(
  */
 export function scopeAcceptsSlotChange(scope: SlotScopeRecord | null, journaled: boolean): boolean {
   return scope?.state === "valid" || (journaled && scope?.state === "invalidating");
+}
+
+/**
+ * Whether an execution claim by `sessionUuid` may go through in a scope that does not accept slot
+ * changes (#11642). Only one case: the scope is `invalidating` and the slot's recorded execution
+ * is that same session, so the claim re-stamps which process holds a session the scope is already
+ * waiting for (a restarted daemon re-owning its live execution). It adds no owner to the scope:
+ * an ownerless slot and a slot recorded for any other session stay refused, and an `invalidated`
+ * scope accepts nothing.
+ */
+export function scopeAcceptsSameSessionClaim(
+  scope: SlotScopeRecord | null,
+  current: Pick<SlotAssignmentRecord, "execOwner"> | null,
+  sessionUuid: string,
+): boolean {
+  return scope?.state === "invalidating" && current?.execOwner?.sessionUuid === sessionUuid;
 }
 
 /**

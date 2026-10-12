@@ -4,6 +4,8 @@ import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
 import type { DeviceBootResult, DeviceBootService } from "../devices/deviceBootService";
 import { logger } from "../utils/logger";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { runOutsideRequestContext, runWithAbortSignal } from "../utils/AbortContext";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { ProgressCallback } from "./toolRegistry";
 import type {
@@ -85,8 +87,13 @@ interface SystemUiAnrRebootContext {
   signal: AbortSignal | undefined;
   progress: { report: ProgressCallback } | undefined;
   recoveryAutolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined;
+  assertHolder: () => void;
   collectColdBootSettlement: ColdBootSettlementCollector;
   publishReplacementReadinessMarker?: (replacement: BootedDevice) => void;
+  releasePreservedSession: (
+    replacement: PooledDevice,
+    preservedSessionId: string | undefined,
+  ) => Promise<void>;
   operations: SystemUiAnrRecoveryOperations;
 }
 
@@ -98,19 +105,8 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
   validatePreservedSession?: () => Promise<void>;
   releaseRecoveryRouteLease?: () => void;
 }> {
-  const {
-    boot,
-    args,
-    bootService,
-    devicePool,
-    totalDeadlineMs,
-    signal,
-    progress,
-    recoveryAutolockClient,
-    collectColdBootSettlement,
-    publishReplacementReadinessMarker,
-    operations,
-  } = context;
+  const { boot, devicePool, signal, recoveryAutolockClient, collectColdBootSettlement } = context;
+  context.assertHolder();
   const sourceImage = await resolveSystemUiRecoveryImage(context);
   const releaseReadinessReservation = devicePool
     ? await devicePool.reserveDeviceForReadiness(
@@ -121,98 +117,218 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
         recoveryAutolockClient,
       )
     : undefined;
-  let shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>;
-  let shutdownWasConfirmed = false;
-  const shutdown: SystemUiAnrShutdownState = {};
-  let keepReadinessReservation = false;
-  let replacementBoot: DeviceBootResult | undefined;
-  const releaseShutdownReservation = async (): Promise<void> => {
-    try {
-      await shutdownReservation?.release();
-    } catch (error) {
-      // Release is best-effort cleanup and must not replace the shutdown outcome.
-      logger.warn(
-        `[DeviceTools] Failed to release System UI ANR shutdown reservation: ${errorMessage(error)}`,
-        error,
-      );
-    }
+  const state: SystemUiAnrRestartState = {
+    sourceImage,
+    releaseReadinessReservation,
+    shutdownWasConfirmed: false,
+    shutdown: {},
   };
+  const runningBeforeCall = wasRunningBeforeCall(boot);
+  const restartContext = runningBeforeCall
+    ? { ...context, signal: new AbortController().signal }
+    : context;
+  let backgroundTail = false;
+  let keepReadinessReservation = false;
+  let restart: Promise<SystemUiAnrRecoveryResult> | undefined;
   try {
-    shutdownReservation = await reserveSystemUiAnrShutdown(
+    state.shutdownReservation = await reserveSystemUiAnrShutdown(
       devicePool,
       boot.device.deviceId,
       signal,
       recoveryAutolockClient,
+      context.assertHolder,
     );
-    await shutdownAndroidForSystemUiAnr(context, shutdown);
-    shutdownWasConfirmed = true;
+    // Before dispatch the request still owns cancellation: nothing has been touched yet.
+    signal?.throwIfAborted();
+    restart = runningBeforeCall
+      ? runOutsideRequestContext(() =>
+          runWithAbortSignal(restartContext.signal, () =>
+            restartAndroidForSystemUiAnr(restartContext, state, signal),
+          ),
+        )
+      : restartAndroidForSystemUiAnr(restartContext, state, signal);
+    const result = runningBeforeCall
+      ? await raceWithDeadline(restart, {
+          signal,
+          timer: context.timer,
+          label: "System UI ANR recovery",
+        })
+      : await restart;
+    keepReadinessReservation = true;
+    return result;
+  } catch (error) {
+    if (shouldFinishCancelledRestart(boot, signal, state) && restart) {
+      // The request returns now; the recovery owns all reservations until its bounded tail ends.
+      backgroundTail = true;
+      const pendingRestart = restart;
+      collectColdBootSettlement(
+        runOutsideRequestContext(() =>
+          settleCancelledSystemUiAnrRecovery(pendingRestart, restartContext, state),
+        ),
+      );
+      throw error;
+    }
+    await cleanUpRecoveryFailure(context, state);
+    throw error;
+  } finally {
+    if (!backgroundTail) {
+      await releaseRecoveryReservations(state, keepReadinessReservation);
+    }
+  }
+}
 
-    replacementBoot = await bootSystemUiAnrReplacement(
+interface SystemUiAnrRestartState {
+  sourceImage: DeviceInfo;
+  releaseReadinessReservation: DeviceReadinessReservation | undefined;
+  shutdownReservation?: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>;
+  shutdownWasConfirmed: boolean;
+  shutdown: SystemUiAnrShutdownState;
+  replacementBoot?: DeviceBootResult;
+}
+
+function wasRunningBeforeCall(boot: DeviceBootResult): boolean {
+  return !boot.provisioned && (boot.source === "booted" || boot.runningBeforeCall === true);
+}
+
+function shouldFinishCancelledRestart(
+  boot: DeviceBootResult,
+  signal: AbortSignal | undefined,
+  state: SystemUiAnrRestartState,
+): boolean {
+  return (
+    wasRunningBeforeCall(boot) && signal?.aborted === true && state.shutdown.command !== undefined
+  );
+}
+
+async function restartAndroidForSystemUiAnr(
+  context: SystemUiAnrRebootContext,
+  state: SystemUiAnrRestartState,
+  requestSignalBeforeKill: AbortSignal | undefined,
+): Promise<SystemUiAnrRecoveryResult> {
+  const { boot, bootService, args, totalDeadlineMs, signal, progress, devicePool } = context;
+  await shutdownAndroidForSystemUiAnr(context, state.shutdown, requestSignalBeforeKill);
+  state.shutdownWasConfirmed = true;
+  state.replacementBoot = carryCreatedByCall(
+    await bootSystemUiAnrReplacement(
       bootService,
       args,
-      sourceImage,
+      state.sourceImage,
       totalDeadlineMs,
       signal,
       progress,
-    );
-    const adoptedReplacementBoot = replacementBoot;
-    assertSystemUiAnrReplacementIdentity(adoptedReplacementBoot, sourceImage);
-    const handoff = await handoffSystemUiAnrReplacement(
-      devicePool,
-      shutdownReservation,
-      adoptedReplacementBoot,
-      sourceImage,
-      publishReplacementReadinessMarker,
-    );
-    keepReadinessReservation = true;
-    return {
-      boot: adoptedReplacementBoot,
-      preservedSessionId: handoff?.preservedSessionId,
-      releaseReadinessReservation,
-      retireReplacement: async () =>
-        await retireSystemUiAnrReplacement(
-          devicePool,
-          handoff?.replacementDevice,
-          adoptedReplacementBoot,
-          collectColdBootSettlement,
-          operations,
-        ),
-      validatePreservedSession: handoff?.validatePreservedSession,
-      releaseRecoveryRouteLease: shutdownReservation?.releaseRecoveryRouteLease,
-    };
+    ),
+    boot,
+  );
+  assertSystemUiAnrReplacementIdentity(state.replacementBoot, state.sourceImage);
+  // Identity is the AVD name, not the emulator port. A wrong AVD remains call-owned.
+  if (wasRunningBeforeCall(boot) && !state.replacementBoot.provisioned) {
+    state.replacementBoot.runningBeforeCall = true;
+  }
+  const adoptedReplacementBoot = state.replacementBoot;
+  const handoff = await handoffSystemUiAnrReplacement(
+    devicePool,
+    state.shutdownReservation,
+    adoptedReplacementBoot,
+    state.sourceImage,
+    context.publishReplacementReadinessMarker,
+  );
+  return {
+    boot: adoptedReplacementBoot,
+    preservedSessionId: handoff?.preservedSessionId,
+    releaseReadinessReservation: state.releaseReadinessReservation,
+    retireReplacement: async () =>
+      await retireSystemUiAnrReplacement(
+        devicePool,
+        handoff?.replacementDevice,
+        adoptedReplacementBoot,
+        context.collectColdBootSettlement,
+        context.operations,
+        {
+          sessionId: handoff?.preservedSessionId,
+          release: async (replacement) =>
+            await context.releasePreservedSession(replacement, handoff?.preservedSessionId),
+        },
+      ),
+    validatePreservedSession: handoff?.validatePreservedSession,
+    releaseRecoveryRouteLease: state.shutdownReservation?.releaseRecoveryRouteLease,
+  };
+}
+
+async function settleCancelledSystemUiAnrRecovery(
+  restart: Promise<SystemUiAnrRecoveryResult>,
+  context: SystemUiAnrRebootContext,
+  state: SystemUiAnrRestartState,
+): Promise<void> {
+  try {
+    const recovered = await restart;
+    // Never validate or bind for the cancelled request. Release its preserved owner only
+    // after the replacement is fully handed off, while the AVD is still fenced.
+    await recovered.retireReplacement?.();
   } catch (error) {
-    // The pool rolls an adopted replacement back before rejecting its handoff,
-    // so any replacement still in scope here is safe to cancel as an unowned
-    // cold boot.
-    collectColdBootSettlement(operations.cancelUnownedColdBoot(replacementBoot));
-    try {
-      await cleanUpFailedSystemUiAnrRecovery(
-        context,
-        shutdownReservation,
-        shutdownWasConfirmed,
-        shutdown,
-      );
-    } catch (cleanupError) {
-      logger.warn(
-        `[DeviceTools] Failed to clean up after System UI ANR recovery failure: ${cleanupError}`,
-        cleanupError,
-      );
-    }
-    throw error;
+    logger.warn(
+      `[DeviceTools] Background System UI ANR recovery failed: ${errorMessage(error)}`,
+      error,
+    );
+    await cleanUpRecoveryFailure(context, state, true);
   } finally {
-    await releaseShutdownReservation();
-    if (!keepReadinessReservation) {
-      shutdownReservation?.releaseRecoveryRouteLease();
-      try {
-        await releaseReadinessReservation?.();
-      } catch (error) {
-        // Release is best-effort cleanup and must not replace the recovery outcome.
-        logger.warn(
-          `[DeviceTools] Failed to release System UI ANR readiness reservation: ${errorMessage(error)}`,
-          error,
-        );
-      }
-    }
+    await releaseRecoveryReservations(state, false);
+  }
+}
+
+async function cleanUpRecoveryFailure(
+  context: SystemUiAnrRebootContext,
+  state: SystemUiAnrRestartState,
+  waitForTermination = false,
+): Promise<void> {
+  // A failed handoff already rolled its pool entry back. A confirmed same-AVD replacement
+  // stays alive; a mismatched or call-cold-booted replacement remains call-owned.
+  const settlement = context.operations.cancelUnownedColdBoot(state.replacementBoot);
+  context.collectColdBootSettlement(settlement);
+  // The detached tail itself must own a late termination: prepareDevice has already taken
+  // its settlement snapshot by then, so merely adding another promise would release the lease early.
+  if (waitForTermination) {
+    await settlement;
+  }
+  try {
+    await cleanUpFailedSystemUiAnrRecovery(
+      context,
+      state.shutdownReservation,
+      state.shutdownWasConfirmed,
+      state.shutdown,
+    );
+  } catch (error) {
+    logger.warn(
+      `[DeviceTools] Failed to clean up after System UI ANR recovery failure: ${errorMessage(error)}`,
+      error,
+    );
+  }
+}
+
+async function releaseRecoveryReservations(
+  state: SystemUiAnrRestartState,
+  keepReadinessReservation: boolean,
+): Promise<void> {
+  try {
+    await state.shutdownReservation?.release();
+  } catch (error) {
+    // Release is best-effort cleanup and must not replace the shutdown outcome.
+    logger.warn(
+      `[DeviceTools] Failed to release System UI ANR shutdown reservation: ${errorMessage(error)}`,
+      error,
+    );
+  }
+  if (keepReadinessReservation) {
+    return;
+  }
+  try {
+    await state.releaseReadinessReservation?.();
+  } catch (error) {
+    logger.warn(
+      `[DeviceTools] Failed to release System UI ANR readiness reservation: ${errorMessage(error)}`,
+      error,
+    );
+  } finally {
+    state.shutdownReservation?.releaseRecoveryRouteLease();
   }
 }
 
@@ -221,11 +337,17 @@ async function reserveSystemUiAnrShutdown(
   deviceId: string,
   signal: AbortSignal | undefined,
   autolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined,
+  assertHolder: () => void,
 ): Promise<Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>> {
   if (!devicePool) {
     return undefined;
   }
-  const reservation = await devicePool.reserveDeviceForShutdown(deviceId, signal, autolockClient);
+  const reservation = await devicePool.reserveDeviceForShutdown(
+    deviceId,
+    signal,
+    autolockClient,
+    assertHolder,
+  );
   if (reservation) {
     devicePool.markIntentionalShutdown(deviceId);
   }
@@ -235,6 +357,7 @@ async function reserveSystemUiAnrShutdown(
 async function shutdownAndroidForSystemUiAnr(
   context: SystemUiAnrRebootContext,
   shutdown: SystemUiAnrShutdownState,
+  requestSignalBeforeKill?: AbortSignal,
 ): Promise<void> {
   const {
     boot: { device },
@@ -253,6 +376,7 @@ async function shutdownAndroidForSystemUiAnr(
       requestAbortSignal: signal,
       operation: async (shutdownSignal, timeoutMs) => {
         shutdownSignal.throwIfAborted();
+        requestSignalBeforeKill?.throwIfAborted();
         shutdown.command = deviceManager.killDevice(device, { signal: shutdownSignal, timeoutMs });
         return await shutdown.command;
       },
@@ -296,6 +420,19 @@ async function bootSystemUiAnrReplacement(
     progress,
   );
   return { ...replacement, sourceImage };
+}
+
+/**
+ * The replacement reboots the same AVD, which the original boot may have created for this very
+ * call. The replacement booted an existing image, so its own `provisioned` is false; carry the
+ * original's, or a later bind failure could neither delete that AVD nor attribute it to this call
+ * (#11548). An AVD that pre-existed stays false: the original is false then too.
+ */
+function carryCreatedByCall(
+  replacement: DeviceBootResult,
+  original: DeviceBootResult,
+): DeviceBootResult {
+  return { ...replacement, provisioned: original.provisioned || replacement.provisioned };
 }
 
 function assertSystemUiAnrReplacementIdentity(
@@ -387,7 +524,29 @@ async function retireSystemUiAnrReplacement(
   replacementBoot: DeviceBootResult,
   collectColdBootSettlement: ColdBootSettlementCollector,
   operations: SystemUiAnrRecoveryOperations,
+  preservedSession: {
+    sessionId: string | undefined;
+    release: (replacement: PooledDevice) => Promise<void>;
+  },
 ): Promise<void> {
+  const currentReplacement = devicePool?.getDevice(replacementBoot.device.deviceId);
+  // Exact binds can also arrive after handoff, while replacement readiness is pending.
+  if (
+    currentReplacement?.sessionId &&
+    currentReplacement.sessionId !== preservedSession.sessionId
+  ) {
+    return;
+  }
+  if (replacementBoot.runningBeforeCall) {
+    if (
+      expectedReplacement &&
+      devicePool?.getDevice(expectedReplacement.id) === expectedReplacement
+    ) {
+      await preservedSession.release(expectedReplacement);
+    }
+    collectColdBootSettlement(operations.cancelUnownedColdBoot(replacementBoot));
+    return;
+  }
   try {
     if (expectedReplacement) {
       await devicePool?.retireDeviceAfterSystemUiAnrRecoveryFailure(expectedReplacement);

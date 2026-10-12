@@ -42,7 +42,10 @@ import { ToolUnavailableError } from "./toolUnavailableError";
 import { stripInternalToolParams } from "./internalToolParams";
 export { stripInternalToolParams } from "./internalToolParams";
 import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
-import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
+import {
+  DaemonRestartPendingError,
+  daemonRestartPendingToolResult,
+} from "../daemon/daemonRestartAdmission";
 import { resolveDirectSessionDevice, unregisterDirectSession } from "./directSessionDeviceRegistry";
 import {
   INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
@@ -64,6 +67,13 @@ import {
   remainingDeviceLossIncidentWaitMs,
   type DeviceLossOutcome,
 } from "./deviceLossOutcome";
+
+import {
+  isControlCallOnNamedSession,
+  isSessionOwnedByAnotherConnection,
+  namedSessionAccess,
+  refuseControlOnForeignOwnedSession,
+} from "./foreignOwnedSessionRefusal";
 
 // Import the tool registry
 import { ToolRegistry, toolHasOutputSchema } from "./toolRegistry";
@@ -674,12 +684,26 @@ export function registerMcpTools(daemonMode: boolean): void {
   validateConfiguredToolSelectionDefaults(new Set(ToolRegistry.getConfigurableToolNames()));
 }
 
+/**
+ * Whether `sessionUuid` is a live session of the plan `boundSessionUuid` belongs to (#11602). The
+ * one answer for a connection's seeded binding ({@link SessionToolBinding}) and for the binding
+ * its calls recorded, read without holding, extending or releasing either session.
+ */
+function namesLiveSessionOfBoundPlan(sessionUuid: string, boundSessionUuid: string): boolean {
+  const daemonState = DaemonState.getInstance();
+  return (
+    daemonState.isInitialized() &&
+    daemonState.getSessionManager().isLiveSessionOfSamePlan(sessionUuid, boundSessionUuid)
+  );
+}
+
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   const sessionToolBinding = new SessionToolBinding(
     options.sessionContext?.initialSessionToolBinding,
     options.sessionContext?.initialToolSelectionProfile,
     undefined,
     options.sessionContext?.initialReleasedSession,
+    namesLiveSessionOfBoundPlan,
   );
   // Plan execution lock with per-session scope to prevent interference during executePlan
   // Each test thread gets its own sessionUuid, enabling parallel execution on different devices
@@ -1132,7 +1156,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         boundDeviceSessionUuid &&
         explicitSessionUuid &&
         explicitSessionUuid !== boundDeviceSessionUuid &&
-        !sessionToolBinding.ownsSession(sessionId, explicitSessionUuid)
+        !sessionToolBinding.ownsSession(sessionId, explicitSessionUuid) &&
+        // #11602: a derived `${base}:${label}` session counts as its base, so a connection bound
+        // to the base or to one of its labels may name any live session of that plan. It is no
+        // second device: the session is already allocated. Whose base it is stays the owner
+        // rule's question below.
+        !namesLiveSessionOfBoundPlan(explicitSessionUuid, boundDeviceSessionUuid)
       ) {
         throw new ActionableError(
           `MCP connection is bound to device session ${boundDeviceSessionUuid}; ` +
@@ -1258,6 +1287,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       toolName: name,
       sessionId,
       sessionUuid: executionSessionUuid,
+      readOnly: tool.isDeviceReadOnlyCall?.(toolParams) === true,
     });
     if (decision.blocked) {
       logger.warn(
@@ -1290,6 +1320,26 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       sessionUuid: providedSessionUuid,
     });
 
+    // A plain read (inventory, diagnostics, status) names a session only to watch it: it is
+    // admitted read-only (no activity refresh), so neither its start nor its end is use (#11107).
+    const plainReadCall =
+      !tool.requiresDevice &&
+      (isDeviceInventoryTool(name) || tool.isDeviceReadOnlyCall?.(parsedParams) === true);
+    // #11344: a control call never runs on a session another connected client owns. Refused
+    // before the execution starts, so naming the session neither extends nor binds it. A plain
+    // control tool (killDevice, recordSteps) is admitted on the session it names, so it is judged
+    // like a device call (#11542); nested internal calls are judged by the same predicate (#11555).
+    if (daemonMode && isControlCallOnNamedSession(tool, parsedParams)) {
+      // The session the call names, and the one a `device` label resolves to, which is the one
+      // the call runs on (#11542). The implicit routing session of a call that names none is not
+      // judged: a connection's bound session reaches here unnamed, and whether a binding another
+      // connection merely declares may drive the session is an open owner question (#11555,
+      // pinned in test/daemon/implicitRoutingForeignOwnedSession.test.ts).
+      for (const sessionUuid of new Set([providedSessionUuid, derivedLabelSessionUuid])) {
+        refuseControlOnForeignOwnedSession(name, sessionUuid, requestMcpSessionId, parsedParams);
+      }
+    }
+
     // #6869: the capabilities this acquisition declares, validated up front.
     const requestedEnableTools = resolveRequestedEnableTools(name, parsedParams);
 
@@ -1317,26 +1367,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       );
     } catch (error) {
       if (error instanceof DaemonRestartPendingError) {
-        const pending = {
-          error: {
-            code: error.code,
-            message: error.message,
-            retryable: error.retryable,
-          },
-        };
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(pending) }],
-          structuredContent: pending,
-          isError: true,
-        };
+        return daemonRestartPendingToolResult(error);
       }
       throw error;
     }
-    // A plain read (inventory, diagnostics, status) names a session only to watch it: it is
-    // admitted read-only (no activity refresh), so neither its start nor its end is use (#11107).
-    const plainReadCall =
-      !tool.requiresDevice &&
-      (isDeviceInventoryTool(name) || tool.isDeviceReadOnlyCall?.(parsedParams) === true);
     if (plainReadCall) {
       executionTracker.markReadOnlySessionAccess(execution.id);
     }
@@ -1365,16 +1399,16 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // The daemon echoes the session it routed an admitted, non-read call to, so a proxy credits
     // exactly that session instead of guessing it from a selector (#10974). Read before the
     // execution ends.
-    // #11235: an explicitly named session another connected client owns by autolock. Naming a
-    // UUID is not proof of ownership (#11164): the call may still run on that session, but this
-    // connection must never bind it for later sessionless calls. Decided before any bind, and
-    // read at bind time so an ownership change during the handler is honored.
+    // #11235, #11344: an explicitly named session another connected client owns, with autolock
+    // on or off. Naming a UUID is not proof of ownership (#11164): a read may still watch that
+    // session, but this connection must never bind it for later sessionless calls. Decided
+    // before any bind, and read at bind time so an ownership change during the handler is honored.
     const foreignOwnedExplicitSessionUuid = (): string | undefined =>
       providedSessionUuid &&
       DaemonState.getInstance().isInitialized() &&
       DaemonState.getInstance()
         .getDevicePool()
-        .isAutolockSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)
+        .isSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)
         ? providedSessionUuid
         : undefined;
     // The proxy learns from the marker not to remember a foreign-owned session it named.
@@ -1450,6 +1484,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
     let cleanupAcquisitionRelease: (() => void) | undefined;
     const releasedAcquisitionSessions = new Set<string>();
+    // The explicit-UUID attach below runs after the handler. Claim the bind for the whole call, so
+    // a connection that closes mid-handler is refused as owner instead of recorded dead (#11348).
+    const endExplicitSessionBindClaim =
+      providedSessionUuid &&
+      tool.requiresDevice &&
+      implicitAutolockMcpSessionId &&
+      DaemonState.getInstance().isInitialized()
+        ? DaemonState.getInstance().getDevicePool().beginMcpBind(implicitAutolockMcpSessionId)
+        : undefined;
     try {
       if (isDeviceSessionAcquisitionTool(name)) {
         // A handler can mint and release a session before returning its UUID.
@@ -1510,15 +1553,27 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       ) {
         // Plain tools can strip or ignore sessionUuid themselves. Device-aware
         // tools carry their admitted identity into execution in ToolRegistry.
+        // #11555: naming a session another connected client owns is not use of it, for any
+        // plain tool the owner rule lets through (`setToolEnabled`). Such a call passes the
+        // same refusals as the owner's, but neither its admission nor its end stamps the
+        // session, and while in flight it holds the session no more than a read does.
+        const namesForeignOwnedSession = isSessionOwnedByAnotherConnection(
+          providedSessionUuid,
+          requestMcpSessionId,
+        );
         await DaemonState.getInstance()
           .getSessionManager()
           .admitIssuedSessionForAutomation(
             providedSessionUuid,
             sessionExecutionMetadataOf(execution),
-            plainReadCall ? { access: "read-only" } : undefined,
+            namedSessionAccess(plainReadCall, namesForeignOwnedSession),
           );
-        // Only an admitted call's end is session use (#10824).
-        executionTracker.markSessionAdmitted(execution.id);
+        if (namesForeignOwnedSession) {
+          executionTracker.markReadOnlySessionAccess(execution.id);
+        } else {
+          // Only an admitted call's end is session use (#10824).
+          executionTracker.markSessionAdmitted(execution.id);
+        }
       }
       const runToolHandler = () =>
         runWithToolSelectionContext(
@@ -1532,6 +1587,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             // that label from the base map; unlabeled calls retain the derived
             // ambient session.
             routingSessionUuid: handlerRoutingSessionUuid,
+            // #11469: nested internal calls and plan steps run for this daemon connection.
+            callerMcpSessionId: requestMcpSessionId,
             ownsDeviceSession: (sessionUuid) =>
               sessionToolBinding.ownsSession(sessionId, sessionUuid),
             execution: {
@@ -1808,6 +1865,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         }) as McpToolCallResult,
       );
     } finally {
+      endExplicitSessionBindClaim?.();
       try {
         cleanupAcquisitionRelease?.();
       } finally {
@@ -1818,9 +1876,28 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   // A typed refusal thrown while routing, before the body's own `try`, would otherwise escape into
   // the SDK as an untyped -32603 error. Shape it here so every typed refusal reaches the client in
   // the same result shape; untyped pre-`try` failures (unknown tool, ...) still throw (#11292).
+  // #11618: the device ids a call names, as the pool's canonical ids, before anything below routes,
+  // judges or queues it. The socket server resolves a forwarded call's ids from the pool's cached
+  // fold only, and a client on the daemon's HTTP endpoint reaches this server with the ids as sent.
+  // Synchronous unless a control call names a transport the pool has never seen.
+  const withCanonicalDeviceIds = (
+    call: ToolCall<McpToolCallExtra>,
+  ): ToolCall<McpToolCallExtra> | Promise<ToolCall<McpToolCallExtra>> => {
+    const tool = daemonMode ? ToolRegistry.getTool(call.name) : undefined;
+    if (!tool) {
+      return call;
+    }
+    const args = ToolRegistry.resolveToolCallDeviceIds(tool, call.args, call.extra.signal);
+    return args instanceof Promise
+      ? args.then((resolved) => ({ ...call, args: resolved }))
+      : args === call.args
+        ? call
+        : { ...call, args };
+  };
   const executeToolCall = async (call: ToolCall<McpToolCallExtra>): Promise<McpToolCallResult> => {
     try {
-      return await executeToolCallBody(call);
+      const canonical = withCanonicalDeviceIds(call);
+      return await executeToolCallBody(canonical instanceof Promise ? await canonical : canonical);
     } catch (error) {
       if (!isTypedToolRefusal(error)) {
         throw error;

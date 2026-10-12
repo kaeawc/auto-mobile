@@ -1,0 +1,10 @@
+{
+  "id": 36655614924,
+  "name": "On Merge",
+  "path": ".github/workflows/merge.yml",
+  "event": "push",
+  "head_branch": "main",
+  "status": "completed",
+  "conclusion": "success",
+  "run_started_at": "2026-09-30T01:32:35Z"
+}

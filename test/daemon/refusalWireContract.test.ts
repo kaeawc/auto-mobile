@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
 import * as inputOwnership from "../../src/daemon/inputDeviceOwnership";
@@ -7,13 +7,36 @@ import * as managedSlotRefusals from "../../src/daemon/managedSlots/managedSlotR
 import * as bootCapacity from "../../src/models/BootCapacityExhaustedError";
 import * as boundSessionRefusal from "../../src/server/deviceOutsideBoundSessionRefusal";
 import * as daemonTypes from "../../src/daemon/types";
+import * as daemonConstants from "../../src/daemon/constants";
+import * as mcpTimeouts from "../../src/daemon/McpTimeoutError";
+import * as sessionReleasedDuringCall from "../../src/daemon/sessionReleasedDuringCall";
+import * as appNotRunning from "../../src/models/AppNotRunningError";
+import * as sessionRecovery from "../../src/models/deviceSessionRecovery";
+import type { ManagedSlotsResult } from "../../src/models/managedSlotsResult";
 import { DEFAULT_PROVISION_DEVICE_RETRYABILITY } from "../../src/devices/exactDeviceProvisioning";
+import { planRefusalFields } from "../../src/server/planExecutionOrchestrator";
+import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
+import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
+import {
+  DaemonRestartDeferredError,
+  DaemonRestartPendingError,
+} from "../../src/daemon/daemonRestartAdmission";
 import {
   MANAGED_SLOT_FIXTURE_PREFIX,
+  recoveryPendingError,
+  shapedRefusalResult,
   PROVISION_DEVICE_FIXTURE_PREFIX,
+  buildRefusalSurfaceFixtures,
+  type RefusalSurfaceFixture,
+  type RefusalWireResult,
+  expectedWireCodes,
   managedSlotNestedCodes,
   REFUSAL_FIXTURES_DIR,
+  REFUSAL_SURFACES_DIR,
+  serializeRefusalSurfaceFixture,
+  surfaceFixtureStem,
   UNFIXTURED_REFUSAL_CODES,
+  LITERAL_CLIENT_REACHABLE_CODES,
   buildRefusalWireFixtures,
   serializeRefusalFixture,
   type RefusalDisposition,
@@ -93,9 +116,18 @@ function readFields(payload: WirePayload): RefusalFields {
 /** The precedence documented in expectations.json, applied to the top-level wire fields. */
 function deriveDisposition(payload: WirePayload): RefusalDisposition {
   const envelope = typeof payload.error === "object" ? payload.error : undefined;
-  const code = envelope?.code ?? payload.code ?? "";
-  const retryable = (envelope?.retryable ?? payload.retryable) === true;
-  const nextAction = envelope?.nextAction ?? payload.nextAction;
+  return dispositionOf(
+    envelope?.code ?? payload.code ?? "",
+    (envelope?.retryable ?? payload.retryable) === true,
+    envelope?.nextAction ?? payload.nextAction,
+  );
+}
+
+function dispositionOf(
+  code: string,
+  retryable: boolean,
+  nextAction: string | undefined,
+): RefusalDisposition {
   if (WAIT_CODES.has(code) || (retryable && RETRYABLE_WAIT_CODES.has(code))) {
     return "wait";
   }
@@ -112,9 +144,9 @@ const fixtures = buildRefusalWireFixtures();
 const fixtureCodes = fixtures.map((fixture) => fixture.code);
 
 /**
- * Every exported `*_CODE` string constant of the modules that define device-refusal codes. The
- * session-envelope codes (`session_ownership_lost`, `no_active_device_session`) and the daemon
- * lifecycle codes are literals or live beside unrelated protocol codes; they are fixtured by name.
+ * Every exported `*_CODE` string constant of the modules that define device, session and daemon
+ * lifecycle refusal codes (#11351). Codes written as literals (`no_active_device_session`,
+ * `session_recovery_pending`, ...) are listed in `LITERAL_CLIENT_REACHABLE_CODES` instead.
  */
 function exportedCodeConstants(): Map<string, string> {
   const found = new Map<string, string>();
@@ -125,6 +157,11 @@ function exportedCodeConstants(): Map<string, string> {
     managedSlotRefusals,
     boundSessionRefusal,
     daemonTypes,
+    daemonConstants,
+    mcpTimeouts,
+    sessionReleasedDuringCall,
+    appNotRunning,
+    sessionRecovery,
   ]) {
     for (const [name, value] of Object.entries(module)) {
       if (name.endsWith("_CODE") && typeof value === "string") {
@@ -134,6 +171,68 @@ function exportedCodeConstants(): Map<string, string> {
   }
   return found;
 }
+
+interface SurfaceFields extends RefusalFields {
+  /** The evidence the refusal carries beside its typed fields. */
+  details?: Record<string, unknown>;
+  /** A managed slot failure's boot-capacity object. */
+  capacity?: Record<string, unknown>;
+}
+
+interface SurfaceExpectations {
+  fixtures: Record<string, { expected: RefusalDisposition; fields: SurfaceFields }>;
+}
+
+interface TypedFields {
+  code?: string;
+  retryable?: boolean;
+  retryAfterMs?: number;
+  nextAction?: string;
+}
+
+/** The typed fields a surface fixture's payload carries, and where they sit on that surface. */
+function surfaceTyped(fixture: RefusalSurfaceFixture): {
+  typed: TypedFields;
+  details?: Record<string, unknown>;
+  capacity?: Record<string, unknown>;
+} {
+  const payload = fixture.payload as Record<string, unknown>;
+  if (fixture.surface === "socket-frame") {
+    return { typed: payload as TypedFields, details: payload.details as Record<string, unknown> };
+  }
+  if (fixture.surface === "delete-device") {
+    const text = (payload as unknown as RefusalWireResult).content[0].text;
+    const failure = (JSON.parse(text) as { failure: Record<string, unknown> }).failure;
+    const { code, phase, message, retryable, retryAfterMs, nextAction, ...evidence } = failure;
+    expect([phase, typeof message], fixture.name).toEqual(["precondition", "string"]);
+    return {
+      typed: { code, retryable, retryAfterMs, nextAction } as TypedFields,
+      details: Object.keys(evidence).length > 0 ? evidence : undefined,
+    };
+  }
+  const result = payload as unknown as ManagedSlotsResult;
+  const failure = result.slots.find((slot) => slot.failure)?.failure ?? result.failure;
+  return { typed: failure as TypedFields, capacity: failure?.capacity };
+}
+
+function surfaceFields(fixture: RefusalSurfaceFixture): SurfaceFields {
+  const { typed, details, capacity } = surfaceTyped(fixture);
+  return {
+    code: typed.code,
+    retryable: typed.retryable === true,
+    acquireNewSession: typed.nextAction === "acquire_new_session",
+    ...(typeof typed.retryAfterMs === "number" && typed.retryAfterMs > 0
+      ? { retryAfterMs: typed.retryAfterMs }
+      : {}),
+    ...(details ? { details } : {}),
+    ...(capacity ? { capacity } : {}),
+  };
+}
+
+const surfaceFixtures = buildRefusalSurfaceFixtures();
+const surfaceExpectations = JSON.parse(
+  readFileSync(join(REFUSAL_SURFACES_DIR, "expectations.json"), "utf8"),
+) as SurfaceExpectations;
 
 describe("refusal wire contract", () => {
   test("committed fixtures equal what the real TypeScript builders emit", () => {
@@ -153,19 +252,7 @@ describe("refusal wire contract", () => {
   test("every fixture carries the code it is named for on the wire", () => {
     for (const fixture of fixtures) {
       const payload = JSON.parse(fixture.result.content[0].text) as WirePayload;
-      const wire = wireCodes(payload);
-      if (fixture.code.startsWith(MANAGED_SLOT_FIXTURE_PREFIX)) {
-        expect(wire, fixture.code).toEqual([
-          "managed_slot_acquisition_failed",
-          fixture.code.slice(MANAGED_SLOT_FIXTURE_PREFIX.length),
-        ]);
-      } else if (fixture.code.startsWith(PROVISION_DEVICE_FIXTURE_PREFIX)) {
-        expect(wire, fixture.code).toEqual([
-          fixture.code.slice(PROVISION_DEVICE_FIXTURE_PREFIX.length),
-        ]);
-      } else {
-        expect(wire, fixture.code).toEqual([fixture.code]);
-      }
+      expect(wireCodes(payload), fixture.code).toEqual(expectedWireCodes(fixture.code));
     }
   });
 
@@ -216,6 +303,17 @@ describe("refusal wire contract", () => {
     expect(missing).toEqual([]);
   });
 
+  test("every client-reachable code defined as a literal has a fixture or a recorded reason", () => {
+    const missing = LITERAL_CLIENT_REACHABLE_CODES.filter(
+      (code) => !fixtureCodes.includes(code) && !(code in UNFIXTURED_REFUSAL_CODES),
+    );
+    expect(missing).toEqual([]);
+    // A recorded reason never outlives its gap: a code with a fixture must not stay excused.
+    expect(
+      Object.keys(UNFIXTURED_REFUSAL_CODES).filter((code) => fixtureCodes.includes(code)),
+    ).toEqual([]);
+  });
+
   test("every retryable acquisition code has a fixture", () => {
     for (const code of acquisitionRefusals.RETRYABLE_DEVICE_ACQUISITION_CODES) {
       expect(fixtureCodes).toContain(code);
@@ -232,5 +330,149 @@ describe("refusal wire contract", () => {
         expect(actual, code).not.toBe(row.expected);
       }
     }
+  });
+
+  describe("one class, three wires", () => {
+    // The MCP result, the socket failure frame and the executePlan result of a thrown error must
+    // agree on the class's `code` and `retryable` (#11544); the owner contracts pin the values.
+    const SESSION = "11111111-2222-4333-8444-555555555555";
+    const classes: readonly (readonly [
+      string,
+      () => Error,
+      string,
+      boolean,
+      string | undefined,
+    ])[] = [
+      [
+        "idle release cut a call",
+        () => new SessionReleasedDuringCallError(SESSION, "cli-idle-timeout"),
+        "session_ownership_lost",
+        false,
+        "acquire_new_session",
+      ],
+      [
+        "heartbeat release cut a call",
+        () => new SessionReleasedDuringCallError(SESSION, "heartbeat-timeout"),
+        "session_ownership_lost",
+        false,
+        "acquire_new_session",
+      ],
+      [
+        "restart deferred",
+        () => new DaemonRestartDeferredError("a device operation is active"),
+        "daemon_restart_deferred",
+        true,
+        undefined,
+      ],
+      [
+        "restart pending",
+        () => new DaemonRestartPendingError(),
+        "daemon_restart_pending",
+        true,
+        undefined,
+      ],
+      [
+        "session recovery pending",
+        recoveryPendingError,
+        "session_recovery_pending",
+        true,
+        undefined,
+      ],
+    ];
+
+    test.each(classes)("%s", (_name, build, code, retryable, nextAction) => {
+      const error = build();
+      const mcp = readFields(JSON.parse(shapedRefusalResult(error).content[0].text) as WirePayload);
+      const frame = mcpRequestFailureDetails(error, undefined);
+      const plan = planRefusalFields(error);
+      expect([mcp.code, mcp.retryable]).toEqual([code, retryable]);
+      expect(mcp.acquireNewSession).toBe(nextAction === "acquire_new_session");
+      expect([frame.code, frame.retryable, frame.nextAction]).toEqual([
+        code,
+        retryable,
+        nextAction,
+      ]);
+      expect([plan.code, plan.retryable, plan.nextAction]).toEqual([code, retryable, nextAction]);
+    });
+
+    test("session_recovery_pending keeps its nested details for current readers", () => {
+      const error = recoveryPendingError();
+      expect(mcpRequestFailureDetails(error, undefined).details).toMatchObject({
+        code: "session_recovery_pending",
+        retryable: true,
+        sessionUuid: SESSION,
+        recoveryWindowRemainingMs: 120_000,
+      });
+      expect(planRefusalFields(error).details).toMatchObject({ code: "session_recovery_pending" });
+    });
+  });
+
+  describe("surfaces that carry a refusal but are not a tool result", () => {
+    test("committed surface fixtures equal what the real serializers emit", () => {
+      if (process.env.UPDATE_CAPTURED_FIXTURES === "1") {
+        mkdirSync(REFUSAL_SURFACES_DIR, { recursive: true });
+        for (const fixture of surfaceFixtures) {
+          writeFileSync(
+            join(REFUSAL_SURFACES_DIR, `${surfaceFixtureStem(fixture)}.json`),
+            serializeRefusalSurfaceFixture(fixture),
+          );
+        }
+      }
+      for (const fixture of surfaceFixtures) {
+        const path = join(REFUSAL_SURFACES_DIR, `${surfaceFixtureStem(fixture)}.json`);
+        expect(existsSync(path), `${path}; regenerate with UPDATE_CAPTURED_FIXTURES=1`).toBe(true);
+        expect(readFileSync(path, "utf8")).toBe(serializeRefusalSurfaceFixture(fixture));
+      }
+    });
+
+    test("no stray surface fixture exists without a builder", () => {
+      const files = readdirSync(REFUSAL_SURFACES_DIR)
+        .filter((name) => name.endsWith(".json") && name !== "expectations.json")
+        .map((name) => name.replace(/\.json$/, ""));
+      expect(files.sort()).toEqual(surfaceFixtures.map(surfaceFixtureStem).sort());
+      expect(Object.keys(surfaceExpectations.fixtures).sort()).toEqual(files.sort());
+    });
+
+    test("the expectations pin the fields and disposition each surface carries", () => {
+      for (const fixture of surfaceFixtures) {
+        const stem = surfaceFixtureStem(fixture);
+        const row = surfaceExpectations.fixtures[stem];
+        const fields = surfaceFields(fixture);
+        expect(row.fields, stem).toEqual(fields);
+        expect(row.expected, stem).toBe(
+          dispositionOf(
+            fields.code ?? "",
+            fields.retryable,
+            fields.acquireNewSession ? "acquire_new_session" : undefined,
+          ),
+        );
+      }
+    });
+
+    test("every socket frame carries the code it is named for and its retry intent", () => {
+      for (const fixture of surfaceFixtures.filter((f) => f.surface === "socket-frame")) {
+        const frame = fixture.payload as { success: boolean; code?: string; retryable?: boolean };
+        expect(frame.success, fixture.name).toBe(false);
+        expect([frame.code], fixture.name).toEqual(expectedWireCodes(fixture.name));
+        expect(typeof frame.retryable, fixture.name).toBe("boolean");
+      }
+    });
+
+    test("the surfaces cover the shapes the wire gained on 2026-10-10", () => {
+      const names = (surface: string) =>
+        surfaceFixtures.filter((f) => f.surface === surface).map((f) => f.name);
+      expect(names("socket-frame")).toEqual(
+        expect.arrayContaining([
+          "device_owned_by_other_session",
+          "device_outside_bound_session",
+          "device_outside_managed_slots",
+          "device_assigned_to_managed_slot",
+        ]),
+      );
+      expect(names("delete-device")).toEqual(
+        expect.arrayContaining(["device_owned_by_other_daemon", "discovery_incomplete"]),
+      );
+      expect(names("managed-slots-result")).toContain("capacity_exhausted.capacity_external");
+    });
   });
 });

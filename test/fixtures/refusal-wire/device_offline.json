@@ -1,0 +1,13 @@
+{
+  "code": "device_offline",
+  "builder": "DeviceTransportOfflineError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Device 'emulator-5554' is still attached but adb lists it as offline (code device_offline); it was not bound. Retry in about 1000ms.\",\"code\":\"device_offline\",\"deviceId\":\"emulator-5554\",\"retryable\":true,\"retryAfterMs\":1000}"
+      }
+    ],
+    "isError": true
+  }
+}

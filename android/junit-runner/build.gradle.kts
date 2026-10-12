@@ -142,6 +142,12 @@ tasks.withType<Test> {
     .withPropertyName("refusalWireFixtures")
     .withPathSensitivity(PathSensitivity.RELATIVE)
 
+  // The retryAfterMs hint table shared with XCTestRunner (#11544).
+  inputs
+    .dir(layout.projectDirectory.dir("../../test/fixtures/refusal-wire-hints"))
+    .withPropertyName("refusalWireHintFixtures")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+
   // Enable parallel test execution across multiple devices
   maxParallelForks = Runtime.getRuntime().availableProcessors().coerceAtLeast(2)
   dependsOn(":control-proxy:assembleDebug")

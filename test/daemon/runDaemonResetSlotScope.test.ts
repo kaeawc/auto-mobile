@@ -74,6 +74,23 @@ describe("reset-slot-scope daemon command", () => {
     expect(
       parseResetSlotScopeCommandArgs(["--incarnation", "b", "--runner-namespace", "n"]),
     ).toEqual({ runnerNamespace: "n", runnerIncarnation: "b" });
+    expect(
+      parseResetSlotScopeCommandArgs(["--incarnation", "b", "--runner-namespace", "n", "--force"]),
+    ).toEqual({ runnerNamespace: "n", runnerIncarnation: "b", force: true });
+  });
+
+  test("--force reaches the daemon request (#11336)", async () => {
+    const result = { outcome: "invalidated", retryable: false, scopes: [], waitedMs: 0 };
+    const { client } = await run(
+      ["--runner-namespace", "ns", "--incarnation", "boot-1", "--force"],
+      result,
+    );
+    expect(client.callDaemonMethodCalls).toEqual([
+      {
+        method: DAEMON_RESET_SLOT_SCOPE_METHOD,
+        params: { runnerNamespace: "ns", runnerIncarnation: "boot-1", force: true },
+      },
+    ]);
   });
 
   test.each([
@@ -115,6 +132,77 @@ describe("reset-slot-scope daemon command", () => {
       scopes: [],
       waitedMs: 10_000,
     });
+    expect(output.slice(1)).toEqual([
+      [
+        "stderr",
+        "Scope is still settling (live owners or pending cleanup); acquisitions stay blocked. Retry the command.",
+      ],
+      ["exit", 2],
+    ]);
+  });
+
+  test("a refused --force exits 2 and says on stderr why each slot was left alone (#11545)", async () => {
+    const result = {
+      outcome: "pending",
+      retryable: true,
+      waitedMs: 0,
+      scopes: [
+        {
+          scopeKey: "scope-1",
+          outcome: "pending",
+          freedDevices: [],
+          forceRefusals: [
+            {
+              slotIndex: 0,
+              reason: "within_settlement_cap",
+              remainingMs: 123_000,
+              message: "Slot scope-1/0 is still settling; retry --force in 123000ms.",
+            },
+            {
+              slotIndex: 2,
+              reason: "owner_liveness_unknown",
+              message: "Slot scope-1/2 is owned by another running daemon.",
+            },
+          ],
+        },
+        { scopeKey: "scope-2", outcome: "invalidated", freedDevices: [] },
+      ],
+    };
+
+    const { output } = await run(
+      ["--runner-namespace", "ns", "--incarnation", "boot-1", "--force"],
+      result,
+    );
+
+    expect(output).toEqual([
+      ["stdout", JSON.stringify(result)],
+      [
+        "stderr",
+        "Scope is still settling (live owners or pending cleanup); acquisitions stay blocked. Retry the command.",
+      ],
+      ["stderr", "--force left 2 slot(s) alone:"],
+      [
+        "stderr",
+        "  scope-1 slot 0 [within_settlement_cap, remainingMs=123000]: Slot scope-1/0 is still settling; retry --force in 123000ms.",
+      ],
+      [
+        "stderr",
+        "  scope-1 slot 2 [owner_liveness_unknown]: Slot scope-1/2 is owned by another running daemon.",
+      ],
+      ["exit", 2],
+    ]);
+  });
+
+  test("a malformed refusal list never breaks the exit-2 report", async () => {
+    const { output } = await run(["--runner-namespace", "ns", "--incarnation", "boot-1"], {
+      outcome: "pending",
+      scopes: [
+        null,
+        { scopeKey: "scope-1", forceRefusals: [null, { slotIndex: "x" }] },
+        { forceRefusals: 3 },
+      ],
+    });
+
     expect(output.slice(1)).toEqual([
       [
         "stderr",

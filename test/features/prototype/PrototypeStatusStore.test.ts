@@ -107,6 +107,37 @@ describe("InMemoryPrototypeStatusStore scope bound", () => {
   });
 });
 
+describe("InMemoryPrototypeStatusStore failed mutations", () => {
+  test("a failed show or dismiss leaves the shown prototype's flags and snapshot intact (#11394)", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    const scope = { deviceId: "dev" };
+    store.adopt(scope, {
+      id: "panel",
+      persistent: true,
+      suspended: true,
+      pages: { pager: 1 },
+      state: { title: "typed" },
+    });
+    const failed = { success: false, error: "boom" };
+    const shown = store.record(scope, "show", { id: "panel" }, failed);
+    store.record(scope, "dismiss", { id: "panel" }, failed);
+    expect(shown).toMatchObject({ success: false, error: "boom" });
+    expect(store.status(scope).prototypes).toMatchObject([
+      {
+        id: "panel",
+        adopted: true,
+        persistent: true,
+        suspended: true,
+        success: true,
+        pages: { pager: 1 },
+        lastKnown: true,
+      },
+    ]);
+    expect(store.status(scope).prototypes[0]).not.toHaveProperty("error");
+    expect(store.status(scope).lastResult).toMatchObject({ success: false, error: "boom" });
+  });
+});
+
 describe("InMemoryPrototypeStatusStore suspended", () => {
   test("adopt records suspended only when true, and a fresh show clears it", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
@@ -118,6 +149,81 @@ describe("InMemoryPrototypeStatusStore suspended", () => {
     store.adopt(scope, { id: "panel", suspended: true, pages: {}, state: {} });
     store.record(scope, "show", { id: "panel" }, ok);
     expect(store.status(scope).prototypes[0]).not.toHaveProperty("suspended");
+  });
+});
+
+describe("InMemoryPrototypeStatusStore appearance", () => {
+  const scope = { deviceId: "dev" };
+  const light = { mode: "light", source: "system", deviceDark: false } as const;
+  const change = (sequence: number, payload: Record<string, string>) => ({
+    ...event(sequence, "panel", "appearance_changed"),
+    name: null,
+    payload,
+  });
+
+  test("a successful show and an adopt cache the reported appearance; absence stays absent", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    expect(store.record(scope, "show", { id: "panel" }, ok)).not.toHaveProperty("appearance");
+    const shown = store.record(scope, "show", { id: "panel" }, { ...ok, appearance: light });
+    expect(shown.appearance).toEqual(light);
+    expect(store.status(scope).prototypes[0]?.appearance).toEqual(light);
+    store.adopt(scope, { id: "panel", pages: {}, state: {} });
+    expect(store.status(scope).prototypes[0]).not.toHaveProperty("appearance");
+    store.adopt(scope, { id: "panel", appearance: light, pages: {}, state: {} });
+    expect(store.status(scope).prototypes[0]?.appearance).toEqual(light);
+  });
+
+  test("a failed show or dismiss never reports one and keeps the shown prototype's", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    store.record(scope, "show", { id: "panel" }, { ...ok, appearance: light });
+    const failed = { success: false, appearance: { ...light, mode: "dark" as const } };
+    expect(store.record(scope, "show", { id: "panel" }, failed)).not.toHaveProperty("appearance");
+    expect(store.record(scope, "dismiss", { id: "panel" }, failed)).not.toHaveProperty(
+      "appearance",
+    );
+    expect(store.status(scope).prototypes[0]?.appearance).toEqual(light);
+    const dismissed = store.record(scope, "dismiss", { id: "panel" }, { ...ok, appearance: light });
+    expect(dismissed).not.toHaveProperty("appearance");
+  });
+
+  test("appearance_changed updates mode and source and drops deviceDark until a device result", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    store.record(scope, "show", { id: "panel" }, { ...ok, appearance: light });
+    store.recordEvent(scope, change(1, { mode: "dark", source: "system" }));
+    expect(store.status(scope).prototypes[0]?.appearance).toEqual({
+      mode: "dark",
+      source: "system",
+    });
+    store.recordEvent(scope, change(2, { mode: "light", source: "authoredBackground" }));
+    expect(store.status(scope).prototypes[0]?.appearance).toEqual({
+      mode: "light",
+      source: "authoredBackground",
+    });
+    // A device result supplies it again.
+    store.adopt(scope, { id: "panel", appearance: light, pages: {}, state: {} });
+    expect(store.status(scope).prototypes[0]?.appearance).toEqual(light);
+    // The record of the show itself is not rewritten.
+    expect(store.status(scope).lastResult?.appearance).toEqual(light);
+  });
+
+  test("appearance_changed never invents a deviceDark, and ignores an unshown id or a bad payload", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    store.recordEvent(scope, change(1, { mode: "dark", source: "system" }));
+    expect(store.status(scope).prototypes).toEqual([]);
+    store.record(scope, "show", { id: "panel" }, ok);
+    store.recordEvent(scope, change(2, { mode: "dark", source: "override" }));
+    expect(store.status(scope).prototypes[0]?.appearance).toEqual({
+      mode: "dark",
+      source: "override",
+    });
+    store.recordEvent(scope, change(3, { mode: "sepia", source: "system" }));
+    expect(store.status(scope).prototypes[0]?.appearance).toEqual({
+      mode: "dark",
+      source: "override",
+    });
+    // Even a system-sourced change does not state the device's setting by itself.
+    store.recordEvent(scope, change(4, { mode: "light", source: "system" }));
+    expect(store.status(scope).prototypes[0]?.appearance).not.toHaveProperty("deviceDark");
   });
 });
 

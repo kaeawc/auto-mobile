@@ -75,6 +75,14 @@ order with `terminal` requirements so a failure never skips later jobs:
 9. Swift Packages Sweep (Xcode 26.5)
 10. Build Xcode Projects Sweep (Xcode 26.5)
 
+CircleCI posts no commit status for the scheduled pipeline (#11615), so
+`.github/workflows/circleci-nightly-visibility.yml` (ubuntu, daily 10:40 UTC, not a
+required check) runs `scripts/ci/report-circleci-nightly.sh`. It reads the nightly
+through the CircleCI API with the existing `CIRCLECI_TOKEN` secret and opens or
+updates one `circleci-nightly-macos` issue naming each red job, its job URL and its
+artifact names (for example `bats-unit-joblog/bats-unit-joblog-durations.tsv`).
+Without the secret, or if CircleCI refuses it, the run skips with a notice.
+
 The Xcode 26.5 sweeps run last because every iOS PR already builds on 26.5. The
 nightly sweeps build unsigned (the CircleCI executor pins signing off); the
 GitHub sweeps signed when certificates were configured. Release and signing
@@ -88,11 +96,13 @@ The owner's Mac (ARM64, 16 cores: 12 performance + 4 efficiency, 128 GiB) runs
 two runner pools for owner-authored same-repository PRs. Fork PRs always use
 hosted `macos-26` / `macos-latest`. Routing is the existing expression
 (`github.event.pull_request.user.login == 'kaeawc'` and same repository), plus a
-rollout switch, the repository variable `AUTOMOBILE_MAC_POOLS_ENABLED`, on the
-jobs this change moved. Until the owner registers the runners and sets it to
-`true`, those jobs keep running on hosted `macos-26`. Without the switch, a job
-labelled `automobile-mac-heavy` would queue forever with no runner, and the
-required `iOS Build` gate with it.
+rollout switch, the repository variable `AUTOMOBILE_MAC_POOLS_ENABLED`, on every
+self-hosted Mac job (the four that were on the Mac before the pools gained it in
+#11580). Unless it is `true`, those jobs run on hosted `macos-26` /
+`macos-latest`. Without the switch, a job labelled for a pool with no online
+runner queues forever, and its required check with it: on 2026-10-10 no runner
+took a job between 18:25 and 20:02 UTC and one PR's seven Mac jobs waited 19–64
+minutes until they were cancelled (#11580).
 
 | Pool                   | Jobs                                                                                                                                       |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -102,6 +112,11 @@ required `iOS Build` gate with it.
 - The heavy pool has exactly one runner process, so xcodebuild and simulator
   jobs never overlap, and each job owns the simulators it creates. Heavy jobs
   have tight `timeout-minutes` (25, or 30 for the Playground fallback).
+- Build Xcode Projects is one job that builds Playground and then CtrlProxy in
+  separate named steps (#11580). As two matrix legs they ran one after the other
+  on the heavy runner anyway and repeated the setup. Prototype Simulator `needs`
+  that job, so the runner serves the build behind the required `iOS Build` gate
+  first; it still runs whatever the build's result.
 - The PR-time XcodeGen drift check (#10939) is the `Check XcodeGen Project
   Drift` step of Build Xcode Projects, so it runs on the heavy lane.
 - Every moved job isolates `HOME`, `TMPDIR`, the XDG dirs and
@@ -201,12 +216,13 @@ These need a login or a credential, so they were not done in the change.
 Registering runners needs a registration token, so it was not done here. Run on
 the Mac as the user that owns `~/actions-runner`:
 
-1. Install Xcode 26.5 next to the current Xcode 26.6 (`/Applications/Xcode.app`)
-   and Xcode 27.1 beta, for example `xcodes install 26.5`, then
-   `DEVELOPER_DIR=/Applications/Xcode-26.5.0.app/Contents/Developer xcodebuild -downloadPlatform iOS`.
-   `bash scripts/ci/select-self-hosted-xcode.sh 26.5` must succeed afterwards.
-   Swift Packages, Build Root SPM Package, Build Xcode Projects, the Playground
-   fallback and Prototype Simulator all pin 26.5.
+1. Keep an Xcode 26.x installed (currently 26.6 at `/Applications/Xcode.app`,
+   next to Xcode 27.1 beta) with its iOS platform
+   (`xcodebuild -downloadPlatform iOS`). Swift Packages, Build Root SPM Package,
+   Build Xcode Projects, the Playground fallback and Prototype Simulator request
+   26.5; `bash scripts/ci/select-self-hosted-xcode.sh 26.5` uses 26.5 when
+   installed and otherwise the newest installed 26.x at or above it (26.6 today),
+   printing which it chose (#11422). It never selects Xcode 27.
 2. Get a registration token (valid for one hour):
 
    ```bash
@@ -258,7 +274,10 @@ the Mac as the user that owns `~/actions-runner`:
    `automobile-mac-heavy`, all `online`.
 
 6. Turn the routing on: `gh variable set AUTOMOBILE_MAC_POOLS_ENABLED --body true`.
-   To fall back to hosted runners, set it to anything else.
+   To fall back to hosted runners, set it to anything else
+   (`gh variable set AUTOMOBILE_MAC_POOLS_ENABLED --body false`). Runs created
+   after that use hosted runners for every Mac job. Jobs already queued for the
+   Mac stay there until their run is cancelled, for example by a new push.
 
 ### Namespace macOS
 

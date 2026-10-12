@@ -84,7 +84,7 @@ class PrototypeOfflineReplayTest {
       clients = 1
       controller.onClientConnected()
 
-      assertEquals(listOf("tap", null, "again"), events.map { it.name })
+      assertEquals(listOf("tap", "pager", "again"), events.map { it.name })
       assertEquals(
         listOf(PrototypeEventKind.EMIT, PrototypeEventKind.PAGE_CHANGED, PrototypeEventKind.EMIT),
         events.map { it.kind },
@@ -223,7 +223,7 @@ class PrototypeOfflineReplayTest {
 
     controller.inspect("inspect-1")
 
-    assertEquals(listOf("held", null, "change"), events.map { it.name })
+    assertEquals(listOf("held", "pager", "change"), events.map { it.name })
     val (requestId, prototypes, dropped) = statuses.single()
     assertEquals("inspect-1", requestId)
     assertEquals(0L, dropped)

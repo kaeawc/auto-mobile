@@ -79,7 +79,7 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
   "src/daemon/sessionManager.ts": [
     "SessionManager.recordHeartbeat",
     "SessionManager.claimLivenessOwnership",
-    "SessionManager.claimLivenessOwnershipForSession",
+    "SessionManager.takeLivenessOwnership",
     "SessionManager.persistNewLivenessOwnershipClaim",
     "SessionManager.claimUnownedLivenessOwnership",
     "SessionManager.releaseLivenessOwnership",
@@ -127,6 +127,8 @@ const EXPIRY_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
     "SessionManager.isSessionExpiredForNewExecution",
   ],
   "src/daemon/sessionHoldDiagnostics.ts": ["idleReleaseAt", "vetoedIdleReleaseAt"],
+  // #11558: the one idle deadline the scan, a late call's admission and `idleReleaseAt` share.
+  "src/daemon/sessionClocks.ts": ["sessionIdleDeadline", "effectiveLastToolActivity"],
   "src/daemon/daemonMcpProxy.ts": [
     "DaemonMcpProxy.evictAbandonedHeldSessions",
     // The replay-lease TTL (#10656): a heartbeat ack must not keep a dead binding replayable.
@@ -146,6 +148,10 @@ const SESSION_CLOCK_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
     // #11290: a new call's start is judged against `expiresAt` on the session clock.
     "SessionManager.isSessionExpiredForNewExecution",
     "SessionManager.isLateExecutionWhileEarlierWorkIsActive",
+    // #11359: the wall-clock request deadline is converted onto the session clock before it is
+    // compared with the session-clock restart deadline.
+    "SessionManager.waitForAbortedAssignment",
+    "SessionManager.waitForSharedAssignment",
   ],
   // #11162: the release's deferral is a session-clock instant from the execution veto.
   "src/daemon/ownerDisconnectRelease.ts": [
@@ -335,6 +341,13 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     reason:
       "Rollback: a session resumed after a daemon_stalled handover is held again with the " +
       "lastUsedAt it had before the handover; the heartbeat ack that resumed it renews nothing (#10989).",
+  },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.noteSessionRestoredByCall": {
+    writes: 1,
+    reason:
+      "Tool usage: the daemon echoed a held session as the one it admitted a control call under " +
+      "and used, after the proxy had dropped it for a not-found heartbeat answer; it is held " +
+      "again from that call (#11570). A read or refused call carries no echo and holds nothing.",
   },
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.rebindResumedSession": {
     writes: 1,
@@ -1189,11 +1202,18 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
   });
 
   test("session-stamp judgements read the session clock, never the raw wall clock (#11105)", () => {
-    const reads = Object.entries(SESSION_CLOCK_JUDGEMENTS).flatMap(([path, roots]) =>
-      roots.flatMap((root) =>
-        forbiddenReads(models.get(path)!, root, new Set(["timer.now"]), wallTimerReadOf),
-      ),
-    );
+    // The frame conversions are the one place that pairs a wall read with a session-clock read.
+    const conversions = [
+      "SessionManager.wallToSessionClock:",
+      "SessionManager.sessionClockToWall:",
+    ];
+    const reads = Object.entries(SESSION_CLOCK_JUDGEMENTS)
+      .flatMap(([path, roots]) =>
+        roots.flatMap((root) =>
+          forbiddenReads(models.get(path)!, root, new Set(["timer.now"]), wallTimerReadOf),
+        ),
+      )
+      .filter((read) => !conversions.some((conversion) => read.includes(` ${conversion}`)));
     expect(reads).toEqual([]);
   });
 
@@ -1227,7 +1247,11 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
             readsActivity = true;
           }
           // The stall-forgiven tool-activity clock (#10835) reads only activity clocks.
-          if (ts.isIdentifier(inner) && inner.text === "effectiveLastToolActivity") {
+          // So does the shared idle deadline built on it (#11558), guarded by rule 5 above.
+          if (
+            ts.isIdentifier(inner) &&
+            (inner.text === "effectiveLastToolActivity" || inner.text === "sessionIdleDeadline")
+          ) {
             readsActivity = true;
           }
           if (

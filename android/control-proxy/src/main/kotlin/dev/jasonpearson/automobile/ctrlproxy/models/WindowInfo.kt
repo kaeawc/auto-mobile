@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.models
 
+import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
@@ -32,5 +33,11 @@ data class WindowInfo(
    * (window opacity 100 and an opaque root or scrim).
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val prototypeOpaque: Boolean? = null,
+  /**
+   * Only alongside [prototypePlacement]: the light or dark mode the prototype is drawn in, as
+   * `{mode, source, deviceDark}`. Sent by a CtrlProxy advertising `prototype_appearance_v1`;
+   * omitted by older APKs.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val prototypeAppearance: PrototypeAppearance? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val truncationReasons: List<String>? = null,
 )

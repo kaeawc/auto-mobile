@@ -1,4 +1,5 @@
 import { Timer, defaultTimer, monotonicClockSemanticsDrift } from "../utils/SystemTimer";
+import { readOptionalEnvPositiveInteger } from "../utils/envNumbers";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
@@ -10,7 +11,7 @@ import {
 } from "./sessionManager";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { judgedLeaseHeartbeat, suspectGraceMsFor } from "./livenessOwnerLease";
-import { effectiveLastToolActivity } from "./sessionClocks";
+import { sessionIdleDeadline } from "./sessionClocks";
 import {
   UNSETTLED_EXECUTION_VETO_CEILING_MS,
   UnsettledExecutionVeto,
@@ -46,8 +47,51 @@ export interface HeartbeatSessionSource {
    * clock.
    */
   sessionNow?(): number;
+  /** Lease heartbeat including a qualifying same-token base's owner proof (#11722). */
+  judgedLeaseHeartbeat?(session: Session): number;
   /** Register a detector the source runs before every expiry judgement; undefined detaches it. */
   setStallProbe?(probe: (() => void) | undefined): void;
+  /**
+   * The idle releases the source started itself (its idle sweep, a lazy expiry) that still hold
+   * their device, with when each started on the session clock (#11481). They are not reaps of the
+   * monitor, so it learns of them here to hold them to the same stuck deadline.
+   */
+  getIdleReleasesInProgress?(): IdleReleaseInProgress[];
+  /**
+   * The releases in progress that carry a non-terminal reason (a `device-restart:` handoff, a
+   * `plan-auto-release`), with when each started on the session clock (#11554). The source
+   * refuses heartbeats for a releasing session, so the monitor judges such a session as of the
+   * release's start and never reaps it for the silence the release itself imposed.
+   */
+  getNonTerminalReleasesInProgress?(): NonTerminalReleaseInProgress[];
+  /**
+   * Whether the release of this session that started at `startedAtMs` is still running and still
+   * holds its device, whatever reason it carries now (#11554). A joiner can upgrade a non-terminal
+   * release to a terminal reason, which drops it from {@link getNonTerminalReleasesInProgress}
+   * while it is as wedged as before; the monitor asks this before it forgets a release it tracks.
+   */
+  isReleaseInProgress?(sessionId: string, startedAtMs: number): boolean;
+}
+
+/** One idle release the session source is still running. */
+export interface IdleReleaseInProgress {
+  sessionId: string;
+  startedAtMs: number;
+}
+
+/** One release with a non-terminal reason the session source is still running. */
+export interface NonTerminalReleaseInProgress extends IdleReleaseInProgress {
+  /** The session incarnation being released: a re-created session of the same id is not it. */
+  session: Session;
+}
+
+/** A release the monitor holds to {@link STUCK_REAP_WARN_MS}. */
+interface TrackedRelease {
+  at: number;
+  /** Reported (and forced, when a force is wired) already: once per release. */
+  reported: boolean;
+  /** Started by the session source (an idle or non-terminal release), not by a monitor reap. */
+  sourceRelease?: boolean;
 }
 
 type SessionHeartbeatReleaseReason =
@@ -131,12 +175,7 @@ export const STUCK_REAP_WARN_MS =
 const DEFAULT_INITIAL_GRACE_MS = 20_000;
 
 function readPositiveMsEnv(primaryName: string, legacyName: string): number | undefined {
-  const rawValue = process.env[primaryName] ?? process.env[legacyName];
-  if (!rawValue) {
-    return undefined;
-  }
-  const parsed = Number.parseInt(rawValue, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  return readOptionalEnvPositiveInteger(primaryName, legacyName);
 }
 
 /**
@@ -184,8 +223,18 @@ export class SessionHeartbeatMonitor {
    * waits on them: one slow teardown must not delay the expiry checks of every other session.
    */
   private readonly reapsInFlight = new Map<string, Promise<void>>();
-  /** When each in-flight release started, and whether it has been reported as stuck. */
-  private readonly reapStartedAt = new Map<string, { at: number; reported: boolean }>();
+  /**
+   * When each release in progress started, and whether it has been reported as stuck: the
+   * monitor's own reaps, the source's idle releases (#11481) and its non-terminal releases
+   * (#11554). Stuck detection runs over this
+   * set, never over the visible sessions, which hide a session once its idle deadline passes.
+   */
+  private readonly reapStartedAt = new Map<string, TrackedRelease>();
+  /**
+   * When the non-terminal release of each session being released started, as of this scan
+   * (#11554). Heartbeats are refused from that instant, so the session is judged as of it.
+   */
+  private heartbeatsRefusedSince = new Map<Session, number>();
 
   constructor(
     private readonly sessions: HeartbeatSessionSource,
@@ -447,6 +496,7 @@ export class SessionHeartbeatMonitor {
       // sweeping here gives them the monitor's interval granularity instead of the
       // 5-minute cleanup sweep.
       this.sessions.cleanupExpiredSessions();
+      this.forceStuckReleases();
       return this.reapStaleSessions();
     } finally {
       this.scanInFlight = false;
@@ -466,12 +516,15 @@ export class SessionHeartbeatMonitor {
     const reaps: Promise<void>[] = [];
     for (const session of this.sessions.getAllSessions()) {
       if (this.reapsInFlight.has(session.sessionId)) {
-        this.reportIfStuck(session.sessionId);
         continue;
       }
+      // A session mid-release has its heartbeats refused, so the time since its release began is
+      // not its owner's silence (#11554): judge it as of that instant. A recoverable handoff or a
+      // plan's release that outlasts lease plus grace is then never reaped, nor rewritten into a
+      // terminal heartbeat loss, while an owner that had already lost its lease is still reaped.
       // Awaiting-owner sessions never receive pre-first-heartbeat grace; judge them solely by
       // the rehydration-owner timeout while they await ownership.
-      const now = this.now();
+      const now = Math.min(this.now(), this.heartbeatsRefusedSince.get(session) ?? Infinity);
       const reason =
         session.ownership === "awaiting-owner"
           ? this.rehydrationOwnerStaleReason(session, now)
@@ -507,14 +560,73 @@ export class SessionHeartbeatMonitor {
       () => undefined,
     );
     this.reapsInFlight.set(sessionId, settled);
-    this.reapStartedAt.set(sessionId, { at: this.now(), reported: false });
+    const tracked: TrackedRelease = { at: this.now(), reported: false };
+    this.reapStartedAt.set(sessionId, tracked);
     void settled.then(() => {
       if (this.reapsInFlight.get(sessionId) === settled) {
         this.reapsInFlight.delete(sessionId);
+      }
+      if (this.reapStartedAt.get(sessionId) === tracked) {
         this.reapStartedAt.delete(sessionId);
       }
     });
     return logged;
+  }
+
+  /**
+   * Hold every release in progress to the stuck deadline (#10963), whether or not its session is
+   * still visible (#11481): a session past its idle deadline is hidden from `getAllSessions()`
+   * and skipped by the idle sweep while it is releasing, so a scan of visible sessions never
+   * reached a release that wedged across that deadline, nor any idle release.
+   */
+  private forceStuckReleases(): void {
+    this.trackSourceReleases();
+    for (const sessionId of this.reapStartedAt.keys()) {
+      this.reportIfStuck(sessionId);
+    }
+  }
+
+  /**
+   * Mirror the releases the source runs without a monitor reap into {@link reapStartedAt}: its
+   * idle releases (#11481) and its non-terminal releases, which the monitor never joins (#11554)
+   * and so must hold to the stuck deadline from their own start. One that settled, or was forced
+   * and so no longer holds its device, is forgotten here; a new release of the same session id
+   * starts a new deadline. One a joiner upgraded to a terminal reason also drops out of the
+   * source's lists, but it is the same release, as wedged as before, and no reap of the monitor
+   * need ever join it (an in-flight call vetoes the reap): it stays tracked from its own start
+   * until the source says it is over, and is forced with whatever reason it carries by then. A
+   * reap of the monitor's own is left alone: it is already tracked from its own start and
+   * forgotten when it settles.
+   */
+  private trackSourceReleases(): void {
+    const nonTerminal = this.sessions.getNonTerminalReleasesInProgress?.() ?? [];
+    this.heartbeatsRefusedSince = new Map(
+      nonTerminal.map((release) => [release.session, release.startedAtMs]),
+    );
+    const inProgress = new Map(
+      [...nonTerminal, ...(this.sessions.getIdleReleasesInProgress?.() ?? [])].map((release) => [
+        release.sessionId,
+        release.startedAtMs,
+      ]),
+    );
+    for (const [sessionId, tracked] of this.reapStartedAt) {
+      if (
+        tracked.sourceRelease &&
+        inProgress.get(sessionId) !== tracked.at &&
+        this.sessions.isReleaseInProgress?.(sessionId, tracked.at) !== true
+      ) {
+        this.reapStartedAt.delete(sessionId);
+      }
+    }
+    for (const [sessionId, startedAtMs] of inProgress) {
+      if (!this.reapStartedAt.has(sessionId)) {
+        this.reapStartedAt.set(sessionId, {
+          at: startedAtMs,
+          reported: false,
+          sourceRelease: true,
+        });
+      }
+    }
   }
 
   /** Warn once when a release has been tearing down for {@link STUCK_REAP_WARN_MS} (#10704). */
@@ -585,9 +697,9 @@ export class SessionHeartbeatMonitor {
     // heartbeat: a `--daemon heartbeat` loop proves liveness, not use, and must
     // not hold the device with no tool calls (owner decision 2026-10-08).
     if (session.livenessPolicy === "cli-idle") {
-      const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
-      // The daemon's own stall is not idleness either (#10835): see `idleStallForgivenAt`.
-      return now - effectiveLastToolActivity(session) > timeoutMs ? "cli-idle-timeout" : undefined;
+      // The daemon's own stall is not idleness either (#10835): see `idleStallForgivenAt`. The
+      // deadline is the one a late call's admission and the reported `idleReleaseAt` use (#11558).
+      return now > sessionIdleDeadline(session) ? "cli-idle-timeout" : undefined;
     }
     return this.heartbeatLeaseStaleReason(session, now);
   }
@@ -605,9 +717,11 @@ export class SessionHeartbeatMonitor {
     // heartbeated is judged on its owner's own heartbeats: `lastHeartbeat` is also stamped by tool
     // calls from any connection, which must not keep a dead owner's lease alive (#11107). A
     // session no proxy owns keeps the activity-refreshed `lastHeartbeat` fallback.
-    const lastHeartbeat = judgedLeaseHeartbeat(session);
+    const ownHeartbeat = judgedLeaseHeartbeat(session);
+    const lastHeartbeat = this.sessions.judgedLeaseHeartbeat?.(session) ?? ownHeartbeat;
 
-    if (!session.hasReceivedHeartbeat) {
+    // A later base heartbeat is owner proof even if this label never heartbeated by name (#11722).
+    if (!session.hasReceivedHeartbeat && lastHeartbeat === ownHeartbeat) {
       if (session.heartbeatTimeoutSource === "default") {
         return now - lastHeartbeat > this.preFirstHeartbeatGraceMs
           ? "missing-first-heartbeat"

@@ -9,7 +9,11 @@ import {
   type ManagedSlotReconcileResult,
   chooseIosDeviceType,
 } from "../../../src/daemon/managedSlots/reconciler";
-import type { SlotKey } from "../../../src/daemon/managedSlots/slotRegistry";
+import { InFlightSlotReservations } from "../../../src/daemon/managedSlots/slotOwnerLiveness";
+import {
+  MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS,
+  type SlotKey,
+} from "../../../src/daemon/managedSlots/slotRegistry";
 import {
   ProvisionDeviceError,
   type ExactDeviceSpecification,
@@ -154,6 +158,45 @@ describe("ManagedSlotReconciler", () => {
     return result.device.stableId;
   }
 
+  describe("booting a device that already exists", () => {
+    test("the slot's own stopped or booting device is provisioned without asking the probe", async () => {
+      const ownId = await seedAssigned();
+      Object.assign(
+        inventory.devices.find((device) => device.deviceId === ownId)!,
+        {
+          isRunning: false,
+          state: "Booting",
+        },
+      );
+      capacity.result = { kind: "exhausted", limit: 1, booted: 1, retryAfterMs: 5_000 };
+      capacity.checks = 0;
+
+      const result = expectReady(await reconciler.reconcile(request()));
+
+      expect(result.disposition).toBe("reused");
+      expect(result.device.stableId).toBe(ownId);
+      expect(capacity.checks).toBe(0);
+    });
+
+    test("an adopted leftover device is provisioned without asking the probe", async () => {
+      inventory.devices.push({
+        name: managedSlotDeviceName(key, 1, "earlier"),
+        platform: "ios",
+        deviceId: "UDID-LEFTOVER",
+        isRunning: false,
+        state: "Booting",
+        runtime: IOS_18,
+        deviceType: IPHONE_16,
+      });
+      capacity.result = { kind: "exhausted", limit: 1, booted: 1, retryAfterMs: 5_000 };
+
+      const result = expectReady(await reconciler.reconcile(request()));
+
+      expect(result.disposition).toBe("adopted");
+      expect(capacity.checks).toBe(0);
+    });
+  });
+
   describe("empty slot", () => {
     test("creates a device under the generated name and commits it ready at generation 1", async () => {
       const result = expectReady(await reconciler.reconcile(request()));
@@ -206,6 +249,90 @@ describe("ManagedSlotReconciler", () => {
       expect(result.assignment).toMatchObject({ stableDeviceId: "UDID-FREE", state: "ready" });
       expect(await registry.listFreeDevices()).toEqual([]);
       expect(provisioner.created()).toHaveLength(0);
+    });
+
+    async function freeStoppableIosDevice(): Promise<void> {
+      inventory.devices.push({
+        name: "old",
+        platform: "ios",
+        deviceId: "UDID-FREE",
+        isRunning: false,
+        runtime: IOS_18,
+        deviceType: IPHONE_16,
+      });
+      const old = await registry.ensureScope({ ...SCOPE, runnerNamespace: "other" });
+      if (old.kind !== "ready") {
+        throw new Error("setup");
+      }
+      const oldKey = { scopeKey: old.scope.scopeKey, slotIndex: 0 };
+      await registry.initSlot(oldKey, { role: "app", platform: "ios", requestedSpec: SPEC_18 });
+      await registry.commitBinding(
+        oldKey,
+        { generation: 0, stableDeviceId: null },
+        {
+          stableDeviceId: "UDID-FREE",
+          deviceName: "old",
+          resolvedSpec: null,
+          specFingerprint: null,
+          state: "ready",
+        },
+      );
+      await registry.beginScopeInvalidation(old.scope.scopeKey, "operator_reset");
+      await registry.completeScopeInvalidation(old.scope.scopeKey);
+      timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS);
+    }
+
+    test("adopts a stopped free-pool device and boots it through the adopt provision path (#11337)", async () => {
+      await freeStoppableIosDevice();
+      const [free] = await registry.listFreeDevices();
+      const claim = { ...free!, claimedBy: "daemon-1" };
+      await registry.beginFreeDeviceStop(claim);
+      await registry.completeFreeDeviceStop(claim);
+
+      const result = expectReady(await reconciler.reconcile(request()));
+
+      expect(result.disposition).toBe("adopted");
+      expect(result.evidence.adoptedFrom).toBe("free_pool");
+      expect(provisioner.calls.map((call) => call.mode)).toEqual(["adopt"]);
+      expect(await registry.listFreeDevices()).toEqual([]);
+    });
+
+    test("adopting a stopped device at the boot limit fails typed capacity_exhausted without queueing (#11337)", async () => {
+      await freeStoppableIosDevice();
+      const [free] = await registry.listFreeDevices();
+      const claim = { ...free!, claimedBy: "daemon-1" };
+      await registry.beginFreeDeviceStop(claim);
+      await registry.completeFreeDeviceStop(claim);
+      provisioner.failWith = () =>
+        new BootCapacityExhaustedError(
+          { platform: "ios", limit: 1, booted: 1, retryAfterMs: 1_000 },
+          "full",
+        );
+
+      const result = expectFailed(await reconciler.reconcile(request()));
+
+      expect(result.failure).toMatchObject({ code: "capacity_exhausted", retryable: true });
+      // One refused boot attempt, no wait. The device is still offline and now reserved by the
+      // slot (adoption commits first), so the caller's retry reuses it once capacity frees up.
+      expect(provisioner.calls).toHaveLength(1);
+      expect(result.assignment).toMatchObject({
+        stableDeviceId: "UDID-FREE",
+        state: "provisioning",
+      });
+      expect(inventory.devices.find((device) => device.deviceId === "UDID-FREE")?.isRunning).toBe(
+        false,
+      );
+    });
+
+    test("does not adopt a free-pool device that is mid-shutdown (#11337)", async () => {
+      await freeStoppableIosDevice();
+      const [free] = await registry.listFreeDevices();
+      await registry.beginFreeDeviceStop({ ...free!, claimedBy: "daemon-1" });
+
+      const result = expectReady(await reconciler.reconcile(request()));
+
+      expect(result.disposition).toBe("created");
+      expect(await registry.listFreeDevices()).toMatchObject([{ state: "stopping" }]);
     });
 
     test("adopts this slot's own uncommitted leftover, but never a matching unmanaged device", async () => {
@@ -778,6 +905,85 @@ describe("ManagedSlotReconciler", () => {
       expect(running.disposition).toBe("replaced");
     });
 
+    test("a booting or shutting-down old simulator holds the boot slot its replacement takes", async () => {
+      for (const state of ["Booting", "Shutting Down"]) {
+        const oldId = await seedAssigned(SPEC_17);
+        Object.assign(
+          inventory.devices.find((device) => device.deviceId === oldId)!,
+          {
+            isRunning: false,
+            state,
+          },
+        );
+        capacity.result = { kind: "exhausted", limit: 1, booted: 1, retryAfterMs: 5_000 };
+
+        const result = expectReady(await reconciler.reconcile(request(SPEC_18)));
+
+        expect(result.disposition).toBe("replaced");
+        expect(deleter.calls.at(-1)?.stableId).toBe(oldId);
+        capacity.result = { kind: "available" };
+      }
+    });
+
+    test("a replacement is not refused after the delete while the old device is still counted", async () => {
+      const oldId = await seedAssigned(SPEC_17);
+      inventory.devices.find((device) => device.deviceId === oldId)!.isRunning = true;
+      // The gate keeps counting the deleted device (still shutting down) for the whole attempt.
+      capacity.result = { kind: "exhausted", limit: 1, booted: 1, retryAfterMs: 5_000 };
+      capacity.checks = 0;
+
+      const result = expectReady(await reconciler.reconcile(request(SPEC_18)));
+
+      expect(result.disposition).toBe("replaced");
+      expect(capacity.checks).toBe(1);
+      expect(result.device.stableId).not.toBe(oldId);
+    });
+
+    test("an unknown booted count never replaces: discovery_incomplete before deleting", async () => {
+      const oldId = await seedAssigned(SPEC_17);
+      inventory.devices.find((device) => device.deviceId === oldId)!.isRunning = true;
+      capacity.result = { kind: "unknown", message: "simulator count unknown" };
+
+      const result = expectFailed(await reconciler.reconcile(request(SPEC_18)));
+
+      expect(result.failure).toMatchObject({ code: "discovery_incomplete", retryable: true });
+      expect(deleter.calls).toHaveLength(0);
+      expect(result.assignment).toMatchObject({ stableDeviceId: oldId, state: "ready" });
+    });
+
+    test("over the boot limit a running old device is not deleted: one freed slot is not enough", async () => {
+      const oldId = await seedAssigned(SPEC_17);
+      inventory.devices.find((device) => device.deviceId === oldId)!.isRunning = true;
+      capacity.result = { kind: "exhausted", limit: 1, booted: 2, retryAfterMs: 5_000 };
+
+      const result = expectFailed(await reconciler.reconcile(request(SPEC_18)));
+
+      expect(result.failure).toMatchObject({
+        code: "capacity_exhausted",
+        capacity: { limit: 1, booted: 2 },
+      });
+      expect(deleter.calls).toHaveLength(0);
+    });
+
+    test("a running device of another platform frees no boot slot: not deleted at the limit", async () => {
+      const oldId = await seedAssigned();
+      inventory.devices.find((device) => device.deviceId === oldId)!.isRunning = true;
+      capacity.result = { kind: "exhausted", limit: 1, booted: 1, retryAfterMs: 5_000 };
+
+      const result = expectFailed(
+        await reconciler.reconcile(
+          request(
+            { runtime: "system-images;android-35;google_apis;arm64-v8a", deviceType: "pixel_8" },
+            { platform: "android" },
+          ),
+        ),
+      );
+
+      expect(result.failure.code).toBe("capacity_exhausted");
+      expect(deleter.calls).toHaveLength(0);
+      expect(result.assignment).toMatchObject({ platform: "ios", stableDeviceId: oldId });
+    });
+
     test("a slot left replacing without a journal entry is redriven: delete finished, slot refilled", async () => {
       const oldId = await seedAssigned(SPEC_17);
       await registry.updateSlotState(key, { generation: 1, stableDeviceId: oldId }, "replacing");
@@ -949,6 +1155,37 @@ describe("ManagedSlotReconciler", () => {
       });
     });
 
+    test("a reservation is in flight only while its attempt runs (#11339)", async () => {
+      await seedAssigned();
+      const owner = { daemonId: "daemon-a", pid: 4242 };
+      const inFlight = new InFlightSlotReservations();
+      reconciler = new ManagedSlotReconciler({
+        registry,
+        inventory,
+        matcher,
+        resolver: new DefaultManagedSpecResolver(),
+        provisioner,
+        deleter,
+        claims,
+        capacity,
+        timer,
+        idGenerator: new FakeIdGenerator(["r1"]),
+        isExecOwnerLive: () => true,
+        reservations: inFlight,
+      });
+      let duringProvision: boolean | undefined;
+      provisioner.beforeReturn = async () => {
+        const reserved = (await registry.getAssignment(key))?.execOwner?.sessionUuid;
+        duringProvision = reserved !== undefined && inFlight.has(reserved);
+      };
+
+      const result = expectReady(await reconciler.reconcile(request(SPEC_18, { owner })));
+
+      expect(duringProvision).toBe(true);
+      expect(result.disposition).toBe("reused");
+      expect(inFlight.has("reserve-r1")).toBe(false);
+    });
+
     test("an owned create claims the slot for the provisioned session", async () => {
       const owner = { daemonId: "daemon-a", pid: 4242 };
 
@@ -1001,6 +1238,114 @@ describe("ManagedSlotReconciler", () => {
       expect(expectReady(first).disposition).toBe("created");
       expect(expectReady(second).disposition).toBe("reused");
       expect(expectReady(second).device.stableId).toBe(expectReady(first).device.stableId);
+      expect(provisioner.created()).toHaveLength(1);
+    });
+  });
+
+  describe("a duplicate acquisition behind an in-flight reconcile (#11342)", () => {
+    // The first reconcile parks inside provisioning until `release()`.
+    function parkFirst() {
+      let release!: () => void;
+      const parked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      provisioner.beforeCreate = () => parked;
+      return release;
+    }
+
+    async function untilPending(count: number) {
+      for (let turn = 0; turn < 50 && timer.getPendingTimeoutCount() < count; turn += 1) {
+        await Promise.resolve();
+      }
+    }
+
+    test("reports timeout at its own deadline while the first is still running", async () => {
+      const release = parkFirst();
+      const first = reconciler.reconcile(request());
+      await Promise.resolve();
+      const second = reconciler.reconcile(request(SPEC_18, { deadlineMs: timer.now() + 5_000 }));
+      await untilPending(1);
+      timer.advanceTime(5_000);
+
+      expect(expectFailed(await second).failure.code).toBe("timeout");
+      release();
+      expect(expectReady(await first).disposition).toBe("created");
+      expect(provisioner.created()).toHaveLength(1);
+    });
+
+    test("a later caller still queues behind the running reconcile after a waiter times out", async () => {
+      const release = parkFirst();
+      const first = reconciler.reconcile(request());
+      await Promise.resolve();
+      const second = reconciler.reconcile(request(SPEC_18, { deadlineMs: timer.now() + 5_000 }));
+      await untilPending(1);
+      timer.advanceTime(5_000);
+      expect(expectFailed(await second).failure.code).toBe("timeout");
+
+      const third = reconciler.reconcile(request());
+      for (let turn = 0; turn < 50; turn += 1) {
+        await Promise.resolve();
+      }
+      expect(provisioner.calls).toHaveLength(1);
+      release();
+      expect(expectReady(await first).disposition).toBe("created");
+      expect(expectReady(await third).disposition).toBe("reused");
+      expect(provisioner.created()).toHaveLength(1);
+    });
+
+    test("a later caller still queues behind the running reconcile after a waiter is cancelled", async () => {
+      const release = parkFirst();
+      const first = reconciler.reconcile(request());
+      await Promise.resolve();
+      const controller = new AbortController();
+      const second = reconciler.reconcile(request(SPEC_18, { signal: controller.signal }));
+      await untilPending(1);
+      controller.abort();
+      expect(expectFailed(await second).failure.code).toBe("cancelled");
+
+      const third = reconciler.reconcile(request());
+      for (let turn = 0; turn < 50; turn += 1) {
+        await Promise.resolve();
+      }
+      expect(provisioner.calls).toHaveLength(1);
+      release();
+      expect(expectReady(await first).disposition).toBe("created");
+      expect(expectReady(await third).disposition).toBe("reused");
+    });
+
+    test("a chain of two abandoned waiters still holds the queue for the running reconcile", async () => {
+      const release = parkFirst();
+      const first = reconciler.reconcile(request());
+      await Promise.resolve();
+      const second = reconciler.reconcile(request(SPEC_18, { deadlineMs: timer.now() + 5_000 }));
+      const third = reconciler.reconcile(request(SPEC_18, { deadlineMs: timer.now() + 5_000 }));
+      await untilPending(2);
+      timer.advanceTime(5_000);
+      expect(expectFailed(await second).failure.code).toBe("timeout");
+      expect(expectFailed(await third).failure.code).toBe("timeout");
+
+      const fourth = reconciler.reconcile(request());
+      for (let turn = 0; turn < 50; turn += 1) {
+        await Promise.resolve();
+      }
+      expect(provisioner.calls).toHaveLength(1);
+      release();
+      expect(expectReady(await first).disposition).toBe("created");
+      expect(expectReady(await fourth).disposition).toBe("reused");
+    });
+
+    test("reports cancelled when its signal aborts while the first is still running", async () => {
+      const release = parkFirst();
+      const first = reconciler.reconcile(request());
+      await Promise.resolve();
+      const controller = new AbortController();
+      const second = reconciler.reconcile(request(SPEC_18, { signal: controller.signal }));
+      await untilPending(1);
+      controller.abort();
+
+      expect(expectFailed(await second).failure.code).toBe("cancelled");
+      release();
+      expect(expectReady(await first).disposition).toBe("created");
       expect(provisioner.created()).toHaveLength(1);
     });
   });

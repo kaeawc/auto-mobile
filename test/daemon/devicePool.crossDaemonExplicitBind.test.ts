@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { resolve, sep } from "node:path";
+import type { AcquisitionReceipt } from "../../src/daemon/acquisitionReceipt";
 import {
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   DeviceOwnedByOtherDaemonError,
@@ -229,6 +230,192 @@ for (const [platform, deviceId] of [
       expect(settled).toBe(false);
       expect(b.pool.getDevice(deviceId)?.sessionId ?? null).toBeNull();
       b.pool.releaseDeviceClaimsForShutdown();
+    });
+
+    // #11565: the claim publish is awaited after the session committed, so a request can be
+    // cancelled (or the publish can fail) with the session already bound and its id undelivered.
+    describe("an acquisition whose result is never delivered (#11565)", () => {
+      /** This daemon's ownership with every claim publish held until the test settles it. */
+      const gated = (pid: number) => {
+        const own = store.forDaemon(pid);
+        const pending: Array<(outcome?: Error) => void> = [];
+        const ownership: ForeignDeviceOwnership = {
+          refresh: (ids) => own.refresh(ids),
+          foreignOwnerPid: (id) => own.foreignOwnerPid(id),
+          claim: async (id) => {
+            const failure = await new Promise<Error | undefined>((settle) => pending.push(settle));
+            if (failure) {
+              throw failure;
+            }
+            return await own.claim(id);
+          },
+          release: (id) => own.release(id),
+        };
+        return { ownership, pending };
+      };
+      const untilPending = async (pending: readonly unknown[], count: number) => {
+        for (let turn = 0; turn < 2_000 && pending.length < count; turn++) {
+          await Promise.resolve();
+        }
+        expect(pending.length).toBe(count);
+      };
+      const bind = (
+        pool: DevicePool,
+        sessionId: string,
+        receipt?: AcquisitionReceipt,
+        allowSessionRebind = false,
+      ) =>
+        pool.bindOrReuseDeviceSession(
+          sessionId,
+          deviceId,
+          platform,
+          undefined,
+          undefined,
+          undefined,
+          allowSessionRebind,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          false,
+          receipt,
+        );
+      const autolockWith = (pool: DevicePool, receipt: AcquisitionReceipt) =>
+        pool.autolockDevice(
+          deviceId,
+          platform,
+          "mcp-a",
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          "automationReady",
+          undefined,
+          { autolockEnabled: true, receipt },
+        );
+      const countReleases = (sessions: SessionManager): string[] => {
+        const released: string[] = [];
+        const releaseSession = sessions.releaseSession.bind(sessions);
+        sessions.releaseSession = async (sessionId, ...rest) => {
+          released.push(sessionId);
+          return await releaseSession(sessionId, ...rest);
+        };
+        return released;
+      };
+
+      const acquisitions = {
+        "explicit bind": (pool: DevicePool, receipt: AcquisitionReceipt) =>
+          bind(pool, "a-session", receipt),
+        autolock: autolockWith,
+      };
+
+      for (const [kind, acquire] of Object.entries(acquisitions)) {
+        test(`${kind}: the session it minted is released for good, exactly once, and the claim withdrawn`, async () => {
+          const a = await daemon(DAEMON_A_PID);
+          const receipt: AcquisitionReceipt = {};
+          const minted = (await acquire(a.pool, receipt))!;
+          expect(receipt.minted).toMatchObject({
+            session: a.sessions.getSession(minted)!,
+            deviceId,
+          });
+          const released = countReleases(a.sessions);
+
+          await a.pool.releaseUndeliveredAcquisition(receipt);
+          await a.pool.releaseUndeliveredAcquisition(receipt);
+
+          expect(released).toEqual([minted]);
+          expect(a.pool.getDevice(deviceId)).toMatchObject({ sessionId: null, status: "idle" });
+          expect(a.sessions.getAllSessions()).toEqual([]);
+          expect(store.claims.has(deviceId)).toBe(false);
+          expect(a.pool.resolveAutolockSessionForMcpSession("mcp-a")).toBeUndefined();
+          // Terminal: the id no client ever received is never handed out again.
+          await expect(bind(a.pool, minted, undefined, true)).rejects.toThrow();
+        });
+
+        test(`${kind}: a repeat acquisition that reused the session takes nothing back`, async () => {
+          const a = await daemon(DAEMON_A_PID);
+          const held = (await acquire(a.pool, {}))!;
+          const receipt: AcquisitionReceipt = {};
+
+          const reused =
+            kind === "autolock"
+              ? await autolockWith(a.pool, receipt)
+              : await bind(a.pool, "b-session", receipt);
+          await a.pool.releaseUndeliveredAcquisition(receipt);
+
+          expect(reused).toBe(held);
+          expect(receipt.minted).toBeUndefined();
+          expect(a.pool.getDevice(deviceId)?.sessionId).toBe(held);
+          expect(store.claims.get(deviceId)).toBe(DAEMON_A_PID);
+        });
+
+        test(`${kind}: a publish that fails releases the session it minted`, async () => {
+          const { ownership, pending } = gated(DAEMON_A_PID);
+          const a = await daemon(DAEMON_A_PID, ownership);
+          const failure = new Error("claim directory is not writable");
+
+          const outcome = acquire(a.pool, {}).then(
+            () => undefined,
+            (error: unknown) => error,
+          );
+          await untilPending(pending, 1);
+          pending[0](failure);
+
+          expect(await outcome).toBe(failure);
+          expect(a.pool.getDevice(deviceId)).toMatchObject({ sessionId: null, status: "idle" });
+          expect(a.sessions.getAllSessions()).toEqual([]);
+        });
+
+        test(`${kind}: nothing is taken back from the session that acquired the device since`, async () => {
+          const a = await daemon(DAEMON_A_PID);
+          const receipt: AcquisitionReceipt = {};
+          const first = (await acquire(a.pool, receipt))!;
+          await releaseSessionAndDevice(a.sessions, a.pool, deviceId, first, "explicit-release");
+          await bind(a.pool, "second");
+          const released = countReleases(a.sessions);
+
+          await a.pool.releaseUndeliveredAcquisition(receipt);
+
+          expect(released).toEqual([]);
+          expect(a.pool.getDevice(deviceId)).toMatchObject({ sessionId: "second", status: "busy" });
+          expect(a.sessions.getSession("second")?.assignedDevice).toBe(deviceId);
+          expect(store.claims.get(deviceId)).toBe(DAEMON_A_PID);
+        });
+      }
+
+      test("a rebind of a session id the client supplied mints nothing to take back", async () => {
+        const a = await daemon(DAEMON_A_PID);
+        const receipt: AcquisitionReceipt = {};
+
+        await bind(a.pool, "client-session", receipt, true);
+        await a.pool.releaseUndeliveredAcquisition(receipt);
+
+        expect(receipt.minted).toBeUndefined();
+        expect(a.pool.getDevice(deviceId)?.sessionId).toBe("client-session");
+        expect(store.claims.get(deviceId)).toBe(DAEMON_A_PID);
+      });
+
+      test("a publish that lands after another session took the device leaves that session's claim", async () => {
+        const { ownership, pending } = gated(DAEMON_A_PID);
+        const a = await daemon(DAEMON_A_PID, ownership);
+        const receipt: AcquisitionReceipt = {};
+
+        const first = bind(a.pool, "first", receipt);
+        await untilPending(pending, 1);
+        await releaseSessionAndDevice(a.sessions, a.pool, deviceId, "first", "explicit-release");
+        const second = bind(a.pool, "second");
+        await untilPending(pending, 2);
+        pending[1]();
+        expect(await second).toBe("second");
+        pending[0]();
+        await first;
+        await a.pool.releaseUndeliveredAcquisition(receipt);
+
+        expect(a.pool.getDevice(deviceId)?.sessionId).toBe("second");
+        expect(a.sessions.getSession("second")?.assignedDevice).toBe(deviceId);
+        expect(store.claims.get(deviceId)).toBe(DAEMON_A_PID);
+      });
     });
   });
 }

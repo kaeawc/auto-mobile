@@ -1,6 +1,8 @@
 test/fixtures/android-display/**/*.txt text eol=lf
 test/fixtures/android-display-config/*.txt text eol=lf
 test/fixtures/macos-profiles/*.txt text eol=lf
+test/fixtures/bats-joblog/*.tsv text eol=lf
+test/fixtures/ci-time-to-green/*.json text eol=lf
 # Real dumpsys captures whose exact bytes are asserted (issue #4329): pin to LF
 # so a Windows checkout with core.autocrlf=true cannot rewrite them to CRLF and
 # break the byte-exact fixture premise.
@@ -10,6 +12,7 @@ test/fixtures/android-notification-policy/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/ios-duo/*.json text eol=lf
 test/fixtures/ios-simctl/*.json text eol=lf
+test/fixtures/ci/coverage-badge/*.json text eol=lf
 test/fixtures/release/*.md text eol=lf
 test/fixtures/android-launcher/*.txt text eol=lf
 test/fixtures/android-launcher/*.json text eol=lf
@@ -137,7 +140,11 @@ test/fixtures/ios/ctrlproxy-golden/**/*.json text eol=lf
 test/fixtures/ios/merger-pairs/*.json text eol=lf
 android/control-proxy/src/test/resources/ime-traces/*.txt text eol=lf
 test/fixtures/ios-sim-fleet/*.txt text eol=lf
+# Real `ps -axo pid=,ppid=,rss=,pcpu=,command=` capture with a running emulator (#11588).
+test/fixtures/android-boot-admission/*.txt text eol=lf
 test/fixtures/ios-sim-fleet/*.json text eol=lf
 test/fixtures/android-apk-signing/*.b64 text eol=lf
 test/fixtures/android-apk-signing/*.txt text eol=lf
 test/fixtures/refusal-wire/*.json text eol=lf
+test/fixtures/refusal-wire/surfaces/*.json text eol=lf
+test/fixtures/refusal-wire-hints/*.json text eol=lf

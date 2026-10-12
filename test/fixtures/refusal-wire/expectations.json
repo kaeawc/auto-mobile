@@ -1,6 +1,14 @@
 {
   "description": "How a runner must classify each typed daemon refusal in this directory (<code>.json, generated from the real TypeScript builders by scripts/generate-refusal-wire-fixtures.ts). wait = wait for the device within the bounded device wait; acquire-new-session = retry under a fresh session UUID; retry = ordinary bounded retry; fail = fail the attempt. Precedence when a runner derives it: wait, then acquire-new-session (nextAction), then retry (retryable: true), else fail. knownGaps maps a runner (kotlin, swift) to the disposition it currently produces instead of the expected one, so the suite stays green while the gap is tracked; a gap that starts matching the expectation fails the suite until the entry is removed. fields is what a runner must read from the fixture's wire payload: the typed code, retryable, whether nextAction is acquire_new_session, a positive retryAfterMs hint, and (capacity refusals) the externalDevices that count against the limit. A field absent from a row is absent on the wire.",
   "codes": {
+    "app_not_running": {
+      "expected": "fail",
+      "fields": {
+        "code": "app_not_running",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
     "capacity_exhausted": {
       "expected": "wait",
       "fields": {
@@ -9,6 +17,16 @@
         "acquireNewSession": false,
         "retryAfterMs": 5000,
         "externalDevices": ["emulator-5560"]
+      }
+    },
+    "capacity_exhausted.ios": {
+      "expected": "wait",
+      "fields": {
+        "code": "capacity_exhausted",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 5000,
+        "externalDevices": ["9A1B2C3D-0000-4000-8000-000000000001"]
       }
     },
     "daemon_session_suspect": {
@@ -60,6 +78,14 @@
         "acquireNewSession": false
       }
     },
+    "device_outside_managed_slots.tool": {
+      "expected": "fail",
+      "fields": {
+        "code": "device_outside_managed_slots",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
     "device_owned_by_other_daemon": {
       "expected": "wait",
       "fields": {
@@ -94,6 +120,22 @@
         "acquireNewSession": false
       }
     },
+    "discovery_incomplete.ios": {
+      "expected": "wait",
+      "fields": {
+        "code": "discovery_incomplete",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "managed_execution_ended": {
+      "expected": "fail",
+      "fields": {
+        "code": "managed_execution_ended",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
     "managed_slot_acquisition_failed.cancelled": {
       "expected": "fail",
       "fields": {
@@ -103,6 +145,22 @@
       }
     },
     "managed_slot_acquisition_failed.capacity_exhausted": {
+      "expected": "fail",
+      "fields": {
+        "code": "managed_slot_acquisition_failed",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
+    "managed_slot_acquisition_failed.capacity_exhausted.capacity": {
+      "expected": "fail",
+      "fields": {
+        "code": "managed_slot_acquisition_failed",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
+    "managed_slot_acquisition_failed.capacity_exhausted.capacity_external": {
       "expected": "fail",
       "fields": {
         "code": "managed_slot_acquisition_failed",
@@ -334,14 +392,6 @@
         "acquireNewSession": false
       }
     },
-    "provision_device.device_offline": {
-      "expected": "retry",
-      "fields": {
-        "code": "device_offline",
-        "retryable": true,
-        "acquireNewSession": false
-      }
-    },
     "provision_device.identity_conflict": {
       "expected": "fail",
       "fields": {
@@ -415,6 +465,62 @@
         "acquireNewSession": true
       }
     },
+    "session_ownership_lost.recovery_owned_by_other_daemon": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "session_ownership_lost.recovery_owned_by_other_daemon_unknown_pid": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "session_ownership_lost.recovery_target_absent": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "session_ownership_lost.released_cli_idle_timeout": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "session_ownership_lost.released_explicit_release": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "session_ownership_lost.released_heartbeat_timeout": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "session_ownership_lost.released_owner_disconnected": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
     "session_rebinding": {
       "expected": "retry",
       "fields": {
@@ -430,6 +536,48 @@
         "code": "session_terminal_release_in_progress",
         "retryable": false,
         "acquireNewSession": true
+      }
+    },
+    "daemon_queue_timeout": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_queue_timeout",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "session_recovery_pending": {
+      "expected": "retry",
+      "fields": {
+        "code": "session_recovery_pending",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "daemon_restart_deferred": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_restart_deferred",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 1000
+      }
+    },
+    "daemon_restart_pending": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_restart_pending",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "device_offline": {
+      "expected": "retry",
+      "fields": {
+        "code": "device_offline",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 1000
       }
     }
   }

@@ -122,11 +122,11 @@ theme from authored backgrounds (it would be circular); set `theme.mode` or
 
 ### Light and dark values
 
-A prototype resolves to exactly one mode, light or dark, each time it is composed: an explicit
-`theme.mode` (`system` reads the device setting), else the luminance of a flat `colors.background`
-(else `colors.surface`) override, else the first opaque hex background on the root's leading
-chain, else the device setting. Every per-mode form below reads that one resolved mode. A device
-needs `prototype_theme_modes_v1` for them; the host refuses such a spec for an older CtrlProxy.
+A shown prototype has exactly one resolved mode, light or dark: an explicit `theme.mode`
+(`system` reads the system setting), else the luminance of a flat `colors.background` (else
+`colors.surface`) override, else the first opaque hex background on the root's leading chain, else
+the system setting. Every per-mode form below reads that one resolved mode. A device needs
+`prototype_theme_modes_v1` for them; the host refuses such a spec for an older CtrlProxy.
 
 - **Colour pairs.** Every colour slot (`style.background`, `style.color`, `style.shadowColor`,
   `style.border.color`, gradient stops, `window.placement.scrim` and the `bottomSheet` `scrim`,
@@ -161,14 +161,48 @@ needs `prototype_theme_modes_v1` for them; the host refuses such a spec for an o
   both ids are checked at `show` and reported in `missingAssets`, and both stay retained with the
   prototype.
 - **Window metadata.** `prototypeOpaque` follows what is drawn. The root background and the window
-  scrim are resolved for every mode the prototype can reach (one mode when `theme.mode` is
-  `light` or `dark` or the backgrounds fix it, both otherwise) and count as solid only when the
-  result is fully opaque in each. An opaque role counts; the `scrim` role in a scrim slot never
-  does.
+  scrim are resolved in the mode the show resolved to and count as solid only when the result is
+  fully opaque. An opaque role counts; the `scrim` role in a scrim slot never does. The root
+  counts only when it is drawn over the whole window (#11408): `width` and `height` both `fill`,
+  no `anchor` (an anchored root is laid out at its anchor's rectangle, in every placement),
+  no `maxWidth`/`maxHeight` cap and no `aspectRatio`, no non-zero `offset`, no rounded corner
+  (`cornerRadius` absent, `0`, `none` or all corners `0`) and no `pressScale` below one. A root
+  that fails any of these lets the app show at an edge or corner, so only an opaque fullscreen
+  scrim behind it can still make the window opaque.
 
-The mode is resolved when the prototype composes. Re-theming a prototype that is already showing
-when the device setting changes, a per-show appearance override, and reporting the resolved mode
-to the host are tracked in #11221.
+### Live appearance (#11221, `prototype_appearance_v1`)
+
+The controller resolves the mode once per show and keeps it current. That one value drives the
+host chrome (dismiss bar, Close control), the window scrim, every colour and image pair in the
+content and the window metadata, so they cannot draw in different modes. No window reads its own
+Compose configuration for it, which is why a window created from a display or app-layer window
+context follows the same value as one on the service context.
+
+- **Override.** `show_prototype` takes a top-level `appearance`: `"device"` (the default when
+  absent), `"light"` or `"dark"`. It stands in for the system setting only: it decides a spec with
+  `theme.mode: "system"` and a spec whose mode would otherwise fall through to the device. It does
+  not beat an explicit `light`/`dark` mode, a flat `background`/`surface` override or an authored
+  opaque background. It belongs to the show: a later show of the same id without the field follows
+  the device again. An unknown value fails the request and leaves what is showing untouched.
+- **Re-theme.** The mode is resolved again after each interaction (a pager page or a `styleWhen`
+  state can change the background it is inferred from) and on every configuration change (the
+  device's night mode; on API 31+ the Material You palette, so a `colors.source: "device"` scheme
+  is read again after a wallpaper change). The window, the runtime, authored state, pager pages
+  and text-field contents are kept; only colours change. A prototype hidden by the lock screen or
+  because its app left the foreground is resolved too, and returns in the current mode.
+- **Event.** When the resolved mode changes, the device sends one `prototype_event` with
+  `kind: "appearance_changed"`, `name: null` and `payload: {mode, source}`, on the normal
+  sequence, buffering and replay path. Nothing is sent when the mode stays the same (a repeated
+  configuration change, a device flip under an explicit mode or an override, a palette change), nor
+  for the show itself, whose result carries the mode.
+- **Report.** A successful `show_prototype` result and each `inspect_prototypes` entry carry
+  `appearance: {mode, source, deviceDark}`. `mode` is `light` or `dark`. `source` names the step
+  that decided it: `explicit`, `override`, `roleLuminance`, `authoredBackground` or `system`
+  (`theme.mode: "system"` reports `system`, or `override` when the show pinned it). `deviceDark` is
+  the device's own setting whatever decided the mode. The host's `prototype` tool reports it only in
+  device answers (show, inspect); its host-local `status` omits it (#11416). The prototype's own window entry in a
+  hierarchy capture carries the same object as `prototypeAppearance`, next to `prototypePlacement`
+  and `prototypeOpaque`; an APK without `prototype_appearance_v1` omits it.
 
 ## Windows
 
@@ -288,6 +322,10 @@ the future renderer. Nav item count need not equal pager page count; authors
 should match them when each item represents a page. Per-pager selection starts
 at zero, is separate from the flat state map, and is changed by `setPage`.
 
+When a pager settles on another page the device sends one `page_changed` event whose
+`name` is the pager id and whose `payload` is the new zero-based page index, the same
+shape as the iOS agent (#11409). The event `pages` map still carries every pager.
+
 `bottomSheet.openWhen` is `{key, equals}` with a **boolean** equals value. Its
 state key may be absent (sheet closed); an existing value must be boolean. A
 swipe dismissal with `dismissOnSwipe: true` writes `!equals` to that key, making
@@ -393,6 +431,22 @@ keys may appear in text. No expressions or interpolation parsing occurs during
 validation. Pager context is the nearest enclosing pager; outside a pager those
 two reserved placeholders remain literal. State keys `page` and `pageCount` are
 permitted but the pager placeholders take precedence within a pager.
+
+A number renders the same in a `{key}` placeholder and in a `repeat` binding (#11408),
+and as the TypeScript host renders it (`renderScalar`):
+
+- An integral number prints every digit with no decimal point and no exponent at any
+  magnitude (`12345678`, `1000000000000000000000`), and negative zero prints `0`.
+- Any other number prints as JavaScript's `String(number)`: the shortest decimal digits
+  that read back as the same double, in plain notation down to `0.000001`
+  (`0.30000000000000004`, `0.00001`) and as `<digits>e-<exponent>` below that (`1e-7`,
+  `2.5e-7`). Android computes the digits itself, so the result does not depend on the
+  device's `Double.toString`.
+
+Known divergence: the iOS agent formats a non-integral number with Swift's own
+description, which switches to an exponent earlier and pads it (`0.00001` shows as
+`1e-05`). Integral numbers agree on all three. Prefer integral state for numbers a
+prototype shows, or keep display text in a string key.
 
 ## Style
 
@@ -611,6 +665,8 @@ A condition is exactly one of these forms. `visibleWhen` takes any of them;
 | `{any: [condition, ...]}`  | At least one member holds. One to 16 members.                            |
 | `{not: condition}`         | The member does not hold.                                                |
 
+Numbers compare by value, so a state of `-0` equals `0` on every platform (#11408).
+
 Conditions nest to a depth of 8 (`MAX_PROTOTYPE_CONDITION_DEPTH` in the shared
 contract). `key` takes exactly one comparison, and comparisons need `key`;
 errors point at the offending field (for example `root.visibleWhen.gt`).
@@ -623,6 +679,20 @@ key sends `{key, value}`; several send `{keys, values}`. `emit` actions still fi
 in order with the state at that point, a list that nets no change emits nothing,
 and a switch or checkbox tap keeps its own `{key, value}` change before its
 `onTap` runs. Wire patches from the host stay silent.
+
+An action list is atomic on Android (#11408). The runtime re-validates the state every
+write would leave (binding types, numeric ranges, the size cap) before the first action
+runs; if any write is rejected, nothing in the list is applied and nothing is emitted,
+so device state and the host's event-fed copy never drift apart. Actions after a
+`dismiss` never run and are not checked. A control's own write (a switch flip, a chosen
+option, a slider value, a picked time, a tab selection, a dialog close) is part of the
+same unit as its `onTap` list: a rejected list leaves the control's value and a bound
+pager's page untouched too. An accepted control still reports its own `change` first
+and then its list, as the iOS agent does. A rejected interaction is logged on the device
+only; no event or status field reports it, so the host sees nothing change. The iOS
+agent does not re-validate at runtime, so the same list applies there in full with
+one `change`; the TypeScript host and Kotlin validators refuse at `show` a `setState` whose
+value type does not fit a control bound to the key (#11452), which closes that gap on the host.
 
 ### Conditional style: styleWhen
 

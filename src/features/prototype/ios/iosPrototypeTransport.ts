@@ -3,15 +3,17 @@
  *
  * The agent speaks the CtrlProxy prototype message names, so requests and `prototype_event` pushes
  * map one to one. It has no `update_prototype` (#10550): a same-id `show` replaces the prototype.
- * It has no display targeting. `reset` is forwarded to start a same-id show fresh. Per-call `timeoutMs` is not forwarded: the agent client applies
+ * It has no display targeting. `reset` is forwarded to start a same-id show fresh, and `appearance`
+ * to pin the system setting (an agent advertising `prototype_appearance_v1` only). Per-call `timeoutMs` is not forwarded: the agent client applies
  * its own request timeout to every request.
  */
 import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { PrototypeAssetRequestOptions } from "../../observe/android/CtrlProxyPrototypes";
-import { prototypeEventSchema } from "../../observe/android/CtrlProxyPrototypes";
+import { decodePrototypeEvent } from "../../observe/android/CtrlProxyPrototypes";
 import {
+  PROTOTYPE_APPEARANCE_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
   SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY,
 } from "../../observe/android/ctrlProxyProtocol";
@@ -21,6 +23,10 @@ import type {
   PrototypeEvent,
   PrototypeResult,
 } from "../../observe/android/ctrlProxyProtocol";
+import {
+  parsePrototypeAppearance,
+  prototypeAppearanceUnsupportedMessage,
+} from "../prototypeAppearance";
 import {
   prototypeAssetIdProblem,
   prototypeAssetUploadProblem,
@@ -99,7 +105,10 @@ export function prototypeAgentNotConnectedMessage(deviceId: string): string {
 
 function toPrototypeResult(result: PrototypeAgentResult): PrototypeResult {
   const { missingAssets, totalTimeMs } = result;
+  // Only a show answered by an agent advertising prototype_appearance_v1 carries it.
+  const appearance = parsePrototypeAppearance(result.appearance);
   return {
+    ...(appearance ? { appearance } : {}),
     success: result.success,
     requestId: result.requestId,
     ...(typeof result.error === "string" ? { error: result.error } : {}),
@@ -202,10 +211,16 @@ export class IosPrototypeTransport implements PrototypeTransport {
           "the app with launchApp prototype: true to load the agent built for this AutoMobile version.",
       );
     }
+    const { appearance } = options;
+    if (appearance !== undefined && !this.supportsCapability(PROTOTYPE_APPEARANCE_CAPABILITY)) {
+      // Never send appearance to an agent that would ignore it and follow the simulator.
+      throw new ActionableError(prototypeAppearanceUnsupportedMessage(appearance, "ios"));
+    }
     return toPrototypeResult(
       await this.agent.request("show_prototype", {
         spec,
         ...(options.reset === true ? { reset: true } : {}),
+        ...(appearance === undefined ? {} : { appearance }),
       }),
     );
   }
@@ -262,13 +277,12 @@ export class IosPrototypeTransport implements PrototypeTransport {
 
   onEvent(listener: (event: PrototypeEvent) => void): () => void {
     return this.agent.onEvent((message) => {
-      // Decode at the push boundary, as CtrlProxy does: malformed frames never reach listeners.
-      const decoded = prototypeEventSchema.safeParse(message);
-      if (!decoded.success) {
-        logger.warn("[prototype-agent] Dropping malformed prototype_event", decoded.error);
-        return;
+      // Decode at the push boundary, as CtrlProxy does: malformed frames never reach listeners,
+      // and a kind this host does not know arrives as a sequence-only marker.
+      const decoded = decodePrototypeEvent(message, "[prototype-agent]");
+      if (decoded !== undefined) {
+        listener(decoded);
       }
-      listener(decoded.data);
     });
   }
 

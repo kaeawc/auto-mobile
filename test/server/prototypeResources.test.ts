@@ -1,6 +1,15 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import contract from "../../schemas/prototype-spec-contract.json";
 import { validatePrototypeSpec } from "../../src/features/prototype/prototypeValidation";
+import {
+  PROTOTYPE_APPEARANCE_CAPABILITY,
+  PROTOTYPE_THEME_MODES_CAPABILITY,
+} from "../../src/features/observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_APPEARANCE_INPUTS,
+  PROTOTYPE_APPEARANCE_SOURCES,
+} from "../../src/features/prototype/prototypeAppearance";
+import { prototypeSchema } from "../../src/server/prototypeTools";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { registerPrototypeResources } from "../../src/server/prototypeResources";
 import {
@@ -74,9 +83,12 @@ describe("automobile:prototype resource", () => {
     const blocks = [...renderPrototypeGuide().matchAll(/```json\n([\s\S]*?)```/g)].map((m) =>
       JSON.parse(m[1]),
     );
-    expect(blocks).toHaveLength(3);
-    const [minimal, list, components] = blocks;
+    expect(blocks).toHaveLength(4);
+    const [minimal, list, components, appearanceCall] = blocks;
     expect(validatePrototypeSpec(minimal).success).toBe(true);
+    // The light/dark section's example is a whole tool call, not a bare spec.
+    expect(prototypeSchema.safeParse(appearanceCall)).toMatchObject({ success: true });
+    expect(appearanceCall.appearance).toBe("dark");
     expect(validatePrototypeSpec(components)).toMatchObject({ success: true });
     const wrapped = {
       id: "list",
@@ -85,5 +97,31 @@ describe("automobile:prototype resource", () => {
       root: list,
     };
     expect(validatePrototypeSpec(wrapped)).toMatchObject({ success: true });
+  });
+
+  test("the light and dark section states the owner-decided rules and the names the tool uses", () => {
+    const guide = renderPrototypeGuide();
+    const section = guide.slice(guide.indexOf("## Light and dark mode"), guide.indexOf("## Icons"));
+    expect(section.length).toBeGreaterThan(0);
+    for (const name of [
+      PROTOTYPE_APPEARANCE_CAPABILITY,
+      PROTOTYPE_THEME_MODES_CAPABILITY,
+      ...PROTOTYPE_APPEARANCE_INPUTS,
+      ...PROTOTYPE_APPEARANCE_SOURCES,
+      "appearance_changed",
+      "theme.colors.light",
+      "theme.colors.dark",
+      "{light, dark}",
+      "displayConfig",
+      "0.4 alpha",
+    ]) {
+      expect(section).toContain(name);
+    }
+    // The override is the last step before the device, after everything the spec itself says.
+    const order = ["(`explicit`)", "(`roleLuminance`)", "(`authoredBackground`)", "(`override`)"];
+    const positions = order.map((step) => section.indexOf(step));
+    expect(positions.every((position) => position > 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    expect(section).toContain("(`override`), else\n   the device's own setting (`system`)");
   });
 });

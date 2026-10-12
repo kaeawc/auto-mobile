@@ -4,6 +4,7 @@ import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecovery
 import { describe, expect, test } from "bun:test";
 import {
   SessionNoLongerOwnsDeviceError,
+  SessionRecoveryIdentityLossError,
   SessionTerminalReleaseInProgressError,
   TerminalSessionError,
   type SessionReleaseSnapshot,
@@ -244,5 +245,60 @@ describe("declaresDeviceSessionInvalid reads the real serializer output (#11296)
         content: [{ type: "text", text: JSON.stringify({ code: "session_ownership_lost" }) }],
       }),
     ).toBe(false);
+  });
+});
+
+describe("a persisted session lost to recovery identity loss is a terminal-session refusal (#11391)", () => {
+  const target = {
+    platform: "android" as const,
+    stableDeviceId: "stable-1",
+    deviceId: "emulator-5554",
+  };
+  type Reason = ConstructorParameters<typeof SessionRecoveryIdentityLossError>[2];
+  const REASONS: Reason[] = [
+    "target-absent",
+    "target-busy",
+    "identity-continuity-lost",
+    "owned-by-other-daemon",
+  ];
+
+  function identityLossResult(reason: Reason) {
+    const error = new SessionRecoveryIdentityLossError(
+      "dead-session",
+      target,
+      reason,
+      reason === "owned-by-other-daemon"
+        ? { deviceId: "emulator-5554", ownerPid: 4242 }
+        : undefined,
+    );
+    return shapeToolCallError(error, { toolName: "tapOn", source: "MCP" });
+  }
+
+  test.each(REASONS)("%s is answered with the standard terminal refusal", (reason) => {
+    const result = identityLossResult(reason);
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.error).toMatchObject({
+      code: "session_ownership_lost",
+      sessionUuid: "dead-session",
+      // What a later call naming the terminalized UUID is told (TerminalSessionError).
+      reason: `identity-recovery-${reason}`,
+      recoveryReason: reason,
+      deviceId: "emulator-5554",
+      ...terminalSessionRefusalFields(reason === "owned-by-other-daemon" ? 4242 : undefined),
+    });
+    expect(payload.error.message).toContain("Cannot safely recover session dead-session");
+    expect("ownerPid" in payload.error).toBe(reason === "owned-by-other-daemon");
+  });
+
+  test.each(REASONS)("%s is recognised by declaresDeviceSessionInvalid", (reason) => {
+    expect(declaresDeviceSessionInvalid(identityLossResult(reason))).toBe(true);
+  });
+
+  test("owned-by-other-daemon does not carry the wait-class acquisition code", () => {
+    // device_owned_by_other_daemon tells a runner to wait for the other daemon (refusal-wire
+    // expectations: retryable, retryAfterMs 2000); this session UUID never comes back.
+    const text = identityLossResult("owned-by-other-daemon").content[0].text;
+    expect(JSON.parse(text).error.code).toBe("session_ownership_lost");
+    expect(JSON.parse(text).code).toBeUndefined();
   });
 });

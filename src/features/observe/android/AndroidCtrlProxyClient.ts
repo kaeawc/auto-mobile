@@ -198,6 +198,7 @@ import { CtrlProxyPrototypes, type PrototypeAssetRequestOptions } from "./CtrlPr
 import type { PrototypeSpec } from "../../prototype/prototypeSpec";
 import type { PrototypeAssetUpload } from "../../prototype/prototypeAssets";
 import type {
+  PrototypeAppearanceOverride,
   PrototypeAssetResult,
   PrototypeDismiss,
   PrototypeEvent,
@@ -1330,6 +1331,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     displayId?: number,
     reset?: boolean,
+    appearance?: PrototypeAppearanceOverride,
   ): Promise<PrototypeResult>;
   requestDismissPrototype(
     target: PrototypeDismiss,
@@ -3867,8 +3869,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf?: PerformanceTracker,
     displayId?: number,
     reset?: boolean,
+    appearance?: PrototypeAppearanceOverride,
   ): Promise<PrototypeResult> {
-    return this.prototypes.requestShowPrototype(spec, timeoutMs, perf, displayId, reset);
+    return this.prototypes.requestShowPrototype(
+      spec,
+      timeoutMs,
+      perf,
+      displayId,
+      reset,
+      appearance,
+    );
   }
   requestDismissPrototype(
     target: PrototypeDismiss,

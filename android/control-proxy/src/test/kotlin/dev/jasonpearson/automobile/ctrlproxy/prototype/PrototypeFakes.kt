@@ -4,7 +4,40 @@ import android.view.Display
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import dev.jasonpearson.automobile.protocol.PrototypeAppearanceMode
+import dev.jasonpearson.automobile.protocol.PrototypeAppearanceSource
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
+
+/** A device whose light or dark setting and palette the test flips. */
+internal class FakePrototypeDeviceAppearance(
+  override var dark: Boolean = false,
+  override var paletteKey: Int = 0,
+) : PrototypeDeviceAppearance
+
+/**
+ * Whether [model]'s own spec fixes the mode (an explicit `light`/`dark`, a role surface override or
+ * an authored background), or null when it is left to the system setting.
+ */
+internal fun prototypeSpecDark(model: PrototypeRenderModel): Boolean? =
+  prototypeResolveAppearance(model.root, model.theme, deviceDark = false)
+    .takeIf { it.source != PrototypeAppearanceSource.SYSTEM }
+    ?.dark
+
+/** The theme flow a controller show hands the host for [model], resolved on a light device. */
+internal fun prototypeShownThemeFlow(
+  model: PrototypeRenderModel,
+  dark: Boolean? = null,
+): MutableStateFlow<PrototypeShownTheme> {
+  val resolved = prototypeResolveAppearance(model.root, model.theme, deviceDark = false)
+  val appearance =
+    if (dark == null) resolved
+    else
+      resolved.copy(
+        mode = if (dark) PrototypeAppearanceMode.DARK else PrototypeAppearanceMode.LIGHT,
+      )
+  return MutableStateFlow(PrototypeShownTheme(model.root, model.theme, appearance))
+}
 
 internal class FakePrototypeMainThread : PrototypeMainThread {
   var onMain = true

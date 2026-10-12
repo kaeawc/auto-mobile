@@ -68,7 +68,7 @@ describe("daemon command characterization with fake I/O", () => {
           ],
           [
             "stdout",
-            "  reset-slot-scope --runner-namespace <ns> --incarnation <id>  Invalidate a managed slot scope; free its devices",
+            "  reset-slot-scope --runner-namespace <ns> --incarnation <id> [--force]  Invalidate a managed slot scope; free its devices",
           ],
           ["stdout", "\nOptions:"],
           [
@@ -93,9 +93,12 @@ describe("daemon command characterization with fake I/O", () => {
       isInitialized: () => true,
       getDevicePool: () => ({
         // The in-daemon path refreshes slot and foreign ownership before reading stats (#11317).
-        getRefreshedStats: async () => {
+        getRefreshedInventory: async () => {
           events.push("stats");
-          return { idle: 1, assigned: 0, error: 0, total: 1 };
+          return {
+            stats: { idle: 1, assigned: 0, error: 0, total: 1 },
+            deviceIds: new Set(["fake"]),
+          };
         },
         getRecoveryPolicy: () => {
           events.push("policy");
@@ -473,10 +476,6 @@ describe("daemon command characterization with fake I/O", () => {
 
   test.each([
     {
-      content: "",
-      expected: { availableDevices: 0, totalDevices: 0, assignedDevices: 0, errorDevices: 0 },
-    },
-    {
       content: JSON.stringify({
         poolStatus: {
           idle: 1,
@@ -494,6 +493,21 @@ describe("daemon command characterization with fake I/O", () => {
         errorDevices: 1,
         recoveryPolicy: { onLoss: true, maxAttempts: 2 },
         devices: [{ deviceId: "unknown", platform: "ios" }],
+      },
+    },
+    {
+      // A partial observation that still has real entries prints as before.
+      content: JSON.stringify({
+        observationComplete: false,
+        poolStatus: { idle: 1, total: 1, assigned: 0, error: 0 },
+        devices: [{ platform: "android", runtime: { deviceId: "emulator-5554" } }],
+      }),
+      expected: {
+        availableDevices: 1,
+        totalDevices: 1,
+        assignedDevices: 0,
+        errorDevices: 0,
+        devices: [{ deviceId: "emulator-5554", platform: "android" }],
       },
     },
   ])(
@@ -532,6 +546,62 @@ describe("daemon command characterization with fake I/O", () => {
       }
     },
   );
+
+  // An unknown never reads as "0 devices": a resource with no usable pool status fails the command.
+  test.each([
+    { name: "no text", content: undefined },
+    { name: "empty text", content: "" },
+    { name: "unparseable text", content: "not json" },
+    { name: "an error object", content: JSON.stringify({ error: "Invalid platform" }) },
+    {
+      name: "no pool status",
+      content: JSON.stringify({ totalCount: 0, devices: [], observationComplete: false }),
+    },
+    {
+      name: "an incomplete observation with an empty pool",
+      content: JSON.stringify({
+        observationComplete: false,
+        poolStatus: { idle: 0, total: 0, assigned: 0, error: 0 },
+        devices: [],
+      }),
+    },
+  ])("available-devices fails instead of printing zeros for $name", async ({ content }) => {
+    const out: unknown[] = [];
+    class Client extends FakeDaemonClient {
+      override async connect() {}
+      override async readResource() {
+        return { contents: content === undefined ? [] : [{ text: content }] };
+      }
+      override async close() {}
+    }
+    class Manager extends SafeDaemonManager {
+      override getDaemonState() {
+        return remoteState;
+      }
+      override createClient() {
+        return new Client();
+      }
+    }
+    const log = spyOn(console, "log").mockImplementation((text) => out.push(["stdout", text]));
+    const err = spyOn(console, "error").mockImplementation((text) => out.push(["stderr", text]));
+    const exit = spyOn(process, "exit").mockImplementation((code) => {
+      out.push(["exit", code]);
+      throw new Error("fake exit");
+    });
+    try {
+      await expect(runDaemonCommand("available-devices", [], {}, Manager)).rejects.toThrow(
+        "fake exit",
+      );
+      expect(out).toHaveLength(2);
+      expect(JSON.stringify(out[0])).toContain("stderr");
+      expect(JSON.stringify(out[0])).toContain("booted-devices resource");
+      expect(out[1]).toEqual(["exit", 1]);
+    } finally {
+      exit.mockRestore();
+      err.mockRestore();
+      log.mockRestore();
+    }
+  });
 
   test("active-sessions asks the daemon for per-session hold diagnostics (#10671)", async () => {
     const events: unknown[] = [];

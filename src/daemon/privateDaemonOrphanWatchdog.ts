@@ -1,5 +1,6 @@
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
+import { parseStrictPositiveInteger } from "../utils/envNumbers";
 
 /** What the watchdog observes about this daemon process. */
 export interface PrivateDaemonOrphanPort {
@@ -7,6 +8,14 @@ export interface PrivateDaemonOrphanPort {
   parentPid(): number;
   /** The parent PID recorded when this daemon started: the launcher. */
   launcherPid(): number;
+  /**
+   * True when the launcher named itself (`AUTOMOBILE_DAEMON_LAUNCHER_PID`) rather than
+   * being inferred from the entry parent: its direct parent may then be an intermediate
+   * shell or wrapper, so liveness of the launcher decides instead of the parent pid.
+   */
+  launcherIsExplicit(): boolean;
+  /** Whether a process is alive; injected so tests never signal a real pid. */
+  isProcessRunning(pid: number): boolean;
   /** Open control-socket and auxiliary-socket connections and in-flight HTTP requests. */
   clientCount(): number;
   /**
@@ -28,6 +37,7 @@ const INIT_PID = 1;
 /** Idle timeout for an orphaned private daemon; 0 disables the watchdog. */
 export function resolvePrivateDaemonOrphanIdleMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env[PRIVATE_DAEMON_ORPHAN_IDLE_MS_ENV];
+  // oxlint-disable-next-line auto-mobile/no-raw-env-number-parse -- 0 is meaningful here (it disables the watchdog), so the positive-integer helper does not fit.
   const parsed = raw === undefined ? Number.NaN : Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS;
 }
@@ -45,8 +55,8 @@ export function resolveLauncherPid(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
   const raw = env[DAEMON_LAUNCHER_PID_ENV]?.trim() ?? "";
-  const parsed = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
-  return Number.isSafeInteger(parsed) && parsed > 1 ? parsed : entryParentPid;
+  const parsed = parseStrictPositiveInteger(raw);
+  return parsed !== undefined && parsed > 1 ? parsed : entryParentPid;
 }
 
 /** Explicit harness marker: `1` arms the orphan watchdog, `0` opts a daemon out of it. */
@@ -125,13 +135,20 @@ export class PrivateDaemonOrphanWatchdog {
   }
 
   /**
-   * The launcher is gone once init adopted us or any other process did: under a
-   * Linux subreaper (systemd --user, container inits) the new parent is not pid 1
-   * but is still not the launcher we recorded at start.
+   * Orphaned when init adopted us, or: with an explicit launcher pid, the launcher is no
+   * longer alive (an intermediate shell or wrapper parent is expected, #11370); without
+   * one, the parent is no longer the entry parent. The second case covers a Linux
+   * subreaper (systemd --user, container inits) whose pid is not 1.
    */
   private isOrphaned(): boolean {
     const parent = this.port.parentPid();
-    return parent === INIT_PID || parent !== this.port.launcherPid();
+    if (parent === INIT_PID) {
+      return true;
+    }
+    const launcher = this.port.launcherPid();
+    return this.port.launcherIsExplicit()
+      ? !this.port.isProcessRunning(launcher)
+      : parent !== launcher;
   }
 
   /** One check; returns true when it requested shutdown. */

@@ -1,6 +1,6 @@
 import { drainUntil, drainUntilQuiescent, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { expect, spyOn, test } from "bun:test";
+import { beforeAll, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -795,7 +795,8 @@ test.each(["not-attempted", "exhausted"] as const)(
       },
     );
     await flush();
-    expect(timer.getPendingTimeouts()).toEqual([1_000]);
+    // The handoff hold outlives this caller; its three-minute expiry is still armed.
+    expect(timer.getPendingTimeouts()).toEqual([180_000, 1_000]);
     await incidents.completeRecovery(incident.id, outcome, { sessionState: "awaiting-device" });
     timer.advanceTime(1_000);
     await drainUntilQuiescent(timer);
@@ -840,7 +841,8 @@ test("restart assignment keeps waiting while the loss incident has no recovery o
   timer.advanceTime(1_000);
   await flush();
   expect(settled).toBe(false);
-  expect(timer.getPendingTimeouts()).toEqual([1_000]);
+  // The handoff hold outlives this caller; its three-minute expiry is still armed.
+  expect(timer.getPendingTimeouts()).toEqual([180_000, 1_000]);
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
   timer.advanceTime(1_000);
@@ -954,30 +956,51 @@ test("last joined restart waiter aborts slow discovery and fences its late devic
   await drainUntilQuiescent(timer);
   expect(sessions.getSession("session")).toBeNull();
   expect(pool.getDevice(original.deviceId)?.sessionId ?? null).toBeNull();
-  expect(timer.getPendingTimeouts()).toEqual([]);
+  // The handoff hold outlives this caller; its three-minute expiry is still armed.
+  expect(timer.getPendingTimeouts()).toEqual([180_000]);
 });
 
-test("single restart acquisition retains its deadline and fences late availability", async () => {
-  const { timer, sessions, pool, manager } = await setupPassiveRestart();
-  sessions.stopCleanupTimer();
-  const acquisition = sessions
-    .getOrCreateSession("session", pool, "android", undefined, true, {
-      requestDeadlineMs: 3_500,
-    })
-    .then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-  await drainUntilQuiescent(timer);
-  timer.advanceTime(2_500);
-  expect(String(await acquisition)).toContain("Cannot safely recover session");
-  manager.bootedDevices = [original];
-  timer.advanceTime(1_000);
-  await drainUntilQuiescent(timer);
-  expect(sessions.getSession("session")).toBeNull();
-  expect(pool.getDevice(original.deviceId)?.sessionId ?? null).toBeNull();
-  expect(timer.getPendingTimeouts()).toEqual([]);
-});
+// #11359: the request deadline is wall time, so a wall step must not move the wait's budget.
+test.each([
+  ["no step", 0],
+  ["a backward step", -3_600_000],
+  ["a forward step (Linux model)", 3_600_000],
+])(
+  "single restart acquisition retains its deadline and fences late availability across %s",
+  async (_name, stepMs) => {
+    const { timer, sessions, pool, manager } = await setupPassiveRestart();
+    sessions.stopCleanupTimer();
+    // Linux: the monotonic clock includes host sleep, so a forward wall step is not counted as sleep.
+    timer.simulateSleepCountingMonotonicClock();
+    timer.stepWallClock(stepMs);
+    const acquisition = sessions
+      .getOrCreateSession("session", pool, "android", undefined, true, {
+        requestDeadlineMs: timer.now() + 3_500,
+      })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    let settled = false;
+    void acquisition.then(() => {
+      settled = true;
+    });
+    await drainUntilQuiescent(timer);
+    // The 3.5 s request less its 1 s response margin: neither early nor late, whatever the step.
+    timer.advanceTime(2_400);
+    await drainUntilQuiescent(timer);
+    expect(settled).toBe(false);
+    timer.advanceTime(100);
+    expect(String(await acquisition)).toContain("Cannot safely recover session");
+    manager.bootedDevices = [original];
+    timer.advanceTime(1_000);
+    await drainUntilQuiescent(timer);
+    expect(sessions.getSession("session")).toBeNull();
+    expect(pool.getDevice(original.deviceId)?.sessionId ?? null).toBeNull();
+    // The handoff hold outlives this caller; its three-minute expiry is still armed.
+    expect(timer.getPendingTimeouts()).toEqual([180_000]);
+  },
+);
 
 test.each([
   [60_000, false],
@@ -1088,7 +1111,10 @@ test.each(["deadline", "abort"] as const)(
       timer.advanceTime(1_499);
       await drainUntilQuiescent(timer);
       expect(settled).toBe(false);
-      expect(timer.getPendingTimeouts()).toEqual(cancellation === "deadline" ? [1_500] : []);
+      // The handoff hold outlives this caller; its three-minute expiry is still armed.
+      expect(timer.getPendingTimeouts()).toEqual(
+        cancellation === "deadline" ? [180_000, 1_500] : [180_000],
+      );
       if (cancellation === "deadline") {
         timer.advanceTime(1);
       } else {
@@ -1180,7 +1206,8 @@ test("restart assignment bounds slow discovery and fences its late device claim"
   await drainUntilQuiescent(timer);
   expect(sessions.getSession("session")).toBeNull();
   expect(pool.getDevice(original.deviceId)?.sessionId ?? null).toBeNull();
-  expect(timer.getPendingTimeouts()).toEqual([]);
+  // The handoff hold outlives this caller; its three-minute expiry is still armed.
+  expect(timer.getPendingTimeouts()).toEqual([180_000]);
 });
 
 test("binding during a gated idle process exit rejects and evicts the dead emulator", async () => {
@@ -1942,7 +1969,8 @@ test("device-restart resume waits for the same serial and preserves its session 
   try {
     const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
     await flush();
-    expect(timer.getPendingTimeouts()).toEqual([1_000]);
+    // The handoff hold outlives this caller; its three-minute expiry is still armed.
+    expect(timer.getPendingTimeouts()).toEqual([180_000, 1_000]);
     expect(await persistence.getSession?.("session")).toMatchObject({
       release_reason: `device-restart:${original.name}`,
     });
@@ -1968,7 +1996,8 @@ test("device-restart resume keeps retrying across a forward wall-clock step insi
   try {
     const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
     await flush();
-    expect(timer.getPendingTimeouts()).toEqual([1_000]);
+    // The handoff hold outlives this caller; its three-minute expiry is still armed.
+    expect(timer.getPendingTimeouts()).toEqual([180_000, 1_000]);
     // An NTP step an hour forward on a clock whose monotonic reading runs through host sleep
     // (Linux, Windows), so the session clock ignores the step: the recovery window derives from
     // session stamps, and the retry gate must not read the stepped wall clock as past it.
@@ -1997,7 +2026,8 @@ test("device-restart resume waits through an unknown new serial and binds by AVD
     await pool.refreshDevices();
     const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
     await drainUntilQuiescent(timer);
-    expect(timer.getPendingTimeouts()).toEqual([1_000]);
+    // The handoff hold outlives this caller; its three-minute expiry is still armed.
+    expect(timer.getPendingTimeouts()).toEqual([180_000, 1_000]);
     expect(await persistence.getSession?.("session")).toMatchObject({
       release_reason: `device-restart:${original.name}`,
     });
@@ -2090,7 +2120,8 @@ test("device-restart resume terminalizes absence at the persisted restart deadli
   try {
     const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
     await flush();
-    expect(timer.getPendingTimeouts()).toEqual([1_000]);
+    // The handoff hold outlives this caller; its three-minute expiry is still armed.
+    expect(timer.getPendingTimeouts()).toEqual([180_000, 1_000]);
     timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
     await expect(resume).rejects.toThrow("recovery reason: target-absent");
     expect(await persistence.getSession?.("session")).toMatchObject({
@@ -2152,6 +2183,10 @@ test("an in-flight caller keeps device-restart recovery past the idle window", a
     // The call is in flight, so it is activity: the two-minute idle deadline does not apply.
     await advanceSecondsUntil(timer, 150_000);
     expect(resume.settled()).toBe(false);
+    // The row's idle deadline has passed, but the recovery is still running: a heartbeat or
+    // session-info lookup keeps naming the handoff, never `expired` (#11361).
+    expect(await sessions.getReleasedSessionReason("session")).toMatch(/^device-restart:/);
+    expect(await sessions.getExpiredReleaseSnapshot("session")).toBeUndefined();
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
     timer.advanceTime(1_000);
@@ -2249,9 +2284,12 @@ test("a quiet client loses device-restart recovery two minutes after its last ca
     await advanceSecondsUntil(timer, lastCallEndedAt + RESTART_TEST_IDLE_MS);
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await expect(
-      sessions.getOrCreateSession("session", pool, "android", undefined, true),
-    ).rejects.toThrow("is not an active daemon session");
+    // The lapsed recovery is the typed terminal refusal, not an untyped not-found (#11361).
+    const lapsed = await sessions
+      .getOrCreateSession("session", pool, "android", undefined, true)
+      .catch((error: unknown) => error);
+    expect(lapsed).toBeInstanceOf(TerminalSessionError);
+    expect((lapsed as TerminalSessionError).release.releaseReason).toBe("expired");
     expect(await persistence.getSession?.("session")).toMatchObject({
       status: "expired",
       release_reason: "expired",
@@ -3736,9 +3774,21 @@ test("failed-release retry flight excludes overlapping expiry releases", async (
   assertNoRecoveryReservationsRemain(pool, "session");
 });
 
+type IntentionalStopFixture = Awaited<ReturnType<typeof setup>> & {
+  manager: RearmableShutdownManager;
+};
+let cancelledRecoveryFixture: IntentionalStopFixture;
+let resetStopFixture: IntentionalStopFixture;
+beforeAll(async () => {
+  // Independent bound holders; the timed tests still perform the real cancellation and rebinding.
+  const cancelledManager = new RearmableShutdownManager(original.deviceId);
+  const resetManager = new RearmableShutdownManager(original.deviceId);
+  cancelledRecoveryFixture = { ...(await setup(cancelledManager)), manager: cancelledManager };
+  resetStopFixture = { ...(await setup(resetManager)), manager: resetManager };
+});
+
 test("a cancelled Android recovery does not spend the crash-loop budget (#7545)", async () => {
-  const manager = new RearmableShutdownManager(original.deviceId);
-  const { timer, sessions, pool, captured } = await setup(manager);
+  const { timer, sessions, pool, captured, persistence, manager } = cancelledRecoveryFixture;
   try {
     pool.markIntentionalShutdown(captured.id);
     const firstKill = manager.nextKillAccepted();
@@ -3755,11 +3805,15 @@ test("a cancelled Android recovery does not spend the crash-loop budget (#7545)"
     expect(manager.startedDevices).toHaveLength(0);
     expect(sessions.getSession("session")).toBeNull();
 
+    // The holder stopped this device; cancellation must not create a recovery handoff.
+    expect((await persistence.getSession?.("session"))?.release_reason).toBe("explicit-release");
+
     // Re-provision the AVD and bind a fresh session, then simulate a
     // genuine loss. maxAttempts is 1, so this only recovers if the
     // cancelled attempt above did not spend the budget.
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
+    expect(pool.genericAvailability(original.deviceId)).toBe("free");
     await pool.bindOrReuseDeviceSession(
       "session-2",
       original.deviceId,
@@ -3783,6 +3837,43 @@ test("a cancelled Android recovery does not spend the crash-loop budget (#7545)"
     await expect(secondRecovery).resolves.toBe("recovered");
     expect(manager.startedDevices).toHaveLength(1);
   } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("holder stop during detached ADB-reset recovery leaves no restart handoff", async () => {
+  const { timer, sessions, pool, captured, persistence, manager } = resetStopFixture;
+  const detached = await pool.detachAdbServerResetCohort([captured]);
+  try {
+    pool.markIntentionalShutdown(original.deviceId);
+    const kill = manager.nextKillAccepted();
+    const recovery = pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
+      original.deviceId,
+      detached.devices[0],
+    );
+    await kill;
+    manager.bootedDevices = [];
+    timer.advanceTime(1_000);
+    await expect(recovery).resolves.toBe(false);
+    expect((await persistence.getSession?.("session"))?.release_reason).toBe("explicit-release");
+    expect(sessions.getSession("session")).toBeNull();
+    await pool.releaseAdbServerResetCohortReservations(detached.devices);
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    expect(pool.genericAvailability(original.deviceId)).toBe("free");
+    await expect(
+      pool.bindOrReuseDeviceSession(
+        "session-2",
+        original.deviceId,
+        "android",
+        image,
+        undefined,
+        original,
+      ),
+    ).resolves.toBe("session-2");
+  } finally {
+    await pool.releaseAdbServerResetCohortReservations(detached.devices);
+    pool.releaseDeviceClaimsForShutdown();
     sessions.stopCleanupTimer();
   }
 });

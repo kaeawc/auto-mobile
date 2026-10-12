@@ -1,4 +1,5 @@
 import type { FeatureFlagKey } from "../models/FeatureFlagDefinitions";
+import { readBooleanFlag } from "./flagTokens";
 
 /**
  * Config plumbing for the MCP output-context reduction effort (issue #2756).
@@ -107,15 +108,17 @@ export function parseOutputReductionFlags(
   };
   for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
     if (spec.field === "actionsCompactMetadata") {
-      if (spec.disableCli && args.includes(spec.disableCli)) {
+      const disabled = spec.disableCli ? readBooleanFlag(args, [spec.disableCli]) : undefined;
+      const enabled = readBooleanFlag(args, [spec.cli]);
+      if (disabled === true) {
         flags.actionsCompactMetadata = false;
-      } else if (args.includes(spec.cli)) {
-        flags.actionsCompactMetadata = true;
+      } else if (enabled !== undefined) {
+        flags.actionsCompactMetadata = enabled;
       } else if (env[spec.env] === "0" || env[spec.env] === "1") {
         flags.actionsCompactMetadata = env[spec.env] === "1";
       }
     } else {
-      flags[spec.field] = args.includes(spec.cli) || env[spec.env] === "1";
+      flags[spec.field] = readBooleanFlag(args, [spec.cli]) ?? env[spec.env] === "1";
     }
   }
   return flags;

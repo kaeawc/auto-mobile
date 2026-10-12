@@ -17,23 +17,26 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 
 ## Feature support
 
-| Feature                                                                  | iOS simulator                                                                                                        |
-| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `show`, `dismiss`, `status`, `awaitEvent`; fullscreen, floating, sheet   | Supported                                                                                                            |
-| Replace in place, and `reset: true` to start fresh                       | Supported (`prototype_show_in_place_v1`)                                                                             |
-| Element and bounds anchors                                               | Supported, in points (`prototype_anchor_v1`); see [Anchors](#anchors)                                                |
-| `pressScale`, motion, `visibleWhen`, state and actions, assets and fonts | Supported                                                                                                            |
-| Material component nodes, dialog, snackbar, pickers                      | Supported; see [Material components](#material-components)                                                           |
-| Reusable `components` / `use` nodes (#11053)                             | Supported: the host expands them before sending, so the agent only sees plain nodes                                  |
-| Prototype hidden from `layer: "app"` observe screenshots (`target`)      | Supported (#10943, #10988); the host restores it after capture                                                       |
-| `display` selector                                                       | Refused: a simulator has one screen                                                                                  |
-| `window.layer: "app"`                                                    | Accepted and ignored, silently: the window level is fixed at alert + 1 (decision 3)                                  |
-| `window.persistence: "device"`                                           | Refused: the agent lives in the app process and dies with it                                                         |
-| `inspect`                                                                | Supported (`prototype_inspect_v1`); see [Inspect](#inspect)                                                          |
-| Idle TTL and dismissal on host disconnect                                | Supported; see [Expiry](#expiry). Reasons `user`, `agent`, `ttl`, `disconnect`                                       |
-| Per-mode colours and images, gradients, role scrims (#11220)             | Supported, not yet device-verified (`prototype_theme_modes_v1`); see [Light and dark values](#light-and-dark-values) |
-| Bottom sheet lifting above the keyboard                                  | Supported, not yet device-verified; see [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard)              |
-| Foreground scoping to the shown-over app                                 | Not needed: the agent lives in the app, so backgrounding the app hides its window                                    |
+| Feature                                                                               | iOS simulator                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `show`, `dismiss`, `status`, `awaitEvent`; fullscreen, floating, sheet                | Supported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Replace in place, and `reset: true` to start fresh                                    | Supported (`prototype_show_in_place_v1`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Element and bounds anchors                                                            | Supported, in points (`prototype_anchor_v1`); see [Anchors](#anchors)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `pressScale`, motion, `visibleWhen`, state and actions, assets and fonts              | Supported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Material component nodes, dialog, snackbar, pickers                                   | Supported; see [Material components](#material-components)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Reusable `components` / `use` nodes (#11053)                                          | Supported: the host expands them before sending, so the agent only sees plain nodes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Prototype hidden from `layer: "app"` observe screenshots (`target`)                   | Supported (#10943, #10988); the host restores it after capture                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `display` selector                                                                    | Refused: a simulator has one screen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `window.layer: "app"`                                                                 | Accepted and ignored, silently: the window level is fixed at alert + 1 (decision 3)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `window.persistence: "device"`                                                        | Refused: the agent lives in the app process and dies with it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `inspect`                                                                             | Supported (`prototype_inspect_v1`); see [Inspect](#inspect)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Idle TTL and dismissal on host disconnect                                             | Supported; see [Expiry](#expiry). Reasons `user`, `agent`, `ttl`, `disconnect`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Per-mode colours and images, gradients, role scrims (#11220)                          | Supported, not yet device-verified (`prototype_theme_modes_v1`); see [Light and dark values](#light-and-dark-values)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Appearance override, inference, live re-theme, reported mode (#11222)                 | Supported, not yet device-verified (`prototype_appearance_v1`); see [Appearance](#appearance)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Bottom sheet lifting above the keyboard                                               | Supported, not yet device-verified; see [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Style `weight`, `minWidth`/`maxWidth`/`minHeight`/`maxHeight`, `aspectRatio` (#11543) | Supported, not yet device-verified: sized by `PrototypeSizing` in Android's order (bounds, then `width`/`height`, then aspect ratio); a weight takes exactly its share of a `row`/`column`'s main axis and beats that axis's size and bounds, and is ignored outside a row or column; `min` wins when it exceeds `max`; content on an axis with no authored size (or `wrap`) is centred in the box a min bound grew, as `wrapContentWidth()`/`wrapContentHeight()` do, while an explicit `width`/`height`/`fill` keeps the node's alignment; weighted stacks mirror under RTL via SwiftUI's own Layout mirroring; sizes are fractional points, not rounded to pixels |
+| Non-scalar state values (`null`, array, object)                                       | Refused at `show`, as Android and the host schema do: state is string, number or boolean only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Foreground scoping to the shown-over app                                              | Not needed: the agent lives in the app, so backgrounding the app hides its window                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 ## Open decisions
 
@@ -106,6 +109,20 @@ screenshots and video recording all see the prototype the same way they see app 
 - **Structural limits are re-checked.** The agent does not validate a spec, but it refuses one
   whose expanded tree passes the node (2000), depth (24) or `repeat` item (128) limit of
   `schemas/prototype-spec-contract.json` before expanding it (#11049).
+- **Every state write is validated.** A tap, a control's own write, text-field typing and
+  `setStates` all go through one validator (`PrototypeStateValidator`) with Android's binding
+  rules, and a rejected interaction changes nothing and emits nothing (#11408, #11551, #11562).
+  A rejected edit also redraws the text field so it shows the accepted text again. Android
+  versions each field's text (`textEpochs`) to drop edits typed against replaced text; the iOS
+  field binds the live state on the main actor, so there is no in-flight stale edit to drop.
+- **Spec byte cap (difference from Android).** Android re-encodes the whole spec, state
+  included, after each write and rejects one over `MAX_PROTOTYPE_SPEC_BYTES` (1 MiB of UTF-8).
+  The agent keeps no raw spec bytes, so it measures the shown spec's size outside `state` once,
+  from the `show_prototype` request's own `spec` (re-serialized, so whitespace is not counted),
+  and adds the candidate state's JSON size to it on each write. A rejection (`Spec byte limit
+  exceeded`) is therefore the same up to a few bytes of encoder difference (number spelling,
+  default fields Kotlin re-emits). A session built without a request (unit tests) counts the
+  state alone.
 
 ## Entry point: `launchApp { prototype: true }`
 
@@ -153,6 +170,9 @@ is simulator-only and device launches will fail to load it.
 
 ## Differences from Android
 
+- Numbers in `{key}` text and `repeat` bindings render exactly as the host's `renderScalar` does
+  (`PrototypeScalarText`): integral values as exact plain digits at any magnitude (`-0` is `0`), all
+  others as JavaScript `String(number)` (`1e-7`, `1.5e-7`, `0.30000000000000004`).
 - `prototype` on iOS has no `showVariants` and no `update` action (removed by owner decision).
   Showing a spec with an id that is already shown updates it in place, keeping each pager's page;
   `reset: true` starts it fresh (the agent advertises `prototype_show_in_place_v1`, and the host refuses
@@ -214,11 +234,8 @@ per-mode spec forms. The rules below are the Core target's (`PrototypeModeValue`
 `PrototypePalette`, `PrototypeGradient`, `PrototypeThemeModes`), covered by `swift test`; the
 drawing itself is not yet device-verified.
 
-**Which mode.** One mode is resolved per shown prototype, by `PrototypePalette.make`, and every
-per-mode value follows it: explicit `theme.mode`, else the luminance of the flat
-`theme.colors.background` (else `surface`) override, else the appearance SwiftUI reports for the
-prototype window. A spec without a `theme` follows that appearance too. Inference from an authored
-background, a pinned appearance and live re-theming are #11222.
+**Which mode.** One mode is resolved per shown prototype, and every per-mode value follows it. The
+order, and what the agent reports about it, is in [Appearance](#appearance).
 
 **Colours.** Every colour slot takes a hex value, a role name, or `{light, dark}` whose sides are
 each a hex value or a role: `style.background`, `style.color`, `style.shadowColor`,
@@ -275,6 +292,72 @@ fixture for these forms fails on iOS (`PrototypeThemeModesTests`). Two things st
 alone: the image-count limit (the agent has none, and a spec over it draws correctly), and a
 single unknown value in a slot that predates the capability (a style colour, a border or shadow
 colour), which draws that slot's fallback as before.
+
+## Appearance
+
+The agent advertises `prototype_appearance_v1` (#11222, part of #11215). The rules are the Core
+target's (`PrototypeAppearance`, `PrototypeSession`), covered by `swift test`; the UIKit side is not
+yet device-verified.
+
+**Resolution order.** The same on Android (#11215 D4, owner decision 2026-10-10). The first that
+applies decides the mode, and names the `source` the agent reports:
+
+| Step | Decides                                                            | `source`             |
+| ---- | ------------------------------------------------------------------ | -------------------- |
+| 1    | `theme.mode` `light` or `dark`                                     | `explicit`           |
+| 2    | Luminance of the flat `theme.colors.background` (else `surface`)   | `roleLuminance`      |
+| 3    | The first opaque authored background on the root's leading chain   | `authoredBackground` |
+| 4    | The system setting: the show's `appearance` when `light` or `dark` | `override`           |
+|      | else the simulator's appearance                                    | `system`             |
+
+The override replaces the simulator's setting only, so it never beats what the spec itself says: a
+spec with no mode and a white root shown with `appearance: "dark"` is light, from
+`authoredBackground`. `override` is reported only when the override decided the mode.
+`theme.mode: "system"` asks for the system setting outright, so it skips steps 2 and 3. A surface
+is dark when its luminance is below 0.179, as on Android.
+
+**Authored background.** Step 3 is Android's `prototypeAuthoredTheme`. The leading chain is the
+root, then its first visible child, and so on; a pager continues into its current page, and a
+single-child node into its `child`. A node hidden by `visibleWhen` paints nothing and is skipped.
+The background is the node's style with every matching `styleWhen` merged in. Only a single hex
+value with alpha of at least 0.99 decides: a role name and a `{light, dark}` pair depend on the
+mode, so neither can infer it, and the search continues below them. `theme.colors.light` / `dark`
+never take part either. Unlike Android, the inferred background is not painted over the scheme's
+surface roles; it only picks the mode.
+
+**Override.** `show_prototype` takes a request-level `appearance`: `device` (the default, also
+when the field is absent), `light` or `dark`. It belongs to that show: a later show without it
+follows the simulator again. Any other value fails the show with
+`appearance: Expected device, light or dark` and leaves the shown prototype untouched. The
+simulator itself is not changed, so the app behind keeps its own appearance.
+
+**One mode for everything.** `PrototypeSession.appearance` is derived from the spec, the current
+state and pages, the override and the simulator's appearance. The palette, the host chrome (the
+dismiss bar and close chip), scrims, per-mode colours and images, the SwiftUI `colorScheme` and
+the window's UIKit trait all read that one value. A state change that changes the inferred
+background (a `styleWhen`, a `visibleWhen`, a pager page) therefore moves all of them together.
+
+**UIKit trait.** The prototype window's `overrideUserInterfaceStyle` is set to the resolved mode,
+so UIKit-backed pieces (a text field's keyboard, dynamic `UIColor`s) match what SwiftUI draws.
+Because the window is overridden, the simulator's appearance is read from the window scene's trait
+collection instead, and the agent does not adopt an app window's own override (#11215 Q1).
+
+**Live re-theme and the event.** The agent registers for `UITraitUserInterfaceStyle` changes on
+the window scene. A change re-resolves the shown prototype, keeping its state and pages. Whenever
+the resolved mode of a shown prototype changes, the agent pushes exactly one `prototype_event`
+with `kind: "appearance_changed"`, `name: null` and `payload: {mode, source}`, sequenced like any
+other event. That covers the simulator flipping, and a state change that moves the inferred
+background; for the latter the event follows the `change` or `page_changed` that caused it
+(`PrototypeSession.transition`). There is no event when the mode stays as it was (an explicit
+mode, a repeated report, a state change that leaves the leading background's polarity alone), for
+the show itself (its result reports the mode), or with nothing shown.
+
+**Report.** A successful `show_prototype` result and `get_prototype_status`'s `status` carry
+`appearance: {mode, source, deviceDark}`: `mode` is `light` or `dark`, `source` is one of the five
+names above, and `deviceDark` is the simulator's own appearance whatever decided the mode. The
+agent states it in each reply; the host's `prototype` `status` action is host-local and reports
+only `mode` and `source`, because a pinned mode sends no event when the appearance flips (#11416). The
+status has no `appearance` while nothing is shown.
 
 ## Anchors
 

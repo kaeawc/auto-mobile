@@ -30,6 +30,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.serializer
 
 private val DAEMON_PATHS_LOG = LoggerFactory.getLogger("DaemonSocketPaths")
@@ -687,15 +688,19 @@ class McpDaemonClient(
     }
   }
 
+  /** A failure frame's code, `retryable` and `details.remainingMs`, kept on the input result. */
+  private fun DaemonResponse.toFailedInputResult(method: String): InputActionResult =
+    InputActionResult(
+      action = method,
+      success = false,
+      error = error,
+      code = code?.contentOrNull,
+      retryable = retryable,
+      retryAfterMs = (details?.get("remainingMs") as? JsonPrimitive)?.longOrNull,
+    )
+
   private fun DaemonResponse.toInputActionResult(method: String): InputActionResult {
-    if (!success) {
-      return InputActionResult(
-        action = method,
-        success = false,
-        error = error,
-        code = code?.contentOrNull,
-      )
-    }
+    if (!success) return toFailedInputResult(method)
     val body =
       result
         ?: return InputActionResult(
@@ -961,12 +966,7 @@ class McpDaemonClient(
     // after 5s than sit dead for a minute.
     val response = sendRequest(method, withInputSession(params), timeoutMs = inputRequestTimeoutMs)
     if (!response.success) {
-      return InputActionResult(
-        action = method,
-        success = false,
-        error = response.error,
-        code = response.code?.contentOrNull,
-      )
+      return response.toFailedInputResult(method)
     }
     val result =
       response.result
@@ -1406,6 +1406,13 @@ data class DaemonResponse(
    * `heartbeat-timeout`, `cleanup-expired`); absent for a UUID it never issued (#10730).
    */
   val releaseReason: String? = null,
+  /** Whether retrying the same call can succeed (failure frames, `src/daemon/types.ts`). */
+  val retryable: Boolean? = null,
+  /**
+   * Structured context on a failure frame: `deviceId`, `boundSessionUuid`, `sessionUuid`, `reason`,
+   * and `remainingMs` for a suspect session.
+   */
+  val details: JsonObject? = null,
 )
 
 @Serializable private data class DaemonCapabilitiesResult(val capabilities: List<String>)

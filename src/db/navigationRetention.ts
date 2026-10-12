@@ -60,6 +60,7 @@
 // all), and the active-row lookup is a relational max-join, never a per-row OR
 // chain. See the per-helper notes below.
 
+import { readOptionalEnvPositiveInteger } from "../utils/envNumbers";
 import { sql, type Kysely } from "kysely";
 import type { Database } from "./types";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
@@ -176,11 +177,7 @@ function readPositiveIntEnv(
   name: string,
   max: number = Number.MAX_SAFE_INTEGER,
 ): number | undefined {
-  const raw = process.env[name]?.trim();
-  if (!raw || !/^\d+$/.test(raw)) {
-    return undefined;
-  }
-  return sanitizePositiveInt(Number.parseInt(raw, 10), max);
+  return sanitizePositiveInt(readOptionalEnvPositiveInteger(name, undefined), max);
 }
 
 /**

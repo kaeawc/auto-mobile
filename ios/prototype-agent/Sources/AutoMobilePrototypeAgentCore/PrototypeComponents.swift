@@ -144,14 +144,14 @@ extension PrototypeSession {
     /// `change` when it moved, then runs the node's actions. A non-string key leaves it inert.
     mutating func choose(key: String, value: String, then actions: [PrototypeAction]) -> [PrototypeEvent] {
         guard isShown, case .string? = state[key] else { return [] }
-        return change(key: key, value: .string(value)) + run(actions)
+        return control(own: [(key, .string(value))], then: actions)
     }
 
     /// A `slider` drag: stores the already-snapped number, then runs the node's actions. An
     /// unchanged value, or a key that no longer holds a number, does nothing.
     mutating func slide(key: String, value: Double, then actions: [PrototypeAction]) -> [PrototypeEvent] {
         guard isShown, case let .number(stored)? = state[key], stored != value else { return [] }
-        return change(key: key, value: .number(value)) + run(actions)
+        return control(own: [(key, .number(value))], then: actions)
     }
 
     /// A `timePicker` change: both keys are stored together and reported by one `change` event
@@ -168,20 +168,19 @@ extension PrototypeSession {
     {
         guard isShown, state[hourKey]?.numberValue != nil, state[minuteKey]?.numberValue != nil else { return [] }
         let next: [(String, JSONValue)] = [(hourKey, .number(Double(hour))), (minuteKey, .number(Double(minute)))]
-        let moved = next.filter { state[$0.0] != $0.1 }
-        guard !moved.isEmpty else { return [] }
-        return setStates(moved) + run(actions)
+        guard next.contains(where: { state[$0.0] != $0.1 }) else { return [] }
+        return control(own: next, then: actions)
     }
 
     /// A `dialog` or `snackbar` button, or the dialog scrim: closes the modal by writing the
     /// opposite of `openWhen.equals` (emitting `change`), then runs the button's actions.
     mutating func closeModal(_ node: PrototypeNode, then actions: [PrototypeAction] = []) -> [PrototypeEvent] {
         guard isShown else { return [] }
-        var events: [PrototypeEvent] = []
+        var own: [(String, JSONValue)] = []
         if let (key, equals) = node.openCondition, state[key] == .bool(equals) {
-            events = change(key: key, value: .bool(!equals))
+            own = [(key, .bool(!equals))]
         }
-        return events + run(actions)
+        return control(own: own, then: actions)
     }
 }
 

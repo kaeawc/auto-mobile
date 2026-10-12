@@ -15,6 +15,11 @@ import {
 import type { SlotKey } from "../../src/daemon/managedSlots/slotRegistry";
 import { assertManagedConnectionPlainToolCall } from "../../src/server/managedConnectionToolGate";
 import type { BootedDevice } from "../../src/models";
+import {
+  DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+  type InputDeviceOwnedError,
+} from "../../src/daemon/inputDeviceOwnership";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -214,6 +219,94 @@ describe("ToolRegistry managed-slot enforcement (#11178)", () => {
       await call("readProbe", { platform: "ios", deviceId: free.deviceId, __mcpSessionId: mcpA });
       await call("readProbe", { platform: "ios", deviceId: slotB.deviceId, __mcpSessionId: mcpA });
       expect(handled).toEqual([`read:${free.deviceId}`, `read:${slotB.deviceId}`]);
+    });
+
+    // #11397: a plan step or nested tool call never passes the MCP ingress and carries no socket
+    // session id; it is confined by the slot session it runs on.
+    test("an internal call on its slot session may not reach lifecycle tools", async () => {
+      ToolRegistry.register("getAndroid", "Acquire probe", z.object({}).passthrough(), async () => {
+        handled.push("acquire");
+        return { success: true };
+      });
+      const internal = async (sessionUuid: string): Promise<unknown> => {
+        try {
+          return await ToolRegistry.callInternal("getAndroid", {}, undefined, undefined, {
+            sessionUuid,
+          });
+        } catch (error) {
+          return error;
+        }
+      };
+
+      const refused = await internal(execA);
+      expect(refused).toBeInstanceOf(DeviceOutsideManagedSlotsError);
+      expect((refused as DeviceOutsideManagedSlotsError).toPayload()).toMatchObject({
+        code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
+        reason: "tool",
+        action: "getAndroid",
+      });
+      expect(handled).toEqual([]);
+
+      // A generic session's plan step is not confined.
+      await sessionManager.createSession("generic-session", free.deviceId, "ios");
+      await internal("generic-session");
+      expect(handled).toEqual(["acquire"]);
+    });
+
+    // #11469: a sessionless plan's steps run for the managed connection that called executePlan.
+    test("a sessionless plan step may name its slot session, not one another connection owns", async () => {
+      const asManagedConnection = (sessionUuid: string): Promise<unknown> =>
+        runWithToolSelectionContext({ callerMcpSessionId: mcpA }, () =>
+          ToolRegistry.callInternal("controlProbe", { platform: "ios", sessionUuid }),
+        ).catch((error: unknown) => error);
+      await DaemonState.getInstance()
+        .getDevicePool()
+        .bindOrReuseDeviceSession(
+          "foreign-session",
+          free.deviceId,
+          "ios",
+          undefined,
+          undefined,
+          undefined,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          "mcp-socket-other",
+        );
+
+      const refused = await asManagedConnection("foreign-session");
+      expect((refused as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(handled).toEqual([]);
+
+      await asManagedConnection(execA);
+      expect(handled).toEqual([`control:${slotA.deviceId}`]);
+    });
+
+    test("an internal call on its slot session may not control an unassigned device", async () => {
+      let refused: unknown;
+      try {
+        await ToolRegistry.callInternal(
+          "controlProbe",
+          { platform: "ios", deviceId: free.deviceId },
+          undefined,
+          undefined,
+          { sessionUuid: execA },
+        );
+      } catch (error) {
+        refused = error;
+      }
+      expect(refused).toBeInstanceOf(DeviceOutsideManagedSlotsError);
+      expect((refused as DeviceOutsideManagedSlotsError).toPayload()).toMatchObject({
+        reason: "device",
+        deviceId: free.deviceId,
+      });
+      expect(handled).toEqual([]);
+
+      await ToolRegistry.callInternal("controlProbe", {}, undefined, undefined, {
+        sessionUuid: execA,
+      });
+      expect(handled).toEqual([`control:${slotA.deviceId}`]);
     });
 
     test("may not acquire, start, provision or delete devices, or retarget setActiveDevice", () => {

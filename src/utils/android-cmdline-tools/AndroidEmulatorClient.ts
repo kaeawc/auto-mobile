@@ -16,6 +16,7 @@ import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../mod
 import { toActionableError } from "../../models/ActionableError";
 import { EmulatorLaunchCancelledError } from "../../models/EmulatorLaunchCancelledError";
 import type { AdmitColdBoot, BootAdmission } from "../../models/BootAdmission";
+import { spawnUnderBootAdmission, type OnAdmittedSpawn } from "./spawnUnderBootAdmission";
 import { AdbClientFactory, unadmittedAdbClientFactory } from "./AdbClientFactory";
 import { AdbClient } from "./AdbClient";
 import {
@@ -1587,7 +1588,13 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     }
     let states: AdbDeviceState[];
     try {
-      states = (await this.adbFactory.create(null).getDeviceStates?.(options)) ?? [];
+      // The candidates are devices this host held, so adb existed: an executable that has since
+      // vanished (replaced mid-upgrade) is a probe that could not ask, never "listed nowhere"
+      // (#11643). Callers with no candidates return above and never reach a missing adb.
+      states =
+        (await this.adbFactory
+          .create(null)
+          .getDeviceStates?.({ ...options, throwOnMissingAdb: true })) ?? [];
     } catch (error) {
       throw new AndroidOfflineProbeError(`Device-state probe failed: ${errorMessage(error)}`, {
         cause: error,
@@ -2992,9 +2999,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   }
 
   /**
-   * Holds a boot admission (#11181) across the spawn: freed when the spawn fails or
-   * finds a duplicate, handed off to the reserved serial when an emulator starts,
-   * and freed early if that emulator exits before adb lists it.
+   * Holds a boot admission (#11181) across the spawn: handed off to the reserved serial the
+   * moment the emulator process exists, freed when the spawn fails or finds a duplicate, and
+   * freed early if that emulator exits before adb lists it.
    */
   private async spawnWithBootAdmission(
     avdName: string,
@@ -3007,19 +3014,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       return await this.spawnAdmittedEmulator(avdName, perf, args, options);
     }
     options.onAdmitted?.(admission);
-    try {
-      const launch = await this.spawnAdmittedEmulator(avdName, perf, args, options);
-      if (launch.process) {
-        launch.process.once("exit", () => admission.release());
-        admission.handOff(launch.reservedDeviceId ?? options.expectedDeviceId);
-      } else {
-        admission.release();
-      }
-      return launch;
-    } catch (error) {
-      admission.release();
-      throw error;
-    }
+    return await spawnUnderBootAdmission(admission, options.expectedDeviceId, (onAdmittedSpawn) =>
+      this.spawnAdmittedEmulator(avdName, perf, args, options, onAdmittedSpawn),
+    );
   }
 
   private async spawnAdmittedEmulator(
@@ -3027,6 +3024,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
     args: string[],
     options: EmulatorProcessOptions,
+    onAdmittedSpawn?: OnAdmittedSpawn<ChildProcess>,
   ): Promise<EmulatorProcessLaunch & { reservedDeviceId?: string }> {
     const {
       onSpawn,
@@ -3057,7 +3055,11 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       perf,
       args,
       reservedEmulator,
-      onSpawn,
+      // The capacity slot is handed off before the launch owner can act on the child.
+      onSpawn: (spawned) => {
+        onAdmittedSpawn?.(spawned, reservedEmulator?.deviceId);
+        onSpawn?.(spawned);
+      },
     });
     // The spawn resolves without a process only when the emulator exited as a duplicate of one
     // started outside this process.
@@ -4006,6 +4008,8 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       const states = await adb.getDeviceStates({
         timeoutMs: options.timeoutMs,
         signal: options.signal,
+        // A vanished adb cannot say the serial is gone either (#11643).
+        throwOnMissingAdb: true,
       });
       return states.find((state) => state.deviceId === device.deviceId)?.state;
     } catch (error) {

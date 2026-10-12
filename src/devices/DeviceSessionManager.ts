@@ -5,6 +5,7 @@ import {
   type DeviceExecutionBinding,
 } from "../server/deviceExecutionBinding";
 import { errorMessage } from "../utils/describeUnknownError";
+import { isIosSimulatorAlreadyStoppedError } from "../utils/ios-cmdline-tools/simulatorStateErrors";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import {
   ActionableError,
@@ -377,6 +378,10 @@ export function isScanAuthoritativeFor(scan: ConnectedPlatformScan, device: Boot
 
 export type DeviceReadinessLevel = "booted" | "automationReady";
 
+/** Same cadence as the deleteDevice absence verification (DEVICE_SHUTDOWN_POLL_INTERVAL_MS). */
+const CREATED_IOS_ABSENCE_POLL_MS = 1_000;
+const CREATED_IOS_ABSENCE_TIMEOUT_MS = 10_000;
+
 /**
  * Ordering of {@link DeviceReadinessLevel} by how much setup each represents
  * having achieved. `SessionManager.setDeviceReadiness` (#6227 round 7) uses
@@ -398,6 +403,14 @@ export type ResolvedDeviceIdentity = Pick<BootedDevice, "deviceId" | "name" | "o
 
 export interface DeviceReadyOptions {
   sessionId?: string;
+  /**
+   * What the caller will do with the device. A `read` gets only the readiness reading needs: no
+   * current-device pin, no appearance or settings write (#11641). Defaults to `control`.
+   * A read may boot only the `deviceId` supplied on this call, after alias resolution.
+   * Platform-only selection, a setActiveDevice pin, and a cached current device are not
+   * explicit IDs. Session-bound calls keep control readiness (toolRegistry does not mark them read).
+   */
+  intent?: "read" | "control";
   skipCtrlProxyDownload?: boolean;
   signal?: AbortSignal;
   /** Reuses device discovery already started by the current target resolution. */
@@ -778,6 +791,22 @@ export class DeviceSessionManager implements DeviceSessionManager {
     const iosDevices = connectedPlatforms.filter((device) => device.platform === "ios");
     logger.info(`Found ${iosDevices.length} ios devices`);
 
+    const readDevice = await this.resolveReadinessReadTarget(
+      platform,
+      providedDeviceId,
+      scan,
+      options,
+    );
+    if (readDevice) {
+      return await this.finishReadinessSelection(
+        readDevice,
+        readDevice.platform,
+        "provided",
+        scan,
+        options,
+      );
+    }
+
     const { platformDevices, resolvedPlatform } = this.resolveReadinessPlatform(
       platform,
       androidDevices,
@@ -788,6 +817,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     let selectedDevice: BootedDevice | undefined;
     let deviceVerified = false;
     let deviceSource: "provided" | "current" | "auto" = "auto";
+    let staleCurrentDeviceId: string | undefined;
 
     // If a specific device is provided, verify it exists on the correct platform
     if (providedDeviceId) {
@@ -809,14 +839,18 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
     // If we have a current device for the requested platform, verify it's still ready
     if (!selectedDevice && this.hasCurrentReadinessDevice(platform, resolvedPlatform)) {
+      const currentDeviceId = this.currentDevice!.deviceId;
       selectedDevice = await this.verifyCurrentReadinessDevice(
         platformDevices,
         resolvedPlatform,
+        scan,
         options,
       );
       if (selectedDevice) {
         deviceVerified = true;
         deviceSource = "current";
+      } else {
+        staleCurrentDeviceId = currentDeviceId;
       }
     }
 
@@ -825,7 +859,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
       logger.info(
         `[DeviceSessionManager] No current device, finding or starting device for platform ${resolvedPlatform}`,
       );
-      selectedDevice = await this.findOrStartDevice(resolvedPlatform, options);
+      selectedDevice = await this.findOrStartReadinessDevice(
+        resolvedPlatform,
+        scan,
+        options,
+        staleCurrentDeviceId,
+      );
       deviceVerified = true;
       deviceSource = "auto";
     }
@@ -852,6 +891,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
       selectedDevice,
       resolvedPlatform,
       deviceSource,
+      scan,
       options,
     );
   }
@@ -870,6 +910,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     selectedDevice: BootedDevice,
     resolvedPlatform: Platform,
     deviceSource: "provided" | "current" | "auto",
+    scan: ConnectedPlatformScan,
     options?: DeviceReadyOptions,
   ): Promise<BootedDevice> {
     // Safety check: ensure the selected device's platform matches the resolved platform.
@@ -881,21 +922,23 @@ export class DeviceSessionManager implements DeviceSessionManager {
           `has platform '${selectedDevice.platform}' but resolved platform is '${resolvedPlatform}'. ` +
           `Discarding and finding correct platform device.`,
       );
-      selectedDevice = await this.findOrStartDevice(resolvedPlatform, options);
+      selectedDevice = await this.findOrStartReadinessDevice(resolvedPlatform, scan, options);
     }
 
     // A cancelled call (e.g. another session acquired the device, #10905) stops before each
     // device-mutating step: the current-device pin and the settings writes.
     options?.signal?.throwIfAborted();
-    this.setCurrentDevice(selectedDevice, resolvedPlatform);
-    if (deviceSource !== "current") {
-      await applyAppearanceOnConnect(
-        selectedDevice,
-        this.appearanceOnConnectDependencies,
-        resolveAppearanceSessionKey(options?.sessionId),
-      );
-      options?.signal?.throwIfAborted();
-      await disableStylusHandwriting(selectedDevice, this.adbFactory);
+    if (options?.intent !== "read") {
+      this.setCurrentDevice(selectedDevice, resolvedPlatform);
+      if (deviceSource !== "current") {
+        await applyAppearanceOnConnect(
+          selectedDevice,
+          this.appearanceOnConnectDependencies,
+          resolveAppearanceSessionKey(options?.sessionId),
+        );
+        options?.signal?.throwIfAborted();
+        await disableStylusHandwriting(selectedDevice, this.adbFactory);
+      }
     }
     logger.info(`[DeviceSessionManager] Using ${deviceSource} device: ${selectedDevice.deviceId}`);
     return selectedDevice;
@@ -933,6 +976,214 @@ export class DeviceSessionManager implements DeviceSessionManager {
       );
     }
     return providedDevice;
+  }
+
+  private assertReadinessDiscoveryComplete(
+    platform: SomePlatform,
+    scan: ConnectedPlatformScan,
+  ): void {
+    const platforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
+    for (const candidate of platforms) {
+      if (!scan.scanned[candidate]) {
+        throw new BootedDeviceDiscoveryIncompleteError(candidate, undefined);
+      }
+    }
+  }
+
+  private async resolveReadinessReadTarget(
+    platform: SomePlatform,
+    providedDeviceId: string | undefined,
+    scan: ConnectedPlatformScan,
+    options?: DeviceReadyOptions,
+  ): Promise<BootedDevice | undefined> {
+    if (options?.intent !== "read") {
+      return undefined;
+    }
+    if (!providedDeviceId) {
+      // Stop before current-device verification can reserve a lifecycle lease for a stale target.
+      this.requireRunningReadinessDevice(platform, scan);
+      return undefined;
+    }
+    if (
+      scan.devices.some(
+        (device) =>
+          device.deviceId === providedDeviceId &&
+          (platform === "either" || device.platform === platform),
+      )
+    ) {
+      return undefined;
+    }
+    // Resolve a stopped image before mixed-platform ambiguity: the call names its own platform.
+    return await this.bootProvidedReadinessImage(platform, providedDeviceId, scan, options);
+  }
+
+  private requireRunningReadinessDevice(
+    platform: SomePlatform,
+    scan: ConnectedPlatformScan,
+    excludedDeviceId?: string,
+  ): BootedDevice {
+    const devices = scan.devices.filter(
+      (candidate) =>
+        (platform === "either" || candidate.platform === platform) &&
+        candidate.deviceId !== excludedDeviceId,
+    );
+    // Preserve findOrStartIosDevice's deterministic first-running selection.
+    if (platform === "ios") {
+      devices.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
+    }
+    const device = devices[0];
+    if (device) {
+      return device;
+    }
+    // An either-platform read can establish absence on any completed platform.
+    if (platform !== "either" || !Object.values(scan.scanned).some(Boolean)) {
+      this.assertReadinessDiscoveryComplete(platform, scan);
+    }
+    const label =
+      platform === "either" ? "Android or iOS" : platform === "android" ? "Android" : "iOS";
+    throw new ActionableError(
+      `No ${label} device is running, so there is nothing to read. ` +
+        "Start one with startDevice or provisionDevice, or pass a deviceId.",
+    );
+  }
+
+  /** Every readiness fallback, including platform mismatch, observes the read's no-implicit-boot rule. */
+  private async findOrStartReadinessDevice(
+    platform: Platform,
+    scan: ConnectedPlatformScan,
+    options?: DeviceReadyOptions,
+    excludedDeviceId?: string,
+  ): Promise<BootedDevice> {
+    if (options?.intent !== "read") {
+      return await this.findOrStartDevice(platform, options);
+    }
+    const device = await this.resolveAndroidReadinessIdentity(
+      this.requireRunningReadinessDevice(platform, scan, excludedDeviceId),
+      options.signal,
+    );
+    await this.withLifecycleStart(lifecycleIdentityForDevice(device), options, async (signal) => {
+      if (platform === "android") {
+        AndroidCtrlProxyClient.resumeAfterDeviceStart(device.deviceId);
+      } else {
+        IOSCtrlProxyClient.resumeAfterDeviceStart(device.deviceId);
+      }
+      await this.verifyDevice(device.deviceId, platform, { ...options, signal }, device);
+    });
+    return device;
+  }
+
+  private async listProvidedReadinessImages(
+    platform: Platform,
+    options: DeviceReadyOptions,
+  ): Promise<DeviceInfo[]> {
+    if (platform === "ios" && !this.simctl) {
+      throw new BootedDeviceDiscoveryIncompleteError("ios", {
+        code: "unavailable",
+        message: "iOS simulator tools not available",
+        retryable: true,
+      });
+    }
+    const controller = new AbortController();
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
+    const timeoutError = new BootedDeviceDiscoveryIncompleteError(platform, {
+      code: "timeout",
+      message: "Named device image discovery timed out",
+      retryable: true,
+    });
+    try {
+      return await raceWithDeadline(
+        () =>
+          platform === "android"
+            ? this.deviceUtils.listDeviceImages("android", signal)
+            : this.simctl!.listSimulatorImages(undefined, { bypassCache: true, signal }),
+        {
+          timer: this.runnerReadinessTimer,
+          timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS,
+          signal: options.signal,
+          label: "Named device image discovery",
+          timeoutError: () => timeoutError,
+          onTimeout: () => controller.abort(timeoutError),
+        },
+      );
+    } catch (error) {
+      options.signal?.throwIfAborted();
+      if (error instanceof ActionableError) {
+        throw error;
+      }
+      throw new BootedDeviceDiscoveryIncompleteError(platform, {
+        code: "failed",
+        message: errorMessage(error),
+        retryable: true,
+      });
+    }
+  }
+
+  private async findProvidedReadinessImage(
+    platform: SomePlatform,
+    providedDeviceId: string,
+    scan: ConnectedPlatformScan,
+    options: DeviceReadyOptions,
+  ): Promise<DeviceInfo | undefined> {
+    if (platform !== "either") {
+      this.assertReadinessDiscoveryComplete(platform, scan);
+    }
+    const platforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
+    const inventories = await Promise.allSettled(
+      platforms.map((p) => this.listProvidedReadinessImages(p, options)),
+    );
+    options.signal?.throwIfAborted();
+    const images = inventories.flatMap((result) =>
+      result.status === "fulfilled" ? result.value : [],
+    );
+    const matches = images.filter((image) =>
+      image.platform === "android"
+        ? image.name === providedDeviceId
+        : image.deviceId === providedDeviceId,
+    );
+    const image = matches.length === 1 ? matches[0] : undefined;
+    // A match needs authoritative discovery only for its own platform. Without
+    // a match, an incomplete in-scope scan still cannot establish not-found.
+    this.assertReadinessDiscoveryComplete(image?.platform ?? platform, scan);
+    for (const [index, result] of inventories.entries()) {
+      if (result.status === "rejected" && scan.scanned[platforms[index]]) {
+        // Completed discovery with failed inventory cannot rule out an ambiguous ID.
+        throw result.reason;
+      }
+    }
+    return image;
+  }
+
+  private async bootProvidedReadinessImage(
+    platform: SomePlatform,
+    providedDeviceId: string,
+    scan: ConnectedPlatformScan,
+    options: DeviceReadyOptions,
+  ): Promise<BootedDevice> {
+    const image = await this.findProvidedReadinessImage(platform, providedDeviceId, scan, options);
+    if (
+      !image ||
+      image.isRunning !== false ||
+      (image.platform === "ios" && image.isAvailable === false)
+    ) {
+      // Keep the existing not-found text, even when ambient devices span both platforms.
+      return this.requireProvidedReadinessDevice(
+        platform,
+        scan.devices.filter((device) => platform === "either" || device.platform === platform),
+        providedDeviceId,
+      );
+    }
+    if (image.platform === "android") {
+      if (image.isRunningStateKnown === false) {
+        throw new AndroidBootedDeviceDiscoveryIncompleteError(
+          undefined,
+          `Cannot safely cold-boot Android AVD '${image.name}': its running state is unknown.`,
+        );
+      }
+      return await this.bootAndroidReadinessImage(image, options);
+    }
+    return await this.bootIosReadinessImage(image, options);
   }
 
   private findPinnedReadinessDevice(platformDevices: BootedDevice[]): BootedDevice | undefined {
@@ -1033,11 +1284,34 @@ export class DeviceSessionManager implements DeviceSessionManager {
     );
   }
 
+  private skipUndiscoveredReadinessCurrentDevice(
+    platformDevices: BootedDevice[],
+    scan: ConnectedPlatformScan,
+    options?: DeviceReadyOptions,
+  ): boolean {
+    if (
+      options?.intent === "read" &&
+      !platformDevices.some((device) => device.deviceId === this.currentDevice?.deviceId)
+    ) {
+      // A cached current device is not an explicit deviceId on this call.
+      if (isScanAuthoritativeFor(scan, this.currentDevice!)) {
+        this.currentDevice = undefined;
+        this.currentPlatform = undefined;
+      }
+      return true;
+    }
+    return false;
+  }
+
   private async verifyCurrentReadinessDevice(
     platformDevices: BootedDevice[],
     resolvedPlatform: Platform,
+    scan: ConnectedPlatformScan,
     options?: DeviceReadyOptions,
   ): Promise<BootedDevice | undefined> {
+    if (this.skipUndiscoveredReadinessCurrentDevice(platformDevices, scan, options)) {
+      return undefined;
+    }
     logger.info(
       `[DeviceSessionManager] Found current device: ${this.currentDevice!.deviceId}, verifying readiness`,
     );
@@ -1073,8 +1347,15 @@ export class DeviceSessionManager implements DeviceSessionManager {
         throw error;
       }
       logger.warn(`Current device ${this.currentDevice} is no longer ready: ${error}`);
+      const stillDiscovered = platformDevices.some(
+        (device) => device.deviceId === this.currentDevice?.deviceId,
+      );
       this.currentDevice = undefined;
       this.currentPlatform = undefined;
+      if (options?.intent === "read" && stillDiscovered) {
+        // Verification failure does not mean a discovered device stopped running.
+        throw error;
+      }
     }
     return undefined;
   }
@@ -1815,6 +2096,15 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
     // Start the first available AVD
     const deviceImage = availableImages[0];
+    return await this.bootAndroidReadinessImage(deviceImage, options, perf);
+  }
+
+  /** Shared exact-image launch; reads never substitute another AVD. */
+  private async bootAndroidReadinessImage(
+    deviceImage: DeviceInfo,
+    options?: DeviceReadyOptions,
+    perf = createGlobalPerformanceTracker(),
+  ): Promise<BootedDevice> {
     assertAndroidImageRunningStateKnown(deviceImage);
     logger.info(`Starting Android emulator ${deviceImage}...`);
     return await this.withLifecycleStart(
@@ -1909,14 +2199,96 @@ export class DeviceSessionManager implements DeviceSessionManager {
     );
     // Cancellation cleanup must not inherit an already-aborted request signal.
     const cleanupSignal = new AbortController().signal;
-    await this.simctl!.deleteSimulator(created.deviceId, { signal: cleanupSignal }).catch(
-      (deleteError) => {
-        logger.warn(
-          `[DeviceSessionManager] Failed to roll back created iOS simulator ` +
-            `'${created.name}' (${created.deviceId}): ${errorMessage(deleteError)}`,
-        );
-      },
-    );
+    const device: BootedDevice = {
+      name: created.name,
+      platform: "ios",
+      deviceId: created.deviceId,
+    };
+    let step = "retire runner";
+    try {
+      // Same order as the deleteDevice teardown: runner, shutdown, delete, verify absence.
+      await this.retireCreatedIosRunner(device);
+      step = "shut down";
+      await this.shutDownCreatedIosSimulator(device, cleanupSignal);
+      step = "delete";
+      await this.simctl!.deleteSimulator(created.deviceId, { signal: cleanupSignal });
+      step = "verify absence of";
+      await this.verifyCreatedIosSimulatorAbsent(created.deviceId, cleanupSignal);
+    } catch (cleanupError) {
+      // The caller's failure is what explains the request; a rollback error never replaces it.
+      const state = await this.readCreatedIosSimulatorState(created.deviceId, cleanupSignal);
+      logger.warn(
+        `[DeviceSessionManager] Failed to ${step} created iOS simulator ` +
+          `'${created.name}' (${created.deviceId}, state: ${state}); it may be left behind: ` +
+          errorMessage(cleanupError),
+        cleanupError,
+      );
+    }
+  }
+
+  /** Mirrors the teardown's pre-shutdown runner stop; a failure is logged, not fatal. */
+  private async retireCreatedIosRunner(device: BootedDevice): Promise<void> {
+    try {
+      // Fence the observer first so the runner's socket close cannot reconnect and reboot the simulator.
+      await IOSCtrlProxyClient.retireInstance(device.deviceId);
+      await this.provider.getIOSCtrlProxyManager(device).stop();
+    } catch (error) {
+      logger.warn(
+        `[DeviceSessionManager] Failed to stop CtrlProxy iOS for created simulator ` +
+          `${device.deviceId} before rollback: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
+  private async shutDownCreatedIosSimulator(
+    device: BootedDevice,
+    signal: AbortSignal,
+  ): Promise<void> {
+    try {
+      await this.simctl!.killSimulator(device, { signal });
+    } catch (error) {
+      if (!isIosSimulatorAlreadyStoppedError(error)) {
+        throw error;
+      }
+      // simctl reports the simulator is already Shutdown: the state the delete needs.
+      logger.debug(
+        `[DeviceSessionManager] ${device.deviceId} was already shut down: ${errorMessage(error)}`,
+      );
+    }
+  }
+
+  private async verifyCreatedIosSimulatorAbsent(udid: string, signal: AbortSignal): Promise<void> {
+    const deadlineMs = this.runnerReadinessTimer.now() + CREATED_IOS_ABSENCE_TIMEOUT_MS;
+    for (;;) {
+      const images = await this.simctl!.listSimulatorImages(undefined, {
+        bypassCache: true,
+        signal,
+      });
+      if (!images.some((image) => image.deviceId === udid)) {
+        return;
+      }
+      if (this.runnerReadinessTimer.now() >= deadlineMs) {
+        throw new ActionableError(`iOS simulator ${udid} is still listed after delete.`);
+      }
+      await this.runnerReadinessTimer.sleep(CREATED_IOS_ABSENCE_POLL_MS);
+    }
+  }
+
+  private async readCreatedIosSimulatorState(udid: string, signal: AbortSignal): Promise<string> {
+    try {
+      const images = await this.simctl!.listSimulatorImages(undefined, {
+        bypassCache: true,
+        signal,
+      });
+      const image = images.find((candidate) => candidate.deviceId === udid);
+      return image ? (image.state ?? "unknown") : "absent";
+    } catch (error) {
+      logger.debug(
+        `[DeviceSessionManager] Could not read state of ${udid}: ${errorMessage(error)}`,
+      );
+      return "unknown";
+    }
   }
 
   /**
@@ -2048,6 +2420,15 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
     // No booted devices - boot the first available simulator
     const device = availableDevices[0];
+    return await this.bootIosReadinessImage(device, options, perf);
+  }
+
+  /** Shared exact-image boot; a named read never reaches simulator creation. */
+  private async bootIosReadinessImage(
+    device: DeviceInfo,
+    options?: DeviceReadyOptions,
+    perf = createGlobalPerformanceTracker(),
+  ): Promise<BootedDevice> {
     const deviceId = device.deviceId!;
     logger.info(`[DeviceSessionManager] Booting iOS simulator ${device.name} (${deviceId})...`);
 

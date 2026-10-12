@@ -38,6 +38,14 @@ import {
   parseDaemonArgs,
   type DaemonCommandFlagSpec,
 } from "./daemonArgs";
+import {
+  findValueOperand,
+  findValueOperands,
+  parseBooleanFlagValue,
+  readBooleanFlag,
+  readValueOperand,
+  splitFlagToken,
+} from "../../utils/flagTokens";
 import { describeForeignForwardLeaseHolders } from "../forwardLeaseHolders";
 import { DAEMON_RESET_SLOT_SCOPE_METHOD } from "../constants";
 import {
@@ -107,19 +115,27 @@ export function parseDaemonHeartbeatCommandArgs(args: string[]): DaemonHeartbeat
   let livenessOwnerToken: string | undefined;
   let claimLivenessOwnership = false;
   for (let index = 1; index < args.length; index++) {
-    switch (args[index]) {
+    const { flag, inlineValue } = splitFlagToken(args[index]);
+    switch (flag) {
       case "--liveness-owner-token": {
-        const ownerToken = args[index + 1];
-        if (!ownerToken || ownerToken.startsWith("--")) {
+        const operand = readValueOperand(args, index);
+        if (!operand.value) {
           throw new ActionableError("--liveness-owner-token requires a non-empty value");
         }
-        livenessOwnerToken = ownerToken;
-        index++;
+        livenessOwnerToken = operand.value;
+        index = operand.last;
         break;
       }
-      case "--claim-liveness-ownership":
-        claimLivenessOwnership = true;
+      case "--claim-liveness-ownership": {
+        const claim = parseBooleanFlagValue(inlineValue);
+        if (claim === undefined) {
+          throw new ActionableError(
+            `Invalid value for --claim-liveness-ownership: ${inlineValue}; expected true or false`,
+          );
+        }
+        claimLivenessOwnership = claim;
         break;
+      }
       default:
         throw new ActionableError(`Unknown heartbeat option: ${args[index]}`);
     }
@@ -137,26 +153,31 @@ export interface ResetSlotScopeCommandArgs {
   runnerIncarnation: string;
   managedHostScope?: string;
   waitMs?: number;
+  force?: boolean;
 }
 
 /**
  * Parse `--daemon reset-slot-scope --runner-namespace <ns> --incarnation <id>
- * [--managed-host-scope <scope>] [--wait-ms <ms>]` (#11174).
+ * [--managed-host-scope <scope>] [--wait-ms <ms>] [--force]` (#11174, #11336).
  */
 export function parseResetSlotScopeCommandArgs(args: string[]): ResetSlotScopeCommandArgs {
   const read = (flag: string, required: boolean): string | undefined => {
-    const index = args.indexOf(flag);
-    if (index === -1) {
+    const operands = findValueOperands(args, [flag]);
+    if (operands.length === 0) {
       if (required) {
         throw new ActionableError(`reset-slot-scope requires ${flag} <value>`);
       }
       return undefined;
     }
-    const value = args[index + 1]?.trim();
-    if (!value || value.startsWith("--")) {
+    const values = operands.map((operand) => operand.value?.trim());
+    if (values.some((value) => !value)) {
       throw new ActionableError(`${flag} requires a non-empty value`);
     }
-    return value;
+    if (new Set(values).size > 1) {
+      // Two different values for one option: neither can be silently dropped.
+      throw new ActionableError(`${flag} was given more than once with different values`);
+    }
+    return values[0];
   };
   const runnerNamespace = read("--runner-namespace", true)!;
   const runnerIncarnation = read("--incarnation", true)!;
@@ -171,24 +192,64 @@ export function parseResetSlotScopeCommandArgs(args: string[]): ResetSlotScopeCo
       );
     }
   }
+  const force = readBooleanFlag(args, ["--force"]) === true;
   return {
     runnerNamespace,
     runnerIncarnation,
     ...(managedHostScope === undefined ? {} : { managedHostScope }),
     ...(waitMs === undefined ? {} : { waitMs }),
+    ...(force ? { force: true } : {}),
   };
 }
 
 /** Socket budget for the reset RPC: its settle wait plus room for the registry work. */
 const RESET_SLOT_SCOPE_CALL_MARGIN_MS = 5_000;
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+/**
+ * The stderr lines saying why `--force` left each slot alone (#11545): one per `forceRefusals`
+ * entry of the reset result, with its typed reason, the time remaining when the daemon gave one,
+ * and its message. The result crossed the daemon socket, so it is read defensively: anything that
+ * is not a well-formed refusal is skipped (the full result is still on stdout).
+ */
+export function resetSlotScopeForceRefusalLines(result: unknown): string[] {
+  const scopes = isObject(result) && Array.isArray(result.scopes) ? result.scopes : [];
+  const lines = scopes.flatMap((scope: unknown): string[] => {
+    if (!isObject(scope) || !Array.isArray(scope.forceRefusals)) {
+      return [];
+    }
+    const scopeKey = typeof scope.scopeKey === "string" ? scope.scopeKey : "(unknown scope)";
+    return scope.forceRefusals.flatMap((refusal: unknown): string[] => {
+      if (
+        !isObject(refusal) ||
+        typeof refusal.slotIndex !== "number" ||
+        typeof refusal.reason !== "string" ||
+        typeof refusal.message !== "string"
+      ) {
+        return [];
+      }
+      const remaining =
+        typeof refusal.remainingMs === "number" ? `, remainingMs=${refusal.remainingMs}` : "";
+      return [
+        `  ${scopeKey} slot ${refusal.slotIndex} [${refusal.reason}${remaining}]: ${refusal.message}`,
+      ];
+    });
+  });
+  return lines.length === 0 ? [] : [`--force left ${lines.length} slot(s) alone:`, ...lines];
+}
+
 /**
  * `--daemon reset-slot-scope`: invalidate one runner incarnation's managed slot scope (#11174).
  * Prints the daemon's JSON result; exits 2 when the scope is still waiting on owners or cleanup
- * (retry later) and 1 when no scope matched or the call failed.
+ * (retry later), naming on stderr every slot `--force` left alone and why, and 1 when no scope
+ * matched or the call failed.
  */
 async function resetSlotScope(args: string[], manager: DaemonManager): Promise<void> {
   let outcome: unknown;
+  let refusalLines: string[] = [];
   try {
     const request = parseResetSlotScopeCommandArgs(args);
     const client = manager.createClient();
@@ -208,6 +269,7 @@ async function resetSlotScope(args: string[], manager: DaemonManager): Promise<v
       result !== null && typeof result === "object" && "outcome" in result
         ? result.outcome
         : undefined;
+    refusalLines = resetSlotScopeForceRefusalLines(result);
   } catch (error) {
     if (error instanceof ActionableError) {
       console.error(`Error: ${error.message}`);
@@ -220,6 +282,9 @@ async function resetSlotScope(args: string[], manager: DaemonManager): Promise<v
     console.error(
       "Scope is still settling (live owners or pending cleanup); acquisitions stay blocked. Retry the command.",
     );
+    for (const line of refusalLines) {
+      console.error(line);
+    }
     process.exit(2);
   }
   if (outcome === "not_found") {
@@ -229,9 +294,8 @@ async function resetSlotScope(args: string[], manager: DaemonManager): Promise<v
 }
 
 export function parseRestartAdmittedMaintenanceToken(args: string[]): string {
-  const tokenIndex = args.indexOf("--maintenance-token");
-  const token = tokenIndex === -1 ? undefined : args[tokenIndex + 1];
-  if (!token || token.startsWith("--")) {
+  const token = findValueOperand(args, ["--maintenance-token"])?.value;
+  if (!token) {
     throw new ActionableError("--maintenance-token requires a non-empty value");
   }
   return token;
@@ -239,9 +303,8 @@ export function parseRestartAdmittedMaintenanceToken(args: string[]): string {
 
 export function parseAcceptanceSessionRestartScope(args: string[]): AcceptanceSessionRestartScope {
   const read = (flag: string): string => {
-    const index = args.indexOf(flag);
-    const value = index === -1 ? undefined : args[index + 1];
-    if (!value || value.startsWith("--")) {
+    const value = findValueOperand(args, [flag])?.value;
+    if (!value) {
       throw new ActionableError(`${flag} requires a non-empty value`);
     }
     return value;
@@ -311,29 +374,95 @@ const formatPoolStats = (
     ...(devices ? { devices } : {}),
   });
 
+/** The typed, retryable refusal every `available-devices` path gives for an unknown count. */
+function discoveryIncompleteRefusal(message: string): ActionableError {
+  return Object.assign(new ActionableError(message), {
+    code: "discovery_incomplete",
+    retryable: true,
+  });
+}
+
+/** Why a booted-devices resource with a pool status still has no known device count, if so. */
+function unknownPoolCountReason(data: {
+  observationComplete?: boolean;
+  poolStatus?: { countUnknown?: { platforms?: string[] } };
+  devices?: unknown[];
+}): string | undefined {
+  const countUnknown = data.poolStatus?.countUnknown;
+  if (countUnknown) {
+    // A pooled device's own discovery source did not complete, so whether it is still there is
+    // unknown: the same refusal pool stats and `daemon/availableDevices` give (#11643).
+    const platforms = countUnknown.platforms?.join(", ") || "a pooled platform";
+    return `Device discovery for ${platforms} did not complete, so the pooled device count is unknown`;
+  }
+  if (data.observationComplete === false && (data.devices?.length ?? 0) === 0) {
+    // A discovery source that exists on this host failed and the pool has nothing to fall back
+    // on: zeros here would read as "0 devices" when the count is actually unknown. Tooling that
+    // is not installed (a single-platform host) leaves the observation complete (#11605).
+    return "The booted-devices resource reports incomplete discovery and the pool has no devices, so the count is unknown";
+  }
+  return undefined;
+}
+
+/**
+ * Render the booted-devices resource as `available-devices` output. A resource with no usable pool
+ * status (no text, unparseable text, an error object, or no `poolStatus`) is an unknown, so it
+ * fails rather than printing zeros that read as "0 devices". So does a pool status marked
+ * `countUnknown` (a pooled device's own discovery source did not complete), and an incomplete
+ * observation (`observationComplete: false`) with no device entries. A partial observation whose
+ * failed source no pooled device depends on still prints: its counts are exact.
+ */
 function printAvailableDevicesContent(content: string | undefined): void {
-  if (!content) {
-    console.log(formatPoolStats());
-  } else {
-    const data = JSON.parse(content);
-    console.log(
-      formatPoolStats(
-        data?.poolStatus,
-        data?.poolStatus?.recoveryPolicy,
-        data?.devices?.map(
-          (device: {
-            platform: string;
-            runtime?: { deviceId?: string | null };
-            recoveryEligibility?: unknown;
-          }) => ({
-            deviceId: device.runtime?.deviceId ?? "unknown",
-            platform: device.platform,
-            recoveryEligibility: device.recoveryEligibility,
-          }),
-        ),
-      ),
+  let data: {
+    error?: unknown;
+    observationComplete?: boolean;
+    poolStatus?: {
+      idle: number;
+      assigned: number;
+      error: number;
+      total: number;
+      recoveryPolicy?: { onLoss: boolean; maxAttempts: number };
+      countUnknown?: { platforms?: string[] };
+    };
+    devices?: Array<{
+      platform: string;
+      runtime?: { deviceId?: string | null };
+      recoveryEligibility?: unknown;
+    }>;
+  } | null = null;
+  try {
+    data = content ? JSON.parse(content) : null;
+  } catch (error) {
+    throw new ActionableError(
+      `The booted-devices resource was not valid JSON: ${errorMessage(error)}`,
     );
   }
+  if (typeof data?.error === "string") {
+    throw new ActionableError(`The booted-devices resource reported an error: ${data.error}`);
+  }
+  if (!data?.poolStatus) {
+    throw discoveryIncompleteRefusal(
+      "The booted-devices resource carried no pool status, so the device count is unknown " +
+        "(discovery_incomplete); retry once the daemon finishes discovery.",
+    );
+  }
+  const unknownCount = unknownPoolCountReason(data);
+  if (unknownCount) {
+    throw discoveryIncompleteRefusal(
+      `${unknownCount} (discovery_incomplete); retry once the daemon finishes discovery.`,
+    );
+  }
+  console.log(
+    formatPoolStats(
+      data.poolStatus,
+      data.poolStatus.recoveryPolicy,
+      data.devices?.map((device) => ({
+        deviceId: device.runtime?.deviceId ?? "unknown",
+        platform: device.platform,
+        recoveryEligibility: device.recoveryEligibility,
+      })),
+    ),
+  );
 }
 
 /**
@@ -476,7 +605,7 @@ async function runDaemonLifecycleCommand(
 /** Print `--daemon status` (or its `--json` object); true when it must exit non-zero. */
 async function runDaemonStatusCommand(args: string[], manager: DaemonManager): Promise<boolean> {
   const status = await manager.status();
-  if (args.includes(DAEMON_JSON_FLAG)) {
+  if (readBooleanFlag(args, [DAEMON_JSON_FLAG]) === true) {
     console.log(JSON.stringify(status));
     return daemonStatusIsUnhealthy(status);
   }
@@ -544,6 +673,18 @@ async function runDaemonDiagnosticsCommand(
   }
 }
 
+/** " (released: <reason>[, idle])", or "" when the daemon gave neither. */
+function releasedLabel(reason: string | undefined, idle: boolean): string {
+  const label = [reason, idle ? "idle" : undefined].filter(Boolean).join(", ");
+  return label ? ` (released: ${label})` : "";
+}
+
+function recordOrUndefined(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 /**
  * A daemon query or release that failed, keeping the daemon's typed refusal fields (#11252)
  * instead of flattening them into a bare "Failed to ...: message".
@@ -554,6 +695,9 @@ export class DaemonCommandRefusal extends ActionableError {
   readonly retryable?: boolean;
   readonly retryAfterMs?: number;
   readonly releaseReason?: string;
+  /** True when the daemon released the session at its idle window (#10832). */
+  readonly idle?: true;
+  readonly details?: Record<string, unknown>;
   readonly detail: string;
 
   constructor(context: string, error: unknown) {
@@ -566,12 +710,13 @@ export class DaemonCommandRefusal extends ActionableError {
     const retryable = field("retryable");
     const retryAfterMs = field("retryAfterMs");
     const releaseReason = releaseReasonFromError(error);
+    const idle = field("idle") === true;
     const detail = errorMessage(error);
     const typedCode =
       typeof code === "string" || typeof code === "number" ? String(code) : undefined;
     const typedNextAction = typeof nextAction === "string" ? nextAction : undefined;
     super(
-      `${context}: ${detail}${releaseReason ? ` (released: ${releaseReason})` : ""}` +
+      `${context}: ${detail}${releasedLabel(releaseReason, idle)}` +
         `${typedCode ? ` [${typedCode}]` : ""}${typedNextAction ? ` Next: ${typedNextAction}` : ""}`,
       { cause: error },
     );
@@ -581,6 +726,8 @@ export class DaemonCommandRefusal extends ActionableError {
     this.retryable = typeof retryable === "boolean" ? retryable : undefined;
     this.retryAfterMs = typeof retryAfterMs === "number" ? retryAfterMs : undefined;
     this.releaseReason = releaseReason;
+    this.idle = idle ? true : undefined;
+    this.details = recordOrUndefined(field("details"));
   }
 }
 
@@ -595,6 +742,8 @@ function daemonQueryFailureJson(error: unknown): Record<string, unknown> {
     retryable: error.retryable,
     retryAfterMs: error.retryAfterMs,
     releaseReason: error.releaseReason,
+    idle: error.idle,
+    details: error.details,
   };
   return {
     ok: false,
@@ -617,9 +766,16 @@ function exitWithDaemonQueryFailure(error: unknown, json: boolean): void {
 
 /** Split `--json` out of a command's arguments. */
 function takeJsonFlag(args: string[]): { json: boolean; rest: string[] } {
+  // Words after a bare `--` are positionals, never flags.
+  const end = args.indexOf("--");
+  const options = end === -1 ? args : args.slice(0, end);
+  const positionals = end === -1 ? [] : args.slice(end + 1);
   return {
-    json: args.includes(DAEMON_JSON_FLAG),
-    rest: args.filter((arg) => arg !== DAEMON_JSON_FLAG),
+    json: readBooleanFlag(options, [DAEMON_JSON_FLAG]) === true,
+    rest: [
+      ...options.filter((arg) => splitFlagToken(arg).flag !== DAEMON_JSON_FLAG),
+      ...positionals,
+    ],
   };
 }
 
@@ -631,15 +787,22 @@ async function queryAvailableDevices(args: string[], manager: DaemonManager): Pr
     if (daemonState.isInitialized()) {
       // Running inside daemon process
       const pool = daemonState.getDevicePool();
+      // An unknown count keeps its typed refusal (code, retryable), as the socket branch does.
+      const { stats, deviceIds } = await pool.getRefreshedInventory().catch((error: unknown) => {
+        throw new DaemonCommandRefusal("Failed to query available devices", error);
+      });
       console.log(
         formatPoolStats(
-          await pool.getRefreshedStats(),
+          stats,
           pool.getRecoveryPolicy(),
-          pool.getAllDevices().map((device) => ({
-            deviceId: device.id,
-            platform: device.platform,
-            recoveryEligibility: pool.getRecoveryEligibility(device.id),
-          })),
+          pool
+            .getAllDevices()
+            .filter((device) => deviceIds.has(device.id))
+            .map((device) => ({
+              deviceId: device.id,
+              platform: device.platform,
+              recoveryEligibility: pool.getRecoveryEligibility(device.id),
+            })),
         ),
       );
       return;
@@ -831,7 +994,8 @@ function heartbeatFailureMessage(sessionId: string, error: unknown): string {
 /** " (released: <reason>)" when the daemon said why a not-found session is gone (#10730). */
 function releasedSuffix(error: unknown): string {
   const reason = releaseReasonFromError(error);
-  return reason ? ` (released: ${reason})` : "";
+  const idle = recordOrUndefined(error)?.idle === true;
+  return reason ? releasedLabel(reason, idle) : "";
 }
 
 async function recordDaemonHeartbeat(args: string[], manager: DaemonManager): Promise<void> {
@@ -970,11 +1134,11 @@ const RESET_SLOT_SCOPE_FLAGS = [
 ];
 
 /**
- * Daemon commands that take no positional arguments, with the options each accepts. The
- * lifecycle commands are strict (#11252): a stray word or a misspelled option is refused
- * rather than silently stopping or restarting the daemon without it.
+ * Daemon commands with the options and positional words each accepts (none by default). The
+ * commands are strict (#11252, #11612): a stray word or a misspelled option is refused rather
+ * than silently stopping or restarting the daemon, or releasing a session, without it.
  */
-const NO_POSITIONAL_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpec>> = {
+const STRICT_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpec>> = {
   start: { launchFlags: true },
   stop: { launchFlags: true },
   restart: { launchFlags: true },
@@ -988,7 +1152,15 @@ const NO_POSITIONAL_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpe
   diagnose: { launchFlags: true },
   "available-devices": { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
   "active-sessions": { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
-  "reset-slot-scope": { launchFlags: true, valueFlags: RESET_SLOT_SCOPE_FLAGS },
+  "reset-slot-scope": {
+    launchFlags: true,
+    valueFlags: RESET_SLOT_SCOPE_FLAGS,
+    booleanFlags: ["--force"],
+  },
+  // One session id each, optionally with --json: `release-session a b` would free only `a`
+  // and `session-info a --jsno` would drop the typo'd flag (#11612).
+  "session-info": { launchFlags: false, booleanFlags: [DAEMON_JSON_FLAG], positionals: 1 },
+  "release-session": { launchFlags: false, booleanFlags: [DAEMON_JSON_FLAG], positionals: 1 },
 };
 
 /**
@@ -997,8 +1169,8 @@ const NO_POSITIONAL_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpe
  * that flag's value, so launch options such as `--port 3001` keep working after the command.
  */
 export function daemonCommandArgumentError(command: string, args: string[]): string | undefined {
-  const spec = Object.hasOwn(NO_POSITIONAL_DAEMON_COMMANDS, command)
-    ? NO_POSITIONAL_DAEMON_COMMANDS[command]
+  const spec = Object.hasOwn(STRICT_DAEMON_COMMANDS, command)
+    ? STRICT_DAEMON_COMMANDS[command]
     : undefined;
   if (!spec) {
     return undefined;
@@ -1007,8 +1179,11 @@ export function daemonCommandArgumentError(command: string, args: string[]): str
   if (!invalid) {
     return undefined;
   }
-  return invalid.kind === "positional"
-    ? `Unexpected argument for daemon ${command}: ${invalid.argument}`
+  if (invalid.kind === "positional") {
+    return `Unexpected argument for daemon ${command}: ${invalid.argument}`;
+  }
+  return invalid.kind === "value"
+    ? `Invalid value for daemon ${command} option ${invalid.argument}; expected true or false`
     : `Unknown option for daemon ${command}: ${invalid.argument}`;
 }
 
@@ -1036,7 +1211,7 @@ function printDaemonUsageError(message: string): void {
       "  heartbeat <id>        Heartbeat a session (one-shot CLI: no-op; proxy-owned: refused)",
     );
     console.log(
-      "  reset-slot-scope --runner-namespace <ns> --incarnation <id>  Invalidate a managed slot scope; free its devices",
+      "  reset-slot-scope --runner-namespace <ns> --incarnation <id> [--force]  Invalidate a managed slot scope; free its devices",
     );
     console.log("\nOptions:");
     console.log(
@@ -1095,8 +1270,8 @@ export async function runDaemonCommand(
     stateProvider?: () => DaemonStateLike,
   ) => DaemonManager,
 ): Promise<void> {
-  const allowSharedNamespace = rawArgs.includes(ALLOW_SHARED_NAMESPACE_FLAG);
-  const args = rawArgs.filter((arg) => arg !== ALLOW_SHARED_NAMESPACE_FLAG);
+  const allowSharedNamespace = readBooleanFlag(rawArgs, [ALLOW_SHARED_NAMESPACE_FLAG]) === true;
+  const args = rawArgs.filter((arg) => splitFlagToken(arg).flag !== ALLOW_SHARED_NAMESPACE_FLAG);
   const manager = new DaemonManager(options.clientFactory, options.stateProvider);
 
   const handlers: Partial<Record<string, () => Promise<void> | void>> = {

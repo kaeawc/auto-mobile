@@ -112,7 +112,7 @@ scan_device() {
 }
 
 active_sessions() {
-  local dir dev entries=()
+  local dir dev entries=() jitter
   for dir in "${state}"/emulator-*; do
     [[ -d "${dir}" && -f "${dir}/session" ]] || continue
     scan_device "$(basename "${dir}")"
@@ -120,8 +120,14 @@ active_sessions() {
   for dir in "${state}"/emulator-*; do
     [[ -d "${dir}" && -f "${dir}/session" ]] || continue
     dev="$(basename "${dir}")"
+    # FAKE_ACTIVITY_JITTER_MS: once the session has idled 8 s, the unmoved lastToolActivityAt reads
+    # back that many ms earlier, as the daemon's wall/monotonic conversion does (#11368).
+    jitter=0
+    if (($(cat "${dir}/last_beat") - $(cat "${dir}/last_tool") >= 8000)); then
+      jitter=$((-${FAKE_ACTIVITY_JITTER_MS:-0}))
+    fi
     entries+=("$(jq -cn --arg id "$(cat "${dir}/session")" --arg dev "${dev}" \
-      --argjson tool "$(cat "${dir}/last_tool")" --argjson beat "$(cat "${dir}/last_beat")" \
+      --argjson tool "$(($(cat "${dir}/last_tool") + jitter))" --argjson beat "$(cat "${dir}/last_beat")" \
       --argjson idle "${idle_ms}" --arg kind "${FAKE_HOLDER_KIND:-stdio-proxy}" \
       '{sessionId: $id, assignedDevice: $dev, platform: "android", lastToolActivityAt: $tool,
         lastOwnerHeartbeatAt: $beat, idleReleaseAt: ($tool + $idle + 4000),
@@ -138,10 +144,15 @@ if [[ "$2" == "--daemon" ]]; then
   printf '%s\n' "${*:2}" >> "${FAKE}/daemon.calls"
   case "$3" in
     start)
+      [[ "${FAKE_DAEMON_START_FAIL:-0}" != 1 ]] || exit 1
       env | grep -E '^(AUTOMOBILE|AUTO_MOBILE)_' | sort > "${FAKE}/daemon.env"
       ;;
     stop) ;;
-    active-sessions) active_sessions ;;
+    active-sessions)
+      if [[ "${FAKE_ABORT_AFTER_FAILURE:-0}" == 1 && -f "${FAKE}/releases" ]] &&
+        grep -q ' bug ' "${FAKE}/releases"; then exit 1; fi
+      active_sessions
+      ;;
     *) exit 1 ;;
   esac
   exit 0
@@ -181,6 +192,37 @@ while IFS= read -r line; do
   printf '%s %s\n' "${tool}" "$(jq -c '.params.arguments' <<< "${line}")" >> "${FAKE}/tool.calls"
   target=""
   session_arg="$(jq -r '.params.arguments.sessionUuid // empty' <<< "${line}")"
+  # A released owner cannot re-use its connection binding or its old UUID.
+  device_arg="$(jq -r '.params.arguments.deviceId // empty' <<< "${line}")"
+  released_device="${device_arg}"
+  if [[ -n "${session_arg}" && "${session_arg}" == "${FAKE_SESSION_UUID}" ]]; then
+    released_device=emulator-5560
+  fi
+  if [[ "${tool}" == homeScreen && -n "${released_device}" &&
+    ! -d "${state}/${released_device}" && -f "${FAKE}/releases" &&
+    "${FAKE_RELEASE_NOT_TERMINAL:-0}" != 1 ]]; then
+    code=no_active_device_session
+    [[ -z "${session_arg}" ]] || code="${FAKE_RELEASE_SESSION_CODE:-session_ownership_lost}"
+    next_action="${FAKE_RELEASE_NEXT_ACTION:-acquire_new_session}"
+    refusal="$(jq -cn --arg code "${code}" --arg next "${next_action}" --arg session "${session_arg}" \
+      '{error: {code: $code, retryable: false, nextAction: $next, sessionUuid: $session}}')"
+    if [[ "${FAKE_RELEASE_REACQUIRE:-0}" == 1 ]]; then
+      mkdir -p "${state}/${released_device}"
+      session_for "${released_device}" > "${state}/${released_device}/session"
+      printf '%s\n' "$$" > "${state}/${released_device}/proxy_pid"
+      now > "${state}/${released_device}/acquired"
+      now > "${state}/${released_device}/last_beat"
+      now > "${state}/${released_device}/last_tool"
+    fi
+    if [[ "${FAKE_RELEASE_RPC_ERROR:-0}" == 1 ]]; then
+      jq -cn --argjson id "${id}" --arg text "${refusal}" \
+        '{jsonrpc: "2.0", id: $id, error: {code: -32000, message: $text}}'
+    else
+      reply "${id}" "$(jq -cn --arg text "${refusal}" \
+        '{isError: true, content: [{type: "text", text: $text}]}')"
+    fi
+    continue
+  fi
   if [[ "${tool}" == getAndroid || "${tool}" == provisionDevice ]]; then
     # provisionDevice names the AVD, not the serial; the fake runs one emulator for it.
     target="$(jq -r '.params.arguments.deviceId // "emulator-5560"' <<< "${line}")"
@@ -224,6 +266,10 @@ printf '%s\n' '{"id":"1","type":"subscription_response","success":true,"subscrip
 if [[ "${FAKE_STREAM_ENDED:-0}" == 1 ]]; then
   printf '%s\n' '{"type":"device_session_ended","deviceId":"emulator-5560"}'
 fi
+# The real stream pushes a terminal SESSION_ENDED error frame when the session is released.
+if [[ "${FAKE_STREAM_NO_SESSION_ENDED:-0}" != 1 ]]; then
+  printf '%s\n' '{"type":"error","success":false,"code":"SESSION_ENDED","error":"Observation stream ended: session_ended"}'
+fi
 cat > /dev/null
 EOF
   chmod +x "${FAKE}/now" "${FAKE}/sleep" "${FAKE}/adb" "${FAKE}/bun" "${FAKE}/nc"
@@ -264,6 +310,7 @@ run_check() {
   [[ "${output}" == *"--confirm-live"* ]]
   [ ! -e "${FAKE}/daemon.calls" ]
   [ ! -e "${FAKE}/adb.calls" ]
+  [ ! -e "${EVIDENCE}/failed-scenarios.txt" ]
 }
 
 @test "refuses a serial that is not an emulator" {
@@ -290,6 +337,7 @@ run_check() {
   FAKE_ADB_STATE=offline run_check
   [ "${status}" -eq 1 ]
   [[ "${output}" == *"not an online adb device"* ]]
+  [ ! -e "${EVIDENCE}/failed-scenarios.txt" ]
   [ ! -e "${FAKE}/daemon.calls" ]
 }
 
@@ -437,6 +485,24 @@ run_check() {
   [[ "${output}" == *"FAIL observe-only"*"a read must not count as use"* ]]
 }
 
+@test "idle: a few ms of wall-clock jitter on an unmoved lastToolActivityAt is not activity" {
+  FAKE_ACTIVITY_JITTER_MS=2 run_check --scenario idle
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"PASS idle"* ]]
+}
+
+@test "idle: a shift beyond the jitter bound still fails" {
+  FAKE_ACTIVITY_JITTER_MS=50 run_check --scenario idle
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"heartbeats moved lastToolActivityAt"* ]]
+}
+
+@test "observe-only: a few ms of wall-clock jitter is not activity" {
+  FAKE_ACTIVITY_JITTER_MS=2 run_check --scenario observe-only
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"PASS observe-only"* ]]
+}
+
 @test "all: a failing scenario does not hide the scenarios after it" {
   FAKE_SELECTOR_NOT_CREDITED=1 run_check --scenario all
   [ "${status}" -eq 1 ]
@@ -445,6 +511,7 @@ run_check() {
   [[ "${output}" == *"PASS stream"* ]]
   [[ "${output}" == *"FAILED scenarios: selector"* ]]
   [[ "${output}" != *"all requested scenarios passed"* ]]
+  [ "$(cat "${EVIDENCE}/failed-scenarios.txt")" = selector ]
   grep -qx -- "--daemon stop --port 3920 --strict-port" "${FAKE}/daemon.calls"
 }
 
@@ -465,13 +532,20 @@ run_check() {
   [ ! -e "${FAKE}/tool.calls" ]
 }
 
-@test "stream: the subscription survives the idle release and frames are kept as evidence" {
+@test "stream: the subscription ends with SESSION_ENDED at the idle release and frames are kept as evidence" {
   run_check --scenario stream
   [ "${status}" -eq 0 ]
   [[ "${output}" == *"PASS stream"* ]]
   grep -q '"command":"subscribe"' "${FAKE}/nc.requests"
   grep -q "\"sessionUuid\":\"${SESSION_UUID}\"" "${FAKE}/nc.requests"
   grep -q subscription_response "${EVIDENCE}/stream.stream.frames"
+  grep -q SESSION_ENDED "${EVIDENCE}/stream.stream.frames"
+}
+
+@test "stream: fails when the idle release never ends the subscription" {
+  FAKE_STREAM_NO_SESSION_ENDED=1 run_check --scenario stream
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"did not end with SESSION_ENDED"* ]]
 }
 
 @test "stream: fails when the idle release pushes device_session_ended" {
@@ -500,4 +574,86 @@ run_check() {
   [[ "${output}" == *"--second-serial"* ]]
   run_check --scenario two-devices --second-serial emulator-5560
   [ "${status}" -eq 2 ]
+}
+
+
+@test "idle: release is terminal for deviceId and sessionUuid calls, with evidence" {
+  run_check --scenario idle
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"terminal"*"no_active_device_session"*"session_ownership_lost"* ]]
+  [ "$(wc -l < "${EVIDENCE}/idle.refusals.log" | tr -d ' ')" = 2 ]
+  jq -e -s '.[0].result.isError and .[1].result.isError' "${EVIDENCE}/idle.refusals.log"
+  grep -q no_active_device_session "${EVIDENCE}/idle.refusals.log"
+  grep -q session_ownership_lost "${EVIDENCE}/idle.refusals.log"
+  grep -q acquire_new_session "${EVIDENCE}/idle.refusals.log"
+  [ "$(tail -n 2 "${FAKE}/tool.calls")" = "$(printf 'homeScreen {"deviceId":"emulator-5560"}\nhomeScreen {"sessionUuid":"%s"}' "${SESSION_UUID}")" ]
+  [ ! -e "${EVIDENCE}/failed-scenarios.txt" ]
+}
+
+@test "idle: a successful post-release control call fails the terminal contract" {
+  FAKE_RELEASE_NOT_TERMINAL=1 run_check --scenario idle
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL idle: a control call after the idle release succeeded; an idle release must be terminal for the session"* ]]
+}
+
+@test "idle: a refusal without acquire_new_session fails" {
+  FAKE_RELEASE_NEXT_ACTION=retry run_check --scenario idle
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL idle:"*"expected"*"acquire_new_session"*"reply"* ]]
+  grep -q retry "${EVIDENCE}/idle.refusals.log"
+}
+
+@test "idle: sessionUuid refusal must name session_ownership_lost" {
+  FAKE_RELEASE_SESSION_CODE=no_active_device_session run_check --scenario idle
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL idle:"*"expected"*"session_ownership_lost"*"reply"* ]]
+  [ "$(wc -l < "${EVIDENCE}/idle.refusals.log" | tr -d ' ')" = 2 ]
+}
+
+@test "idle: a refused call must not re-acquire the device" {
+  FAKE_RELEASE_REACQUIRE=1 run_check --scenario idle
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL idle: a refused call re-acquired emulator-5560 after its idle release"* ]]
+}
+
+@test "idle: JSON-RPC error refusals satisfy the terminal contract" {
+  FAKE_RELEASE_RPC_ERROR=1 run_check --scenario idle
+  [ "${status}" -eq 0 ]
+  jq -e -s 'length == 2 and all(.[]; .error != null)' "${EVIDENCE}/idle.refusals.log"
+}
+
+@test "single-scenario failure records exactly its name" {
+  FAKE_NEVER_IDLE_RELEASE=1 run_check --scenario idle
+  [ "${status}" -eq 1 ]
+  [ "$(cat "${EVIDENCE}/failed-scenarios.txt")" = idle ]
+  [ "$(wc -l < "${EVIDENCE}/failed-scenarios.txt" | tr -d ' ')" = 1 ]
+}
+
+@test "a passing direct run clears a stale failed-scenario verdict" {
+  mkdir -p "${EVIDENCE}"
+  printf 'idle\nstream\n' > "${EVIDENCE}/failed-scenarios.txt"
+  run_check --scenario idle
+  [ "${status}" -eq 0 ]
+  [ ! -e "${EVIDENCE}/failed-scenarios.txt" ]
+}
+
+@test "a daemon setup failure never records a scenario" {
+  FAKE_DAEMON_START_FAIL=1 run_check --scenario idle
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"private daemon did not start"* ]]
+  [ ! -e "${EVIDENCE}/failed-scenarios.txt" ]
+}
+
+@test "all: failed verdict is recorded before a parent query aborts between scenarios" {
+  FAKE_RELEASE_AFTER_MS=8000 FAKE_ABORT_AFTER_FAILURE=1 run_check --scenario all
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL active"* ]]
+  [[ "${output}" == *"could not query --daemon active-sessions"* ]]
+  [ "$(cat "${EVIDENCE}/failed-scenarios.txt")" = active ]
+}
+
+@test "all: multiple failed scenarios are listed once in order" {
+  FAKE_SELECTOR_NOT_CREDITED=1 FAKE_STREAM_NO_SESSION_ENDED=1 run_check --scenario all
+  [ "${status}" -eq 1 ]
+  [ "$(cat "${EVIDENCE}/failed-scenarios.txt")" = $'selector\nstream' ]
 }

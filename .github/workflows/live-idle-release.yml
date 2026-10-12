@@ -1,9 +1,9 @@
 name: "Live Idle Release"
 
 # Check of the device-session release windows (#10840, parent #10655), on demand and nightly
-# (#10983). It never runs on pull requests or merges. The nightly run is advisory: the check job
-# is continue-on-error until it has been green twice in a row, then drop that line to make a red
-# night visible. Nothing depends on it, so it cannot block a merge either way. It boots one
+# (#10983). It never runs on pull requests or merges. The nightly run is advisory only in that
+# nothing depends on it and it is not a required check, so it cannot block a merge; a failing
+# scenario still fails the job and the run (#11368). It boots one
 # emulator and runs scripts/live-idle-release-check.sh against a private daemon with a
 # short idle window; each scenario's ground truth (daemon `active-sessions` snapshots,
 # daemon log lines, observation-stream frames) is uploaded as an artifact.
@@ -50,9 +50,16 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.repository == 'kaeawc/auto-mobile')
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Advisory until green twice in a row (#10983); the evidence artifact is uploaded either way.
-    continue-on-error: true
+    # No continue-on-error (#11368): a failed scenario fails this job and the run. The shared
+    # android-emulator action's second attempt only helps infrastructure failures: once an
+    # attempt records a failed scenario, the runner refuses to re-run it, so the job stays red.
+    # The evidence artifact is uploaded either way.
     needs: build-control-proxy-apk
+    # Job-level so only this job can write issues (the alert step below); other jobs keep the
+    # workflow's read-only default.
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -91,3 +98,13 @@ jobs:
           name: live-idle-release-evidence
           path: scratch/live-idle-release-check/
           if-no-files-found: warn
+
+      # Advisory job, loud failure (#11368): open or update ONE tracking issue.
+      - name: "Alert on Failure"
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALERT_JOB_STATUS: ${{ job.status }}
+          ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ALERT_EVIDENCE_DIR: scratch/live-idle-release-check/ci
+        run: bash scripts/ci/open-live-idle-release-alert.sh

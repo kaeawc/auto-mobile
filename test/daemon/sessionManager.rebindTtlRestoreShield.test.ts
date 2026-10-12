@@ -60,6 +60,50 @@ async function harness() {
 }
 
 describe("rebind and network TTL restores use the teardown shield", () => {
+  test("ttl advertises the remaining restore cap and clears quarantine at the cap (#11360)", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await harness();
+      h.fake.hang = true;
+      h.manager.scheduleNetworkConditionExpiry(h.session, 1);
+      await h.timer.advanceTimeAsync(1_000, flush);
+      await flush();
+      expect(h.fake.calls).toHaveLength(1);
+      expect(h.fake.reached).toEqual([]);
+      expect(h.manager.hasDeviceCleanupInProgress(oldDevice)).toBe(true);
+      expect(h.manager.getDeviceCleanupRetryAfterMs(oldDevice)).toBe(
+        SESSION_RELEASE_TEARDOWN_CAP_MS,
+      );
+      await h.timer.advanceTimeAsync(4_000, flush);
+      expect(h.manager.hasDeviceCleanupInProgress(oldDevice)).toBe(true);
+      expect(h.manager.getDeviceCleanupRetryAfterMs(oldDevice)).toBe(6_000);
+      await h.timer.advanceTimeAsync(SESSION_RELEASE_TEARDOWN_CAP_MS - 4_001, flush);
+      expect(h.manager.hasDeviceCleanupInProgress(oldDevice)).toBe(true);
+      expect(h.manager.getDeviceCleanupRetryAfterMs(oldDevice)).toBe(1);
+      await h.timer.advanceTimeAsync(1, flush);
+      await flush();
+      expect(h.fake.calls[0]?.signal?.aborted).toBe(true);
+      expect(h.manager.getPendingDeviceCleanup(oldDevice)).toBeNull();
+      expect(h.manager.hasDeviceCleanupInProgress(oldDevice)).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a pending cleanup registered without a cap keeps the default polling hint", async () => {
+    const h = await harness();
+    const cleanup = Promise.withResolvers<void>();
+    h.manager.registerPendingDeviceCleanup(oldDevice, cleanup.promise);
+    expect(h.manager.hasDeviceCleanupInProgress(oldDevice)).toBe(true);
+    expect(h.manager.getDeviceCleanupRetryAfterMs(oldDevice)).toBe(1_000);
+    await h.timer.advanceTimeAsync(4_000, flush);
+    expect(h.manager.hasDeviceCleanupInProgress(oldDevice)).toBe(true);
+    expect(h.manager.getDeviceCleanupRetryAfterMs(oldDevice)).toBe(1_000);
+    cleanup.resolve();
+    await flush();
+    expect(h.manager.hasDeviceCleanupInProgress(oldDevice)).toBe(false);
+  });
+
   for (const path of ["rebind", "ttl"] as const) {
     test.each([true, false])(
       `${path} restores under an ambient signal (cancelled=%s)`,

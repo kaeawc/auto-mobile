@@ -22,7 +22,8 @@ batches: `private-daemon.ts init|start|status|stop|env|wrappers`, `in-daemon-env
 `proxy-session.ts up|call|read|tools|resources|subscribe|status|close`,
 `daemon-frame.ts send|session-info|heartbeat`, and `aux-socket.ts recording|video|webrtc` under
 `scripts/manual-test/`. Use those commands instead of hand-rolling a private
-environment, MCP stdio loop or socket client.
+environment, MCP stdio loop or socket client. For Python/anyio close and typing
+reproduction, use the [Python MCP SDK stdio clients](../../docs/using/manual-test-harness.md#python-mcp-sdk-stdio-clients).
 
 - Never touch the resident daemon, its default socket, port 3000 or
   `~/.auto-mobile`; every client uses the wrapper or a guarded harness CLI.

@@ -882,7 +882,14 @@ describe("every inventory surface gives one answer per discovery-source outcome 
         listBootedDevicesForIdeAction(p: "android" | "ios", serial: string): Promise<unknown>;
       }
     ).listBootedDevicesForIdeAction;
-    const select = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+    const select = createSetActiveDeviceHandler({
+      resumeCtrlProxy: async () => {},
+      transportWait: {
+        timer: new FakeTimer(),
+        probe: async () => new Map(),
+        invalidateDeviceList: () => {},
+      },
+    });
     const selectAbsent = (source: DiscoverySource) =>
       select({ deviceId: ABSENT[source], sessionUuid: "selection" }).then(
         () => [`${source}:selected`],

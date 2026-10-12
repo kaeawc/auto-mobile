@@ -1,5 +1,6 @@
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
-import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
+import type { BackoffPolicy } from "../utils/Backoff";
+import { TransitionalWaitBudget } from "../utils/TransitionalWaitBudget";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
@@ -14,19 +15,22 @@ interface TransitionalAdbBindWaitPorts {
   probeTimeoutMs: number;
   getSignal: () => AbortSignal | undefined;
   backoff?: BackoffPolicy;
+  holdAbsenceAfterTransitional?: boolean;
 }
 
 /** One exact discovery's wait state; each delay requires an entirely fresh pool snapshot. */
 export class TransitionalAdbBindWait {
-  private firstProbeMs: number | undefined;
-  private attempt = 0;
-  private readonly backoff: BackoffPolicy;
+  private observedTransitional = false;
+  private readonly budget: TransitionalWaitBudget;
 
   constructor(
     private readonly deviceId: string,
     private readonly ports: TransitionalAdbBindWaitPorts,
   ) {
-    this.backoff = ports.backoff ?? exponentialBackoff({ initialDelayMs: 100, maxDelayMs: 1_000 });
+    this.budget = new TransitionalWaitBudget({
+      ...ports,
+      budgetMs: TRANSITIONAL_ADB_BIND_WAIT_BUDGET_MS,
+    });
   }
 
   /** False preserves ordinary absence handling; true discards the caller's snapshot. */
@@ -37,8 +41,7 @@ export class TransitionalAdbBindWait {
     if (!probe) {
       return false;
     }
-    this.firstProbeMs ??= timer.now();
-    const remaining = this.remainingMs();
+    const remaining = this.budget.remainingMs();
     let state: string | undefined;
     try {
       // Exhaustion still needs current evidence, with a short positive probe cap.
@@ -57,39 +60,19 @@ export class TransitionalAdbBindWait {
       return false;
     }
     signal?.throwIfAborted();
-    if (state === undefined || !isTransitionalAdbState(state)) {
+    if (state === undefined) {
+      // A transport may disappear briefly between offline and device during an adb reconnect.
+      return this.ports.holdAbsenceAfterTransitional && this.observedTransitional
+        ? await this.budget.waitForNextAttempt()
+        : false;
+    }
+    if (!isTransitionalAdbState(state)) {
       return false;
     }
-    const delayMs = Math.min(this.backoff.delayForAttempt(++this.attempt), this.remainingMs());
-    if (delayMs <= 0) {
+    this.observedTransitional = true;
+    if (!(await this.budget.waitForNextAttempt())) {
       throw new DeviceTransportOfflineError(this.deviceId, state);
     }
-    await this.wait(delayMs, signal);
-    signal?.throwIfAborted();
     return true;
-  }
-
-  private async wait(delayMs: number, signal: AbortSignal | undefined): Promise<void> {
-    const { timer } = this.ports;
-    let handle: NodeJS.Timeout | undefined;
-    try {
-      await raceWithDeadline(
-        () =>
-          new Promise<void>((resolve) => {
-            handle = timer.setTimeout(resolve, delayMs);
-          }),
-        { timer, signal, label: "Exact device adb transport wait" },
-      );
-    } finally {
-      if (handle !== undefined) {
-        timer.clearTimeout(handle);
-      }
-    }
-  }
-
-  private remainingMs(): number {
-    return this.firstProbeMs === undefined
-      ? TRANSITIONAL_ADB_BIND_WAIT_BUDGET_MS
-      : TRANSITIONAL_ADB_BIND_WAIT_BUDGET_MS - (this.ports.timer.now() - this.firstProbeMs);
   }
 }

@@ -476,9 +476,8 @@ export class SessionHeartbeatMonitor {
     const forgiven = this.sessions.forgiveDaemonStall?.(now, lateMs, sleptMs, gapBeganAt) ?? 0;
     logger.warn(
       `Heartbeat monitor tick fired ${lateMs}ms late after the host slept ${sleptMs}ms; ` +
-        `${forgiven} session(s) get their lease extended by ${lateMs + sleptMs}ms and their idle ` +
-        `deadline by the ${lateMs}ms the daemon stalled (host sleep counts toward idle); a lease is ` +
-        "extended only when its owner was live as the gap began",
+        `${forgiven} session(s) considered for stall forgiveness (host sleep counts toward idle); ` +
+        "lease and idle extension counts are logged by the session manager",
     );
   }
 
@@ -534,7 +533,10 @@ export class SessionHeartbeatMonitor {
         continue;
       }
       logger.warn(
-        `Session ${session.sessionId} ${STALE_REASON_DESCRIPTION[reason]}, cancelling (reason=${reason})`,
+        `Session ${session.sessionId} ${STALE_REASON_DESCRIPTION[reason]}, cancelling (reason=${reason})` +
+          (reason === "heartbeat-timeout"
+            ? `; last heartbeat age=${now - (this.sessions.judgedLeaseHeartbeat?.(session) ?? judgedLeaseHeartbeat(session))}ms, heartbeat timeout=${session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs}ms`
+            : ""),
       );
       try {
         reaps.push(this.trackReap(session.sessionId, this.reap(session.sessionId, reason)));

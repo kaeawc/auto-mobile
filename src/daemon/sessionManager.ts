@@ -776,6 +776,8 @@ export class DaemonSessionCreationRejectedError extends ActionableError {
 
 /** Idle expiry has no caller to return the device; its diagnostic may name a heartbeat timeout. */
 export interface SessionReleaseOptions {
+  /** The serial no longer runs this session's device: drop saved state without device-side restores. */
+  deviceIdentityReplaced?: boolean;
   /** Device-restart release persistence, including a retry after a failed write. */
   releasePersisted?: Promise<void>;
   expiryOrigin?: "lazy-expiry" | "cleanup-expired";
@@ -5896,6 +5898,7 @@ export class SessionManager {
     releaseReason: SessionReleaseReason,
     shouldCommit: ReleaseCommitFence | undefined,
     allowExpired: boolean = false,
+    options: SessionReleaseOptions = {},
   ): Promise<ConditionalSessionRelease> {
     let superseded = false;
     const fence: ReleaseCommitFence | undefined =
@@ -5908,7 +5911,13 @@ export class SessionManager {
             }
             return true;
           };
-    const deviceId = await this.releaseSession(sessionId, releaseReason, allowExpired, fence);
+    const deviceId = await this.releaseSession(
+      sessionId,
+      releaseReason,
+      allowExpired,
+      fence,
+      options,
+    );
     return superseded ? { superseded: true } : { superseded: false, deviceId };
   }
 
@@ -6338,7 +6347,12 @@ export class SessionManager {
       this.cancelNetworkConditionExpiry(sessionId);
       // Release removes the iOS app rule itself; stop renewing it first.
       this.iosAppNetworkLeases.stop(sessionId);
-      const pendingCleanup = await this.drainReleaseTeardown(sessionId, session, operation);
+      const pendingCleanup = await this.drainReleaseTeardown(
+        sessionId,
+        session,
+        operation,
+        options,
+      );
       const deviceId = session.assignedDevice;
       // Forced while tearing down (#11058): the force already fenced the session and handed the
       // device back, so nothing here may commit, quarantine or notify for it.
@@ -6407,6 +6421,7 @@ export class SessionManager {
       if (!this.commitReleaseRemoval(sessionId, session, deviceId, pendingCleanup)) {
         return null;
       }
+      this.commitReplacedDeviceTeardown(sessionId, session, options);
       if (!releaseSnapshot.terminal) {
         this.terminalReleaseSnapshots.delete(sessionId);
         this.terminalReleaseReasonStates.delete(sessionId);
@@ -6488,13 +6503,14 @@ export class SessionManager {
     sessionId: string,
     session: Session,
     operation?: SessionReleaseOperation,
+    options: SessionReleaseOptions = {},
   ): Promise<readonly Promise<void>[]> {
-    if (!this.releaseNeedsTeardown(session)) {
+    if (!options.deviceIdentityReplaced && !this.releaseNeedsTeardown(session)) {
       return [];
     }
     const forcedSignal = operation?.forcedAbort?.signal;
     return this.runUnderTeardownShield(
-      () => this.startReleaseTeardown(sessionId, session, operation),
+      () => this.startReleaseTeardown(sessionId, session, operation, options),
       forcedSignal,
     );
   }
@@ -6592,6 +6608,7 @@ export class SessionManager {
     sessionId: string,
     session: Session,
     operation?: SessionReleaseOperation,
+    options: SessionReleaseOptions = {},
   ): Promise<readonly ReleaseTeardownStage[]> {
     // Captured before any await: a rebind reassigns `session.assignedDevice`.
     const deviceId = session.assignedDevice;
@@ -6601,6 +6618,9 @@ export class SessionManager {
     const setups = Array.from(this.sessionSetupPromises, (setup) =>
       setup.session === session ? setup.promise : null,
     ).filter((setup): setup is Promise<void> => setup !== null);
+    if (options.deviceIdentityReplaced) {
+      return await this.startReplacedDeviceTeardown(sessionId, setups);
+    }
     // A forced release (#11058) stops before its next restore: the device may already belong to
     // the next owner. Whatever it started is aborted through `forcedAbort` and handed back as is.
     const forced = () => releaseWasForced(operation);
@@ -6681,6 +6701,68 @@ export class SessionManager {
       }
     }
     return stages;
+  }
+
+  /** Wait for setup without changing saved state or retries before the release's commit fence. */
+  private async startReplacedDeviceTeardown(
+    sessionId: string,
+    setups: readonly Promise<void>[],
+  ): Promise<readonly ReleaseTeardownStage[]> {
+    const pending =
+      setups.length > 0 ? (await this.waitForSessionSetup(sessionId, setups)).pending : null;
+    return pending ? [{ pending }] : [];
+  }
+
+  /** Only a committed handoff retires the old device's saved baselines and serial retries. */
+  private commitReplacedDeviceTeardown(
+    sessionId: string,
+    session: Session,
+    options: SessionReleaseOptions,
+  ): void {
+    if (!options.deviceIdentityReplaced) {
+      return;
+    }
+    const deviceId = session.assignedDevice;
+    const dropped = new Set<string>();
+    if (this.pendingClockRestores.has(deviceId)) {
+      dropped.add("clock");
+    }
+    if (this.abandonedRotations.has(deviceId) || this.pendingRotationRestores.has(deviceId)) {
+      dropped.add("rotation");
+    }
+    if (
+      this.abandonedScreenReaders.has(deviceId) ||
+      this.pendingScreenReaderRestores.has(deviceId)
+    ) {
+      dropped.add("screen-reader");
+    }
+    this.dropReplacedDeviceRestoreState(session, dropped);
+    this.retireClockRestoration(deviceId);
+    this.retireRotationRestoration(deviceId);
+    this.retireScreenReaderRestoration(deviceId);
+    if (dropped.size > 0) {
+      logger.warn(
+        `Dropped restore state for session ${sessionId} on replaced serial ${deviceId}: ${[...dropped].join(", ")}`,
+      );
+    }
+  }
+
+  /** Saved baselines belong to the retired device, never the new occupant of its serial. */
+  private dropReplacedDeviceRestoreState(session: Session, dropped: Set<string>): void {
+    const kinds = [
+      ["keepScreenAwake", "keep-awake"],
+      ["biometricEnrollment", "biometric"],
+      ["networkCondition", "network-condition"],
+      ["clock", "clock"],
+      ["rotation", "rotation"],
+      ["screenReader", "screen-reader"],
+    ] as const;
+    for (const [key, kind] of kinds) {
+      if (session.cacheData[key]) {
+        dropped.add(kind);
+        delete session.cacheData[key];
+      }
+    }
   }
 
   /** The teardown budget ran out with this restore unfinished: record it like an exhausted retry. */

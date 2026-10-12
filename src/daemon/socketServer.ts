@@ -5492,10 +5492,9 @@ export class UnixSocketServer {
           (request.params as { force?: unknown }).force === true,
           ideMutation,
         );
-        ideMutation?.dispatching();
-
-        getAbortSignal()?.throwIfAborted();
         if (args.platform === "android") {
+          getAbortSignal()?.throwIfAborted();
+          ideMutation?.dispatching();
           AndroidCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
           const manager = AndroidCtrlProxyManager.getInstance(targetDevice);
           const result = await manager.ensureCompatibleVersion({
@@ -5510,6 +5509,8 @@ export class UnixSocketServer {
           };
         } else {
           const manager = IOSCtrlProxyManager.getInstance(targetDevice);
+          getAbortSignal()?.throwIfAborted();
+          ideMutation?.dispatching();
           IOSCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
           await manager.forceRestart();
           return {
@@ -5545,14 +5546,17 @@ export class UnixSocketServer {
         let usedDirectFileFallback = false;
         let resolution: PreferenceStoreResolution | undefined;
         if (args.value === null || args.value === undefined) {
-          ideMutation?.dispatching();
           ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
             platform,
             device,
             appId,
             fileName,
-            () => client.removePreference(appId, fileName, key),
-            (adb) => removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+            {
+              dispatching: () => ideMutation?.dispatching(),
+              viaSdk: () => client.removePreference(appId, fileName, key),
+              viaDirectFile: (adb) =>
+                removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+            },
           ));
         } else {
           // Enforce the same cross-platform type guidance as the MCP-tool path
@@ -5561,15 +5565,17 @@ export class UnixSocketServer {
           validateTypeForPlatform(platform, args.type as KeyValueType);
           const value = args.value;
           const type = args.type as KeyValueType;
-          ideMutation?.dispatching();
           ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
             platform,
             device,
             appId,
             fileName,
-            () => client.setPreference(appId, fileName, key, value, type),
-            (adb) =>
-              setAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key, value, type),
+            {
+              dispatching: () => ideMutation?.dispatching(),
+              viaSdk: () => client.setPreference(appId, fileName, key, value, type),
+              viaDirectFile: (adb) =>
+                setAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key, value, type),
+            },
           ));
         }
         const resolvedStore = resolution?.resolvedStore;
@@ -5607,14 +5613,17 @@ export class UnixSocketServer {
         const appId = args.appId;
         const fileName = args.fileName;
         const key = args.key;
-        ideMutation?.dispatching();
         const { usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
           platform,
           device,
           appId,
           fileName,
-          () => client.removePreference(appId, fileName, key),
-          (adb) => removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+          {
+            dispatching: () => ideMutation?.dispatching(),
+            viaSdk: () => client.removePreference(appId, fileName, key),
+            viaDirectFile: (adb) =>
+              removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+          },
         );
         const resolvedStore = resolution?.resolvedStore;
         const warning = usedDirectFileFallback
@@ -5646,14 +5655,17 @@ export class UnixSocketServer {
         );
         const appId = args.appId;
         const fileName = args.fileName;
-        ideMutation?.dispatching();
         const { usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
           platform,
           device,
           appId,
           fileName,
-          () => client.clearPreferenceStore(appId, fileName),
-          (adb) => clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
+          {
+            dispatching: () => ideMutation?.dispatching(),
+            viaSdk: () => client.clearPreferenceStore(appId, fileName),
+            viaDirectFile: (adb) =>
+              clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
+          },
         );
         const resolvedStore = resolution?.resolvedStore;
         const warning = usedDirectFileFallback
@@ -5987,15 +5999,19 @@ export class UnixSocketServer {
     device: BootedDevice,
     appId: string,
     fileName: string,
-    viaSdk: () => Promise<PreferenceStoreResolution | void>,
-    viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>,
+    mutation: {
+      dispatching: () => void;
+      viaSdk: () => Promise<PreferenceStoreResolution | void>;
+      viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>;
+    },
   ): Promise<{
     usedDirectFileFallback: boolean;
     resolution: PreferenceStoreResolution | undefined;
   }> {
     if (platform !== "android") {
       getAbortSignal()?.throwIfAborted();
-      const resolution = (await viaSdk()) || undefined;
+      mutation.dispatching();
+      const resolution = (await mutation.viaSdk()) || undefined;
       return { usedDirectFileFallback: false, resolution };
     }
     let resolution: PreferenceStoreResolution | undefined;
@@ -6005,12 +6021,13 @@ export class UnixSocketServer {
       () => this.adbClientFactory.create(device),
       async () => {
         getAbortSignal()?.throwIfAborted();
-        resolution = (await viaSdk()) || undefined;
+        mutation.dispatching();
+        resolution = (await mutation.viaSdk()) || undefined;
       },
       // The ide/* params carry no userId, so an ambiguous-user error cannot say "pass userId".
       (adb) => {
         getAbortSignal()?.throwIfAborted();
-        return viaDirectFile(adb).catch(rethrowForRouteWithoutUserId);
+        return mutation.viaDirectFile(adb).catch(rethrowForRouteWithoutUserId);
       },
     );
     return { ...result, resolution };

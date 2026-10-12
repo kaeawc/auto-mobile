@@ -866,6 +866,11 @@ async function handleHeartbeat(
       livenessOwnerToken,
       outcome,
     );
+    if (rejection?.code === DAEMON_SESSION_NOT_FOUND_CODE) {
+      // The release that ended the session while the claim was resolving is named like on every
+      // other not-found answer (#11646); the lookup changes nothing and nothing is recorded after.
+      return sessionNotFoundResult(manager, sessionId);
+    }
     if (rejection) {
       // A concurrent `--cli` call can move the session onto the cli-idle policy (claiming it
       // with its own token) while the keeper's claim was resolving; the keeper still no-ops.

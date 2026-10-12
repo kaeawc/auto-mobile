@@ -218,10 +218,12 @@ describe("handleDaemonRequest", () => {
       expect(ownership).toHaveBeenCalledTimes(1);
       await sessionManager.releaseSession(sessionId);
       claim.resolve("claimed");
+      // The finished release is named, as it is for a heartbeat that arrives after it (#11646).
       expect(await response).toEqual({
         success: false,
         error: `Session not found: ${sessionId}`,
         code: DAEMON_SESSION_NOT_FOUND_CODE,
+        releaseReason: "explicit-release",
       });
       expect(heartbeat).not.toHaveBeenCalled();
     } finally {

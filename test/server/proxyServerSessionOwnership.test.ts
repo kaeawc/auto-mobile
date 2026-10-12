@@ -130,13 +130,16 @@ describe("proxy server session ownership errors", () => {
       await started.promise;
       const signal = call.mock.calls[0][1]?.signal;
       expect(signal).toBeInstanceOf(AbortSignal);
-      expect(fakeClient.readResourceSignals[0]).toBe(signal);
+      // The daemon client gets a signal that follows the request's (and the proxy's close).
+      const forwarded = fakeClient.readResourceSignals[0];
+      expect(forwarded?.aborted).toBe(false);
       controller.abort(new Error("cancel MCP resource read"));
       expect(await result).toMatchObject({
         message: expect.stringContaining("cancel MCP resource read"),
       });
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(signal?.aborted).toBe(true);
+      expect(forwarded?.aborted).toBe(true);
     } finally {
       controller.abort();
       gate.resolve();

@@ -121,6 +121,22 @@ export class AndroidAvdIdentityUnresolvedError extends ActionableError {
   }
 }
 
+/**
+ * Whether a request that names its device by `deviceId` also carries spec fields that device must
+ * satisfy. `name` is a spec field like any other (#11648); an exact name (`matchExactName`) paired
+ * with a deviceId is an identity pair with its own typed mismatch checks, so it stays out.
+ */
+function hasExplicitSpecConstraints(request: DeviceBootRequest): boolean {
+  return (
+    (request.name !== undefined && request.matchExactName !== true) ||
+    request.minOsVersion !== undefined ||
+    request.maxOsVersion !== undefined ||
+    request.formFactor !== undefined ||
+    request.requires !== undefined ||
+    request.screenSize !== undefined
+  );
+}
+
 function assertAndroidAvdIdentityResolved(devices: readonly BootedDevice[], avdName: string): void {
   const unresolved = devices
     .filter(
@@ -145,6 +161,17 @@ function assertBootedMatchesImage(device: BootedDevice, image: DeviceInfo): void
         `(${image.deviceId ?? "no runtime ID"}) resolved to '${device.name}' (${device.deviceId}). ` +
         "Retry after device discovery refreshes.",
     );
+  }
+}
+
+/**
+ * A `name` constraint on an emulator whose AVD-name probe went unanswered cannot be judged: the
+ * placeholder name proves neither a match nor a mismatch, so the request is retryable rather than
+ * refused as unsatisfied (#11648).
+ */
+function assertRequestedNameVerifiable(request: DeviceBootRequest, running: BootedDevice): void {
+  if (request.name !== undefined && request.matchExactName !== true) {
+    assertAndroidAvdIdentityResolved([running], request.name);
   }
 }
 
@@ -362,6 +389,13 @@ export interface DeviceBootRequest {
    * devices and images.
    */
   excludeDeviceIds?: ReadonlySet<string>;
+  /**
+   * Booted devices a selector match takes only when no other booted device satisfies the spec:
+   * the ones another session holds (#11648). They stay candidates, so a spec only held devices
+   * satisfy keeps its typed ownership refusal instead of booting around the holder. An exact
+   * target (`deviceId`, `matchExactName`) is an identity, not a choice, and ignores this.
+   */
+  deferDeviceIds?: ReadonlySet<string>;
   /** Non-mutating acceptance control for deterministic discovery-order coverage. */
   presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"];
 }
@@ -373,6 +407,7 @@ export interface DeviceBootProgress {
 export interface DeviceBootResult {
   device: BootedDevice;
   source: "booted" | "cold-boot";
+  runningBeforeCall?: true;
   sourceImage?: DeviceInfo;
   processHandle?: ChildProcess | null;
   processId?: number;
@@ -660,12 +695,7 @@ export class DeviceBootService {
       true,
       request.presentationOrder,
     );
-    const hasExplicitConstraints =
-      request.minOsVersion !== undefined ||
-      request.maxOsVersion !== undefined ||
-      request.formFactor !== undefined ||
-      request.requires !== undefined ||
-      request.screenSize !== undefined;
+    const hasExplicitConstraints = hasExplicitSpecConstraints(request);
     const running = booted.find((device) => device.deviceId === request.deviceId);
     if (running) {
       return await this.waitForKnownRunningDevice(
@@ -725,6 +755,7 @@ export class DeviceBootService {
     context: BootDeadlineContext,
     progress: DeviceBootProgress | undefined,
   ): Promise<DeviceBootResult> {
+    assertRequestedNameVerifiable(request, running);
     const enriched = await this.enrichKnownRunningDevice(
       running,
       request.deviceId,
@@ -929,11 +960,7 @@ export class DeviceBootService {
     const match =
       request.matchExactName && request.name
         ? findEligibleExactBootedDevice(request.platform, enriched, request.name, criteria)
-        : this.dependencies.deviceMatcher.matchBootedDevice(
-            criteria,
-            enriched,
-            this.dependencies.matchingStrategy,
-          );
+        : this.matchBootedPreferringUndeferred(criteria, enriched, request.deferDeviceIds);
     if (!match) {
       return undefined;
     }
@@ -944,6 +971,24 @@ export class DeviceBootService {
     return image
       ? { ...result, device: enrichBootedDevice(result.device, image), sourceImage: image }
       : result;
+  }
+
+  /** The strategy's pick among the booted devices not deferred, else among all of them. */
+  private matchBootedPreferringUndeferred(
+    criteria: DeviceMatchCriteria,
+    booted: BootedDevice[],
+    deferred: ReadonlySet<string> | undefined,
+  ): BootedDevice | null {
+    const { deviceMatcher, matchingStrategy } = this.dependencies;
+    const preferred = deferred?.size
+      ? booted.filter((device) => !deferred.has(device.deviceId))
+      : booted;
+    return (
+      deviceMatcher.matchBootedDevice(criteria, preferred, matchingStrategy) ??
+      (preferred.length < booted.length
+        ? deviceMatcher.matchBootedDevice(criteria, booted, matchingStrategy)
+        : null)
+    );
   }
 
   /**

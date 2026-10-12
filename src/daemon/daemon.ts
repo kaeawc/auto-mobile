@@ -1291,11 +1291,14 @@ export class Daemon {
     );
     // A sessionless call admitted while the device was free must not keep driving it for the new
     // holder (#10829). The call performing the acquisition is spared.
-    // A sessionless recording on the device is stopped and finalized the same way (#10961).
-    const stopOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(this.sessionManager);
+    // The acquiring holder adopts active sessionless recordings without stopping them (#11665).
+    const adoptOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(
+      this.sessionManager,
+    );
     // Sessionless network mocks and simulations are cleared the same way (#11130).
     const clearOwnerlessNetworkState = createOwnerlessNetworkStateAcquisitionCleanup(
       this.sessionManager,
+      { timer: this.timer },
     );
     // Display/system settings a previous session changed are reset to the recorded device
     // defaults when a different session acquires the device (#11145).
@@ -1310,6 +1313,7 @@ export class Daemon {
     const resetSettingDefaults = createDeviceSettingDefaultsAcquisitionReset(
       this.sessionManager,
       settingDefaults,
+      this.timer,
     );
     this.sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {
       executionTracker.cancelSessionlessDeviceUse(deviceId, {
@@ -1317,7 +1321,7 @@ export class Daemon {
       });
       // A sessionless stroke parked on the device with no frame in flight is lifted too (#11541).
       this.socketServer?.liftSessionlessStrokesOn(deviceId);
-      stopOwnerlessRecordings(deviceId);
+      adoptOwnerlessRecordings(deviceId, sessionId);
       clearOwnerlessNetworkState(deviceId);
       resetSettingDefaults(deviceId, sessionId);
     });
@@ -1373,6 +1377,7 @@ export class Daemon {
     // A rebind keeps the session live, but its navigation state was collected on
     // the old device and must not follow it to the new one.
     this.sessionManager.onSessionDeviceUnbound((sessionId, deviceId) => {
+      this.socketServer?.liftStrokesHeldByOn(sessionId, deviceId);
       DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
       const previousNavigationManager = NavigationGraphManager.getInstanceForSession(sessionId);
       NavigationGraphManager.resetSession(sessionId);

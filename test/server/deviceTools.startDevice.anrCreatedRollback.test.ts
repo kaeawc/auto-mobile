@@ -1,5 +1,5 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   setDeviceToolsDependencies,
   resetDeviceToolsDependencies,
@@ -39,7 +39,7 @@ describe("createIfMissing rollback after System UI recovery", () => {
   let fakeProvisioner: FakeDeviceProvisioner;
   let sessionManager: SessionManager;
 
-  beforeEach(() => {
+  const arrange = (): void => {
     resetDeviceToolsDependencies();
     DaemonState.getInstance().reset();
     clearDirectSessionDevices();
@@ -89,9 +89,10 @@ describe("createIfMissing rollback after System UI recovery", () => {
       new DeviceSessionRegistry(timer, idGenerator),
     );
     registerDeviceTools();
-  });
+  };
+  beforeEach(arrange);
 
-  afterEach(() => {
+  const dispose = (): void => {
     resetDeviceToolsDependencies();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();
@@ -99,7 +100,8 @@ describe("createIfMissing rollback after System UI recovery", () => {
     setDeviceManager(null);
     PlatformDeviceManagerFactory.reset();
     resetVideoRecordingManagerDependencies();
-  });
+  };
+  afterEach(dispose);
 
   async function callStartDevice(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const tool = ToolRegistry.getTool("startDevice");
@@ -137,6 +139,20 @@ describe("createIfMissing rollback after System UI recovery", () => {
       fakeDeviceUtils.setBootedDevices(platform, []);
     };
   }
+
+  // Pay start/bind module and JIT costs on a throwaway pool, outside all scenarios.
+  beforeAll(async () => {
+    arrange();
+    const warm = { deviceId: "emulator-5590", name: "warm-up", platform: "android" as const };
+    fakeDeviceUtils.setBootedDevices("android", [warm]);
+    fakeMatcher.setBootedResult(warm);
+    setDeviceToolsDependencies({ avdManagerFactory: () => ({ listDeviceImages: async () => [] }) });
+    try {
+      await callStartDevice({ platform: "android" });
+    } finally {
+      dispose();
+    }
+  });
 
   it("deletes the AVD it created when binding fails after a System UI ANR replacement boot", async () => {
     fakeGate.setAllowed(true);
@@ -219,5 +235,48 @@ describe("createIfMissing rollback after System UI recovery", () => {
     expect(readinessAttempts).toBe(2);
     expect(fakeProvisioner.requests).toEqual([]);
     expect(fakeDeviceUtils.getExecutedOperations().join("\n")).not.toContain("destroyDevice");
+  });
+
+  it("keeps the AVD it created once another session selected it while its runner was prepared", async () => {
+    fakeGate.setAllowed(true);
+    const created = {
+      platform: "android" as const,
+      name: "AutoMobile-android-34-abcd1234",
+      deviceType: "system-images;android-34;google_apis;arm64-v8a",
+      runtime: "android-34",
+    };
+    const createdDeviceId = `mock-${created.name}`;
+    setDeviceToolsDependencies({
+      deviceProvisionerFactory: () => ({
+        provision: async (_criteria, _signal, identityHooks) => {
+          await identityHooks?.reserveBeforeCreate(created);
+          fakeDeviceUtils.setDeviceImages("android", [
+            { name: created.name, platform: "android", isRunning: false },
+          ]);
+          await identityHooks?.bindAfterCreate(created);
+          return created;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        // An internal binder remains permissive under the readiness reservation (#11651);
+        // setActiveDevice now refuses this window, so exercise the cleanup safety net directly.
+        await DaemonState.getInstance()
+          .getDevicePool()
+          .bindOrReuseDeviceSession("other-session", createdDeviceId, "android");
+        throw new Error("automation runner did not become ready");
+      },
+    });
+    await useFakeTeardown("android");
+
+    await expect(callStartDevice({ platform: "android", createIfMissing: true })).rejects.toThrow(
+      /automation runner did not become ready/,
+    );
+
+    // Stopping or deleting it would be lifecycle on the other session's device.
+    expect(sessionManager.getSession("other-session")?.assignedDevice).toBe(createdDeviceId);
+    const operations = fakeDeviceUtils.getExecutedOperations().join("\n");
+    expect(operations).not.toContain("destroyDevice");
+    expect(operations).not.toContain("killDevice");
+    expect(await fakeDeviceUtils.listDeviceImages("android")).toHaveLength(1);
   });
 });

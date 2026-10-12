@@ -1,11 +1,13 @@
 import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
 import { logger } from "../../utils/logger";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
 import {
   assertBootCapacityGranted,
   atCapacityDecision,
   BootAdmissionLedger,
   DEFAULT_ADMISSION_RETRY_AFTER_MS,
+  DEFAULT_SAMPLE_TIMEOUT_MS,
   admitBootNow,
   type BootAdmissionResult,
   type BootCapacityChecker,
@@ -66,7 +68,11 @@ export interface CapacityGateOptions {
   retryAfterMs?: number;
   /** Consecutive pressured samples before `describeCapacity` reports sustained host pressure. */
   sustainedSamples?: number;
+  /** The ledger of admitted boots; injectable so a test can watch its sample windows. */
+  ledger?: BootAdmissionLedger;
 }
+
+const CAPACITY_LABEL = "iOS simulator capacity";
 
 export class IosSimCapacityGate
   implements SimulatorCapacityGate, BootCapacityReporter, BootCapacityChecker
@@ -93,7 +99,7 @@ export class IosSimCapacityGate
     this.env = options.env ?? process.env;
     this.retryAfterMs = options.retryAfterMs ?? DEFAULT_ADMISSION_RETRY_AFTER_MS;
     this.sustainedSamples = options.sustainedSamples ?? DEFAULT_SUSTAINED_SAMPLES;
-    this.admittedBoots = new BootAdmissionLedger(timer);
+    this.admittedBoots = options.ledger ?? new BootAdmissionLedger(timer);
   }
 
   /** Collect a fresh report and fold it into the pressure history. Used by the monitor too. */
@@ -163,7 +169,7 @@ export class IosSimCapacityGate
       timer: this.timer,
       platform: "ios",
       signal: options.signal,
-      label: "iOS simulator capacity",
+      label: CAPACITY_LABEL,
       // Fresh: the listing must start after the ledger window opened (see FleetCostSource).
       sample: () => this.refresh({ fresh: true }),
       ledger: this.admittedBoots,
@@ -181,27 +187,69 @@ export class IosSimCapacityGate
    * Refuses with `capacity_exhausted` when booting a simulator would be refused now; admits nothing.
    * A warm simulator is not a substitute here: the caller boots its own device.
    */
-  async assertCapacityAvailable(): Promise<void> {
-    // A capacity check is not a boot decision: it must not advance the sustained-pressure streak.
-    const report = await this.fleet.collect();
-    assertCapacityGranted({ decision: this.decide(report, undefined, "hint") });
+  async assertCapacityAvailable(options: { signal?: AbortSignal } = {}): Promise<void> {
+    return this.sampleInWindow(options, (report, window) => {
+      assertCapacityGranted({
+        decision: this.decide(report, undefined, "hint", undefined, window),
+      });
+    });
   }
 
   /** Current limit, booted simulators (every Booted one, owned or not) and admitted boots in flight. */
-  async describeCapacity(): Promise<BootCapacitySnapshot> {
-    // A listing is not a boot decision: reading must not advance the sustained-pressure streak.
-    const report = await this.fleet.collect();
-    this.assertCountKnown(report);
-    return {
-      limit: this.limitsFor(report).maxBooted,
-      booted: occupyingUdids(report).length,
-      inFlight: this.inFlightBootCount(report),
-      hostPressure: {
-        sustained: this.pressuredStreak >= this.sustainedSamples,
-        consecutiveSamples: this.pressuredStreak,
-        memoryPressure: report.host?.memoryPressure ?? "unknown",
-      },
-    };
+  async describeCapacity(options: { signal?: AbortSignal } = {}): Promise<BootCapacitySnapshot> {
+    // Sampled like the check and an admission, so a listing's capacity block and a boot decided
+    // at the same instant count the same simulators (#11643).
+    return this.sampleInWindow(options, (report, window) => {
+      this.assertCountKnown(report);
+      return {
+        limit: this.limitsFor(report).maxBooted,
+        booted: occupyingUdids(report).length,
+        inFlight: this.inFlightBootCount(report, undefined, window),
+        hostPressure: {
+          sustained: this.pressuredStreak >= this.sustainedSamples,
+          consecutiveSamples: this.pressuredStreak,
+          memoryPressure: report.host?.memoryPressure ?? "unknown",
+        },
+      };
+    });
+  }
+
+  /**
+   * One listing begun inside its own ledger window, as `admitBoot` takes it: a boot that ends
+   * while the listing is open, or after an earlier caller's listing began, still holds its slot
+   * for this read (#11643). Judge synchronously inside the window so a boot released between
+   * closing the window and an awaiting caller resuming cannot disappear from the count.
+   * Bounded and cancellable like an admission's sample, so a hung
+   * `simctl list` neither hangs the caller nor keeps the window (and every boot that ends in it)
+   * alive: an unfinished sample is an unknown count, retryable `discovery_incomplete`, never
+   * "capacity available". A read is not a boot decision, so it does not advance the
+   * sustained-pressure streak.
+   */
+  private async sampleInWindow<T>(
+    options: { signal?: AbortSignal },
+    judge: (report: FleetCostReport, window: LedgerSampleWindow) => T,
+  ): Promise<T> {
+    options.signal?.throwIfAborted();
+    const window = this.admittedBoots.beginSample();
+    try {
+      // The collector's run is shared with other callers, so losing the race never cancels it.
+      const report = await raceWithDeadline(() => this.fleet.collectFresh(), {
+        timer: this.timer,
+        timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS,
+        signal: options.signal,
+        label: `Collecting ${CAPACITY_LABEL}`,
+        timeoutError: () =>
+          new BootedDeviceDiscoveryIncompleteError("ios", {
+            code: "timeout",
+            message: `timed out after ${DEFAULT_SAMPLE_TIMEOUT_MS}ms collecting ${CAPACITY_LABEL}`,
+            retryable: true,
+          }),
+      });
+      options.signal?.throwIfAborted();
+      return judge(report, window);
+    } finally {
+      window.close();
+    }
   }
 
   /**

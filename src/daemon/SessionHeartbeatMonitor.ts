@@ -1,4 +1,5 @@
 import { Timer, defaultTimer, monotonicClockSemanticsDrift } from "../utils/SystemTimer";
+import { readOptionalEnvPositiveInteger } from "../utils/envNumbers";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
@@ -46,6 +47,8 @@ export interface HeartbeatSessionSource {
    * clock.
    */
   sessionNow?(): number;
+  /** Lease heartbeat including a qualifying same-token base's owner proof (#11722). */
+  judgedLeaseHeartbeat?(session: Session): number;
   /** Register a detector the source runs before every expiry judgement; undefined detaches it. */
   setStallProbe?(probe: (() => void) | undefined): void;
   /**
@@ -172,12 +175,7 @@ export const STUCK_REAP_WARN_MS =
 const DEFAULT_INITIAL_GRACE_MS = 20_000;
 
 function readPositiveMsEnv(primaryName: string, legacyName: string): number | undefined {
-  const rawValue = process.env[primaryName] ?? process.env[legacyName];
-  if (!rawValue) {
-    return undefined;
-  }
-  const parsed = Number.parseInt(rawValue, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  return readOptionalEnvPositiveInteger(primaryName, legacyName);
 }
 
 /**
@@ -719,9 +717,11 @@ export class SessionHeartbeatMonitor {
     // heartbeated is judged on its owner's own heartbeats: `lastHeartbeat` is also stamped by tool
     // calls from any connection, which must not keep a dead owner's lease alive (#11107). A
     // session no proxy owns keeps the activity-refreshed `lastHeartbeat` fallback.
-    const lastHeartbeat = judgedLeaseHeartbeat(session);
+    const ownHeartbeat = judgedLeaseHeartbeat(session);
+    const lastHeartbeat = this.sessions.judgedLeaseHeartbeat?.(session) ?? ownHeartbeat;
 
-    if (!session.hasReceivedHeartbeat) {
+    // A later base heartbeat is owner proof even if this label never heartbeated by name (#11722).
+    if (!session.hasReceivedHeartbeat && lastHeartbeat === ownHeartbeat) {
       if (session.heartbeatTimeoutSource === "default") {
         return now - lastHeartbeat > this.preFirstHeartbeatGraceMs
           ? "missing-first-heartbeat"

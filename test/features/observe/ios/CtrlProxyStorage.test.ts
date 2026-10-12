@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import { runWithAbortSignal } from "../../../../src/utils/AbortContext";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import type { BootedDevice } from "../../../../src/models";
 import {
@@ -111,6 +112,36 @@ describe("CtrlProxyStorage (iOS)", function () {
     socket.sentMessages
       .map((message) => JSON.parse(message))
       .filter((payload) => !syncMessageTypes.has(payload.type));
+
+  describe("storage cancellation after connection (#11667)", () => {
+    for (const method of ["setPreference", "removePreference", "clearPreferenceStore"] as const) {
+      test(`${method} sends nothing when cancelled after connection resolves`, async () => {
+        const h = createIosDelegateHarness({ timer: fakeTimer });
+        const storage = new CtrlProxyStorage(h.context);
+        const call = new AbortController();
+        const ensureConnected = h.context.ensureConnected;
+        h.context.ensureConnected = async () => {
+          const connected = await ensureConnected();
+          expect(connected).toBe(true);
+          expect(call.signal.aborted).toBe(false);
+          // Cancel after connection succeeds, before the storage delegate resumes.
+          call.abort(new Error("call cancelled after connect"));
+          return connected;
+        };
+        const write = () =>
+          method === "setPreference"
+            ? storage.setPreference("com.example", "prefs", "k", "v", "STRING")
+            : method === "removePreference"
+              ? storage.removePreference("com.example", "prefs", "k")
+              : storage.clearPreferenceStore("com.example", "prefs");
+        const pending = runWithAbortSignal(call.signal, write);
+        const error = await pending.catch((error: unknown) => error);
+        expect(h.sentMessages).toEqual([]);
+        expect(error).toBe(call.signal.reason);
+        expect(h.requestManager.getPendingCount()).toBe(0);
+      });
+    }
+  });
 
   // ---------------------------------------------------------------------------
   // listPreferenceFiles

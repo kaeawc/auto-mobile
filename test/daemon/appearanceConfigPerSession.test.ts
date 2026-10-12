@@ -98,7 +98,10 @@ describe("AppearanceSyncScheduler with per-session config", () => {
   test("syncDevice reads the config of the session that acquired the device", async () => {
     const store = new FakeConfigStore();
     await store.update({ syncWithHost: false }, "agent-a");
-    const { instance, applied } = scheduler(store, () => []);
+    const { instance, applied } = scheduler(store, () => [
+      target("emulator-5554", "agent-a"),
+      target("emulator-5556", "agent-b"),
+    ]);
 
     await instance.syncDevice(target("emulator-5554", "agent-a"));
     await instance.syncDevice(target("emulator-5556", "agent-b"));

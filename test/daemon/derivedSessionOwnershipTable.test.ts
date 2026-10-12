@@ -8,7 +8,7 @@ import {
   OWNER_DISCONNECT_GRACE_MS,
   OWNER_DISCONNECTED_RELEASE_REASON,
 } from "../../src/daemon/ownerDisconnectRelease";
-import { PLAN_AUTO_RELEASE_REASON, SessionManager } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { logger } from "../../src/utils/logger";
@@ -230,7 +230,8 @@ const OPERATIONS: Record<string, Operation> = {
   },
   "a liveness claim once the base owner's lease and grace have lapsed": async (w, id) => {
     await w.manager.claimLivenessOwnership(BASE, OWNER_TOKEN);
-    w.timer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
+    // An accepted claim is its owner's heartbeat, holding suspect grace; the lapse check is strict (#11646).
+    w.timer.advanceTime(OWNER_DISCONNECT_GRACE_MS + 1);
     return { outcome: await w.manager.claimLivenessOwnership(id, CLAIMANT_TOKEN) };
   },
   "a tokened heartbeat adopting unowned liveness": (w, id) => ({
@@ -415,7 +416,8 @@ describe("a derived label session is judged and recorded as its base", () => {
     await w.manager.claimLivenessOwnership(BASE, OWNER_TOKEN);
     expect(w.manager.claimUnownedLivenessOwnership(DERIVED, CLAIMANT_TOKEN)).toBe(false);
 
-    w.timer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
+    // An accepted claim is its owner's heartbeat, holding suspect grace; the lapse check is strict (#11646).
+    w.timer.advanceTime(OWNER_DISCONNECT_GRACE_MS + 1);
 
     expect(w.manager.claimUnownedLivenessOwnership(DERIVED, CLAIMANT_TOKEN)).toBe(true);
     expect(w.manager.hasLivenessOwnership(BASE, OWNER_TOKEN)).toBe(true);
@@ -470,7 +472,8 @@ describe("a derived label session is judged and recorded as its base", () => {
 
     expect(releases).toEqual([
       [BASE, OWNER_DISCONNECTED_RELEASE_REASON],
-      [DERIVED, PLAN_AUTO_RELEASE_REASON],
+      // The base's end ends its labels with the base's own reason (#11640).
+      [DERIVED, OWNER_DISCONNECTED_RELEASE_REASON],
     ]);
     expect(w.manager.getSession(DERIVED)).toBeNull();
     expect(w.pool.getDevice(primary.deviceId)?.sessionId).toBeNull();

@@ -140,6 +140,8 @@ test/fixtures/ios/ctrlproxy-golden/**/*.json text eol=lf
 test/fixtures/ios/merger-pairs/*.json text eol=lf
 android/control-proxy/src/test/resources/ime-traces/*.txt text eol=lf
 test/fixtures/ios-sim-fleet/*.txt text eol=lf
+# Real `ps -axo pid=,ppid=,rss=,pcpu=,command=` capture with a running emulator (#11588).
+test/fixtures/android-boot-admission/*.txt text eol=lf
 test/fixtures/ios-sim-fleet/*.json text eol=lf
 test/fixtures/android-apk-signing/*.b64 text eol=lf
 test/fixtures/android-apk-signing/*.txt text eol=lf

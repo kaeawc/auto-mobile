@@ -30,6 +30,13 @@ import {
   type SystemUiAnrRecoveryResult,
 } from "./deviceToolsSystemUiAnr";
 import { errorMessage } from "../utils/describeUnknownError";
+import { releaseSessionAndDevice } from "../daemon/releaseSessionAndDevice";
+import {
+  deviceAlreadyAssignedToAnotherSessionError,
+  isSameHolderSession,
+} from "../daemon/inputDeviceOwnership";
+import { lifecycleRequester } from "./lifecycleDeviceOwnership";
+import { deviceLossCancellationReason } from "../utils/deviceLossCancellationReason";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { terminateColdBootProcess } from "../devices/coldBootProcessTermination";
 import { z } from "zod/v4";
@@ -137,7 +144,11 @@ import {
   type DeviceProvisioner,
 } from "../devices/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
-import { requestAcquisitionReceipt, type AcquisitionReceipt } from "../daemon/acquisitionReceipt";
+import {
+  commitAcquisition,
+  requestAcquisitionReceipt,
+  type AcquisitionReceipt,
+} from "../daemon/acquisitionReceipt";
 import { acquireUndoneIfUndelivered, undoUndeliveredAcquisition } from "./undeliveredAcquisition";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
@@ -3639,6 +3650,7 @@ export async function runProvisionDeviceWithinDeadline<T>(
 export type DeadlineBoundOperation<T> = (
   signal: AbortSignal,
   undoIfUndelivered: (undo: (result: T) => Promise<void>) => void,
+  onDelivered: (commit: () => void) => void,
 ) => Promise<T>;
 
 /**
@@ -3652,9 +3664,15 @@ export function bindUndoneIfUndelivered(
   bind: (receipt: AcquisitionReceipt) => Promise<string>,
   bootOf?: () => DeviceBootResult | undefined,
 ): DeadlineBoundOperation<string> {
-  return async (signal, undoIfUndelivered) => {
+  return async (signal, undoIfUndelivered, onDelivered) => {
     // One receipt per acquiring request, so the request-level undo sees what this bind minted.
-    const receipt = requestAcquisitionReceipt() ?? {};
+    const requestReceipt = requestAcquisitionReceipt();
+    const receipt = requestReceipt ?? {};
+    // A request-level receipt waits for the entire handler; a private one commits only when
+    // the deadline race actually delivers this bind's result.
+    if (!requestReceipt) {
+      onDelivered(() => commitAcquisition(receipt));
+    }
     undoIfUndelivered(async () => {
       await undoUndeliveredAcquisition(receipt, signal.reason);
       const boot = bootOf?.();
@@ -3686,6 +3704,7 @@ export async function runOperationWithinDeadline<T>(
     : controller.signal;
   let operationSettled = false;
   let undo: ((result: T) => Promise<void>) | undefined;
+  let delivered: (() => void) | undefined;
   const registerUndo = (registered: (result: T) => Promise<void>): void => {
     undo = registered;
   };
@@ -3702,7 +3721,11 @@ export async function runOperationWithinDeadline<T>(
     operationSettled = true;
     return result;
   };
-  const operationPromise = runWithAbortSignal(signal, () => operation(signal, registerUndo)).then(
+  const operationPromise = runWithAbortSignal(signal, () =>
+    operation(signal, registerUndo, (commit) => {
+      delivered = commit;
+    }),
+  ).then(
     (result) => {
       // Returning `result` settles this promise in the same turn, so the race below delivers it
       // unless the request was already cancelled or timed out. Then the race is lost for good,
@@ -3725,7 +3748,7 @@ export async function runOperationWithinDeadline<T>(
   });
 
   try {
-    return await raceWithDeadline(operationPromise, {
+    const result = await raceWithDeadline(operationPromise, {
       timer,
       timeoutMs: remainingMs,
       signal: requestSignal,
@@ -3736,6 +3759,8 @@ export async function runOperationWithinDeadline<T>(
         return error;
       },
     });
+    delivered?.();
+    return result;
   } catch (error) {
     if (!operationSettled) {
       onOrphan?.(operationPromise);
@@ -4072,9 +4097,67 @@ export function validatePooledDeviceMapping(device: BootedDevice, requestedIdent
  */
 export type ColdBootSettlementCollector = (settlement: Promise<void> | undefined) => void;
 
+/**
+ * The live session holding `deviceId`, unless this request's own acquisition put it there: the
+ * session a request minted or moved is taken back by that request's undo, not kept.
+ */
+export function liveHolderOtherThanThisRequest(deviceId: string): string | undefined {
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return undefined;
+  }
+  const holder = daemonState.getDevicePool().getDevice(deviceId)?.sessionId;
+  if (!holder || !daemonState.getSessionManager().getSession(holder)) {
+    return undefined;
+  }
+  const receipt = requestAcquisitionReceipt();
+  const ownSessions = [receipt?.minted?.session.sessionId, receipt?.rebound?.session.sessionId];
+  return ownSessions.includes(holder) ? undefined : holder;
+}
+
+/** Shared by ordinary cancellation and recovery cleanup, which otherwise differs in holder checks. */
+function leavePreviouslyRunningBoot(boot: DeviceBootResult | undefined): boolean {
+  if (!boot || (!boot.runningBeforeCall && boot.source !== "booted")) {
+    return false;
+  }
+  logger.info(
+    `[DeviceTools] Leaving ${boot.device.deviceId} running: it was running before this call`,
+  );
+  return true;
+}
+
 export function cancelUnownedColdBoot(
   boot: DeviceBootResult | undefined,
 ): Promise<void> | undefined {
+  if (leavePreviouslyRunningBoot(boot)) {
+    return undefined;
+  }
+  if (boot?.source !== "cold-boot" || !boot.processHandle) {
+    return undefined;
+  }
+  const otherHolder = liveHolderOtherThanThisRequest(boot.device.deviceId);
+  if (otherHolder) {
+    // A readiness reservation keeps the device out of general allocation only, so another
+    // session's exact bind is admitted while this call still prepares the runner (#11651).
+    // Lifecycle on a device another session holds is refused: it stays running for its holder,
+    // and it stays counted against boot capacity as the booted device it is.
+    logger.info(
+      `[DeviceTools] Leaving cold boot ${boot.device.deviceId} running: session ${otherHolder} holds it`,
+    );
+    return undefined;
+  }
+  return stopUnownedColdBoot(boot);
+}
+
+/**
+ * `cancelUnownedColdBoot` without the other-holder check. System UI ANR recovery uses it for its
+ * replacement boot: the replacement reuses the serial of the device it replaces, whose pool entry
+ * still names the session being recovered, so that holder says nothing about the replacement.
+ */
+function stopUnownedColdBoot(boot: DeviceBootResult | undefined): Promise<void> | undefined {
+  if (leavePreviouslyRunningBoot(boot)) {
+    return undefined;
+  }
   if (boot?.source !== "cold-boot" || !boot.processHandle) {
     return undefined;
   }
@@ -4118,8 +4201,10 @@ export async function rollBackUndeliveredBoot(
   identity: VirtualDeviceLifecycleIdentity,
   deleteCreated?: (lifecycleLease: VirtualDeviceLifecycleLease) => Promise<void>,
 ): Promise<void> {
-  if (boot.source !== "cold-boot" && !deleteCreated) {
-    // A device that was already running stays running.
+  if (boot.runningBeforeCall || (boot.source !== "cold-boot" && !deleteCreated)) {
+    logger.info(
+      `[DeviceTools] Leaving ${boot.device.deviceId} running: it was running before this call`,
+    );
     return;
   }
   const deps = getDeviceToolsDependencies();
@@ -4340,9 +4425,16 @@ interface StartDeviceRunnerReadinessInput {
 export async function prepareStartDeviceRunnerReadiness(
   input: StartDeviceRunnerReadinessInput,
 ): Promise<SystemUiAnrRecoveryResult & { recovered: boolean }> {
+  // Exact binds can arrive during readiness; capture identities before leaving request context.
   const devicePool = getStartDevicePool(input.daemonState);
+  const initialHolder = captureSystemUiAnrInitialHolder(input, devicePool);
+  // startDeviceSchema strips sessionUuid, so caller identity comes from admitted ambient routing.
+  const requesterSessionUuid = lifecycleRequester(input.args).sessionUuid;
+  const autolockEnabled =
+    (input.autolockEnabled ?? captureAutolockPolicy(getDeviceToolsDependencies().env)) &&
+    Boolean(devicePool);
   const recoveryAutolockClient =
-    (input.autolockEnabled ?? captureAutolockPolicy(getDeviceToolsDependencies().env)) && devicePool
+    autolockEnabled && devicePool
       ? {
           mcpSessionId: input.args.__mcpSessionId,
           expectedSessionId: devicePool.captureAutolockSessionForMcpSession(
@@ -4353,7 +4445,11 @@ export async function prepareStartDeviceRunnerReadiness(
   const readinessResult = await ensureRunnerReadyWithSystemUiAnrRecovery(
     input.boot,
     createRunnerReadinessAttempt(input),
-    createSystemUiAnrRebooter(input, devicePool, recoveryAutolockClient),
+    createSystemUiAnrRebooter(input, devicePool, recoveryAutolockClient, {
+      initialHolder,
+      requesterSessionUuid,
+      autolockEnabled,
+    }),
   );
   if (readinessResult.recovered) {
     try {
@@ -4401,7 +4497,8 @@ export function assertAndroidBootDidNotEnterRecovery(
 function createRunnerReadinessAttempt(
   input: StartDeviceRunnerReadinessInput,
 ): (candidate: DeviceBootResult) => Promise<void> {
-  return async (candidate) =>
+  return async (candidate) => {
+    input.signal?.throwIfAborted();
     await input.ensureCtrlProxyReady({
       device: candidate.device,
       requestedIdentity: input.requestedIdentity,
@@ -4412,15 +4509,50 @@ function createRunnerReadinessAttempt(
       perf: input.perf,
       signal: input.signal,
     });
+  };
+}
+
+function captureSystemUiAnrInitialHolder(
+  input: StartDeviceRunnerReadinessInput,
+  devicePool: DevicePool | undefined,
+): string | undefined {
+  const sessionId = devicePool?.getDevice(input.boot.device.deviceId)?.sessionId;
+  return sessionId && input.daemonState.getSessionManager().getSession(sessionId)
+    ? sessionId
+    : undefined;
 }
 
 function createSystemUiAnrRebooter(
   input: StartDeviceRunnerReadinessInput,
   devicePool: DevicePool | undefined,
   recoveryAutolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined,
+  entitlement: {
+    initialHolder: string | undefined;
+    requesterSessionUuid: string | undefined;
+    autolockEnabled: boolean;
+  },
 ): (candidate: DeviceBootResult) => Promise<SystemUiAnrRecoveryResult> {
-  return async (candidate) =>
-    await rebootAndroidAfterSystemUiAnr({
+  return async (candidate) => {
+    const manager = devicePool ? input.daemonState.getSessionManager() : undefined;
+    const hasOtherHolder = (deviceId: string) => {
+      const holder = liveHolderOtherThanThisRequest(deviceId);
+      return (
+        holder !== undefined &&
+        !(
+          holder === entitlement.initialHolder &&
+          (entitlement.autolockEnabled || entitlement.requesterSessionUuid === undefined)
+        ) &&
+        !isSameHolderSession(holder, entitlement.requesterSessionUuid, manager)
+      );
+    };
+    const assertHolder = () => {
+      if (hasOtherHolder(candidate.device.deviceId)) {
+        throw deviceAlreadyAssignedToAnotherSessionError(candidate.device.deviceId);
+      }
+    };
+    const sessionId = devicePool?.getDevice(candidate.device.deviceId)?.sessionId;
+    const session = sessionId ? manager?.getSession(sessionId) : undefined;
+    return await rebootAndroidAfterSystemUiAnr({
       boot: candidate,
       args: input.args,
       bootService: input.bootService,
@@ -4431,18 +4563,52 @@ function createSystemUiAnrRebooter(
       signal: input.signal,
       progress: input.progress ? { report: input.progress } : undefined,
       recoveryAutolockClient,
+      assertHolder,
       collectColdBootSettlement: input.collectColdBootSettlement,
       publishReplacementReadinessMarker: (replacement) =>
         input.publishRecoveredReadinessMarker?.(replacement),
+      releasePreservedSession: async (replacement, preservedSessionId) => {
+        if (
+          !devicePool ||
+          !manager ||
+          !sessionId ||
+          preservedSessionId !== sessionId ||
+          devicePool.getDevice(replacement.id) !== replacement ||
+          replacement.sessionId !== sessionId
+        ) {
+          return;
+        }
+        if (session) {
+          await releaseSessionAndDevice(
+            manager,
+            devicePool,
+            replacement.id,
+            sessionId,
+            deviceLossCancellationReason(replacement.id),
+            {
+              release: async () =>
+                await manager.releaseSessionIfOwned(
+                  sessionId,
+                  session,
+                  replacement.id,
+                  deviceLossCancellationReason(replacement.id),
+                ),
+            },
+          );
+        } else {
+          await devicePool.releaseDevice(replacement.id, sessionId);
+        }
+      },
       operations: {
         deviceShutdownTimeoutMs: DEVICE_SHUTDOWN_TIMEOUT_MS,
         runWithinShutdownDeadline,
         waitForDeviceShutdown,
         shouldClearIntentionalShutdownAfterFailure,
-        cancelUnownedColdBoot,
+        cancelUnownedColdBoot: stopUnownedColdBoot,
         isUnknownAndroidRuntimeName,
       },
     });
+  };
 }
 
 async function prepareRecoveredDeviceForRunnerReadiness(

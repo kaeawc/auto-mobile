@@ -10,7 +10,9 @@
 #                 with SIGSTOP, so its socket stays open), the device is
 #                 released about 10 s later.
 #   idle          A proxy that keeps heartbeating but makes no tool calls holds
-#                 the device until the idle window ends, and then loses it.
+#                 the device until the idle window ends, and then loses it. The
+#                 connection binding and released UUID must refuse further control
+#                 calls with acquire_new_session, without re-acquiring the device.
 #   stdin-eof     A proxy whose stdin closes (the MCP host went away) exits on its
 #                 own and its device is released within the no-heartbeat budget.
 #   selector      Control calls that name only `deviceId` (no sessionUuid) are
@@ -47,7 +49,7 @@
 # advisory-nightly workflow .github/workflows/live-idle-release.yml.
 #
 # Status-returning helpers (proxy_alive, wait_for_release, daemon_cmd,
-# active_sessions_json, stop_daemon, stop_proxy) are called in conditions on
+# active_sessions_json, stop_daemon, stop_proxy, call_tool, mcp_request) are called in conditions on
 # purpose. Each checks its own commands explicitly and fails through die, so none
 # relies on errexit inside it.
 # shellcheck disable=SC2310
@@ -95,6 +97,8 @@ subscriber_pid=""
 subscriber_fd_open=false
 daemon_started=false
 request_id=0
+# The matched raw JSON-RPC response, including refusals, for terminal-release evidence.
+last_response=""
 session_id=""
 current_scenario=""
 # Set by query_device_entry and wait_for_release; globals, not stdout, so a failed
@@ -354,6 +358,8 @@ setup_private_namespace() {
   fi
   mkdir -p "${evidence_dir}" "${work_dir}/data" "${work_dir}/logs" "${work_dir}/db" \
     "${work_dir}/coord" "${work_dir}/ios-cache"
+  # A direct run is fresh; the CI runner checks sticky verdicts before invoking us.
+  rm -f "${evidence_dir}/failed-scenarios.txt"
 
   # Drop every inherited daemon selector and session-timing knob so nothing from
   # the caller's shell can point this run at the resident daemon or change the
@@ -497,8 +503,11 @@ stop_proxy() {
 
 # Send one JSON-RPC request and wait for its response; any error fails the scenario, except a
 # tool error naming the optional 4th argument (e.g. no_active_device_session), which returns 3.
+# The optional 5th argument accepts either error shape as a refusal (status 3); callers must
+# validate last_response. Existing callers retain their error and timeout behaviour.
 mcp_request() {
-  local method="$1" params="$2" timeout_s="$3" tolerate="${4:-}"
+  local method="$1" params="$2" timeout_s="$3" tolerate="${4:-}" expect_refusal="${5:-false}"
+  last_response=""
   request_id=$((request_id + 1))
   jq -cn --argjson id "${request_id}" --arg method "${method}" --argjson params "${params}" \
     '{jsonrpc: "2.0", id: $id, method: $method, params: $params}' >&7 ||
@@ -509,11 +518,13 @@ mcp_request() {
       break
     fi
     if jq -e --argjson id "${request_id}" '.id == $id' <<< "${line}" > /dev/null 2>&1; then
+      last_response="${line}"
       if jq -e '.error != null' <<< "${line}" > /dev/null; then
+        [[ "${expect_refusal}" != true ]] || return 3
         die "${method} failed: $(jq -c '.error' <<< "${line}")"
       fi
       if jq -e '.result.isError == true' <<< "${line}" > /dev/null; then
-        if [[ -n "${tolerate}" && "${line}" == *"${tolerate}"* ]]; then
+        if [[ "${expect_refusal}" == true || (-n "${tolerate}" && "${line}" == *"${tolerate}"*) ]]; then
           return 3
         fi
         die "${method} returned an error: $(jq -c '.result.content' <<< "${line}")"
@@ -525,9 +536,9 @@ mcp_request() {
 }
 
 call_tool() {
-  local name="$1" arguments="$2" timeout_s="$3" tolerate="${4:-}"
+  local name="$1" arguments="$2" timeout_s="$3" tolerate="${4:-}" expect_refusal="${5:-false}"
   mcp_request tools/call "$(jq -cn --arg name "${name}" --argjson arguments "${arguments}" \
-    '{name: $name, arguments: $arguments}')" "${timeout_s}" "${tolerate}"
+    '{name: $name, arguments: $arguments}')" "${timeout_s}" "${tolerate}" "${expect_refusal}"
 }
 
 # Through the running proxy, acquire `device` with `tool` (getAndroid or provisionDevice) and
@@ -637,6 +648,44 @@ scenario_no_heartbeat() {
   finish_scenario
 }
 
+# The getAndroid result minted the connection binding without the client naming its UUID.
+# Check deviceId first, then the released UUID, through that same live proxy.
+assert_release_is_terminal() {
+  local selector value expected call_status device_code=""
+  for selector in deviceId sessionUuid; do
+    if [[ "${selector}" == deviceId ]]; then
+      value="${serial}"
+      expected="no_active_device_session or session_ownership_lost, and acquire_new_session"
+    else
+      value="${session_id}"
+      expected="session_ownership_lost and acquire_new_session"
+    fi
+    if call_tool "${CONTROL_TOOL}" "$(jq -cn --arg selector "${selector}" --arg value "${value}" \
+      '{($selector): $value}')" 120 "" true; then
+      call_status=0
+    else
+      call_status=$?
+    fi
+    printf '%s\n' "${last_response}" >> "${evidence_dir}/idle.refusals.log"
+    ((call_status == 3)) ||
+      die "a control call after the idle release succeeded; an idle release must be terminal for the session"
+    if [[ "${last_response}" != *acquire_new_session* ||
+      ("${last_response}" != *session_ownership_lost* &&
+      ("${selector}" == sessionUuid || "${last_response}" != *no_active_device_session*)) ]]; then
+      die "${selector} refusal expected ${expected}; reply: '${last_response:0:300}'"
+    fi
+    if [[ "${selector}" == deviceId ]]; then
+      device_code=no_active_device_session
+      [[ "${last_response}" != *session_ownership_lost* ]] || device_code=session_ownership_lost
+    fi
+    # Check each refusal so a re-acquisition cannot turn the next call into a misleading success.
+    query_device_entry
+    [[ -z "${entry}" ]] || die "a refused call re-acquired ${serial} after its idle release"
+    proxy_alive || die "the proxy exited after the terminal release refusal"
+  done
+  log "idle: terminal release refused control calls with ${device_code} and session_ownership_lost (acquire_new_session)"
+}
+
 scenario_idle() {
   current_scenario="idle"
   acquire_device
@@ -676,6 +725,7 @@ scenario_idle() {
     die "${serial} still held after the ${idle_timeout_ms} ms idle window"
   proxy_alive || die "the proxy exited before the release, so this was not an idle release"
   log "idle: released $((released_at - acquired)) ms after the last tool call (idle window ${idle_timeout_ms} ms)"
+  assert_release_is_terminal
   stop_proxy
   finish_scenario
 }
@@ -942,6 +992,9 @@ scenario_stream() {
 
 cleanup() {
   local status=$?
+  if ((status != 0)) && [[ -n "${current_scenario}" ]]; then
+    printf '%s\n' "${current_scenario}" >> "${evidence_dir}/failed-scenarios.txt"
+  fi
   stop_stream_subscriber || true
   if [[ -n "${proxy_pid}" ]]; then
     stop_proxy || true
@@ -987,14 +1040,14 @@ run_all_scenarios() {
     set -e
     if ((status != 0)); then
       failed+=("${name}")
+      # Persist immediately, before any between-scenario query can abort the parent (#11368).
+      printf '%s\n' "${name}" >> "${evidence_dir}/failed-scenarios.txt"
       # The failed scenario's proxy is gone; give its device time to release before the next one.
       wait_for_release $(($(now_ms) + NO_HEARTBEAT_BUDGET_MS + slack_ms)) || true
     fi
   done
   if ((${#failed[@]} > 0)); then
     log "FAILED scenarios: ${failed[*]}"
-    # The nightly alert step reads this to name the scenarios (#11368).
-    printf '%s\n' "${failed[@]}" > "${evidence_dir}/failed-scenarios.txt"
     exit 1
   fi
 }

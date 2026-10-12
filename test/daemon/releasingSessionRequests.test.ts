@@ -286,6 +286,8 @@ describe("requests during device session release", () => {
         ...before,
         livenessOwnerToken: "new-owner",
         livenessOwnershipClaims: ["new-owner"],
+        // The claim was accepted before the release ended admission: its owner was heard (#11646).
+        hasReceivedHeartbeat: true,
       });
       expect((await persistence.getSession?.(sessionId))?.liveness_owner_token).toBeNull();
       const replacement = await manager.createSession("fresh-session", deviceId, "android");
@@ -361,7 +363,8 @@ describe("requests during device session release", () => {
     );
     persistence.finishRelease.resolve();
     await release;
-    expect(response).toEqual(notFound);
+    // Named while the row is still being written, as the refused tool call is (#11646).
+    expect(response).toEqual({ ...notFound, releaseReason: "heartbeat-timeout" });
     expect(liveness(session)).toEqual(before);
     expect(persistence.activityWrites).toBe(writes);
   });
@@ -517,7 +520,9 @@ describe("requests during device session release", () => {
               return error;
             },
           );
-          expect(await h.request("daemon/heartbeat")).toEqual(notFound);
+          expect(await h.request("daemon/heartbeat")).toEqual(
+            phase === "A" ? notFound : { ...notFound, releaseReason: "explicit-release" },
+          );
           if (phase === "A") {
             expect(settled).toBe(false);
           }

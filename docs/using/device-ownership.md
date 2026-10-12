@@ -399,8 +399,10 @@ call is waiting. Other sessions' selectors skip it and binding by id is refused;
 reads remain available. The hold ends on successful recovery, any terminal session
 release, the three-minute window ending, or daemon shutdown. An idle expiry inside the
 window ends the hold without another call; tool activity extends that deadline, and a
-call in flight retains the hold through the recovery window. Intentional stops end
-the hold. Concurrent daemon-restart and device-restart holds end independently. Managed slots still
+call in flight retains the hold through the recovery window. An intentional stop of the
+device (`killDevice` and similar) leaves the device-restart hold to end by recovery, a
+terminal release of the session, idle expiry, or the window, and never ends a
+daemon-restart hold. Concurrent daemon-restart and device-restart holds end independently. Managed slots still
 win, and the reservation does not extend the owner's heartbeat lease. A wiped or
 re-imaged device returning under the same AVD name or UDID remains an identity gap.
 

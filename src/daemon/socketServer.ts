@@ -8219,6 +8219,21 @@ export class UnixSocketServer {
   }
 
   private indeterminateInputError(method: string, error: unknown): Error {
+    const label =
+      method === "input/key"
+        ? "Key"
+        : method === "input/tap"
+          ? "Tap"
+          : method === "input/swipe"
+            ? "Swipe"
+            : "Button press";
+    if (
+      error instanceof Error &&
+      (("requestDispatched" in error && error.requestDispatched === true) ||
+        error.message.startsWith(`${label} outcome is indeterminate:`))
+    ) {
+      return Object.assign(error, { requestDispatched: true });
+    }
     const reason = errorMessage(error);
     const failure =
       method === "input/key"

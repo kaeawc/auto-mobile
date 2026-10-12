@@ -1,4 +1,5 @@
 import { spyOn } from "bun:test";
+import { executionTracker } from "../../src/server/executionTracker";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import {
   createFakeDaemonState as createDrainDaemonState,
@@ -174,7 +175,7 @@ describe("UnixSocketServer input/swipe", () => {
       0,
       30_000,
       undefined,
-      undefined,
+      expect.any(AbortSignal),
       expect.any(Function),
     );
   });
@@ -221,7 +222,7 @@ describe("UnixSocketServer input/swipe", () => {
       0,
       30_000,
       undefined,
-      undefined,
+      expect.any(AbortSignal),
       expect.any(Function),
     );
   });

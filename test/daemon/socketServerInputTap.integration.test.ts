@@ -288,7 +288,7 @@ describe("UnixSocketServer input/tap", () => {
       30_000,
       undefined,
       undefined,
-      undefined,
+      expect.any(AbortSignal),
       expect.any(Function),
     );
   });
@@ -478,7 +478,7 @@ describe("UnixSocketServer input/tap", () => {
       10_000,
       undefined,
       undefined,
-      undefined,
+      expect.any(AbortSignal),
       expect.any(Function),
     );
   });
@@ -646,7 +646,7 @@ describe("UnixSocketServer input/tap", () => {
       30_000,
       undefined,
       undefined,
-      undefined,
+      expect.any(AbortSignal),
       expect.any(Function),
     );
   });

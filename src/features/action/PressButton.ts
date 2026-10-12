@@ -521,28 +521,47 @@ export class PressButton extends BaseVisualChange {
         if (
           resolveIosHomeBackend(this.device.deviceId, { simctl: this.simctl }).kind === "simulator"
         ) {
-          await this.awaitDispatchedRequest(
-            signal,
-            timeoutMs,
-            async (fenced, dispatch) => {
-              // Fence the launch wait, then check the original caller before home verification.
-              const simctl: Pick<SimCtl, "executeCommandArgs"> = {
-                executeCommandArgs: async (args, options) => {
-                  const result = await this.simctl.executeCommandArgs(args, options);
-                  throwIfAborted(signal);
-                  return result;
-                },
-              };
-              await new HomeScreen(this.device, null, this.timer, simctl).executeIosHomeNavigation(
+          if (!this.holdRequest) {
+            await awaitWhileRequestIsLive(
+              new HomeScreen(this.device, null, this.timer, this.simctl).executeIosHomeNavigation(
                 undefined,
                 frameContext,
                 timeoutMs,
-                fenced,
-                dispatch,
+                signal,
+                onDispatch,
+              ),
+              signal,
+            );
+            return { success: true };
+          }
+          let launch: ReturnType<SimCtl["executeCommandArgs"]> | undefined;
+          const simctl: Pick<SimCtl, "executeCommandArgs"> = {
+            executeCommandArgs: (args, options) => {
+              launch = this.awaitDispatchedRequest(
+                signal,
+                timeoutMs,
+                (fenced, dispatch) => {
+                  throwIfAborted(fenced);
+                  dispatch();
+                  return this.simctl.executeCommandArgs(args, options);
+                },
+                onDispatch,
               );
+              return launch;
             },
-            onDispatch,
-          );
+          };
+          try {
+            // Verification uses the caller signal; only the launch wait is fenced.
+            await new HomeScreen(this.device, null, this.timer, simctl).executeIosHomeNavigation(
+              undefined,
+              frameContext,
+              timeoutMs,
+              signal,
+            );
+          } finally {
+            // HomeScreen can stop on cancellation before simctl settles; retain the key until then.
+            await launch;
+          }
           return { success: true };
         }
         const result = await this.awaitDispatchedRequest(

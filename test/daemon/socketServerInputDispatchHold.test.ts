@@ -208,8 +208,14 @@ test.each(
     } else {
       first.reply();
     }
-    await expect(a).rejects.toThrow("outcome is indeterminate");
-    await expect(a).rejects.toThrow("Do not retry automatically");
+    const failure = await a.catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    if (!(failure instanceof Error)) {
+      throw new Error("Expected an indeterminate Error");
+    }
+    expect(failure.message.split("outcome is indeterminate")).toHaveLength(2);
+    expect(failure.message.split("Do not retry automatically")).toHaveLength(2);
+    expect(failure).toMatchObject({ requestDispatched: true });
     await b;
   } finally {
     first.reply();
@@ -241,11 +247,15 @@ test.each(variants)("%s cancels before dispatch without sending or stamping", as
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
 // daemon/cancelRequest is explicit cancellation; destroying a socket is the other owner abort.
-test.each(variants)(
-  "%s writes its indeterminate response after runner reply and immediate cancel ack",
-  async (variant) => {
+test.each(
+  variants.flatMap((variant) =>
+    ["reply", "error", "deadline"].map((end) => [variant, end] as const),
+  ),
+)(
+  "%s writes one indeterminate response after runner %s and immediate cancel ack",
+  async (variant, end) => {
     const f = socketHarness();
-    const first = runner();
+    const first = runner(end === "deadline");
     transport(variant, first);
     f.socket.send(inputFrame(variant));
     await drainUntil(() => first.dispatched, { description: "wire dispatch" });
@@ -257,15 +267,22 @@ test.each(variants)(
     try {
       expect(f.socket.responses.find((r) => r.id === "A")).toBeUndefined();
     } finally {
-      first.reply();
+      if (end === "deadline") {
+        f.timer.advanceTime(1000);
+      } else if (end === "error") {
+        first.fail();
+      } else {
+        first.reply();
+      }
     }
     await drainUntil(() => f.socket.responses.some((r) => r.id === "A"), {
       description: "indeterminate answer",
     });
-    expect(f.socket.responses.find((r) => r.id === "A")).toMatchObject({
-      success: false,
-      error: expect.stringContaining("outcome is indeterminate"),
-    });
+    const response = f.socket.responses.find((r) => r.id === "A");
+    expect(response?.success).toBe(false);
+    expect(response?.error?.split("outcome is indeterminate")).toHaveLength(2);
+    expect(response?.error?.split("Do not retry automatically")).toHaveLength(2);
+    first.reply();
     await finishSockets(f);
   },
 );

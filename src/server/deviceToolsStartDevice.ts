@@ -8,7 +8,12 @@ import type { DeviceMatcher } from "../utils/deviceMatcher";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import { DaemonState } from "../daemon/daemonState";
-import { isAnonymousAcquisitionSession } from "../daemon/sessionManager";
+import { deviceReservedForRestartRecoveryError } from "../daemon/inputDeviceOwnership";
+import { lifecycleRequester } from "./lifecycleDeviceOwnership";
+import {
+  isAnonymousAcquisitionSession,
+  type SessionRecoveryTarget,
+} from "../daemon/sessionManager";
 import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
 import { requestAcquisitionReceipt, type AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
@@ -340,7 +345,8 @@ const bootAndPrepareDevice = async (
       });
     },
   });
-  const exclusions = await startMatchExclusions(args.platform);
+  admitRestartReservedStart(args);
+  const exclusions = await startMatchExclusions(args);
   const deferDeviceIds = devicesHeldByOtherSessions(args);
   perf.startOperation("bootDevice");
   // Establish the (--debug-perf-gated) ambient tracker around the shared
@@ -472,27 +478,80 @@ const bootAndPrepareDevice = async (
   });
 };
 
-/**
- * Devices a selector-based start must not match: recovering Android AVDs and serials, and every
- * device a managed slot holds, idle ones included (#11174): AVD names on Android, UDIDs on iOS.
- */
-async function startMatchExclusions(platform: "android" | "ios"): Promise<{
+/** Check exact identities before lifecycle waiting, and retain the admitted owner across boot. */
+export function admitRestartReservedStart(args: StartDeviceArgs): void {
+  const reservation = initializedDevicePool()?.restartReservationForStart?.(
+    args.platform,
+    [args.avdName, args.name, args.deviceId].filter((id): id is string => id !== undefined),
+    startRequester(args),
+  );
+  if (!reservation) {
+    return;
+  }
+  if (!reservation.owned) {
+    throw deviceReservedForRestartRecoveryError(
+      reservation.deviceId,
+      reservation.sessionUuid,
+      reservation.retryAfterMs,
+    );
+  }
+  if (reservation.restartHandoff) {
+    args.__restartResumeSessionUuid ??= reservation.sessionUuid;
+  }
+}
+
+function startRequester(args: StartDeviceArgs) {
+  const requester = lifecycleRequester(args);
+  return {
+    ...requester,
+    sessionUuid: args.__requesterSessionUuid ?? requester.sessionUuid,
+    oneShotCli: args.__oneShotCli,
+  };
+}
+
+/** Selectors skip recovery targets and managed slots before discovery can boot them. */
+async function startMatchExclusions(args: StartDeviceArgs): Promise<{
   excludeDeviceNames: ReadonlySet<string> | undefined;
   excludeDeviceIds: ReadonlySet<string> | undefined;
 }> {
+  const platform = args.platform;
   const managed =
     (await managedSlotPoolGate(initializedDevicePool()).managedSlotStableIds?.(platform)) ??
     new Set<string>();
   if (platform === "ios") {
     const exclusions = unionSets(undefined, managed);
-    return { excludeDeviceNames: exclusions, excludeDeviceIds: exclusions };
+    return withRestartMatchExclusions(args, {
+      excludeDeviceNames: exclusions,
+      excludeDeviceIds: exclusions,
+    });
   }
   const recoveryTargets = getStartDevicePool(
     DaemonState.getInstance(),
   )?.getRecoveringAndroidTargets();
-  return {
+  return withRestartMatchExclusions(args, {
     excludeDeviceNames: unionSets(recoveryTargets?.names, managed),
     excludeDeviceIds: recoveryTargets?.serials,
+  });
+}
+
+function withRestartMatchExclusions(
+  args: StartDeviceArgs,
+  exclusions: {
+    excludeDeviceNames: ReadonlySet<string> | undefined;
+    excludeDeviceIds: ReadonlySet<string> | undefined;
+  },
+) {
+  const restart = initializedDevicePool()?.restartReservationExclusions?.(
+    args.platform,
+    startRequester(args),
+  );
+  if (!restart) {
+    return exclusions;
+  }
+  args.__restartResumeTargets ??= restart.resumeTargets;
+  return {
+    excludeDeviceNames: unionSets(exclusions.excludeDeviceNames, restart.names),
+    excludeDeviceIds: unionSets(exclusions.excludeDeviceIds, restart.ids),
   };
 }
 
@@ -909,30 +968,83 @@ async function bindBootedDeviceSession(
     }
   }
 
-  const sessionId = getDeviceToolsDependencies().idGenerator.next();
+  const resumeSessionId = restartResumeSessionForDevice(args, device);
+  const sessionId = resumeSessionId ?? getDeviceToolsDependencies().idGenerator.next();
   if (!daemonState.isInitialized()) {
     registerDirectSessionDevice(sessionId, device);
     return sessionId;
   }
-  const boundSessionId = await daemonState
-    .getDevicePool()
-    .bindOrReuseDeviceSession(
-      sessionId,
-      device.deviceId,
-      device.platform,
-      sourceImage,
-      childProcess,
-      device,
-      false,
-      readinessReservationOwners,
-      verifiedAndroidAvdIdentity,
-      undefined,
-      args.__mcpSessionId,
-      args.__oneShotCli === true,
-      receipt,
-    );
+  const bind = (recoveryTarget?: SessionRecoveryTarget) =>
+    daemonState
+      .getDevicePool()
+      .bindOrReuseDeviceSession(
+        sessionId,
+        device.deviceId,
+        device.platform,
+        sourceImage,
+        childProcess,
+        device,
+        false,
+        readinessReservationOwners,
+        verifiedAndroidAvdIdentity,
+        undefined,
+        args.__mcpSessionId,
+        args.__oneShotCli === true,
+        receipt,
+        false,
+        recoveryTarget,
+      );
+  // getOrCreateSession owns the persisted-row claim, terminal checks, and pending recovery.
+  // Its assigner binds the already prepared target, exempting only this start's readiness owners.
+  const boundSessionId = resumeSessionId
+    ? (
+        await daemonState.getSessionManager().getOrCreateSession(
+          resumeSessionId,
+          {
+            assignDeviceToSession: async (_id, _platform, recoveryTarget) => {
+              if (
+                !recoveryTarget ||
+                recoveryTarget.platform !== device.platform ||
+                recoveryTarget.stableDeviceId !==
+                  (device.platform === "android" ? device.name : device.deviceId)
+              ) {
+                throw new ActionableError(
+                  `Cannot safely recover session ${resumeSessionId}: prepared device does not match its recovery target.`,
+                );
+              }
+              return await bind(recoveryTarget);
+            },
+          },
+          device.platform,
+          undefined,
+          true,
+        )
+      ).sessionId
+    : await bind();
   recordAcquiredSessionReadiness(daemonState, boundSessionId, achievedReadiness);
   return boundSessionId;
+}
+
+function restartResumeSessionForDevice(
+  args: StartDeviceArgs,
+  device: BootedDevice,
+): string | undefined {
+  if (args.__restartResumeSessionUuid) {
+    return args.__restartResumeSessionUuid;
+  }
+  const stableId = device.platform === "android" ? device.name : device.deviceId;
+  const admitted = args.__restartResumeTargets?.find(
+    ({ target }) => target.platform === device.platform && target.stableDeviceId === stableId,
+  );
+  if (admitted) {
+    return admitted.sessionId;
+  }
+  const reservation = initializedDevicePool()?.restartReservationForStart?.(
+    device.platform,
+    [device.deviceId, device.name],
+    startRequester(args),
+  );
+  return reservation?.owned && reservation.restartHandoff ? reservation.sessionUuid : undefined;
 }
 
 /**
@@ -1061,6 +1173,7 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     const args = {
       ...startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs)),
       __mcpSessionId: internalSessionId,
+      __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
       ...(rawArgs.__oneShotCli === true ? { __oneShotCli: true } : {}),
     };
     validateCameraPosterPlatform(args);

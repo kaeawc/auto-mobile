@@ -811,6 +811,12 @@ export interface StartDeviceArgs {
   __mcpSessionId?: string;
   /** Daemon-forwarded: the caller is a one-shot `--cli` connection, so it acquires anonymously (#11096). */
   __oneShotCli?: boolean;
+  /** Request-local owner admitted before boot; never mint a replacement if recovery fails. */
+  __restartResumeSessionUuid?: string;
+  /** Routing snapshot carried across acquisition schema parsing. */
+  __requesterSessionUuid?: string;
+  /** Owner selector candidates captured before boot, so expiry cannot turn resume into a mint. */
+  __restartResumeTargets?: readonly import("../daemon/sessionManager").RehydrationDeviceReservation[];
   /** Acceptance-only, non-mutating discovery presentation control. */
   presentationOrder?: "forward" | "reverse";
   /** Internal exact runtime identity used by getAndroid. */
@@ -833,6 +839,8 @@ export interface GetAppleArgs {
 }
 
 export interface ProvisionDeviceArgs {
+  /** Request-local owner snapshot assigned after public schema validation. */
+  __restartResumeSessionUuid?: string;
   device: {
     platform: "android" | "ios";
     name: string;

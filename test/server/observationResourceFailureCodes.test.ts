@@ -110,6 +110,12 @@ function image(content: ResourceContent, fixture = images[0]): void {
   expect(content.text).toBeUndefined();
 }
 
+async function drainMicrotasks(): Promise<void> {
+  for (let i = 0; i < 100; i++) {
+    await Promise.resolve();
+  }
+}
+
 class UnreadableObservationCache extends FakeObserveCacheStore {
   override getRecentInMemoryEntry(): never {
     throw new Error("observation cache failed");
@@ -392,6 +398,8 @@ describe("observation resource failure envelopes", () => {
       readFile: async () => images[0].bytes,
     });
     failure(await read(RESOURCE_URIS.LATEST_SCREENSHOT), code, { deviceId: deviceA.deviceId });
+    expect(timer.getPendingTimeouts()).toEqual([]);
+    expect(timer.now()).toBe(0);
   });
 
   test("latest screenshot non-file is unavailable", async () => {
@@ -408,16 +416,115 @@ describe("observation resource failure envelopes", () => {
     });
   });
 
+  test("latest screenshot waits for a pending job to replace a pruned path", async () => {
+    await observe();
+    store.update(deviceA.deviceId, "/fake/pruned.png");
+    const statPaths: string[] = [];
+    const readPaths: string[] = [];
+    setScreenshotFileSystem({
+      stat: async (path) => {
+        statPaths.push(path);
+        if (path === "/fake/pruned.png") {
+          throw Object.assign(new Error("pruned screenshot"), { code: "ENOENT" });
+        }
+        return { isFile: () => true };
+      },
+      readFile: async (path) => {
+        readPaths.push(path);
+        return images[1].bytes;
+      },
+    });
+    const gate = Promise.withResolvers<void>();
+    const job = ScreenshotJobTracker.startJob(deviceA.deviceId, async () => {
+      await gate.promise;
+      store.update(deviceA.deviceId, "/fake/new.jpg");
+      return { success: true, path: "/fake/new.jpg" };
+    });
+    let settled = false;
+    const pending = read(RESOURCE_URIS.LATEST_SCREENSHOT).then((content) => {
+      settled = true;
+      return content;
+    });
+    try {
+      await drainMicrotasks();
+      expect(statPaths).toEqual(["/fake/pruned.png"]);
+      expect(readPaths).toEqual([]);
+      expect(settled).toBe(false);
+      expect(timer.getPendingTimeouts()).toEqual([3000]);
+      gate.resolve();
+      image(await pending, images[1]);
+      expect(statPaths).toEqual(["/fake/pruned.png", "/fake/new.jpg"]);
+      expect(readPaths).toEqual(["/fake/new.jpg"]);
+      expect(timer.getPendingTimeouts()).toEqual([]);
+    } finally {
+      gate.resolve();
+      await job.promise;
+    }
+  });
+
+  test("latest pruned screenshot still pending at 3000ms reports not ready", async () => {
+    await observe();
+    store.update(deviceA.deviceId, "/fake/pruned.png");
+    let statCalls = 0;
+    setScreenshotFileSystem({
+      stat: async () => {
+        statCalls++;
+        throw Object.assign(new Error("pruned screenshot"), { code: "ENOENT" });
+      },
+      readFile: async () => {
+        throw new Error("Must not read a pruned path");
+      },
+    });
+    ScreenshotJobTracker.startJob(deviceA.deviceId, async () => new Promise(() => {}));
+    let settled = false;
+    const pending = read(RESOURCE_URIS.LATEST_SCREENSHOT).then((content) => {
+      settled = true;
+      return content;
+    });
+    await drainMicrotasks();
+    timer.advanceTime(2999);
+    await drainMicrotasks();
+    expect(settled).toBe(false);
+    expect(statCalls).toBe(1);
+    timer.advanceTime(1);
+    const body = failure(await pending, "SCREENSHOT_NOT_READY", { deviceId: deviceA.deviceId });
+    expect(body.error).toContain("not ready yet");
+    expect(body.error).not.toContain("observe");
+    expect(statCalls).toBe(2);
+  });
+
   test("latest screenshot still pending after 3000ms is retryable without a blob", async () => {
     await observe();
     ScreenshotJobTracker.startJob(deviceA.deviceId, async () => new Promise(() => {}));
     const pending = read(RESOURCE_URIS.LATEST_SCREENSHOT);
-    for (let i = 0; i < 8; i++) {
-      await Promise.resolve();
-    }
+    await drainMicrotasks();
     timer.advanceTime(3000);
-    failure(await pending, "SCREENSHOT_NOT_READY", { deviceId: deviceA.deviceId });
+    const body = failure(await pending, "SCREENSHOT_NOT_READY", { deviceId: deviceA.deviceId });
+    expect(body.error).toContain("not ready yet");
+    expect(body.error).not.toContain("observe");
   });
+
+  test.each(["job", "observation"])(
+    "latest screenshot pending in %s ignores a previous capture error",
+    async (source) => {
+      const { observationId } = await observe();
+      store.update(deviceA.deviceId, undefined, "previous capture failed");
+      if (source === "job") {
+        ScreenshotJobTracker.startJob(deviceA.deviceId, async () => new Promise(() => {}));
+      } else {
+        store.beginObservation(deviceA.deviceId, observationId);
+      }
+      const pending = read(RESOURCE_URIS.LATEST_SCREENSHOT);
+      await drainMicrotasks();
+      timer.advanceTime(3000);
+      const body = failure(await pending, "SCREENSHOT_NOT_READY", { deviceId: deviceA.deviceId });
+      expect(body.error).toBe(
+        "Screenshot for the latest observation is not ready yet. Call the resource again after the capture completes.",
+      );
+      expect(body.error).not.toContain("observe");
+      expect(body.error).not.toContain("previous capture failed");
+    },
+  );
 
   test.each(images)("latest screenshot consumer receives $mimeType blob", async (fixture) => {
     await observe();
@@ -526,15 +633,30 @@ describe("observation resource failure envelopes", () => {
     });
   });
 
-  test("session pending screenshot is retryable without starting another capture", async () => {
-    const { observationId } = await observe();
-    resolveSession();
-    store.beginObservation(deviceA.deviceId, observationId);
-    failure(await read(sessionUris[1], { sessionUuid }), "SCREENSHOT_NOT_READY", {
-      deviceId: deviceA.deviceId,
-      sessionUuid,
-    });
-  });
+  test.each(["job", "observation"])(
+    "session screenshot pending in %s has a retry remedy",
+    async (source) => {
+      const { observationId } = await observe();
+      resolveSession();
+      store.update(deviceA.deviceId, undefined, "previous capture failed");
+      if (source === "job") {
+        ScreenshotJobTracker.startJob(deviceA.deviceId, async () => new Promise(() => {}));
+      } else {
+        store.beginObservation(deviceA.deviceId, observationId);
+      }
+      const body = failure(await read(sessionUris[1], { sessionUuid }), "SCREENSHOT_NOT_READY", {
+        deviceId: deviceA.deviceId,
+        sessionUuid,
+      });
+      expect(body.error).toBe(
+        `Screenshot for sessionUuid ${sessionUuid} is not ready yet. Call the resource again after the capture completes.`,
+      );
+      expect(body.error).not.toContain("observe");
+      expect(body.error).not.toContain("previous capture failed");
+      expect(timer.getPendingTimeouts()).toEqual([]);
+      expect(timer.now()).toBe(0);
+    },
+  );
 
   test.each([
     ["ENOENT", "SCREENSHOT_FILE_UNAVAILABLE"],

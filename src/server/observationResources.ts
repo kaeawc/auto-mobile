@@ -97,6 +97,16 @@ function resolveLatestScreenshotDeviceId(): string | undefined {
   return RealObserveScreen.getRecentCachedObservation()?.deviceId;
 }
 
+function isCachedScreenshotPending(deviceId: string): boolean {
+  if (ScreenshotJobTracker.isPending(deviceId)) {
+    return true;
+  }
+  const observationId = RealObserveScreen.getRecentCachedResultForDevice(deviceId)?.observationId;
+  return observationId
+    ? getScreenshotStateStore().isObservationPending(deviceId, observationId)
+    : false;
+}
+
 export type ObservationResourceFailureCode =
   | "INVALID_REQUEST"
   | "OBSERVATION_NOT_RETAINED"
@@ -263,9 +273,17 @@ async function getLatestScreenshot(): Promise<ResourceContent> {
       );
     }
     let screenshotPath = await getLatestScreenshotPath(deviceId);
-    if (!screenshotPath && ScreenshotJobTracker.isPending(deviceId)) {
+    if (typeof screenshotPath !== "string" && ScreenshotJobTracker.isPending(deviceId)) {
       await ScreenshotJobTracker.waitForCompletion(deviceId, 3000);
       screenshotPath = await getLatestScreenshotPath(deviceId);
+    }
+    if (typeof screenshotPath !== "string" && isCachedScreenshotPending(deviceId)) {
+      return observationResourceError(
+        RESOURCE_URIS.LATEST_SCREENSHOT,
+        "SCREENSHOT_NOT_READY",
+        "Screenshot for the latest observation is not ready yet. Call the resource again after the capture completes.",
+        { deviceId },
+      );
     }
     if (typeof screenshotPath === "object") {
       return screenshotPath;
@@ -277,9 +295,7 @@ async function getLatestScreenshot(): Promise<ResourceContent> {
         : "No screenshot available. Call the 'observe' tool again to capture a screenshot.";
       return observationResourceError(
         RESOURCE_URIS.LATEST_SCREENSHOT,
-        ScreenshotJobTracker.isPending(deviceId)
-          ? "SCREENSHOT_NOT_READY"
-          : screenshotCaptureFailureCode(screenshotError),
+        screenshotCaptureFailureCode(screenshotError),
         message,
         { deviceId },
       );
@@ -758,20 +774,22 @@ async function getSessionScreenshot(
 
     const screenshotPath = RealObserveScreen.getRecentCachedScreenshotPathForDevice(deviceId);
     if (!screenshotPath) {
+      if (isCachedScreenshotPending(deviceId)) {
+        return observationResourceError(
+          uri,
+          "SCREENSHOT_NOT_READY",
+          `Screenshot for sessionUuid ${sessionUuid} is not ready yet. Call the resource again after the capture completes.`,
+          { deviceId, sessionUuid },
+        );
+      }
       const screenshotError = RealObserveScreen.getRecentCachedScreenshotErrorForDevice(deviceId);
       const message = screenshotError
         ? `No screenshot available for sessionUuid ${sessionUuid}: ${screenshotError}`
         : `No screenshot available for sessionUuid ${sessionUuid}. Call the 'observe' tool again.`;
-      const pending = getScreenshotStateStore().isObservationPending(
+      return observationResourceError(uri, screenshotCaptureFailureCode(screenshotError), message, {
         deviceId,
-        cachedResult.observationId,
-      );
-      return observationResourceError(
-        uri,
-        pending ? "SCREENSHOT_NOT_READY" : screenshotCaptureFailureCode(screenshotError),
-        message,
-        { deviceId, sessionUuid },
-      );
+        sessionUuid,
+      });
     }
 
     const unavailable = await screenshotNotFileError(uri, screenshotPath, {

@@ -242,6 +242,55 @@ test("a new acquisition clears every loss of its platform", async () => {
   await forwarded("homeScreen", { platform: "ios" }, apple.sessionUuid);
 });
 
+test("a new acquisition clears an older loss before the acquired session is held and lost", async () => {
+  await acquireBoth();
+  release();
+  apple = { ...IOS, sessionUuid: "ios-2", deviceId: "SIM-2" };
+  await proxy.callTool("getApple", {});
+  await proxy.callTool("getAndroid", {});
+  release(apple);
+  await refused(apple);
+  await forwarded();
+});
+
+test("setActiveDevice clears the loss for the platform named by the call", async () => {
+  await acquireBoth();
+  release();
+  selected = { sessionUuid: "ios-new", deviceId: "SIM-2" };
+  await proxy.callTool("setActiveDevice", { ...selected, platform: "ios" });
+  await forwarded();
+});
+
+test("setActiveDevice reselecting the lost UUID clears its own loss without a platform", async () => {
+  await acquireBoth();
+  release();
+  ended.delete(IOS.sessionUuid);
+  selected = { sessionUuid: IOS.sessionUuid, deviceId: IOS.deviceId };
+  await proxy.callTool("setActiveDevice", selected);
+  await forwarded();
+});
+
+test("a named held terminal answer under the default fence consumes its platform loss", async () => {
+  await acquireBoth();
+  release();
+  // A client-declared default reports the named UUID at the fence entry gate.
+  selected = { ...ANDROID, sessionUuid: "android-declared" };
+  await proxy.callTool("setActiveDevice", selected);
+  client.callToolCalls.length = 0;
+  release(selected, "explicit-release");
+  await expect(
+    proxy.callTool("homeScreen", { sessionUuid: IOS.sessionUuid }),
+  ).rejects.toMatchObject({
+    name: "DaemonBoundSessionExpiredError",
+    sessionUuid: IOS.sessionUuid,
+    reason: "explicit-release",
+  });
+  expect(client.callToolCalls).toHaveLength(0);
+  android = { ...ANDROID, sessionUuid: "android-2" };
+  await proxy.callTool("getAndroid", {});
+  await forwarded();
+});
+
 test("setActiveDevice selecting known iOS clears its platform loss", async () => {
   await proxy.callTool("getApple", {});
   apple = { ...IOS, sessionUuid: "ios-2", deviceId: "SIM-2" };

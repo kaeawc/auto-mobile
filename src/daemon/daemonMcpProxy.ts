@@ -2876,7 +2876,7 @@ export class DaemonMcpProxy {
     this.clearNotFoundHistory(releasedSessionUuid);
     this.recordHeldSessionTerminalLoss(
       releasedSessionUuid,
-      notification.reason ?? "released",
+      notification.reason,
       notification.release,
     );
     this.dropHeldSession(releasedSessionUuid);
@@ -4698,9 +4698,6 @@ export class DaemonMcpProxy {
         // the evidence-bearing error, so the caller can inspect or retry it.
         if (name === "provisionDevice") {
           await this.bindResultMintedDeviceSession(name, result, callReleaseEpoch);
-          if (getDeviceSessionIdFromResult(result)) {
-            this.clearHeldSessionPlatformLosses(getDevicePlatformFromResult(result));
-          }
         }
         const retryableSuspectRefusal = this.noteSuspectSessionResult(
           name,
@@ -4716,9 +4713,6 @@ export class DaemonMcpProxy {
       this.rememberToolSelectionProfile(name, callerArgs, result);
       if (isSessionAcquisition) {
         await this.bindResultMintedDeviceSession(name, result, callReleaseEpoch);
-        if (getDeviceSessionIdFromResult(result)) {
-          this.clearHeldSessionPlatformLosses(getDevicePlatformFromResult(result));
-        }
         return { result, forwardedSessionUuid };
       }
       // Remember what was actually forwarded, not the caller's raw args. An
@@ -4730,7 +4724,7 @@ export class DaemonMcpProxy {
       if (!this.namesForeignOwnedSession(forwardedArgs, result)) {
         this.rememberSessionUuid(name, forwardedArgs, callReleaseEpoch, false);
       }
-      this.rememberActiveDeviceSession(name, result, callReleaseEpoch);
+      this.rememberActiveDeviceSession(name, callerArgs, result, callReleaseEpoch);
       return { result, forwardedSessionUuid };
     } catch (error) {
       signal?.throwIfAborted();
@@ -5047,7 +5041,7 @@ export class DaemonMcpProxy {
 
   private recordHeldSessionTerminalLoss(
     sessionUuid: string,
-    reason: string,
+    reason = "released",
     release?: SessionReleaseSnapshot,
   ): void {
     const platform = this.sessionPlatforms.get(sessionUuid);
@@ -5062,6 +5056,20 @@ export class DaemonMcpProxy {
       return;
     }
     this.pendingHeldSessionPlatformLosses.set(sessionUuid, { platform, reason, release });
+  }
+
+  private recordHeldSessionNotFoundLoss(sessionUuid: string, outcome: NotFoundAnswerOutcome): void {
+    if (outcome.kind === "ended") {
+      this.recordHeldSessionTerminalLoss(sessionUuid, outcome.reason);
+    }
+  }
+
+  private clearHeldSessionLossesForSelection(sessionUuid: string, callPlatform?: unknown): void {
+    this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
+    this.clearHeldSessionPlatformLosses(this.sessionPlatforms.get(sessionUuid));
+    if (callPlatform === "android" || callPlatform === "ios") {
+      this.clearHeldSessionPlatformLosses(callPlatform);
+    }
   }
 
   private clearHeldSessionPlatformLosses(platform: "android" | "ios" | undefined): void {
@@ -5183,7 +5191,12 @@ export class DaemonMcpProxy {
       : args;
   }
 
-  private rememberActiveDeviceSession(name: string, result: unknown, releaseEpoch: number): void {
+  private rememberActiveDeviceSession(
+    name: string,
+    args: Record<string, unknown>,
+    result: unknown,
+    releaseEpoch: number,
+  ): void {
     if (name !== "setActiveDevice") {
       return;
     }
@@ -5191,7 +5204,7 @@ export class DaemonMcpProxy {
     if (selection) {
       this.throwIfSessionReleasedSince(selection.sessionUuid, releaseEpoch);
       this.rememberSessionUuid(name, selection, releaseEpoch, true);
-      this.clearHeldSessionPlatformLosses(this.sessionPlatforms.get(selection.sessionUuid));
+      this.clearHeldSessionLossesForSelection(selection.sessionUuid, args.platform);
     }
   }
 
@@ -6014,6 +6027,7 @@ export class DaemonMcpProxy {
       return false;
     }
     this.claimableSessions.add(sessionId);
+    this.pendingHeldSessionPlatformLosses.delete(sessionId);
     this.ownedDeviceSessions.add(sessionId);
     this.rememberSessionDevice(sessionId, session.deviceId);
     if (session.platform !== undefined) {
@@ -6868,6 +6882,7 @@ export class DaemonMcpProxy {
       return;
     }
     this.stallHandovers.delete(sessionUuid);
+    this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
     this.resumedStallNotices.set(sessionUuid, {
       handover: record.handover,
       ...(restart ? { restart } : {}),
@@ -7389,6 +7404,7 @@ export class DaemonMcpProxy {
   /** The latest binding moves on: its session stays held and keeps its claim state. */
   private holdPreviousBinding(nextSessionUuid: string): void {
     const previous = this.boundSessionUuid;
+    this.pendingHeldSessionPlatformLosses.delete(nextSessionUuid);
     this.otherHeldSessions.delete(nextSessionUuid);
     this.latestBindingConflict = undefined;
     // Only a session this proxy claims stays held: an args-named one was never heartbeated (#10664).
@@ -7655,9 +7671,7 @@ export class DaemonMcpProxy {
       logger.warn(
         `[DaemonMcpProxy] Held session ${sessionUuid} is gone, no longer heartbeating it`,
       );
-      if (outcome.kind === "ended") {
-        this.recordHeldSessionTerminalLoss(sessionUuid, outcome.reason);
-      }
+      this.recordHeldSessionNotFoundLoss(sessionUuid, outcome);
       this.dropHeldSession(sessionUuid, false, outcome.kind !== "ended");
     } else if (!this.notFoundStopped.has(sessionUuid)) {
       logger.info(
@@ -7690,6 +7704,7 @@ export class DaemonMcpProxy {
       !this.otherHeldSessions.has(sessionUuid)
     ) {
       this.otherHeldSessions.set(sessionUuid, { claimSent: false, lastUsedAt: this.timer.now() });
+      this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
     }
     this.syncHeartbeatKeeper();
   }
@@ -7967,6 +7982,7 @@ export class DaemonMcpProxy {
     if (platform) {
       this.sessionPlatforms.set(mintedSessionUuid, platform);
     }
+    this.clearHeldSessionLossesForSelection(mintedSessionUuid);
     if (mintedSessionUuid === this.boundSessionUuid) {
       return;
     }
@@ -8165,6 +8181,7 @@ export class DaemonMcpProxy {
   // binding is gone). A sessionless refresh re-binds the same UUID and preserves
   // its provenance (issue #5689).
   private updateBoundSessionUuid(sessionUuid: string): void {
+    this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
     // A held session that becomes the binding again keeps its idle clock: the call that named it
     // may be a read, and the daemon's echo already credited it when it was use (#11348).
     const heldLastUsedAt = this.otherHeldSessions.get(sessionUuid)?.lastUsedAt;

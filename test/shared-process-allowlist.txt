@@ -219,7 +219,6 @@ test/daemon/sessionHoldDiagnostics.test.ts
 test/daemon/sessionInfoWallClock.test.ts
 test/daemon/sessionManager.cancelledClientChosenId.test.ts
 test/daemon/sessionManager.displayPin.test.ts
-test/daemon/sessionManager.releaseRowRetry.test.ts
 test/daemon/sessionManager.supersededRowReassertRetry.test.ts
 test/daemon/sessionSuspectGrace.test.ts
 test/daemon/shuttingDownFrameTypedFields.test.ts

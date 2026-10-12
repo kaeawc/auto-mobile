@@ -7,6 +7,7 @@ import {
   DeviceSessionNotActiveError,
   DeviceSessionRepository,
   DeviceSessionRowChangedError,
+  DeviceSessionRowNotReleasableError,
   isRecoverableDaemonReleaseReason,
   RECOVERABLE_DAEMON_RELEASE_REASONS,
   type DeviceSessionRecord,
@@ -197,7 +198,12 @@ describe("DeviceSessionRepository", () => {
         "expired",
         10_000,
         "expired",
-        { expectedRowGeneration: 0, onlyIfRecoverable: true, onlyIfExpiredAtMs: 10_000 },
+        {
+          expectedRowGeneration: 0,
+          onlyIfRecoverable: true,
+          onlyIfExpiredAtMs: 10_000,
+          unlessTerminalOrOwnedByLivePeer: { livePeerDaemonSessionIds: [] },
+        },
       );
       expect(await repo.getSession("remaining-expired")).toMatchObject({ status: "expired" });
     } finally {
@@ -1106,13 +1112,33 @@ describe("DeviceSessionRepository", () => {
       await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
       await release.catch(() => undefined);
 
-      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
-      releaseGate!();
-      await lateWrite;
+      const resumed = await sessionManager.createSession(
+        "session-1",
+        "emulator-5554",
+        "android",
+        60_000,
+        60_000,
+      );
+      const resumedRow = await repo.getSession("session-1");
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        // Observe the raw promise before opening the gate; the manager observes its own write.
+        void lateWrite!.catch(() => undefined);
+        releaseGate!();
+        await expect(lateWrite!).rejects.toBeInstanceOf(DeviceSessionRowNotReleasableError);
+        for (let turn = 0; turn < 100; turn++) {
+          await Promise.resolve();
+        }
 
-      const row = await repo.getSession("session-1");
-      expect(row!.status).toBe("active");
-      expect(row!.release_reason).toBeNull();
+        const row = await repo.getSession("session-1");
+        expect(row!.status).toBe("active");
+        expect(row!.release_reason).toBeNull();
+        expect(row).toEqual(resumedRow);
+        expect(sessionManager.getSession("session-1")).toBe(resumed);
+        expect(warnSpy).not.toHaveBeenCalled();
+      } finally {
+        warnSpy.mockRestore();
+      }
     } finally {
       sessionManager.stopCleanupTimer();
     }

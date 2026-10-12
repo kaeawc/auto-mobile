@@ -26,6 +26,8 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 
+import { nodeProcFs } from "./procProcessTable";
+
 const ADB_LISTING_TIMEOUT_MS = 5_000;
 
 /**
@@ -111,7 +113,11 @@ export function createBootAdmissionGates(
             ),
             executor,
             undefined,
-            { timer, processTableSupported: (deps.hostPlatform ?? process.platform) !== "win32" },
+            {
+              timer,
+              processTableSupported: (deps.hostPlatform ?? process.platform) !== "win32",
+              procFs: (deps.hostPlatform ?? process.platform) === "linux" ? nodeProcFs : undefined,
+            },
           ),
           timer,
           {

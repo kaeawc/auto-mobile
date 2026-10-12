@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { executionTracker } from "../../src/server/executionTracker";
 import { LivenessScenario } from "../helpers/livenessScenarioHarness";
@@ -42,8 +42,12 @@ const ROWS = [
 
 let scenario: LivenessScenario | undefined;
 afterEach(async () => {
-  await scenario?.stop();
-  scenario = undefined;
+  const current = scenario;
+  try {
+    await current?.stop();
+  } finally {
+    scenario = undefined;
+  }
   // Windows runs unit files in one process: every row, including failures, resets the singletons.
   expect(DaemonState.getInstance().isInitialized()).toBe(false);
   expect(executionTracker.getActiveExecutionCount()).toBe(0);
@@ -60,6 +64,21 @@ async function start(missingPixel = false): Promise<LivenessScenario> {
   });
   return scenario;
 }
+
+// The first scenario pays for module-level one-time costs (database template, Daemon module graph).
+// beforeAll is outside the per-test budget: replay a throwaway register -> bind -> tap -> release
+// cycle so the first use of session setup, input dispatch and release also stays outside each row.
+beforeAll(async () => {
+  const warm = await LivenessScenario.start({
+    devices: [PIXEL.deviceId, PIXEL_FOLD.deviceId],
+    deviceNames: { [PIXEL.deviceId]: PIXEL.name, [PIXEL_FOLD.deviceId]: PIXEL_FOLD.name },
+  });
+  try {
+    await warm.replayDesktopFixture(fixture("close-pane-releases-device"));
+  } finally {
+    await warm.stop();
+  }
+});
 
 describe("started daemon desktop fixture replay", () => {
   test("every captured fixture has a scenario row", () => {

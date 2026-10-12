@@ -36,8 +36,37 @@ describe("scanRecordHeartbeatCalls", () => {
     "manager.recordHeartbeat?.(sessionId);",
     'manager?.["recordHeartbeat"](sessionId);',
     'manager["record\\u0048eartbeat"](sessionId);',
+    "manager.recordHeartbeat.call(manager, id);",
+    "manager.recordHeartbeat.apply(manager, [id]);",
+    "manager.recordHeartbeat.bind(manager)(id);",
+    "(manager.recordHeartbeat)(id);",
+    "(0, manager.recordHeartbeat)(id);",
+    "(manager.recordHeartbeat as any)(id);",
+    "manager.recordHeartbeat!(id);",
+    "(manager.recordHeartbeat satisfies F)(id);",
+    "manager[`recordHeartbeat`](id);",
+    "recordHeartbeat.call(manager, id);",
+    "recordHeartbeat.apply(manager, [id]);",
+    "recordHeartbeat.bind(manager)(id);",
+    "((0, (manager.recordHeartbeat as F))!).call(manager, id);",
   ])("flags a direct call: %s", (source) => {
     expect(scanRecordHeartbeatCalls("fixture.ts", source)).toEqual([{ line: 1 }]);
+  });
+
+  test.each([
+    "class Fake { recordHeartbeat(id: string) {} }",
+    "const fake = { recordHeartbeat(id: string) {} };",
+    "interface Manager { recordHeartbeat(id: string): void; }",
+    'spyOn(m, "recordHeartbeat");',
+    "expect(m.recordHeartbeat).toHaveBeenCalled();",
+    "recordHeartbeatAt(id);",
+    "manager.recordHeartbeatAt.call(manager, id);",
+    'const mention = "manager.recordHeartbeat(id)";',
+    "// manager.recordHeartbeat(id);",
+    "m[`record${x}`](id);",
+    "(manager.recordHeartbeat, other)(id);",
+  ])("ignores a non-call or a different callee: %s", (source) => {
+    expect(scanRecordHeartbeatCalls("fixture.ts", source)).toEqual([]);
   });
 
   test("reports both calls on their correct lines", () => {

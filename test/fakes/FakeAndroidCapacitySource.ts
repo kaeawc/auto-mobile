@@ -1,6 +1,7 @@
 import type {
   AndroidCapacitySample,
   AndroidCapacitySource,
+  ProcessTableFailure,
 } from "../../src/features/bootAdmission/AndroidCapacitySource";
 
 const GIB = 1024 ** 3;
@@ -15,6 +16,7 @@ export class FakeAndroidCapacitySource implements AndroidCapacitySource {
   host = { totalMemoryBytes: 64 * GIB, cpuCount: 16 };
   /** Set to model a failed adb listing (`emulatorSerials` is then ignored). */
   serialListingError: string | undefined;
+  processTableFailure: ProcessTableFailure | undefined;
   samples = 0;
   /** Called before each sample is returned, e.g. to change the fleet mid-wait. */
   onSample: ((sampleNumber: number) => void) | undefined;
@@ -36,6 +38,9 @@ export class FakeAndroidCapacitySource implements AndroidCapacitySource {
         ...(listingFailed ? [`adb: ${this.serialListingError}`] : []),
         ...(this.emulatorProcessRssBytes ? [] : ["ps: unavailable"]),
       ],
+      ...(this.emulatorProcessRssBytes === undefined && this.processTableFailure
+        ? { processTableFailure: this.processTableFailure }
+        : {}),
       ...(listingFailed ? { serialListingFailed: true as const } : {}),
     };
   }

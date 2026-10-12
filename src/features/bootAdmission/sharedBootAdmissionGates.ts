@@ -110,6 +110,8 @@ export function createBootAdmissionGates(
               ADB_LISTING_TIMEOUT_MS,
             ),
             executor,
+            undefined,
+            { timer, processTableSupported: (deps.hostPlatform ?? process.platform) !== "win32" },
           ),
           timer,
           {

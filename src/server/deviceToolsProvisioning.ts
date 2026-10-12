@@ -86,7 +86,7 @@ import {
   activeProvisionDeviceRequests,
   attachProvisionDeviceLifecycle,
   cancelProvisionDeviceRequest,
-  cancelUnownedColdBoot,
+  cancelUnownedColdBootUnlessRetryable,
   clearColdBootShutdownMarker,
   createProvisionDeviceResponse,
   createToolErrorResponse,
@@ -2007,7 +2007,11 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       };
     } catch (error) {
       if (!ownershipTransferred) {
-        settlementState.unownedColdBootSettlement = cancelUnownedColdBoot(boot);
+        settlementState.unownedColdBootSettlement = cancelUnownedColdBootUnlessRetryable(
+          boot ? { ...boot, provisioned: boot.provisioned || provisioned.created } : boot,
+          error,
+          operationSignal,
+        );
       }
       throw error;
     } finally {

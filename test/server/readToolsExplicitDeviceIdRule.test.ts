@@ -26,7 +26,18 @@ import { settleByFakeEvents, drainUntilQuiescent } from "../helpers/fakeTimerSte
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { registerMcpTools } from "../../src/server";
 import { sessionlessDeviceReadFor } from "../../src/server/deviceObservationAccess";
-import type { BootedResourceReadListing } from "../../src/server/resourceDeviceResolver";
+import {
+  listBootedDevicesForReadWithStatus,
+  type BootedResourceReadListing,
+} from "../../src/server/resourceDeviceResolver";
+import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import {
+  AndroidEmulatorClient,
+  resetAndroidInventoryEnrichmentCache,
+} from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { createExecResult } from "../../src/utils/execResult";
 import { executionTracker } from "../../src/server/executionTracker";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -198,6 +209,7 @@ function harness(platform: Platform, running: boolean, capacity = false, incompl
       expect(manager.verifyDevice).toBe(originalVerify);
     },
     manager,
+    timer,
     discovery,
     device,
     devices,
@@ -212,6 +224,7 @@ function harness(platform: Platform, running: boolean, capacity = false, incompl
     capacityError,
     iosManager,
     androidManager,
+    handledDevices: [] as BootedDevice[],
     runs: [] as Array<{ deviceId: string; sessionUuid: unknown; readPath: boolean }>,
   };
 }
@@ -230,6 +243,7 @@ const unheld = new Map<Platform, { pool: DevicePool; sessions: SessionManager }>
 let slotOwner: { pool: DevicePool; sessions: SessionManager };
 let restoreReadTimer: (() => void) | undefined;
 let restoreGate: (() => void) | undefined;
+let restoreProbeInventory: (() => Promise<void>) | undefined;
 const decisions = new Map<string, Map<string, string>>();
 const retryTimer = new FakeTimer();
 let statusListing: (() => Promise<BootedResourceReadListing>) | undefined;
@@ -275,6 +289,7 @@ beforeAll(async () => {
         description,
         schema,
         async (device, args) => {
+          h!.handledDevices.push(device);
           h!.runs.push({
             deviceId: device.deviceId,
             sessionUuid: args.sessionUuid,
@@ -339,7 +354,9 @@ beforeAll(async () => {
   await pool.initializeWithDevices([]);
   slotOwner = { pool, sessions };
 });
-afterEach(() => {
+afterEach(async () => {
+  await restoreProbeInventory?.();
+  restoreProbeInventory = undefined;
   statusListing = undefined;
   retryTimer.reset();
   restoreGate?.();
@@ -621,11 +638,198 @@ for (const platform of ["android", "ios"] as const) {
   }
 }
 
+const probeColumns = [
+  "probe-running-name",
+  "probe-held-name",
+  "probe-unresolved",
+  "probe-stopped-name",
+  "probe-running-id",
+] as const;
+
+function installProbeInventory(column: (typeof probeColumns)[number]): void {
+  const current = h!;
+  const stopped = column === "probe-stopped-name";
+  const raw: BootedDevice = {
+    platform: "android",
+    deviceId: stopped ? "emulator-5554" : current.device.deviceId,
+    name: stopped ? "emulator-5554" : current.device.deviceId,
+    observedAt: 1,
+  };
+  current.devices.splice(0, current.devices.length, raw);
+  current.adb.setDevices([raw]);
+  current.discovery.setBootedDevices("android", [raw]);
+  const start = current.discovery.startDevice.bind(current.discovery);
+  current.discovery.startDevice = async (...args) => {
+    const device = await start(...args);
+    const booted = (await current.adb.getBootedAndroidDevices()).map((row) => ({
+      ...row,
+      name: row.deviceId,
+    }));
+    current.adb.setDevices(booted);
+    current.discovery.setBootedDevices("android", booted);
+    return device;
+  };
+  current.adb.setCommandResponse(
+    "emu avd name",
+    createExecResult(
+      column === "probe-unresolved" ? "" : stopped ? "Other_AVD\nOK" : "Named_Pixel\nOK",
+      "",
+    ),
+  );
+  const client = new AndroidEmulatorClient(
+    null,
+    null,
+    current.timer,
+    new FakeAdbClientFactory(current.adb),
+  );
+  const inventory = new MultiPlatformDeviceManager(
+    current.adb,
+    current.simctl as unknown as SimCtlClient,
+    client,
+    new FakeVirtualDeviceLifecycleCoordinator(),
+    current.timer,
+  );
+  const previous = PlatformDeviceManagerFactory.getInstance();
+  PlatformDeviceManagerFactory.setInstance(inventory);
+  statusListing = () => listBootedDevicesForReadWithStatus("android", "read-rule-probe");
+  restoreProbeInventory = async () => {
+    try {
+      // Prove clearing enrichment state forces a probe for every remaining emulator.
+      await client.getBootedDevicesChecked(false, {
+        coalesceInventoryEnrichment: true,
+        readinessOnly: true,
+      });
+      const before = current.adb.getExecutedCommands().filter((c) => c === "emu avd name").length;
+      resetAndroidInventoryEnrichmentCache();
+      await client.getBootedDevicesChecked(false, {
+        coalesceInventoryEnrichment: true,
+        readinessOnly: true,
+      });
+      expect(current.adb.getExecutedCommands().filter((c) => c === "emu avd name").length).toBe(
+        before + (await current.adb.getBootedAndroidDevices()).length,
+      );
+    } finally {
+      resetAndroidInventoryEnrichmentCache();
+      PlatformDeviceManagerFactory.setInstance(previous);
+      expect(PlatformDeviceManagerFactory.getInstance()).toBe(previous);
+    }
+  };
+}
+
+for (const column of probeColumns) {
+  for (const name of EXPECTED) {
+    test(`android ${column}: ${name}`, async () => {
+      const stopped = column === "probe-stopped-name";
+      const held = column === "probe-held-name";
+      h = harness("android", !stopped);
+      installProbeInventory(column);
+      Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+      const daemon = (held ? owners : unheld).get("android")!;
+      DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
+      const before = structuredClone(daemon.sessions.getAllSessions());
+      const id = column === "probe-running-id" ? h.device.deviceId : h.device.name;
+      const execution = executionTracker.startExecution(name);
+      let decision: string;
+      try {
+        // The serial fast path is the generic resolver contract, including observe outside its explicit context.
+        await runWithToolSelectionContext(
+          { explicitObserveDeviceRead: name === "observe" && column !== "probe-running-id" },
+          () =>
+            ToolRegistry.getTool(name)!.handler({
+              platform: "android",
+              deviceId: id,
+              ...readArgs[name],
+              [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
+              [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
+            }),
+        );
+        decision = `device:${h.runs[0]?.deviceId};boots:${h.boots.length}`;
+      } catch (error) {
+        expect(error).toBeInstanceOf(ActionableError);
+        const code: unknown = Reflect.get(error as Error, "code");
+        decision = typeof code === "string" ? code : (error as Error).message;
+      } finally {
+        executionTracker.endExecution(execution.id);
+      }
+      const row = decisions.get(column) ?? new Map<string, string>();
+      row.set(name, decision);
+      decisions.set(column, row);
+      expect(decision).toBe(
+        column === "probe-unresolved"
+          ? "discovery_incomplete"
+          : `device:${h.device.deviceId};boots:${stopped ? 1 : 0}`,
+      );
+      const probes = h.adb.getExecutedCommands().filter((c) => c === "emu avd name");
+      expect(probes).toHaveLength(column === "probe-running-id" ? 0 : 1);
+      expect(h.boots).toHaveLength(stopped ? 1 : 0);
+      expect(h.manager.getCurrentDevice()).toBeUndefined();
+      expect(h.manager.getCurrentPlatform()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+      expect(h.apply).not.toHaveBeenCalled();
+      expect(h.getConfig).not.toHaveBeenCalled();
+      expect(
+        h.adb.getExecutedCommands().filter((c) => /settings (put|delete)|cmd uimode/.test(c)),
+      ).toEqual([]);
+      expect(daemon.sessions.getAllSessions()).toEqual(before);
+      if (h.runs.length) {
+        expect(h.runs[0].sessionUuid).toBeUndefined();
+      }
+      if (held) {
+        expect(h.runs[0].readPath).toBe(true);
+        expect(h.ensure).not.toHaveBeenCalled();
+        expect(h.verify).not.toHaveBeenCalled();
+      } else if (!stopped && column !== "probe-unresolved" && name !== "observe") {
+        expect(h.detect).toHaveBeenCalledTimes(1);
+        expect(h.ensure.mock.calls[0][1]).toBe(h.device.deviceId);
+      }
+    });
+  }
+  test(`android ${column}: every tool reaches an identical decision`, () => {
+    const row = decisions.get(column) ?? new Map<string, string>();
+    expect(new Set(row.values()).size).toBe(row.size ? 1 : 0);
+    if (row.size === EXPECTED.length) {
+      expect([...row.keys()].sort()).toEqual(EXPECTED);
+    }
+  });
+}
+
+test("a probed serial missing from the memoized raw scan is refreshed before readiness", async () => {
+  h = harness("android", true);
+  installProbeInventory("probe-running-name");
+  Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+  const daemon = unheld.get("android")!;
+  DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
+  let scans = 0;
+  h.detect.mockImplementation(async () => ({
+    devices: ++scans === 1 ? [] : h!.devices,
+    scanned: { android: true, ios: true },
+  }));
+  await ToolRegistry.getTool("listApps")!.handler({ platform: "android", deviceId: h.device.name });
+  expect(h.runs).toEqual([
+    { deviceId: h.device.deviceId, sessionUuid: undefined, readPath: false },
+  ]);
+  expect(h.detect).toHaveBeenCalledTimes(2);
+  expect(h.ensure.mock.calls[0][1]).toBe(h.device.deviceId);
+  expect(h.adb.getExecutedCommands().filter((c) => c === "emu avd name")).toHaveLength(1);
+  expect(h.boots).toEqual([]);
+  expect(daemon.sessions.getAllSessions()).toEqual([]);
+  expect(h.manager.getCurrentDevice()).toBeUndefined();
+  expect(h.manager.getCurrentPlatform()).toBeUndefined();
+  expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+  expect(h.apply).not.toHaveBeenCalled();
+});
+
 test("a serial acquired during discovery is rechecked before readiness", async () => {
   h = harness("android", true);
   Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
   DaemonState.getInstance().initialize(slotOwner.sessions, slotOwner.pool);
   let acquired = false;
+  let listings = 0;
+  const listedDevice = { ...h.device, name: "Funnelled_Pixel" };
+  statusListing = async () => {
+    listings++;
+    return { devices: [listedDevice], scanned: { android: true, ios: true } };
+  };
   h.detect.mockImplementation(async () => {
     acquired = true;
     return { devices: h!.devices, scanned: { android: true, ios: true } };
@@ -642,6 +846,9 @@ test("a serial acquired during discovery is rechecked before readiness", async (
     expect(h.runs).toEqual([
       { deviceId: h.device.deviceId, sessionUuid: undefined, readPath: true },
     ]);
+    expect(listings).toBe(1);
+    expect(h.handledDevices).toEqual([listedDevice]);
+    expect(h.handledDevices[0]).toBe(listedDevice);
     expect(h.detect).toHaveBeenCalledTimes(1);
     expect(h.ensure).not.toHaveBeenCalled();
     expect(h.verify).not.toHaveBeenCalled();
@@ -967,9 +1174,10 @@ function reserveReadTarget(platform: Platform, id: string): void {
 
 async function onePlatformDecision(
   platform: Platform,
-  name: "observe" | "listApps",
+  name: "observe" | "listApps" | "getDeviceState",
   scenario: "stopped" | "unknown" | "reserved" | "running",
   requested?: "either",
+  failedOther = false,
 ): Promise<{ decision: string; listings: number }> {
   useFakeReadRetryTimer();
   h = harness(platform, scenario === "running");
@@ -985,7 +1193,11 @@ async function onePlatformDecision(
     return {
       devices: h!.devices,
       scanned,
-      discoveryErrors: { [other]: { code: "unavailable", message: "tooling absent" } },
+      discoveryErrors: {
+        [other]: failedOther
+          ? { code: "failed", message: other === "android" ? "adb died" : "simctl died" }
+          : { code: "unavailable", message: "tooling absent" },
+      },
     };
   };
   const id =
@@ -1006,6 +1218,12 @@ async function onePlatformDecision(
       }),
   ).catch((error: unknown) => error);
   const result = await settleByFakeEvents(retryTimer, outcome, { description: scenario });
+  expect(retryTimer.getPendingTimeoutCount()).toBe(0);
+  expect(retryTimer.getPendingSleepCount()).toBe(0);
+  if (!failedOther || name === "observe" || scenario === "reserved") {
+    expect(retryTimer.now()).toBe(failedOther ? 1000 : 0);
+    expect(retryTimer.getSleepCallCount()).toBe(failedOther ? 2 : 0);
+  }
   let decision: string;
   if (scenario === "reserved") {
     expect(result).toMatchObject({ code: "device_owned_by_other_session", retryAfterMs: 500 });
@@ -1014,23 +1232,62 @@ async function onePlatformDecision(
     expect(h.boots).toEqual([]);
     expect(h.simctl.getMethodCalls("bootSimulator")).toEqual([]);
     decision = "device_owned_by_other_session";
-  } else if (scenario === "unknown") {
+  } else if (scenario === "unknown" || (failedOther && name === "observe")) {
     // The normal readiness path on main cannot prove absence on an incomplete either scan.
     expect(result).toMatchObject({ code: "discovery_incomplete", platform: other });
+    expect(h.runs).toEqual([]);
+    expect(h.boots).toEqual([]);
+    expect(h.simctl.getMethodCalls("bootSimulator")).toEqual([]);
+    if (failedOther && name === "observe") {
+      expect(h.ensure).not.toHaveBeenCalled();
+    }
     decision = "discovery_incomplete";
   } else {
+    expect(result).not.toBeInstanceOf(Error);
     expect(h.runs).toHaveLength(1);
     decision = `device:${h.runs[0].deviceId};boots:${h.boots.length + h.simctl.getMethodCalls("bootSimulator").length}`;
     expect(decision).toBe(`device:${h.device.deviceId};boots:${scenario === "stopped" ? 1 : 0}`);
+    expect(h.runs[0].sessionUuid).toBeUndefined();
+    expect(h.ensure).toHaveBeenCalledTimes(name === "observe" && scenario === "running" ? 0 : 1);
   }
-  expect(retryTimer.now()).toBe(0);
-  expect(retryTimer.getPendingTimeoutCount()).toBe(0);
-  expect(retryTimer.getPendingSleepCount()).toBe(0);
-  expect(retryTimer.getSleepCallCount()).toBe(0);
+  expect(daemon.sessions.getAllSessions()).toEqual([]);
+  expect(h.manager.getCurrentDevice()).toBeUndefined();
+  expect(h.manager.getCurrentPlatform()).toBeUndefined();
+  expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+  expect(h.apply).not.toHaveBeenCalled();
+  expect(h.getConfig).not.toHaveBeenCalled();
+  expect(
+    h.adb.getExecutedCommands().filter((c) => /settings (put|delete)|cmd uimode/.test(c)),
+  ).toEqual([]);
+  if (failedOther) {
+    if (name === "observe" || scenario === "reserved") {
+      expect(listings).toBe(3);
+    }
+    return { decision, listings };
+  }
   expect(listings).toBe(
-    scenario === "reserved" ? (name === "observe" ? 2 : 1) : name === "observe" ? 1 : 0,
+    scenario === "reserved"
+      ? name === "observe"
+        ? 2
+        : 1
+      : name === "observe" || scenario !== "running" || platform === "android"
+        ? 1
+        : 0,
   );
   return { decision, listings };
+}
+
+for (const platform of ["android", "ios"] as const) {
+  for (const requested of [undefined, "either"] as const) {
+    for (const name of ["listApps", "getDeviceState", "observe"] as const) {
+      test(`${platform} failed-other stopped ${name}, platform=${requested ?? "absent"}`, async () => {
+        await onePlatformDecision(platform, name, "stopped", requested, true);
+      });
+    }
+    test(`${platform} failed-other reserved listApps, platform=${requested ?? "absent"}`, async () => {
+      await onePlatformDecision(platform, "listApps", "reserved", requested, true);
+    });
+  }
 }
 
 for (const platform of ["android", "ios"] as const) {

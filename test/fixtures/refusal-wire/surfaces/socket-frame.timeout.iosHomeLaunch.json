@@ -1,0 +1,12 @@
+{
+  "surface": "socket-frame",
+  "name": "timeout.iosHomeLaunch",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "SpringBoard launch exhausted the Home budget",
+    "code": "timeout",
+    "retryable": true
+  }
+}

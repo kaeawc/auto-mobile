@@ -6,7 +6,7 @@ import {
   type AcquisitionReceipt,
   type DeferredRebindCleanup,
 } from "./acquisitionReceipt";
-import { TransitionalAdbBindWait } from "./transitionalAdbBindWait";
+import { TransitionalAdbBindWait, launchProcessLiveness } from "./transitionalAdbBindWait";
 import type { SessionReleaseReason } from "./releaseReasons";
 import type { Environment } from "./poolConfig";
 import {
@@ -734,6 +734,7 @@ export interface TargetDeviceDiscoveryOptions {
   sessionId?: string;
   readinessReservationOwners?: ReadonlySet<symbol>;
   sourceImage?: DeviceInfo;
+  isLaunchProcessAlive?: () => boolean;
   unavailableMessage: string;
   platform: Platform;
   operation: (snapshot: TargetDeviceDiscoverySnapshot) => Promise<string | undefined>;
@@ -1277,6 +1278,7 @@ export class DevicePool {
       sessionTimeoutMs?: number;
       recoveryWindowEndMs?: number;
       ownerMcpSessionIds?: ReadonlySet<string>;
+      ownerLivenessToken?: string;
     }
   >();
   // Permission is scoped to one admitted start's actual symbols, never every hold on R's target.
@@ -4806,6 +4808,7 @@ export class DevicePool {
             this.hasAcquiredDeviceSession(connection, sessionId),
           ),
         );
+        target.ownerLivenessToken = this.restartReservationOwnerToken(session);
         target.sessionTimeoutMs = session.sessionTimeoutMs;
         target.idleDeadlineMs = session.expiresAt;
         target.recoveryWindowEndMs =
@@ -8173,6 +8176,7 @@ export class DevicePool {
     }
     target.restartHandoff = false;
     target.ownerMcpSessionIds = undefined;
+    target.ownerLivenessToken = undefined;
     target.scheduledDeadlineMs = undefined;
     if (target.expiryTimer) {
       this.timer.clearTimeout(target.expiryTimer);
@@ -8466,6 +8470,7 @@ export class DevicePool {
       sessionId,
       readinessReservationOwners,
       sourceImage: verifiedAndroidAvdIdentity ?? sourceImage,
+      isLaunchProcessAlive: launchProcessLiveness(childProcess),
       unavailableMessage: `Device '${deviceId}' is not available in the device pool.`,
       platform,
       operation: async (snapshot) => {
@@ -8980,6 +8985,7 @@ export class DevicePool {
     sessionId,
     readinessReservationOwners,
     sourceImage,
+    isLaunchProcessAlive,
     unavailableMessage,
     platform,
     operation,
@@ -8991,6 +8997,7 @@ export class DevicePool {
       probe: this.deviceManager.getAndroidListedDeviceStates?.bind(this.deviceManager),
       probeTimeoutMs: ANDROID_OFFLINE_PROBE_TIMEOUT_MS,
       getSignal: getAbortSignal,
+      isLaunchProcessAlive,
     });
     while (true) {
       throwIfRequestAborted();
@@ -9743,10 +9750,42 @@ export class DevicePool {
           }
           // A connection that closed while this restore waited is not recorded (#11192).
           this.recordBindOwnership(mcpSessionId, sessionId);
+        } else {
+          this.restoreRestartReservationConnectionOwner(
+            sessionId,
+            mcpSessionId,
+            livenessOwnerToken,
+          );
         }
       }
       return refused;
     });
+  }
+
+  /** Capture from the held session, looking up a base only for derived connection ownership. */
+  private restartReservationOwnerToken(session: Session): string | undefined {
+    const ownerSessionId = this.ownershipSessionId(session.sessionId);
+    return ownerSessionId === session.sessionId
+      ? session.livenessOwnerToken
+      : this.sessionManager.getSession(ownerSessionId)?.livenessOwnerToken;
+  }
+
+  /** Apply token-proved reconnect ownership to a released handoff, under assignmentMutex. */
+  private restoreRestartReservationConnectionOwner(
+    sessionId: string,
+    mcpSessionId: string,
+    livenessOwnerToken: string | undefined,
+  ): void {
+    const target = this.rehydrationReservations.get(sessionId);
+    if (
+      target?.restartHandoff === true &&
+      target.ownerLivenessToken !== undefined &&
+      target.ownerLivenessToken === livenessOwnerToken &&
+      !this.mcpBindsInFlight.get(mcpSessionId)?.closed
+    ) {
+      // The token proves the released holder without reviving it or renewing its hold.
+      target.ownerMcpSessionIds = new Set([...(target.ownerMcpSessionIds ?? []), mcpSessionId]);
+    }
   }
 
   /**

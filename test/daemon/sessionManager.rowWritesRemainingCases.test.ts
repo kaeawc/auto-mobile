@@ -41,7 +41,14 @@ async function settle(): Promise<void> {
 // Deferred seams park statements, never host I/O; the repository still executes the real SQL guards.
 class DeferredRowRepository extends DeviceSessionRepository {
   activityGate?: Promise<void>;
+  activityGates: Promise<void>[] = [];
+  activityEntered?: (count: number) => void;
+  rewriteGate?: Promise<void>;
+  failRewrites = 0;
+  liveRowRewrites = 0;
   releaseGate?: Promise<void>;
+  releaseGates: Promise<void>[] = [];
+  releaseEntered?: (count: number) => void;
   ownershipGate?: Promise<void>;
   ownershipEntered?: () => void;
   beforeOwnership?: () => Promise<void>;
@@ -55,7 +62,15 @@ class DeferredRowRepository extends DeviceSessionRepository {
   ): Promise<number> {
     if (args[2]?.unlessTerminal) {
       this.activityUpserts++;
-      await this.activityGate;
+      this.activityEntered?.(this.activityUpserts);
+      await (this.activityGates.shift() ?? this.activityGate);
+    } else if (args[2]?.rewriteOverSupersededRelease) {
+      this.liveRowRewrites++;
+      await this.rewriteGate;
+      if (this.failRewrites > 0) {
+        this.failRewrites--;
+        throw new Error("SQLITE_BUSY: database is locked");
+      }
     }
     return await super.upsertActiveSession(...args);
   }
@@ -77,7 +92,8 @@ class DeferredRowRepository extends DeviceSessionRepository {
   ): Promise<void> {
     this.releases.push(args[3]);
     this.releaseGenerations.push(args[4]?.expectedRowGeneration);
-    await this.releaseGate;
+    this.releaseEntered?.(this.releases.length);
+    await (this.releaseGates.shift() ?? this.releaseGate);
     if (this.failReleases > 0) {
       this.failReleases--;
       throw new Error("SQLITE_BUSY: database is locked");
@@ -153,6 +169,171 @@ describe("remaining session row writes (#11557)", () => {
     },
   });
   const reissue = () => manager.getOrCreateSession(SESSION, pool(), "android", undefined, true);
+
+  test("a refused superseded release repairs an earlier superseded release's late terminal row", async () => {
+    timer.setCurrentTime(41_000);
+    const session = await create();
+    const reason = `device-disconnected:${DEVICE}`;
+    manager.setSupersededRowReassertBackoff(fixedBackoff(200));
+    const firstWrite = Promise.withResolvers<void>();
+    const secondWrite = Promise.withResolvers<void>();
+    const restoreWrite = Promise.withResolvers<void>();
+    const retryUpsert = Promise.withResolvers<void>();
+    store.releaseGates = [firstWrite.promise, secondWrite.promise, restoreWrite.promise];
+    store.failRewrites = 1;
+    let firstSuperseded = false;
+    const first = manager.releaseSessionUnlessSuperseded(SESSION, reason, () => !firstSuperseded);
+    await settle();
+    expect(store.releases).toEqual([reason]);
+    firstSuperseded = true;
+    await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+    expect(await first).toEqual({ superseded: true });
+    expect(store.liveRowRewrites).toBe(1);
+    expect(timer.getPendingTimeouts()).toEqual([200]);
+
+    store.rewriteGate = retryUpsert.promise;
+    await timer.advanceTimeAsync(200);
+    await settle();
+    expect(store.liveRowRewrites).toBe(2);
+    let secondSuperseded = false;
+    const second = manager.releaseSessionUnlessSuperseded(SESSION, reason, () => !secondSuperseded);
+    await settle();
+    expect(store.releases).toEqual([reason, reason]);
+    await timer.advanceTimeAsync(40);
+    const restoring = Promise.withResolvers<void>();
+    store.releaseEntered = (count) => {
+      if (count === 3) {
+        restoring.resolve();
+      }
+    };
+    store.rewriteGate = undefined;
+    retryUpsert.resolve();
+    await restoring.promise;
+    expect(await row()).toMatchObject({ status: "active", stable_identity_generation: 1 });
+    expect(store.releases).toEqual([reason, reason, reason]);
+
+    await timer.advanceTimeAsync(60);
+    firstWrite.resolve();
+    await settle();
+    expect(await row()).toMatchObject({ status: "released", release_reason: reason });
+    await timer.advanceTimeAsync(840);
+    restoreWrite.resolve();
+    await settle();
+    // R2's restore is refused over R1's terminal row; R2 still waits on its original statement.
+    expect(await row()).toMatchObject({ status: "released", release_reason: reason });
+    secondSuperseded = true;
+    await timer.advanceTimeAsync(9_060);
+    expect(await second).toEqual({ superseded: true });
+    secondWrite.resolve();
+    await settle();
+    expect(await manager.drainReleasePromises(1_000)).toBe(true);
+    const settledRow = await row();
+    timer.advanceTime(1);
+    expect(await manager.getOrCreateSession(SESSION)).toBe(session);
+    expect(manager.getSession(SESSION)).toBe(session);
+    expect(settledRow).toMatchObject({
+      status: "active",
+      release_reason: null,
+      device_id: DEVICE,
+    });
+    expect(await row()).toMatchObject({
+      status: "active",
+      release_reason: null,
+      device_id: DEVICE,
+    });
+    expect(announced).toEqual([]);
+    expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a losing activity repair rejects its caller without ending the live session", async () => {
+    const session = await create();
+    const generation = (await row())!.stable_identity_generation;
+    await sweep();
+    await db
+      .updateTable("device_sessions")
+      .set({ daemon_session_id: "daemon-dead" })
+      .where("session_uuid", "=", SESSION)
+      .execute();
+    const firstRetry = Promise.withResolvers<void>();
+    const secondRetry = Promise.withResolvers<void>();
+    store.activityGates = [
+      Promise.resolve(),
+      firstRetry.promise,
+      Promise.resolve(),
+      secondRetry.promise,
+    ];
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const firstRetryEntered = Promise.withResolvers<void>();
+      store.activityEntered = (count) => {
+        if (count === 2) {
+          firstRetryEntered.resolve();
+        }
+      };
+      timer.advanceTime(1);
+      const first = manager.getOrCreateSession(SESSION);
+      await firstRetryEntered.promise;
+      expect(store.activityUpserts).toBe(2);
+      const firstActivity = {
+        lastUsedAt: session.lastUsedAt,
+        lastHeartbeat: session.lastHeartbeat,
+        expiresAt: session.expiresAt,
+      };
+      timer.advanceTime(1);
+      const secondRetryEntered = Promise.withResolvers<void>();
+      store.activityEntered = (count) => {
+        if (count === 4) {
+          secondRetryEntered.resolve();
+        }
+      };
+      const second = manager.getOrCreateSession(SESSION).then(
+        () => "resolved",
+        (error: unknown) => error,
+      );
+      await secondRetryEntered.promise;
+      expect(store.activityUpserts).toBe(4);
+      firstRetry.resolve();
+      expect(await first).toBe(session);
+      expect(await row()).toMatchObject({ stable_identity_generation: generation + 1 });
+      secondRetry.resolve();
+      expect(await second).toMatchObject({
+        name: "SessionActivityPersistenceError",
+        cause: expect.objectContaining({ name: "DeviceSessionRowNotRewritableError" }),
+      });
+      expect(session).toMatchObject(firstActivity);
+      expect(manager.getSession(SESSION)).toBe(session);
+      expect(announced).toEqual([]);
+      expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+      expect(await row()).toMatchObject({
+        status: "active",
+        release_reason: null,
+        daemon_session_id: "daemon-1",
+        device_id: DEVICE,
+        stable_identity_generation: generation + 1,
+      });
+      expect(warn.mock.calls.map(([message]) => message)).toEqual([
+        `[SessionManager] Session ${SESSION} is live but its row is not active; re-persisting it`,
+        `[SessionManager] Session ${SESSION} is live but its row is not active; re-persisting it`,
+      ]);
+      timer.advanceTime(1);
+      expect(await manager.getOrCreateSession(SESSION)).toBe(session);
+      expect(store.activityUpserts).toBe(4);
+      expect(await row()).toMatchObject({
+        status: "active",
+        daemon_session_id: "daemon-1",
+        device_id: DEVICE,
+        stable_identity_generation: generation + 1,
+        last_used_at_ms: session.lastUsedAt,
+      });
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      firstRetry.resolve();
+      secondRetry.resolve();
+      warn.mockRestore();
+    }
+  });
 
   test.each(["own", "unowned"])(
     "a parked plan release cannot overwrite the shutdown upgrade or arm another write (owner: %s)",

@@ -1,7 +1,11 @@
 import type { ObserveResult, ViewHierarchyNode } from "../../models";
 import { nodeAttributes } from "../../models/ViewHierarchyResult";
 import { DefaultElementParser } from "../utility/ElementParser";
-import { getFocusedTextField, type FocusedTextField } from "./ClearText";
+import {
+  getFocusedTextField,
+  type FocusedTextField,
+  type FocusedTextFieldOptions,
+} from "./ClearText";
 import type { ObserveScreenExecuteOptions } from "../observe/interfaces/ObserveScreen";
 import type { Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -87,6 +91,7 @@ export async function readIosTypedTextField(
   timer: Timer,
   signal?: AbortSignal,
   display?: string,
+  options: FocusedTextFieldOptions = {},
 ): Promise<FocusedTextField | undefined> {
   const requestSignal = combineWithAmbientAbort(signal);
   const deadline = getTextRequestDeadlineMs();
@@ -118,7 +123,7 @@ export async function readIosTypedTextField(
     const hierarchy = observation.viewHierarchy;
     return observation.freshness?.isFresh === false || !hierarchy || hierarchy.hierarchy.error
       ? undefined
-      : getFocusedTextField(hierarchy, new SecureValueOmittingParser());
+      : getFocusedTextField(hierarchy, new SecureValueOmittingParser(), options);
   } catch {
     // Best-effort verification must preserve a confirmed delivery; never log field/transport values.
     logger.warn("[iOS typed text] Focused field read unavailable; result cannot be verified");

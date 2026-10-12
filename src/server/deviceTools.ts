@@ -170,8 +170,11 @@ import { executionTracker } from "./executionTracker";
 import { unregisterDirectSessionsForStableIdentity } from "./directSessionDeviceRegistry";
 import {
   type RunnerReadinessRequest,
+  RunnerReadinessError,
   SystemUiAnrRecoveryRequiredError,
 } from "../ctrlProxy/RunnerReadinessService";
+import { DeviceTransportOfflineError } from "../daemon/deviceAcquisitionRefusals";
+import { DeviceLostError } from "../models/DeviceLostError";
 import {
   DEFAULT_RUNNER_PROVISION_TIMEOUT_MS,
   MAX_RUNNER_READINESS_TIMEOUT_MS,
@@ -275,6 +278,19 @@ const bootCapacitySchema = z.object({
   inFlight: z.number(),
 });
 
+const androidBootCapacitySchema = bootCapacitySchema.extend({
+  processTable: z
+    .object({
+      unavailable: z.boolean(),
+      reason: z.string(),
+      detail: z.string(),
+      attempts: z.number(),
+      admissionsWithoutProcessTable: z.number(),
+      lastAdmissionWithoutProcessTableAtMs: z.number().optional(),
+    })
+    .optional(),
+});
+
 /** iOS also reports host pressure (#11209), which is reported only and never gates a boot. */
 const iosBootCapacitySchema = bootCapacitySchema.extend({
   hostPressure: z
@@ -304,7 +320,7 @@ export const listDevicesOutputSchema = z.object({
     .optional(),
   capacity: z
     .object({
-      android: bootCapacitySchema.optional(),
+      android: androidBootCapacitySchema.optional(),
       ios: iosBootCapacitySchema.optional(),
     })
     .optional()
@@ -4131,6 +4147,38 @@ function leavePreviouslyRunningBoot(boot: DeviceBootResult | undefined): boolean
     `[DeviceTools] Leaving ${boot.device.deviceId} running: it was running before this call`,
   );
   return true;
+}
+
+function coldBootRetryReason(failure: unknown): string | undefined {
+  return failure instanceof DeviceTransportOfflineError
+    ? failure.code
+    : failure instanceof RunnerReadinessError &&
+        failure.deadlineExhausted &&
+        !(failure.diagnosticCause instanceof DeviceLostError)
+      ? (failure.phase ?? "timeout")
+      : undefined;
+}
+
+/** Keep a ready, existing emulator available for another acquisition after a transient failure. */
+export function cancelUnownedColdBootUnlessRetryable(
+  boot: DeviceBootResult | undefined,
+  failure: unknown,
+  signal: AbortSignal | undefined,
+): Promise<void> | undefined {
+  const retryReason = coldBootRetryReason(failure);
+  if (
+    boot?.source === "cold-boot" &&
+    boot.device?.platform === "android" &&
+    boot.provisioned !== true &&
+    !signal?.aborted &&
+    retryReason !== undefined
+  ) {
+    logger.info(
+      `[DeviceTools] Leaving cold boot ${boot.device.deviceId} running for a retry: ${retryReason}`,
+    );
+    return undefined;
+  }
+  return cancelUnownedColdBoot(boot);
 }
 
 export function cancelUnownedColdBoot(

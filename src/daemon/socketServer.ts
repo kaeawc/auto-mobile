@@ -2043,6 +2043,7 @@ export class UnixSocketServer {
       method: SESSION_RELEASED_NOTIFICATION_METHOD,
       sessionId: releasedSessionId,
       ...(reason !== undefined ? { reason } : {}),
+      ...idleReleaseField(reason),
       ...(release !== undefined ? { release } : {}),
       ...(recordingIds && recordingIds.length > 0 ? { recordingIds } : {}),
     };
@@ -4705,6 +4706,7 @@ export class UnixSocketServer {
       code: BOUND_SESSION_LOSS_CODE,
       sessionUuid,
       reason: release?.releaseReason ?? "session-not-found",
+      ...idleReleaseField(release?.releaseReason),
       ...(release ? { release } : {}),
     });
   }

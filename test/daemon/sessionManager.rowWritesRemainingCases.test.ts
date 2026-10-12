@@ -20,6 +20,7 @@ import {
 } from "../../src/db/deviceSessionRepository";
 import type { TerminalReleaseIntent } from "../../src/daemon/terminalReleaseJournal";
 import type { Database } from "../../src/db/types";
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { logger } from "../../src/utils/logger";
 import { createTestDatabase } from "../db/testDbHelper";
@@ -47,6 +48,7 @@ class DeferredRowRepository extends DeviceSessionRepository {
   failReleases = 0;
   activityUpserts = 0;
   releases: string[] = [];
+  releaseGenerations: (number | undefined)[] = [];
 
   override async upsertActiveSession(
     ...args: Parameters<DeviceSessionRepository["upsertActiveSession"]>
@@ -74,6 +76,7 @@ class DeferredRowRepository extends DeviceSessionRepository {
     ...args: Parameters<DeviceSessionRepository["markReleased"]>
   ): Promise<void> {
     this.releases.push(args[3]);
+    this.releaseGenerations.push(args[4]?.expectedRowGeneration);
     await this.releaseGate;
     if (this.failReleases > 0) {
       this.failReleases--;
@@ -288,6 +291,10 @@ describe("remaining session row writes (#11557)", () => {
       const activity = refresh();
       await settle();
       expect(store.activityUpserts).toBe(1);
+      expect(warn).toHaveBeenCalledWith(
+        `[SessionManager] Session ${SESSION} is live but its row is not active; re-persisting it`,
+      );
+      warn.mockClear();
       await manager.releaseSession(SESSION, "daemon-shutdown");
       expect(store.releases).toEqual(["daemon-shutdown"]);
       const released = await row();
@@ -481,7 +488,7 @@ describe("remaining session row writes (#11557)", () => {
   });
 
   test.each([false, true])(
-    "a plan re-issue refused at shutdown restores the plan row (upsert landed: %s)",
+    "a plan re-issue refused at shutdown restores the plan row (upsert landed: %p)",
     async (landed) => {
       await create();
       await manager.releaseSession(SESSION, PLAN);
@@ -517,6 +524,91 @@ describe("remaining session row writes (#11557)", () => {
     },
   );
 
+  test.each([
+    ["daemon-shutdown", false],
+    ["daemon-shutdown", true],
+    [PLAN, false],
+    [PLAN, true],
+  ] as const)(
+    "a cancelled recovery terminalizes its %s row (upsert landed: %p)",
+    async (reason, landed) => {
+      await manager.createSession(SESSION, DEVICE, "android", 60_000, undefined, "stable-row");
+      await manager.releaseSession(SESSION, reason);
+      announced.length = 0;
+      const controller = new AbortController();
+      const failure = new Error("client cancelled");
+      if (landed) {
+        store.beforeOwnership = async () => controller.abort(failure);
+      }
+      const assigner: SessionDeviceAssigner = {
+        async assignDeviceToSession(id) {
+          const creating = manager.createSession(id, DEVICE, "android", 60_000);
+          if (!landed) {
+            controller.abort(failure);
+          }
+          return (await creating).assignedDevice;
+        },
+      };
+      const writesBefore = store.releases.length;
+      await expect(
+        runWithAbortSignal(controller.signal, () =>
+          manager.getOrCreateSession(SESSION, assigner, "android", undefined, true),
+        ),
+      ).rejects.toBe(failure);
+      expect(await row()).toMatchObject({
+        status: "released",
+        release_reason: "session-creation-cancelled",
+      });
+      expect(announced).toEqual(["session-creation-cancelled"]);
+      expect(store.releases.slice(writesBefore)).toEqual(["session-creation-cancelled"]);
+      expect(store.releaseGenerations.slice(writesBefore)).toEqual([undefined]);
+      expect(manager.getTerminalReleaseSnapshot(SESSION)).toMatchObject({ terminal: true });
+      const later = new SessionManager(timer, peer, () => new FakeDbWriteBarrier());
+      later.stopCleanupTimer();
+      later.attachDaemonSessionId("daemon-later");
+      later.attachLiveDaemonSessionIds(() => new Set(["daemon-later"]));
+      try {
+        await expect(later.createSession(SESSION, DEVICE, "android", 60_000)).rejects.toMatchObject(
+          {
+            name: "TerminalSessionError",
+            release: expect.objectContaining({ releaseReason: "session-creation-cancelled" }),
+          },
+        );
+      } finally {
+        later.stopCleanupTimer();
+      }
+    },
+  );
+
+  test.each([`device-restart:${DEVICE}`, "daemon-shutdown"])(
+    "a failed recovery preserves its claimed %s release time",
+    async (reason) => {
+      await manager.createSession(SESSION, DEVICE, "android", 60_000, undefined, "stable-row");
+      await manager.releaseSession(SESSION, reason);
+      const claimed = await row();
+      timer.advanceTime(100);
+      // A new daemon reads persisted stamps on its own session clock, including after a wall step.
+      manager.stopCleanupTimer();
+      manager = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+      manager.stopCleanupTimer();
+      manager.attachDaemonSessionId("daemon-recovery");
+      manager.attachLiveDaemonSessionIds(() => new Set(["daemon-recovery"]));
+      timer.stepWallClock(200);
+      const failure = new DeviceSessionNotActiveError(SESSION);
+      store.beforeOwnership = async () => {
+        timer.advanceTime(100);
+        throw failure;
+      };
+      await expect(reissue()).rejects.toBe(failure);
+      expect(await row()).toMatchObject({
+        status: "released",
+        release_reason: reason,
+        released_at_ms: claimed!.released_at_ms,
+      });
+      expect(await store.listRecoverableSessions()).toHaveLength(1);
+    },
+  );
+
   test("a new creation refused after upsert keeps the shutdown row with its generation guard", async () => {
     store.beforeOwnership = async () => {
       manager.stopAcceptingSessionCreations();
@@ -526,7 +618,7 @@ describe("remaining session row writes (#11557)", () => {
     expect(announced).toEqual(["daemon-shutdown"]);
   });
 
-  test("shutdown refusal keeps its journal reason until the conditioned plan rollback is confirmed", async () => {
+  test("shutdown plan rollback records and resolves no terminal journal intent", async () => {
     await create();
     await manager.releaseSession(SESSION, PLAN);
     const intents: TerminalReleaseIntent[] = [];
@@ -549,14 +641,14 @@ describe("remaining session row writes (#11557)", () => {
     store.failReleases = 1;
     await expect(reissue()).rejects.toMatchObject({ name: "DaemonSessionCreationRejectedError" });
     await settle();
-    expect(recorded).toEqual(["daemon-shutdown"]);
-    expect(intents).toHaveLength(1);
+    expect(recorded).toEqual([]);
+    expect(intents).toEqual([]);
     expect(resolved).toEqual([]);
     await timer.advanceTimeAsync(RETRY_MS);
     await settle();
     expect(await row()).toMatchObject({ release_reason: PLAN });
-    expect(recorded).toEqual(["daemon-shutdown"]);
-    expect(resolved).toEqual(["daemon-shutdown"]);
+    expect(recorded).toEqual([]);
+    expect(resolved).toEqual([]);
     expect(intents).toEqual([]);
   });
 

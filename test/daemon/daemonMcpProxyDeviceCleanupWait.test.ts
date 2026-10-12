@@ -101,6 +101,109 @@ function expectNoWaitTimers(timer: FakeTimer): void {
 }
 
 describe("DaemonMcpProxy waits out device_cleanup_in_progress (#11900)", () => {
+  test("floors repeated 1 ms cleanup hints and ends at the wait budget", async () => {
+    const { timer, client, proxy, pollTimes, lastRefusal, done } = await setup({
+      hint: 1,
+      budgetMs: 1_000,
+    });
+    try {
+      const call = proxy.callTool("getAndroid", {}).catch((error: unknown) => error);
+      expect(await pendingWait(timer)).toBeGreaterThanOrEqual(50);
+      const result = await settleByFakeEvents(timer, call, {
+        maxEvents: 20,
+        description: "floored cleanup polls",
+      });
+      const gaps = pollTimes.slice(1).map((time, i) => time - pollTimes[i]!);
+      for (const gap of gaps.slice(0, -1)) {
+        expect(gap).toBeGreaterThanOrEqual(50);
+      }
+      expect(client.callToolCalls.length).toBeLessThanOrEqual(1_000 / 50 + 1);
+      expect(timer.now()).toBe(1_000);
+      expect(result).toBe(lastRefusal());
+      expect(result).toMatchObject({ isError: true });
+      expect(readToolEnvelopePayload(result)?.payload.code).toBe("device_cleanup_in_progress");
+      expectNoWaitTimers(timer);
+    } finally {
+      await done();
+    }
+  });
+
+  test.each([false, true])(
+    "floors a fractional hint to a whole-millisecond wait (shuttingDown=%s)",
+    async (shuttingDown) => {
+      const { timer, proxy, done } = await setup({
+        hint: 0.4,
+        backoff: shuttingDown ? 0 : 250,
+        shuttingDown,
+        settlesAt: 50,
+      });
+      try {
+        const call = proxy.callTool("startDevice", {}).catch((error: unknown) => error);
+        const delay = await pendingWait(timer);
+        expect(Number.isInteger(delay)).toBe(true);
+        expect(delay).toBeGreaterThanOrEqual(50);
+        timer.advanceTime(delay);
+        await expect(call).resolves.toEqual(success);
+        expect(timer.now()).toBe(50);
+        expectNoWaitTimers(timer);
+      } finally {
+        await done();
+      }
+    },
+  );
+
+  test.each([false, true])(
+    "floors zero backoff with an unusable hint through the budget (shuttingDown=%s)",
+    async (shuttingDown) => {
+      const { timer, proxy, pollTimes, lastRefusal, done } = await setup({
+        backoff: 0,
+        hint: null,
+        shuttingDown,
+        budgetMs: 125,
+      });
+      try {
+        const call = proxy.callTool("getAndroid", {}).catch((error: unknown) => error);
+        expect(await pendingWait(timer)).toBe(50);
+        const result = await settleByFakeEvents(timer, call, {
+          maxEvents: 3,
+          description: "zero backoff cleanup budget",
+        });
+        expect(pollTimes).toEqual([0, 50, 100, 125]);
+        expect(timer.now()).toBe(125);
+        expect(result).toBe(lastRefusal());
+        expectNoWaitTimers(timer);
+      } finally {
+        await done();
+      }
+    },
+  );
+
+  test.each([false, true])(
+    "rounds fractional steps and budget down without a zero-delay spin (shuttingDown=%s)",
+    async (shuttingDown) => {
+      const { timer, proxy, pollTimes, lastRefusal, done } = await setup({
+        hint: 75.4,
+        backoff: { delayForAttempt: () => 75.4 },
+        shuttingDown,
+        budgetMs: 100.4,
+      });
+      try {
+        const call = proxy.callTool("getAndroid", {}).catch((error: unknown) => error);
+        expect(await pendingWait(timer)).toBe(75);
+        const result = await settleByFakeEvents(timer, call, {
+          maxEvents: 3,
+          description: "whole-millisecond cleanup budget",
+        });
+        expect(pollTimes).toEqual([0, 75, 100]);
+        expect(timer.now()).toBe(100);
+        expect(result).toBe(lastRefusal());
+        expectNoWaitTimers(timer);
+      } finally {
+        await done();
+      }
+    },
+  );
+
   test("retries a refused bind on backoff and returns success shortly after early cleanup", async () => {
     const { timer, client, proxy, pollTimes, done } = await setup({ settlesAt: 1_000 });
     try {
@@ -209,14 +312,14 @@ describe("DaemonMcpProxy waits out device_cleanup_in_progress (#11900)", () => {
   });
 
   test("uses the injected backoff sequence and repeats its final step", async () => {
-    const { timer, proxy, pollTimes, done } = await setup({ backoff: [10, 20], settlesAt: 50 });
+    const { timer, proxy, pollTimes, done } = await setup({ backoff: [10, 60], settlesAt: 170 });
     try {
       await expect(
         settleByFakeEvents(timer, proxy.callTool("getAndroid", {}), {
           description: "injected backoff",
         }),
       ).resolves.toEqual(success);
-      expect(pollTimes).toEqual([0, 10, 30, 50]);
+      expect(pollTimes).toEqual([0, 50, 110, 170]);
       expectNoWaitTimers(timer);
     } finally {
       await done();

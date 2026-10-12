@@ -1310,6 +1310,9 @@ const DEVICE_CLEANUP_BACKOFF = exponentialBackoff({
   maxDelayMs: 5_000,
 });
 
+/** A hint or backoff near zero must not busy-poll the daemon (#11900). */
+const DEVICE_CLEANUP_POLL_FLOOR_MS = 50;
+
 /**
  * Record a managed execution's release outcome (#11177). `cleanup_pending` means some of the
  * execution's work outlived the drain budget: the slot keeps its device but its next acquisition
@@ -4276,13 +4279,18 @@ export class DaemonMcpProxy {
       const hintMs = refusal.retryAfterMs;
       const cleanupCap =
         readToolEnvelopePayload(current.result)?.payload.code === DEVICE_CLEANUP_IN_PROGRESS_CODE;
-      const stepMs =
+      const stepMs = Math.max(
+        DEVICE_CLEANUP_POLL_FLOOR_MS,
         hintMs !== undefined && hintMs > 0
           ? cleanupCap
             ? Math.min(hintMs, backoffMs)
             : Math.max(hintMs, backoffMs)
-          : backoffMs;
-      const delayMs = Math.min(remaining, stepMs);
+          : backoffMs,
+      );
+      const delayMs = Math.floor(Math.min(remaining, stepMs));
+      if (delayMs <= 0) {
+        return current;
+      }
       logger.info(
         `[DaemonMcpProxy] ${name} refused while the device finishes its previous session's cleanup; re-checking in ${delayMs}ms`,
       );

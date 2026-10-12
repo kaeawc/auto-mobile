@@ -10,7 +10,8 @@ import {
   type DaemonExitRecord,
   type DaemonExitRecordFileSystem,
 } from "../../src/daemon/daemonExitRecord";
-import type { DaemonOptions } from "../../src/daemon/types";
+import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
+import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDaemonExitRecordFileSystem, SafeDaemonManager } from "../fakes/SafeDaemonManager";
@@ -48,10 +49,33 @@ interface ManagerInternals {
   removeConfirmedDeadPidFile(): Promise<void>;
   stopRunningDaemon(): Promise<void>;
   identityRecoveryIO: { socketExists(): boolean };
+  launchLogFileSystem: {
+    openSync(path: string, flags: "w", mode: number): number;
+    closeSync(fd: number): void;
+  };
+  launchWorkingDirectory: () => string;
+  verifyDaemonGenerationBeforeSignal(): Promise<boolean>;
+  prepareDaemonForConditionalRestart(status: DaemonStatus): Promise<{ accepted: boolean }>;
+  assertNoSurvivingDaemonBeforeRestart(options: DaemonOptions): Promise<void>;
+  stopNamespaceOrphansForExplicitRestart(pid?: number): Promise<void>;
+  recordedStatus(): DaemonStatus;
 }
 
 function manager(files: FakeDaemonExitRecordFileSystem, timer = new FakeTimer()) {
-  const instance = new SafeDaemonManager(undefined, undefined, timer, undefined, undefined, SOCKET);
+  const args: ConstructorParameters<typeof SafeDaemonManager> = [
+    undefined,
+    undefined,
+    timer,
+    undefined,
+    undefined,
+    SOCKET,
+  ];
+  args[17] = {
+    socketExists: () => false,
+    readRecord: () => null,
+    probe: async () => ({ running: false }),
+  };
+  const instance = new SafeDaemonManager(...args);
   const internals = instance as unknown as ManagerInternals;
   internals.exitRecordFileSystem = files;
   internals.currentBuildId = () => "build-a";
@@ -66,6 +90,42 @@ afterEach(() => {
   }
 });
 
+const FLAGLESS_CLIENT: DaemonOptions = {
+  observeResultIncludeElements: false,
+  actionsDiffObserve: false,
+  actionsNoObserve: false,
+};
+
+function launchingManager(files: FakeDaemonExitRecordFileSystem) {
+  const timer = new FakeTimer();
+  const h = manager(files, timer);
+  const previousLogSink = process.env.AUTOMOBILE_LOG_SINK;
+  process.env.AUTOMOBILE_LOG_SINK = "stderr";
+  restores.push(() => {
+    timer.reset();
+    if (previousLogSink === undefined) {
+      delete process.env.AUTOMOBILE_LOG_SINK;
+    } else {
+      process.env.AUTOMOBILE_LOG_SINK = previousLogSink;
+    }
+  });
+  h.internals.launchLogFileSystem = { openSync: () => 42, closeSync: () => {} };
+  h.internals.launchWorkingDirectory = () => "/memory";
+  const status = spyOn(h.instance, "status").mockResolvedValue({ running: false });
+  const stderr = spyOn(process.stderr, "write").mockReturnValue(true);
+  for (const spy of [
+    status,
+    stderr,
+    spyOn(h.instance, "acquireLock").mockReturnValue(true),
+    spyOn(h.instance, "releaseLock").mockImplementation(() => {}),
+    spyOn(h.instance, "waitForReady").mockResolvedValue(true),
+    spyOn(h.internals, "verifyDaemonGenerationBeforeSignal").mockResolvedValue(true),
+  ]) {
+    restores.push(() => spy.mockRestore());
+  }
+  return { ...h, status, stderr, timer };
+}
+
 describe("daemon exit record", () => {
   test("full options round-trip once and are consumed", () => {
     const files = new FakeDaemonExitRecordFileSystem();
@@ -77,6 +137,8 @@ describe("daemon exit record", () => {
 
   test("legacy and malformed records are ignored and removed", () => {
     const files = new FakeDaemonExitRecordFileSystem();
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    restores.push(() => warn.mockRestore());
     for (const raw of [
       JSON.stringify({ port: 3161, exitedAtMs: 0 }),
       "{",
@@ -114,7 +176,7 @@ describe("daemon exit record", () => {
     );
   });
 
-  test("defined client keys win while undefined keys inherit", async () => {
+  test("defined client values win while undefined and false boolean keys inherit", async () => {
     const files = new FakeDaemonExitRecordFileSystem();
     writeDaemonExitRecord(SOCKET, record({ ...OPTIONS, embeddedSdk: false }), files);
     expect(
@@ -128,8 +190,153 @@ describe("daemon exit record", () => {
       ...OPTIONS,
       embeddedSdk: true,
       planExecutionLockScope: "session",
-      networkMockable: false,
+      networkMockable: true,
     });
+  });
+
+  test("a flag-less real client's false output flags retain inherited true values", () => {
+    const options = {
+      observeResultIncludeElements: true,
+      actionsDiffObserve: true,
+      actionsNoObserve: true,
+    };
+    expect(
+      resolveDaemonExitOptions(FLAGLESS_CLIENT, record(options), 0, 100, "build-a").options,
+    ).toEqual(options);
+    expect(resolveDaemonExitOptions(FLAGLESS_CLIENT, undefined, 0, 100, "build-a").options).toEqual(
+      FLAGLESS_CLIENT,
+    );
+  });
+
+  test("start sends inherited port and boolean flags to the fake spawner", async () => {
+    const files = new FakeDaemonExitRecordFileSystem();
+    writeDaemonExitRecord(
+      SOCKET,
+      record({ port: 3161, debug: true, actionsDiffObserve: true }),
+      files,
+    );
+    const h = launchingManager(files);
+    expect(await h.instance.start(FLAGLESS_CLIENT)).toBe("started");
+    expect(h.instance.defaultSpawner.calls).toHaveLength(1);
+    expect(h.instance.defaultSpawner.calls[0]?.args).toEqual(
+      expect.arrayContaining([
+        "--port",
+        "3161",
+        "--strict-port",
+        "--debug",
+        "--actions-diff-observe",
+      ]),
+    );
+    expect(files.files.size).toBe(0);
+  });
+
+  test("a joined start leaves the record for the following launching start", async () => {
+    const files = new FakeDaemonExitRecordFileSystem();
+    const entry = record({ port: 3161, debug: true, actionsDiffObserve: true });
+    writeDaemonExitRecord(SOCKET, entry, files);
+    const h = launchingManager(files);
+    h.status.mockResolvedValueOnce({
+      running: true,
+      pid: 123,
+      port: 3161,
+      version: DAEMON_VERSION,
+    });
+    expect(await h.instance.start(FLAGLESS_CLIENT)).toBe("joined");
+    expect(files.files.get(daemonExitRecordPath(SOCKET))).toBe(JSON.stringify(entry));
+    expect(h.instance.defaultSpawner.calls).toHaveLength(0);
+    expect(h.stderr.mock.calls.some(([line]) => String(line).includes("Inheriting"))).toBe(false);
+    expect(await h.instance.start(FLAGLESS_CLIENT)).toBe("started");
+    expect(h.instance.defaultSpawner.calls[0]?.args).toEqual(
+      expect.arrayContaining([
+        "--port",
+        "3161",
+        "--strict-port",
+        "--debug",
+        "--actions-diff-observe",
+      ]),
+    );
+    expect(files.files.size).toBe(0);
+  });
+
+  function prepareRunningReplacement(h: ReturnType<typeof launchingManager>) {
+    h.timer.enableAutoAdvance();
+    for (const spy of [
+      spyOn(h.internals, "prepareDaemonForConditionalRestart").mockResolvedValue({
+        accepted: true,
+      }),
+      spyOn(h.internals, "stopRunningDaemon").mockResolvedValue(undefined),
+      spyOn(h.internals, "assertNoSurvivingDaemonBeforeRestart").mockResolvedValue(undefined),
+      spyOn(h.internals, "stopNamespaceOrphansForExplicitRestart").mockResolvedValue(undefined),
+      spyOn(h.internals, "recordedStatus").mockReturnValue({ running: false }),
+    ]) {
+      restores.push(() => spy.mockRestore());
+    }
+  }
+
+  test("an older running daemon takeover discards the record and preserves running options", async () => {
+    const files = new FakeDaemonExitRecordFileSystem();
+    writeDaemonExitRecord(SOCKET, record({ port: 3161, debug: true, embeddedSdk: true }), files);
+    const h = launchingManager(files);
+    prepareRunningReplacement(h);
+    h.status.mockResolvedValueOnce({
+      running: true,
+      pid: 123,
+      version: "0.0.0",
+      options: { port: 4000, debug: false },
+    });
+    expect(await h.instance.start()).toBe("started");
+    const args = h.instance.defaultSpawner.calls[0]?.args;
+    expect(args).toEqual(expect.arrayContaining(["--port", "4000", "--strict-port"]));
+    expect(args).not.toContain("--debug");
+    expect(args).not.toContain("--embedded-sdk");
+    expect(files.files.size).toBe(0);
+    expect(h.stderr.mock.calls.some(([line]) => String(line).includes("Inheriting"))).toBe(false);
+  });
+
+  test("restart after stopping a running daemon uses its options without record inheritance", async () => {
+    const files = new FakeDaemonExitRecordFileSystem();
+    const h = launchingManager(files);
+    prepareRunningReplacement(h);
+    h.status.mockResolvedValueOnce({
+      running: true,
+      pid: 123,
+      port: 4000,
+      options: { debug: true },
+    });
+    const stop = spyOn(h.instance, "stop").mockImplementation(async () => {
+      // A record present at launch must not alter this running-generation restart.
+      writeDaemonExitRecord(SOCKET, record({ embeddedSdk: true }), files);
+    });
+    restores.push(() => stop.mockRestore());
+    expect(await h.instance.restart({ debug: false })).toBe("restarted");
+    const args = h.instance.defaultSpawner.calls[0]?.args;
+    expect(args).toEqual(expect.arrayContaining(["--port", "4000", "--strict-port"]));
+    expect(args).not.toContain("--debug");
+    expect(args).not.toContain("--embedded-sdk");
+    expect(files.files.size).toBe(0);
+    expect(h.stderr.mock.calls.some(([line]) => String(line).includes("Inheriting"))).toBe(false);
+  });
+
+  test("restart after a self-exit inherits the record at the replacement launch", async () => {
+    const files = new FakeDaemonExitRecordFileSystem();
+    writeDaemonExitRecord(
+      SOCKET,
+      record({ port: 3161, debug: true, actionsDiffObserve: true }),
+      files,
+    );
+    const h = launchingManager(files);
+    prepareRunningReplacement(h);
+    expect(await h.instance.restart(FLAGLESS_CLIENT)).toBe("restarted");
+    expect(h.instance.defaultSpawner.calls[0]?.args).toEqual(
+      expect.arrayContaining([
+        "--port",
+        "3161",
+        "--strict-port",
+        "--debug",
+        "--actions-diff-observe",
+      ]),
+    );
+    expect(files.files.size).toBe(0);
   });
 
   test("an explicit client port excludes inherited port and strictness but inherits other flags", async () => {
@@ -151,7 +358,7 @@ describe("daemon exit record", () => {
         DAEMON_EXIT_RECORD_TTL_MS,
         "build-a",
       ).options.strictPort,
-    ).toBe(false);
+    ).toBeUndefined();
   });
 
   test("the TTL boundary inherits; one millisecond beyond logs exactly one info", async () => {

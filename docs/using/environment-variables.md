@@ -101,13 +101,15 @@ startup-option restart for the same reason; they still auto-start a daemon when
 none is running. `AUTOMOBILE_LOG_DIR` does not count (it only moves log files),
 nor do the coordination directories, which cooperating daemons share.
 
-After any daemon self-exit, a client auto-starting a replacement on the same
-socket inherits the previous daemon's bound port and startup flags. The starting
-client's explicit flags win per option; omission does not switch an inherited
-boolean flag off. An explicit tool enable list removes those tools from the
-inherited disable list, and an explicit disable list removes them from the inherited enable list.
-Stop the daemon or pass the flags to `--daemon restart` for a
-fresh set. The exit record is consumed by the first replacement and is ignored
+After a daemon self-exit, a replacement started on the same socket inherits the
+previous daemon's bound port and startup flags. Explicit `--daemon start` and
+`--daemon restart` after a self-exit inherit just like an auto-start. The starting
+client's explicit flags win per option, but a boolean startup flag cannot be
+turned off on the inheriting start. An explicit tool enable list removes those
+tools from the inherited disable list, and an explicit disable list removes them
+from the inherited enable list. For a fresh set, run `--daemon stop` (which clears
+the record), then start with the desired flags. The exit record is consumed by
+the first replacement launch and is ignored
 when it is older than 30 minutes or names a different build id. If another
 process has taken the inherited port, the replacement can select an available
 port instead of requiring that port strictly. `--daemon stop` clears the record.
@@ -117,6 +119,8 @@ client's environment, so env-only settings such as APK and runner overrides
 follow the new client. A setting the previous daemon already resolved into a
 startup option is carried as that option. `kill -9` or any externally delivered
 signal leaves no exit record, so the next start uses the client's own settings.
+A daemon that fails before it finishes entering daemon mode, for example during
+database preflight, also leaves no record.
 
 Set `AUTOMOBILE_AUX_SOCKET_DIR` to reach a private daemon instead. To act on the
 shared daemon deliberately, pass `--allow-shared-namespace` after the daemon

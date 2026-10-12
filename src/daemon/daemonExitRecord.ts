@@ -147,13 +147,17 @@ export function resolveDaemonExitOptions(
   if (record.buildId !== buildId) {
     return { options, outcome: "build-mismatch", inheritedPort: false };
   }
+  // Startup booleans are positive-only: a client's false default is omission.
+  const explicitOptions: DaemonOptions = Object.fromEntries(
+    Object.entries(options).filter(([, value]) => value !== false),
+  );
   const inherited = { ...record.options };
   if (options.port !== undefined) {
     delete inherited.port;
     delete inherited.strictPort;
   }
   return {
-    options: mergeDaemonStartupOptions(inherited, options),
+    options: mergeDaemonStartupOptions(inherited, explicitOptions),
     outcome: "inherited",
     inheritedPort: options.port === undefined && inherited.port !== undefined,
   };

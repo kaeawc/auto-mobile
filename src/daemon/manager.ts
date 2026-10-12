@@ -536,7 +536,13 @@ export class DaemonManager implements DaemonManagerLike {
   /** Whether a TCP port can be bound right now; replaceable so tests need no real socket. */
   private portFreeProbe: (port: number) => Promise<boolean> = isTcpPortFree;
   protected exitRecordFileSystem: DaemonExitRecordFileSystem = defaultDaemonExitRecordFileSystem;
+  private launchLogFileSystem: {
+    openSync(path: string, flags: "w", mode: number): number;
+    closeSync(fd: number): void;
+  } = { openSync, closeSync };
+  private launchWorkingDirectory: () => string = resolveStableDaemonWorkingDirectory;
   private currentBuildId: () => string = () => getCurrentBuildIdentity().buildId;
+  private readonly runningRestartOptions = new WeakSet<DaemonOptions>();
   /**
    * A per-instance owner token written into the startup lock alongside the PID
    * (issue #5904). It distinguishes a genuinely new lock holder from the prior one
@@ -1003,14 +1009,27 @@ export class DaemonManager implements DaemonManagerLike {
    * proxy processes try to start the daemon simultaneously.
    */
   async start(options: DaemonOptions = {}): Promise<DaemonStartResult> {
+    const inheritExitRecord = !this.runningRestartOptions.has(options);
     if (!this.acquireLock()) {
-      return await this.startByAwaitingLockHolder(options);
+      return await this.startByAwaitingLockHolder(options, undefined, () =>
+        this.startUnlocked(options, undefined, inheritExitRecord),
+      );
     }
 
     try {
-      return await this.startUnlocked(options);
+      return await this.startUnlocked(options, undefined, inheritExitRecord);
     } finally {
       this.releaseLock();
+    }
+  }
+
+  /** Keep virtual start() dispatch while scoping the running-options policy to this request. */
+  private async startWithRunningOptions(options: DaemonOptions): Promise<DaemonStartResult> {
+    this.runningRestartOptions.add(options);
+    try {
+      return await this.start(options);
+    } finally {
+      this.runningRestartOptions.delete(options);
     }
   }
 
@@ -1275,9 +1294,9 @@ export class DaemonManager implements DaemonManagerLike {
   private async startUnlocked(
     options: DaemonOptions,
     recoverySignal?: AbortSignal,
+    inheritExitRecord = true,
   ): Promise<DaemonStartResult> {
     options = daemonProcessOptions(options);
-    options = await this.inheritExitSettings(options);
     // The overall start budget, captured before any work so the post-exit peer
     // rejoin (issue #6103) can only ever spend time the caller still has. The
     // client times its `tools/list` out at DAEMON_STARTUP_TIMEOUT_MS; launchAndWait
@@ -1366,6 +1385,8 @@ export class DaemonManager implements DaemonManagerLike {
         `Detected strictly older AutoMobile daemon version ${status.version} (PID ${status.pid}); stopping it before upgrade...`,
       );
       await this.stopRunningDaemon(status, DAEMON_SHUTDOWN_TIMEOUT_MS, false);
+      // This takeover already has the running generation's authoritative options.
+      inheritExitRecord = false;
       await this.assertNoSurvivingDaemonBeforeRestart(options);
       await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
     }
@@ -1416,6 +1437,11 @@ export class DaemonManager implements DaemonManagerLike {
     // reclaim only a socket with an unreachable listener and a positively-dead
     // recorded owner; it publishes its own early PID record before that bind.
 
+    if (inheritExitRecord) {
+      options = await this.inheritExitSettings(options);
+    } else {
+      removeDaemonExitRecord(this.socketPath, this.exitRecordFileSystem);
+    }
     stderrLog("Starting AutoMobile daemon...");
 
     // Resolve the current binary so the daemon uses the same version.
@@ -1457,7 +1483,7 @@ export class DaemonManager implements DaemonManagerLike {
     // Open with restricted permissions (0o600 = owner read/write only).
     // Stderr-only containers deliberately skip the file capture and do not need
     // a writable AutoMobile data directory.
-    const logFd = openSync(logPath, "w", 0o600);
+    const logFd = this.launchLogFileSystem.openSync(logPath, "w", 0o600);
 
     try {
       let retriedIncompleteExtraction = false;
@@ -1475,7 +1501,7 @@ export class DaemonManager implements DaemonManagerLike {
             args,
             spawnOptions: {
               detached: true,
-              cwd: resolveStableDaemonWorkingDirectory(),
+              cwd: this.launchWorkingDirectory(),
               stdio: [
                 "ignore",
                 capturesLaunchOutput ? logFd : "ignore",
@@ -1550,7 +1576,7 @@ export class DaemonManager implements DaemonManagerLike {
       throw error;
     } finally {
       // Close our reference to the log file (daemon process still has it open)
-      closeSync(logFd);
+      this.launchLogFileSystem.closeSync(logFd);
     }
 
     const newStatus = await this.lifecycleStatus();
@@ -2197,7 +2223,9 @@ export class DaemonManager implements DaemonManagerLike {
     this.throwIfRecoveryCancelled(signal);
     await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
     this.throwIfRecoveryCancelled(signal);
-    return restartResultFromStart(await this.startUnlocked(recoveryOptions, signal));
+    return restartResultFromStart(
+      await this.startUnlocked(recoveryOptions, signal, !status.running),
+    );
   }
 
   private findRecoveryCandidate(
@@ -2932,7 +2960,9 @@ export class DaemonManager implements DaemonManagerLike {
     await this.assertNoSurvivingDaemonBeforeRestart(options);
     // Wait a bit before starting
     await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
-    const startResult = await this.start(options);
+    const startResult = status.running
+      ? await this.startWithRunningOptions(options)
+      : await this.start(options);
     const successor = this.recordedStatus();
     if (
       status.running &&
@@ -2983,7 +3013,11 @@ export class DaemonManager implements DaemonManagerLike {
     // handoff. Ordinary start() joins that winner instead of terminating it.
     await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
     // Recovery already owns the startup lock; do not recursively acquire it.
-    const startResult = recovering ? await this.startUnlocked(options) : await this.start(options);
+    const startResult = recovering
+      ? await this.startUnlocked(options, undefined, !status.running)
+      : status.running
+        ? await this.startWithRunningOptions(options)
+        : await this.start(options);
     return restartResultFromStart(startResult);
   }
 
@@ -3040,7 +3074,7 @@ export class DaemonManager implements DaemonManagerLike {
     // a later status read could name its replacement instead.
     await this.stopRunningDaemon(status, DAEMON_SHUTDOWN_TIMEOUT_MS, false);
     await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
-    return restartResultFromStart(await this.startUnlocked(restartOptions));
+    return restartResultFromStart(await this.startUnlocked(restartOptions, undefined, false));
   }
 
   private isSameDaemonGeneration(current: DaemonStatus, expected: DaemonStatus): boolean {
@@ -3153,7 +3187,11 @@ export class DaemonManager implements DaemonManagerLike {
     await this.cleanupAcceptanceRestartFiles(status, replacedByOtherGeneration);
     await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
     return restartResultFromStart(
-      await this.startUnlocked({ ...daemonProcessOptions(status.options), strictPort: true }),
+      await this.startUnlocked(
+        { ...daemonProcessOptions(status.options), strictPort: true },
+        undefined,
+        false,
+      ),
     );
   }
 

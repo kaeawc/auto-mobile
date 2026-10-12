@@ -1,5 +1,6 @@
+import { realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { DEFAULT_DAEMON_PORT, resolveDaemonStatePath } from "../../src/daemon/constants";
 import { isDaemonNamespaceIsolated } from "../../src/daemon/sharedNamespaceGuard";
 import { resolveAuxSocketDir } from "../../src/daemon/socketServer/SocketServerTypes";
@@ -39,33 +40,10 @@ export interface PrivateDaemonSpec {
 export interface HostDefaults {
   homeDirs: string[];
   uid: number | string;
+  canonicalize(path: string): string;
 }
 
-/** These inherited overrides take precedence over the derived DB/aux directories. */
-const INHERITED_PATH_OVERRIDES = [
-  "AUTOMOBILE_DB_PATH",
-  "AUTO_MOBILE_DB_PATH",
-  "AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH",
-  "AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH",
-];
-export function privateClientEnvironment(
-  inherited: Record<string, string | undefined>,
-  overrides: Record<string, string>,
-): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(inherited)) {
-    if (
-      value !== undefined &&
-      key !== MANAGED_SLOT_CONFIG_ENV &&
-      !INHERITED_PATH_OVERRIDES.includes(key)
-    ) {
-      env[key] = value;
-    }
-  }
-  return { ...env, ...overrides };
-}
-
-/** Also block aliases and DB/socket overrides that could shadow the derived namespace. */
+/** Paths every private launcher and client must supply. */
 export const DERIVED_PATH_VARIABLES: readonly string[] = [
   "AUTOMOBILE_DATA_DIR",
   "AUTOMOBILE_LOG_DIR",
@@ -77,29 +55,63 @@ export const DERIVED_PATH_VARIABLES: readonly string[] = [
   "AUTOMOBILE_DAEMON_PID_FILE_PATH",
   "AUTOMOBILE_DAEMON_LOCK_FILE_PATH",
   "AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH",
-  "AUTOMOBILE_DB_PATH",
-  "AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH",
-  "AUTO_MOBILE_DATA_DIR",
-  "AUTO_MOBILE_LOG_DIR",
-  "AUTO_MOBILE_DB_DIR",
-  "AUTO_MOBILE_DB_PATH",
-  "AUTO_MOBILE_COORDINATION_DIR",
-  "AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR",
-  "AUTO_MOBILE_DAEMON_SOCKET_PATH",
-  "AUTO_MOBILE_DAEMON_PID_FILE_PATH",
-  "AUTO_MOBILE_DAEMON_LOCK_FILE_PATH",
-  "AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH",
+];
+const INHERITED_PATH_OVERRIDES = ["AUTOMOBILE_DB_PATH", "AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH"];
+const OWNED_ENV_VARIABLES = [
+  ...DERIVED_PATH_VARIABLES,
+  ...INHERITED_PATH_OVERRIDES,
   "MT_BATCH",
   "MT_DAEMON",
   "MT_SERVER",
   "MT_PORT",
 ];
+export function isInheritedPathOverride(key: string): boolean {
+  return key.startsWith("AUTO_MOBILE_") || INHERITED_PATH_OVERRIDES.includes(key);
+}
+export function privateClientEnvironment(
+  inherited: Record<string, string | undefined>,
+  overrides: Record<string, string>,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(inherited)) {
+    if (value !== undefined && key !== MANAGED_SLOT_CONFIG_ENV && !isInheritedPathOverride(key)) {
+      env[key] = value;
+    }
+  }
+  return { ...env, ...overrides };
+}
+/** Resolve symlink aliases even before a batch's final path exists. */
+export function canonicalizeHostPath(path: string): string {
+  let ancestor = resolve(path.trim());
+  const remaining: string[] = [];
+  for (;;) {
+    try {
+      return join(realpathSync(ancestor), ...remaining);
+    } catch (error) {
+      // Missing descendants are expected before init; other filesystem failures must surface.
+      if (
+        !(error instanceof Error) ||
+        !("code" in error) ||
+        (error.code !== "ENOENT" && error.code !== "ENOTDIR") ||
+        dirname(ancestor) === ancestor
+      ) {
+        throw error;
+      }
+      remaining.unshift(basename(ancestor));
+      ancestor = dirname(ancestor);
+    }
+  }
+}
 export function extraEnvRefusal(env: Record<string, string>): string | undefined {
   for (const [key, value] of Object.entries(env)) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || value.includes("\0")) {
       return `Invalid --env assignment for ${key}; use a shell variable name and a value without NUL.`;
     }
-    if (DERIVED_PATH_VARIABLES.includes(key) || key === MANAGED_SLOT_CONFIG_ENV) {
+    if (
+      OWNED_ENV_VARIABLES.includes(key) ||
+      isInheritedPathOverride(key) ||
+      key === MANAGED_SLOT_CONFIG_ENV
+    ) {
       return `--env may not override ${key}; the harness owns its private namespace.`;
     }
     if (
@@ -160,9 +172,41 @@ export function derivePrivateDaemonBatch(options: PrivateDaemonBatchOptions): Pr
     };
   });
 }
-function inside(candidate: string, root: string): boolean {
-  const rel = relative(resolve(root), resolve(candidate.trim()));
+function inside(candidate: string, root: string, host: HostDefaults): boolean {
+  const rel = relative(host.canonicalize(root), host.canonicalize(candidate.trim()));
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+/** Shared launcher/client boundary: canonical host defaults and resident basenames. */
+export function privatePathRefusal(candidate: string, host: HostDefaults): string | undefined {
+  const value = candidate.trim();
+  if (!isAbsolute(value) || value.includes("\0")) {
+    return `Private path must be absolute without NUL: ${candidate}`;
+  }
+  for (const home of host.homeDirs) {
+    const base = resolveAutoMobileBaseDir({}, home, home);
+    // Product path resolvers are lazy and these explicit defaults keep the boundary host-independent.
+    const roots = [
+      base,
+      resolveAutoMobileLogsDir({}, home, home),
+      dirname(resolveDatabasePathFromEnvironment({}, base)),
+      getSharedAutoMobileDir("", home, {}),
+      getAdbServerScopedAutoMobileDir("", "", {}, home),
+      resolveAuxSocketDir({ AUTOMOBILE_AUX_SOCKET_DIR: base }),
+    ];
+    if (roots.some((root) => inside(value, root, host))) {
+      return `Refusing default product state path ${candidate}; choose a private batch/aux root outside the host defaults.`;
+    }
+  }
+  for (const ext of ["sock", "pid", "lock"] as const) {
+    const resident = resolveDaemonStatePath(ext, {}, String(host.uid));
+    if (
+      host.canonicalize(value) === host.canonicalize(resident) ||
+      basename(value) === basename(resident)
+    ) {
+      return `Refusing resident daemon path ${candidate}; choose a private namespace.`;
+    }
+  }
+  return undefined;
 }
 export function privateDaemonBatchRefusal(
   specs: PrivateDaemonSpec[],
@@ -223,40 +267,12 @@ export function privateDaemonBatchRefusal(
       spec.auxSocketDir,
       spec.logDir,
       spec.adbServerCoordinationDir,
-      ...DERIVED_PATH_VARIABLES.flatMap((key) =>
-        spec.env[key] && !key.startsWith("MT_") ? [spec.env[key]] : [],
-      ),
+      ...DERIVED_PATH_VARIABLES.flatMap((key) => (spec.env[key] ? [spec.env[key]] : [])),
     ];
     for (const candidate of paths) {
-      if (!isAbsolute(candidate)) {
-        return `Private path must be absolute: ${candidate}`;
-      }
-      for (const home of host.homeDirs) {
-        const base = resolveAutoMobileBaseDir({}, home, options.batchDir);
-        // database.ts is lazy at import; the injected default keeps this pure and host-independent.
-        const db = dirname(resolveDatabasePathFromEnvironment({}, base));
-        // resolveAuxSocketDir has no home parameter; its default is the same product base.
-        const aux = resolveAuxSocketDir({ AUTOMOBILE_AUX_SOCKET_DIR: base });
-        const roots = [
-          base,
-          resolveAutoMobileLogsDir({}, home, options.batchDir),
-          db,
-          getSharedAutoMobileDir("", home, {}),
-          getAdbServerScopedAutoMobileDir("", "", {}, home),
-          aux,
-        ];
-        if (roots.some((root) => inside(candidate, root))) {
-          return `Refusing default product state path ${candidate}; choose a private batch/aux root outside the host defaults.`;
-        }
-      }
-      if (
-        ["sock", "pid", "lock"].some(
-          (ext) =>
-            resolve(candidate) ===
-            resolveDaemonStatePath(ext as "sock" | "pid" | "lock", {}, String(host.uid)),
-        )
-      ) {
-        return `Refusing resident daemon path ${candidate}; choose a private namespace.`;
+      const refusal = privatePathRefusal(candidate, host);
+      if (refusal) {
+        return refusal;
       }
     }
     if (!isDaemonNamespaceIsolated(spec.env)) {
@@ -278,6 +294,7 @@ export function renderEnvFile(spec: PrivateDaemonSpec, options: PrivateDaemonBat
     Object.entries(spec.env)
       .map(([key, value]) => `export ${key}=${shellQuote(value)}`)
       .join("\n") +
-    `\nunset ${MANAGED_SLOT_CONFIG_ENV}\nunset ${INHERITED_PATH_OVERRIDES.join(" ")}\n`
+    `\nunset ${MANAGED_SLOT_CONFIG_ENV}\nunset ${INHERITED_PATH_OVERRIDES.join(" ")}\n` +
+    'for legacy_name in "${!AUTO_MOBILE_@}"; do unset "$legacy_name"; done\n'
   );
 }

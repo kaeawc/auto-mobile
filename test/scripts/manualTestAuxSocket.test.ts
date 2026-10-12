@@ -6,6 +6,7 @@ import {
   type AuxSocketCommand,
   type AuxSocketDeps,
 } from "../../scripts/manual-test/aux-socket";
+import { derivePrivateDaemonBatch } from "../../scripts/manual-test/privateDaemonEnv";
 import type { FrameConnection } from "../../scripts/manual-test/frameWire";
 import {
   TEST_RECORDING_SOCKET_CONFIG,
@@ -25,6 +26,8 @@ beforeEach(() => {
 afterEach(() => {
   testOverrides.auxSocketDir = previousAux;
 });
+
+const posixTest = process.platform === "win32" ? test.skip : test;
 
 class FakeConnection implements FrameConnection {
   writes: Array<Record<string, unknown>> = [];
@@ -81,11 +84,18 @@ function fixture() {
   aux.respond = () => aux.push({ success: true });
   const deps: AuxSocketDeps = {
     env: {
+      ...derivePrivateDaemonBatch({
+        batchDir: resolve("/fake/batch"),
+        count: 1,
+        basePort: 3160,
+        auxRoot: resolve("/fake/aux"),
+        serverPath: resolve("/fake/server"),
+      })[0].env,
       AUTOMOBILE_AUX_SOCKET_DIR: resolve("/fake/aux"),
       AUTOMOBILE_DAEMON_SOCKET_PATH: resolve("/fake/aux/d.sock"),
       MT_SERVER: resolve("/fake/server"),
     },
-    host: { homeDirs: [resolve("/fake/home")], uid: 424242 },
+    host: { homeDirs: [resolve("/fake/home")], uid: 424242, canonicalize: resolve },
     timer,
     ids: new FakeIdGenerator(),
     connect: async (path) => {
@@ -169,7 +179,7 @@ test("rejects usage, JSON, duplicates, missing values, invalid options and obser
     expect(parseAuxSocketArgs(args)).toHaveProperty("error");
   }
 });
-test("private environment refusal never connects or sends WebRTC", async () => {
+posixTest("private environment refusal never connects or sends WebRTC", async () => {
   const f = fixture();
   f.deps.env = {};
   expect(await runAuxSocket(parsed(["recording", "status"]), f.deps)).toBe(2);
@@ -177,96 +187,111 @@ test("private environment refusal never connects or sends WebRTC", async () => {
   expect(f.paths).toEqual([]);
   expect(f.webCalls).toEqual([]);
 });
-test("recording status round trip derives path from explicit auxiliary directory", async () => {
-  const f = fixture();
-  expect(
-    await runAuxSocket(parsed(["recording", "status", "--session-uuid", "uuid"]), f.deps),
-  ).toBe(0);
-  expect(f.paths).toEqual([
-    join(f.deps.env.AUTOMOBILE_AUX_SOCKET_DIR!, basename(TEST_RECORDING_SOCKET_CONFIG.defaultPath)),
-  ]);
-  expect(f.aux.writes).toEqual([{ command: "status", sessionUuid: "uuid" }]);
-  expect(f.out).toEqual(['{"success":true}']);
-  expect(f.aux.ended).toBe(true);
-});
-test("observer registers, injects UUID, heartbeats during video hold and releases on exit", async () => {
-  const f = fixture();
-  f.aux.respond = () =>
-    f.aux.data(
-      Buffer.concat([
-        Buffer.from('{"type":"video_stream_response","success":true}\n'),
-        Buffer.from([255, 10, 0]),
+posixTest(
+  "recording status round trip derives path from explicit auxiliary directory",
+  async () => {
+    const f = fixture();
+    expect(
+      await runAuxSocket(parsed(["recording", "status", "--session-uuid", "uuid"]), f.deps),
+    ).toBe(0);
+    expect(f.paths).toEqual([
+      join(
+        f.deps.env.AUTOMOBILE_AUX_SOCKET_DIR!,
+        basename(TEST_RECORDING_SOCKET_CONFIG.defaultPath),
+      ),
+    ]);
+    expect(f.aux.writes).toEqual([{ command: "status", sessionUuid: "uuid" }]);
+    expect(f.out).toEqual(['{"success":true}']);
+    expect(f.aux.ended).toBe(true);
+  },
+);
+posixTest(
+  "observer registers, injects UUID, heartbeats during video hold and releases on exit",
+  async () => {
+    const f = fixture();
+    f.aux.respond = () =>
+      f.aux.data(
+        Buffer.concat([
+          Buffer.from('{"type":"video_stream_response","success":true}\n'),
+          Buffer.from([255, 10, 0]),
+        ]),
+      );
+    const task = runAuxSocket(
+      parsed([
+        "video",
+        '{"action":"subscribe"}',
+        "--observer",
+        "--observer-name",
+        "viewer",
+        "--hold-ms",
+        "4500",
       ]),
-    );
-  const task = runAuxSocket(
-    parsed([
-      "video",
-      '{"action":"subscribe"}',
-      "--observer",
-      "--observer-name",
-      "viewer",
-      "--hold-ms",
-      "4500",
-    ]),
-    f.deps,
-  );
-  await drainUntilQuiescent(f.timer);
-  expect(f.control.writes[0]).toMatchObject({
-    method: "daemon/registerSession",
-    params: { sessionId: "fake-1", clientName: "viewer" },
-  });
-  expect(f.aux.writes[0]).toEqual({ action: "subscribe", sessionUuid: "fake-1" });
-  f.timer.advanceTime(2000);
-  await drainUntilQuiescent(f.timer);
-  expect(f.control.writes[1]).toMatchObject({
-    method: "daemon/heartbeat",
-    params: { sessionId: "fake-1" },
-  });
-  f.aux.data(Buffer.from([3, 4]));
-  f.timer.advanceTime(2000);
-  await drainUntilQuiescent(f.timer);
-  f.timer.advanceTime(500);
-  expect(await task).toBe(0);
-  expect(f.control.writes.at(-1)).toMatchObject({
-    method: "daemon/releaseSession",
-    params: { sessionId: "fake-1" },
-  });
-  expect(JSON.parse(f.out.at(-2)!)).toMatchObject({ bytesAfterAck: 5, closedBy: "hold" });
-  expect(f.paths[1]).toBe(
-    join(f.deps.env.AUTOMOBILE_AUX_SOCKET_DIR!, basename(VIDEO_STREAM_SOCKET_CONFIG.defaultPath)),
-  );
-  const n = f.control.writes.length;
-  f.timer.advanceTime(10000);
-  expect(f.control.writes).toHaveLength(n);
-  expect(f.control.ended).toBe(true);
-});
-test("refused observer registration prints full refusal and sends no auxiliary request", async () => {
-  const f = fixture();
-  f.control.respond = (frame) =>
-    f.control.push({
-      id: frame.id,
-      type: "mcp_response",
-      success: false,
-      code: "observer_refused",
-      error: "full refusal",
-    });
-  expect(await runAuxSocket(parsed(["recording", "status", "--observer"]), f.deps)).toBe(1);
-  expect(f.paths).toHaveLength(1);
-  expect(f.aux.writes).toEqual([]);
-  expect(f.out[0]).toContain("observer_refused");
-});
-test("observer cadence at or above lease refuses, releases registration, never sends aux", async () => {
-  const f = fixture();
-  expect(
-    await runAuxSocket(
-      parsed(["recording", "status", "--observer", "--heartbeat-ms", "8000"]),
       f.deps,
-    ),
-  ).toBe(2);
-  expect(f.control.writes.at(-1)?.method).toBe("daemon/releaseSession");
-  expect(f.aux.writes).toEqual([]);
-});
-test("video failed acknowledgement exits 1, server close reports all bytes", async () => {
+    );
+    await drainUntilQuiescent(f.timer);
+    expect(f.control.writes[0]).toMatchObject({
+      method: "daemon/registerSession",
+      params: { sessionId: "fake-1", clientName: "viewer" },
+    });
+    expect(f.aux.writes[0]).toEqual({ action: "subscribe", sessionUuid: "fake-1" });
+    f.timer.advanceTime(2000);
+    await drainUntilQuiescent(f.timer);
+    expect(f.control.writes[1]).toMatchObject({
+      method: "daemon/heartbeat",
+      params: { sessionId: "fake-1" },
+    });
+    f.aux.data(Buffer.from([3, 4]));
+    f.timer.advanceTime(2000);
+    await drainUntilQuiescent(f.timer);
+    f.timer.advanceTime(500);
+    expect(await task).toBe(0);
+    expect(f.control.writes.at(-1)).toMatchObject({
+      method: "daemon/releaseSession",
+      params: { sessionId: "fake-1" },
+    });
+    expect(JSON.parse(f.out.at(-2)!)).toMatchObject({ bytesAfterAck: 5, closedBy: "hold" });
+    expect(f.paths[1]).toBe(
+      join(f.deps.env.AUTOMOBILE_AUX_SOCKET_DIR!, basename(VIDEO_STREAM_SOCKET_CONFIG.defaultPath)),
+    );
+    const n = f.control.writes.length;
+    f.timer.advanceTime(10000);
+    expect(f.control.writes).toHaveLength(n);
+    expect(f.control.ended).toBe(true);
+  },
+);
+posixTest(
+  "refused observer registration prints full refusal and sends no auxiliary request",
+  async () => {
+    const f = fixture();
+    f.control.respond = (frame) =>
+      f.control.push({
+        id: frame.id,
+        type: "mcp_response",
+        success: false,
+        code: "observer_refused",
+        error: "full refusal",
+      });
+    expect(await runAuxSocket(parsed(["recording", "status", "--observer"]), f.deps)).toBe(1);
+    expect(f.paths).toHaveLength(1);
+    expect(f.aux.writes).toEqual([]);
+    expect(f.out[0]).toContain("observer_refused");
+  },
+);
+posixTest(
+  "observer cadence at or above lease refuses, releases registration, never sends aux",
+  async () => {
+    const f = fixture();
+    expect(
+      await runAuxSocket(
+        parsed(["recording", "status", "--observer", "--heartbeat-ms", "8000"]),
+        f.deps,
+      ),
+    ).toBe(2);
+    expect(f.control.writes.at(-1)?.method).toBe("daemon/releaseSession");
+    expect(f.aux.writes).toEqual([]);
+  },
+);
+posixTest("video failed acknowledgement exits 1, server close reports all bytes", async () => {
   const f = fixture();
   f.aux.respond = () =>
     f.aux.push({ type: "video_stream_response", success: false, error: "typed refusal" });
@@ -280,27 +305,30 @@ test("video failed acknowledgement exits 1, server close reports all bytes", asy
   expect(await runAuxSocket(parsed(["video", '{"action":"subscribe"}']), f.deps)).toBe(0);
   expect(JSON.parse(f.out.at(-1)!)).toMatchObject({ bytesAfterAck: 2, closedBy: "server" });
 });
-test("WebRTC uses the repo sender seam with explicit private socket and parsed success", async () => {
-  const f = fixture();
-  f.deps.env.AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH = resolve("/fake/inherited-other.sock");
-  expect(await runAuxSocket(parsed(["webrtc", "list", "--observer"]), f.deps)).toBe(0);
-  expect(f.webCalls[0]).toEqual({
-    request: { action: "list", sessionUuid: "fake-1" },
-    socketPath: resolveWebRtcStreamSocketPath({
-      AUTOMOBILE_AUX_SOCKET_DIR: f.deps.env.AUTOMOBILE_AUX_SOCKET_DIR,
-    }),
-  });
-  f.deps.sendWebRtc = async () => ({
-    type: "webrtc_stream_response",
-    success: false,
-    error: "full refusal",
-  });
-  expect(await runAuxSocket(parsed(["webrtc", "status", "--session-uuid", "uuid"]), f.deps)).toBe(
-    1,
-  );
-  expect(f.out.at(-1)).toContain("full refusal");
-});
-test("recording timeout cleans observer heartbeat and releases on exit", async () => {
+posixTest(
+  "WebRTC uses the repo sender seam with explicit private socket and parsed success",
+  async () => {
+    const f = fixture();
+    f.deps.env.AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH = resolve("/fake/inherited-other.sock");
+    expect(await runAuxSocket(parsed(["webrtc", "list", "--observer"]), f.deps)).toBe(0);
+    expect(f.webCalls[0]).toEqual({
+      request: { action: "list", sessionUuid: "fake-1" },
+      socketPath: resolveWebRtcStreamSocketPath({
+        AUTOMOBILE_AUX_SOCKET_DIR: f.deps.env.AUTOMOBILE_AUX_SOCKET_DIR,
+      }),
+    });
+    f.deps.sendWebRtc = async () => ({
+      type: "webrtc_stream_response",
+      success: false,
+      error: "full refusal",
+    });
+    expect(await runAuxSocket(parsed(["webrtc", "status", "--session-uuid", "uuid"]), f.deps)).toBe(
+      1,
+    );
+    expect(f.out.at(-1)).toContain("full refusal");
+  },
+);
+posixTest("recording timeout cleans observer heartbeat and releases on exit", async () => {
   const f = fixture();
   f.aux.respond = () => {};
   const task = runAuxSocket(
@@ -312,4 +340,18 @@ test("recording timeout cleans observer heartbeat and releases on exit", async (
   expect(await task).toBe(3);
   expect(f.control.writes.at(-1)?.method).toBe("daemon/releaseSession");
   expect(f.timer.getPendingIntervalCount()).toBe(0);
+});
+
+posixTest("canonical auxiliary socket pointing into default state refuses before I/O", async () => {
+  const f = fixture();
+  const socket = join(
+    f.deps.env.AUTOMOBILE_AUX_SOCKET_DIR!,
+    basename(TEST_RECORDING_SOCKET_CONFIG.defaultPath),
+  );
+  f.deps.host.canonicalize = (path) =>
+    path === socket ? resolve("/fake/home/.auto-mobile/recording.sock") : resolve(path);
+  expect(await runAuxSocket(parsed(["recording", "status"]), f.deps)).toBe(2);
+  expect(f.paths).toEqual([]);
+  expect(f.webCalls).toEqual([]);
+  expect(f.err.join(" ")).toContain("default product");
 });

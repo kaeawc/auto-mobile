@@ -28,9 +28,11 @@ export function deviceStartGuardRefusal(
     return undefined;
   }
   const device = object(values.device);
+  // Match startDeviceSchema preprocessing exactly: top-level keys override legacy device keys.
+  const merged = { ...device, ...values };
   const names =
     tool === "startDevice"
-      ? [values.name, values.avdName, values.deviceId, device?.name, device?.deviceId]
+      ? [merged.avdName, merged.deviceId]
       : tool === "getAndroid"
         ? [values.avdName, values.deviceId]
         : tool === "getApple"
@@ -39,5 +41,11 @@ export function deviceStartGuardRefusal(
   if (names.some((value) => typeof value === "string" && value.trim().length > 0)) {
     return undefined;
   }
-  return `${tool} requires an explicit AVD name or UDID/deviceId. A selector-only start booted a protected AVD in batch 20261012a; pass ${ALLOW_SELECTOR_FLAG} only to allow that selection deliberately.`;
+  const identifier =
+    tool === "startDevice" || tool === "getAndroid"
+      ? "avdName (Android) or deviceId (UDID/serial)"
+      : tool === "getApple"
+        ? "udid or deviceId"
+        : "device.name or device.deviceId";
+  return `${tool} requires ${identifier}. A selector-only start booted a protected AVD in batch 20261012a; pass ${ALLOW_SELECTOR_FLAG} only to allow that selection deliberately.`;
 }

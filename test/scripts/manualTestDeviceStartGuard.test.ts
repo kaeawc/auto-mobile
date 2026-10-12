@@ -5,10 +5,9 @@ import {
 } from "../../scripts/manual-test/deviceStartGuard";
 const explicit: Record<string, unknown[]> = {
   startDevice: [
-    { name: "Pixel" },
     { avdName: "Pixel" },
     { deviceId: "serial" },
-    { device: { name: "Pixel" } },
+    { device: { avdName: "Pixel" } },
     { device: { deviceId: "udid" } },
   ],
   getAndroid: [{ avdName: "Pixel" }, { deviceId: "serial" }],
@@ -39,4 +38,20 @@ for (const tool of DEVICE_START_TOOLS) {
 test("other tools pass without interpreting their arguments", () => {
   expect(deviceStartGuardRefusal("observe", null, { allowSelector: false })).toBeUndefined();
   expect(deviceStartGuardRefusal("listDevices", {}, { allowSelector: false })).toBeUndefined();
+});
+
+test("startDevice requires exact identifiers and top-level fields win over legacy device", () => {
+  for (const args of [
+    { name: "Pixel" },
+    { device: { name: "Pixel_9" } },
+    { udid: "simulator" },
+    { avdName: "", device: { avdName: "Pixel_9" } },
+    { deviceId: " ", device: { deviceId: "serial" } },
+    { platform: "android", name: "", device: { name: "Pixel_9" } },
+  ]) {
+    expect(deviceStartGuardRefusal("startDevice", args, { allowSelector: false })).toContain(
+      "avdName (Android) or deviceId (UDID/serial)",
+    );
+    expect(deviceStartGuardRefusal("startDevice", args, { allowSelector: true })).toBeUndefined();
+  }
 });

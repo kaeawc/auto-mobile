@@ -33,7 +33,7 @@ function fixture() {
   const launches: Array<{ command: string; args: string[]; env: Record<string, string> }> = [];
   const deps: PrivateDaemonCliDeps = {
     runtimePath: resolve("/fake/runtime"),
-    host: { homeDirs: [resolve("/home/fake")], uid: 4242 },
+    host: { homeDirs: [resolve("/home/fake")], uid: 4242, canonicalize: resolve },
     env: {
       AUTOMOBILE_MANAGED_SLOT_CONFIG: "inherited",
       AUTOMOBILE_DB_PATH: "/wrong-db",
@@ -68,7 +68,7 @@ function fixture() {
   };
   return { files, writes, dirs, logs, launches, deps };
 }
-test("parses each command and exact start passthrough", () => {
+posixTest("parses each command and exact start passthrough", () => {
   expect(
     parsed([
       "init",

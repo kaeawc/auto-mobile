@@ -25,7 +25,11 @@ import { defaultTimer, MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../src/uti
 import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { privateHarnessEnvRefusal } from "./harnessEnv";
-import { privateClientEnvironment, type HostDefaults } from "./privateDaemonEnv";
+import {
+  privatePathRefusal,
+  privateClientEnvironment,
+  type HostDefaults,
+} from "./privateDaemonEnv";
 import {
   FrameRpc,
   connectWithDeadline,
@@ -336,8 +340,9 @@ export async function runAuxSocket(
               .defaultPath,
           ),
         );
-  if (!isAbsolute(socket)) {
-    deps.err("Aux socket path must be absolute.");
+  const socketRefusal = privatePathRefusal(socket, deps.host);
+  if (!isAbsolute(socket) || socketRefusal) {
+    deps.err(socketRefusal ?? "Aux socket path must be absolute.");
     return 2;
   }
   if (command.observer && command.request.sessionUuid !== undefined) {

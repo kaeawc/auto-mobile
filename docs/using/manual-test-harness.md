@@ -18,7 +18,8 @@ protocol or its evidence assertions.
 - Never use `pkill` or `killall`. Stop only daemons you started, using
   `private-daemon.ts stop` for that batch and daemon number.
 - Never delete an AVD, simulator, or directory. Keep batch evidence and devices.
-- Device starts must name an explicit AVD name or simulator UDID/deviceId.
+- For `startDevice`, use `avdName` (Android) or `deviceId` (UDID/serial);
+  `name` alone is a matcher and is refused.
   Selector-only acquisition booted a protected AVD in batch 20261012a. The
   harness guards `startDevice`, `provisionDevice`, `getAndroid`, and `getApple`;
   `--allow-selector` deliberately bypasses that guard for a selection test.
@@ -48,9 +49,13 @@ bun scripts/manual-test/private-daemon.ts stop --batch-dir "$B" --daemon 1
 `start` uses the current runtime and owns `--port` and `--strict-port`; it
 refuses a recorded live PID. `status` reports the stored PID, port, socket and
 env file. `stop` targets one manifest daemon. Restart means `stop` followed by
-`start`; the wrapper's `daemon start` and `daemon restart` shorthands refuse.
+`start`; the wrapper refuses all `daemon start*` and `daemon restart*` shorthands.
 Use `env --batch-dir "$B" --daemon 1` to print the env file path, or source
 `"$B/daemon1/env.sh"` before using `frame`/`aux` CLIs directly.
+
+Every client requires all initialized private path variables and refuses host
+defaults, canonical path aliases and resident socket/PID/lock basenames. Inherited
+legacy `AUTO_MOBILE_*`, DB-file and WebRTC-socket overrides are stripped.
 
 Each daemon isolates its data, logs, database, coordination directory, auxiliary
 sockets, control socket, PID, lock and launch log. The daemons still share the
@@ -65,6 +70,9 @@ It does not create separate adb servers or make host capacity independent.
 
 The wrapper's `proxy` shorthand runs `proxy-session.ts`. Use a new session
 directory for every `up`. Paths resolve from your current working directory.
+`up` and `serve` require a valid private daemon PID file naming a live process.
+Run `private-daemon.ts start` first; never launch a proxy to wake a dead daemon.
+
 Omit `--config` for a plain proxy; supply a managed-slot config for a managed
 execution. Managed acquisition is real and can create and boot a device.
 
@@ -73,7 +81,7 @@ bash scripts/manual-test/in-daemon-env.sh --batch-dir "$B" --daemon 1 \
   proxy up --dir "$B/sessions/plain-1"
 bash scripts/manual-test/in-daemon-env.sh --batch-dir "$B" --daemon 1 \
   proxy call --dir "$B/sessions/plain-1" startDevice \
-  '{"platform":"android","name":"manual-test-avd"}'
+  '{"platform":"android","avdName":"manual-test-avd"}'
 bash scripts/manual-test/in-daemon-env.sh --batch-dir "$B" --daemon 1 \
   proxy tools --dir "$B/sessions/plain-1"
 bash scripts/manual-test/in-daemon-env.sh --batch-dir "$B" --daemon 1 \

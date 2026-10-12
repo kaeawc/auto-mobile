@@ -38,7 +38,7 @@ case "$1" in
     [[ -n "${MT_SERVER:-}" ]] || fail 'env needs MT_SERVER for daemon shorthand'
     shift
     case "${1:-}" in
-      start | restart) fail 'use private-daemon.ts start, which owns --port --strict-port; a restart is stop + start' ;;
+      start* | restart*) fail 'use private-daemon.ts start, which owns --port --strict-port; a restart is stop + start' ;;
     esac
     exec bun "$MT_SERVER" --daemon "$@"
     ;;

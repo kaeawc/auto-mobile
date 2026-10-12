@@ -14,6 +14,7 @@ import { ensureSecureDirectorySync } from "../../src/utils/tempDir";
 import { isProcessRunning } from "../../src/utils/processLiveness";
 import {
   privateClientEnvironment,
+  canonicalizeHostPath,
   derivePrivateDaemonBatch,
   privateDaemonBatchRefusal,
   renderEnvFile,
@@ -340,6 +341,7 @@ export async function main(): Promise<number> {
     host: {
       homeDirs: [homedir(), userInfo().homedir],
       uid: process.getuid?.() ?? userInfo().username,
+      canonicalize: canonicalizeHostPath,
     },
     log: console.log,
     env: process.env,

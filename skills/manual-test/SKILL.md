@@ -28,9 +28,12 @@ environment, MCP stdio loop or socket client.
   `~/.auto-mobile`; every client uses the wrapper or a guarded harness CLI.
 - Never `pkill`/`killall`; stop only your own daemon with `private-daemon.ts stop`.
 - Never delete an AVD, simulator or directory.
-- Start devices by explicit AVD name or UDID/deviceId. The guard refuses
+- For `startDevice`, use `avdName` (Android) or `deviceId` (UDID/serial).
+  `name` is a matcher and is refused. The guard refuses
   selector-only starts because one booted a protected AVD in batch 20261012a;
   `--allow-selector` is only for a deliberate selection test.
+- Run `private-daemon.ts start` before proxy `up`/`serve`; both require a
+  private PID file naming a live daemon. Never use a proxy to wake a dead daemon.
 - Never pass daemon flags to a proxy or rebuild `dist/` while batch daemons run.
 - Keep one shared adb-server coordination directory per batch; split it only
   when testing isolated registries, aware of the false 7-of-6 finding (#11905).

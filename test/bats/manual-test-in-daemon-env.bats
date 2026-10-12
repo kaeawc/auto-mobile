@@ -1,13 +1,8 @@
 #!/usr/bin/env bats
 
-setup() {
-  TEST_ROOT="$(mktemp -d)"
-  MOCK_BIN="${TEST_ROOT}/bin"
-  BATCH="${TEST_ROOT}/batch"
-  COMMAND_LOG="${TEST_ROOT}/commands.log"
-  SCRIPT="${BATS_TEST_DIRNAME}/../../scripts/manual-test/in-daemon-env.sh"
-  export COMMAND_LOG
-  mkdir -p "${MOCK_BIN}" "${BATCH}/daemon1"
+setup_file() {
+  MOCK_BIN="${BATS_FILE_TMPDIR}/bin"
+  mkdir -p "${MOCK_BIN}" "${BATS_FILE_TMPDIR}/batch/daemon1"
   cat > "${MOCK_BIN}/bun" <<'MOCK'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >> "${COMMAND_LOG}"
@@ -17,17 +12,19 @@ MOCK
 printf '%s\n' "$AUTOMOBILE_AUX_SOCKET_DIR" "$AUTOMOBILE_DAEMON_SOCKET_PATH" "$MT_SERVER" "$PWD" "$@" >> "${COMMAND_LOG}"
 MOCK
   chmod +x "${MOCK_BIN}/bun" "${MOCK_BIN}/check-env"
-  export PATH="${MOCK_BIN}:${PATH}"
-  cat > "${BATCH}/daemon1/env.sh" <<'ENV'
-export AUTOMOBILE_AUX_SOCKET_DIR=/fake/aux
-export AUTOMOBILE_DAEMON_SOCKET_PATH=/fake/aux/d.sock
-export MT_SERVER='/fake/built entry.js'
-ENV
-  unset AUTOMOBILE_AUX_SOCKET_DIR AUTOMOBILE_DAEMON_SOCKET_PATH
 }
 
-teardown() {
-  rm -rf "${TEST_ROOT}"
+setup() {
+  MOCK_BIN="${BATS_FILE_TMPDIR}/bin"
+  BATCH="${BATS_FILE_TMPDIR}/batch"
+  COMMAND_LOG="${BATS_TEST_TMPDIR}/commands.log"
+  SCRIPT="${BATS_TEST_DIRNAME}/../../scripts/manual-test/in-daemon-env.sh"
+  export COMMAND_LOG
+  export PATH="${MOCK_BIN}:${PATH}"
+  printf '%s\n' 'export AUTOMOBILE_AUX_SOCKET_DIR=/fake/aux' \
+    'export AUTOMOBILE_DAEMON_SOCKET_PATH=/fake/aux/d.sock' \
+    "export MT_SERVER='/fake/built entry.js'" > "${BATCH}/daemon1/env.sh"
+  unset AUTOMOBILE_AUX_SOCKET_DIR AUTOMOBILE_DAEMON_SOCKET_PATH
 }
 
 @test "argument errors exit 2 without running a command" {
@@ -108,4 +105,18 @@ teardown() {
   repo="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
   expected="$(printf '%s\n' "${repo}/scripts/manual-test/aux-socket.ts" recording status --observer)"
   [ "$(cat "${COMMAND_LOG}")" = "${expected}" ]
+}
+
+@test "daemon restart-admitted shorthand refuses before launching" {
+  run bash "${SCRIPT}" --batch-dir "${BATCH}" --daemon 1 daemon restart-admitted
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *'use private-daemon.ts start'* ]]
+  [ ! -f "${COMMAND_LOG}" ]
+}
+
+@test "daemon restart-acceptance-session shorthand refuses before launching" {
+  run bash "${SCRIPT}" --batch-dir "${BATCH}" --daemon 1 daemon restart-acceptance-session
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *'use private-daemon.ts start'* ]]
+  [ ! -f "${COMMAND_LOG}" ]
 }

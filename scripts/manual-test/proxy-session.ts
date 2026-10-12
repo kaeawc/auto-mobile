@@ -31,7 +31,12 @@ import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { ensureSecureDirectorySync } from "../../src/utils/tempDir";
 import { deviceStartGuardRefusal } from "./deviceStartGuard";
 import { privateHarnessEnvRefusal } from "./harnessEnv";
-import { extraEnvRefusal, privateClientEnvironment, type HostDefaults } from "./privateDaemonEnv";
+import {
+  canonicalizeHostPath,
+  extraEnvRefusal,
+  privateClientEnvironment,
+  type HostDefaults,
+} from "./privateDaemonEnv";
 
 const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 export interface ProxySessionCommand {
@@ -218,9 +223,29 @@ function privateEnv(command: ProxySessionCommand, deps: ProxySessionDeps): Recor
   return privateClientEnvironment(deps.env, command.env);
 }
 function startupRefusal(command: ProxySessionCommand, deps: ProxySessionDeps): string | undefined {
-  return (
-    extraEnvRefusal(command.env) ?? privateHarnessEnvRefusal(privateEnv(command, deps), deps.host)
-  );
+  const env = privateEnv(command, deps);
+  const refusal = extraEnvRefusal(command.env) ?? privateHarnessEnvRefusal(env, deps.host);
+  if (refusal || (command.op !== "up" && command.op !== "serve")) {
+    return refusal;
+  }
+  const startFirst =
+    "Run private-daemon.ts start first; proxy up/serve must not wake a dead daemon.";
+  try {
+    const data = readJson(env.AUTOMOBILE_DAEMON_PID_FILE_PATH, deps);
+    const pid = data?.pid;
+    if (
+      typeof pid !== "number" ||
+      !Number.isSafeInteger(pid) ||
+      pid <= 0 ||
+      !deps.isPidAlive(pid)
+    ) {
+      return startFirst;
+    }
+  } catch (error) {
+    deps.log(`Private daemon pid file is invalid: ${errorMessage(error)}`);
+    return startFirst;
+  }
+  return undefined;
 }
 function validateConfig(command: ProxySessionCommand, deps: ProxySessionDeps): void {
   if (command.config !== undefined) {
@@ -400,8 +425,26 @@ export async function runServe(
         .listFiles(join(dir, "in"))
         .filter((file) => file.endsWith(".json") && !seen.has(file))
         .sort()) {
+        let input: unknown;
+        try {
+          input = JSON.parse(deps.readFile(join(dir, "in", file)));
+        } catch (error) {
+          // A writer may still be publishing the file; leave it unseen and retry next poll.
+          deps.log(`Incomplete inbox request ${file}; retrying: ${errorMessage(error)}`);
+          continue;
+        }
         seen.add(file);
-        const request = requestSchema.parse(readJson(join(dir, "in", file), deps));
+        const parsed = requestSchema.safeParse(input);
+        if (!parsed.success) {
+          deps.log(`Invalid inbox request ${file}: ${errorMessage(parsed.error)}`);
+          deps.writeJson(join(dir, "out", file), {
+            id: record(input)?.id,
+            ok: false,
+            error: errorJson(parsed.error),
+          });
+          continue;
+        }
+        const request = parsed.data;
         const t0 = deps.timer.now();
         if (request.op === "close") {
           closing = true;
@@ -605,6 +648,7 @@ function realDeps(): ProxySessionDeps {
     host: {
       homeDirs: [homedir(), userInfo().homedir],
       uid: process.getuid?.() ?? userInfo().username,
+      canonicalize: canonicalizeHostPath,
     },
     pid: process.pid,
     timer: defaultTimer,

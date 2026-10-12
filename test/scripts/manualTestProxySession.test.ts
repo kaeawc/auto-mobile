@@ -35,6 +35,7 @@ function fixture() {
     auxRoot: "/mt-aux",
     serverPath: "/built/index.js",
   })[0].env;
+  files.set(env.AUTOMOBILE_DAEMON_PID_FILE_PATH, JSON.stringify({ pid: 9876 }));
   const client: ProxySessionClient = {
     connect: async () => {},
     close: async () => {
@@ -55,7 +56,7 @@ function fixture() {
   };
   const deps: ProxySessionDeps = {
     env,
-    host: { homeDirs: ["/home/fake"], uid: 4242 },
+    host: { homeDirs: ["/home/fake"], uid: 4242, canonicalize: resolve },
     pid: 1234,
     timer,
     ids: new CountingIdGenerator("request"),
@@ -310,7 +311,14 @@ posixTest("serve polling failure closes its client and writes closed.json", asyn
 posixTest("up success waits for initialize and keeps the parsed config/env", async () => {
   const f = fixture();
   const command = parsed(["up", "--dir", dir, "--env", "NOTE=value"]);
+  let daemonAliveChecked = false;
+  f.deps.isPidAlive = (pid) => {
+    expect(pid).toBe(9876);
+    daemonAliveChecked = true;
+    return true;
+  };
   f.deps.spawnServe = (received) => {
+    expect(daemonAliveChecked).toBe(true);
     expect(received).toEqual(command);
     f.calls.push("spawnServe");
     f.files.set(join(dir, "init.json"), '{"ok":true,"driverPid":1234}');
@@ -346,5 +354,66 @@ posixTest(
     });
     expect(await runProxySessionCommand(parsed(["status", "--dir", dir]), f.deps)).toBe(0);
     expect(f.calls).toEqual([]);
+  },
+);
+
+posixTest("up and serve refuse missing, invalid or dead daemon pid before any spawn", async () => {
+  for (const op of ["up", "serve"]) {
+    for (const text of [
+      undefined,
+      "not-json",
+      "{}",
+      '{"pid":"9876"}',
+      '{"pid":0}',
+      '{"pid":9876}',
+    ]) {
+      const f = fixture();
+      const path = f.deps.env.AUTOMOBILE_DAEMON_PID_FILE_PATH!;
+      if (text === undefined) {
+        f.files.delete(path);
+      } else {
+        f.files.set(path, text);
+      }
+      f.deps.isPidAlive = () => false;
+      expect(await runProxySessionCommand(parsed([op, "--dir", dir]), f.deps)).toBe(2);
+      expect(f.calls).toEqual([]);
+      expect(f.writes).toEqual([]);
+      expect(f.logs.join(" ")).toContain("private-daemon.ts start");
+    }
+  }
+});
+posixTest(
+  "schema-invalid inbox gets an error, incomplete JSON retries, following call is served",
+  async () => {
+    const f = fixture();
+    const incomplete = join(dir, "in", "2.json");
+    f.files.set(join(dir, "in", "1.json"), '{"id":"1","op":"call"}');
+    f.files.set(incomplete, '{"id":');
+    const listFiles = f.deps.listFiles;
+    let polls = 0;
+    f.deps.listFiles = (path) => {
+      if (++polls === 2) {
+        f.files.set(incomplete, '{"id":"2","op":"call","tool":"observe","args":{}}');
+      }
+      return listFiles(path);
+    };
+    const writeJson = f.deps.writeJson;
+    f.deps.writeJson = (path, value) => {
+      writeJson(path, value);
+      if (path === join(dir, "out", "2.json")) {
+        f.files.set(join(dir, "in", "3.json"), '{"id":"3","op":"close"}');
+      }
+    };
+    f.timer.enableAutoAdvance();
+    try {
+      expect(await runServe(parsed(["serve", "--dir", dir]), f.deps)).toBe(0);
+      expect(JSON.parse(f.files.get(join(dir, "out", "1.json"))!).ok).toBe(false);
+      expect(JSON.parse(f.files.get(join(dir, "out", "2.json"))!).ok).toBe(true);
+      expect(f.calls).toEqual(["createClient", "observe", "close"]);
+      expect(f.logs.join(" ")).toContain("Invalid inbox request");
+      expect(f.logs.join(" ")).toContain("Incomplete inbox request");
+    } finally {
+      f.timer.reset();
+    }
   },
 );

@@ -2,25 +2,37 @@
 import { readFileSync } from "node:fs";
 import { Socket } from "node:net";
 import { homedir, userInfo } from "node:os";
-import { isAbsolute, resolve } from "node:path";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import { isAbsolute } from "node:path";
+import {
+  DAEMON_SESSION_NOT_FOUND_CODE,
+  type DaemonRequest,
+  type DaemonResponse,
+} from "../../src/daemon/types";
 import {
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_RELEASE_EXECUTION_METHOD,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
-  resolveDaemonStatePath,
 } from "../../src/daemon/constants";
 import { acquireManagedSlotsThroughDaemon } from "../../src/daemon/managedSlotProxyAcquisition";
 import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "../../src/daemon/managedExecutionLiveness";
-import { PROXY_HEARTBEAT_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
+import {
+  DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
+  PROXY_HEARTBEAT_INTERVAL_MS,
+} from "../../src/daemon/sessionLivenessWindows";
 import { parseManagedSlotConfigSource } from "../../src/models/managedSlotConfig";
 import { defaultTimer, MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../src/utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
+import { readEnvPositiveInteger } from "../../src/utils/envNumbers";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
 import { privateHarnessEnvRefusal } from "./harnessEnv";
 import { deviceStartGuardRefusal } from "./deviceStartGuard";
-import { privateClientEnvironment, type HostDefaults } from "./privateDaemonEnv";
+import {
+  canonicalizeHostPath,
+  privatePathRefusal,
+  privateClientEnvironment,
+  type HostDefaults,
+} from "./privateDaemonEnv";
 import {
   encodeDaemonFrame,
   LineDecoder,
@@ -336,16 +348,33 @@ async function managedKeeper(
   config: ReturnType<typeof parseManagedSlotConfigSource>,
   rpc: FrameRpc,
   deps: DaemonFrameDeps,
-): Promise<() => Promise<void>> {
+): Promise<(sendRelease?: boolean) => Promise<void>> {
   const token = deps.ids.next();
-  const held = new Map<string, NodeJS.Timeout>();
+  const held = new Map<string, NodeJS.Timeout | undefined>();
   const options = { timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS };
-  const release = async (): Promise<void> => {
+  const leaseMs = readEnvPositiveInteger(
+    "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+    undefined,
+    { fallback: DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS },
+    deps.env,
+    { warn: deps.err },
+  );
+  // Same per-heartbeat deadline as DaemonMcpProxy, independent of its lifecycle machinery.
+  const heartbeatTimeoutMs = Math.max(
+    1,
+    Math.min(Math.floor(leaseMs / 2), PROXY_HEARTBEAT_INTERVAL_MS * 2),
+  );
+  const release = async (sendRelease = true): Promise<void> => {
     const sessions = [...held.keys()];
     for (const handle of held.values()) {
-      deps.timer.clearInterval(handle);
+      if (handle) {
+        deps.timer.clearInterval(handle);
+      }
     }
     held.clear();
+    if (!sendRelease) {
+      return;
+    }
     await Promise.all(
       sessions.map(async (sessionId) => {
         try {
@@ -380,31 +409,40 @@ async function managedKeeper(
       };
       // The proxy does NOT send livenessOwnerKind; it sends the heartbeat policy,
       // which the daemon preserves as managed-execution for slot sessions.
+      held.set(sessionId, undefined);
+      await rpc.call(
+        DAEMON_HEARTBEAT_METHOD,
+        { ...params, claimLivenessOwnership: true },
+        { timeoutMs: heartbeatTimeoutMs },
+      );
       let inFlight = false;
       const handle = deps.timer.setInterval(() => {
         if (inFlight) {
           return;
         }
         inFlight = true;
-        void rpc
-          .call(DAEMON_HEARTBEAT_METHOD, params, { timeoutMs: PROXY_HEARTBEAT_INTERVAL_MS })
-          .then(
-            () => {
-              inFlight = false;
-            },
-            (error: unknown) => {
-              inFlight = false;
-              deps.err(`Managed heartbeat failed: ${errorMessage(error)}`);
-              rpc.fail(new Error(errorMessage(error)));
-            },
-          );
+        void rpc.call(DAEMON_HEARTBEAT_METHOD, params, { timeoutMs: heartbeatTimeoutMs }).then(
+          () => {
+            inFlight = false;
+          },
+          (error: unknown) => {
+            inFlight = false;
+            deps.err(`Managed heartbeat failed: ${errorMessage(error)}`);
+            // A typed not-found answer ends this session's keeper; transient misses do not
+            // abort the shared connection or its user frames (as for proxy held sessions).
+            if (
+              error !== null &&
+              typeof error === "object" &&
+              "code" in error &&
+              error.code === DAEMON_SESSION_NOT_FOUND_CODE
+            ) {
+              deps.timer.clearInterval(handle);
+              held.delete(sessionId);
+            }
+          },
+        );
       }, PROXY_HEARTBEAT_INTERVAL_MS);
       held.set(sessionId, handle);
-      await rpc.call(
-        DAEMON_HEARTBEAT_METHOD,
-        { ...params, claimLivenessOwnership: true },
-        { timeoutMs: PROXY_HEARTBEAT_INTERVAL_MS },
-      );
     },
   });
   deps.out(JSON.stringify(result));
@@ -419,11 +457,7 @@ export async function runDaemonFrame(
   const refusal =
     privateHarnessEnvRefusal(env, deps.host) ??
     privateHarnessEnvRefusal({ ...env, AUTOMOBILE_DAEMON_SOCKET_PATH: socket }, deps.host);
-  if (
-    refusal ||
-    !isAbsolute(socket) ||
-    resolve(socket) === resolve(resolveDaemonStatePath("sock", {}, String(deps.host.uid)))
-  ) {
+  if (refusal || !isAbsolute(socket) || privatePathRefusal(socket, deps.host)) {
     deps.err(refusal ?? "Refusing non-absolute or resident socket.");
     return 2;
   }
@@ -463,7 +497,7 @@ export async function runDaemonFrame(
     return 2;
   }
   let rpc: FrameRpc | undefined;
-  let release: (() => Promise<void>) | undefined;
+  let release: ((sendRelease?: boolean) => Promise<void>) | undefined;
   let abrupt = false;
   try {
     const connection = await connectWithDeadline(
@@ -510,7 +544,7 @@ export async function runDaemonFrame(
     return 3;
   } finally {
     if (release) {
-      await release();
+      await release(!abrupt);
     }
     if (rpc) {
       rpc.fail(new Error("Frame client finished."));
@@ -524,6 +558,7 @@ export function frameHostDefaults(): HostDefaults {
   return {
     homeDirs: [homedir(), userInfo().homedir],
     uid: process.getuid?.() ?? userInfo().username,
+    canonicalize: canonicalizeHostPath,
   };
 }
 export async function main(): Promise<number> {

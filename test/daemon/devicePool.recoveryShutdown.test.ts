@@ -17,7 +17,6 @@ import {
 } from "../../src/daemon/emulatorLossIncident";
 import {
   SessionManager,
-  SessionRecoveryIdentityLossError,
   TerminalSessionError,
   type Session,
 } from "../../src/daemon/sessionManager";
@@ -1599,7 +1598,7 @@ test("sequential settled restart retries never reboot an idle bystander with onL
   }
 });
 
-test("settled restart retry reports identity continuity loss without claiming the replacement", async () => {
+test("settled restart retry keeps serial reuse pending without claiming the replacement", async () => {
   const { sessions, pool, manager, persistence } = await setupSettledRestart();
   const replacement = { ...original, name: "Different_AVD" };
   const unrelated = { ...original, deviceId: "emulator-5556", name: "Unrelated_AVD" };
@@ -1607,12 +1606,18 @@ test("settled restart retry reports identity continuity loss without claiming th
   const error = await sessions
     .getOrCreateSession("session", pool, "android", undefined, true)
     .catch((error: unknown) => error);
-  expect(error).toBeInstanceOf(SessionRecoveryIdentityLossError);
-  expect(error).toMatchObject({ reason: "identity-continuity-lost" });
+  expect(error).toMatchObject({
+    name: "SessionRecoveryAssignmentError",
+    details: {
+      code: "session_recovery_pending",
+      retryable: true,
+      recoveryWindowRemainingMs: 180_000,
+    },
+  });
   expect(sessions.getSession("session")).toBeNull();
   expect(await persistence.getSession?.("session")).toMatchObject({
     status: "released",
-    release_reason: "identity-recovery-identity-continuity-lost",
+    release_reason: `device-restart:${original.name}`,
   });
   expect(pool.getDevice(replacement.deviceId)).toMatchObject({
     name: replacement.name,
@@ -2303,8 +2308,8 @@ test("a quiet client loses device-restart recovery two minutes after its last ca
   }
 });
 
-test("a resolved old-serial replacement fences recovery despite another unknown emulator", async () => {
-  const { persistence, sessions, manager, pool } = await setupPassiveRestart();
+test("a resolved old-serial replacement keeps recovery pending despite another unknown emulator", async () => {
+  const { persistence, sessions, manager, pool } = await setupSettledRestart();
   try {
     manager.bootedDevices = [
       { ...original, name: "Different_AVD" },
@@ -2313,9 +2318,12 @@ test("a resolved old-serial replacement fences recovery despite another unknown 
     await pool.refreshDevices();
     await expect(
       sessions.getOrCreateSession("session", pool, "android", undefined, true),
-    ).rejects.toThrow("recovery reason: identity-continuity-lost");
+    ).rejects.toMatchObject({
+      name: "SessionRecoveryAssignmentError",
+      details: { code: "session_recovery_pending", retryable: true },
+    });
     expect(await persistence.getSession?.("session")).toMatchObject({
-      release_reason: "identity-recovery-identity-continuity-lost",
+      release_reason: `device-restart:${original.name}`,
     });
   } finally {
     sessions.stopCleanupTimer();

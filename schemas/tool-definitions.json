@@ -8755,6 +8755,37 @@
                 },
                 "inFlight": {
                   "type": "number"
+                },
+                "processTable": {
+                  "type": "object",
+                  "properties": {
+                    "unavailable": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "attempts": {
+                      "type": "number"
+                    },
+                    "admissionsWithoutProcessTable": {
+                      "type": "number"
+                    },
+                    "lastAdmissionWithoutProcessTableAtMs": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "unavailable",
+                    "reason",
+                    "detail",
+                    "attempts",
+                    "admissionsWithoutProcessTable"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": ["limit", "booted", "inFlight"],

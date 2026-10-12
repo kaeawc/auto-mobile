@@ -17,6 +17,7 @@ import { IosSimFleetMonitor } from "../../../src/features/iosSimFleet/FleetMonit
 import {
   CommandFleetHostSource,
   parseMemoryPressureLevel,
+  readHostProcessTable,
 } from "../../../src/features/iosSimFleet/FleetHostSource";
 import {
   IOS_SIM_MAX_BOOTED_ENV,
@@ -25,6 +26,7 @@ import {
   resolveCapacityLimits,
 } from "../../../src/features/iosSimFleet/capacityPolicy";
 import {
+  PS_SNAPSHOT_MAX_BUFFER_BYTES,
   attributeSimulatorProcesses,
   parsePsSnapshot,
 } from "../../../src/features/iosSimFleet/psSnapshot";
@@ -80,6 +82,70 @@ describe("ps parsing and attribution", () => {
 
   test("counts malformed rows instead of dropping them silently", () => {
     expect(parsePsSnapshot("garbage\n  12 1 100 0.5 /bin/x\n").skipped).toBe(1);
+  });
+
+  test("parses comma decimal CPU values from localized ps output", () => {
+    const localizedPs =
+      "    1     0  26592   1,3 /sbin/launchd\n  114     1   3424   0,0 /usr/libexec/mlruntimed\n  347     1  79088   0,7 /usr/libexec/logd";
+    expect(parsePsSnapshot(localizedPs)).toEqual({
+      rows: [
+        { pid: 1, ppid: 0, rssBytes: 26592 * 1024, cpuPercent: 1.3, command: "/sbin/launchd" },
+        {
+          pid: 114,
+          ppid: 1,
+          rssBytes: 3424 * 1024,
+          cpuPercent: 0,
+          command: "/usr/libexec/mlruntimed",
+        },
+        {
+          pid: 347,
+          ppid: 1,
+          rssBytes: 79088 * 1024,
+          cpuPercent: 0.7,
+          command: "/usr/libexec/logd",
+        },
+      ],
+      skipped: 0,
+    });
+  });
+
+  test("localized process table remains parseable at the host source", async () => {
+    const localizedPs =
+      "    1     0  26592   1,3 /sbin/launchd\n  114     1   3424   0,0 /usr/libexec/mlruntimed\n  347     1  79088   0,7 /usr/libexec/logd";
+    const executor = new FakeHostCommandExecutor();
+    executor.setCommandResponse("ps", {
+      stdout: localizedPs,
+      stderr: "",
+      toString: () => localizedPs,
+      trim: () => localizedPs.trim(),
+      includes: (value: string) => localizedPs.includes(value),
+    });
+    expect((await readHostProcessTable(executor)).map((row) => row.cpuPercent)).toEqual([
+      1.3, 0, 0.7,
+    ]);
+    expect(
+      parsePsSnapshot(localizedPs.replaceAll(",", ".")).rows.map((row) => row.cpuPercent),
+    ).toEqual([1.3, 0, 0.7]);
+  });
+
+  test("reads the process table with a large bounded stdout buffer", async () => {
+    let receivedOptions: { maxBuffer?: number } | undefined;
+    const executor = {
+      executeCommand: async (_file: string, _args?: string[], options?: { maxBuffer?: number }) => {
+        receivedOptions = options;
+        return {
+          stdout: PS,
+          stderr: "",
+          toString: () => PS,
+          trim: () => PS.trim(),
+          includes: (value: string) => PS.includes(value),
+        };
+      },
+    };
+
+    await readHostProcessTable(executor);
+    expect(PS_SNAPSHOT_MAX_BUFFER_BYTES).toBe(32 * 1024 ** 2);
+    expect(receivedOptions?.maxBuffer).toBe(PS_SNAPSHOT_MAX_BUFFER_BYTES);
   });
 
   test("attributes each process tree to its own simulator in one pass", () => {

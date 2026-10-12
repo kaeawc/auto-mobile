@@ -173,13 +173,16 @@ export class DualTrackRecorder {
     logger.debug("[DualTrackRecorder] Started dual-track recording");
   }
 
-  async stop(): Promise<{
+  async stop(options: { hostOnly?: boolean } = {}): Promise<{
     steps: PlanStep[];
     stepCount: number;
     touchTrackFailure?: TouchTrackFailure;
     /** Rotation/size problems that may have mis-recorded tapAt/swipeOn steps (#10174). */
     geometryWarnings?: string[];
   }> {
+    if (options.hostOnly) {
+      this.geometry?.dispose();
+    }
     if (this.stopped) {
       const geometryWarnings = (await this.finalized) ?? [];
       return this.stopResult(geometryWarnings);
@@ -187,7 +190,9 @@ export class DualTrackRecorder {
     this.stopped = true;
 
     // Notify Kotlin service that recording is stopping before unsubscribing
-    this.activeA11y?.notifyRecordingStopped();
+    if (!options.hostOnly) {
+      this.activeA11y?.notifyRecordingStopped();
+    }
     this.activeA11y = null;
 
     this.unsubscribeA11y?.();
@@ -195,17 +200,15 @@ export class DualTrackRecorder {
     this.activeEmitter?.stop();
     this.activeEmitter = null;
 
-    // Flush pending gestures that haven't been matched yet
-    for (const pending of this.pendingGestures) {
-      if (!pending.resolved) {
-        this.resolveGesture(pending);
-      }
-    }
-    this.pendingGestures = [];
+    this.flushPendingGestures();
 
     // Display pushes stay subscribed until finalisation is done: the device debounces
     // them (100 ms), so a rotation just before stop is pushed after it.
-    this.finalized = this.finalizeGeometry().finally(() => {
+    this.finalized = (
+      options.hostOnly
+        ? Promise.resolve(this.geometry ? [GEOMETRY_UNCONFIRMED_WARNING] : [])
+        : this.finalizeGeometry()
+    ).finally(() => {
       this.unsubscribeDisplay?.();
       this.unsubscribeDisplay = null;
     });
@@ -214,6 +217,15 @@ export class DualTrackRecorder {
     logger.debug(`[DualTrackRecorder] Stopped with ${this.steps.length} steps`);
 
     return this.stopResult(geometryWarnings);
+  }
+
+  private flushPendingGestures(): void {
+    for (const pending of this.pendingGestures) {
+      if (!pending.resolved) {
+        this.resolveGesture(pending);
+      }
+    }
+    this.pendingGestures = [];
   }
 
   private stopResult(geometryWarnings: string[]) {

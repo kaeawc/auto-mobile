@@ -132,6 +132,10 @@ import {
 } from "./buildIdentity";
 import { ActionableError, toActionableError } from "../models";
 import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "./managedExecutionLiveness";
+import {
+  TimerManagedConnectionRebind,
+  type ManagedConnectionRebind,
+} from "./managedSlots/managedConnectionRebind";
 import { acquireManagedSlotsThroughDaemon } from "./managedSlotProxyAcquisition";
 import type { ManagedSlotConfig } from "../models/managedSlotConfig";
 import { managedSlotForSession, type ManagedSlotsResult } from "../models/managedSlotsResult";
@@ -1489,6 +1493,11 @@ export class DaemonMcpProxy {
    * (#10971). From then on, read-only tools are forwarded without a session.
    */
   private releaseSurfacedFor: string | undefined;
+  /** Held terminal losses awaiting one platform-only control answer, in loss order (#12090). */
+  private readonly pendingHeldSessionPlatformLosses = new Map<
+    string,
+    { platform: "android" | "ios"; reason: string; release?: SessionReleaseSnapshot }
+  >();
   /** Bounded per-session recovery when heartbeat acknowledgements stop (#10053). */
   private readonly livenessRecovery: LivenessRecovery;
   /** The call-wait bound of the current stretch of liveness recovery (#10508). */
@@ -1618,6 +1627,7 @@ export class DaemonMcpProxy {
   private readonly abandonedManagedSessions = new Set<string>();
   /** The managed slot acquisition's result, once it ran (#11173). */
   private managedSlotsResult: ManagedSlotsResult | undefined;
+  private managedConnectionRebind: ManagedConnectionRebind | undefined;
   /** Aborts an in-flight managed slot acquisition when the proxy closes (EOF, SIGTERM, owner loss). */
   private managedSlotsAcquisitionAbort: AbortController | undefined;
   /**
@@ -1939,25 +1949,48 @@ export class DaemonMcpProxy {
   /**
    * Re-bind a reconnected socket to this proxy's managed slot sessions through
    * `daemon/registerSession` (#11178), proven by the owner token the sessions were claimed for.
-   * Best effort like the token resume: a refusal is logged, and the slot devices stay protected
-   * from every other caller by the generic managed-slot exclusion.
+   * The first attempt is awaited; transient refusals retry in the background on the same socket.
+   * The daemon confines refused registrations until their held sessions can be proven.
    */
   private async rebindManagedConnection(client: DaemonClientLike): Promise<void> {
-    const binding = this.heldManagedSlotBinding();
-    if (!binding || this.closing || this.client !== client) {
-      return;
-    }
-    try {
+    const liveSessions = (sessionUuids: string[]) =>
+      sessionUuids.filter(
+        (uuid) =>
+          this.isHeldSession(uuid) ||
+          (this.claimableSessions.has(uuid) && this.stallHandovers.has(uuid)),
+      );
+    const currentBinding = () => {
+      const binding = this.heldManagedSlotBinding();
+      if (!binding) {
+        return undefined;
+      }
+      const sessionUuids = liveSessions(binding.sessionUuids);
+      // Even an ended execution declares the socket managed so the daemon confines its refusal.
+      return sessionUuids.length > 0 ? { ...binding, sessionUuids } : binding;
+    };
+    const sameSocket = () => !this.closing && this.client === client;
+    const stillWanted = () =>
+      sameSocket() && liveSessions(this.heldManagedSlotBinding()?.sessionUuids ?? []).length > 0;
+    const attempt = async () => {
+      const binding = currentBinding();
+      if (!binding || !sameSocket()) {
+        return;
+      }
       await client.callDaemonMethod(DAEMON_REGISTER_SESSION_METHOD, {
         sessionId: binding.sessionUuids[0],
         clientName: MANAGED_SLOT_PROXY_CLIENT_NAME,
         managedSlots: { ...binding, livenessOwnerToken: this.livenessOwnerToken },
       });
+    };
+    if (!currentBinding() || !sameSocket()) {
+      return;
+    }
+    this.managedConnectionRebind ??= new TimerManagedConnectionRebind(this.timer);
+    try {
+      await attempt();
     } catch (error) {
-      logger.warn(
-        `[DaemonMcpProxy] Re-binding the managed slot connection failed: ${errorMessage(error)}`,
-        error,
-      );
+      // Establishment stays available; retry only while this socket still holds the execution.
+      this.managedConnectionRebind.start({ attempt, stillWanted }, error);
     }
   }
 
@@ -2869,6 +2902,11 @@ export class DaemonMcpProxy {
     this.ownedDeviceSessions.delete(releasedSessionUuid);
     this.claimableSessions.delete(releasedSessionUuid);
     this.clearNotFoundHistory(releasedSessionUuid);
+    this.recordHeldSessionTerminalLoss(
+      releasedSessionUuid,
+      notification.reason,
+      notification.release,
+    );
     this.dropHeldSession(releasedSessionUuid);
     if (
       releasedSessionUuid === this.boundSessionUuid ||
@@ -4046,6 +4084,7 @@ export class DaemonMcpProxy {
   private async resetConnection(): Promise<void> {
     const shutdownDisconnectResolve = this.resolveDaemonShutdownDisconnect;
     const staleClient = this.client;
+    this.managedConnectionRebind?.cancel();
     this.resourceSubscriptionSync = Promise.resolve();
     this.connected = false;
     this.client = null;
@@ -4593,11 +4632,13 @@ export class DaemonMcpProxy {
       await this.waitForLivenessRecovery(signal);
     }
     callerArgs = this.withFencedControlDeviceSession(name, callerArgs);
+    const platformSelectorArgs = callerArgs;
     const ownSession = this.ownSessionForPlatformSelector(name, callerArgs, true);
     if (ownSession !== undefined) {
       callerArgs = { ...callerArgs, sessionUuid: ownSession };
     }
     this.refuseAmbiguousSessionSelector(name, callerArgs);
+    this.reportHeldSessionPlatformLoss(name, platformSelectorArgs);
     this.reportToolSessionLoss(name, callerArgs);
     if (this.stallHandovers.size > 0) {
       await this.resumeStalledSessionNamedBy(callerArgs);
@@ -4712,7 +4753,7 @@ export class DaemonMcpProxy {
       if (!this.namesForeignOwnedSession(forwardedArgs, result)) {
         this.rememberSessionUuid(name, forwardedArgs, callReleaseEpoch, false);
       }
-      this.rememberActiveDeviceSession(name, result, callReleaseEpoch);
+      this.rememberActiveDeviceSession(name, callerArgs, result, callReleaseEpoch);
       return { result, forwardedSessionUuid };
     } catch (error) {
       signal?.throwIfAborted();
@@ -5011,16 +5052,92 @@ export class DaemonMcpProxy {
   /**
    * Record that a tool call's answer named the fenced binding as released (#11483), as the entry
    * gate does: `answer` is a terminal refusal the daemon answered and this proxy relayed, or the
-   * fence error raised while the call was in flight. Any other answer, and a session that is not
-   * the fenced binding, records nothing.
+   * fence error raised while the call was in flight. A held session's terminal answer also
+   * cancels its pending platform report: the caller has already been told about that loss.
    */
   private noteReleaseSurfacedBy(answer: unknown): void {
     const sessionUuid =
       answer instanceof DaemonBoundSessionExpiredError
         ? answer.sessionUuid
         : readTerminalSessionRefusal(answer)?.sessionUuid;
+    if (sessionUuid !== undefined) {
+      this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
+    }
     if (sessionUuid !== undefined && sessionUuid === this.terminalBoundSession?.sessionUuid) {
       this.releaseSurfacedFor = sessionUuid;
+    }
+  }
+
+  private recordHeldSessionTerminalLoss(
+    sessionUuid: string,
+    reason = "released",
+    release?: SessionReleaseSnapshot,
+  ): void {
+    const platform = this.sessionPlatforms.get(sessionUuid);
+    const handedOver = this.stallHandovers.get(sessionUuid);
+    if (
+      platform === undefined ||
+      sessionUuid === this.boundSessionUuid ||
+      sessionUuid === this.terminalBoundSession?.sessionUuid ||
+      (!this.otherHeldSessions.has(sessionUuid) && (!handedOver || handedOver.restore.bound)) ||
+      this.pendingHeldSessionPlatformLosses.has(sessionUuid)
+    ) {
+      return;
+    }
+    this.pendingHeldSessionPlatformLosses.set(sessionUuid, { platform, reason, release });
+  }
+
+  private recordHeldSessionNotFoundLoss(sessionUuid: string, outcome: NotFoundAnswerOutcome): void {
+    if (outcome.kind === "ended") {
+      this.recordHeldSessionTerminalLoss(sessionUuid, outcome.reason);
+    }
+  }
+
+  private clearHeldSessionLossesForSelection(sessionUuid: string, callPlatform?: unknown): void {
+    this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
+    this.clearHeldSessionPlatformLosses(this.sessionPlatforms.get(sessionUuid));
+    if (callPlatform === "android" || callPlatform === "ios") {
+      this.clearHeldSessionPlatformLosses(callPlatform);
+    }
+  }
+
+  private clearHeldSessionPlatformLosses(platform: "android" | "ios" | undefined): void {
+    if (platform === undefined) {
+      return;
+    }
+    for (const [sessionUuid, loss] of this.pendingHeldSessionPlatformLosses) {
+      if (loss.platform === platform) {
+        this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
+      }
+    }
+  }
+
+  /** Ambiguity and the default fence win; reads leave these one-shot reports untouched. */
+  private reportHeldSessionPlatformLoss(name: string, args: Record<string, unknown>): void {
+    const platform = args.platform;
+    if (
+      this.terminalBoundSession ||
+      !this.isSessionlessControlDeviceTool(name) ||
+      (platform !== "android" && platform !== "ios") ||
+      typeof args.deviceId === "string" ||
+      this.sessionUuidFromArgs(args) !== undefined ||
+      args.device
+    ) {
+      return;
+    }
+    const live = [this.boundSessionUuid, ...this.otherHeldSessions.keys()];
+    if (live.some((id) => id !== undefined && this.sessionPlatforms.get(id) === platform)) {
+      this.clearHeldSessionPlatformLosses(platform);
+      return;
+    }
+    for (const [sessionUuid, loss] of this.pendingHeldSessionPlatformLosses) {
+      if (loss.platform === platform) {
+        // A terminal stall already has its typed answer; reporting it consumes both records.
+        this.reportPendingSessionLoss({ sessionUuid });
+        const answer = new DaemonBoundSessionExpiredError(sessionUuid, loss.reason, loss.release);
+        this.noteReleaseSurfacedBy(answer);
+        throw answer;
+      }
     }
   }
 
@@ -5103,7 +5220,12 @@ export class DaemonMcpProxy {
       : args;
   }
 
-  private rememberActiveDeviceSession(name: string, result: unknown, releaseEpoch: number): void {
+  private rememberActiveDeviceSession(
+    name: string,
+    args: Record<string, unknown>,
+    result: unknown,
+    releaseEpoch: number,
+  ): void {
     if (name !== "setActiveDevice") {
       return;
     }
@@ -5111,6 +5233,7 @@ export class DaemonMcpProxy {
     if (selection) {
       this.throwIfSessionReleasedSince(selection.sessionUuid, releaseEpoch);
       this.rememberSessionUuid(name, selection, releaseEpoch, true);
+      this.clearHeldSessionLossesForSelection(selection.sessionUuid, args.platform);
     }
   }
 
@@ -5301,7 +5424,9 @@ export class DaemonMcpProxy {
     // The agent has now been told about this release; later reads go through without a session.
     this.releaseSurfacedFor = terminal.sessionUuid;
     if (callerReferencedTerminal) {
-      throw this.boundSessionExpiredError(explicitSessionUuid);
+      const answer = this.boundSessionExpiredError(explicitSessionUuid);
+      this.noteReleaseSurfacedBy(answer);
+      throw answer;
     }
     throw new DaemonConnectionSessionReleasedError(terminal.reason);
   }
@@ -5931,6 +6056,7 @@ export class DaemonMcpProxy {
       return false;
     }
     this.claimableSessions.add(sessionId);
+    this.pendingHeldSessionPlatformLosses.delete(sessionId);
     this.ownedDeviceSessions.add(sessionId);
     this.rememberSessionDevice(sessionId, session.deviceId);
     if (session.platform !== undefined) {
@@ -6785,6 +6911,7 @@ export class DaemonMcpProxy {
       return;
     }
     this.stallHandovers.delete(sessionUuid);
+    this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
     this.resumedStallNotices.set(sessionUuid, {
       handover: record.handover,
       ...(restart ? { restart } : {}),
@@ -6930,6 +7057,7 @@ export class DaemonMcpProxy {
         action: "reacquire_lost_sessions",
       };
       this.pendingSessionLosses.set(sessionUuid, loss);
+      this.recordHeldSessionTerminalLoss(sessionUuid, releaseReason);
       if (record.handover.code === DAEMON_STALLED_CODE) {
         // A daemon stall that ends in a lost session pushes the same liveness notification a
         // proxy stall does, worded as the daemon stall it was (#11028). A proxy_stalled handover
@@ -7200,6 +7328,7 @@ export class DaemonMcpProxy {
         `[DaemonMcpProxy] Held session ${sessionUuid} is gone, no longer heartbeating: ${error.message}`,
         error,
       );
+      this.recordHeldSessionTerminalLoss(sessionUuid, error.reason, error.release);
       this.dropHeldSession(sessionUuid);
       return;
     }
@@ -7238,6 +7367,7 @@ export class DaemonMcpProxy {
         `[DaemonMcpProxy] Held session ${sessionUuid} is owned by another live liveness owner; no longer heartbeating it`,
       );
       this.livenessConflictLogged.delete(sessionUuid);
+      this.recordHeldSessionTerminalLoss(sessionUuid, "liveness-owner-conflict");
       this.dropHeldSession(sessionUuid);
       return;
     }
@@ -7303,6 +7433,7 @@ export class DaemonMcpProxy {
   /** The latest binding moves on: its session stays held and keeps its claim state. */
   private holdPreviousBinding(nextSessionUuid: string): void {
     const previous = this.boundSessionUuid;
+    this.pendingHeldSessionPlatformLosses.delete(nextSessionUuid);
     this.otherHeldSessions.delete(nextSessionUuid);
     this.latestBindingConflict = undefined;
     // Only a session this proxy claims stays held: an args-named one was never heartbeated (#10664).
@@ -7569,6 +7700,7 @@ export class DaemonMcpProxy {
       logger.warn(
         `[DaemonMcpProxy] Held session ${sessionUuid} is gone, no longer heartbeating it`,
       );
+      this.recordHeldSessionNotFoundLoss(sessionUuid, outcome);
       this.dropHeldSession(sessionUuid, false, outcome.kind !== "ended");
     } else if (!this.notFoundStopped.has(sessionUuid)) {
       logger.info(
@@ -7601,6 +7733,7 @@ export class DaemonMcpProxy {
       !this.otherHeldSessions.has(sessionUuid)
     ) {
       this.otherHeldSessions.set(sessionUuid, { claimSent: false, lastUsedAt: this.timer.now() });
+      this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
     }
     this.syncHeartbeatKeeper();
   }
@@ -7878,6 +8011,7 @@ export class DaemonMcpProxy {
     if (platform) {
       this.sessionPlatforms.set(mintedSessionUuid, platform);
     }
+    this.clearHeldSessionLossesForSelection(mintedSessionUuid);
     if (mintedSessionUuid === this.boundSessionUuid) {
       return;
     }
@@ -8076,6 +8210,7 @@ export class DaemonMcpProxy {
   // binding is gone). A sessionless refresh re-binds the same UUID and preserves
   // its provenance (issue #5689).
   private updateBoundSessionUuid(sessionUuid: string): void {
+    this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
     // A held session that becomes the binding again keeps its idle clock: the call that named it
     // may be a read, and the daemon's echo already credited it when it was use (#11348).
     const heldLastUsedAt = this.otherHeldSessions.get(sessionUuid)?.lastUsedAt;
@@ -8578,6 +8713,7 @@ export class DaemonMcpProxy {
     this.completeDaemonShutdownDisconnect();
     this.cancelBackgroundConnectRetry();
     this.cancelConnectedFallbackReconcile();
+    this.managedConnectionRebind?.cancel();
     this.connectionCloseReject?.(new DaemonUnavailableError("MCP proxy is closing"));
     // Before the keeper stops, so the lease stays live until the release lands (#11176).
     await Promise.all([
@@ -8610,6 +8746,7 @@ export class DaemonMcpProxy {
     this.stallHandovers.clear();
     this.resumedStallNotices.clear();
     this.pendingSessionLosses.clear();
+    this.pendingHeldSessionPlatformLosses.clear();
     this.livenessHandoverListeners.clear();
     this.ownedDeviceSessions.clear();
     this.terminalBoundSession = undefined;

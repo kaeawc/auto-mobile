@@ -208,6 +208,15 @@ describe("VideoRecorderService", () => {
     );
   });
 
+  test("passes host-only force-stop options through to the capture backend", async () => {
+    const recording = await service.startRecording();
+
+    await service.forceStopRecording(recording.recordingId, { hostOnly: true });
+
+    expect(backend.forceStopCalls).toEqual([backend.startResults[0]]);
+    expect(backend.forceStopOptionsCalls).toEqual([{ hostOnly: true }]);
+  });
+
   test("warns for a missing recording file and preserves backend metadata", async () => {
     const warn = mock(() => {});
     const recorder = new VideoRecorderService({

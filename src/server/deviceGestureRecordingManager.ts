@@ -442,6 +442,7 @@ export async function stopDeviceGestureRecording(
   recordingId?: string,
   planName?: string,
   timer: Timer = deviceGestureRecordingStopTimer(),
+  options: { hostOnly?: boolean } = {},
 ): Promise<DeviceGestureRecordingStopResult> {
   if (startingRecording) {
     await startingRecording.promise;
@@ -462,7 +463,7 @@ export async function stopDeviceGestureRecording(
   }
 
   activeRecording = null;
-  const promise = stopAndBuildResult(session, planName, timer)
+  const promise = stopAndBuildResult(session, planName, timer, options)
     .then((result) => {
       retainStoppedPlan(session, result);
       return result;
@@ -490,9 +491,13 @@ interface RecorderStopOutcome {
  * collects its steps before it does any device work, so they are returned with a
  * warning whenever it can still hand them over.
  */
-async function stopRecorder(session: RecordingSession, timer: Timer): Promise<RecorderStopOutcome> {
+async function stopRecorder(
+  session: RecordingSession,
+  timer: Timer,
+  options: { hostOnly?: boolean },
+): Promise<RecorderStopOutcome> {
   try {
-    return await raceWithDeadline(() => session.recorder.stop(), {
+    return await raceWithDeadline(() => session.recorder.stop(options), {
       timer,
       timeoutMs: STOP_RECORDING_TIMEOUT_MS,
       label: "Stopping device gesture recording",
@@ -513,10 +518,12 @@ async function stopAndBuildResult(
   session: RecordingSession,
   planName: string | undefined,
   timer: Timer,
+  options: { hostOnly?: boolean },
 ): Promise<DeviceGestureRecordingStopResult> {
   const { steps, touchTrackFailure, geometryWarnings, salvagedAfter } = await stopRecorder(
     session,
     timer,
+    options,
   );
 
   const touchTrackMessage = touchTrackFailure

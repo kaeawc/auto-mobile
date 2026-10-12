@@ -104,6 +104,62 @@ describe("RegistryManagedSlotExclusion", () => {
     expect(exclusion.holderOf({ platform: "ios", stableIds: ["UDID-1"] })).toBeDefined();
   });
 
+  test("required refresh rejects a failed read, retains known devices, then recovers", async () => {
+    await assignManagedSlotDevice(registry, "ios", "UDID-1");
+    const exclusion = exclusionOver(openFake);
+    await exclusion.refresh();
+    const read = registry.snapshotManagedDevices.bind(registry);
+    registry.snapshotManagedDevices = async () => {
+      throw new Error("locked");
+    };
+    await expect(exclusion.refresh({ requireCurrent: true })).rejects.toMatchObject({
+      code: MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE,
+      retryable: true,
+    });
+    expect(exclusion.holderOf({ platform: "ios", stableIds: ["UDID-1"] })).toBeDefined();
+    registry.snapshotManagedDevices = read;
+    await assignManagedSlotDevice(registry, "ios", "UDID-2", "runner-b");
+    await exclusion.refresh({ requireCurrent: true });
+    expect(exclusion.holderOf({ platform: "ios", stableIds: ["UDID-2"] })).toBeDefined();
+  });
+
+  test("a young good snapshot satisfies a required refresh without reading", async () => {
+    const exclusion = exclusionOver(openFake);
+    await exclusion.refresh();
+    let reads = 0;
+    registry.snapshotManagedDevices = async () => {
+      reads++;
+      throw new Error("locked");
+    };
+    await exclusion.refresh({ maxAgeMs: 1_000, requireCurrent: true });
+    expect(reads).toBe(0);
+  });
+
+  test.each([false, true])(
+    "shared failed load has per-caller strictness (fresh %s)",
+    async (fresh) => {
+      const exclusion = exclusionOver(openFake);
+      await exclusion.refresh();
+      const pending =
+        Promise.withResolvers<Awaited<ReturnType<SlotRegistry["snapshotManagedDevices"]>>>();
+      let reads = 0;
+      registry.snapshotManagedDevices = () => {
+        reads++;
+        return pending.promise;
+      };
+      const tolerant = exclusion.refresh();
+      const required = exclusion.refresh({ requireCurrent: true, fresh });
+      const refused = required.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      pending.reject(new Error("locked"));
+      await tolerant;
+      expect(await refused).toBeInstanceOf(ManagedSlotDiscoveryIncompleteError);
+      expect(reads).toBe(fresh ? 2 : 1);
+    },
+  );
+
   test("maxAgeMs reuses a young snapshot; the default always re-reads", async () => {
     const exclusion = exclusionOver(openFake);
     await exclusion.refresh();

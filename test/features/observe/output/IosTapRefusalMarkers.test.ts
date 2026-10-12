@@ -5,7 +5,8 @@ import { DefaultObserveElementCollector } from "../../../../src/features/observe
 import { projectSkeleton } from "../../../../src/features/observe/output/SkeletonProjection";
 import { getSearchableEntries } from "../../../../src/features/observe/output/elementProvenance";
 import {
-  clipIosTapBoundsToScrollAncestors,
+  createIosVisibleTapContext,
+  iosVisibleTapArea,
   resolveIosOwnedTapPoint,
 } from "../../../../src/features/action/iosTapTargetOwnership";
 import { visibleTapBounds } from "../../../../src/features/utility/ElementGeometry";
@@ -63,6 +64,11 @@ const elements = collect(capture);
 const coveredElements = collect(covered);
 const partialElements = collect(partial);
 const siblingElements = collect(sibling);
+const tapContext = createIosVisibleTapContext(
+  getSearchableEntries(elements)!,
+  capture.screenSize!,
+  capture.viewHierarchy,
+);
 const unmarked = projectSkeleton(elements, capture.screenSize);
 const enabled = () => projectSkeleton(elements, capture.screenSize, undefined, { ios: true });
 function rowAt(rows: readonly SkeletonElement[], top: number): SkeletonElement | undefined {
@@ -71,9 +77,15 @@ function rowAt(rows: readonly SkeletonElement[], top: number): SkeletonElement |
 function refuses(nodes: readonly SearchableEntry[], target: SearchableEntry): boolean {
   const screenBounds = target.bounds && visibleTapBounds(target.bounds, capture.screenSize);
   if (!screenBounds) {
-    return false;
+    return true;
   }
-  const bounds = clipIosTapBoundsToScrollAncestors(nodes, target, screenBounds);
+  const bounds = iosVisibleTapArea({
+    bounds: screenBounds,
+    matched: target.element!,
+    target: target.element!,
+    nodes,
+    context: tapContext,
+  });
   if (!bounds) {
     return true;
   }

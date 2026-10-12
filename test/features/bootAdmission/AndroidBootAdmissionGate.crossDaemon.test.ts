@@ -203,6 +203,7 @@ test("8: handOff publishes serial, pid, and deadline; release removes it", async
       ownerPid: 100,
       deviceId: "emulator-5554",
       processId: 4242,
+      admittedUntilMs: 1000,
       handedOffUntilMs: 1000,
     },
   ]);
@@ -210,6 +211,106 @@ test("8: handOff publishes serial, pid, and deadline; release removes it", async
   first.release();
   first.handOff("emulator-5556", 5000);
   expect(host.records.size).toBe(0);
+});
+
+test("F1: failed release removal is retried by the owner's next capacity sample", async () => {
+  const { gates, registries, host } = setup();
+  const admission = await gates[0].admit(request);
+  registries[0].failWrites = true;
+  expect(() => admission.release()).not.toThrow();
+  expect((await gates[0].describeCapacity()).inFlight).toBe(0);
+  expect(host.records.size).toBe(1);
+  exhausted(await rejected(gates[1].admit(request)));
+  registries[0].failWrites = false;
+  await gates[0].describeCapacity();
+  expect(host.records.size).toBe(0);
+  (await gates[1].admit(request)).release();
+});
+
+test("F1: failed sample removal remains pending even when the serial disappears", async () => {
+  const { gates, registries, source, host } = setup();
+  const admission = await gates[0].admit(request);
+  admission.handOff("emulator-5554", 4242);
+  source.emulatorSerials = ["emulator-5554"];
+  registries[0].failWrites = true;
+  await gates[0].describeCapacity();
+  expect(host.records.size).toBe(1);
+  source.emulatorSerials = [];
+  registries[0].failWrites = false;
+  await gates[0].describeCapacity();
+  expect(host.records.size).toBe(0);
+  admission.release();
+  (await gates[1].admit(request)).release();
+});
+
+test("F2: lock release failure rolls back the admission before a retry", async () => {
+  const { gates, registries, host } = setup();
+  registries[0].failAfterRun = true;
+  incomplete(await rejected(gates[0].admit(request)));
+  registries[0].failAfterRun = false;
+  expect((await gates[0].describeCapacity()).inFlight).toBe(0);
+  expect(registries[1].readPeerAdmissions()).toEqual([]);
+  expect(host.records.size).toBe(0);
+  (await gates[0].admit(request)).release();
+});
+
+test("F2: rollback removal failure is retried by the next capacity sample", async () => {
+  const { gates, registries, host, source } = setup();
+  registries[0].failAfterRun = true;
+  source.onSample = () => {
+    registries[0].failWrites = true;
+  };
+  incomplete(await rejected(gates[0].admit(request)));
+  expect(host.records.size).toBe(1);
+  source.onSample = undefined;
+  registries[0].failAfterRun = false;
+  registries[0].failWrites = false;
+  expect((await gates[0].describeCapacity()).inFlight).toBe(0);
+  expect(registries[1].readPeerAdmissions()).toEqual([]);
+  (await gates[0].admit(request)).release();
+});
+
+test("F2: abort after the admit callback rolls back while preserving its reason", async () => {
+  const { gates, registries } = setup();
+  const controller = new AbortController();
+  const reason = new Error("cancel after admission");
+  const withLock = registries[0].withAdmissionLock.bind(registries[0]);
+  registries[0].withAdmissionLock = async (options, fn) => {
+    await withLock(options, fn);
+    controller.abort(reason);
+    throw reason;
+  };
+  expect(await rejected(gates[0].admit({ ...request, signal: controller.signal }))).toBe(reason);
+  registries[0].withAdmissionLock = withLock;
+  expect((await gates[0].describeCapacity()).inFlight).toBe(0);
+  expect(registries[1].readPeerAdmissions()).toEqual([]);
+  (await gates[0].admit(request)).release();
+});
+
+test("F3a: publication contains the absolute admission budget deadline", async () => {
+  const { gates, timer, host } = setup();
+  timer.setCurrentTime(1800000000000);
+  const admission = await gates[0].admit(request);
+  expect([...host.records.values()][0].admittedUntilMs).toBe(timer.now() + request.timeoutMs);
+  admission.release();
+});
+
+test("F3a: unspawned peers count only before their admission deadline", async () => {
+  const { gates, timer, host } = setup();
+  host.records.set("peer", { id: "peer", ownerPid: 200, admittedUntilMs: timer.now() + 100 });
+  exhausted(await rejected(gates[0].admit(request)));
+  timer.advanceTime(100);
+  (await gates[0].admit(request)).release();
+});
+
+test("F3a: a peer expiring during the sample is omitted from the retained pre-sample read", async () => {
+  const { gates, timer, host, source } = setup();
+  host.records.set("peer", { id: "peer", ownerPid: 200, admittedUntilMs: timer.now() + 100 });
+  source.onSample = () => {
+    timer.advanceTime(100);
+    host.records.delete("peer");
+  };
+  (await gates[0].admit(request)).release();
 });
 
 test("8: handOff and release never throw on failed registry writes", async () => {

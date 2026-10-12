@@ -65,7 +65,7 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
   private readonly hostRegistry: HostBootAdmissionRegistry | undefined;
   private readonly publications = new Map<
     PublishedBootAdmission,
-    Pick<HostBootAdmissionRecord, "deviceId" | "handedOffUntilMs">
+    Pick<HostBootAdmissionRecord, "deviceId" | "handedOffUntilMs"> & { pendingRemoval?: boolean }
   >();
   private warnedLimit: string | undefined;
   /** Serials of emulators this process launched through an admission. */
@@ -112,7 +112,7 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
         admit: () => {
           admitted = this.ledger.admit();
           try {
-            published = this.hostRegistry?.publish();
+            published = this.hostRegistry?.publish({ admittedUntilMs: deadlineMs });
             if (published) {
               this.publications.set(published, {});
             }
@@ -123,7 +123,13 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
           return admitted.release;
         },
       });
-    const result = await this.runWithHostLock(request, run);
+    const result = await this.runWithHostLock(request, run).catch((error: unknown) => {
+      // The callback may have admitted a boot before releasing the host lock failed.
+      // No caller received its handle, so roll it back even for an aborted request.
+      admitted?.release();
+      this.removePublication(published);
+      throw error;
+    });
     assertBootCapacityGranted(result, "android", "emulator");
     const ledgerAdmission = admitted;
     if (!ledgerAdmission) {
@@ -136,10 +142,7 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
       release: () => {
         released = true;
         ledgerAdmission.release();
-        this.updatePublication(published, () => published?.remove());
-        if (published) {
-          this.publications.delete(published);
-        }
+        this.removePublication(published);
         // A boot that ended before adb ever listed it never held its serial: an emulator
         // started elsewhere that takes the serial later is not ours.
         for (const serial of handedOffSerials) {
@@ -408,10 +411,10 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     listed: ReadonlySet<string>,
     processIds: ReadonlySet<number>,
   ): { count: number; withListedProcess: number; listedWithoutProcess: number } {
-    const active = peers.filter(
-      (record) =>
-        record.handedOffUntilMs === undefined || this.timer.now() < record.handedOffUntilMs,
-    );
+    const active = peers.filter((record) => {
+      const deadline = record.handedOffUntilMs ?? record.admittedUntilMs;
+      return deadline === undefined || this.timer.now() < deadline;
+    });
     const visible = (record: HostBootAdmissionRecord): boolean =>
       record.deviceId !== undefined && listed.has(record.deviceId);
     const matched = (record: HostBootAdmissionRecord): boolean =>
@@ -427,18 +430,33 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
   private updatePublication(
     publication: PublishedBootAdmission | undefined,
     write: () => void,
-  ): void {
+  ): boolean {
     if (!publication) {
-      return;
+      return false;
     }
     try {
       write();
+      return true;
     } catch (error) {
       // Exit handlers cannot throw; the retained record conservatively holds the slot for peers.
       logger.warn(
         `[BootAdmission] Host registry update/remove failed: ${errorMessage(error)}`,
         error,
       );
+      return false;
+    }
+  }
+
+  private removePublication(publication: PublishedBootAdmission | undefined): void {
+    if (!publication) {
+      return;
+    }
+    const fields = this.publications.get(publication);
+    if (fields) {
+      fields.pendingRemoval = true;
+    }
+    if (this.updatePublication(publication, () => publication.remove())) {
+      this.publications.delete(publication);
     }
   }
 
@@ -448,9 +466,8 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
         fields.deviceId !== undefined && sample.emulatorSerials.includes(fields.deviceId);
       const expired =
         fields.handedOffUntilMs !== undefined && this.timer.now() >= fields.handedOffUntilMs;
-      if (listed || expired) {
-        this.updatePublication(publication, () => publication.remove());
-        this.publications.delete(publication);
+      if (fields.pendingRemoval || listed || expired) {
+        this.removePublication(publication);
       }
     }
   }

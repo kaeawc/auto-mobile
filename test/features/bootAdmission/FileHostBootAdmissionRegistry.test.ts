@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import {
   existsSync,
   mkdtempSync,
@@ -8,22 +8,29 @@ import {
   readFileSync,
   mkdirSync,
   unlinkSync,
+  utimesSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FileHostBootAdmissionRegistry } from "../../../src/features/bootAdmission/FileHostBootAdmissionRegistry";
+import {
+  ADMISSION_LOCK_MAX_AGE_MS,
+  INVALID_ADMISSION_RECORD_MAX_AGE_MS,
+  FileHostBootAdmissionRegistry,
+} from "../../../src/features/bootAdmission/FileHostBootAdmissionRegistry";
 import { HostBootAdmissionRegistryError } from "../../../src/features/bootAdmission/HostBootAdmissionRegistry";
 import { AndroidBootAdmissionGate } from "../../../src/features/bootAdmission/AndroidBootAdmissionGate";
 import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { FakeAndroidCapacitySource } from "../../fakes/FakeAndroidCapacitySource";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { logger } from "../../../src/utils/logger";
 
 let directory: string;
 let timer: FakeTimer;
 let live: Set<number>;
 beforeEach(() => {
-  directory = mkdtempSync(join(tmpdir(), "boot-admission-test-"));
+  const root = join(process.cwd(), "scratch/lane-11369");
+  mkdirSync(root, { recursive: true });
+  directory = mkdtempSync(join(root, "boot-admission-test-"));
   timer = new FakeTimer();
   live = new Set([100, 200]);
 });
@@ -292,4 +299,160 @@ test("file-backed lock timeout becomes a typed Android discovery timeout", async
     expect(error.discoveryError?.code).toBe("timeout");
     expect(error.message).toContain(path);
   }
+});
+
+test("F3a: a live owner's unspawned record expires at its admission deadline", () => {
+  timer.setCurrentTime(1800000000000);
+  const admittedUntilMs = timer.now() + 100;
+  const admission = registry(200).publish({ admittedUntilMs });
+  const [record] = registry().readPeerAdmissions();
+  expect(record.admittedUntilMs).toBe(admittedUntilMs);
+  const path = join(directory, `${record.ownerPid}.${record.id}.json`);
+  expect(existsSync(path)).toBe(true);
+  timer.advanceTime(100);
+  expect(registry().readPeerAdmissions()).toEqual([]);
+  expect(existsSync(path)).toBe(false);
+  admission.remove();
+});
+
+test("F3b: old live-owner corrupt files are dropped while young files fail closed", () => {
+  timer.setCurrentTime(1800000000000);
+  const corrupt = join(directory, "200.corrupt.json");
+  const valid = recordFile(200, "valid");
+  writeFileSync(corrupt, "");
+  const youngMs = timer.now() - INVALID_ADMISSION_RECORD_MAX_AGE_MS + 1;
+  utimesSync(corrupt, youngMs / 1000, youngMs / 1000);
+  expect(() => registry().readPeerAdmissions()).toThrow(HostBootAdmissionRegistryError);
+  expect(existsSync(corrupt)).toBe(true);
+  const oldMs = timer.now() - INVALID_ADMISSION_RECORD_MAX_AGE_MS - 1;
+  utimesSync(corrupt, oldMs / 1000, oldMs / 1000);
+  const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
+  try {
+    expect(registry().readPeerAdmissions()).toEqual([{ id: "valid", ownerPid: 200 }]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain(corrupt);
+    expect(existsSync(corrupt)).toBe(false);
+    expect(existsSync(valid)).toBe(true);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("F3c: old live-owner locks are taken over, young locks remain held", async () => {
+  timer.setCurrentTime(1800000000000);
+  const path = join(directory, "admission.lock");
+  writeFileSync(path, "200\nold-peer-token");
+  const oldMs = timer.now() - ADMISSION_LOCK_MAX_AGE_MS - 1;
+  utimesSync(path, oldMs / 1000, oldMs / 1000);
+  let entered = 0;
+  const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
+  try {
+    const acquisition = registry().withAdmissionLock({ timeoutMs: 100 }, async () => {
+      entered++;
+      expect(readFileSync(path, "utf8")).toBe("100\nfake-1");
+    });
+    timer.advanceTime(100);
+    await acquisition;
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain(path);
+    expect(warn.mock.calls[0][0]).toContain("200");
+  } finally {
+    warn.mockRestore();
+  }
+  expect(entered).toBe(1);
+  expect(existsSync(path)).toBe(false);
+  writeFileSync(path, "200\nfresh-peer-token");
+  const youngMs = timer.now() - ADMISSION_LOCK_MAX_AGE_MS + 101;
+  utimesSync(path, youngMs / 1000, youngMs / 1000);
+  const failure = rejected(
+    registry().withAdmissionLock({ timeoutMs: 100 }, async () => {
+      entered++;
+    }),
+  );
+  timer.advanceTime(100);
+  const error = await failure;
+  expect(error).toBeInstanceOf(HostBootAdmissionRegistryError);
+  if (error instanceof HostBootAdmissionRegistryError) {
+    expect(error.code).toBe("timeout");
+  }
+  expect(entered).toBe(1);
+  expect(readFileSync(path, "utf8")).toBe("200\nfresh-peer-token");
+});
+
+test("F4: a corrupt read logs and wraps its path only once", () => {
+  timer.setCurrentTime(1800000000000);
+  const path = join(directory, "200.corrupt.json");
+  writeFileSync(path, "{broken");
+  utimesSync(path, timer.now() / 1000, timer.now() / 1000);
+  const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
+  try {
+    let failure: unknown;
+    try {
+      registry().readPeerAdmissions();
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(HostBootAdmissionRegistryError);
+    if (failure instanceof HostBootAdmissionRegistryError) {
+      expect(failure.message).toContain(path);
+      expect(failure.message.split("Host boot registry failed at")).toHaveLength(2);
+      expect(failure.message.split(path)).toHaveLength(2);
+    }
+    expect(warn).toHaveBeenCalledTimes(1);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("F4: an unreadable lock logs and wraps once through tryAcquire", async () => {
+  const path = join(directory, "admission.lock");
+  mkdirSync(path);
+  const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
+  try {
+    const failure = await rejected(
+      registry().withAdmissionLock({ timeoutMs: 100 }, async () => undefined),
+    );
+    expect(failure).toBeInstanceOf(HostBootAdmissionRegistryError);
+    if (failure instanceof HostBootAdmissionRegistryError) {
+      expect(failure.message.split("Host boot registry failed at")).toHaveLength(2);
+      expect(failure.message.split(path)).toHaveLength(2);
+    }
+    expect(warn).toHaveBeenCalledTimes(1);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("F3c: the constructor can override the stale-lock age for tests", async () => {
+  timer.setCurrentTime(1800000000000);
+  const path = join(directory, "admission.lock");
+  writeFileSync(path, "200\npeer-token");
+  const oldMs = timer.now() - 1001;
+  utimesSync(path, oldMs / 1000, oldMs / 1000);
+  const owner = new FileHostBootAdmissionRegistry({
+    directory: () => directory,
+    timer,
+    pid: 100,
+    isProcessRunning: (pid) => live.has(pid),
+    idGenerator: new FakeIdGenerator(),
+    lockMaxAgeMs: 1000,
+  });
+  let entered = false;
+  await owner.withAdmissionLock({ timeoutMs: 100 }, async () => {
+    entered = true;
+  });
+  expect(entered).toBe(true);
+  expect(existsSync(path)).toBe(false);
+});
+
+test("F3a: the hand-off deadline takes precedence over the original admission deadline", () => {
+  timer.setCurrentTime(1800000000000);
+  const path = recordFile(200, "handed-off", {
+    admittedUntilMs: timer.now() - 1,
+    handedOffUntilMs: timer.now() + 100,
+  });
+  expect(registry().readPeerAdmissions()).toHaveLength(1);
+  timer.advanceTime(100);
+  expect(registry().readPeerAdmissions()).toEqual([]);
+  expect(existsSync(path)).toBe(false);
 });

@@ -19,6 +19,7 @@ export class FakeHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
   failReads = false;
   failPublish = false;
   failWrites = false;
+  failAfterRun = false;
   lockHeldForever = false;
 
   constructor(
@@ -54,7 +55,11 @@ export class FakeHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
     options.signal?.throwIfAborted();
     this.host.locked = true;
     try {
-      return await fn();
+      const result = await fn();
+      if (this.failAfterRun) {
+        throw new HostBootAdmissionRegistryError("failed", "fake admission.lock release failed");
+      }
+      return result;
     } finally {
       this.host.locked = false;
       for (const wake of this.host.waiters) {
@@ -72,7 +77,9 @@ export class FakeHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
       .map((record) => ({ ...record }));
   }
 
-  publish(fields: Pick<HostBootAdmissionRecord, "deviceId"> = {}): PublishedBootAdmission {
+  publish(
+    fields: Pick<HostBootAdmissionRecord, "deviceId" | "admittedUntilMs"> = {},
+  ): PublishedBootAdmission {
     if (this.failPublish) {
       throw new HostBootAdmissionRegistryError("failed", "fake boot registry unwritable");
     }

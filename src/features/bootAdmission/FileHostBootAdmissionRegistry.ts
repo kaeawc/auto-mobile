@@ -1,10 +1,22 @@
-import { readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../../utils/fileLock";
+import {
+  readExclusiveLockContent,
+  releaseExclusiveLock,
+  takeOverExclusiveLock,
+  tryAcquireExclusiveLock,
+} from "../../utils/fileLock";
 import { logger } from "../../utils/logger";
 import { isProcessRunning } from "../../utils/processLiveness";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -21,8 +33,14 @@ const recordSchema = z.object({
   ownerPid: z.number().int().positive(),
   deviceId: z.string().optional(),
   processId: z.number().int().positive().optional(),
+  admittedUntilMs: z.number().finite().optional(),
   handedOffUntilMs: z.number().finite().optional(),
 });
+
+/** Final record names are atomic renames, so corrupt files cannot be writes in progress. */
+export const INVALID_ADMISSION_RECORD_MAX_AGE_MS = 10 * 60 * 1000;
+/** A legitimate lock covers just one sample, bounded to 15 seconds by the gate. */
+export const ADMISSION_LOCK_MAX_AGE_MS = 60 * 1000;
 
 export interface FileHostBootAdmissionRegistryOptions {
   directory: () => string;
@@ -30,6 +48,7 @@ export interface FileHostBootAdmissionRegistryOptions {
   pid?: number;
   isProcessRunning?: (pid: number) => boolean;
   idGenerator?: IdGenerator;
+  lockMaxAgeMs?: number;
 }
 
 /** Atomic records and the canonical exclusive lock, scoped by the caller to one host service. */
@@ -108,10 +127,42 @@ export class FileHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
       });
       if (!acquired) {
         this.checkReadableLock(path);
+        return this.takeOverStaleLock(path, token);
       }
       return acquired;
     } catch (error) {
       throw this.failed(path, error);
+    }
+  }
+
+  private takeOverStaleLock(path: string, token: string): boolean {
+    const observedOwner = readExclusiveLockContent(path);
+    if (
+      !observedOwner ||
+      !this.olderThan(path, this.options.lockMaxAgeMs ?? ADMISSION_LOCK_MAX_AGE_MS)
+    ) {
+      return false;
+    }
+    const acquired = takeOverExclusiveLock(path, observedOwner, {
+      pid: this.pid,
+      ownerToken: token,
+    });
+    if (acquired) {
+      logger.warn(
+        `[BootAdmission] Took over stale host admission lock at ${path} from PID ${observedOwner.pid}`,
+      );
+    }
+    return acquired;
+  }
+
+  private olderThan(path: string, ageMs: number): boolean {
+    try {
+      return this.timer.now() - statSync(path).mtimeMs > ageMs;
+    } catch (error) {
+      if (!this.missing(error, path)) {
+        throw this.failed(path, error);
+      }
+      return false;
     }
   }
 
@@ -173,15 +224,23 @@ export class FileHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
     try {
       const record = recordSchema.parse(JSON.parse(body));
       if (name !== `${record.ownerPid}.${record.id}.json`) {
-        throw new HostBootAdmissionRegistryError(
-          "failed",
-          `Mismatched admission record at ${path}`,
-        );
+        throw new Error("Mismatched admission record identity");
       }
       return record;
     } catch (error) {
-      if (!Number.isInteger(ownerPid) || ownerPid <= 0 || this.running(ownerPid)) {
+      if (!Number.isInteger(ownerPid) || ownerPid <= 0) {
         throw this.failed(path, error);
+      }
+      if (this.running(ownerPid)) {
+        if (!this.olderThan(path, INVALID_ADMISSION_RECORD_MAX_AGE_MS)) {
+          throw this.failed(path, error);
+        }
+        logger.warn(
+          `[BootAdmission] Dropping old invalid record at ${path} from PID ${ownerPid}: ${errorMessage(error)}`,
+          error,
+        );
+        this.cleanup(path);
+        return undefined;
       }
       // A dead owner cannot be filling this corrupt record; no valid boot can be recovered from it.
       logger.debug(
@@ -193,12 +252,18 @@ export class FileHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
   }
 
   private isStale(record: HostBootAdmissionRecord): boolean {
-    return record.handedOffUntilMs === undefined
-      ? !this.running(record.ownerPid)
-      : this.timer.now() >= record.handedOffUntilMs;
+    if (record.handedOffUntilMs !== undefined) {
+      return this.timer.now() >= record.handedOffUntilMs;
+    }
+    return (
+      !this.running(record.ownerPid) ||
+      (record.admittedUntilMs !== undefined && this.timer.now() >= record.admittedUntilMs)
+    );
   }
 
-  publish(fields: Pick<HostBootAdmissionRecord, "deviceId"> = {}): PublishedBootAdmission {
+  publish(
+    fields: Pick<HostBootAdmissionRecord, "deviceId" | "admittedUntilMs"> = {},
+  ): PublishedBootAdmission {
     let record: HostBootAdmissionRecord = { id: this.ids.next(), ownerPid: this.pid, ...fields };
     this.write(record);
     let removed = false;
@@ -280,6 +345,9 @@ export class FileHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
   }
 
   private failed(path: string, error: unknown): HostBootAdmissionRegistryError {
+    if (error instanceof HostBootAdmissionRegistryError) {
+      return error;
+    }
     logger.warn(`[BootAdmission] Host registry failed at ${path}: ${errorMessage(error)}`, error);
     return new HostBootAdmissionRegistryError(
       "failed",

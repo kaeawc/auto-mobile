@@ -6,6 +6,8 @@ export interface HostBootAdmissionRecord {
   ownerPid: number;
   deviceId?: string;
   processId?: number;
+  /** Absolute boot-budget deadline, including the period before hand-off. Absent on legacy records. */
+  admittedUntilMs?: number;
   handedOffUntilMs?: number;
 }
 
@@ -27,7 +29,9 @@ export interface HostBootAdmissionRegistry {
   /** Other processes only. Throws if the shared view is unreadable. */
   readPeerAdmissions(): HostBootAdmissionRecord[];
   /** Publishes this process's admission. Throws if the shared view is unwritable. */
-  publish(fields?: Pick<HostBootAdmissionRecord, "deviceId">): PublishedBootAdmission;
+  publish(
+    fields?: Pick<HostBootAdmissionRecord, "deviceId" | "admittedUntilMs">,
+  ): PublishedBootAdmission;
 }
 
 /** Platform-neutral failure; the consuming gate maps it to its discovery error. */

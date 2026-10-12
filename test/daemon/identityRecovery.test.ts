@@ -31,6 +31,7 @@ import { executionTracker } from "../../src/server/executionTracker";
 import { ActionableError } from "../../src/models";
 import type { DaemonStatus, PidFileData, DaemonSocketPaths } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { formatLockContent, parseLockContent } from "../../src/utils/fileLock";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { getCurrentBuildIdentity } from "../../src/daemon/buildIdentity";
 import { DAEMON_STARTUP_TIMEOUT_MS, DAEMON_VERSION } from "../../src/daemon/constants";
@@ -476,15 +477,40 @@ describe("provider-owned identity recovery", () => {
     },
   );
 
-  test("safe owned startup lock writes the recovery marker preserving PID and token", () => {
+  test("safe owned startup lock writes the recovery marker preserving PID, token, and generation", () => {
     const dir = scratchDir("identity-safe-marker-");
     const h = harness({ accepted: true }, join(dir, "lock"));
     try {
       expect(h.manager.acquireLock()).toBe(true);
+      const path = join(dir, "lock");
+      const { pid, token } = parseLockContent(readFileSync(path, "utf8").trim());
+      const generation = "linux:boot:123";
+      const oldBody = formatLockContent(
+        pid,
+        token,
+        JSON.stringify({ logPath: "", extra: "x".repeat(200) }),
+        generation,
+      );
+      writeFileSync(path, oldBody);
       const before = (h.manager as any).readStartupLockHolder();
-      expect(before.recovering).toBeUndefined();
+      expect(before.recovering).toBe(false);
       (h.manager as any).markStartupLockRecovering();
       expect((h.manager as any).readStartupLockHolder()).toEqual({ ...before, recovering: true });
+      const body = readFileSync(path, "utf8");
+      expect(body).toBe(
+        formatLockContent(
+          pid,
+          token,
+          JSON.stringify({ logPath: "", recovering: true }),
+          generation,
+        ).padEnd(Buffer.byteLength(oldBody)),
+      );
+      expect(parseLockContent(body.trim())).toEqual({
+        pid,
+        token,
+        metadata: JSON.stringify({ logPath: "", recovering: true }),
+        generation,
+      });
     } finally {
       h.manager.releaseLock();
     }

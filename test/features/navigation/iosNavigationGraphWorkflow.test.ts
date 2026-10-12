@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { getDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import {
   DefaultIosSdkEventIngestor,
@@ -36,6 +37,7 @@ describe("iOS navigation-event graph workflow", () => {
   });
 
   test("ingests SDK events, reports the learned graph, and replays its iOS path", async () => {
+    const sharedInFlight = getDbWriteBarrier().inFlightCount();
     const graph = new FakeNavigationGraphManager();
     const ingestor = new DefaultIosSdkEventIngestor({
       deviceId: iOSDevice.deviceId,
@@ -59,6 +61,8 @@ describe("iOS navigation-event graph workflow", () => {
       navigationEvent("Settings"),
       "dev.jasonpearson.automobile.Playground",
     );
+
+    expect(getDbWriteBarrier().inFlightCount()).toBe(sharedInFlight);
 
     const graphReport = await graph.exportGraph();
     expect(graphReport.nodes.map((node) => node.screenName)).toEqual(["Home", "Settings"]);

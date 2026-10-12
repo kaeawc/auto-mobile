@@ -12,6 +12,10 @@ import {
   type DriveStep,
 } from "../../scripts/mcp-drive";
 
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
+
 function envelope(payload: Record<string, unknown>, isError = false): unknown {
   return {
     content: [{ type: "text", text: JSON.stringify(payload) }],

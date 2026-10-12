@@ -37,6 +37,10 @@ class FakeDatabaseHealthProbe {
     this.error = error;
   }
 
+  succeed(): void {
+    this.error = null;
+  }
+
   async check(): Promise<void> {
     this.checkCalls += 1;
     if (this.error) {
@@ -136,6 +140,62 @@ describe("Daemon database health check", () => {
     }
 
     expect(exitCodes).toEqual([1]);
+  });
+
+  test("passes the last database probe failure to exit recovery", async () => {
+    const timer = new FakeTimer();
+    const databaseHealthProbe = new FakeDatabaseHealthProbe();
+    databaseHealthProbe.failWith(new Error("SQLITE_BUSY: database is locked"));
+    const recoveryCalls: Array<{ code: number; detail?: string }> = [];
+    const daemon = buildDaemon(timer, databaseHealthProbe, (code: number, detail?: string) => {
+      recoveryCalls.push({ code, detail });
+    });
+    const internals = daemon as unknown as DaemonHealthInternals;
+    cleanup = { internals, timer };
+
+    internals.httpServer = { listening: true };
+    internals.socketServer = { isListening: () => true };
+    internals.startHealthCheckTimer();
+
+    for (let i = 0; i < MAX_FAILED_CHECKS; i += 1) {
+      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+    }
+
+    expect(recoveryCalls).toEqual([
+      { code: 1, detail: expect.stringContaining("SQLITE_BUSY: database is locked") },
+    ]);
+  });
+
+  test("clears the previous database probe failure after a passing probe", async () => {
+    const timer = new FakeTimer();
+    const databaseHealthProbe = new FakeDatabaseHealthProbe();
+    databaseHealthProbe.failWith(new Error("first failure"));
+    const recoveryCalls: Array<{ code: number; detail?: string }> = [];
+    const daemon = buildDaemon(timer, databaseHealthProbe, (code: number, detail?: string) => {
+      recoveryCalls.push({ code, detail });
+    });
+    const internals = daemon as unknown as DaemonHealthInternals;
+    cleanup = { internals, timer };
+
+    internals.httpServer = { listening: true };
+    internals.socketServer = { isListening: () => true };
+    internals.startHealthCheckTimer();
+
+    for (let i = 0; i < MAX_FAILED_CHECKS - 1; i += 1) {
+      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+    }
+
+    databaseHealthProbe.succeed();
+    await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+
+    databaseHealthProbe.failWith(new Error("second failure"));
+    for (let i = 0; i < MAX_FAILED_CHECKS; i += 1) {
+      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+    }
+
+    expect(databaseHealthProbe.checkCalls).toBe(6);
+    expect(recoveryCalls).toEqual([{ code: 1, detail: expect.stringContaining("second failure") }]);
+    expect(recoveryCalls[0]!.detail).not.toContain("first failure");
   });
 
   test("awaits asynchronous database recovery before completing recovery", async () => {

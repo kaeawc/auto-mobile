@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 extension CommandHandler {
     // MARK: - View Hierarchy
@@ -237,9 +238,15 @@ extension CommandHandler {
     }
 
     private func currentFrameContext() async -> String? {
-        guard let hierarchy = try? await captureHierarchy() else {
+        do {
+            let hierarchy = try await captureHierarchy()
+            return frameContext.context(for: enrichWithCachedSdkHierarchy(hierarchy))
+        } catch {
+            Logger(subsystem: "dev.jasonpearson.automobile", category: "CommandHandler")
+                .warning(
+                    "Could not capture the view hierarchy for screenshot frame correlation: \(WireError.message(for: error), privacy: .public)"
+                )
             return nil
         }
-        return frameContext.context(for: enrichWithCachedSdkHierarchy(hierarchy))
     }
 }

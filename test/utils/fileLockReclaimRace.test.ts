@@ -22,6 +22,131 @@ const NOW = 20_000;
 const OLD = "99\nstale\n\nold-generation";
 type Steps<T> = Generator<LockStep, T, void>;
 
+test("B1: a guard whose content write fails is removed and the acquire returns false", () => {
+  const f = fixture("99");
+  f.fs.linkError = "ENOTSUP";
+  f.fs.writeError = "ENOSPC";
+  const original = f.fs.stat(PATH);
+  const guard = `${prefix(f.fs)}.0`;
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    expect(tryAcquireExclusiveLock(PATH, f.options(101))).toBe(false);
+    expect(f.fs.readText(PATH)).toBe("99");
+    expect(f.fs.stat(PATH)).toEqual(original);
+    expect(f.fs.operations.some((step) => step.op === "rename")).toBe(false);
+    expect(f.fs.paths()).toEqual([PATH]);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(`${guard}: ENOSPC`),
+      expect.anything(),
+    );
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test.each([true, false])(
+  "B1: seventeen disk-full attempts spaced past the abandon age do not exhaust the chain (atomic write failure: %s)",
+  (atomicFailure) => {
+    const f = fixture("99");
+    f.fs.linkError = "ENOTSUP";
+    f.fs.writeError = "ENOSPC";
+    f.fs.writeFileError = atomicFailure ? "ENOSPC" : undefined;
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      for (let attempt = 0; attempt < 17; attempt++) {
+        expect(tryAcquireExclusiveLock(PATH, f.options(101))).toBe(false);
+        expect(f.fs.paths()).toEqual([PATH]);
+        expect(f.fs.readText(PATH)).toBe("99");
+        f.clock.advanceTime(RECLAIM_GUARD_ABANDON_AGE_MS + 1);
+      }
+      f.fs.writeError = undefined;
+      f.fs.writeFileError = undefined;
+      expect(tryAcquireExclusiveLock(PATH, f.options(101))).toBe(true);
+      exactHolder(f.fs, 101);
+      expect(f.fs.paths()).toEqual([PATH]);
+    } finally {
+      warn.mockRestore();
+    }
+  },
+);
+
+test.each([
+  ["openError", "EACCES"],
+  ["openError", "EROFS"],
+  ["writeError", "EIO"],
+  ["closeError", "ENOSPC"],
+  ["closeError", "EIO"],
+  ["closeError", "EEXIST"],
+] as const)("guard creation: %s %s backs off without touching the lock", (operation, code) => {
+  const f = fixture("99");
+  f.fs.linkError = "ENOTSUP";
+  f.fs[operation] = code;
+  const guard = `${prefix(f.fs)}.0`;
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    const racer = f.acquire(101);
+    if (operation === "writeError" || operation === "closeError") {
+      racer.until((step) => step.op === "unlink" && step.path === guard);
+      expect(f.fs.exists(guard)).toBe(true); // Cleanup yields before unlinking our guard.
+    }
+    expect(racer.finish()).toBe(false);
+    expect(f.fs.paths()).toEqual([PATH]);
+    expect(f.fs.readText(PATH)).toBe("99");
+    expect(racer.trace.some((step) => step.op === "rename")).toBe(false);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(`${guard}: ${code}`),
+      expect.anything(),
+    );
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("guard creation: atomic writeFile EIO falls back to legacy creation without litter", () => {
+  const f = fixture("99");
+  f.fs.writeFileError = "EIO";
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    expect(f.acquire(101).finish()).toBe(true);
+    exactHolder(f.fs, 101);
+    expect(f.fs.paths()).toEqual([PATH]);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Atomic lock publication failed"),
+      expect.anything(),
+    );
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test.each(["EACCES", "EROFS"])(
+  "B2: a directory that refuses guard creation reads as held, not as an error (%s)",
+  (code) => {
+    const f = fixture("99");
+    f.fs.writeFileError = code;
+    f.fs.openError = code;
+    const original = f.fs.stat(PATH);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(tryAcquireExclusiveLock(PATH, f.options(101))).toBe(false);
+      expect(takeOverExclusiveLock(PATH, { pid: 99, token: undefined }, f.options(101))).toBe(
+        false,
+      );
+      expect(f.fs.readText(PATH)).toBe("99");
+      expect(f.fs.stat(PATH)).toEqual(original);
+      expect(f.fs.operations.some((step) => step.op === "rename")).toBe(false);
+      expect(f.fs.paths()).toEqual([PATH]);
+      f.fs.unlink(PATH);
+      expect(() => tryAcquireExclusiveLock(PATH, f.options(101))).toThrow(
+        "Failed to create exclusive lock file",
+      );
+      expect(f.fs.paths()).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  },
+);
+
 /** A pending descriptor names the operation the NEXT advance will execute. */
 class Racer<T> {
   pending: IteratorResult<LockStep, T>;
@@ -356,46 +481,49 @@ test("R1 defence in depth: late legacy fd write before rename is restored withou
   expect(fs.paths()).toEqual([PATH]);
 });
 
-test("fallback ENOTSUP: wx acquire succeeds, genuine create error throws, guard fallback reclaims exclusively", () => {
-  const f = fixture();
-  f.fs.unlink(PATH);
-  f.fs.linkError = "ENOTSUP";
-  const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  try {
-    expect(f.acquire(101).finish()).toBe(true);
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(f.fs.paths()).toEqual([PATH]);
+test.each(["ENOTSUP", "EPERM", "ENOSYS", "EIO"])(
+  "fallback %s: wx acquire succeeds, genuine create error throws, guard fallback reclaims exclusively",
+  (code) => {
+    const f = fixture();
     f.fs.unlink(PATH);
-    f.fs.openError = "EACCES";
-    expect(() => f.acquire(101).finish()).toThrow("Failed to create exclusive lock file");
-    expect(f.fs.paths()).toEqual([]);
-    f.fs.openError = undefined;
-    f.fs.seed(PATH, OLD);
-    expect(f.acquire(303).finish()).toBe(true);
-    exactHolder(f.fs, 303);
-    expect(f.fs.paths()).toEqual([PATH]);
-    f.fs.seed(PATH, OLD);
-    const racer = f.acquire(303);
-    const guard = `${prefix(f.fs)}.0`;
-    racer.until((step) => step.op === "stat" && step.path === PATH && f.fs.exists(guard));
-    expect(f.acquire(202).finish()).toBe(false);
-    expect(f.fs.readText(PATH)).toBe(OLD);
-    expect(racer.finish()).toBe(true);
-    expect(racer.trace.some((step) => step.op === "openExclusive" && step.path === guard)).toBe(
-      true,
-    );
-    expect(racer.trace.some((step) => step.op === "write")).toBe(true);
-    expect(racer.trace.some((step) => step.op === "close")).toBe(true);
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("Atomic lock publication failed"),
-      expect.anything(),
-    );
-    exactHolder(f.fs, 303);
-    expect(f.fs.paths()).toEqual([PATH]);
-  } finally {
-    warn.mockRestore();
-  }
-});
+    f.fs.linkError = code;
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(f.acquire(101).finish()).toBe(true);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(f.fs.paths()).toEqual([PATH]);
+      f.fs.unlink(PATH);
+      f.fs.openError = "EACCES";
+      expect(() => f.acquire(101).finish()).toThrow("Failed to create exclusive lock file");
+      expect(f.fs.paths()).toEqual([]);
+      f.fs.openError = undefined;
+      f.fs.seed(PATH, OLD);
+      expect(f.acquire(303).finish()).toBe(true);
+      exactHolder(f.fs, 303);
+      expect(f.fs.paths()).toEqual([PATH]);
+      f.fs.seed(PATH, OLD);
+      const racer = f.acquire(303);
+      const guard = `${prefix(f.fs)}.0`;
+      racer.until((step) => step.op === "stat" && step.path === PATH && f.fs.exists(guard));
+      expect(f.acquire(202).finish()).toBe(false);
+      expect(f.fs.readText(PATH)).toBe(OLD);
+      expect(racer.finish()).toBe(true);
+      expect(racer.trace.some((step) => step.op === "openExclusive" && step.path === guard)).toBe(
+        true,
+      );
+      expect(racer.trace.some((step) => step.op === "write")).toBe(true);
+      expect(racer.trace.some((step) => step.op === "close")).toBe(true);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Atomic lock publication failed"),
+        expect.anything(),
+      );
+      exactHolder(f.fs, 303);
+      expect(f.fs.paths()).toEqual([PATH]);
+    } finally {
+      warn.mockRestore();
+    }
+  },
+);
 
 interface Actor {
   pid: number;

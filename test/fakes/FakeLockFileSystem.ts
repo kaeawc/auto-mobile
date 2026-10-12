@@ -17,6 +17,9 @@ export class FakeLockFileSystem implements LockFileSystem {
   readonly operations: { op: keyof LockFileSystem; path: string }[] = [];
   linkError?: string;
   openError?: string;
+  writeError?: string;
+  writeFileError?: string;
+  closeError?: string;
 
   constructor(private readonly now: () => number = () => 0) {}
 
@@ -82,6 +85,9 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   openExclusive(path: string): number {
     this.record("openExclusive", path);
+    if (this.files.has(path)) {
+      throw this.error("EEXIST", path);
+    }
     if (this.openError) {
       throw this.error(this.openError, path);
     }
@@ -93,6 +99,9 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   write(fd: number, content: string): void {
     this.record("write", String(fd));
+    if (this.writeError) {
+      throw this.error(this.writeError, String(fd));
+    }
     const node = this.descriptors.get(fd);
     if (!node) {
       throw this.error("EBADF", String(fd));
@@ -106,10 +115,16 @@ export class FakeLockFileSystem implements LockFileSystem {
     if (!this.descriptors.delete(fd)) {
       throw this.error("EBADF", String(fd));
     }
+    if (this.closeError) {
+      throw this.error(this.closeError, String(fd));
+    }
   }
 
   writeFile(path: string, content: string): void {
     this.record("writeFile", path);
+    if (this.writeFileError) {
+      throw this.error(this.writeFileError, path);
+    }
     if (this.files.has(path)) {
       this.update(path, content);
     } else {

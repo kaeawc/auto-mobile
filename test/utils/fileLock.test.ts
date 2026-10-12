@@ -15,6 +15,7 @@ import {
 } from "../../src/utils/fileLock";
 import { FakeLockOwnerGenerationProbe } from "../fakes/FakeLockOwnerGenerationProbe";
 import { logger } from "../../src/utils/logger";
+import { nodeLockFileSystem } from "../../src/utils/lockFileSystem";
 
 describe("fileLock primitive", () => {
   let dir: string;
@@ -27,6 +28,13 @@ describe("fileLock primitive", () => {
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("the node lock filesystem overwrites a leftover private publication file", () => {
+    const path = join(dir, "leftover.tmp");
+    writeFileSync(path, "leftover-private-publication-content");
+    nodeLockFileSystem.writeFile(path, "100");
+    expect(readFileSync(path, "utf8")).toBe("100");
   });
 
   describe("OS generation ownership (#11812)", () => {

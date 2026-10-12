@@ -327,12 +327,12 @@ function* claimReclaimGuard(
   const content = formatLockContent(pid, options.ownerToken, undefined, generation);
   for (let k = 0; k < 16; k++) {
     const path = `${prefix}.${k}`;
-    const published = yield* publishFile(path, content, pid, fileSystem);
-    if (
-      published === "created" ||
-      (published === "unsupported" && (yield* writeLegacyLock(path, content, fileSystem)))
-    ) {
+    const published = yield* publishReclaimGuard(path, content, pid, fileSystem);
+    if (published === "created") {
       return k;
+    }
+    if (published === "failed") {
+      return undefined;
     }
     const guard = yield* sampleLock(path, fileSystem);
     if (guard === undefined || isGuardLive(guard, options)) {
@@ -663,7 +663,7 @@ function isOwnLockContent(
   return ownerToken === undefined || content.token === undefined || content.token === ownerToken;
 }
 
-type Publication = "created" | "contended" | "unsupported";
+type Publication = "created" | "contended" | { error: unknown };
 let publicationCounter = 0;
 
 /** One publication protocol for locks and guards: complete private bytes, then exclusive link. */
@@ -689,7 +689,7 @@ function* publishFile(
       return "contended";
     }
     logger.warn(`Atomic lock publication failed at ${path}: ${errorMessage(error)}`, error);
-    return "unsupported";
+    return { error };
   } finally {
     yield* cleanupFile(tmp, fileSystem);
   }
@@ -707,13 +707,58 @@ function* writeExclusiveLockFile(
     const generation = captureLockOwnerGeneration(options.ownerGeneration, pid);
     const content = formatLockContent(pid, options.ownerToken, options.metadata, generation);
     const publication = yield* publishFile(path, content, pid, fileSystem);
-    if (publication !== "unsupported") {
+    if (typeof publication === "string") {
       return { acquired: publication === "created", generation };
     }
     return { acquired: yield* writeLegacyLock(path, content, fileSystem), generation };
   } catch (error) {
     // Genuine IO failures are not contention (#3623).
     throw toActionableError(error, `Failed to create exclusive lock file at ${path}`);
+  }
+}
+
+function* publishReclaimGuard(
+  path: string,
+  content: string,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<"created" | "contended" | "failed"> {
+  const publication = yield* publishFile(path, content, pid, fileSystem);
+  if (typeof publication === "string") {
+    return publication;
+  }
+  return yield* writeLegacyReclaimGuard(path, content, fileSystem);
+}
+
+function* writeLegacyReclaimGuard(
+  path: string,
+  content: string,
+  fileSystem: LockFileSystem,
+): Steps<"created" | "contended" | "failed"> {
+  let fd: number | undefined;
+  try {
+    yield { op: "openExclusive", path };
+    fd = fileSystem.openExclusive(path);
+    try {
+      yield { op: "write", path };
+      fileSystem.write(fd, content);
+    } finally {
+      yield { op: "close", path };
+      fileSystem.close(fd);
+    }
+    return "created";
+  } catch (error) {
+    if (fd === undefined && (error as NodeJS.ErrnoException).code === "EEXIST") {
+      // Exclusive-open contention leaves the existing guard for inspection.
+      logger.debug(`Reclaim guard already held at ${path}: ${errorMessage(error)}`);
+      return "contended";
+    }
+    logger.warn(`Reclaim guard creation failed at ${path}: ${errorMessage(error)}`, error);
+    if (fd !== undefined) {
+      // Only our successful exclusive open proves this guard is ours to remove.
+      yield* cleanupFile(path, fileSystem);
+    }
+    return "failed";
   }
 }
 

@@ -10,7 +10,11 @@ import {
   type Session,
 } from "./sessionManager";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { judgedLeaseHeartbeat, suspectGraceMsFor } from "./livenessOwnerLease";
+import {
+  judgedLeaseHeartbeat,
+  suspectGraceMsFor,
+  heartbeatLeasePastGrace,
+} from "./livenessOwnerLease";
 import { sessionIdleDeadline } from "./sessionClocks";
 import {
   UNSETTLED_EXECUTION_VETO_CEILING_MS,
@@ -734,7 +738,7 @@ export class SessionHeartbeatMonitor {
 
     // Past the lease the session is suspect, not released: it is held for the
     // grace window with its device reserved so the owner can restore it (#10051).
-    return now - lastHeartbeat > timeoutMs + suspectGraceMsFor(session)
+    return heartbeatLeasePastGrace(now, lastHeartbeat, timeoutMs, suspectGraceMsFor(session))
       ? "heartbeat-timeout"
       : undefined;
   }

@@ -30379,6 +30379,13 @@
           "description": "Total attempts",
           "type": "number"
         },
+        "warnings": {
+          "description": "Field operation warnings",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "error": {
           "description": "Error message",
           "type": "string"

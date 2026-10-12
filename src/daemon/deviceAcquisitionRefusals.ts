@@ -67,10 +67,20 @@ export function freshStartAlreadyBoundError(
   deviceId: string,
   holderSessionId: string,
   holderAwaitingOwner: boolean,
+  retryAfterMs?: number,
 ): InputDeviceOwnedError {
   // Typed device_owned_by_other_session (#11351): clients branch on the code, not this wording.
   const refusal = (message: string) =>
-    new InputDeviceOwnedError("startDevice", deviceId, undefined, undefined, message);
+    new InputDeviceOwnedError(
+      "startDevice",
+      deviceId,
+      undefined,
+      undefined,
+      retryAfterMs === undefined
+        ? message
+        : `${message}${message.endsWith(".") ? "" : "."} The holder is being released; retry in about ${retryAfterMs}ms.`,
+      retryAfterMs,
+    );
   if (holderAwaitingOwner) {
     return refusal(
       `Device '${deviceId}' is reserved for session ${holderSessionId}, which the daemon restored ` +

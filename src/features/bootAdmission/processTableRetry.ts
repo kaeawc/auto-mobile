@@ -10,7 +10,9 @@ import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { readHostProcessTable } from "../iosSimFleet/FleetHostSource";
-import type { HostProcessRow } from "../iosSimFleet/types";
+import { wrapCommandError } from "../../utils/CommandError";
+import { PS_SNAPSHOT_ARGS } from "../iosSimFleet/psSnapshot";
+import { readProcProcessTable, type AndroidProcessRow, type ProcFs } from "./procProcessTable";
 
 export type ProcessTableFailureReason =
   | "timeout"
@@ -42,10 +44,12 @@ export interface ProcessTableReadOptions {
   backoff?: BackoffInput;
   budgetMs?: number;
   processTableSupported?: boolean;
+  procFs?: ProcFs;
+  exitDeterministicAfterSamples?: number;
 }
 
 interface ProcessTableResult {
-  value?: HostProcessRow[];
+  value?: AndroidProcessRow[];
   error?: string;
   failure?: ProcessTableFailure;
 }
@@ -70,6 +74,7 @@ const TRANSIENT_REASONS = new Set<ProcessTableFailureReason>([
 const DENIED = /operation not permitted|permission denied/i;
 const USAGE_ERROR = /illegal option|invalid option|unrecognized option|usage:/i;
 const MIN_RETRY_TIMEOUT_MS = 250;
+export const DEFAULT_EXIT_DETERMINISTIC_AFTER_SAMPLES = 3;
 
 function stderrText(stderr: unknown): string {
   return Buffer.isBuffer(stderr) ? stderr.toString() : typeof stderr === "string" ? stderr : "";
@@ -110,7 +115,7 @@ function rawFailureReason(error: object): ProcessTableFailureReason {
   if ("signal" in error && typeof error.signal === "string") {
     return signalFailureReason(error, error.signal, code);
   }
-  return errorMessage(error).startsWith("ps returned no parseable processes")
+  return /^(?:ps|\/proc) returned no parseable processes/.test(errorMessage(error))
     ? "unparseable"
     : "unknown";
 }
@@ -172,6 +177,13 @@ export class ProcessTableReader {
   private readonly budgetMs: number;
   private readonly supported: boolean;
   private readonly warnedReasons = new Set<ProcessTableFailureReason>();
+  private readonly warnedProcReasons = new Set<ProcessTableFailureReason>();
+
+  private readonly procFs: ProcFs | undefined;
+  private readonly exitDeterministicAfterSamples: number;
+  private consecutiveExitSamples = 0;
+  private exitLatched = false;
+  private procLatched = false;
 
   constructor(
     private readonly executor: HostCommandExecutor,
@@ -185,9 +197,26 @@ export class ProcessTableReader {
     );
     this.budgetMs = options.budgetMs ?? 9_000;
     this.supported = options.processTableSupported ?? true;
+    this.procFs = options.procFs;
+    this.exitDeterministicAfterSamples =
+      options.exitDeterministicAfterSamples ?? DEFAULT_EXIT_DETERMINISTIC_AFTER_SAMPLES;
   }
 
   async read(options: { signal?: AbortSignal; deadlineMs?: number }): Promise<ProcessTableResult> {
+    try {
+      return await this.readSupported(options);
+    } catch (error) {
+      this.consecutiveExitSamples = 0;
+      // An aborted read breaks the consecutive-sample sequence; preserve its raw reason.
+      logger.debug(`[BootAdmission] process table read cancelled: ${errorMessage(error)}`);
+      throw error;
+    }
+  }
+
+  private async readSupported(options: {
+    signal?: AbortSignal;
+    deadlineMs?: number;
+  }): Promise<ProcessTableResult> {
     options.signal?.throwIfAborted();
     if (!this.supported) {
       return this.failed({
@@ -198,6 +227,16 @@ export class ProcessTableReader {
       });
     }
     const endMs = options.deadlineMs ?? this.timer.now() + this.budgetMs;
+    if (this.procLatched) {
+      return this.readProc(options, endMs);
+    }
+    return this.readPs(options, endMs);
+  }
+
+  private async readPs(
+    options: { signal?: AbortSignal },
+    endMs: number,
+  ): Promise<ProcessTableResult> {
     let retriedReason: ProcessTableFailureReason | undefined;
     for (let attempts = 1; ; attempts++) {
       options.signal?.throwIfAborted();
@@ -207,10 +246,13 @@ export class ProcessTableReader {
           ? this.attemptTimeoutMs
           : Math.min(this.attemptTimeoutMs, endMs - this.timer.now());
       try {
-        const value = await readHostProcessTable(this.executor, {
-          signal: options.signal,
+        const value = await this.attempt(
+          (signal) => readHostProcessTable(this.executor, { signal, timeoutMs }),
           timeoutMs,
-        });
+          options.signal,
+          "ps",
+        );
+        this.resetExitLatch();
         if (retriedReason) {
           logger.info(
             `[BootAdmission] emulator process snapshot succeeded on attempt ${attempts} after ${retriedReason}`,
@@ -220,7 +262,7 @@ export class ProcessTableReader {
       } catch (error) {
         options.signal?.throwIfAborted();
         const { reason, detail } = classifyFailure(error, timeoutMs);
-        const transient = TRANSIENT_REASONS.has(reason);
+        const transient = TRANSIENT_REASONS.has(reason) && !(reason === "exit" && this.exitLatched);
         const failure = {
           reason,
           transient,
@@ -229,19 +271,124 @@ export class ProcessTableReader {
         };
         const delay = this.retryDelay(failure, endMs);
         if (delay === undefined) {
-          return this.failed(failure, errorMessage(error));
+          return this.finishPsFailure(failure, error, options, endMs);
         }
         retriedReason = reason;
-        // Only sleep is raced, so an aborted waiter never starts another ps in the background.
+        // An aborted backoff never starts another ps in the background.
         await raceWithDeadline(() => this.timer.sleep(delay), {
           timer: this.timer,
           signal: options.signal,
           label: "Android process table retry backoff",
         });
         if (endMs - this.timer.now() < MIN_RETRY_TIMEOUT_MS) {
-          return this.failed(failure, errorMessage(error));
+          return this.finishPsFailure(failure, error, options, endMs);
         }
       }
+    }
+  }
+
+  private async attempt(
+    read: (signal: AbortSignal) => Promise<AndroidProcessRow[]>,
+    timeoutMs: number,
+    callerSignal: AbortSignal | undefined,
+    label: "ps" | "/proc",
+  ): Promise<AndroidProcessRow[]> {
+    const controller = new AbortController();
+    const signal = callerSignal
+      ? AbortSignal.any([callerSignal, controller.signal])
+      : controller.signal;
+    return raceWithDeadline(() => read(signal), {
+      timer: this.timer,
+      timeoutMs,
+      signal: callerSignal,
+      label: `Android ${label} process table`,
+      timeoutError: () => {
+        const error = Object.assign(new Error(`timed out after ${timeoutMs}ms`), {
+          killed: true,
+          signal: "SIGTERM",
+          code: null,
+        });
+        return label === "ps"
+          ? wrapCommandError(error, { command: "ps", args: PS_SNAPSHOT_ARGS })
+          : error;
+      },
+      onTimeout: () => controller.abort(),
+    });
+  }
+
+  private resetExitLatch(): void {
+    this.consecutiveExitSamples = 0;
+    this.exitLatched = false;
+    this.warnedReasons.delete("exit");
+  }
+
+  private recordPsFailure(failure: ProcessTableFailure): void {
+    if (failure.reason !== "exit") {
+      this.consecutiveExitSamples = 0;
+      return;
+    }
+    if (this.exitLatched) {
+      return;
+    }
+    this.consecutiveExitSamples += 1;
+    if (this.consecutiveExitSamples < this.exitDeterministicAfterSamples) {
+      return;
+    }
+    this.exitLatched = true;
+    this.warnedReasons.add("exit");
+    logger.warn(
+      `[BootAdmission] ps exit repeated for ${this.consecutiveExitSamples} exhausted samples; retries stop until ps succeeds: ${failure.detail}`,
+    );
+  }
+
+  private finishPsFailure(
+    failure: ProcessTableFailure,
+    error: unknown,
+    options: { signal?: AbortSignal },
+    endMs: number,
+  ): Promise<ProcessTableResult> | ProcessTableResult {
+    this.recordPsFailure(failure);
+    if (!failure.transient && this.procFs) {
+      return this.readProc(options, endMs, failure);
+    }
+    return this.failed(failure, errorMessage(error));
+  }
+
+  private async readProc(
+    options: { signal?: AbortSignal },
+    endMs: number,
+    psFailure?: ProcessTableFailure,
+  ): Promise<ProcessTableResult> {
+    const timeoutMs = Math.max(0, Math.min(this.attemptTimeoutMs, endMs - this.timer.now()));
+    try {
+      const value = await this.attempt(
+        (signal) => readProcProcessTable(this.procFs!, { signal }),
+        timeoutMs,
+        options.signal,
+        "/proc",
+      );
+      if (!this.procLatched) {
+        logger.info(
+          `[BootAdmission] ps unavailable (${psFailure?.reason}: ${psFailure?.detail}); using /proc process table instead`,
+        );
+        this.procLatched = true;
+      }
+      return { value };
+    } catch (error) {
+      options.signal?.throwIfAborted();
+      const classified = classifyFailure(error, timeoutMs);
+      const suffix = psFailure ? `; ps ${psFailure.reason}` : "";
+      const detail = `/proc: ${classified.detail.slice(0, 193 - suffix.length)}${suffix}`;
+      const failure = {
+        ...classified,
+        detail,
+        transient: TRANSIENT_REASONS.has(classified.reason),
+        attempts: psFailure?.attempts ?? 0,
+      };
+      // A failed procfs read leaves adb's count available and is warned once per reason.
+      const result = this.failed(failure, detail, this.warnedProcReasons);
+      this.warnedProcReasons.add(failure.reason);
+      return result;
     }
   }
 
@@ -253,16 +400,20 @@ export class ProcessTableReader {
     return this.timer.now() + delay + MIN_RETRY_TIMEOUT_MS <= endMs ? delay : undefined;
   }
 
-  private failed(failure: ProcessTableFailure, message = failure.detail): ProcessTableResult {
+  private failed(
+    failure: ProcessTableFailure,
+    message = failure.detail,
+    warnedReasons = this.warnedReasons,
+  ): ProcessTableResult {
     const log = `[BootAdmission] emulator process snapshot unavailable: ${failure.reason}, attempts=${failure.attempts}: ${failure.detail}`;
-    if (failure.reason === "unsupported-platform" || this.warnedReasons.has(failure.reason)) {
+    if (failure.reason === "unsupported-platform" || warnedReasons.has(failure.reason)) {
       // No ps is expected on Windows; repeated deterministic failures already have a WARN trace.
       logger.debug(log);
     } else {
       logger.warn(log);
     }
     if (!failure.transient) {
-      this.warnedReasons.add(failure.reason);
+      warnedReasons.add(failure.reason);
     }
     return { failure, error: `ps: ${message}` };
   }

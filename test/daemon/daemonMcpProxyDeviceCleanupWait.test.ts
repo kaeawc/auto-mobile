@@ -12,6 +12,7 @@ import type { BackoffInput } from "../../src/utils/Backoff";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 
 const refusal = (retryAfterMs: number) =>
@@ -425,8 +426,10 @@ describe("DaemonMcpProxy waits out device_cleanup_in_progress (#11900)", () => {
         description: "unchanged re-poll args",
       });
       expect(client.callToolCalls.length).toBeGreaterThanOrEqual(2);
+      const firstAttempt = client.callToolCalls[0]!;
+      expect(firstAttempt).toEqual({ toolName: "getAndroid", params: withProxyOwnerToken(args) });
       for (const call of client.callToolCalls) {
-        expect(call).toEqual({ toolName: "getAndroid", params: args });
+        expect(call).toEqual(firstAttempt);
       }
       expectNoWaitTimers(timer);
     } finally {

@@ -8,10 +8,12 @@ import {
   RUNNER_FOCUS_QUERY_FAILED_CODE,
   RUNNER_GESTURE_BOUND_EXCEEDED_CODE,
   RUNNER_GESTURE_BOUND_EXCEEDED_WORDING,
+  RUNNER_HIERARCHY_CAPTURE_FAILED_CODE,
   isRunnerDeadlineCompletedLate,
   isRunnerFocusQueryFailed,
   isRunnerGestureBoundExceeded,
   isRunnerGestureOutcomeUnknown,
+  isRunnerHierarchyCaptureFailed,
 } from "../../../../src/features/observe/ios/runnerErrorCodes";
 
 // The one place the Swift runner's deadline error and the host's reading of it are pinned together
@@ -175,5 +177,43 @@ describe("arrow focus-query failure: Swift GestureError <-> host contract (#1092
     expect(isRunnerFocusQueryFailed({ errorCode: RUNNER_FOCUS_QUERY_FAILED_CODE })).toBe(true);
     expect(isRunnerFocusQueryFailed({ errorCode: RUNNER_GESTURE_BOUND_EXCEEDED_CODE })).toBe(false);
     expect(isRunnerFocusQueryFailed({})).toBe(false);
+  });
+});
+
+describe("hierarchy capture failure: Swift CommandError <-> host contract (#11886)", () => {
+  test("the Swift wire code is the TypeScript constant", () => {
+    const match = /case \.hierarchyCaptureFailed:[\s\S]*?return "([^"]+)"/.exec(swift);
+    expect(match?.[1]).toBe("hierarchy_capture_failed");
+    expect(match?.[1]).toBe(RUNNER_HIERARCHY_CAPTURE_FAILED_CODE);
+  });
+
+  test("the Swift description says the gesture was not sent and cannot imply stale or unknown outcome", () => {
+    const match = /case let \.hierarchyCaptureFailed\(reason\):\s*return "([^"]+)"/.exec(swift);
+    expect(match).not.toBeNull();
+    const description = match?.[1] ?? "";
+    expect(description).toContain("validate the frame context");
+    expect(description).toContain("the gesture was not sent");
+    expect(description).toContain("\\(reason)");
+    expect(description).not.toMatch(/stale/i);
+    expect(description).not.toMatch(/stale frame context/i);
+    expect(description).not.toMatch(RUNNER_DEADLINE_COMPLETED_LATE_WORDING);
+    expect(description).not.toMatch(RUNNER_GESTURE_BOUND_EXCEEDED_WORDING);
+  });
+
+  test("only the code identifies the failure", () => {
+    expect(
+      isRunnerHierarchyCaptureFailed({ errorCode: RUNNER_HIERARCHY_CAPTURE_FAILED_CODE }),
+    ).toBe(true);
+    for (const errorCode of [
+      RUNNER_DEADLINE_COMPLETED_LATE_CODE,
+      RUNNER_DEADLINE_NOT_STARTED_CODE,
+      RUNNER_GESTURE_BOUND_EXCEEDED_CODE,
+      RUNNER_FOCUS_QUERY_FAILED_CODE,
+      "unknown_code",
+      "",
+    ]) {
+      expect(isRunnerHierarchyCaptureFailed({ errorCode })).toBe(false);
+    }
+    expect(isRunnerHierarchyCaptureFailed({})).toBe(false);
   });
 });

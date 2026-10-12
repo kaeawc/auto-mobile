@@ -1,3 +1,4 @@
+import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DaemonBoundSessionExpiredError,
@@ -168,7 +169,9 @@ describe("reads after a terminal release of a result-minted session (#11483)", (
     await releaseManagedBinding();
     const forwardedBefore = client.callToolCalls.length;
     await expect(proxy.callTool("observe", { deviceId: ANDROID.deviceId })).resolves.toBeDefined();
-    expect(client.callToolCalls.at(-1)?.params).toEqual({ deviceId: ANDROID.deviceId });
+    expect(client.callToolCalls.at(-1)?.params).toEqual(
+      withProxyOwnerToken({ deviceId: ANDROID.deviceId }, "fake-1"),
+    );
     expect(client.callToolCalls.length).toBe(forwardedBefore + 1);
   });
 

@@ -540,7 +540,7 @@ function writeExclusiveLockFile(
   }
 }
 
-function compareLockOwnerGeneration(
+export function compareLockOwnerGeneration(
   probe: LockOwnerGenerationProbe | undefined,
   pid: number,
   recorded: string | undefined,

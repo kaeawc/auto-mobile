@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { SessionManager, type SessionExecutionMetadata } from "../../src/daemon/sessionManager";
+import {
+  SessionManager,
+  TerminalSessionError,
+  type SessionExecutionMetadata,
+} from "../../src/daemon/sessionManager";
+import { hasActiveSessionExecution } from "../../src/daemon/toolCallActivity";
+import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
 import { SESSION_IDLE_TIMEOUT_ENV } from "../../src/daemon/sessionLivenessWindows";
 import {
   ExecutionTracker,
@@ -120,6 +126,7 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
   let timer: FakeTimer;
   let tracker: ExecutionTracker;
   let manager: SessionManager;
+  let releases: string[];
   const savedEnv = process.env[SESSION_IDLE_TIMEOUT_ENV];
 
   beforeEach(async () => {
@@ -128,15 +135,28 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
     tracker = new ExecutionTracker(timer, new FakeIdGenerator());
     manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     manager.stopCleanupTimer();
+    releases = [];
+    manager.onSessionRelease((_sessionId, _deviceId, reason) => releases.push(reason));
     tracker.setSessionClockOffsetProvider(
       (wallNowMs = timer.now()) => manager.sessionNow() - wallNowMs,
     );
     manager.setActiveSessionExecutionChecker((sessionId, query) =>
-      tracker.hasActiveSessionUuidExecutions(sessionId, query),
+      hasActiveSessionExecution(
+        tracker,
+        manager,
+        { isSessionRecoveryInFlight: () => false },
+        sessionId,
+        query,
+      ),
     );
     manager.setSessionExecutionDeadlineLookup((sessionId) =>
       tracker.getLatestSessionExecutionDeadlineMs(sessionId, { onSessionClock: true }),
     );
+    manager.setExpiryReleaseExecutionCanceller((sessionId, cancellation, query) => {
+      void tracker.cancelDeviceSessionExecutions(sessionId, cancellation, {
+        excludeExecutionId: query.excludeExecutionId,
+      });
+    });
     await manager.createSession(SESSION, DEVICE, "android");
   });
 
@@ -166,7 +186,7 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
   }
 
   for (const step of [0, -HOUR_MS]) {
-    it(`refuses a call begun after the idle deadline while earlier work holds the session, wall step ${step}`, () => {
+    it(`admits a call begun after the idle deadline while timely control work holds the session, wall step ${step}`, async () => {
       startLongCallHoldingTheSession();
       timer.advanceTime(IDLE_MS + 80_000);
       manager.cleanupExpiredSessions();
@@ -174,8 +194,56 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
 
       const late = tracker.startExecution("tapOn", undefined, SESSION);
 
-      expect(admission(metadataOf(late))).toBe("refused");
+      expect(admission(metadataOf(late))).toBe("admitted");
       expect(manager.getSession(SESSION)?.expiresAt).toBe(IDLE_MS);
+      const read = tracker.startExecution("observe", undefined, SESSION);
+      tracker.markDeviceReadCall(read.id, read.toolName);
+      expect(manager.deviceHeldForLateRead(SESSION, metadataOf(read))).toBe(DEVICE);
+      await expect(
+        manager.admitIssuedSessionForAutomation(SESSION, metadataOf(read), { access: "read-only" }),
+      ).resolves.toBeUndefined();
+      expect(manager.getAllSessions()[0]?.expiresAt).toBe(IDLE_MS);
+      expect(releases).toEqual([]);
+    });
+
+    it(`two calls both begun after the deadline cannot admit each other, wall step ${step}`, async () => {
+      timer.advanceTime(IDLE_MS + 1);
+      timer.stepWallClock(step);
+      const first = tracker.startExecution("tapOn", undefined, SESSION);
+      const second = tracker.startExecution("tapOn", undefined, SESSION);
+      const admissionA = manager.admitIssuedSessionForAutomation(SESSION, metadataOf(first));
+      const admissionB = manager.admitIssuedSessionForAutomation(SESSION, metadataOf(second));
+      const outcomes = await Promise.allSettled([admissionA, admissionB]);
+      for (const outcome of outcomes) {
+        expect(outcome.status).toBe("rejected");
+        if (outcome.status !== "rejected") {
+          throw new Error("A late call was admitted");
+        }
+        expect(outcome.reason).toBeInstanceOf(Error);
+        expect(outcome.reason.message).toBe(
+          `Session ${SESSION} expired before this execution began while earlier work is still active.`,
+        );
+      }
+      expect(first.abortController.signal.aborted).toBe(false);
+      expect(second.abortController.signal.aborted).toBe(false);
+      const read = tracker.startExecution("observe", undefined, SESSION);
+      tracker.markDeviceReadCall(read.id, read.toolName);
+      expect(manager.deviceHeldForLateRead(SESSION, metadataOf(read))).toBe(DEVICE);
+      await expect(
+        manager.admitIssuedSessionForAutomation(SESSION, metadataOf(read), { access: "read-only" }),
+      ).resolves.toBeUndefined();
+      expect(manager.hasSession(SESSION)).toBe(true);
+      expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+      expect(manager.getAllSessions()[0]?.expiresAt).toBe(IDLE_MS);
+      expect(releases).toEqual([]);
+      manager.cleanupExpiredSessions();
+      expect(releases).toEqual([]);
+      tracker.endExecution(first.id);
+      tracker.endExecution(second.id);
+      manager.cleanupExpiredSessions();
+      await manager.waitForSessionRelease(SESSION);
+      expect(manager.getSession(SESSION)).toBeNull();
+      expect(releases).toEqual(["cleanup-expired"]);
     });
 
     it(`expires the session for a call begun after the idle deadline, wall step ${step}`, () => {
@@ -196,6 +264,116 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
       expect(admission({ executionId: late.id, startTime: late.startTime })).toBe("expired");
     });
   }
+
+  for (const access of ["control", "read-only"] as const) {
+    it(`recovery alone preserves the held session for a late ${access} call without admitting it`, async () => {
+      manager.setActiveSessionExecutionChecker((sessionId, query) =>
+        hasActiveSessionExecution(
+          tracker,
+          manager,
+          { isSessionRecoveryInFlight: () => true },
+          sessionId,
+          query,
+        ),
+      );
+      timer.advanceTime(IDLE_MS + 1);
+      const late = tracker.startExecution(
+        access === "control" ? "tapOn" : "observe",
+        undefined,
+        SESSION,
+      );
+      if (access === "read-only") {
+        tracker.markDeviceReadCall(late.id, late.toolName);
+        expect(manager.deviceHeldForLateRead(SESSION, metadataOf(late))).toBe(DEVICE);
+        await expect(
+          manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late), { access }),
+        ).resolves.toBeUndefined();
+      } else {
+        await expect(
+          manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late)),
+        ).rejects.toThrow(
+          `Session ${SESSION} expired before this execution began while earlier work is still active.`,
+        );
+      }
+      manager.cleanupExpiredSessions();
+      expect(manager.hasSession(SESSION)).toBe(true);
+      expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+      expect(manager.getAllSessions()[0]?.expiresAt).toBe(IDLE_MS);
+      expect(releases).toEqual([]);
+    });
+  }
+
+  it("a control call begun exactly at the deadline admits later non-owner control without stamping activity", async () => {
+    timer.advanceTime(IDLE_MS);
+    const timely = tracker.startExecution("tapOn", undefined, SESSION);
+    timer.advanceTime(1);
+    const late = tracker.startExecution("tapOn", undefined, SESSION);
+    const session = await manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late), {
+      access: "non-owner-control",
+    });
+    expect(session?.expiresAt).toBe(IDLE_MS);
+    expect(session?.lastUsedAt).toBe(0);
+    tracker.endExecution(timely.id);
+    tracker.endExecution(late.id);
+  });
+
+  it("a late control call with only an earlier read in flight expires and cuts that read", async () => {
+    const read = tracker.startExecution("observe", undefined, SESSION);
+    tracker.markDeviceReadCall(read.id, read.toolName);
+    timer.advanceTime(IDLE_MS + 1);
+    const late = tracker.startExecution("tapOn", undefined, SESSION);
+    const pending = manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late));
+    await expect(pending).rejects.toBeInstanceOf(TerminalSessionError);
+    await expect(pending).rejects.toMatchObject({ release: { releaseReason: "cleanup-expired" } });
+    expect(sessionReleasedDuringCallPayload(read.cancelReason)).toMatchObject({
+      error: { reason: "cleanup-expired", idle: true },
+    });
+    await manager.waitForSessionRelease(SESSION);
+  });
+
+  it("a derived session counts timely base control work on the session clock, never recovery alone", () => {
+    const derived = `${SESSION}:tablet`;
+    const earlier = tracker.startExecution("tapOn", undefined, SESSION);
+    timer.stepWallClock(-HOUR_MS);
+    timer.advanceTime(IDLE_MS + 1);
+    const late = tracker.startExecution("tapOn", undefined, derived);
+    const managerPort = {
+      getDeviceLabels: (id: string) => (id === SESSION ? { tablet: derived } : undefined),
+    };
+    const query = {
+      sessionClockStartedAtOrBefore: IDLE_MS,
+      excludeExecutionId: late.id,
+      excludeReads: true,
+    };
+    expect(
+      hasActiveSessionExecution(
+        tracker,
+        managerPort,
+        { isSessionRecoveryInFlight: () => false },
+        derived,
+        query,
+      ),
+    ).toBe(true);
+    tracker.endExecution(earlier.id);
+    expect(
+      hasActiveSessionExecution(
+        tracker,
+        managerPort,
+        { isSessionRecoveryInFlight: () => true },
+        derived,
+        query,
+      ),
+    ).toBe(false);
+    expect(
+      hasActiveSessionExecution(
+        tracker,
+        managerPort,
+        { isSessionRecoveryInFlight: () => true },
+        derived,
+        { excludeExecutionId: late.id, excludeReads: true },
+      ),
+    ).toBe(true);
+  });
 
   it("admits a call begun before the idle deadline after a forward wall step", () => {
     // Where the monotonic clock includes sleep (Linux, Windows) the session clock ignores a forward step.

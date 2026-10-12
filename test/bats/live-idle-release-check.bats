@@ -94,7 +94,7 @@ scan_device() {
   elif [[ "$(ps -o stat= -p "${pid}" 2> /dev/null)" == *T* ]]; then
     [[ -f "${dir}/stopped_since" ]] || printf '%s\n' "${t}" > "${dir}/stopped_since"
     if ((t - $(cat "${dir}/stopped_since") >= ${FAKE_NO_HB_RELEASE_MS:-8000})); then
-      release "${dev}" heartbeat-timeout
+      release "${dev}" "${FAKE_HEARTBEAT_RELEASE_REASON:-heartbeat-timeout}"
       return
     fi
   else
@@ -105,7 +105,7 @@ scan_device() {
     fi
   fi
   if [[ "${FAKE_NEVER_IDLE_RELEASE:-0}" != 1 ]] && ((t > $(cat "${dir}/last_tool") + idle_ms + ${FAKE_IDLE_RELEASE_LAG_MS:-2000})); then
-    release "${dev}" cleanup-expired
+    release "${dev}" "${FAKE_IDLE_RELEASE_REASON:-cleanup-expired}"
   elif [[ -n "${FAKE_RELEASE_AFTER_MS:-}" ]] && ((t - $(cat "${dir}/acquired") >= FAKE_RELEASE_AFTER_MS)); then
     release "${dev}" bug
   fi
@@ -148,6 +148,58 @@ if [[ "$2" == "--daemon" ]]; then
       env | grep -E '^(AUTOMOBILE|AUTO_MOBILE)_' | sort > "${FAKE}/daemon.env"
       ;;
     stop) ;;
+    session-info)
+      for arg in "$@"; do
+        [[ "${arg}" != --port && "${arg}" != --strict-port ]] || exit 2
+      done
+      session="$4"
+      calls=0
+      [[ ! -f "${FAKE}/session-info.calls" ]] || calls="$(cat "${FAKE}/session-info.calls")"
+      calls=$((calls + 1))
+      printf '%s\n' "${calls}" > "${FAKE}/session-info.calls"
+      device="$(device_for_session "${session}")"
+      if ((calls <= ${FAKE_SESSION_INFO_TRANSIENT_CALLS:-0})); then
+        case "${FAKE_SESSION_INFO_TRANSIENT_SHAPE:-releasing}" in
+          releasing)
+            jq -cn --arg session "${session}" --arg device "${device:-emulator-5560}" \
+              '{sessionId: $session, assignedDevice: $device, platform: "android", releasing: true}'
+            exit 0
+            ;;
+          no-reason)
+            jq -cn --arg session "${session}" \
+              '{ok: false, error: ("Session not found: " + $session), code: "daemon_session_not_found"}'
+            exit 1
+            ;;
+          garbage)
+            printf '%s\n' 'not json'
+            exit 1
+            ;;
+        esac
+      fi
+      if [[ -n "${device}" || "${FAKE_SESSION_INFO_STILL_LIVE:-0}" == 1 ]]; then
+        jq -cn --arg session "${session}" --arg device "${device:-emulator-5560}" \
+          '{sessionId: $session, assignedDevice: $device, platform: "android"}'
+        exit 0
+      fi
+      reason=""
+      if [[ -f "${FAKE}/releases" ]]; then
+        while read -r time released_reason released_serial; do
+          if [[ "$(session_for "${released_serial}")" == "${session}" ]]; then
+            reason="${released_reason}"
+          fi
+        done < "${FAKE}/releases"
+      fi
+      idle=false
+      if [[ ("${reason}" == cleanup-expired && "${FAKE_IDLE_FLAG_MISSING:-0}" != 1) ||
+        ("${reason}" == heartbeat-timeout && "${FAKE_HEARTBEAT_RELEASE_IDLE:-0}" == 1) ]]; then
+        idle=true
+      fi
+      jq -cn --arg session "${session}" --arg reason "${reason}" --argjson idle "${idle}" \
+        '{ok: false, error: ("Session not found: " + $session), code: "daemon_session_not_found"}
+        + (if $reason != "" then {releaseReason: $reason} else {} end)
+        + (if $idle then {idle: true} else {} end)'
+      exit 1
+      ;;
     active-sessions)
       if [[ "${FAKE_ABORT_AFTER_FAILURE:-0}" == 1 && -f "${FAKE}/releases" ]] &&
         grep -q ' bug ' "${FAKE}/releases"; then exit 1; fi
@@ -185,7 +237,7 @@ while IFS= read -r line; do
     observed="$(jq -r '.params.arguments.deviceId // empty' <<< "${line}")"
     if [[ "${FAKE_REFUSE_WHILE_HELD:-0}" == 1 ||
       (-n "${observed}" && ! -d "${state}/${observed}" && -f "${FAKE}/releases") ]]; then
-      jq -cn --argjson id "${id}" '{jsonrpc: "2.0", id: $id, result: {isError: true, content: [{type: "text", text: "{\"code\":\"no_active_device_session\",\"reason\":\"lazy-expiry\"}"}]}}'
+      jq -cn --argjson id "${id}" '{jsonrpc: "2.0", id: $id, result: {isError: true, content: [{type: "text", text: "{\"error\":{\"code\":\"no_active_device_session\",\"reason\":\"cleanup-expired\",\"idle\":true}}"}]}}'
       continue
     fi
   fi
@@ -205,7 +257,9 @@ while IFS= read -r line; do
     [[ -z "${session_arg}" ]] || code="${FAKE_RELEASE_SESSION_CODE:-session_ownership_lost}"
     next_action="${FAKE_RELEASE_NEXT_ACTION:-acquire_new_session}"
     refusal="$(jq -cn --arg code "${code}" --arg next "${next_action}" --arg session "${session_arg}" \
-      '{error: {code: $code, retryable: false, nextAction: $next, sessionUuid: $session}}')"
+      --arg reason "${FAKE_REFUSAL_REASON:-cleanup-expired}" --argjson missing "${FAKE_REFUSAL_IDLE_MISSING:-0}" \
+      '{error: ({code: $code, retryable: false, nextAction: $next, sessionUuid: $session, reason: $reason}
+        + (if $missing == 1 then {} else {idle: true} end))}')"
     if [[ "${FAKE_RELEASE_REACQUIRE:-0}" == 1 ]]; then
       mkdir -p "${state}/${released_device}"
       session_for "${released_device}" > "${state}/${released_device}/session"
@@ -216,7 +270,7 @@ while IFS= read -r line; do
     fi
     if [[ "${FAKE_RELEASE_RPC_ERROR:-0}" == 1 ]]; then
       jq -cn --argjson id "${id}" --arg text "${refusal}" \
-        '{jsonrpc: "2.0", id: $id, error: {code: -32000, message: $text}}'
+        '{jsonrpc: "2.0", id: $id, error: {code: -32603, message: ("MCP error -32603: " + $text), data: ($text | fromjson)}}'
     else
       reply "${id}" "$(jq -cn --arg text "${refusal}" \
         '{isError: true, content: [{type: "text", text: $text}]}')"
@@ -656,4 +710,173 @@ run_check() {
   FAKE_SELECTOR_NOT_CREDITED=1 FAKE_STREAM_NO_SESSION_ENDED=1 run_check --scenario all
   [ "${status}" -eq 1 ]
   [ "$(cat "${EVIDENCE}/failed-scenarios.txt")" = $'selector\nstream' ]
+}
+
+@test "release reason: idle records daemon ground truth and queries without launch flags" {
+  run_check --scenario idle
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"idle: daemon recorded the release as cleanup-expired (idle: true)"* ]]
+  [ -s "${EVIDENCE}/idle.release.log" ]
+  jq -e '.releaseReason == "cleanup-expired" and .idle == true' \
+    < <(cut -d' ' -f2- "${EVIDENCE}/idle.release.log")
+  grep -qx -- "--daemon session-info ${SESSION_UUID} --json" "${FAKE}/daemon.calls"
+  run grep 'session-info.*--port\|session-info.*--strict-port' "${FAKE}/daemon.calls"
+  [ "${status}" -eq 1 ]
+}
+
+@test "release reason: idle rejects another daemon reason" {
+  FAKE_IDLE_RELEASE_REASON=heartbeat-timeout run_check --scenario idle
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"the idle release was recorded as 'heartbeat-timeout'; an idle end must carry reason cleanup-expired"* ]]
+}
+
+@test "release reason: idle requires the daemon idle flag" {
+  FAKE_IDLE_FLAG_MISSING=1 run_check --scenario idle
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"the idle release (cleanup-expired) does not carry idle: true"* ]]
+}
+
+@test "release reason: idle refusal requires idle true" {
+  FAKE_REFUSAL_IDLE_MISSING=1 run_check --scenario idle
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"deviceId refusal after the idle release does not carry idle: true; reply: '"* ]]
+}
+
+@test "release reason: idle refusal rejects a heartbeat reason" {
+  FAKE_REFUSAL_REASON=heartbeat-timeout run_check --scenario idle
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"deviceId refusal after the idle release names reason 'heartbeat-timeout'; expected cleanup-expired (or the proxy-local replay-lease-expired)"* ]]
+}
+
+@test "release reason: idle refusal accepts and logs the proxy-local reason" {
+  FAKE_REFUSAL_REASON=replay-lease-expired run_check --scenario idle
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"daemon recorded the release as cleanup-expired (idle: true)"* ]]
+  [[ "${output}" == *"deviceId reason: replay-lease-expired; sessionUuid reason: replay-lease-expired"* ]]
+}
+
+@test "release reason: JSON-RPC idle refusal requires idle true" {
+  FAKE_RELEASE_RPC_ERROR=1 FAKE_REFUSAL_IDLE_MISSING=1 run_check --scenario idle
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"deviceId refusal after the idle release does not carry idle: true"* ]]
+}
+
+@test "release reason: JSON-RPC idle refusal accepts the proxy-local reason" {
+  FAKE_RELEASE_RPC_ERROR=1 FAKE_REFUSAL_REASON=replay-lease-expired run_check --scenario idle
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"deviceId reason: replay-lease-expired; sessionUuid reason: replay-lease-expired"* ]]
+}
+
+@test "release reason: heartbeat loss has no idle field" {
+  run_check --scenario no-heartbeat
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"no-heartbeat: daemon recorded the release as heartbeat-timeout (no idle field)"* ]]
+  [ -s "${EVIDENCE}/no-heartbeat.release.log" ]
+}
+
+@test "release reason: heartbeat loss rejects an idle field" {
+  FAKE_HEARTBEAT_RELEASE_IDLE=1 run_check --scenario no-heartbeat
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"the heartbeat-loss release carries an idle field; only an idle end may"* ]]
+}
+
+@test "release reason: heartbeat loss rejects an idle reason" {
+  FAKE_HEARTBEAT_RELEASE_REASON=cleanup-expired run_check --scenario no-heartbeat
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"the heartbeat-loss release was recorded as 'cleanup-expired'; expected heartbeat-timeout or missing-first-heartbeat"* ]]
+}
+
+@test "release reason: heartbeat loss accepts missing-first-heartbeat" {
+  FAKE_HEARTBEAT_RELEASE_REASON=missing-first-heartbeat run_check --scenario no-heartbeat
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"daemon recorded the release as missing-first-heartbeat (no idle field)"* ]]
+}
+
+@test "release reason: observe-only logs an idle end" {
+  run_check --scenario observe-only
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"observe-only: daemon recorded the release as cleanup-expired (idle: true)"* ]]
+}
+
+@test "release reason: observe-only rejects a heartbeat end" {
+  FAKE_IDLE_RELEASE_REASON=heartbeat-timeout run_check --scenario observe-only
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"the idle release was recorded as 'heartbeat-timeout'; an idle end must carry reason cleanup-expired"* ]]
+}
+
+@test "release reason: stream logs an idle end" {
+  run_check --scenario stream
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"stream: daemon recorded the release as cleanup-expired (idle: true)"* ]]
+}
+
+@test "release reason: stream rejects a heartbeat end" {
+  FAKE_IDLE_RELEASE_REASON=heartbeat-timeout run_check --scenario stream
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"the idle release was recorded as 'heartbeat-timeout'; an idle end must carry reason cleanup-expired"* ]]
+}
+
+@test "release reason: two-devices queries A while B is held" {
+  run_check --scenario two-devices --second-serial emulator-5562
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"two-devices: daemon recorded the release as cleanup-expired (idle: true)"* ]]
+  run grep session-info "${FAKE}/daemon.calls"
+  [ "${output}" = "--daemon session-info ${SESSION_UUID} --json" ]
+}
+
+@test "release reason: two-devices requires A's idle flag" {
+  FAKE_IDLE_FLAG_MISSING=1 run_check --scenario two-devices --second-serial emulator-5562
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"the idle release (cleanup-expired) does not carry idle: true"* ]]
+}
+
+@test "release reason: daemon still reporting a released session live fails" {
+  FAKE_SESSION_INFO_STILL_LIVE=1 run_check --scenario idle
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"session-info still reports session ${SESSION_UUID} live 30 s after active-sessions stopped listing it"* ]]
+}
+
+@test "release reason: idle waits for two releasing replies" {
+  FAKE_SESSION_INFO_TRANSIENT_CALLS=2 FAKE_SESSION_INFO_TRANSIENT_SHAPE=releasing run_check --scenario idle
+  [ "${status}" -eq 0 ]
+  [ "$(wc -l < "${EVIDENCE}/idle.release.log" | tr -d ' ')" -eq 3 ]
+}
+
+@test "release reason: idle waits for two no-reason replies" {
+  FAKE_SESSION_INFO_TRANSIENT_CALLS=2 FAKE_SESSION_INFO_TRANSIENT_SHAPE=no-reason run_check --scenario idle
+  [ "${status}" -eq 0 ]
+  [ "$(wc -l < "${EVIDENCE}/idle.release.log" | tr -d ' ')" -eq 3 ]
+}
+
+@test "release reason: idle waits for two garbage replies" {
+  FAKE_SESSION_INFO_TRANSIENT_CALLS=2 FAKE_SESSION_INFO_TRANSIENT_SHAPE=garbage run_check --scenario idle
+  [ "${status}" -eq 0 ]
+  [ "$(wc -l < "${EVIDENCE}/idle.release.log" | tr -d ' ')" -eq 3 ]
+}
+
+@test "release reason: heartbeat loss waits for two releasing replies" {
+  FAKE_SESSION_INFO_TRANSIENT_CALLS=2 FAKE_SESSION_INFO_TRANSIENT_SHAPE=releasing run_check --scenario no-heartbeat
+  [ "${status}" -eq 0 ]
+  [ "$(wc -l < "${EVIDENCE}/no-heartbeat.release.log" | tr -d ' ')" -eq 3 ]
+}
+
+@test "release reason: a final first reply does not poll" {
+  run_check --scenario idle
+  [ "${status}" -eq 0 ]
+  [ "$(grep -c session-info "${FAKE}/daemon.calls")" -eq 1 ]
+}
+
+@test "release reason: daemon never names a reason fails after 30 seconds" {
+  FAKE_SESSION_INFO_TRANSIENT_CALLS=1000 FAKE_SESSION_INFO_TRANSIENT_SHAPE=no-reason run_check --scenario idle
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"named no releaseReason for session ${SESSION_UUID} within 30 s of its release"* ]]
+}
+
+@test "neighbour pins: active stdin-eof selector and provision do not query release reasons" {
+  for scenario in active stdin-eof selector provision; do
+    run_check --scenario "${scenario}"
+    [ "${status}" -eq 0 ]
+    run grep session-info "${FAKE}/daemon.calls"
+    [ "${status}" -eq 1 ]
+  done
 }

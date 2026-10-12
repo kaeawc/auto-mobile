@@ -427,7 +427,9 @@ owned by other sessions; its owner resumes only when the selected device is that
 Binding rechecks the reservation if it changed during startup.
 The reserving session's own start can boot the device and resume the same session UUID.
 Ownership comes from its routing session (including labels resolved through live base
-state) or the MCP connection that owned it at handoff. An anonymous or one-shot CLI
+state) or the MCP connection that owned it at handoff, including a later connection of
+the same client once it proves the session's liveness owner token (a stdio proxy reconnects
+after the handoff). Naming the session UUID alone is not proof. An anonymous or one-shot CLI
 caller without that routing session cannot claim the hold. Reads remain available.
 The hold ends on successful recovery, any terminal session
 release, the three-minute window ending, or daemon shutdown. When the fixed 180 s

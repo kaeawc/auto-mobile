@@ -1,3 +1,4 @@
+import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessService";
 import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import { DaemonState } from "../daemon/daemonState";
 import type { DevicePool, PooledDevice } from "../daemon/devicePool";
@@ -104,6 +105,8 @@ function transitionalTransportAttempt(
           return (await manager.getAndroidListedDeviceStates?.(ids, options)) ?? new Map();
         },
   });
+  const isNonReadinessRefusal = (error: unknown): boolean =>
+    isTypedToolRefusal(error) && !(error instanceof RunnerReadinessError);
   return async (attempt) => {
     for (;;) {
       try {
@@ -113,7 +116,7 @@ function transitionalTransportAttempt(
           signal?.aborted ||
           args.platform === "ios" ||
           isIosUdid(args.deviceId) ||
-          isTypedToolRefusal(error) ||
+          isNonReadinessRefusal(error) ||
           error instanceof DisplayPinNeedsSessionError ||
           !(await wait.waitIfTransitional())
         ) {

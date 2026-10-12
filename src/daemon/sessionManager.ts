@@ -6768,6 +6768,10 @@ export class SessionManager {
       !this.refusedReleaseWrites.has(releaseSnapshot)
     ) {
       await this.reassertSupersededLiveRow(session, [releaseSnapshot.releaseReason]);
+    } else if (liftTerminalFence && this.supersededReleaseReasons.get(session)?.size) {
+      // This release's refusal proves only that its own write landed nothing. An earlier
+      // superseded release's late row may have deferred its rewrite behind this fence.
+      await this.reassertSupersededLiveRow(session, []);
     }
     return null;
   }

@@ -448,7 +448,7 @@ connection that owned the session at handoff. Naming the holder from another rec
 connection is refused even with `force: true`; the existing session-only rule applies when
 no connection identity or owner snapshot is available.
 
-Stop protection and sessionless completion match restart reservations by stable identity (Android AVD name or iOS UDID), not an Android runtime serial alone.
+Stop protection and sessionless completion match restart reservations by daemon-confirmed identity (the runtime AVD name or iOS UDID); a caller-supplied name is never trusted. `force: true` never skips this confirmation. If identity cannot be confirmed and the target might be reserved (its serial or supplied label matches a restart hold), the stop returns retryable `discovery_incomplete` without touching the device or reservation, except for the owner acting on its own hold.
 A different session's stop or destroy is refused with `device_owned_by_other_session`,
 `retryable: true` and `retryAfterMs` equal to the remaining recovery hold. `force: true` does
 not override it. A label whose handed-off base no longer has live label state counts as a

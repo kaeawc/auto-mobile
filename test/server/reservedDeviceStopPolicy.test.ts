@@ -1,4 +1,8 @@
 import { describe, expect, spyOn } from "bun:test";
+import {
+  getDeviceToolsDependencies,
+  setDeviceToolsDependencies,
+} from "../../src/server/deviceTools";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
 import { TerminalSessionError } from "../../src/daemon/sessionManager";
@@ -183,12 +187,18 @@ describe("reserved device stop policy", () => {
           await f.pool.initializeWithDevices([unknown]);
         }
         const before = await snapshot(f);
-        await f.call("killDevice", requester, true, undefined, undefined, unknown);
-        expect(f.manager.killed).toEqual([unknown.deviceId]);
+        const pending = f.call("killDevice", requester, true, undefined, undefined, unknown);
         if (requester === BASE) {
+          await pending;
+          expect(f.manager.killed).toEqual([unknown.deviceId]);
           expect(f.internals.rehydrationReservations.has(BASE)).toBe(false);
           expect(await f.persistence.getSession!(BASE)).toEqual(before.row);
         } else {
+          await expect(pending).rejects.toMatchObject({
+            code: "discovery_incomplete",
+            retryable: true,
+          });
+          expect(f.manager.killed).toEqual([]);
           await unchanged(f, before);
         }
       });
@@ -234,6 +244,311 @@ describe("reserved device stop policy", () => {
       }
     }
   }
+
+  // These two timelines are Android-only: iOS UDID is both serial and daemon-known stable id.
+  async function unknownTarget(f: Fixture, deviceId: string, pooled: boolean, runtimeName: string) {
+    await f.pool.removeDevice(f.device.deviceId, true, f.pool.getDevice(f.device.deviceId));
+    const target = { ...f.device, deviceId, name: `Unknown (${deviceId})` };
+    f.manager.setBootedDevices("android", [target]);
+    if (pooled) {
+      await f.pool.initializeWithDevices([target]);
+    }
+    setDeviceToolsDependencies({ resolveRunningAndroidAvdName: async () => runtimeName });
+    const probe = spyOn(getDeviceToolsDependencies(), "resolveRunningAndroidAvdName");
+    cleanups.push(() => probe.mockRestore());
+    return { target, probe };
+  }
+
+  for (const pooled of [false, true]) {
+    for (const force of [false, true]) {
+      for (const requester of [undefined, "other-session"]) {
+        test(`identity A killDevice: stale caller label, pooled ${pooled}, force ${force}, ${requester ?? "sessionless"}`, async () => {
+          const f = await fixture("android");
+          const { target, probe } = await unknownTarget(
+            f,
+            f.device.deviceId,
+            pooled,
+            "unrelated-phone",
+          );
+          f.manager.setBootedDevices("android", [{ ...target, name: "unrelated-phone" }]);
+          f.manager.compareAvdName = true;
+          const before = await snapshot(f);
+          const pending = f.call("killDevice", requester, force, undefined, undefined, f.device);
+          if (force) {
+            await pending;
+            expect(f.manager.killed).toEqual([target.deviceId]);
+            expect(f.manager.killedTargets[0]!.name).toBe("unrelated-phone");
+          } else {
+            await expect(pending).rejects.toThrow("AVD name differs from discovered runtime");
+            expect(f.manager.killed).toEqual([]);
+          }
+          expect(probe).toHaveBeenCalledTimes(1);
+          await unchanged(f, before);
+        });
+        test(`identity A deleteDevice: stale target label, pooled ${pooled}, force ${force}, ${requester ?? "sessionless"}`, async () => {
+          const f = await fixture("android");
+          const { probe } = await unknownTarget(f, f.device.deviceId, pooled, "unrelated-phone");
+          // Stale discovery names R, so teardown can select the recycled serial; the console disagrees.
+          f.manager.setBootedDevices("android", [f.device]);
+          f.manager.compareAvdName = true;
+          f.manager.confirmedRuntimeAvdName = "unrelated-phone";
+          const before = await snapshot(f);
+          const response = await f.call("deleteDevice", requester, force);
+          if (force) {
+            expect(response).toMatchObject({ structuredContent: { state: "destroyed" } });
+            expect(f.manager.killed).toEqual([f.device.deviceId]);
+            expect(f.manager.killedTargets[0]!.name).toBe("unrelated-phone");
+          } else {
+            expect(JSON.parse(response.content[0].text)).toMatchObject({
+              success: false,
+              failure: {
+                phase: "stop",
+                code: "operation_failed",
+                message:
+                  "Failed to kill android device: Error: AVD name differs from discovered runtime",
+              },
+            });
+            expect(f.manager.killed).toEqual([]);
+          }
+          expect(probe).toHaveBeenCalledTimes(1);
+          await unchanged(f, before);
+        });
+      }
+      for (const tool of ["killDevice", "deleteDevice"] as const) {
+        for (const caller of ["other-session", "sessionless", "owner", "connection"] as const) {
+          test(`identity B ${tool}: confirmed reserved AVD on unknown new serial, pooled ${pooled}, force ${force}, ${caller}`, async () => {
+            const f = await fixture("android");
+            const { target: returned, probe } = await unknownTarget(
+              f,
+              "emulator-5556",
+              pooled,
+              f.device.name,
+            );
+            // deleteDevice resolves the image from discovery; the pool still has an unknown label.
+            f.manager.setBootedDevices("android", [
+              tool === "killDevice" ? returned : { ...returned, name: f.device.name },
+            ]);
+            f.manager.confirmedRuntimeAvdName = f.device.name;
+            f.manager.setDeviceImages("android", [f.device]);
+            f.manager.compareAvdName = true;
+            f.timer.advanceTime(1_234);
+            const before = await snapshot(f);
+            const pending = f.call(
+              tool,
+              caller === "other-session" ? caller : caller === "owner" ? BASE : undefined,
+              force,
+              caller === "connection" ? "owner-conn" : undefined,
+              undefined,
+              tool === "killDevice" ? returned : { ...returned, name: f.device.name },
+            );
+            if (caller === "other-session") {
+              await refusal(pending, tool, {
+                code: "device_owned_by_other_session",
+                retryable: true,
+                retryAfterMs: before.hold.scheduledDeadlineMs! - f.sessions.sessionNow(),
+              });
+              expect(f.manager.killed).toEqual([]);
+              await unchanged(f, before);
+            } else {
+              await pending;
+              expect(f.manager.killed).toEqual([returned.deviceId]);
+              expect(f.manager.killedTargets[0]!.name).toBe(f.device.name);
+              expect(f.internals.rehydrationReservations.has(BASE)).toBe(false);
+              if (caller === "sessionless") {
+                await terminal(f);
+              } else {
+                expect(await f.persistence.getSession!(BASE)).toEqual(before.row);
+              }
+            }
+            expect(probe).toHaveBeenCalledTimes(1);
+          });
+        }
+      }
+    }
+  }
+  for (const force of [false, true]) {
+    for (const requester of [undefined, "other-session"]) {
+      for (const mode of ["unresolved", "throws"] as const) {
+        for (const tool of ["killDevice", "deleteDevice"] as const) {
+          test(`identity unconfirmed ${tool}: ${mode}, force ${force}, ${requester ?? "sessionless"}`, async () => {
+            const f = await fixture("android");
+            await unknownTarget(f, f.device.deviceId, true, "restart-phone");
+            f.manager.setBootedDevices("android", [f.device]);
+            setDeviceToolsDependencies({
+              resolveRunningAndroidAvdName: async () => {
+                if (mode === "throws") {
+                  throw new Error("console transport transitional");
+                }
+                return undefined;
+              },
+            });
+            const before = await snapshot(f);
+            const pending = f.call(tool, requester, force);
+            if (tool === "killDevice") {
+              await expect(pending).rejects.toMatchObject({
+                code: "discovery_incomplete",
+                retryable: true,
+              });
+            } else {
+              expect(JSON.parse((await pending).content[0].text)).toMatchObject({
+                success: false,
+                failure: { phase: "precondition", code: "discovery_incomplete", retryable: true },
+              });
+            }
+            expect(f.manager.killed).toEqual([]);
+            await unchanged(f, before);
+          });
+        }
+      }
+    }
+    test(`identity unconfirmed killDevice: no reservation skips probe, force ${force}`, async () => {
+      const f = await fixture("android");
+      f.pool.releaseDeviceRestartReservation(BASE);
+      await f.pool.removeDevice(f.device.deviceId, true, f.pool.getDevice(f.device.deviceId));
+      const target = { ...f.device, name: `Unknown (${f.device.deviceId})` };
+      f.manager.setBootedDevices("android", [target]);
+      const probe = spyOn(
+        getDeviceToolsDependencies(),
+        "resolveRunningAndroidAvdName",
+      ).mockResolvedValue(undefined);
+      cleanups.push(() => probe.mockRestore());
+      await f.call("killDevice", undefined, force, undefined, undefined, target);
+      expect(f.manager.killed).toEqual([target.deviceId]);
+      expect(probe).not.toHaveBeenCalled();
+    });
+  }
+  for (const force of [false, true]) {
+    for (const requester of [undefined, "other-session"]) {
+      for (const tool of ["killDevice", "deleteDevice"] as const) {
+        test(`identity unconfirmed ${tool}: new serial matches only caller hint, force ${force}, ${requester ?? "sessionless"}`, async () => {
+          const f = await fixture("android");
+          const { target } = await unknownTarget(f, "emulator-5556", true, "restart-phone");
+          const stale = { ...target, name: f.device.name };
+          f.manager.setBootedDevices("android", [stale]);
+          setDeviceToolsDependencies({ resolveRunningAndroidAvdName: async () => undefined });
+          const before = await snapshot(f);
+          const pending = f.call(tool, requester, force, undefined, undefined, stale);
+          if (tool === "killDevice") {
+            await expect(pending).rejects.toMatchObject({
+              code: "discovery_incomplete",
+              retryable: true,
+            });
+          } else {
+            expect(JSON.parse((await pending).content[0].text)).toMatchObject({
+              success: false,
+              failure: { phase: "precondition", code: "discovery_incomplete", retryable: true },
+            });
+          }
+          expect(f.manager.killed).toEqual([]);
+          expect(f.internals.intentionalShutdowns.size).toBe(0);
+          await unchanged(f, before);
+        });
+      }
+    }
+    test(`identity unconfirmed killDevice: reservation cannot be this target, force ${force}`, async () => {
+      const f = await fixture("android");
+      const { target } = await unknownTarget(f, "emulator-5556", true, "restart-phone");
+      setDeviceToolsDependencies({ resolveRunningAndroidAvdName: async () => undefined });
+      const before = await snapshot(f);
+      await f.call("killDevice", "other-session", force, undefined, undefined, target);
+      expect(f.manager.killed).toEqual([target.deviceId]);
+      await unchanged(f, before);
+    });
+  }
+
+  for (const tool of ["killDevice", "deleteDevice"] as const) {
+    test(`identity ${tool}: resolved pooled AVD needs no extra probe`, async () => {
+      const f = await fixture("android");
+      const probe = spyOn(
+        getDeviceToolsDependencies(),
+        "resolveRunningAndroidAvdName",
+      ).mockResolvedValue(undefined);
+      cleanups.push(() => probe.mockRestore());
+      await f.call(tool);
+      await terminal(f);
+      expect(probe).not.toHaveBeenCalled();
+    });
+  }
+  for (const tool of ["killDevice", "deleteDevice"] as const) {
+    for (const mode of ["unresolved", "throws"] as const) {
+      test(`identity ${tool}: existing kill-time probe ${mode} before mutation`, async () => {
+        const f = await fixture("android");
+        const unknown = { ...f.device, name: `Unknown (${f.device.deviceId})` };
+        f.pool.getDevice(f.device.deviceId)!.avdName = f.device.name;
+        f.manager.setBootedDevices("android", [unknown]);
+        setDeviceToolsDependencies({
+          resolveRunningAndroidAvdName: async () => {
+            if (mode === "throws") {
+              throw new Error("console transport transitional");
+            }
+            return undefined;
+          },
+        });
+        const before = await snapshot(f);
+        const pending = f.call(
+          tool,
+          undefined,
+          false,
+          undefined,
+          undefined,
+          tool === "killDevice" ? unknown : f.device,
+        );
+        if (tool === "killDevice") {
+          await expect(pending).rejects.toMatchObject({
+            code: "discovery_incomplete",
+            retryable: true,
+          });
+        } else {
+          expect(JSON.parse((await pending).content[0].text)).toMatchObject({
+            success: false,
+            failure: { code: "discovery_incomplete", retryable: true },
+          });
+        }
+        expect(f.manager.killed).toEqual([]);
+        expect(f.internals.intentionalShutdowns.size).toBe(0);
+        await unchanged(f, before);
+      });
+    }
+  }
+
+  for (const force of [false, true]) {
+    for (const owner of ["routing", "connection"] as const) {
+      test(`identity unconfirmed killDevice: own hold exception by ${owner}, force ${force}`, async () => {
+        const f = await fixture("android");
+        const { target } = await unknownTarget(f, f.device.deviceId, true, "restart-phone");
+        setDeviceToolsDependencies({ resolveRunningAndroidAvdName: async () => undefined });
+        const before = await snapshot(f);
+        await f.call(
+          "killDevice",
+          owner === "routing" ? BASE : undefined,
+          force,
+          owner === "connection" ? "owner-conn" : undefined,
+          undefined,
+          target,
+        );
+        expect(f.manager.killed).toEqual([target.deviceId]);
+        expect(f.internals.rehydrationReservations.has(BASE)).toBe(false);
+        expect(await f.persistence.getSession!(BASE)).toEqual(before.row);
+      });
+    }
+  }
+
+  test("token-proved reconnect is the stop owner without a routing session for both tools", async () => {
+    for (const tool of ["killDevice", "deleteDevice"] as const) {
+      const f = await fixture("android", false, false, "owner-conn", true, "holder-token");
+      const before = await snapshot(f);
+      expect(
+        await f.pool.restoreOwnedDeviceSessionsForMcpSession([BASE], "reconnected", "holder-token"),
+      ).toEqual([]);
+      expect(
+        f.internals.rehydrationReservations.get(BASE)!.ownerMcpSessionIds?.has("reconnected"),
+      ).toBe(true);
+      await f.call(tool, undefined, false, "reconnected");
+      expect(f.manager.killed).toEqual([f.device.deviceId]);
+      expect(f.internals.rehydrationReservations.has(BASE)).toBe(false);
+      expect(await f.persistence.getSession!(BASE)).toEqual(before.row);
+    }
+  });
 
   for (const platform of ["android", "ios"] as const) {
     for (const tool of ["killDevice", "deleteDevice"] as const) {

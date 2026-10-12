@@ -10,6 +10,7 @@ import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyC
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import type { BootedDevice, Platform } from "../../src/models";
 import {
+  getDeviceToolsDependencies,
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
@@ -36,6 +37,7 @@ export const BASE = "restart-holder";
 export const LABEL = `${BASE}:phone`;
 export const SIBLING = `${BASE}:tablet`;
 const originalLoggerWarn = logger.warn;
+const originalAvdResolver = getDeviceToolsDependencies().resolveRunningAndroidAvdName;
 const originalIosManagerGetInstance = IOSCtrlProxyManager.getInstance;
 const originalIosClientRetireInstance = IOSCtrlProxyClient.retireInstance;
 
@@ -61,11 +63,23 @@ interface RestartHoldInternals {
 
 class StoppingDeviceManager extends FakeDeviceUtils {
   readonly killed: string[] = [];
+  readonly killedTargets: BootedDevice[] = [];
   beforeKill: (() => void | Promise<void>) | undefined;
   stayRunning = false;
+  compareAvdName = false;
+  confirmedRuntimeAvdName?: string;
 
-  override async killDevice(device: BootedDevice): Promise<void> {
+  override async killDevice(device: BootedDevice, options?: { force?: boolean }): Promise<void> {
+    if (this.compareAvdName && !options?.force) {
+      const runtime = (await this.getBootedDevices(device.platform)).find(
+        (target) => target.deviceId === device.deviceId,
+      );
+      if ((this.confirmedRuntimeAvdName ?? runtime?.name) !== device.name) {
+        throw new Error("AVD name differs from discovered runtime");
+      }
+    }
     this.killed.push(device.deviceId);
+    this.killedTargets.push(device);
     await this.beforeKill?.();
     if (!this.stayRunning) {
       this.setBootedDevices(device.platform, []);
@@ -86,6 +100,7 @@ export function restartStopHarness() {
     DaemonState.getInstance().reset();
     resetDbWriteBarrier();
     expect(logger.warn).toBe(originalLoggerWarn);
+    expect(getDeviceToolsDependencies().resolveRunningAndroidAvdName).toBe(originalAvdResolver);
     expect(ToolRegistry.getAllTools()).toHaveLength(0);
     expect(DaemonState.getInstance().isInitialized()).toBe(false);
     expect(getDbWriteBarrier().inFlightCount()).toBe(0);
@@ -100,6 +115,7 @@ export function restartStopHarness() {
     publishLabels = false,
     connection: string | null = "owner-conn",
     handoff = true,
+    ownerToken?: string,
   ) {
     const timer = new FakeTimer();
     timer.setCurrentTime(1_000);
@@ -196,6 +212,9 @@ export function restartStopHarness() {
     const internals = pool as unknown as RestartHoldInternals;
     if (platform === "ios") {
       manager.beforeKill = () => expect(internals.intentionalShutdowns.size).toBe(0);
+    }
+    if (ownerToken) {
+      expect(await sessions.claimLivenessOwnership(holder, ownerToken)).toBe("claimed");
     }
     if (handoff) {
       await internals.releaseDisconnectedRecoverySessionWithRetry(

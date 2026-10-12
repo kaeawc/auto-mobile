@@ -1,3 +1,5 @@
+import type { RestartStopIdentity } from "../daemon/devicePool";
+import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import { DaemonState } from "../daemon/daemonState";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { getAbortSignal } from "../utils/AbortContext";
@@ -25,6 +27,7 @@ import {
   LIFECYCLE_TOOL_FOREIGN_DAEMON_REMEDY,
   assertLifecycleCallerNotOnForeignManagedSlot,
   lifecycleRequester,
+  resolveRestartStopIdentity,
   type LifecycleRequester,
 } from "./lifecycleDeviceOwnership";
 import { DeviceAssignedToManagedSlotError } from "../daemon/managedSlots/managedSlotRefusal";
@@ -100,6 +103,7 @@ type TeardownState = {
   earlyResponse?: TeardownToolResponse;
   lastVerificationFailure?: TeardownToolResponse;
   commitRestartHoldStop?: () => void | Promise<void>;
+  stopIdentity?: RestartStopIdentity;
 };
 
 /**
@@ -111,6 +115,7 @@ async function teardownOwnershipRefusal(
   args: TeardownDeviceArgs,
   target: TeardownResolvedTarget,
   requester: LifecycleRequester | undefined,
+  stopIdentity?: RestartStopIdentity,
 ): Promise<TeardownToolResponse | undefined> {
   if (!requester) {
     return undefined;
@@ -128,6 +133,7 @@ async function teardownOwnershipRefusal(
       requester,
       force: args.force ?? false,
       stableIds: [args.target.stableId],
+      stopIdentity,
     });
     if (target.wasBooted) {
       await assertLifecycleTargetNotHeldByOtherDaemon({
@@ -139,18 +145,21 @@ async function teardownOwnershipRefusal(
     return undefined;
   } catch (error) {
     const refusal = typedTeardownRefusal(args, error, target.device);
-    if (
-      !refusal ||
-      !(
-        error instanceof DeviceAssignedToManagedSlotError ||
-        error instanceof InputDeviceOwnedError ||
-        error instanceof DeviceOwnedByOtherDaemonError
-      )
-    ) {
+    if (!refusal || !isTeardownOwnershipRefusal(error)) {
       throw error;
     }
+    logger.warn("[DeviceTools] deleteDevice stop admission refused", error);
     return refusal;
   }
+}
+
+function isTeardownOwnershipRefusal(error: unknown): boolean {
+  return (
+    error instanceof DeviceAssignedToManagedSlotError ||
+    error instanceof InputDeviceOwnedError ||
+    error instanceof DeviceOwnedByOtherDaemonError ||
+    error instanceof BootedDeviceDiscoveryIncompleteError
+  );
 }
 
 /**
@@ -219,12 +228,23 @@ async function managedSlotDeleteRefusal(
  * not (#11174); a device another session holds stops only for its holder or an explicit force
  * (#10785), and one another live daemon holds only with an explicit force (#11200).
  */
-async function assertKillDeviceCaller(args: KillDeviceArgs): Promise<void> {
+async function assertKillDeviceCaller(
+  args: KillDeviceArgs,
+  deps: DeviceToolsDependencies,
+  deadlineMs: number,
+  signal: AbortSignal | undefined,
+): Promise<RestartStopIdentity | undefined> {
   await assertLifecycleCallerNotOnForeignManagedSlot({
     toolName: "killDevice",
     device: args.device,
     requester: lifecycleRequester(args),
     stableIds: [args.device.name],
+  });
+  const stopIdentity = await resolveRestartStopIdentity({
+    device: args.device,
+    dependencies: deps,
+    deadlineMs,
+    signal,
   });
   assertLifecycleCallerHoldsDevice({
     checkRestartHold: true,
@@ -233,13 +253,17 @@ async function assertKillDeviceCaller(args: KillDeviceArgs): Promise<void> {
     requester: lifecycleRequester(args),
     force: args.force ?? false,
     stableIds: [args.device.name],
+    stopIdentity,
   });
   await assertLifecycleTargetNotHeldByOtherDaemon({
     toolName: "killDevice",
     device: args.device,
     force: args.force ?? false,
   });
+  return stopIdentity;
 }
+
+type TeardownStopIdentities = Map<string, RestartStopIdentity | undefined>;
 
 interface PreLeaseTeardown {
   args: TeardownDeviceArgs;
@@ -247,6 +271,7 @@ interface PreLeaseTeardown {
   deadlineMs: number;
   timeoutMs: number;
   requestAbortSignal: AbortSignal | undefined;
+  stopIdentities: TeardownStopIdentities;
 }
 
 /** Every deleteDevice refusal that must precede the teardown lease reservation. */
@@ -267,7 +292,7 @@ async function preLeaseRefusal(
  * lease; a target that does not resolve here is left to the workflow's own resolution.
  */
 async function preLeaseHolderRefusal(
-  { args, deps, deadlineMs, timeoutMs, requestAbortSignal }: PreLeaseTeardown,
+  { args, deps, deadlineMs, timeoutMs, requestAbortSignal, stopIdentities }: PreLeaseTeardown,
   requester: LifecycleRequester | undefined,
   lifecycleLease: VirtualDeviceLifecycleLease | undefined,
 ): Promise<TeardownToolResponse | undefined> {
@@ -275,7 +300,7 @@ async function preLeaseHolderRefusal(
   if (!requester || lifecycleLease || requestAbortSignal?.aborted) {
     return undefined;
   }
-  const resolution = await resolveTeardownTarget({
+  const context: TeardownContext = {
     args,
     dependencies: deps,
     deviceManager: deps.deviceManagerFactory(),
@@ -286,17 +311,53 @@ async function preLeaseHolderRefusal(
     cancelOnRequestAbort: args.cancellationPolicy === "cancel-on-request-abort",
     mode: args.force === true ? "serial-only" : "named",
     initialScan: { serials: new Set(), pooledEntries: [] },
-  });
+  };
+  const resolution = await resolveTeardownTarget(context);
   if ("response" in resolution) {
     return undefined;
   }
-  return await teardownOwnershipRefusal(args, resolution.target, requester);
+  const stopIdentity = await resolveTeardownStopIdentity(
+    context,
+    resolution.target,
+    stopIdentities,
+  );
+  return await teardownOwnershipRefusal(args, resolution.target, requester, stopIdentity);
+}
+
+/** Per-call cache reuses serial evidence across teardown's read-only target resolutions. */
+async function resolveTeardownStopIdentity(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+  identities: TeardownStopIdentities,
+): Promise<RestartStopIdentity | undefined> {
+  const device = target.wasBooted
+    ? target.bootedDevice
+    : { ...target.device, deviceId: context.args.target.stableId };
+  const key = `${device.platform}:${target.wasBooted}:${device.deviceId}`;
+  if (!identities.has(key)) {
+    identities.set(
+      key,
+      await resolveRestartStopIdentity({
+        device,
+        dependencies: context.dependencies,
+        deadlineMs: context.deadlineMs,
+        signal: context.requestAbortSignal,
+        stoppedStableId: target.wasBooted
+          ? undefined
+          : target.device.platform === "android"
+            ? target.device.name
+            : target.device.deviceId,
+      }),
+    );
+  }
+  return identities.get(key);
 }
 
 /** Stopped image destruction captures the stable target before any platform mutation. */
 function captureStoppedImageRestartHold(
   args: TeardownDeviceArgs,
   requester: LifecycleRequester | undefined,
+  stopIdentity?: RestartStopIdentity,
 ): (() => void | Promise<void>) | undefined {
   const daemonState = DaemonState.getInstance();
   if (!requester || !daemonState.isInitialized()) {
@@ -308,6 +369,7 @@ function captureStoppedImageRestartHold(
       mcpSessionId: requester.mcpSessionId,
       platform: args.target.platform,
       stableIds: [args.target.stableId],
+      stopIdentity,
     });
 }
 
@@ -322,12 +384,16 @@ async function destroyDeleteDeviceTarget(
   }
   const { context, target } = state;
   if (!target.wasBooted) {
-    const refusal = await teardownOwnershipRefusal(args, target, requester);
+    const refusal = await teardownOwnershipRefusal(args, target, requester, state.stopIdentity);
     if (refusal) {
       state.earlyResponse = refusal;
       return;
     }
-    state.commitRestartHoldStop = captureStoppedImageRestartHold(args, requester);
+    state.commitRestartHoldStop = captureStoppedImageRestartHold(
+      args,
+      requester,
+      state.stopIdentity,
+    );
   }
   await destroyTeardownTarget(context, target, retainLeaseUntil, () => {
     void finalizeTeardownEviction(context, target, state.androidManager);
@@ -363,6 +429,7 @@ function createDeleteDeviceWorkflow(
   deadlineMs: number,
   timeoutMs: number,
   requester: LifecycleRequester | undefined,
+  stopIdentities: TeardownStopIdentities,
 ): DeviceTeardownWorkflow<TeardownState, "accepted" | "not_required", TeardownToolResponse> {
   return {
     resolve: async (requestAbortSignal, lifecycleLease) => {
@@ -385,7 +452,17 @@ function createDeleteDeviceWorkflow(
       if ("response" in resolution) {
         return { response: resolution.response };
       }
-      const ownershipRefusal = await teardownOwnershipRefusal(args, resolution.target, requester);
+      const stopIdentity = await resolveTeardownStopIdentity(
+        context,
+        resolution.target,
+        stopIdentities,
+      );
+      const ownershipRefusal = await teardownOwnershipRefusal(
+        args,
+        resolution.target,
+        requester,
+        stopIdentity,
+      );
       if (ownershipRefusal) {
         return { response: ownershipRefusal };
       }
@@ -394,7 +471,7 @@ function createDeleteDeviceWorkflow(
         runtime?.platform === "android"
           ? AndroidCtrlProxyManager.getExistingInstance(runtime.deviceId)
           : undefined;
-      return { target: { context, target: resolution.target, androidManager } };
+      return { target: { context, target: resolution.target, androidManager, stopIdentity } };
     },
     stop: async (state, requestAbortSignal, retainLeaseUntil) => {
       const { context, target } = state;
@@ -416,13 +493,14 @@ function createDeleteDeviceWorkflow(
             stoppingSessionUuid: requester?.sessionUuid,
             stoppingMcpSessionId: requester?.mcpSessionId,
             stableIds: [args.target.stableId],
+            stopIdentity: state.stopIdentity,
             retainLifecycleUntil: retainLeaseUntil,
             pooledAvdIdentity: {
               capture: target.pooledAvdCapture,
               force: args.force ?? false,
             },
             assertHolder: requester
-              ? () =>
+              ? (stopIdentity = state.stopIdentity) =>
                   assertLifecycleCallerHoldsDevice({
                     checkRestartHold: true,
                     toolName: "deleteDevice",
@@ -430,6 +508,7 @@ function createDeleteDeviceWorkflow(
                     requester,
                     force: args.force ?? false,
                     stableIds: [args.target.stableId],
+                    stopIdentity,
                   })
               : undefined,
             foreignClaim: requester
@@ -531,10 +610,10 @@ export function createLifecycleHandlers() {
     _progress?: ProgressCallback,
     abortSignal?: AbortSignal,
   ) => {
-    await assertKillDeviceCaller(args);
     const deps = getDeviceToolsDependencies();
     const requestAbortSignal = abortSignal ?? getAbortSignal();
     const deadlineMs = deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
+    const stopIdentity = await assertKillDeviceCaller(args, deps, deadlineMs, requestAbortSignal);
     const daemonState = DaemonState.getInstance();
     const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
     // Preflight: if this target's AVD name comes from the pool rather than from
@@ -590,10 +669,11 @@ export function createLifecycleHandlers() {
           stoppingSessionUuid: lifecycleRequester(args).sessionUuid,
           stoppingMcpSessionId: lifecycleRequester(args).mcpSessionId,
           stableIds: [args.device.name],
+          stopIdentity,
           retainLifecycleUntil,
           pooledAvdIdentity: pooledAvdKillIdentity(pooledAvdCapture, args.force ?? false),
           // The entry check predates the lease wait; re-check under the assignment mutex.
-          assertHolder: () =>
+          assertHolder: (confirmedIdentity = stopIdentity) =>
             assertLifecycleCallerHoldsDevice({
               checkRestartHold: true,
               toolName: "killDevice",
@@ -601,6 +681,7 @@ export function createLifecycleHandlers() {
               requester: lifecycleRequester(args),
               force: args.force ?? false,
               stableIds: [args.device.name],
+              stopIdentity: confirmedIdentity,
             }),
           foreignClaim: {
             toolName: "killDevice",
@@ -628,6 +709,7 @@ export function createLifecycleHandlers() {
   ): Promise<TeardownToolResponse> {
     const timeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
     const deadlineMs = deps.timer.now() + timeoutMs;
+    const stopIdentities: TeardownStopIdentities = new Map();
     // Refuse a managed slot's device before reserving the teardown lease, as killDevice does:
     // that reservation preempts the slot's in-flight acquisition even when the delete is then
     // refused (#11271). The workflow re-checks under the lease.
@@ -635,7 +717,7 @@ export function createLifecycleHandlers() {
       // Likewise the session-holder refusal (#11274); it needs the resolved target, so it
       // resolves read-only first. The workflow re-checks both under the lease.
       const refusal = await preLeaseRefusal(
-        { args, deps, deadlineMs, timeoutMs, requestAbortSignal: callerSignal },
+        { args, deps, deadlineMs, timeoutMs, requestAbortSignal: callerSignal, stopIdentities },
         requester,
         lifecycleLease,
       ).catch((error: unknown) => {
@@ -658,7 +740,7 @@ export function createLifecycleHandlers() {
           cancellationPolicy: args.cancellationPolicy ? "cancel-on-caller-abort" : undefined,
           lifecycleLease,
         },
-        createDeleteDeviceWorkflow(args, deps, deadlineMs, timeoutMs, requester),
+        createDeleteDeviceWorkflow(args, deps, deadlineMs, timeoutMs, requester, stopIdentities),
       );
     } catch (error) {
       return deleteDeviceCatchResponse(args, error, callerSignal);

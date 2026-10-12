@@ -8,7 +8,12 @@ import type { Timer } from "../utils/SystemTimer";
 import { fixedBackoff } from "../utils/Backoff";
 import { getAbortSignal } from "../utils/AbortContext";
 import { DaemonState } from "../daemon/daemonState";
-import type { DevicePool, PooledDevice, ShutdownForeignClaim } from "../daemon/devicePool";
+import type {
+  DevicePool,
+  PooledDevice,
+  ShutdownForeignClaim,
+  RestartStopIdentity,
+} from "../daemon/devicePool";
 import type { Session, SessionManager } from "../daemon/sessionManager";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
@@ -1338,8 +1343,9 @@ export async function retireShutdownOwnership(
  * is re-confirmed and the runtime is asked to name itself, and the kill runs
  * under the name the runtime gave.
  *
- * Under `force` (#6864) the runtime is not asked, so there is no name to run
- * under and the caller's target is used unchanged. That is not a detail:
+ * For an ordinary stop, `force` (#6864) skips this probe and preserves the
+ * caller's target. A restart hold still requires the separately confirmed
+ * identity passed by lifecycle admission; force never skips that confirmation.
  * `AndroidEmulatorClient.killDevice` re-discovers the serial and refuses a
  * target whose name differs from the discovered one, so substituting the
  * unconfirmed pooled label here would make the forced kill refuse itself on
@@ -1359,8 +1365,8 @@ async function resolvePooledAvdKillTarget(
   device: BootedDevice,
   pooledAvdIdentity: PooledAvdKillIdentity | undefined,
   devicePool: DevicePool | undefined,
-  shutdownDeadlineMs: number,
-  requestAbortSignal: AbortSignal | undefined,
+  budget: Pick<ShutdownEntryContext, "deadlineMs" | "requestAbortSignal">,
+  assertStopIdentity?: (stopIdentity?: RestartStopIdentity) => void,
 ): Promise<BootedDevice> {
   if (!pooledAvdIdentity?.capture) {
     return device;
@@ -1370,10 +1376,20 @@ async function resolvePooledAvdKillTarget(
     pooledAvdIdentity.capture,
     devicePool,
     dependencies.resolveRunningAndroidAvdName,
-    { timer: dependencies.timer, deadlineMs: shutdownDeadlineMs, signal: requestAbortSignal },
+    { timer: dependencies.timer, deadlineMs: budget.deadlineMs, signal: budget.requestAbortSignal },
     pooledAvdIdentity.force,
-  );
+  ).catch((error: unknown) => {
+    logger.warn(`[DeviceTools] Pooled stop identity probe failed for ${device.deviceId}`, error);
+    assertStopIdentity?.({ unconfirmed: true });
+    throw error;
+  });
   if (confirmation.kind === "refusal") {
+    // Discovery lost identity evidence after admission; the restart guard must see that too.
+    assertStopIdentity?.(
+      confirmation.refusal.reason === "conflict"
+        ? { confirmed: confirmation.refusal.runtimeAvdName }
+        : { unconfirmed: true },
+    );
     throw new PooledAvdIdentityError(pooledAvdNameRefusalMessage(device, confirmation.refusal));
   }
   return confirmation.kind === "skipped"
@@ -1385,6 +1401,7 @@ interface KillProcessAndRetireOwnershipOptions {
   stoppingSessionUuid?: string;
   stoppingMcpSessionId?: string;
   stableIds?: readonly string[];
+  stopIdentity?: RestartStopIdentity;
   androidObserverState: AndroidObserverShutdownState;
   releaseShutdownReservation: () => Promise<void>;
   strictDeadline: boolean;
@@ -1562,6 +1579,7 @@ async function killProcessAndRetireOwnership(
       mcpSessionId: options.stoppingMcpSessionId,
       platform: device.platform,
       stableIds: options.stableIds,
+      stopIdentity: options.stopIdentity,
     },
   );
 
@@ -1778,12 +1796,44 @@ interface ShutdownDeviceOptions {
   stoppingSessionUuid?: string;
   stoppingMcpSessionId?: string;
   stableIds?: readonly string[];
+  stopIdentity?: RestartStopIdentity;
   retainLifecycleUntil?: (operation: Promise<unknown>) => void;
   pooledAvdIdentity?: PooledAvdKillIdentity;
   /** Re-checks the caller still holds the device; runs under the pool's assignment mutex. */
-  assertHolder?: () => void;
+  assertHolder?: (stopIdentity?: RestartStopIdentity) => void;
   /** Claim the device against other live daemons while it is stopped (#11200). */
   foreignClaim?: ShutdownForeignClaim;
+}
+
+/** Reuse entry evidence unless the existing pooled shutdown path performs a fresh probe. */
+async function resolveRestartStopKillTarget(
+  dependencies: DeviceToolsDependencies,
+  context: ShutdownEntryContext,
+  options: ShutdownDeviceOptions,
+  devicePool: DevicePool | undefined,
+): Promise<{ killTarget: BootedDevice; stopIdentity: RestartStopIdentity | undefined }> {
+  const { device } = context;
+  const pooledKillTarget = await resolvePooledAvdKillTarget(
+    dependencies,
+    device,
+    options.pooledAvdIdentity,
+    devicePool,
+    context,
+    options.assertHolder,
+  );
+  // A kill-time re-probe supersedes entry evidence before any destructive preparation.
+  const stopIdentity =
+    pooledKillTarget !== device ? { confirmed: pooledKillTarget.name } : options.stopIdentity;
+  if (pooledKillTarget !== device) {
+    options.assertHolder?.(stopIdentity);
+  }
+  const killTarget =
+    stopIdentity &&
+    "confirmed" in stopIdentity &&
+    (options.pooledAvdIdentity?.force || isUnknownAndroidRuntimeName(pooledKillTarget))
+      ? { ...pooledKillTarget, name: stopIdentity.confirmed }
+      : pooledKillTarget;
+  return { killTarget, stopIdentity };
 }
 
 export async function shutdownDevice(
@@ -1857,13 +1907,11 @@ export async function shutdownDevice(
           retainReservationUntil: retainShutdownUntil,
         };
         // Identity first: a refusal must leave a still-running device untouched.
-        const killTarget = await resolvePooledAvdKillTarget(
+        const { killTarget, stopIdentity } = await resolveRestartStopKillTarget(
           dependencies,
-          device,
-          pooledAvdIdentity,
+          context,
+          options,
           devicePool,
-          shutdownDeadlineMs,
-          requestAbortSignal,
         );
         await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
         await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf);
@@ -1888,6 +1936,7 @@ export async function shutdownDevice(
             stoppingSessionUuid: options.stoppingSessionUuid,
             stoppingMcpSessionId: options.stoppingMcpSessionId,
             stableIds: options.stableIds,
+            stopIdentity,
             releaseShutdownReservation,
             retainReservationUntil: retainShutdownUntil,
             strictDeadline,

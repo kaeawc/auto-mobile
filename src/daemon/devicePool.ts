@@ -297,6 +297,15 @@ export function classifyPoolStatus(
   return status === "busy" || unlendable ? "assigned" : "idle";
 }
 
+/** A stop's daemon-confirmed stable identity; labels supplied by the caller are only hints. */
+export type RestartStopIdentity = { confirmed: string } | { unconfirmed: true };
+
+interface RestartStopTargetIdentity {
+  platform?: Platform;
+  stableIds?: readonly string[];
+  stopIdentity?: RestartStopIdentity;
+}
+
 /** A lifecycle stop that must not take a device another live daemon holds (#11200). */
 export interface ShutdownForeignClaim {
   toolName: string;
@@ -2624,7 +2633,7 @@ export class DevicePool {
   markIntentionalShutdown(
     deviceId: string,
     stoppingSessionId?: string,
-    options?: { mcpSessionId?: string; platform?: Platform; stableIds?: readonly string[] },
+    options?: RestartStopTargetIdentity & { mcpSessionId?: string },
   ): () => void | Promise<void> {
     this.sessionManager.flushDeferredRebindCleanups({ deviceId });
     const commitRestartHoldStop = this.releaseDeviceRestartReservationForStop(
@@ -2660,7 +2669,7 @@ export class DevicePool {
   releaseDeviceRestartReservationForStop(
     deviceId: string,
     stoppingSessionId?: string,
-    options?: { mcpSessionId?: string; platform?: Platform; stableIds?: readonly string[] },
+    options?: RestartStopTargetIdentity & { mcpSessionId?: string },
   ): () => void | Promise<void> {
     const requester = { sessionUuid: stoppingSessionId, mcpSessionId: options?.mcpSessionId };
     const sessionless =
@@ -2681,7 +2690,7 @@ export class DevicePool {
 
   private restartReservationsForStop(
     deviceId: string,
-    identity?: { platform?: Platform; stableIds?: readonly string[] },
+    identity?: RestartStopTargetIdentity,
     ownerRequester?: { sessionUuid?: string; mcpSessionId?: string },
   ) {
     const stopIdentity = this.restartStopStableIdentity(deviceId, identity);
@@ -2710,30 +2719,67 @@ export class DevicePool {
 
   private restartStopStableIdentity(
     deviceId: string,
-    identity?: { platform?: Platform; stableIds?: readonly string[] },
+    identity?: RestartStopTargetIdentity,
   ): { platform: Platform | undefined; stableIds: readonly string[] } {
-    const resetReservation = Array.from(this.adbServerResetRecoveryReservations.values()).find(
+    const platform = identity?.platform ?? this.devices.get(deviceId)?.platform;
+    if (identity?.stopIdentity) {
+      return {
+        platform,
+        stableIds: "confirmed" in identity.stopIdentity ? [identity.stopIdentity.confirmed] : [],
+      };
+    }
+    const confirmed = this.restartStopConfirmedPooledIdentity(deviceId, platform);
+    return { platform, stableIds: confirmed === undefined ? [] : [confirmed] };
+  }
+
+  /** Ordinary stops incur no identity probe when this platform has no restart handoff. */
+  hasRestartHandoffReservation(platform: Platform): boolean {
+    return [...this.rehydrationReservations.values()].some(
+      (target) => target.restartHandoff && target.platform === platform,
+    );
+  }
+
+  /** Pool/boot evidence, never the caller's label. Reset-cohort identity retains precedence. */
+  restartStopConfirmedPooledIdentity(deviceId: string, platform?: Platform): string | undefined {
+    const resetReservation = [...this.adbServerResetRecoveryReservations.values()].find(
       (reservation) => reservation.deviceId === deviceId,
     );
-    const device = this.devices.get(deviceId);
-    const stableDeviceId =
-      resetReservation?.image.name ?? (device && this.stableDeviceIdFor(device));
-    const platform = resetReservation ? "android" : (device?.platform ?? identity?.platform);
-    if (stableDeviceId !== undefined) {
-      return { platform, stableIds: [stableDeviceId] };
+    if (resetReservation) {
+      return resetReservation.image.name;
     }
-    const stableIds = [deviceId, ...(identity?.stableIds ?? [])].filter(
-      (id) =>
-        !isUnresolvedAndroidEmulatorName({ deviceId, name: id, platform: platform ?? "android" }),
+    const device = this.devices.get(deviceId);
+    if (device?.identityUnresolved) {
+      return undefined;
+    }
+    if (device) {
+      return this.stableDeviceIdFor(device);
+    }
+    return platform === "ios" || (platform === "android" && !isAndroidEmulatorSerial(deviceId))
+      ? deviceId
+      : undefined;
+  }
+
+  /** An unresolved target might be reserved; only an owner acting on its own hold can proceed. */
+  hasUnconfirmedRestartStopReservation(
+    deviceId: string,
+    requester: { sessionUuid?: string; mcpSessionId?: string },
+    identity: RestartStopTargetIdentity,
+  ): boolean {
+    return [...this.rehydrationReservations].some(
+      ([sessionId, target]) =>
+        target.restartHandoff &&
+        target.platform === identity.platform &&
+        (target.deviceId === deviceId || identity.stableIds?.includes(target.stableDeviceId)) &&
+        (!this.ownsRestartReservationForStop(sessionId, target, requester) ||
+          this.restartStopNamesForeignConnection(sessionId, target, requester)),
     );
-    return { platform, stableIds };
   }
 
   /** Synchronous stop admission uses the same captured target identities as the success commit. */
   restartReservationForStop(
     deviceId: string,
     requester: { sessionUuid?: string; mcpSessionId?: string },
-    identity?: { platform?: Platform; stableIds?: readonly string[] },
+    identity?: RestartStopTargetIdentity,
   ) {
     const reservation = this.restartReservationsForStop(deviceId, identity)[0];
     if (!reservation) {
@@ -8479,7 +8525,7 @@ export class DevicePool {
   isRestartReservationOwnedByOtherConnection(
     deviceId: string,
     requester: { sessionUuid?: string; mcpSessionId?: string },
-    identity?: { platform?: Platform; stableIds?: readonly string[] },
+    identity?: RestartStopTargetIdentity,
   ): boolean {
     return this.restartReservationsForStop(deviceId, identity, requester).some(
       ([sessionId, target]) => this.restartStopNamesForeignConnection(sessionId, target, requester),

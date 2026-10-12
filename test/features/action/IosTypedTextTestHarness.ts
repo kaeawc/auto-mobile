@@ -3,14 +3,18 @@ import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { iosKeyboardVisibleHierarchy } from "../../fixtures/observe/iosKeyboardStates";
 
-export function typedObservation(value: string, secure = false): ObserveResult {
+export function typedObservation(value: string, secure = false, omitValue = false): ObserveResult {
   const hierarchy = structuredClone(iosKeyboardVisibleHierarchy);
   const parser = new DefaultElementParser();
   for (const root of parser.extractRootNodes(hierarchy)) {
     parser.traverseNode(root, (node: ViewHierarchyNode) => {
       const attributes = nodeAttributes(node);
       if (attributes.focused === "true" && attributes["hint-text"] === "Email") {
-        attributes.value = value;
+        if (omitValue) {
+          delete attributes.value;
+        } else {
+          attributes.value = value;
+        }
         attributes.password = secure;
         if (secure) {
           Object.defineProperty(attributes, "value", {

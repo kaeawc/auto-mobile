@@ -174,9 +174,13 @@ liveness policy (heartbeat, one-shot CLI or managed execution; owner decision
 | `session-creation-timeout`, `allocation-rollback`, `device-disconnected-during-session-create:<device>` | No         | The session was never handed out; the UUID may be created again.                                                                                                                                                                                                    |
 | `expired`                                                                                               | No         | A non-terminal row past its idle deadline: a control call naming it is refused with `session_ownership_lost`, reason `expired` and `idle: true`; heartbeat and `daemon/sessionInfo` answer `daemon_session_not_found`, `releaseReason: "expired"` and `idle: true`. |
 
-`idle` sits beside the reason it qualifies: `error.reason`/`error.idle` in an MCP envelope,
+`idle` sits beside the reason it qualifies: `error.reason`/`error.idle` in an MCP envelope
+(including `no_active_device_session` and `managed_execution_ended`),
 `details.reason`/`details.idle` in a typed failure frame, or top-level `releaseReason`/`idle`
-on a not-found answer. It is only ever `true` and is absent otherwise; a heartbeat lapse
+on a not-found answer. It also sits beside `executionEnded.reason` as `executionEnded.idle`
+in the managed-slots resource, beside `boundSessionLoss.reason` as `boundSessionLoss.idle`
+in a failed daemon-socket response, and beside `reason` as `idle` in the
+`notifications/session/released` push. It is only ever `true` and is absent otherwise; a heartbeat lapse
 (`heartbeat-timeout`, `missing-first-heartbeat`) never carries `idle`. For `expired`, `idle: true`
 means the row's idle deadline passed with no daemon holding the session: time the daemon was
 down counts toward the window, and no heartbeat was judged during it.
@@ -308,13 +312,14 @@ acquisitions as anonymous (#11096):
 - A call naming a session that is gone for good (`session_ownership_lost`,
   `no_active_device_session`) is refused with `retryable: false` and
   `nextAction: "acquire_new_session"` (`ACQUIRE_NEW_SESSION_NEXT_ACTION` in
-  `src/models/deviceSessionRecovery.ts`, #11098). Acquire a new session with
+  `src/models/deviceSessionRecovery.ts`, #11098), with `idle: true` beside the
+  release reason after an idle release. Acquire a new session with
   `getAndroid` or `getApple`; retrying the same UUID cannot succeed.
 - A managed connection (a proxy launched with `--managed-slot-config`) never
   acquires devices, so after its execution's session is released it answers
   `managed_execution_ended` instead: `retryable: false`,
-  `nextAction: "relaunch_execution"`, the release `reason`, and the slot's
-  `slotIndex` and `assignmentGeneration`. It names no recovery tools; the
+  `nextAction: "relaunch_execution"`, the release `reason`, `idle: true` after an idle release,
+  and the slot's `slotIndex` and `assignmentGeneration`. It names no recovery tools; the
   runner decides whether to relaunch the execution (#11341).
 - Booted-device discovery that did not complete (adb or simctl failed, or a
   running emulator's AVD identity has not resolved) is refused with the retryable
@@ -495,8 +500,8 @@ session and does not change the default. A control call with only `platform`,
 a `deviceId` that no surviving session holds (or that the proxy cannot match to
 exactly one surviving session), or no selector is refused with
 `no_active_device_session`, `nextAction: "acquire_new_session"` and the release
-reason. To continue without naming the surviving session or its device each
-time, call `setActiveDevice` for that device or acquire a new session with
+reason (`idle: true` beside it after an idle release). To continue without naming
+the surviving session or its device each time, call `setActiveDevice` for that device or acquire a new session with
 `getAndroid` or `getApple`.
 
 ## Stopping a held device: `killDevice` and `deleteDevice`

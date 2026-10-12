@@ -151,6 +151,9 @@ export interface FocusedTextFieldOptions {
    * focused editable with no value, or a value equal to its placeholder, reads as "" (#9078).
    */
   iosEmptyAsBlank?: boolean;
+  /** Treat an iOS value equal to its placeholder as blank, while omitted values stay unreadable.
+   * Read only the runner value; never fall back to the field's text or accessibility label. */
+  iosPlaceholderAsBlank?: boolean;
 }
 
 /** Preserve security metadata even when a focused field's value is unreadable. */
@@ -184,17 +187,24 @@ function readFocusedTextField(
   const searchable = toSearchable(properties);
   const nodeClass = properties.class ?? properties.className;
   const secure =
-    properties.password === true ||
-    properties.password === "true" ||
+    isTruthyFlag(properties.password) ||
     (typeof nodeClass === "string" && nodeClass.includes("SecureTextField"));
   // Text sources preserve editable values; captured length distinguishes empty text from absence.
-  const value =
-    options.iosEmptyAsBlank && !secure
-      ? iosFieldValueOrBlank(searchable.textSources)
-      : (searchable.textSources.value ??
-        searchable.textSources.text ??
-        (searchable.capturedTextLength === 0 ? "" : undefined));
-  return value !== undefined || secure ? { value, secure } : undefined;
+  const defaultValue =
+    searchable.textSources.value ??
+    searchable.textSources.text ??
+    (searchable.capturedTextLength === 0 ? "" : undefined);
+  if (secure) {
+    return { value: defaultValue, secure };
+  }
+  const value = options.iosEmptyAsBlank
+    ? iosFieldValueOrBlank(searchable.textSources)
+    : options.iosPlaceholderAsBlank
+      ? searchable.textSources.value === undefined
+        ? undefined
+        : iosFieldValueOrBlank(searchable.textSources)
+      : defaultValue;
+  return value !== undefined ? { value, secure } : undefined;
 }
 
 function iosFieldValueOrBlank(textSources: Readonly<Record<string, string>>): string {

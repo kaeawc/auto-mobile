@@ -197,9 +197,15 @@ connection used for tools and resources:
    device-tool refusal). A daemon restart does not end the execution: its session
    is rehydrated, the proxy re-binds, and the restarted daemon records itself as
    the slot's owner. While the daemon is away, tool calls answer `daemon_stalled`
-   after automatic recovery is exhausted. The proxy keeps probing every heartbeat
-   interval, however long the daemon was away, and reclaims the rehydrated session
-   when the restarted daemon answers; the next call carries `daemon_restart_resumed`.
+   after automatic recovery is exhausted. Its message names the affected sessions
+   and attempt count, with `recovery.action: "wait_for_managed_reclaim"`: the proxy
+   keeps probing every heartbeat interval, however long the daemon was away, and
+   reclaims the session itself once a daemon answers again. Do not pass a `sessionUuid`
+   or try to acquire a device; retry the call later. The proxy never restarts the
+   shared daemon. If no daemon comes back, restarting it or relaunching the execution
+   is the runner's decision. If the session turns out to be released, calls answer
+   `managed_execution_ended`. The next call after reclaim carries `daemon_restart_resumed`
+   when the daemon restarted, or `daemon_stall_resumed` when the same daemon resumed.
    The restarted daemon waits lease + suspect grace (about 8 s) for the owner.
    During reclaim, reasonless not-found answers and `daemon-shutdown` or
    `daemon-restart` answers are awaited for the existing rehydration window, once
@@ -277,6 +283,7 @@ A managed-execution session uses the `managed-execution` liveness policy:
 - **Idle release is terminal.** As for every session, the session UUID ends with
   the idle release. A call on the managed connection after it is answered with
   `managed_execution_ended` (`nextAction: relaunch_execution`, the release reason,
+  `idle: true` beside the reason,
   `slotIndex` and `assignmentGeneration`; no recovery tools). Reads that name a
   non-blank string `deviceId` still work; a read without one (including a
   `device` label alone) is answered with
@@ -446,7 +453,7 @@ The initialize capability is a snapshot at connect. Resource reads add
 | `outcome`                | `"ready"` or `"failed"`.                                                                                                                                                                                                                                                                                                                                   |
 | `idleTimeoutMs`          | The idle window the sessions are held with.                                                                                                                                                                                                                                                                                                                |
 | `slots[]`                | Per slot: `slotIndex`, `role`, `platform`, `assignmentGeneration`, `device` (`stableId`, `transportId`, `name`), `sessionUuid`, `requestedSpec`, `resolvedSpec`, `specFingerprint` (`version`, `hash`), `disposition`, `readiness` (`mode`, `status`), `lifecycle` (provision timing and the reconciler's decision trail), and `failure` on a failed slot. |
-| `slots[].executionEnded` | Optional `{ reason: string, nextAction: "relaunch_execution" }`, present only in the `automobile:managed-slots` resource after that slot's session was terminally released.                                                                                                                                                                                |
+| `slots[].executionEnded` | Optional `{ reason: string, idle?: true, nextAction: "relaunch_execution" }`, present only in the `automobile:managed-slots` resource after that slot's session was terminally released; `idle` is true after an idle release and absent otherwise.                                                                                                        |
 | `failure`                | Scope- or transport-level failure: `code`, `retryable`, `message`, `nextAction`. Per-slot failures sit on the slot entry.                                                                                                                                                                                                                                  |
 
 If acquisition fails, the proxy still serves MCP: `initialize` reports outcome

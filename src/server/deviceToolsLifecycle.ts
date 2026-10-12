@@ -20,6 +20,7 @@ import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusa
 import type { ProgressCallback } from "./toolRegistry";
 import {
   assertLifecycleCallerHoldsDevice,
+  assertLifecycleCallerMayStopRestartReservation,
   assertLifecycleTargetNotHeldByOtherDaemon,
   LIFECYCLE_TOOL_FOREIGN_DAEMON_REMEDY,
   assertLifecycleCallerNotOnForeignManagedSlot,
@@ -115,7 +116,10 @@ async function teardownOwnershipRefusal(
     return undefined;
   }
   try {
-    assertLifecycleCallerHoldsDevice({
+    const assertOwnership = target.wasBooted
+      ? assertLifecycleCallerHoldsDevice
+      : assertLifecycleCallerMayStopRestartReservation;
+    assertOwnership({
       checkRestartHold: true,
       toolName: "deleteDevice",
       device: target.wasBooted
@@ -411,6 +415,7 @@ function createDeleteDeviceWorkflow(
             timeoutMs: context.timeoutMs,
             stoppingSessionUuid: requester?.sessionUuid,
             stoppingMcpSessionId: requester?.mcpSessionId,
+            stableIds: [args.target.stableId],
             retainLifecycleUntil: retainLeaseUntil,
             pooledAvdIdentity: {
               capture: target.pooledAvdCapture,
@@ -584,6 +589,7 @@ export function createLifecycleHandlers() {
           timeoutMs: DEVICE_SHUTDOWN_TIMEOUT_MS,
           stoppingSessionUuid: lifecycleRequester(args).sessionUuid,
           stoppingMcpSessionId: lifecycleRequester(args).mcpSessionId,
+          stableIds: [args.device.name],
           retainLifecycleUntil,
           pooledAvdIdentity: pooledAvdKillIdentity(pooledAvdCapture, args.force ?? false),
           // The entry check predates the lease wait; re-check under the assignment mutex.

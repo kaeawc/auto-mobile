@@ -1384,6 +1384,7 @@ async function resolvePooledAvdKillTarget(
 interface KillProcessAndRetireOwnershipOptions {
   stoppingSessionUuid?: string;
   stoppingMcpSessionId?: string;
+  stableIds?: readonly string[];
   androidObserverState: AndroidObserverShutdownState;
   releaseShutdownReservation: () => Promise<void>;
   strictDeadline: boolean;
@@ -1550,19 +1551,19 @@ async function killProcessAndRetireOwnership(
   const deviceManager = dependencies.deviceManagerFactory();
   // A failed/cancelled/timed-out call never commits, including a late platform settlement:
   // the unchanged restart hold remains governed by its original recovery window.
-  let commitRestartHoldStop: (() => void | Promise<void>) | undefined;
-  if (devicePool) {
-    commitRestartHoldStop =
-      device.platform === "android"
-        ? devicePool.markIntentionalShutdown(device.deviceId, options.stoppingSessionUuid, {
-            mcpSessionId: options.stoppingMcpSessionId,
-          })
-        : devicePool.releaseDeviceRestartReservationForStop(
-            device.deviceId,
-            options.stoppingSessionUuid,
-            { mcpSessionId: options.stoppingMcpSessionId },
-          );
-  }
+  const captureRestartHold =
+    device.platform === "android"
+      ? "markIntentionalShutdown"
+      : "releaseDeviceRestartReservationForStop";
+  const commitRestartHoldStop = devicePool?.[captureRestartHold](
+    device.deviceId,
+    options.stoppingSessionUuid,
+    {
+      mcpSessionId: options.stoppingMcpSessionId,
+      platform: device.platform,
+      stableIds: options.stableIds,
+    },
+  );
 
   let shutdownDevice = device;
   let alreadyStoppedMessage: string | undefined;
@@ -1776,6 +1777,7 @@ interface ShutdownDeviceOptions {
   timeoutMs: number;
   stoppingSessionUuid?: string;
   stoppingMcpSessionId?: string;
+  stableIds?: readonly string[];
   retainLifecycleUntil?: (operation: Promise<unknown>) => void;
   pooledAvdIdentity?: PooledAvdKillIdentity;
   /** Re-checks the caller still holds the device; runs under the pool's assignment mutex. */
@@ -1885,6 +1887,7 @@ export async function shutdownDevice(
             androidObserverState,
             stoppingSessionUuid: options.stoppingSessionUuid,
             stoppingMcpSessionId: options.stoppingMcpSessionId,
+            stableIds: options.stableIds,
             releaseShutdownReservation,
             retainReservationUntil: retainShutdownUntil,
             strictDeadline,

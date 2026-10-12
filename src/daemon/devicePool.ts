@@ -2663,7 +2663,7 @@ export class DevicePool {
     const requester = { sessionUuid: stoppingSessionId, mcpSessionId: options?.mcpSessionId };
     const sessionless =
       !stoppingSessionId && !this.restartStopConnectionHasLiveSession(requester.mcpSessionId);
-    const reservations = this.restartReservationsForStop(deviceId, options).filter(
+    const reservations = this.restartReservationsForStop(deviceId, options, requester).filter(
       ([sessionId, target]) =>
         sessionless || this.ownsRestartReservationForStop(sessionId, target, requester),
     );
@@ -2680,37 +2680,51 @@ export class DevicePool {
   private restartReservationsForStop(
     deviceId: string,
     identity?: { platform?: Platform; stableIds?: readonly string[] },
+    ownerRequester?: { sessionUuid?: string; mcpSessionId?: string },
   ) {
+    const stopIdentity = this.restartStopStableIdentity(deviceId, identity);
+    return Array.from(this.rehydrationReservations).filter(([sessionId, target]) => {
+      if (!target.restartHandoff) {
+        return false;
+      }
+      const stableMatch =
+        (stopIdentity.platform === undefined || target.platform === stopIdentity.platform) &&
+        stopIdentity.stableIds.includes(target.stableDeviceId);
+      // Unknown serial-only stops may drop the owner's own hold, never another session's row.
+      const ownSerialMatch =
+        stopIdentity.stableIds.length === 0 &&
+        target.deviceId === deviceId &&
+        ownerRequester !== undefined &&
+        this.ownsRestartReservationForStop(sessionId, target, ownerRequester);
+      return (
+        (stableMatch || ownSerialMatch) &&
+        !this.managedSlotExclusion?.holderOf({
+          platform: target.platform,
+          stableIds: [target.stableDeviceId, target.deviceId],
+        })
+      );
+    });
+  }
+
+  private restartStopStableIdentity(
+    deviceId: string,
+    identity?: { platform?: Platform; stableIds?: readonly string[] },
+  ): { platform: Platform | undefined; stableIds: readonly string[] } {
     const resetReservation = Array.from(this.adbServerResetRecoveryReservations.values()).find(
       (reservation) => reservation.deviceId === deviceId,
     );
     const device = this.devices.get(deviceId);
     const stableDeviceId =
       resetReservation?.image.name ?? (device && this.stableDeviceIdFor(device));
-    return Array.from(this.rehydrationReservations).filter(([sessionId, target]) => {
-      if (!target.restartHandoff) {
-        return false;
-      }
-      if (!device && !resetReservation && identity?.platform && identity.stableIds) {
-        return (
-          target.platform === identity.platform &&
-          this.startMatchesRestartReservation(
-            identity.platform,
-            identity.stableIds,
-            sessionId,
-            target,
-          ) &&
-          !this.managedSlotExclusion?.holderOf({
-            platform: target.platform,
-            stableIds: [target.stableDeviceId, target.deviceId],
-          })
-        );
-      }
-      return (
-        target.deviceId === deviceId &&
-        (stableDeviceId === undefined || target.stableDeviceId === stableDeviceId)
-      );
-    });
+    const platform = resetReservation ? "android" : (device?.platform ?? identity?.platform);
+    if (stableDeviceId !== undefined) {
+      return { platform, stableIds: [stableDeviceId] };
+    }
+    const stableIds = [deviceId, ...(identity?.stableIds ?? [])].filter(
+      (id) =>
+        !isUnresolvedAndroidEmulatorName({ deviceId, name: id, platform: platform ?? "android" }),
+    );
+    return { platform, stableIds };
   }
 
   /** Synchronous stop admission uses the same captured target identities as the success commit. */
@@ -8461,9 +8475,10 @@ export class DevicePool {
   isRestartReservationOwnedByOtherConnection(
     deviceId: string,
     requester: { sessionUuid?: string; mcpSessionId?: string },
+    identity?: { platform?: Platform; stableIds?: readonly string[] },
   ): boolean {
-    return this.restartReservationsForStop(deviceId).some(([sessionId, target]) =>
-      this.restartStopNamesForeignConnection(sessionId, target, requester),
+    return this.restartReservationsForStop(deviceId, identity, requester).some(
+      ([sessionId, target]) => this.restartStopNamesForeignConnection(sessionId, target, requester),
     );
   }
 

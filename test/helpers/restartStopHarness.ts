@@ -162,7 +162,10 @@ export function restartStopHarness() {
       ensureCtrlProxyReady: async () => {},
       stopPerformanceMonitoring: () => {},
       stopAndroidObservers: async () => {},
-      resolveRunningAndroidAvdName: async () => device.name,
+      resolveRunningAndroidAvdName: async (target) =>
+        (await manager.getBootedDevices("android")).find(
+          (device) => device.deviceId === target.deviceId,
+        )?.name,
       timer,
     });
     await pool.initializeWithDevices([device]);
@@ -211,16 +214,17 @@ export function restartStopHarness() {
       force = false,
       mcpSessionId?: string,
       signal?: AbortSignal,
+      targetDevice: BootedDevice = device,
     ) =>
       runWithToolSelectionContext({ routingSessionUuid: requester }, () =>
         ToolRegistry.getTool(name)!.handler(
           name === "killDevice"
-            ? { device, force, [INTERNAL_MCP_SESSION_PARAM]: mcpSessionId }
+            ? { device: targetDevice, force, [INTERNAL_MCP_SESSION_PARAM]: mcpSessionId }
             : {
                 target: {
                   platform,
                   isVirtual: true,
-                  stableId: platform === "android" ? device.name : device.deviceId,
+                  stableId: platform === "android" ? targetDevice.name : targetDevice.deviceId,
                 },
                 mode: "destroy",
                 verifyAbsence: true,

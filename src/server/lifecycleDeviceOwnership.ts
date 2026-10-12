@@ -71,7 +71,7 @@ export function assertLifecycleCallerHoldsDevice(input: {
   const base = (uuid: string) => resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
   assertNotForeignManagedSlotFromSnapshot(daemonState, input);
   const pool = daemonState.getDevicePool();
-  assertLifecycleRequesterOwnsRestartHold(pool, input);
+  assertLifecycleCallerMayStopRestartReservation(input);
   const owner = sessionManager.getSessionForDevice(device.deviceId) ?? undefined;
   if (!owner) {
     return;
@@ -108,36 +108,29 @@ export function assertLifecycleCallerHoldsDevice(input: {
   });
 }
 
-/** Naming a handed-off holder remains connection-owned even while no live session exists. */
-function assertLifecycleRequesterOwnsRestartHold(
-  pool: ReturnType<DaemonState["getDevicePool"]>,
-  {
-    toolName,
-    device,
-    requester,
-    checkRestartHold,
-    stableIds,
-  }: Pick<
-    Parameters<typeof assertLifecycleCallerHoldsDevice>[0],
-    "toolName" | "device" | "requester" | "checkRestartHold" | "stableIds"
-  >,
-): void {
-  if (!checkRestartHold) {
+/** Stopped images need only the restart guard; live-holder and slot snapshot checks stay separate. */
+export function assertLifecycleCallerMayStopRestartReservation({
+  toolName,
+  device,
+  requester,
+  checkRestartHold,
+  stableIds,
+}: Parameters<typeof assertLifecycleCallerHoldsDevice>[0]): void {
+  const daemonState = DaemonState.getInstance();
+  if (!checkRestartHold || !daemonState.isInitialized()) {
     return;
   }
-  const reservation = pool.restartReservationForStop?.(
-    device.deviceId,
-    requester,
-    stableIds
-      ? {
-          platform: device.platform,
-          stableIds: [device.deviceId, ...stableIds.filter((id): id is string => id !== undefined)],
-        }
-      : undefined,
-  );
+  const pool = daemonState.getDevicePool();
+  const identity = stableIds
+    ? {
+        platform: device.platform,
+        stableIds: stableIds.filter((id): id is string => id !== undefined),
+      }
+    : undefined;
+  const reservation = pool.restartReservationForStop?.(device.deviceId, requester, identity);
   if (
     reservation?.foreignConnection ||
-    pool.isRestartReservationOwnedByOtherConnection?.(device.deviceId, requester)
+    pool.isRestartReservationOwnedByOtherConnection?.(device.deviceId, requester, identity)
   ) {
     throw new InputDeviceOwnedError(
       toolName,

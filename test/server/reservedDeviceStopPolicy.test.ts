@@ -90,6 +90,151 @@ describe("reserved device stop policy", () => {
     expect(f.timer.getPendingTimeoutCount()).toBe(0);
   }
 
+  test("ios deleteDevice: stopped pooled live session without a restart reservation × sessionless", async () => {
+    const f = await fixture("ios", false, false, "owner-conn", false);
+    f.manager.setBootedDevices("ios", []);
+    expect(f.sessions.getSessionForDevice(f.device.deviceId)).toBe(BASE);
+    expect(f.internals.rehydrationReservations.size).toBe(0);
+    expect(await f.call("deleteDevice")).toMatchObject({
+      structuredContent: { state: "destroyed" },
+    });
+    expect(f.manager.killed).toEqual([]);
+    expect(f.pool.getDevice(f.device.deviceId)).toBeNull();
+  });
+
+  // Android runtime serials can be recycled or change; iOS UDIDs are the stable identity.
+  for (const pooled of [false, true]) {
+    for (const tool of ["killDevice", "deleteDevice"] as const) {
+      for (const requester of [undefined, "other-session"]) {
+        test(`android ${tool}: recycled serial unrelated AVD, pooled ${pooled} × ${requester ?? "sessionless"}`, async () => {
+          const f = await fixture("android");
+          await f.pool.removeDevice(f.device.deviceId, true, f.pool.getDevice(f.device.deviceId));
+          const unrelated = { ...f.device, name: "unrelated-phone" };
+          f.manager.setBootedDevices("android", [unrelated]);
+          f.manager.setDeviceImages("android", [f.device, unrelated]);
+          if (pooled) {
+            await f.pool.initializeWithDevices([unrelated]);
+          }
+          const before = await snapshot(f);
+          const result = await f.call(tool, requester, false, undefined, undefined, unrelated);
+          if (tool === "deleteDevice") {
+            expect(result).toMatchObject({ structuredContent: { state: "destroyed" } });
+          }
+          expect(f.manager.killed).toEqual([unrelated.deviceId]);
+          await unchanged(f, before);
+        });
+      }
+      for (const caller of ["other-session", "sessionless", "owner"] as const) {
+        test(`android ${tool}: reserved AVD on another serial, pooled ${pooled} × ${caller}`, async () => {
+          const f = await fixture("android");
+          await f.pool.removeDevice(f.device.deviceId, true, f.pool.getDevice(f.device.deviceId));
+          const returned = { ...f.device, deviceId: "emulator-5556" };
+          f.manager.setBootedDevices("android", [returned]);
+          f.manager.setDeviceImages("android", [returned]);
+          if (pooled) {
+            await f.pool.initializeWithDevices([returned]);
+            expect(f.pool.genericAvailability(returned.deviceId)).toBe("reserved");
+          }
+          f.timer.advanceTime(1_234);
+          const before = await snapshot(f);
+          const pending = f.call(
+            tool,
+            caller === "sessionless" ? undefined : caller === "owner" ? BASE : caller,
+            false,
+            undefined,
+            undefined,
+            returned,
+          );
+          if (caller === "other-session") {
+            await refusal(pending, tool, {
+              code: "device_owned_by_other_session",
+              retryable: true,
+              retryAfterMs: before.hold.scheduledDeadlineMs! - f.sessions.sessionNow(),
+            });
+            await unchanged(f, before);
+            expect(f.manager.killed).toEqual([]);
+            expect(
+              f.manager.getExecutedOperations().filter((op) => op.startsWith("destroyDevice")),
+            ).toEqual([]);
+          } else {
+            const result = await pending;
+            if (tool === "deleteDevice") {
+              expect(result).toMatchObject({ structuredContent: { state: "destroyed" } });
+            }
+            expect(f.manager.killed).toEqual([returned.deviceId]);
+            expect(f.internals.rehydrationReservations.has(BASE)).toBe(false);
+            if (caller === "sessionless") {
+              await terminal(f);
+            } else {
+              expect(await f.persistence.getSession!(BASE)).toEqual(before.row);
+              expect(before.row.release_reason).toStartWith("device-restart:");
+            }
+          }
+        });
+      }
+    }
+    for (const requester of [undefined, "other-session", BASE]) {
+      test(`android killDevice: forced unknown identity, pooled ${pooled} × ${requester ?? "sessionless"}`, async () => {
+        const f = await fixture("android");
+        await f.pool.removeDevice(f.device.deviceId, true, f.pool.getDevice(f.device.deviceId));
+        const unknown = { ...f.device, name: `Unknown (${f.device.deviceId})` };
+        f.manager.setBootedDevices("android", [unknown]);
+        if (pooled) {
+          await f.pool.initializeWithDevices([unknown]);
+        }
+        const before = await snapshot(f);
+        await f.call("killDevice", requester, true, undefined, undefined, unknown);
+        expect(f.manager.killed).toEqual([unknown.deviceId]);
+        if (requester === BASE) {
+          expect(f.internals.rehydrationReservations.has(BASE)).toBe(false);
+          expect(await f.persistence.getSession!(BASE)).toEqual(before.row);
+        } else {
+          await unchanged(f, before);
+        }
+      });
+    }
+    for (const tool of ["killDevice", "deleteDevice"] as const) {
+      for (const caller of ["other-session", "sessionless", "owner"] as const) {
+        test(`ios ${tool}: reserved UDID, pooled ${pooled} × ${caller}`, async () => {
+          const f = await fixture("ios");
+          if (!pooled) {
+            await f.pool.removeDevice(f.device.deviceId, true, f.pool.getDevice(f.device.deviceId));
+          }
+          f.timer.advanceTime(1_234);
+          const before = await snapshot(f);
+          const pending = f.call(
+            tool,
+            caller === "sessionless" ? undefined : caller === "owner" ? BASE : caller,
+          );
+          if (caller === "other-session") {
+            await refusal(pending, tool, {
+              code: "device_owned_by_other_session",
+              retryable: true,
+              retryAfterMs: before.hold.scheduledDeadlineMs! - f.sessions.sessionNow(),
+            });
+            await unchanged(f, before);
+            expect(f.manager.killed).toEqual([]);
+            expect(
+              f.manager.getExecutedOperations().filter((op) => op.startsWith("destroyDevice")),
+            ).toEqual([]);
+          } else {
+            const result = await pending;
+            if (tool === "deleteDevice") {
+              expect(result).toMatchObject({ structuredContent: { state: "destroyed" } });
+            }
+            expect(f.manager.killed).toEqual([f.device.deviceId]);
+            if (caller === "sessionless") {
+              await terminal(f);
+            } else {
+              expect(f.internals.rehydrationReservations.has(BASE)).toBe(false);
+              expect(await f.persistence.getSession!(BASE)).toEqual(before.row);
+            }
+          }
+        });
+      }
+    }
+  }
+
   for (const platform of ["android", "ios"] as const) {
     for (const tool of ["killDevice", "deleteDevice"] as const) {
       for (const force of [false, true]) {

@@ -331,6 +331,7 @@ interface StallHandoverRecord {
 /** A forwarded tool call's result, with the suspect refusal the proxy may retry it after. */
 interface ForwardedToolCall {
   result: any;
+  forwardedSessionUuid?: string;
   retryableSuspectRefusal?: DeviceSessionSuspectRefusal;
 }
 
@@ -4358,7 +4359,7 @@ export class DaemonMcpProxy {
     }
     const refusal = first.retryableSuspectRefusal;
     if (!refusal || !(await this.awaitSuspectSessionRecovery(refusal, signal))) {
-      return this.withPendingResumedNotice(args, first.result);
+      return this.withPendingResumedNotice(first.forwardedSessionUuid, first.result);
     }
     // Exactly one retry: the refused call never reached its handler (isSuspectRefusalRetryable).
     // The retry's own pre-forward checks surface a handover or loss recovery recorded.
@@ -4371,7 +4372,7 @@ export class DaemonMcpProxy {
       signal,
       false,
     );
-    return this.withPendingResumedNotice(args, retried.result);
+    return this.withPendingResumedNotice(retried.forwardedSessionUuid, retried.result);
   }
 
   /**
@@ -4447,8 +4448,7 @@ export class DaemonMcpProxy {
    * The first call to reach a session resumed after a `daemon_stalled` handover carries the
    * warning that it resumed, so the harness can disregard the handover it was told about (#10989).
    */
-  private withPendingResumedNotice(args: Record<string, unknown>, result: unknown): unknown {
-    const sessionUuid = this.sessionUuidFromArgs(args) ?? this.boundSessionUuid;
+  private withPendingResumedNotice(sessionUuid: string | undefined, result: unknown): unknown {
     const pending = sessionUuid ? this.resumedStallNotices.get(sessionUuid) : undefined;
     if (!sessionUuid || !pending) {
       return result;
@@ -4650,12 +4650,12 @@ export class DaemonMcpProxy {
         this.bindForwardedSessionOnErrorResult(name, forwardedArgs, result, callReleaseEpoch);
         // The daemon's own terminal refusal (a cut call's answer included) told this caller.
         this.noteReleaseSurfacedBy(result);
-        return { result, retryableSuspectRefusal };
+        return { result, forwardedSessionUuid, retryableSuspectRefusal };
       }
       this.rememberToolSelectionProfile(name, callerArgs, result);
       if (isSessionAcquisition) {
         await this.bindResultMintedDeviceSession(name, result, callReleaseEpoch);
-        return { result };
+        return { result, forwardedSessionUuid };
       }
       // Remember what was actually forwarded, not the caller's raw args. An
       // implicit sessionless call injects the bound UUID into forwardedArgs and
@@ -4667,7 +4667,7 @@ export class DaemonMcpProxy {
         this.rememberSessionUuid(name, forwardedArgs, callReleaseEpoch, false);
       }
       this.rememberActiveDeviceSession(name, result, callReleaseEpoch);
-      return { result };
+      return { result, forwardedSessionUuid };
     } catch (error) {
       signal?.throwIfAborted();
       // A fence raised while this call was in flight names the session it lost: the caller is told.
@@ -4769,6 +4769,10 @@ export class DaemonMcpProxy {
     progressToken: string | number | undefined,
     signal: AbortSignal | undefined,
   ): Promise<ForwardedToolCall> {
+    // Artifact lookup only reaches a resumed session when its owner is still held.
+    const forwardedSessionUuid = this.isHeldSession(ownerSessionUuid)
+      ? ownerSessionUuid
+      : undefined;
     const forwardedArgs = this.withOneShotCliMarker(
       this.withAcceptanceConfiguration(
         this.withToolSelectionProfile({ ...callerArgs, sessionUuid: ownerSessionUuid }),
@@ -4791,7 +4795,7 @@ export class DaemonMcpProxy {
       ),
       { timer: this.timer, signal, label: `Daemon tool ${name}` },
     );
-    return { result };
+    return { result, forwardedSessionUuid };
   }
 
   private withOneShotCliMarker(args: Record<string, unknown>): Record<string, unknown> {

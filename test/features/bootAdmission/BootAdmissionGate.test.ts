@@ -20,6 +20,7 @@ import { parsePsSnapshot } from "../../../src/features/iosSimFleet/psSnapshot";
 import { testOverrides } from "../../../src/utils/testOverrides";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { settleByFakeEvents } from "../../helpers/fakeTimerStepping";
 
 const GIB = 1024 ** 3;
 
@@ -401,6 +402,37 @@ describe("shared boot admission gates", () => {
     const gates = createBootAdmissionGates({ env: {}, timer: new FakeTimer() });
     expect(gates.android).toBeUndefined();
     expect(gates.ios).toBeUndefined();
+  });
+
+  test("describeBootCapacity aborts only the reporter that times out", async () => {
+    const timer = new FakeTimer();
+    let androidSignal: AbortSignal | undefined;
+    let iosSignal: AbortSignal | undefined;
+    const android: BootCapacityReporter = {
+      describeCapacity: async (options) => {
+        androidSignal = options?.signal;
+        return { limit: 2, booted: 1, inFlight: 1 };
+      },
+    };
+    const ios: BootCapacityReporter = {
+      describeCapacity: async (options) => {
+        iosSignal = options?.signal;
+        return new Promise(() => {});
+      },
+    };
+    expect(
+      await settleByFakeEvents(
+        timer,
+        describeBootCapacity(["android", "ios"], { android, ios }, timer),
+        { description: "independent reporter deadlines" },
+      ),
+    ).toEqual({ android: { limit: 2, booted: 1, inFlight: 1 } });
+    expect(timer.now()).toBe(3_000);
+    expect(androidSignal).toBeInstanceOf(AbortSignal);
+    expect(iosSignal).toBeInstanceOf(AbortSignal);
+    expect(androidSignal).not.toBe(iosSignal);
+    expect(androidSignal?.aborted).toBe(false);
+    expect(iosSignal?.aborted).toBe(true);
   });
 
   test("describeBootCapacity reports gated platforms and drops a failed one", async () => {

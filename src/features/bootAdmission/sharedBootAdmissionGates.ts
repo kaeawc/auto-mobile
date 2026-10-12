@@ -110,6 +110,8 @@ export function createBootAdmissionGates(
               ADB_LISTING_TIMEOUT_MS,
             ),
             executor,
+            undefined,
+            { timer, processTableSupported: (deps.hostPlatform ?? process.platform) !== "win32" },
           ),
           timer,
           {
@@ -172,12 +174,17 @@ export async function describeBootCapacity(
       if (!reporter) {
         return [];
       }
+      const controller = new AbortController();
       try {
-        const snapshot = await raceWithDeadline(() => reporter.describeCapacity(), {
-          timer,
-          timeoutMs: CAPACITY_REPORT_TIMEOUT_MS,
-          label: `Reporting ${platform} boot capacity`,
-        });
+        const snapshot = await raceWithDeadline(
+          () => reporter.describeCapacity({ signal: controller.signal }),
+          {
+            timer,
+            timeoutMs: CAPACITY_REPORT_TIMEOUT_MS,
+            label: `Reporting ${platform} boot capacity`,
+            onTimeout: () => controller.abort(),
+          },
+        );
         return [[platform, snapshot] as const];
       } catch (error) {
         logger.warn(

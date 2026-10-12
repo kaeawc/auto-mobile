@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { getFocusedTextField } from "../../../src/features/action/ClearText";
 import { DefaultSendKeysCommandExecutor, SendKeys } from "../../../src/features/action/SendKeys";
 import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
 import type { ObserveScreenExecuteOptions } from "../../../src/features/observe/interfaces/ObserveScreen";
@@ -118,6 +119,119 @@ test("placeholder value is blank after clearing", async () => {
   };
   expect(await h.executor.clear()).toEqual({ success: true });
   expect(h.calls).toEqual(["clear"]);
+});
+
+test("an omitted value after a no-op clear remains unverified", async () => {
+  const h = harness("old");
+  h.observer.execute = async () => typedObservation(h.value, false, true);
+  h.client.clear = async () => {
+    h.calls.push("clear");
+    return { success: true };
+  };
+  expect(await h.executor.clear()).toEqual({
+    success: true,
+    warning: "iOS clear was not verified: the focused field could not be read.",
+  });
+  expect(h.calls).toEqual(["clear"]);
+  expect(h.value).toBe("old");
+});
+
+test("a clear/type batch carries the warning for an omitted clear read-back value", async () => {
+  const h = harness("old");
+  h.observer.execute = async () => typedObservation(h.value, false, true);
+  h.client.clear = async () => {
+    h.calls.push("clear");
+    return { success: true };
+  };
+  const result = await h.action.execute([{ action: "clear" }, { action: "type", text: "new" }]);
+  const warning = "iOS clear was not verified: the focused field could not be read.";
+  expect(result.success).toBe(true);
+  expect(result.commands[0]).toMatchObject({ success: true, warning });
+  expect(result.warning).toContain(warning);
+  expect(h.calls).toEqual(["clear", "insert:new"]);
+});
+
+test.each(["standalone", "batch"])(
+  "an unreadable retry after leftover text fails the %s clear before typing",
+  async (mode) => {
+    const h = harness(":son");
+    deleteLast(h);
+    const observe = h.observer.execute;
+    h.observer.execute = async (options) => {
+      if (h.calls.length === 2) {
+        throw new Error("No hierarchy after retry");
+      }
+      return observe(options);
+    };
+    const failure = {
+      success: false,
+      error:
+        'iOS clear could not be verified after 2 attempt(s); the focused field last held ":so" and could not be read again.',
+    };
+    if (mode === "standalone") {
+      expect(await h.executor.clear()).toEqual(failure);
+    } else {
+      const result = await h.action.execute([
+        { action: "clear" },
+        { action: "type", text: ":sonr" },
+      ]);
+      expect(result).toMatchObject({ success: false, failedIndex: 0 });
+      expect(result.commands).toHaveLength(1);
+      expect(result.commands[0]).toMatchObject(failure);
+    }
+    expect(h.calls).toEqual(["clear", "clear"]);
+    expect(h.value).toBe(":s");
+    expect(h.timer.getSleepHistory()).toEqual([100]);
+  },
+);
+
+test.each([
+  { value: undefined, expected: undefined, legacy: "" },
+  { value: "", expected: "", legacy: "" },
+  { value: "Email", expected: "", legacy: "" },
+  { value: "leftover", expected: "leftover", legacy: "leftover" },
+])(
+  "clear read-back options distinguish missing and blank values: %j",
+  ({ value, expected, legacy }) => {
+    const hierarchy = {
+      hierarchy: {
+        node: {
+          class: "UITextField",
+          focused: true,
+          actions: ["set_text"],
+          text: "Accessibility label",
+          "ios-accessibility-label": "Other label",
+          "hint-text": "Email",
+          ...(value === undefined ? {} : { value }),
+        },
+      },
+    };
+    expect(getFocusedTextField(hierarchy, undefined, { iosPlaceholderAsBlank: true })?.value).toBe(
+      expected,
+    );
+    expect(getFocusedTextField(hierarchy, undefined, { iosEmptyAsBlank: true })?.value).toBe(
+      legacy,
+    );
+  },
+);
+
+test.each([
+  { class: "UITextField", password: true, value: "Email" },
+  { class: "UITextField", password: "true", value: "" },
+  { class: "UISecureTextField", value: "Email" },
+  { class: "UISecureTextField" },
+])("clear read-back options preserve secure classification and values: %j", (properties) => {
+  const hierarchy = {
+    hierarchy: {
+      node: { focused: true, actions: ["set_text"], "hint-text": "Email", ...properties },
+    },
+  };
+  const baseline = getFocusedTextField(hierarchy);
+  expect(baseline).toEqual({ value: properties.value, secure: true });
+  expect(getFocusedTextField(hierarchy, undefined, { iosPlaceholderAsBlank: true })).toEqual(
+    baseline,
+  );
+  expect(getFocusedTextField(hierarchy, undefined, { iosEmptyAsBlank: true })).toEqual(baseline);
 });
 
 test("unchanged mask settles after one retry with remaining-value evidence", async () => {

@@ -10,11 +10,21 @@ import { getTextRequestDeadlineMs } from "./textTransportTimeout";
 export const IOS_CLEAR_MAX_ATTEMPTS = 3;
 const clearBackoff = sequenceBackoff([100, 200]);
 
-function classifyClearField(field: FocusedTextField | undefined): TextActionResult | string {
+function classifyClearField(
+  field: FocusedTextField | undefined,
+  lastValue?: string,
+  attempts = 1,
+): TextActionResult | string {
   if (field?.secure) {
     return { success: true, warning: "iOS clear check skipped for a secure field." };
   }
   if (field?.value === undefined) {
+    if (lastValue !== undefined) {
+      return {
+        success: false,
+        error: `iOS clear could not be verified after ${attempts} attempt(s); the focused field last held ${JSON.stringify(lastValue)} and could not be read again.`,
+      };
+    }
     return {
       success: true,
       warning: "iOS clear was not verified: the focused field could not be read.",
@@ -38,13 +48,13 @@ export async function verifyIosClear({
   display?: string;
 }): Promise<TextActionResult> {
   const requestSignal = combineWithAmbientAbort(signal);
-  const read = async () => {
+  const read = async (lastValue?: string, attempts = 1) => {
     requestSignal?.throwIfAborted();
     const field = await readIosTypedTextField(observer, timer, requestSignal, display, {
-      iosEmptyAsBlank: true,
+      iosPlaceholderAsBlank: true,
     });
     requestSignal?.throwIfAborted();
-    return classifyClearField(field);
+    return classifyClearField(field, lastValue, attempts);
   };
   let remaining = await read();
   let attempts = 1;
@@ -70,7 +80,7 @@ export async function verifyIosClear({
     if (!result.success) {
       return result;
     }
-    const after = await read();
+    const after = await read(remaining, attempts);
     if (after === remaining) {
       return {
         success: true,

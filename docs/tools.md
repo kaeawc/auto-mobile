@@ -2149,7 +2149,7 @@ while the shared 10,000 ms read continues; coalesced AVD reads use a 30,000 ms s
 | 🔒 <code>criticalSection</code>                                | Synchronizes devices, then runs steps serially.                                |
 | 🚧 <code>barrier</code>                                        | Synchronizes devices, then lets them proceed concurrently.                     |
 | 📝 <code>recordSteps</code>                                    | Records MCP calls to YAML; begin and end require <code>--mcp-recording</code>. |
-| ⏺️ <code>startTestRecording</code>                             | Starts recording user interactions for <code>exportPlan</code>.                |
+| ⏺️ <code>startTestRecording</code>                             | Records on-device user input (not tool calls) for <code>exportPlan</code>.     |
 | 📤 <code>exportPlan</code>                                     | Stops the active recording and exports a YAML plan.                            |
 | 🎥 <code>videoRecording</code>                                 | Starts or stops device video recording.                                        |
 
@@ -2217,6 +2217,17 @@ step until you set `confirm: true` in the plan by hand. A recording whose calls
 were all skipped fails with an error that lists them.
 `exportPlan.recordingId` identifies the recording to export, and `planName`
 names the exported plan.
+
+Test recordings capture input made on the device itself: touches on its touch
+screen or emulator window, and text changes in input fields. A text change is recorded whatever produced it,
+so text typed by a tool becomes a `sendKeys` step. Taps, swipes and
+other gestures sent through AutoMobile tools (`tapAt`, `tapOn`, `swipeOn`, etc.)
+or `adb shell input` are injected and are not recorded by design; use
+`recordSteps` to record tool calls. Recording status always reports
+`captureScope: "user-input"` and includes a `notice` while `eventCount` is zero.
+A stop or `exportPlan` with no captured input fails with
+`reason: "no_user_input_captured"` and the same explanation; touch-track or
+recorder-stop failures retain their own errors.
 
 ### Video recording quality and limits
 

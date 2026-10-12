@@ -109,6 +109,7 @@ import {
 } from "./poolConfig";
 import {
   DeviceSessionRepository,
+  deviceRestartReleaseReason,
   isDeviceRestartReleaseReason,
 } from "../db/deviceSessionRepository";
 import { AndroidDeviceReboot, BoundedAndroidDeviceReboot } from "../devices/androidDeviceReboot";
@@ -644,6 +645,9 @@ export interface PooledDevice {
    *    instead of serving it into that routing black hole.
    */
   identityUnresolved?: boolean;
+
+  /** Trusted identity captured before quarantine; only the old holder's restart handoff may use it. */
+  preQuarantineStableDeviceId?: string;
 
   /**
    * The `BootedDevice.observedAt` of the newest identity observation folded into
@@ -4546,6 +4550,30 @@ export class DevicePool {
     return present && this.runtimeIdentity.isPooledDeviceIdentityAssignable(device);
   }
 
+  /** A resolved serial reuse hands the old AVD back to its owner without touching the stranger. */
+  private restartReleaseReasonForIdentityReplacement(
+    device: PooledDevice,
+    observation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
+  ): SessionReleaseReason | undefined {
+    const session = device.sessionId && this.sessionManager.getSession(device.sessionId);
+    if (session && this.intentionallyCancelledRecoverySessions.has(session)) {
+      return undefined;
+    }
+    if (
+      !observation ||
+      !this.hasReusableSerial(device) ||
+      observation.platform !== "android" ||
+      this.runtimeIdentity.hasUnresolvedEmulatorName(observation) ||
+      this.matchesRuntimeIdentity(device, observation)
+    ) {
+      return undefined;
+    }
+    const stableDeviceId = this.stableDeviceIdFor(device) ?? device.preQuarantineStableDeviceId;
+    return stableDeviceId !== undefined && stableDeviceId !== observation.name
+      ? deviceRestartReleaseReason(stableDeviceId)
+      : undefined;
+  }
+
   private async releaseSessionForEvictedDevice(
     device: PooledDevice,
     incidentId: string | undefined,
@@ -4573,14 +4601,44 @@ export class DevicePool {
       );
       return false;
     }
-    const released = await this.retrySessionRelease(sessionId, device.id, () =>
+    const releaseReason =
+      this.restartReleaseReasonForIdentityReplacement(device, identityObservation) ??
+      deviceLossCancellationReason(device.id, incidentId);
+    const attempt = () =>
       this.releaseSessionForDisconnectedDevice(
         sessionId,
         device.id,
-        deviceLossCancellationReason(device.id, incidentId),
+        releaseReason,
         () => !isSupersededByNewerIdentity(),
-      ),
-    );
+      );
+    let released: boolean | void = undefined;
+    if (isDeviceRestartReleaseReason(releaseReason)) {
+      // Quarantine normally drains the holder, but shutdown reservations defer it.
+      // Fresh settlement must drain that deferred work before publishing B too.
+      if (
+        !device.identityUnresolved ||
+        this.runtimeIdentity.hasDeferredQuarantineCancellation(device)
+      ) {
+        await this.cancelDeviceSessionExecutions(
+          sessionId,
+          deviceLossCancellationReason(device.id, incidentId),
+          { excludeExecutionId: this.ambientExecutionIdReader?.getExecutionId() },
+        );
+      }
+      if (isSupersededByNewerIdentity()) {
+        return false;
+      }
+      // Use the existing handoff bookkeeping, including rollback when the fenced
+      // release is superseded. Recovery must never stop or boot this reused serial.
+      released = await this.releaseSerialReuseRecoverySession(
+        device,
+        sessionId,
+        releaseReason,
+        attempt,
+      );
+    } else {
+      released = await this.retrySessionRelease(sessionId, device.id, attempt);
+    }
     if (released === false) {
       logger.info(
         `[DevicePool] Aborting session release for ${device.id}: a newer identity observation ` +
@@ -4596,6 +4654,39 @@ export class DevicePool {
     device.sessionId = null;
     this.notifyDeviceStateChanged(device);
     return true;
+  }
+
+  /** Serial reuse is loss of A, with diagnostics but no relaunch of the reused transport. */
+  private async releaseSerialReuseRecoverySession(
+    device: PooledDevice,
+    sessionId: string,
+    releaseReason: SessionReleaseReason,
+    attempt: () => Promise<boolean | void>,
+  ): Promise<boolean | void> {
+    const incidentId = await this.recordEmulatorLossIncident(device.id, "serial-reuse");
+    const result: { released: boolean | void } = { released: undefined };
+    try {
+      await this.releaseDisconnectedRecoverySessionWithRetry(
+        sessionId,
+        device.id,
+        releaseReason,
+        async () => {
+          result.released = await attempt();
+        },
+      );
+      if (result.released === false) {
+        await this.finishEmulatorLossIncident(incidentId, "not-attempted");
+      } else {
+        await this.completeEmulatorLossRecovery(incidentId, "not-attempted", "awaiting-device");
+      }
+      return result.released;
+    } catch (error) {
+      logger.warn(`[DevicePool] Serial-reuse session release failed for ${device.id}`, error);
+      await this.completeEmulatorLossRecovery(incidentId, "exhausted");
+      throw error;
+    } finally {
+      this.settleEmulatorLossIncident(incidentId);
+    }
   }
 
   /** Device-loss releases never reach releaseDevice, the only capture consumer (#11123). */
@@ -5880,11 +5971,11 @@ export class DevicePool {
     // deciding whether this attempt should report pending.
     incident ??= await this.settledRecoveryLossIncident(sessionId, target);
     const failure = this.recoveryFailure(sessionId, target, refreshCompleteness);
-    // Proven serial reuse is terminal even inside the recovery window.
-    if (
-      failure instanceof SessionRecoveryIdentityLossError &&
-      failure.reason === "identity-continuity-lost"
-    ) {
+    // Duplicate exact identities stay terminal. Serial reuse means absence during
+    // a restart handoff, including its absent-target answer after expiry.
+    if (failure instanceof SessionRecoveryIdentityLossError) {
+      // Persisted-only terminalization does not notify the live-session release listener.
+      this.releaseRehydrationReservation(sessionId, true);
       throw failure;
     }
     // Reading diagnostics or discovery can cross the restart deadline. Only
@@ -5968,6 +6059,8 @@ export class DevicePool {
         (candidate) =>
           candidate.session?.sessionUuid === sessionId &&
           candidate.deviceId === target.deviceId &&
+          (candidate.detectionPath !== "serial-reuse" ||
+            candidate.session.state === "awaiting-device") &&
           (candidate.avdName === undefined || candidate.avdName === target.stableDeviceId),
       );
       return incident &&
@@ -10846,7 +10939,8 @@ export class DevicePool {
    * exact target is absent, busy, or replaced at its old transport address,
    * fail immediately rather than allowing retry timing or discovery order to
    * choose another signed device. A device-restart release has a persisted,
-   * bounded grace period for absence. An unresolved emulator identity at any
+   * bounded grace period for absence, including another runtime at its old transport.
+   * An unresolved emulator identity at any
    * serial is not evidence of absence or replacement.
    */
   private recoveryFailure(
@@ -10864,13 +10958,16 @@ export class DevicePool {
     if (exactMatches.length !== 1) {
       const { transportReused, transportIdentityUnresolved, absenceAuthoritative } =
         this.recoveryDiscoveryEvidence(target, platformDevices, refreshCompleteness);
-      if (transportReused || exactMatches.length > 1) {
+      if (exactMatches.length > 1) {
         return new SessionRecoveryIdentityLossError(sessionId, target, "identity-continuity-lost");
+      }
+      if (transportReused) {
+        return this.reusedTransportRecoveryFailure(sessionId, target);
       }
       if (transportIdentityUnresolved) {
         if (
           target.restartRecoveryDeadlineMs === undefined ||
-          this.recoveryNow() < target.restartRecoveryDeadlineMs
+          this.isRestartRecoveryPending(target)
         ) {
           return new DevicePoolError("Recovery target identity is unresolved", true);
         }
@@ -10878,15 +10975,33 @@ export class DevicePool {
       if (!absenceAuthoritative) {
         return new DevicePoolError("Recovery target absence is not yet authoritative", true);
       }
-      if (
-        target.restartRecoveryDeadlineMs !== undefined &&
-        this.recoveryNow() < target.restartRecoveryDeadlineMs
-      ) {
+      if (this.isRestartRecoveryPending(target)) {
         return new DevicePoolError("Recovery target is restarting", true);
       }
       return new SessionRecoveryIdentityLossError(sessionId, target, "target-absent");
     }
     return this.recoveryBusyFailure(sessionId, target, exactMatches[0]);
+  }
+
+  private reusedTransportRecoveryFailure(
+    sessionId: string,
+    target: SessionRecoveryTarget,
+  ): DevicePoolError | SessionRecoveryIdentityLossError {
+    if (this.isRestartRecoveryPending(target)) {
+      return new DevicePoolError("Recovery target is restarting", true);
+    }
+    return new SessionRecoveryIdentityLossError(
+      sessionId,
+      target,
+      target.restartRecoveryDeadlineMs === undefined ? "identity-continuity-lost" : "target-absent",
+    );
+  }
+
+  private isRestartRecoveryPending(target: SessionRecoveryTarget): boolean {
+    return (
+      target.restartRecoveryDeadlineMs !== undefined &&
+      this.recoveryNow() < target.restartRecoveryDeadlineMs
+    );
   }
 
   private recoveryBusyFailure(

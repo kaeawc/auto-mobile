@@ -1,5 +1,5 @@
 import { getTextRequestDeadlineMs } from "./textTransportTimeout";
-import { verifyIosClear } from "./iosClearVerification";
+import { clearIosFieldWithVerification } from "./iosClearVerification";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "../../utils/android-cmdline-tools/asciiKeyEvents";
@@ -511,10 +511,12 @@ export class ClearText extends BaseVisualChange {
           ...(deadlineMs === undefined ? {} : { deadlineMs }),
         });
       };
-      const acknowledgement = await clear();
-      const result = acknowledgement.success
-        ? await verifyIosClear({ clear, observer: this.observeScreen, timer: this.timer, signal })
-        : acknowledgement;
+      const result = await clearIosFieldWithVerification({
+        clear,
+        observer: this.observeScreen,
+        timer: this.timer,
+        signal,
+      });
       if (result.retryable !== false) {
         signal?.throwIfAborted();
       }

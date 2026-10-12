@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { ContrastChecker } from "../../../src/features/accessibility/ContrastChecker";
 import type { Element } from "../../../src/models/Element";
 import type { RawImage } from "../../../src/utils/image/backend/ImageBackend";
@@ -45,6 +45,21 @@ const glyphs =
       ? value
       : undefined;
 
+/**
+ * Rendering a canvas pixel by pixel is one-time work that does not belong in a timed test (CI's
+ * per-test time includes the test body): each describe renders its fixtures in `beforeAll`, which
+ * the budget excludes. The images are never mutated, so tests share them.
+ */
+function renderInBeforeAll(renderers: Record<string, () => RawImage>): Record<string, RawImage> {
+  const images: Record<string, RawImage> = {};
+  beforeAll(() => {
+    for (const [key, render] of Object.entries(renderers)) {
+      images[key] = render();
+    }
+  });
+  return images;
+}
+
 function check(image: RawImage, bounds: Element["bounds"]) {
   const backend = new FakeImageBackend();
   backend.setRawPixelsResult(image);
@@ -55,18 +70,21 @@ function check(image: RawImage, bounds: Element["bounds"]) {
 }
 
 describe("solid-stroke sampling in a large box", () => {
+  const images = renderInBeforeAll({
+    large: () =>
+      canvas(1008, 264, 255, [
+        rect(24, 40, 104, 220, 0),
+        rect(904, 40, 984, 220, 0),
+        // Hairline stems on columns 379 and 441 (x = 375 and 437 inside the inset box) and
+        // 3px stems between them: the 1000x256 inset box has area 256000, so 4096 evenly
+        // spaced offsets visit only 16 columns, 62-63px apart.
+        rect(379, 120, 380, 144, 200),
+        rect(441, 120, 442, 144, 200),
+        glyphs(386, 120, 436, 144, 200, 3, 7),
+      ]),
+  });
   test("a small low-contrast label between two high-contrast icons in a 1008x264 box fails", async () => {
-    const image = canvas(1008, 264, 255, [
-      rect(24, 40, 104, 220, 0),
-      rect(904, 40, 984, 220, 0),
-      // Hairline stems on columns 379 and 441 (x = 375 and 437 inside the inset box) and
-      // 3px stems between them: the 1000x256 inset box has area 256000, so 4096 evenly
-      // spaced offsets visit only 16 columns, 62-63px apart.
-      rect(379, 120, 380, 144, 200),
-      rect(441, 120, 442, 144, 200),
-      glyphs(386, 120, 436, 144, 200, 3, 7),
-    ]);
-    const result = await check(image, { left: 0, top: 0, right: 1008, bottom: 264 });
+    const result = await check(images.large!, { left: 0, top: 0, right: 1008, bottom: 264 });
     expect(result).not.toBeNull();
     expect(result!.textColor.r).toBe(200);
     expect(result!.meetsAA).toBe(false);
@@ -85,14 +103,20 @@ describe("faint tonal shapes beside legible text are not text", () => {
     divider: (dark) => rect(150, 100, 850, 103, dark ? 47 : 238),
     "progress track": (dark) => rect(560, 56, 860, 64, dark ? 47 : 238),
   };
+  const renderers: Record<string, () => RawImage> = {};
+  for (const dark of [false, true]) {
+    for (const [name, shape] of Object.entries(shapes)) {
+      renderers[`${dark}/${name}`] = () =>
+        canvas(900, 120, dark ? 30 : 255, [glyphs(150, 40, 500, 80, dark ? 240 : 0), shape(dark)]);
+    }
+  }
+  const images = renderInBeforeAll(renderers);
   for (const dark of [false, true]) {
     const theme = dark ? "dark" : "light";
-    const background = dark ? 30 : 255;
     const ink = dark ? 240 : 0;
-    for (const [name, shape] of Object.entries(shapes)) {
+    for (const name of Object.keys(shapes)) {
       test(`${theme}: an inset ${name} does not replace the text colour`, async () => {
-        const image = canvas(900, 120, background, [glyphs(150, 40, 500, 80, ink), shape(dark)]);
-        const result = await check(image, bounds);
+        const result = await check(images[`${dark}/${name}`]!, bounds);
         expect(result).not.toBeNull();
         expect(result!.textColor.r).toBe(ink);
         expect(result!.meetsAA).toBe(true);
@@ -112,15 +136,15 @@ describe("faint glyph-shaped strokes beside legible text are still text", () => 
       const d = (((x - 560) % 30) - 15) ** 2 + (y - 60) ** 2;
       return d >= 64 && d <= 144 ? value : undefined;
     };
+  const images = renderInBeforeAll({
+    light: () => canvas(900, 120, 255, [glyphs(150, 40, 500, 80, 0), rings(238)]),
+    dark: () => canvas(900, 120, 30, [glyphs(150, 40, 500, 80, 240), rings(47)]),
+  });
   for (const dark of [false, true]) {
     const theme = dark ? "dark" : "light";
     test(`${theme}: faint ring glyphs keep the lower contrast`, async () => {
       const faint = dark ? 47 : 238;
-      const image = canvas(900, 120, dark ? 30 : 255, [
-        glyphs(150, 40, 500, 80, dark ? 240 : 0),
-        rings(faint),
-      ]);
-      const result = await check(image, { left: 0, top: 0, right: 900, bottom: 120 });
+      const result = await check(images[theme]!, { left: 0, top: 0, right: 900, bottom: 120 });
       expect(result).not.toBeNull();
       expect(result!.textColor.r).toBe(faint);
       expect(result!.meetsAA).toBe(false);

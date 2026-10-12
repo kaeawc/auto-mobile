@@ -1,5 +1,6 @@
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn } from "bun:test";
+import { warmedTests } from "../../helpers/warmedTests";
 import { readFileSync } from "node:fs";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
@@ -22,7 +23,8 @@ const editableElement = (focus: Record<string, unknown>) => ({
   ...focus,
 });
 
-afterEach(() => serverConfig.setRawElementSearchEnabled(false));
+// First-use costs are paid in beforeAll (outside CI's per-test time); this resets between runs.
+const test = warmedTests(() => serverConfig.setRawElementSearchEnabled(false));
 
 function loadFocusCapture(moment: "pre" | "post"): ViewHierarchyResult {
   const capture: { viewHierarchy: ViewHierarchyResult } = JSON.parse(

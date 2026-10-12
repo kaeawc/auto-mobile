@@ -5,14 +5,14 @@ import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../../src/models
 import { FakeAndroidCapacitySource } from "../../fakes/FakeAndroidCapacitySource";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
-  FakeBootAdmissionHost,
+  SharedBootAdmissionHostState,
   FakeHostBootAdmissionRegistry,
 } from "../../fakes/FakeHostBootAdmissionRegistry";
 
 const request = { timeoutMs: 1000, avdName: "fake-avd" };
 function setup(limit = "1") {
   const timer = new FakeTimer();
-  const host = new FakeBootAdmissionHost();
+  const host = new SharedBootAdmissionHostState();
   const source = new FakeAndroidCapacitySource();
   const registries = [100, 200].map((pid) => new FakeHostBootAdmissionRegistry(host, pid, timer));
   const gates = registries.map(

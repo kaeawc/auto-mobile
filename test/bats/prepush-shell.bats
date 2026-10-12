@@ -813,3 +813,17 @@ FIXTURE
   grep -Fq -- 'test/bats/uses-fixture.bats' "${BATS_LOG}"
   ! grep -Fq -- 'test/bats/other.bats' "${BATS_LOG}"
 }
+
+@test "changed Python harness inputs select manual-test-python" {
+  commit_change "scripts/manual-test/python/mcp_harness/script.py" "# fixture"
+  run bash scripts/prepush-shell.sh --base base
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only stdlib-first,manual-test-python' "${FAST_LOG}"
+}
+
+@test "changed Python validation script selects manual-test-python" {
+  commit_change "scripts/validate_manual_test_python.sh" "#!/usr/bin/env bash"
+  run bash scripts/prepush-shell.sh --base base
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck,stdlib-first,manual-test-python' "${FAST_LOG}"
+}

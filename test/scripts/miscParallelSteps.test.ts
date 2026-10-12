@@ -122,6 +122,7 @@ describe("#4130 hadolint hoist (fast-validation)", () => {
     expect(waitIndex).toBe(indexOfWaitOn(steps, "setup-uv-lock"));
     expect(waitIndex).toBeLessThan(indexOfNamed(steps, "Run fast validation checks"));
     expect(checks?.run).toContain("github-python-lock");
+    expect(checks?.run).toContain("manual-test-python");
   });
 
   test("the docs-assets freshness gate is in the fast-validation --only list", () => {

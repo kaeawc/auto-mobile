@@ -209,3 +209,196 @@ Frame and aux exit codes are 0 for success, 1 for a typed refusal, 2 for usage o
 a private-environment/device-start guard, and 3 for timeout or connection failure.
 Private-daemon and proxy commands retain their own exit codes; inspect their
 full evidence rather than treating exit 0 as device-side proof.
+
+## Python MCP SDK stdio clients
+
+<!-- Language exception: the TypeScript-only rule applies to application code. This manual-test tooling uses Python because Python anyio/mcp context-close failures cannot be reproduced by a TypeScript client. -->
+
+Use `scripts/manual-test/python/` to retain every request and full response while
+reproducing #11951 (stdio close) and #11950 (multiline typing). This tooling uses
+the official Python `mcp` SDK, locked to 2.3.0. The existing TypeScript
+`proxy-session.ts` and `@modelcontextprotocol/sdk` cannot reproduce Python/anyio
+close-path errors; Python's standard library has no MCP client. The official SDK
+is the thing under test. Tests use `unittest`, as the existing repository Python
+tests do, rather than adding pytest. The only third-party imports are `mcp` and
+its existing dependency `anyio`. No `claude-agent-sdk` or LLM loop is needed for
+these scripted transport, close and typing behaviours.
+
+Initialize and start a private daemon with the commands above first. The Python
+client resolves its launch through `in-daemon-env.sh` and `harness-guard.ts`; the
+TypeScript guard owns all private namespace rules and requires a live daemon pid
+file. The proxy receives only the server entry point, with no daemon startup
+flags. Both real and fake modes check every device-start call, including
+`afterPeerClosed`, before spawning. Selector-only starts need `--allow-selector`.
+There is no arbitrary command, socket, port or real-server environment override.
+
+Set up Python 3.11+ inside an existing absolute batch directory. The setup script
+never creates the batch directory, defaults to no batch, never deletes a venv,
+and prints just the interpreter path on stdout. Its optional version override
+installs after the hashed lock and reports **UNLOCKED** on stderr; use it only
+for comparing SDK lines. The 1.30.0 line reproduces the transport failure.
+
+```bash
+B=/absolute/private/batch
+PY="$(bash scripts/manual-test/python/setup-venv.sh --batch-dir "$B")"
+# Optional comparison (reuses this batch's venv):
+PY="$(bash scripts/manual-test/python/setup-venv.sh --batch-dir "$B" --mcp-version 1.30.0)"
+printf '%s\n' "$PY"
+```
+
+The single-client modes all run the script first, except `mid-call`, which starts
+the last call/read without awaiting it and leaves the contexts after the delay.
+`normal` simply leaves the contexts. `after-server-exit` closes the captured
+child's stdin and waits for exit. `sigterm-server` and `kill-server` signal only
+that captured child, then wait. `--server-exit-wait-ms 0` races the signal with
+context close. A failed process capture refuses modes needing a process handle
+before any step; no pid is guessed. SDK contexts always close in their owning
+task. Close deadlines kill only the captured child and report `CLOSE_HANG`.
+
+```bash
+B=/absolute/private/batch
+PY="$B/python-venv/bin/python"
+SCRIPT=scripts/manual-test/python/scripts/observe-then-close.json
+for MODE in normal after-server-exit mid-call sigterm-server kill-server; do
+  "$PY" scripts/manual-test/python/mcp_stdio_client.py \
+    --batch-dir "$B" --daemon 1 --script "$SCRIPT" --var deviceId=your-device-id \
+    --out-dir "$B/python-$MODE" --close-mode "$MODE" \
+    --server-exit-wait-ms 5000 --mid-call-delay-ms 200 \
+    --step-timeout-ms 60000 --close-timeout-ms 30000
+done
+```
+
+For two emulators sharing one private daemon, each stdio server belongs to its
+own asyncio task. Both initialize before traffic starts. With `a-first`, A closes
+as soon as its steps finish while B continues; B runs `afterPeerClosed` after A's
+close plus `--stagger-ms`. `b-first` mirrors this. `simultaneous` holds both at a
+barrier and offsets B by the requested stagger. Repeat five lifetimes to retain
+each close separately:
+
+```bash
+B=/absolute/private/batch
+PY="$B/python-venv/bin/python"
+"$PY" scripts/manual-test/python/two_clients.py \
+  --batch-dir "$B" --daemon 1 \
+  --script scripts/manual-test/python/scripts/sendkeys-multiline.json \
+  --var-a deviceId=emulator-a --var-b deviceId=emulator-b \
+  --out-dir "$B/python-pair" --lifetimes 5 --close-order a-first --stagger-ms 200 \
+  --close-mode-a normal --close-mode-b normal
+```
+
+`observe-then-close.json` lists tools, observes the explicit device twice, reads
+`automobile:devices/booted`, then idles briefly; its peer continuation observes
+again. `sendkeys-multiline.json` requires an editor already focused on the device.
+It records default multiline typing, repeated type commands in one call, clear
+then type, explicit `mode: "ime"`, three character-at-a-time calls with retries,
+and a final observation. It uses the schema's `deviceId` field for observe and
+`device` field for sendKeys. Retrying a typing error can duplicate text; inspect
+the retained attempts. `--script-a` and `--script-b` can replace `--script` for
+asymmetric traffic. Script keys and operations are strict; `${name}` substitution
+uses `--var` (or `--var-a`/`--var-b`) in string values, including nested arguments.
+Unknown keys, missing variables, non-object arguments and negative numbers
+refuse before launch. `retries` means extra attempts, for exceptions or `isError`.
+
+For a dry run, replace the real launch flags with `--fake-server`; optional
+`--fake-env K=V` applies only to the bundled fake. It uses the installed SDK's
+server API (FastMCP in 1.x, MCPServer in 2.x), implements scripted tools and the
+`fake://status` resource, and bounds every fake to 60 seconds. `FAKE_ON_EOF`
+accepts `exit` (default), `write-then-exit:20`, or `ignore`;
+`FAKE_IGNORE_SIGTERM=1` adds the force-kill case.
+
+```bash
+B=/absolute/private/batch
+PY="$B/python-venv/bin/python"
+"$PY" scripts/manual-test/python/mcp_stdio_client.py --fake-server \
+  --fake-env FAKE_ON_EOF=write-then-exit:20 \
+  --script scripts/manual-test/python/scripts/sendkeys-multiline.json \
+  --var deviceId=fake-device --out-dir "$B/python-fake"
+"$PY" scripts/manual-test/python/characterize_close.py
+"$PY" scripts/manual-test/python/characterize_close.py --json --only normal
+```
+
+The output directory is absolute and created with mode 0700. Evidence includes
+`A.jsonl` (append-only, mode 0600, flush and fsync per record),
+`A.identity.json` (Python/platform/package versions, command/args, environment
+**keys only**, close mode, script path and SHA256), and `A.server.stderr.log`.
+JSONL retains spawn pid, initialization, request before every attempt, full
+`model_dump(mode="json", by_alias=True)` response or exception, notifications
+when the SDK offers a handler, server exit status/timing, and close. Exceptions
+include flattened exception-group leaves and full tracebacks; close tracebacks
+also go to stderr. Per-step stdout JSON is compact and truncates error text at
+300 characters. Original step/application failures and close failures remain
+separate in the final JSON summary. Two-client evidence uses
+`lifetime-001/{A,B}.*` and a plain summary table followed by JSON. Monotonic
+absolute timestamps allow overlap and peer ordering to be checked.
+
+Exit codes: **0** means every step passed and `CLOSE_OK`; **1** means a step
+failed and close succeeded; **3** means close raised or hung; **2** means usage or
+guard refusal. For multiple lifetimes precedence is 2, then 3, then 1, then 0.
+A close result classifies transport failures, cancel-scope misuse, server-gone,
+timeout, or other exceptions. An earlier failure is never replaced by cleanup.
+
+`characterize_close.py` measures every ordering in a fresh child interpreter,
+with a hard timeout (default 12 seconds). A hang is `CLOSE_HANG`; it terminates
+that interpreter by pid and kills only fake-server pids from its spawn evidence.
+It prints identity plus a Markdown table, or machine JSON with `--json`;
+`--only` selects smoke scenarios. It exits 0 regardless of measured close
+outcomes. JSON annotates expected outcomes from the same SDK-major table used
+by tests; measured outcomes are never rewritten to fit expectations. Evidence
+is under `scratch/pyharness/characterize-*` unless `--out-dir` is supplied.
+
+The driver's fake-server probes on Python 3.11.10 / anyio 4.15.1 established the
+following baseline. `RAISED` means leaving `stdio_client` raised, separately from
+any call failure. Timing is approximate; rerun characterization with the
+installed SDK to measure local results.
+
+| Ordering                                                 | mcp 2.3.0                       | mcp 1.30.0                                       | Avoidable by |
+| -------------------------------------------------------- | ------------------------------- | ------------------------------------------------ | ------------ |
+| Normal close after completed calls                       | CLOSE_OK                        | CLOSE_OK                                         | none needed  |
+| Server exits after reply; client idles then closes       | CLOSE_OK                        | CLOSE_OK                                         | none needed  |
+| Server exits; client calls again then closes             | Call: MCPError, close: CLOSE_OK | Call fails; close OK or ExceptionGroup[McpError] | none needed  |
+| Server exits during a call                               | Call: MCPError, close: CLOSE_OK | Call: McpError, close: CLOSE_OK                  | none needed  |
+| In-flight call cancelled, then close                     | CLOSE_OK (~2.6 s)               | CLOSE_OK (~3.8 s)                                | none needed  |
+| Contexts left with a much-later call in flight           | CLOSE_OK                        | CLOSE_OK                                         | none needed  |
+| SIGTERM / SIGKILL server then close                      | CLOSE_OK                        | CLOSE_OK                                         | none needed  |
+| Server closes stdout, stays alive                        | CLOSE_OK                        | CLOSE_OK                                         | none needed  |
+| Server ignores stdin EOF                                 | CLOSE_OK (~2.4 s, SIGTERM)      | CLOSE_OK (~2.4 s)                                | server       |
+| Server ignores stdin EOF and SIGTERM                     | CLOSE_OK (~4.4 s, SIGKILL)      | CLOSE_OK (~4.3 s)                                | server       |
+| Notifications continuously while closing                 | CLOSE_OK                        | RAISED ExceptionGroup[anyio.BrokenResourceError] | SDK          |
+| More stdout messages after stdin EOF                     | CLOSE_OK                        | RAISED ExceptionGroup[anyio.BrokenResourceError] | server       |
+| In-flight response ~200 ms into close window             | CLOSE_OK                        | RAISED ExceptionGroup[anyio.BrokenResourceError] | SDK          |
+| Session exited, transport open, notifications arrive     | CLOSE_OK                        | RAISED ExceptionGroup[anyio.BrokenResourceError] | SDK          |
+| Two clients in own tasks, overlapping independent closes | CLOSE_OK                        | CLOSE_OK                                         | none needed  |
+| Two AsyncExitStacks closed non-LIFO from one task        | RuntimeError: cancel scope      | RuntimeError: cancel scope                       | client       |
+| Contexts closed in a different task                      | Hang / RuntimeError             | RuntimeError: cancel scope                       | client       |
+
+In 1.x, after the session closes its read stream, any further stdout line makes
+the transport reader send into a stream with no receiver. That raises
+`anyio.BrokenResourceError`; 1.x catches only `ClosedResourceError`, so its task
+group fails and transport exit raises an exception group. 2.x catches both.
+The trigger is any stdout write between session closure and transport process
+reaping. A correct client keeps contexts in one task and closes them LIFO.
+For the 1.x transport bug, upgrade to 2.x or catch the exception group at
+`stdio_client` exit; client ordering alone cannot fix a server's post-EOF writes.
+
+Where auto-mobile's proxy falls, from **code reading only** of origin/main on
+2026-10-12, **not yet observed against a live daemon**: stdin EOF starts bounded
+shutdown through `src/processLifecycle.ts` (`installStdinShutdownHandlers`) and
+`src/shutdownCleanup.ts`. The stdio-proxy stage has a 2000 ms budget inside the
+9000 ms process limit, then the process exits, so the proxy does not ignore EOF.
+However, shutdown never closes the MCP Server/StdioServerTransport; stdout
+remains writable until `process.exit`. This puts it in the post-EOF-write row
+for 1.x Python clients. An in-flight tool/resource handler aborted by
+`DaemonMcpProxy.closeOnce`/`untilClosed` returns a structured error which the SDK
+writes within milliseconds of EOF (`src/daemon/daemonMcpProxy.ts`,
+`src/server/proxyServer.ts` tools/call catch → `resolveCallToolErrorResult`).
+While `closeOnce` awaits session releases (up to 1500 ms each), daemon
+notifications can still be forwarded. `handleDaemonNotification`,
+`notifyListChanged`, and `proxyServer.ts`'s `sendToolListChanged` have no closing
+guard for tools/list_changed or resources/list_changed; this notification race
+is plausible and needs a live run. resources/updated is suppressed because its
+listeners are cleared synchronously.
+
+A product fix, **not made here**, would stop stdout writes on EOF before any
+awaited cleanup: close the MCP server/transport, or gate every send on a client
+input-closed flag, then release sessions and exit. That makes the server safe
+for every SDK line; a 1.x client cannot prevent the transport error by itself.

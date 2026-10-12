@@ -1,0 +1,152 @@
+{
+  "description": "#11950 precondition: an editor is already focused on the named device. Retries may duplicate typing; inspect every retained response.",
+  "steps": [
+    {
+      "op": "call",
+      "tool": "observe",
+      "arguments": {
+        "deviceId": "${deviceId}"
+      }
+    },
+    {
+      "op": "call",
+      "tool": "sendKeys",
+      "arguments": {
+        "device": "${deviceId}",
+        "commands": [
+          {
+            "action": "type",
+            "text": "first line\nsecond line\nthird line"
+          }
+        ]
+      },
+      "label": "multiline-default",
+      "retries": 0,
+      "retryDelayMs": 250
+    },
+    {
+      "op": "call",
+      "tool": "sendKeys",
+      "arguments": {
+        "device": "${deviceId}",
+        "commands": [
+          {
+            "action": "type",
+            "text": "one\n"
+          },
+          {
+            "action": "type",
+            "text": "two\n"
+          },
+          {
+            "action": "type",
+            "text": "three"
+          }
+        ]
+      },
+      "label": "several-commands",
+      "retries": 0,
+      "retryDelayMs": 250
+    },
+    {
+      "op": "call",
+      "tool": "sendKeys",
+      "arguments": {
+        "device": "${deviceId}",
+        "commands": [
+          {
+            "action": "clear"
+          },
+          {
+            "action": "type",
+            "text": "after clear\nnext line"
+          }
+        ]
+      },
+      "label": "clear-then-type",
+      "retries": 0,
+      "retryDelayMs": 250
+    },
+    {
+      "op": "call",
+      "tool": "sendKeys",
+      "arguments": {
+        "device": "${deviceId}",
+        "commands": [
+          {
+            "action": "type",
+            "text": "explicit IME\nsecond line",
+            "mode": "ime"
+          }
+        ]
+      },
+      "label": "multiline-ime",
+      "retries": 0,
+      "retryDelayMs": 250
+    },
+    {
+      "op": "call",
+      "tool": "sendKeys",
+      "arguments": {
+        "device": "${deviceId}",
+        "commands": [
+          {
+            "action": "type",
+            "text": "a"
+          }
+        ]
+      },
+      "label": "single-a",
+      "retries": 2,
+      "retryDelayMs": 250
+    },
+    {
+      "op": "call",
+      "tool": "sendKeys",
+      "arguments": {
+        "device": "${deviceId}",
+        "commands": [
+          {
+            "action": "type",
+            "text": "b"
+          }
+        ]
+      },
+      "label": "single-b",
+      "retries": 2,
+      "retryDelayMs": 250
+    },
+    {
+      "op": "call",
+      "tool": "sendKeys",
+      "arguments": {
+        "device": "${deviceId}",
+        "commands": [
+          {
+            "action": "type",
+            "text": "c"
+          }
+        ]
+      },
+      "label": "single-c",
+      "retries": 2,
+      "retryDelayMs": 250
+    },
+    {
+      "op": "call",
+      "tool": "observe",
+      "arguments": {
+        "deviceId": "${deviceId}"
+      }
+    }
+  ],
+  "afterPeerClosed": [
+    {
+      "op": "call",
+      "tool": "observe",
+      "arguments": {
+        "deviceId": "${deviceId}"
+      }
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "description": "#11951: explicit device observations and idle close; peer can keep working.",
+  "steps": [
+    {
+      "op": "listTools"
+    },
+    {
+      "op": "call",
+      "tool": "observe",
+      "arguments": {
+        "deviceId": "${deviceId}"
+      }
+    },
+    {
+      "op": "call",
+      "tool": "observe",
+      "arguments": {
+        "deviceId": "${deviceId}"
+      }
+    },
+    {
+      "op": "read",
+      "uri": "automobile:devices/booted",
+      "timeoutMs": 30000
+    },
+    {
+      "op": "sleep",
+      "ms": 200
+    }
+  ],
+  "afterPeerClosed": [
+    {
+      "op": "call",
+      "tool": "observe",
+      "arguments": {
+        "deviceId": "${deviceId}"
+      }
+    }
+  ]
+}

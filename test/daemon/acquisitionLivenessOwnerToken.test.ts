@@ -1,3 +1,4 @@
+import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
 import { expect, spyOn } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import {
@@ -20,6 +21,8 @@ import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { warmedTests } from "../helpers/warmedTests";
 
 let scenario: LivenessScenario | undefined;
+isolateEmptyToolRegistry();
+
 const proxies: DaemonMcpProxy[] = [];
 let clockOffset: unknown;
 const test = warmedTests(async () => {

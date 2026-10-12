@@ -19,6 +19,12 @@ export class FakeVideoCaptureBackend implements VideoCaptureBackend {
   private stopResultOverrides: Partial<RecordingResult> | null = null;
   private outputPayload: Buffer = Buffer.from("fake-video");
   private nowProvider: () => Date = () => new Date();
+  private forceStopFailures: Array<Error | undefined> = [];
+
+  /** One scripted result per call; undefined succeeds, an Error retains the capture. */
+  setForceStopFailures(failures: Array<Error | undefined>): void {
+    this.forceStopFailures = [...failures];
+  }
 
   private liveCapturePathFor: ((config: VideoCaptureConfig) => string) | null = null;
 
@@ -81,6 +87,10 @@ export class FakeVideoCaptureBackend implements VideoCaptureBackend {
 
   async forceStop(handle: RecordingHandle): Promise<void> {
     this.forceStopCalls.push(handle);
+    const failure = this.forceStopFailures.shift();
+    if (failure) {
+      throw failure;
+    }
   }
 
   waitForStopCall(): Promise<RecordingHandle> {

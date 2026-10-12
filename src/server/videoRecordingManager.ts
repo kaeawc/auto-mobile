@@ -1621,10 +1621,26 @@ export async function forceStopVideoRecording(recordingId: string): Promise<void
   await videoRecorderService.forceStopRecording(recordingId);
 }
 
+/** A retained capture is still owned and must be retried before device reuse is safe. */
+export class VideoRecordingTeardownUnconfirmedError extends ActionableError {
+  constructor(
+    readonly recordingId: string,
+    readonly deviceId: string | undefined,
+    cause: unknown,
+  ) {
+    super(
+      `Teardown of video recording ${recordingId}${deviceId ? ` on ${deviceId}` : ""} is unconfirmed; ` +
+        "the capture process may still be running on the device. Retry stopping the original recording or recover the device.",
+      { cause },
+    );
+    this.name = "VideoRecordingTeardownUnconfirmedError";
+  }
+}
+
 /**
- * Gives up on a recording whose finalize exceeded its cap (#10957): force-stops the capture so
- * the device is free, then marks a row still `recording` as `incomplete` (keeping whatever
- * reached the host). A row the slow stop has since finished is left as it is.
+ * Force-stop a recording whose finalize exceeded its cap (#10957), then mark a row still
+ * `recording` as `incomplete`. Unconfirmed capture teardown retains ownership and safety;
+ * an incomplete artifact is never evidence that a retained capture stopped.
  */
 export async function markVideoRecordingIncomplete(recordingId: string): Promise<void> {
   const owner = recordingOwners.get(recordingId);
@@ -1632,11 +1648,22 @@ export async function markVideoRecordingIncomplete(recordingId: string): Promise
   try {
     await deps.videoRecorderService.forceStopRecording(recordingId);
   } catch (error) {
-    // The capture may already be gone; the row below still has to leave the "recording" state.
     logger.warn(
       `[VideoRecording] Force-stop of ${recordingId} failed: ${errorMessage(error)}`,
       error,
     );
+    if (deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
+      try {
+        await rearmRetainedRecordingSafety(recordingId, deps);
+      } catch (rearmError) {
+        logger.warn(
+          `[VideoRecording] Failed to re-arm retained safety enforcement for ${recordingId}: ${errorMessage(rearmError)}`,
+          rearmError,
+        );
+      }
+      throw new VideoRecordingTeardownUnconfirmedError(recordingId, owner?.deviceId, error);
+    }
+    // No retained capture remains; keep the incomplete artifact even if it was already gone.
   }
   clearAutoStop(recordingId);
   clearInProgressSizeCap(recordingId);

@@ -580,7 +580,11 @@ export class LivenessScenario {
       }
     };
     deps.activeRecordingIdsForOwner = (sessionId) =>
-      this.recordingStopHangs && sessionId !== undefined ? [`recording-of-${sessionId}`] : [];
+      this.recordingStopHangs &&
+      sessionId !== undefined &&
+      !this.incompleteRecordings.includes(`recording-of-${sessionId}`)
+        ? [`recording-of-${sessionId}`]
+        : [];
     deps.markVideoRecordingIncomplete = async (recordingId) => {
       this.incompleteRecordings.push(recordingId);
     };

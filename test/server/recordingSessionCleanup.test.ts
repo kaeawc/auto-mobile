@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { fixedBackoff } from "../../src/utils/Backoff";
+import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { logger } from "../../src/utils/logger";
 import type { SessionManager } from "../../src/daemon/sessionManager";
 import {
@@ -9,6 +11,7 @@ import {
   takeRecordingIdsFinalizedByRelease,
   type RecordingSessionCleanupDeps,
   type RecordingAcquisitionDeps,
+  type RecordingTeardownGiveUp,
 } from "../../src/server/recordingSessionCleanup";
 
 import {
@@ -110,6 +113,12 @@ class FakeRecordings implements RecordingSessionCleanupDeps, RecordingAcquisitio
   timer = new FakeTimer();
   incomplete: string[] = [];
   capMs = 120_000;
+  teardownRetryBackoff = fixedBackoff(1_000);
+  teardownRetryBudgetMs = 25_000;
+  giveUps: RecordingTeardownGiveUp[] = [];
+  markDeviceNeedsRecorderRecovery(giveUp: RecordingTeardownGiveUp): void {
+    this.giveUps.push(giveUp);
+  }
 
   adoptVideoRecordings(deviceId: string, sessionId: string): Promise<void> | undefined {
     const recording = this.active.get(deviceId);
@@ -397,6 +406,69 @@ describe("registerRecordingSessionCleanup", () => {
     expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
   });
 
+  test("an owned device gesture recording retries rejected teardown and gives up at its budget", async () => {
+    const { manager, recordings } = setup();
+    recordings.deviceGestureRecording = { ownerSessionUuid: "session-a", deviceId: "SIM-1" };
+    recordings.teardownRetryBudgetMs = 3_000;
+    const stop = spyOn(recordings, "stopDeviceGestureRecording")
+      .mockImplementationOnce(() => new Promise<void>(() => {}))
+      .mockRejectedValue(new Error("gesture teardown unconfirmed"));
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      manager.release("session-a", "SIM-1");
+      await drainUntilQuiescent(recordings.timer);
+      const done = manager.settle();
+      let settled = false;
+      void done.then(() => {
+        settled = true;
+      });
+      await recordings.timer.advanceTimeAsync(120_000, () => drainUntilQuiescent(recordings.timer));
+      await drainUntilQuiescent(recordings.timer);
+      expect(manager.pendingCleanups.map(({ capMs }) => capMs)).toEqual([125_000, 3_000]);
+      await recordings.timer.advanceTimeAsync(2_999, () => drainUntilQuiescent(recordings.timer));
+      expect(settled).toBe(false);
+      expect(recordings.giveUps).toEqual([]);
+      await recordings.timer.advanceTimeAsync(1, () => drainUntilQuiescent(recordings.timer));
+      await done;
+      expect(stop).toHaveBeenCalledTimes(4); // Graceful, force-stop, two backoff attempts.
+      expect(recordings.giveUps).toEqual([
+        {
+          deviceId: "SIM-1",
+          sessionId: "session-a",
+          recordingIds: ["test-session-a"],
+          attempts: 2,
+          budgetMs: 3_000,
+        },
+      ]);
+      expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      stop.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  test("a rejected force-stop whose id is no longer active does not register retries", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+    recordings.hangStops = true;
+    const mark = spyOn(recordings, "markVideoRecordingIncomplete").mockImplementation(async () => {
+      recordings.active.clear();
+      throw new Error("capture already gone");
+    });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      manager.release("session-a", "SIM-1");
+      await recordings.timer.advanceTimersByTimeAsync(120_000);
+      await manager.settle();
+      expect(manager.pendingCleanups).toHaveLength(1);
+      expect(recordings.giveUps).toEqual([]);
+      expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      mark.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
   test("a segmented stage settling after the cap cannot stop the same session's replacement device gesture recording", async () => {
     const timer = new FakeTimer();
     const manager = new FakeSessionManager();
@@ -538,6 +610,10 @@ describe("registerRecordingSessionCleanup", () => {
             markVideoRecordingIncomplete: async (id) => {
               marked.push(id);
               await markVideoRecordingIncomplete(id);
+              if (id === "seg-1") {
+                // The synthetic segment's successful teardown must release its fake handle too.
+                segmentActive = false;
+              }
             },
           });
           manager.release("session-a", device.deviceId);

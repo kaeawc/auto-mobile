@@ -12,6 +12,10 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { DragAndDropOptions } from "../../src/models";
 import { warmedTests } from "../helpers/warmedTests";
 
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
+
 // First-use costs (schema conversion, handler path) are paid in beforeAll, outside CI's per-test time.
 const test = warmedTests(() => resetDragAndDropFactory());
 

@@ -9,7 +9,9 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { preserveToolRegistry } from "../helpers/withTemporaryTool";
+import { isolateToolRegistry, preserveToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * Integration of #9961 (criticalSection sub-steps get the top-level migration + schema parse),

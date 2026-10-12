@@ -9,7 +9,10 @@ import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarr
 import { executionTracker } from "../../src/server/executionTracker";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
-import { DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS } from "../../src/daemon/sessionManager";
+import {
+  DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS,
+  type Session,
+} from "../../src/daemon/sessionManager";
 import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -18,6 +21,8 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { LivenessScenario } from "../helpers/livenessScenarioHarness";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { warmedTests } from "../helpers/warmedTests";
+import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
+import { freshStartAlreadyBoundError } from "../../src/daemon/deviceAcquisitionRefusals";
 
 let scenario: LivenessScenario | undefined;
 const proxies: DaemonMcpProxy[] = [];
@@ -266,3 +271,110 @@ test("joining an existing ownerless session by id binds no acquisition token", a
   ).not.toMatchObject({ isError: true });
   expect(s.daemon.manager.getSession(id)?.livenessOwnerToken).toBeUndefined();
 });
+
+// #11999: drive the explicit image-backed refusal, including its scan-gap read.
+for (const phase of ["suspect", "awaiting-reap", "disconnect"] as const) {
+  test(`explicit image-backed refusal preserves the ${phase} holder and its retry deadline`, async () => {
+    const { s } = await setup();
+    const id = phase === "disconnect" ? await s.acquireTokenless() : await s.acquire();
+    const beats = phase === "disconnect" ? s.startJunitHeartbeats(id) : undefined;
+    await s.idle(2_000);
+    beats?.stop();
+    s.dropHeartbeats = true;
+    const session = s.daemon.manager.getSession(id)!;
+    if (phase === "disconnect") {
+      s.daemon.pool.releaseMcpSessionBindings("desktop-connection");
+      await s.idle(1_000);
+    } else {
+      await s.idle(phase === "suspect" ? 4_001 : 8_001);
+    }
+    const hint = s.daemon.pool.holderReleaseRemainingMs(id);
+    expect(hint).toBeGreaterThan(0);
+    const before = holderClocks(session);
+    const deadline = s.daemon.pool["ownerDisconnectRelease"].remainingMs(id);
+    const error = await explicitImageRefusal(s);
+    expect(error.toPayload()).toEqual({
+      code: "device_owned_by_other_session",
+      deviceId: "emulator-5554",
+      retryable: true,
+      retryAfterMs: hint,
+    });
+    expect(error.message).toBe(
+      freshStartAlreadyBoundError("emulator-5554", id, false, hint).message,
+    );
+    expect(holderClocks(session)).toEqual(before);
+    expect(s.daemon.pool["ownerDisconnectRelease"].remainingMs(id)).toBe(deadline);
+    expect(s.daemon.pool.holderReleaseRemainingMs(id)).toBe(hint);
+  });
+}
+
+for (const phase of [
+  "healthy",
+  "never-heartbeated",
+  "cli-idle",
+  "awaiting-owner",
+  "control-call",
+] as const) {
+  test(`explicit image-backed refusal keeps the non-retryable ${phase} wording and clocks`, async () => {
+    const { s } = await setup();
+    const id = await s.acquire();
+    const session = s.daemon.manager.getSession(id)!;
+    let call: ReturnType<LivenessScenario["startLongCall"]> | undefined;
+    if (phase === "healthy" || phase === "control-call") {
+      await s.idle(2_000);
+    }
+    if (phase === "cli-idle") {
+      s.daemon.manager.adoptCliLivenessPolicy(id);
+    }
+    if (phase === "awaiting-owner") {
+      session.ownership = "awaiting-owner";
+    }
+    if (phase === "control-call") {
+      call = s.startLongCall(id);
+      await drainMicrotasks(64);
+      expect(executionTracker.getActiveExecutionCount()).toBeGreaterThan(0);
+      s.dropHeartbeats = true;
+      await s.idle(8_001);
+    }
+    try {
+      expect(s.daemon.pool.holderReleaseRemainingMs(id)).toBeUndefined();
+      const before = holderClocks(session);
+      const error = await explicitImageRefusal(s);
+      expect(error.toPayload()).toEqual({
+        code: "device_owned_by_other_session",
+        deviceId: "emulator-5554",
+        retryable: false,
+      });
+      expect(error.message).toBe(
+        freshStartAlreadyBoundError("emulator-5554", id, phase === "awaiting-owner").message,
+      );
+      expect(holderClocks(session)).toEqual(before);
+    } finally {
+      await call?.settle();
+    }
+  });
+}
+
+function holderClocks(session: Session) {
+  return [
+    session.lastHeartbeat,
+    session.lastUsedAt,
+    session.lastOwnerHeartbeat,
+    session.activityGeneration,
+  ];
+}
+
+async function explicitImageRefusal(s: LivenessScenario): Promise<InputDeviceOwnedError> {
+  const error = await s.daemon.pool
+    .bindOrReuseDeviceSession("rival-image-session", "emulator-5554", "android", {
+      name: "Pixel_emulator-5554",
+      platform: "android",
+      isRunning: true,
+    })
+    .catch((error: unknown) => error);
+  expect(error).toBeInstanceOf(InputDeviceOwnedError);
+  if (!(error instanceof InputDeviceOwnedError)) {
+    throw new Error("expected image-backed ownership refusal");
+  }
+  return error;
+}

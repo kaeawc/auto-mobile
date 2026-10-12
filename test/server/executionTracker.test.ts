@@ -1,3 +1,4 @@
+import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { describe, expect, test } from "bun:test";
 import { ExecutionTracker, type ExecutionScopeOptions } from "../../src/server/executionTracker";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
@@ -914,4 +915,58 @@ describe("ExecutionTracker session-clock offset (#11576)", () => {
 
     expect(tracker.getSessionClockStartTime(call.id)).toBe(sessionNow);
   });
+});
+
+for (const controlOrder of ["none", "before read", "after read"] as const) {
+  test(`read readiness cancellation preserves execution and control marks: ${controlOrder}`, () => {
+    const tracker = new ExecutionTracker(
+      new FakeTimer(),
+      new FakeIdGenerator(["read", "excluded"]),
+    );
+    const execution = tracker.startExecution("observe");
+    const excluded = tracker.startExecution("observe");
+    const readiness = new AbortController();
+    const excludedReadiness = new AbortController();
+    const deviceId = "emulator-5556";
+    if (controlOrder === "before read") {
+      tracker.markSessionlessDeviceUse(execution.id, deviceId);
+    }
+    tracker.markSessionlessReadReadiness(execution.id, deviceId, readiness);
+    tracker.markSessionlessReadReadiness(excluded.id, deviceId, excludedReadiness);
+    if (controlOrder === "after read") {
+      tracker.markSessionlessDeviceUse(execution.id, deviceId);
+    }
+    expect(execution.sessionlessDeviceUse).toEqual(new Set([deviceId]));
+    expect(tracker.cancelSessionlessDeviceUse(deviceId, { excludeExecutionId: excluded.id })).toBe(
+      1,
+    );
+    expect(excludedReadiness.signal.aborted).toBe(false);
+    expect(excluded.abortController.signal.aborted).toBe(false);
+    if (controlOrder === "none") {
+      expect(readiness.signal.aborted).toBe(true);
+      expect(execution.abortController.signal.aborted).toBe(false);
+    } else {
+      expect(execution.abortController.signal.reason).toBeInstanceOf(InputDeviceOwnedError);
+    }
+    expect(tracker.cancelSessionlessDeviceUse(deviceId, { excludeExecutionId: excluded.id })).toBe(
+      0,
+    );
+    tracker.unmarkSessionlessReadReadiness(execution.id, deviceId, readiness);
+    expect(execution.sessionlessDeviceUse?.has(deviceId)).toBe(controlOrder !== "none");
+    tracker.endExecution(execution.id);
+    tracker.endExecution(excluded.id);
+  });
+}
+
+test("removing a nested readiness mark never removes or downgrades its control mark", () => {
+  const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["control"]));
+  const execution = tracker.startExecution("rotate");
+  const readiness = new AbortController();
+  tracker.markSessionlessDeviceUse(execution.id, "emulator-5556");
+  tracker.markSessionlessReadReadiness(execution.id, "emulator-5556", readiness);
+  tracker.unmarkSessionlessReadReadiness(execution.id, "emulator-5556", readiness);
+  expect(execution.sessionlessDeviceUse).toEqual(new Set(["emulator-5556"]));
+  expect(tracker.cancelSessionlessDeviceUse("emulator-5556")).toBe(1);
+  expect(execution.abortController.signal.reason).toBeInstanceOf(InputDeviceOwnedError);
+  tracker.endExecution(execution.id);
 });

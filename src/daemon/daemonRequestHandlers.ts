@@ -210,6 +210,7 @@ export interface DaemonStateAccess {
       livenessOwnerToken?: string,
     ): Promise<readonly RefusedOwnedSessionRestore[] | void>;
     releaseMcpSessionBindings?(mcpSessionId: string): void;
+    beginMcpToolCall?(mcpSessionId: string | undefined): (delivered?: boolean) => void;
     declareMcpSessionLivenessOwnerToken?(mcpSessionId: string, token: string): void;
     /** Give up the restart-recovery reservation made for a session, if any (#11294). */
     releaseRehydrationReservation?(sessionId: string): void;

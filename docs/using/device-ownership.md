@@ -543,6 +543,22 @@ the connection that acquired its session may stop it. This includes segmented vi
 and test recordings. Release finalizes adopted recordings within the existing cap,
 announces their recording ids, and keeps their artifacts fetchable by id (#10958).
 
+An undelivered `setActiveDevice` rebind moves its existing session back to the device
+it held (#11593, #11689). Keep-awake, biometric enrollment, network condition, clock,
+rotation and screen-reader restores are deferred until delivery; undo cancels them and
+retains their cache records. Network TTL deadlines and iOS per-app lease renewal survive
+undo. The old device stays quarantined until undo holds it again or all delivered
+restores settle. If undo cannot bind back, it restores the old device before releasing
+quarantine and leaves the session and its replacement-device overrides on the replacement.
+
+Deferral uses the existing 40-second session creation/release-finalization wait. An
+orphaned receipt starts restores at that bound; a later rebind, session release, device
+shutdown/removal or daemon cleanup drain also flushes them once. Callers without a
+receipt restore inline. If undo arrives after restores started, it waits boundedly for
+its cleanup before binding back and leaves reverted overrides absent from the cache.
+If another session acquired the original device, the session stays on the replacement
+and no further restore touches the other holder's device.
+
 ## Retryable acquisition refusals
 
 An acquisition the daemon cannot grant yet is refused with a typed, retryable
@@ -566,6 +582,17 @@ steps (stop, wait for the device to disappear, restart handoff) and records no
 deadline of its own, so there is no remaining time to report. The test runners
 wait `max(30 s, min(waited + retryAfterMs, 150 s))` in total, so a hint without a
 bound gets their 30 s floor, which is one shutdown step's own timeout.
+
+A `setActiveDevice` on a device another request is still preparing (booted or
+picked, runner not ready, no session bound yet) is refused with
+`device_owned_by_other_session`, `retryable: true` and `retryAfterMs: 2000`
+(#11651, owner decision 2026-10-11). It clears when that request binds (then the
+device is held and the same code is `retryable: false`) or fails. `retryAfterMs`
+is a poll interval, not a bound: the reservation lasts through that request's
+preparation and cleanup, which can be long when a failed boot's emulator cannot
+be stopped. A second `startDevice`/`provisionDevice` for the same device waits on
+the device's lifecycle lease instead. Reads (`listDevices`, observation) are
+never refused.
 
 A session UUID whose device is being killed is refused with
 `session_terminal_release_in_progress`, `retryable: false` and `nextAction:

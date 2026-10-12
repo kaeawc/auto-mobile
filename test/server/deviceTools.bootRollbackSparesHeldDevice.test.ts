@@ -11,7 +11,6 @@ import {
 } from "../../src/server/deviceTools";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
 import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
-import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -31,9 +30,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 isolateToolRegistry();
 
 /**
- * A start's readiness reservation keeps its device out of general allocation only; an exact bind
- * (setActiveDevice) by another session is admitted while the booting call is still preparing the
- * runner. When the booting call then fails (runner readiness fails, or its own bind is refused
+ * setActiveDevice refuses another request's live readiness reservation. An internal binder can
+ * still take the device through the permissive pool entry while the booting call prepares the
+ * runner, so the cleanup safety net remains necessary. When that call fails (readiness or bind
  * because the other session now holds the device), its cleanup must not stop the device it
  * booted: lifecycle on a device another live session holds is refused (#11651). With no such
  * holder the device is stopped as before, so nothing this call booted is left running unheld.
@@ -173,9 +172,11 @@ describe("a failed start does not stop the device it booted once another session
   };
 
   /** Another session selects the freshly booted device by id while the boot's caller prepares it. */
-  const otherSessionSelects = async (deviceId: string): Promise<void> => {
-    const select = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
-    await select({ deviceId, sessionUuid: "other-session", __mcpSessionId: "client-b" });
+  const otherSessionSelects = async (
+    deviceId: string,
+    platform: "android" | "ios",
+  ): Promise<void> => {
+    await pool.bindOrReuseDeviceSession("other-session", deviceId, platform);
     expect(pool.getDevice(deviceId)?.sessionId).toBe("other-session");
   };
 
@@ -222,7 +223,7 @@ describe("a failed start does not stop the device it booted once another session
     "$platform: runner readiness fails after another session selected the device",
     async ({ platform, args, deviceId }) => {
       duringReadiness = async () => {
-        await otherSessionSelects(deviceId);
+        await otherSessionSelects(deviceId, platform);
         throw new Error("automation runner did not become ready");
       };
 
@@ -238,7 +239,7 @@ describe("a failed start does not stop the device it booted once another session
   test.each(TARGETS)(
     "$platform: the booting call loses its bind to another session's selection",
     async ({ platform, args, deviceId }) => {
-      duringReadiness = async () => await otherSessionSelects(deviceId);
+      duringReadiness = async () => await otherSessionSelects(deviceId, platform);
 
       const failure = await start(args);
       await drain();
@@ -252,7 +253,7 @@ describe("a failed start does not stop the device it booted once another session
     "$platform: a device the other session let go again is stopped with the failed start",
     async ({ platform, args, deviceId }) => {
       duringReadiness = async () => {
-        await otherSessionSelects(deviceId);
+        await otherSessionSelects(deviceId, platform);
         await sessions.releaseSession("other-session");
         await pool.releaseDevice(deviceId, "other-session");
         throw new Error("automation runner did not become ready");
@@ -268,44 +269,59 @@ describe("a failed start does not stop the device it booted once another session
     },
   );
 
-  // A System UI ANR replacement reuses the serial of the emulator it replaces. While its handoff
-  // is unfinished the pool entry on that serial still names the session being recovered: that
-  // holder is not a holder of the replacement, which a failed recovery must still stop.
-  test("android: a failed System UI ANR recovery still stops its replacement emulator", async () => {
-    const started = await ToolRegistry.getTool("startDevice")!.handler({
-      platform: "android",
-      name: avd.name,
-      __mcpSessionId: "client-a",
-    });
-    const held = pool.getDevice(AVD_SERIAL)?.sessionId;
-    expect(started.isError).not.toBe(true);
-    expect(held).toBeString();
-    const replacement = new RecordingBootHandle(() => devices.setBootedDevices("android", []));
-    const killDevice = devices.killDevice.bind(devices);
-    devices.killDevice = async (device) => {
-      await killDevice(device);
-      devices.setBootedDevices("android", []);
-      bootHandle.kill();
-      await Promise.resolve();
-      devices.setMockChildProcess(avd.name, replacement as unknown as ChildProcess);
-    };
-    duringReadiness = async () => {
-      throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
-    };
-    const handoff = spyOn(
-      DevicePool.prototype as unknown as { cancelOldDeviceWorkForSystemUiAnr(): Promise<void> },
-      "cancelOldDeviceWorkForSystemUiAnr",
-    ).mockRejectedValue(new Error("handoff failed"));
+  // Same serial is not provenance: only a recovery of this call's cold boot owns its replacement.
+  test.each([false, true])(
+    "android: failed ANR handoff respects running-before provenance (%s)",
+    async (runningBefore) => {
+      let held = "owner-session";
+      if (runningBefore) {
+        const started = await ToolRegistry.getTool("startDevice")!.handler({
+          platform: "android",
+          name: avd.name,
+          __mcpSessionId: "client-a",
+        });
+        expect(started.isError).not.toBe(true);
+        const sessionId = pool.getDevice(AVD_SERIAL)?.sessionId;
+        expect(sessionId).toBeString();
+        held = sessionId!;
+      }
+      const replacement = new RecordingBootHandle(() => devices.setBootedDevices("android", []));
+      const killDevice = devices.killDevice.bind(devices);
+      devices.killDevice = async (device) => {
+        await killDevice(device);
+        devices.setBootedDevices("android", []);
+        bootHandle.kill();
+        await Promise.resolve();
+        devices.setMockChildProcess(avd.name, replacement as unknown as ChildProcess);
+      };
+      duringReadiness = async () => {
+        if (!runningBefore) {
+          await pool.bindOrReuseDeviceSession(held, AVD_SERIAL, "android", avd);
+        }
+        expect(pool.getDevice(AVD_SERIAL)?.sessionId).toBe(held);
+        throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+      };
+      const handoff = spyOn(
+        DevicePool.prototype as unknown as { cancelOldDeviceWorkForSystemUiAnr(): Promise<void> },
+        "cancelOldDeviceWorkForSystemUiAnr",
+      ).mockRejectedValue(new Error("handoff failed"));
 
-    try {
-      const failure = await start({ platform: "android", name: avd.name, sessionUuid: held });
-      await drain();
+      try {
+        const failure = await start({ platform: "android", name: avd.name, sessionUuid: held });
+        await drain();
 
-      expect(failure).toBeInstanceOf(Error);
-      expect(handoff).toHaveBeenCalled();
-      expect(replacement.killed).toBe(true);
-    } finally {
-      handoff.mockRestore();
-    }
-  });
+        expect(failure).toBeInstanceOf(Error);
+        expect(handoff).toHaveBeenCalled();
+        expect(replacement.killed).toBe(!runningBefore);
+        expect(await gates.capacity("android")).toEqual({
+          booted: runningBefore ? 1 : 0,
+          inFlight: 0,
+        });
+        expect(sessions.getSession(held)).toBeNull();
+        expect(pool.getDevice(AVD_SERIAL)).toBeNull();
+      } finally {
+        handoff.mockRestore();
+      }
+    },
+  );
 });

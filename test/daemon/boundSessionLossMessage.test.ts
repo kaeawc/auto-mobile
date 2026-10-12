@@ -11,7 +11,7 @@ function loss(reason: string) {
 }
 
 describe("boundSessionLossMessage (#10661)", () => {
-  test.each(["lazy-expiry", "cleanup-expired", "cli-idle-timeout"])(
+  test.each(["lazy-expiry", "cleanup-expired", "cli-idle-timeout", "expired"])(
     "%s explains the idle release, that sleep counts, and the next step",
     (reason) => {
       const message = boundSessionLossMessage(loss(reason));
@@ -57,7 +57,7 @@ describe("boundSessionLossMessage (#10661)", () => {
 });
 
 describe("releasedSessionNotFoundFields (#10832)", () => {
-  test.each(["lazy-expiry", "cleanup-expired", "cli-idle-timeout"])(
+  test.each(["lazy-expiry", "cleanup-expired", "cli-idle-timeout", "expired"])(
     "%s is flagged as an idle release",
     (reason) => {
       expect(releasedSessionNotFoundFields(reason)).toEqual({ releaseReason: reason, idle: true });

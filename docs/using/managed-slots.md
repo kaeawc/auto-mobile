@@ -272,8 +272,8 @@ A managed-execution session uses the `managed-execution` liveness policy:
   non-blank string `deviceId` still work; a read without one (including a
   `device` label alone) is answered with
   `managed_execution_ended` every time;
-  a direct daemon client sees `session_ownership_lost` (session-not-found answers carry
-  `idle: true`). The slot's device stays assigned. To continue, start a new
+  a direct daemon client sees `session_ownership_lost` with `idle: true`
+  (session-not-found answers also carry `idle: true`). The slot's device stays assigned. To continue, start a new
   execution proxy on the same scoped slot; it reuses the device with a new
   session.
 - **Execution owner.** The proxy checks every second that its owner (by default

@@ -6,6 +6,9 @@ import {
   SESSION_RELEASE_REASON_TRAITS,
   isExpiryReleaseReason,
   isIdleReleaseReason,
+  idleReleaseField,
+  releaseReasonStrength,
+  releaseReasonMayReplace,
   isReissuableByNameReleaseReason,
   isRecoverableDaemonReleaseReason,
   isTerminalReleaseReason,
@@ -25,14 +28,61 @@ describe("session release-reason table (#11258)", () => {
 
   test("idle releases are exactly the idle-window reasons", () => {
     expect(literalReleaseReasonsWhere("idle").sort()).toEqual(
-      ["cleanup-expired", "cli-idle-timeout", "lazy-expiry"].sort(),
+      ["cleanup-expired", "cli-idle-timeout", "lazy-expiry", "expired"].sort(),
     );
     expect(releaseReasonFamiliesWhere("idle")).toEqual([]);
   });
 
-  test("every idle release is terminal (owner decision 2026-10-09)", () => {
+  test("idle releases are terminal except a persisted expired row", () => {
     for (const reason of literalReleaseReasonsWhere("idle")) {
-      expect(isTerminalReleaseReason(reason)).toBe(true);
+      expect(isTerminalReleaseReason(reason)).toBe(reason !== "expired");
+    }
+  });
+
+  test("expired qualifies an idle answer while keeping its other traits", () => {
+    expect(sessionReleaseReasonTraits("expired")).toEqual({
+      idle: true,
+      expiry: false,
+      terminal: false,
+      recoverable: false,
+      reissuableByName: false,
+    });
+  });
+
+  test("pins: expired keeps its non-terminal precedence and released-row status", () => {
+    expect(releaseReasonStrength("expired")).toBe(0);
+    expect(releasedRowStatus("expired")).toBe("released");
+    for (const [reason, terminal] of [
+      ["cleanup-expired", true],
+      ["heartbeat-timeout", true],
+      ["daemon-shutdown", false],
+    ] as const) {
+      expect(outranksReleaseReason("expired", reason)).toBe(false);
+      expect(outranksReleaseReason(reason, "expired")).toBe(terminal);
+      expect(releaseReasonMayReplace("expired", reason)).toBe(!terminal);
+      expect(releaseReasonMayReplace(reason, "expired")).toBe(true);
+    }
+    // outranks accepts strings only; the row replacement predicate accepts a null held reason.
+    expect(outranksReleaseReason("expired", "expired")).toBe(false);
+    expect(releaseReasonMayReplace("expired", null)).toBe(true);
+    expect(releaseReasonMayReplace("expired", "expired")).toBe(true);
+  });
+
+  test("idleReleaseField emits only true for idle reasons and omits the key otherwise", () => {
+    for (const reason of ["cli-idle-timeout", "cleanup-expired", "lazy-expiry", "expired"]) {
+      expect(idleReleaseField(reason)).toEqual({ idle: true });
+    }
+    for (const reason of [
+      "heartbeat-timeout",
+      "missing-first-heartbeat",
+      "owner-disconnected",
+      "daemon-shutdown",
+      "device-restart:x",
+      "unknown",
+      "",
+      undefined,
+    ]) {
+      expect(idleReleaseField(reason)).toEqual({});
     }
   });
 

@@ -29,6 +29,8 @@ export interface SetKeyboardProfileResult {
 }
 
 export interface ImeCommitActionResult extends BaseResult {
+  /** Editor delta captured by the device; internal transport evidence only. */
+  insertedText?: string;
   partialApplication?: boolean;
   /** Device upper bound on dispatched editing units; absent/zero means unknown or none. */
   committedUnits?: number;

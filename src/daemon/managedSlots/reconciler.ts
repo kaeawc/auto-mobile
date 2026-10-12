@@ -15,6 +15,10 @@ import {
   type ResolvedExactDeviceSpecification,
 } from "../../devices/exactDeviceProvisioning";
 import type { DeviceInfo } from "../../models";
+import type { FormFactor } from "../../models/DeviceMatchCriteria";
+import { androidProfileFormFactor } from "../../models/formFactor";
+import type { ManagedSlotDeviceFamily } from "../../server/provisionDeviceSpecSchemas";
+import { inferIosFormFactor } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { evaluateRuntimeCompatibility } from "../../utils/ios-cmdline-tools/runtimeCompatibility";
 import type {
   AppleDeviceRuntime,
@@ -103,13 +107,14 @@ export type ManagedSlotDisposition = "reused" | "adopted" | "created" | "replace
 
 type WithOptionalDeviceType<T extends { deviceType: string }> = Omit<T, "deviceType"> & {
   deviceType?: string;
+  deviceFamily?: ManagedSlotDeviceFamily;
 };
 
 /**
  * A managed slot's requested spec: an exact spec whose `deviceType` (the model or hardware
- * profile) may be omitted. Omitted means "any model" (owner decision Q4): any listed device of the
- * requested runtime matches, and a device that must be created gets a model the resolver picks
- * and records in the resolved spec.
+ * profile) may be omitted. Omitted means "any model" (owner decision Q4), constrained only by an
+ * optional `deviceFamily`: matching retains the requested constraints, and a device that must be
+ * created gets a compatible model the resolver picks and records in the resolved spec.
  */
 export type ManagedSlotRequestedSpec =
   | WithOptionalDeviceType<AndroidDeviceSpecification>
@@ -128,6 +133,12 @@ export interface ManagedSlotResolvedSpec {
  * known cutout class). Override per resolver.
  */
 export const MANAGED_SLOT_DEFAULT_ANDROID_DEVICE_TYPE = "pixel_8";
+
+export const MANAGED_SLOT_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY = {
+  phone: MANAGED_SLOT_DEFAULT_ANDROID_DEVICE_TYPE,
+  tablet: "pixel_tablet",
+  foldable: "pixel_fold",
+} as const satisfies Record<ManagedSlotDeviceFamily, string>;
 
 // ---------------------------------------------------------------------------------------------
 // Ports
@@ -193,6 +204,8 @@ export interface ManagedSlotProvisionRequest {
   /**
    * `create` always carries a concrete `deviceType` (the resolved model). `adopt` carries the
    * requested spec, whose omitted `deviceType` accepts the existing device's model.
+   * Neither mode carries `deviceFamily`: the reconciler applies that request constraint before
+   * provisioning, and the provisionDevice schema accepts configuration fields only.
    */
   spec: ManagedSlotRequestedSpec;
   /** `adopt` must never create; `create` provisions a new device under `name`. */
@@ -548,7 +561,17 @@ export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
         ...(spec as WithOptionalDeviceType<AndroidDeviceSpecification>),
         deviceType: (spec.deviceType ?? config.deviceName) as string,
       };
-      return matchesAndroidDeviceSpecification(constraints, config) ? "match" : "mismatch";
+      if (!matchesAndroidDeviceSpecification(constraints, config)) {
+        return "mismatch";
+      }
+      return matchDeviceFamily(spec.deviceFamily, () =>
+        androidProfileFormFactor({
+          profileId: config.deviceName,
+          width: config.screenWidth,
+          height: config.screenHeight,
+          density: config.screenDensity,
+        }),
+      );
     }
     // An unavailable simulator (runtime unmounted, or listed under a different Xcode or
     // DEVELOPER_DIR) proves nothing about its configuration, so it is never a mismatch to replace.
@@ -564,8 +587,50 @@ export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
       runtime: spec.runtime,
       deviceType: spec.deviceType ?? device.deviceType!,
     };
-    return iosDeviceSpecificationMismatch(constraints, device) === undefined ? "match" : "mismatch";
+    return iosDeviceSpecificationMismatch(constraints, device) === undefined
+      ? matchDeviceFamily(spec.deviceFamily, () => inferIosFormFactor(device.deviceType))
+      : "mismatch";
   }
+}
+
+function matchDeviceFamily(
+  requested: ManagedSlotDeviceFamily | undefined,
+  infer: () => FormFactor | undefined,
+): ManagedSpecMatch {
+  if (requested === undefined) {
+    return "match";
+  }
+  const actual = infer();
+  if (actual === undefined || actual === "unknown") {
+    return "unknown";
+  }
+  return actual === requested ? "match" : "mismatch";
+}
+
+/** Request-only constraints must not enter provisionDevice or configuration fingerprints. */
+function provisionableSpec(spec: ManagedSlotRequestedSpec): ManagedSlotRequestedSpec {
+  const configuration = { ...spec };
+  delete configuration.deviceFamily;
+  return configuration;
+}
+
+function unsupportedModelFamily(
+  platform: SlotPlatform,
+  spec: ManagedSlotRequestedSpec,
+): string | undefined {
+  if (spec.deviceType === undefined || spec.deviceFamily === undefined) {
+    return undefined;
+  }
+  const actual =
+    platform === "ios"
+      ? inferIosFormFactor(spec.deviceType)
+      : androidProfileFormFactor({ profileId: spec.deviceType });
+  if (actual === undefined || actual === "unknown") {
+    return `The family of deviceType '${spec.deviceType}' cannot be verified before creation for deviceFamily '${spec.deviceFamily}'. Request either deviceType or deviceFamily, not both.`;
+  }
+  return actual === spec.deviceFamily
+    ? undefined
+    : `deviceType '${spec.deviceType}' is a ${actual}; it conflicts with deviceFamily '${spec.deviceFamily}'.`;
 }
 
 const IOS_RUNTIME_IDENTIFIER_PREFIX = "com.apple.CoreSimulator.SimRuntime.";
@@ -582,6 +647,7 @@ export interface ManagedAndroidProfileCatalog {
 export interface DefaultManagedSpecResolverOptions {
   /** Profile created for an Android spec that omits `deviceType`. */
   androidDefaultDeviceType?: string;
+  androidDefaultDeviceTypesByFamily?: Partial<Record<ManagedSlotDeviceFamily, string>>;
   /**
    * With a catalog, an Android spec whose system image is not installed is refused as
    * `spec_unsupported` before anything is created, instead of surfacing avdmanager's raw text.
@@ -601,10 +667,12 @@ export interface DefaultManagedSpecResolverOptions {
  * An omitted `deviceType` ("any model") resolves to the model a creation would use: on iOS the
  * newest iPhone the catalog lists as supporting the runtime (so a catalog is required), on Android
  * {@link MANAGED_SLOT_DEFAULT_ANDROID_DEVICE_TYPE} unless overridden. Matching still accepts any
- * model; only creation uses the resolved one. A cutout preference needs an explicit model.
+ * model within an optional requested family; only creation uses the resolved one. Android family
+ * defaults can be overridden individually. A cutout preference needs an explicit model.
  */
 export class DefaultManagedSpecResolver implements ManagedSpecResolver {
   private readonly androidDefaultDeviceType: string;
+  private readonly androidDefaultDeviceTypesByFamily: Record<ManagedSlotDeviceFamily, string>;
   private readonly androidImageCatalog?: ManagedAndroidImageCatalog;
   private readonly androidProfileCatalog?: ManagedAndroidProfileCatalog;
 
@@ -614,6 +682,11 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
   ) {
     this.androidDefaultDeviceType =
       options.androidDefaultDeviceType ?? MANAGED_SLOT_DEFAULT_ANDROID_DEVICE_TYPE;
+    this.androidDefaultDeviceTypesByFamily = {
+      ...MANAGED_SLOT_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY,
+      phone: this.androidDefaultDeviceType,
+      ...options.androidDefaultDeviceTypesByFamily,
+    };
     this.androidImageCatalog = options.androidImageCatalog;
     this.androidProfileCatalog = options.androidProfileCatalog;
   }
@@ -662,7 +735,10 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     if (model.kind !== "resolved") {
       return model.resolution;
     }
-    const exact = { ...spec, deviceType: model.deviceType } as ExactDeviceSpecification;
+    const exact = {
+      ...provisionableSpec(spec),
+      deviceType: model.deviceType,
+    } as ExactDeviceSpecification;
     const cutout = resolveDisplayCutoutPreference(platform, exact);
     if (cutout.kind !== "resolved") {
       return { kind: "unsupported", code: "spec_unsupported", message: cutout.message };
@@ -694,6 +770,10 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     spec: ManagedSlotRequestedSpec,
     signal: AbortSignal | undefined,
   ): Promise<string | undefined> {
+    const familyConflict = unsupportedModelFamily(platform, spec);
+    if (familyConflict !== undefined) {
+      return familyConflict;
+    }
     if (platform === "android") {
       return parseAndroidSystemImageRuntime(spec.runtime)
         ? await this.findMissingAndroidImage(spec.runtime, signal)
@@ -722,7 +802,13 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
       );
     }
     if (platform === "android") {
-      return { kind: "resolved", deviceType: this.androidDefaultDeviceType };
+      return {
+        kind: "resolved",
+        deviceType:
+          spec.deviceFamily === undefined
+            ? this.androidDefaultDeviceType
+            : this.androidDefaultDeviceTypesByFamily[spec.deviceFamily],
+      };
     }
     if (!this.iosRuntimeCatalog) {
       return refused(
@@ -750,12 +836,12 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
         },
       };
     }
-    const deviceType = chooseIosDeviceType(spec.runtime, runtimes, deviceTypes);
+    const deviceType = chooseIosDeviceType(spec.runtime, runtimes, deviceTypes, spec.deviceFamily);
     return deviceType
       ? { kind: "resolved", deviceType }
       : refused(
           "runtime_incompatible",
-          `No installed iPhone model supports runtime '${spec.runtime}', or the runtime is not available.`,
+          `No installed ${spec.deviceFamily ?? "iPhone"} model supports runtime '${spec.runtime}', or the runtime is not available.`,
         );
   }
 
@@ -868,22 +954,28 @@ function refused(
 /**
  * The model "any model" creates for an iOS runtime: the last (newest, in simctl's catalog order)
  * iPhone whose runtime range supports it, else the last iPhone with no range metadata (simctl
- * stays the authority). Undefined when the runtime is missing or unavailable, or no iPhone fits.
+ * stays the authority). An explicit family selects that family's types instead. Undefined when
+ * the runtime is missing or unavailable, or no type in the selected family fits.
  */
 export function chooseIosDeviceType(
   runtimeId: string,
   runtimes: readonly AppleDeviceRuntime[],
   deviceTypes: readonly AppleDeviceType[],
+  family?: ManagedSlotDeviceFamily,
 ): string | undefined {
   const runtime = runtimes.find((entry) => entry.identifier === runtimeId);
   if (!runtime?.isAvailable) {
     return undefined;
   }
-  const iphones = deviceTypes.filter((entry) => entry.productFamily === "iPhone");
+  const candidates = deviceTypes.filter((entry) =>
+    family === undefined
+      ? entry.productFamily === "iPhone"
+      : inferIosFormFactor(entry.identifier) === family,
+  );
   const statusOf = (entry: AppleDeviceType) =>
     evaluateRuntimeCompatibility(entry, runtime.version).status;
-  const supported = iphones.filter((entry) => statusOf(entry) === "supported");
-  const unknown = iphones.filter((entry) => statusOf(entry) === "unknown");
+  const supported = candidates.filter((entry) => statusOf(entry) === "supported");
+  const unknown = candidates.filter((entry) => statusOf(entry) === "unknown");
   return (supported.at(-1) ?? unknown.at(-1))?.identifier;
 }
 
@@ -1686,7 +1778,10 @@ export class ManagedSlotReconciler {
           platform: request.platform,
           name,
           // "Any model" creates the model the resolver chose (and recorded).
-          spec: { ...request.requestedSpec, deviceType: context.resolvedSpec.deviceType },
+          spec: {
+            ...provisionableSpec(request.requestedSpec),
+            deviceType: context.resolvedSpec.deviceType,
+          },
           mode: "create",
           deadlineMs: request.deadlineMs,
           signal: request.signal,
@@ -2121,7 +2216,7 @@ export class ManagedSlotReconciler {
         platform: request.platform,
         name: device.name,
         ...(request.platform === "ios" && device.deviceId ? { deviceId: device.deviceId } : {}),
-        spec: request.requestedSpec,
+        spec: provisionableSpec(request.requestedSpec),
         mode: "adopt",
         deadlineMs: request.deadlineMs,
         signal: request.signal,

@@ -8,6 +8,14 @@ const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
 const CORE_SIMULATOR_IDENTIFIER_PREFIX = "com.apple.CoreSimulator.";
 const ANDROID_SYSTEM_IMAGE_PREFIX = "system-images;";
 
+export const MANAGED_SLOT_DEVICE_FAMILIES = ["phone", "tablet", "foldable"] as const;
+export type ManagedSlotDeviceFamily = (typeof MANAGED_SLOT_DEVICE_FAMILIES)[number];
+
+const managedSlotDeviceFamilySchema = z
+  .enum(MANAGED_SLOT_DEVICE_FAMILIES)
+  .optional()
+  .describe("Required device family, independent of the exact model and creation default");
+
 function isModernPlayStoreRuntime(runtime: string): boolean {
   const parsedRuntime = parseAndroidSystemImageRuntime(runtime);
   return (
@@ -119,6 +127,7 @@ export const androidManagedSlotSpecSchema = z
   .object({
     runtime: androidRuntimeSchema,
     deviceType: androidDeviceTypeSchema.optional(),
+    deviceFamily: managedSlotDeviceFamilySchema,
     displayCutout: displayCutoutSchema,
     configuration: androidAvdConfigurationSchema.optional(),
   })
@@ -130,6 +139,7 @@ export const iosManagedSlotSpecSchema = z
   .object({
     runtime: iosRuntimeSchema,
     deviceType: iosDeviceTypeSchema.optional(),
+    deviceFamily: managedSlotDeviceFamilySchema,
     displayCutout: displayCutoutSchema,
   })
   .strict()

@@ -107,13 +107,13 @@ running process and otherwise fails with `managed_slot_config_invalid`.
 
 Each entry of `requests`:
 
-| Field             | Type                     | Notes                                                                                                                                                                                  |
-| ----------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `slotIndex`       | integer >= 0             | Local slot number within the scope.                                                                                                                                                    |
-| `role`            | string, 1-256 chars      | Role key for the slot.                                                                                                                                                                 |
-| `platform`        | `"android"` or `"ios"`   | Selects the spec schema below.                                                                                                                                                         |
-| `requestedSpec`   | object                   | Android: `runtime` (system image id), optional `deviceType`, `displayCutout`, optional `configuration`. iOS: `runtime`, optional `deviceType`, `displayCutout`. Strict: no other keys. |
-| `priorDeviceHint` | `{ "stableId": string }` | Optional and non-authoritative: a prior assignment's stable id may be tried first, never trusted.                                                                                      |
+| Field             | Type                     | Notes                                                                                                                                                                                                                                                                           |
+| ----------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `slotIndex`       | integer >= 0             | Local slot number within the scope.                                                                                                                                                                                                                                             |
+| `role`            | string, 1-256 chars      | Role key for the slot.                                                                                                                                                                                                                                                          |
+| `platform`        | `"android"` or `"ios"`   | Selects the spec schema below.                                                                                                                                                                                                                                                  |
+| `requestedSpec`   | object                   | Android: `runtime` (system image id), optional `deviceType`, `deviceFamily`, `displayCutout`, optional `configuration`. iOS: `runtime`, optional `deviceType`, `deviceFamily`, `displayCutout`. `deviceFamily` is `"phone"`, `"tablet"` or `"foldable"`. Strict: no other keys. |
+| `priorDeviceHint` | `{ "stableId": string }` | Optional and non-authoritative: a prior assignment's stable id may be tried first, never trusted.                                                                                                                                                                               |
 
 `deviceType` is optional for managed slots (an omitted field is unconstrained,
 see Spec matching). The spec schemas are `androidManagedSlotSpecSchema` and
@@ -326,10 +326,15 @@ Matching is declarative, per slot, and the result reports a `disposition` of
 `created`, `reused`, `adopted` or `replaced`:
 
 - **Omitted fields are unconstrained.** An assigned device with any value for an
-  omitted field matches. For example "iPhone on iOS 27.0, any model" reuses a
-  compatible assigned iPhone whatever its model. A changed creation default
-  alone never forces replacement. Resolved values are recorded separately from
-  the requested spec (`resolvedSpec`, for example a defaulted `displayCutout`).
+  omitted field matches. Without `deviceFamily`, an omitted `deviceType` matches
+  any model on the requested runtime, including an iPad, even though creation
+  defaults to a phone. With `deviceFamily: "phone"`, "iPhone on iOS 27.0, any
+  model" reuses an eligible non-default iPhone and rejects an iPad. Original
+  constraints are applied to assigned and eligible cached devices before
+  creation defaults are used. A changed creation default alone never forces
+  replacement. `requestedSpec` retains the constraints, including `deviceFamily`;
+  `resolvedSpec` reports the device's actual configuration without that field.
+  `specFingerprint.version` remains the existing configuration-policy version.
 - **Empty slot (`created`).** The device is created from the spec, with
   deterministic platform defaults filling gaps, and proven ready by a targeted
   observe. If a free-pool device (from a retired scope) matches, it is
@@ -354,6 +359,34 @@ Before deleting or creating a device, Android hardware profiles (including creat
 are checked against `avdmanager list device`: an unknown profile returns non-retryable
 `spec_unsupported`, and an unreadable catalog returns retryable `discovery_incomplete`.
 Reuse and adoption do not require this creation-only catalog check.
+
+`deviceFamily` uses the shared `phone`, `tablet` and `foldable` vocabulary.
+On iOS, family is inferred from the model identifier (`iPhone` or `iPad`);
+there is currently no supported foldable iOS model. On Android, a profile
+containing `fold` or `flip` is foldable; Pixel Tablet and Nexus 9/10 profile
+hints are tablets. Otherwise the AVD's display width, height and density
+determine phone versus tablet (a diagonal of at least 7 inches is a tablet).
+Unknown family evidence returns `discovery_incomplete` for an assigned device;
+it never authorizes deletion.
+
+When creation is needed, Android defaults are `pixel_8` for phone,
+`pixel_tablet` for tablet and `pixel_fold` for foldable. Resolver options can
+override these per family; the existing Android default option still supplies
+the phone default. iOS selects the newest catalog model of the requested family
+known to support the runtime, otherwise the newest whose support is unknown.
+Without a family, it keeps the existing newest-iPhone rule. No compatible iOS
+family/model returns `runtime_incompatible`, naming the family and runtime.
+
+An explicit model and family must agree. A conflict returns `spec_unsupported`.
+The same code refuses a model whose family cannot be verified before creation:
+most Android phone profile IDs (for example `pixel_8`) need AVD geometry, and
+an iOS type containing neither `iPhone` nor `iPad` cannot be classified. Request
+either `deviceType` or `deviceFamily`, not both, for these models. A
+`displayCutout` other than `"any"` still requires an explicit `deviceType`.
+These constraint forms are refused rather than silently dropped. An older
+daemon rejects the unknown `deviceFamily` key as `managed_slot_config_invalid`
+because its schema is strict. The public `provisionDevice` tool does not accept
+`deviceFamily`; this field belongs only to managed-slot requested constraints.
 
 Created devices are named `amslot-<scope prefix>-<slot>-g<n>-<suffix>`; treat
 the name as opaque. The `g<n>` number tracks the journal entry, not a per-slot

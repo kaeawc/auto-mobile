@@ -445,3 +445,20 @@ test("an unreadable adb state list fails the kill instead of reporting the emula
   expect((failure as Error).message).not.toContain("is not running");
   expect(emuKillArgv(adb)).toEqual([]);
 });
+
+test("a kill asks for the adb states in the mode that rejects a missing adb executable", async () => {
+  // A vanished adb answering "no devices" would read as "not running" and let the caller retire
+  // ownership of an emulator that is alive (#11643).
+  const { client, adb } = offlineFixture(offlineEmulator);
+  const asked: Array<boolean | undefined> = [];
+  adb.getDeviceStates = async (options?: { throwOnMissingAdb?: boolean }) => {
+    asked.push(options?.throwOnMissingAdb);
+    throw new Error("ADB executable is unavailable");
+  };
+
+  const failure = await client.killDevice(original).catch((error: unknown) => error);
+
+  expect(asked).toEqual([true]);
+  expect((failure as Error).message).toContain("ADB executable is unavailable");
+  expect((failure as Error).message).not.toContain("is not running");
+});

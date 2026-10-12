@@ -229,7 +229,10 @@ describe("remaining paths during session release", () => {
         `test op rejected: session ${sessionId} is not an active daemon session (unknown or expired).`,
       );
     }
-    expect(await h.request("daemon/sessionInfo")).toEqual(notFound);
+    expect(await h.request("daemon/sessionInfo")).toEqual({
+      ...notFound,
+      releaseReason: "explicit-release",
+    });
     expect(await h.request("daemon/activeSessions")).toEqual({
       success: true,
       result: { activeSessions: 1, activeExecutions: 0, releasingSessions: 1 },

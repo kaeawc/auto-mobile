@@ -19,6 +19,7 @@ import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepositor
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 
 // #11381: every release that ends a session for a reason of its own cancels the calls it cuts
 // with the typed release, so their callers get `session_ownership_lost` and not a generic abort.
@@ -193,7 +194,9 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
     async function baseWithDerivedLabel(): Promise<void> {
       const sessionManager = daemon.getSessionManager();
       await sessionManager.createSession(BASE, BASE_DEVICE, "android", LONG_TIMEOUT_MS);
-      await sessionManager.createSession(DERIVED, DERIVED_DEVICE, "android", DERIVED_TIMEOUT_MS);
+      await asPlanAllocation(sessionManager, BASE, [DERIVED], () =>
+        sessionManager.createSession(DERIVED, DERIVED_DEVICE, "android", DERIVED_TIMEOUT_MS),
+      );
       sessionManager.setDeviceLabels(BASE, { A: DERIVED });
     }
 
@@ -294,7 +297,9 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
         undefined,
         OWNER_CONNECTION,
       );
-      await devicePool.bindOrReuseDeviceSession(DERIVED, DERIVED_DEVICE.deviceId, "android");
+      await asPlanAllocation(sessionManager, BASE, [DERIVED], () =>
+        devicePool.bindOrReuseDeviceSession(DERIVED, DERIVED_DEVICE.deviceId, "android"),
+      );
       sessionManager.setDeviceLabels(BASE, { A: BASE, B: DERIVED });
       sessionManager.recordHeartbeat(BASE);
       (daemon as unknown as DaemonMonitorInternals).startHeartbeatMonitor();

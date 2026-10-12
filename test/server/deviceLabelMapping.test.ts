@@ -1,4 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -78,8 +79,10 @@ describe("deviceLabelMapping ↔ SessionManager.deviceLabels slot (issue #2973)"
     "label release logs a failed session and still releases the rest (session %s, #11091)",
     async (scenario) => {
       await sessionManager.createSession("base", androidA.deviceId, "android");
-      await sessionManager.createSession("base:B", "device-B", "android");
-      await sessionManager.createSession("base:C", "device-C", "android");
+      await asPlanAllocation(sessionManager, "base", ["base:B", "base:C"], async () => {
+        await sessionManager.createSession("base:B", "device-B", "android");
+        await sessionManager.createSession("base:C", "device-C", "android");
+      });
       sessionManager.setDeviceLabels("base", buildDeviceLabelMap(["A", "B", "C"], "base"));
       const pool = DaemonState.getInstance().getDevicePool();
       const failure = new Error("B release failed");
@@ -170,7 +173,9 @@ describe("deviceLabelMapping ↔ SessionManager.deviceLabels slot (issue #2973)"
       ["D", "emulator-5560"],
     ]) {
       await pool.addDevice({ ...androidA, name: `Pixel ${label}`, deviceId });
-      await sessionManager.createSession(`base:${label}`, deviceId, "android");
+      await asPlanAllocation(sessionManager, "base", [`base:${label}`], () =>
+        sessionManager.createSession(`base:${label}`, deviceId, "android"),
+      );
       sessionManager.setDeviceReadiness(`base:${label}`, "automationReady");
     }
     const failure = new Error("B readiness failed");

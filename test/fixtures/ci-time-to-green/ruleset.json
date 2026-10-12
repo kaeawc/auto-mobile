@@ -1,0 +1,53 @@
+{
+  "id": 11406121,
+  "name": "green-main",
+  "target": "branch",
+  "source_type": "Repository",
+  "source": "kaeawc/auto-mobile",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "exclude": [], "include": ["~DEFAULT_BRANCH"] } },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          { "context": "Run JUnit Runner Unit Tests", "integration_id": 15368 },
+          { "context": "Build Playground App", "integration_id": 15368 },
+          { "context": "Build IDE Plugin", "integration_id": 15368 },
+          { "context": "Run IDE Plugin Unit Tests", "integration_id": 15368 },
+          { "context": "Node TypeScript Build and Test (ubuntu-latest)", "integration_id": 15368 },
+          { "context": "Node TypeScript Build and Test (windows-latest)", "integration_id": 15368 },
+          { "context": "Installer Minimal (macos-latest)", "integration_id": 15368 },
+          { "context": "Installer Minimal (ubuntu-latest)", "integration_id": 15368 },
+          { "context": "Run CtrlProxy Unit Tests", "integration_id": 15368 },
+          { "context": "Run Desktop App Unit Tests", "integration_id": 15368 },
+          { "context": "Run Desktop Core Unit Tests", "integration_id": 15368 },
+          { "context": "Build Desktop Core Module", "integration_id": 15368 },
+          { "context": "Fast Validation", "integration_id": 15368 },
+          { "context": "SwiftLint", "integration_id": 15368 },
+          { "context": "Swift Code Coverage", "integration_id": 15368 },
+          { "context": "Build Root SPM Package", "integration_id": 15368 },
+          { "context": "Build CtrlProxy APK", "integration_id": 15368 },
+          { "context": "iOS Build", "integration_id": 15368 },
+          { "context": "IDE Plugin", "integration_id": 15368 },
+          { "context": "Shell Tests", "integration_id": 15368 },
+          { "context": "Node Checks", "integration_id": 15368 },
+          { "context": "JVM Consumer Checks", "integration_id": 15368 }
+        ]
+      }
+    }
+  ],
+  "node_id": "RRS_lACqUmVwb3NpdG9yec4_4YXkzgCuCyk",
+  "created_at": "2025-12-26T12:23:05.056-06:00",
+  "updated_at": "2026-10-08T22:09:50.914-05:00",
+  "bypass_actors": [{ "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }],
+  "current_user_can_bypass": "always",
+  "_links": {
+    "self": { "href": "https://api.github.com/repos/kaeawc/auto-mobile/rulesets/11406121" },
+    "html": { "href": "https://github.com/kaeawc/auto-mobile/rules/11406121" }
+  }
+}

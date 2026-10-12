@@ -115,6 +115,14 @@ export interface LiveExecutionSessionsOptions {
  * judged only by its session (held by this daemon) or, for a `reserve-*` placeholder, by whether
  * that reservation is still in flight. Settlers and journal owners carry no session and are judged
  * by their process alone.
+ *
+ * An id this daemon holds in flight keeps its record live whichever process wrote it. The drain
+ * holds a released session whose work still runs, and that session's record may still name the
+ * previous daemon (a restart not re-owned yet) or another one; judging such a record by its
+ * process would hand the slot out under the running work. The hold is this process's own view.
+ * Other daemons read the same fact from the registry: the drain re-stamps the record with this
+ * daemon before it marks the slot (`ManagedExecutionRelease`), and a record naming a running
+ * daemon reads live everywhere.
  */
 export function withLiveExecutionSessions(
   processLiveness: SlotExecOwnerLiveness,
@@ -126,9 +134,11 @@ export function withLiveExecutionSessions(
   return (owner) => {
     const sessionUuid =
       "sessionUuid" in owner && typeof owner.sessionUuid === "string" ? owner.sessionUuid : null;
+    if (sessionUuid !== null && reservations.has(sessionUuid)) {
+      return true;
+    }
     if (sessionUuid !== null && owner.pid === thisPid) {
       return (
-        reservations.has(sessionUuid) ||
         sessions.isLiveManagedExecutionSession(sessionUuid) ||
         (sessions.hasSession?.(sessionUuid) ?? false)
       );

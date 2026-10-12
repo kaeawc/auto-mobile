@@ -543,3 +543,69 @@ wiring_requires_yq() {
   [[ "$block" != *"run-bats.sh"* ]]
   [[ "$block" != *"bats test/bats"* ]]
 }
+
+@test "one heavy-lane job builds both Xcode projects, each in its own named step (#11580)" {
+  wiring_requires_yq
+  # No per-project matrix: two legs queued one after the other on the single
+  # heavy runner process and repeated all of the setup.
+  run yq -r '.jobs."ios-xcode-build".strategy.matrix | keys | join(",")' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "config" ]
+  run yq -r '.jobs."ios-xcode-build".strategy.matrix.config | length' "$WF"
+  [ "$output" = "1" ]
+  run yq -r '.jobs."ios-xcode-build".name' "$WF"
+  [ "$output" = 'Build Xcode Projects (${{ matrix.config.name }})' ]
+
+  # Both projects are built, each by its own step, so a failure names the
+  # project and neither build is silently dropped.
+  local project built
+  built="$(yq -r '.jobs."ios-xcode-build".steps[] | select(has("run")) | .run' "$WF" | sed -n 's|^\./scripts/ios/xcode-build\.sh \(.*\)$|\1|p' | sort)"
+  [ "$built" = $'CtrlProxy\nPlayground' ]
+  for project in Playground CtrlProxy; do
+    run yq -r ".jobs.\"ios-xcode-build\".steps[] | select(.name == \"Build Xcode Project (${project})\") | .env.AUTOMOBILE_XCODE_DERIVED_DATA" "$WF"
+    [ "$status" -eq 0 ]
+    [ "$output" = "\${{ runner.temp }}/automobile-derived-data-${project}" ]
+    # Same cache key as the former matrix leg, so existing entries still hit.
+    run yq -r ".jobs.\"ios-xcode-build\".steps[] | select(.name == \"Cache Xcode DerivedData (${project})\") | .with.key" "$WF"
+    [[ "$output" == "\${{ runner.os }}-\${{ runner.environment }}-derived-xcode-build-${project}-\${{ matrix.config.xcode }}-"* ]]
+  done
+
+  # Neither build may fail quietly, and the second still runs (and reports)
+  # when the first fails.
+  run yq -r '[.jobs."ios-xcode-build".steps[] | select(has("continue-on-error"))] | length' "$WF"
+  [ "$output" = "0" ]
+  run yq -r '.jobs."ios-xcode-build".steps[] | select(.name == "Build Xcode Project (Playground)") | .if // "none"' "$WF"
+  [ "$output" = "none" ]
+  run yq -r '.jobs."ios-xcode-build".steps[] | select(.name == "Build Xcode Project (CtrlProxy)") | .if' "$WF"
+  [ "$output" = "\${{ !cancelled() && steps.build-xcode-playground.conclusion != 'skipped' }}" ]
+}
+
+@test "the advisory Prototype Simulator job queues behind the required Xcode build (#11580)" {
+  wiring_requires_yq
+  run yq -r '.jobs."prototype-simulator".needs | join(",")' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "detect-changes,fast-validation,ios-xcode-build" ]
+  # always(): it still runs when that build failed or was skipped. It stays out
+  # of the required iOS gate.
+  run yq -r '.jobs."prototype-simulator".if' "$WF"
+  [ "$output" = "always() && !cancelled() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.prototype_simulator_should_run == 'true' && needs.fast-validation.result == 'success'" ]
+  [[ "$(job_block ios-build-gate)" != *"prototype-simulator"* ]]
+}
+
+@test "one switch moves every self-hosted Mac job back to hosted runners (#11580)" {
+  wiring_requires_yq
+  # A job labelled for a self-hosted pool waits forever when no runner is
+  # online. Each one must honour AUTOMOBILE_MAC_POOLS_ENABLED, or switching it
+  # off leaves a required check (SwiftLint, Swift Code Coverage, Installer
+  # Minimal) queued with no runner.
+  local job runs_on count=0
+  while IFS= read -r job; do
+    runs_on="$(yq -r ".jobs.\"${job}\".\"runs-on\"" "$WF")"
+    if [[ "$runs_on" != *"vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('[\"self-hosted\",\"automobile-mac"* ]]; then
+      echo "${job} routes to a self-hosted Mac without the pool switch: ${runs_on}" >&2
+      return 1
+    fi
+    count=$((count + 1))
+  done < <(yq -r '.jobs | to_entries[] | select(.value."runs-on" | tostring | contains("automobile-mac")) | .key' "$WF")
+  [ "$count" -eq 10 ]
+}

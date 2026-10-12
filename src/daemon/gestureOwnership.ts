@@ -116,6 +116,14 @@ export class GestureOwnershipRegistry {
     await this.cancelAllMatching((gesture) => gesture.holderSessionId === holderSessionId);
   }
 
+  /** Lift only the strokes admitted under a holder on the device it just left (#11667). */
+  async cancelAllHeldByOn(holderSessionId: string, deviceId: string): Promise<void> {
+    await this.cancelAllMatching(
+      (gesture) =>
+        gesture.holderSessionId === holderSessionId && gesture.targetDevice.deviceId === deviceId,
+    );
+  }
+
   /**
    * Cancel every open gesture on `deviceId` that was admitted while no session held the device: a
    * session has just acquired it, and sessionless work must not keep driving a device for its new

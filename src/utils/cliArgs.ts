@@ -1,3 +1,5 @@
+import { findValueOperand } from "./flagTokens";
+
 /**
  * Read the value for the first matching flag from an argv array, supporting
  * both the space-separated `--flag value` and inline `--flag=value` forms.
@@ -11,19 +13,7 @@
  * @returns the resolved value, or `undefined` if no flag matched or its value was missing
  */
 export function firstFlagValue(args: string[], flags: string[]): string | undefined {
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (flags.includes(arg)) {
-      const value = args[i + 1];
-      if (!value || value.startsWith("--")) {
-        return undefined;
-      }
-      return value;
-    }
-    const matched = flags.find((flag) => arg.startsWith(`${flag}=`));
-    if (matched) {
-      return arg.slice(matched.length + 1);
-    }
-  }
-  return undefined;
+  const operand = findValueOperand(args, flags);
+  // The separate form treats an empty word as a missing value; an explicit `--flag=` keeps it.
+  return operand && (operand.inline || operand.value) ? operand.value : undefined;
 }

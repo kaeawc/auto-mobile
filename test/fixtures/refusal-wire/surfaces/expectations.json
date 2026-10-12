@@ -12,6 +12,14 @@
         }
       }
     },
+    "socket-frame.session_no_longer_owns_device": {
+      "expected": "fail",
+      "fields": {
+        "code": "session_no_longer_owns_device",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
     "socket-frame.device_outside_bound_session": {
       "expected": "fail",
       "fields": {

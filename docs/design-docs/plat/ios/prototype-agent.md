@@ -355,6 +355,8 @@ the show itself (its result reports the mode), or with nothing shown.
 **Report.** A successful `show_prototype` result and `get_prototype_status`'s `status` carry
 `appearance: {mode, source, deviceDark}`: `mode` is `light` or `dark`, `source` is one of the five
 names above, and `deviceDark` is the simulator's own appearance whatever decided the mode. The
+agent states it in each reply; the host's `prototype` `status` action is host-local and reports
+only `mode` and `source`, because a pinned mode sends no event when the appearance flips (#11416). The
 status has no `appearance` while nothing is shown.
 
 ## Anchors

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { logger } from "../../../utils/logger";
+import { readEnvPositiveInteger } from "../../../utils/envNumbers";
 
 /**
  * Ownership metadata and stale-owner policy for the cross-process CtrlProxy
@@ -64,9 +65,12 @@ export const DEFAULT_CTRL_PROXY_FORWARD_LEASE_IDLE_MS = 60_000;
 export const CTRL_PROXY_FORWARD_LEASE_IDLE_MS_ENV = "AUTOMOBILE_CTRL_PROXY_LEASE_IDLE_MS";
 
 export function resolveCtrlProxyForwardLeaseIdleMs(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env[CTRL_PROXY_FORWARD_LEASE_IDLE_MS_ENV];
-  const parsed = raw === undefined ? Number.NaN : Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CTRL_PROXY_FORWARD_LEASE_IDLE_MS;
+  return readEnvPositiveInteger(
+    CTRL_PROXY_FORWARD_LEASE_IDLE_MS_ENV,
+    undefined,
+    { fallback: DEFAULT_CTRL_PROXY_FORWARD_LEASE_IDLE_MS },
+    env,
+  );
 }
 
 /** What a lease owner reports about one device over `daemon/deviceLeaseStatus`. */

@@ -2399,6 +2399,92 @@ describe("finalizeToolResponse", () => {
       });
     });
 
+    // #11638: Settings sub-screens share one activity, so the screen identity is equal;
+    // a whole-screen replacement of actionable rows must not be emitted as a diff.
+    test("falls back to full when nearly every actionable row was replaced on the same activity (#11638)", () => {
+      const { store } = makeStore();
+      const screenWithRows = (rows: string[]): ObserveResult => {
+        const clickable = rows.map((row, index) => ({
+          bounds: { left: 0, top: index * 50, right: 100, bottom: index * 50 + 40 },
+          "resource-id": `com.example:id/${row}`,
+          text: row,
+          clickable: "true",
+        }));
+        return {
+          ...sameScreenObserve(),
+          elements: { clickable, scrollable: [], text: [], media: [] },
+          viewHierarchy: {
+            packageName: "com.example",
+            hierarchy: {
+              node: {
+                "resource-id": "com.example:id/root",
+                bounds: { left: 0, top: 0, right: 100, bottom: 600 },
+                node: clickable.map((row) => ({ ...row, actions: ["click"] })),
+              },
+            },
+          },
+        } as ObserveResult;
+      };
+      finalizeToolResponse(createStructuredToolResponse(screenWithRows(["a1", "a2", "a3", "a4"])), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({
+          success: true,
+          observation: screenWithRows(["b1", "b2", "b3", "b4"]),
+        }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      expect(structuredPayload(finalized).observation.isDiff).toBeUndefined();
+      expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
+    });
+
+    test("keeps a diff when only one of several actionable rows was replaced", () => {
+      const { store } = makeStore();
+      const screenWithRows = (rows: string[]): ObserveResult => {
+        const clickable = rows.map((row, index) => ({
+          bounds: { left: 0, top: index * 50, right: 100, bottom: index * 50 + 40 },
+          "resource-id": `com.example:id/${row}`,
+          text: row,
+          clickable: "true",
+        }));
+        return {
+          ...sameScreenObserve(),
+          elements: { clickable, scrollable: [], text: [], media: [] },
+          viewHierarchy: {
+            packageName: "com.example",
+            hierarchy: {
+              node: {
+                "resource-id": "com.example:id/root",
+                bounds: { left: 0, top: 0, right: 100, bottom: 600 },
+                node: clickable.map((row) => ({ ...row, actions: ["click"] })),
+              },
+            },
+          },
+        } as ObserveResult;
+      };
+      finalizeToolResponse(createStructuredToolResponse(screenWithRows(["a1", "a2", "a3", "a4"])), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({
+          success: true,
+          observation: screenWithRows(["a1", "a2", "a3", "b4"]),
+        }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      expect(structuredPayload(finalized).observation.isDiff).toBe(true);
+      expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
+    });
+
     test("falls back to full when the screen (app/activity/package) changed", () => {
       const { store } = makeStore();
       finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {

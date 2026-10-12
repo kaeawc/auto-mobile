@@ -1,10 +1,14 @@
 import { beforeAll, expect, spyOn, test } from "bun:test";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  CallToolRequestSchema,
+  ReadResourceRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { createProxyMcpServer } from "../../src/server/proxyServer";
+import { createProxyMcpServer, managedSlotsResourceView } from "../../src/server/proxyServer";
 import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
 import type { ManagedSlotsResult } from "../../src/models/managedSlotsResult";
+import { MANAGED_SLOTS_RESOURCE_URI } from "../../src/models/managedSlotsResult";
 import {
   DaemonBoundSessionExpiredError,
   DaemonConnectionSessionReleasedError,
@@ -102,6 +106,7 @@ test("the managed refusal never points the agent at getAndroid or getApple", asy
   expect(text).not.toContain("getAndroid");
   expect(text).not.toContain("getApple");
   expect(text).not.toContain("acquire_new_session");
+  expect(JSON.parse(text).error.message).toEndWith("reads that name a deviceId still work.");
 });
 
 test("a managed connection's session-less release is managed_execution_ended too", async () => {
@@ -157,7 +162,7 @@ test("a successful result on a managed connection passes through unchanged", asy
   expect(text).toBe('{"success":true}');
 });
 
-test("a read still succeeds after the release, and the refusal carries no role", async () => {
+test("a read naming a device still succeeds after the release, and the refusal carries no role", async () => {
   const { server, proxy, registrations } = createHarness(readyManagedSlotsResult(SESSION));
   const ok: CallToolResult = { content: [{ type: "text", text: '{"hierarchy":[]}' }] };
   const call = spyOn(proxy, "callTool")
@@ -169,7 +174,13 @@ test("a read still succeeds after the release, and the refusal carries no role",
       throw new Error("Missing handler");
     }
     const refused = await handler({ method: "tools/call", params: { name: "tapOn" } }, extra);
-    const read = await handler({ method: "tools/call", params: { name: "observe" } }, extra);
+    const read = await handler(
+      {
+        method: "tools/call",
+        params: { name: "observe", arguments: { deviceId: "emulator-5554" } },
+      },
+      extra,
+    );
     expect(refused.isError).toBe(true);
     expect(JSON.parse(refused.content[0].text).error).not.toHaveProperty("role");
     expect(read.isError).toBeUndefined();
@@ -179,4 +190,66 @@ test("a read still succeeds after the release, and the refusal carries no role",
     await server.close();
     await proxy.close();
   }
+});
+
+test("the managed-slots resource reflects a terminal release at read time", async () => {
+  const managedSlots = readyManagedSlotsResult(SESSION);
+  const { server, proxy, registrations } = createHarness(managedSlots);
+  let ended: { sessionUuid: string; reason: string } | undefined;
+  const terminal = spyOn(proxy, "getTerminalSessionRelease").mockImplementation(() => ended);
+  try {
+    const handler = registrations.find(([schema]) => schema === ReadResourceRequestSchema)?.[1];
+    if (!handler) {
+      throw new Error("Missing resource handler");
+    }
+    const request = { method: "resources/read", params: { uri: MANAGED_SLOTS_RESOURCE_URI } };
+    const before = await handler(request, extra);
+    expect(JSON.parse(before.contents[0].text)).toEqual(managedSlots);
+    ended = { sessionUuid: SESSION, reason: "cleanup-expired" };
+    const after = await handler(request, extra);
+    expect(JSON.parse(after.contents[0].text).slots[0]).toMatchObject({
+      sessionUuid: SESSION,
+      executionEnded: { reason: "cleanup-expired", nextAction: "relaunch_execution" },
+    });
+    expect(managedSlots.slots[0]).not.toHaveProperty("executionEnded");
+  } finally {
+    terminal.mockRestore();
+    await server.close();
+    await proxy.close();
+  }
+});
+
+test("the managed-slots resource view adds ended evidence without changing acquisition fields", () => {
+  const result = readyManagedSlotsResult(SESSION);
+  result.slots.push({ ...result.slots[0]!, slotIndex: 2, sessionUuid: "another-session" });
+  const before = structuredClone(result);
+  const view = managedSlotsResourceView(result, {
+    sessionUuid: SESSION,
+    reason: "cleanup-expired",
+  });
+  expect(view).toEqual({
+    ...before,
+    slots: [
+      {
+        ...before.slots[0],
+        executionEnded: { reason: "cleanup-expired", nextAction: "relaunch_execution" },
+      },
+      before.slots[1],
+    ],
+  });
+  expect(view).not.toBe(result);
+  expect(view.slots[1]).toBe(result.slots[1]);
+  expect(result).toEqual(before);
+});
+
+test("the managed-slots resource view keeps undefined, unknown and failed releases unchanged", () => {
+  const ready = readyManagedSlotsResult(SESSION);
+  const failed: ManagedSlotsResult = { ...ready, outcome: "failed" };
+  expect(managedSlotsResourceView(ready, undefined)).toBe(ready);
+  expect(
+    managedSlotsResourceView(ready, { sessionUuid: "unknown", reason: "cleanup-expired" }),
+  ).toBe(ready);
+  expect(
+    managedSlotsResourceView(failed, { sessionUuid: SESSION, reason: "cleanup-expired" }),
+  ).toBe(failed);
 });

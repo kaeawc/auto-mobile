@@ -533,7 +533,9 @@ export interface SlotRegistry {
 
   /**
    * Record the live execution holding a ready slot; refused while another live owner holds it,
-   * unless that owner is the session `options.supersedesSessionUuid` names.
+   * unless that owner is the session `options.supersedesSessionUuid` names. Needs a `valid` scope,
+   * except that the session the slot already records may re-stamp its owner process while the
+   * scope is `invalidating` ({@link scopeAcceptsSameSessionClaim}).
    */
   claimExecution(
     key: SlotKey,
@@ -735,13 +737,10 @@ export function sameBinding(a: SlotBindingExpectation, b: SlotBindingExpectation
 
 /**
  * The stable id an open journal entry's new device has, or will have: the recorded id once creation
- * returned it, else (Android) the generated AVD name, which is the stable id.
+ * returned it, else the generated name (the AVD identity on Android, a temporary iOS identity).
  */
 export function journalNewStableId(entry: SlotJournalEntry): string | null {
-  return (
-    entry.target.newStableId ??
-    (journalCreationPlatform(entry) === "android" ? entry.target.newName : null)
-  );
+  return entry.target.newStableId ?? entry.target.newName;
 }
 
 /**
@@ -783,6 +782,22 @@ export function journalTargetEntries(
  */
 export function scopeAcceptsSlotChange(scope: SlotScopeRecord | null, journaled: boolean): boolean {
   return scope?.state === "valid" || (journaled && scope?.state === "invalidating");
+}
+
+/**
+ * Whether an execution claim by `sessionUuid` may go through in a scope that does not accept slot
+ * changes (#11642). Only one case: the scope is `invalidating` and the slot's recorded execution
+ * is that same session, so the claim re-stamps which process holds a session the scope is already
+ * waiting for (a restarted daemon re-owning its live execution). It adds no owner to the scope:
+ * an ownerless slot and a slot recorded for any other session stay refused, and an `invalidated`
+ * scope accepts nothing.
+ */
+export function scopeAcceptsSameSessionClaim(
+  scope: SlotScopeRecord | null,
+  current: Pick<SlotAssignmentRecord, "execOwner"> | null,
+  sessionUuid: string,
+): boolean {
+  return scope?.state === "invalidating" && current?.execOwner?.sessionUuid === sessionUuid;
 }
 
 /**

@@ -119,7 +119,13 @@ bun test <file>        # Run specific test file (no cache)
 Before pushing Node/TypeScript changes, run `bash scripts/prepush-node.sh`.
 Use `bash scripts/prepush-node.sh --changed` for the faster affected-unit-test
 loop; formatting, typecheck, and lint intentionally remain full repository
-gates. `oxlint`'s actual exit code is authoritative: Error-level rules such as
+gates. It also runs the tool-free TypeScript subset of CI Fast Validation
+(`scripts/all_fast_validate_checks.sh --only ...`, ~10 s, including the offline
+lychee pass when `lychee` is installed), the `test/lint/` suites (including the
+Windows path-separator assertion guard), and, on Linux or with `--timing`, the
+100 ms unit budget. Shell, Kotlin, Swift, docs-syntax, bats and Windows/macOS
+matrix lanes are not covered: use `scripts/prepush-shell.sh` and the platform
+gates, and expect CI to be the only Windows run. `oxlint`'s actual exit code is authoritative: Error-level rules such as
 `eqeqeq` are enforced directly by oxlint, not its warning-only ratchet, and
 diffing warnings does not satisfy the gate. Before asking for a merge, fetch
 `origin/main`, confirm the branch contains it, and re-run local gates.
@@ -310,10 +316,17 @@ present in the shade; ignoring this flag keeps those children matchable.
 
 # CI failure triage
 
-`pull_request.yml` keeps roll-up gates only for required checks (`IDE Plugin`,
-`iOS Build`, `Shell Tests`); every other job reports directly, and advisory lanes
-never block a merge. Runs from before the `iOS`, `Android`, `Node Tests`, and
-`WebRTC` roll-ups were removed may still show them red. Run
+The `green-main` ruleset requires 22 status checks to merge, not just the three
+roll-up gates. The ruleset is the only authoritative list (deliberately not
+copied here, so it cannot rot): `gh api repos/kaeawc/auto-mobile/rulesets`, then
+`.../rulesets/<id>` and its `required_status_checks` rule. The roll-up gates
+(`IDE Plugin`, `iOS Build`, `Shell Tests`) only give a required context a stable
+name over matrix or skipped jobs; every other required check is an ordinary job
+that reports directly, so read that job. "Advisory" means not in the ruleset: it
+never blocks a merge. Runs from before the `iOS`, `Android`, `Node Tests`, and
+`WebRTC` roll-ups were removed may still show them red.
+`bun scripts/ci/ci-time-to-green.ts` reports time-to-green against the live
+required list. Run
 `bash scripts/ci/classify-failure.sh <run-id>` before retrying or changing code;
 it identifies the specific upstream job and consults
 `scripts/ci/known-flakes.txt`. Do not re-fix documented non-fixes. Before

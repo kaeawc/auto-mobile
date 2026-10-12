@@ -21,6 +21,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import { RealToolCallPath } from "../helpers/realToolCallPath";
 
 // #11586: a direct-socket client names the owner's derived `${base}:${label}` session in its
@@ -116,7 +117,9 @@ describe("restoring a derived label session through the owned-sessions selector"
     const labels = buildDeviceLabelMap(["A", "B"], BASE);
     labelSession = labels.B;
     manager.setDeviceLabels(BASE, labels);
-    await pool.assignMultipleDevices([labelSession], 1_000, "android");
+    await asPlanAllocation(manager, BASE, [labelSession], () =>
+      pool.assignMultipleDevices([labelSession], 1_000, "android"),
+    );
     socketServer = new UnixSocketServer(
       "/tmp/never-listened.sock",
       "http://localhost:0/mcp",

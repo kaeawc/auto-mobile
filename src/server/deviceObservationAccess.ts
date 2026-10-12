@@ -1,4 +1,8 @@
-import { matchRunningReadTarget, providedReadTargetNotFound } from "../devices/runningReadTarget";
+import {
+  explicitReadTargetPlatform,
+  matchRunningReadTarget,
+  providedReadTargetNotFound,
+} from "../devices/runningReadTarget";
 import type { BootedDevice, SomePlatform } from "../models";
 import { ActionableError } from "../models/ActionableError";
 import {
@@ -24,6 +28,9 @@ export const defaultDeviceObservationAccess: DeviceObservationAccess = {
   // The local daemon socket admits observation reads regardless of pool ownership.
   isAuthorized: () => true,
 };
+
+/** Inventory confirmation is read-only and may establish a stopped target on a healthy platform. */
+export type ConfirmStoppedReadTarget = (listing: BootedResourceReadListing) => Promise<boolean>;
 
 export interface DeviceReadRetryOptions {
   timer?: Timer;
@@ -53,7 +60,9 @@ async function findObservationReadTarget(
   access: DeviceObservationAccess,
   platform: SomePlatform,
   retry: DeviceReadRetryOptions,
+  confirmStopped?: ConfirmStoppedReadTarget,
 ): Promise<{ device: BootedDevice | undefined; devices: BootedDevice[] }> {
+  const targetPlatform = explicitReadTargetPlatform(deviceId, platform);
   try {
     return await new DefaultRetryExecutor(retry.timer).executeOrThrow(
       async () => {
@@ -63,10 +72,10 @@ async function findObservationReadTarget(
           : { devices: await access.listBooted(signal), scanned: { android: true, ios: true } };
         signal?.throwIfAborted();
         const fresh = listing.devices.filter((device) => listing.scanned[device.platform]);
-        const device = matchRunningReadTarget(fresh, deviceId, platform);
+        const device = matchRunningReadTarget(fresh, deviceId, targetPlatform);
         if (!device) {
-          const failedPlatform = incompleteReadPlatform(listing, platform);
-          if (failedPlatform) {
+          const failedPlatform = incompleteReadPlatform(listing, targetPlatform);
+          if (failedPlatform && !(await confirmStopped?.(listing))) {
             throw new BootedDeviceDiscoveryIncompleteError(
               failedPlatform,
               listing.discoveryErrors?.[failedPlatform],
@@ -137,19 +146,21 @@ export function sessionlessDeviceReadFor(
     deviceId: string,
     signal?: AbortSignal,
     platform?: SomePlatform,
+    confirmStopped?: ConfirmStoppedReadTarget,
   ): Promise<BootedDevice | undefined>;
   assertAuthorized(device: BootedDevice): void;
 } {
   return {
     resolve: (deviceId, signal, platform) =>
       resolveDeviceForObservationRead(deviceId, signal, access, platform, retry),
-    findRunning: async (deviceId, signal, platform) => {
+    findRunning: async (deviceId, signal, platform, confirmStopped) => {
       const { device } = await findObservationReadTarget(
         deviceId,
         signal,
         access,
         platform ?? "either",
         retry,
+        confirmStopped,
       );
       return device;
     },

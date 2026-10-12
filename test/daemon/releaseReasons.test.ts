@@ -22,6 +22,22 @@ import {
 import { DEVICE_LOSS_REASON_PREFIX } from "../../src/utils/deviceLossCancellationReason";
 
 describe("session release-reason table (#11258)", () => {
+  test("proxy-local idle reasons qualify wires without entering daemon decisions", () => {
+    expect(isIdleReleaseReason("replay-lease-expired")).toBe(true);
+    expect(idleReleaseField("replay-lease-expired")).toEqual({ idle: true });
+    expect(sessionReleaseReasonTraits("replay-lease-expired")).toEqual({
+      idle: false,
+      expiry: false,
+      terminal: false,
+      recoverable: false,
+      reissuableByName: false,
+    });
+    expect(isTerminalReleaseReason("replay-lease-expired")).toBe(false);
+    expect(releaseReasonStrength("replay-lease-expired")).toBe(0);
+    expect(literalReleaseReasonsWhere("idle")).not.toContain("replay-lease-expired");
+    expect(isIdleReleaseReason("session-not-found")).toBe(false);
+  });
+
   test("the utils-side device-loss prefix is a family in the table", () => {
     expect(Object.keys(SESSION_RELEASE_REASON_FAMILY_TRAITS)).toContain(DEVICE_LOSS_REASON_PREFIX);
   });

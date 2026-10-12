@@ -25,6 +25,7 @@ import {
 } from "./AndroidDisplayInventory";
 import { TTLCache } from "../cache/Cache";
 import { SingleFlight } from "../cache/SingleFlight";
+import { transportIdFor } from "../androidSerial";
 import { arch } from "os";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import { resolveAndroidSdkRoot } from "./androidSdkRoot";
@@ -79,10 +80,16 @@ type InventoryNameResult = {
   consoleBusyDuringProbe?: boolean;
 };
 type InventoryDisplayResult = Awaited<ReturnType<typeof readAndroidDeviceDisplaysChecked>>;
+interface ReadNameConnection {
+  key: string;
+}
 interface InventoryEnrichmentState {
   generation: number;
   names: TTLCache<string, InventoryNameResult>;
   nameFlight: SingleFlight<string, InventoryNameResult>;
+  readNames: TTLCache<string, InventoryNameResult>;
+  readNameConnections: TTLCache<string, ReadNameConnection>;
+  readNameFlight: SingleFlight<ReadNameConnection, InventoryNameResult>;
   displays: TTLCache<string, InventoryDisplayResult>;
   displayFlight: SingleFlight<string, InventoryDisplayResult>;
   avds: TTLCache<string, DeviceInfo[]>;
@@ -98,6 +105,9 @@ function inventoryEnrichmentState(timer: Timer): InventoryEnrichmentState {
       generation: 0,
       names: new TTLCache(timer, options),
       nameFlight: new SingleFlight(),
+      readNames: new TTLCache(timer, options),
+      readNameConnections: new TTLCache(timer, options),
+      readNameFlight: new SingleFlight(),
       displays: new TTLCache(timer, options),
       displayFlight: new SingleFlight(),
       avds: new TTLCache(timer, options),
@@ -117,6 +127,8 @@ export function resetAndroidInventoryEnrichmentCache(): void {
     }
     state.generation++;
     state.names.clear();
+    state.readNames.clear();
+    state.readNameConnections.clear();
     state.displays.clear();
     state.avds.clear();
     // Retain active flights: lifecycle invalidation must never multiply subprocesses.
@@ -168,6 +180,8 @@ interface BootedDeviceScan {
 
 interface BootedDeviceScanOptions {
   coalesceInventoryEnrichment?: boolean;
+  /** Read listings only: briefly reuse names proven on the same ADB connection. */
+  memoizeReadAvdNames?: boolean;
   bypassDeviceListCache?: boolean;
   devices?: BootedDevice[];
   timeoutMs?: number;
@@ -2162,6 +2176,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           signal,
         }));
       perf.endOperation("adbDeviceScan");
+      this.invalidateReadNameConnections(devices, options);
       this.invalidateInventorySerials(devices, options);
       if (!options.devices) {
         this.evictDepartedDeviceInfo(devices);
@@ -2352,6 +2367,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       signal,
     }: { options: BootedDeviceScanOptions; timeoutMs: number; signal?: AbortSignal },
   ): Promise<InventoryNameResult> {
+    if (options.memoizeReadAvdNames && !options.readinessOnly) {
+      return this.readRunningAvdName(device, timeoutMs, signal ?? getAbortSignal());
+    }
     const key = this.inventoryCacheKey(device, options);
     if (!key) {
       return this.getRunningAVDName(device, timeoutMs, signal);
@@ -2373,6 +2391,84 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           return result;
         }),
       signal ?? getAbortSignal(),
+    );
+  }
+
+  private invalidateReadNameConnections(
+    devices: BootedDevice[],
+    options: BootedDeviceScanOptions,
+  ): void {
+    const state = inventoryEnrichmentState(this.timer);
+    const rows = new Map(devices.map((device) => [device.deviceId, device]));
+    const completeListing = !options.devices && !options.targetDeviceId;
+    // Sweep names independently: the bounded connection cache may have evicted
+    // an unresolved connection while a successful name entry is still live.
+    for (const key of state.readNames.keys()) {
+      const [serial, transportId] = key.split("\0");
+      const row = rows.get(serial);
+      if (row ? transportId !== transportIdFor(row) : completeListing) {
+        state.readNames.delete(key);
+      }
+    }
+    for (const serial of state.readNameConnections.keys()) {
+      const connection = state.readNameConnections.get(serial);
+      const row = rows.get(serial);
+      if (
+        connection &&
+        ((row && connection.key !== `${serial}\0${transportIdFor(row) ?? ""}`) ||
+          (!row && completeListing))
+      ) {
+        state.readNames.delete(connection.key);
+        state.readNameConnections.delete(serial);
+      }
+    }
+  }
+
+  private async readRunningAvdName(
+    device: BootedDevice,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<InventoryNameResult> {
+    signal?.throwIfAborted();
+    const transportId = transportIdFor(device);
+    if (!transportId) {
+      return this.getRunningAVDName(device, timeoutMs, signal);
+    }
+    const state = inventoryEnrichmentState(this.timer);
+    const key = `${device.deviceId}\0${transportId}`;
+    let connection = state.readNameConnections.get(device.deviceId);
+    if (!connection || connection.key !== key) {
+      // An orphaned memo must not outlive its connection token after TTL/capacity eviction.
+      state.readNames.delete(key);
+      connection = { key };
+      state.readNameConnections.set(device.deviceId, connection);
+    }
+    const cached = state.readNames.get(key);
+    if (cached) {
+      return cached;
+    }
+    const currentConnection = connection;
+    // Connection objects also separate active flights after disappearance or reset:
+    // a late answer from the departed connection cannot refill or join the new memo.
+    return state.readNameFlight.run(
+      currentConnection,
+      (flightSignal) =>
+        runWithAbortSignal(flightSignal, async () => {
+          const result = await this.getRunningAVDName(device, timeoutMs, flightSignal);
+          if (
+            result.name.trim() &&
+            !result.diagnostic &&
+            !result.consoleBusyDuringProbe &&
+            !flightSignal?.aborted &&
+            state.readNameConnections.get(device.deviceId) === currentConnection
+          ) {
+            state.readNames.set(key, result);
+            state.readNameConnections.set(device.deviceId, currentConnection);
+          }
+          return result;
+        }),
+      signal,
+      { cancelWhenAllWaitersAbort: true },
     );
   }
 

@@ -241,6 +241,7 @@ export function recoveryIdentityLossDetails(loss: RecoveryIdentityLoss): Record<
   return {
     sessionUuid: loss.sessionUuid,
     reason: loss.reason,
+    ...idleReleaseField(loss.reason),
     recoveryReason: loss.recoveryReason,
     ...(loss.deviceId === undefined ? {} : { deviceId: loss.deviceId }),
     ...(loss.ownerPid === undefined ? {} : { ownerPid: loss.ownerPid }),

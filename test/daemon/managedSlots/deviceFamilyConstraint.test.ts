@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import {
   computeManagedSpecFingerprint,
   DefaultManagedSpecMatcher,
@@ -293,6 +293,81 @@ describe("managed-slot iOS family constraints", () => {
 });
 
 describe("managed-slot Android family constraints", () => {
+  afterEach(() => mock.restore());
+
+  for (const field of ["screenWidth", "screenHeight", "screenDensity"] as const) {
+    test.each(FAMILIES)(
+      `refuses ${field} override with %s before mutation`,
+      async (deviceFamily) => {
+        const h = await harness("android");
+        const journal = spyOn(h.registry, "openSlotJournal");
+        const result = await h.acquire({
+          runtime: ANDROID,
+          deviceFamily,
+          configuration: { [field]: 240 },
+        });
+        expect(result).toMatchObject({
+          outcome: "failed",
+          failure: { code: "spec_unsupported", retryable: false },
+        });
+        expect(result.failure?.message).toContain("classified from screen geometry");
+        expect(result.failure?.message).toContain("cannot be verified before creation");
+        expect(result.failure?.message).toContain("deviceFamily without screen overrides");
+        expect(result.failure?.message).toContain("deviceType without deviceFamily");
+        expectNoMutation(h);
+        expect(journal).not.toHaveBeenCalled();
+        expect(await h.registry.getAssignment(h.key)).toBeNull();
+      },
+    );
+  }
+
+  test("phone with only memory configuration creates pixel_8 then reuses its real geometry", async () => {
+    const h = await harness("android", {
+      config: androidConfig("pixel_8", { ramSizeMb: 4096 }),
+    });
+    const spec: ManagedSlotRequestedSpec = {
+      runtime: ANDROID,
+      deviceFamily: "phone",
+      configuration: { memoryMb: 4096 },
+    };
+    const first = await h.acquire(spec);
+    expect(first).toMatchObject({
+      outcome: "ready",
+      disposition: "created",
+      resolvedSpec: { deviceType: "pixel_8", configuration: { memoryMb: 4096 } },
+    });
+    if (first.outcome !== "ready") {
+      throw new Error("initial creation failed");
+    }
+    expect(await h.acquire(spec)).toMatchObject({
+      outcome: "ready",
+      disposition: "reused",
+      device: first.device,
+    });
+    expect(h.provisioner.created()).toHaveLength(1);
+    expect(h.deleter.calls).toEqual([]);
+  });
+
+  test.each(["screenWidth", "screenHeight", "screenDensity"] as const)(
+    "%s override without family still resolves unchanged",
+    async (field) => {
+      const resolver = new DefaultManagedSpecResolver();
+      expect(
+        await resolver.resolve(
+          "android",
+          {
+            runtime: ANDROID,
+            configuration: { [field]: 240 },
+          },
+          {},
+        ),
+      ).toMatchObject({
+        kind: "resolved",
+        resolvedSpec: { deviceType: "pixel_8", configuration: { [field]: 240 } },
+      });
+    },
+  );
+
   const cases = [
     { name: "phone geometry", config: androidConfig(), family: "phone" },
     { name: "tablet profile", config: androidConfig("pixel_tablet"), family: "tablet" },

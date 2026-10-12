@@ -361,11 +361,13 @@ are checked against `avdmanager list device`: an unknown profile returns non-ret
 Reuse and adoption do not require this creation-only catalog check.
 
 `deviceFamily` uses the shared `phone`, `tablet` and `foldable` vocabulary.
-On iOS, family is inferred from the model identifier (`iPhone` or `iPad`);
-there is currently no supported foldable iOS model. On Android, a profile
-containing `fold` or `flip` is foldable; Pixel Tablet and Nexus 9/10 profile
-hints are tablets. Otherwise the AVD's display width, height and density
-determine phone versus tablet (a diagonal of at least 7 inches is a tablet).
+On both platforms, any model or profile identifier containing `fold` or `flip`
+(case-insensitive) is classified as foldable before other family hints.
+For example, an iPhone "Fold" type is foldable and mismatches a `phone` request.
+Other iOS identifiers are classified from `iPhone` or `iPad`. On Android,
+Pixel Tablet and Nexus 9/10 profile hints are tablets. Otherwise the AVD's display
+width, height and density determine phone versus tablet (a diagonal of at least
+7 inches is a tablet).
 Unknown family evidence returns `discovery_incomplete` for an assigned device;
 it never authorizes deletion.
 
@@ -380,9 +382,17 @@ family/model returns `runtime_incompatible`, naming the family and runtime.
 An explicit model and family must agree. A conflict returns `spec_unsupported`.
 The same code refuses a model whose family cannot be verified before creation:
 most Android phone profile IDs (for example `pixel_8`) need AVD geometry, and
-an iOS type containing neither `iPhone` nor `iPad` cannot be classified. Request
-either `deviceType` or `deviceFamily`, not both, for these models. A
+an iOS type containing none of `fold`, `flip`, `iPhone` or `iPad` cannot be
+classified. Request either `deviceType` or `deviceFamily`, not both, for these models. A
 `displayCutout` other than `"any"` still requires an explicit `deviceType`.
+On Android, `deviceFamily` together with any of `configuration.screenWidth`,
+`configuration.screenHeight` or `configuration.screenDensity` returns non-retryable
+`spec_unsupported` before anything is created or deleted: family is classified
+from screen geometry and cannot be verified before creation when that geometry
+is overridden. Request `deviceFamily` without screen overrides, or an explicit
+`deviceType` without `deviceFamily`. Other configuration fields such as
+`memoryMb` remain allowed with `deviceFamily`; screen overrides without
+`deviceFamily` remain supported.
 These constraint forms are refused rather than silently dropped. An older
 daemon rejects the unknown `deviceFamily` key as `managed_slot_config_invalid`
 because its schema is strict. The public `provisionDevice` tool does not accept

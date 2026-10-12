@@ -35,7 +35,7 @@ class FakeProfileCatalog implements ManagedAndroidProfileCatalog {
   }
 }
 
-async function harness(options: DefaultManagedSpecResolverOptions = {}) {
+async function harness(options: DefaultManagedSpecResolverOptions = {}, emptyIos = false) {
   const timer = new FakeTimer();
   const registry = new FakeSlotRegistry(timer);
   const inventory = new FakeInventory();
@@ -57,14 +57,18 @@ async function harness(options: DefaultManagedSpecResolverOptions = {}) {
     idGenerator: new FakeIdGenerator(),
     isExecOwnerLive: () => false,
   });
-  const key = await assignManagedSlotDevice(registry, "android", OLD);
-  inventory.devices.push({
-    name: OLD,
-    platform: "android",
-    runtime: RUNTIME,
-    deviceType: "pixel_8",
-    isRunning: false,
-  });
+  const key = emptyIos
+    ? await emptyIosSlot(registry)
+    : await assignManagedSlotDevice(registry, "android", OLD);
+  if (!emptyIos) {
+    inventory.devices.push({
+      name: OLD,
+      platform: "android",
+      runtime: RUNTIME,
+      deviceType: "pixel_8",
+      isRunning: false,
+    });
+  }
   const before = await registry.getAssignment(key);
   const journal = spyOn(registry, "openSlotJournal");
   const acquire = (spec: ManagedSlotRequestedSpec, signal?: AbortSignal) =>
@@ -81,7 +85,7 @@ async function harness(options: DefaultManagedSpecResolverOptions = {}) {
     expect(provisioner.calls).toEqual([]);
     expect(journal).not.toHaveBeenCalled();
     expect(await registry.getAssignment(key)).toEqual(before);
-    expect(inventory.has(OLD)).toBe(true);
+    expect(inventory.has(OLD)).toBe(!emptyIos);
   };
   return {
     timer,
@@ -99,8 +103,103 @@ async function harness(options: DefaultManagedSpecResolverOptions = {}) {
   };
 }
 
+async function emptyIosSlot(registry: FakeSlotRegistry) {
+  const scope = await registry.ensureScope({
+    managedHostScope: "host",
+    runnerNamespace: "runner-a",
+    runnerIncarnation: "boot-1",
+  });
+  if (scope.kind !== "ready") {
+    throw new Error("scope setup failed");
+  }
+  const key = { scopeKey: scope.scope.scopeKey, slotIndex: 0 };
+  await registry.initSlot(key, { role: "primary", platform: "ios", requestedSpec: {} });
+  return key;
+}
+
 describe("Android creation profile is validated before managed-slot mutation", () => {
   afterEach(() => mock.restore());
+
+  test("absent default profile leaves an empty iOS slot unchanged", async () => {
+    const h = await harness({}, true);
+    h.profiles.ids = ["pixel_9"];
+    expect(await h.acquire({ runtime: RUNTIME })).toMatchObject({
+      outcome: "failed",
+      failure: { code: "spec_unsupported", retryable: false },
+      assignment: h.before,
+    });
+    expect(h.profiles.calls).toHaveLength(1);
+    await h.expectIntact();
+  });
+
+  test("unreadable catalog leaves an empty iOS slot unchanged", async () => {
+    const h = await harness({}, true);
+    h.profiles.read = async () => {
+      throw new Error("catalog read failed");
+    };
+    expect(await h.acquire({ runtime: RUNTIME })).toMatchObject({
+      outcome: "failed",
+      failure: { code: "discovery_incomplete", retryable: true },
+      assignment: h.before,
+    });
+    expect(h.profiles.calls).toHaveLength(1);
+    await h.expectIntact();
+  });
+
+  test("incomplete Android discovery leaves an empty iOS slot unchanged before catalog lookup", async () => {
+    const h = await harness({}, true);
+    h.inventory.complete = false;
+    const listed = spyOn(h.inventory, "list");
+    const result = await h.acquire({ runtime: RUNTIME });
+    expect(result).toMatchObject({
+      outcome: "failed",
+      failure: { code: "discovery_incomplete", retryable: true },
+      assignment: h.before,
+      evidence: { inventoryComplete: false },
+    });
+    expect(listed).toHaveBeenCalledWith("android", { signal: undefined });
+    expect(h.profiles.calls).toEqual([]);
+    await h.expectIntact();
+  });
+
+  test("empty iOS slot adopts an Android leftover without reading an unreadable catalog", async () => {
+    const h = await harness({}, true);
+    const name = managedSlotDeviceName(h.key, 3, "leftover");
+    h.inventory.devices.push({
+      name,
+      platform: "android",
+      runtime: RUNTIME,
+      deviceType: "pixel_8",
+      isRunning: false,
+    });
+    h.profiles.read = async () => {
+      throw new Error("catalog read failed");
+    };
+    expect(await h.acquire({ runtime: RUNTIME })).toMatchObject({
+      outcome: "ready",
+      disposition: "adopted",
+      assignment: { platform: "android", stableDeviceId: name },
+    });
+    expect(h.profiles.calls).toEqual([]);
+    expect(h.provisioner.created()).toEqual([]);
+    expect(h.deleter.calls).toEqual([]);
+    expect(await h.registry.getAssignment(h.key)).toMatchObject({ platform: "android" });
+  });
+
+  test("valid default profile creates on Android in an empty iOS slot", async () => {
+    const h = await harness({}, true);
+    expect(await h.acquire({ runtime: RUNTIME })).toMatchObject({
+      outcome: "ready",
+      disposition: "created",
+      assignment: { platform: "android" },
+      resolvedSpec: { deviceType: "pixel_8" },
+    });
+    expect(h.profiles.calls).toHaveLength(1);
+    expect(h.provisioner.created()).toHaveLength(1);
+    expect(h.provisioner.created()[0]?.platform).toBe("android");
+    expect(h.deleter.calls).toEqual([]);
+    expect(await h.registry.getAssignment(h.key)).toMatchObject({ platform: "android" });
+  });
 
   test("unknown explicit profile leaves the assigned AVD and its binding intact", async () => {
     const h = await harness();

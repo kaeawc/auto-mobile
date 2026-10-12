@@ -633,6 +633,21 @@ function unsupportedModelFamily(
     : `deviceType '${spec.deviceType}' is a ${actual}; it conflicts with deviceFamily '${spec.deviceFamily}'.`;
 }
 
+function unsupportedFamilyScreenOverrides(
+  platform: SlotPlatform,
+  spec: ManagedSlotRequestedSpec,
+): string | undefined {
+  if (platform !== "android" || spec.deviceFamily === undefined || !("configuration" in spec)) {
+    return undefined;
+  }
+  const overridden = (["screenWidth", "screenHeight", "screenDensity"] as const).some(
+    (field) => spec.configuration?.[field] !== undefined,
+  );
+  return overridden
+    ? "The family is classified from screen geometry, so it cannot be verified before creation when the geometry is overridden. Request deviceFamily without screen overrides, or an explicit deviceType without deviceFamily."
+    : undefined;
+}
+
 const IOS_RUNTIME_IDENTIFIER_PREFIX = "com.apple.CoreSimulator.SimRuntime.";
 
 /** The Android system-image packages installed in the SDK, as `system-images;...` identifiers. */
@@ -770,7 +785,8 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     spec: ManagedSlotRequestedSpec,
     signal: AbortSignal | undefined,
   ): Promise<string | undefined> {
-    const familyConflict = unsupportedModelFamily(platform, spec);
+    const familyConflict =
+      unsupportedFamilyScreenOverrides(platform, spec) ?? unsupportedModelFamily(platform, spec);
     if (familyConflict !== undefined) {
       return familyConflict;
     }
@@ -1426,13 +1442,12 @@ export class ManagedSlotReconciler {
   ): Promise<ReadyResult> {
     const { request, evidence } = context;
     if (assignment.stableDeviceId === null) {
-      const moved = await this.emptyOnRequestedPlatform(context, assignment);
       const inventory = await this.deps.inventory.list(request.platform, {
         signal: request.signal,
       });
       evidence.inventoryComplete = inventory.complete;
       this.checkBudget(request);
-      return await this.fillEmptySlot(context, moved, inventory);
+      return await this.fillEmptySlot(context, assignment, inventory);
     }
     const inventory = await this.deps.inventory.list(assignment.platform, {
       signal: request.signal,
@@ -1625,6 +1640,13 @@ export class ManagedSlotReconciler {
       );
     }
     const candidate = await this.findAdoptionCandidate(context, inventory.devices);
+    if (assignment.platform !== context.request.platform) {
+      // Validate creation before moving an empty slot; adoption needs no creation catalog.
+      if (!candidate) {
+        await this.assertCreatable(context);
+      }
+      assignment = await this.emptyOnRequestedPlatform(context, assignment);
+    }
     if (candidate) {
       return await this.adopt(context, assignment, candidate.device, candidate.source);
     }

@@ -355,6 +355,11 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
   /**
    * `booted` is the larger of the adb listing (any adb state) and the qemu
    * process count: a booting emulator has a process before adb lists it at all.
+   * `inFlight` is the larger adb/process load (`reported`) minus `booted`.
+   * It is never negative: unseenBoots >= 0, so reported >= listed and reported >= processes.
+   * `booted + inFlight` equals `effective` whenever no listed boot lacks a process.
+   * The report omits `listedWithoutProcess`:
+   * that fail-closed safety margin is decision-only, deliberately not reported as a boot in flight.
    *
    * `effective` is the larger of two views of the same load: the adb listing plus every admitted
    * boot (local or peer) it does not show, and the process table plus every boot this sample knows whose own
@@ -403,19 +408,14 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     );
     const peerCounts = this.countPeers(peers, new Set(sample.emulatorSerials), listedProcessIds);
     const count = inFlight.count + peerCounts.count;
-    return {
-      booted: Math.max(listed, processes),
-      inFlight: count,
-      effective: Math.max(
-        listed + count,
-        processes +
-          count -
-          inFlight.withListedProcess -
-          peerCounts.withListedProcess +
-          inFlight.listedWithoutProcess +
-          peerCounts.listedWithoutProcess,
-      ),
-    };
+    const booted = Math.max(listed, processes);
+    const unseenBoots = count - inFlight.withListedProcess - peerCounts.withListedProcess;
+    const reported = Math.max(listed + count, processes + unseenBoots);
+    const effective = Math.max(
+      listed + count,
+      processes + unseenBoots + inFlight.listedWithoutProcess + peerCounts.listedWithoutProcess,
+    );
+    return { booted, inFlight: reported - booted, effective };
   }
 
   private async runWithHostLock<T>(

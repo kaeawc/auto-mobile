@@ -529,7 +529,9 @@ it and learns from the tool-call error:
 
 For `daemon_stalled` the harness restarts the daemon, then resumes each session
 by passing its `sessionUuid` on a tool call: the first call after the error
-re-claims it with the same owner token. For `proxy_stalled` the listed sessions and devices are gone;
+re-claims it with the same owner token. Managed slot proxies instead reclaim their
+rehydrated sessions automatically on the same heartbeat cadence when the restarted
+daemon answers, without the harness naming a UUID. For `proxy_stalled` the listed sessions and devices are gone;
 reacquire them with `getAndroid` or `getApple`. During a liveness recovery episode
 or while a session remains handed over, **the proxy never starts or restarts the
 daemon**: it is shared, and restarting it is a harness action. Tool calls and resource reads wait for automatic recovery;

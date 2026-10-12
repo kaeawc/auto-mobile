@@ -143,7 +143,7 @@ function managedStallLossPayload(
   handover: LivenessHandover,
 ) {
   return handover.code === PROXY_STALLED_CODE
-    ? managedEndedPayload(managedSlots, sessionUuid, handover.code)
+    ? managedEndedPayload(managedSlots, sessionUuid, handover.releaseReason ?? handover.code)
     : undefined;
 }
 

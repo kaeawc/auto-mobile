@@ -114,6 +114,7 @@ async function teardownOwnershipRefusal(
   }
   try {
     assertLifecycleCallerHoldsDevice({
+      checkRestartHold: true,
       toolName: "deleteDevice",
       device: target.bootedDevice,
       requester,
@@ -216,6 +217,7 @@ async function assertKillDeviceCaller(args: KillDeviceArgs): Promise<void> {
     stableIds: [args.device.name],
   });
   assertLifecycleCallerHoldsDevice({
+    checkRestartHold: true,
     toolName: "killDevice",
     device: args.device,
     requester: lifecycleRequester(args),
@@ -346,6 +348,7 @@ function createDeleteDeviceWorkflow(
             assertHolder: requester
               ? () =>
                   assertLifecycleCallerHoldsDevice({
+                    checkRestartHold: true,
                     toolName: "deleteDevice",
                     device: target.bootedDevice,
                     requester,
@@ -529,6 +532,7 @@ export function createLifecycleHandlers() {
           // The entry check predates the lease wait; re-check under the assignment mutex.
           assertHolder: () =>
             assertLifecycleCallerHoldsDevice({
+              checkRestartHold: true,
               toolName: "killDevice",
               device: args.device,
               requester: lifecycleRequester(args),

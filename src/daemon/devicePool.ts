@@ -2619,13 +2619,18 @@ export class DevicePool {
   }
 
   /**
-   * Mark the Android stop; killDevice and deleteDevice name their admitted routing session,
-   * dropping only that session's device-restart handoff source, never the daemon-restart source.
+   * Mark the Android stop and capture its requester's restart holds before identity can change.
+   * The returned commit drops only those handoff sources after successful shutdown; it never
+   * drops the daemon-restart source. Callers without a session retain their marker-only behavior.
    * Base/label matches require live label state; a handed-off base's unresolved label leaves
    * the hold to recovery, terminal release, idle expiry or the 180 s window.
    */
-  markIntentionalShutdown(deviceId: string, stoppingSessionId?: string): void {
+  markIntentionalShutdown(deviceId: string, stoppingSessionId?: string): () => void {
     this.sessionManager.flushDeferredRebindCleanups({ deviceId });
+    const commitRestartHoldStop = this.releaseDeviceRestartReservationForStop(
+      deviceId,
+      stoppingSessionId,
+    );
     const resetReservation = Array.from(this.adbServerResetRecoveryReservations.values()).find(
       (reservation) => reservation.deviceId === deviceId,
     );
@@ -2633,51 +2638,54 @@ export class DevicePool {
       // Resolve reset-cohort ownership before consulting the current serial. A
       // prior recovery may already have reused this serial for a different AVD.
       resetReservation.cancelled = true;
-      this.releaseDeviceRestartReservationForStop(deviceId, stoppingSessionId);
-      return;
+      return commitRestartHoldStop;
     }
     const device = this.devices.get(deviceId);
-    this.releaseDeviceRestartReservationForStop(deviceId, stoppingSessionId);
     if (device) {
       // Tie the marker to the incarnation present now, so a later same-serial
       // replacement is not treated as intentionally stopped.
       this.intentionalShutdowns.set(deviceId, device.incarnation);
       this.settledLateShutdowns.delete(deviceId);
-      return;
+      return commitRestartHoldStop;
     }
     if (this.recoveringAndroidDeviceIds.has(deviceId)) {
       // No pooled device yet (an in-flight recovery owns the serial); the mark
       // applies to whatever incarnation the recovery produces.
       this.intentionalShutdowns.set(deviceId, INCARNATION_ANY);
     }
+    return commitRestartHoldStop;
   }
 
-  /** Drop only the named requester's restart hold, without setting a platform shutdown marker. */
-  releaseDeviceRestartReservationForStop(deviceId: string, stoppingSessionId?: string): void {
+  /** Capture a success-only hold release, without setting a platform shutdown marker. */
+  releaseDeviceRestartReservationForStop(deviceId: string, stoppingSessionId?: string): () => void {
+    const reservations = this.restartReservationsForStop(deviceId, stoppingSessionId);
+    return () => this.dropStoppedDeviceRestartReservations(reservations);
+  }
+
+  private restartReservationsForStop(deviceId: string, stoppingSessionId?: string) {
     // Reset-cohort identity wins over a serial that recovery may have reused for another AVD.
     const resetReservation = Array.from(this.adbServerResetRecoveryReservations.values()).find(
       (reservation) => reservation.deviceId === deviceId,
     );
     const device = this.devices.get(deviceId);
-    this.dropStoppedDeviceRestartReservations(
-      deviceId,
-      resetReservation?.image.name ?? (device && this.stableDeviceIdFor(device)),
-      stoppingSessionId,
+    const stableDeviceId =
+      resetReservation?.image.name ?? (device && this.stableDeviceIdFor(device));
+    return Array.from(this.rehydrationReservations).filter(
+      ([sessionId, target]) =>
+        isSameHolderSession(sessionId, stoppingSessionId, this.sessionManager) &&
+        target.restartHandoff &&
+        target.deviceId === deviceId &&
+        (stableDeviceId === undefined || target.stableDeviceId === stableDeviceId),
     );
   }
 
   private dropStoppedDeviceRestartReservations(
-    deviceId: string,
-    stableDeviceId?: string,
-    stoppingSessionId?: string,
+    reservations: ReturnType<DevicePool["restartReservationsForStop"]>,
   ): void {
-    for (const [sessionId, target] of this.rehydrationReservations) {
-      if (
-        isSameHolderSession(sessionId, stoppingSessionId, this.sessionManager) &&
-        target.restartHandoff &&
-        target.deviceId === deviceId &&
-        (stableDeviceId === undefined || target.stableDeviceId === stableDeviceId)
-      ) {
+    for (const [sessionId, target] of reservations) {
+      // Success commits exactly the objects selected at mark time, even after serial reuse or
+      // pooled eviction. A new hold for the same session must survive the old stop's completion.
+      if (this.rehydrationReservations.get(sessionId) === target && target.restartHandoff) {
         this.releaseDeviceRestartReservation(sessionId);
       }
     }
@@ -8325,6 +8333,28 @@ export class DevicePool {
     return { names, ids, resumeTargets };
   }
 
+  /** A stop naming a restart holder cannot impersonate its handoff connection, even with force. */
+  isRestartReservationOwnedByOtherConnection(
+    deviceId: string,
+    requester: { sessionUuid?: string; mcpSessionId?: string },
+  ): boolean {
+    if (requester.mcpSessionId === undefined) {
+      return false;
+    }
+    return this.restartReservationsForStop(deviceId, requester.sessionUuid).some(
+      ([, target]) =>
+        (target.ownerMcpSessionIds?.size ?? 0) > 0 &&
+        !this.restartReservationHasConnectionOwner(target, requester.mcpSessionId),
+    );
+  }
+
+  private restartReservationHasConnectionOwner(
+    target: { ownerMcpSessionIds?: ReadonlySet<string> } | undefined,
+    mcpSessionId: string | undefined,
+  ): boolean {
+    return mcpSessionId !== undefined && target?.ownerMcpSessionIds?.has(mcpSessionId) === true;
+  }
+
   private ownsRestartReservation(
     sessionUuid: string,
     requester: { sessionUuid?: string; mcpSessionId?: string; oneShotCli?: boolean },
@@ -8332,10 +8362,10 @@ export class DevicePool {
     return (
       isSameHolderSession(sessionUuid, requester.sessionUuid, this.sessionManager) ||
       (requester.oneShotCli !== true &&
-        requester.mcpSessionId !== undefined &&
-        this.rehydrationReservations
-          .get(sessionUuid)
-          ?.ownerMcpSessionIds?.has(requester.mcpSessionId) === true)
+        this.restartReservationHasConnectionOwner(
+          this.rehydrationReservations.get(sessionUuid),
+          requester.mcpSessionId,
+        ))
     );
   }
 
@@ -9589,6 +9619,13 @@ export class DevicePool {
 
   captureAutolockSessionForMcpSession(mcpSessionId: string | undefined): string | undefined {
     return this.autolockManager.captureAutolockSessionForMcpSession(mcpSessionId);
+  }
+
+  adoptResumedAutolockSession(
+    ...args: Parameters<DeviceAutolockManager["adoptResumedAutolockSession"]>
+  ): Promise<void> {
+    const endBind = this.beginMcpBind(args[2]);
+    return this.autolockManager.adoptResumedAutolockSession(...args).finally(endBind);
   }
 
   resolveAutolockSessionForMcpSession(

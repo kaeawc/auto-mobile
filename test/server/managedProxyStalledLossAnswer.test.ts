@@ -403,7 +403,13 @@ test.each(["daemon-restart", "daemon-shutdown"])(
         const result = await callTool("tapOn", { text: "OK" });
         expect(result.isError).not.toBe(true);
         expect(clients.flatMap((client) => client.callToolCalls)).toEqual([
-          { toolName: "tapOn", params: { text: "OK", sessionUuid: SESSION } },
+          {
+            toolName: "tapOn",
+            params: withProxyOwnerToken(
+              { text: "OK", sessionUuid: SESSION },
+              "managed-proxy-token",
+            ),
+          },
         ]);
         expect(handovers).toEqual([]);
         expect(proxy.getTerminalSessionRelease()).toBeUndefined();

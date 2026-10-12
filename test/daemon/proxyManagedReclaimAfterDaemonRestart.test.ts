@@ -21,7 +21,11 @@ import {
 } from "../../src/daemon/constants";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { livenessBudgetMs, type LivenessHandover } from "../../src/daemon/proxyLivenessRecovery";
+import {
+  livenessBudgetMs,
+  managedDaemonStalledPayload,
+  type LivenessHandover,
+} from "../../src/daemon/proxyLivenessRecovery";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { logger } from "../../src/utils/logger";
@@ -489,7 +493,10 @@ test.each([
     client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, SESSION, reason);
     await s.stop(false);
     expect(s.handovers.map(({ handover }) => handover.code)).toEqual(["daemon_stalled"]);
-    expect(JSON.stringify(logged.mock.calls)).not.toContain("managed_execution_ended");
+    // The handover may mention a future terminal answer; the notification itself is still stalled.
+    expect(logged.mock.calls.map(([params]) => params.data)).toEqual([
+      managedDaemonStalledPayload(s.handovers[0].handover),
+    ]);
     expect(s.proxy.getTerminalSessionRelease()).toBeUndefined();
     expect(s.proxy.getManagedExecutionSessions()).toEqual([SESSION]);
     await expect(s.proxy.callTool("observe", {})).rejects.toMatchObject({
@@ -516,7 +523,9 @@ test.each([
       [],
     );
     expect(s.handovers.map(({ handover }) => handover.code)).toEqual(["daemon_stalled"]);
-    expect(JSON.stringify(logged.mock.calls)).not.toContain("managed_execution_ended");
+    expect(logged.mock.calls.map(([params]) => params.data)).toEqual([
+      managedDaemonStalledPayload(s.handovers[0].handover),
+    ]);
     expect(s.proxy.getTerminalSessionRelease()).toBeUndefined();
   } finally {
     await server.close();

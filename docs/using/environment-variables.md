@@ -527,20 +527,24 @@ it and learns from the tool-call error:
 }
 ```
 
-| Field                                    | Meaning                                                                                                                                                                               |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `code`                                   | `daemon_stalled` or `proxy_stalled`.                                                                                                                                                  |
-| `sessions[]`                             | `daemon_stalled`: the sessions that could not be reached. `proxy_stalled`: the sessions that were lost. Each has `sessionUuid` and `deviceId` (`null` if the proxy never learned it). |
-| `sessions[].lastAcknowledgedHeartbeatAt` | When the daemon last acknowledged that session's heartbeat, in milliseconds on the proxy's clock.                                                                                     |
-| `attempts`, `maxAttempts`                | Recovery attempts made (most of any listed session) and the limit, always 3.                                                                                                          |
-| `lastAcknowledgedHeartbeatAt`            | The latest of the listed sessions' last acknowledgements.                                                                                                                             |
-| `recovery.action`                        | `restart_daemon_then_resume_by_session_uuid` for `daemon_stalled`; `reacquire_lost_sessions` for `proxy_stalled`.                                                                     |
+| Field                                    | Meaning                                                                                                                                                                                          |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `code`                                   | `daemon_stalled` or `proxy_stalled`.                                                                                                                                                             |
+| `sessions[]`                             | `daemon_stalled`: the sessions that could not be reached. `proxy_stalled`: the sessions that were lost. Each has `sessionUuid` and `deviceId` (`null` if the proxy never learned it).            |
+| `sessions[].lastAcknowledgedHeartbeatAt` | When the daemon last acknowledged that session's heartbeat, in milliseconds on the proxy's clock.                                                                                                |
+| `attempts`, `maxAttempts`                | Recovery attempts made (most of any listed session) and the limit, always 3.                                                                                                                     |
+| `lastAcknowledgedHeartbeatAt`            | The latest of the listed sessions' last acknowledgements.                                                                                                                                        |
+| `recovery.action`                        | `daemon_stalled`: `wait_for_managed_reclaim` for a ready managed connection's slot sessions, otherwise `restart_daemon_then_resume_by_session_uuid`. `proxy_stalled`: `reacquire_lost_sessions`. |
 
-For `daemon_stalled` the harness restarts the daemon, then resumes each session
+For `daemon_stalled` on a generic connection the harness restarts the daemon, then resumes each session
 by passing its `sessionUuid` on a tool call: the first call after the error
-re-claims it with the same owner token. Managed slot proxies instead reclaim their
-rehydrated sessions automatically on the same heartbeat cadence when the restarted
-daemon answers, without the harness naming a UUID. For `proxy_stalled` the listed sessions and devices are gone;
+re-claims it with the same owner token. A ready managed connection's slot sessions
+instead receive `wait_for_managed_reclaim`: the proxy keeps probing every heartbeat
+interval and reclaims the session itself once a daemon answers again. Do not pass a
+`sessionUuid` or try to acquire a device; retry the call later. The proxy never restarts
+the shared daemon. If no daemon comes back, restarting it or relaunching the execution
+is the runner's decision. If the session turns out to be released, calls answer
+`managed_execution_ended`. For `proxy_stalled` the listed sessions and devices are gone;
 reacquire them with `getAndroid` or `getApple`. During a liveness recovery episode
 or while a session remains handed over, **the proxy never starts or restarts the
 daemon**: it is shared, and restarting it is a harness action. Tool calls and resource reads wait for automatic recovery;
@@ -556,7 +560,7 @@ after the ownership grace window. A `session-released` notification also ends it
 regardless of the current binding. A definitive loss delivers `proxy_stalled` once
 on the next tool call for that session, naming the sessions and devices to
 reacquire, then normal lifecycle behavior returns. An unreachable daemon retains
-the handover and the no-start fence; the harness must restart it. Recovery cannot join a pending
+the handover and the no-start fence; on a generic connection the harness must restart it. Recovery cannot join a pending
 connection allowed to start or restart the daemon. Healthy proxies and proxies
 without device sessions retain normal auto-start and skew reconciliation.
 

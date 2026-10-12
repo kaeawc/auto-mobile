@@ -144,6 +144,14 @@
         "acquireNewSession": false
       }
     },
+    "managed_execution_ended.released_cleanup_expired": {
+      "expected": "fail",
+      "fields": {
+        "code": "managed_execution_ended",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
     "managed_slot_acquisition_failed.cancelled": {
       "expected": "fail",
       "fields": {
@@ -369,6 +377,14 @@
       }
     },
     "no_active_device_session": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "no_active_device_session",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "no_active_device_session.released_cleanup_expired": {
       "expected": "acquire-new-session",
       "fields": {
         "code": "no_active_device_session",

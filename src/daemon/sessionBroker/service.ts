@@ -15,6 +15,8 @@ import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultLockOwnerGenerationProbe } from "../lockOwnerGeneration";
 import type { ManagedSlotAcquisition } from "../managedSlots/managedSlotAcquisition";
+import { defaultManagedSlotToolInvoker } from "../managedSlots/daemonManagedSlotAcquisition";
+import { readToolPayload } from "../managedSlots/managedSlotReconcilerPorts";
 import type { ManagedExecutionRelease } from "../managedSlots/managedExecutionRelease";
 import type { ManagedSlotJournal } from "../managedSlots/slotJournal";
 import {
@@ -25,6 +27,9 @@ import { computeSlotScopeKey, type SlotProcessIdentity } from "../managedSlots/s
 import { SessionBroker } from "./broker";
 import { ManagedDevicePort } from "./managedDevicePort";
 import { SESSION_BROKER_SCOPE, type SessionBrokerHostConfig } from "./hostConfig";
+import { IosBaselineReset } from "./iosBaselineReset";
+import type { SqliteSessionBrokerStore } from "./sqliteStore";
+import type { BrokerResourceRecord } from "./store";
 
 export interface SessionBrokerHostLock {
   acquire(): void;
@@ -111,20 +116,23 @@ export async function openSessionBrokerService(
         `Session broker's private ownership scope is unavailable: ${scope.kind}`,
       );
     }
+    const store = options.registry.sessionBrokerStore(scopeKey);
+    const reset = options.config.reuseCleanDevices ? nativeIosBaselineReset() : undefined;
     const devices = new ManagedDevicePort({
       scope: SESSION_BROKER_SCOPE,
       managedSlotAcquisition: options.acquisition,
       managedExecutionRelease: options.release,
       registry: options.registry,
       managedSlotJournal: options.journal,
+      ...(reset
+        ? {
+            resetIosBaseline: reset.reset.bind(reset),
+            isCurrentReset: (resource: BrokerResourceRecord) => isCurrentReset(store, resource),
+          }
+        : {}),
     });
-    if (options.config.reuseCleanDevices) {
-      throw new ActionableError(
-        "Native clean-baseline reuse is not yet qualified; use zero-pooling mode for this milestone",
-      );
-    }
     const broker = new SessionBroker({
-      store: options.registry.sessionBrokerStore(scopeKey),
+      store,
       devices,
       owner: options.owner,
       limits: options.config.limits,
@@ -139,6 +147,7 @@ export async function openSessionBrokerService(
         return defaults;
       },
       sessionIsLive: options.sessionIsLive,
+      reuseCleanDevices: options.config.reuseCleanDevices,
     });
     await broker.recover();
     const service = new SessionBrokerService(broker, scopeKey, lock, options.timer);
@@ -148,6 +157,39 @@ export async function openSessionBrokerService(
     lock.release();
     throw toActionableError(error, "Session broker startup failed");
   }
+}
+
+function nativeIosBaselineReset(): IosBaselineReset {
+  return new IosBaselineReset({
+    simctl: new SimCtlClient(null),
+    stopDevice: async (device) => {
+      // The ordinary lifecycle handler joins device controllers and invalidates caches before
+      // erasure. A raw simctl shutdown would skip that provider bookkeeping.
+      const result = readToolPayload(
+        await defaultManagedSlotToolInvoker("killDevice", { device }, undefined),
+      );
+      if (result.isError || result.payload.success === false) {
+        throw new ActionableError(
+          "Provider device shutdown did not confirm a clean controller teardown",
+        );
+      }
+    },
+  });
+}
+
+async function isCurrentReset(
+  store: SqliteSessionBrokerStore,
+  expected: BrokerResourceRecord,
+): Promise<boolean> {
+  const current = (await store.listResources()).find(
+    (resource) => resource.resourceId === expected.resourceId,
+  );
+  return (
+    current?.state === "resetting" &&
+    current.revision === expected.revision &&
+    current.requestId === expected.requestId &&
+    current.scopeKey === expected.scopeKey
+  );
 }
 
 async function assertBrokerSessionsOwned(

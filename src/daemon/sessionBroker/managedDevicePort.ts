@@ -2,6 +2,7 @@ import type { ManagedExecutionRelease } from "../managedSlots/managedExecutionRe
 import type { ManagedSlotAcquisition } from "../managedSlots/managedSlotAcquisition";
 import type { ManagedSlotJournal } from "../managedSlots/slotJournal";
 import { defaultSlotExecOwnerLiveness } from "../managedSlots/slotOwnerLiveness";
+import { runAsManagedSlotReconciler } from "../managedSlots/managedSlotExclusion";
 import {
   computeSlotScopeKey,
   journalOwnersEqual,
@@ -14,6 +15,7 @@ import {
 } from "../managedSlots/slotRegistry";
 import { parseManagedSlotConfig, type ManagedSlotConfig } from "../../models/managedSlotConfig";
 import { ActionableError } from "../../models/ActionableError";
+import type { BootedDevice } from "../../models/DeviceInfo";
 import { parseAndroidSystemImageRuntime } from "../../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import type { SessionBrokerDevicePort, SessionDevicePreparationOptions } from "./devicePort";
 import { nativeProfile, type BrokerNativeProfile } from "./profile";
@@ -38,6 +40,14 @@ export interface ManagedDevicePortDependencies {
   managedSlotJournal: Pick<ManagedSlotJournal, "owner" | "redriveSlot">;
   /** Defaults to the managed-slot PID plus process-generation liveness check. */
   isExecOwnerLive?: SlotExecOwnerLiveness;
+  /** Supplied only for qualified platform reset implementations. */
+  resetIosBaseline?: (
+    device: BootedDevice,
+    profile: Extract<BrokerNativeProfile, { platform: "ios" }>,
+    assertOwned: () => Promise<void>,
+  ) => Promise<"clean">;
+  /** Durable request/revision fence; a stale reset must not act on a later session's resource. */
+  isCurrentReset?: (resource: BrokerResourceRecord) => Promise<boolean>;
 }
 
 /**
@@ -132,6 +142,56 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
         result.settlement === "confirmed" &&
         result.slotFailures.length === 0,
     };
+  }
+
+  async reset(resource: BrokerResourceRecord): Promise<"clean" | "pending"> {
+    this.assertResource(resource, "resetting");
+    const profile = nativeProfile(resource);
+    const reset = this.dependencies.resetIosBaseline;
+    const isCurrent = this.dependencies.isCurrentReset;
+    if (profile.platform !== "ios" || !reset || !isCurrent) {
+      return "pending";
+    }
+    const key = this.key(resource);
+    const assignment = await this.dependencies.registry.getAssignment(key);
+    if (!assignment?.stableDeviceId || !assignment.deviceName) {
+      throw new ActionableError("Reset requires a current bound native device");
+    }
+    const name = assignment.deviceName;
+    const expected = {
+      generation: assignment.generation,
+      stableDeviceId: assignment.stableDeviceId,
+    };
+    const assertOwned = async () => {
+      if (!(await isCurrent(resource))) {
+        throw new ActionableError("Clean reset no longer owns its durable resource revision");
+      }
+      const current = await this.dependencies.registry.getAssignment(key);
+      const valid =
+        current &&
+        sameBinding(current, expected) &&
+        current.state === "ready" &&
+        current.execOwner === null &&
+        current.settler === null &&
+        this.belongsToResource(current, profile, this.requestedSpec(profile));
+      if (!valid || (await this.hasOpenJournal(key))) {
+        throw new ActionableError("Clean reset lost exclusive native binding ownership");
+      }
+    };
+    await assertOwned();
+    const result = await runAsManagedSlotReconciler(key, () =>
+      reset(
+        {
+          platform: "ios",
+          deviceId: expected.stableDeviceId,
+          name,
+        },
+        profile,
+        assertOwned,
+      ),
+    );
+    await assertOwned();
+    return result;
   }
 
   async destroy(resource: BrokerResourceRecord): Promise<DestructionProgress> {
@@ -251,7 +311,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
 
   private assertResource(
     resource: BrokerResourceRecord,
-    expectedState: "reserved" | "destroying",
+    expectedState: "reserved" | "destroying" | "resetting",
   ): void {
     if (!resource.resourceId.trim()) {
       throw new ActionableError("A broker resource identity must be non-empty");

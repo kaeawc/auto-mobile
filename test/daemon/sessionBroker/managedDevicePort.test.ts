@@ -12,6 +12,8 @@ import {
   type SlotScopeIdentity,
 } from "../../../src/daemon/managedSlots/slotRegistry";
 import { ManagedDevicePort } from "../../../src/daemon/sessionBroker/managedDevicePort";
+import { currentManagedSlotReconciler } from "../../../src/daemon/managedSlots/managedSlotExclusion";
+import type { ManagedDevicePortDependencies } from "../../../src/daemon/sessionBroker/managedDevicePort";
 import type { BrokerResourceRecord } from "../../../src/daemon/sessionBroker/store";
 import type { ManagedSlotConfig } from "../../../src/models/managedSlotConfig";
 import type { ManagedSlotsResult } from "../../../src/models/managedSlotsResult";
@@ -388,6 +390,82 @@ function destroyingPort(
     isExecOwnerLive: rig.isExecOwnerLive,
   });
 }
+
+describe("ManagedDevicePort clean-reset ownership", () => {
+  async function resetRig(
+    reset: NonNullable<ManagedDevicePortDependencies["resetIosBaseline"]>,
+    current = true,
+  ) {
+    const rig = await destructionRig();
+    const port = new ManagedDevicePort({
+      scope: SCOPE,
+      managedSlotAcquisition: acquisition(async (config) => readyResult(config)),
+      managedExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
+      registry: rig.registry,
+      managedSlotJournal: rig.journal,
+      resetIosBaseline: reset,
+      isCurrentReset: async () => current,
+    });
+    return { ...rig, port, resource: { ...rig.resource, state: "resetting" as const } };
+  }
+
+  test("qualified reset is bound to the private native identity and async ownership scope", async () => {
+    const rig = await resetRig(async (device, profile, assertOwned) => {
+      expect(device.deviceId).toBe("UDID-1");
+      expect(profile.runtimeId).toBe(IOS.profile.runtimeId);
+      expect(currentManagedSlotReconciler()).toEqual({ scopeKey: SCOPE_KEY, slotIndex: 7 });
+      await assertOwned();
+      return "clean";
+    });
+    expect(await rig.port.reset(rig.resource)).toBe("clean");
+  });
+
+  test("a stale durable reset cannot invoke native cleanup", async () => {
+    let called = false;
+    const rig = await resetRig(async () => {
+      called = true;
+      return "clean";
+    }, false);
+    await expect(rig.port.reset(rig.resource)).rejects.toThrow("durable resource revision");
+    expect(called).toBe(false);
+  });
+
+  test("a live execution prevents resetting its device", async () => {
+    let called = false;
+    const rig = await resetRig(async () => {
+      called = true;
+      return "clean";
+    });
+    const assignment = await rig.registry.getAssignment(rig.key);
+    if (!assignment) {
+      throw new Error("Missing binding");
+    }
+    await rig.registry.claimExecution(rig.key, assignment, {
+      ...OWNER,
+      sessionUuid: "next-session",
+    });
+    await expect(rig.port.reset(rig.resource)).rejects.toThrow("exclusive native binding");
+    expect(called).toBe(false);
+  });
+
+  test("a changed native binding cannot be returned clean after reset", async () => {
+    const rig = await resetRig(async () => {
+      const previous = await rig.registry.getAssignment(rig.key);
+      if (!previous) {
+        throw new Error("Missing binding");
+      }
+      await rig.registry.commitBinding(rig.key, previous, {
+        stableDeviceId: "UDID-2",
+        deviceName: "replacement",
+        resolvedSpec: previous.resolvedSpec,
+        specFingerprint: previous.specFingerprint,
+        state: "ready",
+      });
+      return "clean";
+    });
+    await expect(rig.port.reset(rig.resource)).rejects.toThrow("exclusive native binding");
+  });
+});
 
 describe("ManagedDevicePort destruction", () => {
   test("drains its current execution before journaled deletion and confirms absence", async () => {

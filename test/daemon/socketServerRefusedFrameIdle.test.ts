@@ -8,6 +8,7 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import {
   hasActiveSessionExecution,
@@ -350,6 +351,11 @@ describe("a holder's control frame refused before it reaches the device", () => 
     spyOn(InputKey.prototype, "press").mockRestore();
     PlatformDeviceManagerFactory.reset();
     sessionManager.stopCleanupTimer();
+    expect(executionTracker.getActiveExecutionCount()).toBe(0);
+    AndroidCtrlProxyClient.clearInstanceRegistryForTesting();
+    IOSCtrlProxyClient.clearInstanceRegistryForTesting();
+    expect(AndroidCtrlProxyClient.getExistingInstance(DEVICE)).toBeNull();
+    expect(IOSCtrlProxyClient.getExistingInstance("idle-ios")).toBeNull();
   });
 
   afterAll(() => {
@@ -403,6 +409,68 @@ describe("a holder's control frame refused before it reaches the device", () => 
     expect(response?.error).toContain("frameContext is stale or unavailable");
     expect(idleClock()).toEqual(before);
   });
+
+  test.each(["client cancel", "session release"])(
+    "post-dispatch text %s retains the holder's idle stamp",
+    async (abort) => {
+      const before = idleClock();
+      const reply = Promise.withResolvers<{ success: true }>();
+      let dispatched = false;
+      const mark = spyOn(executionTracker, "markSessionAdmitted");
+      deviceWork = async (onDispatch) => {
+        onDispatch?.();
+        dispatched = true;
+        return reply.promise;
+      };
+      timer.advanceTime(1_000);
+      socket.send({
+        id: "typing",
+        type: "mcp_request",
+        method: "input/typeText",
+        params: { platform: "android", deviceId: DEVICE, sessionUuid: SESSION, text: "abc" },
+      });
+      await drainUntil(() => dispatched, { description: "text dispatched" });
+      const stamped = {
+        lastUsedAt: before.lastUsedAt! + 1_000,
+        expiresAt: before.expiresAt! + 1_000,
+      };
+      expect(idleClock()).toEqual(before);
+      expect(mark).toHaveBeenCalledTimes(1);
+      if (abort === "session release") {
+        expect(
+          await executionTracker.cancelDeviceSessionExecutions(
+            SESSION,
+            new SessionReleasedDuringCallError(SESSION, "explicit-release"),
+          ),
+        ).toBe(1);
+      } else {
+        socket.send({
+          id: "cancel-typing",
+          type: "daemon_request",
+          method: "daemon/cancelRequest",
+          params: { requestId: "typing" },
+        });
+        await drainUntil(() => socket.responses.some((r) => r.id === "cancel-typing"), {
+          description: "cancel ack",
+        });
+      }
+      await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+      expect(socket.responses.some((r) => r.id === "typing")).toBe(false);
+      expect(idleClock()).toEqual(before);
+      expect(mark).toHaveBeenCalledTimes(1);
+      expect(executionTracker.getActiveExecutionCount()).toBe(1);
+      reply.resolve({ success: true });
+      await Promise.all([...internals.activeRequestHandlers]);
+      expect(socket.responses.find((r) => r.id === "typing")).toMatchObject({
+        success: false,
+        error: expect.stringContaining("outcome is indeterminate"),
+      });
+      expect(idleClock()).toEqual(stamped);
+      expect(mark).toHaveBeenCalledTimes(1);
+      mark.mockRestore();
+      expect(executionTracker.getActiveExecutionCount()).toBe(0);
+    },
+  );
 
   test("a client repeating a refused frame does not hold the device past the idle window", async () => {
     const releaseAt = idleClock().expiresAt!;

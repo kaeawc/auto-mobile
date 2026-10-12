@@ -1252,7 +1252,7 @@ export class UnixSocketServer {
    * shelling out to a real `adb` (and so a stalled subprocess can be simulated).
    */
   appendTextFactory: (device: BootedDevice) => AppendTextInput = (device) =>
-    new InputText(device, defaultAdbClientFactory, undefined, this.timer);
+    this.createSocketAppendTextInput(device);
 
   /**
    * Per-device append helpers, cached so the API-level probe (`adb shell getprop`)
@@ -2450,6 +2450,8 @@ export class UnixSocketServer {
           // typed cancellation result), not by this race, which would reply at once (#11074).
           // provisionDevice is a barrier, so a cancel must release it at once: its typed
           // cancellation reply is awaited outside the barrier below (#11092).
+          // Text cancellation is answered by its handler too: after dispatch it
+          // must await the bounded request hold and return an indeterminate error.
           return this.isProvisionDeviceCall(request)
             ? this.runProvisionBarrier(handler, cancellation.signal, () =>
                 this.mcpForwardFailureResponse({
@@ -2460,7 +2462,9 @@ export class UnixSocketServer {
                   signal: cancellation.signal,
                 }),
               )
-            : this.runCancellableQueuedHandler(handler, cancellation.signal);
+            : request.method === "input/typeText"
+              ? handler()
+              : this.runCancellableQueuedHandler(handler, cancellation.signal);
         },
         {
           timer: this.timer,
@@ -6852,29 +6856,41 @@ export class UnixSocketServer {
         }
 
         const imeAction: ImeAction | undefined = args.submit ? "done" : undefined;
-        return await this.runInputOperationWithTimeout(
-          request.method,
-          totalTimeoutMs,
-          remainingTimeoutMs,
-          "UnixSocketServer.handleInputTypeText",
-          () =>
-            this.executeInputTypeText(
-              args.platform,
-              executionTargetDevice,
-              args.text,
-              imeAction,
-              remainingTimeoutMs,
-              args.append,
-              args.frameContext,
-              recordConfirmedAppendCharsSent,
-              signal,
-              dispatching,
-            ),
-          (timeoutError) =>
-            args.append && confirmedAppendCharsSent !== undefined
-              ? new InputTypeTextAppendError(timeoutError.message, confirmedAppendCharsSent)
-              : undefined,
-        );
+        let dispatched = false;
+        const onDispatch = () => {
+          dispatched = true;
+          dispatching?.();
+        };
+        try {
+          return await this.runInputOperationWithTimeout(
+            request.method,
+            totalTimeoutMs,
+            remainingTimeoutMs,
+            "UnixSocketServer.handleInputTypeText",
+            () =>
+              this.executeInputTypeText(
+                args.platform,
+                executionTargetDevice,
+                args.text,
+                imeAction,
+                remainingTimeoutMs,
+                args.append,
+                args.frameContext,
+                recordConfirmedAppendCharsSent,
+                signal,
+                onDispatch,
+              ),
+            (timeoutError) =>
+              args.append && confirmedAppendCharsSent !== undefined
+                ? new InputTypeTextAppendError(timeoutError.message, confirmedAppendCharsSent)
+                : undefined,
+          );
+        } catch (error) {
+          if (dispatched && signal?.aborted) {
+            throw this.indeterminateTextError(error, signal.reason, confirmedAppendCharsSent);
+          }
+          throw error;
+        }
       },
       this.inputDeviceGate(
         request.method,
@@ -7053,6 +7069,132 @@ export class UnixSocketServer {
     };
   }
 
+  private indeterminateTextError(
+    error: unknown,
+    reason: unknown,
+    confirmedCharsSent?: number,
+  ): Error {
+    const message = `Text input outcome is indeterminate: the request was dispatched but no result was confirmed when cancellation arrived (${errorMessage(reason)}). Do not retry automatically. Observe before retrying.`;
+    // A confirmed append prefix remains useful even when submit was cancelled.
+    const charsSent =
+      confirmedCharsSent ??
+      (error instanceof InputTypeTextAppendError ? error.charsSent : undefined);
+    const failure =
+      charsSent === undefined
+        ? new ActionableError(message, { cause: error })
+        : new InputTypeTextAppendError(message, charsSent);
+    return Object.assign(failure, { requestDispatched: true });
+  }
+
+  /**
+   * Fence cancellation at the actual send, retaining the device key until that request
+   * replies/errors or its existing remaining budget expires. Before send, cancellation
+   * still reaches connection/dispatch checks. After send it stops the NEXT operation,
+   * not this wait. The caller's answer waits with the key, like the timeout path.
+   */
+  private async holdDispatchedTextRequest<T>(
+    signal: AbortSignal | undefined,
+    timeoutMs: number,
+    send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>,
+    onDispatch?: () => void,
+  ): Promise<T> {
+    assertSocketInputNotAborted(signal);
+    const deadline = this.timer.now() + timeoutMs;
+    const fence = new AbortController();
+    let dispatched = false;
+    let timeout: ReturnType<Timer["setTimeout"]> | undefined;
+    const onAbort = () => {
+      if (!dispatched) {
+        fence.abort(signal?.reason);
+        return;
+      }
+      // Do not restart the budget at abort, and do not change the ordinary timeout hold.
+      timeout = this.timer.setTimeout(
+        () => {
+          const error = new ActionableError("Text input request deadline expired after dispatch");
+          fence.abort(error);
+        },
+        Math.max(0, deadline - this.timer.now()),
+      );
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const fenced = signal ? fence.signal : undefined;
+    try {
+      const request = runWithAbortSignal(fenced, () =>
+        send(fenced, () => {
+          dispatched = true;
+          onDispatch?.();
+        }),
+      );
+      return await raceWithDeadline(request, {
+        timer: this.timer,
+        signal: fenced,
+        label: "Text input request",
+      });
+    } finally {
+      if (timeout !== undefined) {
+        this.timer.clearTimeout(timeout);
+      }
+      signal?.removeEventListener("abort", onAbort);
+    }
+  }
+
+  private createSocketAppendTextInput(device: BootedDevice): AppendTextInput {
+    // InputText checks the original signal between commands. Fence only each ADB
+    // execute, so abort cannot release the key early or type the remaining suffix.
+    // The executor contract is large; a proxy preserves every existing method and
+    // its receiver rather than adding a second generic executor implementation.
+    let deadline = 0;
+    let onDispatch: (() => void) | undefined;
+    const factory: AdbClientFactory = {
+      create: (target, retry) => {
+        const adb = defaultAdbClientFactory.create(target, retry);
+        return new Proxy(adb, {
+          get: (executor, property, receiver) => {
+            if (property === "execute") {
+              return (
+                args: Parameters<typeof adb.execute>[0],
+                options: Parameters<typeof adb.execute>[1] = {},
+              ) => {
+                // Capability probes are reads, not text dispatch. They still cancel immediately.
+                if (args[0] !== "shell" || args[1] !== "input") {
+                  return adb.execute(args, options);
+                }
+                return this.holdDispatchedTextRequest(
+                  options.signal,
+                  Math.min(options.timeoutMs ?? Infinity, deadline - this.timer.now()),
+                  (fenced, dispatched) =>
+                    adb.execute(args, {
+                      ...options,
+                      signal: fenced,
+                      beforeDispatch: async (remaining) => {
+                        await options.beforeDispatch?.(remaining);
+                        fenced?.throwIfAborted();
+                        dispatched();
+                      },
+                    }),
+                  onDispatch,
+                );
+              };
+            }
+            const value = Reflect.get(executor, property, receiver);
+            return typeof value === "function" ? value.bind(executor) : value;
+          },
+        });
+      },
+    };
+    const input = new InputText(device, factory, undefined, this.timer);
+    return {
+      appendText: (...args) => {
+        deadline = this.timer.now() + (args[1] ?? 0);
+        // Latch dispatch only after the original validation and final abort check,
+        // not inside InputText's earlier asynchronous beforeDispatch callback.
+        onDispatch = args[4];
+        return input.appendText(args[0], args[1], args[2], args[3]);
+      },
+    };
+  }
+
   private async executeInputTypeText(
     platform: "android" | "ios",
     targetDevice: BootedDevice,
@@ -7105,10 +7247,10 @@ export class UnixSocketServer {
         signal,
         onDispatch,
       });
-      assertSocketInputNotAborted(signal);
       if (textResult.charsSent !== undefined) {
         onConfirmedAppendCharsSent?.(textResult.charsSent);
       }
+      assertSocketInputNotAborted(signal);
       if (!textResult.success) {
         return {
           success: false,
@@ -7118,20 +7260,26 @@ export class UnixSocketServer {
       }
       appendCharsSent = textResult.charsSent;
     } else {
-      const textResult = append
-        ? await (client as IOSCtrlProxyClient).requestAppendText(
-            text,
-            timeoutMs,
-            undefined,
-            frameContext,
-            { abortSignal: signal, onDispatch },
-          )
-        : await client.requestSetText(text, {
-            timeoutMs,
-            frameContext,
-            abortSignal: signal,
-            onDispatch,
-          });
+      const textResult = await this.holdDispatchedTextRequest(
+        signal,
+        deadline - this.timer.now(),
+        (fenced, dispatched) =>
+          append
+            ? (client as IOSCtrlProxyClient).requestAppendText(
+                text,
+                timeoutMs,
+                undefined,
+                frameContext,
+                { abortSignal: fenced, onDispatch: dispatched },
+              )
+            : client.requestSetText(text, {
+                timeoutMs,
+                frameContext,
+                abortSignal: fenced,
+                onDispatch: dispatched,
+              }),
+        onDispatch,
+      );
       assertSocketInputNotAborted(signal);
       if (!textResult.success) {
         return { success: false, error: textResult.error };
@@ -7318,13 +7466,14 @@ export class UnixSocketServer {
       });
     }
     try {
-      const result = await client.requestImeAction(
-        imeAction,
-        remainingTimeoutMs,
-        undefined,
+      const result = await this.holdDispatchedTextRequest(
         signal,
+        remainingTimeoutMs,
+        (fenced, dispatched) =>
+          client.requestImeAction(imeAction, remainingTimeoutMs, undefined, fenced, dispatched),
         onDispatch,
       );
+      assertSocketInputNotAborted(signal);
       if (!result.success) {
         const message = imeActionFailedAfterTextEntered(imeAction, result.error || "unknown error");
         logger.warn(`[input/typeText] ${message}`);
@@ -8127,6 +8276,14 @@ export class UnixSocketServer {
     try {
       return await run();
     } catch (error) {
+      // A dispatched text write cannot be represented as an undispatched release refusal.
+      if (
+        error instanceof Error &&
+        "requestDispatched" in error &&
+        error.requestDispatched === true
+      ) {
+        throw error;
+      }
       throw sessionReleaseThatCancelledCall(execution.cancelReason) ?? error;
     }
   }

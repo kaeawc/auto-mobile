@@ -17,6 +17,64 @@ from mcp_harness.script import load_script, parse_script
 from tests.support import ROOT, call, guard_ok, run_fake, tempdir
 
 class ReviewFixTests(unittest.TestCase):
+    def test_mid_call_records_each_outcome_once(self) -> None:
+        with tempdir() as tmp:
+            result, records, _ = run_fake(Path(tmp), [call('slow', seconds=1.5)], mode='mid-call')
+            outcomes = [r for r in records if r.get('index') == 0 and r.get('attempt') == 1
+                        and r['event'] in ('response', 'exception', 'late-response', 'late-exception', 'abandoned')]
+            self.assertEqual(len(outcomes), 1, outcomes)
+            self.assertIn(outcomes[0]['event'], ('response', 'exception'))
+            self.assertTrue(outcomes[0]['inFlightAtClose'])
+            close = next(r for r in records if r['event'] == 'close')
+            if outcomes[0]['seq'] > close['seq']:
+                self.assertTrue(outcomes[0]['afterClose'])
+            self.assertEqual(result.late_responses, 0)
+
+    def test_cancel_same_tick_keeps_finished_outcome(self) -> None:
+        from mcp_harness.client import Requests, Summary, run_step
+        for failure in (False, True):
+            with self.subTest(failure=failure), tempdir() as tmp:
+                evidence = Evidence(Path(tmp), 'A')
+                async def execute():
+                    loop = asyncio.get_running_loop()
+                    errors = []
+                    loop.set_exception_handler(lambda loop, context: errors.append(context))
+                    summary = Summary('A')
+                    requests = Requests(evidence, summary)
+                    requests.closing()
+                    requests.contexts_exited = True
+                    future = loop.create_future()
+                    owner = asyncio.current_task()
+                    def complete():
+                        if failure:
+                            future.set_exception(ValueError('finished failure'))
+                        else:
+                            future.set_result(None)
+                        owner.cancel()
+                    def created(coroutine):
+                        coroutine.close()
+                        loop.call_soon(complete)
+                        return future
+                    with patch('mcp_harness.client.asyncio.create_task', created):
+                        await run_step(None, call('echo'), 0, evidence, Options(), summary,
+                                       lambda _: None, True, requests)
+                    await asyncio.sleep(0)
+                    self.assertFalse(requests.tasks)
+                    self.assertFalse(errors)
+                    self.assertFalse(future._log_traceback)
+                try:
+                    asyncio.run(execute())
+                finally:
+                    evidence.close()
+                records = [json.loads(l) for l in (Path(tmp)/'A.jsonl').read_text().splitlines()]
+                outcomes = [r for r in records if r['event'] != 'request']
+                self.assertEqual(len(outcomes), 1, outcomes)
+                self.assertEqual(outcomes[0]['event'], 'exception' if failure else 'response')
+                self.assertTrue(outcomes[0]['afterClose'])
+                self.assertTrue(outcomes[0]['inFlightAtClose'])
+                if failure:
+                    self.assertEqual(outcomes[0]['exception']['class'], 'builtins.ValueError')
+
     def test_late_response_retains_real_result(self) -> None:
         with tempdir() as tmp:
             result, records, events = run_fake(Path(tmp), [{**call('slow', seconds=0.6), 'timeoutMs': 150, 'retries': 0}, {'op': 'sleep', 'ms': 800}])
@@ -204,6 +262,7 @@ class ReviewFixTests(unittest.TestCase):
                 requests = Requests(evidence, summary)
                 task = asyncio.create_task(asyncio.sleep(60))
                 requests.add(task, 4, 2, 10, False)
+                requests.tasks[task]["late"] = True  # Model a step that already timed out.
                 requests.closing()
                 await requests.drain()
                 self.assertTrue(task.cancelled())

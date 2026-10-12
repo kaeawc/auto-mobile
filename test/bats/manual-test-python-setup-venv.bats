@@ -120,11 +120,3 @@ MOCK
   [ "$status" -eq 2 ]
   [ ! -s "$COMMAND_LOG" ]
 }
-
-@test "validator fails loudly for unavailable Python even with former skip flag" {
-  export MOCK_VERSION_EXIT=1
-  run bash "${SCRIPT%/manual-test/python/setup-venv.sh}/validate_manual_test_python.sh" --skip-unavailable
-  [ "$status" -eq 2 ]
-  [[ "$output" == *'Python 3.11 or newer is required'* ]]
-  [ ! -s "$COMMAND_LOG" ]
-}

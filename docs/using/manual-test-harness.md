@@ -560,4 +560,4 @@ awaited cleanup: close the MCP server/transport, or gate every send on a client
 input-closed flag, then release sessions and exit. That makes the server safe
 for every SDK line; a 1.x client cannot prevent the transport error by itself.
 
-The Python check runs when `scripts/manual-test/python/` or the validator changes (path-selected in `scripts/prepush-shell.sh`) and locally via `bash scripts/all_fast_validate_checks.sh --only manual-test-python`.
+The Python check uses python3 >=3.11, falling back to a uv-managed interpreter (finding an existing one or installing 3.11), and runs when `scripts/manual-test/python/` or the validator changes (path-selected in `scripts/prepush-shell.sh`) and locally via `bash scripts/all_fast_validate_checks.sh --only manual-test-python`.

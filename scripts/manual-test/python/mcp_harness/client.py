@@ -109,6 +109,7 @@ class Requests:
         self.evidence, self.summary = evidence, summary
         self.tasks: dict[asyncio.Task[Any], dict[str, Any]] = {}
         self.after_close = False
+        self.contexts_exited = False
 
     def add(self, task: asyncio.Task[Any], index: int, attempt: int, timeout_ms: float,
             in_flight: bool) -> None:
@@ -117,13 +118,17 @@ class Requests:
         task.add_done_callback(self.finished)
 
     def finished(self, task: asyncio.Task[Any]) -> None:
-        fields = self.tasks.pop(task, None)
+        fields = self.tasks.get(task)
         if fields is None:
+            # A cancelled step already recorded its outcome; retrieve later exceptions.
+            if not task.cancelled():
+                task.exception()
             return
-        late = fields.pop("late")
+        if not fields["late"]:
+            return  # The waiting run_step still owns even an already finished task.
+        self.tasks.pop(task)
+        fields.pop("late")
         deadline = fields.pop("deadline")
-        if not late:
-            return  # run_step consumes and records an on-time outcome.
         fields.update(lateByMs=max(0, (time.monotonic()-deadline)*1000), afterClose=self.after_close)
         try:
             result = task.result()
@@ -137,7 +142,7 @@ class Requests:
     def closing(self) -> None:
         self.after_close = True
         for fields in self.tasks.values():
-            fields["late"] = True
+            fields["inFlightAtClose"] = True
 
     async def drain(self) -> None:
         if not self.tasks:
@@ -146,6 +151,10 @@ class Requests:
         for task in done:
             self.finished(task)
         for task in pending:
+            if not self.tasks[task]["late"]:
+                # The waiting step records cancellation, so do not also abandon it.
+                task.cancel()
+                continue
             fields = self.tasks.pop(task)
             deadline = fields.pop("deadline")
             fields.pop("late")
@@ -168,6 +177,7 @@ async def run_step(session: ClientSession, step: dict[str, Any], index: int, evi
     for attempt in range(1, step.get("retries", 0) + 2):
         attempts = attempt
         evidence.record("request", index=index, attempt=attempt, step=step, inFlightAtClose=in_flight)
+        cancelled: asyncio.CancelledError | None = None
         try:
             async def request() -> Any:
                 if step["op"] == "call":
@@ -181,28 +191,41 @@ async def run_step(session: ClientSession, step: dict[str, Any], index: int, evi
             timeout_ms = step.get("timeoutMs", options.step_timeout_ms)
             task = asyncio.create_task(request())
             requests.add(task, index, attempt, timeout_ms, in_flight)
-            done, _ = await asyncio.wait({task}, timeout=timeout_ms / 1000)
+            try:
+                done, _ = await asyncio.wait({task}, timeout=timeout_ms / 1000)
+            except asyncio.CancelledError as exc:
+                if not task.done():
+                    raise
+                # Cancellation and completion can share a tick: consume the real outcome.
+                cancelled = exc
+                done = {task}
             if not done:
                 requests.tasks[task]["late"] = True
                 timed_out_attempts += 1
                 raise TimeoutError("Request wait timed out; request still pending")
+            requests.tasks.pop(task, None)
             result = task.result()
             payload = result.model_dump(mode="json", by_alias=True) if result is not None else None
             ok = not bool(payload.get("isError", False)) if isinstance(payload, dict) else True
             error = None if ok else str(payload)
             evidence.record("response", index=index, attempt=attempt, response=payload, ok=ok,
-                            inFlightAtClose=in_flight)
+                            inFlightAtClose=in_flight,
+                            **({"afterClose": True} if requests.contexts_exited else {}))
         except BaseException as exc:
             error = f"{type(exc).__name__}: {exc}"
             evidence.record("exception", index=index, attempt=attempt, exception=exception_json(exc),
                             inFlightAtClose=in_flight,
+                            **({"afterClose": True} if requests.contexts_exited else {}),
                             **({"timedOut": True, "stillPending": True} if isinstance(exc, TimeoutError) and not task.done() else {}))
             if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
-                if task in requests.tasks:
-                    requests.tasks[task]["late"] = True
+                requests.tasks.pop(task, None)
                 if in_flight and isinstance(exc, asyncio.CancelledError):
                     break  # Deliberately cancelled mid-call scenario.
                 raise
+        if cancelled is not None:
+            if in_flight:
+                break
+            raise cancelled
         if ok or attempt > step.get("retries", 0):
             break
         await asyncio.sleep(step.get("retryDelayMs", 250) / 1000)
@@ -332,6 +355,7 @@ async def _run_client(launch: LaunchSpec, script: Script, evidence: Evidence, op
                 except BaseException as exc:
                     close_exc = BaseExceptionGroup("session and transport cleanup", [close_exc, exc]) if close_exc else exc
             timer.cancel()
+        requests.contexts_exited = True
         summary.close = classify_close(close_exc, (time.monotonic()-close_start)*1000, timed_out)
         if summary.close.traceback:
             print(summary.close.traceback, file=sys.stderr, end="")

@@ -9483,6 +9483,7 @@ export class DevicePool {
         deviceId,
         existingSessionId,
         existingSession.ownership === "awaiting-owner",
+        this.holderReleaseRemainingMs(existingSessionId),
       );
     }
     // A caller that proved it owns the holder (its MCP connection acquired it) may reuse another

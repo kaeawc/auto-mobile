@@ -180,9 +180,18 @@ interface VideoArchiveEvictionResult {
 
 interface VideoRecordingManagerDependencies {
   videoRecorderService: VideoRecorderService;
-  recordingRepository: VideoRecordingRepository;
+  recordingRepository: Pick<
+    VideoRecordingRepository,
+    | "insertRecording"
+    | "updateRecording"
+    | "getRecording"
+    | "listRecordings"
+    | "getLatestRecording"
+    | "touchRecording"
+    | "deleteRecording"
+  >;
   configRepository: ConfigRepository<VideoRecordingConfig>;
-  highlightClient: VisualHighlightClient;
+  highlightClient: Pick<VisualHighlightClient, "addHighlight">;
   timer: Timer;
   now: () => Date;
   /** The same live-owner snapshot used by daemon startup's device-session sweep. */
@@ -451,6 +460,32 @@ async function initializeVideoRecordingState(
     managerInitializationPromise = trackedInitialization;
   }
   await managerInitializationPromise;
+}
+
+/** Startup composition seam: the interruption sweep must finish before orphan rows are read. */
+export async function initializeRecordingTeardownRedriveState(): Promise<
+  Pick<
+    VideoRecordingManagerDependencies,
+    "recordingRepository" | "videoRecorderService" | "liveDaemonSessionIds"
+  >
+> {
+  return getVideoRecordingDependencies();
+}
+
+async function refreshCaptureTeardown(
+  recordingId: string,
+  deps: VideoRecordingManagerDependencies,
+): Promise<void> {
+  try {
+    await deps.recordingRepository.updateRecording(recordingId, {
+      captureTeardown: deps.videoRecorderService.getCaptureTeardown(recordingId),
+    });
+  } catch (error) {
+    logger.warn(
+      `[VideoRecording] Failed to refresh capture teardown descriptor for ${recordingId}`,
+      error,
+    );
+  }
 }
 
 async function performVideoRecordingStateInitialization(
@@ -1246,7 +1281,7 @@ function applyRecordingDisplayWarning(
 
 /** Publish capture ownership before inserting its row, and preserve adoption during that insert. */
 async function persistStartedVideoRecording(
-  recordingRepository: VideoRecordingRepository,
+  deps: VideoRecordingManagerDependencies,
   request: StartVideoRecordingRequest,
   active: ActiveVideoRecording,
   abortSignal: AbortSignal,
@@ -1254,9 +1289,11 @@ async function persistStartedVideoRecording(
   pruneRecordingOwners();
   const owner = { ownerSessionUuid: request.ownerSessionUuid, deviceId: request.device.deviceId };
   recordingOwners.set(active.recordingId, owner);
+  const { recordingRepository, videoRecorderService } = deps;
   const ownerAtInsert = owner.ownerSessionUuid;
   await recordingRepository.insertRecording({
     recordingId: active.recordingId,
+    captureTeardown: videoRecorderService.getCaptureTeardown(active.recordingId),
     deviceId: request.device.deviceId,
     platform: request.device.platform,
     status: "recording",
@@ -1294,7 +1331,7 @@ export async function startVideoRecording(
   try {
     const deps = await getVideoRecordingDependencies();
     start.abortSignal.throwIfAborted();
-    const { videoRecorderService, recordingRepository, timer } = deps;
+    const { videoRecorderService, timer } = deps;
     await ensureRecordingDeviceAvailable(deps, request.device, start.abortSignal);
     const overrides = request.configOverrides ?? {};
     const configInput = await resolveConfigInput(overrides);
@@ -1321,7 +1358,7 @@ export async function startVideoRecording(
     start.abortSignal.throwIfAborted();
     applyRecordingDisplayWarning(active, recordingDisplay);
 
-    await persistStartedVideoRecording(recordingRepository, request, active, start.abortSignal);
+    await persistStartedVideoRecording(deps, request, active, start.abortSignal);
 
     if (recordingDisplay && active.recordedPanel) {
       beginRecordingDisplaySession(
@@ -1384,7 +1421,8 @@ export async function rollbackVideoRecordingStart(
 ): Promise<void> {
   recordingDisplaySessions.get(recordingId)?.unsubscribe();
   recordingDisplaySessions.delete(recordingId);
-  const { videoRecorderService, recordingRepository } = await getVideoRecordingDependencies();
+  const deps = await getVideoRecordingDependencies();
+  const { videoRecorderService, recordingRepository } = deps;
 
   const serviceOwnsRecording = videoRecorderService.listActiveRecordingIds().includes(recordingId);
   if (serviceOwnsRecording) {
@@ -1392,6 +1430,7 @@ export async function rollbackVideoRecordingStart(
       await videoRecorderService.discardRecording(recordingId, options);
     } catch (error) {
       if (videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
+        await refreshCaptureTeardown(recordingId, deps);
         throw error;
       }
       // The backend stopped, but artifact removal failed. Retain its durable
@@ -1524,6 +1563,7 @@ async function stopActiveVideoRecording(
     //     used elsewhere, instead of leaving it stuck in "recording" forever.
     const stillOwnedByService = videoRecorderService.listActiveRecordingIds().includes(resolvedId);
     if (stillOwnedByService) {
+      await refreshCaptureTeardown(resolvedId, deps);
       logger.warn(
         `[VideoRecording] Stop of ${resolvedId} could not confirm teardown; the service ` +
           `retained ownership, so its recording row stays active: ${error}`,
@@ -1571,6 +1611,7 @@ async function stopActiveVideoRecording(
   }
   await recordingRepository.updateRecording(resolvedId, {
     status: "completed",
+    captureTeardown: undefined,
     ownerSessionUuid: owner?.ownerSessionUuid,
     outputName: metadata.outputName,
     fileName: metadata.fileName,
@@ -1634,6 +1675,7 @@ async function interruptVideoRecordingWithDependencies(
 
   await recordingRepository.updateRecording(recordingId, {
     status: "interrupted",
+    captureTeardown: deps.videoRecorderService.getCaptureTeardown(recordingId),
     ownerSessionUuid: owner?.ownerSessionUuid ?? record.ownerSessionUuid,
     endedAt,
     lastAccessedAt: endedAt,
@@ -1727,6 +1769,7 @@ async function abandonActiveVideoRecording(
       await deps.videoRecorderService.forceStopRecording(recordingId, { hostOnly: true });
     } catch (error) {
       if (deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
+        await refreshCaptureTeardown(recordingId, deps);
         await rearmRetainedRecordingSafety(recordingId, deps).catch((rearmError: unknown) => {
           logger.warn(
             `[VideoRecording] Failed to re-arm retained safety enforcement for ${recordingId}: ${errorMessage(rearmError)}`,
@@ -1751,11 +1794,19 @@ async function abandonActiveVideoRecording(
 
 /** Force-stops the owning capture process before its recording is marked interrupted. */
 export async function forceStopVideoRecording(recordingId: string): Promise<void> {
-  const { videoRecorderService } = await getVideoRecordingDependencies();
-  await videoRecorderService.forceStopRecording(
-    recordingId,
-    hostOnlyRecordingTeardowns.has(recordingId) ? { hostOnly: true } : undefined,
-  );
+  const deps = await getVideoRecordingDependencies();
+  try {
+    await deps.videoRecorderService.forceStopRecording(
+      recordingId,
+      hostOnlyRecordingTeardowns.has(recordingId) ? { hostOnly: true } : undefined,
+    );
+  } catch (error) {
+    if (deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
+      await refreshCaptureTeardown(recordingId, deps);
+    }
+    throw toActionableError(error, `Failed to force-stop video recording ${recordingId}`);
+  }
+  await refreshCaptureTeardown(recordingId, deps);
 }
 
 /** A retained capture is still owned and must be retried before device reuse is safe. */
@@ -1793,6 +1844,7 @@ export async function markVideoRecordingIncomplete(recordingId: string): Promise
       error,
     );
     if (deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
+      await refreshCaptureTeardown(recordingId, deps);
       try {
         await rearmRetainedRecordingSafety(recordingId, deps);
       } catch (rearmError) {
@@ -1814,6 +1866,7 @@ export async function markVideoRecordingIncomplete(recordingId: string): Promise
   const endedAt = deps.now().toISOString();
   await deps.recordingRepository.updateRecording(recordingId, {
     status: "incomplete",
+    captureTeardown: undefined,
     ownerSessionUuid: owner?.ownerSessionUuid,
     endedAt,
     lastAccessedAt: endedAt,

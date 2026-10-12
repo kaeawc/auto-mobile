@@ -2211,6 +2211,20 @@ export class SessionManager {
     );
   }
 
+  /** Recorder teardown was unconfirmed; quarantine synchronously before release settles. */
+  markDeviceNeedsRecorderTeardown(
+    deviceId: string,
+    retry: () => Promise<void>,
+    retryTimeoutMs: number,
+  ): void {
+    this.abandonRestore(
+      { deviceId, incarnation: this.deviceHealth?.incarnation(deviceId) },
+      "recording-teardown",
+      retry,
+      retryTimeoutMs,
+    );
+  }
+
   private restoreIncarnationIsCurrent(target: {
     deviceId: string;
     incarnation?: number;

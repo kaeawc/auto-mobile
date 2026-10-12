@@ -1,4 +1,5 @@
 import { sql, type Kysely, type SelectQueryBuilder } from "kysely";
+import { z } from "zod";
 import { getDatabase } from "./database";
 import type {
   VideoContainerFormat,
@@ -13,6 +14,7 @@ import type {
   VideoRecordingUpdate,
   VideoRecording as DbVideoRecording,
 } from "./types";
+import type { VideoCaptureTeardownDescriptor } from "../features/video/VideoRecorderService";
 import { logger } from "../utils/logger";
 
 /**
@@ -29,6 +31,7 @@ export const FINISHED_VIDEO_RECORDING_STATUSES: VideoRecordingStatus[] = [
 ];
 
 export interface VideoRecordingRecord extends VideoRecordingMetadata {
+  captureTeardown?: VideoCaptureTeardownDescriptor;
   deviceId: string;
   platform: "android" | "ios";
   status: VideoRecordingStatus;
@@ -79,6 +82,7 @@ export function ownerVisibleInScope(
 }
 
 export interface VideoRecordingQuery extends VideoRecordingOwnerScope {
+  hasCaptureTeardown?: boolean;
   /** Restart maintenance must leave active sessions owned by live daemons alone. */
   excludeLiveDaemonSessionIds?: ReadonlySet<string>;
   status?: VideoRecordingStatus | VideoRecordingStatus[];
@@ -126,9 +130,28 @@ function parseDisplayMetadata<T>(value: string | null): T | undefined {
   }
 }
 
+const captureTeardownSchema = z.object({
+  kind: z.literal("android-screenrecord"),
+  deviceTempPath: z.string().min(1),
+  devicePid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+});
+
+function parseCaptureTeardown(value: string | null): VideoCaptureTeardownDescriptor | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  try {
+    return captureTeardownSchema.parse(JSON.parse(value));
+  } catch (error) {
+    logger.warn("[VideoRecordingRepository] Failed to parse capture teardown descriptor", error);
+    return undefined;
+  }
+}
+
 function toRecord(row: DbVideoRecording): VideoRecordingRecord {
   return {
     recordingId: row.recording_id,
+    captureTeardown: parseCaptureTeardown(row.capture_teardown_json),
     deviceId: row.device_id,
     platform: row.platform as "android" | "ios",
     status: row.status as VideoRecordingStatus,
@@ -187,12 +210,44 @@ function applyOwnerScope<O>(
   });
 }
 
+/** Persisted orphan maintenance leaves live peer-daemon captures alone. */
+function applyMaintenanceScope<O>(
+  builder: SelectQueryBuilder<Database, "video_recordings", O>,
+  query: VideoRecordingQuery,
+): SelectQueryBuilder<Database, "video_recordings", O> {
+  const liveDaemonSessionIds = Array.from(query.excludeLiveDaemonSessionIds ?? []);
+  if (liveDaemonSessionIds.length > 0) {
+    builder = builder.where((eb) =>
+      eb.not(
+        eb.exists(
+          eb
+            .selectFrom("device_sessions")
+            .select("session_uuid")
+            .whereRef("device_sessions.session_uuid", "=", "video_recordings.owner_session_uuid")
+            .where("device_sessions.status", "=", "active")
+            .where("device_sessions.daemon_session_id", "in", liveDaemonSessionIds),
+        ),
+      ),
+    );
+  }
+  if (query.hasCaptureTeardown) {
+    builder = builder.where("capture_teardown_json", "is not", null);
+  }
+  return builder;
+}
+
 function buildUpdatePayload(update: Partial<VideoRecordingRecord>): VideoRecordingUpdate {
   const payload: VideoRecordingUpdate = {};
 
   applyRecordingFileUpdate(payload, update);
   applyRecordingTimestampUpdate(payload, update);
   applyRecordingMetadataUpdate(payload, update);
+  // Presence, not value: an explicit undefined clears the nullable descriptor.
+  if (Object.hasOwn(update, "captureTeardown")) {
+    payload.capture_teardown_json = update.captureTeardown
+      ? JSON.stringify(update.captureTeardown)
+      : null;
+  }
   return payload;
 }
 
@@ -313,6 +368,7 @@ export class VideoRecordingRepository {
       last_accessed_at: record.lastAccessedAt,
       config_json: JSON.stringify(record.config),
       highlights_json: record.highlights ? JSON.stringify(record.highlights) : null,
+      capture_teardown_json: record.captureTeardown ? JSON.stringify(record.captureTeardown) : null,
       recorded_panel_json: record.recordedPanel ? JSON.stringify(record.recordedPanel) : null,
       display_transitions_json: record.transitions ? JSON.stringify(record.transitions) : null,
       owner_session_uuid: record.ownerSessionUuid ?? null,
@@ -342,6 +398,7 @@ export class VideoRecordingRepository {
           last_accessed_at: row.last_accessed_at,
           config_json: row.config_json,
           highlights_json: row.highlights_json,
+          capture_teardown_json: row.capture_teardown_json,
           recorded_panel_json: row.recorded_panel_json,
           display_transitions_json: row.display_transitions_json,
           owner_session_uuid: row.owner_session_uuid,
@@ -383,21 +440,7 @@ export class VideoRecordingRepository {
     let builder = db.selectFrom("video_recordings").selectAll();
 
     builder = applyOwnerScope(builder, query);
-    const liveDaemonSessionIds = Array.from(query.excludeLiveDaemonSessionIds ?? []);
-    if (liveDaemonSessionIds.length > 0) {
-      builder = builder.where((eb) =>
-        eb.not(
-          eb.exists(
-            eb
-              .selectFrom("device_sessions")
-              .select("session_uuid")
-              .whereRef("device_sessions.session_uuid", "=", "video_recordings.owner_session_uuid")
-              .where("device_sessions.status", "=", "active")
-              .where("device_sessions.daemon_session_id", "in", liveDaemonSessionIds),
-          ),
-        ),
-      );
-    }
+    builder = applyMaintenanceScope(builder, query);
     if (query.status !== undefined) {
       const statuses = Array.isArray(query.status) ? query.status : [query.status];
       builder = builder.where("status", "in", statuses);

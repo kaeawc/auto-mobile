@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { NoopTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import type { DaemonExitRecord } from "../../src/daemon/daemonExitRecord";
 import { Daemon, type DaemonStartHost } from "../../src/daemon/daemon";
 import * as buildIdentity from "../../src/daemon/buildIdentity";
@@ -29,6 +30,9 @@ interface DaemonStartInternals {
   setupShutdownHandlers(): void;
   writeEarlyOwnerRecord(): Promise<void>;
   startThroughSocketBind(): Promise<void>;
+  initializeDatabase(): Promise<void>;
+  initializeDevicePoolWithTimeout(timeoutMs: number): Promise<void>;
+  initializeIosServices(): Promise<void>;
   stopSessionTimers(): void;
 }
 
@@ -93,6 +97,44 @@ describe("Daemon.start() tool-call-end wiring", () => {
       DaemonState.getInstance().reset();
     }
     NavigationGraphManager.resetInstance();
+  });
+
+  test("startup redrives recorder teardowns after pool initialization before binding the control socket", async () => {
+    const { daemon, internals } = await makeDaemon({ port: 3161, debug: true });
+    const events: string[] = [];
+    const spies = [
+      spyOn(internals, "initializeDatabase").mockResolvedValue(undefined),
+      spyOn(internals, "initializeDevicePoolWithTimeout").mockImplementation(async () => {
+        events.push("pool");
+      }),
+      spyOn(internals, "initializeIosServices").mockResolvedValue(undefined),
+      spyOn(logger, "info").mockImplementation(() => {}),
+    ];
+    const host: DaemonStartHost = {
+      ...internals.processStartHost(),
+      enterProcess: () => {},
+      publishForwardLeaseOwner: () => {},
+      writeExitRecord: () => {},
+      writeEarlyOwnerRecord: async () => {},
+      openTerminalReleaseJournal: () => new NoopTerminalReleaseJournal(),
+      startHttpIngress: async () => {},
+      sweepStaleAppearanceConfigs: async () => {},
+      redriveRecorderTeardowns: async () => {
+        events.push("redrive");
+        return true;
+      },
+      bindControlSocket: async () => {
+        events.push("bind");
+        throw new StartupStopped();
+      },
+    };
+    try {
+      await expect(daemon.startOn(host)).rejects.toBeInstanceOf(StartupStopped);
+      expect(events).toEqual(["pool", "redrive", "bind"]);
+    } finally {
+      spies.reverse().forEach((spy) => spy.mockRestore());
+      internals.stopSessionTimers();
+    }
   });
 
   test("a started daemon stamps a session's activity at the end of its tool call", async () => {

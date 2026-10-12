@@ -138,6 +138,42 @@ describe("recording teardown ownership", () => {
     stat.mockRestore();
   });
 
+  test("give-up marks health before retry cleanup settles and retries only retained captures", async () => {
+    const active = await start();
+    let retry: (() => Promise<void>) | undefined;
+    const deps = {
+      ...defaultRecordingSessionCleanupDeps,
+      timer,
+      teardownRetryBudgetMs: 2_000,
+      teardownRetryBackoff: sequenceBackoff([8_000]),
+    };
+    deps.markDeviceNeedsRecorderRecovery = recordingCleanup.createRecorderTeardownRecoveryMarker(
+      {
+        markDeviceNeedsRecorderTeardown(id, work, deadline) {
+          expect(id).toBe(device.deviceId);
+          expect(deadline).toBe(5_000);
+          expect(manager.registrations.at(-1)?.settled).toBe(false);
+          retry = work;
+        },
+      },
+      deps,
+    );
+    registerRecordingSessionCleanup(manager, deps);
+    backend.setForceStopFailures([teardownError(), teardownError()]);
+    manager.releaseA();
+    await advance(127_000);
+    expect(retry).toBeDefined();
+    expect(manager.registrations.at(-1)?.settled).toBe(true);
+    await expect(retry!()).rejects.toThrow(active.recordingId);
+    expect(recordingCleanup.recordingTeardownRecoveryNeeded(device.deviceId)).toBeDefined();
+    // The manager's safety stop can finish between health attempts.
+    await markVideoRecordingIncomplete(active.recordingId);
+    const calls = backend.forceStopCalls.length;
+    await expect(retry!()).resolves.toBeUndefined();
+    expect(backend.forceStopCalls.length).toBe(calls);
+    expect(recordingCleanup.recordingTeardownRecoveryNeeded(device.deviceId)).toBeUndefined();
+  });
+
   const start = (ownerSessionUuid = "session-a") =>
     startVideoRecording({
       device,

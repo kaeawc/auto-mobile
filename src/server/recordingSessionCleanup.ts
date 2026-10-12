@@ -1,3 +1,4 @@
+import { ActionableError } from "../models/ActionableError";
 import type { SessionManager } from "../daemon/sessionManager";
 import { registerBoundedAcquisitionCleanup } from "../utils/boundedAcquisitionCleanup";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -175,6 +176,46 @@ export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
     recorderRecoveryNeeded.set(giveUp.deviceId, giveUps);
   },
 };
+
+/** Connect give-up to the pool's synchronous health quarantine and bounded recovery. */
+export function createRecorderTeardownRecoveryMarker(
+  manager: Pick<SessionManager, "markDeviceNeedsRecorderTeardown">,
+  deps: RecordingSessionCleanupDeps = defaultRecordingSessionCleanupDeps,
+): RecordingSessionCleanupDeps["markDeviceNeedsRecorderRecovery"] {
+  return (giveUp) => {
+    defaultRecordingSessionCleanupDeps.markDeviceNeedsRecorderRecovery(giveUp);
+    manager.markDeviceNeedsRecorderTeardown(
+      giveUp.deviceId,
+      () => retryGivenUpRecordings(giveUp.deviceId, deps),
+      INCOMPLETE_MARK_GRACE_MS,
+    );
+  };
+}
+
+async function retryGivenUpRecordings(
+  deviceId: string,
+  deps: RecordingSessionCleanupDeps,
+): Promise<void> {
+  // Health recovery deduplicates by device/reason. Include later give-ups in that same retry.
+  const giveUps = recorderRecoveryNeeded.get(deviceId) ?? [];
+  for (const giveUp of giveUps) {
+    const retained = unconfirmedRecordingIds(deps, giveUp.sessionId, deviceId, giveUp.recordingIds);
+    await forceStopOwnedRecordings(
+      deps,
+      retained,
+      deps.ownedDeviceGestureRecordingId(giveUp.sessionId, deviceId),
+    );
+  }
+  const remaining = (recorderRecoveryNeeded.get(deviceId) ?? []).flatMap((giveUp) =>
+    unconfirmedRecordingIds(deps, giveUp.sessionId, deviceId, giveUp.recordingIds),
+  );
+  if (remaining.length > 0) {
+    throw new ActionableError(
+      `Recorder teardown on device ${deviceId} is still unconfirmed for ${remaining.join(", ")}. Recover the device if retries fail.`,
+    );
+  }
+  recorderRecoveryNeeded.delete(deviceId);
+}
 
 async function abandonRecordingsOnReplacedDevice(
   sessionId: string,

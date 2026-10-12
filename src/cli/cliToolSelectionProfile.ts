@@ -1,8 +1,13 @@
+import { defaultLockOwnerGenerationProbe } from "../daemon/lockOwnerGeneration";
 import fs from "node:fs";
 import path from "node:path";
 import { ActionableError } from "../models";
 import { errorMessage } from "../utils/describeUnknownError";
-import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
+import {
+  releaseExclusiveLock,
+  tryAcquireExclusiveLock,
+  type LockOwnerGenerationProbe,
+} from "../utils/fileLock";
 import { defaultIdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
@@ -21,6 +26,7 @@ export interface CliToolSelectionProfileLockOptions {
   pollIntervalMs?: number;
   timeoutMs?: number;
   isProcessRunning?: (pid: number) => boolean;
+  ownerGeneration?: LockOwnerGenerationProbe;
   pid?: number;
   ownerToken?: string;
 }
@@ -91,6 +97,7 @@ function cliToolSelectionProfileLock(
             tryAcquireExclusiveLock(lockPath, {
               pid,
               isProcessRunning: options.isProcessRunning,
+              ownerGeneration: options.ownerGeneration ?? defaultLockOwnerGenerationProbe,
               reclaimOwnPid: true,
               ownerToken,
             })

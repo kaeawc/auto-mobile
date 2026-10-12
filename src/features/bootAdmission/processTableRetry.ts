@@ -70,15 +70,15 @@ const TRANSIENT_REASONS = new Set<ProcessTableFailureReason>([
 const DENIED = /operation not permitted|permission denied/i;
 const USAGE_ERROR = /illegal option|invalid option|unrecognized option|usage:/i;
 
+function stderrText(stderr: unknown): string {
+  return Buffer.isBuffer(stderr) ? stderr.toString() : typeof stderr === "string" ? stderr : "";
+}
+
 function exitReason(code: number, stderr: unknown): ProcessTableFailureReason {
   if (code === 0) {
     return "unknown";
   }
-  const text = Buffer.isBuffer(stderr)
-    ? stderr.toString()
-    : typeof stderr === "string"
-      ? stderr
-      : "";
+  const text = stderrText(stderr);
   if (code === 126 || DENIED.test(text)) {
     return "denied";
   }
@@ -114,10 +114,36 @@ function rawFailureReason(error: object): ProcessTableFailureReason {
     : "unknown";
 }
 
+function rawFailureDetail(
+  error: object,
+  reason: ProcessTableFailureReason,
+  timeoutMs: number,
+): string {
+  if (reason === "timeout") {
+    return `timed out after ${timeoutMs}ms`;
+  }
+  if (reason === "killed" && "signal" in error) {
+    return `killed by ${String(error.signal)}`;
+  }
+  const code = "code" in error ? error.code : undefined;
+  if (typeof code === "number") {
+    const line = stderrText("stderr" in error ? error.stderr : undefined)
+      .split(/\r?\n/)
+      .find((value) => value.trim());
+    return line ? `exit ${code}: ${line}` : `exit ${code}`;
+  }
+  const message = errorMessage(error);
+  return typeof code === "string" ? `${code}: ${message}` : message;
+}
+
 /** ExecSeam preserves the raw exec error in cause, rather than copying its status fields. */
-function classifyFailure(error: unknown): ProcessTableFailureReason {
+function classifyFailure(
+  error: unknown,
+  timeoutMs: number,
+): Pick<ProcessTableFailure, "reason" | "detail"> {
   const seen = new Set<unknown>();
   let reason: ProcessTableFailureReason = "unknown";
+  let detail = errorMessage(error);
   for (
     let current = error;
     typeof current === "object" && current !== null && !seen.has(current);
@@ -129,10 +155,11 @@ function classifyFailure(error: unknown): ProcessTableFailureReason {
     const candidate = rawFailureReason(current);
     if (candidate !== "unknown") {
       reason = candidate;
+      detail = rawFailureDetail(current, candidate, timeoutMs);
     }
     current = "cause" in current ? current.cause : undefined;
   }
-  return reason;
+  return { reason, detail: detail.split(/\r?\n/, 1)[0].slice(0, 200) };
 }
 
 /** Bounded retries for the Android count only; iOS keeps its one-shot process read. */
@@ -173,7 +200,11 @@ export class ProcessTableReader {
     let retriedReason: ProcessTableFailureReason | undefined;
     for (let attempts = 1; ; attempts++) {
       options.signal?.throwIfAborted();
-      const timeoutMs = Math.min(this.attemptTimeoutMs, Math.max(endMs - this.timer.now(), 250));
+      // Keep the first read's full timeout so a short whole-sample race still fails closed.
+      const timeoutMs =
+        attempts === 1
+          ? this.attemptTimeoutMs
+          : Math.min(this.attemptTimeoutMs, endMs - this.timer.now());
       try {
         const value = await readHostProcessTable(this.executor, {
           signal: options.signal,
@@ -187,13 +218,13 @@ export class ProcessTableReader {
         return { value };
       } catch (error) {
         options.signal?.throwIfAborted();
-        const reason = classifyFailure(error);
+        const { reason, detail } = classifyFailure(error, timeoutMs);
         const transient = TRANSIENT_REASONS.has(reason);
         const failure = {
           reason,
           transient,
           attempts,
-          detail: errorMessage(error).split(/\r?\n/, 1)[0].slice(0, 200),
+          detail,
         };
         const delay = this.retryDelay(failure, endMs);
         if (delay === undefined) {

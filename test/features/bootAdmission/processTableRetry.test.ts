@@ -7,19 +7,22 @@ import {
 } from "../../../src/features/bootAdmission/AndroidBootAdmissionGate";
 import { DEFAULT_SAMPLE_TIMEOUT_MS } from "../../../src/features/bootAdmission/BootAdmissionGate";
 import { ADMISSION_LOCK_MAX_AGE_MS } from "../../../src/features/bootAdmission/FileHostBootAdmissionRegistry";
+import { describeBootCapacity } from "../../../src/features/bootAdmission/sharedBootAdmissionGates";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
+import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { wrapCommandError } from "../../../src/utils/CommandError";
 import type {
   HostCommandExecutor,
   HostCommandOptions,
 } from "../../../src/utils/HostCommandExecutor";
 import { logger } from "../../../src/utils/logger";
+import { raceWithDeadline } from "../../../src/utils/raceWithDeadline";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   FakeHostBootAdmissionRegistry,
   SharedBootAdmissionHostState,
 } from "../../fakes/FakeHostBootAdmissionRegistry";
-import { drainUntilQuiescent } from "../../helpers/fakeTimerStepping";
+import { drainUntilQuiescent, settleByFakeEvents } from "../../helpers/fakeTimerStepping";
 
 const PS = readFileSync(
   new URL(
@@ -48,7 +51,11 @@ class ScriptedPs implements HostCommandExecutor {
     this.calls.push(options);
     const step = this.steps[Math.min(this.calls.length - 1, this.steps.length - 1)];
     if (step === "timeout") {
-      await this.timer.sleep(options.timeoutMs!);
+      await raceWithDeadline(() => this.timer.sleep(options.timeoutMs!), {
+        timer: this.timer,
+        signal: options.signal,
+        label: "Scripted ps",
+      });
       throw wrapCommandError(
         Object.assign(new Error("Command failed: ps ..."), {
           killed: true,
@@ -97,6 +104,38 @@ function execError(fields: object, message = "ps failed"): Error {
 }
 
 describe("process table retries within Android admission (#11941)", () => {
+  test.each([300, 1_000, 3_000])(
+    "hung ps refuses discovery at a short %ims request timeout",
+    async (timeoutMs) => {
+      const { gate, executor, timer } = harness(["timeout"], undefined, false);
+      const error = await settleByFakeEvents(
+        timer,
+        caught(gate.admit({ avdName: "sixth", timeoutMs })),
+        { description: "short admission deadline" },
+      );
+      expect(error).toBeInstanceOf(AndroidBootedDeviceDiscoveryIncompleteError);
+      expect(error).toMatchObject({ code: "discovery_incomplete", retryable: true });
+      expect(timer.now()).toBe(timeoutMs);
+      expect(executor.calls).toHaveLength(1);
+      expect(executor.calls[0].timeoutMs).toBe(5_000);
+      await timer.advanceTimeAsync(20_000, () => drainUntilQuiescent(timer));
+      expect(executor.calls).toHaveLength(1);
+    },
+  );
+
+  test("abandoned capacity report aborts its ps and never retries", async () => {
+    const { gate, executor, timer } = harness(["timeout"], undefined, false);
+    const result = describeBootCapacity(["android"], { android: gate }, timer);
+    await drainUntilQuiescent(timer);
+    timer.advanceTime(3_000);
+    expect(await result).toBeUndefined();
+    expect(timer.now()).toBe(3_000);
+    await timer.advanceTimeAsync(20_000, () => drainUntilQuiescent(timer));
+    expect(executor.calls).toHaveLength(1);
+    expect(executor.calls[0].signal).toBeInstanceOf(AbortSignal);
+    expect(executor.calls[0].signal?.aborted).toBe(true);
+  });
+
   test("7-of-6: retries a timeout and refuses the unlisted sixth emulator", async () => {
     const { gate, executor, timer } = harness(["timeout", SIX_PS]);
     const error = await caught(gate.admit({ avdName: "seventh", timeoutMs: 60_000 }));
@@ -115,6 +154,7 @@ describe("process table retries within Android admission (#11941)", () => {
     try {
       const { gate, executor, timer } = harness(["timeout"]);
       const admission = await gate.admit({ avdName: "sixth", timeoutMs: 60_000 });
+      expect(timer.now()).toBe(14_500);
       expect(timer.now()).toBeLessThan(DEFAULT_SAMPLE_TIMEOUT_MS);
       expect(executor.calls).toHaveLength(3);
       expect(executor.calls.map((call) => call.timeoutMs)).toEqual([5_000, 5_000, 4_200]);
@@ -122,12 +162,14 @@ describe("process table retries within Android admission (#11941)", () => {
       expect(messages).toHaveLength(2);
       expect(messages[0]).toContain("timeout");
       expect(messages[0]).toContain("3");
+      expect(messages[0]).toContain("timed out after 4200ms");
       expect(messages[1]).toContain("sixth");
       admission.release();
       expect((await gate.describeCapacity()).processTable).toMatchObject({
         unavailable: true,
         reason: "timeout",
         attempts: 3,
+        detail: "timed out after 4200ms",
         admissionsWithoutProcessTable: 1,
         lastAdmissionWithoutProcessTableAtMs: 14_500,
       });
@@ -231,6 +273,56 @@ describe("process table retries within Android admission (#11941)", () => {
     expect(timer.getSleepHistory()).toEqual([]);
   });
 
+  test("timeout detail uses the full first attempt timeout through the command wrapper", async () => {
+    const { source, executor, timer } = harness(["timeout"], undefined, false);
+    const sample = await settleByFakeEvents(timer, source.sample({ deadlineMs: 5_000 }), {
+      description: "single timed-out ps",
+    });
+    expect(executor.calls[0].timeoutMs).toBe(5_000);
+    expect(sample.processTableFailure?.detail).toBe("timed out after 5000ms");
+    expect(sample.errors[0]).toStartWith("ps: Command failed: ps");
+  });
+
+  test.each([
+    [
+      { code: 1, stderr: "\n\r\nps: Operation not permitted\nsecond" },
+      "denied",
+      "exit 1: ps: Operation not permitted",
+    ],
+    [{ code: 1, stderr: "" }, "exit", "exit 1"],
+    [
+      { code: 1, stderr: Buffer.from("\nps: illegal option -- x\nusage: ps") },
+      "unsupported-flags",
+      "exit 1: ps: illegal option -- x",
+    ],
+    [{ code: 126 }, "denied", "exit 126"],
+    [{ code: 127 }, "not-found", "exit 127"],
+    [{ code: "ENOENT" }, "not-found", "ENOENT: ps failed"],
+    [{ code: "EACCES" }, "denied", "EACCES: ps failed"],
+    [{ code: "ENOMEM" }, "spawn-resources", "ENOMEM: ps failed"],
+    [
+      { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" },
+      "output-too-large",
+      "ERR_CHILD_PROCESS_STDIO_MAXBUFFER: ps failed",
+    ],
+    [{ killed: false, signal: "SIGKILL", code: null }, "killed", "killed by SIGKILL"],
+  ] as const)("detail uses the raw exec cause for %j", async (fields, reason, detail) => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
+    try {
+      const raw = execError(fields, "ps failed\nsecond message line");
+      const { source } = harness([new Error("outer wrapper", { cause: raw })]);
+      const sample = await source.sample({ deadlineMs: 0 });
+      expect(sample.processTableFailure).toMatchObject({ reason, detail, attempts: 1 });
+      expect(sample.processTableFailure?.detail).not.toStartWith("Command failed: ps");
+      expect(warn.mock.calls[0][0]).toContain(detail);
+      expect(sample.errors[0]).toBe(
+        `ps: ${wrapCommandError(new Error("outer wrapper", { cause: raw }), { command: "ps", args: ["-axo", "pid=,ppid=,rss=,pcpu=,command="] }).message}`,
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("warns once per deterministic reason, then debug; detail stays one line and bounded", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
     const debug = spyOn(logger, "debug").mockImplementation(() => undefined);
@@ -241,6 +333,7 @@ describe("process table retries within Android admission (#11941)", () => {
       expect(warn).toHaveBeenCalledTimes(1);
       expect(debug).toHaveBeenCalledTimes(1);
       expect(first.processTableFailure?.detail.length).toBeLessThanOrEqual(200);
+      expect(first.processTableFailure?.detail).toBe(`ENOENT: ${"x".repeat(192)}`);
       expect(first.processTableFailure?.detail).not.toContain("\n");
     } finally {
       warn.mockRestore();
@@ -434,8 +527,12 @@ describe("process table retries within Android admission (#11941)", () => {
 
   test("healthy report uses one ps, no sleeps, and no processTable diagnostic", async () => {
     const { gate, executor, timer } = harness([PS]);
-    expect(await gate.describeCapacity()).toEqual({ limit: 6, booted: 5, inFlight: 0 });
+    expect(await describeBootCapacity(["android"], { android: gate }, timer)).toEqual({
+      android: { limit: 6, booted: 5, inFlight: 0 },
+    });
     expect(executor.calls).toHaveLength(1);
+    expect(executor.calls[0].signal).toBeInstanceOf(AbortSignal);
+    expect(executor.calls[0].signal?.aborted).toBe(false);
     expect(timer.getSleepHistory()).toEqual([]);
   });
 });

@@ -209,7 +209,7 @@ test("the managed-slots resource reflects a terminal release at read time", asyn
     const after = await handler(request, extra);
     expect(JSON.parse(after.contents[0].text).slots[0]).toMatchObject({
       sessionUuid: SESSION,
-      executionEnded: { reason: "cleanup-expired", nextAction: "relaunch_execution" },
+      executionEnded: { reason: "cleanup-expired", idle: true, nextAction: "relaunch_execution" },
     });
     expect(managedSlots.slots[0]).not.toHaveProperty("executionEnded");
   } finally {
@@ -232,7 +232,7 @@ test("the managed-slots resource view adds ended evidence without changing acqui
     slots: [
       {
         ...before.slots[0],
-        executionEnded: { reason: "cleanup-expired", nextAction: "relaunch_execution" },
+        executionEnded: { reason: "cleanup-expired", idle: true, nextAction: "relaunch_execution" },
       },
       before.slots[1],
     ],

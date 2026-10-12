@@ -49,7 +49,9 @@ import { ToolRegistry } from "./toolRegistry";
 import { installToolCallDispatcher } from "./toolCallDispatch";
 import { shapeToolCallError } from "./shapeToolCallError";
 import {
+  DAEMON_STALLED_CODE,
   livenessHandoverPayload,
+  managedDaemonStalledPayload,
   PROXY_STALLED_CODE,
   type LivenessHandover,
 } from "../daemon/proxyLivenessRecovery";
@@ -60,7 +62,7 @@ import {
   managedSlotForSession,
   type ManagedSlotsResult,
 } from "../models/managedSlotsResult";
-import { SESSION_NOT_FOUND_REASON } from "../daemon/releaseReasons";
+import { idleReleaseField, SESSION_NOT_FOUND_REASON } from "../daemon/releaseReasons";
 
 const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
 const ACCEPTANCE_DISCOVERY_ORDER_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER";
@@ -152,10 +154,30 @@ function managedStallLossPayload(
     : undefined;
 }
 
+/** Only a ready connection's slot sessions can reclaim without harness intervention. */
+function managedDaemonStallPayload(
+  managedSlots: ManagedSlotsResult | undefined,
+  handover: LivenessHandover,
+  sessionUuid?: string,
+) {
+  if (
+    handover.code !== DAEMON_STALLED_CODE ||
+    managedSlots?.outcome !== "ready" ||
+    (sessionUuid !== undefined && !managedSlotForSession(managedSlots, sessionUuid))
+  ) {
+    return undefined;
+  }
+  const sessions = handover.sessions.filter((session) =>
+    managedSlotForSession(managedSlots, session.sessionUuid),
+  );
+  return sessions.length > 0 ? managedDaemonStalledPayload({ ...handover, sessions }) : undefined;
+}
+
 /**
  * The logging notifications for one liveness handover. A managed connection reports each slot
  * session a `proxy_stalled` handover lost as `managed_execution_ended`; whatever is left keeps
- * the handover payload, as does every handover on a generic connection.
+ * the handover payload. Managed `daemon_stalled` sessions receive automatic reclaim advice;
+ * non-slot sessions and generic connections keep the generic handover.
  */
 export function livenessHandoverNotificationPayloads(
   handover: LivenessHandover,
@@ -165,9 +187,14 @@ export function livenessHandoverNotificationPayloads(
     managedStallLossPayload(managedSlots, session.sessionUuid, handover),
   );
   const rest = handover.sessions.filter((_, index) => !ended[index]);
+  const managed = managedDaemonStallPayload(managedSlots, { ...handover, sessions: rest });
+  const generic = managed
+    ? rest.filter((session) => !managedSlotForSession(managedSlots, session.sessionUuid))
+    : rest;
   return [
     ...ended.filter((payload) => payload !== undefined),
-    ...(rest.length > 0 ? [livenessHandoverPayload({ ...handover, sessions: rest })] : []),
+    ...(managed ? [managed] : []),
+    ...(generic.length > 0 ? [livenessHandoverPayload({ ...handover, sessions: generic })] : []),
   ];
 }
 
@@ -179,7 +206,9 @@ function boundSessionOwnershipLostPayload(
     // `daemon_stalled` / `proxy_stalled` (#10053): the harness is told which sessions and devices
     // are affected and what to do, rather than the generic "acquire a replacement session".
     return (
-      managedStallLossPayload(managedSlots, error.sessionUuid, error.handover) ?? error.toPayload()
+      managedStallLossPayload(managedSlots, error.sessionUuid, error.handover) ??
+      managedDaemonStallPayload(managedSlots, error.handover, error.sessionUuid) ??
+      error.toPayload()
     );
   }
   const ended = managedEndedPayload(managedSlots, error.sessionUuid, error.reason);
@@ -239,6 +268,7 @@ export function noActiveDeviceSessionPayload(
       code: "no_active_device_session",
       message: error.message,
       reason: error.reason,
+      ...idleReleaseField(error.reason),
       ...terminalSessionRefusalFields(),
     },
   };
@@ -545,7 +575,11 @@ export function managedSlotsResourceView(
       slot.sessionUuid === ended.sessionUuid
         ? {
             ...slot,
-            executionEnded: { reason: ended.reason, nextAction: RELAUNCH_EXECUTION_NEXT_ACTION },
+            executionEnded: {
+              reason: ended.reason,
+              ...idleReleaseField(ended.reason),
+              nextAction: RELAUNCH_EXECUTION_NEXT_ACTION,
+            },
           }
         : slot,
     ),

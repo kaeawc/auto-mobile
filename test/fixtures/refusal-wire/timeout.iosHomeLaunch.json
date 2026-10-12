@@ -1,0 +1,13 @@
+{
+  "code": "timeout.iosHomeLaunch",
+  "builder": "IosHomeLaunchTimeoutError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"SpringBoard launch exhausted the Home budget\",\"code\":\"timeout\",\"retryable\":true}"
+      }
+    ],
+    "isError": true
+  }
+}

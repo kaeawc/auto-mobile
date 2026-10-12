@@ -17,7 +17,12 @@ import { ScreenshotJobTracker } from "../../../utils/ScreenshotJobTracker";
 import type { ScreenshotService } from "../interfaces/ScreenshotService";
 import type { ScreenshotOptions } from "../TakeScreenshot";
 import type { ObserveScreenshotOptions } from "./screenshotOptions";
-import { getScreenshotStateStore, ScreenshotStateStore } from "./ScreenshotStateRegistry";
+import {
+  getScreenshotStateStore,
+  ScreenshotStateStore,
+  SCREENSHOT_CAPTURE_CANCELLED_REASON,
+  SCREENSHOT_CAPTURE_SUPERSEDED_REASON,
+} from "./ScreenshotStateRegistry";
 import { validateCapturedScreenshot } from "./validateCapturedScreenshot";
 import { ActionableError, toActionableError } from "../../../models/ActionableError";
 
@@ -140,12 +145,20 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
           isLatest: completion.isLatest,
         });
         if (!completion.isLatest) {
-          this.store.endObservation(this.device.deviceId, observationId, "capture superseded");
+          this.store.endObservation(
+            this.device.deviceId,
+            observationId,
+            SCREENSHOT_CAPTURE_SUPERSEDED_REASON,
+          );
           return;
         }
         if (completion.aborted) {
           logger.debug("[OBSERVE] Screenshot capture cancelled");
-          this.store.endObservation(this.device.deviceId, observationId, "capture cancelled");
+          this.store.endObservation(
+            this.device.deviceId,
+            observationId,
+            SCREENSHOT_CAPTURE_CANCELLED_REASON,
+          );
           return;
         }
         try {
@@ -307,12 +320,20 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
               isLatest: completion.isLatest,
             });
             if (!completion.isLatest) {
-              this.store.endObservation(this.device.deviceId, observationId, "capture superseded");
+              this.store.endObservation(
+                this.device.deviceId,
+                observationId,
+                SCREENSHOT_CAPTURE_SUPERSEDED_REASON,
+              );
               return;
             }
             if (completion.aborted) {
               logger.debug("[OBSERVE] Screenshot capture cancelled");
-              this.store.endObservation(this.device.deviceId, observationId, "capture cancelled");
+              this.store.endObservation(
+                this.device.deviceId,
+                observationId,
+                SCREENSHOT_CAPTURE_CANCELLED_REASON,
+              );
               return;
             }
             try {
@@ -364,7 +385,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
           this.store.endObservation(
             this.device.deviceId,
             options.observationId,
-            "capture cancelled",
+            SCREENSHOT_CAPTURE_CANCELLED_REASON,
           );
         }
         return;
@@ -429,7 +450,9 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
           this.store.endObservation(
             this.device.deviceId,
             observationId,
-            snapshot?.isLatest === false ? "capture superseded" : "capture cancelled",
+            snapshot?.isLatest === false
+              ? SCREENSHOT_CAPTURE_SUPERSEDED_REASON
+              : SCREENSHOT_CAPTURE_CANCELLED_REASON,
           );
           return;
         }

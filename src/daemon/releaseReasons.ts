@@ -11,8 +11,9 @@
 
 export interface SessionReleaseReasonTraits {
   /**
-   * The session ran out its idle window (#10832): session-not-found answers carry `idle: true`
-   * and the loss message explains the idle window.
+   * The session ran out its idle window (#10832): answers carry `idle: true` beside the reason
+   * and the loss message explains the idle window. This does not imply a terminal row:
+   * outranksReleaseReason/releaseReasonStrength consult idle only for terminal reasons.
    */
   readonly idle: boolean;
   /**
@@ -82,10 +83,15 @@ const NOT_TERMINAL: SessionReleaseReasonTraits = {
 const TERMINAL: SessionReleaseReasonTraits = { ...NOT_TERMINAL, terminal: true };
 const TERMINAL_EXPIRY: SessionReleaseReasonTraits = { ...TERMINAL, expiry: true };
 /**
- * Every idle release ends the session, whatever the liveness policy: heartbeat, one-shot CLI or
+ * Every live idle release ends the session, whatever the liveness policy: heartbeat, one-shot CLI or
  * managed execution (owner decision 2026-10-09, #11258).
  */
 const IDLE_EXPIRY: SessionReleaseReasonTraits = { ...TERMINAL_EXPIRY, idle: true };
+/**
+ * A stored row found past its idle deadline with no daemon there to release it: the answer about
+ * it carries `idle: true`, while the reason itself stays non-terminal.
+ */
+const PERSISTED_IDLE_LAPSE: SessionReleaseReasonTraits = { ...NOT_TERMINAL, idle: true };
 const RECOVERABLE_HANDOFF: SessionReleaseReasonTraits = {
   ...NOT_TERMINAL,
   recoverable: true,
@@ -134,7 +140,7 @@ export const SESSION_RELEASE_REASON_TRAITS: Readonly<
   /** The daemon restarted; it may rehydrate the session. */
   "daemon-restart": RECOVERABLE_HANDOFF,
   /** A persisted row found past its deadline (it can no longer be recovered anyway). */
-  expired: NOT_TERMINAL,
+  expired: PERSISTED_IDLE_LAPSE,
 };
 
 /** The tags of every prefix family, checked in this order. */
@@ -203,6 +209,14 @@ export function isExpiryReleaseReason(reason: string): reason is SessionReleaseR
 /** Whether the session ran out its idle window (see {@link SessionReleaseReasonTraits.idle}). */
 export function isIdleReleaseReason(reason: string): boolean {
   return sessionReleaseReasonTraits(reason).idle;
+}
+
+/**
+ * `idle` sits beside the reason it qualifies (error.reason, details.reason or releaseReason), is
+ * only ever true, and is absent otherwise. Every wire reads the reason table through this helper.
+ */
+export function idleReleaseField(reason: string | undefined): { idle?: true } {
+  return reason && isIdleReleaseReason(reason) ? { idle: true } : {};
 }
 
 /** Whether a restarted daemon may rehydrate the session (see {@link SessionReleaseReasonTraits.recoverable}). */

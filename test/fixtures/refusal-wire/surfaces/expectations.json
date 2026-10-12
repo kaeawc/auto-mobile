@@ -164,7 +164,8 @@
         "acquireNewSession": true,
         "details": {
           "sessionUuid": "11111111-2222-4333-8444-555555555555",
-          "reason": "cli-idle-timeout"
+          "reason": "cli-idle-timeout",
+          "idle": true
         }
       }
     },
@@ -272,7 +273,8 @@
         "acquireNewSession": true,
         "details": {
           "sessionUuid": "11111111-2222-4333-8444-555555555555",
-          "reason": "cli-idle-timeout"
+          "reason": "cli-idle-timeout",
+          "idle": true
         }
       }
     },
@@ -312,6 +314,19 @@
         "code": "daemon_restart_pending",
         "retryable": true,
         "acquireNewSession": false
+      }
+    },
+    "socket-frame.session_ownership_lost.admission_expired": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "expired",
+          "idle": true
+        }
       }
     },
     "overload-frame.daemon_overloaded": {

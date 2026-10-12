@@ -137,7 +137,11 @@ import {
   type DeviceProvisioner,
 } from "../devices/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
-import { requestAcquisitionReceipt, type AcquisitionReceipt } from "../daemon/acquisitionReceipt";
+import {
+  commitAcquisition,
+  requestAcquisitionReceipt,
+  type AcquisitionReceipt,
+} from "../daemon/acquisitionReceipt";
 import { acquireUndoneIfUndelivered, undoUndeliveredAcquisition } from "./undeliveredAcquisition";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
@@ -3639,6 +3643,7 @@ export async function runProvisionDeviceWithinDeadline<T>(
 export type DeadlineBoundOperation<T> = (
   signal: AbortSignal,
   undoIfUndelivered: (undo: (result: T) => Promise<void>) => void,
+  onDelivered: (commit: () => void) => void,
 ) => Promise<T>;
 
 /**
@@ -3652,9 +3657,15 @@ export function bindUndoneIfUndelivered(
   bind: (receipt: AcquisitionReceipt) => Promise<string>,
   bootOf?: () => DeviceBootResult | undefined,
 ): DeadlineBoundOperation<string> {
-  return async (signal, undoIfUndelivered) => {
+  return async (signal, undoIfUndelivered, onDelivered) => {
     // One receipt per acquiring request, so the request-level undo sees what this bind minted.
-    const receipt = requestAcquisitionReceipt() ?? {};
+    const requestReceipt = requestAcquisitionReceipt();
+    const receipt = requestReceipt ?? {};
+    // A request-level receipt waits for the entire handler; a private one commits only when
+    // the deadline race actually delivers this bind's result.
+    if (!requestReceipt) {
+      onDelivered(() => commitAcquisition(receipt));
+    }
     undoIfUndelivered(async () => {
       await undoUndeliveredAcquisition(receipt, signal.reason);
       const boot = bootOf?.();
@@ -3686,6 +3697,7 @@ export async function runOperationWithinDeadline<T>(
     : controller.signal;
   let operationSettled = false;
   let undo: ((result: T) => Promise<void>) | undefined;
+  let delivered: (() => void) | undefined;
   const registerUndo = (registered: (result: T) => Promise<void>): void => {
     undo = registered;
   };
@@ -3702,7 +3714,11 @@ export async function runOperationWithinDeadline<T>(
     operationSettled = true;
     return result;
   };
-  const operationPromise = runWithAbortSignal(signal, () => operation(signal, registerUndo)).then(
+  const operationPromise = runWithAbortSignal(signal, () =>
+    operation(signal, registerUndo, (commit) => {
+      delivered = commit;
+    }),
+  ).then(
     (result) => {
       // Returning `result` settles this promise in the same turn, so the race below delivers it
       // unless the request was already cancelled or timed out. Then the race is lost for good,
@@ -3725,7 +3741,7 @@ export async function runOperationWithinDeadline<T>(
   });
 
   try {
-    return await raceWithDeadline(operationPromise, {
+    const result = await raceWithDeadline(operationPromise, {
       timer,
       timeoutMs: remainingMs,
       signal: requestSignal,
@@ -3736,6 +3752,8 @@ export async function runOperationWithinDeadline<T>(
         return error;
       },
     });
+    delivered?.();
+    return result;
   } catch (error) {
     if (!operationSettled) {
       onOrphan?.(operationPromise);

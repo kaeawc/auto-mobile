@@ -1,3 +1,4 @@
+import type { DeferredRebindCleanup } from "./acquisitionReceipt";
 import type { TimingData } from "../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
@@ -34,7 +35,11 @@ import {
   refusedClaimHoldSource,
   type LivenessOwnerView,
 } from "./livenessClaimDecision";
-import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
+import {
+  getAbortSignal,
+  runOutsideRequestContext,
+  runWithAbortSignal,
+} from "../utils/AbortContext";
 import { requestAcquisitionReceipt } from "./acquisitionReceipt";
 import { defaultTimer, SteadyWallClock, Timer } from "../utils/SystemTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
@@ -1169,6 +1174,8 @@ export interface RebindSessionOptions {
   stableDeviceId?: string;
   /** Internal owner proving that a shutdown reservation authorized this recovery rebind. */
   terminalReleaseReservationOwner?: symbol;
+  /** Only receipt-backed acquisitions can decide delivery versus undo. */
+  deferCleanup?: (cleanup: DeferredRebindCleanup) => void;
 }
 
 const KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS = 1_000;
@@ -1548,6 +1555,8 @@ export class SessionManager {
    * late setup or keep-awake restore.
    */
   private readonly pendingDeviceCleanups: Map<string, Promise<void>> = new Map();
+  /** Individual promises let an undo join every cleanup except the gate it still owns. */
+  private readonly pendingDeviceCleanupWork = new Map<string, Set<Promise<unknown>>>();
   /** The latest cap-bounded settle time of each device's pending cleanup, when one was given. */
   private readonly pendingDeviceCleanupSettlesBy: Map<string, number> = new Map();
   /**
@@ -1643,6 +1652,13 @@ export class SessionManager {
   private readonly pendingSessionReleases: Map<string, PendingSessionRelease> = new Map();
   /** Rebinds that a release must await before it can remove the live binding. */
   private readonly pendingSessionRebinds: Map<string, PendingSessionRebind> = new Map();
+  private readonly deferredRebindCleanups = new Map<
+    DeferredRebindCleanup,
+    {
+      sessionId: string;
+      deviceId: string;
+    }
+  >();
   private readonly terminalReleaseSnapshots: Map<string, SessionReleaseSnapshot> = new Map();
   private readonly pendingNonTerminalReleaseSnapshots: Map<string, SessionReleaseSnapshot> =
     new Map();
@@ -2353,12 +2369,19 @@ export class SessionManager {
   }
 
   /** Return outstanding post-release device work, if the device must stay quarantined. */
-  getPendingDeviceCleanup(deviceId: string): Promise<void> | null {
+  getPendingDeviceCleanup(deviceId: string, ownGate?: Promise<void>): Promise<void> | null {
+    if (ownGate) {
+      const work = Array.from(this.pendingDeviceCleanupWork.get(deviceId) ?? []).filter(
+        (cleanup) => cleanup !== ownGate,
+      );
+      return work.length > 0 ? Promise.allSettled(work).then(() => undefined) : null;
+    }
     return this.pendingDeviceCleanups.get(deviceId) ?? null;
   }
 
   /** Wait for the device work that outlived release, without blocking shutdown indefinitely. */
   async drainPendingDeviceCleanups(timeoutMs: number): Promise<boolean> {
+    this.flushDeferredRebindCleanups();
     const cleanups = [
       ...this.pendingDeviceCleanups.values(),
       ...this.acquisitionDeviceCleanups.values(),
@@ -2471,8 +2494,13 @@ export class SessionManager {
 
   /** Release owns the device until both bounded teardown and any overflow work settle. */
   hasDeviceCleanupInProgress(deviceId: string): boolean {
+    const receipt = requestAcquisitionReceipt();
+    const ownGate =
+      receipt?.rebound?.fromDeviceId === deviceId && receipt.deferredRebindCleanup?.retained
+        ? receipt.deferredRebindCleanup?.settled
+        : undefined;
     return (
-      this.pendingDeviceCleanups.has(deviceId) ||
+      this.getPendingDeviceCleanup(deviceId, ownGate) !== null ||
       (this.acquisitionDeviceCleanups.has(deviceId) &&
         this.getSessionForDevice(deviceId) === null) ||
       Array.from(this.activeReleasePromises).some(
@@ -4834,11 +4862,13 @@ export class SessionManager {
       throw new Error(`Cannot rebind released session ${sessionId}.`);
     }
 
+    this.flushDeferredRebindCleanups({ sessionId });
     const promise = this.persistAndPublishRebind(
       existing,
       assignedDevice,
       platform,
       options.stableDeviceId ?? existing.stableDeviceId,
+      options.deferCleanup,
     );
     const rebind = { session: existing, promise };
     this.pendingSessionRebinds.set(sessionId, rebind);
@@ -4872,6 +4902,7 @@ export class SessionManager {
     assignedDevice: string,
     platform: Platform,
     stableDeviceId: string | undefined,
+    deferCleanup?: (cleanup: DeferredRebindCleanup) => void,
   ): Promise<Session> {
     const activeSetups = Array.from(this.sessionSetupPromises, (setup) =>
       setup.session === existing ? setup.promise : null,
@@ -4898,51 +4929,33 @@ export class SessionManager {
       // session and wrote its row while this row was in flight, and this row landed over it.
       await this.restoreReleasedRowAfterReassert(existing);
     }
-    const pendingKeepScreenAwakeRestoration = (
-      await this.restoreKeepScreenAwakeBestEffort(existing)
-    ).pending;
-    // Same contract as release: a failed restore must not hand the old
-    // simulator back to the pool clean. Any outstanding retry is registered
-    // against that device below, so DevicePool.releaseDevice defers idling it.
-    const pendingBiometricRestoration = (await this.restoreBiometricEnrollmentBestEffort(existing))
-      .pending;
-    // Rebind restores the old device to `none` here, so cancel any standalone TTL
-    // for this session — it must not later fire against the now-released old
-    // device (issue #6085 item 2).
+    const previousDevice = existing.assignedDevice;
+    const oldView: Session = { ...existing, cacheData: { ...existing.cacheData } };
+    const expiry = this.peekNetworkConditionExpiry(existing.sessionId);
+    const lease = this.iosAppNetworkLeases.active(existing.sessionId);
+    // These callbacks read the live session. Suspend TTL and transfer lease renewal before
+    // publishing B, so neither can address B with A's state. Undo resumes the original deadline.
     this.cancelNetworkConditionExpiry(existing.sessionId);
     this.iosAppNetworkLeases.stop(existing.sessionId);
-    const networkTarget = this.networkConditionRestoreTarget(existing);
-    const pendingNetworkRestoration = networkTarget
-      ? ((
-          await this.runUnderTeardownShield(async () => [
-            {
-              ...(await this.restoreNetworkConditionBestEffort(existing)),
-              abandon: () => this.abandonCappedRestore(networkTarget, "network-condition"),
-            },
-          ])
-        )[0] ?? null)
-      : null;
-
-    const pendingClockRestoration = existing.cacheData.clock
-      ? (await this.getPendingClockRestoration(existing, null)).pending
-      : null;
-    const pendingRotationRestoration = existing.cacheData.rotation
-      ? (await this.getPendingRotationRestoration(existing, null)).pending
-      : null;
-    const pendingScreenReaderRestoration = existing.cacheData.screenReader
-      ? (await this.getPendingScreenReaderRestoration(existing, null)).pending
-      : null;
-    const previousDevice = existing.assignedDevice;
-    const pendingRebindCleanup = [
-      pendingKeepScreenAwakeRestoration,
-      pendingBiometricRestoration,
-      pendingNetworkRestoration,
-      pendingClockRestoration,
-      pendingRotationRestoration,
-      pendingScreenReaderRestoration,
-    ].filter((cleanup): cleanup is Promise<void> => cleanup !== null);
-    if (pendingRebindCleanup.length > 0) {
-      this.trackPendingDeviceCleanup(previousDevice, pendingRebindCleanup);
+    if (deferCleanup) {
+      const cleanup = this.deferRebindOverrides(
+        oldView,
+        () => {
+          if (expiry) {
+            this.rearmNetworkConditionExpiry(existing, expiry);
+          }
+          if (lease) {
+            this.confirmIosAppNetworkRule(existing, lease);
+          }
+        },
+        lease,
+      );
+      deferCleanup(cleanup);
+    } else {
+      const pending = await this.restoreRebindOverrides(existing);
+      if (pending.length > 0) {
+        this.trackPendingDeviceCleanup(previousDevice, pending);
+      }
     }
     // Preserve object identity so an already-started release observes the
     // rebinding and frees its live replacement rather than a stale snapshot.
@@ -4970,6 +4983,163 @@ export class SessionManager {
     }
     this.notifySessionDeviceUnbound(existing.sessionId, previousDevice);
     return existing;
+  }
+
+  /** Flush only matching receipts; release, a later rebind and shutdown all commit once. */
+  flushDeferredRebindCleanups(filter: { sessionId?: string; deviceId?: string } = {}): void {
+    for (const [cleanup, owner] of this.deferredRebindCleanups) {
+      if (
+        (filter.sessionId === undefined || filter.sessionId === owner.sessionId) &&
+        (filter.deviceId === undefined || filter.deviceId === owner.deviceId)
+      ) {
+        cleanup.commit();
+      }
+    }
+  }
+
+  private deferRebindOverrides(
+    oldView: Session,
+    resumeRetainedState: () => void,
+    lease: IosAppNetworkRule | undefined,
+  ): DeferredRebindCleanup {
+    const gate = Promise.withResolvers<void>();
+    let state: "deferred" | "started" | "cancelled" | "rebound" = "deferred";
+    const incarnation = this.deviceHealth?.incarnation(oldView.assignedDevice);
+    const mayRestore = () => {
+      const holder = this.getSessionForDevice(oldView.assignedDevice);
+      return (
+        (holder === null || holder === oldView.sessionId) &&
+        (incarnation === undefined ||
+          this.deviceHealth?.incarnation(oldView.assignedDevice) === incarnation)
+      );
+    };
+    const leaseKey = `rebind:${oldView.sessionId}:${oldView.assignedDevice}`;
+    const finish = () => {
+      this.timer.clearTimeout(bound);
+      this.iosAppNetworkLeases.stop(leaseKey);
+      this.deferredRebindCleanups.delete(cleanup);
+    };
+    const start = (failedUndo = false) => {
+      if (state !== "deferred" && !(failedUndo && state === "cancelled")) {
+        return;
+      }
+      state = "started";
+      finish();
+      // Quarantine was registered before publication. Check ownership again before any write;
+      // a forcibly replaced holder must never receive this session's restores.
+      if (!mayRestore()) {
+        logger.warn(
+          `Not restoring rebound device ${oldView.assignedDevice}: runtime changed or reassigned`,
+        );
+        gate.resolve();
+        return;
+      }
+      void runOutsideRequestContext(async () => {
+        const pending = await this.restoreRebindOverrides(oldView, mayRestore);
+        await Promise.allSettled(pending);
+      }).then(gate.resolve, (error: unknown) => {
+        logger.warn(
+          `Deferred rebind cleanup failed on ${oldView.assignedDevice}: ${errorMessage(error)}`,
+          error,
+        );
+        gate.resolve();
+      });
+    };
+    const cleanup: DeferredRebindCleanup = {
+      settled: gate.promise,
+      get retained() {
+        return state === "cancelled";
+      },
+      commit: () => start(),
+      cancel: () => {
+        if (state === "started" || state === "rebound") {
+          return false;
+        }
+        if (state === "deferred") {
+          state = "cancelled";
+          finish();
+        }
+        return true;
+      },
+      finish: (outcome) => {
+        if (state === "cancelled") {
+          if (outcome === "rebound") {
+            state = "rebound";
+            gate.resolve();
+          } else {
+            // Only failed undo may restart cancelled restores, using the same old-device view.
+            start(true);
+          }
+        } else if (state === "deferred") {
+          cleanup.commit();
+        }
+      },
+      resumeRetainedState: () => {
+        if (state === "cancelled") {
+          resumeRetainedState();
+        }
+      },
+    };
+    // Reuse the creation/release-finalization wait (40s); an orphaned receipt cannot reserve A forever.
+    const bound = this.timer.setTimeout(cleanup.commit, SESSION_CREATE_WAIT_TIMEOUT_MS);
+    bound.unref?.();
+    this.deferredRebindCleanups.set(cleanup, {
+      sessionId: oldView.sessionId,
+      deviceId: oldView.assignedDevice,
+    });
+    if (lease) {
+      this.iosAppNetworkLeases.start(
+        leaseKey,
+        lease,
+        () => state === "deferred" && this.getSessionForDevice(oldView.assignedDevice) === null,
+      );
+    }
+    this.registerPendingDeviceCleanup(
+      oldView.assignedDevice,
+      gate.promise,
+      SESSION_CREATE_WAIT_TIMEOUT_MS + SESSION_RELEASE_TEARDOWN_CAP_MS,
+    );
+    return cleanup;
+  }
+
+  /** One restore sequence shared by inline rebinds and receipt-owned deferred cleanup. */
+  private async restoreRebindOverrides(
+    existing: Session,
+    mayRestore: () => boolean = () => true,
+  ): Promise<Promise<void>[]> {
+    const restores: Array<() => Promise<{ pending: Promise<void> | null }>> = [
+      () => this.restoreKeepScreenAwakeBestEffort(existing),
+      () => this.restoreBiometricEnrollmentBestEffort(existing),
+      async () => {
+        const networkTarget = this.networkConditionRestoreTarget(existing);
+        if (!networkTarget) {
+          return { pending: null };
+        }
+        const pending = await this.runUnderTeardownShield(async () => [
+          {
+            ...(await this.restoreNetworkConditionBestEffort(existing)),
+            abandon: () => this.abandonCappedRestore(networkTarget, "network-condition"),
+          },
+        ]);
+        return { pending: pending[0] ?? null };
+      },
+      () => this.getPendingClockRestoration(existing, null),
+      () => this.getPendingRotationRestoration(existing, null),
+      () => this.getPendingScreenReaderRestoration(existing, null),
+    ];
+    const pending: Promise<void>[] = [];
+    for (const restore of restores) {
+      // A shutdown or forced handoff can retire A during an earlier awaited write. Do not
+      // capture subsequent targets from a replacement runtime or another session's holder.
+      if (!mayRestore()) {
+        break;
+      }
+      const result = await restore();
+      if (result.pending) {
+        pending.push(result.pending);
+      }
+    }
+    return pending;
   }
 
   /**
@@ -5329,10 +5499,12 @@ export class SessionManager {
       expiryOrigin: options.expiryOrigin,
       forcedAbort: new AbortController(),
     };
-    const run = () =>
-      release.forced
+    const run = () => {
+      this.flushDeferredRebindCleanups({ sessionId });
+      return release.forced
         ? this.finishReleaseForcedBeforeStart(session)
         : this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options, release);
+    };
     if (pendingRebind?.session === session) {
       release.stage = "awaiting-rebind";
       release.promise = pendingRebind.promise.then(run, run);
@@ -9075,6 +9247,18 @@ export class SessionManager {
   }
 
   private trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<unknown>[]): void {
+    const work = this.pendingDeviceCleanupWork.get(deviceId) ?? new Set<Promise<unknown>>();
+    this.pendingDeviceCleanupWork.set(deviceId, work);
+    for (const promise of cleanups) {
+      work.add(promise);
+      const remove = () => {
+        work.delete(promise);
+        if (work.size === 0 && this.pendingDeviceCleanupWork.get(deviceId) === work) {
+          this.pendingDeviceCleanupWork.delete(deviceId);
+        }
+      };
+      void promise.then(remove, remove);
+    }
     const previous = this.pendingDeviceCleanups.get(deviceId);
     const cleanup = Promise.allSettled(previous ? [previous, ...cleanups] : cleanups).then(
       () => undefined,

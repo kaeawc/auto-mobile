@@ -543,6 +543,22 @@ the connection that acquired its session may stop it. This includes segmented vi
 and test recordings. Release finalizes adopted recordings within the existing cap,
 announces their recording ids, and keeps their artifacts fetchable by id (#10958).
 
+An undelivered `setActiveDevice` rebind moves its existing session back to the device
+it held (#11593, #11689). Keep-awake, biometric enrollment, network condition, clock,
+rotation and screen-reader restores are deferred until delivery; undo cancels them and
+retains their cache records. Network TTL deadlines and iOS per-app lease renewal survive
+undo. The old device stays quarantined until undo holds it again or all delivered
+restores settle. If undo cannot bind back, it restores the old device before releasing
+quarantine and leaves the session and its replacement-device overrides on the replacement.
+
+Deferral uses the existing 40-second session creation/release-finalization wait. An
+orphaned receipt starts restores at that bound; a later rebind, session release, device
+shutdown/removal or daemon cleanup drain also flushes them once. Callers without a
+receipt restore inline. If undo arrives after restores started, it waits boundedly for
+its cleanup before binding back and leaves reverted overrides absent from the cache.
+If another session acquired the original device, the session stays on the replacement
+and no further restore touches the other holder's device.
+
 ## Retryable acquisition refusals
 
 An acquisition the daemon cannot grant yet is refused with a typed, retryable

@@ -1,5 +1,20 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { Platform } from "../models";
 import type { Session, SessionCacheData } from "./sessionManager";
+
+/** The old device stays quarantined until delivery cleanup or undo's bind-back settles. */
+export interface DeferredRebindCleanup {
+  readonly settled: Promise<void>;
+  /** Undo owns this still-closed gate after preventing restores from starting. */
+  readonly retained: boolean;
+  commit(): void;
+  /** True only when undo prevented every restore from starting. */
+  cancel(): boolean;
+  /** Complete undo: retain a rebound device, or restore the old snapshot on failure. */
+  finish(outcome: "rebound" | "failed"): void;
+  /** Resume the retained device's TTL/lease after its cache has been put back. */
+  resumeRetainedState(): void;
+}
 
 /**
  * What one acquisition created, filled in while it runs. A caller whose result never reaches its
@@ -13,6 +28,7 @@ export interface AcquisitionReceipt {
    * its retry: a cancellation at any point of the mint must leave the id free to be created.
    */
   clientChosenSessionId?: string;
+  deferredRebindCleanup?: DeferredRebindCleanup;
   /**
    * The session this acquisition minted. Absent when it reused or moved an existing one.
    * `activityGeneration` is the session's at the mint: it advances whenever anyone resolves the
@@ -32,12 +48,13 @@ export interface AcquisitionReceipt {
    * The existing session this call moved to `deviceId`, and the device it held before.
    * `cacheData` is what the session cached for that device when the move began. A rebind discards
    * it, so moving the session back puts back the part that still describes the device (display
-   * pin, readiness, observation baselines) and not the overrides the rebind already restored.
+   * pin, readiness, observation baselines), including overrides when deferred cleanup was cancelled.
    */
   rebound?: {
     readonly session: Session;
     readonly deviceId: string;
     readonly fromDeviceId: string;
+    readonly fromPlatform: Platform;
     readonly cacheData: SessionCacheData;
   };
   /**
@@ -76,4 +93,9 @@ export function runWithAcquisitionReceipt<T>(receipt: AcquisitionReceipt, run: (
 /** The receipt of the acquiring request this code runs for, when there is one. */
 export function requestAcquisitionReceipt(): AcquisitionReceipt | undefined {
   return requestReceipt.getStore();
+}
+
+/** The answer is delivered (or another call holds it): old-device cleanup now belongs to release. */
+export function commitAcquisition(receipt: AcquisitionReceipt): void {
+  receipt.deferredRebindCleanup?.commit();
 }

@@ -128,6 +128,122 @@ function harness(env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" }) {
 }
 
 describe("DeviceAutolockManager", () => {
+  for (const persistenceFails of [false, true]) {
+    test(`adopts resumed R after readiness without minting; persistenceFails=${persistenceFails}`, async () => {
+      const h = harness();
+      try {
+        const session = await h.sessions.createSession("resumed-R", h.device.id, "android");
+        h.device.sessionId = session.sessionId;
+        h.device.status = "busy";
+        const recordReadiness = h.sessions.setDeviceReadiness.bind(h.sessions);
+        h.sessions.setDeviceReadiness = (id, level) => {
+          expect(h.manager.captureAutolockSessionForMcpSession("owner")).toBeUndefined();
+          h.events.push("readiness");
+          recordReadiness(id, level);
+        };
+        h.port.recordBindOwnership = (owner, id) => {
+          expect({ owner, id }).toEqual({ owner: "owner", id: "resumed-R" });
+          expect(h.sessions.getDeviceReadiness(id)).toBe("booted");
+          expect(h.manager.captureAutolockSessionForMcpSession(owner)).toBeUndefined();
+          h.events.push("ownership");
+          return true;
+        };
+        h.setPersistence(async (id, input) => {
+          expect(id).toBe("resumed-R");
+          expect(input.mcpSessionId).toBe("owner");
+          expect(h.manager.captureAutolockSessionForMcpSession("owner")).toBe("resumed-R");
+          h.events.push("persist");
+          if (persistenceFails) {
+            throw new Error("autolock write unavailable");
+          }
+        });
+        await h.manager.adoptResumedAutolockSession(
+          "resumed-R",
+          {
+            deviceId: h.device.id,
+            name: h.device.name,
+            platform: "android",
+          },
+          "owner",
+          "booted",
+        );
+        expect(h.device.autolockSessionId).toBe("resumed-R");
+        expect(h.sessions.getAllSessions()).toEqual([session]);
+        expect(h.device.assignmentCount).toBe(0);
+        expect(h.events).toEqual([
+          "lock",
+          "identity",
+          "readiness",
+          "ownership",
+          "persist",
+          "unlock",
+        ]);
+      } finally {
+        h.sessions.stopCleanupTimer();
+        h.timer.reset();
+      }
+    });
+  }
+
+  test("resumed autolock adoption never publishes or persists a closed connection", async () => {
+    const h = harness();
+    try {
+      await h.sessions.createSession("resumed-R", h.device.id, "android");
+      h.device.sessionId = "resumed-R";
+      h.port.recordBindOwnership = () => false;
+      await h.manager.adoptResumedAutolockSession(
+        "resumed-R",
+        {
+          deviceId: h.device.id,
+          name: h.device.name,
+          platform: "android",
+        },
+        "closed",
+        "automationReady",
+      );
+      expect(h.device.autolockSessionId).toBe("resumed-R");
+      expect(h.sessions.getDeviceReadiness("resumed-R")).toBe("automationReady");
+      expect(h.manager.captureAutolockSessionForMcpSession("closed")).toBeUndefined();
+      expect(h.events).toEqual(["lock", "identity", "unlock"]);
+    } finally {
+      h.sessions.stopCleanupTimer();
+      h.timer.reset();
+    }
+  });
+
+  test("resumed autolock adoption refuses an assignment lost while waiting for the lock", async () => {
+    const h = harness();
+    try {
+      await h.sessions.createSession("resumed-R", h.device.id, "android");
+      h.device.sessionId = "resumed-R";
+      h.port.withAssignmentLock = async (operation) => {
+        h.device.sessionId = "rival";
+        h.device.autolockSessionId = "rival";
+        return await operation();
+      };
+      await expect(
+        h.manager.adoptResumedAutolockSession(
+          "resumed-R",
+          {
+            deviceId: h.device.id,
+            name: h.device.name,
+            platform: "android",
+          },
+          "owner",
+          "booted",
+        ),
+      ).rejects.toThrow("no longer holds device");
+      expect(h.device.sessionId).toBe("rival");
+      expect(h.device.autolockSessionId).toBe("rival");
+      expect(h.manager.captureAutolockSessionForMcpSession("owner")).toBeUndefined();
+      expect(h.sessions.getAllSessions()).toHaveLength(1);
+      expect(h.events).toEqual([]);
+    } finally {
+      h.sessions.stopCleanupTimer();
+      h.timer.reset();
+    }
+  });
+
   test("standalone fallback reads the injected environment for each operation", async () => {
     const env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
     const { manager, sessions, device, events } = harness(env);

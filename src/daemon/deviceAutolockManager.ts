@@ -78,7 +78,8 @@ export interface DeviceAutolockPoolPort {
   assertNotReservedForShutdown(device: PooledDevice, message: string): void;
   /**
    * Refuse a device reserved for another session's restart recovery, like an explicit bind
-   * (#11294, #11461). An autolock mints a fresh session, so it is never the reserved row's own.
+   * (#11294, #11461). Ordinary autolock acquisition mints a fresh session; an owner's start
+   * resumes through the explicit bind before adopting that session as an autolock.
    */
   assertNotReservedForOtherRehydration(device: PooledDevice): void;
   recordSourceAndroidAvd(id: string, image: DeviceInfo | undefined): void;
@@ -749,6 +750,46 @@ export class DeviceAutolockManager {
     return this.attachAutolockSessionToMcpSession(sessionId, mcpSessionId, "if-absent", true);
   }
 
+  /** Adopt R only after the owner/target/deadline-checked restart bind has resumed it. */
+  async adoptResumedAutolockSession(
+    sessionId: string,
+    expectedDevice: BootedDevice,
+    mcpSessionId: string | undefined,
+    achievedReadiness: DeviceReadinessLevel,
+  ): Promise<void> {
+    await this.pool.withAssignmentLock(async () => {
+      const sessions = this.pool.getSessionManager();
+      const session = sessions.getSession(sessionId);
+      const device = this.pool.getDevice(expectedDevice.deviceId);
+      if (
+        !session ||
+        !device ||
+        session.assignedDevice !== expectedDevice.deviceId ||
+        session.platform !== expectedDevice.platform ||
+        !this.pool.isSessionAssignmentCurrent(device, session) ||
+        !sessions.isAdmittedForAutomation(session)
+      ) {
+        throw new ActionableError(
+          `Resumed session '${sessionId}' no longer holds device '${expectedDevice.deviceId}'.`,
+        );
+      }
+      this.pool.assertRuntimeIdentity(device, expectedDevice);
+      this.assertMcpSessionCanAutolockDevice(mcpSessionId, device);
+      // #6227: readiness must be recorded before publishing the resumed autolock route.
+      sessions.setDeviceReadiness(sessionId, achievedReadiness);
+      device.autolockSessionId = sessionId;
+      this.pool.noteDeviceStateChanged?.(device);
+      // Like acquisition and attach, never publish or persist a connection closed mid-bind.
+      if (mcpSessionId && !this.pool.recordBindOwnership(mcpSessionId, sessionId)) {
+        return;
+      }
+      if (mcpSessionId) {
+        this.recordAttachment(sessionId, mcpSessionId, true);
+      }
+      await this.persistAttachment(session, mcpSessionId);
+    });
+  }
+
   /**
    * Associate a live autolock session with a reconnected MCP client session.
    * `refuseForeignOwned` (reconnect restore, explicit-UUID calls) refuses a session another
@@ -799,13 +840,13 @@ export class DeviceAutolockManager {
 
   private async persistAttachment(
     session: Session,
-    mcpSessionId: string,
+    mcpSessionId: string | undefined,
   ): Promise<AutolockAttachOutcome> {
     try {
       const sessions = this.pool.getSessionManager();
       // Persisted stamps are wall epoch ms, shared by every process (#11162).
       await this.deviceSessionRepository.markAutolockSession(session.sessionId, {
-        mcpSessionId,
+        mcpSessionId: mcpSessionId ?? null,
         daemonSessionId: this.pool.getDaemonSessionId(),
         lastUsedAtMs: sessions.sessionClockToWall(session.lastUsedAt),
         expiresAtMs: sessions.sessionClockToWall(session.expiresAt),

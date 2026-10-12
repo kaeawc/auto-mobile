@@ -84,10 +84,12 @@ describe("start admission and owner resume for restart reservations", () => {
       connection?: string;
       label?: boolean;
       idleMs?: number;
+      autolock?: boolean;
     } = {},
   ) {
     const platform = options.platform ?? "android";
-    const env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
+    const env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: options.autolock ? "1" : "0" };
+    const holder = options.label ? `${HOLDER}:phone` : HOLDER;
     const timer = new FakeTimer();
     timer.setCurrentTime(1_000);
     const manager = new RestartDeviceManager();
@@ -101,6 +103,7 @@ describe("start admission and owner resume for restart reservations", () => {
     manager.setDeviceImages(platform, [image]);
     manager.setMockChildProcess(device.name, null);
     const persistence = new FakeDeviceSessionPersistence();
+    const autolockWrites: Array<{ sessionId: string; mcpSessionId: string | null }> = [];
     const sessions = new SessionManager(
       timer,
       persistence,
@@ -116,6 +119,15 @@ describe("start admission and owner resume for restart reservations", () => {
         deviceManager: manager,
         installedAppsRepository: new FakeInstalledAppsRepository(),
         recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+        idGenerator: new FakeIdGenerator(options.autolock ? [holder] : []),
+        deviceSessionRepository: {
+          markAutolockSession: async (id, metadata) => {
+            autolockWrites.push({ sessionId: id, mcpSessionId: metadata.mcpSessionId ?? null });
+            const row = (await persistence.getSession!(id))!;
+            row.autolock_enabled = 1;
+            row.mcp_session_id = metadata.mcpSessionId;
+          },
+        },
       }),
     );
     const restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
@@ -152,20 +164,32 @@ describe("start admission and owner resume for restart reservations", () => {
     });
     await pool.initializeWithDevices([device]);
     DaemonState.getInstance().initialize(sessions, pool);
-    const holder = options.label ? `${HOLDER}:phone` : HOLDER;
-    await pool.bindOrReuseDeviceSession(
-      holder,
-      device.deviceId,
-      platform,
-      undefined,
-      undefined,
-      device,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      options.connection,
-    );
+    if (options.autolock) {
+      expect(
+        await pool.autolockDevice(
+          device.deviceId,
+          platform,
+          options.connection,
+          undefined,
+          undefined,
+          device,
+        ),
+      ).toBe(holder);
+    } else {
+      await pool.bindOrReuseDeviceSession(
+        holder,
+        device.deviceId,
+        platform,
+        undefined,
+        undefined,
+        device,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        options.connection,
+      );
+    }
     // Keep idle expiry beyond the fixed restart window, so the retry pin measures that window.
     const live = sessions.getSession(holder)!;
     live.expiresAt = timer.now() + (options.idleMs ?? 600_000);
@@ -198,6 +222,7 @@ describe("start admission and owner resume for restart reservations", () => {
       { deviceReadiness: "booted" },
     );
     manager.clearHistory();
+    autolockWrites.length = 0;
     const call = (name: string, args: Record<string, unknown>, routingSessionUuid?: string) =>
       runWithToolSelectionContext({ routingSessionUuid }, () =>
         ToolRegistry.getTool(name)!.handler(args),
@@ -215,6 +240,7 @@ describe("start admission and owner resume for restart reservations", () => {
       device,
       image,
       holder,
+      autolockWrites,
       call,
       start,
     };
@@ -257,6 +283,128 @@ describe("start admission and owner resume for restart reservations", () => {
     });
   }
   type Fixture = Awaited<ReturnType<typeof fixture>>;
+
+  test("autolock owner connection exact start resumes R and publishes its route", async () => {
+    const f = await fixture({ autolock: true, connection: "owner-conn" });
+    const readiness = f.sessions.setDeviceReadiness.bind(f.sessions);
+    f.sessions.setDeviceReadiness = (id, level) => {
+      expect(f.pool.captureAutolockSessionForMcpSession("owner-conn")).toBeUndefined();
+      readiness(id, level);
+    };
+    await resumed(f, () => f.start({ avdName: f.device.name, __mcpSessionId: "owner-conn" }));
+    expect(f.manager.getCallCount("startDevice")).toBe(1);
+    expect(f.manager.getCallCount("killDevice")).toBe(0);
+    expect(f.pool.getDevice(f.device.deviceId)?.autolockSessionId).toBe(HOLDER);
+    expect(
+      f.pool.resolveAutolockSessionForMcpSession(
+        "owner-conn",
+        f.device.platform,
+        undefined,
+        f.device.deviceId,
+      ),
+    ).toBe(HOLDER);
+    expect(f.pool.resolveOwnedDeviceSessionForMcpSession("owner-conn", f.device.deviceId)).toBe(
+      HOLDER,
+    );
+    expect(f.sessions.getAllSessions().map((session) => session.sessionId)).toEqual([HOLDER]);
+    expect(await f.persistence.getSession!(HOLDER)).toMatchObject({
+      autolock_enabled: 1,
+      mcp_session_id: "owner-conn",
+    });
+    expect(f.autolockWrites).toEqual([{ sessionId: HOLDER, mcpSessionId: "owner-conn" }]);
+  });
+
+  test("autolock resumed owner closed during boot is neither routed nor persisted", async () => {
+    const f = await fixture({ autolock: true, connection: "owner-conn" });
+    f.manager.beforeReady = async () => f.pool.releaseMcpSessionBindings("owner-conn");
+    expect(await f.start({ avdName: f.device.name, __mcpSessionId: "owner-conn" })).toMatchObject({
+      structuredContent: { runtime: { session: { sessionUuid: HOLDER } } },
+    });
+    expect(f.pool.getDevice(f.device.deviceId)?.autolockSessionId).toBe(HOLDER);
+    expect(f.pool.captureAutolockSessionForMcpSession("owner-conn")).toBeUndefined();
+    expect(
+      f.pool.resolveOwnedDeviceSessionForMcpSession("owner-conn", f.device.deviceId),
+    ).toBeUndefined();
+    expect(f.autolockWrites).toEqual([]);
+    expect(f.sessions.getAllSessions().map((session) => session.sessionId)).toEqual([HOLDER]);
+    expect(f.manager.getCallCount("killDevice")).toBe(0);
+  });
+
+  test("autolock routing owner with a different connection adopts and persists R", async () => {
+    const f = await fixture({ autolock: true, connection: "owner-conn" });
+    await resumed(f, () => f.start({ avdName: f.device.name, __mcpSessionId: "new-conn" }, HOLDER));
+    expect(f.pool.resolveAutolockSessionForMcpSession("new-conn")).toBe(HOLDER);
+    expect(f.pool.resolveOwnedDeviceSessionForMcpSession("new-conn", f.device.deviceId)).toBe(
+      HOLDER,
+    );
+    expect(f.autolockWrites).toEqual([{ sessionId: HOLDER, mcpSessionId: "new-conn" }]);
+    expect(f.manager.getCallCount("startDevice")).toBe(1);
+    expect(f.manager.getCallCount("killDevice")).toBe(0);
+  });
+
+  for (const identity of ["routing", "label", "selector", "ios"] as const) {
+    test(`autolock ${identity} owner resumes R without a replacement session`, async () => {
+      const f = await fixture({
+        autolock: true,
+        connection: "owner-conn",
+        label: identity === "label",
+        platform: identity === "ios" ? "ios" : "android",
+      });
+      await resumed(f, () =>
+        identity === "selector"
+          ? f.call("startDevice", { platform: "android", createIfMissing: false }, HOLDER)
+          : f.start(undefined, HOLDER),
+      );
+      expect(f.manager.getCallCount("startDevice")).toBe(1);
+      expect(f.manager.getCallCount("killDevice")).toBe(0);
+      expect(f.pool.getDevice(f.device.deviceId)?.autolockSessionId).toBe(f.holder);
+      expect(
+        f.sessions
+          .getAllSessions()
+          .map((session) => session.sessionId)
+          .sort(),
+      ).toEqual(identity === "label" ? [HOLDER, f.holder].sort() : [HOLDER]);
+    });
+  }
+
+  test("autolock rival exact start and direct acquisition preserve the restart hold", async () => {
+    const f = await fixture({ autolock: true, running: true, connection: "owner-conn" });
+    await refusal(f, () => f.start({ avdName: f.device.name, __mcpSessionId: "rival" }));
+    const row = { ...(await f.persistence.getSession!(HOLDER))! };
+    const hold = f.internals.rehydrationReservations.get(HOLDER);
+    await expect(
+      f.pool.autolockDevice(f.device.deviceId, "android", "rival"),
+    ).rejects.toMatchObject({ code: "device_owned_by_other_session" });
+    expect(f.sessions.getAllSessions()).toHaveLength(0);
+    expect(f.pool.getDevice(f.device.deviceId)?.sessionId).toBeNull();
+    expect(f.internals.rehydrationReservations.get(HOLDER)).toBe(hold);
+    expect(await f.persistence.getSession!(HOLDER)).toEqual(row);
+    expect(f.manager.getCallCount("startDevice")).toBe(0);
+    expect(f.manager.getCallCount("killDevice")).toBe(0);
+  });
+
+  for (const ending of ["terminal", "window"] as const) {
+    test(`autolock admitted owner ${ending} during boot never mints a replacement`, async () => {
+      const f = await fixture({ autolock: true, connection: "owner-conn" });
+      const { child } = coldBoot(f);
+      f.manager.beforeReady = async () => {
+        if (ending === "terminal") {
+          await f.sessions.releaseSession(HOLDER, "explicit-release");
+        } else {
+          f.timer.advanceTime(180_001);
+          await drainMicrotasks(40);
+        }
+      };
+      await expect(
+        f.start({ avdName: f.device.name, bootTimeoutMs: 240_000, __mcpSessionId: "owner-conn" }),
+      ).rejects.toBeInstanceOf(TerminalSessionError);
+      expect(f.sessions.getAllSessions()).toHaveLength(0);
+      expect(f.pool.resolveAutolockSessionForMcpSession("owner-conn")).toBeUndefined();
+      expect(child.killed).toBe(true);
+      f.timer.advanceTime(0);
+      await drainMicrotasks();
+    });
+  }
 
   function coldBoot(f: Fixture) {
     const child = new FakeChildProcess(f.timer);
@@ -986,6 +1134,56 @@ describe("start admission and owner resume for restart reservations", () => {
     });
     expect(f.internals.rehydrationReservations.has(HOLDER)).toBe(true);
   });
+
+  for (const owner of [false, true]) {
+    for (const byName of [false, true]) {
+      test(`unpooled reused serial owner=${owner} byName=${byName} preserves the spare and R`, async () => {
+        const f = await fixture();
+        const row = { ...(await f.persistence.getSession!(HOLDER))! };
+        const hold = f.internals.rehydrationReservations.get(HOLDER);
+        const spare = { ...f.device, name: "spare-phone" };
+        const returned = { ...f.device, deviceId: "emulator-5556" };
+        f.manager.setBootedDevices("android", [spare]);
+        f.manager.setDeviceImages("android", [
+          { ...f.image, ...returned },
+          { ...f.image, ...spare, isRunning: true },
+        ]);
+        expect(f.pool.getDevice(spare.deviceId)).toBeNull();
+        const args = byName ? { avdName: f.device.name } : { deviceId: spare.deviceId };
+        if (owner && byName) {
+          expect(await f.start(args, HOLDER)).toMatchObject({
+            structuredContent: {
+              runtime: { deviceId: returned.deviceId, session: { sessionUuid: HOLDER } },
+            },
+          });
+          expect(f.sessions.getSession(HOLDER)?.assignedDevice).toBe(returned.deviceId);
+          expect(f.internals.rehydrationReservations.has(HOLDER)).toBe(false);
+          expect(f.manager.getCallCount("startDevice")).toBe(1);
+        } else {
+          const error: unknown = await f
+            .start(args, owner ? HOLDER : undefined)
+            .catch((error: unknown) => error);
+          expect(await f.persistence.getSession!(HOLDER)).toEqual(row);
+          expect(f.internals.rehydrationReservations.get(HOLDER)).toBe(hold);
+          expect(f.sessions.getSession(HOLDER)).toBeNull();
+          expect(f.manager.getCallCount("startDevice")).toBe(0);
+          expect(f.manager.getCallCount("killDevice")).toBe(0);
+          expect(await f.manager.getBootedDevices("android")).toContainEqual(spare);
+          if (owner) {
+            expect(error).toMatchObject({
+              message: `Cannot safely recover session ${HOLDER}: prepared device does not match its recovery target.`,
+            });
+          } else {
+            expect(error).toMatchObject({ code: "device_owned_by_other_session", retryable: true });
+          }
+        }
+        expect(f.manager.getCallCount("killDevice")).toBe(0);
+        expect(await f.manager.getBootedDevices("android")).toContainEqual(spare);
+        expect(f.pool.getDevice(spare.deviceId)?.sessionId).not.toBe(HOLDER);
+        expect(f.internals.intentionalShutdowns.size).toBe(0);
+      });
+    }
+  }
   test("iOS exact UDID reservation refuses before boot", async () => {
     const f = await fixture({ platform: "ios" });
     await refusal(f, () => f.start());

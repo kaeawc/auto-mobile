@@ -9580,6 +9580,13 @@ export class DevicePool {
     return this.autolockManager.captureAutolockSessionForMcpSession(mcpSessionId);
   }
 
+  adoptResumedAutolockSession(
+    ...args: Parameters<DeviceAutolockManager["adoptResumedAutolockSession"]>
+  ): Promise<void> {
+    const endBind = this.beginMcpBind(args[2]);
+    return this.autolockManager.adoptResumedAutolockSession(...args).finally(endBind);
+  }
+
   resolveAutolockSessionForMcpSession(
     ...args: Parameters<DeviceAutolockManager["resolveAutolockSessionForMcpSession"]>
   ): string | undefined {

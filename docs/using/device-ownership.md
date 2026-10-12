@@ -752,8 +752,9 @@ transport as `offline` or `unauthorized` (#11713). If it stays transitional,
 hint. The refusal is retryable, and any existing pool entry is left untouched.
 
 Each refusal carries a `retryAfterMs` hint. For `device_cleanup_in_progress` it
-is the time the cleanup can still take (#11360): the rest of a release's bounded
-teardown, or the rest of a recording finalize's cap (120 s plus a 5 s grace),
+is the time the cleanup can still take (#11360): the rest of an in-flight release's
+forced-release worst case, or of a registered cleanup's own cap, including a
+recording finalize's cap (120 s plus a 5 s grace),
 whether that finalize started at its session's release or when a session
 acquired a device with an owner-less recording on it (#11616). Cleanup with no
 cap of its own is manager-capped at 10 s only for release/unbound network-state
@@ -766,8 +767,8 @@ and contribute no bound (a 1 s polling hint when nothing else bounds cleanup).
 Trusted numeric caps remain owned by recording finalize, held-plan app cleanup,
 forced stuck release, network-condition TTL restore, deferred rebind gates, and
 bounded acquisition cleanups. An in-flight release
-advertises the stuck deadline plus one heartbeat-monitor interval plus 10 s
-quarantine (52 s with the default interval); the monitor only forces releases
+advertises the stuck deadline plus two heartbeat-monitor intervals plus 10 s
+quarantine (54 s with the default interval); the monitor only forces releases
 it tracks, while terminal explicit releases rely on their own bounded stages.
 `device_shutting_down` always
 advertises 2 s: a shutdown reservation is held across several separately bounded

@@ -317,6 +317,125 @@ for (const marked of [false, true]) {
   });
 }
 
+test("a late set from a same-UUID replacement's old object preserves the held marker", async () => {
+  const h = harness();
+  const commands: string[][] = [];
+  const clears = new MockLocationClearRegistry({
+    timer: h.timer,
+    simctlFactory: () => ({
+      executeCommandArgs: async (args) => {
+        commands.push(args);
+        return "";
+      },
+    }),
+  });
+  registerLocationRouteSessionCleanup(h.manager, {
+    registry: new LocationRouteRegistry(h.timer),
+    mockLocationClears: clears,
+  });
+  const old = await h.manager.createSession("old", device.deviceId, "ios");
+  const applied = createSessionLocationAppliedCallback({
+    sessionManager: h.manager,
+    sessionUuid: "old",
+    device,
+    mockLocationClears: clears,
+  });
+  await h.manager.releaseSession("old", "plan-auto-release");
+  const replacement = await h.manager.createSession("old", device.deviceId, "ios");
+  expect(replacement).not.toBe(old);
+  clears.markSet("old", device);
+  applied!();
+  await flush();
+  expect(h.manager.getSessionForDevice(device.deviceId)).toBe("old");
+  expect(commands).toEqual([]);
+  expect(h.warn).toHaveBeenCalledTimes(1);
+  expect(String(h.warn.mock.calls[0][0])).toContain("now held by old");
+  await h.manager.releaseSession("old");
+  await flush();
+  // Only the replacement's release consumes the surviving marker.
+  expect(commands).toEqual([["location", device.deviceId, "clear"]]);
+});
+
+for (const interval of [3_000, 7_000]) {
+  test(`a joined monitor reap meets the advertised release bound at ${interval}ms cadence`, async () => {
+    const key = "AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS";
+    const previous = process.env[key];
+    dispose.push(() => {
+      if (previous === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = previous;
+      }
+    });
+    process.env[key] = String(interval);
+    class ParkedPersistence extends FakeDeviceSessionPersistence {
+      gate: Promise<void> | undefined;
+      override async upsertActiveSession(record: DeviceSessionRecord) {
+        await this.gate;
+        await super.upsertActiveSession(record);
+      }
+    }
+    const persistence = new ParkedPersistence();
+    const h = harness(persistence);
+    await h.manager.createSession("old", android.deviceId, "android");
+    // No owner heartbeat arrives. It is already stale when the release starts.
+    await h.timer.advanceTimeAsync(90_000, flush);
+    persistence.gate = new Promise<void>(() => {});
+    void h.manager.rebindSession("old", "emulator-5556", "android");
+    await flush();
+    let reaps = 0;
+    const monitor = new SessionHeartbeatMonitor(
+      h.manager,
+      () => false,
+      async (id, reason) => {
+        reaps++;
+        await h.manager.releaseSession(id, reason);
+      },
+      h.timer,
+      { forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id) },
+    );
+    monitor.start();
+    dispose.push(() => {
+      void monitor.stop();
+    });
+    expect(h.timer.getPendingIntervals()).toContain(interval);
+    await h.timer.advanceTimeAsync(1, flush);
+    const startedAt = h.timer.now();
+    void h.manager.releaseSession("old", "plan-auto-release");
+    await flush();
+    const worst = getSessionReleaseCleanupWorstCaseMs();
+    expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(worst);
+    expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).toThrow(
+      DeviceCleanupInProgressError,
+    );
+    let freedAt: number | undefined;
+    const observe = async () => {
+      await flush();
+      if (freedAt === undefined && !h.manager.hasDeviceCleanupInProgress(android.deviceId)) {
+        freedAt = h.timer.now();
+      }
+    };
+    await h.timer.advanceTimeAsync(worst - 1, observe);
+    expect(reaps).toBe(1); // The monitor really joined the parked release.
+    if (h.manager.hasDeviceCleanupInProgress(android.deviceId)) {
+      expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).toThrow(
+        DeviceCleanupInProgressError,
+      );
+    } else {
+      expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).not.toThrow();
+    }
+    await h.timer.advanceTimeAsync(1, observe);
+    expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
+    expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).not.toThrow();
+    // The join restamps at the first scan; force runs at the first scan >= 40s later.
+    const actualMs = interval + Math.ceil(STUCK_REAP_WARN_MS / interval) * interval + cap - 1;
+    expect(freedAt).toBe(startedAt + actualMs);
+    expect(actualMs).toBe(interval === 3_000 ? 54_999 : 58_999);
+    expect(worst - actualMs).toBeGreaterThanOrEqual(0);
+    expect(worst - actualMs).toBeLessThan(interval);
+  });
+}
+
 test("a monitor-tracked wedged release advertises the whole forced-release worst case", async () => {
   class ParkedPersistence extends FakeDeviceSessionPersistence {
     gate: Promise<void> | undefined;
@@ -350,7 +469,7 @@ test("a monitor-tracked wedged release advertises the whole forced-release worst
   const interval = getSessionHeartbeatCheckIntervalMs();
   expect(interval).toBe(DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
   const worst = getSessionReleaseCleanupWorstCaseMs();
-  expect(worst).toBe(STUCK_REAP_WARN_MS + interval + cap);
+  expect(worst).toBe(STUCK_REAP_WARN_MS + 2 * interval + cap);
   expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(worst);
   expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).toThrow(
     DeviceCleanupInProgressError,
@@ -475,7 +594,7 @@ test("the env-resolved monitor interval is shared by the manager release bound",
   expect(h.timer.getPendingIntervals()).toContain(7_000);
   // The manager resolves the env when reading a hint; daemon construction uses
   // this same resolver for the monitor's default configuration.
-  expect(getSessionReleaseCleanupWorstCaseMs()).toBe(STUCK_REAP_WARN_MS + 7_000 + cap);
+  expect(getSessionReleaseCleanupWorstCaseMs()).toBe(STUCK_REAP_WARN_MS + 2 * 7_000 + cap);
   expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(
     getSessionReleaseCleanupWorstCaseMs(),
   );

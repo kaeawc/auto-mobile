@@ -1314,13 +1314,14 @@ export const SESSION_RELEASE_STUCK_DEADLINE_MS =
   SESSION_RELEASE_STUCK_MARGIN_MS;
 
 /**
- * The next monitor scan can force a stuck release, followed by capped quarantine.
+ * One scan may pass before a monitor reap joins the release and restarts its monitor clock.
+ * Allow one more scan to find it past the stuck deadline, then the capped forced quarantine.
  * Only monitor-tracked releases are forced; terminal explicit releases rely on their own stages.
  */
-export function getSessionReleaseCleanupWorstCaseMs(): number {
+export function getSessionReleaseCleanupWorstCaseMs(env: NodeJS.ProcessEnv = process.env): number {
   return (
     SESSION_RELEASE_STUCK_DEADLINE_MS +
-    getSessionHeartbeatCheckIntervalMs() +
+    2 * getSessionHeartbeatCheckIntervalMs(env) +
     SESSION_RELEASE_TEARDOWN_CAP_MS
   );
 }

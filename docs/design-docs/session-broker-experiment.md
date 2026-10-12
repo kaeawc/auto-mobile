@@ -231,6 +231,24 @@ A new execution attempt needs a new request ID.
 Release reports either confirmed release or cleanup still pending. A later
 recovery pass owns pending cleanup independently of the client connection.
 
+Deterministic consumers can use the provider CLI instead of implementing its
+socket protocol:
+
+```text
+auto-mobile --daemon session-request-status <request-id> --liveness-owner-token <token> --json
+auto-mobile --daemon release-broker-session <session-uuid> --liveness-owner-token <token> --json
+auto-mobile --daemon session-info <session-uuid> --json
+```
+
+These commands only contact the existing daemon. Status preserves terminal
+failures and pending cleanup as reported; successful command execution does not
+mean acquisition succeeded. Release has a 240-second request budget and returns
+`released`, `cleanup_pending`, or `unknown_session`. An unknown session is not
+cleanup proof. Query the original request receipt after an ambiguous release.
+Session info supplies the currently bound native device as descriptive metadata;
+it is not a device-selection operation. These are harness lifecycle commands,
+not model tools.
+
 ## Ownership and recovery
 
 There is one host registry and one native journal authority. The broker adds

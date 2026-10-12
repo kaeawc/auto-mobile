@@ -181,7 +181,7 @@ function isUnitTestDbGuardArmed(env: NodeJS.ProcessEnv): boolean {
 // The four env vars that redirect the database off the default `~/.auto-mobile`
 // location. A test that sets any of these has explicitly opted into a real
 // file-backed (or `:memory:`) DB it controls, so the guard leaves it alone.
-const DB_PATH_OVERRIDE_ENV_KEYS = [
+export const DB_PATH_OVERRIDE_ENV_KEYS = [
   "AUTOMOBILE_DB_PATH",
   "AUTO_MOBILE_DB_PATH",
   "AUTOMOBILE_DB_DIR",

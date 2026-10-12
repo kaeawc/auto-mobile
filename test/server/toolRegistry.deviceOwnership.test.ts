@@ -401,16 +401,15 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     ["an explicit deviceId", { deviceId: free.deviceId }],
     ["the predicted target", {}],
   ] as Array<[string, Record<string, unknown>]>) {
-    test(`a sessionless observe inside readiness on ${label} is cancelled when a session acquires it`, async () => {
+    test(`a sessionless observe inside readiness on ${label} watches when a session acquires it`, async () => {
       devices.setConnectedDevices([free]);
       const call = await startInReadiness("observe", { platform: "android", ...args });
       await sessionManager.createSession("late-holder", free.deviceId, "android");
       call.release();
-      const error = await call.outcome;
+      expect(await call.outcome).toBeUndefined();
 
-      expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
       expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
-      expect(ran).toEqual([]);
+      expect(ran).toEqual([{ name: "observe", deviceId: free.deviceId }]);
     });
   }
 

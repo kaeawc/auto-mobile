@@ -78,7 +78,7 @@ export class RealToolCallPath {
     this.deviceSessionManager.setConnectedDevices(devices);
   }
 
-  install(): this {
+  install(registerDefaultTools = true): this {
     ToolRegistry.clearTools();
     this.restorers.push(
       ToolRegistry.setPipelineOverridesForTesting({
@@ -135,6 +135,10 @@ export class RealToolCallPath {
         }) as unknown as AndroidCtrlProxyClient,
     );
     this.restorers.push(() => ctrlProxy.mockRestore());
+    // Focused admission suites register their own tool and keep the real pipeline above.
+    if (!registerDefaultTools) {
+      return this;
+    }
     registerInteractionTools();
     // sqlQuery is an embedded-SDK tool: it is only reachable when that mode is on.
     const embeddedSdk = serverConfig.isEmbeddedSdkEnabled();

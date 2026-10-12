@@ -32,6 +32,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { executionTracker, sessionExecutionMetadataOf } from "./executionTracker";
 import { withAdmittedSessionEcho } from "./routedSessionEcho";
 import { withForeignOwnedSessionMeta } from "./routedSessionMeta";
+import { holdsOwnerHeartbeatLease } from "../daemon/managedExecutionLiveness";
 import { combineRequestAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
@@ -1428,14 +1429,28 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // on or off. Naming a UUID is not proof of ownership (#11164): a read may still watch that
     // session, but this connection must never bind it for later sessionless calls. Decided
     // before any bind, and read at bind time so an ownership change during the handler is honored.
-    const foreignOwnedExplicitSessionUuid = (): string | undefined =>
-      providedSessionUuid &&
-      DaemonState.getInstance().isInitialized() &&
-      DaemonState.getInstance()
-        .getDevicePool()
-        .isSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)
+    const foreignOwnedExplicitSessionUuid = (): string | undefined => {
+      const state = DaemonState.getInstance();
+      if (!providedSessionUuid || !state.isInitialized()) {
+        return undefined;
+      }
+      const pool = state.getDevicePool();
+      if (pool.isSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)) {
+        return providedSessionUuid;
+      }
+      // A read never adopts an ownerless session or starts the proxy's owner heartbeat (#11557).
+      const session =
+        daemonMode &&
+        tool.isDeviceReadOnlyCall?.(parsedParams) === true &&
+        implicitAutolockMcpSessionId
+          ? state.getSessionManager().getSession(providedSessionUuid)
+          : undefined;
+      return session &&
+        holdsOwnerHeartbeatLease(session.livenessPolicy) &&
+        !pool.isSessionOwnedByConnection(providedSessionUuid, implicitAutolockMcpSessionId)
         ? providedSessionUuid
         : undefined;
+    };
     // The proxy learns from the marker not to remember a foreign-owned session it named.
     const withRoutedSession = <T>(result: T): T =>
       daemonMode
@@ -1514,6 +1529,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const endExplicitSessionBindClaim =
       providedSessionUuid &&
       tool.requiresDevice &&
+      tool.isDeviceReadOnlyCall?.(parsedParams) !== true &&
       implicitAutolockMcpSessionId &&
       DaemonState.getInstance().isInitialized()
         ? DaemonState.getInstance().getDevicePool().beginMcpBind(implicitAutolockMcpSessionId)
@@ -1746,7 +1762,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         !result?.isError &&
         providedSessionUuid &&
         // Ownership first (#11235): a foreign-owned session never binds this connection.
-        foreignOwnedExplicitSessionUuid() === undefined &&
+        (!daemonSessionManager ||
+          !DaemonState.getInstance()
+            .getDevicePool()
+            .isSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)) &&
         !isRecordingIdCleanup &&
         (daemonSessionManager
           ? sessionForBinding !== null &&
@@ -1757,7 +1776,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         if (sessionToolBinding.bind(sessionId, providedSessionUuid)) {
           ToolRegistry.notifyToolListChanged();
         }
-        if (tool.requiresDevice && daemonSessionManager && implicitAutolockMcpSessionId) {
+        if (
+          tool.requiresDevice &&
+          tool.isDeviceReadOnlyCall?.(parsedParams) !== true &&
+          daemonSessionManager &&
+          implicitAutolockMcpSessionId
+        ) {
           await DaemonState.getInstance()
             .getDevicePool()
             .attachExplicitSessionUuidCall(providedSessionUuid, implicitAutolockMcpSessionId);

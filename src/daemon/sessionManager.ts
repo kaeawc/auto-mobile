@@ -179,6 +179,8 @@ export interface BiometricEnrollmentSessionState {
 /** What a pending restore must write, resolved before any await (see below). */
 /** One restore a release started; `abandon` records it when the teardown cap expires first. */
 interface ReleaseTeardownStage {
+  /** In-flight setup can still drive the serial even when restoration is skipped. */
+  setup?: boolean;
   pending: Promise<void> | null;
   abandon?: () => void;
 }
@@ -920,6 +922,15 @@ interface PendingSessionRelease {
 
 interface SessionReleaseOperation extends PendingSessionRelease {
   options: SessionReleaseOptions;
+  identityReplacement?: {
+    deviceId: string;
+    final: boolean;
+    commitFences: ReleaseCommitFence[];
+    resumeStep: number;
+  };
+  teardownStep?: number;
+  teardownResumeStep?: number;
+  teardownStages?: ReleaseTeardownStage[];
   session: Session;
   /** Suspect before the handoff: the owner's existing grace still runs across teardown (#11691). */
   judgeSuspectOwnerAtCommit?: boolean;
@@ -2041,13 +2052,25 @@ export class SessionManager {
   private markIdentityReplacedRelease(
     release: SessionReleaseOperation,
     options = release.options,
+    shouldCommit?: ReleaseCommitFence,
   ): void {
     if (!options.deviceIdentityReplaced) {
       return;
     }
     // Commands already dispatched cannot be recalled; fence every subsequent dispatch (#12063).
     release.options.deviceIdentityReplaced = true;
-    const deviceId = release.session.assignedDevice;
+    const replacement = (release.identityReplacement ??= {
+      deviceId: release.session.assignedDevice,
+      final: false,
+      commitFences: [],
+      resumeStep: release.teardownStep ?? 0,
+    });
+    if (shouldCommit) {
+      replacement.commitFences.push(shouldCommit);
+    } else {
+      replacement.final = true;
+    }
+    const { deviceId } = replacement;
     let fence = this.identityReplacementFences.get(deviceId);
     if (!fence) {
       const settled = Promise.withResolvers<void>();
@@ -2061,13 +2084,35 @@ export class SessionManager {
   }
 
   private finishIdentityReplacedRelease(release: SessionReleaseOperation): void {
-    const deviceId = release.session.assignedDevice;
+    const deviceId = release.identityReplacement?.deviceId;
+    if (deviceId === undefined) {
+      return;
+    }
     const fence = this.identityReplacementFences.get(deviceId);
     if (!fence || !fence.releases.delete(release) || fence.releases.size > 0) {
       return;
     }
     this.identityReplacementFences.delete(deviceId);
     fence.resume();
+  }
+
+  /** A declined join revokes only its replacement mark, never the ordinary release itself. */
+  private revokeSupersededIdentityReplacement(operation?: SessionReleaseOperation): boolean {
+    const replacement = operation?.identityReplacement;
+    if (
+      !operation ||
+      releaseWasForced(operation) ||
+      !replacement ||
+      replacement.final ||
+      !replacement.commitFences.every(releaseSuperseded)
+    ) {
+      return false;
+    }
+    this.finishIdentityReplacedRelease(operation);
+    delete operation.options.deviceIdentityReplaced;
+    operation.teardownResumeStep = replacement.resumeStep;
+    delete operation.identityReplacement;
+    return true;
   }
 
   private async waitForIdentityReplacement(deviceId: string, generation: number): Promise<boolean> {
@@ -2082,7 +2127,7 @@ export class SessionManager {
   /** Pause rather than consume a retry: a superseded handoff still owns its original baseline. */
   private async dispatchDeviceRestore(
     deviceId: string,
-    restore: (signal: AbortSignal) => Promise<void>,
+    restore: (signal: AbortSignal, identitySignal: AbortSignal) => Promise<void>,
     generation = this.replacedRestoreGenerations.get(deviceId) ?? 0,
   ): Promise<void> {
     if (this.identityReplacementFences.has(deviceId)) {
@@ -2100,9 +2145,11 @@ export class SessionManager {
     }
     controllers.add(controller);
     try {
+      // Clients still receive the ambient abort, but a successful late acknowledgement only
+      // becomes a failed restore for identity replacement, as ordinary teardown did on main.
       const ambient = getAbortSignal();
       const signal = ambient ? AbortSignal.any([ambient, controller.signal]) : controller.signal;
-      await runWithAbortSignal(signal, () => restore(signal));
+      await runWithAbortSignal(signal, () => restore(signal, controller.signal));
     } finally {
       controllers.delete(controller);
       if (controllers.size === 0) {
@@ -5955,7 +6002,7 @@ export class SessionManager {
     const inFlightRelease = this.releasePromises.get(sessionId);
     if (inFlightRelease?.session === session) {
       this.upgradeReleaseReason(inFlightRelease.reason, releaseReason);
-      this.markIdentityReplacedRelease(inFlightRelease, options);
+      this.markIdentityReplacedRelease(inFlightRelease, options, shouldCommit);
       return await inFlightRelease.promise;
     }
 
@@ -5988,17 +6035,16 @@ export class SessionManager {
             release,
           );
     };
-    if (pendingRebind?.session === session) {
-      release.stage = "awaiting-rebind";
-      release.promise = pendingRebind.promise.then(run, run);
-    } else {
-      release.promise = run();
-    }
-    const promise = release.promise;
-    this.releasePromises.set(sessionId, release);
-    this.activeReleasePromises.add(release);
     try {
-      return await promise;
+      if (pendingRebind?.session === session) {
+        release.stage = "awaiting-rebind";
+        release.promise = pendingRebind.promise.then(run, run);
+      } else {
+        release.promise = run();
+      }
+      this.releasePromises.set(sessionId, release);
+      this.activeReleasePromises.add(release);
+      return await release.promise;
     } finally {
       this.finishIdentityReplacedRelease(release);
       this.activeReleasePromises.delete(release);
@@ -6472,12 +6518,10 @@ export class SessionManager {
       this.cancelNetworkConditionExpiry(sessionId);
       // Release removes the iOS app rule itself; stop renewing it first.
       this.iosAppNetworkLeases.stop(sessionId);
-      const pendingCleanup = await this.drainReleaseTeardown(
-        sessionId,
-        session,
-        operation,
-        options,
-      );
+      let pendingCleanup = await this.drainReleaseTeardown(sessionId, session, operation, options);
+      while (this.revokeSupersededIdentityReplacement(operation)) {
+        pendingCleanup = await this.drainReleaseTeardown(sessionId, session, operation, options);
+      }
       const deviceId = session.assignedDevice;
       // Forced while tearing down (#11058): the force already fenced the session and handed the
       // device back, so nothing here may commit, quarantine or notify for it.
@@ -6526,6 +6570,9 @@ export class SessionManager {
         ({ snapshot: releaseSnapshot, persisted: terminalPersisted } =
           await this.persistTerminalReleaseWithinDeadline(releaseSnapshot, reason, session));
       }
+      while (this.revokeSupersededIdentityReplacement(operation)) {
+        pendingCleanup = await this.drainReleaseTeardown(sessionId, session, operation, options);
+      }
       if (releaseWasForced(operation)) {
         return null;
       }
@@ -6546,7 +6593,7 @@ export class SessionManager {
       if (!this.commitReleaseRemoval(sessionId, session, deviceId, pendingCleanup)) {
         return null;
       }
-      this.commitReplacedDeviceTeardown(sessionId, session, options);
+      this.commitReplacedDeviceTeardown(sessionId, session, options, operation);
       if (!releaseSnapshot.terminal) {
         this.terminalReleaseSnapshots.delete(sessionId);
         this.terminalReleaseReasonStates.delete(sessionId);
@@ -6557,36 +6604,56 @@ export class SessionManager {
 
       this.notifySessionRelease(releaseSnapshot, options);
       enter("finalize-persist");
-      let persistedSnapshot: SessionReleaseSnapshot;
-      try {
-        persistedSnapshot = await this.completeReleasePersistence(
-          releaseSnapshot,
-          reason,
-          session,
-          terminalPersisted,
-        );
-      } catch (error) {
-        // Removal committed before persistence. Retain its identity and reason
-        // while the pending release snapshot is retried by the recovery owner.
-        reason.finalizedSnapshot ??= releaseSnapshot;
-        this.recordFinalizedSessionRelease(session, reason);
-        throw toActionableError(error, `Failed to finalize session ${sessionId} release`);
-      }
-      this.recordFinalizedSessionRelease(session, reason);
-      if (persistedSnapshot !== releaseSnapshot) {
-        // A terminal reason upgraded this release while it persisted. Its cleanup already ran on
-        // the first notification, so announce only the reason change (#10825, #11146).
-        this.notifySessionRelease(persistedSnapshot, { ...options, upgradeOnly: true });
-      }
-      logger.info(
-        pendingCleanup.length > 0
-          ? `Released session ${sessionId}; device ${deviceId} remains quarantined until teardown completes`
-          : `Released session ${sessionId}, freeing device ${deviceId}`,
+      return await this.finishCommittedRelease(
+        session,
+        reason,
+        releaseSnapshot,
+        terminalPersisted,
+        options,
+        pendingCleanup,
       );
-      return deviceId;
     } finally {
       this.releasingSessions.delete(session);
     }
+  }
+
+  /** Persistence after removal cannot undo a committed release or re-run its listeners. */
+  private async finishCommittedRelease(
+    session: Session,
+    reason: ReleaseReasonState,
+    releaseSnapshot: SessionReleaseSnapshot,
+    terminalPersisted: boolean,
+    options: SessionReleaseOptions,
+    pendingCleanup: readonly Promise<void>[],
+  ): Promise<string> {
+    const { sessionId, deviceId } = releaseSnapshot;
+    let persistedSnapshot: SessionReleaseSnapshot;
+    try {
+      persistedSnapshot = await this.completeReleasePersistence(
+        releaseSnapshot,
+        reason,
+        session,
+        terminalPersisted,
+      );
+    } catch (error) {
+      // Removal committed before persistence. Retain its identity and reason
+      // while the pending release snapshot is retried by the recovery owner.
+      reason.finalizedSnapshot ??= releaseSnapshot;
+      this.recordFinalizedSessionRelease(session, reason);
+      throw toActionableError(error, `Failed to finalize session ${sessionId} release`);
+    }
+    this.recordFinalizedSessionRelease(session, reason);
+    if (persistedSnapshot !== releaseSnapshot) {
+      // A terminal reason upgraded this release while it persisted. Its cleanup already ran on
+      // the first notification, so announce only the reason change (#10825, #11146).
+      this.notifySessionRelease(persistedSnapshot, { ...options, upgradeOnly: true });
+    }
+    logger.info(
+      pendingCleanup.length > 0
+        ? `Released session ${sessionId}; device ${deviceId} remains quarantined until teardown completes`
+        : `Released session ${sessionId}, freeing device ${deviceId}`,
+    );
+    return deviceId;
   }
 
   /**
@@ -6634,12 +6701,11 @@ export class SessionManager {
       return [];
     }
     const forcedSignal = operation?.forcedAbort?.signal;
-    const pending = await this.runUnderTeardownShield(
-      () => this.startReleaseTeardown(sessionId, session, operation, options),
-      forcedSignal,
-    );
-    // Work belonging to the retired identity must never quarantine the stranger.
-    return options.deviceIdentityReplaced ? [] : pending;
+    return this.runUnderTeardownShield(async () => {
+      const stages = await this.startReleaseTeardown(sessionId, session, operation, options);
+      // Setup remains in flight; skipped/aborted restores must arm neither quarantine nor retries.
+      return options.deviceIdentityReplaced ? stages.filter((stage) => stage.setup) : stages;
+    }, forcedSignal);
   }
 
   /** Own the restore signal until all stages settle, bounded by the shared teardown cap. */
@@ -6762,7 +6828,7 @@ export class SessionManager {
       async () => {
         pendingSetups =
           setups.length > 0 ? (await this.waitForSessionSetup(sessionId, setups)).pending : null;
-        return { pending: pendingSetups };
+        return { pending: pendingSetups, setup: true };
       },
       async () => ({
         pending: (await this.restoreKeepScreenAwakeBestEffort(session, forced)).pending,
@@ -6820,14 +6886,43 @@ export class SessionManager {
         };
       },
     ];
-    const stages: ReleaseTeardownStage[] = [];
-    for (const step of steps) {
-      stages.push(await step());
+    return await this.runReleaseTeardownSteps(steps, operation, forced);
+  }
+
+  private async runReleaseTeardownSteps(
+    steps: readonly (() => Promise<ReleaseTeardownStage>)[],
+    operation: SessionReleaseOperation | undefined,
+    forced: () => boolean,
+  ): Promise<readonly ReleaseTeardownStage[]> {
+    const resumeStep = operation?.teardownResumeStep ?? 0;
+    // Earlier completed steps are not resent, but their outstanding cleanup still quarantines
+    // an ordinary release after revocation. Setup is recaptured by step zero below.
+    const stages = operation?.teardownStages?.slice(1, resumeStep) ?? [];
+    for (const [index, step] of steps.entries()) {
+      if (index > 0 && index < resumeStep) {
+        continue;
+      }
+      if (operation) {
+        operation.teardownStep = index;
+      }
+      const stage = await step();
+      stages.push(stage);
+      this.recordReleaseTeardownStage(operation, index, stage);
       if (forced()) {
         break;
       }
     }
     return stages;
+  }
+
+  private recordReleaseTeardownStage(
+    operation: SessionReleaseOperation | undefined,
+    index: number,
+    stage: ReleaseTeardownStage,
+  ): void {
+    if (operation) {
+      (operation.teardownStages ??= [])[index] = stage;
+    }
   }
 
   /** Wait for setup without changing saved state or retries before the release's commit fence. */
@@ -6837,7 +6932,7 @@ export class SessionManager {
   ): Promise<readonly ReleaseTeardownStage[]> {
     const pending =
       setups.length > 0 ? (await this.waitForSessionSetup(sessionId, setups)).pending : null;
-    return pending ? [{ pending }] : [];
+    return pending ? [{ pending, setup: true }] : [];
   }
 
   /** Only a committed handoff retires the old device's saved baselines and serial retries. */
@@ -6845,11 +6940,14 @@ export class SessionManager {
     sessionId: string,
     session: Session,
     options: SessionReleaseOptions,
+    operation?: SessionReleaseOperation,
   ): void {
     if (!options.deviceIdentityReplaced) {
       return;
     }
-    const deviceId = session.assignedDevice;
+    // Retire the replaced serial captured at mark, even if an awaiting rebind published another
+    // device. Its generations/retries are independent of the session's new binding (#12063).
+    const deviceId = operation?.identityReplacement?.deviceId ?? session.assignedDevice;
     this.replacedRestoreGenerations.set(
       deviceId,
       (this.replacedRestoreGenerations.get(deviceId) ?? 0) + 1,
@@ -8670,10 +8768,10 @@ export class SessionManager {
     };
     await this.dispatchDeviceRestore(
       target.deviceId,
-      (signal) =>
+      (_signal, identitySignal) =>
         this.keepScreenAwakeRestorerFactory(device)
           .restore(target.state)
-          .then(() => signal.throwIfAborted()),
+          .then(() => identitySignal.throwIfAborted()),
       target.restoreGeneration,
     );
     this.clearRestoreHealth(target, "keep-screen-awake");
@@ -8755,10 +8853,10 @@ export class SessionManager {
     }
     await this.dispatchDeviceRestore(
       target.deviceId,
-      (signal) =>
+      (_signal, identitySignal) =>
         this.biometricEnrollmentRestorerFactory(device)
           .restore(target.enrollment)
-          .then(() => signal.throwIfAborted()),
+          .then(() => identitySignal.throwIfAborted()),
       target.restoreGeneration,
     );
     this.clearRestoreHealth(target, "biometric-enrollment");
@@ -8947,7 +9045,7 @@ export class SessionManager {
     const restore = () =>
       this.dispatchDeviceRestore(
         deviceId,
-        (fenceSignal) =>
+        (fenceSignal, identitySignal) =>
           defaultDeviceClockRestoreRegistry.runExclusive(
             deviceId,
             async () => {
@@ -8956,9 +9054,9 @@ export class SessionManager {
                 return;
               }
               const dispatchSignal = AbortSignal.any([target.controller.signal, fenceSignal]);
-              dispatchSignal.throwIfAborted();
+              identitySignal.throwIfAborted();
               await this.clockRestorerFactory(device).restore(target.state, dispatchSignal);
-              dispatchSignal.throwIfAborted();
+              identitySignal.throwIfAborted();
               target.controller.signal.throwIfAborted();
               defaultDeviceClockRestoreRegistry.restored(deviceId, target.state);
               target.clear();
@@ -9157,11 +9255,13 @@ export class SessionManager {
     const restore = () =>
       this.dispatchDeviceRestore(
         deviceId,
-        async (fenceSignal) => {
+        async (fenceSignal, identitySignal) => {
           const dispatchSignal = AbortSignal.any([target.controller.signal, fenceSignal]);
-          dispatchSignal.throwIfAborted();
+          target.controller.signal.throwIfAborted();
+          identitySignal.throwIfAborted();
           await this.rotationRestorerFactory(device).restore(target.state, dispatchSignal);
-          dispatchSignal.throwIfAborted();
+          identitySignal.throwIfAborted();
+          target.controller.signal.throwIfAborted();
           target.clear();
           const targets = this.pendingRotationRestores.get(deviceId);
           if (targets?.get(target.state) === target) {
@@ -9458,11 +9558,13 @@ export class SessionManager {
     const restore = () =>
       this.dispatchDeviceRestore(
         deviceId,
-        async (fenceSignal) => {
+        async (fenceSignal, identitySignal) => {
           const dispatchSignal = AbortSignal.any([target.controller.signal, fenceSignal]);
-          dispatchSignal.throwIfAborted();
+          target.controller.signal.throwIfAborted();
+          identitySignal.throwIfAborted();
           await this.screenReaderRestorerFactory(device).restore(target.state, dispatchSignal);
-          dispatchSignal.throwIfAborted();
+          identitySignal.throwIfAborted();
+          target.controller.signal.throwIfAborted();
           target.clear();
           const targets = this.pendingScreenReaderRestores.get(deviceId);
           if (targets?.get(target.state) === target) {
@@ -9859,10 +9961,10 @@ export class SessionManager {
     }
     await this.dispatchDeviceRestore(
       target.deviceId,
-      (signal) =>
+      (_signal, identitySignal) =>
         this.networkConditionRestorerFactory(device)
           .restore(target.profile)
-          .then(() => signal.throwIfAborted()),
+          .then(() => identitySignal.throwIfAborted()),
       target.restoreGeneration,
     );
     this.clearRestoreHealth(target, "network-condition");

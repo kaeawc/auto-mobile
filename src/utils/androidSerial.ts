@@ -54,7 +54,7 @@ export function copyAndroidTransportId<T extends object>(source: object, target:
   return withAndroidTransportId(target, (source as AndroidTransportRow)[adbTransportId]);
 }
 
-function transportIdFor(device: BootedDevice): string | undefined {
+export function transportIdFor(device: BootedDevice): string | undefined {
   return (device as AndroidTransportRow)[adbTransportId];
 }
 

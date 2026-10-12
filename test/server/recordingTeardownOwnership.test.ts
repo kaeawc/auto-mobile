@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { promises as fsPromises } from "node:fs";
 import type { SessionManager } from "../../src/daemon/sessionManager";
 import { VideoRecorderService } from "../../src/features/video";
+import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
 import * as recordingCleanup from "../../src/server/recordingSessionCleanup";
 import { sequenceBackoff } from "../../src/utils/Backoff";
 import {
@@ -27,7 +28,7 @@ import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeSecurePermissions } from "../fakes/FakeSecurePermissions";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
+import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 
 type CleanupManager = Parameters<typeof registerRecordingSessionCleanup>[0];
 class FakeSessionManager implements CleanupManager {
@@ -59,10 +60,10 @@ class FakeSessionManager implements CleanupManager {
       entry.settled = true;
     });
   }
-  releaseA(): void {
-    this.release("session-a", device.deviceId, "idle-timeout", {
+  releaseA(deviceId = device.deviceId): void {
+    this.release("session-a", deviceId, "idle-timeout", {
       sessionId: "session-a",
-      deviceId: device.deviceId,
+      deviceId,
       releaseReason: "idle-timeout",
       releasedAtMs: 0,
       terminal: false,
@@ -170,6 +171,79 @@ describe("recording teardown ownership", () => {
     expect(warn.mock.calls.some(([line]) => String(line).includes("recorder recovery"))).toBe(
       false,
     );
+  });
+
+  test("a real session's release-time rotation retains its new capture through cap retry and give-up", async () => {
+    const android = { ...device, deviceId: "emulator-5554", platform: "android" as const };
+    await setVideoRecordingManagerDependencies({ resolveAndroidDisplay: async () => undefined });
+    const replacement = Promise.withResolvers<void>();
+    let replacementIssued = false;
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: android,
+      outputNamePrefix: "rotated",
+      ownerSessionUuid: "session-a",
+      timer,
+      segmentRotateAfterMs: 1000,
+      startVideoRecording: async (request) => {
+        if (request.outputName === "rotated-seg1") {
+          replacementIssued = true;
+          await replacement.promise;
+        }
+        return startVideoRecording(request);
+      },
+    });
+    const first = await session.startFirstSegment();
+    graceful.resolve();
+    timer.advanceTime(1000);
+    const rotation = session.onBeforePlanStep();
+    await drainUntil(() => replacementIssued, { description: "in-flight rotation start" });
+    graceful = Promise.withResolvers<void>();
+    const giveUps: recordingCleanup.RecordingTeardownGiveUp[] = [];
+    registerRecordingSessionCleanup(manager, {
+      ...defaultRecordingSessionCleanupDeps,
+      timer,
+      hasRecordingsToStop: () => true,
+      activeRecordingIdsForOwner: (owner, id) => [
+        ...defaultRecordingSessionCleanupDeps.activeRecordingIdsForOwner(owner, id),
+        first.recordingId,
+      ],
+      captureSegmentedRecordingIdsForOwner: () => () => session.liveCaptureIds,
+      stopSegmentedRecordings: async () => {
+        await session.stop();
+      },
+      teardownRetryBackoff: sequenceBackoff([1000]),
+      teardownRetryBudgetMs: 2_000,
+      markDeviceNeedsRecorderRecovery: (giveUp) => {
+        giveUps.push(giveUp);
+        defaultRecordingSessionCleanupDeps.markDeviceNeedsRecorderRecovery(giveUp);
+      },
+    });
+    manager.releaseA(android.deviceId);
+    replacement.resolve();
+    await rotation;
+    const captureId = session.liveCaptureIds[0];
+    expect(captureId).not.toBe(first.recordingId);
+    backend.setForceStopFailures([teardownError(), teardownError()]);
+    try {
+      await advance(122_000);
+      expect(backend.forceStopCalls).toEqual([backend.startResults[1], backend.startResults[1]]);
+      expect(giveUps).toEqual([
+        {
+          deviceId: android.deviceId,
+          sessionId: "session-a",
+          recordingIds: [captureId],
+          attempts: 1,
+          budgetMs: 2_000,
+        },
+      ]);
+      expect(
+        recordingCleanup.recordingTeardownRecoveryNeeded(android.deviceId)?.recordingIds,
+      ).toEqual([captureId]);
+      expect((await repository.getRecording(captureId))?.status).toBe("recording");
+    } finally {
+      graceful.resolve();
+      await session.stop();
+    }
   });
 
   test("a retained segmented capture gives up with its capture id and recovery persists until settlement", async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
 import type { BootedDevice, VideoRecordingMetadata } from "../../src/models";
+import type { ActiveVideoRecording } from "../../src/features/video";
 import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -69,6 +70,69 @@ async function sessionWithTwoCompletedAndOneActive() {
 }
 
 describe("AndroidSegmentedPlanVideoSession.finalizeWithoutDevice", () => {
+  for (const lateSuccess of [false, true]) {
+    test(`host-only finalize scopes an in-flight rotation rollback (${lateSuccess ? "late success" : "aborted start"})`, async () => {
+      const timer = new FakeTimer();
+      const gate = Promise.withResolvers<void>();
+      let replacementRequest:
+        | Parameters<
+            NonNullable<
+              ConstructorParameters<
+                typeof AndroidSegmentedPlanVideoSession
+              >[0]["startVideoRecording"]
+            >
+          >[0]
+        | undefined;
+      const rollback = mock(
+        async (_id: string, _options?: { hostOnly?: boolean; deviceWide?: boolean }) => {},
+      );
+      const session = new AndroidSegmentedPlanVideoSession({
+        device,
+        outputNamePrefix: "rotation",
+        timer,
+        segmentRotateAfterMs: 1000,
+        startVideoRecording: async (request) => {
+          const active: ActiveVideoRecording = {
+            recordingId: request.outputName!,
+            outputPath: "/host/capture.mp4",
+            fileName: "capture.mp4",
+            startedAt: "",
+            config,
+          };
+          if (request.outputName === "rotation-seg1") {
+            replacementRequest = request;
+            await gate.promise;
+            if (!lateSuccess) {
+              await rollback(active.recordingId, request.rollbackOptions?.());
+              request.abortSignal?.throwIfAborted();
+            }
+          }
+          return active;
+        },
+        stopVideoRecording: async (id) => ({ metadata: metadata(id!), evictedRecordingIds: [] }),
+        rollbackVideoRecordingStart: rollback,
+      });
+      await session.startFirstSegment();
+      timer.advanceTime(1000);
+      const rotation = session.onBeforePlanStep();
+      await drainUntil(() => replacementRequest !== undefined, {
+        description: "replacement start",
+      });
+      expect(replacementRequest?.rollbackOptions?.()).toBeUndefined();
+      await session.finalizeWithoutDevice({ hostOnly: true });
+      expect(replacementRequest?.abortSignal?.aborted).toBe(true);
+      gate.resolve();
+      await rotation;
+      expect(rollback.mock.calls).toEqual([
+        ["rotation-seg1", { hostOnly: true, deviceWide: false }],
+      ]);
+      expect(session.liveCaptureIds).toEqual([]);
+      expect(await session.finalizeWithoutDevice({ hostOnly: true })).toMatchObject({
+        recordingIds: ["rotation"],
+      });
+    });
+  }
+
   test("keeps completed segments and discards only the active one, scoped to our recorder", async () => {
     const { session, stop, rollback } = await sessionWithTwoCompletedAndOneActive();
 

@@ -22,6 +22,7 @@ import {
 } from "../features/video";
 import { serverConfig } from "../utils/ServerConfig";
 import { logger } from "../utils/logger";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { redactHomeDir } from "../utils/redactPath";
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -136,6 +137,9 @@ export function resolveVideoRetentionPolicy(
   };
 }
 
+/** Shared bound for post-cap host settlement and replaced-device stop waits. */
+export const INCOMPLETE_MARK_GRACE_MS = 5_000;
+
 interface StartVideoRecordingRequest {
   device: BootedDevice;
   configOverrides?: VideoRecordingConfigInput;
@@ -149,6 +153,8 @@ interface StartVideoRecordingRequest {
    */
   ownerSessionUuid?: string;
   abortSignal?: AbortSignal;
+  /** Read at rollback time because the device may be replaced during startup. */
+  rollbackOptions?: () => ForceStopOptions | undefined;
   display?: string;
   /** Physical ID already pinned by the first segment. */
   physicalDisplayId?: string;
@@ -1354,7 +1360,7 @@ export async function startVideoRecording(
   } catch (error) {
     if (active) {
       try {
-        await rollbackVideoRecordingStart(active.recordingId);
+        await rollbackVideoRecordingStart(active.recordingId, request.rollbackOptions?.());
       } catch (rollbackError) {
         logger.warn(
           `[VideoRecording] Failed to roll back recording ${active.recordingId}: ${rollbackError}`,
@@ -1664,8 +1670,8 @@ async function abandonVideoRecordingWithDependencies(
       if (record && record.status !== "recording") {
         return { metadata: toMetadata(record), evictedRecordingIds: [] };
       }
-      // Capture teardown already won; only the original stop's host persistence remains.
-      return await stopping;
+      // Capture teardown won, but a display probe in the original stop may still be wedged.
+      return await settleReplacedRecordingStop(recordingId, stopping, deps);
     } finally {
       hostOnlyRecordingTeardowns.delete(recordingId);
     }
@@ -1681,6 +1687,33 @@ async function abandonVideoRecordingWithDependencies(
     if (!deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
       hostOnlyRecordingTeardowns.delete(recordingId);
     }
+  }
+}
+
+async function settleReplacedRecordingStop(
+  recordingId: string,
+  stopping: Promise<StopVideoRecordingResult>,
+  deps: VideoRecordingManagerDependencies,
+): Promise<StopVideoRecordingResult> {
+  let timedOut = false;
+  try {
+    return await raceWithDeadline(stopping, {
+      timer: deps.timer,
+      timeoutMs: INCOMPLETE_MARK_GRACE_MS,
+      label: `Stop of replaced-device recording ${recordingId}`,
+      onTimeout: () => {
+        timedOut = true;
+      },
+    });
+  } catch (error) {
+    if (!timedOut) {
+      throw error;
+    }
+    logger.warn(
+      `[VideoRecording] Settling replaced-device recording on the host: ${errorMessage(error)}`,
+      error,
+    );
+    return abandonActiveVideoRecording(recordingId, deps);
   }
 }
 

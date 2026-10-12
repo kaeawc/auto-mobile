@@ -223,6 +223,16 @@ export class AndroidSegmentedPlanVideoSession {
     return this.device.deviceId;
   }
 
+  /** Current segment and pending stops; archived segments are excluded. */
+  get liveCaptureIds(): readonly string[] {
+    return [
+      ...new Set([
+        ...this.pendingStops.keys(),
+        ...(this.activeRecordingId ? [this.activeRecordingId] : []),
+      ]),
+    ];
+  }
+
   /**
    * Match the owning device. A stopped Android AVD has no runtime serial, so its stable name is
    * the available identity during deletion; booted devices retain exact serial matching.
@@ -594,7 +604,16 @@ export class AndroidSegmentedPlanVideoSession {
           ? undefined
           : (displayTransitions.observedPanel(this.device.deviceId) ?? this.lastActivePanel),
       abortSignal: abortSignal ?? this.sessionAbortController.signal,
+      rollbackOptions: () =>
+        this.hostOnlyFinalization ? { hostOnly: true, deviceWide: false } : undefined,
     });
+    if (this.hostOnlyFinalization) {
+      await this.rollbackVideoRecordingStartFn(recording.recordingId, {
+        hostOnly: true,
+        deviceWide: false,
+      });
+      throw new DOMException("Segment start completed after host-only finalization", "AbortError");
+    }
     this.recordedPhysicalDisplayId ??= recording.physicalDisplayId;
     this.lastActivePanel ??= recording.recordedPanel;
     this.consecutiveStartFailures = 0;

@@ -5,7 +5,7 @@ import XCTest
 
 /// A single-sleeper clock: automatic sleeps advance instantly; manual sleeps suspend
 /// until released or cancelled. No wall time, actor blocking, or unchecked Sendable.
-private final class KeyboardTestClock: Clock, Sendable {
+final class KeyboardTestClock: Clock, Sendable {
     struct Instant: InstantProtocol {
         let offset: Duration
 

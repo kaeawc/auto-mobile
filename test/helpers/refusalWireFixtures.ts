@@ -61,7 +61,10 @@ import {
   AndroidAvdIdentityConflictError,
   DeviceBootTimeoutError,
 } from "../../src/devices/deviceBootService";
-import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
+import {
+  REPLAY_LEASE_EXPIRED_REASON,
+  type SessionReleaseReason,
+} from "../../src/daemon/releaseReasons";
 import { typedTeardownRefusal } from "../../src/server/deviceToolsLifecycle";
 import {
   DaemonConnectionSessionReleasedError,
@@ -435,6 +438,14 @@ const BUILDERS: readonly FixtureEntry[] = [
     () =>
       noActiveDeviceSessionResult(
         driven(new DaemonConnectionSessionReleasedError("cleanup-expired")),
+      ) as RefusalWireResult,
+  ],
+  [
+    "no_active_device_session.replay_lease_expired",
+    "noActiveDeviceSessionResult",
+    () =>
+      noActiveDeviceSessionResult(
+        driven(new DaemonConnectionSessionReleasedError(REPLAY_LEASE_EXPIRED_REASON)),
       ) as RefusalWireResult,
   ],
   [

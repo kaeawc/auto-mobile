@@ -1,5 +1,15 @@
 import type { BootedDevice, SomePlatform } from "../models";
+import { isAndroidEmulatorSerial } from "../utils/androidSerial";
+import { isIosUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { ActionableError } from "../models/ActionableError";
+
+/** An explicit platform scopes the lookup; only an either-platform id is narrowed by shape. */
+export function explicitReadTargetPlatform(deviceId: string, platform: SomePlatform): SomePlatform {
+  if (platform !== "either") {
+    return platform;
+  }
+  return isIosUdid(deviceId) ? "ios" : isAndroidEmulatorSerial(deviceId) ? "android" : platform;
+}
 
 /** Exact ids win over names; a name must identify one running device in scope. */
 export function matchRunningReadTarget(

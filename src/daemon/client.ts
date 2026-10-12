@@ -19,6 +19,7 @@ import {
   sanitizeBoundSessionLoss,
   sanitizeDaemonRequestFailureCause,
   daemonInstanceFromError,
+  releasedSessionNotFoundFields,
 } from "./types";
 import type { BoundSessionLoss } from "./types";
 import {
@@ -284,9 +285,8 @@ function releaseReasonField(response: DaemonResponse): { releaseReason?: string;
   if (typeof response.releaseReason !== "string" || response.releaseReason.length === 0) {
     return {};
   }
-  return response.idle === true
-    ? { releaseReason: response.releaseReason, idle: true }
-    : { releaseReason: response.releaseReason };
+  // Daemon and proxy versions always match, so the shared reason table reproduces daemon idle.
+  return releasedSessionNotFoundFields(response.releaseReason);
 }
 
 /** A typed refusal's retry intent from a failed response (#11244), as error fields. */

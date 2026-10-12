@@ -128,6 +128,46 @@ function harness(env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" }) {
 }
 
 describe("DeviceAutolockManager", () => {
+  for (const retryAfterMs of [undefined, 250]) {
+    test(`fresh-start holder refusal ${retryAfterMs === undefined ? "stays non-retryable when healthy" : "is retryable when leaving"}`, async () => {
+      const h = harness();
+      try {
+        await h.sessions.createSession("holder", h.device.id, "android");
+        h.device.sessionId = "holder";
+        h.port.holderReleaseRemainingMs = (holder) => {
+          expect(holder).toBe("holder");
+          return retryAfterMs;
+        };
+        const refusal = await h.manager
+          .autolockDevice(h.device.id, "android", undefined, {
+            deviceId: h.device.id,
+            name: h.device.name,
+            platform: "android",
+          })
+          .catch((error: unknown) => error);
+        expect(refusal).toMatchObject({
+          code: "device_owned_by_other_session",
+          retryable: retryAfterMs !== undefined,
+        });
+        const message =
+          "Freshly started device 'emulator-5554' was assigned to session holder before its owning session could reserve it.";
+        expect(refusal).toMatchObject({
+          message:
+            retryAfterMs === undefined
+              ? message
+              : `${message} The holder is being released; retry in about 250ms.`,
+        });
+        if (retryAfterMs === undefined) {
+          expect(refusal).not.toHaveProperty("retryAfterMs");
+        } else {
+          expect(refusal).toHaveProperty("retryAfterMs", retryAfterMs);
+        }
+      } finally {
+        h.sessions.stopCleanupTimer();
+        h.timer.reset();
+      }
+    });
+  }
   for (const persistenceFails of [false, true]) {
     test(`adopts resumed R after readiness without minting; persistenceFails=${persistenceFails}`, async () => {
       const h = harness();

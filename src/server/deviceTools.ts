@@ -4091,23 +4091,44 @@ export function validateRequestedAndroidSerial(
   );
 }
 
-export function validatePooledDeviceMapping(device: BootedDevice, requestedIdentity: string): void {
+export async function validatePooledDeviceMapping(
+  device: BootedDevice,
+  requestedIdentity: string,
+  options: { signal?: AbortSignal; totalDeadlineMs?: number } = {},
+): Promise<void> {
   const daemonState = DaemonState.getInstance();
   if (!daemonState.isInitialized()) {
     return;
   }
   const devicePool = daemonState.getDevicePool();
-  const pooled = devicePool.getDevice(device.deviceId);
+  let pooled = devicePool.getDevice(device.deviceId);
   // Delegate to the pool's own predicate rather than re-deriving it, so this
   // validator cannot reject a pairing the pool tolerates: a physical iPhone's
   // mutable display name (#5690) and an emulator's `Unknown (<serial>)`
   // placeholder (#10603) are both judged exactly as the pool judges them.
   if (pooled && !devicePool.matchesRuntimeIdentity(pooled, device)) {
-    throw new ActionableError(
+    if (devicePool.hasReusableSerial(pooled)) {
+      await devicePool.settlePooledRuntimeIdentity(device.deviceId, {
+        ...options,
+        platform: device.platform,
+      });
+      pooled = devicePool.getDevice(device.deviceId);
+      if (!pooled || devicePool.matchesRuntimeIdentity(pooled, device)) {
+        return;
+      }
+    }
+    const mismatch =
       `startDevice identity mismatch: requested=[${requestedIdentity}] ` +
-        `resolved=[${device.name} (${device.deviceId}) platform=${device.platform}] ` +
-        `pooled=[${pooled.name} (${pooled.id}) platform=${pooled.platform}] ` +
-        "phase=pool-match: stale pool identity conflicts with the resolved runtime",
+      `resolved=[${device.name} (${device.deviceId}) platform=${device.platform}] ` +
+      `pooled=[${pooled.name} (${pooled.id}) platform=${pooled.platform}] ` +
+      "phase=pool-match: stale pool identity conflicts with the resolved runtime";
+    if (!devicePool.hasReusableSerial(pooled)) {
+      throw new ActionableError(mismatch);
+    }
+    throw new BootedDeviceDiscoveryIncompleteError(
+      device.platform,
+      undefined,
+      `${mismatch}; a pool refresh is settling it; retry.`,
     );
   }
 }
@@ -4381,7 +4402,7 @@ async function reserveRecoveredDeviceForReadiness(
   releaseReadinessReservations: DeviceReadinessReservation[],
 ): Promise<void> {
   validateBootIdentity(args, boot.device, boot.source, boot.sourceImage);
-  validatePooledDeviceMapping(boot.device, requestedIdentity);
+  await validatePooledDeviceMapping(boot.device, requestedIdentity);
   if (devicePool) {
     releaseReadinessReservations.push(
       await devicePool.reserveDeviceForReadiness(

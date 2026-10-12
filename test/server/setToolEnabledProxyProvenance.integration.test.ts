@@ -1,4 +1,5 @@
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { daemonLoopbackToolArgs } from "../helpers/daemonLoopbackToolArgs";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import {
   afterEach,
@@ -161,7 +162,10 @@ describe("setToolEnabled through the daemon-proxy loopback hop (#6148 round 4)",
           typeof params.sessionUuid === "string" && params.sessionUuid.trim().length > 0;
         const target = hasSessionUuid ? sessionScopedClient : sharedDefaultClient;
         return target.request(
-          { method: "tools/call", params: { name: "setToolEnabled", arguments: params } },
+          {
+            method: "tools/call",
+            params: { name: "setToolEnabled", arguments: daemonLoopbackToolArgs(params) },
+          },
           z.any(),
         );
       },

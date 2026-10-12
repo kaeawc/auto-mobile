@@ -19,7 +19,15 @@ function freshDevices(discovery: BootedDeviceDiscovery): BootedDevice[] {
 
 async function discoverForResource(
   platform: SomePlatform,
-  { signal, requireFresh }: { signal?: AbortSignal; requireFresh?: boolean } = {},
+  {
+    signal,
+    requireFresh,
+    memoizeReadAvdNames,
+  }: {
+    signal?: AbortSignal;
+    requireFresh?: boolean;
+    memoizeReadAvdNames?: boolean;
+  } = {},
   onDiscovery?: (discovery: BootedDeviceDiscovery) => void,
 ): Promise<BootedDevice[]> {
   const manager = PlatformDeviceManagerFactory.getInstance();
@@ -29,6 +37,7 @@ async function discoverForResource(
   const discovery = await manager.getBootedDevicesDetailed(platform, {
     signal,
     bypassAndroidDeviceListCache: requireFresh,
+    memoizeReadAvdNames,
     bypassIosDeviceListCache: requireFresh,
   });
   signal?.throwIfAborted();
@@ -132,7 +141,7 @@ export async function listBootedDevicesForReadWithStatus(
     };
     const rawDevices = await discoverForResource(
       platform,
-      { signal, requireFresh: true },
+      { signal, requireFresh: true, memoizeReadAvdNames: true },
       (discovery) => {
         status = {
           scanned: {

@@ -34,6 +34,35 @@ describe("transitional adb bind wait", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
+  test.each([undefined, "device"])(
+    "a boot-resolved adopted runtime waits for a fresh listing with probe %s",
+    async (state) => {
+      const timer = new FakeTimer();
+      const wait = new TransitionalAdbBindWait(id, {
+        timer,
+        getSignal: () => undefined,
+        probeTimeoutMs: 10000,
+        backoff: fixedBackoff(5000),
+        probe: async () => (state === undefined ? new Map() : new Map([[id, state]])),
+        hasResolvedRuntime: true,
+      });
+      const pending = wait.waitIfTransitional();
+      await drainUntilQuiescent(timer);
+      expect(timer.getPendingTimeouts()).toEqual([5000]);
+      timer.advanceTime(5000);
+      expect(await pending).toBe(true);
+      await expect(wait.waitIfTransitional()).rejects.toMatchObject({
+        code: "device_offline",
+        retryable: true,
+        retryAfterMs: 1000,
+        state: undefined,
+        name: "DeviceTransportOfflineError",
+        message: `adb did not list the previously resolved emulator '${id}' steadily while binding (its transport was absent or flapping) (code device_offline); it was not bound. Retry in about 1000ms.`,
+      });
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+
   test.each([undefined, () => false])(
     "absent transport without a live launch stays absent (%s)",
     async (isLaunchProcessAlive) => {

@@ -408,7 +408,13 @@ export interface SendKeysCommandExecutor {
     signal?: AbortSignal,
     display?: string,
     mode?: SendKeysClearMode,
-  ): Promise<{ success: boolean; error?: string; retryable?: boolean; warning?: string }>;
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    retryable?: boolean;
+    warning?: string;
+    partialApplication?: boolean;
+  }>;
 }
 
 export interface SendKeysTargetFocuser {
@@ -4199,6 +4205,7 @@ export class SendKeys {
           index: -1,
           action: "clear",
           success: result.success,
+          ...(result.partialApplication ? { partialApplication: true } : {}),
           ...(result.retryable === false ? { retryable: false } : {}),
           ...(result.warning === undefined ? {} : { warning: result.warning }),
           ...(result.error ? { error: result.error } : {}),

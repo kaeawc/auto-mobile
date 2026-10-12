@@ -1211,6 +1211,11 @@ export class DeviceSessionManager implements DeviceSessionManager {
       }
     }
     if (running) {
+      if (image.platform === "android") {
+        AndroidCtrlProxyClient.resumeAfterDeviceStart(running.deviceId);
+      } else {
+        IOSCtrlProxyClient.resumeAfterDeviceStart(running.deviceId);
+      }
       await this.verifyDevice(running.deviceId, image.platform, options, running);
     }
     return running;

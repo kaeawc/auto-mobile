@@ -429,6 +429,8 @@ type Column =
   | "failed-other-stopped"
   | "failed-other-unknown"
   | "failed-other-shaped-running"
+  | "failed-own-shaped-running"
+  | "healthy-shaped-running"
   | "failed-other-shaped-absent"
   | "failed-other-running-name"
   | "failed-other-reserved";
@@ -451,6 +453,8 @@ const columns: Column[] = [
   "failed-other-stopped",
   "failed-other-unknown",
   "failed-other-shaped-running",
+  "failed-own-shaped-running",
+  "healthy-shaped-running",
   "failed-other-shaped-absent",
   "failed-other-running-name",
   "failed-other-reserved",
@@ -465,13 +469,17 @@ for (const platform of ["android", "ios"] as const) {
     ) {
       continue;
     }
-    for (const requested of (column.startsWith("failed-other")
-      ? [undefined, "either"]
-      : [platform]) as readonly (Platform | "either" | undefined)[]) {
-      for (const name of EXPECTED) {
+    const exactRunningPin =
+      column === "failed-own-shaped-running" || column === "healthy-shaped-running";
+    for (const requested of (exactRunningPin
+      ? [undefined]
+      : column.startsWith("failed-other")
+        ? [undefined, "either"]
+        : [platform]) as readonly (Platform | "either" | undefined)[]) {
+      for (const name of EXPECTED.filter((name) => !exactRunningPin || name !== "observe")) {
         test(`${platform} ${column}, platform=${requested ?? "absent"}: ${name}`, async () => {
           const failedOther = column.startsWith("failed-other");
-          if (failedOther) {
+          if (failedOther || exactRunningPin) {
             useFakeReadRetryTimer();
           }
           let listings = 0;
@@ -482,10 +490,11 @@ for (const platform of ["android", "ios"] as const) {
               column === "reserved-running" ||
               column === "ambiguous" ||
               column === "failed-other-running-name" ||
-              column === "failed-other-shaped-running",
+              column === "failed-other-shaped-running" ||
+              exactRunningPin,
             column === "capacity",
             column === "incomplete",
-            column.startsWith("failed-other-shaped"),
+            column.startsWith("failed-other-shaped") || exactRunningPin,
           );
           const other = platform === "android" ? "ios" : "android";
           if (failedOther) {
@@ -497,6 +506,26 @@ for (const platform of ["android", "ios"] as const) {
                 devices: h!.devices,
                 scanned,
                 discoveryErrors: { [other]: { code: "failed", message: "other listing failed" } },
+              };
+            };
+          }
+          if (exactRunningPin) {
+            const failedOwn = column === "failed-own-shaped-running";
+            statusListing = async () => {
+              listings++;
+              return {
+                devices: h!.devices,
+                scanned: {
+                  android: !failedOwn || platform !== "android",
+                  ios: !failedOwn || platform !== "ios",
+                },
+                ...(failedOwn
+                  ? {
+                      discoveryErrors: {
+                        [platform]: { code: "failed", message: "own listing failed" },
+                      },
+                    }
+                  : {}),
               };
             };
           }
@@ -595,7 +624,7 @@ for (const platform of ["android", "ios"] as const) {
                   [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
                 }),
             );
-            if (failedOther) {
+            if (failedOther || exactRunningPin) {
               await settleByFakeEvents(retryTimer, outcome, { description: column });
             } else {
               await outcome;
@@ -647,12 +676,23 @@ for (const platform of ["android", "ios"] as const) {
             const retried = column === "failed-other-unknown" || column === "failed-other-reserved";
             expect(retryTimer.now()).toBe(retried ? 1000 : 0);
             expect(retryTimer.getSleepCallCount()).toBe(retried ? 2 : 0);
-            expect(listings).toBe(retried ? 3 : 1);
+            expect(listings).toBe(
+              column === "failed-other-shaped-running" && name !== "observe" ? 0 : retried ? 3 : 1,
+            );
             if (column === "failed-other-unknown") {
               expect(h.ensure).not.toHaveBeenCalled();
               expect(h.verify).not.toHaveBeenCalled();
               expect(h.runs).toEqual([]);
             }
+          }
+          if (exactRunningPin) {
+            expect(listings).toBe(0);
+            expect(retryTimer.now()).toBe(0);
+            expect(retryTimer.getSleepCallCount()).toBe(0);
+            expect(h.timer.now()).toBe(0);
+            expect(h.timer.getSleepCallCount()).toBe(0);
+            expect(h.detect).toHaveBeenCalledTimes(1);
+            expect(h.handledDevices).toEqual([h.device]);
           }
           expect(h.manager.getCurrentDevice()).toBeUndefined();
           expect(h.manager.getCurrentPlatform()).toBeUndefined();

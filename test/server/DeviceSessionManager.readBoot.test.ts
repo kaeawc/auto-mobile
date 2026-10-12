@@ -1,4 +1,6 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
+import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import {
   DeviceSessionManager,
   type ConnectedPlatformScan,
@@ -27,6 +29,12 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeWindow } from "../fakes/FakeWindow";
 import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
 import { drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
+
+let restoreResume: (() => void) | undefined;
+afterEach(() => {
+  restoreResume?.();
+  restoreResume = undefined;
+});
 
 class FakeReadSimctl extends FakeSimctl {
   readonly presentations: string[] = [];
@@ -832,7 +840,23 @@ for (const platform of ["android", "ios"] as const) {
       });
       const beforeReadBoot = mock(async () => {});
       const options = { ...h.options, beforeReadBoot };
-      const verifyDevice = mock(h.manager.verifyDevice.bind(h.manager));
+      const client = platform === "android" ? AndroidCtrlProxyClient : IOSCtrlProxyClient;
+      const originalResume = client.resumeAfterDeviceStart;
+      const events: string[] = [];
+      const resume = spyOn(client, "resumeAfterDeviceStart").mockImplementation((deviceId) => {
+        expect(deviceId).toBe(h.device.deviceId);
+        events.push("resume");
+      });
+      restoreResume = () => {
+        resume.mockRestore();
+        expect(client.resumeAfterDeviceStart).toBe(originalResume);
+      };
+      const originalVerify = h.manager.verifyDevice.bind(h.manager);
+      const verifyDevice = mock(async (...args: Parameters<typeof originalVerify>) => {
+        events.push("verify");
+        expect(events).toEqual(["resume", "resume", "verify"]);
+        return await originalVerify(...args);
+      });
       h.manager.verifyDevice = verifyDevice;
       const outcomes = Promise.all([
         h.manager.ensureDeviceReady(platform, h.id, options),

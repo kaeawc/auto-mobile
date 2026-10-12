@@ -942,42 +942,39 @@ async function findExplicitReadTarget(
   input: ExecutionTargetInput,
   read: SessionlessDeviceRead,
   platform: SomePlatform,
-  knownRunning?: BootedDevice,
   fallback?: () => Promise<BootedDevice | undefined>,
 ): Promise<BootedDevice | undefined> {
   return withReadRestartReservation(input, input.args.deviceId, () =>
-    knownRunning
-      ? Promise.resolve(knownRunning)
-      : read.findRunning
-        ? read.findRunning(input.args.deviceId, input.signal, platform, async (listing) => {
-            // A bare name may identify a stopped image on the completed platform. Probe inventory
-            // before backoff, without entering readiness or changing any device/session state.
-            // Keep the bounded discovery verdict for a reserved target; reservation wins at
-            // the outer error boundary, before readiness can start.
-            if (readRestartReservation([input.args.deviceId], input.args.platform)) {
-              return false;
-            }
-            const targetPlatform = explicitReadTargetPlatform(input.args.deviceId, platform);
-            const healthy = (["android", "ios"] as const).filter(
-              (p) => listing.scanned[p] && (targetPlatform === "either" || targetPlatform === p),
-            );
-            for (const p of healthy) {
-              const image = await input.deviceSessionManager.findProvidedReadinessImage(
-                p,
-                input.args.deviceId,
-                listing,
-                { intent: "read", signal: input.signal },
-              );
-              input.signal?.throwIfAborted();
-              if (image) {
-                return true;
-              }
-            }
+    read.findRunning
+      ? read.findRunning(input.args.deviceId, input.signal, platform, async (listing) => {
+          // A bare name may identify a stopped image on the completed platform. Probe inventory
+          // before backoff, without entering readiness or changing any device/session state.
+          // Keep the bounded discovery verdict for a reserved target; reservation wins at
+          // the outer error boundary, before readiness can start.
+          if (readRestartReservation([input.args.deviceId], input.args.platform)) {
             return false;
-          })
-        : fallback
-          ? fallback()
-          : read.resolve(input.args.deviceId, input.signal, platform),
+          }
+          const targetPlatform = explicitReadTargetPlatform(input.args.deviceId, platform);
+          const healthy = (["android", "ios"] as const).filter(
+            (p) => listing.scanned[p] && (targetPlatform === "either" || targetPlatform === p),
+          );
+          for (const p of healthy) {
+            const image = await input.deviceSessionManager.findProvidedReadinessImage(
+              p,
+              input.args.deviceId,
+              listing,
+              { intent: "read", signal: input.signal },
+            );
+            input.signal?.throwIfAborted();
+            if (image) {
+              return true;
+            }
+          }
+          return false;
+        })
+      : fallback
+        ? fallback()
+        : read.resolve(input.args.deviceId, input.signal, platform),
   );
 }
 
@@ -995,14 +992,13 @@ async function findRunningExplicitReadTarget(
       device.deviceId === input.args.deviceId &&
       (platform === "either" || device.platform === platform),
   );
-  if (exact && explicitReadTargetPlatform(input.args.deviceId, platform) === platform) {
-    const device = await findExplicitReadTarget(input, read, platform, exact);
-    return device ? { device, fromListing: false } : undefined;
+  if (exact) {
+    return { device: exact, fromListing: false };
   }
   if (alreadyChecked) {
     return undefined;
   }
-  const running = await findExplicitReadTarget(input, read, platform, undefined, async () =>
+  const running = await findExplicitReadTarget(input, read, platform, async () =>
     matchRunningReadTarget(scan.devices, input.args.deviceId, platform),
   );
   if (

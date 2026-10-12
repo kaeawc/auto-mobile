@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
-import { parseSync, Visitor, type ClassDeclaration } from "oxc-parser";
+import { parseSync, Visitor, type ClassDeclaration, type ClassExpression } from "oxc-parser";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
@@ -132,19 +132,62 @@ interface CodedErrorModule {
   classes: string[];
 }
 
-/** Pure parser: comments, strings and uncoded/local classes cannot satisfy the guard. */
-function codedErrorModule(module: string, source: string): CodedErrorModule[] {
+interface ScannedClass {
+  module: string;
+  name: string;
+  parentName: string | undefined;
+  declaresCode: boolean;
+  exported: boolean;
+}
+
+type ScannedClassNode = ClassDeclaration | ClassExpression;
+
+function declaresCode(node: ScannedClassNode): boolean {
+  return node.body.body.some((member) => {
+    if (member.type === "PropertyDefinition") {
+      return (
+        !member.computed &&
+        ((member.key.type === "Identifier" && member.key.name === "code") ||
+          (member.key.type === "Literal" && member.key.value === "code"))
+      );
+    }
+    return (
+      member.type === "MethodDefinition" &&
+      member.kind === "constructor" &&
+      member.value.params.some((parameter) => {
+        if (parameter.type !== "TSParameterProperty") {
+          return false;
+        }
+        const property =
+          parameter.parameter.type === "AssignmentPattern"
+            ? parameter.parameter.left
+            : parameter.parameter;
+        return property.type === "Identifier" && property.name === "code";
+      })
+    );
+  });
+}
+
+/** Pure parser: collect local bases too, including variable-bound class expressions. */
+function scanClasses(module: string, source: string): ScannedClass[] {
   const { program, errors } = parseSync(`${module}.ts`, source);
   if (errors.length > 0) {
     throw new Error(`${module}: ${errors[0].message}`);
   }
-  const exported = new Set<ClassDeclaration>();
+  const exported = new Set<ScannedClassNode>();
   const exportedNames = new Set<string>();
-  const classes: ClassDeclaration[] = [];
+  const classes: { node: ScannedClassNode; name: string }[] = [];
   new Visitor({
     ExportNamedDeclaration(node) {
       if (node.declaration?.type === "ClassDeclaration") {
         exported.add(node.declaration);
+      }
+      if (node.declaration?.type === "VariableDeclaration") {
+        for (const declaration of node.declaration.declarations) {
+          if (declaration.id.type === "Identifier") {
+            exportedNames.add(declaration.id.name);
+          }
+        }
       }
       if (!node.source && node.exportKind !== "type") {
         for (const specifier of node.specifiers) {
@@ -161,10 +204,15 @@ function codedErrorModule(module: string, source: string): CodedErrorModule[] {
       }
     },
     ClassDeclaration(node) {
-      classes.push(node);
+      classes.push({ node, name: node.id?.name ?? "default" });
+    },
+    VariableDeclarator(node) {
+      if (node.id.type === "Identifier" && node.init?.type === "ClassExpression") {
+        classes.push({ node: node.init, name: node.id.name });
+      }
     },
   }).visit(program);
-  const coded = classes.filter((node) => {
+  return classes.map(({ node, name }) => {
     const parent = node.superClass;
     const parentName =
       parent?.type === "Identifier"
@@ -174,37 +222,54 @@ function codedErrorModule(module: string, source: string): CodedErrorModule[] {
             parent.property.type === "Identifier"
           ? parent.property.name
           : undefined;
-    return (
-      (exported.has(node) || (node.id !== null && exportedNames.has(node.id.name))) &&
-      parentName?.endsWith("Error") &&
-      node.body.body.some((member) => {
-        if (member.type === "PropertyDefinition") {
-          return (
-            !member.computed &&
-            ((member.key.type === "Identifier" && member.key.name === "code") ||
-              (member.key.type === "Literal" && member.key.value === "code"))
-          );
-        }
-        return (
-          member.type === "MethodDefinition" &&
-          member.kind === "constructor" &&
-          member.value.params.some((parameter) => {
-            if (parameter.type !== "TSParameterProperty") {
-              return false;
-            }
-            const property =
-              parameter.parameter.type === "AssignmentPattern"
-                ? parameter.parameter.left
-                : parameter.parameter;
-            return property.type === "Identifier" && property.name === "code";
-          })
-        );
-      })
-    );
+    return {
+      module,
+      name,
+      parentName,
+      declaresCode: declaresCode(node),
+      exported: exported.has(node) || exportedNames.has(name),
+    };
   });
-  return coded.length > 0
-    ? [{ module, classes: coded.map((node) => node.id?.name ?? "default") }]
-    : [];
+}
+
+/**
+ * Resolve both Error ancestry and inherited codes across the whole scan by class name.
+ * Name collisions across modules and codes assigned via Object.assign are not resolved.
+ */
+function codedErrorModules(
+  sources: readonly { module: string; source: string }[],
+): CodedErrorModule[] {
+  const classes = sources.flatMap(({ module, source }) => scanClasses(module, source));
+  const errors = new Set(["Error", "ActionableError"]);
+  const coded = new Set(classes.filter((entry) => entry.declaresCode).map((entry) => entry.name));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const entry of classes) {
+      if (!entry.parentName) {
+        continue;
+      }
+      for (const names of [errors, coded]) {
+        if (names.has(entry.parentName) && !names.has(entry.name)) {
+          names.add(entry.name);
+          changed = true;
+        }
+      }
+    }
+  }
+  const modules = new Map<string, string[]>();
+  for (const entry of classes) {
+    if (entry.exported && errors.has(entry.name) && coded.has(entry.name)) {
+      const names = modules.get(entry.module) ?? [];
+      names.push(entry.name);
+      modules.set(entry.module, names);
+    }
+  }
+  return [...modules].map(([module, names]) => ({ module, classes: names }));
+}
+
+function codedErrorModule(module: string, source: string): CodedErrorModule[] {
+  return codedErrorModules([{ module, source }]);
 }
 
 function unlistedCodedErrorModules(
@@ -229,16 +294,16 @@ let codedErrorInventory: readonly CodedErrorModule[] = [];
 beforeAll(() => {
   const root = join(import.meta.dir, "..", "..", "src");
   codedErrorInventory = Object.freeze(
-    readdirSync(root, { recursive: true })
-      .filter((file) => file.endsWith(".ts"))
-      .flatMap((file) => {
-        const source = readFileSync(join(root, file), "utf8");
-        // Cheap lexical prefilter only; TypeScript declarations are always parsed structurally.
-        if (!source.includes("extends") || !source.includes("code")) {
-          return [];
-        }
-        return codedErrorModule(file.split(sep).join("/").slice(0, -3), source);
-      }),
+    codedErrorModules(
+      readdirSync(root, { recursive: true })
+        .filter((file) => file.endsWith(".ts"))
+        .map((file) => ({
+          module: file.split(sep).join("/").slice(0, -3),
+          source: readFileSync(join(root, file), "utf8"),
+        }))
+        // Inherited codes need no local code token. Declarations are parsed structurally.
+        .filter(({ source }) => source.includes("extends")),
+    ),
   );
 });
 
@@ -797,6 +862,38 @@ describe("refusal wire contract", () => {
         { "new/refusal": "process exit code" },
       ),
     ).toEqual(["new/refusal"]);
+  });
+
+  test.each([
+    {
+      name: "a coded superclass in another module",
+      source: "export class MutInherited extends InputDeviceOwnedError {}",
+      className: "MutInherited",
+    },
+    {
+      name: "a transitive local superclass without an Error suffix",
+      source:
+        "class LocalBase extends InputDeviceOwnedError {} export class MutLocal extends LocalBase {}",
+      className: "MutLocal",
+    },
+    {
+      name: "an exported class expression",
+      source: 'export const X = class extends ActionableError { readonly code = "x"; };',
+      className: "X",
+    },
+  ])("the module checker detects $name", ({ source, className }) => {
+    const inventory = codedErrorModules([
+      { module: "mutation", source },
+      {
+        module: "daemon/inputDeviceOwnership",
+        source:
+          'export class InputDeviceOwnedError extends ActionableError { readonly code = "owned"; }',
+      },
+      { module: "negative", source: 'export class NotAnError { readonly code = "ordinary"; }' },
+    ]);
+    expect(
+      unlistedCodedErrorModules(inventory, new Set(Object.keys(refusalErrorModules)), {}),
+    ).toEqual([`mutation: ${className}`]);
   });
 
   test("the module scanner covers properties, parameter properties and exported aliases", () => {

@@ -1,4 +1,7 @@
-import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
+import {
+  devicePreparedForOtherRequestError,
+  InputDeviceOwnedError,
+} from "../../src/daemon/inputDeviceOwnership";
 import { SessionNoLongerOwnsDeviceError } from "../../src/daemon/sessionNoLongerOwnsDevice";
 import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
@@ -450,6 +453,15 @@ describe("observer session admission is opt-in", () => {
       env: {},
     });
     expect(() => auth.authorize({ sessionUuid: "observer" })).toThrow(/Register a session/);
+  });
+});
+
+test("aux authorization fields retain a preparation refusal's retry bound", () => {
+  expect(streamAuthRefusalFields(devicePreparedForOtherRequestError("emu"))).toEqual({
+    code: "device_owned_by_other_session",
+    retryable: true,
+    deviceId: "emu",
+    retryAfterMs: 2_000,
   });
 });
 

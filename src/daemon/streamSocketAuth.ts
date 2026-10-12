@@ -90,10 +90,18 @@ export function streamAuthRefusalFields(error: unknown):
       code: InputDeviceOwnedError["code"] | SessionNoLongerOwnsDeviceError["code"];
       retryable: boolean;
       deviceId: string;
+      retryAfterMs?: number;
     }
   | {} {
   if (error instanceof InputDeviceOwnedError || error instanceof SessionNoLongerOwnsDeviceError) {
-    return { code: error.code, retryable: error.retryable, deviceId: error.deviceId };
+    return {
+      code: error.code,
+      retryable: error.retryable,
+      deviceId: error.deviceId,
+      ...(error instanceof InputDeviceOwnedError && typeof error.retryAfterMs === "number"
+        ? { retryAfterMs: error.retryAfterMs }
+        : {}),
+    };
   }
   return {};
 }

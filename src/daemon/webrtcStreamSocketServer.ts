@@ -482,7 +482,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   }): WebRtcStreamSocketResponse {
     const fields = streamAuthRefusalFields(error);
     if ("code" in fields) {
-      logger.warn(`[WebRtcStream] Authorization refused: ${errorMessage(error)}`, error);
+      logger.warn(`[WebRtcStream] Ownership refusal: ${errorMessage(error)}`, error);
       return {
         ...this.createErrorResponse(request.id, errorMessage(error)),
         ...fields,

@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -7,6 +7,7 @@ import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDevice
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
+import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
 import { executionTracker } from "../../src/server/executionTracker";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -55,14 +56,18 @@ describe("a connection bound to the base session naming its own derived label se
   let fixtures: McpTestFixture[];
   let spies: Array<ReturnType<typeof spyOn>>;
   let previousAutolock: string | undefined;
+  let restoreServerFixture: () => void;
 
   beforeAll(async () => {
     // Pay the server module's cold import outside any test's budget.
     const restore = installHermeticServerFixture();
     const warm = new McpTestFixture({ daemonMode: true });
-    await warm.setup();
-    await warm.teardown();
-    restore();
+    try {
+      await warm.setup();
+    } finally {
+      await warm.teardown();
+      restore();
+    }
     // Warm the fake daemon/device pipeline too, before the routing cases are timed.
     await setUp();
     try {
@@ -101,6 +106,7 @@ describe("a connection bound to the base session naming its own derived label se
       }));
 
   async function setUp(): Promise<void> {
+    restoreServerFixture = installHermeticServerFixture();
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     fixtures = [];
@@ -153,12 +159,13 @@ describe("a connection bound to the base session naming its own derived label se
       await fixture.teardown();
     }
     tools.uninstall();
-    PlatformDeviceManagerFactory.setInstance(null);
+    clearDirectSessionDevices();
     DaemonState.getInstance().reset();
     manager.stopCleanupTimer();
     for (const spy of spies) {
       spy.mockRestore();
     }
+    restoreServerFixture();
     if (previousAutolock === undefined) {
       delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     } else {
@@ -177,59 +184,57 @@ describe("a connection bound to the base session naming its own derived label se
   };
 
   describe("typed routing refusals and exempt reads", () => {
-    beforeEach(setUp);
-    afterEach(tearDown);
-
     test.each([false, true])(
       "a foreign-session control refusal is typed and starts no execution (seeded=%s)",
-      async (seeded) => {
-        const owner = await connection({
-          sessionId: "http-owner",
-          ...(seeded ? { initialSessionToolBinding: BASE } : {}),
-        });
-        if (!seeded) {
-          expect((await tap(owner, { sessionUuid: BASE })).isError).not.toBe(true);
-        }
-        await pool.bindOrReuseDeviceSession(
-          "other",
-          third.deviceId,
-          "android",
-          undefined,
-          undefined,
-          undefined,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          OTHER,
-        );
-        const before = { ...manager.peekSession(BASE)! };
-        const namedBefore = { ...manager.peekSession("other")! };
-        const ranBefore = tools.runs.length;
-        timer.advanceTime(1_000);
-        const started = spyOn(executionTracker, "startExecution");
-        try {
-          const result = await owner.client.callTool({
-            name: "tapAt",
-            arguments: { sessionUuid: "other", x: 1, y: 1, [INTERNAL_MCP_SESSION_PARAM]: OWNER },
+      (seeded) =>
+        scenario(async () => {
+          const owner = await connection({
+            sessionId: "http-owner",
+            ...(seeded ? { initialSessionToolBinding: BASE } : {}),
           });
-          expect(result.isError).toBe(true);
-          expect(wire(result)).toEqual({
-            success: false,
-            error: expect.stringMatching(BOUND_TO_OTHER_SESSION),
-            code: "device_outside_bound_session",
-            boundSessionUuid: BASE,
-            requestedSessionUuid: "other",
-            retryable: false,
-          });
-          expect(started).not.toHaveBeenCalled();
-          expect(manager.peekSession(BASE)).toEqual(before);
-          expect(manager.peekSession("other")).toEqual(namedBefore);
-          expect(tools.runs.length).toBe(ranBefore);
-        } finally {
-          started.mockRestore();
-        }
-      },
+          if (!seeded) {
+            expect((await tap(owner, { sessionUuid: BASE })).isError).not.toBe(true);
+          }
+          await pool.bindOrReuseDeviceSession(
+            "other",
+            third.deviceId,
+            "android",
+            undefined,
+            undefined,
+            undefined,
+            false,
+            undefined,
+            undefined,
+            undefined,
+            OTHER,
+          );
+          const before = { ...manager.peekSession(BASE)! };
+          const namedBefore = { ...manager.peekSession("other")! };
+          const ranBefore = tools.runs.length;
+          timer.advanceTime(1_000);
+          const started = spyOn(executionTracker, "startExecution");
+          try {
+            const result = await owner.client.callTool({
+              name: "tapAt",
+              arguments: { sessionUuid: "other", x: 1, y: 1, [INTERNAL_MCP_SESSION_PARAM]: OWNER },
+            });
+            expect(result.isError).toBe(true);
+            expect(wire(result)).toEqual({
+              success: false,
+              error: expect.stringMatching(BOUND_TO_OTHER_SESSION),
+              code: "device_outside_bound_session",
+              boundSessionUuid: BASE,
+              requestedSessionUuid: "other",
+              retryable: false,
+            });
+            expect(started).not.toHaveBeenCalled();
+            expect(manager.peekSession(BASE)).toEqual(before);
+            expect(manager.peekSession("other")).toEqual(namedBefore);
+            expect(tools.runs.length).toBe(ranBefore);
+          } finally {
+            started.mockRestore();
+          }
+        })(),
     );
 
     test.each([
@@ -239,9 +244,8 @@ describe("a connection bound to the base session naming its own derived label se
       { seeded: true, target: "foreign-owned", live: true },
       { seeded: false, target: "unissued", live: false },
       { seeded: true, target: "unissued", live: false },
-    ])(
-      "a bound connection reads $target without use or rebinding (seeded=$seeded)",
-      async (row) => {
+    ])("a bound connection reads $target without use or rebinding (seeded=$seeded)", (row) =>
+      scenario(async () => {
         if (row.live) {
           await pool.bindOrReuseDeviceSession(
             row.target,
@@ -322,7 +326,7 @@ describe("a connection bound to the base session naming its own derived label se
         } finally {
           bound.mockRestore();
         }
-      },
+      })(),
     );
   });
 

@@ -16,11 +16,20 @@ afterAll(async () => {
 
 test("cross-session refusal reaches the client as a tool error before executing", async () => {
   const response = await fixture.client.callTool({
-    name: "observe",
-    arguments: { sessionUuid: "session-b" },
+    name: "tapOn",
+    arguments: { sessionUuid: "session-b", text: "x" },
   });
   expect(response.isError).toBe(true);
   expect(response.content).toEqual([
     { type: "text", text: expect.stringMatching(/session-a.*session-b.*separate MCP connection/) },
   ]);
+  const content = response.content as { text: string }[];
+  expect(JSON.parse(content[0].text)).toEqual({
+    success: false,
+    error: expect.stringMatching(/session-a.*session-b.*separate MCP connection/),
+    code: "device_outside_bound_session",
+    boundSessionUuid: "session-a",
+    requestedSessionUuid: "session-b",
+    retryable: false,
+  });
 });

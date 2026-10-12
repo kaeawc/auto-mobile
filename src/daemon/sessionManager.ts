@@ -10283,7 +10283,37 @@ export class SessionManager {
     return (
       judgesOwnerHeartbeats(session) &&
       suspectGraceMsFor(session) > 0 &&
-      livenessLeaseState(sessionJudgedLeaseSnapshot(session, this.sessionNow())).phase === "lapsed"
+      livenessLeaseState({
+        ...sessionJudgedLeaseSnapshot(session, this.sessionNow()),
+        lastHeartbeat: this.judgedLeaseHeartbeat(session),
+      }).phase === "lapsed"
+    );
+  }
+
+  /** Later owner proof from a same-token base, including its release-local credit (#11722). */
+  judgedLeaseHeartbeat(session: Session): number {
+    const ownHeartbeat = judgedLeaseHeartbeat(session);
+    const baseId = this.ownershipSessionUuid(session.sessionId);
+    const releasingBaseId =
+      baseId === session.sessionId ? this.getBaseSessionOfDerivedLabel(session.sessionId) : baseId;
+    const base =
+      this.livenessBaseSession(session) ??
+      (releasingBaseId === undefined ? undefined : this.getReleasingSession(releasingBaseId));
+    if (
+      !base ||
+      !judgesOwnerHeartbeats(base) ||
+      base.livenessOwnerToken === undefined ||
+      base.livenessOwnerToken !== session.livenessOwnerToken
+    ) {
+      return ownHeartbeat;
+    }
+    const operation = this.releasePromises.get(base.sessionId);
+    return Math.max(
+      ownHeartbeat,
+      judgedLeaseHeartbeat(base),
+      operation?.session === base
+        ? (operation.ownerHeartbeatDuringRelease ?? Number.NEGATIVE_INFINITY)
+        : Number.NEGATIVE_INFINITY,
     );
   }
 
@@ -10323,20 +10353,8 @@ export class SessionManager {
       return undefined;
     }
     const snapshot = sessionJudgedLeaseSnapshot(session, this.sessionNow());
-    const base = this.livenessBaseSession(session);
-    if (
-      base &&
-      judgesOwnerHeartbeats(base) &&
-      base.livenessOwnerToken !== undefined &&
-      base.livenessOwnerToken === session.livenessOwnerToken
-    ) {
-      snapshot.lastHeartbeat = Math.max(
-        snapshot.lastHeartbeat,
-        sessionJudgedLeaseSnapshot(base, snapshot.now).lastHeartbeat,
-      );
-    }
     snapshot.lastHeartbeat = Math.max(
-      snapshot.lastHeartbeat,
+      this.judgedLeaseHeartbeat(session),
       operation?.ownerHeartbeatDuringRelease ?? Number.NEGATIVE_INFINITY,
     );
     return snapshot;

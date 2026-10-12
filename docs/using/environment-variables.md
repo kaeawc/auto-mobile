@@ -792,6 +792,7 @@ refused. An admitted boot holds its slot until adb lists the new emulator (or th
 simulator boot finishes), the launch fails or is cancelled, or the boot deadline
 passes. `listDevices` reports `capacity` per gated platform as
 `{ limit, booted, inFlight }`.
+Android also reports optional `processTable` diagnostics when the current sample lacks the host process table or this daemon has admitted a boot on the adb-only count: availability, the most recent failure reason, detail and attempt count, plus the number and last time of such admissions. Transient `ps` failures are retried with exponential backoff within the sample deadline; exhausted retries retain the adb-only fallback.
 
 ```bash
 export AUTOMOBILE_ANDROID_MAX_BOOTED=3     # fixed Android limit

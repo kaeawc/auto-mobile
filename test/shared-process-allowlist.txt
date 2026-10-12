@@ -1070,7 +1070,6 @@ test/setup/gitVersionProbe.test.ts
 test/setup/preloadDoesNotLoadCtrlProxyClients.test.ts
 test/setup/testDirectories.test.ts
 test/shutdownCleanup.test.ts
-test/shutdownLateOutcomes.test.ts
 test/stdioShutdownStages.test.ts
 test/utils/ArchiveExtractor.test.ts
 test/utils/Backoff.property.test.ts

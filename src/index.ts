@@ -217,8 +217,14 @@ async function main() {
             }
           },
           closeDatabase: async () => {
+            // The shutdown close: an in-flight tool call that outlives it is refused from here
+            // on instead of lazily reopening the database behind the exiting process.
             const { closeDatabase } = await import("./db/database");
-            await closeDatabase();
+            await closeDatabase({ forShutdown: true });
+          },
+          refusedDatabaseAccessCount: async () => {
+            const { refusedDatabaseAccessCountAfterShutdownClose } = await import("./db/database");
+            return refusedDatabaseAccessCountAfterShutdownClose();
           },
           closeLogger: () => logger.closeAfterFlush(),
           warn: (message) => logger.warn(message),

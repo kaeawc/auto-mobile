@@ -220,6 +220,7 @@ import {
   getDatabase,
   getDatabasePath,
   getDbWriteBarrier,
+  refusedDatabaseAccessCountAfterShutdownClose,
 } from "../db";
 import { NavigationRetention } from "../db/navigationRetention";
 import { NavigationRetentionMonitor } from "./NavigationRetentionMonitor";
@@ -5186,7 +5187,9 @@ export class Daemon {
     // Abandoned is not cancelled: the connection stays open while an abandoned stage that may
     // write is still running, and closes late if those stragglers finish in time (#11601).
     const databaseTail = createShutdownDatabaseTail({
-      closeDatabase: () => closeDatabase(),
+      // The shutdown close: late work is refused from here on instead of reopening it.
+      closeDatabase: () => closeDatabase({ forShutdown: true }),
+      refusedAccessCount: () => refusedDatabaseAccessCountAfterShutdownClose(),
       drainWrites: (timeoutMs) => this.drainShutdownDatabaseWrites(timeoutMs),
       keepOpenReason: () =>
         this.shutdownSessionReleasesDrained

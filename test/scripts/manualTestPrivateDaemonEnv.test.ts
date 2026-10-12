@@ -8,11 +8,166 @@ import {
   DERIVED_PATH_VARIABLES,
   privateClientEnvironment,
   type PrivateDaemonBatchOptions,
+  canonicalizePath,
+  privatePathRefusal,
+  INHERITED_ENV_VARIABLES,
+  type CanonicalizePathFs,
 } from "../../scripts/manual-test/privateDaemonEnv";
 import { privateHarnessEnvRefusal } from "../../scripts/manual-test/harnessEnv";
 import { resolveAutoMobileBaseDir } from "../../src/utils/tempDir";
 
 const posixTest = process.platform === "win32" ? test.skip : test;
+function memoryFs(
+  entries: Record<string, { realpath?: string; error?: string; target?: string }>,
+): CanonicalizePathFs {
+  const failure = (code: string): Error => Object.assign(new Error(code), { code });
+  return {
+    realpath(path) {
+      const entry = entries[path];
+      if (!entry || entry.error) {
+        throw failure(entry?.error ?? "ENOENT");
+      }
+      return entry.realpath ?? path;
+    },
+    lstat(path) {
+      const entry = entries[path];
+      if (!entry) {
+        throw failure("ENOENT");
+      }
+      return { isSymbolicLink: () => entry.target !== undefined };
+    },
+    readlink(path) {
+      const target = entries[path]?.target;
+      if (target === undefined) {
+        throw failure("EINVAL");
+      }
+      return target;
+    },
+  };
+}
+posixTest("canonicalizePath uses the realpath result for an existing path", () => {
+  const fs = memoryFs({ "/alias/file": { realpath: "/canonical/file" } });
+  expect(canonicalizePath(" /alias/file ", fs)).toBe("/canonical/file");
+});
+posixTest("canonicalizePath canonicalizes a socket's aliased parent", () => {
+  const fs = memoryFs({
+    "/tmp": { realpath: "/private/tmp" },
+    "/tmp/d.sock": { error: "EOPNOTSUPP" },
+  });
+  expect(canonicalizePath("/tmp/d.sock", fs)).toBe("/private/tmp/d.sock");
+});
+posixTest("canonicalizePath joins missing descendants to the deepest existing ancestor", () => {
+  const fs = memoryFs({ "/alias": { realpath: "/canonical" } });
+  expect(canonicalizePath("/alias/missing/leaf", fs)).toBe("/canonical/missing/leaf");
+  const notDirectory = memoryFs({
+    "/alias": { realpath: "/canonical" },
+    "/alias/file/leaf": { error: "ENOTDIR" },
+  });
+  expect(canonicalizePath("/alias/file/leaf", notDirectory)).toBe("/canonical/file/leaf");
+});
+posixTest("canonicalizePath follows dangling links into default roots and refuses them", () => {
+  for (const target of ["../home/fake/.auto-mobile/missing", "/home/fake/.auto-mobile/missing"]) {
+    const fs = memoryFs({
+      "/": {},
+      "/alias": { realpath: "/canonical" },
+      "/alias/link": { error: "ENOENT", target },
+    });
+    expect(canonicalizePath("/alias/link", fs)).toBe("/home/fake/.auto-mobile/missing");
+    expect(
+      privatePathRefusal("/alias/link", {
+        ...host,
+        canonicalize: (path) => canonicalizePath(path, fs),
+      }),
+    ).toContain("default product");
+  }
+});
+posixTest("canonicalizePath fails closed for ELOOP", () => {
+  const fs = memoryFs({ "/loop": { error: "ELOOP" } });
+  expect(() => canonicalizePath("/loop", fs)).toThrow("ELOOP");
+});
+posixTest("canonicalizePath bounds dangling symlink resolution", () => {
+  const entries: Parameters<typeof memoryFs>[0] = { "/": {} };
+  for (let index = 0; index < 9; index++) {
+    entries[`/link${index}`] = { error: "ENOENT", target: `/link${index + 1}` };
+  }
+  const fs = memoryFs(entries);
+  expect(() => canonicalizePath("/link0", fs)).toThrow("depth");
+  expect(canonicalizePath("/link1", fs)).toBe("/link9");
+});
+posixTest("canonicalizePath propagates unreadable metadata and unreadable symlink targets", () => {
+  const fs = memoryFs({ "/": {}, "/link": { error: "ENOENT", target: "/missing" } });
+  expect(() =>
+    canonicalizePath("/link", {
+      ...fs,
+      lstat: () => {
+        throw new Error("lstat denied");
+      },
+    }),
+  ).toThrow("lstat denied");
+  expect(() =>
+    canonicalizePath("/link", {
+      ...fs,
+      readlink: () => {
+        throw new Error("readlink denied");
+      },
+    }),
+  ).toThrow("readlink denied");
+});
+posixTest(
+  "path, batch and client refusals report canonicalization errors with the failing path",
+  () => {
+    for (const failure of ["candidate", "root", "resident"]) {
+      let failingPath = "";
+      const failingHost = {
+        ...host,
+        homeDirs: failure === "resident" ? [] : host.homeDirs,
+        canonicalize(path: string) {
+          if (
+            (failure === "candidate" && path === options.batchDir) ||
+            (failure === "root" && path === "/home/fake/.auto-mobile") ||
+            (failure === "resident" && path.endsWith(".sock"))
+          ) {
+            failingPath = path;
+            throw new Error(`EACCES at ${path}`);
+          }
+          return resolve(path);
+        },
+      };
+      const specs = derivePrivateDaemonBatch(options);
+      const messages = [
+        privatePathRefusal(options.batchDir, failingHost),
+        privateDaemonBatchRefusal(specs, options, failingHost),
+        privateHarnessEnvRefusal(
+          { ...specs[0].env, AUTOMOBILE_DATA_DIR: options.batchDir },
+          failingHost,
+        ),
+      ];
+      for (const message of messages) {
+        expect(message).toContain("Refusing");
+        expect(message).toContain("EACCES");
+        expect(failingPath).not.toBe("");
+        expect(message).toContain(failingPath);
+      }
+    }
+  },
+);
+posixTest("env file uses POSIX unset lines for the shared inherited names", () => {
+  expect(INHERITED_ENV_VARIABLES).toEqual([
+    ...DERIVED_PATH_VARIABLES.map((key) => key.replace("AUTOMOBILE_", "AUTO_MOBILE_")),
+    "AUTOMOBILE_DB_PATH",
+    "AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH",
+    "AUTO_MOBILE_DB_PATH",
+    "AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH",
+    "AUTOMOBILE_MANAGED_SLOT_CONFIG",
+  ]);
+  const envFile = renderEnvFile(derivePrivateDaemonBatch(options)[0], options);
+  expect(envFile).not.toContain("${!");
+  for (const key of INHERITED_ENV_VARIABLES) {
+    expect(envFile).toContain(`unset ${key}\n`);
+    expect(privateClientEnvironment({ [key]: "inherited" }, {})).toEqual({});
+    expect(refusal({ extraEnv: { [key]: "override" } })).toContain("may not override");
+  }
+});
 const host = {
   homeDirs: [resolve("/home/fake"), resolve("/home/other-fake")],
   uid: 4242,

@@ -53,6 +53,26 @@ setup() {
   [ "$(cat "${COMMAND_LOG}")" = "${expected}" ]
 }
 
+@test "rendered env unset lines source cleanly in a POSIX shell" {
+  # Copy the renderer's explicit unset-line format; setup_file's bun is a mock.
+  printf '%s\n' 'unset AUTO_MOBILE_DATA_DIR' \
+    'unset AUTO_MOBILE_LOG_DIR' \
+    'unset AUTO_MOBILE_DB_DIR' \
+    'unset AUTO_MOBILE_COORDINATION_DIR' \
+    'unset AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR' \
+    'unset AUTO_MOBILE_AUX_SOCKET_DIR' \
+    'unset AUTO_MOBILE_DAEMON_SOCKET_PATH' \
+    'unset AUTO_MOBILE_DAEMON_PID_FILE_PATH' \
+    'unset AUTO_MOBILE_DAEMON_LOCK_FILE_PATH' \
+    'unset AUTO_MOBILE_DAEMON_LAUNCH_LOG_PATH' \
+    'unset AUTOMOBILE_DB_PATH' \
+    'unset AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH' \
+    'unset AUTO_MOBILE_DB_PATH' \
+    'unset AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH' \
+    'unset AUTOMOBILE_MANAGED_SLOT_CONFIG' >> "${BATCH}/daemon1/env.sh"
+  sh -c '. "$1"' sh "${BATCH}/daemon1/env.sh"
+}
+
 @test "daemon shorthand uses built server and --daemon" {
   run bash "${SCRIPT}" --batch-dir "${BATCH}" --daemon 1 daemon status --debug
   [ "${status}" -eq 0 ]

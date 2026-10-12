@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { DEFAULT_DAEMON_PORT, resolveDaemonStatePath } from "../../src/daemon/constants";
@@ -7,6 +7,7 @@ import { resolveAuxSocketDir } from "../../src/daemon/socketServer/SocketServerT
 import { resolveDatabasePathFromEnvironment } from "../../src/db/database";
 import { MANAGED_SLOT_CONFIG_ENV } from "../../src/models/managedSlotConfig";
 import { shellQuote } from "../../src/utils/shellQuote";
+import { errorMessage } from "../../src/utils/describeUnknownError";
 import {
   getAdbServerScopedAutoMobileDir,
   getSharedAutoMobileDir,
@@ -57,6 +58,12 @@ export const DERIVED_PATH_VARIABLES: readonly string[] = [
   "AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH",
 ];
 const INHERITED_PATH_OVERRIDES = ["AUTOMOBILE_DB_PATH", "AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH"];
+export const INHERITED_ENV_VARIABLES: readonly string[] = [
+  ...DERIVED_PATH_VARIABLES.map((key) => key.replace("AUTOMOBILE_", "AUTO_MOBILE_")),
+  ...INHERITED_PATH_OVERRIDES,
+  ...INHERITED_PATH_OVERRIDES.map((key) => key.replace("AUTOMOBILE_", "AUTO_MOBILE_")),
+  MANAGED_SLOT_CONFIG_ENV,
+];
 const OWNED_ENV_VARIABLES = [
   ...DERIVED_PATH_VARIABLES,
   ...INHERITED_PATH_OVERRIDES,
@@ -66,7 +73,10 @@ const OWNED_ENV_VARIABLES = [
   "MT_PORT",
 ];
 export function isInheritedPathOverride(key: string): boolean {
-  return key.startsWith("AUTO_MOBILE_") || INHERITED_PATH_OVERRIDES.includes(key);
+  return (
+    key.startsWith("AUTO_MOBILE_") ||
+    (key !== MANAGED_SLOT_CONFIG_ENV && INHERITED_ENV_VARIABLES.includes(key))
+  );
 }
 export function privateClientEnvironment(
   inherited: Record<string, string | undefined>,
@@ -80,27 +90,66 @@ export function privateClientEnvironment(
   }
   return { ...env, ...overrides };
 }
-/** Resolve symlink aliases even before a batch's final path exists. */
-export function canonicalizeHostPath(path: string): string {
-  let ancestor = resolve(path.trim());
-  const remaining: string[] = [];
-  for (;;) {
+export interface CanonicalizePathFs {
+  realpath(path: string): string;
+  lstat(path: string): { isSymbolicLink(): boolean };
+  readlink(path: string): string;
+}
+function isMissingPathError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error.code === "ENOENT" || error.code === "ENOTDIR")
+  );
+}
+/** Resolve aliases and dangling links without opening special files such as sockets. */
+export function canonicalizePath(path: string, fs: CanonicalizePathFs): string {
+  function canonicalize(current: string, depth: number): string {
     try {
-      return join(realpathSync(ancestor), ...remaining);
+      return fs.realpath(current);
     } catch (error) {
-      // Missing descendants are expected before init; other filesystem failures must surface.
+      // Missing paths and unopened special files require resolving their parent instead.
       if (
-        !(error instanceof Error) ||
-        !("code" in error) ||
-        (error.code !== "ENOENT" && error.code !== "ENOTDIR") ||
-        dirname(ancestor) === ancestor
+        (typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "ELOOP") ||
+        dirname(current) === current
       ) {
         throw error;
       }
-      remaining.unshift(basename(ancestor));
-      ancestor = dirname(ancestor);
+      let symlink: boolean;
+      try {
+        symlink = fs.lstat(current).isSymbolicLink();
+      } catch (statError) {
+        // A missing leaf has no link target; unreadable metadata must still fail closed.
+        if (!isMissingPathError(statError) || !isMissingPathError(error)) {
+          throw statError;
+        }
+        symlink = false;
+      }
+      if (symlink) {
+        if (!isMissingPathError(error)) {
+          throw error;
+        }
+        if (depth >= 8) {
+          throw new Error(`Canonicalization symlink depth exceeded for ${current}`);
+        }
+        const parent = canonicalize(dirname(current), depth);
+        return canonicalize(resolve(parent, fs.readlink(current)), depth + 1);
+      }
+      return join(canonicalize(dirname(current), depth), basename(current));
     }
   }
+  return canonicalize(resolve(path.trim()), 0);
+}
+export function canonicalizeHostPath(path: string): string {
+  return canonicalizePath(path, {
+    realpath: realpathSync,
+    lstat: lstatSync,
+    readlink: readlinkSync,
+  });
 }
 export function extraEnvRefusal(env: Record<string, string>): string | undefined {
   for (const [key, value] of Object.entries(env)) {
@@ -172,8 +221,8 @@ export function derivePrivateDaemonBatch(options: PrivateDaemonBatchOptions): Pr
     };
   });
 }
-function inside(candidate: string, root: string, host: HostDefaults): boolean {
-  const rel = relative(host.canonicalize(root), host.canonicalize(candidate.trim()));
+function inside(candidate: string, root: string): boolean {
+  const rel = relative(root, candidate);
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 /** Shared launcher/client boundary: canonical host defaults and resident basenames. */
@@ -182,29 +231,37 @@ export function privatePathRefusal(candidate: string, host: HostDefaults): strin
   if (!isAbsolute(value) || value.includes("\0")) {
     return `Private path must be absolute without NUL: ${candidate}`;
   }
-  for (const home of host.homeDirs) {
-    const base = resolveAutoMobileBaseDir({}, home, home);
-    // Product path resolvers are lazy and these explicit defaults keep the boundary host-independent.
-    const roots = [
-      base,
-      resolveAutoMobileLogsDir({}, home, home),
-      dirname(resolveDatabasePathFromEnvironment({}, base)),
-      getSharedAutoMobileDir("", home, {}),
-      getAdbServerScopedAutoMobileDir("", "", {}, home),
-      resolveAuxSocketDir({ AUTOMOBILE_AUX_SOCKET_DIR: base }),
-    ];
-    if (roots.some((root) => inside(value, root, host))) {
-      return `Refusing default product state path ${candidate}; choose a private batch/aux root outside the host defaults.`;
+  let canonicalizing = value;
+  const canonicalize = (path: string): string => {
+    canonicalizing = path;
+    return host.canonicalize(path);
+  };
+  try {
+    const canonicalValue = canonicalize(value);
+    for (const home of host.homeDirs) {
+      const base = resolveAutoMobileBaseDir({}, home, home);
+      // Product path resolvers are lazy and these explicit defaults keep the boundary host-independent.
+      const roots = [
+        base,
+        resolveAutoMobileLogsDir({}, home, home),
+        dirname(resolveDatabasePathFromEnvironment({}, base)),
+        getSharedAutoMobileDir("", home, {}),
+        getAdbServerScopedAutoMobileDir("", "", {}, home),
+        resolveAuxSocketDir({ AUTOMOBILE_AUX_SOCKET_DIR: base }),
+      ];
+      if (roots.some((root) => inside(canonicalValue, canonicalize(root)))) {
+        return `Refusing default product state path ${candidate}; choose a private batch/aux root outside the host defaults.`;
+      }
     }
-  }
-  for (const ext of ["sock", "pid", "lock"] as const) {
-    const resident = resolveDaemonStatePath(ext, {}, String(host.uid));
-    if (
-      host.canonicalize(value) === host.canonicalize(resident) ||
-      basename(value) === basename(resident)
-    ) {
-      return `Refusing resident daemon path ${candidate}; choose a private namespace.`;
+    for (const ext of ["sock", "pid", "lock"] as const) {
+      const resident = resolveDaemonStatePath(ext, {}, String(host.uid));
+      if (canonicalValue === canonicalize(resident) || basename(value) === basename(resident)) {
+        return `Refusing resident daemon path ${candidate}; choose a private namespace.`;
+      }
     }
+  } catch (error) {
+    // The CLI reports this refusal through its normal exit-2 path before any I/O.
+    return `Refusing private path ${candidate}; cannot canonicalize ${canonicalizing}: ${errorMessage(error)}`;
   }
   return undefined;
 }
@@ -294,7 +351,7 @@ export function renderEnvFile(spec: PrivateDaemonSpec, options: PrivateDaemonBat
     Object.entries(spec.env)
       .map(([key, value]) => `export ${key}=${shellQuote(value)}`)
       .join("\n") +
-    `\nunset ${MANAGED_SLOT_CONFIG_ENV}\nunset ${INHERITED_PATH_OVERRIDES.join(" ")}\n` +
-    'for legacy_name in "${!AUTO_MOBILE_@}"; do unset "$legacy_name"; done\n'
+    "\n" +
+    INHERITED_ENV_VARIABLES.map((key) => `unset ${key}\n`).join("")
   );
 }

@@ -122,7 +122,7 @@ function isOverlay(query: OwnershipQuery, node: SearchableEntry, scroll: Searcha
     node.windowRank === target.windowRank &&
     node.rootGroup === target.rootGroup &&
     ![target, ...matched].some((anchor) => isRelated(nodes, node, anchor)) &&
-    !isDescendant(nodes, node, scroll)
+    (!isDescendant(nodes, node, scroll) || node.index > target.index)
   );
 }
 
@@ -145,8 +145,8 @@ function overlaysFor(
   if (!scroll) {
     return [];
   }
-  // iOS accessibility order is not z-order. Scroll content slides under controls outside its
-  // scroll container; overlapping siblings inside that container do not establish ownership.
+  // Scroll content slides under controls outside its container. Within the same container,
+  // captured UIKit subview order is back-to-front: only later-drawn controls can cover it.
   return uniqueBySource(query.nodes)
     .filter((node) => isOverlay(query, node, scroll))
     .flatMap((node) => {
@@ -156,7 +156,6 @@ function overlaysFor(
 }
 
 function exclusivePoint(query: OwnershipQuery, covers: readonly ElementBounds[]): TapPoint | null {
-  // A caller's key-row-derived IME cover can leave the frame strip above the first row eligible (#11947 follow-ups).
   const regions = covers.reduce(
     (exposed, cover) => exposed.flatMap((region) => subtractCover(region, cover)),
     [query.visibleBounds],
@@ -184,6 +183,7 @@ function exclusivePoint(query: OwnershipQuery, covers: readonly ElementBounds[])
 export function resolveIosOwnedTapPoint(query: OwnershipQuery): {
   point: TapPoint | null;
   coveredBy?: SearchableEntry;
+  ownerInsideScrollContainer?: boolean;
 } {
   const overlays = overlaysFor(query);
   let owner: SearchableEntry | undefined;
@@ -205,15 +205,32 @@ export function resolveIosOwnedTapPoint(query: OwnershipQuery): {
     covers.push(query.imeBounds);
   }
   const point = exclusivePoint(query, covers);
-  return point ? { point } : { point: null, coveredBy: owner };
+  return point
+    ? { point }
+    : {
+        point: null,
+        coveredBy: owner,
+        ownerInsideScrollContainer: isDescendant(
+          query.nodes,
+          owner,
+          scrollAncestors(query.nodes, query.target)[0],
+        ),
+      };
 }
 
-export function iosTapOwnershipErrorMessage(target: Element, owner: SearchableEntry): string {
+export function iosTapOwnershipErrorMessage(
+  target: Element,
+  owner: SearchableEntry,
+  ownerInsideScrollContainer = false,
+): string {
   const targetLabel =
     [target.text, target["content-desc"], target["resource-id"]].find(Boolean) ?? "target";
   const ownerLabel =
     [owner.displayedLabel, owner.label, owner.elementId, owner.className].find(Boolean) ??
     "control";
   const { left, top, right, bottom } = owner.bounds!;
-  return `Target ${JSON.stringify(targetLabel)} is covered by ${JSON.stringify(ownerLabel)} (${owner.className ? `${owner.className} at ` : ""}[${left},${top},${right},${bottom}]) at its only visible tap area; scroll the target clear of it with swipeOn or choose another target, then retry tapOn.`;
+  const remediation = ownerInsideScrollContainer
+    ? "the covering control is drawn over the target in the same scroll container; reveal the target or choose another target, then retry tapOn."
+    : "scroll the target clear of it with swipeOn or choose another target, then retry tapOn.";
+  return `Target ${JSON.stringify(targetLabel)} is covered by ${JSON.stringify(ownerLabel)} (${owner.className ? `${owner.className} at ` : ""}[${left},${top},${right},${bottom}]) at its only visible tap area; ${remediation}`;
 }

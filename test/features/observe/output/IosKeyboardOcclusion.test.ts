@@ -14,11 +14,12 @@ import {
  * Soft-keyboard coverage of iOS skeleton rows, on the captured Playground
  * keyboard states (issues #10027 / #10028). `ios-keyboard-visible` is the Forms
  * screen on 402x874 with the UIKeyboard container at [0,590,402,816] and key
- * union [4,597,399,813] (docked occluder [0,597,402,874]);
+ * union [4,597,399,813], with assistant bar [0,546,402,590]
+ * (docked app-content occluder [0,546,402,874]);
  * `ios-keyboard-minimized` parks the keyboard at [0,918,402,1144].
  */
 const SCREEN = { width: 402, height: 874 };
-const DOCKED_KEYBOARD = [0, 597, 402, 874] as const;
+const DOCKED_KEYBOARD = [0, 546, 402, 874] as const;
 
 function project(hierarchy: typeof iosKeyboardVisibleHierarchy, viewport = SCREEN) {
   const elements = new DefaultObserveElementCollector().collect(hierarchy, "ios");
@@ -45,8 +46,15 @@ describe("iOS skeleton rows covered by the visible soft keyboard (#10028)", () =
     expect(projection.keyboard).toEqual({ visible: true, package: "com.apple.keyboard" });
   });
 
-  test("no actionable app row has its centre behind the keyboard", () => {
-    expect(appRows.filter((row) => centreInside(row, DOCKED_KEYBOARD))).toEqual([]);
+  test("only captured assistant chrome keeps actionable centres inside the app-content cover", () => {
+    // The assistant and predictions are keyboard members, exempt from the extended top.
+    const chrome = appRows.filter((row) => centreInside(row, DOCKED_KEYBOARD));
+    expect(chrome.map((row) => ({ bounds: row.bounds, affordances: row.affordances }))).toEqual([
+      { bounds: [0, 546, 134, 590], affordances: ["tap"] },
+      { bounds: [134, 546, 268, 590], affordances: ["tap"] },
+      { bounds: [268, 546, 402, 590], affordances: ["tap"] },
+      { bounds: [0, 546, 402, 590], affordances: ["scroll"] },
+    ]);
   });
 
   test("the tab bar and its items move to context as occluded with no affordances", () => {
@@ -68,9 +76,13 @@ describe("iOS skeleton rows covered by the visible soft keyboard (#10028)", () =
     expect(projection.skeleton.some((row) => row.occluded)).toBe(false);
   });
 
-  test("rows above the keyboard and a row only partly covered keep their tap", () => {
-    // Save Changes [16,549,386,601] reaches 4pt into the keyboard but its centre is clear.
-    for (const label of ["Save Changes", "Personal Information", "Theme, System"]) {
+  test("Save Changes under the assistant bar is occluded while rows above keep their tap", () => {
+    // Save Changes [16,549,386,601] is entirely under the chrome starting at y=546.
+    const save = labelled(projection.context, "Save Changes");
+    expect(save?.occluded).toBe(true);
+    expect(save?.affordances).toEqual([]);
+    expect(labelled(projection.skeleton, "Save Changes")).toBeUndefined();
+    for (const label of ["Personal Information", "Theme, System"]) {
       const row = labelled(projection.skeleton, label);
       expect(row?.affordances).toContain("tap");
       expect(row?.occluded).toBeUndefined();

@@ -216,6 +216,36 @@ describe("AbandonedScopeReclaimer", () => {
     expect(await registry.getAssignment(key)).toEqual(before);
   });
 
+  test("a reset just before the journal opens reports a non-abandoned scope without an entry or fence", async () => {
+    const key = await idleSlot("UDID-A");
+    abandonAll();
+    const before = await registry.getAssignment(key);
+    const racing = new Proxy(registry, {
+      get(target, property, receiver) {
+        const value: unknown = Reflect.get(target, property, receiver);
+        if (property !== "openSlotJournal" || typeof value !== "function") {
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return async (...args: Parameters<SlotRegistry["openSlotJournal"]>) => {
+          await target.beginScopeInvalidation(key.scopeKey, "operator_reset");
+          return target.openSlotJournal(...args);
+        };
+      },
+    });
+
+    const report = await reclaimer("daemon-1", racing).sweep();
+
+    expect(report.skipped).toEqual([{ ...key, reason: "scope_not_abandoned" }]);
+    expect(deleter.calls).toEqual([]);
+    expect(await registry.getScope(key.scopeKey)).toMatchObject({
+      state: "invalidating",
+      invalidationReason: "operator_reset",
+    });
+    expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+    expect(await registry.getSlotJournal(1)).toBeNull();
+    expect(await registry.getAssignment(key)).toEqual(before);
+  });
+
   test("a revive just after the journal opens completes the delete in the same sweep", async () => {
     const key = await idleSlot("UDID-A");
     abandonAll();

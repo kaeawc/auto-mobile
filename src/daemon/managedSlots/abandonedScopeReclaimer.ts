@@ -1,6 +1,10 @@
 /**
  * Abandoned managed-slot scope reclamation (#11174 part c, epic #11172).
  *
+ * Owner decisions 2026-10-09: a scope with no activity (acquisition or execution release) and no
+ * live execution owner or settler for one hour is abandoned and its devices may be deleted (Q3);
+ * the same incarnation returning revives it.
+ *
  * Owner decision 2026-10-12 (#11545): a returning incarnation revives its scope and reuses
  * unjournaled devices. Already journaled deletes, even blocked ones, always complete first;
  * the reconciler then creates a new device with a later generation.
@@ -19,8 +23,9 @@
  *    work. A crash mid-delete therefore leaves an open entry that the next sweep (or the slot's next
  *    acquisition) redrives to convergence.
  *
- * New deletes are accepted only for abandoned scopes. Accepted journaled deletes complete even
- * after revival, and only while the slot still holds the entry's exact binding.
+ * New deletes are accepted only for abandoned scopes; a valid scope's device is never newly
+ * fenced. Accepted journaled deletes complete even after revival, and only while the slot still
+ * holds the entry's exact binding.
  */
 
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -29,7 +34,6 @@ import type { Timer } from "../../utils/SystemTimer";
 import type { ManagedSlotJournal } from "./slotJournal";
 import {
   FENCING_SLOT_STATES,
-  isAbandonedScope,
   type AbandonmentQuery,
   type SlotAssignmentRecord,
   type SlotKey,
@@ -150,9 +154,6 @@ export class AbandonedScopeReclaimer {
       }
     }
     for (const scope of await registry.listAbandonedScopes()) {
-      if (!isAbandonedScope(scope)) {
-        continue;
-      }
       for (const slot of await registry.listAssignments(scope.scopeKey)) {
         await this.reclaimSlot(registry, journal, slot, report);
       }
@@ -200,7 +201,10 @@ export class AbandonedScopeReclaimer {
     if (opened.kind !== "opened") {
       report.skipped.push({
         ...key,
-        reason: opened.kind === "scope_not_abandoned" ? "scope_revived" : opened.kind,
+        reason:
+          opened.kind === "scope_not_abandoned" && opened.scope?.state === "valid"
+            ? "scope_revived"
+            : opened.kind,
       });
       return;
     }

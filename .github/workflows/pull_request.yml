@@ -744,7 +744,7 @@ jobs:
   build-desktop-app:
     timeout-minutes: 20
     name: "Build Desktop App (${{ matrix.os }})"
-    runs-on: ${{ (matrix.os == 'macos-latest' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","automobile-mac"]') || matrix.os }}
+    runs-on: ${{ (matrix.os == 'macos-latest' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac"]') || matrix.os }}
     needs: detect-changes
     if: (needs.detect-changes.outputs.desktop_app_changed == 'true' || needs.detect-changes.outputs.desktop_core_changed == 'true') && needs.detect-changes.outputs.sha256_only != 'true'
     strategy:
@@ -1223,7 +1223,7 @@ jobs:
   installer-minimal:
     timeout-minutes: 20
     name: "Installer Minimal (${{ matrix.os }})"
-    runs-on: ${{ (matrix.os == 'macos-latest' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","automobile-mac"]') || (matrix.os == 'ubuntu-latest' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && 'namespace-profile-auto-mobile-small' || matrix.os }}
+    runs-on: ${{ (matrix.os == 'macos-latest' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac"]') || (matrix.os == 'ubuntu-latest' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && 'namespace-profile-auto-mobile-small' || matrix.os }}
     needs: detect-changes
     env:
       RUN_INSTALLER: ${{ needs.detect-changes.outputs.docs_only != 'true' }}
@@ -2273,9 +2273,12 @@ jobs:
   swiftlint:
     timeout-minutes: 20
     name: "SwiftLint"
-    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","automobile-mac"]') || 'macos-26' }}
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac"]') || 'macos-26' }}
     # Do not spend a macOS slot when the inexpensive Ubuntu validation has
     # already proved this revision cannot merge.
+    # vars.AUTOMOBILE_MAC_POOLS_ENABLED gates every self-hosted Mac job (#11580):
+    # set it to anything but "true" and they all run on hosted runners, so no
+    # required check waits for a Mac that is offline.
     needs: [detect-changes, fast-validation]
     if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
     steps:
@@ -2337,7 +2340,7 @@ jobs:
     # declares swift-tools-version 6.3 (its strict-concurrency floor, matching the
     # repo-wide iOS 6.3 migration), which the Swift 5.10 toolchain on macos-14 /
     # Xcode 15.4 cannot even parse. Mirrors the other Swift-6.3 jobs' toolchain.
-    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","automobile-mac"]') || 'macos-26' }}
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac"]') || 'macos-26' }}
     # Keep costly hosted macOS work behind the inexpensive Fast Validation gate.
     needs: [detect-changes, fast-validation]
     if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
@@ -2537,11 +2540,14 @@ jobs:
         run: rm -rf -- "$RUNNER_TEMP/swift-packages-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   ios-xcode-build:
-    name: "Build Xcode Projects (${{ matrix.config.name }}, ${{ matrix.project }})"
+    name: "Build Xcode Projects (${{ matrix.config.name }})"
     # Heavy self-hosted lane (one runner process, so xcodebuild/simulator jobs
     # never overlap on the Mac) for owner-authored same-repository PRs once the
     # pools are registered (#11011); forks and pre-rollout use hosted macos-26.
     # The XcodeGen drift check below is the PR-time drift gate (#10939).
+    # One job builds both projects (#11580): as two matrix legs they queued one
+    # after the other on the single heavy runner and each repeated the checkout,
+    # XcodeGen install, drift check, simulator-runtime check and SwiftPM resolve.
     runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac-heavy"]') || matrix.config.runner }}
     # Keep costly hosted macOS work behind the inexpensive Fast Validation gate.
     needs: [detect-changes, fast-validation]
@@ -2557,15 +2563,6 @@ jobs:
         # PR runs only the primary Xcode toolchain; full sweep runs nightly on CircleCI.
         config:
           - { name: "Xcode 26.5", runner: "macos-26", xcode: "26.5" }
-        # Shard the two Xcode projects across two runners so they build in
-        # parallel on hosted runners (on the single heavy self-hosted lane they
-        # run one after the other). The "iOS Build" gate reads
-        # needs.ios-xcode-build.result, which aggregates the whole matrix (green
-        # only if every shard is green), so the gate needs no change. Names must
-        # match the generated <name>.xcodeproj basenames passed to xcode-build.sh.
-        project:
-          - Playground
-          - CtrlProxy
     steps:
       - name: "Isolate self-hosted Xcode build home"
         if: runner.environment == 'self-hosted'
@@ -2607,20 +2604,38 @@ jobs:
           path: |
             ~/Library/Caches/org.swift.swiftpm
             ~/.swiftpm/cache
-          key: ${{ runner.os }}-${{ runner.environment }}-spm-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
+          key: ${{ runner.os }}-${{ runner.environment }}-spm-xcode-build-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
+          # The second prefix is the Playground leg's key from before the two
+          # legs were merged (#11580); both legs resolved the same packages.
           restore-keys: |
-            ${{ runner.os }}-${{ runner.environment }}-spm-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-
+            ${{ runner.os }}-${{ runner.environment }}-spm-xcode-build-${{ matrix.config.xcode }}-
+            ${{ runner.os }}-${{ runner.environment }}-spm-xcode-build-Playground-${{ matrix.config.xcode }}-
 
-      - name: "Cache Xcode DerivedData"
+      # Each project keeps its own DerivedData directory and cache key, exactly as
+      # when the two were separate matrix legs, so existing cache entries still
+      # hit. Names must match the generated <name>.xcodeproj basenames passed to
+      # xcode-build.sh.
+      - name: "Cache Xcode DerivedData (Playground)"
         uses: actions/cache@v5
-        id: cache-xcode-derived-data
+        id: cache-xcode-derived-data-playground
         with:
           path: |
-            ${{ runner.temp }}/automobile-derived-data-${{ matrix.project }}/Build
-            ${{ runner.temp }}/automobile-derived-data-${{ matrix.project }}/ModuleCache.noindex
-          key: ${{ runner.os }}-${{ runner.environment }}-derived-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-${{ hashFiles('ios/**/*.swift', 'ios/**/*.m', 'ios/**/*.mm', 'ios/**/*.h', 'ios/**/*.c', 'ios/**/*.cpp', 'ios/**/*.xcconfig', 'ios/**/*.plist', 'ios/**/*.entitlements', 'ios/**/*.storyboard', 'ios/**/*.xib', 'ios/**/*.xcassets/**', 'ios/**/*.strings', 'ios/**/*.ttf', 'ios/**/*.otf', 'ios/**/*.xcprivacy', 'ios/**/*.pbxproj', 'ios/**/*.xcscheme', 'ios/**/project.yml', 'ios/**/Package.swift', 'ios/**/Package.resolved') }}
+            ${{ runner.temp }}/automobile-derived-data-Playground/Build
+            ${{ runner.temp }}/automobile-derived-data-Playground/ModuleCache.noindex
+          key: ${{ runner.os }}-${{ runner.environment }}-derived-xcode-build-Playground-${{ matrix.config.xcode }}-${{ hashFiles('ios/**/*.swift', 'ios/**/*.m', 'ios/**/*.mm', 'ios/**/*.h', 'ios/**/*.c', 'ios/**/*.cpp', 'ios/**/*.xcconfig', 'ios/**/*.plist', 'ios/**/*.entitlements', 'ios/**/*.storyboard', 'ios/**/*.xib', 'ios/**/*.xcassets/**', 'ios/**/*.strings', 'ios/**/*.ttf', 'ios/**/*.otf', 'ios/**/*.xcprivacy', 'ios/**/*.pbxproj', 'ios/**/*.xcscheme', 'ios/**/project.yml', 'ios/**/Package.swift', 'ios/**/Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.environment }}-derived-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-
+            ${{ runner.os }}-${{ runner.environment }}-derived-xcode-build-Playground-${{ matrix.config.xcode }}-
+
+      - name: "Cache Xcode DerivedData (CtrlProxy)"
+        uses: actions/cache@v5
+        id: cache-xcode-derived-data-ctrlproxy
+        with:
+          path: |
+            ${{ runner.temp }}/automobile-derived-data-CtrlProxy/Build
+            ${{ runner.temp }}/automobile-derived-data-CtrlProxy/ModuleCache.noindex
+          key: ${{ runner.os }}-${{ runner.environment }}-derived-xcode-build-CtrlProxy-${{ matrix.config.xcode }}-${{ hashFiles('ios/**/*.swift', 'ios/**/*.m', 'ios/**/*.mm', 'ios/**/*.h', 'ios/**/*.c', 'ios/**/*.cpp', 'ios/**/*.xcconfig', 'ios/**/*.plist', 'ios/**/*.entitlements', 'ios/**/*.storyboard', 'ios/**/*.xib', 'ios/**/*.xcassets/**', 'ios/**/*.strings', 'ios/**/*.ttf', 'ios/**/*.otf', 'ios/**/*.xcprivacy', 'ios/**/*.pbxproj', 'ios/**/*.xcscheme', 'ios/**/project.yml', 'ios/**/Package.swift', 'ios/**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.environment }}-derived-xcode-build-CtrlProxy-${{ matrix.config.xcode }}-
 
       - name: "Install XcodeGen"
         run: ./scripts/ios/install-xcodegen.sh
@@ -2638,14 +2653,29 @@ jobs:
             (cd "${package}" && swift package resolve)
           done
 
-      - name: "Build Xcode Projects"
+      # One step per project, so a failed build names its project in the check
+      # run. The CtrlProxy build still runs when the Playground build fails (it
+      # used to be an independent matrix leg); it is skipped only when a setup
+      # step above failed and the Playground build never started.
+      - name: "Build Xcode Project (Playground)"
+        id: build-xcode-playground
         env:
-          AUTOMOBILE_XCODE_DERIVED_DATA: "${{ runner.temp }}/automobile-derived-data-${{ matrix.project }}"
+          AUTOMOBILE_XCODE_DERIVED_DATA: "${{ runner.temp }}/automobile-derived-data-Playground"
         run: |
           echo "Swift package cache hit: ${{ steps.cache-xcode-spm.outputs.cache-hit }}"
-          echo "DerivedData cache hit: ${{ steps.cache-xcode-derived-data.outputs.cache-hit }}"
+          echo "DerivedData cache hit: ${{ steps.cache-xcode-derived-data-playground.outputs.cache-hit }}"
           SECONDS=0
-          ./scripts/ios/xcode-build.sh ${{ matrix.project }}
+          ./scripts/ios/xcode-build.sh Playground
+          echo "build took ${SECONDS}s"
+
+      - name: "Build Xcode Project (CtrlProxy)"
+        if: ${{ !cancelled() && steps.build-xcode-playground.conclusion != 'skipped' }}
+        env:
+          AUTOMOBILE_XCODE_DERIVED_DATA: "${{ runner.temp }}/automobile-derived-data-CtrlProxy"
+        run: |
+          echo "DerivedData cache hit: ${{ steps.cache-xcode-derived-data-ctrlproxy.outputs.cache-hit }}"
+          SECONDS=0
+          ./scripts/ios/xcode-build.sh CtrlProxy
           echo "build took ${SECONDS}s"
 
       - name: "Remove isolated Xcode build home"
@@ -2655,7 +2685,7 @@ jobs:
 
   # The Playground design-system tests (colour/contrast/typography/shape, #5102)
   # normally run on CircleCI (.circleci/continue_config.yml → ios-playground-tests),
-  # which frees a concurrent GitHub macOS slot for the sharded build lanes above.
+  # which frees a concurrent GitHub macOS slot for the build job above.
   # CircleCI derives its run-ios parameter from changed PATHS only, so it cannot
   # see the run-ios / run-native LABEL force. This GHA job is the fallback for that
   # one case: a label-forced run whose diff touches no iOS path (ios_should_run is
@@ -2848,8 +2878,12 @@ jobs:
   prototype-simulator:
     name: "Prototype Simulator iOS ${{ matrix.ios }}"
     runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac-heavy"]') || 'macos-26' }}
-    needs: [detect-changes, fast-validation]
-    if: needs.detect-changes.outputs.prototype_simulator_should_run == 'true' && needs.fast-validation.result == 'success'
+    # Waits for ios-xcode-build so the one heavy runner serves the job behind the
+    # required "iOS Build" gate before this advisory one (#11580). always() keeps
+    # this job running whatever that build's result, including skipped (a
+    # prototype-only change does not build the Xcode projects).
+    needs: [detect-changes, fast-validation, ios-xcode-build]
+    if: always() && !cancelled() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.prototype_simulator_should_run == 'true' && needs.fast-validation.result == 'success'
     # Tight bound for the single heavy lane; the smoke boots one simulator.
     timeout-minutes: 25
     strategy:
@@ -2987,6 +3021,16 @@ jobs:
     needs:
       [detect-changes, build-android-control-proxy, build-playground-app, junit-runner-unit-tests]
     if: needs.detect-changes.outputs.android_should_run == 'true'
+    # Gradle home borrowed from main's kotlin-code-coverage job (#11578). The
+    # setup-gradle cache is read-only on PRs and is found by job id plus the
+    # Gradle home path; no main job has this job's id, so its own home was never
+    # restored and every run built from an empty one (Gradle distribution,
+    # dependencies and build-logic from scratch, ~150 s before the first project
+    # task). That main job runs :junit-runner:test and the SDK debug compile,
+    # which this lane's suites build on. A miss only restores the old cold start.
+    # test/bats/android-gradle-home-donors.bats pins the pairing.
+    env:
+      GRADLE_BUILD_ACTION_CACHE_KEY_JOB: kotlin-code-coverage
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -3007,7 +3051,7 @@ jobs:
           script: "../scripts/android/run-emulator-suites.sh control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"
           working-directory: "./android/"
           accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          gradle-home-directory: "~/.gradle/${{ env.GRADLE_BUILD_ACTION_CACHE_KEY_JOB }}"
           release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
@@ -3138,6 +3182,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true'
+    # Gradle home borrowed from main's sdk-debug-inspector-consumer job (#11578;
+    # see android-emulator-tests): this job id exists only on PRs, so its own
+    # Gradle home was never restored. That main job runs this job's SDK publish
+    # and apiCheck tasks.
+    env:
+      GRADLE_BUILD_ACTION_CACHE_KEY_JOB: sdk-debug-inspector-consumer
     defaults:
       run:
         working-directory: android
@@ -3153,7 +3203,7 @@ jobs:
         with:
           gradle-tasks: ":junitRunner:assemble"
           gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          gradle-home-directory: "~/.gradle/${{ env.GRADLE_BUILD_ACTION_CACHE_KEY_JOB }}"
           reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
           release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
@@ -3181,7 +3231,7 @@ jobs:
         with:
           gradle-tasks: ":auto-mobile-sdk:publishToMavenLocal :auto-mobile-sdk:apiCheck"
           gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          gradle-home-directory: "~/.gradle/${{ env.GRADLE_BUILD_ACTION_CACHE_KEY_JOB }}"
           reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
@@ -3257,6 +3307,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true'
+    # Gradle home borrowed from main's kotlin-code-coverage job (#11578; see
+    # android-emulator-tests): main's Build Playground App job is disabled, so
+    # this job's own Gradle home was never saved. That main job compiles the SDK
+    # debug variant the Playground app depends on.
+    env:
+      GRADLE_BUILD_ACTION_CACHE_KEY_JOB: kotlin-code-coverage
     defaults:
       run:
         working-directory: android
@@ -3280,7 +3336,7 @@ jobs:
           # moved here from the removed Android Emulator Compile Smoke).
           gradle-tasks: ":playground:app:assembleDebug :playground:app:compileDebugUnitTestKotlin :playground:design:system:testDebugUnitTest :playground:discover:testDebugUnitTest"
           gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          gradle-home-directory: "~/.gradle/${{ env.GRADLE_BUILD_ACTION_CACHE_KEY_JOB }}"
           reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
           release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}

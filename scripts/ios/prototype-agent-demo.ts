@@ -7,6 +7,13 @@
  *   bun scripts/ios/prototype-agent-demo.ts floating                  floating card over a live app
  *   bun scripts/ios/prototype-agent-demo.ts sheet                     bottom sheet with a text field
  *   bun scripts/ios/prototype-agent-demo.ts status | dismiss | events
+ *   bun scripts/ios/prototype-agent-demo.ts hold                      keep one host connection open until killed
+ *
+ * Each command opens its own connection and closes it when it has its reply. The agent dismisses
+ * the shown prototype when its LAST host connection closes (as Android does), so a prototype shown
+ * by `floating` or `sheet` is gone as soon as that command returns unless another connection is
+ * open. Run `hold` (or `events`) in another terminal first to keep it up across commands; `hold`
+ * prints one `{"type":"host_hold","connected":true}` line once it is connected and nothing else.
  *
  * Stdout carries only machine-readable output: each command prints its reply as ONE compact JSON
  * line, which scripts/ios/prototype-agent-smoke.sh parses. Human-facing logs (the agent handshake)
@@ -248,6 +255,13 @@ async function main(): Promise<void> {
       }
       case "dismiss":
         console.log(JSON.stringify(await agent.request("dismiss_prototype", { all: true })));
+        break;
+      case "hold":
+        // Stdout stays silent after this line: the reader may stop listening once it has it.
+        console.log(JSON.stringify({ type: "host_hold", connected: true }));
+        await new Promise<void>((_resolve, reject) => {
+          agent.onClosed(reject);
+        });
         break;
       case "events":
         console.log("Listening for prototype events (Ctrl-C to stop)...");

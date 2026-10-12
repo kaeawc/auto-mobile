@@ -116,8 +116,26 @@ export interface FrameHeldSession {
   platform: string;
 }
 
+/** The reverse-map holders, including expired/releasing sessions; older fakes use live sessions. */
+export function frameHeldSessionsFrom(sessionManager: {
+  getHeldDeviceSessions?: () => readonly {
+    deviceId: string;
+    sessionId: string;
+    stableDeviceId?: string;
+    platform: string;
+  }[];
+  getAllSessions?: () => readonly FrameHeldSession[];
+}): readonly FrameHeldSession[] {
+  return sessionManager.getHeldDeviceSessions
+    ? sessionManager.getHeldDeviceSessions().map(({ deviceId, ...session }) => ({
+        ...session,
+        assignedDevice: deviceId,
+      }))
+    : (sessionManager.getAllSessions?.() ?? []);
+}
+
 /**
- * The one definition of could-alias-a-held-device, for the MCP path to adopt. The sessions must
+ * The one definition of could-alias-a-held-device, shared by direct frames and MCP calls. Sessions
  * represent the device reverse-map holders, including expired and releasing sessions until
  * ownership is removed; unrepresented managed holds share one unknown identity, read through
  * the same one-second snapshot as the input managed-slot gate.
@@ -143,6 +161,24 @@ export async function aliasableHeldAndroidDevices(
   };
 }
 
+/** Non-throwing identity verdict shared by control gates and sessionless read routing (#11596). */
+export async function heldDevicesUnidentifiedTransportCouldAlias(
+  pool: FrameDeviceIdentityPool | undefined,
+  device: BootedDevice,
+  heldBySession: boolean,
+  sessions: readonly FrameHeldSession[],
+) {
+  if (
+    heldBySession ||
+    device.platform !== "android" ||
+    pool?.isAndroidTransportAssignable?.(device) !== false
+  ) {
+    return undefined;
+  }
+  const held = await aliasableHeldAndroidDevices(pool, device, sessions);
+  return held.sessions.length > 0 || held.managed ? held : undefined;
+}
+
 /** Unidentifiable control is refused only while it could alias a held Android device (#11596). */
 export async function assertFrameTargetIdentityProven(
   pool: FrameDeviceIdentityPool | undefined,
@@ -157,21 +193,16 @@ export async function assertFrameTargetIdentityProven(
     sessionManager?: ToolSelectionSessionManager;
   },
 ): Promise<void> {
-  if (
-    heldBySession ||
-    device.platform !== "android" ||
-    pool?.isAndroidTransportAssignable?.(device) !== false
-  ) {
-    return;
-  }
-  const { sessions: aliasable, managed } = await aliasableHeldAndroidDevices(
+  const held = await heldDevicesUnidentifiedTransportCouldAlias(
     pool,
     device,
+    heldBySession,
     ownership.sessions,
   );
-  if (aliasable.length === 0 && !managed) {
+  if (!held) {
     return;
   }
+  const { sessions: aliasable, managed } = held;
   const requesterSessionUuid = ownership.requester?.() ?? ownership.requesterSessionUuid;
   if (
     !managed &&

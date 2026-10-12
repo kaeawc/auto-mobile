@@ -407,6 +407,7 @@ export interface DeviceBootProgress {
 export interface DeviceBootResult {
   device: BootedDevice;
   source: "booted" | "cold-boot";
+  runningBeforeCall?: true;
   sourceImage?: DeviceInfo;
   processHandle?: ChildProcess | null;
   processId?: number;

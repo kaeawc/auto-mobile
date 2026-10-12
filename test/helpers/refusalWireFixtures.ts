@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   assertBootCapacityGranted,
   atCapacityDecision,
@@ -28,7 +27,10 @@ import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/d
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { typedTeardownRefusal } from "../../src/server/deviceToolsLifecycle";
-import { DaemonConnectionSessionReleasedError } from "../../src/daemon/daemonMcpProxy";
+import {
+  DaemonConnectionSessionReleasedError,
+  DaemonAmbiguousSessionSelectorError,
+} from "../../src/daemon/daemonMcpProxy";
 import { daemonShuttingDownMcpOutcome } from "../../src/daemon/daemonShutdownOutcome";
 import { deviceAssignedToOtherSessionError } from "../../src/daemon/inputDeviceOwnership";
 import {
@@ -53,6 +55,7 @@ import {
   managedEndedPayload,
   managedSlotsFailedToolResult,
   noActiveDeviceSessionResult,
+  ambiguousSessionSelectorResult,
 } from "../../src/server/proxyServer";
 import {
   MANAGED_SLOT_ACQUISITION_OWN_FAILURE_CODES,
@@ -90,9 +93,8 @@ export interface RefusalWireFixture {
   result: RefusalWireResult;
 }
 
-export const REFUSAL_FIXTURES_DIR = fileURLToPath(
-  new URL("../fixtures/refusal-wire/", import.meta.url),
-);
+// import.meta.dir, not fileURLToPath(new URL(...)): the latter yields "\\D:\\a\\..." on Windows Bun.
+export const REFUSAL_FIXTURES_DIR = join(import.meta.dir, "..", "fixtures", "refusal-wire");
 
 const SESSION = "11111111-2222-4333-8444-555555555555";
 const DEVICE = "emulator-5554";
@@ -288,6 +290,17 @@ const BUILDERS: readonly FixtureEntry[] = [
     () =>
       noActiveDeviceSessionResult(
         new DaemonConnectionSessionReleasedError("heartbeat_timeout"),
+      ) as RefusalWireResult,
+  ],
+  [
+    "ambiguous_session_selector",
+    "ambiguousSessionSelectorResult",
+    () =>
+      ambiguousSessionSelectorResult(
+        new DaemonAmbiguousSessionSelectorError("android", [
+          { sessionUuid: SESSION, deviceId: DEVICE },
+          { sessionUuid: "second-android-session", deviceId: "emulator-5556" },
+        ]),
       ) as RefusalWireResult,
   ],
   [
@@ -769,6 +782,7 @@ export function expectedWireCodes(fixtureCode: string): string[] {
  * each must have a fixture or a recorded reason (#11351).
  */
 export const LITERAL_CLIENT_REACHABLE_CODES: readonly string[] = [
+  "ambiguous_session_selector",
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
   MCP_OVERLOAD_ERROR_CODE,
   "session_recovery_pending",

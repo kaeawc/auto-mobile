@@ -1,19 +1,29 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { exec, execFile, execFileSync, execSync, spawn, spawnSync } from "node:child_process";
+import { exec, execFile, execFileSync, execSync, fork, spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
+  BUN_SHELL_COMMAND,
   blockedToolForArgv,
   drainViolations,
+  hostCommandName,
   installRealDeviceToolSpawnGuard,
   isUnitTestPath,
+  neverAllowListable,
+  parseHostSpawnAllowList,
   spawnArgv,
   testFileFromStack,
+  type HostSpawnAllowList,
   type SpawnGuardDependencies,
+  type SpawnTarget,
   type Violation,
 } from "./realDeviceToolSpawnGuard";
+
+const EXAMPLE_FILE = "test/setup/example.test.ts";
+const allowing = (testFile: string, ...commands: string[]): HostSpawnAllowList =>
+  new Map([[testFile, new Set(commands)]]);
 
 function fakeGuard(overrides: Partial<SpawnGuardDependencies> = {}) {
   const calls: { receiver: unknown; args: unknown[] }[] = [];
@@ -22,13 +32,13 @@ function fakeGuard(overrides: Partial<SpawnGuardDependencies> = {}) {
     calls.push({ receiver: this, args: [first, ...rest] });
     return result;
   }
-  const target = { spawn: original, spawnSync: original };
+  const target: SpawnTarget = { spawn: original, spawnSync: original };
   const report: Violation[] = [];
   const deps: SpawnGuardDependencies = {
     target,
     report,
-    testFile: "test/setup/example.test.ts",
-    loadAllowList: () => new Set(),
+    testFile: EXAMPLE_FILE,
+    loadAllowList: () => new Map(),
     mode: "enforce",
     ...overrides,
   };
@@ -60,20 +70,21 @@ test("runtime attribution changes allow-list and unit policy per launch, even af
     getTestFile: () => file,
     loadAllowList: () => {
       loads++;
-      return new Set(["test/allowed.test.ts"]);
+      return allowing("test/allowed.test.ts", "git");
     },
   });
   expect(guard.target.spawn(["ffmpeg", "-version"])).toBe(guard.result);
+  expect(guard.target.spawn(["adb"])).toBe(guard.result);
   expect(loads).toBe(0);
   file = "test/allowed.test.ts";
-  expect(guard.target.spawn(["adb"])).toBe(guard.result);
+  expect(guard.target.spawn(["git", "status"])).toBe(guard.result);
   file = "test/offender.test.ts";
-  expect(() => guard.target.spawn(["adb"])).toThrow("test/offender.test.ts");
+  expect(() => guard.target.spawn(["git", "status"])).toThrow("test/offender.test.ts");
   expect(guard.report[0].testFile).toBe(file);
   file = "test/stress/host.test.ts";
   expect(guard.target.spawn(["adb"])).toBe(guard.result);
   expect(loads).toBe(1);
-  expect(guard.calls).toHaveLength(3);
+  expect(guard.calls).toHaveLength(4);
 });
 
 test("a test drains only its own scope, leaving outside-test violations for one file failure", () => {
@@ -333,7 +344,7 @@ test("array and options forms block both APIs without calling originals", () => 
   for (const method of [guard.target.spawn, guard.target.spawnSync]) {
     for (const arg of [["adb", "devices"], { cmd: ["adb", "devices"] }]) {
       expect(() => method(arg)).toThrow(
-        /test\/setup\/example\.test\.ts.*adb devices.*FakeProcessExecutor.*unit-test-device-spawn-allowlist\.txt.*only shrink/s,
+        /test\/setup\/example\.test\.ts.*adb devices.*FakeProcessExecutor.*can never be allow-listed/s,
       );
     }
   }
@@ -342,38 +353,188 @@ test("array and options forms block both APIs without calling originals", () => 
   guard.restore();
 });
 
-test("safe commands preserve receiver, arguments, exact result and function length without loading the list", () => {
+test("an allow-listed command preserves receiver, arguments, exact result and function length", () => {
+  const commands = ["git", "ps", "bash", "node", "bun", "plutil"];
   let loads = 0;
   const guard = fakeGuard({
     loadAllowList: () => {
       loads++;
-      return new Set();
+      return allowing(EXAMPLE_FILE, ...commands);
     },
   });
   const receiver = { example: true };
   const options = { stdout: "pipe" };
-  for (const command of ["git", "ps", "bash", "node", "bun", "plutil"]) {
+  for (const command of commands) {
     const argv = [command];
     expect(guard.target.spawn.call(receiver, argv, options)).toBe(guard.result);
     expect(guard.calls.at(-1)).toEqual({ receiver, args: [argv, options] });
   }
-  expect(guard.calls).toHaveLength(6);
+  expect(guard.target.spawnSync({ cmd: ["/usr/bin/git", "status"] })).toBe(guard.result);
+  expect(guard.calls).toHaveLength(7);
   expect(guard.target.spawn.length).toBe(guard.original.length);
-  expect(loads).toBe(0);
-});
-
-test("allow-list is loaded once on demand and permits exact pass-through", () => {
-  let loads = 0;
-  const guard = fakeGuard({
-    loadAllowList: () => {
-      loads++;
-      return new Set(["test/setup/example.test.ts"]);
-    },
-  });
-  expect(guard.target.spawn(["adb"])).toBe(guard.result);
-  expect(guard.target.spawnSync({ cmd: ["xcrun"] })).toBe(guard.result);
   expect(loads).toBe(1);
   expect(guard.report).toHaveLength(0);
+});
+
+test("every launch from a unit test is refused unless its file lists that command", () => {
+  const guard = fakeGuard({ loadAllowList: () => allowing("test/other.test.ts", "git") });
+  for (const method of [guard.target.spawn, guard.target.spawnSync]) {
+    expect(() => method(["/usr/bin/git", "status"])).toThrow(
+      /host command spawned by a unit test: test\/setup\/example\.test\.ts: \/usr\/bin\/git status \(git\).*add "test\/setup\/example\.test\.ts git".*scripts\/unit-test-host-spawn-allowlist\.txt/s,
+    );
+  }
+  // A launch the guard cannot read has no command an entry could name.
+  for (const args of [[], [null], [{ cmd: "git" }], [["git", 1]]]) {
+    expect(() => guard.target.spawn(...(args as never[]))).toThrow("(unparsed)");
+  }
+  expect(guard.calls).toHaveLength(0);
+  expect(guard.report.map((violation) => violation.forbidden)).toEqual(Array(6).fill(false));
+  expect(guard.report[0].origin).toContain("realDeviceToolSpawnGuard.test.ts");
+  expect(hostCommandName(["C:\\tools\\git.exe"])).toBe("git");
+});
+
+// The names the owner ruled out after the unit suite drove a developer's emulator (2026-10-11).
+const NEVER_ALLOW_LISTABLE = [
+  "adb",
+  "xcrun",
+  "simctl",
+  "emulator",
+  "avdmanager",
+  "defaults",
+  "gsettings",
+  "auto-mobile",
+  "sdkmanager",
+  "xcodebuild",
+  "devicectl",
+];
+
+test("a device, simulator, host-settings or daemon command is refused even when it is listed", () => {
+  const listed = NEVER_ALLOW_LISTABLE.map((tool) => `${EXAMPLE_FILE} ${tool}`).join("\n");
+  const parsed = parseHostSpawnAllowList(`${listed}\n${EXAMPLE_FILE} git\n`);
+  expect([...parsed.allowList]).toEqual([[EXAMPLE_FILE, new Set(["git"])]]);
+  expect(parsed.errors).toEqual(
+    NEVER_ALLOW_LISTABLE.map(
+      (tool, index) => `line ${index + 1}: ${tool} can never be allow-listed`,
+    ),
+  );
+  // Even an allow-list built without the parser cannot let one through.
+  const guard = fakeGuard({
+    loadAllowList: () => allowing(EXAMPLE_FILE, "sh", "env", "which", ...NEVER_ALLOW_LISTABLE),
+  });
+  for (const tool of NEVER_ALLOW_LISTABLE) {
+    for (const argv of [
+      [tool],
+      [`/opt/sdk/${tool}`, "devices"],
+      ["sh", "-c", `${tool} --version`],
+      ["env", "A=1", tool],
+      ["which", tool],
+    ]) {
+      expect(() => guard.target.spawn(argv), argv.join(" ")).toThrow("can never be allow-listed");
+    }
+  }
+  expect(guard.target.spawn(["sh", "-c", "echo ok"])).toBe(guard.result);
+  expect(guard.calls).toHaveLength(1);
+  expect(guard.report.every((violation) => violation.forbidden)).toBe(true);
+});
+
+test("the device rule ignores case, and a wrapper the guard cannot see through is never listable", () => {
+  // A case-insensitive file system runs adb for ADB.
+  expect(neverAllowListable(["ADB", "devices"])).toBe("adb");
+  expect(neverAllowListable(["/opt/sdk/Adb.EXE"])).toBe("adb");
+  expect(neverAllowListable(["sh", "-c", "XCRUN simctl list"])).toBe("xcrun");
+  const wrappers = ["sudo", "doas", "xargs", "script", "osascript", "stdbuf", "setsid", "open"];
+  const parsed = parseHostSpawnAllowList(
+    ["ADB", ...wrappers].map((command) => `${EXAMPLE_FILE} ${command}`).join("\n"),
+  );
+  expect(parsed.allowList.size).toBe(0);
+  expect(parsed.errors).toHaveLength(wrappers.length + 1);
+  const guard = fakeGuard({ loadAllowList: () => allowing(EXAMPLE_FILE, "ADB", ...wrappers) });
+  for (const argv of [["ADB"], ...wrappers.map((wrapper) => [wrapper, "adb", "devices"])]) {
+    expect(() => guard.target.spawn(argv), argv.join(" ")).toThrow("can never be allow-listed");
+  }
+  expect(guard.calls).toHaveLength(0);
+});
+
+test("a launch that names the resident daemon's socket, pid or lock file is refused", () => {
+  const guard = fakeGuard({ loadAllowList: () => allowing(EXAMPLE_FILE, "bun", "nc", "sh") });
+  for (const argv of [
+    ["nc", "-U", "/tmp/auto-mobile-daemon-501.sock"],
+    ["bun", "cli.js", "--socket=/tmp/auto-mobile-daemon-501.sock"],
+    ["sh", "-c", "cat /tmp/auto-mobile-daemon-501.pid"],
+    ["sh", "-c", "rm /tmp/auto-mobile-daemon-default.lock"],
+  ]) {
+    expect(neverAllowListable(argv)).toBe("resident daemon socket");
+    expect(() => guard.target.spawn(argv)).toThrow("can never be allow-listed");
+  }
+  // An isolated daemon's files carry a hash suffix and stay a matter for the allow-list.
+  const isolated = ["nc", "-U", "/tmp/auto-mobile-daemon-501-0123456789.sock"];
+  expect(neverAllowListable(isolated)).toBeUndefined();
+  expect(guard.target.spawn(isolated)).toBe(guard.result);
+});
+
+test("the allow-list parser reports every line that is not a unit test file and a bare command", () => {
+  const parsed = parseHostSpawnAllowList(
+    [
+      "# comment",
+      "",
+      "test/a.test.ts git",
+      "test/a.test.ts\tbun",
+      `test/a.test.ts ${BUN_SHELL_COMMAND}`,
+      "test/a.test.ts",
+      "test/a.test.ts git status",
+      "test/a.integration.test.ts git",
+      "src/a.test.ts git",
+      "test/stress/a.test.ts git",
+      "test/a.test.ts /usr/bin/git",
+      "test/a.test.ts (unparsed)",
+    ].join("\r\n"),
+  );
+  expect([...parsed.allowList]).toEqual([
+    ["test/a.test.ts", new Set(["git", "bun", BUN_SHELL_COMMAND])],
+  ]);
+  expect(parsed.errors).toEqual([
+    'line 6: expected "<unit test file> <command>", got "test/a.test.ts"',
+    'line 7: expected "<unit test file> <command>", got "test/a.test.ts git status"',
+    "line 8: test/a.integration.test.ts is not a repo-relative unit test file",
+    "line 9: src/a.test.ts is not a repo-relative unit test file",
+    "line 10: test/stress/a.test.ts is not a repo-relative unit test file",
+    "line 11: /usr/bin/git must be a bare command name, not a path",
+    "line 12: (unparsed) can never be allow-listed",
+  ]);
+});
+
+function fakeShellGuard(allowList: HostSpawnAllowList = new Map()) {
+  const scripts: string[] = [];
+  const shell = Object.assign(
+    (strings: TemplateStringsArray, ...values: unknown[]) => {
+      scripts.push(String.raw({ raw: strings }, ...values));
+      return "ran";
+    },
+    { escape: (value: string) => `escaped ${value}` },
+  );
+  const target: SpawnTarget = { spawn: () => 0, spawnSync: () => 0, $: shell };
+  const guard = fakeGuard({ target, loadAllowList: () => allowList });
+  return { ...guard, target, shell, scripts, $: target.$ as unknown as typeof shell };
+}
+
+test("Bun's shell template is refused unless the file lists Bun.$", () => {
+  const refused = fakeShellGuard();
+  expect(() => refused.$`git status ${"--short"}`).toThrow(
+    /host command spawned by a unit test: .*Bun\.\$ git status --short \(Bun\.\$\)/,
+  );
+  expect(refused.$.escape("x")).toBe("escaped x");
+  expect(refused.scripts).toEqual([]);
+
+  const listed = fakeShellGuard(allowing(EXAMPLE_FILE, BUN_SHELL_COMMAND));
+  expect(listed.$`git status ${"--short"}`).toBe("ran");
+  expect(() => listed.$`ls && adb ${"devices"}`).toThrow("can never be allow-listed");
+  expect(() => listed.$`cat /tmp/auto-mobile-daemon-501.pid`).toThrow("resident daemon socket");
+  // Bun's shell spreads an array into words and takes `{ raw }` as shell text.
+  expect(() => listed.$`${["adb", "devices"]}`).toThrow("can never be allow-listed");
+  expect(() => listed.$`${{ raw: "ls; adb devices" }}`).toThrow("can never be allow-listed");
+  expect(listed.scripts).toEqual(["git status --short"]);
+  listed.restore();
+  expect(listed.target.$).toBe(listed.shell);
 });
 
 test("integration and stress files remain untouched; unit paths normalize Windows separators", () => {
@@ -415,7 +576,9 @@ test("swallowed violations drain once and clear before throwing", () => {
     expect(error).toBeInstanceOf(Error);
   }
   expect(guard.report).toHaveLength(1);
-  expect(() => drainViolations(guard.report)).toThrow("real device tool spawned");
+  expect(() => drainViolations(guard.report)).toThrow(
+    /real device tool spawned.*\nLaunched from:\n.*realDeviceToolSpawnGuard\.test\.ts/s,
+  );
   expect(guard.report).toHaveLength(0);
   expect(() => drainViolations(guard.report)).not.toThrow();
 });
@@ -442,13 +605,32 @@ test("census records and blocks with ENOENT regardless of allow-list, without en
   expect(guard.report).toHaveLength(0);
 });
 
+test("census records every launch, runs the listable ones and still refuses the rest", () => {
+  const records: unknown[][] = [];
+  const guard = fakeGuard({
+    mode: "census",
+    loadAllowList: () => {
+      throw new Error("must not load");
+    },
+    record: (...row) => records.push(row),
+  });
+  expect(guard.target.spawn(["/usr/bin/git", "status"])).toBe(guard.result);
+  expect(() => guard.target.spawnSync(["defaults", "read", "-g"])).toThrow("ENOENT");
+  expect(records).toEqual([
+    ["git", ["/usr/bin/git", "status"], EXAMPLE_FILE, false],
+    ["defaults", ["defaults", "read", "-g"], EXAMPLE_FILE, true],
+  ]);
+  expect(guard.calls).toHaveLength(1);
+  expect(guard.report).toHaveLength(0);
+});
+
 describe("Bun child_process interception (imports captured before installation)", () => {
   let dir: string;
   let marker: string;
   let previousPath: string | undefined;
   let restore: () => void;
   const report: Violation[] = [];
-  const originals = { spawn: Bun.spawn, spawnSync: Bun.spawnSync };
+  const originals = { spawn: Bun.spawn, spawnSync: Bun.spawnSync, $: Bun.$ };
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), "spawn-guard-"));
     marker = join(dir, "launched");
@@ -467,10 +649,13 @@ describe("Bun child_process interception (imports captured before installation)"
     Bun.spawnSync = function (...args: unknown[]) {
       return Reflect.apply(originals.spawnSync, Bun, args);
     } as typeof Bun.spawnSync;
+    Bun.$ = function (...args: unknown[]) {
+      return Reflect.apply(originals.$, Bun, args);
+    } as typeof Bun.$;
     restore = installRealDeviceToolSpawnGuard({
       target: Bun,
       testFile: "test/setup/example.test.ts",
-      loadAllowList: () => new Set(),
+      loadAllowList: () => new Map(),
       mode: "enforce",
       report,
     });
@@ -479,6 +664,7 @@ describe("Bun child_process interception (imports captured before installation)"
     restore();
     Bun.spawn = originals.spawn;
     Bun.spawnSync = originals.spawnSync;
+    Bun.$ = originals.$;
     report.splice(0);
     expect(existsSync(marker)).toBe(false);
   });
@@ -503,6 +689,33 @@ describe("Bun child_process interception (imports captured before installation)"
       expect(report).toHaveLength(1);
     });
   }
+  // Every node:child_process launcher reads Bun.spawn/Bun.spawnSync at the call, so an unlisted
+  // harmless command is refused through each of them too. Nothing here reaches a process.
+  for (const [name, invoke] of [
+    ["spawn", () => spawn("true")],
+    ["execFile", () => execFile("true")],
+    ["exec", () => exec("true")],
+    ["execSync", () => execSync("true")],
+    ["execFileSync", () => execFileSync("true")],
+    ["fork", () => fork(join(dir, "missing-module.js"))],
+    ["Bun.spawn", () => Bun.spawn(["true"])],
+    ["Bun.spawnSync", () => Bun.spawnSync({ cmd: ["true"] })],
+    ["Bun.$", () => Bun.$`true`],
+  ] as const) {
+    test(`${name} of an unlisted command throws synchronously and records a violation`, () => {
+      expect(invoke).toThrow("host command spawned by a unit test");
+      expect(report).toHaveLength(1);
+      expect(report[0].forbidden).toBe(false);
+    });
+  }
+  test("spawnSync of an unlisted command returns the refusal as its error", () => {
+    expect(spawnSync("true").error?.message).toContain("host command spawned by a unit test");
+    expect(report).toHaveLength(1);
+  });
+  test("Bun's shell refuses a device tool whatever the allow-list says", () => {
+    expect(() => Bun.$`adb ${"devices"}`).toThrow("real device tool spawned");
+    expect(report[0]).toMatchObject({ tool: "adb", forbidden: true });
+  });
   test("spawnSync returns an error and still records the violation", () => {
     expect(spawnSync("adb").error?.message).toContain("real device tool spawned");
     expect(report).toHaveLength(1);

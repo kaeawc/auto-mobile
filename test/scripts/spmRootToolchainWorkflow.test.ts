@@ -56,6 +56,11 @@ describe("root SPM toolchain floor workflow", () => {
     }
     for (const name of ORIGINAL_SELF_HOSTED_JOBS) {
       expect(jobs[name]?.["runs-on"]).toContain(SMALL_LABEL);
+      // Same switch as the moved jobs, so turning it off sends every Mac job to
+      // a hosted runner instead of leaving these queued with no runner (#11580).
+      expect(jobs[name]?.["runs-on"]).toContain(
+        `${SAME_REPO} && ${POOLS_ENABLED}) && ${SMALL_LABEL}`,
+      );
     }
     expect(jobs["build-desktop-app"]?.["runs-on"]).toContain("matrix.os == 'macos-latest'");
     expect(jobs["build-desktop-app"]?.["runs-on"]).toContain("|| matrix.os");

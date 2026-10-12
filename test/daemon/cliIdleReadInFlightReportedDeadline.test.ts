@@ -1,16 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { handleSessionInfo } from "../../src/daemon/daemonRequestHandlers";
-import { SessionManager, type ActiveSessionExecutionQuery } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
+import { ExecutionTracker } from "../../src/server/executionTracker";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 
-// A one-shot CLI session is released only by the heartbeat monitor, whose execution probe ignores
-// reads (#11322, owner contract: a read never holds a session). `session-info` and the heartbeat
-// ack report `idleReleaseAt` from the session manager's own veto lookup, which still counts a read
-// in flight (#11381 item 2). For a `cli-idle` session the two surfaces then disagree: the monitor
-// frees the device at the idle deadline while the daemon tells the CLI the release is due 30
-// minutes later.
+// Idle-release reports and releasers agree: only control calls veto, for every liveness
+// policy. An inventory or device read in flight never postpones the reported deadline (#11381).
 
 const SESSION = "00000000-0000-4000-8000-000000000044";
 const DEVICE = "emulator-5554";
@@ -27,16 +25,19 @@ describe("cli-idle session with a read in flight past its idle deadline", () => 
   let manager: SessionManager;
   let monitor: SessionHeartbeatMonitor;
   let reaped: Array<{ at: number; reason: string }>;
-  let readInFlight: boolean;
+  let tracker: ExecutionTracker;
+  let started: string[];
 
   beforeEach(async () => {
     timer = new FakeTimer();
-    readInFlight = false;
+    tracker = new ExecutionTracker(timer, new FakeIdGenerator());
+    started = [];
     manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    // The daemon's tracker: a read counts unless the caller excludes reads.
-    manager.setActiveSessionExecutionChecker(
-      (_sessionId: string, query?: ActiveSessionExecutionQuery) =>
-        readInFlight && query?.excludeReads !== true,
+    manager.setActiveSessionExecutionChecker((sessionId, query) =>
+      tracker.hasActiveSessionUuidExecutions(sessionId, query),
+    );
+    manager.setSessionExecutionDeadlineLookup((sessionId, query) =>
+      tracker.getLatestSessionExecutionDeadlineMs(sessionId, query),
     );
     reaped = [];
     monitor = new SessionHeartbeatMonitor(
@@ -57,11 +58,14 @@ describe("cli-idle session with a read in flight past its idle deadline", () => 
   afterEach(async () => {
     await monitor.stop();
     manager.stopCleanupTimer();
+    for (const id of started) {
+      tracker.endExecution(id);
+    }
   });
 
   test("session-info does not report an idle release later than the monitor performs it", async () => {
     const lastToolActivityAt = manager.getSession(SESSION)!.lastUsedAt;
-    readInFlight = true;
+    startRead();
 
     await timer.advanceTimeAsync(CLI_IDLE_MS - 10_000, drain);
     const state = {
@@ -93,11 +97,13 @@ describe("cli-idle session with a read in flight past its idle deadline", () => 
   test("a control call in flight still pushes the reported deadline out, by its own deadline only", () => {
     const controlDeadlineMs = timer.now() + CLI_IDLE_MS + 5_000;
     const lookups: Array<boolean | undefined> = [];
-    manager.setActiveSessionExecutionChecker(() => true);
+    const control = tracker.startExecution("tapOn", undefined, SESSION);
+    started.push(control.id);
+    tracker.setExecutionDeadline(control.id, () => controlDeadlineMs);
+    startRead(controlDeadlineMs + 60_000);
     manager.setSessionExecutionDeadlineLookup((_sessionId, query) => {
       lookups.push(query?.excludeReads);
-      // A read with a later deadline is also in flight; the monitor's veto never sees it.
-      return query?.excludeReads ? controlDeadlineMs : controlDeadlineMs + 60_000;
+      return tracker.getLatestSessionExecutionDeadlineMs(SESSION, query);
     });
 
     expect(manager.getIdleReleaseExecutionVeto(SESSION)).toEqual({
@@ -106,12 +112,19 @@ describe("cli-idle session with a read in flight past its idle deadline", () => 
     expect(lookups).toEqual([true]);
   });
 
-  // The idle sweep releases a heartbeat-policy session, and its veto still counts a read
-  // (#11381 items 1-2, undecided): the report follows that releaser unchanged.
-  test("a heartbeat-policy session's report still counts a read, as its idle sweep does", () => {
-    manager.restoreHeartbeatLivenessPolicy(SESSION);
-    readInFlight = true;
+  function startRead(deadline?: number): void {
+    const read = tracker.startExecution("observe", undefined, SESSION);
+    started.push(read.id);
+    tracker.markDeviceReadCall(read.id, read.toolName);
+    if (deadline !== undefined) {
+      tracker.setExecutionDeadline(read.id, () => deadline);
+    }
+  }
 
-    expect(manager.getIdleReleaseExecutionVeto(SESSION)).toEqual({ latestDeadlineMs: undefined });
+  test("a heartbeat-policy session's report excludes a read, as its idle sweep does", () => {
+    manager.restoreHeartbeatLivenessPolicy(SESSION);
+    startRead();
+
+    expect(manager.getIdleReleaseExecutionVeto(SESSION)).toBeUndefined();
   });
 });

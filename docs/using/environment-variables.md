@@ -412,7 +412,7 @@ To tell an idle holder from an active one, `session-info` also prints:
 | `lastOwnerHeartbeatAt` | The owner's last heartbeat, or `null` before the first.                        |
 | `idleReleaseAt`        | When idle release is due; the next monitor scan after it releases the session. |
 | `holderKind`           | `stdio-proxy`, `desktop`, `ide`, `cli`, `junit` or `unknown`.                  |
-| `activeExecutions`     | Tool calls in flight on the session. Idle release waits for them to finish.    |
+| `activeExecutions`     | Calls in flight, reads included. Only a control call holds the idle release.   |
 
 `holderKind` comes from the session's liveness policy (`cli` for a one-shot
 `--cli` owner), the client name a client sent to `daemon/registerSession`, and

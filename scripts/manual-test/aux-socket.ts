@@ -1,5 +1,9 @@
 #!/usr/bin/env bun
 import "./harnessLogSink";
+import {
+  AUX_SOCKET_MAX_FRAME_BYTES,
+  FAILURES_STREAM_MAX_FRAME_BYTES,
+} from "../../src/daemon/socketServer/LineFramer";
 import { basename, join, isAbsolute } from "node:path";
 import {
   DEVICE_GESTURE_RECORDING_SOCKET_CONFIG,
@@ -195,6 +199,7 @@ export function parseAuxSocketArgs(
   return command;
 }
 export interface AuxSocketDeps {
+  maxFrameBytes?: number;
   env: Record<string, string | undefined>;
   host: HostDefaults;
   connect: ConnectFrameSocket;
@@ -211,7 +216,11 @@ async function recording(
   timeoutMs: number,
 ): Promise<number> {
   return new Promise((done, reject) => {
-    const decoder = new LineDecoder();
+    // planContent is uncapped generated YAML; allow the shared 8 MiB stream budget.
+    const decoder = new LineDecoder(
+      deps.maxFrameBytes ?? FAILURES_STREAM_MAX_FRAME_BYTES,
+      "Recording response",
+    );
     let settled = false;
     const finish = (error?: Error, code = 0): void => {
       if (settled) {
@@ -233,16 +242,21 @@ async function recording(
       finish(error ?? new Error("Recording socket closed before response.")),
     );
     connection.onData((chunk) => {
-      const [line] = decoder.push(chunk, 1);
-      if (line === undefined || settled) {
+      if (settled) {
         return;
       }
-      deps.out(line);
-      try {
-        const response: DeviceGestureRecordingResponse = JSON.parse(line);
-        finish(undefined, response.success === true ? 0 : 1);
-      } catch (error) {
-        finish(new Error(`Invalid recording response: ${errorMessage(error)}`));
+      const { line, overflow } = decoder.pushFirst(chunk);
+      if (line !== undefined) {
+        deps.out(line);
+        try {
+          const response: DeviceGestureRecordingResponse = JSON.parse(line);
+          finish(undefined, response.success === true ? 0 : 1);
+        } catch (error) {
+          finish(new Error(`Invalid recording response: ${errorMessage(error)}`));
+        }
+      }
+      if (overflow) {
+        finish(overflow);
       }
     });
     try {
@@ -259,7 +273,11 @@ async function video(
   deps: AuxSocketDeps,
 ): Promise<number> {
   return new Promise((done, reject) => {
-    const decoder = new LineDecoder();
+    // The video acknowledgement is a small JSON object: the auxiliary 1 MiB budget.
+    const decoder = new LineDecoder(
+      deps.maxFrameBytes ?? AUX_SOCKET_MAX_FRAME_BYTES,
+      "Video acknowledgement",
+    );
     let ack: VideoStreamSocketResponse | undefined;
     let bytesAfterAck = 0;
     let settled = false;
@@ -297,22 +315,24 @@ async function video(
         bytesAfterAck += chunk.length;
         return;
       }
-      const [line] = decoder.push(chunk, 1);
-      if (line === undefined) {
-        return;
-      }
-      deps.out(line);
-      try {
-        ack = JSON.parse(line) as VideoStreamSocketResponse;
-        bytesAfterAck += decoder.remainder().length;
-        deps.timer.clearTimeout(timeout);
-        if (ack.success !== true) {
-          finish("server");
-          return;
+      const { line, raw, overflow } = decoder.pushFirst(chunk);
+      if (line !== undefined) {
+        deps.out(line);
+        try {
+          ack = JSON.parse(line) as VideoStreamSocketResponse;
+          bytesAfterAck += raw.length;
+          deps.timer.clearTimeout(timeout);
+          if (ack.success !== true) {
+            finish("server");
+            return;
+          }
+          hold = deps.timer.setTimeout(() => finish("hold"), command.holdMs);
+        } catch (error) {
+          finish("server", new Error(`Invalid video ack: ${errorMessage(error)}`));
         }
-        hold = deps.timer.setTimeout(() => finish("hold"), command.holdMs);
-      } catch (error) {
-        finish("server", new Error(`Invalid video ack: ${errorMessage(error)}`));
+      }
+      if (overflow) {
+        finish("server", overflow);
       }
     });
     try {

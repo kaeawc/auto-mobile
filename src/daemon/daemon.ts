@@ -2051,7 +2051,7 @@ export class Daemon {
       return;
     }
 
-    let payload: { sessionId?: string } | null = null;
+    let payload: { sessionId?: string; livenessOwnerToken?: unknown } | null = null;
     try {
       payload = JSON.parse(bodyResult.body);
     } catch (error) {
@@ -2069,6 +2069,19 @@ export class Daemon {
       return;
     }
 
+    const readOwnerToken = (value: unknown): string | undefined =>
+      typeof value === "string" && value.trim() ? value : undefined;
+    const ownerToken = readOwnerToken(payload?.livenessOwnerToken);
+    const creditLiveHeartbeat = (session: Session): void => {
+      // Match the socket's non-claiming rule; a different owner remains a 200 liveness no-op.
+      const ownsLiveness = ownerToken
+        ? this.sessionManager.hasLivenessOwnership(sessionId, ownerToken) ||
+          this.sessionManager.claimUnownedLivenessOwnership(sessionId, ownerToken)
+        : !isTokenOwnedOrClaimPending(session);
+      if (ownsLiveness) {
+        this.sessionManager.recordHeartbeat(sessionId);
+      }
+    };
     const session =
       this.sessionManager.getSession(sessionId) ??
       this.sessionManager.getReleasingSession(sessionId);
@@ -2076,6 +2089,9 @@ export class Daemon {
     // 404 unless it names a live observer session, so a client learns its session
     // is gone instead of heartbeating a dead id forever.
     if (!session || isSessionReleasing(this.sessionManager, sessionId, session)) {
+      if (ownerToken) {
+        this.sessionManager.creditOwnerHeartbeatDuringRelease(sessionId, ownerToken);
+      }
       if (this.observerSessionRegistry.heartbeat(sessionId)) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "ok" }));
@@ -2091,11 +2107,7 @@ export class Daemon {
       );
       return;
     }
-    // HTTP heartbeats carry no liveness owner token, so apply the socket route's
-    // tokenless rule: a no-op (200) on a proxy-owned or claim-pending session.
-    if (!isTokenOwnedOrClaimPending(session)) {
-      this.sessionManager.recordHeartbeat(sessionId);
-    }
+    creditLiveHeartbeat(session);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok" }));
     return;

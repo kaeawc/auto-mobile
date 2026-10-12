@@ -1,6 +1,7 @@
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  DaemonBoundSessionExpiredError,
   DaemonConnectionSessionReleasedError,
   DaemonAmbiguousSessionSelectorError,
   DaemonMcpProxy,
@@ -459,11 +460,20 @@ describe("#11714: an unambiguous platform-only call uses its connection's defaul
     });
   }
 
-  test("PIN: a released android sibling is no longer a platform candidate", async () => {
+  test("a released android sibling refuses platform control once and is no longer a platform candidate", async () => {
     await acquire("getAndroid", ANDROID);
     await acquire("getApple", IOS);
     client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, ANDROID.sessionUuid, "idle");
+    const before = forwarded.length;
+    const refusal = await proxy.callTool("homeScreen", { platform: "android" }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(refusal).toBeInstanceOf(DaemonBoundSessionExpiredError);
+    expect(refusal).toMatchObject({ sessionUuid: ANDROID.sessionUuid, reason: "idle" });
+    expect(forwarded.length).toBe(before);
     await proxy.callTool("homeScreen", { platform: "android" });
+    expect(forwarded.length).toBe(before + 1);
     expect(lastParams()).toMatchObject({
       platform: "android",
       [DAEMON_OWNED_SESSIONS_PARAM]: [IOS.sessionUuid],

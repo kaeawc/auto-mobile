@@ -1843,6 +1843,8 @@ export class DaemonMcpProxy {
    * {@link close} (stdin EOF, owner loss, or any other shutdown) instead of waiting out the
    * daemon's no-heartbeat release. Throws when the proxy is closing, already holds a different
    * binding, or cannot reach the daemon.
+   * When `signal` aborts mid-hold, this method throws and the caller must release what it
+   * tracked — {@link acquireManagedSlots} does.
    */
   async holdManagedExecutionSession(sessionUuid: string, signal?: AbortSignal): Promise<void> {
     try {
@@ -1854,8 +1856,13 @@ export class DaemonMcpProxy {
     if (trimmed.length === 0) {
       throw new ActionableError("A managed execution session UUID is required.");
     }
-    if (this.closing || this.abandonedManagedSessions.has(trimmed)) {
+    if (this.closing) {
       throw new DaemonUnavailableError("MCP proxy is closing");
+    }
+    if (this.abandonedManagedSessions.has(trimmed)) {
+      throw new ActionableError(
+        `Cannot hold managed execution session ${trimmed}: this execution's acquisition abandoned it; relaunch the execution.`,
+      );
     }
     if (this.boundSessionUuid !== undefined && this.boundSessionUuid !== trimmed) {
       throw new ActionableError(

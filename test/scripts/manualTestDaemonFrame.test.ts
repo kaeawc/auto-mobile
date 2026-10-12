@@ -492,6 +492,68 @@ posixTest(
   },
 );
 
+posixTest(
+  "a claim answered after the preparation deadline cannot start an abandoned keeper",
+  async () => {
+    const f = managedFixture();
+    const write = f.connection.write.bind(f.connection);
+    let claim: FakeConnection["writes"][number] | undefined;
+    f.connection.write = (data) => {
+      const frame = JSON.parse(data) as FakeConnection["writes"][number];
+      if (frame.method === "daemon/heartbeat" && frame.params.claimLivenessOwnership) {
+        claim = frame;
+        f.connection.writes.push(frame);
+      } else {
+        write(data);
+      }
+    };
+    const task = runDaemonFrame(
+      {
+        ...parsed(),
+        managedBinding: JSON.stringify({ ...JSON.parse(config), preparationTimeoutMs: 100 }),
+        holdMs: 10000,
+      },
+      f.deps,
+    );
+    await drainUntilQuiescent(f.timer);
+    expect(claim).toBeDefined();
+    f.timer.advanceTime(100);
+    await drainUntilQuiescent(f.timer);
+    const result = f.out.find((line) => line.startsWith('{"contractVersion":'));
+    expect(JSON.parse(result!)).toMatchObject({
+      outcome: "failed",
+      failure: { code: "timeout" },
+      slots: [{ sessionUuid: null }],
+    });
+    const releases = () =>
+      f.connection.writes.filter((frame) => frame.method === "daemon/releaseExecution");
+    expect(releases()).toHaveLength(1);
+    expect(releases()[0].params).toEqual({
+      sessionId: "slot-session",
+      livenessOwnerToken: "fake-1",
+    });
+    f.timer.advanceTime(1);
+    f.connection.data(
+      Buffer.from(
+        JSON.stringify({ id: claim!.id, type: "mcp_response", success: true, result: {} }) + "\n",
+      ),
+    );
+    await drainUntilQuiescent(f.timer);
+    expect(f.timer.getPendingIntervalCount()).toBe(0);
+    for (let tick = 0; tick < 4; tick++) {
+      f.timer.advanceTime(2000);
+      await drainUntilQuiescent(f.timer);
+    }
+    expect(f.connection.writes.filter((frame) => frame.method === "daemon/heartbeat")).toHaveLength(
+      1,
+    );
+    f.timer.advanceTime(2000);
+    expect(await task).toBe(0);
+    expect(releases()).toHaveLength(1);
+    expect(f.paths).toHaveLength(1);
+  },
+);
+
 posixTest("failed keeper heartbeat logs and continues to a successful exit", async () => {
   const f = managedFixture();
   const write = f.connection.write.bind(f.connection);

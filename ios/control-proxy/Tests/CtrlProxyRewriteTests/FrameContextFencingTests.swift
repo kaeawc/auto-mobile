@@ -9,7 +9,8 @@ final class FrameContextFencingTests: XCTestCase {
     private func dispatch(
         type: RequestType,
         fields: Fields,
-        token: String?
+        token: String?,
+        locator: RewriteFakeElementLocator? = nil
     )
         async throws -> (WebSocketResponse, RewriteFakeGesturePerformer)
     {
@@ -28,7 +29,7 @@ final class FrameContextFencingTests: XCTestCase {
         )
         let gestures = RewriteFakeGesturePerformer()
         let handler = CommandHandler(
-            elementLocator: RewriteFakeElementLocator(hierarchy: hierarchy),
+            elementLocator: locator ?? RewriteFakeElementLocator(hierarchy: hierarchy),
             gesturePerformer: gestures,
             perf: PerfProvider(),
             frameContext: frameContext
@@ -63,7 +64,12 @@ final class FrameContextFencingTests: XCTestCase {
     {
         let (response, gestures) = try await dispatch(type: type, fields: fields, token: "stale-token")
         XCTAssertEqual(response.success, false, file: file, line: line)
-        XCTAssertTrue(response.error?.localizedCaseInsensitiveContains("stale") == true, file: file, line: line)
+        XCTAssertEqual(
+            response.error,
+            "Command execution failed: Stale frame context; observe a fresh frame before retrying",
+            file: file, line: line
+        )
+        XCTAssertNil(response.errorCode, file: file, line: line)
         XCTAssertEqual(calls(for: type, on: gestures), 0, file: file, line: line)
     }
 
@@ -161,9 +167,70 @@ final class FrameContextFencingTests: XCTestCase {
     }
 
     func testContextlessRequestUsesFastPath() async throws {
-        let (response, gestures) = try await dispatch(type: .requestShake, fields: [:], token: nil)
+        let locator = RewriteFakeElementLocator()
+        locator.onCapture = { throw CaptureFailure() }
+        let (response, gestures) = try await dispatch(
+            type: .requestShake, fields: [:], token: nil, locator: locator
+        )
         XCTAssertEqual(response.success, true)
         XCTAssertEqual(gestures.shakeCalls, 1)
+        XCTAssertTrue(locator.filteringRequests.isEmpty)
+    }
+
+    func testSyncGestureCaptureFailureIsNotStaleAndDoesNotSendGesture() async throws {
+        let locator = RewriteFakeElementLocator()
+        locator.onCapture = { throw CaptureFailure() }
+        let (response, gestures) = try await dispatch(
+            type: .requestShake, fields: [:], token: "current", locator: locator
+        )
+        XCTAssertEqual(response.success, false)
+        let message = try XCTUnwrap(response.error)
+        XCTAssertFalse(message.localizedCaseInsensitiveContains("stale"))
+        XCTAssertTrue(message.contains("XCUITest hierarchy query timed out"))
+        XCTAssertEqual(response.errorCode, "hierarchy_capture_failed")
+        XCTAssertEqual(gestures.shakeCalls, 0)
+        XCTAssertEqual(locator.filteringRequests.count, 1)
+    }
+
+    func testAsyncGestureCaptureFailureIsNotStaleAndDoesNotSendGesture() async throws {
+        let locator = RewriteFakeElementLocator()
+        locator.onCapture = { throw CaptureFailure() }
+        let (response, gestures) = try await dispatch(
+            type: .requestSetText, fields: ["resourceId": "field", "text": "value"],
+            token: "current", locator: locator
+        )
+        XCTAssertEqual(response.success, false)
+        let message = try XCTUnwrap(response.error)
+        XCTAssertFalse(message.localizedCaseInsensitiveContains("stale"))
+        XCTAssertTrue(message.contains("XCUITest hierarchy query timed out"))
+        XCTAssertEqual(response.errorCode, "hierarchy_capture_failed")
+        XCTAssertEqual(gestures.setTextCalls, 0)
+        XCTAssertEqual(locator.filteringRequests.count, 1)
+    }
+
+    func testContextlessAsyncGestureSkipsFailingCapture() async throws {
+        let locator = RewriteFakeElementLocator()
+        locator.onCapture = { throw CaptureFailure() }
+        let (response, gestures) = try await dispatch(
+            type: .requestSetText, fields: ["resourceId": "field", "text": "value"],
+            token: nil, locator: locator
+        )
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(gestures.setTextCalls, 1)
+        XCTAssertTrue(locator.filteringRequests.isEmpty)
+    }
+
+    func testHierarchyCaptureFailureWireContract() {
+        let error = CommandError.hierarchyCaptureFailed(reason: "x")
+        XCTAssertEqual(error.wireCode, "hierarchy_capture_failed")
+        XCTAssertEqual(
+            error.errorDescription,
+            "Could not capture the view hierarchy to validate the frame context; the gesture was not sent: x"
+        )
+    }
+
+    private struct CaptureFailure: LocalizedError {
+        var errorDescription: String? { "XCUITest hierarchy query timed out" }
     }
 
     private var swipeFields: Fields { ["x1": 1, "y1": 2, "x2": 3, "y2": 4] }

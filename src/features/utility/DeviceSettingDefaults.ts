@@ -3,6 +3,7 @@ import {
   defaultAdbClientFactory,
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { registerBoundedAcquisitionCleanup } from "../../utils/boundedAcquisitionCleanup";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -453,17 +454,30 @@ export async function recordDeviceSettingDefaultsBeforeChange(
 /**
  * The acquisition-time reset (#11145), run where acquisition cancels sessionless work. Tracked as
  * acquisition cleanup, like the other ownerless cleanups: the acquiring holder is not refused
- * while it runs, and a failure is logged and retried at the next acquisition, never quarantining
- * the device.
+ * while it runs. After release, the device is quarantined only until the reset settles or its
+ * cap expires; bounding the tracked promise leaves the reset's queue and fences unchanged.
  */
 export function createDeviceSettingDefaultsAcquisitionReset(
-  manager: { registerAcquisitionDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void },
+  manager: {
+    registerAcquisitionDeviceCleanup(
+      deviceId: string,
+      cleanup: Promise<unknown>,
+      capMs?: number,
+    ): void;
+  },
   defaults: Pick<DeviceSettingDefaults, "resetOnAcquisition">,
+  timer: Pick<Timer, "setTimeout" | "clearTimeout"> = defaultTimer,
 ): (deviceId: string, sessionId: string) => void {
   return (deviceId, sessionId) => {
-    manager.registerAcquisitionDeviceCleanup(
+    registerBoundedAcquisitionCleanup(
+      manager,
       deviceId,
       defaults.resetOnAcquisition(deviceId, sessionId),
+      {
+        timer,
+        capMs: PENDING_RESET_WAIT_MS,
+        label: `reset device setting defaults for session ${sessionId}`,
+      },
     );
   };
 }

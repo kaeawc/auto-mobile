@@ -1,4 +1,6 @@
-import type { SessionManager } from "../daemon/sessionManager";
+import { SESSION_RELEASE_TEARDOWN_CAP_MS, type SessionManager } from "../daemon/sessionManager";
+import { registerBoundedAcquisitionCleanup } from "../utils/boundedAcquisitionCleanup";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -26,6 +28,7 @@ export interface NetworkStateSessionCleanupOptions {
   /** Resolved lazily per call so a replaced singleton is always honoured. */
   state?: () => NetworkState;
   pusher?: NetworkDeviceStatePusher;
+  timer?: Pick<Timer, "setTimeout" | "clearTimeout">;
 }
 
 async function pushClearedState(pusher: NetworkDeviceStatePusher, deviceId: string): Promise<void> {
@@ -86,6 +89,10 @@ export function createOwnerlessNetworkStateAcquisitionCleanup(
     if (!state.clearSessionlessDeviceState(deviceId)) {
       return;
     }
-    manager.registerAcquisitionDeviceCleanup(deviceId, pushClearedState(pusher, deviceId));
+    registerBoundedAcquisitionCleanup(manager, deviceId, pusher.push(deviceId), {
+      timer: options.timer ?? defaultTimer,
+      capMs: SESSION_RELEASE_TEARDOWN_CAP_MS,
+      label: "push cleared network state",
+    });
   };
 }

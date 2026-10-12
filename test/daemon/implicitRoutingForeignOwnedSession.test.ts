@@ -1,5 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
+import {
+  DAEMON_BOUND_SESSION_PARAM,
+  DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
+  DAEMON_OWNED_SESSIONS_PARAM,
+} from "../../src/daemon/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
@@ -27,6 +31,7 @@ import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import { RealToolCallPath } from "../helpers/realToolCallPath";
 
 /**
@@ -45,13 +50,12 @@ import { RealToolCallPath } from "../helpers/realToolCallPath";
  *   route, and on the loopback both connections share (`device:<id>`, reached by a top-level
  *   `deviceId`) a device call resolves its session per connection from the pool, while every plain
  *   control tool rejects a top-level `deviceId` in its strict schema before its handler runs.
- * - One path IS reachable (the last describe block): a call that marks the session it names as
- *   its connection's bound session (`DAEMON_BOUND_SESSION_PARAM`, the wire shape the proxy uses
- *   for its own binding, including an `--initial-session-uuid` startup binding). The socket strips
- *   `sessionUuid` and seeds the loopback with it, so the ingress sees a sessionless call whose
- *   routing session is the owner's and its owner rule judges nothing. A public MCP caller cannot
- *   send the marker (the proxy strips it); a proxy sends it only for its own binding. Left as is:
- *   see the OPEN note on that block.
+ * - A marker echoing the named session (`DAEMON_BOUND_SESSION_PARAM`, including the proxy's
+ *   `--initial-session-uuid` shape) is honoured unless another connected client owns that session
+ *   and its recorded liveness token differs from the call's token. Then `sessionUuid` stays for
+ *   the ingress owner rule: control is refused without use or socket rebinding, reads still run.
+ *   Matching tokens, the owning connection, disconnected owners and tokenless sessions retain
+ *   the bound-session path.
  */
 class RecordingKillDeviceManager extends FakeDeviceUtils {
   readonly killed: string[] = [];
@@ -65,6 +69,7 @@ class RecordingKillDeviceManager extends FakeDeviceUtils {
 const held: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
 const other: BootedDevice = { name: "Pixel B", deviceId: "emulator-5556", platform: "android" };
 const HOLDER = "holder-session";
+const OWNER_TOKEN = "holder-owner-token";
 const SHARED_LOOPBACK = `device:${held.deviceId}`;
 
 interface Connection {
@@ -199,6 +204,7 @@ describe("the implicit routing session of a call that names none", () => {
     owner = connect();
     stranger = connect();
     // The owner's connection acquires the session that holds the device.
+    pool.declareMcpSessionLivenessOwnerToken(owner.id, OWNER_TOKEN);
     await pool.bindOrReuseDeviceSession(
       HOLDER,
       held.deviceId,
@@ -212,6 +218,7 @@ describe("the implicit routing session of a call that names none", () => {
       undefined,
       owner.id,
     );
+    expect(sessionManager.getSession(HOLDER)?.livenessOwnerToken).toBe(OWNER_TOKEN);
   };
 
   const destroy = async (): Promise<void> => {
@@ -360,6 +367,20 @@ describe("the implicit routing session of a call that names none", () => {
     expect(devices.killed).toEqual([held.deviceId]);
   });
 
+  for (const sessionUuid of [null, 5]) {
+    test(`the owner's unmarked tap with sessionUuid ${sessionUuid} still runs as HOLDER`, async () => {
+      const tap = await owner.call("tapAt", {
+        x: 1,
+        y: 1,
+        deviceId: held.deviceId,
+        sessionUuid,
+      });
+
+      expect(isToolError(tap)).toBe(false);
+      expect(heldRuns().map((run) => run.sessionUuid)).toEqual([HOLDER]);
+    });
+  }
+
   test("with autolock on, a sessionless call never resolves to another connection's autolock", async () => {
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const autolock = (await pool.autolockDevice(other.deviceId, "android", owner.id))!;
@@ -385,28 +406,167 @@ describe("the implicit routing session of a call that names none", () => {
     expect(devices.killed).toEqual([other.deviceId]);
   });
 
-  // The one reachable path (#11555 item 3). A call that marks the session it names as its
-  // connection's bound session has `sessionUuid` stripped by the socket
-  // (`withSocketSessionAutolockKey`) and lands on a loopback seeded with it
-  // (`sessionScopedForwardRoute`), so the ingress sees no named session. Unjudged, the tap reaches
-  // the owner's device and killDevice passes the holder check without `force`.
+  // #11555 item 3: a foreign connected owner's binding requires its recorded liveness token.
   describe("a call marking the owner's session as its own bound session", () => {
     const marked = { sessionUuid: HOLDER, [DAEMON_BOUND_SESSION_PARAM]: HOLDER };
 
-    // OPEN (#11555 item 3): this pins what happens today, not what should. Refusing here by
-    // connection ownership would also refuse a proxy that took the session over by a liveness
-    // claim while the acquiring connection stays connected (a liveness claim records no
-    // connection ownership), so which ownership governs a declared binding is the owner's call.
-    test("REACHABLE: its control calls run as the owner's session", async () => {
-      const tap = await stranger.call("tapAt", { x: 1, y: 1, ...marked });
-      await stranger.call("killDevice", { device: held, ...marked });
+    for (const token of [undefined, "someone-else"]) {
+      test(`refuses stranger control with ${token === undefined ? "no" : "a different"} owner token`, async () => {
+        const before = sessionManager.getSession(HOLDER)!.lastUsedAt;
+        timer.advanceTime(60_000);
+        const args = {
+          ...marked,
+          ...(token ? { [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: token } : {}),
+        };
+        const tap = await stranger.call("tapAt", { x: 1, y: 1, ...args });
+        const kill = await stranger.call("killDevice", { device: held, ...args });
+
+        expect(payload(tap).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+        expect(payload(kill).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+        expect(heldRuns()).toEqual([]);
+        expect(devices.killed).toEqual([]);
+        expect(sessionManager.getSession(HOLDER)!.lastUsedAt).toBe(before);
+        expect(server["boundMcpClientKeysBySocketSession"].get(stranger.id)?.sessionUuid).not.toBe(
+          HOLDER,
+        );
+      });
+    }
+
+    test("runs stranger control carrying the recorded owner token before reconnect restore", async () => {
+      const tap = await stranger.call("tapAt", {
+        x: 1,
+        y: 1,
+        ...marked,
+        [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: OWNER_TOKEN,
+      });
+      expect(isToolError(tap)).toBe(false);
+      expect(heldRuns().map((run) => run.sessionUuid)).toEqual([HOLDER]);
+      expect(pool.isSessionOwnedByOtherConnection(HOLDER, stranger.id)).toBe(true);
+    });
+
+    test("restores ownership and runs a fresh connection's marked tap in one call", async () => {
+      const reconnected = connect();
+      expect(pool.isSessionOwnedByOtherConnection(HOLDER, owner.id)).toBe(false);
+      expect(pool.isSessionOwnedByOtherConnection(HOLDER, reconnected.id)).toBe(true);
+
+      const tap = await reconnected.call("tapAt", {
+        x: 1,
+        y: 1,
+        ...marked,
+        [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: OWNER_TOKEN,
+        [DAEMON_OWNED_SESSIONS_PARAM]: [HOLDER],
+      });
 
       expect(isToolError(tap)).toBe(false);
       expect(heldRuns().map((run) => run.sessionUuid)).toEqual([HOLDER]);
-      // Unforced: the lifecycle holder check took the declared binding for the holder.
-      expect(devices.killed).toEqual([held.deviceId]);
-      // The pool still records the acquiring connection as the session's owner.
+      // The existing restore rule transfers ownership rather than retaining two owners.
+      expect(pool.isSessionOwnedByOtherConnection(HOLDER, owner.id)).toBe(true);
+      expect(pool.isSessionOwnedByOtherConnection(HOLDER, reconnected.id)).toBe(false);
+    });
+
+    test("refuses a stranger's marked tap and restore with a wrong owner token", async () => {
+      const before = sessionManager.peekSession(HOLDER)!.lastUsedAt;
+      expect(pool.isSessionOwnedByOtherConnection(HOLDER, owner.id)).toBe(false);
       expect(pool.isSessionOwnedByOtherConnection(HOLDER, stranger.id)).toBe(true);
+
+      const tap = await stranger.call("tapAt", {
+        x: 1,
+        y: 1,
+        ...marked,
+        [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "someone-else",
+        [DAEMON_OWNED_SESSIONS_PARAM]: [HOLDER],
+      });
+
+      // Targeted restore refusal is a daemon error before any loopback tool call.
+      expect(tap.success).toBe(false);
+      expect(tap.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(tap.retryable).toBe(false);
+      expect(tools.runs).toEqual([]);
+      expect(loopbackKeys()).toEqual([]);
+      expect(pool.isSessionOwnedByOtherConnection(HOLDER, owner.id)).toBe(false);
+      expect(pool.isSessionOwnedByOtherConnection(HOLDER, stranger.id)).toBe(true);
+      expect(sessionManager.peekSession(HOLDER)!.livenessOwnerToken).toBe(OWNER_TOKEN);
+      expect(sessionManager.peekSession(HOLDER)!.lastUsedAt).toBe(before);
+    });
+
+    test("runs the owning connection's marked call with its token", async () => {
+      const tap = await owner.call("tapAt", {
+        x: 1,
+        y: 1,
+        ...marked,
+        [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: OWNER_TOKEN,
+      });
+      expect(isToolError(tap)).toBe(false);
+      expect(heldRuns().map((run) => run.sessionUuid)).toEqual([HOLDER]);
+    });
+
+    test("judges a derived binding by its base owner's token, not the label's token", async () => {
+      const label = `${HOLDER}:B`;
+      sessionManager.setDeviceLabels(HOLDER, { A: HOLDER, B: label });
+      await asPlanAllocation(sessionManager, HOLDER, [label], () =>
+        pool.assignMultipleDevices([label], 300_000, "android"),
+      );
+      // Model a label's existing distinct liveness record; only its base owns the connection.
+      sessionManager.peekSession(label)!.livenessOwnerToken = "label-token";
+      expect(sessionManager.peekSession(label)?.livenessOwnerToken).toBe("label-token");
+      expect(sessionManager.ownershipSessionUuid(label)).toBe(HOLDER);
+      const before = sessionManager.peekSession(HOLDER)!.lastUsedAt;
+      timer.advanceTime(60_000);
+      const markedLabel = { sessionUuid: label, [DAEMON_BOUND_SESSION_PARAM]: label };
+      const refused = await stranger.call("tapAt", {
+        x: 1,
+        y: 1,
+        ...markedLabel,
+        [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "label-token",
+      });
+      expect(payload(refused).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(tools.runs).toEqual([]);
+      expect(sessionManager.peekSession(HOLDER)!.lastUsedAt).toBe(before);
+      const tap = await stranger.call("tapAt", {
+        x: 1,
+        y: 1,
+        ...markedLabel,
+        [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: OWNER_TOKEN,
+      });
+      expect(isToolError(tap)).toBe(false);
+      expect(tools.runs.map((run) => run.sessionUuid)).toEqual([label]);
+    });
+
+    test("remaining tokenless case of #11555 item 3 still runs stranger marked control", async () => {
+      const TOKENLESS = "tokenless-session";
+      const tokenlessOwner = connect();
+      await pool.bindOrReuseDeviceSession(
+        TOKENLESS,
+        other.deviceId,
+        "android",
+        undefined,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        tokenlessOwner.id,
+      );
+      expect(sessionManager.peekSession(TOKENLESS)?.livenessOwnerToken).toBeUndefined();
+      expect(pool.isSessionOwnedByOtherConnection(TOKENLESS, stranger.id)).toBe(true);
+      const tap = await stranger.call("tapAt", {
+        x: 1,
+        y: 1,
+        sessionUuid: TOKENLESS,
+        [DAEMON_BOUND_SESSION_PARAM]: TOKENLESS,
+      });
+      expect(isToolError(tap)).toBe(false);
+      expect(tools.runs.map((run) => run.sessionUuid)).toEqual([TOKENLESS]);
+    });
+
+    test("runs marked control without a token after the tokened owner's disconnect", async () => {
+      pool.releaseMcpSessionBindings(owner.id);
+      expect(pool.isSessionOwnedByOtherConnection(HOLDER, stranger.id)).toBe(false);
+      expect(sessionManager.peekSession(HOLDER)?.livenessOwnerToken).toBe(OWNER_TOKEN);
+      const tap = await stranger.call("tapAt", { x: 1, y: 1, ...marked });
+      expect(isToolError(tap)).toBe(false);
+      expect(heldRuns().map((run) => run.sessionUuid)).toEqual([HOLDER]);
     });
 
     test("is still answered when it is a read, and does not extend the session", async () => {

@@ -472,6 +472,27 @@ describe("Android CtrlProxyText", () => {
       });
 
       socket.sentMessages.length = 0;
+      for (const insertedText of ["value", 123, null]) {
+        const promise = textDelegate.commitViaIme("value", "prior-ime");
+        const nextRequest = await waitForRequest(socket, "request_commit_text");
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "commit_text_result",
+            timestamp: 1,
+            requestId: nextRequest.requestId,
+            success: true,
+            insertedText,
+          }),
+        );
+        const result = await promise;
+        if (typeof insertedText === "string") {
+          expect(result).toHaveProperty("insertedText", insertedText);
+        } else {
+          expect(result).not.toHaveProperty("insertedText");
+        }
+        socket.sentMessages.length = 0;
+      }
+
       const eventPromise = textDelegate.commitViaIme(
         "Ab!",
         "prior-ime",

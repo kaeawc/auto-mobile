@@ -4,6 +4,7 @@ import { z } from "zod";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { errorMessage } from "../utils/describeUnknownError";
+import { DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
 import {
   DAEMON_DEVICE_LEASE_STATUS_METHOD,
   DAEMON_RELINQUISH_DEVICE_LEASE_METHOD,
@@ -19,6 +20,7 @@ import type {
 export type DaemonSocketExchangeOutcome =
   | { kind: "connect-failed"; detail: string }
   | { kind: "timeout" }
+  | { kind: "oversized"; limitBytes: number }
   | { kind: "response"; line: string };
 
 /** Sends one newline-framed request and resolves with the first response line. */
@@ -132,6 +134,9 @@ export class DaemonDeviceLeaseOwnerProbe
     if (outcome.kind === "timeout") {
       return { kind: "no-response", detail: `no answer within ${timeoutMs}ms` };
     }
+    if (outcome.kind === "oversized") {
+      return { kind: "unsupported", detail: `response exceeded ${outcome.limitBytes} bytes` };
+    }
     return parseOwnerResponse(outcome.line, resultSchema);
   }
 }
@@ -158,63 +163,71 @@ function parseOwnerResponse<T>(line: string, resultSchema: z.ZodType<T>): OwnerA
 }
 
 /** Real exchange over a Unix socket / named pipe. */
-export const rawDaemonSocketExchange: DaemonSocketExchange = (
-  socketPath,
-  frame,
-  timeoutMs,
-  timer,
-) =>
-  new Promise((resolve) => {
-    let settled = false;
-    let connected = false;
-    let buffer = "";
-    const held: { socket?: Socket } = {};
-    const settle = (outcome: DaemonSocketExchangeOutcome): void => {
-      if (settled) {
+export function createRawDaemonSocketExchange(
+  options: {
+    socketFactory?: () => Socket;
+    socketExists?: (path: string) => boolean;
+    maxFrameBytes?: number;
+  } = {},
+): DaemonSocketExchange {
+  return (socketPath, frame, timeoutMs, timer) =>
+    new Promise((resolve) => {
+      let settled = false;
+      let connected = false;
+      const held: { socket?: Socket } = {};
+      const settle = (outcome: DaemonSocketExchangeOutcome): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        timer.clearTimeout(timeout);
+        held.socket?.destroy();
+        resolve(outcome);
+      };
+      // A slow connect or answer means a live but busy owner, never a gone one.
+      const timeout = timer.setTimeout(() => settle({ kind: "timeout" }), timeoutMs);
+      // A missing Unix socket means nothing listens; Bun raises its connect error
+      // synchronously, before listeners attach, so check first (as DaemonSocketReachability does).
+      if (process.platform !== "win32" && !(options.socketExists ?? existsSync)(socketPath)) {
+        settle({ kind: "connect-failed", detail: "ENOENT" });
         return;
       }
-      settled = true;
-      timer.clearTimeout(timeout);
-      held.socket?.destroy();
-      resolve(outcome);
-    };
-    // A slow connect or answer means a live but busy owner, never a gone one.
-    const timeout = timer.setTimeout(() => settle({ kind: "timeout" }), timeoutMs);
-    // A missing Unix socket means nothing listens; Bun raises its connect error
-    // synchronously, before listeners attach, so check first (as DaemonSocketReachability does).
-    if (process.platform !== "win32" && !existsSync(socketPath)) {
-      settle({ kind: "connect-failed", detail: "ENOENT" });
-      return;
-    }
-    // Attach listeners before connecting: Bun on Windows raises a missing-pipe
-    // error synchronously inside connect(), which is uncaught with no listener.
-    const connection = new Socket();
-    held.socket = connection;
-    connection.setEncoding("utf8");
-    connection.on("data", (chunk: string) => {
-      buffer += chunk;
-      const newline = buffer.indexOf("\n");
-      if (newline >= 0) {
-        settle({ kind: "response", line: buffer.slice(0, newline) });
+      // Attach listeners before connecting: Bun on Windows raises a missing-pipe
+      // error synchronously inside connect(), which is uncaught with no listener.
+      const connection = options.socketFactory?.() ?? new Socket();
+      held.socket = connection;
+      const maxFrameBytes = options.maxFrameBytes ?? DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES;
+      const framer = new LineFramer(maxFrameBytes, {
+        onLine: (line) => settle({ kind: "response", line }),
+        onOverflow: () => settle({ kind: "oversized", limitBytes: maxFrameBytes }),
+      });
+      connection.on("data", (chunk: Buffer) => {
+        if (!settled) {
+          framer.push(chunk);
+        }
+      });
+      connection.on("error", (error: NodeJS.ErrnoException) => {
+        settle(
+          connected
+            ? { kind: "timeout" }
+            : { kind: "connect-failed", detail: error.code ?? "error" },
+        );
+      });
+      connection.on("close", () => {
+        settle(connected ? { kind: "timeout" } : { kind: "connect-failed", detail: "closed" });
+      });
+      try {
+        connection.connect(socketPath, () => {
+          connected = true;
+          connection.write(frame);
+        });
+      } catch (error) {
+        settle({
+          kind: "connect-failed",
+          detail: (error as NodeJS.ErrnoException).code ?? errorMessage(error),
+        });
       }
     });
-    connection.on("error", (error: NodeJS.ErrnoException) => {
-      settle(
-        connected ? { kind: "timeout" } : { kind: "connect-failed", detail: error.code ?? "error" },
-      );
-    });
-    connection.on("close", () => {
-      settle(connected ? { kind: "timeout" } : { kind: "connect-failed", detail: "closed" });
-    });
-    try {
-      connection.connect(socketPath, () => {
-        connected = true;
-        connection.write(frame);
-      });
-    } catch (error) {
-      settle({
-        kind: "connect-failed",
-        detail: (error as NodeJS.ErrnoException).code ?? errorMessage(error),
-      });
-    }
-  });
+}
+
+export const rawDaemonSocketExchange = createRawDaemonSocketExchange();

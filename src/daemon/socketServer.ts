@@ -3214,15 +3214,24 @@ export class UnixSocketServer {
   }
 
   private async restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void> {
-    const pool = this.daemonState.getDevicePool();
     const token = this.ownedSessionsOwnerToken(args);
     if (token !== undefined) {
-      pool.declareMcpSessionLivenessOwnerToken?.(socketSessionId, token);
+      try {
+        if (this.daemonState.isInitialized()) {
+          this.daemonState
+            .getDevicePool()
+            .declareMcpSessionLivenessOwnerToken?.(socketSessionId, token);
+        }
+      } catch (error) {
+        // Declaring an optional connection identity must not block the tool call or restore.
+        logger.warn(`Unable to declare MCP session owner token: ${errorMessage(error)}`, error);
+      }
     }
     const ids = this.selectorSessionIds(args);
     if (!ids) {
       return;
     }
+    const pool = this.daemonState.getDevicePool();
     const ownerSocket = this.clientSockets.get(socketSessionId);
     // Restoration attaches only live sessions. It restores both explicit
     // acquisition ownership and autolock routing without reallocating a

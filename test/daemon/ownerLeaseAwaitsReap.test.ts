@@ -137,7 +137,7 @@ test("awaiting-reap uses later same-token base proof, not the label's older hear
     probes++;
   });
   expect(manager.ownerLeaseAwaitsReap(label.sessionId)).toBe(false);
-  expect(probes).toBe(0);
+  expect(probes).toBeGreaterThan(0);
   timer.setCurrentTime(12_001);
   expect(manager.ownerLeaseAwaitsReap(label.sessionId)).toBe(true);
 });
@@ -161,5 +161,5 @@ test("acquisition adoption follows the base guard and never stamps an owner hear
   expect(label.livenessOwnerToken).toBe("owner");
   expect(label.hasReceivedHeartbeat).toBe(false);
   expect(clocks(label)).toEqual(before);
-  expect(probes).toBe(0);
+  expect(probes).toBeGreaterThan(0);
 });

@@ -222,3 +222,47 @@ test("a declared CLI proxy keeps the existing tokenless discovery wire", async (
     DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
   );
 });
+
+test("naming a tokenless holder twice gains no token after its acquiring connection closes", async () => {
+  const { s } = await setup();
+  const id = await s.acquireTokenless();
+  const beats = s.startJunitHeartbeats(id);
+  try {
+    await s.idle(2_000);
+    s.daemon.pool.releaseMcpSessionBindings("desktop-connection");
+    for (let call = 0; call < 2; call++) {
+      expect(await s.proxy.callTool("observe", { sessionUuid: id })).not.toMatchObject({
+        isError: true,
+      });
+    }
+    await s.idle(18_001);
+    expect(s.daemon.manager.hasSession(id)).toBe(true);
+    expect(s.daemon.manager.getSession(id)?.livenessOwnerToken).toBeUndefined();
+    expect(s.heartbeatsByToken.get("scenario-proxy-owner") ?? 0).toBe(0);
+    expect(s.releaseOf(id)).toBeUndefined();
+  } finally {
+    beats.stop();
+  }
+});
+
+test("a healthy holder has no retry hint on the first read after a daemon stall", async () => {
+  const { s } = await setup();
+  const id = await s.acquire();
+  await s.idle(4_000);
+  expect(s.daemon.pool.holderReleaseRemainingMs(id)).toBeUndefined();
+  s.lateTicks(20_000);
+  expect(s.daemon.pool.holderReleaseRemainingMs(id)).toBeUndefined();
+  await s.idle(6_000);
+  expect(s.daemon.manager.hasSession(id)).toBe(true);
+});
+
+test("joining an existing ownerless session by id binds no acquisition token", async () => {
+  const { s, proxy } = await setup();
+  const id = await s.acquireTokenless();
+  s.daemon.pool.releaseMcpSessionBindings("desktop-connection");
+  expect(await proxy.callTool("observe", { sessionUuid: id })).not.toMatchObject({ isError: true });
+  expect(
+    await proxy.callTool("getAndroid", { deviceId: "emulator-5554", sessionUuid: id }),
+  ).not.toMatchObject({ isError: true });
+  expect(s.daemon.manager.getSession(id)?.livenessOwnerToken).toBeUndefined();
+});

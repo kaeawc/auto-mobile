@@ -104,7 +104,7 @@ export interface DeviceAutolockPoolPort {
   ): Promise<Session>;
   stableDeviceIdFor(device: PooledDevice): string | undefined;
   /** Records the owner unless its connection closed mid-acquire; false means not recorded. */
-  recordBindOwnership(client: string, session: string): boolean;
+  recordBindOwnership(client: string, session: string, minted?: true): boolean;
   restoreSessionAssignment(device: PooledDevice, snapshot: SessionAssignmentSnapshot): void;
   isSessionAssignmentCurrent(device: PooledDevice, session: Session): boolean;
   getPooledSessionIdentity(device: PooledDevice): Session | undefined;
@@ -355,7 +355,7 @@ export class DeviceAutolockManager {
     // A connection that closed mid-acquire already had its bindings released: publishing its
     // routes now would leave a dead owner that suppresses the owner-disconnect release (#11166).
     const owner =
-      mcpSessionId && this.pool.recordBindOwnership(mcpSessionId, sessionId)
+      mcpSessionId && this.pool.recordBindOwnership(mcpSessionId, sessionId, true)
         ? mcpSessionId
         : undefined;
     if (owner) {

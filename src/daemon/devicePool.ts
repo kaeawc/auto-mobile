@@ -1842,7 +1842,10 @@ export class DevicePool {
         createSessionOrRestore: (device, snapshot, create) =>
           this.createSessionOrRestore(device, snapshot, create),
         stableDeviceIdFor: (device) => this.stableDeviceIdFor(device),
-        recordBindOwnership: (client, session) => this.recordBindOwnership(client, session),
+        recordBindOwnership: (client, session, minted) =>
+          minted
+            ? this.recordMintedSessionOwnership(client, session)
+            : this.recordBindOwnership(client, session),
         restoreSessionAssignment: (device, snapshot) =>
           this.restoreSessionAssignment(device, snapshot),
         isSessionAssignmentCurrent: (device, session) =>
@@ -8929,7 +8932,11 @@ export class DevicePool {
         cacheData: previousCacheData,
       };
     }
-    this.recordBindOwnership(caller.mcpSessionId, sessionId);
+    if (options.receipt.minted?.session === session) {
+      this.recordMintedSessionOwnership(caller.mcpSessionId, sessionId);
+    } else {
+      this.recordBindOwnership(caller.mcpSessionId, sessionId);
+    }
     this.notifyDeviceStateChanged(device);
   }
 
@@ -9591,6 +9598,19 @@ export class DevicePool {
     this.mcpSessionLivenessOwnerTokens.set(mcpSessionId, token);
   }
 
+  /** Record a minted session's owner and its acquisition identity in one synchronous commit. */
+  private recordMintedSessionOwnership(
+    mcpSessionId: string | undefined,
+    sessionId: string,
+  ): boolean {
+    const recorded = this.recordBindOwnership(mcpSessionId, sessionId);
+    const token = mcpSessionId && this.mcpSessionLivenessOwnerTokens.get(mcpSessionId);
+    if (recorded && token) {
+      this.sessionManager.bindAcquiredLivenessOwnerToken(sessionId, token);
+    }
+    return recorded;
+  }
+
   private recordMcpSessionOwnership(
     mcpSessionId: string | undefined,
     namedSessionId: string,
@@ -9599,10 +9619,6 @@ export class DevicePool {
       return;
     }
     const sessionId = this.ownershipSessionId(namedSessionId);
-    const token = this.mcpSessionLivenessOwnerTokens.get(mcpSessionId);
-    if (token !== undefined) {
-      this.sessionManager.bindAcquiredLivenessOwnerToken(sessionId, token);
-    }
     this.ownerDisconnectRelease.cancel(sessionId);
     // One owning connection per session (#11107): recording ownership moves it off any other
     // connection, so the previous owner's disconnect can no longer be suppressed by a duplicate.
@@ -9971,7 +9987,7 @@ export class DevicePool {
         target.restartHandoff !== true ||
         target.ownerLivenessToken !== livenessOwnerToken ||
         (reservationSessionId !== sessionId &&
-          this.sessionManager.ownershipSessionUuid(reservationSessionId, false) !== sessionId)
+          this.sessionManager.ownershipSessionUuid(reservationSessionId) !== sessionId)
       ) {
         continue;
       }

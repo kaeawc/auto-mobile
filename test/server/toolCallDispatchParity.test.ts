@@ -5,7 +5,12 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod/v4";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION, INTERNAL_EXECUTION_ID_PARAM } from "../../src/daemon/constants";
+import {
+  DAEMON_VERSION,
+  INTERNAL_EXECUTION_ID_PARAM,
+  DAEMON_OWNED_SESSIONS_PARAM,
+  DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
+} from "../../src/daemon/constants";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import { ActionableError } from "../../src/models";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
@@ -108,7 +113,11 @@ class ForwardingDaemonClient extends FakeDaemonClient {
     onRequestId?: (requestId: string) => void,
   ): Promise<unknown> {
     await super.callTool(toolName, params, progressToken, onRequestId);
-    return this.daemonServerClient().callTool({ name: toolName, arguments: params });
+    // Mirror the socket server's removal of daemon-wire ownership metadata before validation.
+    const forwardedArgs = { ...params };
+    delete forwardedArgs[DAEMON_OWNED_SESSIONS_PARAM];
+    delete forwardedArgs[DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM];
+    return this.daemonServerClient().callTool({ name: toolName, arguments: forwardedArgs });
   }
 }
 

@@ -1,3 +1,4 @@
+import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import {
   SessionRecoveryIdentityLossError,
@@ -63,11 +64,6 @@ const NEWER_VERSION = "9999.0.0";
 // (numeric) comparison semantics, so the client version is injected explicitly.
 const CLIENT_VERSION = "0.0.39";
 const ANCIENT_TIMESTAMP = 1;
-
-/** Exact forwarded arguments include the proxy's identity independently of retained sessions. */
-function withProxyOwnerToken(params: Record<string, unknown>) {
-  return { ...params, [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: expect.any(String) };
-}
 
 function connectionProfileResult(profileUuid: string) {
   return {

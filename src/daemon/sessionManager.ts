@@ -3779,11 +3779,8 @@ export class SessionManager {
     expireDespiteActiveExecution: boolean,
     execution?: SessionExecutionMetadata,
     releaseExpired = true,
-    probeStall?: boolean,
   ): Session | null {
-    if (probeStall !== false) {
-      this.stallProbe?.();
-    }
+    this.stallProbe?.();
     if (this.terminalReleaseSnapshots.has(sessionId)) {
       return null;
     }
@@ -10812,21 +10809,19 @@ export class SessionManager {
    * connection ownership is keyed (#11586). Undefined for a session that is not a published label,
    * and for a label whose base is gone.
    */
-  private livenessBaseSession(session: Session, probeStall = true): Session | undefined {
-    const baseSessionId = this.ownershipSessionUuid(session.sessionId, probeStall);
+  private livenessBaseSession(session: Session): Session | undefined {
+    const baseSessionId = this.ownershipSessionUuid(session.sessionId);
     return baseSessionId === session.sessionId
       ? undefined
-      : (this.peekSession(baseSessionId, probeStall) ?? undefined);
+      : (this.peekSession(baseSessionId) ?? undefined);
   }
 
   /**
    * The live session under `sessionId` for a lookup that only judges: unlike {@link getSession},
    * an expired session the scan has not reached is reported gone and is not released here.
    */
-  peekSession(sessionId: string, probeStall = true): Session | null {
-    return this.unlessBaseEnded(
-      this.getSessionInternal(sessionId, false, undefined, false, probeStall),
-    );
+  peekSession(sessionId: string): Session | null {
+    return this.unlessBaseEnded(this.getSessionInternal(sessionId, false, undefined, false));
   }
 
   /**
@@ -10970,9 +10965,9 @@ export class SessionManager {
    * ({@link resolveOwnershipSessionUuid}), resolved without releasing anything: an expired base
    * publishes no labels, and its release is left to the scan and the lazy-expiry paths.
    */
-  ownershipSessionUuid(sessionId: string, probeStall = true): string {
+  ownershipSessionUuid(sessionId: string): string {
     return resolveOwnershipSessionUuid(sessionId, {
-      getDeviceLabels: (id) => this.peekSession(id, probeStall)?.cacheData.deviceLabels,
+      getDeviceLabels: (id) => this.peekSession(id)?.cacheData.deviceLabels,
     });
   }
 
@@ -11139,13 +11134,13 @@ export class SessionManager {
    * next scan releases the session (#11285). Only a session judged on its owner's own heartbeats
    * qualifies: one no proxy owns is kept alive by its tool calls, which are its only liveness.
    */
-  private isOwnerLeaseLapsed(session: Session, probeStall = true): boolean {
+  private isOwnerLeaseLapsed(session: Session): boolean {
     return (
       judgesOwnerHeartbeats(session) &&
       suspectGraceMsFor(session) > 0 &&
       heartbeatLeasePastGrace(
         this.sessionNow(),
-        this.judgedLeaseHeartbeat(session, probeStall),
+        this.judgedLeaseHeartbeat(session),
         session.heartbeatTimeoutMs,
         suspectGraceMsFor(session),
       )
@@ -11154,22 +11149,22 @@ export class SessionManager {
 
   /** A live owner's lapsed lease awaits the next scan, unless a control call keeps it. */
   ownerLeaseAwaitsReap(sessionId: string): boolean {
-    const session = this.peekSession(sessionId, false);
+    const session = this.peekSession(sessionId);
     return (
       session !== null &&
-      this.isOwnerLeaseLapsed(session, false) &&
+      this.isOwnerLeaseLapsed(session) &&
       !this.activeSessionExecutionChecker(sessionId, { excludeReads: true })
     );
   }
 
   /** Later owner proof from a same-token base, including its release-local credit (#11722). */
-  judgedLeaseHeartbeat(session: Session, probeStall = true): number {
+  judgedLeaseHeartbeat(session: Session): number {
     const ownHeartbeat = judgedLeaseHeartbeat(session);
-    const baseId = this.ownershipSessionUuid(session.sessionId, probeStall);
+    const baseId = this.ownershipSessionUuid(session.sessionId);
     const releasingBaseId =
       baseId === session.sessionId ? this.getBaseSessionOfDerivedLabel(session.sessionId) : baseId;
     const base =
-      this.livenessBaseSession(session, probeStall) ??
+      this.livenessBaseSession(session) ??
       (releasingBaseId === undefined ? undefined : this.getReleasingSession(releasingBaseId));
     if (
       !base ||
@@ -11539,16 +11534,12 @@ export class SessionManager {
 
   /** Bind acquisition identity only: no heartbeat, claim history or release deadline changes. */
   bindAcquiredLivenessOwnerToken(sessionId: string, ownerToken: string): boolean {
-    const session = this.peekSession(sessionId, false);
-    return session !== null && this.adoptUnownedLivenessOwnerToken(session, ownerToken, false);
+    const session = this.peekSession(sessionId);
+    return session !== null && this.adoptUnownedLivenessOwnerToken(session, ownerToken);
   }
 
-  private adoptUnownedLivenessOwnerToken(
-    session: Session,
-    ownerToken: string,
-    probeStall = true,
-  ): boolean {
-    const base = this.livenessBaseSession(session, probeStall);
+  private adoptUnownedLivenessOwnerToken(session: Session, ownerToken: string): boolean {
+    const base = this.livenessBaseSession(session);
     const adopt = mayAdoptUnownedLiveness({
       claimantToken: ownerToken,
       session: this.livenessOwnerView(session),

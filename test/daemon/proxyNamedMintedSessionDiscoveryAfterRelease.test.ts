@@ -1,8 +1,11 @@
 import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
 import { DaemonBoundSessionExpiredError, DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
-import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
+import { DAEMON_OWNED_SESSIONS_PARAM, DAEMON_VERSION } from "../../src/daemon/constants";
+import {
+  withForeignOwnedSessionMeta,
+  withRoutedSessionMeta,
+} from "../../src/server/routedSessionMeta";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -43,8 +46,12 @@ function deviceStartResult(device: typeof ANDROID) {
 let client: FakeDaemonClient;
 let proxy: DaemonMcpProxy;
 let spies: Array<ReturnType<typeof spyOn>>;
+let timer: FakeTimer;
+let markedReadError: boolean | undefined;
 
 const setUp = (): void => {
+  markedReadError = undefined;
+  timer = new FakeTimer();
   client = new FakeDaemonClient({
     daemonMethodResults: new Map<string, unknown>([
       ["tools/list", { tools: TOOLS }],
@@ -68,11 +75,20 @@ const setUp = (): void => {
                   },
                 ],
               }
-            : // The daemon echoes the session an admitted control call used (#10974).
-              withRoutedSessionMeta(
-                { content: [{ type: "text", text: "ok" }] },
-                typeof params.sessionUuid === "string" ? params.sessionUuid : undefined,
-              ),
+            : name === "observe" && markedReadError !== undefined
+              ? withForeignOwnedSessionMeta(
+                  // Even an admission echo cannot override the do-not-remember marker on errors.
+                  withRoutedSessionMeta(
+                    { content: [{ type: "text", text: "read result" }], isError: markedReadError },
+                    markedReadError ? "ownerless-session" : undefined,
+                  ),
+                  "ownerless-session",
+                )
+              : // The daemon echoes the session an admitted control call used (#10974).
+                withRoutedSessionMeta(
+                  { content: [{ type: "text", text: "ok" }] },
+                  typeof params.sessionUuid === "string" ? params.sessionUuid : undefined,
+                ),
   });
   const daemonManager = new FakeDaemonManager();
   daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
@@ -86,7 +102,7 @@ const setUp = (): void => {
     clientFactory: () => client,
     daemonManager,
     autoStartDaemon: false,
-    timer: new FakeTimer(),
+    timer,
     idGenerator: new FakeIdGenerator(),
     heartbeatTimeoutMs: 4_000,
     heartbeatIntervalMs: 2_000,
@@ -113,6 +129,28 @@ beforeAll(async () => {
 
 beforeEach(setUp);
 afterEach(tearDown);
+
+test.each([false, true])(
+  "a marked named read is never remembered, bound or heartbeated (failure=%s)",
+  async (fail) => {
+    markedReadError = fail;
+    await proxy.callTool("observe", { sessionUuid: "ownerless-session" });
+    timer.advanceTime(4_000);
+    expect(
+      client.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat"),
+    ).toEqual([]);
+    await proxy.callTool("observe", {});
+    const next = client.callToolCalls.at(-1)!.params;
+    expect(next.sessionUuid).toBeUndefined();
+    expect(next[DAEMON_OWNED_SESSIONS_PARAM]).toBeUndefined();
+    client.emitNotification(
+      SESSION_RELEASED_NOTIFICATION_METHOD,
+      "ownerless-session",
+      "lazy-expiry",
+    );
+    await expect(proxy.listTools()).resolves.toEqual(TOOLS);
+  },
+);
 
 /** Acquire both devices; iOS is the latest binding and Android is held beside it. */
 async function acquireBoth(): Promise<void> {

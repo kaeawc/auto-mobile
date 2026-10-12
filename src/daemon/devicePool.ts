@@ -10210,6 +10210,16 @@ export class DevicePool {
     return device?.autolockSessionId === ownerSessionId;
   }
 
+  /** Whether this connection acquired/restored the session or holds its autolock route. */
+  isSessionOwnedByConnection(sessionId: string, mcpSessionId: string | undefined): boolean {
+    return (
+      mcpSessionId !== undefined &&
+      (this.hasAcquiredDeviceSession(mcpSessionId, sessionId) ||
+        this.autolockManager.captureAutolockSessionForMcpSession(mcpSessionId) ===
+          this.ownershipSessionId(sessionId))
+    );
+  }
+
   /** Whether a connected MCP client other than `exceptMcpSessionId` owns `namedSessionId`. */
   private hasConnectedMcpSessionOwner(
     namedSessionId: string,

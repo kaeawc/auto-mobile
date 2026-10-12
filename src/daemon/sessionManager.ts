@@ -11606,7 +11606,40 @@ export class SessionManager {
     }
     session.livenessOwnerToken = ownerToken;
     session.livenessOwnerBoundAt = undefined;
+    this.persistAdoptedLivenessOwnerToken(session);
     return true;
+  }
+
+  private persistAdoptedLivenessOwnerToken(session: Session): void {
+    if (!this.deviceSessionRepository.replaceLivenessOwnership) {
+      return;
+    }
+    void this.getBarrier()
+      .track(() =>
+        this.livenessOwnershipClaimMutexFor(session).runExclusive(async () => {
+          if (
+            this.peekSession(session.sessionId) !== session ||
+            !this.isAdmittedForAutomation(session) ||
+            !session.livenessOwnerToken
+          ) {
+            return;
+          }
+          // Read under the claim mutex: a queued adoption must not restore an older owner.
+          await this.deviceSessionRepository.replaceLivenessOwnership?.(
+            session.sessionId,
+            session.livenessOwnerToken,
+          );
+        }),
+      )
+      .catch((error) => {
+        if (error instanceof DeviceSessionNotActiveError) {
+          // The row may have been released or not yet activated; in-memory adoption still stands.
+          logger.debug("[SessionManager] Adopted liveness owner row is no longer active");
+          return;
+        }
+        // Persistence is best-effort; omit error details because they may contain the token.
+        logger.warn("[SessionManager] Failed to persist adopted liveness ownership");
+      });
   }
 
   /**

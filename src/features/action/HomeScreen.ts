@@ -295,13 +295,14 @@ export class HomeScreen extends BaseVisualChange {
     frameContext?: string,
     timeoutMs?: number,
     signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<void> {
     throwIfAborted(signal);
     const backend = resolveIosHomeBackend(this.device.deviceId, { simctl: this.simctl });
     if (backend.kind === "physical") {
       const client = IOSCtrlProxyClient.getInstance(this.device);
       const pressError = await awaitWhileRequestIsLive(
-        this.tryIosRunnerHome(client, 5000, perf, frameContext),
+        this.tryIosRunnerHome(client, 5000, perf, frameContext, { signal, onDispatch }),
         signal,
       );
       if (pressError) {
@@ -314,13 +315,13 @@ export class HomeScreen extends BaseVisualChange {
     const deadline = this.timer.now() + (timeoutMs ?? 5000);
     try {
       throwIfAborted(signal);
+      const launchTimeoutMs = Math.min(
+        HomeScreen.IOS_SIMCTL_LAUNCH_TIMEOUT_MS,
+        this.iosHomeRemainingMs(deadline),
+      );
+      onDispatch?.();
       await awaitWhileRequestIsLive(
-        backend.launchSpringboard({
-          timeoutMs: Math.min(
-            HomeScreen.IOS_SIMCTL_LAUNCH_TIMEOUT_MS,
-            this.iosHomeRemainingMs(deadline),
-          ),
-        }),
+        backend.launchSpringboard({ timeoutMs: launchTimeoutMs }),
         signal,
       );
     } catch (error) {
@@ -352,9 +353,16 @@ export class HomeScreen extends BaseVisualChange {
     timeoutMs: number,
     perf: PerformanceTracker | undefined,
     frameContext: string | undefined,
+    options: { signal?: AbortSignal; onDispatch?: () => void } = {},
   ): Promise<string | undefined> {
     try {
-      const result = await client.requestPressHome(timeoutMs, perf, frameContext);
+      const result = await client.requestPressHome(
+        timeoutMs,
+        perf,
+        frameContext,
+        options.signal,
+        options.onDispatch,
+      );
       if (frameContext && result.error?.includes("Stale frame context")) {
         throw new ActionableError(result.error);
       }

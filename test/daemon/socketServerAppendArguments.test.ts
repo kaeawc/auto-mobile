@@ -51,7 +51,8 @@ test.each([false, true])(
       ),
     ).toEqual({ success: true, charsSent: 2 });
     expect(calls).toHaveLength(1);
-    expect(calls[0].length).toBe(present ? 4 : 3);
+    expect(calls[0].length).toBe(5);
+    expect(typeof calls[0][4]).toBe("function");
     expect(calls[0][3]).toBe(signal);
     expect(validate.mock.calls).toEqual(present ? [["frame", 820]] : []);
   },
@@ -89,3 +90,87 @@ test.each(["append", "validation"] as const)(
     expect(validate).not.toHaveBeenCalled();
   },
 );
+
+test.each([false, true])(
+  "append self-heal and submit share one dispatch mark (first sent=%s)",
+  async (firstSent) => {
+    const timer = new FakeTimer();
+    const server: UnixSocketServer = Object.create(UnixSocketServer.prototype);
+    Object.assign(server, { timer });
+    let marks = 0;
+    let attempts = 0;
+    const client: AndroidCtrlProxyClient = Object.create(AndroidCtrlProxyClient.prototype);
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
+    spyOn(client, "requestImeAction").mockImplementation(async (...args) => {
+      args[4]?.();
+      return { success: true, action: "done", totalTimeMs: 0 };
+    });
+    server["evictDeviceInputCache"] = () => {};
+    server["getAppendTextInput"] = () => ({
+      fromCache: true,
+      input: {
+        appendText: async (text, _timeout, _validate, _signal, onDispatch) => {
+          attempts++;
+          if (attempts === 1) {
+            if (firstSent) {
+              onDispatch?.();
+            }
+            return { success: false, charsSent: firstSent ? 1 : 0, error: "helper failed" };
+          }
+          expect(text).toBe(firstSent ? "B" : "AB");
+          onDispatch?.();
+          return { success: true, charsSent: text.length };
+        },
+      },
+    });
+    expect(
+      await server["executeInputTypeText"](
+        "android",
+        device,
+        "AB",
+        "done",
+        1000,
+        true,
+        undefined,
+        undefined,
+        undefined,
+        () => marks++,
+      ),
+    ).toEqual({ success: true, charsSent: 2, action: "done", totalTimeMs: 0 });
+    expect(attempts).toBe(2);
+    expect(marks).toBe(1);
+  },
+);
+
+test("submit is the first dispatch when append sends no keyevents", async () => {
+  const timer = new FakeTimer();
+  const server: UnixSocketServer = Object.create(UnixSocketServer.prototype);
+  Object.assign(server, { timer });
+  let marks = 0;
+  const client: AndroidCtrlProxyClient = Object.create(AndroidCtrlProxyClient.prototype);
+  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
+  spyOn(client, "requestImeAction").mockImplementation(async (...args) => {
+    expect(marks).toBe(0);
+    args[4]?.();
+    return { success: true, action: "done", totalTimeMs: 0 };
+  });
+  server["getAppendTextInput"] = () => ({
+    input: { appendText: async () => ({ success: true, charsSent: 0 }) },
+    fromCache: false,
+  });
+  expect(
+    await server["executeInputTypeText"](
+      "android",
+      device,
+      "",
+      "done",
+      1000,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      () => marks++,
+    ),
+  ).toEqual({ success: true, charsSent: 0, action: "done", totalTimeMs: 0 });
+  expect(marks).toBe(1);
+});

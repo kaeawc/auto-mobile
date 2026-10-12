@@ -349,6 +349,7 @@ async function reserveSystemUiAnrShutdown(
     assertHolder,
   );
   if (reservation) {
+    // Unnamed: rebooting on the session's behalf is not the session giving the device up.
     devicePool.markIntentionalShutdown(deviceId);
   }
   return reservation;

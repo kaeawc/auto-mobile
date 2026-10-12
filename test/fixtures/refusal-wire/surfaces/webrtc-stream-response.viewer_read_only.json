@@ -1,0 +1,12 @@
+{
+  "surface": "webrtc-stream-response",
+  "name": "viewer_read_only",
+  "builder": "WebRtcStreamSocketServer.processLine",
+  "payload": {
+    "success": false,
+    "type": "webrtc_stream_response",
+    "error": "Viewer subscriptions may release or renew their own leases; acquire device ownership before changing stream parameters or controlling other subscriptions.",
+    "errorCode": "viewer_read_only",
+    "subscriptionKind": "viewer"
+  }
+}

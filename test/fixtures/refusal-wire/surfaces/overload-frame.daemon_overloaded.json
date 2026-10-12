@@ -1,0 +1,18 @@
+{
+  "surface": "overload-frame",
+  "name": "daemon_overloaded",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "Daemon overloaded while handling observe: spent 950ms waiting in queue, leaving 50ms of the 1000ms deadline. Retry after 250ms.",
+    "overloadFailure": {
+      "code": "daemon_overloaded",
+      "retryable": true,
+      "retryAfterMs": 250,
+      "reason": "insufficient_forward_budget",
+      "queueWaitMs": 950,
+      "remainingTimeoutMs": 50
+    }
+  }
+}
